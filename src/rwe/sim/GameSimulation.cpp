@@ -1367,7 +1367,6 @@ namespace rwe
             unit.previousRotation = HalfTurn;
         }
 
-        // add weapons
         if (!unitDefinition.weapon1.empty())
         {
             unit.weapons[0] = tryCreateWeapon(simulation, unitDefinition.weapon1);
@@ -1518,7 +1517,6 @@ namespace rwe
     {
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
 
-        // set footprint area as occupied by the unit
         auto footprintRect = computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
         if (isCollisionAt(footprintRect))
         {
@@ -2401,7 +2399,6 @@ namespace rwe
             return WinStatusWon{*livingPlayer};
         }
 
-        // no players are alive, the game is a draw
         return WinStatusDraw();
     }
 
@@ -2802,7 +2799,6 @@ namespace rwe
             const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
             const auto& modelDefinition = sim.unitModelDefinitions.at(unitDefinition.objectName);
 
-            // ignore if the projectile is above or below the unit
             if (projectile.position.y < unit.position.y || projectile.position.y > unit.position.y + modelDefinition.height)
             {
                 return false;
@@ -2823,7 +2819,6 @@ namespace rwe
             const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
             const auto& modelDefinition = sim.unitModelDefinitions.at(unitDefinition.objectName);
 
-            // ignore if the projectile is above or below the unit
             if (projectile.position.y < unit.position.y || projectile.position.y > unit.position.y + modelDefinition.height)
             {
                 return false;
@@ -2837,7 +2832,6 @@ namespace rwe
             const auto& feature = sim.getFeature(*cellValue.featureId);
             const auto& featureDefinition = sim.getFeatureDefinition(feature.featureName);
 
-            // ignore if the projectile is above or below the feature
             if (projectile.position.y < feature.position.y || projectile.position.y > feature.position.y + featureDefinition.height)
             {
                 return false;
@@ -2871,7 +2865,6 @@ namespace rwe
 
         const auto& modelDefinition = sim.unitModelDefinitions.at(unitDefinition.objectName);
 
-        // ignore if the projectile is above or below the unit
         if (projectile.position.y < unit.position.y || projectile.position.y > unit.position.y + modelDefinition.height)
         {
             return false;
@@ -2900,7 +2893,6 @@ namespace rwe
 
     std::optional<ProjectileCollisionInfo> checkProjectileCollision(const GameSimulation& simulation, const Projectile& projectile)
     {
-        // test collision with terrain
         auto terrainHeight = simulation.terrain.tryGetHeightAt(projectile.position.x, projectile.position.z);
         if (!terrainHeight)
         {
@@ -2922,7 +2914,6 @@ namespace rwe
         }
         else
         {
-            // detect collision with something's footprint
             auto heightMapPos = simulation.terrain.worldToHeightmapCoordinate(projectile.position);
             auto cellValue = simulation.occupiedGrid.tryGet(heightMapPos);
             if (cellValue)
@@ -2934,7 +2925,6 @@ namespace rwe
                 }
             }
 
-            // detect collision with flying unit footprint
             for (auto unitId : simulation.flyingUnitsSet)
             {
                 if (projectileCollidesWithUnit(simulation, projectile, unitId))
@@ -3377,9 +3367,7 @@ namespace rwe
 
         auto region = GridRegion::fromCoordinates(minCell, maxCell);
 
-        // for each cell
         region.forEach([&](const auto& coords) {
-          // check if it's in range
           auto cellCenter = terrain.heightmapIndexToWorldCenter(coords.x, coords.y);
           Rectangle2x<SimScalar> cellRectangle(
               Vector2x<SimScalar>(cellCenter.x, cellCenter.z),
@@ -3390,7 +3378,6 @@ namespace rwe
               return;
           }
 
-          // wreckage and scenery in the blast
           if (damagesFeatures && !paralyzer)
           {
               const auto& cell = occupiedGrid.get(coords);
@@ -3435,7 +3422,6 @@ namespace rwe
               }
           }
 
-          // check if a unit is there
           auto occupiedType = occupiedGrid.get(coords);
 
           auto u = occupiedType.mobileUnitId;
@@ -3448,9 +3434,8 @@ namespace rwe
               return;
           }
 
-          // check if the unit was seen/mark as seen
           auto pair = seenUnits.insert(*u);
-          if (!pair.second) // the unit was already present
+          if (!pair.second)
           {
               return;
           }
@@ -3463,32 +3448,26 @@ namespace rwe
 
           const auto& unit = getUnitState(*u);
 
-          // skip dead units
           if (unit.isDead())
           {
               return;
           }
 
-          // add in the third dimension component to distance,
-          // check if we are still in range
           auto unitDistanceSquared = createBoundingBox(unit).distanceSquared(position);
           if (unitDistanceSquared > radiusSquared)
           {
               return;
           }
 
-          // apply appropriate damage
           auto damageScale = blastDamageScale(rweSqrt(unitDistanceSquared), radius, projectile.edgeEffectiveness);
           auto rawDamage = projectile.getDamage(unit.unitType);
           auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * damageScale);
           applyDamage(*u, scaledDamage, projectile.attacker, paralyzer); });
 
-        // Apply damage to flying units
         for (const auto& flyingUnitId : flyingUnitsSet)
         {
             const auto& unit = getUnitState(flyingUnitId);
 
-            // skip units that are dying or dead
             if (!unit.isAlive())
             {
                 continue;
@@ -3500,14 +3479,12 @@ namespace rwe
                 continue;
             }
 
-            // check if the unit is in range
             auto unitDistanceSquared = createBoundingBox(unit).distanceSquared(position);
             if (unitDistanceSquared > radiusSquared)
             {
                 continue;
             }
 
-            // apply appropriate damage
             auto damageScale = blastDamageScale(rweSqrt(unitDistanceSquared), radius, projectile.edgeEffectiveness);
             auto rawDamage = projectile.getDamage(unit.unitType);
             auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * damageScale);
@@ -3648,7 +3625,6 @@ namespace rwe
 
             const auto& weaponDefinition = weaponDefinitions.at(projectile.weaponType);
 
-            // remove if it's time to die
             if (projectile.dieOnFrame && *projectile.dieOnFrame <= gameTime)
             {
                 projectile.isDead = true;
@@ -3747,7 +3723,6 @@ namespace rwe
                 match(
                     *collisionInfo,
                     [&](const ProjectileCollisionInfoOutOfBounds&) {
-                        // silently remove projectiles that go outside the map
                         projectile.isDead = true;
                         events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, ProjectileDiedEvent::DeathType::OutOfBounds});
                     },
@@ -3817,7 +3792,6 @@ namespace rwe
     {
         if (commanderDeathMode == CommanderDeathMode::GameEnds)
         {
-            // if a commander died this frame, kill the player that owns it
             for (const auto& p : units)
             {
                 const auto& unitDefinition = unitDefinitions.at(p.second.unitType);
@@ -3883,10 +3857,8 @@ namespace rwe
             // the wind speed will last between 5 and 14 seconds before changing
             nextWindSpeedChange = gameTime + GameTime(randomBetween(rng, 5, 14) * SimTicksPerSecond);
 
-            // the new wind speed is taken from a uniform distribution between the min and max speeds
             auto currentWindSpeed = randomBetween(rng, minWindSpeed, std::max(minWindSpeed, maxWindSpeed));
 
-            // the new wind direction is a random angle
             auto currentWindDirection = SimAngle(static_cast<uint16_t>(randomBetween(rng, MinAngle.value, MaxAngle.value)));
 
             // A generator gets the wind as a fraction of the speed the game
@@ -3908,7 +3880,6 @@ namespace rwe
         // run resource updates once per second
         if (gameTime % GameTime(SimTicksPerSecond) == GameTime(0))
         {
-            // recalculate max energy and metal storage
             for (auto& player : players)
             {
                 player.maxEnergy = Energy(0);
@@ -3958,7 +3929,6 @@ namespace rwe
 
                     if (unit.isSufficientlyPowered)
                     {
-                        // extract metal
                         if (unitDefinition.extractsMetal != Metal(0))
                         {
                             auto footprint = computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
@@ -3966,7 +3936,6 @@ namespace rwe
                             addResourceDelta(unitId, Energy(0), Metal(metalValue * unitDefinition.extractsMetal.value));
                         }
 
-                        // make metal
                         if (unitDefinition.makesMetal != Metal(0))
                         {
                             addResourceDelta(unitId, Energy(0), unitDefinition.makesMetal);

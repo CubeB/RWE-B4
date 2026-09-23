@@ -483,7 +483,6 @@ namespace rwe
                         unit.moveOrders = UnitMovementOrders::Roam;
                         break;
                     default:
-                        // ignore out-of-range
                         break;
                 }
             },
@@ -501,7 +500,6 @@ namespace rwe
                         unit.setFireOrders(UnitFireOrders::FireAtWill);
                         break;
                     default:
-                        // ignore out-of-range
                         break;
                 }
             },
@@ -534,7 +532,6 @@ namespace rwe
         // and free, at last, the ones deleted a whole pass ago
         env.sweepDeadThreads();
 
-        // clean up any finished threads that were not reaped last frame
         for (const auto& thread : env.finishedQueue)
         {
             env.deleteThread(thread);
@@ -543,8 +540,6 @@ namespace rwe
 
         assert(env.isNotCorrupt());
 
-        // check if any blocked threads can be unblocked
-        // and move them back into the ready queue
         for (auto it = env.blockedQueue.begin(); it != env.blockedQueue.end();)
         {
             const auto& pair = *it;
@@ -572,7 +567,6 @@ namespace rwe
             }
         }
 
-        // check if any sleeping threads can be moved into the ready queue
         auto cobTime = toCobTime(simulation.gameTime);
         for (auto it = env.sleepingQueue.begin(); it != env.sleepingQueue.end();)
         {
@@ -591,7 +585,6 @@ namespace rwe
 
         assert(env.isNotCorrupt());
 
-        // execute ready threads
         while (auto result = executeThreads(env, unitId, simulation.gameTime))
         {
             match(
