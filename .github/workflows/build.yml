@@ -34,8 +34,20 @@ on:
 # A pull request only needs its newest commit checked, and a branch push only
 # needs its newest push. Tags are exempt: a release run must not be cancelled
 # by anything, and each tag has its own ref anyway.
+#
+# A label gets a group of its own, per label name, and that is not tidiness.
+# Opening a pull request and labelling it -- which CLAUDE.md asks for twice,
+# under Contributing and again under Labels, both times in the same breath as
+# opening it -- fires `opened` and then `labeled` seconds apart. With one group for the ref, the second run cancelled the
+# first: "Canceling since a higher priority waiting request for
+# Build-refs/pull/177/merge exists". The survivor was the `labeled` run, whose
+# every job asks whether the label was ci:full and skips when it was not, so
+# the pull request ended up with a green tick and nothing built behind it.
+# Pull requests #177 to #183 were all merged that way. Per label name rather
+# than one "label" group, because adding a second label would otherwise cancel
+# the ci:full run somebody had just asked for.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event.action == 'labeled' && format('label-{0}', github.event.label.name) || 'main' }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
