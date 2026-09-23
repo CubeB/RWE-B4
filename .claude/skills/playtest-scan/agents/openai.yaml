@@ -1,0 +1,3 @@
+interface:
+  display_name: "Playtest Scan"
+  short_description: "Triage arena playtest findings into issues"

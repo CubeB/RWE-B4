@@ -316,6 +316,15 @@ namespace rwe
             return;
         }
         LOG_DEBUG << "AI scout " << scoutId.value << " (" << scout.unitType << "): " << chosen.size() << " leg(s), ending at " << chosen.back().x.value << "," << chosen.back().z.value;
+        sim.eventLog.event(sim.gameTime.value, "scout_assigned")
+            .set("player", scout.owner.value)
+            .set("unit", scoutId.value)
+            .set("subject", scout.unitType)
+            .set("legs", chosen.size())
+            .set("x", static_cast<double>(chosen.back().x.value))
+            .set("z", static_cast<double>(chosen.back().z.value))
+            .set("why", "route_planned")
+            .detail("scout route planned");
         for (std::size_t i = 0; i < chosen.size(); ++i)
         {
             outCommands.push_back(moveCommand(scoutId, chosen[i], i == 0 ? PlayerUnitCommand::IssueOrder::IssueKind::Immediate : PlayerUnitCommand::IssueOrder::IssueKind::Queued));

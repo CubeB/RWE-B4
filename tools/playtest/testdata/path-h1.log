@@ -1,0 +1,9 @@
+path profile t=300 searches=10 expansions=100 suspended=0 abandoned=0 exhausted=3 relaxed=0 bugwalk=0 wasted=0+0 worst=5 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=3
+path profile t=600 searches=11 expansions=110 suspended=0 abandoned=0 exhausted=4 relaxed=0 bugwalk=0 wasted=0+0 worst=6 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=3
+path profile t=900 searches=12 expansions=120 suspended=0 abandoned=0 exhausted=2 relaxed=0 bugwalk=0 wasted=0+0 worst=6 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=3
+path profile t=1200 searches=10 expansions=95 suspended=0 abandoned=0 exhausted=5 relaxed=0 bugwalk=0 wasted=0+0 worst=7 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=4
+path profile t=1500 searches=13 expansions=130 suspended=0 abandoned=0 exhausted=3 relaxed=0 bugwalk=0 wasted=0+0 worst=7 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=4
+path profile t=1800 searches=9 expansions=90 suspended=0 abandoned=0 exhausted=6 relaxed=0 bugwalk=0 wasted=0+0 worst=8 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=4
+path profile t=2100 searches=10 expansions=100 suspended=0 abandoned=0 exhausted=4 relaxed=0 bugwalk=0 wasted=0+0 worst=8 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=5
+path profile t=2400 searches=12 expansions=120 suspended=0 abandoned=0 exhausted=2 relaxed=0 bugwalk=0 wasted=0+0 worst=8 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=5
+path profile t=2700 searches=10 expansions=100 suspended=0 abandoned=0 exhausted=0 relaxed=0 bugwalk=0 wasted=0+0 worst=8 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=5

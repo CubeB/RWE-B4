@@ -1,0 +1,5 @@
+{"schema":1,"secs":20.0,"tick":300,"ev":"path_stats","searches":10,"expansions":100,"suspended":0,"abandoned":0,"exhausted":0,"relaxed":0,"bugwalk":0,"wasted_stand_in":0,"wasted_other":0,"worst":5,"goalblocked":0,"goalblocked_total":0,"walkstuck":0,"queued_per_tick":0.0,"ticks_with_queue":0,"ticks_total":300,"deepest_ever":3,"detail":"path counters"}
+{not json at all
+[]
+{"schema":1,"secs":400.0,"tick":6000,"ev":"ai_perf","player":0,"pass":"economy","ms":8.5,"calls":2,"kind":"summary","worst":4.4,"spikes":2,"detail":"ai pass summary"}
+{"schema":1,"secs":40.0,"tick":600,"ev":"path_stats","searches":11,

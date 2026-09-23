@@ -441,6 +441,8 @@ set(SOURCE_FILES
     src/rwe/game/SaveFile.h
     src/rwe/game/AiArenaReport.cpp
     src/rwe/game/AiArenaReport.h
+    src/rwe/game/SimEventLog.cpp
+    src/rwe/game/SimEventLog.h
     src/rwe/game/GameParameters.h
     src/rwe/io/lostdf/io.cpp
     src/rwe/io/lostdf/io.h

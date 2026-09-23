@@ -1,0 +1,4 @@
+{"schema":1,"secs":200.0,"tick":3000,"ev":"ai_perf","player":0,"pass":"economy","ms":600.0,"calls":10,"kind":"summary","worst":120.0,"spikes":2,"detail":"ai pass summary"}
+{"schema":1,"secs":400.0,"tick":6000,"ev":"ai_perf","player":0,"pass":"economy","ms":200.0,"calls":5,"kind":"summary","worst":90.0,"spikes":1,"detail":"ai pass summary"}
+{"schema":1,"secs":200.0,"tick":3000,"ev":"ai_perf","player":0,"pass":"army","ms":20.0,"calls":20,"kind":"summary","worst":4.0,"spikes":0,"detail":"ai pass summary"}
+{"schema":1,"secs":400.0,"tick":6000,"ev":"ai_perf","player":0,"pass":"army","ms":40.0,"calls":40,"kind":"summary","worst":5.0,"spikes":1,"detail":"ai pass summary"}

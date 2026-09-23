@@ -23,6 +23,7 @@
  * RWE_HASH_LOG and RWE_STATE_DUMP work here as they do in the game.
  */
 
+#include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -200,6 +201,8 @@ int main(int argc, char* argv[])
                       << "  --ai-tune <p>:<k>=<v>   override one AI knob for player p (repeatable)\n"
                       << "  --ai-personality <p>:<name>  play player p as a personality (repeatable)\n"
                       << "  --out <dir>             where ai-arena.csv is written (default: local data path)\n"
+                      << "  --watchdog <seconds>    abort after this much wall-clock time\n"
+                      << "  --strict                exit 1 if no AI-ARENA-RESULT was produced or the watchdog fired\n"
                       << "  --data-path <path>      game data search path (repeatable)\n";
             return 0;
         }
@@ -263,6 +266,11 @@ int main(int argc, char* argv[])
         {
             gameParameters.startLocation = StartLocationMode::Random;
         }
+
+        // A batch cares whether a run actually produced its numbers; the
+        // default stays exit 0 so nothing that runs this today is affected.
+        const bool strict = args.getBool("strict");
+        const unsigned int watchdogSeconds = args.getUint("watchdog", 0);
 
         for (const auto& tuning : args.getMulti("ai-tune"))
         {
@@ -419,11 +427,56 @@ int main(int argc, char* argv[])
 
         SimDiagnostics diagnostics;
 
+        // The watchdog bounds wall time, not game time: it is how long the
+        // batch will wait for one run, so it is measured here and never
+        // reaches the simulation.
+        const auto runStarted = std::chrono::steady_clock::now();
+
         unsigned int sceneTime = 0;
         std::optional<WinStatus> gameOver;
+        bool watchdogFired = false;
+        bool producedResult = false;
+
+        auto winnerFrom = [](const std::optional<WinStatus>& status) -> std::optional<int> {
+            if (status)
+            {
+                if (const auto* won = std::get_if<WinStatusWon>(&*status))
+                {
+                    return static_cast<int>(won->winner.value);
+                }
+            }
+            return std::nullopt;
+        };
+
+        auto writeReport = [&](const char* ended) {
+            auto outDir = args.contains("out")
+                ? fs::path(args.getString("out"))
+                : (getLocalDataPath() ? fs::path(*getLocalDataPath()) : fs::path("."));
+            fs::create_directories(outDir);
+            auto csvPath = outDir / "ai-arena.csv";
+
+            AiArenaRunMetadata metadata;
+            metadata.generatedBy = "ai_arena";
+            metadata.ended = ended;
+            metadata.winner = winnerFrom(gameOver);
+
+            auto summary = arenaReport.write(csvPath, loaded.simulation, gameParameters, metadata);
+            LOG_INFO << summary << " | ended=" << ended;
+            LOG_INFO << "AI arena: wrote " << csvPath.string();
+            producedResult = true;
+        };
 
         while (true)
         {
+            if (watchdogSeconds > 0
+                && std::chrono::steady_clock::now() - runStarted >= std::chrono::seconds(watchdogSeconds))
+            {
+                auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - runStarted).count();
+                LOG_ERROR << "AI-ARENA-WATCHDOG elapsed=" << elapsed << "s budget=" << watchdogSeconds << "s";
+                watchdogFired = true;
+                break;
+            }
+
             feedAiCommands(loaded.simulation, *playerCommandService, targetCommandBufferSize);
 
             auto playerCommands = playerCommandService->tryPopCommands();
@@ -450,14 +503,7 @@ int main(int argc, char* argv[])
             arenaReport.update(loaded.simulation);
             if (gameOver || loaded.simulation.gameTime.value >= arenaEndTick)
             {
-                auto outDir = args.contains("out")
-                    ? fs::path(args.getString("out"))
-                    : (getLocalDataPath() ? fs::path(*getLocalDataPath()) : fs::path("."));
-                fs::create_directories(outDir);
-                auto csvPath = outDir / "ai-arena.csv";
-                auto summary = arenaReport.write(csvPath, loaded.simulation);
-                LOG_INFO << summary << (gameOver ? " | ended=decided" : " | ended=timeout");
-                LOG_INFO << "AI arena: wrote " << csvPath.string();
+                writeReport(gameOver ? "decided" : "timeout");
                 break;
             }
 
@@ -475,6 +521,18 @@ int main(int argc, char* argv[])
                     LOG_INFO << "Game over at tick " << loaded.simulation.gameTime.value;
                 }
             }
+        }
+
+        // The watchdog stops the clock, not the game, so whatever was
+        // measured up to the abort is written before exiting.
+        if (watchdogFired)
+        {
+            writeReport("timeout");
+        }
+
+        if (strict && (!producedResult || watchdogFired))
+        {
+            return 1;
         }
 
         return 0;

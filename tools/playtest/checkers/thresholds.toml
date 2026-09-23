@@ -1,0 +1,129 @@
+# Checker thresholds (design §3.3).
+#
+# TOML, not YAML: stdlib only, no PyYAML on the machines that run this.
+#
+# Every number here is an initial guess. They cast a wide net on purpose --
+# checkers accept false positives because the scan agent is the filter -- so
+# each one should be tuned against the first real runs and its provenance
+# recorded in the comment above it.
+
+[economy]
+# E1 stall: a run of consecutive samples, at or after this many seconds, where
+# metalIncome < e1_income_floor and metal < e1_store_fraction * maxMetal and
+# idleBuilders > 0. e1_min_samples_suspicious is the shortest run worth
+# reporting; e1_min_samples_likely_bug is the length at which it stops looking
+# like a lull.
+# initial guess -- tune against first real runs
+e1_after_seconds = 300
+# initial guess -- tune against first real runs
+e1_income_floor = 0.5
+# initial guess -- tune against first real runs
+e1_store_fraction = 0.02
+# initial guess -- tune against first real runs
+e1_min_samples_suspicious = 3
+# initial guess -- tune against first real runs
+e1_min_samples_likely_bug = 12
+
+# E2 twin delta: share of post-minute-8 samples stalled (metal < 2% of
+# maxMetal and metalDemand > metalIncome), compared with the same seed's
+# control twin. A difference wider than this many percentage points is
+# suspicious.
+# initial guess -- tune against first real runs
+e2_after_seconds = 480
+# initial guess -- tune against first real runs
+e2_delta_points = 25
+
+# E3 waste spike: energyExcess / energyProduced over the whole game above
+# e3_whole_game_share, and the share in the final third of the game exceeding
+# the first two thirds by more than e3_phase_jump_points percentage points.
+# Reported at info severity: a phase transition can legitimately move waste,
+# and the agent decides whether this one is explained.
+# initial guess -- tune against first real runs
+e3_whole_game_share = 0.25
+# initial guess -- tune against first real runs
+e3_phase_jump_points = 20
+
+[production]
+# P1 idle factories: share of samples at or after p1_after_seconds where
+# factories > 0 and idleFactories == factories while metalIncome is at least
+# p1_income_floor. A side with positive income and nothing being built has
+# nowhere to put its metal.
+# initial guess -- tune against first real runs
+p1_after_seconds = 600
+# initial guess -- tune against first real runs
+p1_share = 0.5
+# initial guess -- tune against first real runs
+p1_income_floor = 0.5
+
+# P2 builder collapse: a run of p2_min_samples consecutive samples with
+# builders == 0 and no builder-category death recorded in the events CSV
+# inside that window.
+# initial guess -- tune against first real runs
+p2_min_samples = 3
+
+# P3 milestones: a game this long (seconds) should have a completed
+# economy-category building by p3_mex_minutes minutes and a completed
+# factory-category building by p3_factory_minutes.
+# initial guess -- tune against first real runs
+p3_min_duration = 900
+# initial guess -- tune against first real runs
+p3_mex_minutes = 2
+# initial guess -- tune against first real runs
+p3_factory_minutes = 6
+
+[unitdeath]
+# D1 extractors dying with enemiesNear == 0: suspicious at this many deaths in
+# one game, likely-bug at twice this many.
+# initial guess -- tune against first real runs
+d1_extractor_deaths = 1
+
+# D2 army dying detached: army-category deaths where friendlyArmyNear == 0 and
+# friendlyTowersNear == 0 within one game.
+# initial guess -- tune against first real runs
+d2_detached_army = 5
+
+# D3 scouts dead early: scout-category units dead before d3_minute (seconds)
+# with enemiesNear == 0.
+# initial guess -- tune against first real runs
+d3_minute = 180
+# initial guess -- tune against first real runs
+d3_scout_deaths = 2
+
+[pathfind]
+# H1 sustained exhausted searches: consecutive path-profile windows (300 ticks
+# apart, deltas) with exhausted > 0. The issue #155 signature.
+# initial guess -- tune against first real runs
+h1_windows = 6
+
+# H2 growing stuck counters: bugwalk or walkstuck rising monotonically from a
+# nonzero base across this many consecutive windows.
+# initial guess -- tune against first real runs
+h2_windows = 10
+
+# H3 sustained queue pressure: queued/tick above h3_queued_per_tick for
+# h3_windows consecutive windows.
+# initial guess -- tune against first real runs
+h3_queued_per_tick = 0.5
+# initial guess -- tune against first real runs
+h3_windows = 6
+
+[aiperf]
+# F1 per-pass cost: total ms / calls for one pass of one player over the whole
+# game above f1_mean_ms.
+# initial guess -- tune against first real runs
+f1_mean_ms = 5.0
+
+# F2 spikes: spike lines (pass >= 2 ms) for one pass of one player in one game.
+# initial guess -- tune against first real runs
+f2_spikes = 50
+
+# F3 drift: current per-pass mean exceeding the closest earlier baseline's mean
+# by more than this ratio (1.5 = 50% slower than the baseline).
+# initial guess -- tune against first real runs
+f3_baseline_ratio = 1.5
+
+[baselines]
+# Share drift worth reporting when a baseline exists: a share moving more than
+# this many percentage points between the baseline and now.
+# initial guess -- tune against first real runs
+drift_points = 10

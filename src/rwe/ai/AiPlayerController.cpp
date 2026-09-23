@@ -26,7 +26,7 @@ namespace rwe
         return on;
     }
 
-    void AiProfiler::record(const char* pass, double milliseconds, PlayerId player, GameTime now)
+    void AiProfiler::record(const char* pass, double milliseconds, PlayerId player, GameTime now, const GameSimulation& sim)
     {
         auto& stats = passes[pass];
         stats.totalMs += milliseconds;
@@ -36,11 +36,20 @@ namespace rwe
         if (milliseconds >= AiProfileSpikeThresholdMs)
         {
             ++stats.spikes;
+            sim.eventLog.event(now.value, "ai_perf")
+                .set("player", player.value)
+                .set("pass", pass)
+                .set("ms", milliseconds)
+                .set("calls", stats.calls)
+                .set("kind", "spike")
+                .set("worst", stats.worstMs)
+                .set("spikes", stats.spikes)
+                .detail("ai pass spike");
             LOG_INFO << "AI profile: player " << player.value << " pass " << pass << " took " << milliseconds << " ms at tick " << now.value;
         }
     }
 
-    void AiProfiler::report(PlayerId player, GameTime now)
+    void AiProfiler::report(PlayerId player, GameTime now, const GameSimulation& sim)
     {
         if (passes.empty())
         {
@@ -49,6 +58,15 @@ namespace rwe
         std::string line;
         for (const auto& [name, stats] : passes)
         {
+            sim.eventLog.event(now.value, "ai_perf")
+                .set("player", player.value)
+                .set("pass", name)
+                .set("ms", stats.totalMs)
+                .set("calls", stats.calls)
+                .set("kind", "summary")
+                .set("worst", stats.worstMs)
+                .set("spikes", stats.spikes)
+                .detail("ai pass summary");
             line += " " + name + "=" + std::to_string(stats.totalMs) + "ms/" + std::to_string(stats.calls) + " (worst " + std::to_string(stats.worstMs) + "ms, " + std::to_string(stats.spikes) + " spikes)";
         }
         LOG_INFO << "AI profile summary: player " << player.value << " at tick " << now.value << ", total " << windowMs << " ms:" << line;
@@ -101,7 +119,7 @@ namespace rwe
             auto start = std::chrono::steady_clock::now();
             pass();
             auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-            profiler.record(name, elapsed, playerId, sim.gameTime);
+            profiler.record(name, elapsed, playerId, sim.gameTime, sim);
         };
 
         // 1. What do we own, and how is the economy doing?
@@ -319,6 +337,12 @@ namespace rwe
                      << (loggedAirThreat ? "detected" : "expired")
                      << " at tick " << sim.gameTime.value
                      << ", aircraft known " << blackboard.knownEnemyAirCount;
+            sim.eventLog.event(sim.gameTime.value, "ai_transition")
+                .set("player", playerId.value)
+                .set("kind", "air_threat")
+                .set("on", loggedAirThreat)
+                .set("aircraft", blackboard.knownEnemyAirCount)
+                .detail(loggedAirThreat ? "enemy air threat detected" : "enemy air threat expired");
         }
 
         // And the same for a production site under siege, for the same
@@ -333,6 +357,13 @@ namespace rwe
                      << " at tick " << sim.gameTime.value
                      << ", besieged factories " << blackboard.besiegedFactories.size()
                      << ", frames lost lately " << blackboard.recentUnitLosses.size();
+            sim.eventLog.event(sim.gameTime.value, "ai_transition")
+                .set("player", playerId.value)
+                .set("kind", "production_siege")
+                .set("on", loggedProductionSiege)
+                .set("factories", blackboard.besiegedFactories.size())
+                .set("losses", blackboard.recentUnitLosses.size())
+                .detail(loggedProductionSiege ? "production site siege detected" : "production site siege lifted");
         }
 
         // 4. Which phase of the game are we in?
@@ -342,6 +373,15 @@ namespace rwe
         {
             LOG_INFO << "AI player " << playerId.value << " (" << profile.name << "): " << gamePhaseName(previousPhase) << " -> " << gamePhaseName(blackboard.phase)
                      << " at tick " << sim.gameTime.value << ", army " << blackboard.armySize << ", known enemies " << blackboard.knownEnemies.size();
+            sim.eventLog.event(sim.gameTime.value, "ai_transition")
+                .set("player", playerId.value)
+                .set("kind", "phase")
+                .set("on", true)
+                .set("from", gamePhaseName(previousPhase))
+                .set("to", gamePhaseName(blackboard.phase))
+                .set("army", blackboard.armySize)
+                .set("known_enemies", blackboard.knownEnemies.size())
+                .detail(std::string(gamePhaseName(previousPhase)) + " -> " + gamePhaseName(blackboard.phase));
         }
 
         // Periodic status line for play-test logs.
@@ -394,6 +434,27 @@ namespace rwe
                      << ", enemy across water " << (blackboard.enemyAcrossWater ? "yes" : "no") << ")"
                      << ", naval scout " << (blackboard.navalScoutUnitId ? "yes" : "no")
                      << ", units:" << counts << "; " << commanderDoing;
+
+            sim.eventLog.event(sim.gameTime.value, "ai_status")
+                .set("player", playerId.value)
+                .set("phase", gamePhaseName(blackboard.phase))
+                .set("metal_stalled", blackboard.metalStalled)
+                .set("energy_stalled", blackboard.energyStalled)
+                .set("metal_income", player.previousMetalProductionBuffer.value)
+                .set("energy_income", player.previousEnergyProductionBuffer.value)
+                .set("metal_demand", player.previousDesiredMetalConsumptionBuffer.value)
+                .set("energy_demand", player.previousDesiredEnergyConsumptionBuffer.value)
+                .set("idle_builders", blackboard.idleBuilderCount)
+                .set("army", blackboard.armySize)
+                .set("known_enemies", blackboard.knownEnemies.size())
+                .set("focus_enemy", blackboard.focusEnemy ? static_cast<int>(blackboard.focusEnemy->value) : -1)
+                .set("unreachable_ground", blackboard.hasUnreachableGround)
+                .set("wants_transport", blackboard.wantsTransport)
+                .set("expansion_site", blackboard.hasExpansionSite)
+                .set("enemy_across_water", blackboard.enemyAcrossWater)
+                .set("commander", commanderDoing)
+                .set("types", blackboard.ownedTotalCounts)
+                .detail("status");
         }
 
         // 5. Economy and production.
@@ -432,7 +493,7 @@ namespace rwe
 
         if (profiling && sim.gameTime.value % AiProfileReportIntervalTicks == 0)
         {
-            profiler.report(playerId, sim.gameTime);
+            profiler.report(playerId, sim.gameTime, sim);
         }
     }
 }

@@ -1,0 +1,6 @@
+{"schema":1,"secs":45.0,"tick":675,"ev":"build_order","player":0,"subject":"ARMLAB","unit":"ARMCOM","x":100.0,"z":200.0,"target":"","cost":120.0,"why":"","detail":"ordered a lab at the opening"}
+{"schema":1,"secs":300.0,"tick":4500,"ev":"build_refusal","player":0,"subject":"ARMLAB","unit":"ARMCOM","why":"no_site","detail":"no flat site within reach"}
+{"schema":1,"secs":310.0,"tick":4650,"ev":"build_refusal","player":1,"subject":"CORLAB","unit":"CORCOM","why":"unaffordable","detail":"metal short for a lab"}
+{"schema":1,"secs":420.0,"tick":6300,"ev":"transport_refusal","player":0,"subject":"ARMTRUCK","why":"no_transport","detail":"no transport available for the group"}
+{"schema":1,"secs":600.0,"tick":9000,"ev":"army_dispatch","player":0,"unit":"ARMPW","x":300.0,"z":400.0,"target":"enemy base","why":"attack","detail":"sent the group at the enemy base"}
+{"schema":1,"secs":650.0,"tick":9750,"ev":"scout_assigned","player":1,"unit":"CORFAV","target":"north ridge","why":"scout","detail":"scout sent to the north ridge"}

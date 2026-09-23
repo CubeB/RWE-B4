@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <rwe/sim/PlayerId.h>
 #include <string>
 #include <vector>
@@ -9,6 +10,25 @@
 namespace rwe
 {
     struct GameSimulation;
+    struct GameParameters;
+
+    /**
+     * The parts of a run's identity that only the caller still has. The
+     * `run.json` sidecar combines this with the simulation's own tick count
+     * and the compile-time build identity, so a checker can say which
+     * seed/map/knobs a CSV came from without reading the log's free text.
+     *
+     * Pure observation: built after the run, from arguments already in hand.
+     */
+    struct AiArenaRunMetadata
+    {
+        /** "ai_arena" headless, "rwe" windowed. */
+        std::string generatedBy{"ai_arena"};
+        /** "decided" or "timeout"; absent when the caller cannot say. */
+        std::optional<std::string> ended;
+        /** The winning player index, or null for a draw or a timeout. */
+        std::optional<int> winner;
+    };
 
     /**
      * Records how a computer-versus-computer game went, so a change to the AI
@@ -44,9 +64,14 @@ namespace rwe
 
         /**
          * Writes the economy rows and the events as two CSVs beside each
-         * other, and returns a one-line summary for a batch script to grep.
+         * other, plus a `run.json` sidecar describing the run, and returns a
+         * one-line summary for a batch script to grep.
          */
-        std::string write(const std::filesystem::path& csvPath, const GameSimulation& sim);
+        std::string write(
+            const std::filesystem::path& csvPath,
+            const GameSimulation& sim,
+            const GameParameters& parameters,
+            const AiArenaRunMetadata& metadata);
 
     private:
         struct Row

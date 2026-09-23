@@ -1,0 +1,6 @@
+player,unitType,category,isBuilding,startedTick,startedSeconds,completedTick,completedSeconds,diedTick,diedSeconds,x,z,enemiesNear,nearestEnemyType,friendlyArmyNear,friendlyTowersNear
+0,ARMPW,army,0,0,0,100,10,3000,300,100,200,1,CORAK,0,0
+0,ARMPW,army,0,0,0,100,10,3100,310,101,201,1,CORAK,0,0
+0,ARMPW,army,0,0,0,100,10,3200,320,102,202,1,CORAK,0,0
+0,ARMPW,army,0,0,0,100,10,3300,330,103,203,1,CORAK,0,0
+0,ARMPW,army,0,0,0,100,10,3400,340,104,204,1,CORAK,0,0

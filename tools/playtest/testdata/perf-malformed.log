@@ -1,0 +1,5 @@
+AI profile summary: player 0 at tick 3000, total 620.000000 ms: economy=600.000000ms/ (worst 120.000000ms, 2 spikes)
+AI profile summary: player 1 at tick 3000, total abc ms: army=1ms/1 (worst 1ms, 1 spikes)
+AI profile summary: player x at tick 3000, total 10.000000 ms: economy=1.000000ms/1 (worst 1ms, 1 spikes)
+not a summary line at all
+AI profile summary: player 0 at tick 3000

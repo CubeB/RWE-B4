@@ -775,6 +775,12 @@ namespace rwe
             LOG_DEBUG << "AI build: widened site search for " << unitType << " at "
                       << static_cast<int>(anchor.x.value) << "," << static_cast<int>(anchor.z.value)
                       << (sites.empty() ? " -- still nothing" : " -- found one");
+            sim.eventLog.event(sim.gameTime.value, "build_site_search")
+                .set("subject", unitType)
+                .set("x", static_cast<double>(anchor.x.value))
+                .set("z", static_cast<double>(anchor.z.value))
+                .set("why", sites.empty() ? "nothing" : "found")
+                .detail(sites.empty() ? "widened site search found nothing" : "widened site search found a site");
         }
         if (sites.empty())
         {
@@ -807,6 +813,13 @@ namespace rwe
             LOG_DEBUG << "AI build: widened scored site search for " << unitType << " at "
                       << static_cast<int>(anchor.x.value) << "," << static_cast<int>(anchor.z.value)
                       << (scored.empty() ? " -- still nothing" : " -- found one");
+            sim.eventLog.event(sim.gameTime.value, "build_site_search")
+                .set("subject", unitType)
+                .set("x", static_cast<double>(anchor.x.value))
+                .set("z", static_cast<double>(anchor.z.value))
+                .set("scored", true)
+                .set("why", scored.empty() ? "nothing" : "found")
+                .detail(scored.empty() ? "widened scored site search found nothing" : "widened scored site search found a site");
         }
         for (const auto& site : scored)
         {
@@ -1986,6 +1999,15 @@ namespace rwe
                     LOG_INFO << "AI build: nobody is sent to mend the commander at " << static_cast<int>(commander.position.x.value) << ","
                              << static_cast<int>(commander.position.z.value) << ": " << static_cast<int>(exposure.threatMetal)
                              << " metal of enemies there and " << static_cast<int>(exposure.protectionMetal) << " of cover";
+                    sim.eventLog.event(sim.gameTime.value, "build_commander_mend")
+                        .set("player", aiOwner.value)
+                        .set("unit", bb.commanderUnitId->value)
+                        .set("x", static_cast<double>(commander.position.x.value))
+                        .set("z", static_cast<double>(commander.position.z.value))
+                        .set("threat_metal", exposure.threatMetal)
+                        .set("cover_metal", exposure.protectionMetal)
+                        .set("why", "exposed")
+                        .detail("nobody is sent to mend the commander, it is too exposed");
                 }
                 return;
             }
@@ -2043,6 +2065,16 @@ namespace rwe
                      << " hit points) at " << static_cast<int>(commander.position.x.value) << "," << static_cast<int>(commander.position.z.value) << ": "
                      << onIt << " mending it, "
                      << (anyDistanceSquared ? "the nearest builder " + std::to_string(static_cast<int>(std::sqrt(simScalarToFloat(*anyDistanceSquared)))) + " away" : std::string("no builder left"));
+            sim.eventLog.event(sim.gameTime.value, "build_commander_mend")
+                .set("player", aiOwner.value)
+                .set("unit", bb.commanderUnitId->value)
+                .set("hp", commander.hitPoints)
+                .set("max_hp", commanderDef.maxHitPoints)
+                .set("x", static_cast<double>(commander.position.x.value))
+                .set("z", static_cast<double>(commander.position.z.value))
+                .set("mending", onIt)
+                .set("why", "hurt")
+                .detail("the commander is hurt and needs mending");
         }
         if (onIt >= profile.commanderRepairers || !nearest)
         {
@@ -2050,6 +2082,14 @@ namespace rwe
         }
         LOG_INFO << "AI build: unit " << nearest->value << " leaves what it was doing to repair the commander ("
                  << commander.hitPoints << " of " << commanderDef.maxHitPoints << " hit points)";
+        sim.eventLog.event(sim.gameTime.value, "build_commander_mend")
+            .set("player", aiOwner.value)
+            .set("unit", nearest->value)
+            .set("target_id", bb.commanderUnitId->value)
+            .set("hp", commander.hitPoints)
+            .set("max_hp", commanderDef.maxHitPoints)
+            .set("why", "repairer_dispatched")
+            .detail("a builder leaves its job to repair the commander");
         outCommands.emplace_back(PlayerUnitCommand(*nearest, PlayerUnitCommand::IssueOrder(RepairOrder(*bb.commanderUnitId), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
     }
 
@@ -2270,6 +2310,16 @@ namespace rwe
             LOG_INFO << "AI build: unit " << retreat.builder.value << " (" << unit.unitType << ") backs off from "
                      << static_cast<int>(retreat.exposure.threatMetal) << " metal of enemies with " << static_cast<int>(retreat.exposure.protectionMetal)
                      << " of cover, to " << static_cast<int>(retreat.destination.x.value) << "," << static_cast<int>(retreat.destination.z.value);
+            sim.eventLog.event(sim.gameTime.value, "build_builder_retreat")
+                .set("player", aiOwner.value)
+                .set("unit", retreat.builder.value)
+                .set("subject", unit.unitType)
+                .set("x", static_cast<double>(retreat.destination.x.value))
+                .set("z", static_cast<double>(retreat.destination.z.value))
+                .set("threat_metal", retreat.exposure.threatMetal)
+                .set("cover_metal", retreat.exposure.protectionMetal)
+                .set("why", "exposed")
+                .detail("a builder backs off from a fight it is not covered in");
             builderShelteredUntil[retreat.builder.value] = GameTime(bb.now.value + shelterTicks);
             outCommands.emplace_back(PlayerUnitCommand(retreat.builder, PlayerUnitCommand::IssueOrder(MoveOrder(retreat.destination), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
             // And back to the job afterwards. An immediate order throws away
@@ -2322,11 +2372,13 @@ namespace rwe
             auto site = std::find_if(lostDefenceSites.begin(), lostDefenceSites.end(), [&](const LostDefenceSite& s) {
                 return flatDistance(s.position, loss.position) <= 32_ss;
             });
+            int timesLost = 1;
             if (site != lostDefenceSites.end())
             {
                 ++site->timesLost;
                 site->lostAt = loss.lostAt;
                 site->unitType = loss.unitType;
+                timesLost = site->timesLost;
             }
             else
             {
@@ -2334,6 +2386,13 @@ namespace rwe
             }
             LOG_INFO << "AI build: lost the " << loss.unitType << " at " << static_cast<int>(loss.position.x.value) << ","
                      << static_cast<int>(loss.position.z.value);
+            sim.eventLog.event(sim.gameTime.value, "build_defence_lost")
+                .set("subject", loss.unitType)
+                .set("x", static_cast<double>(loss.position.x.value))
+                .set("z", static_cast<double>(loss.position.z.value))
+                .set("times_lost", timesLost)
+                .set("why", "destroyed")
+                .detail("a defence was lost");
         }
         lostDefencesReadUpTo = newest;
 
@@ -3603,7 +3662,7 @@ namespace rwe
         return wanted;
     }
 
-    void BuildManager::planFactories(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, std::vector<PlayerCommand>& outCommands) const
+    void BuildManager::planFactories(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, const AiBlackboard& bb, std::vector<PlayerCommand>& outCommands) const
     {
         const auto& s = bb.sideUnits;
         auto total = [&](const std::string& t) { return t.empty() ? 0 : countOf(bb.ownedTotalCounts, t); };
@@ -3656,6 +3715,13 @@ namespace rwe
                 {
                     tierTwoReserveStarted = bb.now;
                     LOG_INFO << "AI build: holding the factories for the tier-two economy (" << (labOwed ? "lab " : "") << (mohoOwed ? "moho " : "") << (reactorOwed ? "reactor" : "") << ")";
+                    sim.eventLog.event(sim.gameTime.value, "build_tier_assessment")
+                        .set("player", aiOwner.value)
+                        .set("lab", labOwed)
+                        .set("moho", mohoOwed)
+                        .set("reactor", reactorOwed)
+                        .set("why", "tier_two_reserve_started")
+                        .detail("holding the factories for the tier-two economy");
                 }
                 auto elapsed = bb.now.value - tierTwoReserveStarted->value;
                 auto inTime = elapsed < static_cast<unsigned int>(std::max(0, profile.tierTwoReserveMaxSeconds)) * SimTicksPerSecond;
@@ -3702,6 +3768,14 @@ namespace rwe
                     LOG_INFO << "AI factory: " << factory.unitType << " " << factoryId.value
                              << " stops building " << queuedType << " (" << queuedCount
                              << " queued); an armed enemy is sitting on it and every frame dies as it is born";
+                    sim.eventLog.event(sim.gameTime.value, "factory_queue_cleared")
+                        .set("player", aiOwner.value)
+                        .set("unit", factoryId.value)
+                        .set("factory", factory.unitType)
+                        .set("subject", queuedType)
+                        .set("count", queuedCount)
+                        .set("why", "besieged")
+                        .detail("stops building, an armed enemy is sitting on it");
                     outCommands.emplace_back(PlayerUnitCommand(factoryId, PlayerUnitCommand::ModifyBuildQueue{-queuedCount, queuedType}));
                 }
                 continue;
@@ -3714,6 +3788,13 @@ namespace rwe
                 // asked for anything again. Nothing recorded that until now.
                 LOG_DEBUG << "AI factory: " << factory.unitType << " " << factoryId.value
                           << " skipped, queue holds " << factory.buildQueue.size();
+                sim.eventLog.event(sim.gameTime.value, "factory_hold")
+                    .set("player", aiOwner.value)
+                    .set("unit", factoryId.value)
+                    .set("factory", factory.unitType)
+                    .set("queue", factory.buildQueue.size())
+                    .set("why", "queue_not_drained")
+                    .detail("skipped, the queue still holds something");
                 continue;
             }
 
@@ -3733,6 +3814,12 @@ namespace rwe
             {
                 LOG_DEBUG << "AI factory: " << factory.unitType << " " << factoryId.value
                           << " not topped up, an armed enemy is sitting on it";
+                sim.eventLog.event(sim.gameTime.value, "factory_refusal")
+                    .set("player", aiOwner.value)
+                    .set("unit", factoryId.value)
+                    .set("factory", factory.unitType)
+                    .set("why", "besieged")
+                    .detail("not topped up, an armed enemy is sitting on it");
                 continue;
             }
 
@@ -4078,6 +4165,13 @@ namespace rwe
                 if (nextDef != sim.unitDefinitions.end() && !nextDef->second.builder)
                 {
                     LOG_DEBUG << "AI factory: " << factory.unitType << " " << factoryId.value << " holds " << next << " for the tier-two economy";
+                    sim.eventLog.event(sim.gameTime.value, "factory_hold_t2")
+                        .set("player", aiOwner.value)
+                        .set("unit", factoryId.value)
+                        .set("factory", factory.unitType)
+                        .set("target", next)
+                        .set("why", "tier_two_economy")
+                        .detail("holds production for the tier-two economy");
                     next.clear();
                 }
             }
@@ -4096,6 +4190,13 @@ namespace rwe
                 // ever produced a bomber, which is exactly the question S:16.4
                 // and S:17.2 were about.
                 LOG_INFO << "AI factory: " << factory.unitType << " " << factoryId.value << " starts " << next;
+                sim.eventLog.event(sim.gameTime.value, "factory_start")
+                    .set("player", aiOwner.value)
+                    .set("unit", factoryId.value)
+                    .set("factory", factory.unitType)
+                    .set("subject", next)
+                    .set("why", "planned")
+                    .detail("factory starts a unit");
                 outCommands.emplace_back(PlayerUnitCommand(factoryId, PlayerUnitCommand::ModifyBuildQueue{1, next}));
             }
         }
@@ -4290,6 +4391,17 @@ namespace rwe
                     LOG_DEBUG << "AI build: expansion found no patch for unit " << ctx.builderId.value << " within " << radius.value
                               << ": " << inRange << " patch cells in range, " << offSide << " on the enemy's side, " << unknown << " unexplored, "
                               << guarded << " under enemy guns, " << unwalkable << " unreachable or beyond the commander's leash, the rest taken or unbuildable";
+                    sim.eventLog.event(sim.gameTime.value, "build_refusal")
+                        .set("player", aiOwner.value)
+                        .set("unit", ctx.builderId.value)
+                        .set("subject", next)
+                        .set("patch_cells_in_range", inRange)
+                        .set("off_side", offSide)
+                        .set("unknown", unknown)
+                        .set("guarded", guarded)
+                        .set("unwalkable", unwalkable)
+                        .set("why", "no_patch")
+                        .detail("expansion found no metal patch");
                 }
             }
 
@@ -4395,6 +4507,15 @@ namespace rwe
                     bb.ownReclaimTarget = *chosen;
                     LOG_INFO << "AI build: unit " << ctx.builderId.value << " reclaims its extractor at " << static_cast<int>(old.position.x.value) << ","
                              << static_cast<int>(old.position.z.value) << " to put a " << next << " there; " << bb.currentMetal.value << " metal in hand";
+                    sim.eventLog.event(sim.gameTime.value, "build_order")
+                        .set("player", aiOwner.value)
+                        .set("unit", ctx.builderId.value)
+                        .set("subject", next)
+                        .set("x", static_cast<double>(old.position.x.value))
+                        .set("z", static_cast<double>(old.position.z.value))
+                        .set("cost", bb.currentMetal.value)
+                        .set("why", "moho_extractor_upgrade")
+                        .detail("reclaims its extractor to put a moho there");
                     savingFor.clear();
                     outCommands.emplace_back(PlayerUnitCommand(ctx.builderId, PlayerUnitCommand::IssueOrder(ReclaimOrder(*chosen), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
                     result.stop = true;
@@ -4410,6 +4531,15 @@ namespace rwe
             LOG_INFO << "AI build: unit " << ctx.builderId.value << " puts back the " << next << " lost at "
                      << static_cast<int>(result.site->x.value) << "," << static_cast<int>(result.site->z.value)
                      << (result.clearFirst ? ", clearing its wreck first" : "");
+            sim.eventLog.event(sim.gameTime.value, "build_order")
+                .set("player", aiOwner.value)
+                .set("unit", ctx.builderId.value)
+                .set("subject", next)
+                .set("x", static_cast<double>(result.site->x.value))
+                .set("z", static_cast<double>(result.site->z.value))
+                .set("clears_wreck", result.clearFirst.has_value())
+                .set("why", "rebuild_defence")
+                .detail("puts back a defence that was lost");
         }
         else if (ctx.fortify && next == ctx.fortify->unitType)
         {
@@ -4417,6 +4547,15 @@ namespace rwe
             result.isFortification = true;
             LOG_INFO << "AI build: unit " << ctx.builderId.value << " fortifies tower " << ctx.fortify->tower.value << " with " << next << " at "
                      << static_cast<int>(result.site->x.value) << "," << static_cast<int>(result.site->z.value);
+            sim.eventLog.event(sim.gameTime.value, "build_order")
+                .set("player", aiOwner.value)
+                .set("unit", ctx.builderId.value)
+                .set("subject", next)
+                .set("target_id", ctx.fortify->tower.value)
+                .set("x", static_cast<double>(result.site->x.value))
+                .set("z", static_cast<double>(result.site->z.value))
+                .set("why", "fortify")
+                .detail("fortifies a tower");
         }
         else if (next == ctx.sideUnits.lightLaserTower && ctx.outpost && (ctx.outpost->raided || countOf(bb.ownedTotalCounts, next) >= profile.targetDefenceCount))
         {
@@ -4432,6 +4571,16 @@ namespace rwe
                 LOG_INFO << "AI build: unit " << ctx.builderId.value << " defends " << ctx.outpost->extractors << " extractor(s) at "
                          << static_cast<int>(ctx.outpost->anchor.x.value) << "," << static_cast<int>(ctx.outpost->anchor.z.value)
                          << (ctx.outpost->raided ? " after a raid" : "");
+                sim.eventLog.event(sim.gameTime.value, "build_order")
+                    .set("player", aiOwner.value)
+                    .set("unit", ctx.builderId.value)
+                    .set("subject", next)
+                    .set("x", static_cast<double>(ctx.outpost->anchor.x.value))
+                    .set("z", static_cast<double>(ctx.outpost->anchor.z.value))
+                    .set("extractors", ctx.outpost->extractors)
+                    .set("raided", ctx.outpost->raided)
+                    .set("why", "outpost_defence")
+                    .detail("sites an outpost tower over uncovered extractors");
             }
         }
         else if (profile.spreadDefences && ctx.builderAtBase && (next == ctx.sideUnits.lightLaserTower || next == ctx.sideUnits.antiAirTower))
@@ -4755,6 +4904,11 @@ namespace rwe
             if (bb.baseAnchor)
             {
                 LOG_INFO << "AI build: unit " << fieldPatroller->value << " comes off the battlefield";
+                sim.eventLog.event(sim.gameTime.value, "build_order")
+                    .set("player", aiOwner.value)
+                    .set("unit", fieldPatroller->value)
+                    .set("why", "battlefield_recall")
+                    .detail("worker comes off the battlefield");
                 outCommands.emplace_back(PlayerUnitCommand(*fieldPatroller, PlayerUnitCommand::IssueOrder(MoveOrder(*bb.baseAnchor), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
             }
         }
@@ -4827,6 +4981,16 @@ namespace rwe
                 LOG_INFO << "AI build: unit " << builderId.value << " works the battlefield at "
                          << static_cast<int>(waveCentre->x.value) << "," << static_cast<int>(waveCentre->z.value)
                          << " (" << taken << " of " << wreckCount << " reclaimable within " << profile.battlefieldReclaimRadius.value << ")";
+                sim.eventLog.event(sim.gameTime.value, "build_order")
+                    .set("player", aiOwner.value)
+                    .set("unit", builderId.value)
+                    .set("x", static_cast<double>(waveCentre->x.value))
+                    .set("z", static_cast<double>(waveCentre->z.value))
+                    .set("taken", taken)
+                    .set("wrecks", wreckCount)
+                    .set("radius", profile.battlefieldReclaimRadius.value)
+                    .set("why", "battlefield_reclaim")
+                    .detail("builder sent to work the battlefield");
                 savingFor.clear();
                 for (std::size_t i = 0; i < taken; ++i)
                 {
@@ -4840,7 +5004,7 @@ namespace rwe
         return false;
     }
 
-    void BuildManager::updateAirWorthIt(const AiTuningProfile& profile, AiBlackboard& bb) const
+    void BuildManager::updateAirWorthIt(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, AiBlackboard& bb) const
     {
         // Are aircraft worth spending a tier on? Asked every pass, because
         // the economy streams and the answer at minute three is not the
@@ -4874,6 +5038,14 @@ namespace rwe
             LOG_INFO << "AI build: the air tier is " << (bb.airWorthIt ? "worth having" : "no longer worth having")
                      << " (map " << (airMatters ? "wants it" : "does not") << ", their aircraft " << (bb.enemyAirThreat ? "seen" : "not seen")
                      << ", " << enemyStaticDefences << " standing guns of theirs known)";
+            sim.eventLog.event(sim.gameTime.value, "build_tier_assessment")
+                .set("player", aiOwner.value)
+                .set("on", bb.airWorthIt)
+                .set("air_matters", airMatters)
+                .set("enemy_air_threat", bb.enemyAirThreat)
+                .set("enemy_guns", enemyStaticDefences)
+                .set("why", bb.airWorthIt ? "air_tier_worth" : "air_tier_not_worth")
+                .detail(bb.airWorthIt ? "the air tier is worth having" : "the air tier is no longer worth having");
         }
     }
 
@@ -4887,7 +5059,7 @@ namespace rwe
         std::minstd_rand& rng,
         std::vector<PlayerCommand>& outCommands)
     {
-        updateAirWorthIt(profile, bb);
+        updateAirWorthIt(sim, aiOwner, profile, bb);
         keepBuildersOutOfFights(sim, aiOwner, profile, bb, outCommands);
 
         ++ticksSinceLastPlanning;
@@ -4936,7 +5108,7 @@ namespace rwe
         }
         spendingCapacityShort = capacityShortTicks >= static_cast<unsigned int>(std::max(0, profile.capacitySurplusSeconds)) * SimTicksPerSecond;
 
-        planFactories(sim, profile, bb, outCommands);
+        planFactories(sim, aiOwner, profile, bb, outCommands);
 
         // Every pass, whether or not a builder is idle: the defences are
         // watched for where attacks come from, and a damaged commander takes
@@ -5007,6 +5179,15 @@ namespace rwe
                     LOG_INFO << "AI build: unit " << builderId.value << " dropped its order for " << order.unitType << " at "
                              << static_cast<int>(order.site.x.value) << "," << static_cast<int>(order.site.z.value)
                              << "; the site is left alone for " << profile.failedSiteMemorySeconds << " s";
+                    sim.eventLog.event(sim.gameTime.value, "build_refusal")
+                        .set("player", aiOwner.value)
+                        .set("unit", builderId.value)
+                        .set("subject", order.unitType)
+                        .set("x", static_cast<double>(order.site.x.value))
+                        .set("z", static_cast<double>(order.site.z.value))
+                        .set("memory_seconds", profile.failedSiteMemorySeconds)
+                        .set("why", "order_dropped")
+                        .detail("the build order was dropped and the site is left alone");
                 }
             }
             issuedOrders.erase(issued);
@@ -5161,6 +5342,15 @@ namespace rwe
                 const auto& damaged = sim.getUnitState(*target);
                 LOG_INFO << "AI build: unit " << builderId.value << " repairs " << damaged.unitType << " " << target->value << " ("
                          << damaged.hitPoints << " of " << sim.unitDefinitions.at(damaged.unitType).maxHitPoints << " hit points)";
+                sim.eventLog.event(sim.gameTime.value, "build_order")
+                    .set("player", aiOwner.value)
+                    .set("unit", builderId.value)
+                    .set("target", damaged.unitType)
+                    .set("target_id", target->value)
+                    .set("hp", damaged.hitPoints)
+                    .set("max_hp", sim.unitDefinitions.at(damaged.unitType).maxHitPoints)
+                    .set("why", "repair")
+                    .detail("builder sent to repair a damaged structure");
                 savingFor.clear();
                 outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(RepairOrder(*target), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
                 return;
@@ -5188,6 +5378,14 @@ namespace rwe
                 continue;
             }
             LOG_INFO << "AI build: unit " << builderId.value << " resumes abandoned " << frame.unitType << " (" << estimate.metal << " metal left)";
+            sim.eventLog.event(sim.gameTime.value, "build_order")
+                .set("player", aiOwner.value)
+                .set("unit", builderId.value)
+                .set("subject", frame.unitType)
+                .set("target_id", frameId.value)
+                .set("cost", estimate.metal)
+                .set("why", "resume_frame")
+                .detail("builder resumes an abandoned frame");
             savingFor.clear();
             outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(RepairOrder(frameId), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
             return;
@@ -5224,6 +5422,14 @@ namespace rwe
                 }
                 LOG_INFO << "AI build: unit " << builderId.value << " assists the " << unit.unitType
                          << " frame (" << unit.getBuildPercentLeft(frameDef) << "% left)";
+                sim.eventLog.event(sim.gameTime.value, "build_order")
+                    .set("player", aiOwner.value)
+                    .set("unit", builderId.value)
+                    .set("subject", unit.unitType)
+                    .set("target_id", UnitId(unitId).value)
+                    .set("percent_left", unit.getBuildPercentLeft(frameDef))
+                    .set("why", "assist_frame")
+                    .detail("builder assists a tech frame");
                 savingFor.clear();
                 outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(RepairOrder(UnitId(unitId)), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
                 return;
@@ -5289,6 +5495,13 @@ namespace rwe
             if (worst && !someoneMending)
             {
                 LOG_INFO << "AI build: unit " << builderId.value << " mends unit " << worst->value << " (" << worstShare << "% of its hit points)";
+                sim.eventLog.event(sim.gameTime.value, "build_order")
+                    .set("player", aiOwner.value)
+                    .set("unit", builderId.value)
+                    .set("target_id", worst->value)
+                    .set("percent", worstShare)
+                    .set("why", "mend")
+                    .detail("builder mends a damaged mobile unit");
                 outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(RepairOrder(*worst), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
                 return;
             }
@@ -5371,6 +5584,14 @@ namespace rwe
                 LOG_INFO << "AI build: extractor upgrade at " << static_cast<int>(extractorUpgrade->site.x.value) << ","
                          << static_cast<int>(extractorUpgrade->site.z.value) << " given up ("
                          << (upgraderLives ? "took too long" : "its builder is gone") << "); the patch is released";
+                sim.eventLog.event(sim.gameTime.value, "build_refusal")
+                    .set("player", aiOwner.value)
+                    .set("unit", extractorUpgrade->builder.value)
+                    .set("subject", sideUnits.mohoExtractor)
+                    .set("x", static_cast<double>(extractorUpgrade->site.x.value))
+                    .set("z", static_cast<double>(extractorUpgrade->site.z.value))
+                    .set("why", upgraderLives ? "timed_out" : "builder_gone")
+                    .detail("extractor upgrade given up and the patch released");
                 extractorUpgrade.reset();
             }
         }
@@ -5391,6 +5612,14 @@ namespace rwe
             extractorUpgrade.reset();
             LOG_INFO << "AI build: unit " << builderId.value << " to build " << sideUnits.mohoExtractor << " at " << site.x.value << "," << site.z.value
                      << " where its extractor stood";
+            sim.eventLog.event(sim.gameTime.value, "build_order")
+                .set("player", aiOwner.value)
+                .set("unit", builderId.value)
+                .set("subject", sideUnits.mohoExtractor)
+                .set("x", static_cast<double>(site.x.value))
+                .set("z", static_cast<double>(site.z.value))
+                .set("why", "moho_where_extractor_stood")
+                .detail("builder resumes the moho where its extractor stood");
             savingFor.clear();
             issuedOrders[builderId.value] = IssuedOrder{sideUnits.mohoExtractor, site, bb.now};
             outCommands.push_back(buildCommand(builderId, sideUnits.mohoExtractor, site));
@@ -5527,6 +5756,15 @@ namespace rwe
                             savingFor = next;
                             LOG_INFO << "AI build: unit " << builderId.value << " saving for " << next << ": " << estimate.metal << " metal, have " << bb.currentMetal.value
                                      << ", net " << (bb.metalIncome.value - bb.metalCommitted.value) << "/s";
+                            sim.eventLog.event(sim.gameTime.value, "build_saving")
+                                .set("player", aiOwner.value)
+                                .set("unit", builderId.value)
+                                .set("subject", next)
+                                .set("cost", estimate.metal)
+                                .set("metal", bb.currentMetal.value)
+                                .set("income", bb.metalIncome.value - bb.metalCommitted.value)
+                                .set("why", "unaffordable_wait")
+                                .detail("builder waits for the metal before starting");
                         }
                         // Carry on down the list rather than stopping here.
                         // Extractors and collectors are exempt from the
@@ -5538,6 +5776,14 @@ namespace rwe
                         continue;
                     }
                     LOG_DEBUG << "AI build: cannot afford " << next << " (" << estimate.metal << " metal over " << estimate.seconds << " s), skipping";
+                    sim.eventLog.event(sim.gameTime.value, "build_unaffordable")
+                        .set("player", aiOwner.value)
+                        .set("unit", builderId.value)
+                        .set("subject", next)
+                        .set("cost", estimate.metal)
+                        .set("seconds", estimate.seconds)
+                        .set("why", "cannot_afford")
+                        .detail("cannot afford the build and it is not within reach");
                     continue;
                 }
             }
@@ -5572,6 +5818,15 @@ namespace rwe
                 {
                     LOG_DEBUG << "AI build: " << next << " at " << static_cast<int>(site->x.value) << "," << static_cast<int>(site->z.value)
                               << " is not worth its metal against income " << bb.metalIncome.value << "/s; skipping";
+                    sim.eventLog.event(sim.gameTime.value, "build_not_worth")
+                        .set("player", aiOwner.value)
+                        .set("unit", builderId.value)
+                        .set("subject", next)
+                        .set("x", static_cast<double>(site->x.value))
+                        .set("z", static_cast<double>(site->z.value))
+                        .set("income", bb.metalIncome.value)
+                        .set("why", "tower_not_cost_justified")
+                        .detail("the tower is not worth its metal against income");
                     site.reset();
                 }
             }
@@ -5617,6 +5872,14 @@ namespace rwe
                 {
                     LOG_DEBUG << "AI build: " << next << " at " << static_cast<int>(site->x.value) << "," << static_cast<int>(site->z.value)
                               << " is contested ground; left alone";
+                    sim.eventLog.event(sim.gameTime.value, "build_site_contested")
+                        .set("player", aiOwner.value)
+                        .set("unit", builderId.value)
+                        .set("subject", next)
+                        .set("x", static_cast<double>(site->x.value))
+                        .set("z", static_cast<double>(site->z.value))
+                        .set("why", "contested")
+                        .detail("the site is contested ground and left alone");
                     auto cell = sim.terrain.worldToHeightmapCoordinate(*site);
                     failedSites[std::make_pair(cell.x, cell.y)] = bb.now;
                     site.reset();
@@ -5629,6 +5892,12 @@ namespace rwe
                 // search already skips these; anything else is laid out by
                 // ring and would be offered the same place every pass.
                 LOG_DEBUG << "AI build: " << next << " would go where an order was just dropped; skipping it this pass";
+                sim.eventLog.event(sim.gameTime.value, "build_refusal")
+                    .set("player", aiOwner.value)
+                    .set("unit", builderId.value)
+                    .set("subject", next)
+                    .set("why", "site_recently_failed")
+                    .detail("the site is where an order was just dropped");
                 site.reset();
             }
             if (site && siteUnderEnemyGuns(sim, profile, bb, *site))
@@ -5647,11 +5916,27 @@ namespace rwe
                 // measurement, applied to every site instead of one kind.
                 LOG_DEBUG << "AI build: " << next << " would go under an enemy gun at "
                           << static_cast<int>(site->x.value) << "," << static_cast<int>(site->z.value) << "; skipping it this pass";
+                sim.eventLog.event(sim.gameTime.value, "build_refusal")
+                    .set("player", aiOwner.value)
+                    .set("unit", builderId.value)
+                    .set("subject", next)
+                    .set("x", static_cast<double>(site->x.value))
+                    .set("z", static_cast<double>(site->z.value))
+                    .set("why", "under_enemy_guns")
+                    .detail("the site is under an enemy gun");
                 site.reset();
             }
             if (site)
             {
                 LOG_DEBUG << "AI build: unit " << builderId.value << " to build " << next << " at " << site->x.value << "," << site->z.value;
+                sim.eventLog.event(sim.gameTime.value, "build_order")
+                    .set("player", aiOwner.value)
+                    .set("unit", builderId.value)
+                    .set("subject", next)
+                    .set("x", static_cast<double>(site->x.value))
+                    .set("z", static_cast<double>(site->z.value))
+                    .set("why", "issued")
+                    .detail("builder ordered to build at the site");
                 savingFor.clear();
                 issuedOrders[builderId.value] = IssuedOrder{next, *site, bb.now};
                 if (clearFirst)
@@ -5716,11 +6001,29 @@ namespace rwe
                         LOG_INFO << "AI build: unit " << builderId.value << " building " << next << " "
                                  << static_cast<int>(flatDistance(*site, *bb.baseAnchor).value) << " from base wants a guard"
                                  << " (threat " << siteThreat << ")";
+                        sim.eventLog.event(sim.gameTime.value, "build_guard_request")
+                            .set("player", aiOwner.value)
+                            .set("unit", builderId.value)
+                            .set("subject", next)
+                            .set("x", static_cast<double>(site->x.value))
+                            .set("z", static_cast<double>(site->z.value))
+                            .set("distance", flatDistance(*site, *bb.baseAnchor).value)
+                            .set("threat", siteThreat)
+                            .set("why", "threatened")
+                            .detail("a remote build site wants a guard");
                     }
                 }
                 return;
             }
             LOG_DEBUG << "AI build: no site found for " << next << " near " << builder.position.x.value << "," << builder.position.z.value;
+            sim.eventLog.event(sim.gameTime.value, "build_refusal")
+                .set("player", aiOwner.value)
+                .set("unit", builderId.value)
+                .set("subject", next)
+                .set("x", static_cast<double>(builder.position.x.value))
+                .set("z", static_cast<double>(builder.position.z.value))
+                .set("why", "no_site")
+                .detail("no site found for the build");
         }
 
         // Nothing to build, nowhere to build it, or saving up: harvest the
@@ -5777,6 +6080,14 @@ namespace rwe
                 const auto& frame = sim.getUnitState(*nearestFrame);
                 LOG_INFO << "AI build: the commander helps with the " << frame.unitType << " frame " << nearestFrame->value
                          << " (" << frame.getBuildPercentLeft(sim.unitDefinitions.at(frame.unitType)) << "% left)";
+                sim.eventLog.event(sim.gameTime.value, "build_order")
+                    .set("player", aiOwner.value)
+                    .set("unit", builderId.value)
+                    .set("subject", frame.unitType)
+                    .set("target_id", nearestFrame->value)
+                    .set("percent_left", frame.getBuildPercentLeft(sim.unitDefinitions.at(frame.unitType)))
+                    .set("why", "commander_assist_frame")
+                    .detail("the commander helps with a frame");
                 outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(RepairOrder(*nearestFrame), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
                 return;
             }

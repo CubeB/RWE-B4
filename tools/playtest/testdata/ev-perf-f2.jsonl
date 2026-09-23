@@ -1,0 +1,2 @@
+{"schema":1,"secs":200.0,"tick":3000,"ev":"ai_perf","player":1,"pass":"army","ms":20.0,"calls":1000,"kind":"summary","worst":22.0,"spikes":30,"detail":"ai pass summary"}
+{"schema":1,"secs":400.0,"tick":6000,"ev":"ai_perf","player":1,"pass":"army","ms":30.0,"calls":1500,"kind":"summary","worst":24.0,"spikes":25,"detail":"ai pass summary"}

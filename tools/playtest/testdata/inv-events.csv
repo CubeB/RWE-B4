@@ -1,0 +1,5 @@
+player,unitType,category,isBuilding,startedTick,startedSeconds,completedTick,completedSeconds,diedTick,diedSeconds,x,z,enemiesNear,nearestEnemyType,friendlyArmyNear,friendlyTowersNear
+0,ARMMEX,economy,0,0,0,100,10,,,100,200,,,,
+0,ARMPW,army,0,0,0,100,10,3000,300,100,200,,,,
+0,ARMVP,factory,0,0,0,,,,,100,200,,,,
+1,COREMEX,economy,0,0,0,100,10,,,100,200,,,,

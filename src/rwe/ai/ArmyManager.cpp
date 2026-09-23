@@ -1283,6 +1283,16 @@ namespace rwe
                         {
                             LOG_DEBUG << "AI navy: ship " << shipId.value << " is not hurting " << target.unitType << " " << enemy->value
                                       << "; moving round to " << static_cast<int>(spot->x.value) << "," << static_cast<int>(spot->z.value) << " (attempt " << progress.attempt << ")";
+                            sim.eventLog.event(sim.gameTime.value, "navy_reposition")
+                                .set("player", aiOwner.value)
+                                .set("unit", shipId.value)
+                                .set("target", target.unitType)
+                                .set("target_id", enemy->value)
+                                .set("x", static_cast<double>(spot->x.value))
+                                .set("z", static_cast<double>(spot->z.value))
+                                .set("attempt", progress.attempt)
+                                .set("why", "stalled_attack")
+                                .detail("ship moves round a target it is not hurting");
                             navalRepositioning[shipId.value] = std::make_pair(*spot, GameTime(bb.now.value + (20u * SimTicksPerSecond)));
                             outCommands.push_back(moveCommand(shipId, *spot));
                             continue;
@@ -1389,6 +1399,13 @@ namespace rwe
             return;
         }
         LOG_INFO << "AI army: the commander answers the siege of a production site, attacking " << enemy->value;
+        sim.eventLog.event(sim.gameTime.value, "army_defend")
+            .set("player", commander.owner.value)
+            .set("unit", bb.commanderUnitId->value)
+            .set("target_id", enemy->value)
+            .set("factories", bb.besiegedFactories.size())
+            .set("why", "commander_answers_siege")
+            .detail("the commander answers the siege of a production site");
         outCommands.push_back(attackCommand(*bb.commanderUnitId, *enemy));
     }
 
@@ -1533,6 +1550,12 @@ namespace rwe
                 {
                     LOG_INFO << "AI army: guard of " << bb.guardGroup.size() << " released, builder " << request.builderId.value
                              << (builderGone ? " lost" : (jobDone ? " finished" : " timed out"));
+                    sim.eventLog.event(sim.gameTime.value, "army_guard_released")
+                        .set("player", aiOwner.value)
+                        .set("unit", request.builderId.value)
+                        .set("guard", bb.guardGroup.size())
+                        .set("why", builderGone ? "builder_gone" : (jobDone ? "finished" : "timed_out"))
+                        .detail("guard released, builder " + std::string(builderGone ? "lost" : (jobDone ? "finished" : "timed out")));
                 }
                 bb.buildSiteGuardRequest.reset();
                 bb.guardGroup.clear();
@@ -1624,6 +1647,15 @@ namespace rwe
                         LOG_INFO << "AI army: raid of " << bb.raidGroup.size() << " sent at unit " << target->value
                                  << " at " << static_cast<int>(bb.raidTarget->x.value) << "," << static_cast<int>(bb.raidTarget->z.value)
                                  << ", wave of " << bb.attackGroup.size() << " carries on";
+                        sim.eventLog.event(sim.gameTime.value, "army_dispatch")
+                            .set("player", aiOwner.value)
+                            .set("units", bb.raidGroup.size())
+                            .set("target_id", target->value)
+                            .set("x", static_cast<double>(bb.raidTarget->x.value))
+                            .set("z", static_cast<double>(bb.raidTarget->z.value))
+                            .set("wave", bb.attackGroup.size())
+                            .set("why", "raid")
+                            .detail("raid sent at an outlying enemy building");
                     }
                 }
             }
@@ -1695,6 +1727,12 @@ namespace rwe
                         bb.attackGroup.insert(unitId.value);
                     }
                     LOG_INFO << "AI army: " << reserve.size() << " reinforcements join the wave, now " << bb.attackGroup.size();
+                    sim.eventLog.event(sim.gameTime.value, "army_reinforce")
+                        .set("player", aiOwner.value)
+                        .set("units", reserve.size())
+                        .set("army", bb.attackGroup.size())
+                        .set("why", "wave")
+                        .detail("reinforcements join the wave");
                 }
             }
             if (static_cast<int>(bb.attackGroup.size()) < profile.retreatArmySize)
@@ -1829,6 +1867,16 @@ namespace rwe
                 {
                     LOG_INFO << "AI army: " << outpostResponders.size() << " answer raiders (" << static_cast<int>(raiders) << " metal) at "
                              << static_cast<int>(site->x.value) << "," << static_cast<int>(site->z.value);
+                    sim.eventLog.event(sim.gameTime.value, "army_defend")
+                        .set("player", aiOwner.value)
+                        .set("units", outpostResponders.size())
+                        .set("target_id", outpostRaider ? outpostRaider->value : 0u)
+                        .set("x", static_cast<double>(site->x.value))
+                        .set("z", static_cast<double>(site->z.value))
+                        .set("raiders_metal", raiders)
+                        .set("responders_metal", responders)
+                        .set("why", "outpost_raid")
+                        .detail("reserve answers raiders at an outpost");
                 }
             }
         }
@@ -2167,6 +2215,15 @@ namespace rwe
                                 progress.since = bb.now;
                                 LOG_INFO << "AI army: unit " << unitId.value << " moves to get a shot at " << target.unitType
                                          << " " << enemy->value << " (attempt " << tries << " of " << profile.stalledAttackRepositionTries << ")";
+                                sim.eventLog.event(sim.gameTime.value, "army_reposition")
+                                    .set("player", aiOwner.value)
+                                    .set("unit", unitId.value)
+                                    .set("target", target.unitType)
+                                    .set("target_id", enemy->value)
+                                    .set("attempt", tries)
+                                    .set("max_attempts", profile.stalledAttackRepositionTries)
+                                    .set("why", "stalled_attack")
+                                    .detail("moves to get a shot at a target nothing it fired hurt");
                                 if (!isMovingTo(unit, to))
                                 {
                                     outCommands.push_back(moveCommand(unitId, to));
@@ -2190,6 +2247,14 @@ namespace rwe
                             LOG_INFO << "AI army: unit " << unitId.value << " gives up on " << targetRef->get().unitType
                                      << " " << enemy->value << ", nothing it fired moved its hit points from "
                                      << profile.stalledAttackRepositionTries << " position(s)";
+                            sim.eventLog.event(sim.gameTime.value, "army_retreat")
+                                .set("player", aiOwner.value)
+                                .set("unit", unitId.value)
+                                .set("target", targetRef->get().unitType)
+                                .set("target_id", enemy->value)
+                                .set("attempts", profile.stalledAttackRepositionTries)
+                                .set("why", "stalled_attack")
+                                .detail("gives up on a target nothing it fired could hurt");
                             outCommands.push_back(moveCommand(unitId, unit.position));
                             continue;
                         }

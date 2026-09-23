@@ -1,0 +1,2 @@
+AI arena: fake harness
+AI-ARENA-RESULT ticks=9000 seconds=900 | p0=ARM alive units=10 buildings=5 army=4 lost=2 metalIncome=12 types=ARMCOMx1;ARMPWx9 | p1=CORE alive units=8 buildings=4 army=3 lost=6 metalIncome=10 types=CORCOMx1;CORPWx7 | ended=decided

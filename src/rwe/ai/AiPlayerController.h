@@ -48,10 +48,10 @@ namespace rwe
         };
 
         /** Times one pass, logging straight away if it blew the spike budget. */
-        void record(const char* pass, double milliseconds, PlayerId player, GameTime now);
+        void record(const char* pass, double milliseconds, PlayerId player, GameTime now, const GameSimulation& sim);
 
         /** Logs the accumulated totals since the last report, then clears them. */
-        void report(PlayerId player, GameTime now);
+        void report(PlayerId player, GameTime now, const GameSimulation& sim);
 
     private:
         // std::map so the report comes out in a stable order.

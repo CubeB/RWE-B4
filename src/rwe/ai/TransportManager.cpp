@@ -101,6 +101,13 @@ namespace rwe
             {
                 // Nothing left to carry, or the pickup never happened: call it off.
                 LOG_DEBUG << "AI transport " << transportId.value << ": ferry called off" << (overdue ? " (overdue)" : "");
+                sim.eventLog.event(sim.gameTime.value, "transport_ferry")
+                    .set("player", transport.owner.value)
+                    .set("unit", transportId.value)
+                    .set("passengers", ferry.passengers.size())
+                    .set("carried", transport.carriedUnits.size())
+                    .set("why", overdue ? "overdue" : "called_off")
+                    .detail(overdue ? "ferry called off (overdue)" : "ferry called off");
                 if (!transport.orders.empty())
                 {
                     outCommands.push_back(stopCommand(transportId));
@@ -121,6 +128,13 @@ namespace rwe
                 {
                     // Set down and idle again: the trip is over.
                     LOG_DEBUG << "AI transport " << transportId.value << ": ferry complete at " << ferry.destination.x.value << "," << ferry.destination.z.value;
+                    sim.eventLog.event(sim.gameTime.value, "transport_ferry")
+                        .set("player", transport.owner.value)
+                        .set("unit", transportId.value)
+                        .set("x", static_cast<double>(ferry.destination.x.value))
+                        .set("z", static_cast<double>(ferry.destination.z.value))
+                        .set("why", "complete")
+                        .detail("ferry complete");
                     it = ferries.erase(it);
                     continue;
                 }
@@ -327,6 +341,10 @@ namespace rwe
         if (enemyAcrossWater && bb.phase == GamePhase::Attack && bb.transports.empty())
         {
             LOG_DEBUG << "AI transport: army ferry wanted, but nothing is classified as a transport";
+            sim.eventLog.event(sim.gameTime.value, "transport_refusal")
+                .set("player", aiOwner.value)
+                .set("why", "no_transport")
+                .detail("army ferry wanted, but nothing is classified as a transport");
         }
 
         for (auto transportId : bb.transports)
@@ -342,6 +360,13 @@ namespace rwe
                 {
                     LOG_DEBUG << "AI transport " << transportId.value << ": army ferry blocked, transport busy ("
                               << transport.orders.size() << " orders, " << transport.carriedUnits.size() << " aboard)";
+                    sim.eventLog.event(sim.gameTime.value, "transport_refusal")
+                        .set("player", aiOwner.value)
+                        .set("unit", transportId.value)
+                        .set("orders", transport.orders.size())
+                        .set("carried", transport.carriedUnits.size())
+                        .set("why", "transport_busy")
+                        .detail("army ferry blocked, transport busy");
                 }
                 continue;
             }
@@ -385,6 +410,14 @@ namespace rwe
                 {
                     Ferry ferry{{*builder}, *expansionSite, sim.gameTime, false};
                     LOG_DEBUG << "AI transport " << transportId.value << ": ferrying builder " << builder->value << " to " << expansionSite->x.value << "," << expansionSite->z.value;
+                    sim.eventLog.event(sim.gameTime.value, "transport_dispatch")
+                        .set("player", aiOwner.value)
+                        .set("unit", transportId.value)
+                        .set("passenger", builder->value)
+                        .set("x", static_cast<double>(expansionSite->x.value))
+                        .set("z", static_cast<double>(expansionSite->z.value))
+                        .set("why", "builder_ferry")
+                        .detail("ferrying a builder to a fresh metal patch");
                     outCommands.push_back(loadCommand(transportId, *builder, IssueKind::Immediate));
                     outCommands.push_back(unloadCommand(transportId, *expansionSite, IssueKind::Queued));
                     bookPassengers(bb, ferry);
@@ -408,6 +441,14 @@ namespace rwe
                     LOG_DEBUG << "AI transport " << transportId.value << ": army ferry blocked, no landing near "
                               << static_cast<int>(bb.attackTarget->x.value) << "," << static_cast<int>(bb.attackTarget->z.value)
                               << (transportDef.canFly ? " (air)" : " (sea)");
+                    sim.eventLog.event(sim.gameTime.value, "transport_refusal")
+                        .set("player", aiOwner.value)
+                        .set("unit", transportId.value)
+                        .set("x", static_cast<double>(bb.attackTarget->x.value))
+                        .set("z", static_cast<double>(bb.attackTarget->z.value))
+                        .set("air", transportDef.canFly)
+                        .set("why", "no_landing")
+                        .detail("army ferry blocked, no landing near the attack target");
                     continue;
                 }
                 std::vector<UnitId> passengers;
@@ -577,10 +618,33 @@ namespace rwe
                               // arithmetic of mine to get wrong.
                               << " factoryAt=" << (bb.factories.empty() ? 0 : static_cast<int>(sim.getUnitState(bb.factories.front()).position.x.value))
                               << "," << (bb.factories.empty() ? 0 : static_cast<int>(sim.getUnitState(bb.factories.front()).position.z.value));
+                    sim.eventLog.event(sim.gameTime.value, "transport_refusal")
+                        .set("player", aiOwner.value)
+                        .set("unit", transportId.value)
+                        .set("combat_units", bb.combatUnits.size())
+                        .set("capacity", capacity)
+                        .set("refused_scout", refusedScout)
+                        .set("refused_carried", refusedCarried)
+                        .set("refused_unreachable", refusedUnreachable)
+                        .set("refused_booked", refusedBooked)
+                        .set("refused_cant_be_transported", refusedCantBeTransported)
+                        .set("refused_footprint", refusedFootprint)
+                        .set("refused_needs_water", refusedNeedsWater)
+                        .set("factories_reachable", factoriesReachable)
+                        .set("why", "no_passenger")
+                        .detail("army ferry blocked, no eligible passenger");
                     continue;
                 }
                 Ferry ferry{passengers, *landing, sim.gameTime, false};
                 LOG_DEBUG << "AI transport " << transportId.value << ": ferrying " << passengers.size() << " units to " << landing->x.value << "," << landing->z.value;
+                sim.eventLog.event(sim.gameTime.value, "transport_dispatch")
+                    .set("player", aiOwner.value)
+                    .set("unit", transportId.value)
+                    .set("passengers", passengers.size())
+                    .set("x", static_cast<double>(landing->x.value))
+                    .set("z", static_cast<double>(landing->z.value))
+                    .set("why", "army_ferry")
+                    .detail("ferrying the army to an enemy it cannot walk to");
                 outCommands.push_back(loadCommand(transportId, passengers.front(), IssueKind::Immediate));
                 for (std::size_t i = 1; i < passengers.size(); ++i)
                 {
