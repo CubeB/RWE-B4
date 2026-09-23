@@ -82,6 +82,24 @@ namespace rwe
          */
         std::optional<DesyncReport> desync;
 
+        /**
+         * How many sets have ever been pushed for each player, which is the
+         * tick the next one will be consumed at: the Nth set a player sends is
+         * the one the simulation runs on tick N.
+         *
+         * Only a drop needs this. Cutting a lost peer's stream at an agreed
+         * tick means knowing how far along the stream already is, and the
+         * buffer alone cannot say, having had most of it taken out of it.
+         */
+        std::unordered_map<PlayerId, unsigned int> pushedCount;
+
+        /** Players whose stream has been cut, and the tick it was cut at. */
+        std::unordered_map<PlayerId, unsigned int> droppedFromTick;
+
+        bool isDroppedLocked(PlayerId player) const;
+        std::optional<PlayerId> droppingPlayerForLocked(PlayerId dropped) const;
+        void dropPlayerLocked(PlayerId player, unsigned int fromTick);
+
     public:
         std::optional<std::vector<std::pair<PlayerId, std::vector<PlayerCommand>>>> tryPopCommands();
 
@@ -111,5 +129,55 @@ namespace rwe
          * and nothing while any peer's hashes have yet to arrive.
          */
         std::optional<DesyncReport> checkHashes();
+
+        /**
+         * The players the next tick is waiting on: those with nothing buffered
+         * who have not been dropped. Empty when the tick can go ahead.
+         *
+         * This is what the waiting overlay names. It is ordinarily empty, and
+         * ordinarily non-empty for a frame or two when a peer's packet is late,
+         * which is why the overlay waits a moment before believing it.
+         */
+        std::vector<PlayerId> playersNotReady() const;
+
+        /**
+         * Cuts a player's command stream at `fromTick` and carries on without
+         * them: everything they sent from that tick on is discarded, everything
+         * missing below it is filled in with empty sets, and every tick after it
+         * takes an empty set from them.
+         *
+         * The cut is what makes this safe to apply whenever it arrives. Two
+         * peers may hold different amounts of a lost peer's stream -- a packet
+         * that reached one and not the other -- and forcing both to the same
+         * length at the same tick is what stops that becoming a desync. It also
+         * makes the call idempotent: a second drop for the same player is
+         * ignored, so it may be applied on arrival and again when it is popped.
+         *
+         * They stop being a hash source too: a peer that is not answering is
+         * not submitting sync hashes either, and a hash buffer nobody fills
+         * stalls the comparison for everybody.
+         */
+        void dropPlayer(PlayerId player, unsigned int fromTick);
+
+        /** Whether this player's stream has been cut. */
+        bool isDropped(PlayerId player) const;
+
+        /**
+         * Which player is the one to declare `dropped` lost: the lowest-numbered
+         * peer that is neither the player in question nor already dropped.
+         *
+         * Exactly one peer may issue a drop, or two drops naming different ticks
+         * would cut the stream in two different places. The rule is computed
+         * rather than agreed, from state every peer already shares -- who the
+         * peers are, and who has been dropped -- so every peer works out the
+         * same answer without a message being sent. It is the host in the
+         * ordinary case, player 0 being the seat the lobby gives them; the point
+         * of the rest of it is that the host dropping is the likeliest failure
+         * of all, and somebody has to be able to say so.
+         *
+         * Nothing if this player is the only peer left, there being nobody to
+         * declare anything.
+         */
+        std::optional<PlayerId> droppingPlayerFor(PlayerId dropped) const;
     };
 }

@@ -527,6 +527,8 @@ namespace rwe
             panel->render(chromeUiRenderService);
         }
 
+        renderWaitingForPlayers();
+
         if (paused)
         {
             float centerX = static_cast<float>(sceneContext.viewport->width()) / 2.0f;

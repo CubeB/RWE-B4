@@ -76,6 +76,45 @@ namespace rwe
         return SceneTime(result.get_future().get());
     }
 
+    std::vector<GameNetworkService::PeerStatus> GameNetworkService::getPeerStatuses()
+    {
+        std::promise<std::vector<PeerStatus>> result;
+        asio::post(ioContext, [this, &result]() {
+            auto now = getTimestamp();
+            std::vector<PeerStatus> statuses;
+            for (const auto& e : endpoints)
+            {
+                // A peer never heard from is measured from when this service
+                // started, so that one which never turns up times out like one
+                // which turned up and left. Before the thread has started there
+                // is no clock to measure from and nobody has had a chance to
+                // speak, so the silence is nothing.
+                auto since = e.lastPacketTime ? e.lastPacketTime : startTime;
+                auto silence = since
+                    ? std::chrono::duration_cast<std::chrono::milliseconds>(now - *since)
+                    : std::chrono::milliseconds(0);
+
+                statuses.push_back(PeerStatus{
+                    e.playerId,
+                    silence,
+                    e.lastKnownSceneTime ? std::optional<SceneTime>(e.lastKnownSceneTime->first) : std::nullopt});
+            }
+
+            result.set_value(std::move(statuses));
+        });
+
+        return result.get_future().get();
+    }
+
+    void GameNetworkService::forgetPeer(PlayerId playerId)
+    {
+        asio::post(ioContext, [this, playerId]() {
+            endpoints.erase(
+                std::remove_if(endpoints.begin(), endpoints.end(), [playerId](const auto& e) { return e.playerId == playerId; }),
+                endpoints.end());
+        });
+    }
+
     float GameNetworkService::getMaxAverageRttMillis()
     {
         std::promise<float> result;
@@ -102,6 +141,11 @@ namespace rwe
             auto endpoint = asio::ip::udp::endpoint(asio::ip::udp::v6(), port);
             socket.open(endpoint.protocol());
             socket.bind(endpoint);
+
+            // Where a peer's silence is measured from until it has been
+            // heard once. Set on the network thread, which is the only
+            // thread that reads it.
+            startTime = getTimestamp();
 
             listenForNextMessage();
 
@@ -282,6 +326,12 @@ namespace rwe
             LOG_ERROR << "Player " << endpoint.playerId.value << " endpoint sent wrong player ID: " << message.player_id();
             return;
         }
+
+        // Anything well formed from this peer counts as a sign of life,
+        // whether or not it carries anything new. lastReceiveTime below
+        // moves only for a packet with new commands in it, and so stands
+        // still for a peer that is present and has nothing to say.
+        endpoint.lastPacketTime = receiveTime;
 
         LOG_DEBUG << "Received ack to " << message.next_command_set_to_receive() << " and " << message.command_set_size() << " commands starting at " << message.next_command_set_to_send();
 

@@ -326,6 +326,7 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_endgame.cpp
     src/rwe/game/GameScene_input.cpp
     src/rwe/game/GameScene_menu.cpp
+    src/rwe/game/GameScene_peers.cpp
     src/rwe/game/GameScene_render.cpp
     src/rwe/game/panel_slide.cpp
     src/rwe/game/GameScene_replay.cpp
@@ -978,6 +979,7 @@ set(TEST_FILES
     src/rwe/game/dump_util.test.cpp
     src/rwe/game/DesyncReport.test.cpp
     src/rwe/game/aicommandfeed.test.cpp
+    src/rwe/game/playerdrop.test.cpp
     src/rwe/geometry/BoundingBox3f.test.cpp
     src/rwe/geometry/Circle2f.test.cpp
     src/rwe/geometry/CollisionMesh.test.cpp

@@ -129,6 +129,9 @@ int main(int argc, char* argv[])
                       << "  --data-path <path>    Game data search path (repeatable)\n"
                       << "  --map <name>          Launch directly into a game on this map\n"
                       << "  --port <port>         Network port (default: 1337)\n"
+                      << "  --drop-timeout <secs> Seconds a peer of a network game may go quiet\n"
+                      << "                        before the rest carry on without it; 0 waits\n"
+                      << "                        for ever (default: 10)\n"
                       << "  --player <spec>       Player spec: name;type;side;color[;team] (repeatable)\n"
                       << "                        Players sharing a team number are allies\n"
                       << "  --dir-<name> <dir>    Override directory name for a data category\n"
@@ -155,6 +158,7 @@ int main(int argc, char* argv[])
             config.vehicleShadows = args.getString("vehicle-shadows", "true") != "false";
             config.screenScale = std::clamp(args.getUint("screen-scale", 1), 1u, 4u);
             config.scrollSpeed = std::clamp(args.getUint("scroll-speed", 100), 25u, 200u);
+            config.dropTimeoutSeconds = std::min(600u, args.getUint("drop-timeout", 10));
             config.soundMode = std::min(2u, args.getUint("sound-mode", 2));
             config.unitSpeech = std::min(2u, args.getUint("unit-speech", 2));
             config.musicTrackMode = std::min(3u, args.getUint("music-mode", 3));

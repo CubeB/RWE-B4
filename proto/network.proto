@@ -229,6 +229,15 @@ message PlayerSetGameSpeedCommand
     required int32 speed_index = 1;
 }
 
+// A peer has stopped answering; the rest of the game carries on without it.
+// `from_tick` is the first tick that player's commands are taken as empty,
+// which is what makes every peer cut their stream in the same place.
+message PlayerDroppedCommand
+{
+    required uint32 player = 1;
+    required uint32 from_tick = 2;
+}
+
 message PlayerCommand
 {
     oneof command
@@ -237,6 +246,7 @@ message PlayerCommand
         PlayerPauseGameCommand pause = 2;
         PlayerUnpauseGameCommand unpause = 3;
         PlayerSetGameSpeedCommand set_game_speed = 4;
+        PlayerDroppedCommand dropped = 5;
     }
 }
 

@@ -128,6 +128,17 @@ namespace rwe
         /** Screen scroll speed percentage, 25 to 200; 100 is the old fixed rate. */
         unsigned int scrollSpeed{100};
 
+        /**
+         * How long a peer of a network game may go quiet before the rest
+         * carry on without it, in seconds. An rwe.cfg key, drop-timeout.
+         *
+         * Zero switches dropping off altogether, which leaves the game
+         * waiting for a peer that is not coming back -- the behaviour
+         * before there was a timeout at all, kept for anyone who would
+         * rather wait for a reconnecting player than lose them.
+         */
+        unsigned int dropTimeoutSeconds{10};
+
         /** 0 off, 1 mono, 2 stereo. */
         unsigned int soundMode{2};
 

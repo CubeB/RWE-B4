@@ -741,6 +741,12 @@ namespace rwe
                 });
         }
 
+        // Before anything is queued, so that a drop decided this frame goes
+        // out this frame: the local buffer is at its limit while the game is
+        // stalled, and the push below would otherwise hold it back until a
+        // tick that cannot run without it.
+        updatePeerLiveness();
+
         auto targetCommandBufferSize = commandBufferTargetForRttMillis(gameNetworkService->getMaxAverageRttMillis());
 
         auto bufferedCommandCount = playerCommandService->bufferedCommandCount(localPlayerId);
@@ -762,7 +768,13 @@ namespace rwe
             // If we have too many commands buffered,
             // defer submitting commands this frame
             // so that we drop back down to the threshold.
-            if (bufferedCommandCount <= targetCommandBufferSize)
+            // The second arm is for a stalled game. The buffer is not being
+            // drained, so it sits at its limit and the first arm stops
+            // firing -- which would leave a drop command waiting for a tick
+            // that is waiting for the drop. Queueing an extra set is safe:
+            // every peer sees this peer's stream exactly as it is sent, and
+            // the depth only decides how long an order waits.
+            if (bufferedCommandCount <= targetCommandBufferSize || (!waitingForPlayers.empty() && !localPlayerCommandBuffer.empty()))
             {
                 // Queue up commands collected from the local player
                 playerCommandService->pushCommands(localPlayerId, localPlayerCommandBuffer);
