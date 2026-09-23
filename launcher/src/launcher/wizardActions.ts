@@ -49,8 +49,4 @@ export function close(): CloseAction {
 }
 
 export type WizardAction =
-  | NextAction
-  | DoneAction
-  | FailAction
-  | OpenAction
-  | CloseAction;
+  NextAction | DoneAction | FailAction | OpenAction | CloseAction;

@@ -258,16 +258,14 @@ function getHashes(
     rxop.catchError<DirentPair, rx.Observable<DirentPair>>(err => {
       if (err.code === "ENOTDIR") {
         const parentName = path.dirname(searchDirectory);
-        return rx.from(readDir(path.dirname(searchDirectory))).pipe(
-          rxop.map<fs.Dirent[], DirentPair>(x => [parentName, x])
-        );
+        return rx
+          .from(readDir(path.dirname(searchDirectory)))
+          .pipe(rxop.map<fs.Dirent[], DirentPair>(x => [parentName, x]));
       }
       throw err;
     }),
     rxop.concatMap<DirentPair, rx.Observable<[string, fs.Dirent]>>(x =>
-      rx.from(
-        x[1].map<FlatDirentPair>(y => [x[0], y])
-      )
+      rx.from(x[1].map<FlatDirentPair>(y => [x[0], y]))
     ),
     rxop.filter(x => x[1].isFile()),
     rxop.map(f => path.join(f[0], f[1].name)),

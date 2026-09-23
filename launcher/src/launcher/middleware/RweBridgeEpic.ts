@@ -46,40 +46,36 @@ export const rweBridgeEpic = (
   );
 
   const mapInfoStream = selectedMap$.pipe(
-    rxop.switchMap(
-      (mapListItem): rx.Observable<AppAction> => {
-        const mapInfo$ = rx.from(
-          deps.bridgeService.getMapInfo(mapListItem.source, mapListItem.name)
-        );
-        const minimap$ = rx.from(
-          deps.bridgeService.getMinimap(mapListItem.source, mapListItem.name)
-        );
-        return rx.combineLatest([mapInfo$, minimap$]).pipe(
-          rxop.map(([infoResponse, minimapResponse]) => {
-            return receiveCombinedMapInfo(
-              mapListItem.name,
-              infoResponse,
-              minimapResponse.path
-            );
-          })
-        );
-      }
-    )
+    rxop.switchMap((mapListItem): rx.Observable<AppAction> => {
+      const mapInfo$ = rx.from(
+        deps.bridgeService.getMapInfo(mapListItem.source, mapListItem.name)
+      );
+      const minimap$ = rx.from(
+        deps.bridgeService.getMinimap(mapListItem.source, mapListItem.name)
+      );
+      return rx.combineLatest([mapInfo$, minimap$]).pipe(
+        rxop.map(([infoResponse, minimapResponse]) => {
+          return receiveCombinedMapInfo(
+            mapListItem.name,
+            infoResponse,
+            minimapResponse.path
+          );
+        })
+      );
+    })
   );
 
   const actionPipe = action$.pipe(
-    rxop.flatMap(
-      (action): rx.Observable<AppAction> => {
-        switch (action.type) {
-          case "OPEN_SELECT_MAP_DIALOG": {
-            return rx
-              .from(deps.bridgeService.getMapList())
-              .pipe(rxop.map(x => receiveMapList(x.maps)));
-          }
+    rxop.flatMap((action): rx.Observable<AppAction> => {
+      switch (action.type) {
+        case "OPEN_SELECT_MAP_DIALOG": {
+          return rx
+            .from(deps.bridgeService.getMapList())
+            .pipe(rxop.map(x => receiveMapList(x.maps)));
         }
-        return rx.empty();
       }
-    )
+      return rx.empty();
+    })
   );
 
   return rx.merge(mapInfoStream, actionPipe);

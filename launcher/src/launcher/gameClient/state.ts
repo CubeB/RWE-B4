@@ -69,8 +69,7 @@ export type CanStartGameError =
   | { type: "archives-unchecked"; playerIds: number[] };
 
 export type CanStartGameResult =
-  | { result: "ok" }
-  | { result: "err"; errors: CanStartGameError[] };
+  { result: "ok" } | { result: "err"; errors: CanStartGameError[] };
 
 export function canStartGame(room: CurrentGameState): CanStartGameResult {
   const errors: CanStartGameError[] = [];
@@ -217,8 +216,8 @@ function currentGameReducer(
         action.payload.newAdminPlayerId !== undefined
           ? action.payload.newAdminPlayerId
           : action.payload.playerId === room.adminPlayerId
-          ? undefined
-          : room.adminPlayerId;
+            ? undefined
+            : room.adminPlayerId;
 
       return { ...room, players: newPlayers, adminPlayerId: newAdminId };
     }

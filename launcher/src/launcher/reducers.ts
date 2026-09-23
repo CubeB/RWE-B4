@@ -297,16 +297,18 @@ function currentScreenWrapperReducer(
   );
 }
 
-const reduceOnField = <S, A extends Action, K extends keyof S>(
-  field: K,
-  reducer: (state: S[K], action: A) => S[K]
-) => (state: S, action: A): S => {
-  const newFieldValue = reducer(state[field], action);
-  if (newFieldValue === state[field]) {
-    return state;
-  }
-  return { ...state, [field]: newFieldValue };
-};
+const reduceOnField =
+  <S, A extends Action, K extends keyof S>(
+    field: K,
+    reducer: (state: S[K], action: A) => S[K]
+  ) =>
+  (state: S, action: A): S => {
+    const newFieldValue = reducer(state[field], action);
+    if (newFieldValue === state[field]) {
+      return state;
+    }
+    return { ...state, [field]: newFieldValue };
+  };
 
 const rootReducer = reduceReducers<State, SideEffect, AppAction>(
   globalActionsReducer,

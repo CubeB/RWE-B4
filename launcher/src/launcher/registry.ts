@@ -92,7 +92,7 @@ export function enumerateValues(
     key: `\\${key}`,
   });
   return new Promise((resolve, reject) => {
-    reg.values(function(err, items) {
+    reg.values(function (err, items) {
       if (err) {
         console.log(
           `hkey: ${hkey}, key: ${key}, error: ${err.name}, message: ${err.message}`

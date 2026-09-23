@@ -17,9 +17,7 @@ export interface RweArgsPlayerRemote {
 }
 
 export type RweArgsPlayerController =
-  | RweArgsPlayerHuman
-  | RweArgsPlayerComputer
-  | RweArgsPlayerRemote;
+  RweArgsPlayerHuman | RweArgsPlayerComputer | RweArgsPlayerRemote;
 
 export interface RweArgsPlayerInfo {
   name: string;
@@ -37,8 +35,7 @@ export interface RweArgsFilledPlayerSlot extends RweArgsPlayerInfo {
 }
 
 export type RweArgsPlayerSlot =
-  | RweArgsEmptyPlayerSlot
-  | RweArgsFilledPlayerSlot;
+  RweArgsEmptyPlayerSlot | RweArgsFilledPlayerSlot;
 
 export interface RweArgs {
   dataPaths?: string[];
