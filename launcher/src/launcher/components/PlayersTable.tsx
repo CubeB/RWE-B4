@@ -11,6 +11,7 @@ import {
 import StarIcon from "@material-ui/icons/Grade";
 import * as React from "react";
 import { PlayerInfo, PlayerSide, PlayerSlot } from "../gameClient/state";
+import { archiveDigest } from "../../common/archives";
 import { assertNever } from "../../common/util";
 
 type OpenStatus = "open" | "closed";
@@ -43,6 +44,9 @@ export interface PlayersTableProps {
   rows: PlayerSlot[];
   localPlayerId?: number;
   adminPlayerId?: number;
+
+  /** Which mods the game will use, which is all the Data column is about. */
+  activeMods: string[];
 
   onToggleReady: () => void;
   onChangeSide: (side: PlayerSide) => void;
@@ -84,6 +88,7 @@ export class PlayersTable extends React.Component<PlayersTableProps> {
             <TableCell>Side</TableCell>
             <TableCell>Color</TableCell>
             <TableCell>Team</TableCell>
+            <TableCell>Data</TableCell>
             <TableCell>Ready?</TableCell>
           </TableRow>
         </TableHead>
@@ -114,7 +119,7 @@ export class PlayersTable extends React.Component<PlayersTableProps> {
     return (
       <TableRow key={id}>
         <TableCell>{select}</TableCell>
-        <TableCell colSpan={4}></TableCell>
+        <TableCell colSpan={5}></TableCell>
       </TableRow>
     );
   }
@@ -213,6 +218,11 @@ export class PlayersTable extends React.Component<PlayersTableProps> {
         <TableCell>{sideSelect}</TableCell>
         <TableCell>{colorSelect}</TableCell>
         <TableCell>{teamSelect}</TableCell>
+        <TableCell>
+          {player.archives === undefined
+            ? "checking"
+            : archiveDigest(this.props.activeMods, player.archives)}
+        </TableCell>
         <TableCell padding="checkbox">{checkbox}</TableCell>
       </TableRow>
     );

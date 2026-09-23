@@ -40,11 +40,12 @@ import { dialogSelectMap } from "../mapsDialogActions";
 import {
   ChatMessage,
   canStartGame,
+  CurrentGameState,
   PlayerSlot,
   PlayerSide,
   CanStartGameError,
 } from "../gameClient/state";
-import { assertNever } from "../../common/util";
+import { assertNever, findAndMap } from "../../common/util";
 
 function GameSettingsPanel() {
   return (
@@ -168,6 +169,7 @@ function UnconnectedGameRoomScreen(props: GameRoomScreenProps) {
             rows={props.players}
             localPlayerId={props.localPlayerId}
             adminPlayerId={props.adminPlayerId}
+            activeMods={props.activeMods}
             onOpenSlot={props.onOpenSlot}
             onCloseSlot={props.onCloseSlot}
             onChangeSide={props.onChangeSide}
@@ -255,7 +257,14 @@ function isElementScrolledToBottom(elem: HTMLElement): boolean {
   return scrollBottom <= 0 || scrollPos === scrollBottom;
 }
 
-function errToString(err: CanStartGameError): string {
+function playerName(game: CurrentGameState, playerId: number): string {
+  const player = findAndMap(game.players, x =>
+    x.state === "filled" && x.player.id === playerId ? x.player : undefined
+  );
+  return player ? player.name : `player ${playerId}`;
+}
+
+function errToString(err: CanStartGameError, game: CurrentGameState): string {
   switch (err.type) {
     case "no-map":
       return "No map selected";
@@ -271,6 +280,26 @@ function errToString(err: CanStartGameError): string {
       return "Some players do not have one of the active mods";
     case "unfilled-slots":
       return "Some open slots have not yet been filled";
+    case "archives-differ":
+      // The point of hashing them at all: say which file, not merely that
+      // something is wrong. Issue #43.
+      return err.playersWithWrongArchives
+        .map(p => {
+          const archives = p.mods
+            .flatMap(m =>
+              m.differences.map(d => `${m.modName}/${d.archiveName}`)
+            )
+            .join(", ");
+          return `${playerName(
+            game,
+            p.playerId
+          )} has different game data: ${archives}`;
+        })
+        .join("; ");
+    case "archives-unchecked": {
+      const names = err.playerIds.map(id => playerName(game, id)).join(", ");
+      return `Still checking the game data of ${names}`;
+    }
     default:
       assertNever(err);
   }
@@ -306,7 +335,7 @@ function mapStateToProps(state: State): GameRoomScreenStateProps {
     startEnabled: canStartGameResult.result === "ok",
     startWarnings:
       canStartGameResult.result === "err"
-        ? canStartGameResult.errors.map(x => errToString(x))
+        ? canStartGameResult.errors.map(x => errToString(x, game))
         : [],
     mapName: game.mapName,
     mapDialogOpen: !!mapDialog,

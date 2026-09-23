@@ -4,6 +4,7 @@
 #include <chrono>
 #include <deque>
 #include <future>
+#include <mutex>
 #include <network.pb.h>
 #include <random>
 #include <rwe/game/PlayerCommand.h>
@@ -14,6 +15,7 @@
 #include <rwe/sim/PlayerId.h>
 #include <rwe/util/OpaqueId.h>
 #include <rwe/util/OpaqueUnit.h>
+#include <string>
 
 namespace rwe
 {
@@ -24,6 +26,20 @@ namespace rwe
     {
     public:
         using CommandSet = std::vector<PlayerCommand>;
+        /** A line of chat that arrived from a peer. */
+        struct ReceivedChatMessage
+        {
+            PlayerId sender;
+            std::string text;
+        };
+
+        /**
+         * How many unacked lines a peer may be owed before further ones are
+         * refused. A line is resent until it is acked, so without a ceiling a
+         * peer that has stopped answering is a growing packet.
+         */
+        static constexpr std::size_t MaxPendingChatMessages = 32;
+
         struct EndpointInfo
         {
             PlayerId playerId;
@@ -44,6 +60,22 @@ namespace rwe
             std::optional<Timestamp> lastReceiveTime;
 
             /**
+             * The time anything at all was last heard from this peer, relevant
+             * or not, and the only thing that says whether it is still there.
+             *
+             * Kept apart from lastReceiveTime, which moves only for a packet
+             * carrying new commands and so stands still for a peer that is
+             * connected and simply has nothing to say -- which is most of a
+             * game. A peer sends every 100 ms whether it has anything or not,
+             * so silence here means silence.
+             *
+             * Unset until the first packet, which is why the timeout is
+             * measured from when the service started in that case: a peer that
+             * never arrives has to be droppable too.
+             */
+            std::optional<Timestamp> lastPacketTime;
+
+            /**
              * The last reported scene time from this peer,
              * adjusted for RTT.
              */
@@ -52,6 +84,16 @@ namespace rwe
             std::deque<CommandSet> sendBuffer;
 
             std::deque<GameHash> hashSendBuffer;
+
+            /**
+             * Chat waiting to go to this peer, and where in that stream we
+             * are. The same scheme as the commands and the hashes: the
+             * buffer holds everything not yet acked, every packet carries
+             * all of it, and an ack pops the front.
+             */
+            SequenceNumber nextChatToSend{0};
+            SequenceNumber nextChatToReceive{0};
+            std::deque<std::string> chatSendBuffer;
 
             /**
              * Records the time at which we first sent a packet
@@ -94,9 +136,41 @@ namespace rwe
 
         PlayerCommandService* const playerCommandService;
 
+        /**
+         * Chat that has arrived and not yet been collected by the scene.
+         *
+         * The one piece of state here touched by both threads without going
+         * through the io context, because it travels the other way: every
+         * other call posts work to the network thread and waits, and a
+         * message arriving has nobody to wait for it.
+         */
+        std::mutex chatInboxMutex;
+        std::vector<ReceivedChatMessage> chatInbox;
+
         SceneTime currentSceneTime{0};
 
+        /**
+         * When the network thread started listening, which is where a
+         * peer's silence is measured from until it has ever been heard.
+         */
+        std::optional<Timestamp> startTime;
+
     public:
+        /**
+         * What a peer looks like from here, for deciding whether it is still
+         * there and, if it is not, from which tick to carry on without it.
+         */
+        struct PeerStatus
+        {
+            PlayerId playerId;
+
+            /** How long since anything at all arrived from this peer. */
+            std::chrono::milliseconds silence;
+
+            /** The scene time it last reported, adjusted for the round trip. */
+            std::optional<SceneTime> lastKnownSceneTime;
+        };
+
         GameNetworkService(PlayerId localPlayerId, int port, const std::vector<EndpointInfo>& endpoints, PlayerCommandService* playerCommandService);
 
         virtual ~GameNetworkService();
@@ -116,9 +190,40 @@ namespace rwe
 
         void submitGameHash(GameHash hash);
 
+        /**
+         * Queue a line of chat for every peer.
+         *
+         * Returns false if it was refused, which is what a peer already owed
+         * MaxPendingChatMessages does: it has stopped acking, and the line
+         * would only make the packets to it bigger.
+         */
+        bool submitChatMessage(const std::string& text);
+
+        /** Everything that has arrived since the last call, in the order it arrived. */
+        std::vector<ReceivedChatMessage> takeChatMessages();
+
         SceneTime estimateAvergeSceneTime(SceneTime localSceneTime);
 
         float getMaxAverageRttMillis();
+
+        /**
+         * Every peer, how long it has been quiet, and how far along it said it
+         * was. One call rather than two because both come off the network
+         * thread and both are wanted at the same moment: when a tick will not
+         * go ahead and somebody has to decide whether a peer has gone.
+         */
+        std::vector<PeerStatus> getPeerStatuses();
+
+        /**
+         * Stop listening to a peer that has been dropped.
+         *
+         * Its stream is closed and the game has carried on past the tick it was
+         * cut at, so anything further from it -- a packet still in flight, or a
+         * peer that has come back to life -- would be commands after the cut,
+         * which is a desync rather than a recovery. Coming back is issue #44's
+         * third part and wants the save, not this.
+         */
+        void forgetPeer(PlayerId playerId);
 
     private:
         void run();

@@ -1,6 +1,6 @@
 # Robot War Engine — Revival Roadmap
 
-_Last updated: 2026-09-16. Status of the codebase is as of the `revival` integration branch (upstream `master` @ b2d8a31 + merged fork work, see Phase 0). Run `rwe_test` for the current suite size -- see CLAUDE.md for why it is not recorded here._
+_Last updated: 2026-09-23. Status of the codebase is as of the `revival` integration branch (upstream `master` @ b2d8a31 + merged fork work, see Phase 0). Run `rwe_test` for the current suite size -- see CLAUDE.md for why it is not recorded here._
 
 ## Where the project stands
 
@@ -9,7 +9,7 @@ _Last updated: 2026-09-16. Status of the codebase is as of the `revival` integra
 - **History:** Michael Heasell (2017–2023, ~1,950 commits) — the engine, the format parsers, the COB VM and the deterministic simulation. Kevin Hake modernised the build in March 2026 (Boost removed, C++20, SDL3, CI green). Taylor Gunnoe added hotkeys / speed / pause / Phase‑1 AI in April 2026 (unmerged upstream until now).
 - **First public pre-release 2026-09-10.** Upstream's only tag is `v0.1.0` (2017); this branch tags `v1.0.0` ("Bot bot boom boom v1.0", under the main-menu title — B4 for short, being four B’s), `v1.1.0-pre1` and now `v1.1.0-pre2`, all three on the fork as well as locally. The first two have no release behind them; the third does — Windows installer, Windows zip and Linux AppImage at <https://github.com/CubeB/RWE-B4/releases> (see Phase 0). The CMake version is derived from git tags, and only from annotated ones.
 
-**Next, of the large things** (2026-09-22): **the AI on water and fragmented maps**, which is Phase 2's biggest remaining cluster and is really one problem wearing four entry titles -- the base built on ground its own army cannot leave (the commander's movement class wades deeper and climbs steeper than its constructor's, and `baseAnchor` is never revised), the sea ferry that retried one impossible landing 1426 times in a single game, no hovercraft at all, and naval doctrine. Each of those entries already carries its measurements, so the work is ready to start rather than needing a diagnosis first. Phase 3 is the next whole phase after it, and has a dependency sitting in Phase 2: an AI player in a network game will desync, because each peer generates AI commands locally and never sends them.
+**Next, of the large things** (2026-09-22): **the AI on water and fragmented maps**, which is Phase 2's biggest remaining cluster and is really one problem wearing four entry titles -- the base built on ground its own army cannot leave (the commander's movement class wades deeper and climbs steeper than its constructor's, and `baseAnchor` is never revised), the sea ferry that retried one impossible landing 1426 times in a single game, no hovercraft at all, and naval doctrine. Each of those entries already carries its measurements, so the work is ready to start rather than needing a diagnosis first. Phase 3 is the next whole phase after it, and Phase 3 has begun (2026-09-23): desync diagnostics and drop handling are done, and so is the dependency that was sitting in Phase 2 -- an AI player in a network game no longer desyncs, its command timing having stopped being a function of anything local. What is left of Phase 3 is the launcher's half: the dependency refresh, a public master server, lobby archive matching, in-game chat, and rejoining a game after being dropped (#188).
 
 ## Guiding principles
 
@@ -242,7 +242,7 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
 - [x] Fixed `Blocked waiting for player commands` with a Computer player: the AI buffer was refilled one entry per frame, so any frame dispatching ≥2 sim ticks (catch-up, or game speed > 1×) skipped a tick. AI buffer is now topped up to `targetCommandBufferSize` like the human buffer (`4b0b17a6`). Verified 0 blocked ticks in Debug and Release.
 - [x] **The arena without a window** (2026-09-22, #156, ozgb). `--ai-arena` brought up SDL, a GL context and an ImGui context before the simulation was built, so measuring a simulation that never touches a GPU needed one. `ai_arena` builds the VFS, palettes and side data with no SDL or GL, runs the same loader and tick loop, and writes the same CSVs and `AI-ARENA-RESULT`. What makes it trustworthy is that the shared halves are shared rather than copied -- `loadGameSimulation` and `readMapData` come out of `LoadingScene`, the sim half of a unit command becomes `applyUnitCommandToSimulation`, and `RWE_HASH_LOG`/`RWE_STATE_DUMP` move into `SimDiagnostics`. **Parity reproduced independently before merging** (not merely accepted from the branch): seed 7 on Coast To Coast, 120 s, `rwe --ai-arena` against `ai_arena` -- 3599 ticks of sync hashes byte-identical, `ai-arena.csv` byte-identical. It also takes `LoadingScene.cpp` off the top of the section-count table (22252, 67%) into `GameSimulationLoader.cpp` at 14346, so it buys COFF headroom as well. **#156 stays open for the CI job**, which needs Total Annihilation data that is neither in the repo nor on the runners.
 - [x] **A field's omission from a walk is a named reason** (2026-09-22, #115, ozgb). A `UnitState` field's omission from hash, dump, save or load used to be silent: the table encoded it as a null step, the tests could only assert that nothing was missed, and the reason a field sat out lived nowhere. Each of the 65 rows is a three-kind variant now -- hashed, unhashed with a *why not hashed*, save-only with a *why not loaded* -- a bare null step is not representable, and well-formedness is a `static_assert`. It also wires up `mayBeMissing`, which existed and was documented and never read, so a unit JSON missing a flagged key loads its default instead of throwing. This is the discipline CLAUDE.md's determinism section asks for by hand, moved into the type system.
-- [ ] AI in multiplayer: each peer would generate AI commands locally and never send them, so an AI player in a network game will desync. Either run the AI on one host and transmit its commands, or make AI command timing deterministic. Not needed for single-player.
+- [x] AI in multiplayer: an AI player in a network game would desync. The second of the two cures, making AI command timing deterministic, and it cost nothing: every peer already runs its own copy of the AI over the same simulation and gets the same orders, so nothing needed transmitting -- only the tick those orders land on had to stop being a local measurement. It was one in two ways. The buffer they were queued in was kept at a depth derived from the peer's own measured round trip time, and **the depth decides the game**: the same seed at depth 14 and at depth 18 -- 0 ms and 60 ms of RTT -- diverges at tick 44, measured. And the queue was filled once a *frame* while it is drained once a *tick*, so the delay on an order was also a function of how many ticks the last frame dispatched. Both are gone: `feedAiCommands` is shared with the headless arena rather than copied into it, is called a tick at a time from `tryTickGame`, and takes `aiCommandBufferDepth()`, a constant. **A third way turned up while the drop work was being tested, and it is the subtlest:** a tick that will not run is attempted again on the next frame, so feeding the buffer at the top of the attempt fed it once a frame again the moment anything stalled -- and a stall is one machine's network jitter, not a fact about the simulation. Two peers whose packets were late by different amounts pushed different numbers of sets and the AI's orders landed a tick apart; it desynced at tick 44 in a two-human, one-computer game on loopback. The feed is now guarded by `onlyComputerPlayersAreNotReady`, so it happens for a tick that is about to run and never for one that is merely being attempted. Behaviour-identical where it was already deterministic -- the arena's hash log for seed 7 is byte for byte what it was, and `rwe --ai-arena` still matches `ai_arena` line for line. Two peers on loopback with a computer player in the third slot ran 150 seconds and 4,500 ticks in step, twice over, and twice more under a 1.5x CPU overload that left the two peers' frame counts 17 apart -- which is the condition the third fault needed. Worth knowing: the fault is invisible on two instances of one machine, which pace each other to the same vsync and dispatch the same ticks per frame, and stayed invisible under a 1.5x CPU overload -- it takes two machines, or a real network, which is why the depth experiment is the evidence and not a reproduction.
 - [x] Phase 2: perception through fog of war (Brutal is omniscient), threat map (anti-ground DPS / economic value / staleness), scouting toward unseen ground, expansion build order (solars, mexes, lab, radar, laser towers facing the enemy, stall reactions), factories producing constructors then raiders/rockets 2:1, idle builders assist the factory.
 - [x] Phase 3 (single-army version): rally point facing the enemy, Defend on intruders, Attack on the most valuable known enemy ground once the army reaches the profile's size, regroup when depleted; Easy/Standard/Hard/Brutal profiles via `--ai-difficulty` (Brutal: omniscient + 1.25× income, applied in the sim).
 - [x] Phase 4 (lite): F10 debug window lists each AI's phase, economy, unit counts, army and target; `rwe.log` gets a 30 s AI status line (phase, income/demand, counts, what the commander is doing) and phase transitions.
@@ -312,10 +312,51 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
 
 ## Phase 3 — Multiplayer polish & launcher (≈ 2 months)
 
-- [ ] Launcher dependency refresh: Electron 22 → current LTS, React 16 → 18, Redux Toolkit; drop `react-hot-loader`. Re-run `npm audit` (dependabot PRs #166/#167 still open).
-- [ ] Host a public master server (currently "connect to localhost" in dev); fix non-recommended port (#60).
-- [ ] Desync detection UX: `GameHash` mismatch → show which tick, dump state (`dump_util`) for bug reports.
-- [ ] In-game chat (upstream `network-chat` branch is a 1‑commit scaffold; start from it or from scratch).
+- [ ] Launcher dependency refresh: Electron 22 → current LTS, React 16 → 18, Redux Toolkit;
+      drop `react-hot-loader`. Re-run `npm audit` (dependabot PRs #166/#167 still open).
+      Sized 2026-09-23 and it is bigger than the title: `npm audit` reports 125
+      advisories, 13 of them critical, but all except `@sentry/electron` and `webpack`
+      are transitive through build tooling rather than through anything shipped. The
+      real cost is that React 18 is not a React upgrade -- `@material-ui/core` is v4,
+      which has no React 18 support, so it pulls in the whole MUI v5 migration:
+      package rename across every component, and JSS to emotion. Worth deciding
+      whether to take that on as its own piece of work before starting. Note also
+      that socket.io 2 to 4 is a wire break, so the client cannot move ahead of
+      whatever master server it is expected to talk to -- which ties it to the entry
+      below.
+- [ ] Host a public master server; fix non-recommended port (#60). The launcher already
+      defaults to upstream's `master.rwe.michaelheasell.com` rather than to localhost
+      (`masterServer()` in `launcher/src/common/util.ts`, overridden by
+      `RWE_MASTER_SERVER`), so what is actually owed is a server of this project's own
+      and a default pointing at it. The port is `--port`, defaulting to 5000, which is
+      what macOS has given to the AirPlay receiver since Monterey. Both halves want a
+      hosting decision first.
+- [x] Desync detection UX: `GameHash` mismatch → show which tick, dump state (`dump_util`) for bug reports.
+      The mismatch names the **first** tick the peers disagreed on rather than
+      the one it was noticed on, which is a round trip later; every peer names
+      the same tick, because every peer compares the same two ordered hash
+      streams. Each writes `rwe-desync-tick<n>-player<p>.json` beside the log --
+      the mismatch, every peer's hash for it, the build, then the hashed state --
+      where the old code wrote `rwe-dump-<rand()>.json` into whatever directory
+      the game started in and said only "Desync detected". Two findings came out
+      of building it. The check was **quietly off in any game with a computer
+      player in it**: every player got a hash buffer, only the local peer and the
+      network endpoints ever filled one, and a buffer nobody fills stalls the
+      comparison for everybody -- hash sources are now registered separately from
+      players. And the single-player game was pushing a hash a tick into a deque
+      nothing ever drained. `RWE_DESYNC_AT=<tick>` on one peer counterfeits a
+      desync without touching the simulation, which is how it was checked: two
+      peers on loopback both named tick 200 and both wrote their dump.
+- [x] In-game chat, and the Enter message bar of #30. Enter opens the bar, Enter
+      sends, Escape abandons it; a line appears in the speaker's own colour in the
+      console the game already announces into, so it ages out and F12 clears it.
+      It travels beside the command stream rather than in it -- acked and resent
+      on the same packet as the sync hashes -- because a tick cannot run without
+      every peer's commands, so the moment a player most wants to say something is
+      exactly the moment a command cannot be delivered. Nothing typed reaches the
+      simulation. Verified over two loopback peers: each said a line, both arrived
+      within 100 ms, and the peers agreed on all 761 ticks. The upstream
+      `network-chat` branch was SDL boilerplate and was not used.
 - [x] Replays: record the `PlayerCommand` stream + seed; playback through the same sim.
       `--record-replay <file>` writes one, `--replay <file>` watches it, and the
       arena keeps one per game. Verified by running a replay back through the
@@ -323,8 +364,48 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
       winds on at about a hundred times real time; seeking backwards restarts the
       scene and winds forward, because a lockstep game only runs one way. Periodic
       keyframes through `save_util` would make that instant and are the next step.
-- [ ] Lobby mod management (the stated reason the launcher exists): detect installed `.hpi/.ufo/.ccx`, hash them, require all players match.
-- [ ] Reconnect / drop handling instead of hard failure.
+- [x] Lobby mod management (the stated reason the launcher exists): detect installed
+      `.hpi/.ufo/.ccx/.gpf/.gp3`, hash them, require all players match. The name of a
+      mod was never the question -- two players can both have one called `ta` and have
+      put different archives in it -- so each mod is reduced to its archives and the
+      SHA-256 of each, hashed in the background against a cache keyed by size and
+      modification time. The lobby shows a six-digit digest of the active mods beside
+      each player, refuses to start while anyone differs and names the mod and the file,
+      and refuses to start while anyone is still being checked; the game server applies
+      the same rule, so a client that skips it gets nowhere. Measured over this machine's
+      855 MB of archives: 2.6 s cold, nothing at all warm.
+- [x] Drop handling instead of hard failure. Rejoining is still owed and is
+      issue #44's third part. A lost peer used to freeze the game for
+      everybody with nothing on screen and a line a frame in the log, because
+      a lockstep tick cannot run without every player's commands for it. Now
+      the pause banner comes up naming who is being waited for and counting
+      down, and after `drop-timeout` seconds (rwe.cfg, 10 by default, 0 to
+      wait for ever) the rest carry on without them. Their units stay exactly
+      as they were, with the orders and the fire mode they had, which is what
+      the original does.
+
+      **The drop is a command, and it is applied when it arrives rather than
+      when it is popped.** That is the one departure from how every other
+      command works, and it is forced: what the drop unblocks is the pop
+      itself, so a drop waiting its turn would wait for ever. It is safe
+      because the command says a *tick* and not a moment -- `fromTick`, the
+      first tick the lost peer's commands are taken as empty -- so applying it
+      early, late or twice all come to the same thing. Peers can hold
+      different amounts of a lost peer's stream, a packet having reached one
+      and not another, so the cut forces both ends: what is past it is
+      discarded, what is missing below it is filled in.
+
+      **Exactly one peer may issue it**, or two drops naming two ticks would
+      cut the stream in two places. Which one is computed rather than agreed,
+      from state every peer already shares: the lowest-numbered peer that is
+      neither the player in question nor itself dropped. That is the host in
+      the ordinary case, and the point of the rest of it is that the host
+      going is the likeliest failure of all and somebody has to be able to say
+      so. Measured on loopback, off-screen: killing the non-host, killing the
+      host, and three peers with one killed -- in which the two survivors cut
+      at the same tick and agreed on all 1,536 ticks compared, with the sync
+      hash check live throughout. Not handled: two peers lost at once, which
+      would leave two deciders.
 
 ## Phase 4 — Compatibility & content breadth (ongoing)
 

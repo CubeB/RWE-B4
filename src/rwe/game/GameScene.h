@@ -756,6 +756,18 @@ namespace rwe
         };
         std::deque<ConsoleMessage> consoleMessages;
 
+        /**
+         * The message bar: what has been typed so far, or nothing at all when
+         * it is closed. Enter opens it, Enter sends, Escape abandons it.
+         *
+         * While it is open it owns the keyboard, every key on it being a
+         * letter -- without that, typing "stop" would stop the selection.
+         */
+        std::optional<std::string> chatInput;
+
+        /** Whether RWE_CHAT_TEST has had its one say. */
+        bool chatTestSent{false};
+
         /** The last whole second each counting-down unit announced, so each number is said once. */
         std::unordered_map<UnitId, unsigned int> selfDestructAnnounced;
 
@@ -906,6 +918,51 @@ namespace rwe
 
         GameSpeed gameSpeed;
         bool paused{false};
+
+        /**
+         * The players this tick is waiting on, and since when.
+         *
+         * A lockstep tick cannot run until every player's commands for it have
+         * arrived, so one peer going quiet stops the game for everybody. Until
+         * there was a name for that state it was a freeze with nothing on
+         * screen and a line in the log; now it is a caption, and after the
+         * timeout it is a drop. Ordinarily empty, and ordinarily non-empty for
+         * a frame or two whenever a packet is late, which is why the caption
+         * waits WaitingCaptionDelay before believing it.
+         */
+        std::vector<PlayerId> waitingForPlayers;
+        std::optional<Timestamp> waitingSince;
+
+        /**
+         * Seconds left before the quietest peer we are waiting on is dropped,
+         * for the caption. Nothing when nobody is being timed out -- because
+         * nobody is missing, or because the timeout is switched off.
+         */
+        std::optional<unsigned int> dropCountdownSeconds;
+
+        /** Whether the current stall has been logged, so it is said once and not once a frame. */
+        bool stallReported{false};
+
+        /** Peers this peer has already issued a drop command for, so it asks once. */
+        std::unordered_set<unsigned int> dropIssued;
+
+        /** Peers whose departure has already been put on screen. */
+        std::unordered_set<unsigned int> dropAnnounced;
+
+        /** A stall shorter than this is jitter and is not worth a caption. */
+        static constexpr std::chrono::milliseconds WaitingCaptionDelay{1000};
+
+        /**
+         * How far ahead of everybody a drop's cut is placed, in ticks.
+         *
+         * The cut has to be beyond the last tick any peer can have run, or a
+         * peer that ran further than the one issuing the drop would have
+         * simulated commands the others are about to throw away. Two seconds
+         * is far more than the spread between peers that are all stalled on
+         * the same missing player, and it costs nothing: the ticks it covers
+         * are ones the lost peer sent nothing for anyway.
+         */
+        static constexpr unsigned int DropTickMargin{60};
 
         std::vector<FlashEffect> flashes;
         bool guiVisible{true};
@@ -1096,6 +1153,75 @@ namespace rwe
         static Matrix4f minimapToWorldMatrix(const MapTerrain& terrain, const Rectangle2f& minimapRect);
 
         void tryTickGame();
+
+        /**
+         * Works out who the tick is waiting on and, if one of them has been
+         * quiet past the timeout and this peer is the one to say so, issues the
+         * drop that lets everybody else carry on.
+         */
+        void updatePeerLiveness();
+
+        /**
+         * Whether the only command buffers still empty are computer players'.
+         *
+         * Which is the same question as "is this tick going to run once the AI
+         * has been asked", and it is what keeps a stall out of the simulation:
+         * the AI's buffer may only be topped up for a tick that happens.
+         */
+        bool onlyComputerPlayersAreNotReady() const;
+
+        /**
+         * The tick a drop cuts the lost peer's stream at: beyond the furthest
+         * any peer has said it had got, plus DropTickMargin.
+         */
+        unsigned int chooseDropTick(const std::vector<GameNetworkService::PeerStatus>& peers) const;
+
+        /** The caption over the world while a tick is waiting on somebody. */
+        void renderWaitingForPlayers();
+
+        /**
+         * Carries on without a player who has stopped answering: cuts their
+         * command stream at `fromTick`, says so on screen, and stops listening
+         * to their endpoint. Their units are left standing with the orders and
+         * the fire mode they had.
+         */
+        void onPlayerDropped(PlayerId player, unsigned int fromTick);
+
+        /** Whether the message bar is open, and so holding the keyboard. */
+        bool isChatBarOpen() const;
+
+        /** Opens the message bar, in a game where this player may talk at all. */
+        void openChatBar();
+
+        /**
+         * Handles a key while the message bar is open. Every key is the bar's:
+         * Return sends, Escape abandons, Backspace deletes, and the rest are
+         * letters, which arrive as text input rather than as keys.
+         */
+        void handleChatBarKey(const SDL_KeyboardEvent& keysym);
+
+        /** Sends what has been typed, and puts it on screen here. */
+        void sendChatMessage();
+
+        /**
+         * RWE_CHAT_TEST=<tick>:<text>, which says that line once at that tick.
+         *
+         * There is nobody at the keyboard in a headless two-peer run, so this
+         * is what lets one prove that chat crosses the wire.
+         */
+        void updateChatTest();
+
+        /** Collects what peers have said since the last frame. */
+        void receiveChatMessages();
+
+        /** Puts one line of chat on screen and in the log. */
+        void printChatLine(PlayerId sender, const std::string& text);
+
+        /** The message bar itself, drawn over the world while it is open. */
+        void renderChatBar();
+
+        /** A player's lobby name, or "Player n" when they gave none. */
+        std::string playerDisplayName(PlayerId playerId) const;
 
         std::optional<UnitId> getUnitUnderCursor() const;
         std::optional<FeatureId> getFeatureUnderCursor() const;

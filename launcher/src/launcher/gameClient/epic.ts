@@ -16,6 +16,7 @@ import {
   receiveSlotOpened,
   receiveStartGame,
   receiveActiveModsChanged,
+  receivePlayerArchivesChanged,
 } from "./actions";
 import { State } from "../state";
 import { EpicDependencies } from "../middleware/EpicDependencies";
@@ -40,6 +41,9 @@ export const gameClientEventsEpic = (
     clientService.onSlotOpened.pipe(rxop.map(receiveSlotOpened)),
     clientService.onSlotClosed.pipe(rxop.map(receiveSlotClosed)),
     clientService.onActiveModsChanged.pipe(rxop.map(receiveActiveModsChanged)),
+    clientService.onPlayerArchivesChanged.pipe(
+      rxop.map(receivePlayerArchivesChanged)
+    ),
     clientService.onPlayerReady.pipe(rxop.map(receivePlayerReady)),
     clientService.onMapChanged.pipe(rxop.map(receiveMapChanged)),
     clientService.onStartGame.pipe(rxop.map(receiveStartGame))

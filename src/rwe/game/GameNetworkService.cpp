@@ -1,4 +1,5 @@
 #include "GameNetworkService.h"
+#include <rwe/game/chat_util.h>
 #include <algorithm>
 #include <rwe/network_util.h>
 #include <rwe/proto/serialization.h>
@@ -62,6 +63,39 @@ namespace rwe
         });
     }
 
+    bool GameNetworkService::submitChatMessage(const std::string& text)
+    {
+        // Waits for the answer, where submitCommands does not, because a line
+        // can be refused and the player is owed the news that theirs was. It
+        // happens once per line typed, not once a tick.
+        std::promise<bool> result;
+        asio::post(ioContext, [this, text, &result]() {
+            for (const auto& e : endpoints)
+            {
+                if (e.chatSendBuffer.size() >= MaxPendingChatMessages)
+                {
+                    result.set_value(false);
+                    return;
+                }
+            }
+
+            for (auto& e : endpoints)
+            {
+                e.chatSendBuffer.push_back(text);
+            }
+
+            result.set_value(true);
+        });
+
+        return result.get_future().get();
+    }
+
+    std::vector<GameNetworkService::ReceivedChatMessage> GameNetworkService::takeChatMessages()
+    {
+        std::scoped_lock<std::mutex> lock(chatInboxMutex);
+        return std::move(chatInbox);
+    }
+
     SceneTime GameNetworkService::estimateAvergeSceneTime(SceneTime localSceneTime)
     {
         std::promise<unsigned int> result;
@@ -74,6 +108,45 @@ namespace rwe
         });
 
         return SceneTime(result.get_future().get());
+    }
+
+    std::vector<GameNetworkService::PeerStatus> GameNetworkService::getPeerStatuses()
+    {
+        std::promise<std::vector<PeerStatus>> result;
+        asio::post(ioContext, [this, &result]() {
+            auto now = getTimestamp();
+            std::vector<PeerStatus> statuses;
+            for (const auto& e : endpoints)
+            {
+                // A peer never heard from is measured from when this service
+                // started, so that one which never turns up times out like one
+                // which turned up and left. Before the thread has started there
+                // is no clock to measure from and nobody has had a chance to
+                // speak, so the silence is nothing.
+                auto since = e.lastPacketTime ? e.lastPacketTime : startTime;
+                auto silence = since
+                    ? std::chrono::duration_cast<std::chrono::milliseconds>(now - *since)
+                    : std::chrono::milliseconds(0);
+
+                statuses.push_back(PeerStatus{
+                    e.playerId,
+                    silence,
+                    e.lastKnownSceneTime ? std::optional<SceneTime>(e.lastKnownSceneTime->first) : std::nullopt});
+            }
+
+            result.set_value(std::move(statuses));
+        });
+
+        return result.get_future().get();
+    }
+
+    void GameNetworkService::forgetPeer(PlayerId playerId)
+    {
+        asio::post(ioContext, [this, playerId]() {
+            endpoints.erase(
+                std::remove_if(endpoints.begin(), endpoints.end(), [playerId](const auto& e) { return e.playerId == playerId; }),
+                endpoints.end());
+        });
     }
 
     float GameNetworkService::getMaxAverageRttMillis()
@@ -103,6 +176,11 @@ namespace rwe
             socket.open(endpoint.protocol());
             socket.bind(endpoint);
 
+            // Where a peer's silence is measured from until it has been
+            // heard once. Set on the network thread, which is the only
+            // thread that reads it.
+            startTime = getTimestamp();
+
             listenForNextMessage();
 
             sendLoop();
@@ -126,30 +204,36 @@ namespace rwe
             });
     }
 
+    /**
+     * The packet sent to one peer: where we are in each of the three streams
+     * that flow to it, and everything in them it has not yet acked.
+     *
+     * chatCount is how much of the chat buffer to include, because chat is the
+     * one part of a packet whose size is not bounded by the tick rate -- see
+     * send, which uses it to make an outsized packet fit.
+     */
     proto::NetworkMessage createProtoMessage(
         int packetId,
         PlayerId playerId,
         SceneTime currentSceneTime,
-        SequenceNumber nextCommandToSend,
-        SequenceNumber nextCommandToReceive,
-        GameTime nextHashToSend,
-        GameTime nextHashToReceive,
         std::chrono::milliseconds ackDelay,
-        const std::deque<GameNetworkService::CommandSet>& sendBuffer,
-        const std::deque<GameHash>& gameHashBuffer)
+        const GameNetworkService::EndpointInfo& endpoint,
+        std::size_t chatCount)
     {
         proto::NetworkMessage outerMessage;
         auto& m = *outerMessage.mutable_game_update();
         m.set_packet_id(packetId);
         m.set_player_id(playerId.value);
         m.set_current_scene_time(currentSceneTime.value);
-        m.set_next_command_set_to_send(nextCommandToSend.value);
-        m.set_next_command_set_to_receive(nextCommandToReceive.value);
-        m.set_next_game_hash_to_send(nextHashToSend.value);
-        m.set_next_game_hash_to_receive(nextHashToReceive.value);
+        m.set_next_command_set_to_send(endpoint.nextCommandToSend.value);
+        m.set_next_command_set_to_receive(endpoint.nextCommandToReceive.value);
+        m.set_next_game_hash_to_send(endpoint.nextHashToSend.value);
+        m.set_next_game_hash_to_receive(endpoint.nextHashToReceive.value);
+        m.set_next_chat_to_send(endpoint.nextChatToSend.value);
+        m.set_next_chat_to_receive(endpoint.nextChatToReceive.value);
         m.set_ack_delay(ackDelay.count());
 
-        for (const auto& set : sendBuffer)
+        for (const auto& set : endpoint.sendBuffer)
         {
             auto& setMessage = *m.add_command_set();
 
@@ -160,9 +244,14 @@ namespace rwe
             }
         }
 
-        for (const auto& hash : gameHashBuffer)
+        for (const auto& hash : endpoint.hashSendBuffer)
         {
             m.add_game_hashes(hash.value);
+        }
+
+        for (std::size_t i = 0; i < chatCount; ++i)
+        {
+            m.add_chat()->set_text(endpoint.chatSendBuffer[i]);
         }
 
         return outerMessage;
@@ -202,9 +291,17 @@ namespace rwe
             delay = std::chrono::duration_cast<std::chrono::milliseconds>(sendTime - *endpoint.lastReceiveTime);
         }
 
-        auto message = createProtoMessage(packetId, localPlayerId, currentSceneTime, endpoint.nextCommandToSend, endpoint.nextCommandToReceive, endpoint.nextHashToSend, endpoint.nextHashToReceive, delay, endpoint.sendBuffer, endpoint.hashSendBuffer);
+        auto sizeLimit = static_cast<unsigned long long>(getSize(sendBuffer) - 4);
+        auto chatCount = chooseChatCountForPacket(
+            endpoint.chatSendBuffer.size(),
+            sizeLimit,
+            [&](std::size_t count) {
+                return createProtoMessage(packetId, localPlayerId, currentSceneTime, delay, endpoint, count).ByteSizeLong();
+            });
+
+        auto message = createProtoMessage(packetId, localPlayerId, currentSceneTime, delay, endpoint, chatCount);
         auto messageSize = message.ByteSizeLong();
-        if (messageSize > static_cast<unsigned long long>(getSize(sendBuffer) - 4))
+        if (messageSize > sizeLimit)
         {
             throw std::runtime_error("Message to be sent was bigger than buffer size");
         }
@@ -282,6 +379,12 @@ namespace rwe
             LOG_ERROR << "Player " << endpoint.playerId.value << " endpoint sent wrong player ID: " << message.player_id();
             return;
         }
+
+        // Anything well formed from this peer counts as a sign of life,
+        // whether or not it carries anything new. lastReceiveTime below
+        // moves only for a packet with new commands in it, and so stands
+        // still for a peer that is present and has nothing to say.
+        endpoint.lastPacketTime = receiveTime;
 
         LOG_DEBUG << "Received ack to " << message.next_command_set_to_receive() << " and " << message.command_set_size() << " commands starting at " << message.next_command_set_to_send();
 
@@ -364,6 +467,42 @@ namespace rwe
         {
             playerCommandService->pushHash(endpoint.playerId, GameHash(message.game_hashes(i)));
             endpoint.nextHashToReceive += GameTime(1);
+        }
+
+        SequenceNumber newNextChatToSend(message.next_chat_to_receive());
+        if (newNextChatToSend > endpoint.nextChatToSend + SequenceNumber(endpoint.chatSendBuffer.size()))
+        {
+            LOG_ERROR << "Remote acked chat up to " << newNextChatToSend.value << ", but we are at " << endpoint.nextChatToSend.value << " and the chat buffer contains " << endpoint.chatSendBuffer.size() << " elements";
+        }
+        while (newNextChatToSend > endpoint.nextChatToSend && !endpoint.chatSendBuffer.empty())
+        {
+            endpoint.chatSendBuffer.pop_front();
+            endpoint.nextChatToSend = SequenceNumber(endpoint.nextChatToSend.value + 1);
+        }
+
+        SequenceNumber firstChatNumber(message.next_chat_to_send());
+        if (firstChatNumber > endpoint.nextChatToReceive)
+        {
+            LOG_ERROR << "First chat number in message was too high! Expecting no more than " << endpoint.nextChatToReceive.value << ", received " << firstChatNumber.value;
+            return;
+        }
+
+        auto firstRelevantChatIndex = (endpoint.nextChatToReceive - firstChatNumber).value;
+        for (int i = firstRelevantChatIndex; i < message.chat_size(); ++i)
+        {
+            // Sanitised here rather than at the far end, so that nothing a peer
+            // sends reaches the scene, the font or the log unexamined. What
+            // survives is printable, one line, and bounded.
+            auto text = sanitizeChatText(message.chat(i).text());
+            endpoint.nextChatToReceive = SequenceNumber(endpoint.nextChatToReceive.value + 1);
+
+            if (text.empty())
+            {
+                continue;
+            }
+
+            std::scoped_lock<std::mutex> lock(chatInboxMutex);
+            chatInbox.push_back(ReceivedChatMessage{endpoint.playerId, text});
         }
     }
 }

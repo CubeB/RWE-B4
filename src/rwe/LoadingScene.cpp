@@ -155,7 +155,23 @@ namespace rwe
             auto playerId = *loaded.gamePlayers[i];
             playerCommandService->registerPlayer(playerId);
 
-            if (auto networkInfo = std::get_if<PlayerControllerTypeNetwork>(&params->controller); networkInfo != nullptr)
+            auto isRemote = std::get_if<PlayerControllerTypeNetwork>(&params->controller) != nullptr;
+
+            // Only a peer running its own simulation has a sync hash to
+            // report: this machine, and the machines on the other end of the
+            // network. That is exactly the set GameScene pushes a hash for
+            // every tick, and the set has to match, because a hash buffer
+            // nobody ever fills stalls the comparison for every player at
+            // once -- which is how desync detection came to be quietly off in
+            // any game with a computer player in it. A computer player's
+            // commands come out of this very simulation, so it has no second
+            // opinion to offer and gets no buffer.
+            if (playerId == *loaded.localPlayerId || isRemote)
+            {
+                playerCommandService->registerHashSource(playerId);
+            }
+
+            if (isRemote)
             {
                 endpointInfos.emplace_back(playerId, networkService.getEndpoint(i));
             }

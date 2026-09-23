@@ -229,6 +229,15 @@ message PlayerSetGameSpeedCommand
     required int32 speed_index = 1;
 }
 
+// A peer has stopped answering; the rest of the game carries on without it.
+// `from_tick` is the first tick that player's commands are taken as empty,
+// which is what makes every peer cut their stream in the same place.
+message PlayerDroppedCommand
+{
+    required uint32 player = 1;
+    required uint32 from_tick = 2;
+}
+
 message PlayerCommand
 {
     oneof command
@@ -237,7 +246,24 @@ message PlayerCommand
         PlayerPauseGameCommand pause = 2;
         PlayerUnpauseGameCommand unpause = 3;
         PlayerSetGameSpeedCommand set_game_speed = 4;
+        PlayerDroppedCommand dropped = 5;
     }
+}
+
+// A line of chat between players.
+//
+// It travels beside the command stream rather than in it. A tick cannot run
+// until every peer's commands for it have arrived, so the moment a player
+// most wants to say something -- the game has stopped because somebody's
+// packets have -- is exactly the moment the command stream cannot carry it.
+// Chat is acked and resent like the hashes are, and nothing it carries ever
+// reaches the simulation.
+message ChatMessage
+{
+    // Who said it is not carried: a peer can only speak for itself, so the
+    // sender is the packet's sender. A line addressed to allies rather than
+    // to everyone would want a field here, and nothing else would.
+    required string text = 1;
 }
 
 message GameUpdateMessage
@@ -256,6 +282,9 @@ message GameUpdateMessage
     required int32 next_game_hash_to_send = 8;
     required int32 next_game_hash_to_receive = 9;
     repeated int32 game_hashes = 10;
+    required int32 next_chat_to_send = 11;
+    required int32 next_chat_to_receive = 12;
+    repeated ChatMessage chat = 13;
 }
 
 message NetworkMessage

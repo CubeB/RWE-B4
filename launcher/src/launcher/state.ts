@@ -1,3 +1,4 @@
+import { ModFingerprint } from "../common/archives";
 import { MapDialogState } from "./mapsDialog";
 import { WizardState } from "./wizard";
 import { RweConfig } from "./rweConfig";
@@ -52,6 +53,12 @@ export interface VideoMode {
 
 export interface State {
   installedMods?: InstalledModInfo[];
+
+  /**
+   * The archives in each installed mod, hashed. Undefined until the hashing,
+   * which runs in the background at startup, has finished.
+   */
+  modFingerprints?: ModFingerprint[];
   videoModes?: VideoMode[];
   activeMods: string[];
   selectedGameId?: number;

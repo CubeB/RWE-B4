@@ -2,10 +2,41 @@
 
 #include <rwe/sim/UnitBehaviorService.h>
 #include <rwe/sim/UnitState.h>
+#include <rwe/util/Index.h>
 #include <rwe/util/match.h>
 
 namespace rwe
 {
+    void feedAiCommands(GameSimulation& simulation, PlayerCommandService& playerCommandService, unsigned int bufferDepth)
+    {
+        for (Index i = 0; i < getSize(simulation.players); ++i)
+        {
+            PlayerId id(static_cast<unsigned int>(i));
+            if (simulation.players[i].type != GamePlayerType::Computer)
+            {
+                continue;
+            }
+
+            auto bufferedCount = playerCommandService.bufferedCommandCount(id);
+            if (bufferedCount <= bufferDepth)
+            {
+                auto aiCommands = simulation.takeAiCommandsForPlayer(id);
+                playerCommandService.pushCommands(id, aiCommands);
+                ++bufferedCount;
+            }
+
+            // A frame may dispatch several ticks -- catching up after a slow
+            // one, or any game speed above 1x -- and each tick pops a set from
+            // every player's buffer. One set queued would leave the second
+            // tick of such a frame with an empty buffer, and the whole
+            // simulation blocked on it.
+            for (; bufferedCount < bufferDepth; ++bufferedCount)
+            {
+                playerCommandService.pushCommands(id, std::vector<PlayerCommand>());
+            }
+        }
+    }
+
     namespace
     {
         void issueOrder(GameSimulation& simulation, UnitId unitId, const UnitOrder& order)

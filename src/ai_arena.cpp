@@ -139,36 +139,6 @@ namespace
         }
     }
 
-    /**
-     * GameScene::update's AI drain, verbatim: keep every computer player's
-     * command buffer topped up to the depth the RTT calls for, taking the
-     * previous tick's AI output first. The depth is what delays an order by a
-     * fixed number of ticks, so it has to match the windowed run exactly.
-     */
-    void feedAiCommands(rwe::GameSimulation& simulation, rwe::PlayerCommandService& playerCommandService, unsigned int targetCommandBufferSize)
-    {
-        for (rwe::Index i = 0; i < rwe::getSize(simulation.players); ++i)
-        {
-            rwe::PlayerId id(i);
-            if (simulation.players[i].type != rwe::GamePlayerType::Computer)
-            {
-                continue;
-            }
-
-            auto bufferedCount = playerCommandService.bufferedCommandCount(id);
-            if (bufferedCount <= targetCommandBufferSize)
-            {
-                auto aiCommands = simulation.takeAiCommandsForPlayer(id);
-                playerCommandService.pushCommands(id, aiCommands);
-                ++bufferedCount;
-            }
-
-            for (; bufferedCount < targetCommandBufferSize; ++bufferedCount)
-            {
-                playerCommandService.pushCommands(id, std::vector<rwe::PlayerCommand>());
-            }
-        }
-    }
 }
 
 int main(int argc, char* argv[])
@@ -421,10 +391,6 @@ int main(int argc, char* argv[])
         const unsigned int arenaEndTick = arenaSeconds * static_cast<unsigned int>(SimTicksPerSecond);
         LOG_INFO << "AI arena: running for " << arenaSeconds << " seconds of game time (" << arenaEndTick << " ticks)";
 
-        // No peers, so the worst RTT is zero; the depth it yields is the same
-        // one the windowed run computes.
-        const unsigned int targetCommandBufferSize = commandBufferTargetForRttMillis(0.0f);
-
         SimDiagnostics diagnostics;
 
         // The watchdog bounds wall time, not game time: it is how long the
@@ -477,7 +443,11 @@ int main(int argc, char* argv[])
                 break;
             }
 
-            feedAiCommands(loaded.simulation, *playerCommandService, targetCommandBufferSize);
+            // aiCommandBufferDepth rather than a figure of the arena's own: the
+            // depth decides which tick an AI order lands on, so an arena that
+            // chose differently would diverge from a windowed run on the first
+            // order given.
+            feedAiCommands(loaded.simulation, *playerCommandService, aiCommandBufferDepth());
 
             auto playerCommands = playerCommandService->tryPopCommands();
             if (!playerCommands)

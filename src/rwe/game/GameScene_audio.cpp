@@ -147,29 +147,6 @@ namespace rwe
         }
     }
 
-    namespace
-    {
-        /**
-         * TA's ten player colours, read off the shipped palette by eye --
-         * close enough for tinting a line of text.
-         */
-        Color playerColorToRgb(const PlayerColorIndex& index)
-        {
-            static const Color colors[] = {
-                Color(60, 88, 244),   // blue
-                Color(228, 32, 32),   // red
-                Color(252, 252, 252), // white
-                Color(24, 208, 24),   // green
-                Color(44, 60, 148),   // navy
-                Color(180, 72, 180),  // purple
-                Color(252, 252, 0),   // yellow
-                Color(96, 96, 96),    // black, lifted so it still reads
-                Color(128, 192, 252), // sky
-                Color(240, 160, 40),  // orange
-            };
-            return index.value < 10 ? colors[index.value] : Color(255, 255, 255);
-        }
-    }
 
     void GameScene::printConsole(const std::string& text, const Color& color)
     {

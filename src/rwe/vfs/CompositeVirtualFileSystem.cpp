@@ -146,8 +146,12 @@ namespace rwe
 
     void addToVfs(CompositeVirtualFileSystem& vfs, const std::filesystem::path& searchPath)
     {
+        // Added in reverse, so a .gp3 is searched before a .hpi -- readFile
+        // takes the first match. The launcher mirrors this list and this order
+        // in launcher/src/common/archives.ts, to work out whether two players
+        // are about to play with the same data; a change here belongs there
+        // too.
         std::vector<std::string> hpiExtensions{".hpi", ".ufo", ".ccx", ".gpf", ".gp3"};
-
         vfs.emplaceFileSystem<DirectoryFileSystem>(searchPath);
 
         for (auto it = hpiExtensions.rbegin(); it != hpiExtensions.rend(); ++it)

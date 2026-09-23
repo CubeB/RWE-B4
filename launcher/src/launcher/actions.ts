@@ -1,3 +1,4 @@
+import { ModFingerprint } from "../common/archives";
 import { GetMapInfoResponse } from "./bridge";
 import { InstalledModInfo, VideoMode } from "./state";
 import { MapsDialogAction } from "./mapsDialogActions";
@@ -363,6 +364,20 @@ export function receiveInstalledMods(
   };
 }
 
+export interface ReceiveModFingerprints {
+  type: "RECEIVE_MOD_FINGERPRINTS";
+  mods: ModFingerprint[];
+}
+
+export function receiveModFingerprints(
+  mods: ModFingerprint[]
+): ReceiveModFingerprints {
+  return {
+    type: "RECEIVE_MOD_FINGERPRINTS",
+    mods,
+  };
+}
+
 export interface ReceiveVideoModes {
   type: "RECEIVE_VIDEO_MODES";
   modes: VideoMode[];
@@ -431,6 +446,7 @@ export type AppAction =
   | ReceiveCombinedMapInfoAction
   | SetActiveModsAction
   | ReceiveInstalledMods
+  | ReceiveModFingerprints
   | ReceiveVideoModes
   | ReceiveRweConfigAction
   | SubmitSettingsDialogAction

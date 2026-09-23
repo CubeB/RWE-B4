@@ -32,6 +32,20 @@ namespace rwe
     {
         return (alpha * val) + ((1.0f - alpha) * average);
     }
+    std::size_t chooseChatCountForPacket(
+        std::size_t available,
+        unsigned long long sizeLimit,
+        const std::function<unsigned long long(std::size_t)>& sizeOf)
+    {
+        auto count = available;
+        while (count > 0 && sizeOf(count) > sizeLimit)
+        {
+            --count;
+        }
+
+        return count;
+    }
+
     void writeInt(char* sendBuffer, unsigned int crcResult)
     {
         sendBuffer[0] = crcResult & 0xffu;

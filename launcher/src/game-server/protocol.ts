@@ -1,3 +1,5 @@
+import { ModFingerprint } from "../common/archives";
+
 export type PlayerSide = "ARM" | "CORE";
 export type PlayerColor = number;
 
@@ -9,6 +11,12 @@ export interface PlayerInfo {
   team?: number;
   ready: boolean;
   installedMods: string[];
+  /**
+   * The archives inside each installed mod, hashed. Undefined until that
+   * player has finished hashing, which is a while after they joined when the
+   * mod runs to gigabytes -- see SetArchives.
+   */
+  archives?: ModFingerprint[];
 }
 
 export interface FilledPlayerSlot {
@@ -133,6 +141,21 @@ export interface OpenSlotPayload {
 export const CloseSlot = "close-slot";
 export interface CloseSlotPayload {
   slotId: number;
+}
+
+// Emitted by the client once it has hashed its installed mods, which is a
+// separate message from the handshake rather than a field on it because the
+// hashing takes as long as it takes and joining should not wait for it.
+export const SetArchives = "set-archives";
+export interface SetArchivesPayload {
+  mods: ModFingerprint[];
+}
+
+// Broadcast by the server to all clients when a player's archives arrive
+export const PlayerArchivesChanged = "player-archives-changed";
+export interface PlayerArchivesChangedPayload {
+  playerId: number;
+  mods: ModFingerprint[];
 }
 
 export const SetActiveMods = "set-active-mods";

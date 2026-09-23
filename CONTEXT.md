@@ -84,6 +84,43 @@ The saved sim state can differ *before* the hash does, because some sim
 state is saved and not hashed.
 _Avoid_: out of sync, drift
 
+**Desync report** (`DesyncReport`):
+What a peer knows when it notices a desync: the first tick the peers
+disagreed on, and every peer's sync hash for it. Distinct from the tick it
+was noticed on, which is a round trip later and differs per peer.
+_Avoid_: desync dump (that is the file the report writes)
+
+**Hash source**:
+A peer that runs its own simulation and so reports a sync hash: this
+machine and the machines on the other end of the network. A computer
+player is a player and not a hash source.
+_Avoid_: peer (a hash source is a peer; not every player is)
+
+**Archive**:
+A `.hpi`, `.ufo`, `.ccx`, `.gpf` or `.gp3` file of game data, loaded by the
+VFS. Lives inside a mod directory; the engine adds them in a fixed extension
+order and the first copy of an entry wins.
+_Avoid_: pack, HPI (one extension of five)
+
+**Mod fingerprint**:
+One mod reduced to what two players have to agree about: the archives in it and
+the SHA-256 of each. What the lobby compares, because the mod name says nothing
+about what is in it.
+_Avoid_: mod hash (it is a list, not a hash)
+
+**Message bar**:
+The one-line field the game opens on Enter, for typing a line of chat. Holds
+the keyboard while it is open, every key on it being a letter.
+_Avoid_: chat box, console (the console is where the line lands, not where it
+is typed)
+
+**Chat line**:
+What a player says to the other players. Carried beside the command stream on
+the same packet, never in it, because a stalled game is exactly when one is
+most wanted -- and so it is not simulation state: never hashed, never saved,
+never recorded in a replay, and never seen by any peer's `GameSimulation`.
+_Avoid_: chat message (that is the wire type, `proto::ChatMessage`)
+
 **Hashed state**:
 Sim state the sync hash reads. Must be initialised by the time the object
 exists, and kept in step across the hash, the save and the dump.

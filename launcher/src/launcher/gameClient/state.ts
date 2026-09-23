@@ -1,4 +1,9 @@
 import { AppAction } from "../actions";
+import {
+  ModDifference,
+  ModFingerprint,
+  checkArchiveAgreement,
+} from "../../common/archives";
 import { findAndMap, assertNever, choose } from "../../common/util";
 
 export type PlayerSide = "ARM" | "CORE";
@@ -13,6 +18,8 @@ export interface PlayerInfo {
   team?: number;
   ready: boolean;
   installedMods: string[];
+  /** The archives in each of their mods, hashed. Undefined until theirs arrive. */
+  archives?: ModFingerprint[];
 }
 
 export interface ChatMessage {
@@ -54,7 +61,12 @@ export type CanStartGameError =
   | {
       type: "missing-mods";
       playersMissingMods: { playerId: number; mods: string[] }[];
-    };
+    }
+  | {
+      type: "archives-differ";
+      playersWithWrongArchives: { playerId: number; mods: ModDifference[] }[];
+    }
+  | { type: "archives-unchecked"; playerIds: number[] };
 
 export type CanStartGameResult =
   | { result: "ok" }
@@ -128,6 +140,30 @@ export function canStartGame(room: CurrentGameState): CanStartGameResult {
 
   if (playersMissingMods.length !== 0) {
     errors.push({ type: "missing-mods", playersMissingMods });
+  }
+
+  // Having the same mods by name is not the same as having the same data in
+  // them, and the difference is a desync. Issue #43.
+  const agreement = checkArchiveAgreement(
+    room.activeMods,
+    choose(room.players, x =>
+      x.state === "filled"
+        ? { playerId: x.player.id, mods: x.player.archives }
+        : undefined
+    ),
+    room.adminPlayerId
+  );
+  if (agreement.mismatches.length !== 0) {
+    errors.push({
+      type: "archives-differ",
+      playersWithWrongArchives: agreement.mismatches,
+    });
+  }
+  if (agreement.uncheckedPlayerIds.length !== 0) {
+    errors.push({
+      type: "archives-unchecked",
+      playerIds: agreement.uncheckedPlayerIds,
+    });
   }
 
   return errors.length === 0 ? { result: "ok" } : { result: "err", errors };
@@ -233,6 +269,16 @@ function currentGameReducer(
           return x;
         }
         const p = { ...x.player, ready: action.payload.value };
+        return { ...x, player: p };
+      });
+      return { ...room, players: newPlayers };
+    }
+    case "RECEIVE_PLAYER_ARCHIVES_CHANGED": {
+      const newPlayers = room.players.map(x => {
+        if (x.state !== "filled" || x.player.id !== action.payload.playerId) {
+          return x;
+        }
+        const p = { ...x.player, archives: action.payload.mods };
         return { ...x, player: p };
       });
       return { ...room, players: newPlayers };

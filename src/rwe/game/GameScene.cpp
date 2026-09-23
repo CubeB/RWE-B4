@@ -457,6 +457,11 @@ namespace rwe
             action();
         }
 
+        // Once a frame, not once a tick: chat arrives on its own and is meant
+        // to keep arriving while the simulation is stalled waiting for a peer.
+        receiveChatMessages();
+        updateChatTest();
+
         updateMusic();
 
         // Pause halts simulation tick dispatch by not advancing the
@@ -736,6 +741,12 @@ namespace rwe
                 });
         }
 
+        // Before anything is queued, so that a drop decided this frame goes
+        // out this frame: the local buffer is at its limit while the game is
+        // stalled, and the push below would otherwise hold it back until a
+        // tick that cannot run without it.
+        updatePeerLiveness();
+
         auto targetCommandBufferSize = commandBufferTargetForRttMillis(gameNetworkService->getMaxAverageRttMillis());
 
         auto bufferedCommandCount = playerCommandService->bufferedCommandCount(localPlayerId);
@@ -757,7 +768,13 @@ namespace rwe
             // If we have too many commands buffered,
             // defer submitting commands this frame
             // so that we drop back down to the threshold.
-            if (bufferedCommandCount <= targetCommandBufferSize)
+            // The second arm is for a stalled game. The buffer is not being
+            // drained, so it sits at its limit and the first arm stops
+            // firing -- which would leave a drop command waiting for a tick
+            // that is waiting for the drop. Queueing an extra set is safe:
+            // every peer sees this peer's stream exactly as it is sent, and
+            // the depth only decides how long an order waits.
+            if (bufferedCommandCount <= targetCommandBufferSize || (!waitingForPlayers.empty() && !localPlayerCommandBuffer.empty()))
             {
                 // Queue up commands collected from the local player
                 playerCommandService->pushCommands(localPlayerId, localPlayerCommandBuffer);
@@ -774,42 +791,12 @@ namespace rwe
             }
         }
 
-        // Queue up commands from the computer players. The AI runs inside
-        // the simulation (one tick ahead of this drain) and writes its
-        // PlayerCommands into `simulation.aiPendingCommands`. We pull them
-        // here and push them through the same PlayerCommandService channel
-        // human input uses, so MP/replay/desync detection treats AI
-        // identically to a remote human.
-        //
-        // The AI buffer is kept topped up to the same threshold as the
-        // local human buffer. A single frame may dispatch several sim
-        // ticks (catch-up after a slow frame, or any game speed above 1x),
-        // and each tick pops one entry from every player's buffer. If the
-        // AI only had one entry queued, the second tick in a frame would
-        // find its buffer empty and be skipped ("Blocked waiting for
-        // player commands").
-        for (Index i = 0; i < getSize(simulation.players); ++i)
-        {
-            PlayerId id(i);
-            const auto& player = simulation.players[i];
-            if (player.type != GamePlayerType::Computer)
-            {
-                continue;
-            }
-
-            auto aiBufferedCount = playerCommandService->bufferedCommandCount(id);
-            if (aiBufferedCount <= targetCommandBufferSize)
-            {
-                auto aiCommands = simulation.takeAiCommandsForPlayer(id);
-                playerCommandService->pushCommands(id, aiCommands);
-                ++aiBufferedCount;
-            }
-
-            for (; aiBufferedCount < targetCommandBufferSize; ++aiBufferedCount)
-            {
-                playerCommandService->pushCommands(id, std::vector<PlayerCommand>());
-            }
-        }
+        // The computer players' commands are NOT queued here. They are taken
+        // in tryTickGame, a tick at a time: the buffer is drained a set per
+        // player per tick, so feeding it per frame made the delay on an AI
+        // order a function of how many ticks the last frame dispatched, which
+        // is not the same number on two peers of a network game. See
+        // feedAiCommands.
         }
 
         // If we are waiting to swap in a new unit GUI panel, do that now

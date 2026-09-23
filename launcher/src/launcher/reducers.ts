@@ -260,6 +260,8 @@ function globalActionsReducer(
       return liftState({ ...state, isRweRunning: false });
     case "RECEIVE_INSTALLED_MODS":
       return liftState({ ...state, installedMods: action.mods });
+    case "RECEIVE_MOD_FINGERPRINTS":
+      return liftState({ ...state, modFingerprints: action.mods });
     case "RECEIVE_VIDEO_MODES":
       return liftState({ ...state, videoModes: action.modes });
     case "CHANGE_SINGLE_PLAYER_MODS":

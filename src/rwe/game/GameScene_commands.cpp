@@ -2706,6 +2706,19 @@ namespace rwe
                 {
                     gameSpeed = GameSpeed(c.speedIndex);
                 }
+            },
+            [&](const PlayerDroppedCommand& c) {
+                // The drop took effect when this command arrived, which is what
+                // let the tick carrying it run at all, and whether the peer who
+                // issued it was entitled to was settled there. So the question
+                // left here is only whether it was honoured: a drop refused on
+                // arrival leaves nothing to announce.
+                if (!playerCommandService->isDropped(c.player))
+                {
+                    return;
+                }
+
+                onPlayerDropped(c.player, c.fromTick);
             });
     }
 

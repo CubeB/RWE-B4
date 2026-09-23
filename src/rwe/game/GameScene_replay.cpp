@@ -18,8 +18,10 @@
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/Mesh.h>
 #include <rwe/camera_util.h>
+#include <rwe/game/DesyncReport.h>
 #include <rwe/game/GameScene_util.h>
 #include <rwe/game/OrderButtons.h>
+#include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/game/dump_util.h>
 #include <rwe/game/matrix_util.h>
 #include <rwe/render/render_prof.h>
@@ -437,22 +439,53 @@ namespace rwe
             // ticks this frame is about to dispatch.
             pushReplayCommandsForTick(sceneTime.value);
         }
-
-        if (!playerCommandService->checkHashes())
+        else if (onlyComputerPlayersAreNotReady())
         {
-            std::ofstream dumpFile;
-            dumpFile.open("rwe-dump-" + std::to_string(std::rand()) + ".json");
-            dumpFile << dumpJson(simulation);
-            dumpFile.close();
-            throw std::runtime_error("Desync detected");
+            // What the computer players asked for on the tick just run, a tick
+            // at a time. Here rather than in update() because the buffer is
+            // drained a set per player per tick and has to be filled the same
+            // way: fed per frame, the delay on an AI order became a function
+            // of how many ticks that frame dispatched, which is not the same
+            // number on two peers of a network game. A recording feeds every
+            // player from the file above instead, this one included.
+            //
+            // And only when the tick is about to run, which is what the guard
+            // is for. This function is reached once a frame while a tick is
+            // held up waiting for a peer, and topping the buffer up on each of
+            // those attempts would push a set for a tick that never happened --
+            // so an AI order would land later on the peer whose packet was late
+            // than on the peer whose packet was not. A stall is a property of
+            // one machine's network and must not reach the simulation.
+            feedAiCommands(simulation, *playerCommandService, aiCommandBufferDepth());
+        }
+
+        if (auto desync = playerCommandService->checkHashes(); desync)
+        {
+            auto dumpPath = writeDesyncDump(*desync, localPlayerId, sceneTime, simulation);
+            auto description = describeDesync(*desync, localPlayerId, sceneTime, dumpPath);
+            LOG_ERROR << description;
+            throw std::runtime_error(description);
         }
 
         auto playerCommands = playerCommandService->tryPopCommands();
         if (!playerCommands)
         {
-            LOG_ERROR << "Blocked waiting for player commands";
+            // Said once a stall rather than once a frame. It used to be every
+            // frame, which at sixty a second buried the log of a game that had
+            // lost a peer under the one thing that log was needed for.
+            if (!waitingForPlayers.empty() && !stallReported)
+            {
+                stallReported = true;
+                std::string names;
+                for (const auto& playerId : waitingForPlayers)
+                {
+                    names += (names.empty() ? "" : ", ") + playerDisplayName(playerId);
+                }
+                LOG_WARN << "Tick " << sceneTime.value << " is waiting for " << names;
+            }
             return;
         }
+        stallReported = false;
 
         if (replayWriter)
         {
