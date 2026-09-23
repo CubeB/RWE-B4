@@ -9,7 +9,7 @@ _Last updated: 2026-09-23. Status of the codebase is as of the `revival` integra
 - **History:** Michael Heasell (2017–2023, ~1,950 commits) — the engine, the format parsers, the COB VM and the deterministic simulation. Kevin Hake modernised the build in March 2026 (Boost removed, C++20, SDL3, CI green). Taylor Gunnoe added hotkeys / speed / pause / Phase‑1 AI in April 2026 (unmerged upstream until now).
 - **First public pre-release 2026-09-10.** Upstream's only tag is `v0.1.0` (2017); this branch tags `v1.0.0` ("Bot bot boom boom v1.0", under the main-menu title — B4 for short, being four B’s), `v1.1.0-pre1` and now `v1.1.0-pre2`, all three on the fork as well as locally. The first two have no release behind them; the third does — Windows installer, Windows zip and Linux AppImage at <https://github.com/CubeB/RWE-B4/releases> (see Phase 0). The CMake version is derived from git tags, and only from annotated ones.
 
-**Next, of the large things** (2026-09-22): **the AI on water and fragmented maps**, which is Phase 2's biggest remaining cluster and is really one problem wearing four entry titles -- the base built on ground its own army cannot leave (the commander's movement class wades deeper and climbs steeper than its constructor's, and `baseAnchor` is never revised), the sea ferry that retried one impossible landing 1426 times in a single game, no hovercraft at all, and naval doctrine. Each of those entries already carries its measurements, so the work is ready to start rather than needing a diagnosis first. Phase 3 is the next whole phase after it, and Phase 3 has begun (2026-09-23): desync diagnostics and drop handling are done, and so is the dependency that was sitting in Phase 2 -- an AI player in a network game no longer desyncs, its command timing having stopped being a function of anything local. What is left of Phase 3 is the launcher's half: the dependency refresh, a public master server, lobby archive matching, in-game chat, and rejoining a game after being dropped (#188).
+**Next, of the large things** (2026-09-22): **the AI on water and fragmented maps**, which is Phase 2's biggest remaining cluster and is really one problem wearing four entry titles -- the base built on ground its own army cannot leave (the commander's movement class wades deeper and climbs steeper than its constructor's, and `baseAnchor` is never revised), the sea ferry that retried one impossible landing 1426 times in a single game, no hovercraft at all, and naval doctrine. Each of those entries already carries its measurements, so the work is ready to start rather than needing a diagnosis first. Phase 3 is the next whole phase after it, and Phase 3 has begun (2026-09-23): desync diagnostics and drop handling are done, and so is the dependency that was sitting in Phase 2 -- an AI player in a network game no longer desyncs, its command timing having stopped being a function of anything local. What is left of Phase 3 is the launcher's half, and less of it each day: lobby archive matching, in-game chat and the dependency refresh are done, which leaves a public master server -- now obligatory rather than optional, the refresh's socket.io 4 having cut the launcher off from upstream's socket.io 2 one -- and rejoining a game after being dropped (#188).
 
 ## Guiding principles
 
@@ -312,18 +312,28 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
 
 ## Phase 3 — Multiplayer polish & launcher (≈ 2 months)
 
-- [ ] Launcher dependency refresh: Electron 22 → current LTS, React 16 → 18, Redux Toolkit;
-      drop `react-hot-loader`. Re-run `npm audit` (dependabot PRs #166/#167 still open).
-      Sized 2026-09-23 and it is bigger than the title: `npm audit` reports 125
-      advisories, 13 of them critical, but all except `@sentry/electron` and `webpack`
-      are transitive through build tooling rather than through anything shipped. The
-      real cost is that React 18 is not a React upgrade -- `@material-ui/core` is v4,
-      which has no React 18 support, so it pulls in the whole MUI v5 migration:
-      package rename across every component, and JSS to emotion. Worth deciding
-      whether to take that on as its own piece of work before starting. Note also
-      that socket.io 2 to 4 is a wire break, so the client cannot move ahead of
-      whatever master server it is expected to talk to -- which ties it to the entry
-      below.
+- [x] **Launcher dependency refresh** (2026-09-23, #11). Electron 22 to 44, React 16
+      to 18, Material-UI v4 to MUI v7, Redux Toolkit, socket.io 2 to 4, ESLint 9 flat
+      config, TypeScript 5.9, Jest 30, Storybook 6 to 10; `react-hot-loader` replaced
+      by React Refresh. `npm audit` went from 125 advisories, 13 critical and 46 high,
+      to none. The sizing this replaces was right that MUI came along for the ride and
+      wrong about where the weight was: `withStyles` is gone from MUI v7 and the six
+      styled components had about a dozen rules between them, two of them
+      `createStyles({})` and nothing else, so `sx` absorbed the lot. Storybook was the
+      surprise -- its webpack4 builders carried 33 of the high-and-above advisories on
+      their own, which is what forced a tool nobody runs in CI to move as well, and its
+      stories are Component Story Format 3 now. **One real fault fell out of it**:
+      Electron 32 removed the non-standard `File.path`, so the wizard's data-path
+      picker had been handing `undefined` to the mod setup, silently, ever since that
+      Electron. The dependabot PRs were upstream's -- #166 and #167 do not exist on
+      this fork. Verified with tsc, 46 tests, lint, all three bundles, a Storybook
+      build, and the lobby end to end against a local master server: create-game,
+      handshake into a ten-slot room, chat echoed back.
+      **The wire break that entry warned about is real and is now cashed in.**
+      socket.io 4 cannot talk to a socket.io 2 server, and `masterServer()` still
+      defaults to upstream's `master.rwe.michaelheasell.com`, which runs the old one --
+      so the launcher can no longer join it, and the entry below stopped being
+      optional.
 - [ ] Host a public master server; fix non-recommended port (#60). The launcher already
       defaults to upstream's `master.rwe.michaelheasell.com` rather than to localhost
       (`masterServer()` in `launcher/src/common/util.ts`, overridden by
