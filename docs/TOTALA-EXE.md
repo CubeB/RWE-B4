@@ -231,11 +231,20 @@ quirks of the original that RWE reproduces although they look like defects.
   candidate list (§17a) is appended *outside* the can-see gate, on `unit+0x110`
   bit 8 — "on my radar picture at all" — walked only when the first list is
   empty and only when the player owns a unit with `istargetingupgrade`. RWE has
-  neither the list nor the flag. Two reasons it should stay that way: the units
-  that carry the flag (`ARMTARG`/`CORTARG`) are Core Contingency and are not in
-  the shipped data here, and the radar picture the list is built from is
-  recomputed for **one** player per tick (§17, the visibility pass), so feeding it into a simulation
-  decision would make the outcome depend on who is sitting at the keyboard.
+  neither the list nor the flag. The reason it should stay that way is the radar
+  picture the list is built from: it is recomputed for **one** player per tick
+  (§17, the visibility pass), so feeding it into a simulation decision would
+  make the outcome depend on who is sitting at the keyboard.
+
+  This entry used to give a second reason, and that reason is **wrong**
+  (checked 2026-09-23): it said `ARMTARG`/`CORTARG` are Core Contingency and
+  so are not in the shipped data here. Core Contingency *is* installed on this
+  machine -- `ccdata.ccx` sits in the engine's own data directory beside the
+  base game, `.ccx` is in the VFS extension list, and `hpi_test list` finds
+  `ARMTARG.FBI` and `CORTARG.FBI` in it along with their models, gadgets and
+  sounds. Every arena run and play-test in this repo has had them loaded. The
+  determinism reason stands on its own and is why nothing changes, but "the
+  units are not here" must not be repeated.
   RWE's radar and sonar contacts therefore reach the minimap (`canDetectUnit`)
   and nothing else; every simulation decision goes through `canSeeUnit`.
 

@@ -147,6 +147,7 @@ namespace rwe
             {
                 timed("reachability", [&] {
                     reachability.rebuild(sim, moverDef->second.movementCollisionInfo, *blackboard.baseAnchor);
+                    blackboard.groundAnchor = *blackboard.baseAnchor;
 
                     // Home on the base we ACTUALLY have, not on the tile the
                     // commander happened to spawn on.
@@ -194,6 +195,12 @@ namespace rwe
                                 if (reachability.isWalkable(sim, factoryPosition))
                                 {
                                     reachability.rebuild(sim, moverDef->second.movementCollisionInfo, factoryPosition);
+                                    // Published, because the layer is not the
+                                    // only thing that wants to know where home
+                                    // moved to: a landing search walks back
+                                    // towards home and has to set off the right
+                                    // way. See AiBlackboard::groundAnchor.
+                                    blackboard.groundAnchor = factoryPosition;
                                     break;
                                 }
                             }

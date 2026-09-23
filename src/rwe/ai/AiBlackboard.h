@@ -304,6 +304,34 @@ namespace rwe
         bool hasUnreachableGround{false};
 
         /**
+         * Where the ground reachability layer was actually homed this pass.
+         *
+         * Usually `baseAnchor`, and then this says nothing new. It differs on
+         * exactly the map that made it necessary: the commander wades deeper
+         * and climbs steeper than the constructor the ground layer is
+         * labelled for, so it can walk off its spawn island and build the
+         * whole base where no kbot it produces can ever follow, and
+         * `baseAnchor` -- set from `homePosition` the first tick the
+         * commander is seen, and never revised -- goes on naming the island
+         * the AI abandoned. AiPlayerController re-homes the layer on a
+         * factory's own ground when not one factory is reachable; this is
+         * the position it settled on.
+         *
+         * What it is for is any question of the form "which way is home",
+         * where home means where the army stands rather than where the game
+         * began. A transport's landing search is the first: it walks back
+         * from the attack target towards home looking for a shore, and
+         * setting off in the wrong direction is how the same impossible
+         * point came to be probed 1426 times in one game.
+         *
+         * `baseAnchor` is deliberately still the answer for the rally point,
+         * the defence facing and the mex leash. Those mean "the base we are
+         * defending", which is a different question, and moving them is a
+         * larger change kept separate.
+         */
+        std::optional<SimVector> groundAnchor;
+
+        /**
          * Whether aircraft are worth spending a tier on, judged this pass
          * rather than decided once.
          *

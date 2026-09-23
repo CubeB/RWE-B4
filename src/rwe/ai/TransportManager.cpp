@@ -433,9 +433,21 @@ namespace rwe
             // Otherwise, carry the army over to an enemy it cannot walk to.
             if (enemyAcrossWater && bb.phase == GamePhase::Attack && bb.baseAnchor)
             {
+                // Walk back towards where the army STANDS, not towards where
+                // the game began. Both searches step from the attack target
+                // back along this direction looking for a shore to put the
+                // cargo on, so the origin decides which side of the target
+                // they look at -- and on a map where the commander walked off
+                // its spawn island, baseAnchor names an island the AI has not
+                // owned since its opening minutes. Measured before this: 1494
+                // blocked landings in four games on Hundred Isles, 1426 of
+                // them the same point, while the same runs found landings
+                // perfectly well for other targets. See
+                // AiBlackboard::groundAnchor.
+                const SimVector& ferryOrigin = bb.groundAnchor ? *bb.groundAnchor : *bb.baseAnchor;
                 auto landing = transportDef.canFly
-                    ? landingNear(sim, reachability, *bb.attackTarget, *bb.baseAnchor)
-                    : navalLandingNear(sim, reachability, *bb.attackTarget, *bb.baseAnchor);
+                    ? landingNear(sim, reachability, *bb.attackTarget, ferryOrigin)
+                    : navalLandingNear(sim, reachability, *bb.attackTarget, ferryOrigin);
                 if (!landing)
                 {
                     LOG_DEBUG << "AI transport " << transportId.value << ": army ferry blocked, no landing near "
@@ -447,6 +459,8 @@ namespace rwe
                         .set("x", static_cast<double>(bb.attackTarget->x.value))
                         .set("z", static_cast<double>(bb.attackTarget->z.value))
                         .set("air", transportDef.canFly)
+                        .set("from_x", static_cast<double>(ferryOrigin.x.value))
+                        .set("from_z", static_cast<double>(ferryOrigin.z.value))
                         .set("why", "no_landing")
                         .detail("army ferry blocked, no landing near the attack target");
                     continue;
