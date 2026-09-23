@@ -239,6 +239,8 @@ set(SOURCE_FILES
     src/rwe/MainMenuModel.cpp
     src/rwe/MainMenuModel.h
     src/rwe/MainMenuScene.cpp
+    src/rwe/MultiplayerSetup.cpp
+    src/rwe/MultiplayerSetup.h
     src/rwe/MainMenuScene.h
     src/rwe/Mesh.cpp
     src/rwe/Mesh.h
@@ -1015,6 +1017,7 @@ set(TEST_FILES
     src/rwe/io/tdf/NetSchemaTdfAdapter.test.cpp
     src/rwe/io/tdf/SimpleTdfAdapter.test.cpp
     src/rwe/io/tdf/TdfBlock.test.cpp
+    src/rwe/MultiplayerSetup.test.cpp
     src/rwe/ip_util.test.cpp
     src/rwe/math/Matrix4f.test.cpp
     src/rwe/math/Vector2f.test.cpp

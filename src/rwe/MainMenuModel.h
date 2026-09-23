@@ -41,7 +41,13 @@ namespace rwe
             {
                 Open,
                 Human,
-                Computer
+                Computer,
+                /**
+                 * Somebody on another machine, in a direct-connect game. Only
+                 * the multiplayer screen offers it -- a skirmish has nobody to
+                 * connect to.
+                 */
+                Network
             };
             enum class Side
             {
@@ -57,10 +63,26 @@ namespace rwe
             BehaviorSubject<Energy> energy;
             /** The AI personality a computer player plays, by name (see AiPersonality.h). */
             BehaviorSubject<std::string> personality{std::string("Balanced")};
+
+            /**
+             * Where a Network player is, as typed: host:port, and the same
+             * forms the --player argument takes, so [::1]:15338 as well as
+             * 192.168.0.5:1337. Kept on the model rather than read off the
+             * text box alone, because changing a slot's type destroys and
+             * rebuilds that box and what was typed should survive it.
+             */
+            BehaviorSubject<std::string> networkAddress{std::string()};
         };
 
     public:
         Subject<int> teamChanges;
+
+        /**
+         * The port this machine listens on in a direct-connect game, which is
+         * what the other peers put in their address for this seat. The default
+         * is the one --port takes.
+         */
+        BehaviorSubject<std::string> localNetworkPort{std::string("1337")};
 
         BehaviorSubject<std::optional<SelectedMapInfo>> selectedMap;
 

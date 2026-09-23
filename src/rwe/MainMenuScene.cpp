@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuModel.h>
+#include <rwe/MultiplayerSetup.h>
+#include <rwe/ip_util.h>
 #include <rwe/camera_util.h>
 #include <rwe/config.h>
 #include <rwe/io/gui/gui.h>
@@ -650,6 +652,16 @@ namespace rwe
             {
                 goToSingleMenu();
             }
+            else if (message == "MULTI")
+            {
+                // Straight to the setup screen. The original's multiplayer
+                // button leads to a protocol chooser first -- NEWMULTI.GUI,
+                // MODEM.GUI and SERIAL.GUI are all still in the data -- but
+                // those choose between a games service, a modem and a null
+                // cable, and RWE speaks none of them. What it does speak is
+                // UDP to an address you give it, which needs no choosing.
+                goToMultiplayerMenu();
+            }
             else if (message == "INTRO")
             {
                 playMovie("movies/2.zrb");
@@ -1009,6 +1021,18 @@ namespace rwe
 
     void MainMenuScene::goToSkirmishMenu()
     {
+        goToPlayerSetupMenu(false);
+    }
+
+    void MainMenuScene::goToMultiplayerMenu()
+    {
+        goToPlayerSetupMenu(true);
+    }
+
+    void MainMenuScene::goToPlayerSetupMenu(bool multiplayer)
+    {
+        multiplayerSetup = multiplayer;
+
         aiPersonalities.clear();
         for (const auto& personality : loadAiPersonalities(aiPersonalityDirectory()))
         {
@@ -1049,6 +1073,33 @@ namespace rwe
 
         attachSkirmishOptionComponents(*panel);
         attachPlayerSelectionComponents("SKIRMISH", *panel);
+
+        if (multiplayerSetup)
+        {
+            // The band between the bottom of the player table, which ends at
+            // 278, and the help line at 330. Nothing of the original's is
+            // there, which is what makes it the place to put something the
+            // original has no gadget for.
+            auto portLabel = uiFactory.createLabel(45, 296, 200, 12, "This machine's port:", UiLabel::Alignment::Left);
+            panel->appendChild(std::move(portLabel));
+
+            auto font = sceneContext.textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+            auto portBox = std::make_unique<UiTextBox>(186, 292, 70, 20, model.localNetworkPort.getValue(), font);
+            portBox->setName("LOCALPORT");
+            panel->appendChild(std::move(portBox));
+
+            // Said on the screen because it is the one thing about a
+            // direct-connect game that surprises people: there is no host
+            // here, so nothing propagates. Every machine types this screen.
+            auto note = uiFactory.createLabel(
+                45,
+                312,
+                430,
+                12,
+                "Everyone sets this screen the same way, with their own seat as Player.",
+                UiLabel::Alignment::Left);
+            panel->appendChild(std::move(note));
+        }
 
         goToMenu(std::move(panel));
     }
@@ -1437,6 +1488,13 @@ namespace rwe
 
     void MainMenuScene::togglePlayer(int playerIndex)
     {
+        // Before the type changes, because changing it tears this row's
+        // gadgets down and builds new ones -- and one of the gadgets may be an
+        // address box with something typed in it that nothing else has read.
+        // A slot cycled past Network and back comes back to the address it
+        // had, which is the behaviour anyone would expect of it.
+        readNetworkAddressesFromPanel();
+
         auto& player = model.players[playerIndex];
 
         switch (player.type.getValue())
@@ -1472,6 +1530,15 @@ namespace rwe
                 player.type.next(MainMenuModel::PlayerSettings::Type::Computer);
                 break;
             case MainMenuModel::PlayerSettings::Type::Computer:
+                // Network sits between Computer and Open, and only on the
+                // multiplayer screen: a skirmish has nobody to connect to, and
+                // a slot that could be set to Network there would be a slot
+                // that stops the game starting.
+                player.type.next(multiplayerSetup
+                        ? MainMenuModel::PlayerSettings::Type::Network
+                        : MainMenuModel::PlayerSettings::Type::Open);
+                break;
+            case MainMenuModel::PlayerSettings::Type::Network:
                 player.type.next(MainMenuModel::PlayerSettings::Type::Open);
                 break;
         }
@@ -1585,6 +1652,21 @@ namespace rwe
         throw std::logic_error("Invalid side");
     }
 
+    /**
+     * The address as typed, turned into what the loader wants. Only reached
+     * after multiplayerSetupProblem has passed the same string, which is what
+     * makes the failure here a logic error rather than a typing mistake.
+     */
+    PlayerControllerType networkControllerFor(const std::string& address)
+    {
+        auto hostAndPort = getHostAndPort(address);
+        if (!hostAndPort)
+        {
+            throw std::logic_error("Unchecked network address: " + address);
+        }
+        return PlayerControllerTypeNetwork{hostAndPort->first, hostAndPort->second};
+    }
+
     PlayerControllerType playerSettingsTypeToPlayerControllerType(MainMenuModel::PlayerSettings::Type t)
     {
         switch (t)
@@ -1650,6 +1732,28 @@ namespace rwe
         return stage == 0 ? CommanderDeathMode::GameEnds : CommanderDeathMode::GameContinues;
     }
 
+    void MainMenuScene::readNetworkAddressesFromPanel()
+    {
+        if (panelStack.empty())
+        {
+            return;
+        }
+
+        auto& panel = *panelStack.back();
+        for (Index i = 0; i < getSize(model.players); ++i)
+        {
+            if (auto box = panel.find<UiTextBox>("PLAYER" + std::to_string(i) + "_address"))
+            {
+                model.players[i].networkAddress.next(box->get().getText());
+            }
+        }
+
+        if (auto box = panel.find<UiTextBox>("LOCALPORT"))
+        {
+            model.localNetworkPort.next(box->get().getText());
+        }
+    }
+
     void MainMenuScene::startGame()
     {
         if (!model.selectedMap.getValue())
@@ -1657,7 +1761,30 @@ namespace rwe
             return;
         }
 
+        if (multiplayerSetup)
+        {
+            readNetworkAddressesFromPanel();
+
+            std::vector<MultiplayerSlot> slots;
+            slots.reserve(model.players.size());
+            for (const auto& player : model.players)
+            {
+                auto type = player.type.getValue();
+                slots.push_back(MultiplayerSlot{
+                    type == MainMenuModel::PlayerSettings::Type::Human,
+                    type == MainMenuModel::PlayerSettings::Type::Network,
+                    player.networkAddress.getValue()});
+            }
+
+            if (auto problem = multiplayerSetupProblem(slots, model.localNetworkPort.getValue()))
+            {
+                openMessageBox(*problem);
+                return;
+            }
+        }
+
         GameParameters params{model.selectedMap.getValue()->name, 0};
+        params.localNetworkPort = model.localNetworkPort.getValue();
         params.aiDifficulty = skirmishDifficultyToAiDifficulty(model.skirmishOptions.difficulty.getValue());
         params.lineOfSight = skirmishStageToLineOfSightMode(model.skirmishOptions.lineOfSight.getValue());
         params.mapping = skirmishStageToMappingMode(model.skirmishOptions.mapping.getValue());
@@ -1673,7 +1800,9 @@ namespace rwe
                 continue;
             }
 
-            auto controller = playerSettingsTypeToPlayerControllerType(playerSlot.type.getValue());
+            auto controller = playerSlot.type.getValue() == MainMenuModel::PlayerSettings::Type::Network
+                ? networkControllerFor(playerSlot.networkAddress.getValue())
+                : playerSettingsTypeToPlayerControllerType(playerSlot.type.getValue());
 
             PlayerInfo playerInfo{std::nullopt, controller, getSideName(playerSlot.side.getValue()), playerSlot.colorIndex.getValue(), playerSlot.metal.getValue(), playerSlot.energy.getValue(), playerSlot.teamIndex.getValue()};
             if (playerSlot.type.getValue() == MainMenuModel::PlayerSettings::Type::Computer)
@@ -1787,6 +1916,11 @@ namespace rwe
                             break;
                         case MainMenuModel::PlayerSettings::Type::Computer:
                             b->setLabel("Computer");
+                            panel.removeChildrenWithPrefix("PLAYER" + std::to_string(i) + "_");
+                            attachDetailedPlayerSelectionComponents(guiName, panel, i);
+                            break;
+                        case MainMenuModel::PlayerSettings::Type::Network:
+                            b->setLabel("Network");
                             panel.removeChildrenWithPrefix("PLAYER" + std::to_string(i) + "_");
                             attachDetailedPlayerSelectionComponents(guiName, panel, i);
                             break;
@@ -1912,6 +2046,20 @@ namespace rwe
             b->addSubscription(std::move(teamSub));
 
             panel.appendChild(std::move(b));
+        }
+
+        if (multiplayerSetup && model.players[i].type.getValue() == MainMenuModel::PlayerSettings::Type::Network)
+        {
+            // Where the other machine is, over the metal and energy columns
+            // and the gap beside them. A network player's resources are not
+            // editable here for the same reason they are not negotiable: this
+            // screen cannot tell the other machine anything, so a figure only
+            // this end had changed would be a desync on the first tick.
+            auto font = sceneContext.textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+            auto box = std::make_unique<UiTextBox>(286, rowStart, 183, 20, model.players[i].networkAddress.getValue(), font);
+            box->setName("PLAYER" + std::to_string(i) + "_address");
+            panel.appendChild(std::move(box));
+            return;
         }
 
         {

@@ -125,6 +125,18 @@ namespace rwe
 
         void goToSkirmishMenu();
 
+        /**
+         * The same screen as the skirmish one, for a game played against other
+         * machines rather than against the computer. What it adds is a slot
+         * type -- Network, with an address -- and the port this machine
+         * listens on; what it has no way to add is agreement, there being no
+         * lobby here to agree anything in. See MultiplayerSetup.h.
+         */
+        void goToMultiplayerMenu();
+
+        /** The screen shared by both, given which one it is being built for. */
+        void goToPlayerSetupMenu(bool multiplayer);
+
         void openMapSelectionDialog();
 
         void exit();
@@ -165,6 +177,22 @@ namespace rwe
         void cycleSkirmishOption(const std::string& optionName);
 
         void startGame();
+
+        /**
+         * Takes what has been typed into the address and port boxes onto the
+         * model. A text box has no change notification, so this is called
+         * before anything reads those values -- at Start, and whenever the
+         * screen is about to throw its boxes away.
+         */
+        void readNetworkAddressesFromPanel();
+
+        /**
+         * Whether this screen is setting up a game against other machines. It
+         * decides three things: whether a slot can be Network at all, whether
+         * the address and port boxes are drawn, and whether Start checks any
+         * of it.
+         */
+        bool multiplayerSetup{false};
 
     private:
         AudioService::LoopToken startBgm();
