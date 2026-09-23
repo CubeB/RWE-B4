@@ -1,12 +1,16 @@
 #include "AiArenaReport.h"
 
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <rwe/ai/AiPlayerController.h>
+#include <rwe/config.h>
+#include <rwe/game/GameParameters.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
+#include <rwe/util/match.h>
 
 namespace rwe
 {
@@ -49,6 +53,98 @@ namespace rwe
                 return "army";
             }
             return "other";
+        }
+
+        std::string controllerName(const PlayerControllerType& controller)
+        {
+            return match(
+                controller,
+                [](const PlayerControllerTypeHuman&) { return "Human"; },
+                [](const PlayerControllerTypeComputer&) { return "Computer"; },
+                [](const PlayerControllerTypeNetwork&) { return "Network"; });
+        }
+
+        std::string difficultyName(AiDifficulty d)
+        {
+            switch (d)
+            {
+                case AiDifficulty::Idle:
+                    return "idle";
+                case AiDifficulty::Easy:
+                    return "easy";
+                case AiDifficulty::Hard:
+                    return "hard";
+                case AiDifficulty::Brutal:
+                    return "brutal";
+                default:
+                    return "standard";
+            }
+        }
+
+        /** One player's --ai-tune overrides, knob -> the raw value string. */
+        nlohmann::json tuneForPlayer(const GameParameters& parameters, unsigned int playerIndex)
+        {
+            auto tune = nlohmann::json::object();
+            for (const auto& entry : parameters.aiTuning)
+            {
+                auto colon = entry.find(':');
+                auto equals = entry.find('=');
+                if (colon == std::string::npos || equals == std::string::npos || equals < colon)
+                {
+                    continue;
+                }
+                if (std::stoul(entry.substr(0, colon)) != playerIndex)
+                {
+                    continue;
+                }
+                tune[entry.substr(colon + 1, equals - colon - 1)] = entry.substr(equals + 1);
+            }
+            return tune;
+        }
+
+        nlohmann::json runJson(const GameParameters& parameters, const GameSimulation& sim, const AiArenaRunMetadata& metadata)
+        {
+            nlohmann::json j;
+            j["schema"] = 1;
+            j["generatedBy"] = metadata.generatedBy;
+            j["gitDescribe"] = GitDescription;
+            j["buildType"] = ProjectBuildType;
+            j["map"] = parameters.mapName;
+            j["seed"] = parameters.randomSeed.value_or(0);
+            j["durationSeconds"] = parameters.aiArenaSeconds.value_or(0);
+            j["startLocation"] = parameters.startLocation == StartLocationMode::Random ? "random" : "fixed";
+            if (metadata.ended)
+            {
+                j["ended"] = *metadata.ended;
+                j["winner"] = metadata.winner ? nlohmann::json(*metadata.winner) : nlohmann::json(nullptr);
+            }
+
+            j["players"] = nlohmann::json::array();
+            for (std::size_t i = 0; i < parameters.players.size(); ++i)
+            {
+                const auto& player = parameters.players[i];
+                if (!player)
+                {
+                    continue;
+                }
+                nlohmann::json p;
+                p["index"] = static_cast<int>(i);
+                p["name"] = player->name.value_or("");
+                p["controller"] = controllerName(player->controller);
+                p["faction"] = player->side;
+                p["colour"] = player->color.value;
+                if (player->teamId)
+                {
+                    p["team"] = *player->teamId;
+                }
+                p["difficulty"] = difficultyName(parameters.aiDifficulty);
+                p["personality"] = player->aiPersonality ? nlohmann::json(*player->aiPersonality) : nlohmann::json(nullptr);
+                p["tune"] = tuneForPlayer(parameters, static_cast<unsigned int>(i));
+                j["players"].push_back(std::move(p));
+            }
+
+            j["simTicks"] = sim.gameTime.value;
+            return j;
         }
     }
 
@@ -284,7 +380,11 @@ namespace rwe
         }
     }
 
-    std::string AiArenaReport::write(const std::filesystem::path& csvPath, const GameSimulation& sim)
+    std::string AiArenaReport::write(
+        const std::filesystem::path& csvPath,
+        const GameSimulation& sim,
+        const GameParameters& parameters,
+        const AiArenaRunMetadata& metadata)
     {
         // Take a final sample whatever the interval says, so the last row is
         // the state the game actually ended in -- unless the interval has
@@ -368,6 +468,22 @@ namespace rwe
         else
         {
             LOG_ERROR << "AI arena: could not write " << eventsPath.string();
+        }
+
+        // The machine-readable identity of the run, beside the CSVs so a
+        // checker can pair a result with its seed, map and knobs without
+        // scraping the log. Written last: if this fails, the numbers are
+        // still there and the error names the missing file.
+        auto runJsonPath = csvPath;
+        runJsonPath.replace_filename("run.json");
+        std::ofstream runInfo(runJsonPath);
+        if (runInfo)
+        {
+            runInfo << runJson(parameters, sim, metadata).dump() << '\n';
+        }
+        else
+        {
+            LOG_ERROR << "AI arena: could not write " << runJsonPath.string();
         }
 
         // The summary line is what a batch script reads. One field per player,

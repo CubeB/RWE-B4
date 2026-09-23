@@ -505,7 +505,19 @@ namespace rwe
                 auto localDataPath = getLocalDataPath();
                 auto csvPath = localDataPath ? *localDataPath : std::filesystem::path(".");
                 csvPath /= "ai-arena.csv";
-                auto summary = arenaReport->write(csvPath, simulation);
+
+                AiArenaRunMetadata metadata;
+                metadata.generatedBy = "rwe";
+                metadata.ended = decided ? "decided" : "timeout";
+                if (decided)
+                {
+                    if (const auto* won = std::get_if<WinStatusWon>(&*gameOver))
+                    {
+                        metadata.winner = static_cast<int>(won->winner.value);
+                    }
+                }
+
+                auto summary = arenaReport->write(csvPath, simulation, gameParameters, metadata);
                 LOG_INFO << summary << (decided ? " | ended=decided" : " | ended=timeout");
                 LOG_INFO << "AI arena: wrote " << csvPath.string();
                 arenaReport.reset();
