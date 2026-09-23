@@ -3,9 +3,8 @@
 #include <cstddef>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <string>
-#include <variant>
-#include <vector>
 
 namespace rwe
 {
@@ -25,10 +24,30 @@ namespace rwe
      * The builder stores its values type-erased so this header does not drag
      * nlohmann into every AI translation unit; the JSON is assembled at flush
      * time in the .cpp.
+     *
+     * **The buffer is held behind a pointer, and that is not an ornament.**
+     * A GameSimulation owns one of these by value, and GameSimulation.h is
+     * included by most of the engine, so anything this header instantiates is
+     * instantiated hundreds of times over. Declaring the value variant here
+     * cost 580 COFF sections in GameSimulation.cpp alone -- against a ceiling
+     * that is a CI check -- because a std::variant of eleven alternatives
+     * brings its whole visit, copy and move apparatus with it. Behind Impl it
+     * is instantiated once, in the .cpp. See CLAUDE.md, "A translation unit
+     * can outgrow what a COFF object can describe".
      */
     class SimEventLog
     {
     public:
+        SimEventLog();
+        ~SimEventLog();
+
+        // Move-only, the buffer being its own. GameSimulation, which holds one
+        // by value, is move-only already and for the same kind of reason.
+        SimEventLog(SimEventLog&&) noexcept;
+        SimEventLog& operator=(SimEventLog&&) noexcept;
+        SimEventLog(const SimEventLog&) = delete;
+        SimEventLog& operator=(const SimEventLog&) = delete;
+
         class Event
         {
         public:
@@ -84,43 +103,18 @@ namespace rwe
 
         void clear() const;
 
-        bool empty() const { return events.empty(); }
+        bool empty() const;
 
     private:
         friend class Event;
 
-        using Value = std::variant<
-            bool,
-            int,
-            unsigned int,
-            long,
-            unsigned long,
-            long long,
-            unsigned long long,
-            float,
-            double,
-            std::string,
-            std::map<std::string, int>>;
-
-        struct Field
-        {
-            std::string key;
-            Value value;
-        };
-
-        struct Pending
-        {
-            unsigned int tick;
-            std::string ev;
-            std::vector<Field> fields;
-        };
-
         /** The index an Event carries when there is nothing to add it to. */
         static constexpr std::size_t NotRecording = static_cast<std::size_t>(-1);
 
-        void addField(std::size_t index, const std::string& key, Value value) const;
+        /** The buffer, and the value type it holds, both defined in the .cpp. */
+        struct Impl;
 
         mutable bool recording{false};
-        mutable std::vector<Pending> events;
+        std::unique_ptr<Impl> impl;
     };
 }

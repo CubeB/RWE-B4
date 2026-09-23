@@ -4,9 +4,73 @@
 #include <nlohmann/json.hpp>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/util/SimpleLogger.h>
+#include <variant>
+#include <vector>
 
 namespace rwe
 {
+    /**
+     * Everything the header would otherwise have made every translation unit
+     * pay for: the value variant, the field and event records, and the buffer.
+     */
+    struct SimEventLog::Impl
+    {
+        using Value = std::variant<
+            bool,
+            int,
+            unsigned int,
+            long,
+            unsigned long,
+            long long,
+            unsigned long long,
+            float,
+            double,
+            std::string,
+            std::map<std::string, int>>;
+
+        struct Field
+        {
+            std::string key;
+            Value value;
+        };
+
+        struct Pending
+        {
+            unsigned int tick;
+            std::string ev;
+            std::vector<Field> fields;
+        };
+
+        std::vector<Pending> events;
+
+        /**
+         * A template rather than an overload set, and here rather than in the
+         * header, so the conversion to Value is instantiated in this file
+         * alone.
+         */
+        template <typename T>
+        void addField(std::size_t index, const std::string& key, T&& value)
+        {
+            if (index == NotRecording)
+            {
+                return;
+            }
+
+            events[index].fields.push_back(Field{key, Value(std::forward<T>(value))});
+        }
+    };
+
+    SimEventLog::SimEventLog()
+        : impl(std::make_unique<Impl>())
+    {
+    }
+
+    // Out of line, all four, because Impl is incomplete where the class is
+    // declared and these are the ones that would need it there.
+    SimEventLog::~SimEventLog() = default;
+    SimEventLog::SimEventLog(SimEventLog&&) noexcept = default;
+    SimEventLog& SimEventLog::operator=(SimEventLog&&) noexcept = default;
+
     SimEventLog::Event::Event(const SimEventLog* log, std::size_t index)
         : log(log), index(index)
     {
@@ -19,89 +83,79 @@ namespace rwe
             return Event(this, NotRecording);
         }
 
-        events.push_back(Pending{tick, name, {}});
-        return Event(this, events.size() - 1);
-    }
-
-    void SimEventLog::addField(std::size_t index, const std::string& key, Value value) const
-    {
-        if (index == NotRecording)
-        {
-            return;
-        }
-
-        events[index].fields.push_back(Field{key, std::move(value)});
+        impl->events.push_back(Impl::Pending{tick, name, {}});
+        return Event(this, impl->events.size() - 1);
     }
 
     SimEventLog::Event& SimEventLog::Event::set(const std::string& key, bool value)
     {
-        log->addField(index, key, value);
+        log->impl->addField(index, key, value);
         return *this;
     }
 
     SimEventLog::Event& SimEventLog::Event::set(const std::string& key, int value)
     {
-        log->addField(index, key, value);
+        log->impl->addField(index, key, value);
         return *this;
     }
 
     SimEventLog::Event& SimEventLog::Event::set(const std::string& key, unsigned int value)
     {
-        log->addField(index, key, value);
+        log->impl->addField(index, key, value);
         return *this;
     }
 
     SimEventLog::Event& SimEventLog::Event::set(const std::string& key, long value)
     {
-        log->addField(index, key, value);
+        log->impl->addField(index, key, value);
         return *this;
     }
 
     SimEventLog::Event& SimEventLog::Event::set(const std::string& key, unsigned long value)
     {
-        log->addField(index, key, value);
+        log->impl->addField(index, key, value);
         return *this;
     }
 
     SimEventLog::Event& SimEventLog::Event::set(const std::string& key, long long value)
     {
-        log->addField(index, key, value);
+        log->impl->addField(index, key, value);
         return *this;
     }
 
     SimEventLog::Event& SimEventLog::Event::set(const std::string& key, unsigned long long value)
     {
-        log->addField(index, key, value);
+        log->impl->addField(index, key, value);
         return *this;
     }
 
     SimEventLog::Event& SimEventLog::Event::set(const std::string& key, float value)
     {
-        log->addField(index, key, value);
+        log->impl->addField(index, key, value);
         return *this;
     }
 
     SimEventLog::Event& SimEventLog::Event::set(const std::string& key, double value)
     {
-        log->addField(index, key, value);
+        log->impl->addField(index, key, value);
         return *this;
     }
 
     SimEventLog::Event& SimEventLog::Event::set(const std::string& key, const std::string& value)
     {
-        log->addField(index, key, value);
+        log->impl->addField(index, key, value);
         return *this;
     }
 
     SimEventLog::Event& SimEventLog::Event::set(const std::string& key, const char* value)
     {
-        log->addField(index, key, std::string(value));
+        log->impl->addField(index, key, std::string(value));
         return *this;
     }
 
     SimEventLog::Event& SimEventLog::Event::set(const std::string& key, const std::map<std::string, int>& value)
     {
-        log->addField(index, key, value);
+        log->impl->addField(index, key, value);
         return *this;
     }
 
@@ -119,7 +173,7 @@ namespace rwe
             return;
         }
 
-        for (const auto& pending : events)
+        for (const auto& pending : impl->events)
         {
             nlohmann::json j;
             j["schema"] = 1;
@@ -136,6 +190,11 @@ namespace rwe
 
     void SimEventLog::clear() const
     {
-        events.clear();
+        impl->events.clear();
+    }
+
+    bool SimEventLog::empty() const
+    {
+        return impl->events.empty();
     }
 }
