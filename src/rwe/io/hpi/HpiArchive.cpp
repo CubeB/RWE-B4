@@ -148,7 +148,6 @@ namespace rwe
 
         const Directory* dir = &root();
 
-        // traverse to the correct directory
         for (auto cIt = components.cbegin(), cEnd = --components.cend(); cIt != cEnd; ++cIt)
         {
             auto& c = *cIt;
@@ -174,7 +173,6 @@ namespace rwe
             dir = foundDir;
         }
 
-        // find the file in the directory
         return findFileInner(*dir, components.back());
     }
 
@@ -184,7 +182,6 @@ namespace rwe
 
         const Directory* dir = &root();
 
-        // traverse to the correct directory
         for (const auto& c : components)
         {
             auto begin = dir->entries.begin();

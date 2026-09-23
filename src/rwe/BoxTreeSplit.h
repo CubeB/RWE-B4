@@ -122,14 +122,12 @@ namespace rwe
     template <typename T>
     BoxTreeNode<T>* BoxTree<T>::findOrCreateNode(unsigned int itemWidth, unsigned int itemHeight)
     {
-        // find a leaf node big enough to fit the box
         auto node = root->findNode(itemWidth, itemHeight);
         if (node)
         {
             return *node;
         }
 
-        // we didn't find one, grow the tree
         GrowDirection direction;
         bool canGrowAcross = itemHeight <= root->height;
         bool canGrowDown = itemWidth <= root->width;
@@ -170,7 +168,6 @@ namespace rwe
     {
         auto node = findOrCreateNode(itemWidth, itemHeight);
 
-        // insert into the node
         // (it's guaranteed to be a leaf)
         BoxTreeLeaf<T>& leaf = std::get<BoxTreeLeaf<T>>(node->value);
         if (node->width == itemWidth && node->height == itemHeight)
@@ -242,14 +239,12 @@ namespace rwe
         {
             if (leaf->value)
             {
-                // leaf is already occupied
                 return std::nullopt;
             }
 
             return this;
         }
 
-        // we must be a split, search both children
         auto split = std::get_if<BoxTreeSplit<T>>(&value);
         auto left = split->leftChild->findNode(itemWidth, itemHeight);
         if (left)
