@@ -57,7 +57,26 @@ namespace rwe
             std::size_t index;
         };
 
-        /** Begins an event at `tick` named `name`. `secs` is derived at flush. */
+        /**
+         * Starts recording. Nothing is kept until this is called.
+         *
+         * Only the arena ever writes this log, and only a run that asked for
+         * the arena ever reads it, so an ordinary game that recorded anyway
+         * would be filling memory for the length of the match with something
+         * nobody will look at -- a long game against the computer produces
+         * thousands of events an hour. The events are free to write and are
+         * never free to keep.
+         */
+        void setRecording(bool value) const { recording = value; }
+
+        bool isRecording() const { return recording; }
+
+        /**
+         * Begins an event at `tick` named `name`. `secs` is derived at flush.
+         *
+         * While not recording this returns an Event that discards everything
+         * set on it, so a call site never has to ask first.
+         */
         Event event(unsigned int tick, const std::string& name) const;
 
         /** Writes every buffered event to `path`, one JSON object per line. */
@@ -96,8 +115,12 @@ namespace rwe
             std::vector<Field> fields;
         };
 
+        /** The index an Event carries when there is nothing to add it to. */
+        static constexpr std::size_t NotRecording = static_cast<std::size_t>(-1);
+
         void addField(std::size_t index, const std::string& key, Value value) const;
 
+        mutable bool recording{false};
         mutable std::vector<Pending> events;
     };
 }

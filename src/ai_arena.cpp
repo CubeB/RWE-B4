@@ -388,6 +388,7 @@ int main(int argc, char* argv[])
 
         const unsigned int sampleIntervalTicks = 10u * static_cast<unsigned int>(SimTicksPerSecond);
         AiArenaReport arenaReport(sampleIntervalTicks);
+        loaded.simulation.eventLog.setRecording(true);
         const unsigned int arenaEndTick = arenaSeconds * static_cast<unsigned int>(SimTicksPerSecond);
         LOG_INFO << "AI arena: running for " << arenaSeconds << " seconds of game time (" << arenaEndTick << " ticks)";
 

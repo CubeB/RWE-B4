@@ -14,12 +14,22 @@ namespace rwe
 
     SimEventLog::Event SimEventLog::event(unsigned int tick, const std::string& name) const
     {
+        if (!recording)
+        {
+            return Event(this, NotRecording);
+        }
+
         events.push_back(Pending{tick, name, {}});
         return Event(this, events.size() - 1);
     }
 
     void SimEventLog::addField(std::size_t index, const std::string& key, Value value) const
     {
+        if (index == NotRecording)
+        {
+            return;
+        }
+
         events[index].fields.push_back(Field{key, std::move(value)});
     }
 

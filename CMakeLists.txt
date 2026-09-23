@@ -986,6 +986,7 @@ set(TEST_FILES
     src/rwe/game/aicommandfeed.test.cpp
     src/rwe/game/playerdrop.test.cpp
     src/rwe/game/chat_util.test.cpp
+    src/rwe/game/SimEventLog.test.cpp
     src/rwe/geometry/BoundingBox3f.test.cpp
     src/rwe/geometry/Circle2f.test.cpp
     src/rwe/geometry/CollisionMesh.test.cpp

@@ -263,6 +263,10 @@ namespace rwe
             // is the shape of the curve, and a row is cheap.
             const unsigned int sampleIntervalTicks = 10u * static_cast<unsigned int>(SimTicksPerSecond);
             arenaReport.emplace(sampleIntervalTicks);
+
+            // The one thing that will write the event log, so the one thing
+            // that turns it on.
+            this->simulation.eventLog.setRecording(true);
             arenaEndTick = *this->gameParameters.aiArenaSeconds * static_cast<unsigned int>(SimTicksPerSecond);
             LOG_INFO << "AI arena: running for " << *this->gameParameters.aiArenaSeconds
                      << " seconds of game time (" << *arenaEndTick << " ticks)";
