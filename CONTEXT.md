@@ -78,6 +78,34 @@ The per-tick digest of hashed sim state. A mismatch between peers is a
 desync.
 _Avoid_: checksum, save hash
 
+**Drop**:
+Cutting a peer's command stream at an agreed tick and carrying on without
+them. A tick, not a moment: everything past the cut is discarded and
+everything missing below it is filled in, which is what lets two peers
+holding different amounts of a lost peer's stream agree on the same game.
+Exactly one peer may issue one.
+_Avoid_: disconnect, timeout, kick
+
+**Rejoin**:
+The inverse: reopening a dropped stream at an agreed tick, from which the
+game needs that player's commands again. Every peer stalls there until the
+returning one arrives, which is the design and not an accident.
+_Avoid_: reconnect
+
+**Rejoin bundle**:
+The recording a returning peer is handed: an ordinary replay file cut to end
+at the tick before the rejoin, which is everything it missed. Carried by the
+lobby, because the lobby is what holds a reliable connection.
+_Avoid_: save, snapshot, catch-up file
+
+**Bridge**:
+The launcher's channel to the engine, one JSON object a line over standard
+input and output. `rwe_bridge` answers questions about the data files before
+a game; `rwe --bridge` answers for a game in progress. Never a simulation
+input: what arrives becomes an ordinary command in the local peer's own
+stream, like a keypress.
+_Avoid_: IPC, RPC
+
 **Desync**:
 Two peers' simulations diverging, first visible as a sync hash mismatch.
 The saved sim state can differ *before* the hash does, because some sim

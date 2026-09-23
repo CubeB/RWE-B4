@@ -9,7 +9,7 @@ _Last updated: 2026-09-23. Status of the codebase is as of the `revival` integra
 - **History:** Michael Heasell (2017–2023, ~1,950 commits) — the engine, the format parsers, the COB VM and the deterministic simulation. Kevin Hake modernised the build in March 2026 (Boost removed, C++20, SDL3, CI green). Taylor Gunnoe added hotkeys / speed / pause / Phase‑1 AI in April 2026 (unmerged upstream until now).
 - **First public pre-release 2026-09-10.** Upstream's only tag is `v0.1.0` (2017); this branch tags `v1.0.0` ("Bot bot boom boom v1.0", under the main-menu title — B4 for short, being four B’s), `v1.1.0-pre1` and now `v1.1.0-pre2`, all three on the fork as well as locally. The first two have no release behind them; the third does — Windows installer, Windows zip and Linux AppImage at <https://github.com/CubeB/RWE-B4/releases> (see Phase 0). The CMake version is derived from git tags, and only from annotated ones.
 
-**Next, of the large things** (2026-09-22): **the AI on water and fragmented maps**, which is Phase 2's biggest remaining cluster and is really one problem wearing four entry titles -- the base built on ground its own army cannot leave (the commander's movement class wades deeper and climbs steeper than its constructor's, and `baseAnchor` is never revised), the sea ferry that retried one impossible landing 1426 times in a single game, no hovercraft at all, and naval doctrine. Each of those entries already carries its measurements, so the work is ready to start rather than needing a diagnosis first. Phase 3 is the next whole phase after it, and Phase 3 has begun (2026-09-23): desync diagnostics and drop handling are done, and so is the dependency that was sitting in Phase 2 -- an AI player in a network game no longer desyncs, its command timing having stopped being a function of anything local. What is left of Phase 3 is the launcher's half, and less of it each day: lobby archive matching, in-game chat and the dependency refresh are done, which leaves a public master server -- now obligatory rather than optional, the refresh's socket.io 4 having cut the launcher off from upstream's socket.io 2 one -- and rejoining a game after being dropped (#188).
+**Next, of the large things** (2026-09-22): **the AI on water and fragmented maps**, which is Phase 2's biggest remaining cluster and is really one problem wearing four entry titles -- the base built on ground its own army cannot leave (the commander's movement class wades deeper and climbs steeper than its constructor's, and `baseAnchor` is never revised), the sea ferry that retried one impossible landing 1426 times in a single game, no hovercraft at all, and naval doctrine. Each of those entries already carries its measurements, so the work is ready to start rather than needing a diagnosis first. Phase 3 is the next whole phase after it, and Phase 3 has begun (2026-09-23): desync diagnostics and drop handling are done, and so is the dependency that was sitting in Phase 2 -- an AI player in a network game no longer desyncs, its command timing having stopped being a function of anything local. What is left of Phase 3 is the launcher's half, and less of it each day: lobby archive matching, in-game chat and the dependency refresh are done, which leaves a public master server -- now obligatory rather than optional, the refresh's socket.io 4 having cut the launcher off from upstream's socket.io 2 one. Rejoining a game after being dropped (#188) is done as of 2026-09-23, engine and lobby both.
 
 ## Guiding principles
 
@@ -416,6 +416,63 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
       at the same tick and agreed on all 1,536 ticks compared, with the sync
       hash check live throughout. Not handled: two peers lost at once, which
       would leave two deciders.
+- [x] **A dropped player can come back (#188, the third part of #44).** The
+      inverse of the drop, and the same shape: the stream reopens at an agreed
+      tick, and from that tick the game needs that player's commands again, so
+      every peer stalls there until they arrive. That stall is the design. It
+      makes a rejoin a lockstep event agreed by every peer at one named tick
+      rather than a race between a catch-up and a running game, and the waiting
+      caption the drop half added is already the thing that shows it.
+
+      **One number, not two.** The recording handed over runs through the tick
+      before the rejoin and no further, so both streams in both directions
+      resume at that one place and there is no gap to bridge. The command
+      stream's sequence numbers are absolute positions, so saying "resume at
+      R-1" is the whole of it; the sync hash stream is numbered the same way
+      but counted rather than carried, so a returning peer re-registers as a
+      hash source from its own first tick and is left out of the comparison
+      below that rather than waited for.
+
+      **The catch-up is the replay viewer's path**, deliberately. Winding a
+      recording forward already takes every player's commands from the file,
+      feeds no computer player, and neither computes nor sends a sync hash --
+      four of the five things a catch-up wants, none of them written twice.
+      740 ticks wind in about 2.5 seconds.
+
+      **Five things went wrong between "it loads" and "it plays", and each is
+      a rule.** Deferring the network thread deadlocks the scene, which asks it
+      for the round trip time every frame; a returning peer listens from the
+      start and withholds what it hands the simulation instead. A recording
+      supplies a set per player per tick unconditionally, and a rejoin has
+      already filled in the ticks below it -- so a peer winding across its own
+      rejoin arrived a hundred sets deep in its own buffer and submitted
+      nothing live. That predicate is absolute, so a viewer seeking backwards
+      has to move the streams with the scene time, which also fixed a viewer
+      wound back past a drop still treating that player as gone. Every hash
+      source on a rejoining peer starts at the rejoin tick while the comparison
+      counter starts at 1, so it compared nothing at all until it was moved up
+      to meet them. And the viewer's end-of-recording pause caught the
+      catch-up, the check that releases it having lived in a tick that a paused
+      playback no longer dispatches.
+
+      **The lobby carries the bytes**, which was the maintainer's direction:
+      the engine speaks to its own launcher over `--bridge` (one JSON object a
+      line, in on stdin and out on stdout, the dialect `rwe_bridge` already
+      speaks), and five lobby messages do the rest. Who may answer a rejoin is
+      computed rather than agreed -- the lowest-numbered slot still in the
+      game, the engine's own rule over facts the server already has. Every peer
+      of a lobby game records a replay now, because the recording is the only
+      thing that keeps the commands.
+
+      **Measured on loopback, off-screen**: killed peer restarted and rejoined,
+      the two agreeing on all 1,975 ticks compared; the same driven over the
+      bridge rather than the test hook, agreeing on 1,842; and with a
+      counterfeit desync after the rejoin, the returning peer names the right
+      tick and writes its dump, which is the hash check being live on a peer
+      that was not there for the first half. The host's own recording of such a
+      game, replayed headlessly, reproduces its hashes exactly across the drop.
+      Not run against two live launchers and a server, which wants two
+      machines.
 
 ## Phase 4 — Compatibility & content breadth (ongoing)
 
