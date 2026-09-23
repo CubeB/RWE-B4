@@ -110,7 +110,6 @@ namespace rwe
         {
             if ((*it)->signalMask & signal)
             {
-                // remove references to the thread
                 removeThreadFromQueues(it->get());
 
                 // delete the thread -- kept, not freed; see deadThreads

@@ -547,11 +547,6 @@ namespace rwe
         {
             if (std::holds_alternative<NormalCursorMode::DraggingMinimapState>(cursor->state))
             {
-                // ok, the cursor is dragging the minimap.
-                // work out where the cursor is on the minimap,
-                // convert that to the world, then set the camera's position to there
-                // (clamped to map bounds)
-
                 auto minimapToWorld = minimapToWorldMatrix(simulation.terrain, minimapRect);
                 auto mousePos = getMousePosition();
                 auto worldPos = minimapToWorld * Vector3f(static_cast<float>(mousePos.x) + 0.5f, static_cast<float>(mousePos.y) + 0.5, 0.0f);

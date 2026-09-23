@@ -575,7 +575,6 @@ namespace rwe
         auto functionId = nextInstruction();
         auto paramCount = nextInstruction();
 
-        // collect up the parameters
         // Arguments were pushed first to last, so they pop off last to first:
         // fill the callee's locals from the back so local 0 is the first argument.
         std::vector<int> params(paramCount);

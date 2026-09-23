@@ -682,7 +682,7 @@ namespace rwe
             auto& unit = getUnit(*unitId);
             const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
             // units start as unbuilt nanoframes,
-            // we we need to convert it immediately into a completed unit.
+            // so convert immediately into a completed unit.
             unit.finishBuilding(unitDefinition);
 
             return unit;
