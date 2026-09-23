@@ -1,0 +1,7 @@
+tick,seconds,player,side,status,metal,energy,maxMetal,maxEnergy,metalIncome,energyIncome,metalDemand,energyDemand,units,buildings,army,builders,unitsLost,buildingsLost,idleBuilders,factories,idleFactories,armyMetal,metalProduced,metalExcess,energyProduced,energyExcess,phase
+0,0,0,ARM,alive,300,3000,1000,5000,2,50,1,10,10,5,4,2,0,0,0,1,0,100,0,0,0,0,mid
+not,enough
+,,,,,,,,,,,,,,,,,,,,,,,,,,
+x,y,z,w,v,u,t,s,r,q,p,o,n,m,l,k,j,i,h,g,f,e,d,c,b,a
+
+10,1,0,ARM,alive,300,3000,1000,5000,2,50,1,10,10,5,4,2,0,0,0,1,0,100,0,0,0,0,mid,EXTRA,EXTRA

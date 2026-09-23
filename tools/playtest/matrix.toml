@@ -1,0 +1,36 @@
+# Scenario matrix for the autonomous playtest runner (design §3.1).
+#
+# TOML, not YAML: the runner is Python stdlib only and the machines that run it
+# carry no PyYAML; tomllib has been in the standard library since 3.11.
+#
+# Each scenario pins everything that affects the simulation. A scenario with a
+# `tune` table gets an automatic control twin (same seed, same players, no
+# tune); a scenario without one is itself a control and runs as `seed<N>-control`.
+
+[[scenarios]]
+id = "standard-arms-coast"
+map = "Coast To Coast"
+duration_s = 900
+seeds = [1, 2, 3, 4, 5, 6]
+
+[[scenarios.players]]
+name = "A"
+side = "ARM"
+colour = 0
+difficulty = "standard"
+
+[[scenarios.players]]
+name = "B"
+side = "CORE"
+colour = 1
+difficulty = "standard"
+
+[[scenarios]]
+id = "tuned-naval-vs-control"
+map = "Coast To Coast"
+duration_s = 900
+seeds = [1, 2, 3, 4, 5, 6]
+players = [ { name = "A", side = "ARM", colour = 0, difficulty = "standard" },
+            { name = "B", side = "CORE", colour = 1, difficulty = "standard" } ]
+# player index (as a string key) -> knob overrides, becomes --ai-tune 0:navalAggression=1.5
+tune = { "0" = { navalAggression = 1.5 } }

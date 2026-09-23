@@ -1,0 +1,44 @@
+# Checker thresholds (design §3.3).
+#
+# TOML, not YAML: stdlib only, no PyYAML on the machines that run this.
+#
+# Every number here is an initial guess. They cast a wide net on purpose --
+# checkers accept false positives because the scan agent is the filter -- so
+# each one should be tuned against the first real runs and its provenance
+# recorded in the comment above it.
+
+[economy]
+# E1 stall: a run of consecutive samples, at or after this many seconds, where
+# metalIncome < e1_income_floor and metal < e1_store_fraction * maxMetal and
+# idleBuilders > 0. e1_min_samples_suspicious is the shortest run worth
+# reporting; e1_min_samples_likely_bug is the length at which it stops looking
+# like a lull.
+# initial guess -- tune against first real runs
+e1_after_seconds = 300
+# initial guess -- tune against first real runs
+e1_income_floor = 0.5
+# initial guess -- tune against first real runs
+e1_store_fraction = 0.02
+# initial guess -- tune against first real runs
+e1_min_samples_suspicious = 3
+# initial guess -- tune against first real runs
+e1_min_samples_likely_bug = 12
+
+# E2 twin delta: share of post-minute-8 samples stalled (metal < 2% of
+# maxMetal and metalDemand > metalIncome), compared with the same seed's
+# control twin. A difference wider than this many percentage points is
+# suspicious.
+# initial guess -- tune against first real runs
+e2_after_seconds = 480
+# initial guess -- tune against first real runs
+e2_delta_points = 25
+
+# E3 waste spike: energyExcess / energyProduced over the whole game above
+# e3_whole_game_share, and the share in the final third of the game exceeding
+# the first two thirds by more than e3_phase_jump_points percentage points.
+# Reported at info severity: a phase transition can legitimately move waste,
+# and the agent decides whether this one is explained.
+# initial guess -- tune against first real runs
+e3_whole_game_share = 0.25
+# initial guess -- tune against first real runs
+e3_phase_jump_points = 20
