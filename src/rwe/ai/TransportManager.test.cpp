@@ -21,11 +21,10 @@
  * ferry across water instead of only ever flying one, and the passenger
  * filter refusing a unit the simulation would refuse to load anyway.
  *
- * Modelled on the air-ferry fixture in AiBehaviour.test.cpp (a file this
- * task may not edit), but kept in its own file with its own copies of the
- * small local helpers -- there is no header to share them from without
- * moving them, and sim_test_util.h is for fixtures more than one file
- * already needed.
+ * Modelled on the air-ferry fixture in AiBehaviour.test.cpp, but kept in its
+ * own file with its own copies of the small local helpers -- there is no
+ * header to share them from without moving them, and sim_test_util.h is for
+ * fixtures more than one file already needed.
  */
 namespace rwe
 {
@@ -139,8 +138,8 @@ namespace rwe
 
         /**
          * ARMTSHIP "Hulk": 919 metal, 6x6, MinWaterDepth=12,
-         * transportsize=3, transportmaxunits=20 -- the verified shipped data
-         * this task was given, not an invented number.
+         * transportsize=3, transportmaxunits=20 -- the verified shipped
+         * data, not an invented number.
          */
         void defineSeaTransport(GameSimulation& sim)
         {

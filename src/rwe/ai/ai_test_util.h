@@ -22,11 +22,9 @@
 /**
  * Fixtures the AI behaviour tests share.
  *
- * These were four anonymous namespaces inside AiBehaviour.test.cpp, which is
- * why that file could only ever be one translation unit of 6,906 lines. They
- * are here so the tests can be split by subject. What only one subject uses
- * stayed with it: countOrders in the army tests, makeTwoShoresTerrain in the
- * naval ones, siteTestBlackboard in the siting ones.
+ * Subject-specific helpers live with their subject: countOrders in the army
+ * tests, makeTwoShoresTerrain in the naval ones, siteTestBlackboard in the
+ * siting ones.
  */
 namespace rwe
 {

@@ -3,9 +3,8 @@
 
 /**
  * Where a building goes: the metal it is put on, the ground it is kept off,
-  * and how the site search widens when nothing fits.
+ * and how the site search widens when nothing fits.
  *
- * Split out of AiBehaviour.test.cpp, which was 6,906 lines over 58 commits.
  * The fixtures these share are in ai_test_util.h.
  */
 namespace rwe

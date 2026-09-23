@@ -14,8 +14,8 @@ namespace rwe
 {
     namespace
     {
-        // Add a barebones UnitDefinition for `unitType`. Only the fields
-        // the AI actually reads in Phase 1 are populated.
+        // A barebones UnitDefinition for `unitType`, carrying only the
+        // fields the AI actually reads.
         UnitDefinition makeUnitDef(
             bool isCommander,
             bool isBuilder,
@@ -102,10 +102,8 @@ namespace rwe
         // float comparison or unordered_map iteration leak.
         // 32x32 cells is 512 world units per axis, which is a map big
         // enough to host one commander and a couple of mexes inside the AI's
-        // search radius. That used to be exactly maxMexSearchRadius; it is
-        // not any more, the default having been raised to 2048 once it
-        // turned out that a 512 ring could not fit a 6x6 lab on an island
-        // start. Nothing here depends on the two matching.
+        // search radius. Nothing here depends on it matching the radius
+        // exactly.
         GameSimulation simA(makeFlatTerrain(32, 32), /*surfaceMetal*/ 5u, 0, 0);
         GameSimulation simB(makeFlatTerrain(32, 32), /*surfaceMetal*/ 5u, 0, 0);
 
@@ -173,7 +171,7 @@ namespace rwe
         std::vector<PlayerCommand> commandsA;
         std::vector<PlayerCommand> commandsB;
 
-        // Phase 1 BuildManager runs every 30 ticks. Tick 60 times so we
+        // BuildManager runs every 30 ticks. Tick 60 times so we
         // see two planning windows at minimum.
         for (int i = 0; i < 60; ++i)
         {

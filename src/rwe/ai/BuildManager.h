@@ -179,6 +179,21 @@ namespace rwe
         int freeDepositsOnOurSide(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb) const;
 
         /** Whether a remembered enemy gun covers this ground. See AiTuningProfile::enemyGunRangeFromWeapon. */
+        /**
+         * Whether an armed enemy is sitting close enough to this site to
+         * shoot whatever we put there.
+         *
+         * The same question the extractor search has always asked about a
+         * metal patch (mexAvoidsEnemyGunsRadius, and the measurement in its
+         * own comment: a commander ordered one site 232 times in five
+         * hundred seconds, each frame living a second or two), asked of
+         * every site instead of only that one. A frame is born with no hit
+         * points whatever it is going to become, so nothing about that
+         * pathology was ever specific to extractors -- and on an all-water
+         * map what the commander actually feeds to the gun is tidal
+         * generators, which the extractor rule never covered. Gated by
+         * noticeProductionHarassment and measured by productionHarassRadius.
+         */
         bool siteUnderEnemyGuns(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& site) const;
 
         /**
@@ -414,6 +429,21 @@ namespace rwe
             std::minstd_rand& rng) const;
 
         /**
+         * Whether one of our other builders has already been told to build
+         * within `radius` of this site. A build order is invisible on the
+         * map until the frame goes down, so without asking this two builders
+         * plan the same metal patch in the same pass and one of them makes
+         * the walk for nothing. Orders being walked to count, and so does a
+         * frame one of them has been sent back to finish.
+         */
+        bool siteClaimedByAnother(
+            const GameSimulation& sim,
+            PlayerId aiOwner,
+            UnitId builder,
+            const SimVector& site,
+            SimScalar radius) const;
+
+        /**
          * The best placement on the nearest metal deposit around the anchor,
          * within the radius. A deposit is a run of patch cells touching at
          * edges or corners, and it is taken at its heart -- the placement
@@ -430,21 +460,6 @@ namespace rwe
          * kept for a moho)? A deposit whose best placement is refused is
          * passed over, rather than settled with a lesser placement beside it.
          */
-        /**
-         * Whether one of our other builders has already been told to build
-         * within `radius` of this site. A build order is invisible on the
-         * map until the frame goes down, so without asking this two builders
-         * plan the same metal patch in the same pass and one of them makes
-         * the walk for nothing. Orders being walked to count, and so does a
-         * frame one of them has been sent back to finish.
-         */
-        bool siteClaimedByAnother(
-            const GameSimulation& sim,
-            PlayerId aiOwner,
-            UnitId builder,
-            const SimVector& site,
-            SimScalar radius) const;
-
         std::optional<SimVector> chooseMexSite(
             const GameSimulation& sim,
             const std::string& unitType,
@@ -648,22 +663,6 @@ namespace rwe
 
         /** Whether an order to this site was dropped lately. */
         bool siteFailedLately(const GameSimulation& sim, const SimVector& site) const;
-
-        /**
-         * Whether an armed enemy is sitting close enough to this site to
-         * shoot whatever we put there.
-         *
-         * The same question the extractor search has always asked about a
-         * metal patch (mexAvoidsEnemyGunsRadius, and the measurement in its
-         * own comment: a commander ordered one site 232 times in five
-         * hundred seconds, each frame living a second or two), asked of
-         * every site instead of only that one. A frame is born with no hit
-         * points whatever it is going to become, so nothing about that
-         * pathology was ever specific to extractors -- and on an all-water
-         * map what the commander actually feeds to the gun is tidal
-         * generators, which the extractor rule never covered. Gated by
-         * noticeProductionHarassment and measured by productionHarassRadius.
-         */
 
         /**
          * Where extractors of ours were destroyed, by heightmap cell, with

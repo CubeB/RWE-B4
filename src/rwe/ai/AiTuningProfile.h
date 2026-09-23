@@ -85,19 +85,6 @@ namespace rwe
          * limit; the number of things able to spend it was.
          */
         /**
-         * What the enemy is made of decides what answers it. Of the armed
-         * enemies the AI remembers, the metal standing in their static
-         * defences and the metal walking in their army are each measured
-         * against the total: a role holding at least counterShareTrigger of
-         * it adds counterShareBonus to the share of what beats it --
-         * artillery over a tower a raider only dies to, rocket kbots against
-         * an army of raiders, which they outrange.
-         *
-         * The shares themselves stay the faction's (labRaiderShare and the
-         * rest); this only leans them, so a personality that sets them still
-         * decides the ground.
-         */
-        /**
          * The D-gun shot goes to the most expensive armed enemy in reach
          * rather than the nearest one. A shot kills whatever it hits, so what
          * it hits should be the thing worth the energy: the nearest rule
@@ -106,29 +93,6 @@ namespace rwe
          */
         bool dgunByValue{true};
 
-        /**
-         * What a remembered enemy gun keeps us off is read from its own
-         * weapon rather than from one radius for everything. An armed
-         * BUILDING of theirs refuses ground out to the range its weapon
-         * table gives it, plus enemyGunRangeMargin; anything mobile keeps
-         * productionHarassRadius, because a unit is somewhere else by the
-         * time a builder walks there and its exact reach says nothing about
-         * where it will be.
-         *
-         * A flat 400 was both too much and too little: it refused ground a
-         * light laser tower cannot cover, and it offered ground a Guardian
-         * shells at three times that. Reading the weapon is what makes a
-         * defence of ours stand where theirs cannot reach it.
-         */
-        /**
-         * A unit that outranges what it is shooting at by kiteRangeMargin
-         * steps back to just outside the enemy's own reach rather than
-         * closing on it: a Hammer against a Peewee, a Slasher against a
-         * Flash. Only against something that can move -- backing away from a
-         * tower is walking away from the job -- and only while the enemy is
-         * near enough to shoot us, so a unit already standing off simply
-         * fires.
-         */
         /**
          * Stop shooting at what we are not hurting. If nothing anything of
          * ours has fired at a target in stalledAttackSeconds has moved its
@@ -203,12 +167,48 @@ namespace rwe
         int stalledAttackRepositionTries{2};
         SimScalar stalledAttackSidestep{240_ss};
 
+        /**
+         * A unit that outranges what it is shooting at by kiteRangeMargin
+         * steps back to just outside the enemy's own reach rather than
+         * closing on it: a Hammer against a Peewee, a Slasher against a
+         * Flash. Only against something that can move -- backing away from a
+         * tower is walking away from the job -- and only while the enemy is
+         * near enough to shoot us, so a unit already standing off simply
+         * fires.
+         */
         bool kiteWithLongerRange{true};
         SimScalar kiteRangeMargin{40_ss};
 
+        /**
+         * What a remembered enemy gun keeps us off is read from its own
+         * weapon rather than from one radius for everything. An armed
+         * BUILDING of theirs refuses ground out to the range its weapon
+         * table gives it, plus enemyGunRangeMargin; anything mobile keeps
+         * productionHarassRadius, because a unit is somewhere else by the
+         * time a builder walks there and its exact reach says nothing about
+         * where it will be.
+         *
+         * A flat 400 was both too much and too little: it refused ground a
+         * light laser tower cannot cover, and it offered ground a Guardian
+         * shells at three times that. Reading the weapon is what makes a
+         * defence of ours stand where theirs cannot reach it.
+         */
         bool enemyGunRangeFromWeapon{true};
         SimScalar enemyGunRangeMargin{32_ss};
 
+        /**
+         * What the enemy is made of decides what answers it. Of the armed
+         * enemies the AI remembers, the metal standing in their static
+         * defences and the metal walking in their army are each measured
+         * against the total: a role holding at least counterShareTrigger of
+         * it adds counterShareBonus to the share of what beats it --
+         * artillery over a tower a raider only dies to, rocket kbots against
+         * an army of raiders, which they outrange.
+         *
+         * The shares themselves stay the faction's (labRaiderShare and the
+         * rest); this only leans them, so a personality that sets them still
+         * decides the ground.
+         */
         bool counterEnemyComposition{true};
         int counterShareBonus{2};
         float counterShareTrigger{0.3f};
@@ -552,6 +552,20 @@ namespace rwe
         SimScalar outpostResponseRadius{1500_ss};
         float outpostResponseStrength{1.2f};
         /**
+         * A builder that is nearly done is left to finish. builderSafety
+         * pulls an exposed builder out with an immediate move, and an
+         * immediate order throws away what it was doing: reported from a
+         * replay as a construction unit "about to finish building an llt"
+         * that "got redirected to sit in the middle of nowhere and do
+         * nothing". Above finishBuildAbovePercent of the way through, the
+         * job is worth more than the builder's safety margin; below it the
+         * builder still goes, but the frame it was on is queued behind the
+         * move so it comes back and finishes rather than abandoning it.
+         */
+        int finishBuildAbovePercent{70};
+        bool resumeAfterBackingOff{true};
+
+        /**
          * Construction units keep out of fights they are not covered in. A
          * builder is exposed where armed enemy ground units it knows of --
          * seen within targetMemoryTicks -- could reach it, their weapon range
@@ -570,20 +584,6 @@ namespace rwe
          * commander. They should avoid enemy units where possible unless they
          * have protection between them and the units attacking them."
          */
-        /**
-         * A builder that is nearly done is left to finish. builderSafety
-         * pulls an exposed builder out with an immediate move, and an
-         * immediate order throws away what it was doing: reported from a
-         * replay as a construction unit "about to finish building an llt"
-         * that "got redirected to sit in the middle of nowhere and do
-         * nothing". Above finishBuildAbovePercent of the way through, the
-         * job is worth more than the builder's safety margin; below it the
-         * builder still goes, but the frame it was on is queued behind the
-         * move so it comes back and finishes rather than abandoning it.
-         */
-        int finishBuildAbovePercent{70};
-        bool resumeAfterBackingOff{true};
-
         bool builderSafety{true};
         SimScalar builderSafetyMargin{150_ss};
         SimScalar builderSafetyCoverRadius{500_ss};
@@ -2034,20 +2034,6 @@ namespace rwe
         int targetFighterCount{2};
         int targetBomberCount{4};
         /**
-         * Gunships the air plant keeps on hand, and how many have to stand
-         * before any of them goes out.
-         *
-         * A gunship is the dearest thing the level-one plant builds and the
-         * only one of them that can hold a position: it stands off what it
-         * is shooting and keeps shooting, where a bomber makes one pass and
-         * goes home for another bomb. That is what makes it the answer to
-         * ground the army cannot cross -- it does not have to cross it.
-         *
-         * Three, and out in pairs, for the bombers' reason: sent one at a
-         * time each new aircraft flies at whatever is worst defended and is
-         * traded for a fraction of it.
-         */
-        /**
          * How many armed enemy buildings it takes before the air tier counts
          * as worth its metal (AiBlackboard::airWorthIt), on top of the two
          * cases that need no counting: a map the ground arm cannot cross,
@@ -2063,6 +2049,20 @@ namespace rwe
         /** Air repair pads wanted. One mends every aircraft inside 3840, which is most of a map. */
         int targetAirRepairPadCount{1};
         int targetAdvancedAirPlantCount{1};
+        /**
+         * Gunships the air plant keeps on hand, and how many have to stand
+         * before any of them goes out.
+         *
+         * A gunship is the dearest thing the level-one plant builds and the
+         * only one of them that can hold a position: it stands off what it
+         * is shooting and keeps shooting, where a bomber makes one pass and
+         * goes home for another bomb. That is what makes it the answer to
+         * ground the army cannot cross -- it does not have to cross it.
+         *
+         * Three, and out in pairs, for the bombers' reason: sent one at a
+         * time each new aircraft flies at whatever is worst defended and is
+         * traded for a fraction of it.
+         */
         int targetGunshipCount{3};
         int gunshipPackSize{2};
         /** How far a fighter will chase something before it is called home. */
