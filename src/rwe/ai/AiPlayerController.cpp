@@ -216,6 +216,13 @@ namespace rwe
                     LOG_INFO << "AI player " << playerId.value << ": ground reachability for " << mover
                              << " walkable=" << reachability.walkableTileCount()
                              << " reachable=" << reachability.reachableTileCount();
+                    sim.eventLog.event(sim.gameTime.value, "ai_reachability")
+                        .set("player", playerId.value)
+                        .set("mover", mover)
+                        .set("walkable", reachability.walkableTileCount())
+                        .set("reachable", reachability.reachableTileCount())
+                        .set("why", "rebuilt")
+                        .detail("ground reachability rebuilt");
                 });
 
                 // 3b-ii. And where can the COMMANDER walk? Not the same

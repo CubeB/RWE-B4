@@ -628,6 +628,15 @@ namespace rwe
             {
                 LOG_INFO << "AI player " << aiOwner.value << ": the commander stays on its " << frame.unitType << " frame " << frameId->value
                          << " and leaves the fight to the army (" << static_cast<int>(cover) << " metal against " << static_cast<int>(threatMetal) << ")";
+                sim.eventLog.event(sim.gameTime.value, "army_commander_stays")
+                    .set("player", aiOwner.value)
+                    .set("unit", bb.commanderUnitId ? bb.commanderUnitId->value : 0u)
+                    .set("frame", frameId->value)
+                    .set("subject", frame.unitType)
+                    .set("cover", static_cast<int>(cover))
+                    .set("threat", static_cast<int>(threatMetal))
+                    .set("why", "army_covers")
+                    .detail("the commander stays on its frame and leaves the fight to the army");
             }
             bb.commanderKeptFrame = frameId;
             return true;
@@ -682,6 +691,14 @@ namespace rwe
         if (helper)
         {
             LOG_INFO << "AI player " << aiOwner.value << ": the commander hands its " << frame.unitType << " frame " << frameId->value << " to unit " << helper->value;
+            sim.eventLog.event(sim.gameTime.value, "army_commander_hands")
+                .set("player", aiOwner.value)
+                .set("unit", bb.commanderUnitId ? bb.commanderUnitId->value : 0u)
+                .set("frame", frameId->value)
+                .set("subject", frame.unitType)
+                .set("helper", helper->value)
+                .set("why", "handover")
+                .detail("the commander hands its frame to a construction unit");
             outCommands.push_back(PlayerUnitCommand(*helper, PlayerUnitCommand::IssueOrder(RepairOrder(*frameId), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
         }
         return false;
@@ -773,6 +790,13 @@ namespace rwe
         {
             LOG_INFO << "AI player " << aiOwner.value << ": the commander is in danger (" << (hurt ? "taking damage" : "armed enemy close")
                      << ") at " << static_cast<int>(commander.position.x.value) << "," << static_cast<int>(commander.position.z.value);
+            sim.eventLog.event(sim.gameTime.value, "army_commander_danger")
+                .set("player", aiOwner.value)
+                .set("unit", bb.commanderUnitId ? bb.commanderUnitId->value : 0u)
+                .set("x", static_cast<int>(commander.position.x.value))
+                .set("z", static_cast<int>(commander.position.z.value))
+                .set("why", hurt ? "taking_damage" : "enemy_close")
+                .detail("the commander is in danger");
         }
         // A chase this rule started that has run on past where the fight
         // was: called off, and the commander back in the planner's hands.
@@ -861,6 +885,12 @@ namespace rwe
                         if (!isDgunning(commander, *shot))
                         {
                             LOG_INFO << "AI player " << aiOwner.value << ": the commander D-guns " << shot->value;
+                            sim.eventLog.event(sim.gameTime.value, "army_commander_dgun")
+                                .set("player", aiOwner.value)
+                                .set("unit", bb.commanderUnitId ? bb.commanderUnitId->value : 0u)
+                                .set("target_id", shot->value)
+                                .set("why", "dgun")
+                                .detail("the commander D-guns an enemy");
                             outCommands.push_back(PlayerUnitCommand(*bb.commanderUnitId, PlayerUnitCommand::IssueOrder(DgunOrder(*shot), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
                             queueReturn();
                         }
@@ -988,11 +1018,21 @@ namespace rwe
         {
             bb.navalSortieActive = true;
             LOG_INFO << "AI player " << aiOwner.value << " navy: " << gatheredAtHome << " hulls gathered, the fleet sails";
+            sim.eventLog.event(sim.gameTime.value, "navy_sail")
+                .set("player", aiOwner.value)
+                .set("hulls", gatheredAtHome)
+                .set("why", "fleet_gathered")
+                .detail("the fleet sails");
         }
         else if (bb.navalSortieActive && fleetSize < reinforcementSize)
         {
             bb.navalSortieActive = false;
             LOG_INFO << "AI player " << aiOwner.value << " navy: " << fleetSize << " hull(s) left, the fleet is recalled";
+            sim.eventLog.event(sim.gameTime.value, "navy_recall")
+                .set("player", aiOwner.value)
+                .set("hulls", fleetSize)
+                .set("why", "fleet_depleted")
+                .detail("the fleet is recalled");
         }
         auto fleetReady = bb.navalSortieActive;
         // Hulls still at the yard join a fleet that is out only as a group.

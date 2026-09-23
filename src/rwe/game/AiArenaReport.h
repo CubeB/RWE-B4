@@ -157,6 +157,15 @@ namespace rwe
             std::string nearestEnemyType;
             int friendlyArmyNear;
             int friendlyTowersNear;
+            /**
+             * How it died and, where the simulation knew, what dealt the blow.
+             * `cause` is a snake_case tag from the decoded death causes; the
+             * killer is empty when the engine never recorded one (a scuttle,
+             * a reclaim, a game-end wipe).
+             */
+            std::string cause;
+            std::string killerType;
+            std::optional<int> killerPlayer;
         };
 
         static constexpr float deathScanRadius = 600.0f;

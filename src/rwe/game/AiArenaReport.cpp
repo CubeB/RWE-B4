@@ -200,28 +200,28 @@ namespace rwe
                 record.completed = true;
                 record.completedTick = now;
             }
-            // One line per death, because the arena's own lost= figure says
+            // One event per death, because the arena's own lost= figure says
             // how many and nothing at all about what. Reading a loss count
             // of 286 and guessing at it cost an afternoon and two wrong
             // fixes: the factory log said two hulls were ever ordered, so
             // the frames looked like they had to be the commander's, and
             // they were not -- a factory does not lose its queue entry when
             // the frame on the slipway dies, and 283 of them came off two
-            // entries. Debug rather than info: an arena game produces a few
-            // hundred of these and the runs that want them already have
-            // debug on.
+            // entries. The event carries what the old debug-only ARENA-DEATH
+            // line carried (frame, born) and is written in release too.
             if (!record.dead && unit.isDead())
             {
                 record.dead = true;
                 record.diedTick = now;
-                LOG_DEBUG << "ARENA-DEATH tick=" << now << " player=" << record.player << " type=" << record.unitType
-                          << " frame=" << (record.completed ? 0 : 1) << " born=" << record.bornTick;
                 recordDeath(sim, unitId.value, record);
             }
         }
 
         // A unit removed from the list entirely is gone too. Only worth
-        // checking the ones we have not already buried.
+        // checking the ones we have not already buried. This is the path a
+        // death normally takes: dead units are erased at the end of the tick,
+        // before this report runs, so the ARENA-GONE line this replaces was
+        // the one that fired in practice.
         for (auto& [rawId, record] : units)
         {
             if (record.dead)
@@ -232,8 +232,6 @@ namespace rwe
             {
                 record.dead = true;
                 record.diedTick = now;
-                LOG_DEBUG << "ARENA-GONE tick=" << now << " player=" << record.player << " type=" << record.unitType
-                         << " frame=" << (record.completed ? 0 : 1) << " born=" << record.bornTick;
                 recordDeath(sim, rawId, record);
             }
         }
@@ -241,6 +239,20 @@ namespace rwe
 
     void AiArenaReport::recordDeath(const GameSimulation& sim, unsigned int rawId, UnitRecord& record)
     {
+        // How it died, from the death path itself: the simulation records the
+        // cause and the killer while it still has them, and the entry outlives
+        // the unit it is keyed to. Absent when the unit left the list without
+        // any death path having run for it.
+        if (auto observation = sim.unitDeathObservations.find(rawId); observation != sim.unitDeathObservations.end())
+        {
+            record.cause = observation->second.cause;
+            record.killerType = observation->second.killerType;
+            if (observation->second.killerPlayer)
+            {
+                record.killerPlayer = static_cast<int>(observation->second.killerPlayer->value);
+            }
+        }
+
         // A walk over every unit, but only once per death, and the arena is
         // the only thing that runs this.
         auto nearestDistanceSquared = deathScanRadius * deathScanRadius;
@@ -280,6 +292,54 @@ namespace rwe
                 nearestDistanceSquared = distanceSquared;
                 record.nearestEnemyType = other.unitType;
             }
+        }
+
+        // The death as a fact, available in release rather than behind
+        // LOG_DEBUG, and carrying the context the old ARENA-DEATH/GONE prose
+        // did. A field the engine cannot answer is null rather than zero:
+        // "killed by nobody" and "killed by player 0" are different claims.
+        auto event = sim.eventLog.event(record.diedTick, "unit_death");
+        event.set("unit", static_cast<int>(rawId))
+            .set("player", record.player)
+            .set("subject", record.unitType)
+            .set("x", static_cast<int>(record.x))
+            .set("z", static_cast<int>(record.z))
+            .set("enemies_near", record.enemiesNear)
+            .set("friendly_army_near", record.friendlyArmyNear)
+            .set("friendly_towers_near", record.friendlyTowersNear)
+            .set("frame", record.completed ? 0 : 1)
+            .set("born", record.bornTick);
+        if (record.cause.empty())
+        {
+            event.set("cause", nullptr);
+        }
+        else
+        {
+            event.set("cause", record.cause);
+        }
+        if (record.killerType.empty())
+        {
+            event.set("killer_type", nullptr);
+        }
+        else
+        {
+            event.set("killer_type", record.killerType);
+        }
+        if (record.killerPlayer)
+        {
+            event.set("killer_player", *record.killerPlayer);
+        }
+        else
+        {
+            event.set("killer_player", nullptr);
+        }
+        if (record.nearestEnemyType.empty())
+        {
+            event.set("nearest_enemy_type", nullptr);
+        }
+        else
+        {
+            event.set("nearest_enemy_type", record.nearestEnemyType);
         }
     }
 
@@ -431,7 +491,8 @@ namespace rwe
         {
             events << "player,unitType,category,isBuilding,startedTick,startedSeconds,"
                       "completedTick,completedSeconds,diedTick,diedSeconds,"
-                      "x,z,enemiesNear,nearestEnemyType,friendlyArmyNear,friendlyTowersNear\n";
+                      "x,z,enemiesNear,nearestEnemyType,friendlyArmyNear,friendlyTowersNear,"
+                      "deathCause,killerType,killerPlayer\n";
             for (const auto& [rawId, r] : units)
             {
                 events << r.player << ',' << r.unitType << ',' << r.category << ',' << (r.isBuilding ? 1 : 0) << ','
@@ -457,11 +518,17 @@ namespace rwe
                 events << static_cast<int>(r.x) << ',' << static_cast<int>(r.z) << ',';
                 if (r.dead)
                 {
-                    events << r.enemiesNear << ',' << r.nearestEnemyType << ',' << r.friendlyArmyNear << ',' << r.friendlyTowersNear << '\n';
+                    events << r.enemiesNear << ',' << r.nearestEnemyType << ',' << r.friendlyArmyNear << ',' << r.friendlyTowersNear << ','
+                           << r.cause << ',' << r.killerType << ',';
+                    if (r.killerPlayer)
+                    {
+                        events << *r.killerPlayer;
+                    }
+                    events << '\n';
                 }
                 else
                 {
-                    events << ",,,\n";
+                    events << ",,,,,\n";
                 }
             }
         }

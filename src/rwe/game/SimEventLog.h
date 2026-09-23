@@ -45,6 +45,9 @@ namespace rwe
             Event& set(const std::string& key, const char* value);
             Event& set(const std::string& key, const std::map<std::string, int>& value);
 
+            /** A JSON null, for a field that is genuinely unknown rather than zero. */
+            Event& set(const std::string& key, std::nullptr_t value);
+
             /** The verbatim prose reason, for judgement and never for parsing. */
             Event& detail(const std::string& text);
 
@@ -71,6 +74,7 @@ namespace rwe
         friend class Event;
 
         using Value = std::variant<
+            std::monostate,
             bool,
             int,
             unsigned int,
