@@ -312,8 +312,25 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
 
 ## Phase 3 — Multiplayer polish & launcher (≈ 2 months)
 
-- [ ] Launcher dependency refresh: Electron 22 → current LTS, React 16 → 18, Redux Toolkit; drop `react-hot-loader`. Re-run `npm audit` (dependabot PRs #166/#167 still open).
-- [ ] Host a public master server (currently "connect to localhost" in dev); fix non-recommended port (#60).
+- [ ] Launcher dependency refresh: Electron 22 → current LTS, React 16 → 18, Redux Toolkit;
+      drop `react-hot-loader`. Re-run `npm audit` (dependabot PRs #166/#167 still open).
+      Sized 2026-09-23 and it is bigger than the title: `npm audit` reports 125
+      advisories, 13 of them critical, but all except `@sentry/electron` and `webpack`
+      are transitive through build tooling rather than through anything shipped. The
+      real cost is that React 18 is not a React upgrade -- `@material-ui/core` is v4,
+      which has no React 18 support, so it pulls in the whole MUI v5 migration:
+      package rename across every component, and JSS to emotion. Worth deciding
+      whether to take that on as its own piece of work before starting. Note also
+      that socket.io 2 to 4 is a wire break, so the client cannot move ahead of
+      whatever master server it is expected to talk to -- which ties it to the entry
+      below.
+- [ ] Host a public master server; fix non-recommended port (#60). The launcher already
+      defaults to upstream's `master.rwe.michaelheasell.com` rather than to localhost
+      (`masterServer()` in `launcher/src/common/util.ts`, overridden by
+      `RWE_MASTER_SERVER`), so what is actually owed is a server of this project's own
+      and a default pointing at it. The port is `--port`, defaulting to 5000, which is
+      what macOS has given to the AirPlay receiver since Monterey. Both halves want a
+      hosting decision first.
 - [x] Desync detection UX: `GameHash` mismatch → show which tick, dump state (`dump_util`) for bug reports.
       The mismatch names the **first** tick the peers disagreed on rather than
       the one it was noticed on, which is a round trip later; every peer names
