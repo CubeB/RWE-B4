@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <functional>
 #include <rwe/game/SceneTime.h>
 #include <rwe/rwe_time.h>
 
@@ -23,6 +25,22 @@ namespace rwe
         }
         return accum / count;
     }
+
+    /**
+     * How many chat lines from the front of a send buffer a packet can carry:
+     * as many as fit, shedding from the tail until they do.
+     *
+     * sizeOf says how big the packet would be carrying that many. Shedding
+     * from the tail is what makes this safe -- what is left is still a prefix
+     * of the stream, so the peer takes it in order and the rest is resent --
+     * and chat is what sheds because the commands cannot: the game stops
+     * without them. Returns 0 rather than failing when even none of it fits,
+     * leaving the caller to decide what an oversized packet means.
+     */
+    std::size_t chooseChatCountForPacket(
+        std::size_t available,
+        unsigned long long sizeLimit,
+        const std::function<unsigned long long(std::size_t)>& sizeOf);
 
     void writeInt(char* sendBuffer, unsigned int crcResult);
 

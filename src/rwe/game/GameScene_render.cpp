@@ -517,6 +517,7 @@ namespace rwe
         renderSpaceTabs();
 
         renderConsole();
+        renderChatBar();
 
         // The menu screens are drawn over the game view -- the original folds
         // its options out across the world rather than tucking them behind

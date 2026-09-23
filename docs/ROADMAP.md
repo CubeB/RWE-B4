@@ -330,7 +330,16 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
       nothing ever drained. `RWE_DESYNC_AT=<tick>` on one peer counterfeits a
       desync without touching the simulation, which is how it was checked: two
       peers on loopback both named tick 200 and both wrote their dump.
-- [ ] In-game chat (upstream `network-chat` branch is a 1‑commit scaffold; start from it or from scratch).
+- [x] In-game chat, and the Enter message bar of #30. Enter opens the bar, Enter
+      sends, Escape abandons it; a line appears in the speaker's own colour in the
+      console the game already announces into, so it ages out and F12 clears it.
+      It travels beside the command stream rather than in it -- acked and resent
+      on the same packet as the sync hashes -- because a tick cannot run without
+      every peer's commands, so the moment a player most wants to say something is
+      exactly the moment a command cannot be delivered. Nothing typed reaches the
+      simulation. Verified over two loopback peers: each said a line, both arrived
+      within 100 ms, and the peers agreed on all 761 ticks. The upstream
+      `network-chat` branch was SDL boilerplate and was not used.
 - [x] Replays: record the `PlayerCommand` stream + seed; playback through the same sim.
       `--record-replay <file>` writes one, `--replay <file>` watches it, and the
       arena keeps one per game. Verified by running a replay back through the

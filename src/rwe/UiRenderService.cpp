@@ -110,7 +110,10 @@ namespace rwe
         for (; it != end; ++it)
         {
             auto ch = *it;
-            if (ch > font.sprites.size())
+            // >=, not >: a code point equal to the count indexes one past
+            // the last sprite. Unreachable while every string drawn came from
+            // the game data; a player typing into the message bar can reach it.
+            if (ch >= font.sprites.size())
             {
                 ch = 0;
             }
@@ -134,7 +137,10 @@ namespace rwe
         for (; it != end; ++it)
         {
             auto ch = *it;
-            if (ch > font.sprites.size())
+            // >=, not >: a code point equal to the count indexes one past
+            // the last sprite. Unreachable while every string drawn came from
+            // the game data; a player typing into the message bar can reach it.
+            if (ch >= font.sprites.size())
             {
                 ch = 0;
             }
@@ -197,7 +203,7 @@ namespace rwe
             for (; it != endOfWord; ++it)
             {
                 auto ch = *it;
-                if (ch > font.sprites.size())
+                if (ch >= font.sprites.size())
                 {
                     ch = 0;
                 }

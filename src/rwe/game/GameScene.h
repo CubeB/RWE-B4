@@ -756,6 +756,18 @@ namespace rwe
         };
         std::deque<ConsoleMessage> consoleMessages;
 
+        /**
+         * The message bar: what has been typed so far, or nothing at all when
+         * it is closed. Enter opens it, Enter sends, Escape abandons it.
+         *
+         * While it is open it owns the keyboard, every key on it being a
+         * letter -- without that, typing "stop" would stop the selection.
+         */
+        std::optional<std::string> chatInput;
+
+        /** Whether RWE_CHAT_TEST has had its one say. */
+        bool chatTestSent{false};
+
         /** The last whole second each counting-down unit announced, so each number is said once. */
         std::unordered_map<UnitId, unsigned int> selfDestructAnnounced;
 
@@ -1174,6 +1186,39 @@ namespace rwe
          * the fire mode they had.
          */
         void onPlayerDropped(PlayerId player, unsigned int fromTick);
+
+        /** Whether the message bar is open, and so holding the keyboard. */
+        bool isChatBarOpen() const;
+
+        /** Opens the message bar, in a game where this player may talk at all. */
+        void openChatBar();
+
+        /**
+         * Handles a key while the message bar is open. Every key is the bar's:
+         * Return sends, Escape abandons, Backspace deletes, and the rest are
+         * letters, which arrive as text input rather than as keys.
+         */
+        void handleChatBarKey(const SDL_KeyboardEvent& keysym);
+
+        /** Sends what has been typed, and puts it on screen here. */
+        void sendChatMessage();
+
+        /**
+         * RWE_CHAT_TEST=<tick>:<text>, which says that line once at that tick.
+         *
+         * There is nobody at the keyboard in a headless two-peer run, so this
+         * is what lets one prove that chat crosses the wire.
+         */
+        void updateChatTest();
+
+        /** Collects what peers have said since the last frame. */
+        void receiveChatMessages();
+
+        /** Puts one line of chat on screen and in the log. */
+        void printChatLine(PlayerId sender, const std::string& text);
+
+        /** The message bar itself, drawn over the world while it is open. */
+        void renderChatBar();
 
         /** A player's lobby name, or "Player n" when they gave none. */
         std::string playerDisplayName(PlayerId playerId) const;

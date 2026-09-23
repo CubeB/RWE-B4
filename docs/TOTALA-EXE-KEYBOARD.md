@@ -376,7 +376,7 @@ Key -> what the original does -> RWE status.
 |---|---|---|
 | Esc | close menu / press STOP gadget / deselect all + close floating panels | **works** (cancels cursor mode rather than pressing STOP; same effect) |
 | Tab | MP: TABMENU bar; SP: GAME OPTIONS | **different** -- always the game menu; no TABMENU bar |
-| Enter | message bar (TALK.GUI / TALK2.GUI) | **missing** -- no message/chat bar at all |
+| Enter | message bar (TALK.GUI / TALK2.GUI) | **different** -- opens a message bar and sends what is typed to the other players, but draws its own one-line bar rather than building TALK.GUI / TALK2.GUI |
 | `+` `=` / `-` `_` | speed 1..20 | **works** |
 | Pause | pause toggle, broadcast | **works** |
 | Arrows | scroll map | **works** |
@@ -396,7 +396,7 @@ Key -> what the original does -> RWE status.
 | F5-F8 | recall camera bookmark 1-4 | **missing** |
 | Ctrl+F5-F8 | save camera bookmark 1-4 | **missing** |
 | Ctrl+F9 | screenshot `screenshots\SHOTnnnn.pcx` | **missing** |
-| F12 | clear all chat messages | **missing** (nothing to clear yet) |
+| F12 | clear all chat messages | **works** -- clears the console, which is where chat lands |
 | Ctrl+A | select **all** units | **different** -- selects on-screen only (the original's Ctrl+S) |
 | Ctrl+S | select all units **on screen** | **different** -- stops selected units (the original's `s` quickkey) |
 | Ctrl+D | self-destruct selection | **works** |
@@ -447,10 +447,12 @@ Ctrl+Shift+digit, keypad speed keys.
 6. **`n`** next-unit-off-screen scroll -- small.
 7. **F1 unit info** display (UNITINFO.GUI); move RWE's help overlay to an
    unused key if kept.
-8. **The message bar**: Enter to open (TALK.GUI), F12 to clear, F3 to jump
-   to the last reporting unit -- one work item, since F3/F12 only mean
-   something once messages exist. MP chat and `h` sharing (SHARE.GUI) hang
-   off the same UI.
+8. **The message bar** as the original draws it: Enter opens a bar and sends
+   chat now, and F12 clears it, but the bar is RWE's own line of text rather
+   than TALK.GUI / TALK2.GUI, and F3 still jumps to the last unit that took a
+   hit rather than walking a message backlog -- there is no backlog, only the
+   five-second console. `h` sharing (SHARE.GUI) hangs off the same UI and is
+   not done.
 9. **F4 / held-Space panel slide** -- cosmetic, needs the panel to be a
    sliding element first.
 10. **Ctrl+F9 screenshot** to `screenshots\SHOTnnnn.pcx` -- nice-to-have.

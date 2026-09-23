@@ -3,6 +3,7 @@
 #include <rwe/AudioService.h>
 #include <rwe/GlobalConfig.h>
 #include <rwe/RenderService.h>
+#include <rwe/ColorPalette.h>
 #include <rwe/collections/VectorMap.h>
 #include <rwe/game/BuilderGuisDatabase.h>
 #include <rwe/game/GameCameraState.h>
@@ -651,6 +652,12 @@ namespace rwe
      * by the clock instead of by being told.
      */
     bool localBuildGhostIsActive(LocalBuildGhostKind kind, bool matchingOrderPresent, GameTime createdAt, GameTime now, GameTime timeout);
+
+    /**
+     * TA's ten player colours, read off the shipped palette by eye --
+     * close enough for tinting a line of text.
+     */
+    Color playerColorToRgb(const PlayerColorIndex& index);
 
     int computeSoundVolume(int soundCount);
 

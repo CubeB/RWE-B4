@@ -457,6 +457,11 @@ namespace rwe
             action();
         }
 
+        // Once a frame, not once a tick: chat arrives on its own and is meant
+        // to keep arriving while the simulation is stalled waiting for a peer.
+        receiveChatMessages();
+        updateChatTest();
+
         updateMusic();
 
         // Pause halts simulation tick dispatch by not advancing the

@@ -321,6 +321,7 @@ set(SOURCE_FILES
     src/rwe/game/GameScene.cpp
     src/rwe/game/GameScene.h
     src/rwe/game/GameScene_audio.cpp
+    src/rwe/game/GameScene_chat.cpp
     src/rwe/game/GameScene_commands.cpp
     src/rwe/game/GameScene_debug.cpp
     src/rwe/game/GameScene_endgame.cpp
@@ -363,6 +364,8 @@ set(SOURCE_FILES
     src/rwe/game/WeaponMediaInfo.cpp
     src/rwe/game/WeaponMediaInfo.h
     src/rwe/game/DesyncReport.cpp
+    src/rwe/game/chat_util.cpp
+    src/rwe/game/chat_util.h
     src/rwe/game/DesyncReport.h
     src/rwe/game/dump_util.cpp
     src/rwe/game/dump_util.h
@@ -980,6 +983,7 @@ set(TEST_FILES
     src/rwe/game/DesyncReport.test.cpp
     src/rwe/game/aicommandfeed.test.cpp
     src/rwe/game/playerdrop.test.cpp
+    src/rwe/game/chat_util.test.cpp
     src/rwe/geometry/BoundingBox3f.test.cpp
     src/rwe/geometry/Circle2f.test.cpp
     src/rwe/geometry/CollisionMesh.test.cpp

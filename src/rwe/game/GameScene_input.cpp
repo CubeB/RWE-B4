@@ -17,6 +17,7 @@
 #include <rwe/Mesh.h>
 #include <rwe/camera_util.h>
 #include <rwe/game/GameScene_util.h>
+#include <rwe/game/chat_util.h>
 #include <rwe/game/OrderButtons.h>
 #include <rwe/game/dump_util.h>
 #include <rwe/game/matrix_util.h>
@@ -42,6 +43,14 @@ namespace rwe
 {
     void GameScene::onKeyDown(const SDL_KeyboardEvent& keysym)
     {
+        // The message bar owns the keyboard ahead of anything else, the menu
+        // included: while it is open, every key on the board is a letter.
+        if (isChatBarOpen())
+        {
+            handleChatBarKey(keysym);
+            return;
+        }
+
         // The game menu owns the keyboard while it is up. Tab and F2 toggle
         // it (the original's keys: Tab opens GAME OPTIONS in single player,
         // F2 anywhere) and Escape closes it.
@@ -61,6 +70,15 @@ namespace rwe
             {
                 panel->keyDown(KeyEvent(keysym.key));
             }
+            return;
+        }
+
+        // Enter opens the message bar, as it does in the original. Ahead of
+        // the panel below, which would otherwise take Enter as an activation
+        // of whichever button last had focus.
+        if (keysym.key == SDLK_RETURN || keysym.key == SDLK_KP_ENTER)
+        {
+            openChatBar();
             return;
         }
 
@@ -406,6 +424,13 @@ namespace rwe
 
     void GameScene::onTextInput(const std::string& text)
     {
+        // The message bar first: it is open only while it is being typed into.
+        if (isChatBarOpen())
+        {
+            chatTextAppend(*chatInput, text);
+            return;
+        }
+
         // The game menu is the only thing in a battle with a field in it, and
         // only while it is open; the side panel is buttons.
         if (!isGameMenuOpen())

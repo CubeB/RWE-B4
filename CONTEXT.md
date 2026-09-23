@@ -96,6 +96,19 @@ machine and the machines on the other end of the network. A computer
 player is a player and not a hash source.
 _Avoid_: peer (a hash source is a peer; not every player is)
 
+**Message bar**:
+The one-line field the game opens on Enter, for typing a line of chat. Holds
+the keyboard while it is open, every key on it being a letter.
+_Avoid_: chat box, console (the console is where the line lands, not where it
+is typed)
+
+**Chat line**:
+What a player says to the other players. Carried beside the command stream on
+the same packet, never in it, because a stalled game is exactly when one is
+most wanted -- and so it is not simulation state: never hashed, never saved,
+never recorded in a replay, and never seen by any peer's `GameSimulation`.
+_Avoid_: chat message (that is the wire type, `proto::ChatMessage`)
+
 **Hashed state**:
 Sim state the sync hash reads. Must be initialised by the time the object
 exists, and kept in step across the hash, the save and the dump.

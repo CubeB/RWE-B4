@@ -4,6 +4,7 @@
 #include <chrono>
 #include <deque>
 #include <future>
+#include <mutex>
 #include <network.pb.h>
 #include <random>
 #include <rwe/game/PlayerCommand.h>
@@ -14,6 +15,7 @@
 #include <rwe/sim/PlayerId.h>
 #include <rwe/util/OpaqueId.h>
 #include <rwe/util/OpaqueUnit.h>
+#include <string>
 
 namespace rwe
 {
@@ -24,6 +26,20 @@ namespace rwe
     {
     public:
         using CommandSet = std::vector<PlayerCommand>;
+        /** A line of chat that arrived from a peer. */
+        struct ReceivedChatMessage
+        {
+            PlayerId sender;
+            std::string text;
+        };
+
+        /**
+         * How many unacked lines a peer may be owed before further ones are
+         * refused. A line is resent until it is acked, so without a ceiling a
+         * peer that has stopped answering is a growing packet.
+         */
+        static constexpr std::size_t MaxPendingChatMessages = 32;
+
         struct EndpointInfo
         {
             PlayerId playerId;
@@ -70,6 +86,16 @@ namespace rwe
             std::deque<GameHash> hashSendBuffer;
 
             /**
+             * Chat waiting to go to this peer, and where in that stream we
+             * are. The same scheme as the commands and the hashes: the
+             * buffer holds everything not yet acked, every packet carries
+             * all of it, and an ack pops the front.
+             */
+            SequenceNumber nextChatToSend{0};
+            SequenceNumber nextChatToReceive{0};
+            std::deque<std::string> chatSendBuffer;
+
+            /**
              * Records the time at which we first sent a packet
              * finishing at the given sequence number.
              * This is used for measuring RTT when we receive acks.
@@ -109,6 +135,17 @@ namespace rwe
         asio::ip::udp::endpoint currentRemoteEndpoint;
 
         PlayerCommandService* const playerCommandService;
+
+        /**
+         * Chat that has arrived and not yet been collected by the scene.
+         *
+         * The one piece of state here touched by both threads without going
+         * through the io context, because it travels the other way: every
+         * other call posts work to the network thread and waits, and a
+         * message arriving has nobody to wait for it.
+         */
+        std::mutex chatInboxMutex;
+        std::vector<ReceivedChatMessage> chatInbox;
 
         SceneTime currentSceneTime{0};
 
@@ -152,6 +189,18 @@ namespace rwe
         void submitCommands(SceneTime currentSceneTime, const CommandSet& commands);
 
         void submitGameHash(GameHash hash);
+
+        /**
+         * Queue a line of chat for every peer.
+         *
+         * Returns false if it was refused, which is what a peer already owed
+         * MaxPendingChatMessages does: it has stopped acking, and the line
+         * would only make the packets to it bigger.
+         */
+        bool submitChatMessage(const std::string& text);
+
+        /** Everything that has arrived since the last call, in the order it arrived. */
+        std::vector<ReceivedChatMessage> takeChatMessages();
 
         SceneTime estimateAvergeSceneTime(SceneTime localSceneTime);
 

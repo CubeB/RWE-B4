@@ -16,6 +16,8 @@
 #   tools/net-test.ps1 -ai                     # add a computer player at the end
 #   tools/net-test.ps1 -desyncAt 200           # peer 0 reports a wrong hash from
 #                                              # tick 200, to fire the report
+#   tools/net-test.ps1 -chat                   # every peer says one line, to
+#                                              # show chat crossing the wire
 #
 # Two things it is good for beyond drop handling: any change to the simulation
 # can be run past it to see whether two peers still agree, and RWE_DESYNC_AT
@@ -30,6 +32,7 @@ param(
     [int]$killAfter = 20,
     [switch]$ai,
     [int]$desyncAt = 0,
+    [switch]$chat,
     [string]$map = "Coast To Coast",
     [int]$basePort = 15337,
     [string]$exe = "D:\RWE\build-release\rwe.exe",
@@ -97,9 +100,16 @@ for ($me = 0; $me -lt $peers; $me++) {
     # Only one peer may counterfeit a desync: the report exists to show two
     # peers disagreeing, and both lying would be two peers agreeing again.
     if ($desyncAt -gt 0 -and $me -eq 0) { $env:RWE_DESYNC_AT = "$desyncAt" }
+
+    # Each peer says one line, at a tick of its own so the order is known:
+    # nobody is at these keyboards, and a line that arrives at every other
+    # peer is the whole of what chat has to do.
+    if ($chat) { $env:RWE_CHAT_TEST = "$(300 + (60 * $me)):hello from $($names[$me])" }
+
     $env:RWE_HASH_LOG = $hashes[$me]
     $procs += Start-Process -FilePath $exe -ArgumentList $a -PassThru
     Remove-Item Env:\RWE_DESYNC_AT -ErrorAction SilentlyContinue
+    Remove-Item Env:\RWE_CHAT_TEST -ErrorAction SilentlyContinue
 }
 Remove-Item Env:\RWE_HASH_LOG -ErrorAction SilentlyContinue
 
@@ -151,7 +161,7 @@ foreach ($p in $procs) { if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force 
 
 foreach ($s in 0..($peers - 1)) {
     $interesting = Get-Content $logs[$s] -ErrorAction SilentlyContinue |
-        Select-String -Pattern "waiting for|quiet for|dropped|left the game|Desync|diverged at tick|critical"
+        Select-String -Pattern "waiting for|quiet for|dropped|left the game|Desync|diverged at tick|critical|Chat from player"
     if ($interesting) {
         Write-Output "=================== player $s ==================="
         $interesting | Select-Object -First 10
