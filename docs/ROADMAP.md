@@ -476,10 +476,36 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
 
 ## Phase 4 — Compatibility & content breadth (ongoing)
 
-- [ ] Map-pack robustness: zlib failure on large `.ufo` (#93), "Expected property name" parse crash (#38), missing `StartPos2` schema key (#49), non-destructible doodads (#52), extra tree on Show Down (#70).
+- [ ] Map-pack robustness. Three of the five are done and have tests against
+      the real data: the `StartPos2` schema key (#49, `io/ota/ota.test.cpp`),
+      non-destructible doodads (#52, `FeatureDefinition::indestructible`, which
+      is also what keeps a geothermal vent and a surface-metal patch out of the
+      feature grid) and Show Down's extra tree (#70,
+      `game/featureplacement.test.cpp`). What is left is the zlib failure on a
+      large `.ufo` (#93) and the "Expected property name" parse crash (#38),
+      and both need the 2 GB V map pack that provoked them -- not on this
+      machine, so they are blocked on fetching it rather than on any reading.
 - [ ] 3DO texture distortion (#7), GAF animation off-by-one (#82), shadows on water (#25).
 - [ ] Run the engine against Core Contingency, Battle Tactics, and the big community mods (TA:Escalation, TA:Mayhem) and log incompatibilities as issues.
-- [ ] Invalid UTF‑8 resilience (#14).
+- [x] Invalid UTF‑8 resilience (#14, 2026-09-23). `ensureUtf8` in
+      `util/rwe_string.h` is the boundary: valid input comes back byte for
+      byte, anything else is read as latin1. latin1 because it is the fallback
+      that loses nothing -- byte 0xE9 becomes U+00E9, so the original byte can
+      still be read differently later -- and because it is what the TDF parser
+      has always done for TA's own files, which are latin1 where they are not
+      ASCII. It is applied where text enters the interface rather than where
+      it is drawn, drawing happening every frame and setting happening once:
+      `UiLabel::setText`, `UiListBox::appendItem` (the map names, which are
+      file names out of an archive and so bytes somebody else chose) and
+      `UiStagedButton::setLabel`, plus `parsePlayerInfoFromArg`, a name in a
+      `--player` spec being the shortest way to reproduce the crash.
+      Two faults fell out of writing the test for it, both invisible while
+      every string in play was ASCII. `utf8Split` built each piece by handing
+      a pair of `utf8::iterator`s to `std::string`, which narrows every code
+      point back through `char`: a name given as perfectly good UTF-8 came out
+      of the split as latin1 again, and the arena's `run.json` threw on it and
+      was left empty. And the trims passed a code point to `isspace`, which is
+      undefined for a value that does not fit an unsigned char.
 - [ ] Compile a `docs/compatibility.md` of what TA behaviour is intentionally *not* replicated (bugs vs features).
 
 ### The demo conformance corpus

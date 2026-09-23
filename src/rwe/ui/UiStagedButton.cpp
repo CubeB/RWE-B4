@@ -1,6 +1,7 @@
 #include "UiStagedButton.h"
 
 #include <cmath>
+#include <rwe/util/rwe_string.h>
 
 namespace rwe
 {
@@ -292,7 +293,9 @@ namespace rwe
 
     void UiStagedButton::setLabel(const std::string& label)
     {
-        stages[currentStage].label = label;
+        // See ensureUtf8: a button's caption comes from the game data as
+        // readily as from a gui file.
+        stages[currentStage].label = ensureUtf8(label);
     }
 
     void UiStagedButton::setNormalSprite(const std::shared_ptr<Sprite>& sprite)

@@ -52,4 +52,24 @@ namespace rwe
     bool endsWithUtf8(const std::string& str, const std::string& end);
 
     std::string latin1ToUtf8(const std::string& str);
+
+    /**
+     * Text from outside, made safe to walk as UTF-8: valid input comes back
+     * byte for byte, and anything else is read as latin1.
+     *
+     * The interface walks every string it draws with a *checked* iterator,
+     * which throws on a byte sequence that is not UTF-8 -- and a throw from
+     * inside a draw call takes the game down. TA's own data is latin1 where it
+     * is not ASCII, and the TDF parser has always fallen back to that, but text
+     * reaches the screen from places no TDF parser sees: the names in an HPI
+     * archive's directory are bytes the archive's author chose, and a map pack
+     * put together in another language is exactly the kind that carries them.
+     *
+     * latin1 rather than a guess at a code page, because it is the one fallback
+     * that loses nothing: byte 0xE9 becomes U+00E9, so the original byte is
+     * still there to be read differently later. Nothing here tries to render
+     * it -- the shipped fonts have no glyph past ASCII, and the renderer
+     * already draws the first glyph in place of one it does not have.
+     */
+    std::string ensureUtf8(const std::string& str);
 }

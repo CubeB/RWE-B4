@@ -92,4 +92,31 @@ namespace rwe
 
         button.reset();
     }
+
+    // Text arriving at the interface is not always UTF-8. The names in an HPI
+    // archive's directory are bytes its author chose, and a map pack put
+    // together in another language carries them into the map list -- where the
+    // renderer walks every string with a checked iterator and throws on the
+    // first byte that is not a sequence, which inside a draw call takes the
+    // game down. It is sanitised on the way in, once, rather than on the way
+    // out, every frame: see ensureUtf8. A button's caption and a label's text
+    // go the same way; the list box is tested because it is the one that holds
+    // the map names.
+    TEST_CASE("text entering the interface is made walkable", "[ui]")
+    {
+        SECTION("a name that is not UTF-8 is read as latin1")
+        {
+            UiListBox listBox(0, 0, 100, 100, nullptr);
+            listBox.appendItem("Caf\xe9 Island");
+            REQUIRE(listBox.getItems().at(0) == "Caf\xc3\xa9 Island");
+        }
+
+        SECTION("and one that is stays exactly as it was")
+        {
+            // Byte for byte, because a map name is also how the map is opened.
+            UiListBox listBox(0, 0, 100, 100, nullptr);
+            listBox.appendItem("Coast To Coast");
+            REQUIRE(listBox.getItems().at(0) == "Coast To Coast");
+        }
+    }
 }

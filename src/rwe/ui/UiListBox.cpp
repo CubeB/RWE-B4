@@ -1,5 +1,6 @@
 #include "UiListBox.h"
 #include <algorithm>
+#include <rwe/util/rwe_string.h>
 
 namespace rwe
 {
@@ -51,7 +52,9 @@ namespace rwe
 
     void UiListBox::appendItem(std::string item)
     {
-        items.push_back(std::move(item));
+        // A list box is what the map names go in, and a map name is the name
+        // of a file in an archive: bytes somebody else chose. See ensureUtf8.
+        items.push_back(ensureUtf8(item));
         itemsChangedSubject.next(true);
     }
 

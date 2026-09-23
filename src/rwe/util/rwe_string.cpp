@@ -4,6 +4,27 @@
 
 namespace rwe
 {
+    /**
+     * The bytes of the original string lying between two positions in it.
+     *
+     * A plain iterator is already a byte position, so the pair is the slice.
+     * A utf8::iterator is not: dereferencing one yields a code point, so
+     * building a string straight out of a pair of them runs every code point
+     * through char -- and puts U+00E9 back as the single byte 0xE9, which is
+     * latin1 again and throws the next time anything walks it as UTF-8. That
+     * is invisible while the input is ASCII, which every player spec and
+     * every shipped map name is. base() is the byte position underneath.
+     */
+    std::string sliceBetween(std::string::const_iterator begin, std::string::const_iterator end)
+    {
+        return std::string(begin, end);
+    }
+
+    std::string sliceBetween(utf8::iterator<std::string::const_iterator> begin, utf8::iterator<std::string::const_iterator> end)
+    {
+        return std::string(begin.base(), end.base());
+    }
+
     template <typename It, typename CIt>
     std::vector<std::string> splitInternal(It begin, It end, CIt codePointsBegin, CIt codePointsEnd)
     {
@@ -12,7 +33,7 @@ namespace rwe
         while (true)
         {
             auto it = std::find_first_of(begin, end, codePointsBegin, codePointsEnd);
-            v.emplace_back(begin, it);
+            v.push_back(sliceBetween(begin, it));
             if (it == end)
             {
                 break;
@@ -117,9 +138,21 @@ namespace rwe
         return utf8::iterator<std::string::iterator>(str.end(), str.begin(), str.end());
     }
 
+    /**
+     * isspace is defined only for a value that fits an unsigned char, and a
+     * code point is not one -- passing U+4E00 to it is undefined, and the
+     * trims walk code points. Nothing above ASCII is whitespace as far as the
+     * trims are concerned, which is what the original does too: it has no
+     * notion of a non-breaking space.
+     */
+    bool isSpaceCodePoint(unsigned int cp)
+    {
+        return cp < 128 && std::isspace(static_cast<int>(cp)) != 0;
+    }
+
     void utf8TrimLeft(std::string& str)
     {
-        auto firstNonSpace = std::find_if(utf8Begin(str), utf8End(str), [](unsigned int cp) { return std::isspace(cp) == 0; });
+        auto firstNonSpace = std::find_if(utf8Begin(str), utf8End(str), [](unsigned int cp) { return !isSpaceCodePoint(cp); });
         str.erase(str.begin(), firstNonSpace.base());
     }
 
@@ -129,7 +162,7 @@ namespace rwe
         auto begin = utf8Begin(str);
         while (it != begin)
         {
-            if (std::isspace(*--it) == 0)
+            if (!isSpaceCodePoint(*--it))
             {
                 ++it;
                 str.erase(it.base(), str.end());
@@ -146,7 +179,7 @@ namespace rwe
 
     void utf8UncheckedTrimLeft(std::string& str)
     {
-        auto firstNonSpace = std::find_if(utf8UncheckedBegin(str), utf8UncheckedEnd(str), [](unsigned int cp) { return std::isspace(cp) == 0; });
+        auto firstNonSpace = std::find_if(utf8UncheckedBegin(str), utf8UncheckedEnd(str), [](unsigned int cp) { return !isSpaceCodePoint(cp); });
         str.erase(str.begin(), firstNonSpace.base());
     }
 
@@ -156,7 +189,7 @@ namespace rwe
         auto begin = utf8UncheckedBegin(str);
         while (it != begin)
         {
-            if (std::isspace(*--it) == 0)
+            if (!isSpaceCodePoint(*--it))
             {
                 ++it;
                 str.erase(it.base(), str.end());
@@ -239,6 +272,16 @@ namespace rwe
         }
 
         return true;
+    }
+
+    std::string ensureUtf8(const std::string& str)
+    {
+        if (utf8::is_valid(str.begin(), str.end()))
+        {
+            return str;
+        }
+
+        return latin1ToUtf8(str);
     }
 
     std::string latin1ToUtf8(const std::string& str)

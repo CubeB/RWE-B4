@@ -31,6 +31,7 @@
 #include <rwe/util/OpaqueArgs.h>
 #include <rwe/util/Result.h>
 #include <rwe/util/SimpleLogger.h>
+#include <rwe/util/rwe_string.h>
 #include <rwe/vfs/CompositeVirtualFileSystem.h>
 
 #include <rwe/GameLaunch.h>
@@ -501,7 +502,13 @@ namespace rwe
             return std::nullopt;
         }
 
-        auto components = rwe::utf8Split(playerString, ';');
+        // ensureUtf8 first, because the split walks the string with a checked
+        // iterator and a name is whatever the launcher or the command line
+        // handed over: a byte outside ASCII that is not part of a UTF-8
+        // sequence throws from inside the split otherwise, before the game
+        // has started. Deterministic, so every peer makes the same name out
+        // of the same bytes and their hashes still agree.
+        auto components = rwe::utf8Split(ensureUtf8(playerString), ';');
         // The team is optional and last, so every spec written before there
         // was one still means what it meant: nobody on a team, everybody
         // fighting alone.
