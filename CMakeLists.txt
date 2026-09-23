@@ -1035,6 +1035,7 @@ set(TEST_FILES
     src/rwe/game/screenshake.test.cpp
     src/rwe/game/wake.test.cpp
     src/rwe/game/viewcull.test.cpp
+    src/rwe/game/animationclock.test.cpp
     src/rwe/sim/buildangle.test.cpp
     src/rwe/sim/buildtime.test.cpp
     src/rwe/sim/aircraftbuild.test.cpp

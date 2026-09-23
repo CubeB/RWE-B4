@@ -1099,6 +1099,28 @@ namespace rwe
     private:
         GameTime getGameTime() const;
 
+        /**
+         * The instant the frame being drawn depicts, in whole sim ticks.
+         *
+         * Everything that moves is drawn as `lerp(previous, current,
+         * interpolationFraction)`, so a frame shows the world somewhere
+         * between the end of tick `gameTime - 1` and the end of `gameTime` --
+         * never at `gameTime` itself, which is a whole tick in the future
+         * until the buffer has filled. An animation keyed on `gameTime`
+         * therefore runs a tick ahead of the units it belongs to, which is
+         * what upstream #82 reports: up to a thirtieth of a second.
+         *
+         * The fraction is deliberately not in the answer. Every animation
+         * here steps on whole ticks, and `floor((t - 1 + frac) / period)` is
+         * `(t - 1) / period` for any frac below one, so carrying it would
+         * change nothing and would make a `GameTime` that is not a tick.
+         *
+         * A clock the player reads, and a countdown, are not animations and
+         * go on using `gameTime`: they are being asked what the simulation
+         * says, not what the frame shows.
+         */
+        GameTime renderTime() const;
+
         void playUiSound(const AudioService::SoundHandle& sound);
 
         void playNotificationSound(const PlayerId& playerId, const AudioService::SoundHandle& sound);

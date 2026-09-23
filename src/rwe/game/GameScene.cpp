@@ -966,6 +966,11 @@ namespace rwe
         return simulation.gameTime;
     }
 
+    GameTime GameScene::renderTime() const
+    {
+        return renderTimeFor(simulation.gameTime);
+    }
+
     Matrix4f GameScene::worldToMinimapMatrix(const MapTerrain& terrain, const Rectangle2f& minimapRect)
     {
         auto view = Matrix4f::rotationToAxes(

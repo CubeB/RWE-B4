@@ -1444,6 +1444,16 @@ namespace rwe
         }
     }
 
+    GameTime renderTimeFor(GameTime simulationTime)
+    {
+        // Tick 0 is the one frame with nothing behind it to interpolate from
+        // -- previousPosition is the spawn position and the lerp is a no-op --
+        // so that frame really does depict tick 0.
+        return simulationTime.value == 0
+            ? GameTime(0)
+            : GameTime(simulationTime.value - 1);
+    }
+
     unsigned int getFrameIndex(GameTime currentTime, unsigned int numFrames)
     {
         return (currentTime.value / 2) % numFrames;
@@ -1534,7 +1544,15 @@ namespace rwe
                         std::round(position.z));
                     Matrix4f conversionMatrix = Matrix4f::scale(Vector3f(1.0f, -2.0f, 1.0f));
                     const auto spriteSeries = gameMediaDatabase.getSpriteSeries("FX", "flamestream").value();
-                    auto timeSinceSpawn = currentTime - projectile.createdAt;
+                    // A round created on the tick just run has not been
+                    // alive yet, the frame being a tick behind the simulation
+                    // (see GameScene::renderTime). It is drawn at the start of
+                    // its sequence rather than left out for a frame: a
+                    // flamethrower is a continuous stream and a hole in it
+                    // shows.
+                    auto timeSinceSpawn = currentTime > projectile.createdAt
+                        ? currentTime - projectile.createdAt
+                        : GameTime(0);
                     auto fullLifetime = projectile.dieOnFrame.value() - projectile.createdAt;
                     auto percentComplete = static_cast<float>(timeSinceSpawn.value) / static_cast<float>(fullLifetime.value);
                     auto frameIndex = static_cast<unsigned int>(percentComplete * spriteSeries->sprites.size());

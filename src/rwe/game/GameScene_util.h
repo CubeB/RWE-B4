@@ -38,6 +38,18 @@ namespace rwe
     struct GameSimulation;
 
     /**
+     * The instant a frame drawn after `simulationTime` depicts, in ticks.
+     *
+     * A frame draws everything that moves as `lerp(previous, current, frac)`,
+     * so it shows the world between the end of tick `simulationTime - 1` and
+     * the end of `simulationTime` -- never at `simulationTime`, which is a
+     * whole tick in the future until the buffer has filled. An animation
+     * keyed on the simulation's own clock therefore runs a tick ahead of the
+     * units it belongs to. See GameScene::renderTime, which is this.
+     */
+    GameTime renderTimeFor(GameTime simulationTime);
+
+    /**
      * Whether a model standing at a world position could reach the view.
      *
      * The renderer walked every unit on the map, worked out a transform for

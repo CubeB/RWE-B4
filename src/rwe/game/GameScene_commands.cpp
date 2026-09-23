@@ -1622,7 +1622,10 @@ namespace rwe
             std::remove_if(
                 flashes.begin(),
                 flashes.end(),
-                [&](const auto& flash) { return flash.isFinished(simulation.gameTime); }),
+                // renderTime, not gameTime: drawFlashes asks the same
+                // question of the same clock, and a flash dropped here a tick
+                // early is a flash that never reaches its last frame.
+                [&](const auto& flash) { return flash.isFinished(renderTime()); }),
             flashes.end());
     }
 

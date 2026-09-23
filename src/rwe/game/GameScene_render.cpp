@@ -1279,7 +1279,7 @@ namespace rwe
 
         // The march wraps every 30 ticks, which is what keeps this in step
         // with the simulation rather than with the frame rate.
-        auto phase = static_cast<float>(simulation.gameTime.value % 30u) * speedPerTick;
+        auto phase = static_cast<float>(renderTime().value % 30u) * speedPerTick;
 
         // The straight line between the two order positions, height included:
         // the trail does not follow the ground, so on a slope it cuts through
@@ -1601,7 +1601,7 @@ namespace rwe
                 if (!featureDefinition.isStanding())
                 {
                     auto fogged = !positionIsVisibleToLocalPlayer(f.second.position);
-                    drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, simulation.gameTime, fogged, flatFeatureBatch);
+                    drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, renderTime(), fogged, flatFeatureBatch);
                     drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, fogged, flatFeatureShadowBatch);
                 }
             }
@@ -1619,7 +1619,7 @@ namespace rwe
             wakeBatch.triangles.clear();
             for (const auto& particle : particles)
             {
-                drawWakeParticle(gameMediaDatabase, simulation.gameTime, viewProjectionMatrix, particle, wakeBatch);
+                drawWakeParticle(gameMediaDatabase, renderTime(), viewProjectionMatrix, particle, wakeBatch);
             }
             RWE_RENDERPROF_COUNT("n.particles", particles.size());
             RWE_RENDERPROF_COUNT("n.waketri", wakeBatch.triangles.size());
@@ -1818,7 +1818,7 @@ namespace rwe
                 }
                 const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
                 const auto& unitModelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
-                drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, unitId.value, simulation.gameTime.value, interpolationFraction, shadeStrengthFor(!unitDefinition.isMobile), unitAtlases, unitMeshBatch);
+                drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, unitId.value, renderTime().value, interpolationFraction, shadeStrengthFor(!unitDefinition.isMobile), unitAtlases, unitMeshBatch);
             }
             for (const auto& [_, feature] : simulation.features)
             {
@@ -1884,7 +1884,7 @@ namespace rwe
                     continue;
                 }
                 const auto& modelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
-                auto wireframeColor = buildCycleColorB(unitId.value, simulation.gameTime.value);
+                auto wireframeColor = buildCycleColorB(unitId.value, renderTime().value);
                 drawUnitWireframe(gameMediaDatabase, unit, unitDefinition, modelDefinition, interpolationFraction, toCamera, wireframeScreen, wireframeColor, wireframeBatch);
             }
             // Solid, as the original's lines are: one palette colour, one
@@ -1897,7 +1897,7 @@ namespace rwe
         UnitMeshBatch meshProjectilesBatch;
         {
             RWE_RENDERPROF("w.projectiles");
-            drawProjectiles(simulation, localPlayerVisibility(), gameMediaDatabase, viewProjectionMatrix, simulation.projectiles, simulation.gameTime, interpolationFraction, unitAtlases, lineProjectilesBatch, spriteProjectilesBatch, meshProjectilesBatch);
+            drawProjectiles(simulation, localPlayerVisibility(), gameMediaDatabase, viewProjectionMatrix, simulation.projectiles, renderTime(), interpolationFraction, unitAtlases, lineProjectilesBatch, spriteProjectilesBatch, meshProjectilesBatch);
             worldRenderService.drawBatch(lineProjectilesBatch, viewProjectionMatrix);
             worldRenderService.drawUnitMeshBatch(meshProjectilesBatch, simScalarToFloat(seaLevel), shadeTableTexture.get());
             worldRenderService.drawSpriteBatch(spriteProjectilesBatch);
@@ -1919,7 +1919,7 @@ namespace rwe
                 if (featureDefinition.isStanding())
                 {
                     auto fogged = !positionIsVisibleToLocalPlayer(f.second.position);
-                    drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, simulation.gameTime, fogged, featureBatch);
+                    drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, renderTime(), fogged, featureBatch);
                     drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, fogged, featureShadowBatch);
                 }
             }
@@ -1957,7 +1957,7 @@ namespace rwe
                 {
                     continue;
                 }
-                drawSpriteParticle(gameMediaDatabase, simulation.gameTime, viewProjectionMatrix, particle, worldSpriteParticlesBatch);
+                drawSpriteParticle(gameMediaDatabase, renderTime(), viewProjectionMatrix, particle, worldSpriteParticlesBatch);
             }
             worldRenderService.drawSpriteBatch(worldSpriteParticlesBatch);
         }
@@ -1971,7 +1971,7 @@ namespace rwe
             RWE_RENDERPROF("w.nano");
             for (const auto& particle : particles)
             {
-                drawNanoParticle(simulation.gameTime, interpolationFraction, particle, nanoParticlesBatch);
+                drawNanoParticle(renderTime(), interpolationFraction, particle, nanoParticlesBatch);
             }
             for (const auto& d : debris)
             {
@@ -1989,7 +1989,7 @@ namespace rwe
             RWE_RENDERPROF("w.flashes");
             sceneContext.graphics->bindFrameBufferColorBuffer(dodgeMask.get());
             sceneContext.graphics->clearColor();
-            worldRenderService.drawFlashes(simulation.gameTime, flashes);
+            worldRenderService.drawFlashes(renderTime(), flashes);
             sceneContext.graphics->bindFrameBufferColorBuffer(worldFrameBuffer.texture.get());
         }
 
@@ -2047,7 +2047,7 @@ namespace rwe
                 {
                     continue;
                 }
-                drawSpriteParticle(gameMediaDatabase, simulation.gameTime, viewProjectionMatrix, particle, spriteParticlesBatch);
+                drawSpriteParticle(gameMediaDatabase, renderTime(), viewProjectionMatrix, particle, spriteParticlesBatch);
             }
             worldRenderService.drawSpriteBatch(spriteParticlesBatch);
         }

@@ -633,7 +633,9 @@ namespace rwe
 
         {
             RWE_RENDERPROF("u.particles");
-            updateParticles(gameMediaDatabase, simulation.terrain, simulation.gameTime, particles);
+            // On the same clock the drawing uses, or a particle is thrown
+            // away a tick before its last frame is shown. See renderTime.
+            updateParticles(gameMediaDatabase, simulation.terrain, renderTime(), particles);
         }
 
         {
