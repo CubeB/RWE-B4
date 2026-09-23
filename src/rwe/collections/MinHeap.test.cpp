@@ -232,8 +232,6 @@ namespace rwe
             auto selectKey = [](const std::pair<int, int>& p) { return p.first; };
             auto lessThan = [](const std::pair<int, int>& a, const std::pair<int, int>& b) { return a.second < b.second; };
 
-            // push all the numbers onto the heap,
-            // then pull them out into a sorted, unique vector.
             auto heap = createMinHeap<int, std::pair<int, int>>(selectKey, lessThan);
 
             for (const auto& elem : inputNumbers)
@@ -248,12 +246,8 @@ namespace rwe
                 heap.pop();
             }
 
-            // create a sorted, unique vector to check against
-            // by manually sorting, then removing duplicate keys.
-            // (Note that this list could reasonably be not be identical to the output
-            // because ordering of elements with the same priority
-            // is not strictly defined, so we will have to be a bit cleverer
-            // when we do comparisons to work around this.)
+            // The ordering of elements with the same priority is not strictly
+            // defined, so the comparison below must not rely on it.
             auto sortedNumbers = inputNumbers;
 
             std::sort(sortedNumbers.begin(), sortedNumbers.end(), lessThan);
@@ -269,10 +263,8 @@ namespace rwe
                 }
             }
 
-            // verify the lists are the same size
             RC_ASSERT(outputNumbers.size() == expectedNumbers.size());
 
-            // verify the lists contain the same frequency of elements
             std::unordered_map<std::pair<int, int>, int> outputFreqs;
             for (const auto& item : outputNumbers)
             {
@@ -287,7 +279,6 @@ namespace rwe
 
             RC_ASSERT(outputFreqs == expectedFreqs);
 
-            // verify that the list is sorted
             RC_ASSERT(std::is_sorted(outputNumbers.begin(), outputNumbers.end(), lessThan));
         });
     }
@@ -306,12 +297,10 @@ namespace rwe
             {
                 if (elem)
                 {
-                    // insert onto the heap
                     heap.pushOrDecrease(*elem);
                 }
                 else
                 {
-                    // pop the heap
                     if (!heap.empty())
                     {
                         heap.pop();

@@ -36,7 +36,6 @@ namespace rwe
                     continue;
                 }
 
-                // --key=value form
                 auto eqPos = arg.find('=');
                 if (eqPos != std::string::npos)
                 {
@@ -46,14 +45,12 @@ namespace rwe
                     continue;
                 }
 
-                // --flag (no next arg or next arg starts with --)
                 if (i + 1 >= argc || (argv[i + 1][0] == '-' && argv[i + 1][1] == '-'))
                 {
                     values[arg].emplace_back("true");
                     continue;
                 }
 
-                // --key value form
                 ++i;
                 values[arg].push_back(argv[i]);
             }
@@ -74,7 +71,6 @@ namespace rwe
             std::string line;
             while (std::getline(stream, line))
             {
-                // trim leading whitespace
                 auto start = line.find_first_not_of(" \t\r\n");
                 if (start == std::string::npos)
                 {
@@ -82,7 +78,6 @@ namespace rwe
                 }
                 line = line.substr(start);
 
-                // skip comments and empty lines
                 if (line.empty() || line[0] == '#')
                 {
                     continue;
@@ -97,14 +92,12 @@ namespace rwe
                 auto key = line.substr(0, eqPos);
                 auto val = line.substr(eqPos + 1);
 
-                // trim trailing whitespace from key
                 auto keyEnd = key.find_last_not_of(" \t");
                 if (keyEnd != std::string::npos)
                 {
                     key = key.substr(0, keyEnd + 1);
                 }
 
-                // trim leading whitespace from value
                 auto valStart = val.find_first_not_of(" \t");
                 if (valStart != std::string::npos)
                 {
@@ -115,7 +108,6 @@ namespace rwe
                     val = "";
                 }
 
-                // Only set from config if not already set by command line
                 if (values.find(key) == values.end())
                 {
                     values[key].push_back(val);

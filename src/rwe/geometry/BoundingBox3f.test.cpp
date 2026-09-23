@@ -30,7 +30,6 @@ namespace rwe
             REQUIRE(r.distanceSquared(Vector3f(2.0f, -2.0f, 0.0f)) == 1.0f); // top
             REQUIRE(r.distanceSquared(Vector3f(2.0f, 10.0f, 0.0f)) == 1.0f); // bottom
 
-            // further away
             REQUIRE(r.distanceSquared(Vector3f(-3.0f, 4.0f, 0.0f)) == 4.0f); // left
             REQUIRE(r.distanceSquared(Vector3f(7.0f, 4.0f, 0.0f)) == 4.0f);  // right
             REQUIRE(r.distanceSquared(Vector3f(2.0f, -3.0f, 0.0f)) == 4.0f); // top
