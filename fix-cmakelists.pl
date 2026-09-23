@@ -12,7 +12,6 @@ my $state = 'look-for-opener';
 
 my @items;
 
-# skip until source files list
 while (my $line = <>) {
     chomp $line;
 

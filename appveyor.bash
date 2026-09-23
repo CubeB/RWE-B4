@@ -4,10 +4,8 @@
 
 set -euo pipefail
 
-# Install build tools.
-# Except cmake, because for some reason if you install it
-# then you'll get exit code 127 when you try to call it.
-# We'll rely on the one bundled with the machine image instead.
+# No cmake: installing it gets exit code 127 when you call it,
+# so rely on the one bundled with the machine image instead.
 pacman -Sq --needed --noconfirm \
     autoconf \
     automake \
@@ -16,7 +14,6 @@ pacman -Sq --needed --noconfirm \
     unzip \
     mingw-w64-x86_64-toolchain
 
-# Install project dependencies
 pacman -Sq --needed --noconfirm \
     mingw-w64-x86_64-boost \
     mingw-w64-x86_64-SDL2 \
@@ -28,23 +25,18 @@ pacman -Sq --needed --noconfirm \
     mingw-w64-x86_64-libpng \
     mingw-w64-x86_64-readline # need up update manually for SDL2_mixer dep
 
-# Build protobuf
 pushd libs
 ./build-protobuf.sh
 popd
 
 mkdir build
 pushd build
-
-# Build the project
 cmake -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE=$Configuration ..
 make -j 2
 ./rwe_test
 
-# Create the build artifacts
 make -j 2 package
 
-# Push the build artifacts
 pushd dist
 for i in *; do
     appveyor PushArtifact "$i"
