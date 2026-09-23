@@ -49,12 +49,20 @@ editing.
 
 Purity checks diff the current tree against a binary built from a chosen
 source state (for PR #187 that was `/tmp/pt-ref/ai_arena`, tmpfs and so
-session-scoped). To recreate one:
+session-scoped). To recreate one, build it in a worktree at the chosen
+commit:
 
-    git stash push          # or use a worktree at the chosen commit
-    cmake --build build --target ai_arena -j$(nproc)
-    cp build/ai_arena /tmp/pt-ref/ai_arena
-    git stash pop
+    git worktree add ../RWE-purity <commit>
+    cmake -S ../RWE-purity -B ../RWE-purity/build -DCMAKE_BUILD_TYPE=Release
+    cmake --build ../RWE-purity/build --target ai_arena -j$(nproc)
 
 and verify with same-seed runs diffed on the columns that must not have
 changed (`cut -d, -f1-16` when columns are being appended).
+
+A worktree and not `git stash`. A stash is a stack shared with whatever else
+is using the repository, and a purity check is exactly the moment when an
+unrelated `git stash pop` -- or a forgotten entry that was already on the
+stack -- restores the wrong tree over the one being measured. The worktree
+leaves the working copy untouched, so a build can be running in it while the
+current tree is still being edited. Remove it with `git worktree remove`
+when the comparison is done.
