@@ -1,10 +1,12 @@
 """AI-profile checker (design §3.3): F1 an expensive pass, F2 a pass spiking
 more than its budget, F3 drift against the closest earlier baseline.
 
-Reads ``ai-profile.log`` when the runner has extracted it, otherwise the
-``AI profile summary:`` lines inside ``game.log``. The engine clears its
-per-pass counters every summary window, so the whole-game total and call count
-for a pass is the sum across windows, and the mean is total/calls.
+When the run dir has an ``event-log.jsonl`` (design §9) the stats come from its
+``ai_perf`` summary events and the prose log is not read at all; otherwise the
+checker falls back to ``ai-profile.log`` (or the ``AI profile summary:`` lines
+in ``game.log``) for older run roots. The engine clears its per-pass counters
+every summary window, so the whole-game total and call count for a pass is the
+sum across windows, and the mean is total/calls.
 
 F3 is guarded: ``baselines`` is a sibling module that loads git state, and
 this checker only uses it when it is importable and answering. Every failure
@@ -17,6 +19,7 @@ import re
 from pathlib import Path
 
 from .economy import Finding, load_thresholds
+from .eventlog import event_log_path, has_event_log, read_events
 
 try:  # a sibling module; absent or mid-write while the tree is shared
     import baselines  # type: ignore
@@ -103,6 +106,37 @@ def aggregate(records) -> dict:
             entry["calls"] += calls
             entry["spikes"] += spikes
             entry["rows"].append(lineno)
+    return agg
+
+
+def aggregate_events(entries) -> dict:
+    """``aggregate()``'s shape, built from ``ai_perf`` summary events.
+
+    Only ``kind == "summary"`` events contribute: a ``spike`` event is the
+    individual slow call the summary already counted, so summing both would
+    double-count. ``ms`` is the window total, as the prose line's ``<total>ms``
+    is, and the mean stays total/calls.
+    """
+    agg: dict = {}
+    for lineno, event in entries:
+        if event.get("ev") != "ai_perf" or event.get("kind") != "summary":
+            continue
+        try:
+            player = int(event["player"])
+            name = str(event["pass"])
+            total = float(event["ms"])
+            calls = int(event["calls"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        try:
+            spikes = int(event.get("spikes", 0))
+        except (TypeError, ValueError):
+            spikes = 0
+        entry = agg.setdefault((player, name), {"total_ms": 0.0, "calls": 0, "spikes": 0, "rows": []})
+        entry["total_ms"] += total
+        entry["calls"] += calls
+        entry["spikes"] += spikes
+        entry["rows"].append(lineno)
     return agg
 
 
@@ -276,13 +310,19 @@ def rule_f3(profile_path, stats: dict, t: dict, context) -> list:
 
 def check(run_dir, context=None) -> list:
     t = _thresholds(context)
-    profile_path, entries = read_source(run_dir)
-    if profile_path is None:
+    if has_event_log(run_dir):
+        profile_path = event_log_path(run_dir)
+        stats = aggregate_events(read_events(run_dir))
+    else:
+        profile_path, entries = read_source(run_dir)
+        if profile_path is None:
+            return []
+        records = _parse_summaries(entries)
+        if not records:
+            return []
+        stats = aggregate(records)
+    if not stats:
         return []
-    records = _parse_summaries(entries)
-    if not records:
-        return []
-    stats = aggregate(records)
     findings: list = []
     findings += rule_f1(profile_path, stats, t)
     findings += rule_f2(profile_path, stats, t)

@@ -322,5 +322,161 @@ class DesyncIndexTests(unittest.TestCase):
             self.assertIsInstance(finding, Finding)
 
 
+class PathfindEventLogTests(unittest.TestCase):
+    """When event-log.jsonl exists the path_stats events are the only source."""
+
+    def _events(self, fixture):
+        return copy_fixture(fixture, tmp_dir(self), "event-log.jsonl").parent
+
+    def test_h1_hit_from_events(self):
+        findings = pathfind.check(self._events("ev-path-h1.jsonl"))
+        h1 = rules(findings, "H1:")
+        self.assertEqual(len(h1), 1)
+        self.assertEqual(h1[0].severity, "suspicious")
+        self.assertGreaterEqual(h1[0].evidence["windows"], 6)
+        self.assertEqual(h1[0].evidence["exhausted"], [3, 4, 2, 5, 3, 6])
+        self.assertTrue(h1[0].evidence["file"].endswith("event-log.jsonl"))
+
+    def test_h1_clean_from_events(self):
+        self.assertEqual(rules(pathfind.check(self._events("ev-path-clean.jsonl")), "H1:"), [])
+
+    def test_h2_hit_from_events(self):
+        h2 = rules(pathfind.check(self._events("ev-path-h2.jsonl")), "H2:")
+        self.assertEqual(len(h2), 1)
+        self.assertEqual(h2[0].evidence["counter"], "bugwalk")
+        self.assertGreaterEqual(h2[0].evidence["windows"], 10)
+        values = h2[0].evidence["values"]
+        self.assertEqual(values, sorted(values))
+        self.assertEqual(values[0], 1)
+
+    def test_h3_hit_from_events(self):
+        h3 = rules(pathfind.check(self._events("ev-path-h3.jsonl")), "H3:")
+        self.assertEqual(len(h3), 1)
+        self.assertGreaterEqual(h3[0].evidence["windows"], 6)
+        self.assertGreater(h3[0].evidence["max_queued_per_tick"], 0.5)
+
+    def test_event_log_takes_priority_over_prose(self):
+        run = self._events("ev-path-clean.jsonl")
+        copy_fixture("path-h1.log", run, "path-profile.log")
+        self.assertEqual(rules(pathfind.check(run), "H1:"), [])
+
+    def test_malformed_event_lines_are_skipped(self):
+        findings = pathfind.check(self._events("ev-malformed.jsonl"))
+        self.assertIsInstance(findings, list)
+        for finding in findings:
+            self.assertIsInstance(finding, Finding)
+
+
+class AiPerfEventLogTests(unittest.TestCase):
+    """When event-log.jsonl exists the ai_perf summary events are the only source."""
+
+    def _events(self, fixture):
+        return copy_fixture(fixture, tmp_dir(self), "event-log.jsonl").parent
+
+    def test_f1_hit_from_events(self):
+        f1 = rules(aiperf.check(self._events("ev-perf-f1.jsonl")), "F1:")
+        self.assertEqual(len(f1), 1)
+        self.assertEqual(f1[0].evidence["player"], 0)
+        self.assertEqual(f1[0].evidence["pass"], "economy")
+        self.assertEqual(f1[0].evidence["calls"], 15)
+        self.assertAlmostEqual(f1[0].evidence["mean_ms"], 800.0 / 15.0, places=4)
+        self.assertTrue(f1[0].evidence["file"].endswith("event-log.jsonl"))
+
+    def test_f2_hit_sums_spikes_from_events(self):
+        f2 = rules(aiperf.check(self._events("ev-perf-f2.jsonl")), "F2:")
+        self.assertEqual(len(f2), 1)
+        self.assertEqual(f2[0].evidence["player"], 1)
+        self.assertEqual(f2[0].evidence["pass"], "army")
+        self.assertEqual(f2[0].evidence["spikes"], 55)
+
+    def test_clean_events_report_nothing(self):
+        findings = aiperf.check(self._events("ev-perf-clean.jsonl"))
+        self.assertEqual(rules(findings, "F1:"), [])
+        self.assertEqual(rules(findings, "F2:"), [])
+
+    def test_spike_events_are_not_double_counted(self):
+        # A summary with 2 spikes plus a spike event for one of them must still
+        # count 2, not 3.
+        run = tmp_dir(self)
+        with open(run / "event-log.jsonl", "w") as fh:
+            fh.write(json.dumps({"schema": 1, "secs": 200.0, "tick": 3000, "ev": "ai_perf",
+                                 "player": 0, "pass": "economy", "ms": 12.0, "calls": 2,
+                                 "kind": "summary", "worst": 30.0, "spikes": 2}) + "\n")
+            fh.write(json.dumps({"schema": 1, "secs": 200.0, "tick": 3000, "ev": "ai_perf",
+                                 "player": 0, "pass": "economy", "ms": 30.0, "calls": 0,
+                                 "kind": "spike", "worst": 30.0, "spikes": 1}) + "\n")
+        f2 = rules(aiperf.check(run), "F2:")
+        self.assertEqual(f2, [])
+
+    def test_event_log_takes_priority_over_prose(self):
+        run = self._events("ev-perf-clean.jsonl")
+        copy_fixture("perf-f1.log", run, "ai-profile.log")
+        self.assertEqual(rules(aiperf.check(run), "F1:"), [])
+
+    def test_malformed_event_lines_are_skipped(self):
+        findings = aiperf.check(self._events("ev-malformed.jsonl"))
+        self.assertIsInstance(findings, list)
+        for finding in findings:
+            self.assertIsInstance(finding, Finding)
+
+
+class DesyncEventLogTests(unittest.TestCase):
+    SCENARIO = "standard-arms-coast"
+
+    def _pair(self, ev_r1, ev_r2, csv_r1="desync-a.csv", csv_r2="desync-a.csv"):
+        root = tmp_dir(self)
+        r1 = root / self.SCENARIO / "seed1-control-r1"
+        r2 = root / self.SCENARIO / "seed1-control-r2"
+        for directory, ev, csv in ((r1, ev_r1, csv_r1), (r2, ev_r2, csv_r2)):
+            directory.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(TESTDATA / "desync-result.log", directory / "game.log")
+            if csv is not None:
+                shutil.copyfile(TESTDATA / csv, directory / "ai-arena.csv")
+            if ev is not None:
+                shutil.copyfile(TESTDATA / ev, directory / "event-log.jsonl")
+        return root, r1, r2
+
+    def _context(self, root, r1, r2, arm):
+        return runner.RunContext(
+            self.SCENARIO, 1, arm,
+            {"control-r1": str(r1), "control-r2": str(r2)},
+            str(root), {})
+
+    def test_identical_event_logs_are_clean(self):
+        root, r1, r2 = self._pair("ev-desync-a.jsonl", "ev-desync-a.jsonl")
+        findings = desync.check(r1, self._context(root, r1, r2, "control-r1"))
+        self.assertEqual(rules(findings, "desync:"), [])
+
+    def test_divergent_event_logs_are_likely_bug(self):
+        root, r1, r2 = self._pair("ev-desync-a.jsonl", "ev-desync-b.jsonl")
+        findings = desync.check(r1, self._context(root, r1, r2, "control-r1"))
+        divergence = [f for f in findings if "event-log divergence" in f.summary]
+        self.assertEqual(len(divergence), 1)
+        self.assertEqual(divergence[0].severity, "likely-bug")
+        evidence = divergence[0].evidence
+        self.assertIsInstance(evidence["first_diff_offset"], int)
+        self.assertGreater(evidence["first_diff_offset"], 0)
+        self.assertEqual(evidence["ev"], "build_order")
+        self.assertEqual(evidence["ev_b"], "build_order")
+
+    def test_missing_event_log_keeps_csv_comparison(self):
+        root, r1, r2 = self._pair(None, None, csv_r1="desync-a.csv", csv_r2="desync-b.csv")
+        findings = desync.check(r1, self._context(root, r1, r2, "control-r1"))
+        divergence = [f for f in findings if "divergence" in f.summary]
+        self.assertEqual(len(divergence), 1)
+        self.assertNotIn("event-log", divergence[0].summary)
+
+    def test_csv_and_event_log_can_both_diverge(self):
+        root, r1, r2 = self._pair("ev-desync-a.jsonl", "ev-desync-b.jsonl",
+                                  csv_r1="desync-a.csv", csv_r2="desync-b.csv")
+        findings = desync.check(r1, self._context(root, r1, r2, "control-r1"))
+        self.assertEqual(len([f for f in findings if "divergence" in f.summary]), 2)
+
+    def test_r2_does_not_report_event_log_divergence(self):
+        root, r1, r2 = self._pair("ev-desync-a.jsonl", "ev-desync-b.jsonl")
+        findings = desync.check(r2, self._context(root, r1, r2, "control-r2"))
+        self.assertEqual([f for f in findings if "event-log divergence" in f.summary], [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

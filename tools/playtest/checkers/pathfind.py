@@ -2,11 +2,13 @@
 (the issue #155 signature), H2 growing stuck counters, H3 sustained queue
 pressure.
 
-Reads ``path-profile.log`` when the runner has extracted it, otherwise the
-``path profile `` lines inside ``game.log``. Every value is a window delta, one
-window per 300 sim ticks, so "consecutive" means the tick fields also step by
-300 -- a malformed line that drops a window must not stitch the runs either
-side of it together.
+When the run dir has an ``event-log.jsonl`` (design §9) the windows come from
+its ``path_stats`` events and the prose log is not read at all; otherwise the
+checker falls back to ``path-profile.log`` (or the ``path profile `` lines in
+``game.log``) for older run roots. Every value is a window delta, one window per
+300 sim ticks, so "consecutive" means the tick fields also step by 300 -- a
+malformed line that drops a window must not stitch the runs either side of it
+together.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import re
 from pathlib import Path
 
 from .economy import Finding, load_thresholds
+from .eventlog import event_log_path, has_event_log, read_events
 
 PROFILE_NAME = "path-profile.log"
 GAME_LOG_NAME = "game.log"
@@ -85,6 +88,43 @@ def parse_windows(entries) -> list:
                 break
         if good:
             windows.append(values)
+    return windows
+
+
+# ``path_stats`` event fields the rules read. The event's envelope ``tick`` is
+# the window tick, on the same 300-tick cadence as the prose line's ``t=``.
+_EVENT_FIELDS = {
+    "exhausted": int,
+    "bugwalk": int,
+    "walkstuck": int,
+    "queued_per_tick": float,
+}
+
+
+def parse_event_windows(entries) -> list:
+    """Same shape as :func:`parse_windows`, built from ``path_stats`` events.
+
+    Windows are returned in tick order; an event missing any field the rules
+    read is dropped rather than half-read.
+    """
+    windows = []
+    for lineno, event in entries:
+        if event.get("ev") != "path_stats":
+            continue
+        try:
+            values = {"lineno": lineno, "tick": int(event["tick"])}
+        except (KeyError, TypeError, ValueError):
+            continue
+        good = True
+        for key, caster in _EVENT_FIELDS.items():
+            try:
+                values[key] = caster(event[key])
+            except (KeyError, TypeError, ValueError):
+                good = False
+                break
+        if good:
+            windows.append(values)
+    windows.sort(key=lambda w: w["tick"])
     return windows
 
 
@@ -210,10 +250,14 @@ def rule_h3(profile_path, windows: list, t: dict) -> list:
 
 def check(run_dir, context=None) -> list:
     t = _thresholds(context)
-    profile_path, entries = read_source(run_dir)
-    if profile_path is None:
-        return []
-    windows = parse_windows(entries)
+    if has_event_log(run_dir):
+        profile_path = event_log_path(run_dir)
+        windows = parse_event_windows(read_events(run_dir))
+    else:
+        profile_path, entries = read_source(run_dir)
+        if profile_path is None:
+            return []
+        windows = parse_windows(entries)
     if not windows:
         return []
     findings: list = []

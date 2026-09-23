@@ -1,0 +1,8 @@
+{"schema":1,"secs":200.0,"tick":3000,"ev":"ai_perf","player":0,"pass":"economy","ms":8.0,"calls":2,"kind":"summary","worst":4.0,"spikes":1,"detail":"ai pass summary"}
+{"schema":1,"secs":200.0,"tick":3000,"ev":"ai_perf","player":0,"pass":"army","ms":32.5,"calls":20,"kind":"summary","worst":5.0,"spikes":2,"detail":"ai pass summary"}
+{"schema":1,"secs":200.0,"tick":3000,"ev":"ai_perf","player":1,"pass":"economy","ms":8.0,"calls":2,"kind":"summary","worst":4.2,"spikes":1,"detail":"ai pass summary"}
+{"schema":1,"secs":200.0,"tick":3000,"ev":"ai_perf","player":1,"pass":"army","ms":34.0,"calls":20,"kind":"summary","worst":5.2,"spikes":2,"detail":"ai pass summary"}
+{"schema":1,"secs":400.0,"tick":6000,"ev":"ai_perf","player":0,"pass":"economy","ms":8.5,"calls":2,"kind":"summary","worst":4.4,"spikes":2,"detail":"ai pass summary"}
+{"schema":1,"secs":400.0,"tick":6000,"ev":"ai_perf","player":0,"pass":"army","ms":35.5,"calls":20,"kind":"summary","worst":5.4,"spikes":3,"detail":"ai pass summary"}
+{"schema":1,"secs":400.0,"tick":6000,"ev":"ai_perf","player":1,"pass":"economy","ms":9.0,"calls":2,"kind":"summary","worst":4.6,"spikes":2,"detail":"ai pass summary"}
+{"schema":1,"secs":400.0,"tick":6000,"ev":"ai_perf","player":1,"pass":"army","ms":37.0,"calls":20,"kind":"summary","worst":5.6,"spikes":3,"detail":"ai pass summary"}
