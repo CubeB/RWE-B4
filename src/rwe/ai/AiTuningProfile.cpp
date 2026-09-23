@@ -208,6 +208,7 @@ namespace rwe
             || setInt("targetMetalExtractorCount", p.targetMetalExtractorCount)
             || setInt("targetConstructorCount", p.targetConstructorCount)
             || setInt("expansionConstructors", p.expansionConstructors)
+            || setInt("seaAirFactoriesWhenIsolated", p.seaAirFactoriesWhenIsolated)
             || setBool("dgunByValue", p.dgunByValue)
             || setBool("kiteWithLongerRange", p.kiteWithLongerRange)
             || setBool("answerStalledAttacks", p.answerStalledAttacks)

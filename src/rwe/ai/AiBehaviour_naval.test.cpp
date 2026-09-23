@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/ai/ai_test_util.h>
 
@@ -493,6 +494,205 @@ namespace rwe
             auto builds = ordersFor<BuildOrder>(commands, commanderId);
             REQUIRE(!builds.empty());
             REQUIRE(builds.front().unitType != "ARMSY");
+        }
+    }
+
+    TEST_CASE("naval: with nobody to walk to, the yard is the opening factory and not the lab", "[ai]")
+    {
+        // The AI opened with a kbot lab on every map, because that is what the
+        // plan does on land, and nothing asked whether what it produces could
+        // ever arrive. On a map of islands it cannot: every unit is born on our
+        // own shore and stays there. Worse, the one factory that CAN reach
+        // anybody was made to wait for it -- earlyShipyard tests
+        // `total(lab) >= 1` -- so the yard queued behind a factory building
+        // units for a war they could not attend.
+        //
+        // Two shores with water between them and a declared start position on
+        // each: the smallest map on which "our army cannot walk to anybody" is
+        // true and readable the way a player reads it off the preview.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeTwoShoresTerrain();
+
+        // 64 tiles of 16 world units, centred: the west shore is heightmap x in
+        // [0, 10), world -512 to -352, and the east shore x in [54, 64), world
+        // 352 to 512.
+        auto westStart = SimVector(-420_ss, 90_ss, 0_ss);
+        auto eastStart = SimVector(420_ss, 90_ss, 0_ss);
+
+        GameSimulation sim(makeTwoShoresTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        // Nothing that walks may cross 60-deep water. makeDef leaves
+        // maxWaterDepth at 255, which wades the whole ocean and makes the far
+        // shore perfectly reachable -- the test would then pin nothing, which
+        // is exactly how it failed the first time it was run. The constructor
+        // is the one that decides it, the ground layer being labelled for it,
+        // but all three are constrained so the fixture says what it means.
+        for (auto* type : {"ARMCOM", "ARMCK", "ARMPW"})
+        {
+            sim.unitDefinitions.at(type).movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 20u};
+        }
+
+        auto commanderId = addUnit(sim, "ARMCOM", ai, westStart, script);
+        // The opening economy, pre-built for the same reason the ordering test
+        // above pre-builds it: with the opening unmet the first want is an
+        // extractor and the ordering under test is never reached. Deliberately
+        // NO lab -- whether one is wanted at all is the question.
+        for (int i = 0; i < 3; ++i)
+        {
+            addUnit(sim, "ARMMEX", ai, SimVector(SimScalar(-470.0f + static_cast<float>(i) * 24.0f), 90_ss, 48_ss), script);
+        }
+        for (int i = 0; i < 4; ++i)
+        {
+            addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(-470.0f + static_cast<float>(i) * 24.0f), 90_ss, -48_ss), script);
+        }
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.targetMetalExtractorCount = 3;
+        REQUIRE(profile.navalFleetSize > 0);
+
+        SECTION("a start position on the far shore is not walkable, and the yard goes down first")
+        {
+            // At 2 the lab is deferred as well, which is the literal reading
+            // of the request this came from. It is not the default -- see the
+            // knob's comment and the roadmap -- so the test says so.
+            profile.seaAirFactoriesWhenIsolated = 2;
+
+            auto mapIntel = analyseMap(makeTwoShoresTerrain(), {westStart, eastStart});
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.landRouteToEnemy.has_value());
+            REQUIRE_FALSE(*bb.landRouteToEnemy);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType == "ARMSY");
+        }
+
+        SECTION("at 1 the yard goes first, and the lab still gets built")
+        {
+            // The milder of the two settings. The yard no longer queues
+            // behind a factory whose units cannot attend the war, but the lab
+            // is still wanted, because it is the AI's land builder and its
+            // base defence and not only its army.
+            profile.seaAirFactoriesWhenIsolated = 1;
+
+            auto mapIntel = analyseMap(makeTwoShoresTerrain(), {westStart, eastStart});
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType == "ARMSY");
+        }
+
+        SECTION("and once the yard stands, the lab is what comes next")
+        {
+            // The deferral is an ordering and not a ban, and this is the
+            // assertion that says so. Asked with the yard already built
+            // rather than by running on and hoping: the commander is busy
+            // with a 615-metal yard for far longer than a test wants to sit
+            // through, and "it did not appear in 400 ticks" would pin the
+            // build time and not the plan.
+            //
+            // The water between the shores is 60 deep everywhere, which
+            // clears ARMSY's MinWaterDepth=30 with room to spare.
+            profile.seaAirFactoriesWhenIsolated = 1;
+            // One yard is the target here, so the naval want is satisfied and
+            // what comes next is the question being asked.
+            profile.targetShipyardCount = 1;
+            addUnit(sim, "ARMSY", ai, SimVector(-300_ss, 0_ss, 0_ss), script);
+
+            auto mapIntel = analyseMap(makeTwoShoresTerrain(), {westStart, eastStart});
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType == "ARMLAB");
+        }
+
+        SECTION("the default is off, and the ordering is exactly what it was")
+        {
+            // Measured 2026-09-23 as a regression at both settings, so the
+            // machinery ships switched off and the lab opens on every map the
+            // way it always did. This is the assertion that says the knob
+            // costs nothing when nobody sets it; see its own comment for the
+            // numbers and for issue #197, which is the disagreement between
+            // that measurement and a play-test.
+            REQUIRE(profile.seaAirFactoriesWhenIsolated == 0);
+
+            auto mapIntel = analyseMap(makeTwoShoresTerrain(), {westStart, eastStart});
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            // The map is still read -- the blackboard says so -- and the plan
+            // still ignores it, which is the whole of what 0 means.
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.landRouteToEnemy.has_value());
+            REQUIRE_FALSE(*bb.landRouteToEnemy);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType == "ARMLAB");
+        }
+
+        SECTION("at 2 the lab is not wanted even once the yard stands")
+        {
+            profile.seaAirFactoriesWhenIsolated = 2;
+            profile.targetShipyardCount = 1;
+            addUnit(sim, "ARMSY", ai, SimVector(-300_ss, 0_ss, 0_ss), script);
+
+            auto mapIntel = analyseMap(makeTwoShoresTerrain(), {westStart, eastStart});
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType != "ARMLAB");
+        }
+
+        SECTION("with the other start on our own shore it is business as usual")
+        {
+            // The control, and it has to be the map telling the difference
+            // rather than the knob: same terrain, same profile, both starts
+            // walkable from each other.
+            auto mapIntel = analyseMap(makeTwoShoresTerrain(), {westStart, SimVector(-380_ss, 90_ss, 96_ss)});
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.landRouteToEnemy.has_value());
+            REQUIRE(*bb.landRouteToEnemy);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType == "ARMLAB");
+        }
+
+        SECTION("seaAirFactoriesWhenIsolated=0 restores the old ordering exactly")
+        {
+            profile.seaAirFactoriesWhenIsolated = 0;
+
+            auto mapIntel = analyseMap(makeTwoShoresTerrain(), {westStart, eastStart});
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType == "ARMLAB");
         }
     }
 

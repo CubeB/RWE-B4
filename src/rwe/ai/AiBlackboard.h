@@ -332,6 +332,27 @@ namespace rwe
         std::optional<SimVector> groundAnchor;
 
         /**
+         * Whether our army could walk to any start position but our own.
+         *
+         * Asked of the map's declared start positions, which is what a player
+         * reads off the preview before the game begins: ours, and the ones an
+         * opponent might be sitting on. False means no land unit we ever
+         * build can arrive anywhere by walking, which is a different game --
+         * see AiTuningProfile::seaAirFactoriesWhenIsolated, which turns the
+         * factory tier towards the yard and the air plant while it holds.
+         *
+         * Unset until the ground layer is valid, and left unset for good on
+         * a map that declares fewer than two start positions. Every reader
+         * must treat unset as "assume there is a route", which is the
+         * behaviour there was before this existed.
+         *
+         * Answered for the constructor's movement class, like everything
+         * else the ground layer answers. That is the convention throughout
+         * and not a claim that every combat unit shares its class.
+         */
+        std::optional<bool> landRouteToEnemy;
+
+        /**
          * Whether aircraft are worth spending a tier on, judged this pass
          * rather than decided once.
          *

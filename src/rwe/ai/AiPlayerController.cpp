@@ -207,6 +207,49 @@ namespace rwe
                         }
                     }
 
+                    // Can our army walk to anybody at all?
+                    //
+                    // Asked of the declared start positions, which is what a
+                    // player reads off the preview before the game starts:
+                    // ours, and the ones an opponent might be on. If not one
+                    // of the others is on ground this labelling can reach,
+                    // no land unit we ever build arrives anywhere by walking,
+                    // and the factory plan has a different answer to give
+                    // (seaAirFactoriesWhenIsolated).
+                    //
+                    // Left unset on a map declaring fewer than two starts,
+                    // and every reader takes unset as "assume a route", so
+                    // such a map behaves exactly as it did before.
+                    if (blackboard.mapIntel.valid && blackboard.mapIntel.startPositions.size() >= 2)
+                    {
+                        const auto& home = blackboard.homePosition ? *blackboard.homePosition : *blackboard.baseAnchor;
+                        auto ownIndex = nearestStartPosition(blackboard.mapIntel, home);
+                        auto anyReachable = false;
+                        for (Index i = 0; i < getSize(blackboard.mapIntel.startPositions); ++i)
+                        {
+                            if (ownIndex && i == *ownIndex)
+                            {
+                                continue;
+                            }
+                            if (reachability.isReachable(sim, blackboard.mapIntel.startPositions[i]))
+                            {
+                                anyReachable = true;
+                                break;
+                            }
+                        }
+                        if (blackboard.landRouteToEnemy != anyReachable)
+                        {
+                            LOG_INFO << "AI player " << playerId.value << ": land route to another start position: " << (anyReachable ? "yes" : "no");
+                            sim.eventLog.event(sim.gameTime.value, "ai_land_route")
+                                .set("player", playerId.value)
+                                .set("reachable", anyReachable)
+                                .set("starts", static_cast<int>(blackboard.mapIntel.startPositions.size()))
+                                .set("why", anyReachable ? "walkable" : "isolated")
+                                .detail("whether the army can walk to any other start position");
+                        }
+                        blackboard.landRouteToEnemy = anyReachable;
+                    }
+
                     blackboard.groundReachabilityValid = reachability.isValid();
                     blackboard.hasUnreachableGround = reachability.walkableTileCount() > reachability.reachableTileCount() + 64;
                     // A reachable count of 0 or 1 means setAnchor found no

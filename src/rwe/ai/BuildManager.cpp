@@ -3104,7 +3104,49 @@ namespace rwe
         {
             wantMetalExtractor();
         }
-        if (total(s.lab) < 1)
+        // The map says our army cannot walk to anybody, so a factory that
+        // makes land units is a factory whose units have nowhere to go. The
+        // tier goes to the yard and the air plant while that holds.
+        //
+        // The AI opened with a lab on every map, because that is what the
+        // plan does on land, and nothing asked whether what it produces could
+        // ever arrive. Worse, the one factory that CAN reach anybody was made
+        // to wait for it: earlyShipyard tests `total(lab) >= 1`, so on a map
+        // of islands the yard queued behind a factory building units for a
+        // war they could not attend.
+        //
+        // A deferral and not a ban, which is the whole of the request this
+        // came from. It lifts the moment land units stop being pointless --
+        // we own a transport and can carry them over, or something armed of
+        // theirs is at our own base and they are needed at home -- and it
+        // never fires at all unless there is a sea factory to build instead,
+        // so a mod with no shipyard, or a map whose water carries no fleet,
+        // cannot end up with the AI building no factory whatever.
+        //
+        // landRouteToEnemy unset means the map declared too few start
+        // positions to ask, and that reads as "assume a route": the ordering
+        // is then exactly what it was before this existed.
+        auto seaFactoryAvailable = navalFleetTarget(profile, bb) > 0 && !s.shipyard.empty();
+        auto canCarryLandUnits = !bb.transports.empty();
+        auto landUnitsNeededAtHome = !bb.enemiesNearBase.empty() || bb.phase == GamePhase::Defend;
+        auto landFactoriesPointless = profile.seaAirFactoriesWhenIsolated > 0
+            && bb.landRouteToEnemy && !*bb.landRouteToEnemy
+            && seaFactoryAvailable
+            && !canCarryLandUnits
+            && !landUnitsNeededAtHome;
+        // The kbot lab is the second step and is kept separate, because
+        // measurement drew a hard line between the two: deferring the vehicle
+        // plant and letting the yard go first is one thing, and taking away
+        // the AI's land builder and its base defence is another. See the
+        // knob's own comment and the roadmap entry.
+        auto labPointless = landFactoriesPointless && profile.seaAirFactoriesWhenIsolated >= 2;
+
+        // On an ordinary map the lab is the first factory, as it always was.
+        // On one where the army has nowhere to walk it moves BELOW the yard a
+        // few lines down -- the planner takes the first entry it can site and
+        // afford, so the order in this list is the whole mechanism, and a lab
+        // left here would win the race however the knob is set.
+        if (!landFactoriesPointless && total(s.lab) < 1)
         {
             want(s.lab);
         }
@@ -3137,11 +3179,26 @@ namespace rwe
         // met yet.
         if (profile.earlyShipyard && navalFleetTarget(profile, bb) > 0 && !s.shipyard.empty()
             && total(s.shipyard) < profile.targetShipyardCount
-            && total(s.lab) >= 1
+            // The yard does not queue behind the lab on a map where the
+            // lab is planned after it (or not at all): waiting on something
+            // deliberately placed below you holds the yard up for the whole
+            // game. See landFactoriesPointless.
+            && (landFactoriesPointless || total(s.lab) >= 1)
             && total(s.solar) >= profile.openingSolarCount
             && total(s.metalExtractor) >= profile.openingMetalExtractorCount)
         {
             want(s.shipyard);
+        }
+
+        // And the lab, second on such a map rather than first. Still wanted:
+        // it is the AI's land builder and its base defence as much as its
+        // army, and measurement was blunt about the difference between moving
+        // it and removing it -- 30 games on Hundred Isles with it removed
+        // decided 3 against 15, with both sides' armies collapsing. Only
+        // seaAirFactoriesWhenIsolated=2 drops it, and that is not the default.
+        if (landFactoriesPointless && !labPointless && total(s.lab) < 1)
+        {
+            want(s.lab);
         }
 
         // Anti-air, and it goes here -- above the radar, the towers and the
@@ -3325,7 +3382,7 @@ namespace rwe
         // With vehiclePlantFirst the order of the two is turned round, unless
         // the map is one aircraft are needed to cross: there the air plant is
         // how anything arrives at all, and does not wait.
-        auto vehiclePlantFirst = profile.vehiclePlantFirst && !airMatters && !s.vehiclePlant.empty();
+        auto vehiclePlantFirst = profile.vehiclePlantFirst && !airMatters && !landFactoriesPointless && !s.vehiclePlant.empty();
         if (vehiclePlantFirst && !metalShort && hasFactory && openingEnergy && total(s.vehiclePlant) < profile.targetVehiclePlantCount)
         {
             want(s.vehiclePlant);
@@ -3381,7 +3438,7 @@ namespace rwe
             want(s.metalExtractor);
         }
         // A vehicle plant comes last: fast scouts and tanks once the economy is ticking over.
-        if (!metalShort && total(s.airPlant) >= profile.targetAirPlantCount && total(s.vehiclePlant) < profile.targetVehiclePlantCount)
+        if (!metalShort && !landFactoriesPointless && total(s.airPlant) >= profile.targetAirPlantCount && total(s.vehiclePlant) < profile.targetVehiclePlantCount)
         {
             want(s.vehiclePlant);
         }
@@ -3394,11 +3451,22 @@ namespace rwe
         // reason to stop taking ground.
         if (spendingCapacityShort && !metalShort && hasFactory)
         {
-            if (!s.vehiclePlant.empty() && total(s.vehiclePlant) < profile.targetVehiclePlantCount + profile.surplusFactories)
+            // Spare capacity on an island map buys another yard rather than
+            // another land factory: the reasoning is the same as the opening
+            // one above, and it would be odd to defer the first lab and then
+            // buy the second out of surplus.
+            if (landFactoriesPointless)
+            {
+                if (total(s.shipyard) < profile.targetShipyardCount + profile.surplusFactories)
+                {
+                    want(s.shipyard);
+                }
+            }
+            else if (!s.vehiclePlant.empty() && total(s.vehiclePlant) < profile.targetVehiclePlantCount + profile.surplusFactories)
             {
                 want(s.vehiclePlant);
             }
-            else if (total(s.lab) < 1 + profile.surplusFactories)
+            else if (!labPointless && total(s.lab) < 1 + profile.surplusFactories)
             {
                 want(s.lab);
             }

@@ -908,6 +908,54 @@ namespace rwe
          */
         bool earlyShipyard{true};
         /**
+         * On a map where the army cannot walk to anybody, put the factory
+         * tier into the yard and the air plant instead of the kbot lab and
+         * the vehicle plant.
+         *
+         * The AI opened with a lab on every map, because that is what the
+         * plan does on land and nothing asked whether the units it makes
+         * could ever arrive. On a map of islands they cannot: they are born
+         * on our own shore and stay there, and the one factory that can
+         * reach anybody -- the yard -- was made to wait for the lab before
+         * it could even be wanted (earlyShipyard tests `total(lab) >= 1`).
+         * With this on, the lab is not wanted while the map says the army
+         * has nowhere to walk, and the yard no longer waits for it.
+         *
+         * **It is a deferral and not a ban**, which is the whole of the
+         * request it came from. Three things lift it, each of them the
+         * moment land units stop being pointless: owning a transport, so
+         * they can be carried over; something armed of theirs standing at
+         * our own base, so they are needed at home; and having no sea
+         * factory to build instead, so that a mod with no shipyard, or a map
+         * whose water does not carry a fleet, never leaves the AI with no
+         * factory at all.
+         *
+         * Three settings, because the two halves of the idea measured very
+         * differently and one of them is a regression:
+         *
+         * - 0 restores the old ordering exactly.
+         * - 1 puts the yard first and defers the VEHICLE plant, leaving the
+         *   kbot lab where it was. The lab is the AI's land builder and its
+         *   base defence as well as its army, and taking it away costs both.
+         * - 2 defers the kbot lab as well, which is the literal reading of
+         *   "other factory types than vehicle and bot".
+         *
+         * **Measured 2026-09-23 and both settings are a regression**, so
+         * the default is 0 and the machinery is kept. Paired asymmetric
+         * arena run -- the knob on p0 for thirty seeds, then on p1 for
+         * thirty -- because a symmetric run measures how evenly matched
+         * the two are and not whether either is stronger. The full
+         * numbers are in docs/ROADMAP.md.
+         *
+         * A play-test the same day says the opposite in play, and issue
+         * #197 is that disagreement: every other fault that play-test
+         * found is a reason a sea-first opening cannot pay off yet --
+         * one transport, no muster, a landing point in front of the
+         * defences, hulls parked on their own yard. Re-measure once
+         * those are closed, then set this or record the second result.
+         */
+        int seaAirFactoriesWhenIsolated{0};
+        /**
          * Land combat units the AI will go on making while there is
          * ground it cannot walk to. Above this every factory that makes
          * them goes quiet -- the kbot lab its raiders and rocket kbots,
