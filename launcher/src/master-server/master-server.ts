@@ -6,10 +6,15 @@ import { getAddr } from "../common/util";
 import { GameServer, Room } from "../game-server/game-server";
 import * as protocol from "./protocol";
 
+// The types are spelled out because yargs 18 does not infer them from the
+// defaults the way the version this was written against did. Without
+// `type: "boolean"`, --reverse-proxy parses as false and says so in the log:
+// the server then records the proxy's address as every player's, and the
+// lobby works while every game sends all the peers to the server.
 const argv = yargs(hideBin(process.argv))
-  .option("host", { alias: "h", default: undefined })
-  .option("port", { alias: "p", default: 5000 })
-  .option("reverse-proxy", { alias: "r", default: false })
+  .option("host", { alias: "h", type: "string", default: undefined })
+  .option("port", { alias: "p", type: "number", default: 5000 })
+  .option("reverse-proxy", { alias: "r", type: "boolean", default: false })
   .parseSync();
 
 const host = argv.host;

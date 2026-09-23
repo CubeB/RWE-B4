@@ -1,0 +1,24 @@
+# TLS and a hostname in front of the master server.
+#
+# The domain comes from the environment, so this file is the same on every
+# host: set RWE_MASTER_DOMAIN in deploy/.env. Caddy gets the certificate from
+# Let's Encrypt on first start and renews it by itself, which is the whole
+# reason it is here rather than nginx.
+#
+# Websockets need no configuration in Caddy 2: an upgrade is proxied like any
+# other request, which matters because socket.io will use one for every client
+# that can.
+
+{$RWE_MASTER_DOMAIN} {
+	# X-Forwarded-For is set by this directive, and the server reads the last
+	# entry of it when started with --reverse-proxy. That address is what the
+	# lobby hands to other players so they can connect to each other directly,
+	# so getting it wrong does not break the lobby -- it breaks the game,
+	# later, by sending everybody to this machine.
+	reverse_proxy master-server:5000
+
+	log {
+		output stdout
+		format console
+	}
+}

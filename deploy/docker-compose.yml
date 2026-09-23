@@ -1,0 +1,45 @@
+# The master server and its TLS terminator, for a small always-on host.
+#
+#   cd deploy
+#   cp .env.example .env     # and put your domain in it
+#   docker compose up -d --build
+#
+# Nothing here holds state that matters except Caddy's certificates, which are
+# in a named volume so a rebuild does not ask Let's Encrypt for new ones. The
+# lobby's own state -- who is in which room -- lives in the server's memory and
+# is meant to: a restart ends the lobbies, and the games already running are
+# peer-to-peer and carry on without it.
+
+services:
+  master-server:
+    build:
+      context: ../launcher
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Behind Caddy, so the forwarded address is the one to believe.
+    command: ["--port", "5000", "--reverse-proxy"]
+    expose:
+      - "5000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      RWE_MASTER_DOMAIN: ${RWE_MASTER_DOMAIN:?set RWE_MASTER_DOMAIN in deploy/.env}
+    ports:
+      - "80:80"
+      - "443:443"
+      # HTTP/3. Harmless if the client never asks for it, and Caddy advertises
+      # it whether or not this is open, so leaving it shut means clients trying
+      # a protocol that cannot answer.
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - master-server
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -15,6 +15,7 @@
     "start": "npm run build:main && cross-env RWE_LAUNCHER_IS_DEV=1 electron ./dist/main.js",
     "server": "cross-env RWE_LAUNCHER_IS_DEV=1 webpack serve --config webpack.renderer.config.js",
     "master-server": "npm run build:master && node dist/master-server.js",
+    "start:master": "node dist/master-server.js",
     "clean": "rm -rf ./dist",
     "package": "npm run build:all:prod && electron-packager dist --arch=x64 --overwrite --asar",
     "lint": "eslint .",

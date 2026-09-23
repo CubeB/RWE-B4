@@ -1,0 +1,8 @@
+# The build installs from the lockfile and compiles from src; everything else
+# is either enormous (node_modules, dist) or irrelevant to a server that draws
+# nothing (the renderer's assets, Storybook).
+node_modules
+dist
+.storybook
+storybook-static
+*.log
