@@ -37,6 +37,7 @@
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/UnitSpatialIndex.h>
 #include <rwe/sim/UnitState.h>
+#include <map>
 #include <set>
 #include <unordered_map>
 #include <vector>
@@ -192,6 +193,24 @@ namespace rwe
         /** Who lost the unit and who killed it, where the sim knows. Scene-facing; not hashed. */
         std::optional<PlayerId> owner{};
         std::optional<PlayerId> killerOwner{};
+    };
+
+    /**
+     * What the arena report needs to say about a death that the unit list
+     * cannot: how it died and, where the simulation knows it, what struck the
+     * blow. Written by the death paths into `unitDeathObservations`, read by
+     * AiArenaReport, and pure observation -- neither hashed, saved nor
+     * dumped, and never read by the simulation.
+     *
+     * `cause` is a snake_case tag in the vocabulary of the eleven decoded
+     * death causes (TOTALA-EXE-WRECKS.md), named only as far as the engine
+     * actually distinguishes them.
+     */
+    struct UnitDeathObservation
+    {
+        std::string cause;
+        std::string killerType;
+        std::optional<PlayerId> killerPlayer;
     };
 
     /**
@@ -591,6 +610,14 @@ namespace rwe
          * change to what it records cannot change an outcome.
          */
         SimEventLog eventLog;
+
+        /**
+         * Death evidence for the arena report, keyed by raw unit id and
+         * written where the death actually happens. Like `eventLog`, pure
+         * observation: neither hashed, saved nor dumped, never read by the
+         * simulation, and so incapable of changing an outcome.
+         */
+        std::map<unsigned int, UnitDeathObservation> unitDeathObservations;
 
         explicit GameSimulation(MapTerrain&& terrain, unsigned char surfaceMetal, int minWindSpeed, int maxWindSpeed);
 

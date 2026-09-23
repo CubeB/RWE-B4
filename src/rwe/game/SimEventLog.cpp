@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/util/SimpleLogger.h>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -16,6 +17,7 @@ namespace rwe
     struct SimEventLog::Impl
     {
         using Value = std::variant<
+            std::monostate,
             bool,
             int,
             unsigned int,
@@ -159,6 +161,12 @@ namespace rwe
         return *this;
     }
 
+    SimEventLog::Event& SimEventLog::Event::set(const std::string& key, std::nullptr_t)
+    {
+        log->impl->addField(index, key, std::monostate{});
+        return *this;
+    }
+
     SimEventLog::Event& SimEventLog::Event::detail(const std::string& text)
     {
         return set("detail", text);
@@ -182,7 +190,18 @@ namespace rwe
             j["ev"] = pending.ev;
             for (const auto& field : pending.fields)
             {
-                j[field.key] = std::visit([](const auto& v) { return nlohmann::json(v); }, field.value);
+                j[field.key] = std::visit(
+                    [](const auto& v) -> nlohmann::json {
+                        if constexpr (std::is_same_v<std::decay_t<decltype(v)>, std::monostate>)
+                        {
+                            return nullptr;
+                        }
+                        else
+                        {
+                            return nlohmann::json(v);
+                        }
+                    },
+                    field.value);
             }
             out << j.dump() << '\n';
         }

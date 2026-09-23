@@ -41,6 +41,27 @@ namespace rwe
         constexpr unsigned int BlockedSiteRetryTicks = 30;
         constexpr unsigned int BlockedSiteAttempts = 10;
 
+        /**
+         * Records how a unit died for the arena report. The attacker's type
+         * and owner are read while it still exists; a blow from nothing (a
+         * scuttle, a reclaim, a game-end wipe) leaves them empty. Pure
+         * observation -- see UnitDeathObservation.
+         */
+        void recordUnitDeath(GameSimulation& sim, UnitId unitId, const std::string& cause, std::optional<UnitId> attacker)
+        {
+            UnitDeathObservation observation;
+            observation.cause = cause;
+            if (attacker && *attacker != unitId)
+            {
+                if (auto attackerUnit = sim.tryGetUnitState(*attacker))
+                {
+                    observation.killerType = attackerUnit->get().unitType;
+                    observation.killerPlayer = attackerUnit->get().owner;
+                }
+            }
+            sim.unitDeathObservations[unitId.value] = std::move(observation);
+        }
+
     }
 
     bool GamePlayerInfo::addResourceDelta(const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal)
@@ -958,6 +979,7 @@ namespace rwe
             auto carriedRef = tryGetUnitState(carriedId);
             if (carriedRef && carriedRef->get().isAlive())
             {
+                recordUnitDeath(*this, carriedId, "carrier_died", attacker);
                 killUnit(carriedId, attacker);
             }
         }
@@ -1005,6 +1027,7 @@ namespace rwe
 
         // Reclaimed units vanish quietly: no wreck, no explosion.
         unit.markAsDeadNoCorpse();
+        recordUnitDeath(*this, targetId, "reclaimed", std::nullopt);
 
         // Death cause 5, and the one place the original checks who is doing it
         // before moving a counter: 0x486899 tests the recorded killer against
@@ -1130,6 +1153,7 @@ namespace rwe
         // The owner is filled in like any other death: the scene needs it to
         // decide whether the blast is one the local player is entitled to
         // see, and by the time it reads the event the unit is gone.
+        recordUnitDeath(*this, unitId, "self_destruct", std::nullopt);
         events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, UnitDiedEvent::DeathType::SelfDestructed, unit.owner});
 
         const auto& explosion = unitDefinition.selfDestructAs.empty() ? unitDefinition.explodeAs : unitDefinition.selfDestructAs;
@@ -2670,6 +2694,7 @@ namespace rwe
 
     void GameSimulation::removeUnfinishedUnit(UnitId unitId)
     {
+        recordUnitDeath(*this, unitId, "unfinished", std::nullopt);
         quietlyKillUnit(unitId, false);
     }
 
@@ -3248,6 +3273,7 @@ namespace rwe
 
         if (unit.hitPoints <= damagePoints)
         {
+            recordUnitDeath(*this, unitId, "weapon", attacker);
             if (unit.isBeingBuilt(unitDefinition))
             {
                 // Units that are still under construction
@@ -3784,6 +3810,7 @@ namespace rwe
                 continue;
             }
 
+            recordUnitDeath(*this, p.first, "self_destruct", std::nullopt);
             killUnit(p.first);
         }
     }

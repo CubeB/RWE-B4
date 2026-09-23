@@ -643,6 +643,25 @@ namespace rwe
         /** The newest loss already read, so each is counted once. */
         std::optional<GameTime> lostDefencesReadUpTo;
         /**
+         * A factory currently held, so a hold that lasts is logged on its
+         * transitions rather than once per planning pass -- a repeated state
+         * was ~2,600 events in one game. `kind` is "queue" (the queue has not
+         * drained) or "tier_two" (held for the tier-two reserve); `subject` is
+         * what is held, so a change of queue or target is a transition too.
+         * Mutable because planFactories is const, and observer-only: nothing
+         * but the logging reads it and it cannot change an outcome.
+         */
+        struct FactoryHoldSpell
+        {
+            std::string kind;
+            std::string factory;
+            std::string subject;
+            GameTime since;
+            bool seenThisPass{false};
+        };
+        mutable std::map<unsigned int, FactoryHoldSpell> factoryHoldSpells;
+
+        /**
          * Whether the commander's current spell below the repair line has
          * been logged. Written to the log and read by nothing else, so it
          * cannot change an outcome.

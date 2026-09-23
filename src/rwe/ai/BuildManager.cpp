@@ -3731,6 +3731,58 @@ namespace rwe
             }
         }
 
+        // A hold that lasts is a state, not a transition. Log the spell when
+        // it begins, when what is held changes, and when it ends, and mark it
+        // seen so the sweep after the loop can find the ones that stopped.
+        auto holdSubject = [](const UnitState& factory) {
+            std::string subject;
+            for (const auto& [type, count] : factory.buildQueue)
+            {
+                if (!subject.empty())
+                {
+                    subject += ',';
+                }
+                subject += type + "x" + std::to_string(count);
+            }
+            return subject;
+        };
+
+        auto emitFactoryHold = [&](const std::string& ev, const std::string& factoryType, UnitId factoryId, int queueSize, const std::string& subject, const std::string& why, unsigned int heldFor, const std::string& detail) {
+            sim.eventLog.event(sim.gameTime.value, ev)
+                .set("player", aiOwner.value)
+                .set("unit", factoryId.value)
+                .set("factory", factoryType)
+                .set("queue", queueSize)
+                .set("subject", subject)
+                .set("held_for", heldFor)
+                .set("why", why)
+                .detail(detail);
+        };
+
+        auto trackFactoryHold = [&](const std::string& ev, const std::string& kind, const std::string& factoryType, UnitId factoryId, int queueSize, const std::string& subject) {
+            auto it = factoryHoldSpells.find(factoryId.value);
+            if (it == factoryHoldSpells.end())
+            {
+                emitFactoryHold(
+                    ev, factoryType, factoryId, queueSize, subject,
+                    kind == "queue" ? "queue_not_drained" : "tier_two_economy", 0,
+                    kind == "queue" ? "the queue still holds something" : "holds production for the tier-two economy");
+                factoryHoldSpells[factoryId.value] = FactoryHoldSpell{kind, factoryType, subject, sim.gameTime, true};
+                return;
+            }
+            if (it->second.subject != subject || it->second.kind != kind)
+            {
+                emitFactoryHold(
+                    ev, factoryType, factoryId, queueSize, subject,
+                    kind == "queue" ? "queue_changed" : "tier_two_target_changed",
+                    sim.gameTime.value - it->second.since.value,
+                    kind == "queue" ? "the held queue changed" : "the held tier-two target changed");
+                it->second.kind = kind;
+                it->second.subject = subject;
+            }
+            it->second.seenThisPass = true;
+        };
+
         for (auto factoryId : bb.factories)
         {
             const auto& factory = sim.getUnitState(factoryId);
@@ -3788,13 +3840,7 @@ namespace rwe
                 // asked for anything again. Nothing recorded that until now.
                 LOG_DEBUG << "AI factory: " << factory.unitType << " " << factoryId.value
                           << " skipped, queue holds " << factory.buildQueue.size();
-                sim.eventLog.event(sim.gameTime.value, "factory_hold")
-                    .set("player", aiOwner.value)
-                    .set("unit", factoryId.value)
-                    .set("factory", factory.unitType)
-                    .set("queue", factory.buildQueue.size())
-                    .set("why", "queue_not_drained")
-                    .detail("skipped, the queue still holds something");
+                trackFactoryHold("factory_hold", "queue", factory.unitType, factoryId, static_cast<int>(factory.buildQueue.size()), holdSubject(factory));
                 continue;
             }
 
@@ -4165,13 +4211,7 @@ namespace rwe
                 if (nextDef != sim.unitDefinitions.end() && !nextDef->second.builder)
                 {
                     LOG_DEBUG << "AI factory: " << factory.unitType << " " << factoryId.value << " holds " << next << " for the tier-two economy";
-                    sim.eventLog.event(sim.gameTime.value, "factory_hold_t2")
-                        .set("player", aiOwner.value)
-                        .set("unit", factoryId.value)
-                        .set("factory", factory.unitType)
-                        .set("target", next)
-                        .set("why", "tier_two_economy")
-                        .detail("holds production for the tier-two economy");
+                    trackFactoryHold("factory_hold_t2", "tier_two", factory.unitType, factoryId, 0, next);
                     next.clear();
                 }
             }
@@ -4199,6 +4239,29 @@ namespace rwe
                     .detail("factory starts a unit");
                 outCommands.emplace_back(PlayerUnitCommand(factoryId, PlayerUnitCommand::ModifyBuildQueue{1, next}));
             }
+        }
+
+        // A hold that was not seen this pass has ended: the queue drained, the
+        // reserve lifted, or the factory is gone. Emit the end with how long it
+        // lasted, then forget it.
+        for (auto it = factoryHoldSpells.begin(); it != factoryHoldSpells.end();)
+        {
+            if (it->second.seenThisPass)
+            {
+                it->second.seenThisPass = false;
+                ++it;
+                continue;
+            }
+            const bool tierTwo = it->second.kind == "tier_two";
+            sim.eventLog.event(sim.gameTime.value, tierTwo ? "factory_hold_t2" : "factory_hold")
+                .set("player", aiOwner.value)
+                .set("unit", it->first)
+                .set("factory", it->second.factory)
+                .set("subject", it->second.subject)
+                .set("held_for", sim.gameTime.value - it->second.since.value)
+                .set("why", tierTwo ? "tier_two_released" : "queue_drained")
+                .detail("the hold ended");
+            it = factoryHoldSpells.erase(it);
         }
     }
 
