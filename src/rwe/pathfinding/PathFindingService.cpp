@@ -321,12 +321,6 @@ namespace rwe
 
     void PathFindingService::logCounters(const GameSimulation& simulation)
     {
-        static const bool on = std::getenv("RWE_PATH_PROFILE") != nullptr;
-        if (!on)
-        {
-            return;
-        }
-
         constexpr long long reportEvery = 300;
         if (counters.ticks % reportEvery != 0)
         {
@@ -338,22 +332,51 @@ namespace rwe
         auto searches = counters.searches - last.searches;
         auto deferred = counters.deferredRequests - last.deferredRequests;
         auto waiting = counters.ticksWithQueue - last.ticksWithQueue;
-        LOG_INFO << "path profile t=" << simulation.gameTime.value
-                 << " searches=" << searches
-                 << " expansions=" << (counters.expansions - last.expansions)
-                 << " suspended=" << (counters.searchesSuspended - last.searchesSuspended)
-                 << " abandoned=" << (counters.searchesAbandoned - last.searchesAbandoned)
-                 << " exhausted=" << (counters.searchesExhausted - last.searchesExhausted)
-                 << " relaxed=" << (counters.searchesRelaxed - last.searchesRelaxed)
-                 << " bugwalk=" << (counters.bugWalkSteps - last.bugWalkSteps)
-                 << " wasted=" << (counters.expansionsExhausted - last.expansionsExhausted) << "+" << (counters.expansionsAbandoned - last.expansionsAbandoned)
-                 << " worst=" << counters.maxSearchExpansions
-                 << " goalblocked=" << (counters.searchesGoalBlocked - last.searchesGoalBlocked)
-                 << "/" << (counters.searchesGoalRelaxed - last.searchesGoalRelaxed)
-                 << " walkstuck=" << (counters.searchesWalkStuck - last.searchesWalkStuck)
-                 << " queued/tick=" << (ticks > 0 ? static_cast<double>(deferred) / static_cast<double>(ticks) : 0.0)
-                 << " ticks with a queue=" << waiting << "/" << ticks
-                 << " deepest ever=" << counters.maxQueue;
+        auto queuedPerTick = ticks > 0 ? static_cast<double>(deferred) / static_cast<double>(ticks) : 0.0;
+
+        // Always on (design §9): the event is cheap and the prose line below
+        // is not, so the counters are emitted whether or not the prose
+        // profiler was asked for.
+        simulation.eventLog.event(simulation.gameTime.value, "path_stats")
+            .set("searches", searches)
+            .set("expansions", counters.expansions - last.expansions)
+            .set("suspended", counters.searchesSuspended - last.searchesSuspended)
+            .set("abandoned", counters.searchesAbandoned - last.searchesAbandoned)
+            .set("exhausted", counters.searchesExhausted - last.searchesExhausted)
+            .set("relaxed", counters.searchesRelaxed - last.searchesRelaxed)
+            .set("bugwalk", counters.bugWalkSteps - last.bugWalkSteps)
+            .set("wasted_stand_in", counters.expansionsExhausted - last.expansionsExhausted)
+            .set("wasted_other", counters.expansionsAbandoned - last.expansionsAbandoned)
+            .set("worst", counters.maxSearchExpansions)
+            .set("goalblocked", counters.searchesGoalBlocked - last.searchesGoalBlocked)
+            .set("goalblocked_total", counters.searchesGoalRelaxed - last.searchesGoalRelaxed)
+            .set("walkstuck", counters.searchesWalkStuck - last.searchesWalkStuck)
+            .set("queued_per_tick", queuedPerTick)
+            .set("ticks_with_queue", waiting)
+            .set("ticks_total", ticks)
+            .set("deepest_ever", counters.maxQueue)
+            .detail("path counters");
+
+        static const bool on = std::getenv("RWE_PATH_PROFILE") != nullptr;
+        if (on)
+        {
+            LOG_INFO << "path profile t=" << simulation.gameTime.value
+                     << " searches=" << searches
+                     << " expansions=" << (counters.expansions - last.expansions)
+                     << " suspended=" << (counters.searchesSuspended - last.searchesSuspended)
+                     << " abandoned=" << (counters.searchesAbandoned - last.searchesAbandoned)
+                     << " exhausted=" << (counters.searchesExhausted - last.searchesExhausted)
+                     << " relaxed=" << (counters.searchesRelaxed - last.searchesRelaxed)
+                     << " bugwalk=" << (counters.bugWalkSteps - last.bugWalkSteps)
+                     << " wasted=" << (counters.expansionsExhausted - last.expansionsExhausted) << "+" << (counters.expansionsAbandoned - last.expansionsAbandoned)
+                     << " worst=" << counters.maxSearchExpansions
+                     << " goalblocked=" << (counters.searchesGoalBlocked - last.searchesGoalBlocked)
+                     << "/" << (counters.searchesGoalRelaxed - last.searchesGoalRelaxed)
+                     << " walkstuck=" << (counters.searchesWalkStuck - last.searchesWalkStuck)
+                     << " queued/tick=" << queuedPerTick
+                     << " ticks with a queue=" << waiting << "/" << ticks
+                     << " deepest ever=" << counters.maxQueue;
+        }
         last = counters;
     }
 

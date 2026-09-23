@@ -22,8 +22,11 @@ Hard rules:
   section before your first edit.
 - Only modify what a task assigns you, typically: `src/ai_arena.cpp`,
   `src/rwe/AiArenaReport.{h,cpp}` and small helpers they already use. Never
-  modify `src/rwe/sim/`, `save_util`, `GameHash_util`, `dump_util`, or
-  anything under `tools/` (a concurrent agent owns `tools/playtest/`).
+  modify `save_util`, `GameHash_util`, or `dump_util`, and never change sim
+  behaviour. Observer-only members on sim-side classes are permitted when a
+  task assigns them, provided they are added to neither the sync hash, the
+  save, nor the state dump, and never touch the simulation RNG. Nothing under
+  `tools/` (a concurrent agent owns `tools/playtest/`).
 - C++ in namespace `rwe`, Allman braces, 4-space indent, match surrounding
   style. No comments unless they carry a non-obvious why.
 - Build in `build/` (already configured, Unix Makefiles): `make -j$(nproc)

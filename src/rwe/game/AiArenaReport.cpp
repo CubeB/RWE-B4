@@ -486,6 +486,12 @@ namespace rwe
             LOG_ERROR << "AI arena: could not write " << runJsonPath.string();
         }
 
+        // The structured event stream beside the CSVs (design §9): sim-tick
+        // facts only, so same-seed runs produce byte-identical logs.
+        auto eventLogPath = csvPath;
+        eventLogPath.replace_filename("event-log.jsonl");
+        sim.eventLog.write(eventLogPath);
+
         // The summary line is what a batch script reads. One field per player,
         // in player order, so a run of twenty games can be reduced with grep
         // and awk and nothing else.

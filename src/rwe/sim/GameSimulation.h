@@ -10,6 +10,7 @@
 #include <rwe/game/GameParameters.h>
 #include <rwe/game/PlayerColorIndex.h>
 #include <rwe/game/PlayerCommand.h>
+#include <rwe/game/SimEventLog.h>
 #include <rwe/geometry/BoundingBox3x.h>
 #include <rwe/pathfinding/PathFindingService.h>
 #include <rwe/sim/FeatureDefinition.h>
@@ -582,6 +583,14 @@ namespace rwe
         // takeAiCommandsForPlayer(). One element per tick — accumulate, then
         // drain, then refill.
         std::unordered_map<PlayerId, std::vector<PlayerCommand>> aiPendingCommands;
+
+        /**
+         * The structured event log for design §9, buffered here as pure
+         * observer state and flushed by AiArenaReport::write. It is neither
+         * hashed, saved nor dumped, and the simulation never reads it, so a
+         * change to what it records cannot change an outcome.
+         */
+        SimEventLog eventLog;
 
         explicit GameSimulation(MapTerrain&& terrain, unsigned char surfaceMetal, int minWindSpeed, int maxWindSpeed);
 
