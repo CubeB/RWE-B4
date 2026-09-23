@@ -47,6 +47,7 @@ class PlannedRun:
     scenario: str
     seed: int
     arm: str
+    base_arm: str
     map: str
     duration_s: int
     players: list
@@ -113,7 +114,7 @@ def normalize_players(scenario: dict) -> list:
     return players
 
 
-def expand(matrix: dict, scenario_filter=None, seeds_override=None) -> list:
+def expand(matrix: dict, scenario_filter=None, seeds_override=None, repeat_seeds=None) -> list:
     runs = []
     for scenario in matrix.get("scenarios", []):
         sid = scenario["id"]
@@ -127,17 +128,22 @@ def expand(matrix: dict, scenario_filter=None, seeds_override=None) -> list:
         arms = ["tuned", "control"] if tune else ["control"]
         for seed in seeds:
             for arm in arms:
-                runs.append(PlannedRun(
-                    run_id=f"{sid}/seed{seed}-{arm}",
-                    scenario=sid,
-                    seed=int(seed),
-                    arm=arm,
-                    map=scenario["map"],
-                    duration_s=int(scenario["duration_s"]),
-                    players=players,
-                    tune=tune if arm == "tuned" else {},
-                    start_location=scenario.get("start_location"),
-                ))
+                # A repeated seed is run twice under -r1/-r2 dir suffixes so
+                # the desync checker can byte-compare the pair.
+                arm_names = [f"{arm}-r{i}" for i in (1, 2)] if seed in (repeat_seeds or ()) else [arm]
+                for arm_name in arm_names:
+                    runs.append(PlannedRun(
+                        run_id=f"{sid}/seed{seed}-{arm_name}",
+                        scenario=sid,
+                        seed=int(seed),
+                        arm=arm_name,
+                        base_arm=arm,
+                        map=scenario["map"],
+                        duration_s=int(scenario["duration_s"]),
+                        players=players,
+                        tune=tune if arm == "tuned" else {},
+                        start_location=scenario.get("start_location"),
+                    ))
     return runs
 
 
@@ -202,7 +208,7 @@ def build_command(binary, run: PlannedRun, run_dir) -> list:
     if run.start_location:
         cmd += ["--start-location", run.start_location]
 
-    if run.arm == "tuned":
+    if run.base_arm == "tuned":
         for player_index, knobs in run.tune.items():
             for knob, value in knobs.items():
                 cmd += ["--ai-tune", f"{player_index}:{knob}={_fmt_value(value)}"]
@@ -433,7 +439,8 @@ def parse_seed_list(value):
 
 def do_plan(args) -> int:
     matrix = load_matrix(args.matrix)
-    runs = expand(matrix, parse_id_list(args.scenarios), parse_seed_list(args.seeds))
+    runs = expand(matrix, parse_id_list(args.scenarios), parse_seed_list(args.seeds),
+                  parse_seed_list(args.repeat_seeds))
     root = run_root_for(args.matrix)
     print(f"run root: {root}")
     for run in runs:
@@ -444,7 +451,8 @@ def do_plan(args) -> int:
 
 def do_execute(args) -> int:
     matrix = load_matrix(args.matrix)
-    runs = expand(matrix, parse_id_list(args.scenarios), parse_seed_list(args.seeds))
+    runs = expand(matrix, parse_id_list(args.scenarios), parse_seed_list(args.seeds),
+                  parse_seed_list(args.repeat_seeds))
     if not runs:
         print("no runs to execute", file=sys.stderr)
         return 1
@@ -479,6 +487,23 @@ def do_execute(args) -> int:
 
     failed = [r for r in ordered
               if r.status == "timeout" or r.status.startswith("exit-") or r.status == "no-result"]
+
+    # Baselines are only meaningful from a current binary: a stale binary
+    # (the fake harness in tests included) must never write one.
+    if not args.no_baselines and not failed and not stale:
+        try:
+            import baselines  # noqa: E402  (lazy: a broken module must not fail a run)
+        except Exception as exc:  # noqa: BLE001  (import errors included)
+            print(f"baselines unavailable: {exc}", file=sys.stderr)
+        else:
+            try:
+                written = baselines.write_baselines(root, REPO_ROOT)
+            except Exception as exc:  # noqa: BLE001  (observer only)
+                print(f"baseline write failed: {exc}", file=sys.stderr)
+            else:
+                if written:
+                    print(f"baselines: {written}")
+
     if failed:
         return 1
     if findings:
@@ -501,7 +526,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--execute", action="store_true", help="execute the planned runs")
     parser.add_argument("--scenarios", default=None, help="comma-separated scenario ids to keep")
     parser.add_argument("--seeds", default=None, help="comma-separated seed override")
+    parser.add_argument("--repeat-seeds", default=None,
+                        help="comma-separated seeds to run twice (same arm, -r1/-r2) for desync checking")
     parser.add_argument("--binary", default=None, help="path to the ai_arena binary")
+    parser.add_argument("--no-baselines", action="store_true",
+                        help="skip baseline writing and reading")
     parser.add_argument("--jobs", type=int, default=None, help="parallel workers (default nproc/2)")
     parser.add_argument("--watchdog-seconds", type=float, default=None, help="per-run wall-clock budget override")
     parser.add_argument("--check-only", default=None, metavar="RUNROOT", help="check an existing run root")

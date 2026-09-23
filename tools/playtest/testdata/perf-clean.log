@@ -1,0 +1,4 @@
+AI profile summary: player 0 at tick 3000, total 40.000000 ms: economy=7.500000ms/2 (worst 4.000000ms, 1 spikes) army=32.500000ms/20 (worst 5.000000ms, 2 spikes)
+AI profile summary: player 1 at tick 3000, total 42.000000 ms: economy=8.000000ms/2 (worst 4.200000ms, 1 spikes) army=34.000000ms/20 (worst 5.200000ms, 2 spikes)
+AI profile summary: player 0 at tick 6000, total 44.000000 ms: economy=8.500000ms/2 (worst 4.400000ms, 2 spikes) army=35.500000ms/20 (worst 5.400000ms, 3 spikes)
+AI profile summary: player 1 at tick 6000, total 46.000000 ms: economy=9.000000ms/2 (worst 4.600000ms, 2 spikes) army=37.000000ms/20 (worst 5.600000ms, 3 spikes)

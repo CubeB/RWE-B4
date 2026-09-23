@@ -72,15 +72,33 @@ def main():
     else:
         (out / "ai-arena.csv").write_text(minimal_csv())
 
-    (out / "ai-arena-events.csv").write_text(
+    # Alive counts must agree with the AI-ARENA-RESULT line below or the
+    # invariant checker fires on every fake run. The economy and factory
+    # completions keep the production checker's milestones satisfied for a
+    # full-length game.
+    events_rows = [
         "player,unitType,category,isBuilding,startedTick,startedSeconds,"
         "completedTick,completedSeconds,diedTick,diedSeconds,"
         "x,z,enemiesNear,nearestEnemyType,friendlyArmyNear,friendlyTowersNear\n"
-    )
+    ]
+    extras = ((0, "ARMMEX", "economy", 60), (0, "ARMLAB", "factory", 300),
+              (1, "CORMEX", "economy", 60), (1, "CORLAB", "factory", 300))
+    for player, unit_type in ((0, "ARMW"), (1, "CORW")):
+        for i in range(10):
+            events_rows.append(
+                f"{player},{unit_type},army,0,50,5,100,10,,,"
+                f"{100 + i},{200 + i},0,,0,0\n"
+            )
+        for _, unit_type, category, completed in extras[player * 2:player * 2 + 2]:
+            events_rows.append(
+                f"{player},{unit_type},{category},1,10,1,{completed},{completed},,,"
+                f"90,{190 + player},0,,0,0\n"
+            )
+    (out / "ai-arena-events.csv").write_text("".join(events_rows))
 
     log_lines = ["AI arena: fake harness"]
     if os.environ.get("FAKE_ARENA_NO_RESULT") != "1":
-        log_lines.append("AI-ARENA-RESULT ticks=9000 seconds=900 | p0=ARM alive units=10 | p1=CORE alive units=10")
+        log_lines.append("AI-ARENA-RESULT ticks=9000 seconds=900 | p0=ARM alive units=12 | p1=CORE alive units=12")
     log_path.write_text("\n".join(log_lines) + "\n")
 
     if os.environ.get("FAKE_ARENA_RUN_JSON") != "0":

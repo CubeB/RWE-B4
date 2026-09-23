@@ -1,0 +1,4 @@
+player,unitType,category,isBuilding,startedTick,startedSeconds,completedTick,completedSeconds,diedTick,diedSeconds,x,z,enemiesNear,nearestEnemyType,friendlyArmyNear,friendlyTowersNear
+0,ARMX,economy
+
+1,ARMY,army,0,0,0,100,10,3000,300,10,20,0,,,

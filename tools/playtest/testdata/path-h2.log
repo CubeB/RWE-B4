@@ -1,0 +1,12 @@
+path profile t=300 searches=10 expansions=100 suspended=0 abandoned=0 exhausted=0 relaxed=0 bugwalk=1 wasted=0+0 worst=5 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=3
+path profile t=600 searches=10 expansions=100 suspended=0 abandoned=0 exhausted=0 relaxed=0 bugwalk=2 wasted=0+0 worst=5 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=3
+path profile t=900 searches=10 expansions=100 suspended=0 abandoned=0 exhausted=0 relaxed=0 bugwalk=3 wasted=0+0 worst=5 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=3
+path profile t=1200 searches=10 expansions=100 suspended=0 abandoned=0 exhausted=0 relaxed=0 bugwalk=4 wasted=0+0 worst=5 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=3
+path profile t=1500 searches=10 expansions=100 suspended=0 abandoned=0 exhausted=0 relaxed=0 bugwalk=5 wasted=0+0 worst=5 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=3
+path profile t=1800 searches=10 expansions=100 suspended=0 abandoned=0 exhausted=0 relaxed=0 bugwalk=6 wasted=0+0 worst=5 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=3
+path profile t=2100 searches=10 expansions=100 suspended=0 abandoned=0 exhausted=0 relaxed=0 bugwalk=7 wasted=0+0 worst=5 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=3
+path profile t=2400 searches=10 expansions=100 suspended=0 abandoned=0 exhausted=0 relaxed=0 bugwalk=8 wasted=0+0 worst=5 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=3
+path profile t=2700 searches=10 expansions=100 suspended=0 abandoned=0 exhausted=0 relaxed=0 bugwalk=9 wasted=0+0 worst=5 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=3
+path profile t=3000 searches=10 expansions=100 suspended=0 abandoned=0 exhausted=0 relaxed=0 bugwalk=10 wasted=0+0 worst=5 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=3
+path profile t=3300 searches=10 expansions=100 suspended=0 abandoned=0 exhausted=0 relaxed=0 bugwalk=11 wasted=0+0 worst=5 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=3
+path profile t=3600 searches=10 expansions=100 suspended=0 abandoned=0 exhausted=0 relaxed=0 bugwalk=12 wasted=0+0 worst=5 goalblocked=0/0 walkstuck=0 queued/tick=0.0 ticks with a queue=0/300 deepest ever=3

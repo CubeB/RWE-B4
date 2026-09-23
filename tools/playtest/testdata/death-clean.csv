@@ -1,0 +1,5 @@
+player,unitType,category,isBuilding,startedTick,startedSeconds,completedTick,completedSeconds,diedTick,diedSeconds,x,z,enemiesNear,nearestEnemyType,friendlyArmyNear,friendlyTowersNear
+0,ARMMEX,economy,0,0,0,100,10,3000,300,100,200,2,CORAK,1,1
+0,ARMPW,army,0,0,0,100,10,3100,310,100,200,1,CORAK,3,0
+1,CORPEEP,scout,0,0,0,100,10,2500,250,100,200,1,ARMPW,,
+0,ARMCOM,commander,0,0,0,0,0,,,100,200,,,,

@@ -123,7 +123,7 @@ class PlanTests(unittest.TestCase):
         self.assertNotIn("--ai-tune", runner.build_command("/bin/ai_arena", control, "/tmp/x"))
 
     def test_command_formats_boolean_knob(self):
-        run = runner.PlannedRun("s/seed1-tuned", "s", 1, "tuned", "m", 10,
+        run = runner.PlannedRun("s/seed1-tuned", "s", 1, "tuned", "tuned", "m", 10,
                                 [{"name": "A", "side": "ARM", "colour": 0, "difficulty": "standard"}],
                                 tune={"1": {"someKnob": False}})
         cmd = runner.build_command("/bin/ai_arena", run, "/tmp/x")
@@ -245,7 +245,7 @@ class ExecuteTests(unittest.TestCase):
 
     def _planned(self, scenario="standard-arms-coast", seed=1, arm="control"):
         return runner.PlannedRun(
-            f"{scenario}/seed{seed}-{arm}", scenario, seed, arm,
+            f"{scenario}/seed{seed}-{arm}", scenario, seed, arm, arm,
             "Coast To Coast", 900,
             [{"name": "A", "side": "ARM", "colour": 0, "difficulty": "standard"},
              {"name": "B", "side": "CORE", "colour": 1, "difficulty": "standard"}])
