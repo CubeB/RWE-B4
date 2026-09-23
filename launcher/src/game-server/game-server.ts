@@ -1,5 +1,6 @@
 import * as crypto from "crypto";
 import * as rx from "rxjs";
+import type { Namespace, Socket } from "socket.io";
 import { ModFingerprint, checkArchiveAgreement } from "../common/archives";
 import { assertNever, choose, findAndMap, getAddr } from "../common/util";
 import * as protocol from "./protocol";
@@ -103,7 +104,7 @@ export interface GameCreatedInfo {
 }
 
 export class GameServer {
-  private readonly ns: SocketIO.Namespace;
+  private readonly ns: Namespace;
   private readonly reverseProxy: boolean;
 
   private nextRoomId = 1;
@@ -112,7 +113,7 @@ export class GameServer {
   private _gameUpdated = new rx.Subject<[number, Room]>();
   private _gameDeleted = new rx.Subject<number>();
 
-  constructor(ns: SocketIO.Namespace, reverseProxy: boolean) {
+  constructor(ns: Namespace, reverseProxy: boolean) {
     this.ns = ns;
     this.reverseProxy = reverseProxy;
     this.connect();
@@ -181,7 +182,7 @@ export class GameServer {
   }
 
   connect() {
-    this.ns.on("connection", socket => {
+    this.ns.on("connection", (socket: Socket) => {
       const address = getAddr(socket, this.reverseProxy);
       this.log(`Received connection from ${address}`);
       socket.on(protocol.Handshake, (data: protocol.HandshakePayload) => {

@@ -2,13 +2,14 @@ import {
   Checkbox,
   MenuItem,
   Select,
+  SelectChangeEvent,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableRow,
-} from "@material-ui/core";
-import StarIcon from "@material-ui/icons/Grade";
+} from "@mui/material";
+import StarIcon from "@mui/icons-material/Grade";
 import * as React from "react";
 import { PlayerInfo, PlayerSide, PlayerSlot } from "../gameClient/state";
 import { archiveDigest } from "../../common/archives";
@@ -232,29 +233,25 @@ export class PlayersTable extends React.Component<PlayersTableProps> {
     this.props.onToggleReady();
   }
 
-  private handleSideChange(event: React.SyntheticEvent<EventTarget>) {
-    this.props.onChangeSide(
-      (event.target as HTMLSelectElement).value as PlayerSide
-    );
+  private handleSideChange(event: SelectChangeEvent<PlayerSide>) {
+    this.props.onChangeSide(event.target.value as PlayerSide);
   }
 
-  private handleColorChange(event: React.SyntheticEvent<EventTarget>) {
-    this.props.onChangeColor(
-      parseInt((event.target as HTMLSelectElement).value)
-    );
+  private handleColorChange(event: SelectChangeEvent<number>) {
+    this.props.onChangeColor(Number(event.target.value));
   }
 
-  private handleTeamChange(event: React.SyntheticEvent<EventTarget>) {
-    const value = (event.target as HTMLSelectElement).value;
+  private handleTeamChange(event: SelectChangeEvent<string>) {
+    const value = event.target.value;
     const parsedValue = value === "" ? undefined : parseInt(value);
     this.props.onChangeTeam(parsedValue);
   }
 
   private handleOpenStatusChange(
     slotId: number,
-    event: React.SyntheticEvent<EventTarget>
+    event: SelectChangeEvent<OpenStatus>
   ) {
-    const value = (event.target as HTMLSelectElement).value as OpenStatus;
+    const value = event.target.value as OpenStatus;
     switch (value) {
       case "open":
         this.props.onOpenSlot(slotId);

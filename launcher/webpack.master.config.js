@@ -19,13 +19,12 @@ module.exports = {
                 "@babel/env",
                 {
                   targets: {
-                    node: "18",
+                    node: "22",
                   },
                 },
               ],
               "@babel/typescript",
             ],
-            plugins: ["@babel/proposal-class-properties"],
           },
         },
         exclude: /node_modules/,

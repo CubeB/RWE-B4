@@ -1,4 +1,4 @@
-import { Collapse, Divider, Paper, Typography } from "@material-ui/core";
+import { Collapse, Divider, Paper, Typography } from "@mui/material";
 import * as React from "react";
 import { connect } from "react-redux";
 import { Dispatch } from "redux";
@@ -79,8 +79,7 @@ interface OverviewScreenStateProps {
 }
 
 interface OverviewScreenProps
-  extends OverviewScreenDispatchProps,
-    OverviewScreenStateProps {}
+  extends OverviewScreenDispatchProps, OverviewScreenStateProps {}
 
 function OverviewScreen(props: OverviewScreenProps) {
   const [modsDialogOpen, setModsDialogOpen] = React.useState(false);

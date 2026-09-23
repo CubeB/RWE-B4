@@ -1,19 +1,6 @@
-import Button from "@material-ui/core/Button";
-import {
-  createStyles,
-  Theme,
-  withStyles,
-  WithStyles,
-} from "@material-ui/core/styles";
+import Button from "@mui/material/Button";
 import * as React from "react";
-import { Grid } from "@material-ui/core";
-
-const styles = (theme: Theme) =>
-  createStyles({
-    joinGameButton: {
-      "margin-left": theme.spacing(1),
-    },
-  });
+import { Grid } from "@mui/material";
 
 interface BottomPanelStateProps {
   hostEnabled: boolean;
@@ -29,14 +16,10 @@ interface BottomPanelDispatchProps {
   onOpenConfigDialog: () => void;
 }
 
-interface UnstyledBottomPanelProps
-  extends BottomPanelStateProps,
-    BottomPanelDispatchProps {}
 interface BottomPanelProps
-  extends UnstyledBottomPanelProps,
-    WithStyles<typeof styles> {}
+  extends BottomPanelStateProps, BottomPanelDispatchProps {}
 
-const UnstyledBottomPanel = (props: BottomPanelProps) => {
+const BottomPanel = (props: BottomPanelProps) => {
   return (
     <div className="bottom-panel">
       <div className="bottom-panel-left">
@@ -50,7 +33,7 @@ const UnstyledBottomPanel = (props: BottomPanelProps) => {
         <Button
           variant="contained"
           color="primary"
-          className={props.classes.joinGameButton}
+          sx={{ marginLeft: 1 }}
           disabled={!props.joinEnabled}
           onClick={props.onJoinGame}
         >
@@ -59,17 +42,17 @@ const UnstyledBottomPanel = (props: BottomPanelProps) => {
       </div>
       <div className="bottom-panel-right">
         <Grid container spacing={1}>
-          <Grid item>
+          <Grid>
             <Button variant="contained" onClick={props.onOpenConfigDialog}>
               RWE Settings
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button variant="contained" onClick={props.onOpenModsDialog}>
               Single Player Mods
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button
               variant="contained"
               disabled={!props.launchEnabled}
@@ -84,5 +67,4 @@ const UnstyledBottomPanel = (props: BottomPanelProps) => {
   );
 };
 
-const BottomPanel = withStyles(styles)(UnstyledBottomPanel);
 export default BottomPanel;

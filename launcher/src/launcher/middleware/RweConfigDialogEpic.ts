@@ -11,7 +11,11 @@ export const rweConfigDialogEpic = (
   const configFilePath = getRweConfigPath();
 
   return action$.pipe(
-    ofType<AppAction, SubmitSettingsDialogAction>("SUBMIT_SETTINGS_DIALOG"),
+    ofType<
+      AppAction,
+      SubmitSettingsDialogAction["type"],
+      SubmitSettingsDialogAction
+    >("SUBMIT_SETTINGS_DIALOG"),
     rxop.concatMap(action => {
       return rx.from(writeConfigToFile(configFilePath, action.settings));
     }),

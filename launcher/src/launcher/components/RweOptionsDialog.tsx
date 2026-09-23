@@ -12,7 +12,7 @@ import {
   InputLabel,
   DialogActions,
   Button,
-} from "@material-ui/core";
+} from "@mui/material";
 import { RweConfig } from "../rweConfig";
 
 interface VideoMode {

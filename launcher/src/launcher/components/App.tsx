@@ -1,5 +1,4 @@
 import * as React from "react";
-import { hot } from "react-hot-loader";
 import { connect } from "react-redux";
 import { AppScreen, State } from "../state";
 import GameRoomScreen from "./GameRoomScreen";
@@ -31,4 +30,4 @@ function App() {
   return <ConnectedScreenContainer />;
 }
 
-export default hot(module)(App);
+export default App;

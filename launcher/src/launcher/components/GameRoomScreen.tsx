@@ -1,18 +1,13 @@
 import {
   Button,
-  createStyles,
   Divider,
   FormControl,
   InputLabel,
   MenuItem,
   Select,
   TextField,
-  Theme,
   Typography,
-  WithStyles,
-  withStyles,
-  RootRef,
-} from "@material-ui/core";
+} from "@mui/material";
 import * as React from "react";
 import { connect } from "react-redux";
 import { Dispatch } from "redux";
@@ -125,16 +120,12 @@ interface GameRoomScreenDispatchProps {
   onChangeMods: (mods: string[]) => void;
 }
 
-const styles = (theme: Theme) => createStyles({});
-
 interface GameRoomScreenProps
-  extends GameRoomScreenStateProps,
-    GameRoomScreenDispatchProps,
-    WithStyles<typeof styles> {}
+  extends GameRoomScreenStateProps, GameRoomScreenDispatchProps {}
 
 function UnconnectedGameRoomScreen(props: GameRoomScreenProps) {
-  const chatDivRef = React.useRef<HTMLElement>();
-  const chatBottomRef = React.useRef<HTMLElement>();
+  const chatDivRef = React.useRef<HTMLDivElement>(null);
+  const chatBottomRef = React.useRef<HTMLDivElement>(null);
 
   const isScrolledToBottom = React.useMemo(() => {
     return chatDivRef.current
@@ -191,14 +182,10 @@ function UnconnectedGameRoomScreen(props: GameRoomScreenProps) {
         <Typography variant="h6" className="game-room-screen-messages-title">
           Messages
         </Typography>
-        <RootRef rootRef={chatDivRef}>
-          <div className="game-room-screen-messages-panel">
-            {messageElements}
-            <RootRef rootRef={chatBottomRef}>
-              <div></div>
-            </RootRef>
-          </div>
-        </RootRef>
+        <div className="game-room-screen-messages-panel" ref={chatDivRef}>
+          {messageElements}
+          <div ref={chatBottomRef}></div>
+        </div>
         <Divider />
         <MessageInput onSend={props.onSend} />
       </div>
@@ -370,4 +357,4 @@ function mapDispatchToProps(dispatch: Dispatch): GameRoomScreenDispatchProps {
 export default connect(
   mapStateToProps,
   mapDispatchToProps
-)(withStyles(styles)(UnconnectedGameRoomScreen));
+)(UnconnectedGameRoomScreen);

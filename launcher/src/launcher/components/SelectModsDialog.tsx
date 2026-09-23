@@ -10,12 +10,12 @@ import {
   DialogTitle,
   Checkbox,
   Grid,
-  ListItemSecondaryAction,
+  ListItemButton,
   Divider,
   IconButton,
-} from "@material-ui/core";
-import ArrowUpwardIcon from "@material-ui/icons/ArrowUpward";
-import ArrowDownwardIcon from "@material-ui/icons/ArrowDownward";
+} from "@mui/material";
+import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
+import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import {
   toggleItem,
   moveUp,
@@ -34,11 +34,16 @@ export interface ItemProps {
 
 function ModListItem(props: ItemProps) {
   return (
-    <ListItem dense button selected={props.selected} onClick={props.onSelect}>
-      <ListItemText primary={props.name} />
-      <ListItemSecondaryAction>
+    <ListItem
+      dense
+      disablePadding
+      secondaryAction={
         <Checkbox checked={props.checked} onChange={props.onToggle} />
-      </ListItemSecondaryAction>
+      }
+    >
+      <ListItemButton selected={props.selected} onClick={props.onSelect}>
+        <ListItemText primary={props.name} />
+      </ListItemButton>
     </ListItem>
   );
 }
@@ -101,8 +106,8 @@ export function SelectModsDialog(props: Props) {
       <DialogTitle>{props.title}</DialogTitle>
       <DialogContent>
         <Grid container>
-          <Grid container direction="column" item xs>
-            <Grid item>
+          <Grid container direction="column" size="grow">
+            <Grid>
               <IconButton
                 disabled={!canMoveUpState(state)}
                 onClick={() => dispatch({ type: "MOD_UP" })}
@@ -111,7 +116,7 @@ export function SelectModsDialog(props: Props) {
                 <ArrowUpwardIcon />
               </IconButton>
             </Grid>
-            <Grid item>
+            <Grid>
               <IconButton
                 disabled={!canMoveDownState(state)}
                 onClick={() => dispatch({ type: "MOD_DOWN" })}
@@ -121,7 +126,7 @@ export function SelectModsDialog(props: Props) {
               </IconButton>
             </Grid>
           </Grid>
-          <Grid item>
+          <Grid>
             {props.items && (
               <>
                 <ModsList
@@ -173,10 +178,7 @@ export interface ModDownAction {
   type: "MOD_DOWN";
 }
 export type ModsDialogAction =
-  | SelectModAction
-  | ToggleModAction
-  | ModUpAction
-  | ModDownAction;
+  SelectModAction | ToggleModAction | ModUpAction | ModDownAction;
 
 function modDialogReducer(
   modsDialog: ModsDialogState,

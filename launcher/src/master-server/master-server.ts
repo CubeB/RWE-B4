@@ -1,14 +1,16 @@
 import * as http from "http";
-import socketio from "socket.io";
-import * as yargs from "yargs";
+import { Server as SocketIoServer } from "socket.io";
+import yargs from "yargs";
+import { hideBin } from "yargs/helpers";
 import { getAddr } from "../common/util";
 import { GameServer, Room } from "../game-server/game-server";
 import * as protocol from "./protocol";
 
-const argv = yargs
+const argv = yargs(hideBin(process.argv))
   .option("host", { alias: "h", default: undefined })
   .option("port", { alias: "p", default: 5000 })
-  .option("reverse-proxy", { alias: "r", default: false }).argv;
+  .option("reverse-proxy", { alias: "r", default: false })
+  .parseSync();
 
 const host = argv.host;
 const port = argv.port;
@@ -19,7 +21,7 @@ console.log(`Running on port ${port}`);
 console.log(`Reverse proxy mode is ${reverseProxy ? "ON" : "OFF"}`);
 
 const server = http.createServer().listen(port, host);
-const io = socketio(server, { serveClient: false });
+const io = new SocketIoServer(server, { serveClient: false });
 
 function roomToEntry(x: Room): protocol.GetGamesReponseEntry {
   return {

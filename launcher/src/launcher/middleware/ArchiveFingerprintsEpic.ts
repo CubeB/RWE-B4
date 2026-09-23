@@ -82,6 +82,7 @@ export const archiveFingerprintsEpic = (
   return action$.pipe(
     ofType<
       AppAction,
+      "RECEIVE_INSTALLED_MODS",
       { type: "RECEIVE_INSTALLED_MODS"; mods: InstalledModInfo[] }
     >("RECEIVE_INSTALLED_MODS"),
     rxop.switchMap(action =>
@@ -103,7 +104,7 @@ export const sendArchivesEpic = (
   { clientService }: EpicDependencies
 ): rx.Observable<AppAction> => {
   return action$.pipe(
-    ofType<AppAction, AppAction>(
+    ofType<AppAction, AppAction["type"], AppAction>(
       "RECEIVE_HANDSHAKE_RESPONSE",
       "RECEIVE_MOD_FINGERPRINTS"
     ),

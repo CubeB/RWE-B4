@@ -1,3 +1,5 @@
+import type { Socket } from "socket.io";
+
 export function masterServer() {
   if (process.env["RWE_MASTER_SERVER"]) {
     return process.env["RWE_MASTER_SERVER"];
@@ -5,9 +7,9 @@ export function masterServer() {
   return "https://master.rwe.michaelheasell.com";
 }
 
-export function getAddr(socket: SocketIO.Socket, reverseProxy: boolean) {
+export function getAddr(socket: Socket, reverseProxy: boolean) {
   if (reverseProxy) {
-    const addrs: string = socket.handshake.headers["x-forwarded-for"];
+    const addrs = socket.handshake.headers["x-forwarded-for"] as string;
     const addrsList = addrs.split(", ");
     return addrsList[addrsList.length - 1];
   }

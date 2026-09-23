@@ -8,7 +8,8 @@ import {
   DialogTitle,
   DialogContent,
   Grid,
-} from "@material-ui/core";
+} from "@mui/material";
+import { webUtils } from "electron";
 import { assertNever } from "../../common/util";
 
 export type State = "welcome" | "working" | "success" | "fail";
@@ -74,8 +75,8 @@ function WizardWelcome() {
 
 function WizardWorking() {
   return (
-    <Grid container direction="row" justify="center">
-      <Grid item>
+    <Grid container direction="row" justifyContent="center">
+      <Grid>
         <CircularProgress />
       </Grid>
     </Grid>
@@ -112,7 +113,9 @@ function WizardManual(props: {
         webkitdirectory="true"
         onChange={e => {
           props.onChange(
-            e.target.files!.length > 0 ? e.target.files![0].path : undefined
+            e.target.files!.length > 0
+              ? webUtils.getPathForFile(e.target.files![0])
+              : undefined
           );
         }}
       />

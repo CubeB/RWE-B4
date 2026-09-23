@@ -1,8 +1,9 @@
-import CssBaseline from "@material-ui/core/CssBaseline";
+import CssBaseline from "@mui/material/CssBaseline";
 import * as React from "react";
-import * as ReactDOM from "react-dom";
+import { createRoot } from "react-dom/client";
 import { Provider } from "react-redux";
-import { applyMiddleware, compose, createStore, Store } from "redux";
+import { configureStore } from "@reduxjs/toolkit";
+import { Store, StoreEnhancer } from "redux";
 import { createEpicMiddleware } from "redux-observable";
 import { AppAction, gameEnded } from "./actions";
 import App from "./components/App";
@@ -21,7 +22,7 @@ import { execRwe } from "./rwe";
 import * as rx from "rxjs";
 import * as rxop from "rxjs/operators";
 
-import { init } from "@sentry/electron/dist/renderer";
+import { init } from "@sentry/electron/renderer";
 
 const development = !!process.env["RWE_LAUNCHER_IS_DEV"];
 
@@ -67,24 +68,32 @@ const executeSideEffect = (se: SideEffect) => {
   }
 };
 
-const composeEnhancers: typeof compose =
-  (window as any).__REDUX_DEVTOOLS_EXTENSION_COMPOSE__ || compose;
-store = createStore(
-  rootReducer as any, // shhhhh
-  composeEnhancers(
-    applyMiddleware(epicMiddleware),
-    createEnhancer(executeSideEffect)
-  )
-);
+// configureStore rather than createStore: it wires the devtools extension
+// itself, so the __REDUX_DEVTOOLS_EXTENSION_COMPOSE__ dance this used to do
+// by hand is gone, and it brings the development-only immutability and
+// serializability checks with it.
+store = configureStore({
+  reducer: rootReducer as any, // shhhhh
+  middleware: getDefaultMiddleware =>
+    getDefaultMiddleware().concat(epicMiddleware),
+  enhancers: defaultEnhancers =>
+    defaultEnhancers.concat(createEnhancer(executeSideEffect) as StoreEnhancer),
+});
 
 epicMiddleware.run(rootEpic);
 
-ReactDOM.render(
+// React 18: createRoot, not ReactDOM.render. The old call still exists in 18
+// but runs in legacy mode and warns, and concurrent features are off.
+const container = document.getElementById("app");
+if (!container) {
+  throw new Error("index.html has no #app to mount the launcher into");
+}
+
+createRoot(container).render(
   <React.Fragment>
     <CssBaseline />
     <Provider store={store}>
       <App />
     </Provider>
-  </React.Fragment>,
-  document.getElementById("app")
+  </React.Fragment>
 );

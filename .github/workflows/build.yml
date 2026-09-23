@@ -65,7 +65,12 @@ jobs:
       - name: install node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 18
+          # 22, not 18: 18 left support in April 2025, and the refreshed
+          # toolchain asks for more than it has -- eslint 9 wants 18.18+,
+          # jest 30 wants 18.14+, and webpack-dev-server 6 wants 22.15+,
+          # which npm reports as a warning rather than a failure and so
+          # would have been found at run time.
+          node-version: 22
           cache: npm
           cache-dependency-path: launcher/package-lock.json
       - name: install npm packages
@@ -77,6 +82,12 @@ jobs:
           npm run tsc
           npm test
           npm run lint
+      # A webpack config can break while every type still checks: a loader
+      # that no longer exists under the name the config gives it is not a
+      # type error. All three bundles, because there are three configs.
+      - name: build launcher bundles
+        working-directory: launcher
+        run: npm run build:all:prod
 
   # MSVC puts the class key into the decorated name, so `struct Foo;` against
   # `class Foo { ... };` is two types to its linker and an unresolved external
@@ -267,7 +278,7 @@ jobs:
       - name: install node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 18
+          node-version: 22
           cache: npm
           cache-dependency-path: launcher/package-lock.json
       - name: install npm packages
@@ -351,7 +362,7 @@ jobs:
       - name: install node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 18
+          node-version: 22
           cache: npm
           cache-dependency-path: launcher/package-lock.json
       - name: install npm packages

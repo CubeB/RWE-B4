@@ -1,27 +1,22 @@
 import { Observable, Subject } from "rxjs";
-import socketioClient from "socket.io-client";
+import { io as socketioClient, Socket } from "socket.io-client";
 import * as protocol from "./protocol";
 
 export class MasterClientService {
-  private client: SocketIOClient.Socket | undefined;
+  private client: Socket | undefined;
 
-  private readonly _onGetGamesReponse = new Subject<
-    protocol.GetGamesResponsePayload
-  >();
-  private readonly _onCreateGameReponse = new Subject<
-    protocol.CreateGameResponsePayload
-  >();
+  private readonly _onGetGamesReponse =
+    new Subject<protocol.GetGamesResponsePayload>();
+  private readonly _onCreateGameReponse =
+    new Subject<protocol.CreateGameResponsePayload>();
   private readonly _onConnect = new Subject<void>();
   private readonly _onDisconnect = new Subject<void>();
-  private readonly _onGameCreated = new Subject<
-    protocol.GameCreatedEventPayload
-  >();
-  private readonly _onGameUpdated = new Subject<
-    protocol.GameUpdatedEventPayload
-  >();
-  private readonly _onGameDeleted = new Subject<
-    protocol.GameDeletedEventPayload
-  >();
+  private readonly _onGameCreated =
+    new Subject<protocol.GameCreatedEventPayload>();
+  private readonly _onGameUpdated =
+    new Subject<protocol.GameUpdatedEventPayload>();
+  private readonly _onGameDeleted =
+    new Subject<protocol.GameDeletedEventPayload>();
 
   get onGetGamesResponse(): Observable<protocol.GetGamesResponsePayload> {
     return this._onGetGamesReponse;

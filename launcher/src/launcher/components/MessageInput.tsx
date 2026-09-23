@@ -1,21 +1,7 @@
-import {
-  Button,
-  createStyles,
-  TextField,
-  Theme,
-  WithStyles,
-  withStyles,
-} from "@material-ui/core";
+import { Button, TextField } from "@mui/material";
 import * as React from "react";
 
-const styles = (theme: Theme) =>
-  createStyles({
-    messageInput: {
-      "flex-grow": 1,
-    },
-  });
-
-interface MessageInputProps extends WithStyles<typeof styles> {
+interface MessageInputProps {
   onSend: (message: string) => void;
 }
 
@@ -41,7 +27,7 @@ class MessageInput extends React.Component<
         onSubmit={this.handleSend}
       >
         <TextField
-          className={this.props.classes.messageInput}
+          sx={{ flexGrow: 1 }}
           value={this.state.value}
           onChange={this.handleMessageChange}
         />
@@ -63,4 +49,4 @@ class MessageInput extends React.Component<
   }
 }
 
-export default withStyles(styles)(MessageInput);
+export default MessageInput;

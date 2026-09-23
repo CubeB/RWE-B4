@@ -1,18 +1,21 @@
-import React from "react";
-
-import { storiesOf } from "@storybook/react";
+import type { Meta, StoryObj } from "@storybook/react-webpack5";
 import { SelectModsDialog } from "./SelectModsDialog";
 
-storiesOf("SelectModsDialog", module).add("default", () => {
-  const installedMods = ["ta", "tacc", "ta31", "taesc"];
-  const activeMods = ["ta", "tacc"];
-  return (
-    <SelectModsDialog
-      title="Select Mods"
-      items={installedMods}
-      initiallyActiveItems={activeMods}
-      onSubmit={() => {}}
-      onCancel={() => {}}
-    />
-  );
-});
+const meta: Meta<typeof SelectModsDialog> = {
+  title: "SelectModsDialog",
+  component: SelectModsDialog,
+};
+
+export default meta;
+
+type Story = StoryObj<typeof SelectModsDialog>;
+
+export const Default: Story = {
+  args: {
+    title: "Select Mods",
+    items: ["ta", "tacc", "ta31", "taesc"],
+    initiallyActiveItems: ["ta", "tacc"],
+    onSubmit: () => {},
+    onCancel: () => {},
+  },
+};

@@ -20,7 +20,7 @@ export const masterClientEventsEpic = (
   deps: EpicDependencies
 ): rx.Observable<AppAction> => {
   const s = deps.masterClentService;
-  return rx.merge<AppAction>(
+  return rx.merge(
     s.onConnect.pipe(rxop.map(masterServerConnect)),
     s.onDisconnect.pipe(rxop.map(masterServerDisconnect)),
     s.onGetGamesResponse.pipe(rxop.map(receiveRooms)),

@@ -95,9 +95,11 @@ export const gameRoomEpic = (
           );
           action$
             .pipe(
-              ofType<AppAction, ReceiveCreateGameResponseAction>(
-                "RECEIVE_CREATE_GAME_RESPONSE"
-              ),
+              ofType<
+                AppAction,
+                ReceiveCreateGameResponseAction["type"],
+                ReceiveCreateGameResponseAction
+              >("RECEIVE_CREATE_GAME_RESPONSE"),
               rxop.first()
             )
             .subscribe(x => {
@@ -125,7 +127,11 @@ export const gameRoomEpic = (
           rx.from(getIpv4Address())
             .pipe(
               rxop.takeUntil(
-                action$.pipe(ofType<AppAction, LeaveGameAction>("LEAVE_GAME"))
+                action$.pipe(
+                  ofType<AppAction, LeaveGameAction["type"], LeaveGameAction>(
+                    "LEAVE_GAME"
+                  )
+                )
               )
             )
             .subscribe(clientAddress => {

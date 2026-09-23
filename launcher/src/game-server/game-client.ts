@@ -1,39 +1,31 @@
 import { Observable, Subject } from "rxjs";
-import socketioClient from "socket.io-client";
+import { io as socketioClient, Socket } from "socket.io-client";
 import { ModFingerprint } from "../common/archives";
 import * as protocol from "./protocol";
 
 export class GameClientService {
-  private client: SocketIOClient.Socket | undefined;
+  private client: Socket | undefined;
 
   private readonly _onDisconnect = new Subject<void>();
-  private readonly _onHandshakeResponse = new Subject<
-    protocol.HandshakeResponsePayload
-  >();
-  private readonly _onPlayerJoined = new Subject<
-    protocol.PlayerJoinedPayload
-  >();
+  private readonly _onHandshakeResponse =
+    new Subject<protocol.HandshakeResponsePayload>();
+  private readonly _onPlayerJoined =
+    new Subject<protocol.PlayerJoinedPayload>();
   private readonly _onPlayerLeft = new Subject<protocol.PlayerLeftPayload>();
-  private readonly _onPlayerChatMessage = new Subject<
-    protocol.PlayerChatMessagePayload
-  >();
-  private readonly _onPlayerChangedSide = new Subject<
-    protocol.PlayerChangedSidePayload
-  >();
-  private readonly _onPlayerChangedTeam = new Subject<
-    protocol.PlayerChangedTeamPayload
-  >();
-  private readonly _onPlayerChangedColor = new Subject<
-    protocol.PlayerChangedColorPayload
-  >();
+  private readonly _onPlayerChatMessage =
+    new Subject<protocol.PlayerChatMessagePayload>();
+  private readonly _onPlayerChangedSide =
+    new Subject<protocol.PlayerChangedSidePayload>();
+  private readonly _onPlayerChangedTeam =
+    new Subject<protocol.PlayerChangedTeamPayload>();
+  private readonly _onPlayerChangedColor =
+    new Subject<protocol.PlayerChangedColorPayload>();
   private readonly _onSlotOpened = new Subject<protocol.SlotOpenedPayload>();
   private readonly _onSlotClosed = new Subject<protocol.SlotClosedPayload>();
-  private readonly _onActiveModsChanged = new Subject<
-    protocol.ActiveModsChangedPayload
-  >();
-  private readonly _onPlayerArchivesChanged = new Subject<
-    protocol.PlayerArchivesChangedPayload
-  >();
+  private readonly _onActiveModsChanged =
+    new Subject<protocol.ActiveModsChangedPayload>();
+  private readonly _onPlayerArchivesChanged =
+    new Subject<protocol.PlayerArchivesChangedPayload>();
   private readonly _onPlayerReady = new Subject<protocol.PlayerReadyPayload>();
   private readonly _onMapChanged = new Subject<protocol.MapChangedPayload>();
   private readonly _onStartGame = new Subject<protocol.StartGamePayload>();
@@ -71,9 +63,7 @@ export class GameClientService {
   get onActiveModsChanged(): Observable<protocol.ActiveModsChangedPayload> {
     return this._onActiveModsChanged;
   }
-  get onPlayerArchivesChanged(): Observable<
-    protocol.PlayerArchivesChangedPayload
-  > {
+  get onPlayerArchivesChanged(): Observable<protocol.PlayerArchivesChangedPayload> {
     return this._onPlayerArchivesChanged;
   }
   get onPlayerReady(): Observable<protocol.PlayerReadyPayload> {

@@ -27,7 +27,7 @@ export const gameClientEventsEpic = (
   state$: StateObservable<State>,
   { clientService }: EpicDependencies
 ): rx.Observable<AppAction> => {
-  return rx.merge<AppAction>(
+  return rx.merge(
     clientService.onDisconnect.pipe(rxop.map(disconnectGame)),
     clientService.onHandshakeResponse.pipe(rxop.map(receiveHandshakeResponse)),
     clientService.onPlayerJoined.pipe(rxop.map(receivePlayerJoined)),

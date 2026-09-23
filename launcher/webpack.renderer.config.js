@@ -1,10 +1,17 @@
 const path = require("path");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
+const ReactRefreshWebpackPlugin = require("@pmmmwh/react-refresh-webpack-plugin");
 const webpack = require("webpack");
+
+// react-hot-loader is gone. It worked by patching react-dom through an alias,
+// which React 18's createRoot does not tolerate; React Refresh is the
+// supported successor and needs no alias, only the babel plugin and the
+// webpack plugin, and only while the dev server is running.
+const isDev = !!process.env.RWE_LAUNCHER_IS_DEV;
 
 module.exports = {
   mode: "development",
-  entry: ["react-hot-loader/patch", "./src/launcher/renderer.tsx"],
+  entry: "./src/launcher/renderer.tsx",
   target: "electron-renderer",
   devtool: "source-map",
   module: {
@@ -19,18 +26,14 @@ module.exports = {
                 "@babel/env",
                 {
                   targets: {
-                    electron: "22.1.0",
-                    node: "18.13.0",
+                    electron: "44.4.5",
                   },
                 },
               ],
               "@babel/react",
               "@babel/typescript",
             ],
-            plugins: [
-              "react-hot-loader/babel",
-              "@babel/proposal-class-properties",
-            ],
+            plugins: isDev ? ["react-refresh/babel"] : [],
           },
         },
         exclude: /node_modules/,
@@ -41,19 +44,12 @@ module.exports = {
       },
       {
         test: /\.ttf$/,
-        use: [
-          {
-            loader: "file-loader",
-          },
-        ],
+        type: "asset/resource",
       },
     ],
   },
   resolve: {
     extensions: [".ts", ".tsx", ".js", ".json"],
-    alias: {
-      "react-dom": "@hot-loader/react-dom",
-    },
   },
   output: {
     filename: "renderer.js",
@@ -73,6 +69,7 @@ module.exports = {
       ],
     }),
     new webpack.IgnorePlugin({ resourceRegExp: /^uws$/ }),
+    ...(isDev ? [new ReactRefreshWebpackPlugin()] : []),
   ],
   optimization: {
     moduleIds: "named",

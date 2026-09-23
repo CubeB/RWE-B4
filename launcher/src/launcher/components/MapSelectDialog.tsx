@@ -1,21 +1,15 @@
 import {
   Button,
-  createStyles,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
-  ListItem,
+  ListItemButton,
   ListItemText,
-  Theme,
   Typography,
-  WithStyles,
-  withStyles,
-} from "@material-ui/core";
+} from "@mui/material";
 import * as React from "react";
 import { FixedSizeList as List } from "react-window";
-
-const styles = (theme: Theme) => createStyles({});
 
 export interface SelectedMapDetails {
   description: string;
@@ -24,7 +18,7 @@ export interface SelectedMapDetails {
   minimap?: string;
 }
 
-export interface MapSelectDialogProps extends WithStyles<typeof styles> {
+export interface MapSelectDialogProps {
   open: boolean;
 
   maps?: string[];
@@ -120,16 +114,15 @@ function MapsList(props: {
   }) => {
     const name = props.maps![index];
     return (
-      <ListItem
+      <ListItemButton
         key={name}
         dense
         style={style}
-        button
         selected={name === props.selectedMap}
         onClick={() => props.onSelect(name)}
       >
         <ListItemText primary={name}></ListItemText>
-      </ListItem>
+      </ListItemButton>
     );
   };
 
@@ -146,4 +139,4 @@ function MapsList(props: {
   );
 }
 
-export default withStyles(styles)(MapSelectDialog);
+export default MapSelectDialog;

@@ -22,7 +22,7 @@ export function wizardEpic(
   const taModPath = path.join(modsPath, "ta");
 
   const stream = action$.pipe(
-    ofType<AppAction, NextAction>("wizard/NEXT"),
+    ofType<AppAction, NextAction["type"], NextAction>("wizard/NEXT"),
     rxop.concatMap(x =>
       rx.from(
         x.path

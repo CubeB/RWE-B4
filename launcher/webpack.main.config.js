@@ -18,14 +18,12 @@ module.exports = {
                 "@babel/env",
                 {
                   targets: {
-                    electron: "22.1.0",
-                    node: "18.13.0",
+                    electron: "44.4.5",
                   },
                 },
               ],
               "@babel/typescript",
             ],
-            plugins: ["@babel/proposal-class-properties"],
           },
         },
         exclude: /node_modules/,

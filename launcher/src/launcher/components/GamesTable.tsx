@@ -4,14 +4,8 @@ import {
   TableHead,
   TableRow,
   Typography,
-} from "@material-ui/core";
-import {
-  createStyles,
-  Theme,
-  withStyles,
-  WithStyles,
-} from "@material-ui/core/styles";
-import Table from "@material-ui/core/Table";
+} from "@mui/material";
+import Table from "@mui/material/Table";
 import * as React from "react";
 import { connect } from "react-redux";
 import { Dispatch } from "redux";
@@ -34,21 +28,16 @@ interface GamesTableDispatchProps {
   onRowClick?: (id: number) => void;
 }
 
-const gamesTableStyles = (theme: Theme) =>
-  createStyles({
-    head: {
-      backgroundColor: "#fafafa",
-      position: "sticky",
-      top: 0,
-    },
-  });
+// The header stays put while the list under it scrolls.
+const stickyHead = {
+  backgroundColor: "#fafafa",
+  position: "sticky",
+  top: 0,
+} as const;
 
 interface UnstyledGamesTableProps
-  extends GamesTableStateProps,
-    GamesTableDispatchProps {}
-interface GamesTableProps
-  extends UnstyledGamesTableProps,
-    WithStyles<typeof gamesTableStyles> {}
+  extends GamesTableStateProps, GamesTableDispatchProps {}
+type GamesTableProps = UnstyledGamesTableProps;
 
 const UnstyledGamesTable = (props: GamesTableProps) => {
   const rows = props.games.map((g, i) => {
@@ -88,8 +77,8 @@ const UnstyledGamesTable = (props: GamesTableProps) => {
     <Table className="games-table">
       <TableHead>
         <TableRow>
-          <TableCell className={props.classes.head}>Description</TableCell>
-          <TableCell className={props.classes.head}>Players</TableCell>
+          <TableCell sx={stickyHead}>Description</TableCell>
+          <TableCell sx={stickyHead}>Players</TableCell>
         </TableRow>
       </TableHead>
       <TableBody>{rowsOrMessage}</TableBody>
@@ -97,7 +86,7 @@ const UnstyledGamesTable = (props: GamesTableProps) => {
   );
 };
 
-const UnconnectedGamesTable = withStyles(gamesTableStyles)(UnstyledGamesTable);
+const UnconnectedGamesTable = UnstyledGamesTable;
 
 function mapStateToProps(state: State): UnstyledGamesTableProps {
   const gameIndex = state.masterClient.games.findIndex(

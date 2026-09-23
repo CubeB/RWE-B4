@@ -7,7 +7,7 @@ import {
 import * as path from "path";
 import { installExtensions } from "./install-devtools-extensions";
 
-import { init } from "@sentry/electron/dist/main";
+import { init } from "@sentry/electron/main";
 
 const development = !!process.env["RWE_LAUNCHER_IS_DEV"];
 console.log(`Running in ${development ? "development" : "production"} mode`);
@@ -97,4 +97,3 @@ app.on("activate", () => {
     createWindow();
   }
 });
-
