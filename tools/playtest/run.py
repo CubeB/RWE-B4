@@ -233,6 +233,30 @@ def newest_src_mtime() -> float:
     return newest
 
 
+def resolve_binary(requested) -> Path:
+    """
+    The arena binary, as an absolute path, and with the platform's suffix.
+
+    Absolute because Windows resolves a relative program name against the
+    calling process's directory and not against the `cwd` handed to Popen, so
+    a relative --binary that exists is still reported as WinError 2 -- which
+    arrives as exit 127 and reads like a broken engine rather than a path the
+    runner could not follow. Suffixed because the default would otherwise name
+    `ai_arena`, which does not exist on Windows under that name at all.
+    """
+    if requested:
+        candidate = Path(requested).expanduser()
+    else:
+        candidate = REPO_ROOT / "build" / "ai_arena"
+
+    candidate = candidate.resolve()
+    if not candidate.exists() and not candidate.suffix and os.name == "nt":
+        windows = candidate.with_suffix(".exe")
+        if windows.exists():
+            return windows
+    return candidate
+
+
 def binary_is_stale(binary) -> bool:
     binary = Path(binary)
     try:
@@ -472,7 +496,7 @@ def do_execute(args) -> int:
 
     root = run_root_for(args.matrix)
     root.mkdir(parents=True, exist_ok=True)
-    binary = Path(args.binary) if args.binary else REPO_ROOT / "build" / "ai_arena"
+    binary = resolve_binary(args.binary)
     stale = binary_is_stale(binary)
 
     jobs = args.jobs if args.jobs and args.jobs > 0 else max(1, (os.cpu_count() or 2) // 2)

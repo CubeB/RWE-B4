@@ -242,6 +242,45 @@ class EconomyRuleTests(unittest.TestCase):
         self.assertTrue(callable(CHECKERS["economy"]))
 
 
+
+class ResolveBinaryTests(unittest.TestCase):
+    """
+    The runner launches with cwd=REPO_ROOT, which on POSIX is enough to make a
+    relative --binary work and on Windows is not: CreateProcess resolves a
+    relative program name against the calling process's directory, so the path
+    has to be absolute before Popen ever sees it.
+    """
+
+    def test_relative_becomes_absolute(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / "ai_arena_probe"
+            binary.write_text("")
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                resolved = runner.resolve_binary(binary.name)
+            finally:
+                os.chdir(cwd)
+            self.assertTrue(resolved.is_absolute())
+            self.assertEqual(resolved, binary.resolve())
+
+    def test_default_is_absolute(self):
+        self.assertTrue(runner.resolve_binary(None).is_absolute())
+
+    @unittest.skipUnless(os.name == "nt", "the .exe suffix is a Windows affair")
+    def test_windows_suffix_is_supplied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / "ai_arena.exe"
+            binary.write_text("")
+            resolved = runner.resolve_binary(Path(tmp) / "ai_arena")
+            self.assertEqual(resolved, binary.resolve())
+
+    def test_a_named_suffix_is_left_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            asked = Path(tmp) / "ai_arena.bin"
+            self.assertEqual(runner.resolve_binary(asked), asked.resolve())
+
+
 class ExecuteTests(unittest.TestCase):
     def _run(self, run, run_dir, watchdog=30.0):
         return runner.execute_run(FAKE, run, run_dir, watchdog, False)
