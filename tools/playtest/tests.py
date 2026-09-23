@@ -24,10 +24,13 @@ sys.path.insert(0, str(HERE))
 import run as runner  # noqa: E402
 from checkers import CHECKERS, economy  # noqa: E402
 from checkers.economy import Finding  # noqa: E402
+from testsupport import fake_binary  # noqa: E402
 
 TESTDATA = HERE / "testdata"
-FAKE = TESTDATA / "fake-ai-arena"
 RUN_PY = HERE / "run.py"
+
+
+FAKE = fake_binary()
 
 CSV_HEADER = (
     "tick,seconds,player,side,status,metal,energy,maxMetal,maxEnergy,"
@@ -370,7 +373,13 @@ class CheckOnlyTests(unittest.TestCase):
             os.utime(older, (1000, 1000))
             os.utime(newer, (2000, 2000))
             with mock.patch.dict(os.environ, {"RWE_LOCAL_DATA": tmp}):
-                self.assertEqual(runner.newest_run_root(), newer)
+                # Resolved, because a Path is not normalised on construction
+                # and these two are built differently: MSYS hands Python a TMP
+                # with forward slashes in it, so the one iterdir returns has a
+                # backslash where the one built here has a slash, and two
+                # WindowsPaths for the same directory compare unequal.
+                self.assertEqual(
+                    runner.newest_run_root().resolve(), newer.resolve())
                 proc = subprocess.run(
                     [sys.executable, str(RUN_PY), "--scan-only"],
                     cwd=str(REPO_ROOT), env={**os.environ, "RWE_LOCAL_DATA": tmp},

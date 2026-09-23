@@ -247,11 +247,24 @@ def binary_is_stale(binary) -> bool:
 # --------------------------------------------------------------------------
 
 def _kill(proc) -> None:
+    """
+    Stops a run, and everything it started.
+
+    The tree and not just the process: on POSIX the run has a session of its
+    own (``start_new_session``) and killpg takes all of it. Windows has no
+    session to signal and ``proc.kill()`` reaches only the one process, so
+    anything the binary launched outlives the watchdog and goes on holding the
+    run directory open -- which is how a timed-out run leaves a directory that
+    cannot be removed. ``taskkill /T`` is the equivalent, and the plain kill
+    below is the fallback for when it is not there.
+    """
     try:
         if hasattr(os, "killpg"):
             os.killpg(os.getpgid(proc.pid), getattr(signal, "SIGKILL", signal.SIGTERM))
         else:
-            proc.kill()
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
     except (ProcessLookupError, PermissionError, OSError):
         try:
             proc.kill()

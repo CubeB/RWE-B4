@@ -13,7 +13,6 @@ directory -- so nothing here asserts on this repo's history.
 import json
 import os
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -27,10 +26,10 @@ REPO_ROOT = HERE.parent.parent
 sys.path.insert(0, str(HERE))
 
 import baselines  # noqa: E402
+from testsupport import copy_fake_binary  # noqa: E402
 import run as runner  # noqa: E402
 
 TESTDATA = HERE / "testdata"
-FAKE = TESTDATA / "fake-ai-arena"
 RUN_PY = HERE / "run.py"
 NIGHTLY = HERE / "nightly.sh"
 
@@ -227,11 +226,7 @@ class RunnerFlagTests(unittest.TestCase):
         self.assertTrue(parser.parse_args(["--no-baselines"]).no_baselines)
 
     def _binary(self, directory, mtime=None):
-        binary = Path(directory) / "fake-ai-arena"
-        shutil.copyfile(FAKE, binary)
-        binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
-        os.utime(binary, None if mtime is None else (mtime, mtime))
-        return binary
+        return copy_fake_binary(directory, mtime)
 
     def _args(self, binary, extra=()):
         return runner.build_parser().parse_args([
