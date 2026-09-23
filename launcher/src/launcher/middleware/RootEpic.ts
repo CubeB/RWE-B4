@@ -5,6 +5,10 @@ import { gameClientEventsEpic } from "../gameClient/epic";
 import { gameRoomEpic } from "./GameRoomEpic";
 import { rweBridgeEpic } from "./RweBridgeEpic";
 import { installedModsEpic } from "./InstalledModsEpic";
+import {
+  archiveFingerprintsEpic,
+  sendArchivesEpic,
+} from "./ArchiveFingerprintsEpic";
 import { videoModesEpic } from "./VideoModesEpic";
 import { rweConfigEpic } from "./RweConfigEpic";
 import { rweConfigDialogEpic } from "./RweConfigDialogEpic";
@@ -23,6 +27,8 @@ export const rootEpic = combineEpics<
   gameRoomEpic,
   rweBridgeEpic,
   installedModsEpic,
+  archiveFingerprintsEpic,
+  sendArchivesEpic,
   wizardEpic,
   videoModesEpic,
   rweConfigEpic,

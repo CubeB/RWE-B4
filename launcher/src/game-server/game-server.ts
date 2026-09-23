@@ -1,5 +1,6 @@
 import * as crypto from "crypto";
 import * as rx from "rxjs";
+import { ModFingerprint, checkArchiveAgreement } from "../common/archives";
 import { assertNever, choose, findAndMap, getAddr } from "../common/util";
 import * as protocol from "./protocol";
 
@@ -16,6 +17,7 @@ interface PlayerInfo {
   team?: number;
   ready: boolean;
   installedMods: string[];
+  archives?: ModFingerprint[];
 }
 
 function toProtocolPlayerInfo(info: PlayerInfo): protocol.PlayerInfo {
@@ -27,6 +29,7 @@ function toProtocolPlayerInfo(info: PlayerInfo): protocol.PlayerInfo {
     team: info.team,
     ready: info.ready,
     installedMods: info.installedMods,
+    archives: info.archives,
   };
 }
 
@@ -216,6 +219,7 @@ export class GameServer {
             team: 0,
             ready: false,
             installedMods: data.installedMods,
+            archives: undefined,
           },
         };
 
@@ -263,6 +267,9 @@ export class GameServer {
         });
         socket.on(protocol.Ready, (data: protocol.ReadyPayload) => {
           this.onPlayerReady(roomId, playerId, data);
+        });
+        socket.on(protocol.SetArchives, (data: protocol.SetArchivesPayload) => {
+          this.onSetArchives(roomId, playerId, data);
         });
         socket.on(protocol.OpenSlot, (data: protocol.OpenSlotPayload) => {
           this.onOpenSlot(roomId, playerId, data);
@@ -505,6 +512,27 @@ export class GameServer {
     this.sendToRoom(roomId, protocol.PlayerReady, payload);
   }
 
+  private onSetArchives(
+    roomId: number,
+    playerId: number,
+    data: protocol.SetArchivesPayload
+  ) {
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      throw new Error("onSetArchives triggered for non-existent room");
+    }
+    const player = findPlayer(room.players, playerId);
+    if (!player) {
+      throw new Error(`Failed to find player ${playerId}`);
+    }
+    player.archives = data.mods;
+    const payload: protocol.PlayerArchivesChangedPayload = {
+      playerId,
+      mods: data.mods,
+    };
+    this.sendToRoom(roomId, protocol.PlayerArchivesChanged, payload);
+  }
+
   private onPlayerRequestStartGame(roomId: number, playerId: number) {
     const room = this.rooms.get(roomId);
     if (!room) {
@@ -542,6 +570,37 @@ export class GameServer {
     ) {
       this.log(
         `Received start-game from ${playerId}, but not all open slots are filled, ready and have the required mods`
+      );
+      return;
+    }
+
+    // The same rule the lobby greys the button with, applied again here
+    // because this is the one that decides: a client that skipped the check,
+    // or was built before it existed, must not be able to start a game where
+    // the players are running different data. Issue #43.
+    const agreement = checkArchiveAgreement(
+      room.activeMods,
+      choose(room.players, x =>
+        x.state === "filled"
+          ? { playerId: x.player.id, mods: x.player.archives }
+          : undefined
+      ),
+      room.adminState.adminPlayerId
+    );
+    if (agreement.mismatches.length !== 0) {
+      const names = agreement.mismatches
+        .map(m => `${m.playerId}: ${m.mods.map(x => x.modName).join(", ")}`)
+        .join("; ");
+      this.log(
+        `Received start-game from ${playerId}, but these players do not have the same archives -- ${names}`
+      );
+      return;
+    }
+    if (agreement.uncheckedPlayerIds.length !== 0) {
+      this.log(
+        `Received start-game from ${playerId}, but these players have not reported their archives yet: ${agreement.uncheckedPlayerIds.join(
+          ", "
+        )}`
       );
       return;
     }

@@ -83,6 +83,17 @@ Key subsystems:
 
 Electron app with React/Redux for the multiplayer lobby. Communicates with the engine via `rwe_bridge` (JSON IPC). Contains `launcher/`, `master-server/`, `game-server/`, and `common/` modules.
 
+Before a network game starts, the lobby checks that every player has the same
+game data, because having the same mods by name does not mean having the same
+bytes in them and the difference is a desync. `common/archives.ts` reduces each
+mod to its archives and the SHA-256 of each, hashed in the background against a
+cache keyed by size and modification time; the room refuses to start while
+anyone differs or is still being checked, and the game server applies the same
+rule so that skipping the client is no help. **That file mirrors the engine's
+archive extension list and load order** from
+`src/rwe/vfs/CompositeVirtualFileSystem.cpp`; a change to one belongs in the
+other.
+
 ## Looking at the game
 
 Reaching for a screenshot is usually not the fastest way to settle a question, and several of these will settle one that a screenshot could only gesture at.

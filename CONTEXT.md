@@ -96,6 +96,18 @@ machine and the machines on the other end of the network. A computer
 player is a player and not a hash source.
 _Avoid_: peer (a hash source is a peer; not every player is)
 
+**Archive**:
+A `.hpi`, `.ufo`, `.ccx`, `.gpf` or `.gp3` file of game data, loaded by the
+VFS. Lives inside a mod directory; the engine adds them in a fixed extension
+order and the first copy of an entry wins.
+_Avoid_: pack, HPI (one extension of five)
+
+**Mod fingerprint**:
+One mod reduced to what two players have to agree about: the archives in it and
+the SHA-256 of each. What the lobby compares, because the mod name says nothing
+about what is in it.
+_Avoid_: mod hash (it is a list, not a hash)
+
 **Message bar**:
 The one-line field the game opens on Enter, for typing a line of chat. Holds
 the keyboard while it is open, every key on it being a letter.

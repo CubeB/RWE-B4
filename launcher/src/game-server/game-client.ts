@@ -1,5 +1,6 @@
 import { Observable, Subject } from "rxjs";
 import socketioClient from "socket.io-client";
+import { ModFingerprint } from "../common/archives";
 import * as protocol from "./protocol";
 
 export class GameClientService {
@@ -29,6 +30,9 @@ export class GameClientService {
   private readonly _onSlotClosed = new Subject<protocol.SlotClosedPayload>();
   private readonly _onActiveModsChanged = new Subject<
     protocol.ActiveModsChangedPayload
+  >();
+  private readonly _onPlayerArchivesChanged = new Subject<
+    protocol.PlayerArchivesChangedPayload
   >();
   private readonly _onPlayerReady = new Subject<protocol.PlayerReadyPayload>();
   private readonly _onMapChanged = new Subject<protocol.MapChangedPayload>();
@@ -66,6 +70,11 @@ export class GameClientService {
   }
   get onActiveModsChanged(): Observable<protocol.ActiveModsChangedPayload> {
     return this._onActiveModsChanged;
+  }
+  get onPlayerArchivesChanged(): Observable<
+    protocol.PlayerArchivesChangedPayload
+  > {
+    return this._onPlayerArchivesChanged;
   }
   get onPlayerReady(): Observable<protocol.PlayerReadyPayload> {
     return this._onPlayerReady;
@@ -192,6 +201,13 @@ export class GameClientService {
     );
 
     this.client.on(
+      protocol.PlayerArchivesChanged,
+      (data: protocol.PlayerArchivesChangedPayload) => {
+        this._onPlayerArchivesChanged.next(data);
+      }
+    );
+
+    this.client.on(
       protocol.PlayerReady,
       (data: protocol.PlayerReadyPayload) => {
         this._onPlayerReady.next(data);
@@ -268,6 +284,14 @@ export class GameClientService {
     }
     const payload: protocol.SetActiveModsPayload = { mods };
     this.client.emit(protocol.SetActiveMods, payload);
+  }
+
+  setArchives(mods: ModFingerprint[]) {
+    if (!this.client) {
+      return;
+    }
+    const payload: protocol.SetArchivesPayload = { mods };
+    this.client.emit(protocol.SetArchives, payload);
   }
 
   setReadyState(value: boolean) {

@@ -347,7 +347,16 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
       winds on at about a hundred times real time; seeking backwards restarts the
       scene and winds forward, because a lockstep game only runs one way. Periodic
       keyframes through `save_util` would make that instant and are the next step.
-- [ ] Lobby mod management (the stated reason the launcher exists): detect installed `.hpi/.ufo/.ccx`, hash them, require all players match.
+- [x] Lobby mod management (the stated reason the launcher exists): detect installed
+      `.hpi/.ufo/.ccx/.gpf/.gp3`, hash them, require all players match. The name of a
+      mod was never the question -- two players can both have one called `ta` and have
+      put different archives in it -- so each mod is reduced to its archives and the
+      SHA-256 of each, hashed in the background against a cache keyed by size and
+      modification time. The lobby shows a six-digit digest of the active mods beside
+      each player, refuses to start while anyone differs and names the mod and the file,
+      and refuses to start while anyone is still being checked; the game server applies
+      the same rule, so a client that skips it gets nowhere. Measured over this machine's
+      855 MB of archives: 2.6 s cold, nothing at all warm.
 - [x] Drop handling instead of hard failure. Rejoining is still owed and is
       issue #44's third part. A lost peer used to freeze the game for
       everybody with nothing on screen and a line a frame in the log, because

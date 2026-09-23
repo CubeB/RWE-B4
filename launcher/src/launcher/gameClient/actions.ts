@@ -192,6 +192,20 @@ export function receiveActiveModsChanged(
   };
 }
 
+export interface ReceivePlayerArchivesChangedAction {
+  type: "RECEIVE_PLAYER_ARCHIVES_CHANGED";
+  payload: protocol.PlayerArchivesChangedPayload;
+}
+
+export function receivePlayerArchivesChanged(
+  payload: protocol.PlayerArchivesChangedPayload
+): ReceivePlayerArchivesChangedAction {
+  return {
+    type: "RECEIVE_PLAYER_ARCHIVES_CHANGED",
+    payload,
+  };
+}
+
 export type GameClientAction =
   | ReceiveHandshakeResponseAction
   | ReceivePlayerJoinedAction
@@ -206,4 +220,5 @@ export type GameClientAction =
   | ReceiveStartGameAction
   | DisconnectGameAction
   | ReceiveMapChangedAction
-  | ReceiveActiveModsChangedAction;
+  | ReceiveActiveModsChangedAction
+  | ReceivePlayerArchivesChangedAction;
