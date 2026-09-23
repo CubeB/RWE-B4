@@ -126,7 +126,6 @@ export class PlayersTable extends React.Component<PlayersTableProps> {
       ) : (
         <Checkbox checked={player.ready} disabled />
       );
-    // const nameCell = <TableCell>{player.name}</TableCell>;
     const nameCell =
       player.id === this.props.adminPlayerId ? (
         <TableCell>

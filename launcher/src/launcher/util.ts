@@ -157,13 +157,6 @@ export function automaticallySetUpTaMod(outDir: string): Promise<boolean> {
   });
 }
 
-/**
- * Converts an observable of key-value pairs [K, V]
- * into an observable that emits a Map<K, V>
- * once the input observable has completed.
- * Duplicate keys that appear later in the stream
- * overwrite keys that appeared previously.
- */
 function toMapOp<K, V>(): rx.OperatorFunction<readonly [K, V], Map<K, V>> {
   return rxop.reduce((m, [k, v]) => {
     m.set(k, v);
@@ -171,13 +164,6 @@ function toMapOp<K, V>(): rx.OperatorFunction<readonly [K, V], Map<K, V>> {
   }, new Map<K, V>());
 }
 
-/**
- * Translates a key-value pair [K, J]
- * to a key-value pair [K, V]
- * via mapping table `mapping` from J to V.
- * If the mapping table does not contain a given `J`,
- * the key-value pair is discarded.
- */
 function translateOp<K, J, V>(
   mapping: Map<J, V>
 ): rx.OperatorFunction<readonly [K, J], readonly [K, V]> {
@@ -220,9 +206,6 @@ export function automaticallySetUpTaModManual(
   });
 }
 
-/**
- * Returns true if map a contains at least all values held by map b
- */
 function hasAllValues<K, V>(a: Map<K, V>, b: Map<K, V>): boolean {
   const aS = new Set(a.values());
   const bS = new Set(b.values());
