@@ -265,6 +265,13 @@ namespace rwe
             out.set_player(c.player.value);
             out.set_from_tick(c.fromTick);
         }
+
+        void operator()(const PlayerRejoinedCommand& c)
+        {
+            auto& out = *cmd->mutable_rejoined();
+            out.set_player(c.player.value);
+            out.set_from_tick(c.fromTick);
+        }
     };
 
     void serializeVector(const SimVector& v, proto::SimVector& out)
@@ -341,6 +348,11 @@ namespace rwe
         if (cmd.has_dropped())
         {
             return PlayerDroppedCommand{PlayerId(cmd.dropped().player()), cmd.dropped().from_tick()};
+        }
+
+        if (cmd.has_rejoined())
+        {
+            return PlayerRejoinedCommand{PlayerId(cmd.rejoined().player()), cmd.rejoined().from_tick()};
         }
 
         if (cmd.has_unit_command())

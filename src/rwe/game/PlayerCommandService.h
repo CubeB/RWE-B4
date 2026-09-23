@@ -65,11 +65,26 @@ namespace rwe
          *
          * It starts at 1 because every peer starts its scene at tick 0 and
          * submits nothing for it, loaded saved games included -- the scene time
-         * restarts at zero there while the simulation's own clock does not. A
-         * peer that rejoined a game in progress would break that, and would
-         * have to be given the tick its first hash belongs to (issue #44).
+         * restarts at zero there while the simulation's own clock does not.
+         *
+         * A peer that rejoins a game in progress does break that, which is
+         * what hashSourceFromTick is for: it submits its first hash for the
+         * tick its stream reopened at, not for tick 1, and until this counter
+         * reaches that tick it is left out of the comparison rather than
+         * waited for.
          */
         SceneTime nextHashTick{1};
+
+        /**
+         * The tick each source's first hash belongs to: 1 for everyone who
+         * started the game, and the rejoin tick for anyone who came back.
+         *
+         * A source is compared only from its own first tick. Before that it is
+         * neither compared nor waited on -- waiting would stall the comparison
+         * for everybody until the rejoin, and comparing would set one peer's
+         * hash for tick 9000 beside another's for tick 1.
+         */
+        std::unordered_map<PlayerId, SceneTime> hashSourceFromTick;
 
         /**
          * Kept once found, and handed back to every later caller.
@@ -93,12 +108,28 @@ namespace rwe
          */
         std::unordered_map<PlayerId, unsigned int> pushedCount;
 
+        /**
+         * How many rounds have been popped, which is how many ticks the
+         * simulation has consumed commands for: one round is one tick, for
+         * every player at once.
+         *
+         * Only a rejoin needs this, and it needs it because pushedCount alone
+         * cannot say how much of a buffer is still ahead of the game. For a
+         * player who is present the two are tied -- a buffer holds pushed minus
+         * popped sets -- but a dropped player's ticks are consumed without
+         * popping anything, so that tie is exactly what a drop breaks. Padding
+         * a reopened stream by push count alone would hand the ticks it missed
+         * to the ticks still to come.
+         */
+        unsigned int poppedRounds{0};
+
         /** Players whose stream has been cut, and the tick it was cut at. */
         std::unordered_map<PlayerId, unsigned int> droppedFromTick;
 
         bool isDroppedLocked(PlayerId player) const;
         std::optional<PlayerId> droppingPlayerForLocked(PlayerId dropped) const;
         void dropPlayerLocked(PlayerId player, unsigned int fromTick);
+        void rejoinPlayerLocked(PlayerId player, unsigned int fromTick);
 
     public:
         std::optional<std::vector<std::pair<PlayerId, std::vector<PlayerCommand>>>> tryPopCommands();
@@ -121,7 +152,7 @@ namespace rwe
          * comparison for everybody -- which is how desync detection came to be
          * silently off in any game with an AI in it.
          */
-        void registerHashSource(PlayerId playerId);
+        void registerHashSource(PlayerId playerId, SceneTime fromTick = SceneTime(1));
 
         /**
          * Compares as far through every peer's hash stream as it can, and
@@ -158,6 +189,25 @@ namespace rwe
          * stalls the comparison for everybody.
          */
         void dropPlayer(PlayerId player, unsigned int fromTick);
+
+        /**
+         * Reopens a dropped player's stream at `fromTick`: the inverse of
+         * dropPlayer, and the other half of issue #188.
+         *
+         * Everything below `fromTick` stays empty, which is what the rest of
+         * the game simulated while they were away, and from `fromTick` on the
+         * tick needs their commands again -- so the game stalls there until
+         * they arrive, exactly as it would for any peer that is behind.
+         *
+         * They become a hash source again, from `fromTick` rather than from
+         * tick 1: they have no hashes for the ticks they missed and the others
+         * have long since compared and discarded theirs.
+         *
+         * Idempotent, and ignored for a player who is not dropped, for the same
+         * reason dropPlayer is: it arrives once over the wire and again when
+         * the command carrying it is popped.
+         */
+        void rejoinPlayer(PlayerId player, unsigned int fromTick);
 
         /** Whether this player's stream has been cut. */
         bool isDropped(PlayerId player) const;

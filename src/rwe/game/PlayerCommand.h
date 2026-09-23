@@ -133,5 +133,36 @@ namespace rwe
         unsigned int fromTick;
     };
 
-    using PlayerCommand = std::variant<PlayerUnitCommand, PlayerPauseGameCommand, PlayerUnpauseGameCommand, PlayerSetGameSpeedCommand, PlayerDroppedCommand>;
+    /**
+     * A dropped peer is coming back, and its stream reopens at `fromTick`.
+     *
+     * The inverse of PlayerDroppedCommand and issued by the same peer, by the
+     * same rule -- droppingPlayerFor names whoever would declare that player
+     * lost, and the player in question being dropped is exactly the state that
+     * rule was written for, so both ends of the round trip are decided by one
+     * peer without a message being sent about which.
+     *
+     * Applied on arrival like the drop, and for the mirror reason: what it
+     * says is a tick rather than a moment, so early, late and twice all come
+     * to the same thing. Unlike the drop it makes the tick *harder* to reach
+     * rather than easier -- from `fromTick` the game needs that player's
+     * commands again -- so every peer stalls at `fromTick` until the returning
+     * one has caught up and started sending. That stall is the design and not
+     * an accident: it is what makes the rejoin a lockstep event rather than a
+     * race between a catch-up and a running game. See GameScene_rejoin.cpp.
+     */
+    struct PlayerRejoinedCommand
+    {
+        /** The player coming back. */
+        PlayerId player;
+
+        /**
+         * The first tick their commands are taken from them again. Everything
+         * below it stays empty, exactly as the rest of the game simulated it
+         * while they were gone.
+         */
+        unsigned int fromTick;
+    };
+
+    using PlayerCommand = std::variant<PlayerUnitCommand, PlayerPauseGameCommand, PlayerUnpauseGameCommand, PlayerSetGameSpeedCommand, PlayerDroppedCommand, PlayerRejoinedCommand>;
 }

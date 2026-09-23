@@ -783,6 +783,7 @@ namespace rwe
                 // Queue up commands collected from the local player
                 playerCommandService->pushCommands(localPlayerId, localPlayerCommandBuffer);
                 gameNetworkService->submitCommands(sceneTime, localPlayerCommandBuffer);
+                ++localSetsSubmitted;
                 localPlayerCommandBuffer.clear();
                 ++bufferedCommandCount;
             }
@@ -792,6 +793,7 @@ namespace rwe
             {
                 playerCommandService->pushCommands(localPlayerId, std::vector<PlayerCommand>());
                 gameNetworkService->submitCommands(sceneTime, std::vector<PlayerCommand>());
+                ++localSetsSubmitted;
             }
         }
 

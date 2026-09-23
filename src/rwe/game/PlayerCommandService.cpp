@@ -32,6 +32,7 @@ namespace rwe
             p.second.pop_front();
         }
 
+        ++poppedRounds;
         return out;
     }
 
@@ -73,6 +74,24 @@ namespace rwe
 
             dropPlayerLocked(dropped->player, dropped->fromTick);
         }
+
+        for (const auto& command : commands)
+        {
+            const auto* rejoined = std::get_if<PlayerRejoinedCommand>(&command);
+            if (rejoined == nullptr)
+            {
+                continue;
+            }
+
+            if (droppingPlayerForLocked(rejoined->player) != player)
+            {
+                LOG_WARN << "Ignoring a rejoin of player " << rejoined->player.value
+                         << " issued by player " << player.value << ", who is not the one to issue it";
+                continue;
+            }
+
+            rejoinPlayerLocked(rejoined->player, rejoined->fromTick);
+        }
     }
 
     void PlayerCommandService::pushHash(PlayerId player, const GameHash& gameHash)
@@ -101,7 +120,7 @@ namespace rwe
         }
     }
 
-    void PlayerCommandService::registerHashSource(PlayerId playerId)
+    void PlayerCommandService::registerHashSource(PlayerId playerId, SceneTime fromTick)
     {
         std::scoped_lock<std::mutex> lock(mutex);
 
@@ -110,6 +129,8 @@ namespace rwe
         {
             throw std::logic_error("Hash source already registered");
         }
+
+        hashSourceFromTick[playerId] = fromTick;
     }
 
     unsigned int PlayerCommandService::bufferedCommandCount(PlayerId player) const
@@ -128,14 +149,36 @@ namespace rwe
             return desync;
         }
 
-        while (!std::any_of(gameTimeBuffers.begin(), gameTimeBuffers.end(), [](const auto& p) { return p.second.empty(); }))
+        // A source whose first hash belongs to a later tick than the one being
+        // compared has not started yet: it is skipped rather than waited for,
+        // or a rejoin agreed for tick 9000 would stall the comparison from now
+        // until then.
+        auto participating = [&](PlayerId playerId) {
+            auto it = hashSourceFromTick.find(playerId);
+            return it == hashSourceFromTick.end() || it->second <= nextHashTick;
+        };
+
+        while (!std::any_of(gameTimeBuffers.begin(), gameTimeBuffers.end(), [&](const auto& p) { return participating(p.first) && p.second.empty(); }))
         {
             std::vector<std::pair<PlayerId, GameHash>> round;
             round.reserve(gameTimeBuffers.size());
             for (auto& p : gameTimeBuffers)
             {
+                if (!participating(p.first))
+                {
+                    continue;
+                }
+
                 round.emplace_back(p.first, p.second.front());
                 p.second.pop_front();
+            }
+
+            if (round.empty())
+            {
+                // Nobody is reporting for this tick, which happens only in a
+                // game whose every hash source has been dropped. There is
+                // nothing to compare and nothing to advance towards.
+                return std::nullopt;
             }
 
             // The buffers live in a hash table, so a round comes out in
@@ -181,6 +224,12 @@ namespace rwe
         dropPlayerLocked(player, fromTick);
     }
 
+    void PlayerCommandService::rejoinPlayer(PlayerId player, unsigned int fromTick)
+    {
+        std::scoped_lock<std::mutex> lock(mutex);
+        rejoinPlayerLocked(player, fromTick);
+    }
+
     bool PlayerCommandService::isDropped(PlayerId player) const
     {
         std::scoped_lock<std::mutex> lock(mutex);
@@ -221,6 +270,76 @@ namespace rwe
         return best;
     }
 
+    void PlayerCommandService::rejoinPlayerLocked(PlayerId player, unsigned int fromTick)
+    {
+        if (!isDroppedLocked(player))
+        {
+            // Idempotent for the same reason the drop is: this arrives once
+            // over the wire and again when the command carrying it is popped.
+            // It is also what a rejoin naming somebody who never left does.
+            return;
+        }
+
+        auto buffer = commandBuffers.find(player);
+        if (buffer == commandBuffers.end())
+        {
+            LOG_ERROR << "Rejoin names player " << player.value << ", who is not in this game";
+            return;
+        }
+
+        auto droppedAt = droppedFromTick.at(player);
+        if (fromTick <= droppedAt)
+        {
+            // The stream would reopen at or before the tick it was cut at, so
+            // there would be ticks the rest of the game ran as empty and this
+            // player is about to fill in. Refuse rather than desync.
+            LOG_ERROR << "Rejoin of player " << player.value << " at tick " << fromTick
+                      << " is not after the tick their stream was cut at (" << droppedAt << ")";
+            return;
+        }
+
+        if (fromTick <= poppedRounds)
+        {
+            // A tick the simulation has already run. Whoever issued this chose
+            // it too low -- the same fault the drop's margin exists to prevent,
+            // and the same refusal, because filling a tick that is in the past
+            // is a desync rather than a recovery.
+            LOG_ERROR << "Rejoin of player " << player.value << " at tick " << fromTick
+                      << " is not in the future; the game has consumed " << poppedRounds << " ticks";
+            return;
+        }
+
+        // Ticks up to fromTick-1 were empty for everyone and stay empty, and
+        // the buffer holds only the ones still ahead of the game.
+        //
+        // Which is why the padding starts at whichever of the two counters is
+        // further on. Below the cut the buffer still holds this player's real
+        // sets and its size is pushed minus popped, as anyone's is; past the
+        // cut it is empty and the game has gone on consuming ticks without
+        // popping anything from it, so popped has overtaken pushed and the
+        // difference is ticks that were never in the buffer at all. Padding
+        // from pushed would then hand the ticks they missed to the ticks still
+        // to come, and padding from popped would drop real commands they sent
+        // before they went quiet.
+        auto padFrom = std::max(pushedCount[player], poppedRounds);
+        for (auto tick = padFrom + 1; tick < fromTick; ++tick)
+        {
+            buffer->second.push_back(std::vector<PlayerCommand>());
+        }
+
+        pushedCount[player] = fromTick - 1;
+
+        droppedFromTick.erase(player);
+
+        // A source again, from the tick they reopened at rather than from tick
+        // 1: they have no hashes for the ticks they missed, and the peers that
+        // stayed compared and discarded theirs long ago.
+        gameTimeBuffers.emplace(player, std::deque<GameHash>());
+        hashSourceFromTick[player] = SceneTime(fromTick);
+
+        LOG_INFO << "Player " << player.value << " rejoined; their commands are needed again from tick " << fromTick;
+    }
+
     void PlayerCommandService::dropPlayerLocked(PlayerId player, unsigned int fromTick)
     {
         if (isDroppedLocked(player))
@@ -239,6 +358,7 @@ namespace rwe
 
         droppedFromTick.emplace(player, fromTick);
         gameTimeBuffers.erase(player);
+        hashSourceFromTick.erase(player);
 
         // Sets 1 to fromTick-1 are theirs; everything from fromTick on is
         // empty. Two peers can hold different amounts of a lost peer's stream,

@@ -238,6 +238,14 @@ message PlayerDroppedCommand
     required uint32 from_tick = 2;
 }
 
+// A dropped peer is coming back; from `from_tick` the game needs its commands
+// again. The inverse of PlayerDroppedCommand, issued by the same peer.
+message PlayerRejoinedCommand
+{
+    required uint32 player = 1;
+    required uint32 from_tick = 2;
+}
+
 message PlayerCommand
 {
     oneof command
@@ -247,6 +255,7 @@ message PlayerCommand
         PlayerUnpauseGameCommand unpause = 3;
         PlayerSetGameSpeedCommand set_game_speed = 4;
         PlayerDroppedCommand dropped = 5;
+        PlayerRejoinedCommand rejoined = 6;
     }
 }
 

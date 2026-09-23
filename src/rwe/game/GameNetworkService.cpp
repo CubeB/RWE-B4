@@ -50,6 +50,18 @@ namespace rwe
             {
                 e.sendBuffer.push_back(commands);
             }
+
+            // Kept whether anyone has been dropped or not, because by the time
+            // one has it is too late to start: a returning peer wants the sets
+            // from before it went quiet.
+            auto next = sendHistory.empty()
+                ? SequenceNumber(0)
+                : SequenceNumber(sendHistory.back().first.value + 1);
+            sendHistory.emplace_back(next, commands);
+            while (sendHistory.size() > RejoinHistoryLength)
+            {
+                sendHistory.pop_front();
+            }
         });
     }
 
@@ -143,10 +155,70 @@ namespace rwe
     void GameNetworkService::forgetPeer(PlayerId playerId)
     {
         asio::post(ioContext, [this, playerId]() {
+            for (const auto& e : endpoints)
+            {
+                if (e.playerId == playerId)
+                {
+                    // Where it was, so that a peer which comes back to the same
+                    // place needs nobody to say where that is.
+                    forgottenEndpoints.emplace_back(playerId, e.endpoint);
+                }
+            }
+
             endpoints.erase(
                 std::remove_if(endpoints.begin(), endpoints.end(), [playerId](const auto& e) { return e.playerId == playerId; }),
                 endpoints.end());
         });
+    }
+
+    bool GameNetworkService::rememberPeer(PlayerId playerId, SequenceNumber fromSequence, SequenceNumber theirNextSequence)
+    {
+        std::promise<bool> result;
+        asio::post(ioContext, [this, playerId, fromSequence, theirNextSequence, &result]() {
+            auto known = std::find_if(forgottenEndpoints.begin(), forgottenEndpoints.end(), [playerId](const auto& p) { return p.first == playerId; });
+            if (known == forgottenEndpoints.end())
+            {
+                LOG_ERROR << "Cannot listen to player " << playerId.value << " again: nothing was ever forgotten about them";
+                result.set_value(false);
+                return;
+            }
+
+            auto haveFrom = sendHistory.empty() ? SequenceNumber(0) : sendHistory.front().first;
+            auto haveTo = sendHistory.empty() ? SequenceNumber(0) : SequenceNumber(sendHistory.back().first.value + 1);
+            if (fromSequence < haveFrom || fromSequence > haveTo)
+            {
+                LOG_ERROR << "Cannot resume the stream to player " << playerId.value << " at " << fromSequence.value
+                          << ": this peer holds " << haveFrom.value << " to " << haveTo.value;
+                result.set_value(false);
+                return;
+            }
+
+            EndpointInfo endpoint(playerId, known->second);
+            endpoint.nextCommandToSend = fromSequence;
+            endpoint.nextCommandToReceive = theirNextSequence;
+            for (const auto& [sequence, commands] : sendHistory)
+            {
+                if (sequence >= fromSequence)
+                {
+                    endpoint.sendBuffer.push_back(commands);
+                }
+            }
+
+            // The hash stream is not resumed. Every peer that stayed has long
+            // since compared and discarded the hashes for the ticks this one
+            // missed, and PlayerCommandService gives a returning source its own
+            // first tick rather than assuming tick 1, so both ends start again
+            // from the rejoin -- see registerHashSource.
+
+            forgottenEndpoints.erase(known);
+            endpoints.push_back(std::move(endpoint));
+
+            LOG_INFO << "Listening to player " << playerId.value << " again, sending from " << fromSequence.value
+                     << " and expecting their set " << theirNextSequence.value;
+            result.set_value(true);
+        });
+
+        return result.get_future().get();
     }
 
     float GameNetworkService::getMaxAverageRttMillis()

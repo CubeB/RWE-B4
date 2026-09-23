@@ -1187,6 +1187,41 @@ namespace rwe
          */
         void onPlayerDropped(PlayerId player, unsigned int fromTick);
 
+        /**
+         * Takes a returning player back into the game from `fromTick`: says so
+         * on screen, and arranges for this peer to listen to them again.
+         *
+         * The listening cannot happen here. A sequence number is an absolute
+         * position in a stream -- set N is tick N+1 -- so the stream to a
+         * returning peer resumes at set fromTick-1, and this peer may not have
+         * submitted that far yet: commands are queued several ticks ahead of
+         * the simulation, but the rejoin is processed at the tick it was
+         * issued on, which is behind. So the peer is remembered when the count
+         * catches up, in resumeRejoiningPeers.
+         */
+        void onPlayerRejoined(PlayerId player, unsigned int fromTick);
+
+        /**
+         * Starts listening to any returning peer whose resume point this peer
+         * has now submitted past. Called once a frame, and ordinarily does
+         * nothing at all.
+         */
+        void resumeRejoiningPeers();
+
+        /** Returning players and the tick their stream reopens at. */
+        std::unordered_map<unsigned int, unsigned int> pendingRejoins;
+
+        /**
+         * How many command sets this peer has put into its own stream, which is
+         * where that stream's sequence numbers have reached.
+         *
+         * Counted here rather than asked of either service because both of
+         * them are told in the same breath -- pushCommands and submitCommands
+         * are called together, once per tick, and neither ever skips -- and it
+         * is that pairing, not either counter, that a rejoin depends on.
+         */
+        unsigned int localSetsSubmitted{0};
+
         /** Whether the message bar is open, and so holding the keyboard. */
         bool isChatBarOpen() const;
 

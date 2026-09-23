@@ -2719,6 +2719,17 @@ namespace rwe
                 }
 
                 onPlayerDropped(c.player, c.fromTick);
+            },
+            [&](const PlayerRejoinedCommand& c) {
+                // The mirror of the drop above, and settled in the same place
+                // for the same reasons: applied on arrival, entitlement checked
+                // there, so what is left here is whether it was honoured.
+                if (playerCommandService->isDropped(c.player))
+                {
+                    return;
+                }
+
+                onPlayerRejoined(c.player, c.fromTick);
             });
     }
 

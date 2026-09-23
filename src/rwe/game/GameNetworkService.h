@@ -130,6 +130,37 @@ namespace rwe
 
         std::vector<EndpointInfo> endpoints;
 
+        /**
+         * The address of every peer that has been forgotten, so that one which
+         * comes back can be listened to again without being told where it is.
+         *
+         * A returning peer reaches the game through the lobby, which knows
+         * where it is now and could say; keeping the old address means the
+         * ordinary case -- the same machine, the same port, a process that was
+         * restarted -- needs nobody to say anything.
+         */
+        std::vector<std::pair<PlayerId, asio::ip::udp::endpoint>> forgottenEndpoints;
+
+        /**
+         * This peer's own submitted command sets, by sequence number, for as
+         * far back as RejoinHistoryLength.
+         *
+         * A sequence number is an absolute position in a peer's stream -- set N
+         * is the one the simulation runs on tick N+1 -- because submitCommands
+         * and PlayerCommandService::pushCommands are called together, once per
+         * tick, and neither ever skips. That is what lets a returning peer be
+         * handed the middle of a stream rather than the start of one.
+         *
+         * A per-endpoint send buffer cannot serve: it holds what that peer has
+         * not acked, and a peer that was dropped has no buffer at all. This is
+         * the other half of what the issue calls the command log since the
+         * save, and the only half that has to live in the engine.
+         */
+        std::deque<std::pair<SequenceNumber, CommandSet>> sendHistory;
+
+        /** How many of this peer's own sets are kept for a returning peer. */
+        static constexpr std::size_t RejoinHistoryLength = 3600;
+
         std::array<char, 1500> sendBuffer;
         std::array<char, 1500> receiveBuffer;
         asio::ip::udp::endpoint currentRemoteEndpoint;
@@ -224,6 +255,24 @@ namespace rwe
          * third part and wants the save, not this.
          */
         void forgetPeer(PlayerId playerId);
+
+        /**
+         * Listen to a dropped peer again, and start sending to it from
+         * `fromSequence` -- the position in this peer's own stream that the
+         * returning one already has, which is the tick its catch-up bundle
+         * ended at.
+         *
+         * `theirNextSequence` is where its stream resumes, so that a packet
+         * from it carrying sets below that -- one still in flight from before
+         * it went quiet, or a resend it has not learned is unwanted -- is
+         * discarded rather than pushed after the ticks it missed.
+         *
+         * Returns false when this peer no longer holds its own stream back to
+         * `fromSequence`. The bundle is then older than RejoinHistoryLength and
+         * the gap cannot be closed from here; whoever asked has to build a
+         * newer one.
+         */
+        bool rememberPeer(PlayerId playerId, SequenceNumber fromSequence, SequenceNumber theirNextSequence);
 
     private:
         void run();

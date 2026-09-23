@@ -72,6 +72,11 @@ namespace rwe
             return;
         }
 
+        // A returning peer is listened to again as soon as this peer's own
+        // stream has reached the point it is to be given, which is ordinarily
+        // a few ticks after the rejoin was agreed.
+        resumeRejoiningPeers();
+
         waitingForPlayers = playerCommandService->playersNotReady();
         if (waitingForPlayers.empty())
         {

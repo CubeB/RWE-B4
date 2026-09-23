@@ -330,6 +330,7 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_peers.cpp
     src/rwe/game/GameScene_render.cpp
     src/rwe/game/panel_slide.cpp
+    src/rwe/game/GameScene_rejoin.cpp
     src/rwe/game/GameScene_replay.cpp
     src/rwe/game/GameScene_util.cpp
     src/rwe/game/featureplacement.cpp
@@ -985,6 +986,7 @@ set(TEST_FILES
     src/rwe/game/DesyncReport.test.cpp
     src/rwe/game/aicommandfeed.test.cpp
     src/rwe/game/playerdrop.test.cpp
+    src/rwe/game/playerrejoin.test.cpp
     src/rwe/game/chat_util.test.cpp
     src/rwe/game/SimEventLog.test.cpp
     src/rwe/geometry/BoundingBox3f.test.cpp
