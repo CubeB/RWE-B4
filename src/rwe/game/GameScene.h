@@ -1201,6 +1201,55 @@ namespace rwe
          */
         void onPlayerRejoined(PlayerId player, unsigned int fromTick);
 
+    public:
+        /**
+         * Rejoin a game in progress: replay `catchUp` up to `atTick`, then
+         * play from there. Issue #188.
+         *
+         * The catch-up is the replay viewer's own path, which is what makes it
+         * cheap to be sure of: the same commands into the same simulation in
+         * the same order, and no live input until it is over. It also suppresses
+         * this peer's sync hashes for exactly the ticks it is winding through,
+         * which is what it wants -- the peers that stayed compared and
+         * discarded theirs long ago.
+         */
+        void beginRejoin(Replay&& catchUp, unsigned int atTick);
+
+    private:
+        /** Leaves the catch-up behind once the rejoin tick has been reached. */
+        void finishRejoinIfCaughtUp();
+
+        /**
+         * Asks for a dropped player to be brought back, when something has
+         * asked for that. The hook a launcher will replace; today it reads
+         * RWE_REJOIN_TEST, which is how the network harness drives it.
+         */
+        void updateRejoinRequest();
+
+        /**
+         * Names the recording a returning player needs, once this peer has run
+         * far enough for it to hold exactly the ticks they are missing.
+         */
+        void writeRejoinBundleIfDue();
+
+        /** Set once a rejoin has been asked for, so it is asked for once. */
+        bool rejoinRequested{false};
+        std::optional<unsigned int> rejoinRequestedAfter;
+
+        /** Players whose bundle is owed, and the tick it must run through. */
+        std::unordered_map<unsigned int, unsigned int> rejoinBundleDue;
+
+        /**
+         * How far ahead a rejoin is agreed for, in ticks.
+         *
+         * Longer than DropTickMargin, and for a different reason. A drop has
+         * only to land past where any peer has already run; a rejoin has also
+         * to leave every peer time to reach that tick and hand over the
+         * recording before the returning one is waited for, and to be late is
+         * only to wait, where to be early is to refuse.
+         */
+        static constexpr unsigned int RejoinTickMargin{120};
+
         /**
          * Starts listening to any returning peer whose resume point this peer
          * has now submitted past. Called once a frame, and ordinarily does
@@ -1210,6 +1259,12 @@ namespace rwe
 
         /** Returning players and the tick their stream reopens at. */
         std::unordered_map<unsigned int, unsigned int> pendingRejoins;
+
+        /**
+         * While this peer is winding itself forward to rejoin, the tick it is
+         * winding to. Unset in any other game, including a recorded one.
+         */
+        std::optional<unsigned int> rejoiningAtTick;
 
         /**
          * How many command sets this peer has put into its own stream, which is

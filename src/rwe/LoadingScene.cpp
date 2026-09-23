@@ -168,16 +168,40 @@ namespace rwe
             // opinion to offer and gets no buffer.
             if (playerId == *loaded.localPlayerId || isRemote)
             {
-                playerCommandService->registerHashSource(playerId);
+                // On a peer rejoining a game in progress, every hash stream
+                // starts at the rejoin tick: this peer has none for the ticks
+                // it missed, and that is also where the peers that stayed
+                // resume sending to it. In an ordinary game it is tick 1,
+                // which is the default.
+                playerCommandService->registerHashSource(
+                    playerId,
+                    gameParameters.rejoinAtTick > 0 ? SceneTime(gameParameters.rejoinAtTick) : SceneTime(1));
             }
 
             if (isRemote)
             {
-                endpointInfos.emplace_back(playerId, networkService.getEndpoint(i));
+                auto& endpoint = endpointInfos.emplace_back(playerId, networkService.getEndpoint(i));
+
+                // Both streams from a peer that stayed resume where this one
+                // rejoins, and everything below that it already has from the
+                // catch-up. A sequence number is an absolute position, so
+                // saying so is the whole of it: a packet carrying sets from
+                // further back is skipped down to here rather than refused.
+                if (gameParameters.rejoinAtTick > 0)
+                {
+                    auto resumeAt = gameParameters.rejoinAtTick - 1;
+                    endpoint.nextCommandToSend = SequenceNumber(resumeAt);
+                    endpoint.nextCommandToReceive = SequenceNumber(resumeAt);
+                    endpoint.nextHashToSend = GameTime(resumeAt);
+                    endpoint.nextHashToReceive = GameTime(resumeAt);
+                }
             }
         }
 
-        auto gameNetworkService = std::make_unique<GameNetworkService>(*loaded.localPlayerId, std::stoi(gameParameters.localNetworkPort), endpointInfos, playerCommandService.get());
+        auto resumeFromSequence = gameParameters.rejoinAtTick > 0
+            ? SequenceNumber(gameParameters.rejoinAtTick - 1)
+            : SequenceNumber(0);
+        auto gameNetworkService = std::make_unique<GameNetworkService>(*loaded.localPlayerId, std::stoi(gameParameters.localNetworkPort), endpointInfos, playerCommandService.get(), resumeFromSequence);
 
         auto minimapDots = sceneContext.textureService->getGafEntry("anims/FX.GAF", "radlogo");
         if (minimapDots->sprites.size() != 10)
@@ -322,7 +346,18 @@ namespace rwe
 
         gameScene->setCameraPosition(Vector3f(simScalarToFloat(humanStartPos->x), 0.0f, simScalarToFloat(humanStartPos->z)));
 
-        if (gameParameters.replayFile)
+        if (gameParameters.rejoinFromReplayFile)
+        {
+            // Rejoining a game in progress. The recording of it so far is
+            // wound through before the first live tick; see beginRejoin.
+            auto catchUp = readReplayFile(*gameParameters.rejoinFromReplayFile);
+            if (!catchUp)
+            {
+                throw std::runtime_error("Could not read rejoin file: " + *gameParameters.rejoinFromReplayFile);
+            }
+            gameScene->beginRejoin(std::move(*catchUp), gameParameters.rejoinAtTick);
+        }
+        else if (gameParameters.replayFile)
         {
             auto replay = readReplayFile(*gameParameters.replayFile);
             if (!replay)

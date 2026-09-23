@@ -161,6 +161,17 @@ namespace rwe
         /** How many of this peer's own sets are kept for a returning peer. */
         static constexpr std::size_t RejoinHistoryLength = 3600;
 
+        /**
+         * How far along this peer's own two streams are: the next sequence
+         * number a submitted set or hash will carry.
+         *
+         * Both are ordinary indices -- set N runs on tick N+1, hash N is the
+         * state at the end of tick N+1 -- and a returning peer is given a
+         * position in each rather than the whole of either.
+         */
+        SequenceNumber nextSendSequence{0};
+        SequenceNumber nextHashSequence{0};
+
         std::array<char, 1500> sendBuffer;
         std::array<char, 1500> receiveBuffer;
         asio::ip::udp::endpoint currentRemoteEndpoint;
@@ -202,7 +213,14 @@ namespace rwe
             std::optional<SceneTime> lastKnownSceneTime;
         };
 
-        GameNetworkService(PlayerId localPlayerId, int port, const std::vector<EndpointInfo>& endpoints, PlayerCommandService* playerCommandService);
+        /**
+         * `resumeFromSequence` is where this peer's own streams begin, which is
+         * zero for a game being started and the rejoin tick minus one for a
+         * peer rejoining one in progress: it has no sets or hashes of its own
+         * for the ticks it missed, and the peers that stayed are expecting its
+         * stream to pick up exactly there.
+         */
+        GameNetworkService(PlayerId localPlayerId, int port, const std::vector<EndpointInfo>& endpoints, PlayerCommandService* playerCommandService, SequenceNumber resumeFromSequence = SequenceNumber(0));
 
         virtual ~GameNetworkService();
 

@@ -17,13 +17,16 @@ namespace rwe
         PlayerId localPlayerId,
         int port,
         const std::vector<GameNetworkService::EndpointInfo>& endpoints,
-        PlayerCommandService* playerCommandService)
+        PlayerCommandService* playerCommandService,
+        SequenceNumber resumeFromSequence)
         : localPlayerId(localPlayerId),
           port(port),
           resolver(ioContext),
           socket(ioContext),
           sendTimer(ioContext),
           endpoints(endpoints),
+          nextSendSequence(resumeFromSequence),
+          nextHashSequence(resumeFromSequence),
           playerCommandService(playerCommandService)
     {
     }
@@ -54,10 +57,8 @@ namespace rwe
             // Kept whether anyone has been dropped or not, because by the time
             // one has it is too late to start: a returning peer wants the sets
             // from before it went quiet.
-            auto next = sendHistory.empty()
-                ? SequenceNumber(0)
-                : SequenceNumber(sendHistory.back().first.value + 1);
-            sendHistory.emplace_back(next, commands);
+            sendHistory.emplace_back(nextSendSequence, commands);
+            nextSendSequence = SequenceNumber(nextSendSequence.value + 1);
             while (sendHistory.size() > RejoinHistoryLength)
             {
                 sendHistory.pop_front();
@@ -72,6 +73,8 @@ namespace rwe
             {
                 e.hashSendBuffer.push_back(hash);
             }
+
+            nextHashSequence = SequenceNumber(nextHashSequence.value + 1);
         });
     }
 
@@ -183,8 +186,8 @@ namespace rwe
                 return;
             }
 
-            auto haveFrom = sendHistory.empty() ? SequenceNumber(0) : sendHistory.front().first;
-            auto haveTo = sendHistory.empty() ? SequenceNumber(0) : SequenceNumber(sendHistory.back().first.value + 1);
+            auto haveFrom = sendHistory.empty() ? nextSendSequence : sendHistory.front().first;
+            auto haveTo = nextSendSequence;
             if (fromSequence < haveFrom || fromSequence > haveTo)
             {
                 LOG_ERROR << "Cannot resume the stream to player " << playerId.value << " at " << fromSequence.value
@@ -204,11 +207,13 @@ namespace rwe
                 }
             }
 
-            // The hash stream is not resumed. Every peer that stayed has long
-            // since compared and discarded the hashes for the ticks this one
-            // missed, and PlayerCommandService gives a returning source its own
-            // first tick rather than assuming tick 1, so both ends start again
-            // from the rejoin -- see registerHashSource.
+            // The hash stream is numbered the same way and needs no history.
+            // This peer has not yet run the tick the returning one is waiting
+            // for, so there is nothing held back to hand over; saying where
+            // this stream has reached is enough, because the receiver skips
+            // whatever falls below the position it asked to resume at.
+            endpoint.nextHashToSend = GameTime(nextHashSequence.value);
+            endpoint.nextHashToReceive = GameTime(theirNextSequence.value);
 
             forgottenEndpoints.erase(known);
             endpoints.push_back(std::move(endpoint));

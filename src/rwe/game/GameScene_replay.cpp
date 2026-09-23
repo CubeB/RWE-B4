@@ -419,6 +419,11 @@ namespace rwe
 
     void GameScene::tryTickGame()
     {
+        // Before anything reads replayPlayback, because that is what a rejoin
+        // borrows to wind itself forward and what it has to stop borrowing at
+        // exactly the right tick.
+        finishRejoinIfCaughtUp();
+
         if (replayPlayback)
         {
             // Before the tick's commands go in, so the keyframe is the state

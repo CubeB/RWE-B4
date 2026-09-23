@@ -298,7 +298,18 @@ namespace rwe
         panelBaseX = currentPanel->getX();
 
         sceneContext.audioService->reserveChannels(reservedChannelsCount);
-        gameNetworkService->start();
+
+        // A peer rejoining a game in progress starts listening only once it has
+        // wound itself forward, in finishRejoinIfCaughtUp. Its command buffers
+        // are being filled from the recording until then, and a set arriving
+        // live would be appended to the same buffers in the middle of that --
+        // landing at whichever tick the catch-up had reached rather than at the
+        // one it belongs to. The peers that stayed lose nothing by waiting:
+        // an unacked set is resent until it is taken.
+        if (!rejoiningAtTick)
+        {
+            gameNetworkService->start();
+        }
 
         recreateWorldRenderTextures();
     }
@@ -750,6 +761,8 @@ namespace rwe
         // stalled, and the push below would otherwise hold it back until a
         // tick that cannot run without it.
         updatePeerLiveness();
+        updateRejoinRequest();
+        writeRejoinBundleIfDue();
 
         auto targetCommandBufferSize = commandBufferTargetForRttMillis(gameNetworkService->getMaxAverageRttMillis());
 

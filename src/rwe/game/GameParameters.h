@@ -163,6 +163,22 @@ namespace rwe
         unsigned int replaySeekToTick{0};
 
         /**
+         * Rejoining a game already in progress: every command the game has
+         * consumed so far, as a replay, and the tick this peer's own stream
+         * reopens at. Issue #188.
+         *
+         * The recording runs through rejoinAtTick-1 and no further, which is
+         * the whole of the arrangement. A lockstep game can only be caught up
+         * with by being replayed, so the peers that stayed stall at that tick
+         * -- they need this player's commands from it -- and everything, in
+         * both directions and in both streams, resumes there. One tick rather
+         * than two is what keeps a returning peer from having to be handed a
+         * gap it could not have filled.
+         */
+        std::optional<std::string> rejoinFromReplayFile;
+        unsigned int rejoinAtTick{0};
+
+        /**
          * Mixed into the simulation's seed when set. Without it the seed
          * comes from the map and the players alone, so two arena runs of the
          * same match-up are the same game -- fine for reproducing one, no use

@@ -121,6 +121,8 @@ int main(int argc, char* argv[])
                       << "                        or one written in the local data folder's ai directory\n"
                       << "  --record-replay <f>   write every command to a replay file as you play\n"
                       << "  --replay <file>       watch a replay instead of playing\n"
+                      << "  --rejoin <file>       rejoin a game in progress from its recording so far\n"
+                      << "  --rejoin-tick <n>     the tick that recording ends at, and this peer resumes at\n"
                       << "  --width <pixels>      Window width (default: 800)\n"
                       << "  --height <pixels>     Window height (default: 600)\n"
                       << "  --fullscreen          Start in fullscreen mode (same as --window-mode fullscreen)\n"
@@ -236,6 +238,20 @@ int main(int argc, char* argv[])
                 if (args.getUint("seed", 0) > 0)
                 {
                     gameParameters->randomSeed = args.getUint("seed", 0);
+                }
+                if (!args.getString("rejoin", "").empty())
+                {
+                    // Rejoining a game already in progress: everything else on
+                    // the command line is the game as the lobby set it up, the
+                    // same as for any other peer, and these two say where to
+                    // pick it up. See GameScene_rejoin.cpp.
+                    auto rejoinTick = args.getUint("rejoin-tick", 0);
+                    if (rejoinTick == 0)
+                    {
+                        throw std::runtime_error("--rejoin wants --rejoin-tick as well");
+                    }
+                    gameParameters->rejoinFromReplayFile = args.getString("rejoin", "");
+                    gameParameters->rejoinAtTick = rejoinTick;
                 }
                 if (!args.getString("record-replay", "").empty())
                 {
