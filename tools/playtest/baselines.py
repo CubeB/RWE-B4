@@ -97,13 +97,29 @@ def _commit_time(sha: str, repo_root) -> int:
         return 0
 
 
+def rwe_user_dir() -> Path:
+    """The engine's user data directory, by the engine's own rule (src/rwe/util.cpp).
+
+    Windows: %APPDATA%\\RWE. Elsewhere "rwe" under the XDG data home
+    (~/.local/share unless XDG_DATA_HOME is set and absolute), except that an
+    existing ~/.rwe from before that move keeps being used until the new
+    location exists (issue #216).
+    """
+    if os.name == "nt":
+        return Path(os.environ["APPDATA"]) / "RWE"
+    xdg = os.environ.get("XDG_DATA_HOME")
+    data_home = Path(xdg) if xdg and os.path.isabs(xdg) else Path.home() / ".local" / "share"
+    candidates = [data_home / "rwe", Path.home() / ".rwe"]
+    return next((c for c in candidates if c.is_dir()), candidates[0])
+
+
 def _data_root(data_root=None) -> Path:
     if data_root is not None:
         return Path(data_root)
     env = os.environ.get("RWE_LOCAL_DATA")
     if env:
         return Path(env)
-    return Path.home() / ".rwe"
+    return rwe_user_dir()
 
 
 def baselines_dir(data_root=None) -> Path:

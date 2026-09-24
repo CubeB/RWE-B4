@@ -151,11 +151,27 @@ def expand(matrix: dict, scenario_filter=None, seeds_override=None, repeat_seeds
 # paths
 # --------------------------------------------------------------------------
 
+def rwe_user_dir() -> Path:
+    """The engine's user data directory, by the engine's own rule (src/rwe/util.cpp).
+
+    Windows: %APPDATA%\\RWE. Elsewhere "rwe" under the XDG data home
+    (~/.local/share unless XDG_DATA_HOME is set and absolute), except that an
+    existing ~/.rwe from before that move keeps being used until the new
+    location exists (issue #216).
+    """
+    if os.name == "nt":
+        return Path(os.environ["APPDATA"]) / "RWE"
+    xdg = os.environ.get("XDG_DATA_HOME")
+    data_home = Path(xdg) if xdg and os.path.isabs(xdg) else Path.home() / ".local" / "share"
+    candidates = [data_home / "rwe", Path.home() / ".rwe"]
+    return next((c for c in candidates if c.is_dir()), candidates[0])
+
+
 def data_root() -> Path:
     env = os.environ.get("RWE_LOCAL_DATA")
     if env:
         return Path(env)
-    return Path.home() / ".rwe"
+    return rwe_user_dir()
 
 
 def matrix_hash(path) -> str:

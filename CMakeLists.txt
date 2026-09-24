@@ -1120,6 +1120,7 @@ set(TEST_FILES
     src/rwe/sim/SimRandom.test.cpp
     src/rwe/sim/resurrect.test.cpp
     src/rwe/sim/saveload.test.cpp
+    src/rwe/util.test.cpp
     src/rwe/util/CrashHandler.test.cpp
     src/rwe/util/OpaqueArgs.test.cpp
     src/rwe/util/Result.test.cpp

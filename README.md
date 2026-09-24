@@ -106,8 +106,10 @@ back here, rather than failing with a filesystem error.
 
 <br>
 
-The engine reads one data directory — `%AppData%/RWE/Data` on Windows,
-`$HOME/.rwe/Data` elsewhere — and mounts every `.hpi`, `.ufo`, `.ccx`, `.gpf`
+The engine reads one data directory: `%AppData%/RWE/Data` on Windows, and
+`~/.local/share/rwe/Data` elsewhere (`$XDG_DATA_HOME/rwe/Data` when that is
+set; an existing `~/.rwe` from before the move keeps being used until the new
+location exists). It mounts every `.hpi`, `.ufo`, `.ccx`, `.gpf`
 and `.gp3` it finds directly inside it. Two subdirectories are read by name:
 `movies` for the films, which the GOG release ships as `.ZRB` (Smacker) files
 under its own `Data` folder, and `music` for the soundtrack. So:
@@ -120,11 +122,12 @@ The lookups are case-insensitive, so the mixed casing the GOG release ships
 (`1.ZRB` beside `2.zrb`) needs no renaming.
 
 ```bash
-mkdir -p "$HOME/.rwe/Data/movies" "$HOME/.rwe/Data/music"
+RWE="${XDG_DATA_HOME:-$HOME/.local/share}/rwe"
+mkdir -p "$RWE/Data/movies" "$RWE/Data/music"
 cp /path/to/totala/*.hpi /path/to/totala/*.ufo /path/to/totala/*.ccx \
-   /path/to/totala/*.gpf /path/to/totala/*.gp3 "$HOME/.rwe/Data"
-cp /path/to/totala/Data/*.[zZ][rR][bB] "$HOME/.rwe/Data/movies"
-cp /path/to/totala/music/*.mp3 "$HOME/.rwe/Data/music"
+   /path/to/totala/*.gpf /path/to/totala/*.gp3 "$RWE/Data"
+cp /path/to/totala/Data/*.[zZ][rR][bB] "$RWE/Data/movies"
+cp /path/to/totala/music/*.mp3 "$RWE/Data/music"
 ```
 
 `rwe --data-path <dir>` overrides the location at runtime.
