@@ -2880,9 +2880,13 @@ the recorder is checked by the same machinery that checks the TA corpus.
     tools/demo-selfcheck.py --seconds 300 --seed 3
     tools/demo-selfcheck.py --demo game.tad --units /path/to/data-set --keep
 
-It records 900 seconds of "Coast To Coast" with two ARM computer players on
+It records 900 seconds of "The Cold Place" with two ARM computer players on
 seed 7 (`--map`, `--seconds`, `--seed`, `--player`, `--ai-arena` and
-`--watchdog` change that), writes everything into `$TMPDIR/rwe-demo-selfcheck`
+`--watchdog` change that). The default map is the one whose AI game puts enough
+shots on the wire for the weapon oracle to score -- a 900-second "Coast To
+Coast" game yields a few hundred and no cell meets `--min-n` -- so that the
+default run exercises the check rather than reporting it not yet scoreable. It
+writes everything into `$TMPDIR/rwe-demo-selfcheck`
 (`--work-dir`; `--keep` stops it clearing the directory first), and `--demo`
 checks an existing file instead of recording one.
 

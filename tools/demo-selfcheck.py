@@ -214,7 +214,11 @@ def main() -> int:
     parser.add_argument("--tad-probe", type=Path, help="the tad_probe binary (default: <repo>/build/tad_probe)")
     parser.add_argument("--tad-episodes", type=Path, help="the tad_episodes binary (default: <repo>/build/tad_episodes)")
     parser.add_argument("--hpi-test", type=Path, help="the hpi_test binary (default: <repo>/build/hpi_test)")
-    parser.add_argument("--map", default="Coast To Coast", help="arena map (default: Coast To Coast)")
+    parser.add_argument(
+        "--map",
+        default="The Cold Place",
+        help="arena map (default: The Cold Place, which gives the weapon oracle something to score)",
+    )
     parser.add_argument("--seconds", type=int, default=900, help="arena game length cap in seconds (default 900)")
     parser.add_argument("--seed", type=int, default=7, help="arena seed (default 7)")
     parser.add_argument(
