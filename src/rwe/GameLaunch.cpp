@@ -49,16 +49,32 @@ namespace rwe
         return OpenGlVersion(major, minor);
     }
 
-    void doGlLoaderInit()
+    /**
+     * Fills in every GL entry point against whichever context is current.
+     *
+     * Nothing may call a GL function before this has run. glad starts every
+     * pointer at null, so the first call jumps to zero -- and the version
+     * query in createOpenGlContext is itself such a call. GLEW did not need
+     * that discipline here, because on Windows the GL 1.1 entry points,
+     * glGetIntegerv among them, resolve at link time through opengl32; under
+     * glad there is no such floor, and the crash is an access violation at
+     * address 0 during startup, before the window is up.
+     *
+     * Called once per context created, the fallback context included: the
+     * pointers belong to a context and are not portable between two.
+     */
+    int loadGlFunctions()
     {
-        int version = gladLoadGL(reinterpret_cast<GLADloadfunc>(SDL_GL_GetProcAddress));
-        if (version == 0)
-        {
-            throw std::runtime_error("Failed to load OpenGL functions");
-        }
+        return gladLoadGL(reinterpret_cast<GLADloadfunc>(SDL_GL_GetProcAddress));
+    }
+
+    /** What the engine needs of a context, asked once the pointers are in. */
+    void requireGlCapabilities()
+    {
         if (!GLAD_GL_VERSION_3_0)
         {
-            throw std::runtime_error("OpenGL 3.0 required, got " + std::to_string(GLAD_VERSION_MAJOR(version)) + "." + std::to_string(GLAD_VERSION_MINOR(version)));
+            auto version = getOpenGlContextVersion();
+            throw std::runtime_error("OpenGL 3.0 required, got " + std::to_string(version.majorVersion) + "." + std::to_string(version.minorVersion));
         }
         // glTexStorage3D, used to build a map's texture array, is GL 4.2 core
         // or this extension; without it the pointer is null and map load dies.
@@ -96,6 +112,16 @@ namespace rwe
         if (glContext == nullptr)
         {
             return Err(SDL_GetError());
+        }
+
+        // Before the version query, not after: that query is a GL call, and
+        // a GL call before the pointers are loaded is a jump to null. This
+        // returns Err rather than throwing so that a context which loads but
+        // is too old still falls back to the 3.0 compatibility one below.
+        if (loadGlFunctions() == 0)
+        {
+            static const char* errMessage = "Failed to load OpenGL functions";
+            return Err(errMessage);
         }
 
         auto contextVersion = getOpenGlContextVersion();
@@ -217,7 +243,7 @@ namespace rwe
             throw std::runtime_error(SDL_GetError());
         }
 
-        doGlLoaderInit();
+        requireGlCapabilities();
 
         LOG_INFO << "OpenGL version: " << glGetString(GL_VERSION);
         LOG_INFO << "OpenGL vendor: " << glGetString(GL_VENDOR);
