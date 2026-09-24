@@ -555,6 +555,15 @@ namespace rwe
         UnitSpeechLevel unitSpeechSetting{UnitSpeechLevel::Full};
         /** MUSICRT's TRACKMODE, TOTALA-EXE.md S:68. Only Custom lets the situational music choose. */
         MusicTrackMode musicTrackModeSetting{MusicTrackMode::Custom};
+
+        /** MUSICRT's TRACKTYPE list, one MusicTrackType per album track; see GlobalConfig::musicTrackTypes. */
+        std::vector<unsigned int> musicTrackTypes;
+
+        /** Re-splits the album into the Building and Battle moods from musicTrackTypes. */
+        void rebuildMusicMoods();
+
+        /** The album index of the track MUSICRT calls current: the one playing, or last played. */
+        std::optional<std::size_t> currentMusicTrackIndex() const;
         unsigned int gammaSetting{100};
         ShadingMode shadingMode{ShadingMode::BuildingsOnly};
         bool antiAliasEnabled{true};
@@ -571,6 +580,9 @@ namespace rwe
 
         /** Pushes the current settings back into the menu widgets: a staged button does not advance its own display. */
         void refreshInGameOptionControls();
+
+        /** TRACKNUM and TRACKTYPE, from the track MUSICRT calls current. */
+        void refreshInGameTrackControls();
 
         /**
          * How much of the measured PALETTE.SHD ramp a model of each kind

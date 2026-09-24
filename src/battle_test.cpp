@@ -218,6 +218,7 @@ int main(int argc, char* argv[])
         config.soundMode = std::min(2u, args.getUint("sound-mode", 2));
         config.unitSpeech = std::min(2u, args.getUint("unit-speech", 2));
         config.musicTrackMode = std::min(3u, args.getUint("music-mode", 3));
+        config.musicTrackTypes = rwe::parseMusicTrackTypes(args.getString("music-track-types", ""));
         config.gamma = std::clamp(args.getUint("gamma", 100), 50u, 133u);
         // "shading" was a plain bool before the switch grew four states. An
         // existing rwe.cfg still carries it, so it decides the default that
