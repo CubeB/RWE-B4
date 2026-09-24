@@ -2135,31 +2135,12 @@ namespace rwe
         // the minimap and nothing whatever in the main view, which is why it
         // cannot be clicked there either.
 
-        // Self-destruct countdowns: seconds remaining, drawn above the unit.
-        for (const auto& [_, unit] : simulation.units)
-        {
-            if (!unit.selfDestructTime || !unit.isAlive())
-            {
-                continue;
-            }
-
-            auto ticksLeft = *unit.selfDestructTime > simulation.gameTime
-                ? (*unit.selfDestructTime - simulation.gameTime).value
-                : 0u;
-            auto secondsLeft = (ticksLeft + SimTicksPerSecond - 1) / SimTicksPerSecond;
-
-            auto uiPos = worldUiRenderService.getInverseViewProjectionMatrix()
-                * viewProjectionMatrix
-                * simVectorToFloat(unit.position);
-            // A red-framed badge so the countdown reads at a glance.
-            const float badgeWidth = 22.0f;
-            const float badgeHeight = 16.0f;
-            auto badgeX = uiPos.x - (badgeWidth / 2.0f);
-            auto badgeY = uiPos.y - 34.0f;
-            worldUiRenderService.fillColor(badgeX, badgeY, badgeWidth, badgeHeight, Color(0, 0, 0, 200));
-            worldUiRenderService.drawBoxOutline(badgeX, badgeY, badgeWidth, badgeHeight, Color(255, 40, 40), 2.0f);
-            worldUiRenderService.drawTextCentered(uiPos.x, badgeY + (badgeHeight / 2.0f), std::to_string(secondsLeft), *guiFont);
-        }
+        // Nothing is drawn on a unit counting down to self-destruct. The
+        // original's handler (0x402010) keeps the count in its mission and
+        // spends it on the count5..count0 speech and a "SELF DESTRUCT
+        // ENGAGED" mission line; no reader of that count exists anywhere in
+        // the renderer. The red badge that used to sit here was RWE's own
+        // guess (issue #29).
 
         // Draw build box outline when a unit is selected to be built.
         // The original's cursor box is two nested one-pixel rectangles in

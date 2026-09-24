@@ -969,6 +969,42 @@ height plus two), and draw a line under the character with the line routine
 `0x4BE950` in interface colour 2 (`[cfg+0x8B4]`), GUIPAL green: from the
 character's left edge to its right edge less one, at y + height(`I`) + 1.
 
+### Self-destruct shows nothing on the unit
+
+Issue #29 asked what a unit counting down to self-destruct looks like, and
+the answer is: like any other unit. The `SelfDestruct` mission handler
+`0x402010(unit, mission, flags)` keeps the count in the low 28 bits of
+`mission+0x3A`, tagged `0xF0000000` so a fresh mission can be told from a
+counted one, and seeds it from `selfdestructcountdown` (`def+0x245` bits 20-22,
+default 5; no shipped unit names the key). Each pass:
+
+- a cancel (`flags & 2`) ends the mission with sound 23, `canceldestruct`,
+  unless `unit+0x110` bit 14 is set, in which case it ends silently
+  (`0x40209B`-`0x4020B4`);
+- otherwise the count is spent one number a pass: sound `17 + count`
+  (`count5` down to `count0`, the ids §97's sound table gives) and a 30-tick
+  sleep for any count above zero (`0x4020F6`); at zero the done flag
+  `mission+0x36` is set, `count0` is played, and the sleep is `rand(15)`
+  ticks (`0x402117`, `0x4B6C30`);
+- the pass after that applies `0x489BB0(unit, unit, 30000, cause 3, 0)`
+  (`0x402147`): thirty thousand points of ordinary damage from the unit to
+  itself, and the death runs its usual course, `Killed` ladder and corpse
+  included.
+
+So the blast lands `150 + rand(15)` ticks after the order. Nothing reads
+`mission+0x3A` but the handler (the mask `0xFFFFFFF` appears once in the
+binary), and the renderer never looks at a unit's current mission at all: the
+two reads of `unit+0x5C` in the interface code are the developer unit-info
+overlay at `0x4681A9`. What the player sees is the speech, the mission line
+("SELF DESTRUCT ENGAGED", ground missions 10 and 11) in the footer, and then
+the explosion. There is no flash, no blink and no number on the unit.
+
+> **RWE, 2026-09-24:** the red countdown badge RWE drew above the unit was
+> its own invention and is gone. Two sim-side differences stay and are
+> recorded in §91: RWE blasts at exactly 150 ticks, without the `rand(15)`
+> tail, and it removes the unit with no corpse where the original's cause-3
+> damage leaves whatever the `Killed` ladder picks.
+
 ### What RWE does with all this
 
 Done: the hovered unit is the subject, metal at one decimal and energy at
