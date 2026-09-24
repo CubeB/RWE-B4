@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <deque>
+#include <filesystem>
 #include <iterator>
 #include <random>
 #include <set>
@@ -20,6 +21,7 @@
 #include <rwe/io/lostdf/io.h>
 #include <rwe/io/moveinfotdf/io.h>
 #include <rwe/io/soundtdf/SoundClass.h>
+#include <rwe/io/tad/tad_events.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/weapontdf/WeaponTdf.h>
 #include <rwe/util/Index.h>
@@ -411,6 +413,20 @@ namespace rwe
             // read unit FBIs
             {
                 auto fbis = services.vfs->getFileNames(services.pathMapping->units, ".fbi");
+
+                // The listing is the data set's load order: TA numbers each
+                // unit type by the position its file would be handed in
+                // (docs/TOTALA-EXE.md section 109), and the sorted stem order
+                // is what that assignment comes out as (tadUnitLoadOrder has
+                // the evidence). Captured here because this is the only place
+                // the listing exists and the demo recorder needs it later.
+                std::vector<std::string> fbiStems;
+                fbiStems.reserve(fbis.size());
+                for (const auto& fbiName : fbis)
+                {
+                    fbiStems.push_back(std::filesystem::path(fbiName).stem().string());
+                }
+                dataMaps.unitLoadOrder = tadUnitLoadOrder(std::move(fbiStems));
 
                 for (const auto& fbiName : fbis)
                 {

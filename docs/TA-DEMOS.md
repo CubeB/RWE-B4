@@ -50,6 +50,60 @@ the transforms. `tools/fetch-demos.py` will fetch a small corpus from
 tademos.xyz -- read the warning at the top of it first, and prefer an archive
 someone has sent you.
 
+## Writing one
+
+RWE's counterpart on the output side is a demo recorder: an observer attached
+to a game RWE is already simulating, framing the DirectPlay traffic each
+player's TA peer would have sent. It is a wire tap of every sender and not a
+recording of one seat, because that is what a real capture contains -- the
+settle fan-out alone is the corpus's `numPlayers - 1` identical `0x28` copies.
+A replay is a different thing and stays RWE's own: seed plus a command stream,
+which only RWE can play. `rwe --record-demo <file>` records a live game, and
+`rwe --replay <file> --record-demo <out>` re-runs one through the real
+simulation, which is how the writer is debugged.
+
+The target is the first two rungs of the fidelity ladder. **L1** is parseable:
+`tad_probe --file` walks it clean, the status checksums verify and nothing is
+unknown. **L2** is mineable: the four oracles score RWE's output against the
+same TA-derived models they score the corpus with. **L3** -- every subpacket a
+real recording of that game would contain, and a TA client able to load it and
+watch -- is roadmap.
+
+What is written faithfully:
+
+- **The container and the transforms.** Header, version-5 extra sectors
+  (recorder version, date, obfuscated player addresses), player records,
+  status messages, the `0x1a` record, packet records -- uncompressed, type
+  `0x03`; the status-message compressor's three-byte header cannot be reused
+  where a record's header is one byte.
+- **The ordering.** Per sender per tick: the unit pass's `0x09`/`0x12`/`0x0d`,
+  then the `0x2c`, then the projectile pass's `0x0b`/`0x0c`, then the settle's
+  `0x28`. The oracles read a tick off this order.
+- **Identity.** Ids partition into blocks of `maxUnits` (a recorder setting,
+  default 1000) and are allocated and recycled within a block, TA's arithmetic.
+- **Time.** `Packet::time` is tick-derived, so a given game writes the same
+  bytes; a pause is a `0x19` record and not a gap in the file.
+- **The decoded payloads.** `0x09`, `0x0b`, `0x0c`, `0x0d`, `0x12`, `0x28` and
+  the `0x2c` bit streams, as read out below.
+
+What is a recorded divergence (ADR-0001):
+
+- **The `0x1a` ids (D7).** The `sub` 3 block's count is the data set's unit
+  count and the fixed pseudo-entry is emitted, but the ids are deterministic
+  synthetic values: the content-derived id has not been reproduced, and two
+  passes have failed at it. The tools use the table's count and not its ids,
+  and `--units` naming does not read it.
+- **The status-message body (D8).** Only the DirectPlay id at offset `0x91` is
+  decoded, so the other bytes are zero. The message encrypt+compresses to a
+  matching checksum, which is what lets `tad_probe` verify it rather than
+  merely walk past it. Fields beyond the id are closeout work.
+- **`0x10` (D9).** Omitted until the `0x456200` call-site inventory is done. A
+  real stream is 14% `0x10` by subpacket count, so a written demo is smaller
+  than a real one of the same game; no L2 oracle reads it.
+
+Recording never reaches back into the simulation: nothing the recorder holds
+is hashed or saved, and no wall-clock or frame-rate value crosses the divide.
+
 ## The short version
 
 A `.tad` is a capture of the DirectPlay traffic seen by **one peer**, framed

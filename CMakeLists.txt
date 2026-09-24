@@ -437,6 +437,10 @@ set(SOURCE_FILES
     src/rwe/io/smk/SmkDecoder.h
     src/rwe/io/tad/TadReader.cpp
     src/rwe/io/tad/TadReader.h
+    src/rwe/io/tad/TadWriter.cpp
+    src/rwe/io/tad/TadWriter.h
+    src/rwe/io/tad/tad_encoders.cpp
+    src/rwe/io/tad/tad_encoders.h
     src/rwe/io/tad/tad_events.cpp
     src/rwe/io/tad/tad_events.h
     src/rwe/io/tad/tad_headers.h
@@ -614,6 +618,8 @@ set(SOURCE_FILES
     src/rwe/sim/ProjectilePhysicsType.h
     src/rwe/sim/AirMovement.cpp
     src/rwe/sim/AirMovement.h
+    src/rwe/sim/DemoRecorder.cpp
+    src/rwe/sim/DemoRecorder.h
     src/rwe/sim/ResourceSettler.cpp
     src/rwe/sim/ResourceSettler.h
     src/rwe/sim/SimAngle.cpp
@@ -1009,7 +1015,9 @@ set(TEST_FILES
     src/rwe/io/hpi/hpi_util.test.cpp
     src/rwe/io/ota/ota.test.cpp
     src/rwe/io/tad/tad.test.cpp
+    src/rwe/io/tad/tad_encoders.test.cpp
     src/rwe/io/tad/tad_events.test.cpp
+    src/rwe/io/tad/tad_writer.test.cpp
     src/rwe/io/pcx/pcx.test.cpp
     src/rwe/scene/Screenshot.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp
@@ -1030,6 +1038,7 @@ set(TEST_FILES
     src/rwe/render/WireframeScan.test.cpp
     src/rwe/rc_gen_optional.h
     src/rwe/sim/GameHash_util.test.cpp
+    src/rwe/sim/demorecorder.test.cpp
     src/rwe/sim/accuracy.test.cpp
     src/rwe/sim/waterline.test.cpp
     src/rwe/game/screenshake.test.cpp

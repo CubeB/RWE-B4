@@ -70,6 +70,15 @@ namespace rwe
         SimpleVectorMap<FeatureDefinition, FeatureDefinitionIdTag> featureDefinitions;
         std::unordered_map<std::string, FeatureDefinitionId> featureNameIndex;
         LosTables losTables;
+
+        /**
+         * The data set's unit types in TA's load order, 0-based:
+         * `tadUnitLoadOrder` over the `units` directory's FBI listing.
+         * `unitDefinitions` is an unordered_map and carries no order, and a
+         * demo's 0x09/0x2c type indices are load-order positions, so the
+         * listing is captured here while it is still in hand.
+         */
+        std::vector<std::string> unitLoadOrder;
     };
 
     /**

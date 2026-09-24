@@ -41,6 +41,7 @@
 #include <rwe/io/sidedatatdf/SideData.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/tnt/TntArchive.h>
+#include <rwe/sim/DemoRecorder.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/util.h>
 #include <rwe/util/OpaqueArgs.h>
@@ -171,6 +172,7 @@ int main(int argc, char* argv[])
                       << "  --ai-tune <p>:<k>=<v>   override one AI knob for player p (repeatable)\n"
                       << "  --ai-personality <p>:<name>  play player p as a personality (repeatable)\n"
                       << "  --out <dir>             where ai-arena.csv is written (default: local data path)\n"
+                      << "  --record-demo <f>       write a TA demo of the game to <f>\n"
                       << "  --watchdog <seconds>    abort after this much wall-clock time\n"
                       << "  --strict                exit 1 if no AI-ARENA-RESULT was produced or the watchdog fired\n"
                       << "  --data-path <path>      game data search path (repeatable)\n";
@@ -199,6 +201,10 @@ int main(int argc, char* argv[])
         if (args.getUint("seed", 0) > 0)
         {
             gameParameters.randomSeed = args.getUint("seed", 0);
+        }
+        if (args.contains("record-demo"))
+        {
+            gameParameters.recordDemoFile = args.getString("record-demo");
         }
 
         auto difficulty = args.getString("ai-difficulty", "standard");
@@ -374,6 +380,19 @@ int main(int argc, char* argv[])
             nullptr};
 
         auto loaded = loadGameSimulation(services, gameParameters, std::move(mapData), ota);
+
+        // Before the commanders are placed, so their creation is offered to
+        // the recorder as any other unit's would be. The recorder's own
+        // constructor writes the demo's header, so no packet can precede it.
+        if (gameParameters.recordDemoFile)
+        {
+            DemoRecorderSettings demoSettings;
+            demoSettings.mapName = gameParameters.mapName;
+            demoSettings.unitLoadOrder = loaded.dataMaps.unitLoadOrder;
+            loaded.simulation.attachDemoRecorder(
+                std::make_unique<DemoRecorder>(*gameParameters.recordDemoFile, loaded.simulation, std::move(demoSettings)));
+            LOG_INFO << "Recording demo to " << *gameParameters.recordDemoFile;
+        }
 
         spawnCommanders(loaded.simulation, loaded, sideData);
 

@@ -25,6 +25,7 @@
 #include <rwe/game/dump_util.h>
 #include <rwe/game/matrix_util.h>
 #include <rwe/render/render_prof.h>
+#include <rwe/sim/DemoRecorder.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/resource_io.h>
 #include <rwe/sim/SimTicksPerSecond.h>
@@ -115,6 +116,16 @@ namespace rwe
     {
         replayWriter.emplace(path, header);
         LOG_INFO << "Recording replay to " << path.string();
+    }
+
+    void GameScene::enableDemoRecording(const std::filesystem::path& path, const std::vector<std::string>& unitLoadOrder)
+    {
+        DemoRecorderSettings settings;
+        settings.mapName = gameParameters.mapName;
+        settings.unitLoadOrder = unitLoadOrder;
+
+        simulation.attachDemoRecorder(std::make_unique<DemoRecorder>(path, simulation, std::move(settings)));
+        LOG_INFO << "Recording demo to " << path.string();
     }
 
     void GameScene::renderReplayWindow()
