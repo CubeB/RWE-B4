@@ -1,0 +1,17 @@
+# Line endings are decided by the repository, not by each clone's
+# core.autocrlf. Text files are stored LF in the index and checked out with
+# the platform's own ending; see issue #135 for the file that drifted when
+# this was left to the clones.
+* text=auto
+
+# Windows scripts are checked out CRLF on every platform: cmd.exe misreads
+# a label after an LF-only line, and PowerShell is happier with CRLF too.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binaries, so auto-detection never has to guess at one.
+*.png binary
+*.ttf binary
+*.pyc binary
+libs/png++-0.2.9/png++/test/cmp/** binary
