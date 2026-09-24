@@ -2,8 +2,17 @@
 # The AppImage has a single entry point, so rwe_setup -- which the engine's
 # "no game data" message tells the player to run -- is reached through it:
 # `./Robot_War_Engine-*.AppImage setup`. Everything else runs the engine.
+#
+# Deliberately no LD_LIBRARY_PATH. linuxdeploy patches an rpath of
+# $ORIGIN/../lib into every binary it deploys, so the bundled libraries are
+# found without it -- and the variable, unlike an rpath, is inherited by every
+# child process, including host programs we did not ship. SDL shells out to
+# the host's zenity to draw a message box; zenity's gtk then resolved libpng
+# from this bundle rather than the system's and died on an undefined symbol
+# before drawing anything. That swallowed every error the engine reports
+# before a window exists -- the "no game data" instructions among them, which
+# is the one message a first-time player most needs. See issue #232.
 HERE="$(dirname "$(readlink -f "$0")")"
-export LD_LIBRARY_PATH="$HERE/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 case "$1" in
     setup|rwe_setup)

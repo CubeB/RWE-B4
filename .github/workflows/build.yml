@@ -247,6 +247,25 @@ jobs:
             --desktop-file AppDir/usr/share/applications/rwe.desktop \
             --custom-apprun cmake/AppRun \
             --output appimage
+
+      # cmake/AppRun deliberately sets no LD_LIBRARY_PATH: that variable is
+      # inherited by every child process, and the bundled libpng reaching the
+      # host's zenity through it killed every error dialog the engine has
+      # (issue #232). What replaces it is the rpath linuxdeploy patches into
+      # each binary, so that rpath is now load-bearing -- if it ever stops
+      # being written the AppImage would not start at all, for anybody. This
+      # fails the build instead of shipping that.
+      - name: the AppImage binaries must carry an rpath
+        if: matrix.cc == 'gcc-14' && matrix.configuration == 'Release'
+        run: |
+          for b in AppDir/usr/bin/rwe AppDir/usr/bin/rwe_setup AppDir/usr/bin/rwe_bridge; do
+            rpath=$(readelf -d "$b" | grep -E 'RUNPATH|RPATH' || true)
+            echo "$b: ${rpath:-<none>}"
+            case "$rpath" in
+              *'$ORIGIN'*) ;;
+              *) echo "::error::$b has no ORIGIN rpath; with no LD_LIBRARY_PATH it cannot find its bundled libraries" ; exit 1 ;;
+            esac
+          done
       - name: upload AppImage artifact
         if: matrix.cc == 'gcc-14' && matrix.configuration == 'Release'
         uses: actions/upload-artifact@v6
