@@ -113,6 +113,14 @@ namespace rwe
     {
         std::variant<UnitId, FeatureId> target;
         std::optional<SimVector> nanoParticleOrigin;
+
+        /**
+         * Ticks of work towards the next bite out of a unit target, the
+         * original's mission+0x3A: a unit is reclaimed as a damage step every
+         * sixteen ticks (0x4048D2), not as a smooth drain. Unused for a
+         * feature target, which is worked a tick at a time.
+         */
+        unsigned int stepCounter{0};
     };
 
     /**
@@ -679,9 +687,6 @@ namespace rwe
          * cost says it should.
          */
         unsigned int nanoframeDecayRemainder{0};
-
-        /** Reclaim work applied to this unit so far, see GameSimulation::reclaimUnit. */
-        unsigned int reclaimProgress{0};
 
 
         /** When set, the game time at which this unit will self-destruct. */

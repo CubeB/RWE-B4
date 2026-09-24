@@ -1495,9 +1495,35 @@ the game and belongs in its own pass with a play-test, so it has been left as
 it is and recorded here.
 
 `ReclaimUnit` is a different mechanism again: state 4 (`0x4048D2`) applies
-`0x489BB0(reclaimer, target, mission+0x36, type 5, 0)` — ordinary damage, of a
-type all its own — once every fifteen ticks, so a unit being reclaimed is
-visibly taken apart rather than dissolved on a timer.
+`0x489BB0(reclaimer, target, mission+0x36, type 5, 0)`, ordinary damage of a
+type all its own, so a unit being reclaimed is visibly taken apart rather than
+dissolved on a timer, and its health bar in the info panel's second slot is
+the progress (§99). The bite is sized once, as the work starts, by
+`0x438650(reclaimer, target, 15)`:
+
+```
+trunc( workertime(reclaimer, def+0x1FE)
+       * ((kills(reclaimer, unit+0xB8) + 5) / 5)         ; integer veterancy
+       * maxdamage(target, def+0x1FA) * 15
+       / (300 * max(buildcostmetal(target, def+0x18A), 10.0)) ), at least 1
+```
+
+and it lands every sixteen ticks, not fifteen: each pass sleeps two ticks and
+adds two to `mission+0x3A`, and the bite is taken once that has reached
+fifteen (`0x40496E`), so the count runs 0, 2, ... 14, 16. `MaxDamage` cancels
+out of the total, so a unit is reclaimed in `300 * buildcostmetal /
+(workertime * veterancy)` ticks of bites whatever its hit points: ten seconds
+per metal-per-workertime, plus the sixteenth.
+
+**Ported 2026-09-24 (#19):** `computeUnitReclaimStep` is the formula and
+`GameSimulation::reclaimUnitStep` the bite, on `UnitBehaviorStateReclaiming`'s
+sixteen-tick `stepCounter`; `UnitState::reclaimProgress`, the drained
+work-count it replaced, is gone. Two things stay RWE's own and are §88's: the
+bite is taken bare off the hit points, without asking whether cause-5 damage
+skips armour the way the cause-10 repair does (not read), and the payback is
+still credited a bite at a time in both resources, where the original pays
+`trunc((1 - progress) * buildcostmetal)` in one lump as the unit dies, metal
+only (`0x402666`).
 
 ### `autoreclaimable` has exactly one reader
 

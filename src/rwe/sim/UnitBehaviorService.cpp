@@ -5433,7 +5433,30 @@ namespace rwe
                 return match(
                     target,
                     [&](const UnitId& targetUnitId) {
-                        auto finished = sim->reclaimUnit(targetUnitId, unitInfo.state->owner, unitInfo.definition->workerTimePerTick);
+                        // ReclaimUnit's state 4 (0x4048D2) takes the unit
+                        // apart a bite at a time: a pass every two ticks
+                        // counts mission+0x3A up by two, and once it has
+                        // reached fifteen the step 0x438650 sized is applied
+                        // as damage and the count starts again. Sixteen ticks
+                        // a bite, then, and the target's health bar is what
+                        // the info panel shows for the progress.
+                        auto targetRef = sim->tryGetUnitState(targetUnitId);
+                        if (!targetRef || targetRef->get().isDead())
+                        {
+                            changeState(*unitInfo.state, UnitBehaviorStateIdle());
+                            return true;
+                        }
+
+                        reclaimingState.stepCounter += 1;
+                        if (reclaimingState.stepCounter < 16)
+                        {
+                            return false;
+                        }
+                        reclaimingState.stepCounter = 0;
+
+                        const auto& targetDefinition = sim->unitDefinitions.at(targetRef->get().unitType);
+                        auto damage = computeUnitReclaimStep(unitInfo.definition->workerTime, unitInfo.state->kills, targetDefinition.maxHitPoints, targetDefinition.buildCostMetal);
+                        auto finished = sim->reclaimUnitStep(targetUnitId, unitInfo.state->owner, damage);
                         if (finished)
                         {
                             changeState(*unitInfo.state, UnitBehaviorStateIdle());

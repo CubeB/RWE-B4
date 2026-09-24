@@ -369,6 +369,20 @@ namespace rwe
         return addFeature(std::move(featureInstance));
     }
 
+    unsigned int computeUnitReclaimStep(unsigned int workerTime, unsigned int kills, unsigned int targetMaxHitPoints, const Metal& targetBuildCostMetal)
+    {
+        // 0x438650: the veterancy factor (kills + 5) / 5 is an integer
+        // division, the product is integer, and only the final scaling by
+        // 300 and the build cost is done in floating point before the
+        // truncation. The cost is floored at ten so a free unit does not
+        // divide by nothing.
+        auto veterancy = (kills + 5u) / 5u;
+        auto product = static_cast<double>(workerTime) * static_cast<double>(veterancy) * static_cast<double>(targetMaxHitPoints) * 15.0;
+        auto cost = std::max(targetBuildCostMetal.value, 10.0f);
+        auto step = static_cast<unsigned int>(product / (300.0 * static_cast<double>(cost)));
+        return std::max(1u, step);
+    }
+
     unsigned int computeFeatureReclaimWork(const FeatureDefinition& definition, unsigned int currentHitPoints)
     {
         // How long a feature takes to reclaim is a function of how much there is
@@ -1037,42 +1051,41 @@ namespace rwe
         }
     }
 
-    bool GameSimulation::reclaimUnit(UnitId targetId, PlayerId reclaimer, unsigned int workAmount)
+    bool GameSimulation::reclaimUnitStep(UnitId targetId, PlayerId reclaimer, unsigned int damage)
     {
         auto unitRef = tryGetUnitState(targetId);
         if (!unitRef || unitRef->get().isDead())
         {
             return true;
         }
-        if (workAmount == 0)
-        {
-            return false;
-        }
 
         auto& unit = unitRef->get();
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
 
-        // Undoing a unit takes as much work as went into it, so a barely
-        // started nanoframe is cleared in moments while a finished unit takes
-        // its full build time.
-        auto totalWork = std::max(1u, std::min(unitDefinition.buildTime, unit.buildTimeCompleted));
-        auto previousProgress = unit.reclaimProgress;
-        auto newProgress = std::min(totalWork, previousProgress + workAmount);
-        unit.reclaimProgress = newProgress;
+        // The bite comes straight off the hit points. It does not go through
+        // applyDamage: that path ends in killUnit, a wreck and an explosion,
+        // and a reclaimed unit leaves none of those. Whether the original's
+        // cause-5 damage skips armour the way its cause-10 repair does is
+        // not read; it is applied bare here.
+        auto before = unit.hitPoints;
+        auto after = damage >= before ? 0u : before - damage;
+        unit.hitPoints = after;
 
-        // Only the share of the cost that has actually been built can be recovered.
+        // Only the share of the cost that has actually been built can be
+        // recovered, and it is handed back as the unit comes apart. (The
+        // original pays trunc((1 - progress) * buildcostmetal) in one lump as
+        // the unit dies, metal only, at 0x402666; RWE's incremental credit of
+        // both resources is its own and is recorded in TOTALA-EXE-ECONOMY.md.)
         auto investedFraction = unitDefinition.buildTime == 0
             ? 1.0f
             : std::min(1.0f, static_cast<float>(unit.buildTimeCompleted) / static_cast<float>(unitDefinition.buildTime));
-
-        auto cumulative = [&](float amount, unsigned int progress) {
-            return amount * investedFraction * (static_cast<float>(progress) / static_cast<float>(totalWork));
-        };
-        Metal metalDelta(cumulative(unitDefinition.buildCostMetal.value, newProgress) - cumulative(unitDefinition.buildCostMetal.value, previousProgress));
-        Energy energyDelta(cumulative(unitDefinition.buildCostEnergy.value, newProgress) - cumulative(unitDefinition.buildCostEnergy.value, previousProgress));
+        auto maxHitPoints = std::max(1u, unitDefinition.maxHitPoints);
+        auto removedFraction = static_cast<float>(before - after) / static_cast<float>(maxHitPoints);
+        Metal metalDelta(unitDefinition.buildCostMetal.value * investedFraction * removedFraction);
+        Energy energyDelta(unitDefinition.buildCostEnergy.value * investedFraction * removedFraction);
         getPlayer(reclaimer).addResourceDelta(energyDelta, metalDelta, energyDelta, metalDelta);
 
-        if (newProgress < totalWork)
+        if (after > 0)
         {
             return false;
         }

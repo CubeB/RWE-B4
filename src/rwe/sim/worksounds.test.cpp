@@ -50,6 +50,8 @@ namespace rwe
             d.builder = true;
             d.canReclamate = true;
             d.workerTimePerTick = 30u;
+            // The unit reclaim bite is sized from the whole WorkerTime, not the per-tick share.
+            d.workerTime = (30u) * 30u;
             d.maxHitPoints = 100;
             d.buildTime = 0u;
             d.buildDistance = 100_ss;

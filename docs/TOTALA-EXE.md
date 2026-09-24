@@ -498,6 +498,14 @@ quirks of the original that RWE reproduces although they look like defects.
   alternatives are a guess between two unknowns.
 
 ---
+- **A unit reclaim pays out as it goes, in both resources.** The original pays
+  `trunc((1 - progress) * buildcostmetal)` in one lump as the reclaimed unit
+  dies, metal only (`0x402666`, §97). RWE credits each sixteen-tick bite its
+  share of the metal *and* the energy that went into the unit. The bite
+  itself and its cadence are the original's (#19, 2026-09-24); the payback
+  schedule was RWE's before and stays so, because changing it moves every
+  reclaim's economy and wants its own pass with a play-test.
+
 
 ## 91. Still unknown or unported
 

@@ -896,6 +896,12 @@ visibility test (`0x465AC0`) and to `hidedamage`. A builder shows what it is
 building and how far along it is; a guard shows what it is guarding; an
 attacker shows what it is shooting at.
 
+A reclaim is the same and nothing more (issue #19). Reclaiming a **unit**, the
+target's health is the progress, because `ReclaimUnit` takes the unit apart
+as damage every sixteen ticks (§97) and the bar simply follows. Reclaiming a
+**feature** points `mission+0x16` at no unit at all, so the slot stays empty:
+nothing in the redraw reads a feature or a work count.
+
 ### Addendum to §25: the anti-missile ring has two states, and the magazine picks
 
 §25 recorded that the coverage ring is dashed when `[weaponSlot+0x0E]` is

@@ -261,7 +261,7 @@ namespace rwe
 
     GameHash computeHashOf(const UnitBehaviorStateReclaiming& s)
     {
-        return combineHashes(s.target, s.nanoParticleOrigin);
+        return combineHashes(s.target, s.nanoParticleOrigin, s.stepCounter);
     }
 
     GameHash computeHashOf(const UnitBehaviorStateCreatingUnit& s)

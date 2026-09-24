@@ -686,7 +686,8 @@ namespace rwe
 
         SECTION("reclaim is cause 5 and leaves nothing")
         {
-            REQUIRE(sim.reclaimUnit(victim, arm, 1));
+            // One bite big enough to take the whole unit.
+            REQUIRE(sim.reclaimUnitStep(victim, arm, 1000000u));
             sim.demoRecorder->endOfTick(sim);
             sim.demoRecorder->close();
 
