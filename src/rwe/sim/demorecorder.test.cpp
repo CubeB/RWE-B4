@@ -117,20 +117,6 @@ namespace rwe
             return tadUnitStateLayout({false, false, true}, 4);
         }
 
-        /** Every subpacket of one code, in the order the packet carried them. */
-        std::vector<TadBytes> subPacketsOf(const std::vector<TadBytes>& subs, uint8_t code)
-        {
-            std::vector<TadBytes> out;
-            for (const auto& sub : subs)
-            {
-                if (!sub.empty() && sub[0] == code)
-                {
-                    out.push_back(sub);
-                }
-            }
-            return out;
-        }
-
         /** The index of the first packet carrying a code, or -1. */
         int packetWithCode(const RecordingHandler& handler, uint8_t code)
         {
@@ -159,16 +145,6 @@ namespace rwe
         void attachDemoRecorder(GameSimulation& simulation, std::ostringstream& stream, DemoRecorderSettings settings)
         {
             simulation.attachDemoRecorder(std::make_unique<DemoRecorder>(stream, simulation, std::move(settings)));
-        }
-
-        /** A unit with a footprint and nothing else, for the event hooks. */
-        UnitDefinition makeM4Unit(unsigned int buildTime)
-        {
-            UnitDefinition definition{};
-            definition.buildTime = buildTime;
-            definition.maxHitPoints = 100;
-            definition.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
-            return definition;
         }
     }
 
