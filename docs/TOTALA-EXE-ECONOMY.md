@@ -216,16 +216,26 @@ differ only in `digger`: with a plane a digger's copy is cut at height
 `0x32 + 0x4B` (`0x4594D8`-`0x459503`), without one it takes the plain copy.
 So the plane is not a gate either; it only changes how a digger is cut.
 
-**So the code and the look agree that the shadow is drawn. What is still
-open is what keeps it out of the frame's outline**, and the listing has
-not settled it. The likeliest place is the blit. Both shadows go through
-`0x4B8500` at `x + 0x85`, before the unit image, and the image is the
-display's scratch copy with its erased pixels written as the transparent
-key (`0x458DA8`). If the frame's own shadow is masked by the whole cached
-bitmap, which is the finished model, or the blitter treats the shadow's
-single index against the frame's key, the shadow would be hidden exactly
-within the model's outline and nowhere else. Other units' shadows would be
-untouched, which is what play shows.
+**The blit is not it either (B4 #40, 2026-09-24).** `0x4B8500` was
+followed to its span blitters. Both, `0x4CBF2C` and `0x4CC057`, remap every
+pixel through `PALETTE.ALP` at `[display+0xC0]` by `(source, destination)`
+and skip only the drawable's own key (§100 has the loop). The copied shadow
+is a silhouette of index 0 (`0x4B96A0` writes 0 over every non-key pixel of
+the copy) and the projected one is filled flat, so a shadow pixel is
+`ALP[0][dest]`, the darkening, wherever the silhouette is; nothing in the
+blitter looks at what is drawn later, and nothing masks one drawable by
+another. The frame's own image is then blitted with its erased pixels
+written as the key (`0x458DA8`), which the blitter skips. **So the code says
+the frame's own shadow is visible through its erased interior**, exactly as
+another unit's is. What was seen in play on 2026-09-11 says it is not. One of
+the two is wrong, and the listing has now been read end to end on this
+path: the draw order (`0x459200`, shadow then image), the two shadow
+builders, the blitter and its table. The look that would settle it is the
+earliest phase, "a bare line sweeping down" (remaining 236-255), when the
+whole interior is erased: is the ground inside the outline darkened where the
+frame's own shadow falls, or not? If it is, the observation was of a later
+phase and the code is right; if it is not, the mask is somewhere outside the
+unit draw, in how the frame's pixels reach the screen.
 
 RWE does not wait on that: it cuts the frame's own shadow by the model's
 outline, which is the look. The mobile case the issue asked about goes the
