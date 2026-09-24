@@ -2,6 +2,8 @@
 
 #include <optional>
 #include <rwe/sim/UnitDefinition.h>
+#include <rwe/sim/UnitFireOrders.h>
+#include <rwe/sim/UnitMovementOrders.h>
 #include <string>
 #include <vector>
 
@@ -95,4 +97,100 @@ namespace rwe
      * the same: it appears if anything in the selection named it.
      */
     bool selectionOffersOrderButton(const std::vector<OrderButtonUnit>& selection, OrderButton button);
+
+    /**
+     * The state one of the four stateful toggles (fire orders, move orders,
+     * on/off, cloak) shows for a selection. The original gathers it in the
+     * selection walk at 0x41B403-0x41B449 into a sentinel accumulator: a unit
+     * that does not name the flag is skipped, the first offerer's value is
+     * taken, and a later offerer that disagrees collapses the state to
+     * "mixed". A click reads this shared state, not each unit's own.
+     */
+    template <typename T>
+    struct GatheredToggle
+    {
+        /** No unit in the selection offers the button. The original greys it. */
+        bool offered{false};
+
+        /** The offerers disagree. `value` is the first offerer's, and means nothing on its own. */
+        bool mixed{false};
+
+        T value{};
+
+        bool operator==(const GatheredToggle&) const = default;
+    };
+
+    /**
+     * Gathers a toggle over a selection. One entry per selected unit: the
+     * unit's own state when its definition offers the button, nothing when it
+     * does not, so the accumulator skips it.
+     */
+    template <typename T>
+    GatheredToggle<T> gatherToggle(const std::vector<std::optional<T>>& states)
+    {
+        GatheredToggle<T> result;
+        for (const auto& state : states)
+        {
+            if (!state)
+            {
+                continue;
+            }
+            if (!result.offered)
+            {
+                result.offered = true;
+                result.value = *state;
+            }
+            else if (*state != result.value)
+            {
+                result.mixed = true;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * The frame a toggle button draws for a gathered state: one per state
+     * value, then one more for a disagreeing selection. The shipped art is
+     * built that way. ARMFIREORD and ARMMOVEORD (commongui.gaf) carry HOLD
+     * FIRE / RETURN FIRE / FIRE AT WILL and then FIRE ORDERS with all three
+     * lights lit, frames 0 to 3, before the pressed and greyed frames;
+     * ARMONOFF carries OFF / ON / OFF/ON ORDERS. `stateCount` is how many
+     * values the toggle has, which is the frame the mixed face sits on.
+     */
+    template <typename T>
+    unsigned int toggleFace(const GatheredToggle<T>& shown, unsigned int stateCount)
+    {
+        return shown.mixed ? stateCount : static_cast<unsigned int>(shown.value);
+    }
+
+    /**
+     * What a click on FIREORD sets every offerer to. The handler at 0x41A5EF
+     * jumps through a four-entry table at 0x41A910 on the gathered state:
+     * hold fire -> return fire -> fire at will -> hold fire, and a mixed
+     * selection goes to hold fire as well. One order goes to the whole
+     * selection, so a mixed selection converges rather than each unit
+     * stepping on from wherever it was.
+     */
+    UnitFireOrders fireOrdersAfterClick(const GatheredToggle<UnitFireOrders>& shown);
+
+    /**
+     * What a click on MOVEORD sets every offerer to: 0x41A4F0 and the table
+     * at 0x41A900, the same shape as FIREORD. Hold position -> maneuver ->
+     * roam -> hold position, and mixed -> hold position.
+     */
+    UnitMovementOrders moveOrdersAfterClick(const GatheredToggle<UnitMovementOrders>& shown);
+
+    /**
+     * What a click on ONOFF sets every offerer to. 0x41A7DB: all off ->
+     * ACTIVATE, all on -> DEACTIVATE, and a mixed selection is switched ON.
+     */
+    bool onOffAfterClick(const GatheredToggle<bool>& shown);
+
+    /**
+     * What a click on CLOAK sets every offerer to. 0x41A743 tests the two
+     * state bits together: only a selection with every cloak off gets
+     * CLOAK_ON; all on, or mixed, gets CLOAK_OFF. Note the asymmetry with
+     * ONOFF, which is the original's and is kept.
+     */
+    bool cloakAfterClick(const GatheredToggle<bool>& shown);
 }

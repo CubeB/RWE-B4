@@ -122,6 +122,9 @@ namespace rwe
 
         void setStage(unsigned int newStage);
 
+        /** How many faces the button has, pressed and greyed not counted. */
+        unsigned int getStageCount() const { return static_cast<unsigned int>(stages.size()); }
+
         bool autoChangeStage{true};
 
         void setTextAlign(TextAlign align);

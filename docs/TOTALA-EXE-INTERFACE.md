@@ -136,6 +136,39 @@ canmove 7, canstop 8, canattack 9, canguard 10, canpatrol 11, canload 12,
 canreclamate 13, cancapture 14, repair 15), `world+0x37EBE` bits 12–14 (fire
 order) and `world+0x37EC2` bit 0 (candgun).
 
+### What a click on a toggle does
+
+The four toggles' click handlers live in the order-panel dispatcher at
+`0x41A490`, one `strstr` on the gadget name each (`0x4E49B0`), and every one of
+them reads the **gathered** state above rather than any unit's own:
+
+| button | reads | state | issues, once, through `0x48CF30` | then stores |
+|---|---|---|---|---|
+| MOVEORD `0x41A4F0` | `world+0x37EC0 & 7`, jump table `0x41A900` | 0 / 1 / 2 / 3 | `STANDING_MOVEORDER` 1 / 2 / 0 / 0 | the value issued |
+| FIREORD `0x41A5EF` | `(world+0x37EBE >> 12) & 7`, jump table `0x41A910` | 0 / 1 / 2 / 3 | `STANDING_FIREORDER` 1 / 2 / 0 / 0 | the value issued |
+| ONOFF `0x41A7DB` | `(world+0x37EC0 >> 5) & 3` | 0 / 1 / 2 | `ACTIVATE` / `DEACTIVATE` / `ACTIVATE` | 1 / 0 / 1 |
+| CLOAK `0x41A743` | `world+0x37EC0 & 0x18` | zero / non-zero | `CLOAK_ON` / `CLOAK_OFF` | 1 / 0 |
+
+So a selection that disagrees converges in one click: to **hold fire**, to
+**hold position**, to **on**, and to **cloak off**. The two three-way tables
+share their third and fourth entries (`0x41A581` and `0x41A684`), which is
+where "mixed goes to 0" comes from; ONOFF's `sub eax,0 / dec / dec` ladder
+sends state 2 down the same arm as state 0; and CLOAK cannot tell "all on" from
+"mixed" because it tests both state bits at once (`test cl,0x18`). Whatever
+state was clicked, the mission goes out as one call over the selection, and
+it is the issuer that skips a unit which does not name the flag: `0x48D0D7`
+tests `def+0x245` bit 1 when the mission is `Standing_FireOrder`, `0x48D104`
+bit 0 for `Standing_MoveOrder`. `ACTIVATE` and `DEACTIVATE` are not filtered
+there; their handlers (`0x403010`, `0x403040`) read `onoffable` themselves.
+
+**The art has a face for the disagreement state.** In `commongui.gaf`,
+`ARMFIREORD` and `ARMMOVEORD` carry six frames: HOLD FIRE / RETURN FIRE / FIRE
+AT WILL (or HOLD POSITION / MANEUVER / ROAM), then a fourth reading FIRE ORDERS
+(MOVE ORDERS) with all three lights lit, then the pressed and greyed frames.
+`ARMONOFF` and `ARMCLOAK` carry five: OFF / ON, then OFF/ON ORDERS, pressed,
+greyed. Frame index equals state value, disagreement included, which is what
+the sentinel accumulator's 3 (or 2) is for.
+
 ### Hidden versus greyed, and the slot LOAD and BLAST share
 
 `0x41A120` is the enable pass — seventeen hardcoded name lookups, each followed
@@ -193,6 +226,14 @@ It now builds the list of selected definitions and applies
 > whose GAF has no such frame gets no dimming at all here, where the original
 > would still have darkened it — the one case where the two can be told
 > apart.
+
+> **Ported, 2026-09-24** (issue #185). The click handlers used to advance
+> each selected unit from its own state, so a selection that disagreed stayed
+> that way for ever, and MOVEORD's face was never updated at all. They now
+> gather the selection's state (`gatherToggle` in `OrderButtons.h`), advance
+> it once (`fireOrdersAfterClick` and its three siblings) and issue that to
+> every unit that offers the button; the faces draw the gathered state, the
+> disagreement frame included (`toggleFace`).
 
 ### Deliberately not ported
 
