@@ -1,4 +1,6 @@
 #include "MainMenuScene.h"
+#include <rwe/game/GameScene_util.h>
+#include <rwe/ui/UiLabel.h>
 #include <rwe/MovieScene.h>
 #include <rwe/game/SaveFile.h>
 #include <rwe/ui/UiTextBox.h>
@@ -51,7 +53,9 @@ namespace rwe
         // (the drone from ALLSOUND.TDF) over its front end, and so does RWE.
         // The playlist is still gathered so the options music page's CD
         // controls can preview tracks.
-        menuPlaylist = sceneContext.audioService->getMusicPlaylist();
+        // The same album the game numbers its tracks by, so a type chosen
+        // here is the type the game reads.
+        menuPlaylist = buildMusicAlbum(sceneContext.audioService->getMusicPlaylist());
 
         bgm = startBgm();
         goToMainMenu();
@@ -115,6 +119,24 @@ namespace rwe
         return sceneContext.audioService->loopSound(*bgm);
     }
 
+    void MainMenuScene::refreshTrackControls(UiPanel& active)
+    {
+        auto index = menuPlaylist.empty() ? std::optional<std::size_t>() : std::optional<std::size_t>(menuPlaylistIndex % menuPlaylist.size());
+        if (auto label = active.find<UiLabel>("TRACKNUM"))
+        {
+            label->get().setText(musicTrackNumberCaption(index));
+        }
+        if (auto toggle = active.find<UiStagedButton>("TRACKTYPE"))
+        {
+            auto type = index ? musicTrackTypeOf(pendingMusicTrackTypes, *index, menuPlaylist[*index]) : MusicTrackType::Building;
+            if (static_cast<unsigned int>(type) < toggle->get().getStageCount())
+            {
+                toggle->get().setStage(static_cast<unsigned int>(type));
+            }
+            toggle->get().setEnabled(index.has_value() && sceneContext.audioService->isMusicEnabled() && pendingMusicTrackMode == MusicTrackMode::Custom);
+        }
+    }
+
     void MainMenuScene::playMenuMusic()
     {
         if (menuPlaylist.empty())
@@ -144,7 +166,8 @@ namespace rwe
             pendingShading,
             pendingAntiAlias,
             pendingBuildingHalo,
-            pendingAntiAliasUnits};
+            pendingAntiAliasUnits,
+            pendingMusicTrackTypes};
     }
 
     void MainMenuScene::applyOptions(const GameOptions& state)
@@ -159,6 +182,7 @@ namespace rwe
         pendingSoundMode = state.soundMode;
         pendingUnitSpeech = state.unitSpeech;
         pendingMusicTrackMode = state.musicTrackMode;
+        pendingMusicTrackTypes = state.musicTrackTypes;
         pendingGamma = state.gamma;
         pendingShading = state.shading;
         pendingAntiAlias = state.antiAlias;
@@ -187,6 +211,7 @@ namespace rwe
             pendingSoundMode = static_cast<SoundMode>(sceneContext.globalConfig->soundMode);
             pendingUnitSpeech = static_cast<UnitSpeechLevel>(sceneContext.globalConfig->unitSpeech);
             pendingMusicTrackMode = static_cast<MusicTrackMode>(sceneContext.globalConfig->musicTrackMode);
+            pendingMusicTrackTypes = sceneContext.globalConfig->musicTrackTypes;
             pendingGamma = sceneContext.globalConfig->gamma;
             pendingShading = static_cast<ShadingMode>(sceneContext.globalConfig->shadingMode);
             pendingAntiAlias = sceneContext.globalConfig->antiAlias;
@@ -342,6 +367,7 @@ namespace rwe
         {
             toggle->get().setStage(static_cast<unsigned int>(pendingMusicTrackMode));
         }
+        refreshTrackControls(active);
 
         if (auto bar = active.find<UiScrollBar>("GAMMA"))
         {
@@ -781,6 +807,21 @@ namespace rwe
                 // governed by it.
                 pendingMusicTrackMode = nextStage(pendingMusicTrackMode);
             }
+            else if (message == "TRACKTYPE")
+            {
+                // Retypes the track the CD controls are on, as the original's
+                // front end does to its own current track (S:68). Offered only
+                // with music on and the mode Custom.
+                if (!menuPlaylist.empty() && sceneContext.audioService->isMusicEnabled() && pendingMusicTrackMode == MusicTrackMode::Custom)
+                {
+                    auto index = menuPlaylistIndex % menuPlaylist.size();
+                    for (auto i = pendingMusicTrackTypes.size(); i < menuPlaylist.size(); ++i)
+                    {
+                        pendingMusicTrackTypes.push_back(static_cast<unsigned int>(defaultMusicTrackType(menuPlaylist[i])));
+                    }
+                    pendingMusicTrackTypes[index] = static_cast<unsigned int>(nextStage(musicTrackTypeOf(pendingMusicTrackTypes, index, menuPlaylist[index])));
+                }
+            }
             else if (message == "SHADING")
             {
                 pendingShading = nextStage(pendingShading);
@@ -955,6 +996,7 @@ namespace rwe
         {
             toggle->get().setStage(static_cast<unsigned int>(pendingMusicTrackMode));
         }
+        refreshTrackControls(active);
         if (auto toggle = active.find<UiStagedButton>("BSHADOWS"))
         {
             toggle->get().setStage(pendingShadows ? 1 : 0);

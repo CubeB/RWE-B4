@@ -206,6 +206,7 @@ namespace rwe
             || setInt("openingSolarCount", p.openingSolarCount)
             || setInt("targetSolarCount", p.targetSolarCount)
             || setInt("targetMetalExtractorCount", p.targetMetalExtractorCount)
+            || setBool("expansionContestsMiddleWhenBoxedIn", p.expansionContestsMiddleWhenBoxedIn)
             || setInt("targetConstructorCount", p.targetConstructorCount)
             || setInt("expansionConstructors", p.expansionConstructors)
             || setInt("seaAirFactoriesWhenIsolated", p.seaAirFactoriesWhenIsolated)

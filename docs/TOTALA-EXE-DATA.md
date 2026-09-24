@@ -254,8 +254,8 @@ Not ported:
   shipped data is both, so the two agree on real data, and the extra conditions
   also guard the metal grid next to it.
 - **The burning-feature smoke** above, and the `treeburn` sound with it.
-- **Downwind drift**, as §90 already records for the rest of the smoke: RWE has
-  no map wind, so a vent's plume goes straight up.
+- ~~**Downwind drift**~~ Ported 2026-09-24 (#111): a vent's steam drifts with
+  the map's wind like every other puff, the wind vector times eight a tick.
 
 ---
 

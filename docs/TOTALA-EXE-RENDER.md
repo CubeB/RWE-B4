@@ -1687,10 +1687,27 @@ One thing is still RWE's own: the **darkening**, a screen fill of black at 70%
 alpha through the stencil, where the original's is a palette lookup on a single
 fill index.
 
-One thing this does **not** settle, and it is not guessed at here: which table
-the darkening lookup uses (`0x4B8500` is a tree walk, and the blit it reaches
-was not followed). What `unit+0x113` bit 5 means, left open here until
-2026-09-11, is settled: it is "is a building or a feature".
+**The darkening lookup is settled, 2026-09-24 (B4 #40).** `0x4B8500` walks the
+drawable tree (`[drawable+0x0A]` children at `[+0x10]`), clips, and hands every
+leaf to one of two span blitters, `0x4CBF2C` or `0x4CC057`, chosen on the
+drawable's byte `+0x09`; **both** take `[display+0xC0]`, which is
+`PALETTE.ALP` (§54), and the inner loop of `0x4CBF2C` is
+
+```
+4cbf99  al = src[x]
+4cbf9b  if (al == key) skip                 ; the drawable's own key, +0x08
+4cbfa0  dest[x] = ALP[al * 256 + dest[x]]   ; 0x4CBFA9
+```
+
+so every pixel that goes through the blitter is remapped through the alpha
+table by (source, destination). An opaque colour's row is the identity, which
+is what makes the unit image paint; row 0 is `mix(dest, black)`, and **the
+shadow drawable is a silhouette of index 0**: `0x45A470` copies the cached
+bitmap byte for byte and then calls `0x4B96A0`, which writes 0 over every
+pixel that is not the key (`0x4B96CA`). That is the whole of "a darkening
+palette lookup": the copied shadow darkens whatever is under it by one row of
+the same table the cloak blend uses. What `unit+0x113` bit 5 means, left open
+here until 2026-09-11, is settled: it is "is a building or a feature".
 
 ### And a measurement of the third palette table
 

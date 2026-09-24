@@ -281,6 +281,13 @@ namespace rwe
 
         unsigned int workerTimePerTick;
 
+        /**
+         * The FBI's WorkerTime as written, def+0x1FE in the original. Most of
+         * the engine wants the per-tick share above; the unit reclaim step
+         * (0x438650) uses the whole figure.
+         */
+        unsigned int workerTime{0};
+
         SimScalar buildDistance;
 
         /**

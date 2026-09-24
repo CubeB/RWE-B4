@@ -136,6 +136,39 @@ canmove 7, canstop 8, canattack 9, canguard 10, canpatrol 11, canload 12,
 canreclamate 13, cancapture 14, repair 15), `world+0x37EBE` bits 12–14 (fire
 order) and `world+0x37EC2` bit 0 (candgun).
 
+### What a click on a toggle does
+
+The four toggles' click handlers live in the order-panel dispatcher at
+`0x41A490`, one `strstr` on the gadget name each (`0x4E49B0`), and every one of
+them reads the **gathered** state above rather than any unit's own:
+
+| button | reads | state | issues, once, through `0x48CF30` | then stores |
+|---|---|---|---|---|
+| MOVEORD `0x41A4F0` | `world+0x37EC0 & 7`, jump table `0x41A900` | 0 / 1 / 2 / 3 | `STANDING_MOVEORDER` 1 / 2 / 0 / 0 | the value issued |
+| FIREORD `0x41A5EF` | `(world+0x37EBE >> 12) & 7`, jump table `0x41A910` | 0 / 1 / 2 / 3 | `STANDING_FIREORDER` 1 / 2 / 0 / 0 | the value issued |
+| ONOFF `0x41A7DB` | `(world+0x37EC0 >> 5) & 3` | 0 / 1 / 2 | `ACTIVATE` / `DEACTIVATE` / `ACTIVATE` | 1 / 0 / 1 |
+| CLOAK `0x41A743` | `world+0x37EC0 & 0x18` | zero / non-zero | `CLOAK_ON` / `CLOAK_OFF` | 1 / 0 |
+
+So a selection that disagrees converges in one click: to **hold fire**, to
+**hold position**, to **on**, and to **cloak off**. The two three-way tables
+share their third and fourth entries (`0x41A581` and `0x41A684`), which is
+where "mixed goes to 0" comes from; ONOFF's `sub eax,0 / dec / dec` ladder
+sends state 2 down the same arm as state 0; and CLOAK cannot tell "all on" from
+"mixed" because it tests both state bits at once (`test cl,0x18`). Whatever
+state was clicked, the mission goes out as one call over the selection, and
+it is the issuer that skips a unit which does not name the flag: `0x48D0D7`
+tests `def+0x245` bit 1 when the mission is `Standing_FireOrder`, `0x48D104`
+bit 0 for `Standing_MoveOrder`. `ACTIVATE` and `DEACTIVATE` are not filtered
+there; their handlers (`0x403010`, `0x403040`) read `onoffable` themselves.
+
+**The art has a face for the disagreement state.** In `commongui.gaf`,
+`ARMFIREORD` and `ARMMOVEORD` carry six frames: HOLD FIRE / RETURN FIRE / FIRE
+AT WILL (or HOLD POSITION / MANEUVER / ROAM), then a fourth reading FIRE ORDERS
+(MOVE ORDERS) with all three lights lit, then the pressed and greyed frames.
+`ARMONOFF` and `ARMCLOAK` carry five: OFF / ON, then OFF/ON ORDERS, pressed,
+greyed. Frame index equals state value, disagreement included, which is what
+the sentinel accumulator's 3 (or 2) is for.
+
 ### Hidden versus greyed, and the slot LOAD and BLAST share
 
 `0x41A120` is the enable pass — seventeen hardcoded name lookups, each followed
@@ -193,6 +226,14 @@ It now builds the list of selected definitions and applies
 > whose GAF has no such frame gets no dimming at all here, where the original
 > would still have darkened it — the one case where the two can be told
 > apart.
+
+> **Ported, 2026-09-24** (issue #185). The click handlers used to advance
+> each selected unit from its own state, so a selection that disagreed stayed
+> that way for ever, and MOVEORD's face was never updated at all. They now
+> gather the selection's state (`gatherToggle` in `OrderButtons.h`), advance
+> it once (`fireOrdersAfterClick` and its three siblings) and issue that to
+> every unit that offers the button; the faces draw the gathered state, the
+> disagreement frame included (`toggleFace`).
 
 ### Deliberately not ported
 
@@ -572,8 +613,19 @@ flag.
 > the current track again, and Custom, the default, is the situational music;
 > the evaluator keeps counting in every mode but only Custom acts on it.
 > CDNEXT and CDPREV step Play All and Repeat through the album. The mode is
-> saved to `rwe.cfg` as `music-mode`. TRACKTYPE and TRACKNUM are not ported
-> (fork issue #20).
+> saved to `rwe.cfg` as `music-mode`. **TRACKTYPE and TRACKNUM followed on
+> 2026-09-24 (#20):** the types live in `rwe.cfg` as `music-track-types`, one
+> number per track of RWE's one album (the music folder's sorted playlist
+> less the title theme), Building / Battle / Victory / Defeat / Unused as
+> 0-4; a track with no entry keeps its name-table default. Custom mode splits
+> the album by those types and Victory, Defeat and Unused sit out of both
+> moods. TRACKTYPE shows the current track's type, cycles and assigns it on
+> a click, and is greyed unless music is on and the mode is Custom; TRACKNUM
+> shows the track number or NO DISC. In game the current track is the one
+> playing; in the front end it is the one the CD controls are on, stepped by
+> CDNEXT and CDPREV. Undo snapshots the list with the other options and
+> Restore Defaults clears it. Not ported: playing a Victory or Defeat track
+> at the end of a game, which nothing in RWE's gameplay triggers either.
 
 Layout (panel 150x352 at (128,128), background GAF entry `MUSICRT`):
 `NOTRAK` "Off|On" (CD music on/off), `MUSICVOL` slider, `TRACKMODE`
@@ -896,6 +948,12 @@ visibility test (`0x465AC0`) and to `hidedamage`. A builder shows what it is
 building and how far along it is; a guard shows what it is guarding; an
 attacker shows what it is shooting at.
 
+A reclaim is the same and nothing more (issue #19). Reclaiming a **unit**, the
+target's health is the progress, because `ReclaimUnit` takes the unit apart
+as damage every sixteen ticks (§97) and the bar simply follows. Reclaiming a
+**feature** points `mission+0x16` at no unit at all, so the slot stays empty:
+nothing in the redraw reads a feature or a work count.
+
 ### Addendum to §25: the anti-missile ring has two states, and the magazine picks
 
 §25 recorded that the coverage ring is dashed when `[weaponSlot+0x0E]` is
@@ -968,6 +1026,42 @@ in the font's per-glyph widths, measure the font's `I` (`0x4A5CB7`, its
 height plus two), and draw a line under the character with the line routine
 `0x4BE950` in interface colour 2 (`[cfg+0x8B4]`), GUIPAL green: from the
 character's left edge to its right edge less one, at y + height(`I`) + 1.
+
+### Self-destruct shows nothing on the unit
+
+Issue #29 asked what a unit counting down to self-destruct looks like, and
+the answer is: like any other unit. The `SelfDestruct` mission handler
+`0x402010(unit, mission, flags)` keeps the count in the low 28 bits of
+`mission+0x3A`, tagged `0xF0000000` so a fresh mission can be told from a
+counted one, and seeds it from `selfdestructcountdown` (`def+0x245` bits 20-22,
+default 5; no shipped unit names the key). Each pass:
+
+- a cancel (`flags & 2`) ends the mission with sound 23, `canceldestruct`,
+  unless `unit+0x110` bit 14 is set, in which case it ends silently
+  (`0x40209B`-`0x4020B4`);
+- otherwise the count is spent one number a pass: sound `17 + count`
+  (`count5` down to `count0`, the ids §97's sound table gives) and a 30-tick
+  sleep for any count above zero (`0x4020F6`); at zero the done flag
+  `mission+0x36` is set, `count0` is played, and the sleep is `rand(15)`
+  ticks (`0x402117`, `0x4B6C30`);
+- the pass after that applies `0x489BB0(unit, unit, 30000, cause 3, 0)`
+  (`0x402147`): thirty thousand points of ordinary damage from the unit to
+  itself, and the death runs its usual course, `Killed` ladder and corpse
+  included.
+
+So the blast lands `150 + rand(15)` ticks after the order. Nothing reads
+`mission+0x3A` but the handler (the mask `0xFFFFFFF` appears once in the
+binary), and the renderer never looks at a unit's current mission at all: the
+two reads of `unit+0x5C` in the interface code are the developer unit-info
+overlay at `0x4681A9`. What the player sees is the speech, the mission line
+("SELF DESTRUCT ENGAGED", ground missions 10 and 11) in the footer, and then
+the explosion. There is no flash, no blink and no number on the unit.
+
+> **RWE, 2026-09-24:** the red countdown badge RWE drew above the unit was
+> its own invention and is gone. Two sim-side differences stay and are
+> recorded in §91: RWE blasts at exactly 150 ticks, without the `rand(15)`
+> tail, and it removes the unit with no corpse where the original's cause-3
+> damage leaves whatever the `Killed` ladder picks.
 
 ### What RWE does with all this
 

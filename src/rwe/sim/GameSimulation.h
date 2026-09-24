@@ -94,6 +94,22 @@ namespace rwe
     unsigned int computeFeatureReclaimWork(const FeatureDefinition& definition, unsigned int currentHitPoints);
 
     /**
+     * The damage one sixteen-tick bite takes out of a unit being reclaimed,
+     * 0x438650(reclaimer, target, 15):
+     *
+     *   trunc(workerTime * ((kills + 5) / 5) * maxDamage * 15 / (300 * max(buildCostMetal, 10)))
+     *
+     * with the veterancy factor in integer arithmetic and never less than one.
+     * Everything but the target's hit points cancels out of the total, so a
+     * unit is reclaimed in 300 * buildCostMetal / (workerTime * veterancy)
+     * ticks whatever its MaxDamage: ten seconds per metal-per-workertime. The
+     * step is sized for fifteen ticks but lands every sixteen (the handler
+     * sleeps two ticks a pass and counts to fifteen), so the real rate is a
+     * sixteenth slower than that.
+     */
+    unsigned int computeUnitReclaimStep(unsigned int workerTime, unsigned int kills, unsigned int targetMaxHitPoints, const Metal& targetBuildCostMetal);
+
+    /**
      * The direction a missile with this attitude is pointing. TA builds its
      * velocity this way round every tick -- pitch first, then heading -- so a
      * missile always flies exactly where its nose points (0x49BA74). That is
@@ -696,13 +712,17 @@ namespace rwe
         bool reclaimFeature(FeatureId featureId, PlayerId reclaimer, unsigned int workAmount);
 
         /**
-         * Applies workAmount of reclaim work to a unit on behalf of a player.
-         * Total work is the unit's buildTime. The player recovers the unit's
-         * build cost scaled by how much of it had actually been built, paid out
-         * progressively. Returns true when the unit is fully reclaimed (it is
-         * then marked dead with no corpse) or no longer exists.
+         * One bite out of a unit being reclaimed. The original's ReclaimUnit
+         * (state 4, 0x4048D2) does not drain the target: every sixteen ticks it
+         * applies ordinary damage of the step 0x438650 sized when the work
+         * began, so the unit is visibly taken apart and its health bar is the
+         * progress the info panel shows. This takes `damage` off the target's
+         * hit points, credits the reclaimer the matching share of what was
+         * invested in it, and at zero removes the unit the reclaim way: no
+         * wreck, no explosion, death cause 5. Returns whether the reclaim is
+         * finished (including a target that is already gone).
          */
-        bool reclaimUnit(UnitId targetId, PlayerId reclaimer, unsigned int workAmount);
+        bool reclaimUnitStep(UnitId targetId, PlayerId reclaimer, unsigned int damage);
 
         /**
          * How many ticks it takes to capture this unit, as the original works
@@ -1171,6 +1191,18 @@ namespace rwe
 
         bool addResourceDelta(const UnitId& unitId, const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal, ResourceDebtGate gate = ResourceDebtGate::EnergyOrMetal);
         bool addResourceDelta(const UnitId& unitId, const Energy& energy, const Metal& metal, ResourceDebtGate gate = ResourceDebtGate::EnergyOrMetal);
+
+        /**
+         * A price that never goes near the throttle: a shot's `energypershot`
+         * and `metalpershot`, and a cloak's cost. The original takes these
+         * straight out of the stockpile if it covers them and refuses them if
+         * it does not (0x401220, 0x401260, 0x4012A0), so they neither slow the
+         * builders nor turn into debt, and a unit that already owes for
+         * something else still pays and fires. The amount is booked as demand
+         * for the resource display when it is taken, as the cloak's is at
+         * 0x40182F. Returns whether it was taken.
+         */
+        bool chargeStockpile(const UnitId& unitId, const Energy& energy, const Metal& metal);
 
         /**
          * The single-resource request, `0x401180`. A repair asks through this

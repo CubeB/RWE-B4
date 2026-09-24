@@ -1,4 +1,5 @@
 #include "GameScene_util.h"
+#include <cctype>
 
 #include <array>
 #include <algorithm>
@@ -1353,7 +1354,7 @@ namespace rwe
         }
     }
 
-    void updateParticles(const GameMediaDatabase& gameMediaDatabase, const MapTerrain& terrain, GameTime currentTime, std::vector<Particle>& particles)
+    void updateParticles(const GameMediaDatabase& gameMediaDatabase, const MapTerrain& terrain, GameTime currentTime, const Vector3f& windDrift, std::vector<Particle>& particles)
     {
         auto end = particles.end();
         for (auto it = particles.begin(); it != end;)
@@ -1396,6 +1397,10 @@ namespace rwe
             }
 
             particle.position += particle.velocity;
+            if (particle.driftsWithWind)
+            {
+                particle.position += windDrift;
+            }
 
             ++it;
         }
@@ -1923,6 +1928,93 @@ namespace rwe
     bool shouldStartNextMusicTrack(bool leavingScene, bool musicPlaying, GameTime gameTime, GameTime holdOffUntil)
     {
         return !leavingScene && !musicPlaying && gameTime >= holdOffUntil;
+    }
+
+    std::vector<std::string> buildMusicAlbum(const std::vector<std::string>& playlist)
+    {
+        std::vector<std::string> album;
+        for (const auto& path : playlist)
+        {
+            auto lower = path;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (lower.find("theme") != std::string::npos)
+            {
+                continue;
+            }
+            album.push_back(path);
+        }
+        return album;
+    }
+
+    MusicTrackType defaultMusicTrackType(const std::string& path)
+    {
+        // Decoded from the exe: when the original recognises the game disc
+        // it types MCI tracks 1-7 Battle and 8-16 Building (0x42F7xx area),
+        // and the GOG shim plays music/<n>.mp3 by raw track number. Matching
+        // the GOG rips to the tagged soundtrack by duration gives these
+        // names. A file the table does not know plays as Building.
+        static const char* const battleNames[] = {
+            "brutal battle",
+            "fire and ice",
+            "attack",
+            "warpath",
+            "march unto death",
+            "ambush in the passage",
+        };
+        auto lower = path;
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        for (const auto* name : battleNames)
+        {
+            if (lower.find(name) != std::string::npos)
+            {
+                return MusicTrackType::Battle;
+            }
+        }
+        return MusicTrackType::Building;
+    }
+
+    MusicTrackType musicTrackTypeOf(const std::vector<unsigned int>& types, std::size_t index, const std::string& path)
+    {
+        if (index < types.size() && types[index] <= 4u)
+        {
+            return static_cast<MusicTrackType>(types[index]);
+        }
+        return defaultMusicTrackType(path);
+    }
+
+    std::string musicTrackNumberCaption(std::optional<std::size_t> index)
+    {
+        // sprintf("%d") on the current track, or NO DISC when it is 0
+        // (TOTALA-EXE-INTERFACE.md S:68).
+        return index ? std::to_string(*index + 1) : std::string("NO DISC");
+    }
+
+    MusicMoods splitMusicMoods(const std::vector<std::string>& album, const std::vector<unsigned int>& types)
+    {
+        MusicMoods moods;
+        for (std::size_t i = 0; i < album.size(); ++i)
+        {
+            switch (musicTrackTypeOf(types, i, album[i]))
+            {
+                case MusicTrackType::Building:
+                    moods.building.push_back(album[i]);
+                    break;
+                case MusicTrackType::Battle:
+                    moods.battle.push_back(album[i]);
+                    break;
+                default:
+                    break;
+            }
+        }
+        if (moods.battle.empty())
+        {
+            moods.battle = moods.building;
+        }
+        if (moods.building.empty())
+        {
+            moods.building = moods.battle;
+        }
+        return moods;
     }
 
     std::size_t nextMusicTrackIndex(MusicTrackMode mode, const std::vector<std::string>& tracks, const std::string& last, int step, unsigned int randomValue)

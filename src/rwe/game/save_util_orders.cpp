@@ -272,7 +272,8 @@ namespace rwe
                 return json{
                     {"kind", "reclaiming"},
                     {"target", saveReclaimTarget(r.target, ctx)},
-                    {"nanoParticleOrigin", saveOptional(r.nanoParticleOrigin, saveSimVector)}};
+                    {"nanoParticleOrigin", saveOptional(r.nanoParticleOrigin, saveSimVector)},
+                    {"stepCounter", r.stepCounter}};
             },
             [&](const UnitBehaviorStateResurrecting& r) {
                 return json{
@@ -305,9 +306,16 @@ namespace rwe
         }
         if (kind == "reclaiming")
         {
-            return UnitBehaviorStateReclaiming{
+            UnitBehaviorStateReclaiming r{
                 loadReclaimTarget(j.at("target"), ctx),
                 loadOptional(j.at("nanoParticleOrigin"), loadSimVector)};
+            // Hashed, so a save taken between two bites must bring the
+            // count back; a save from before it existed starts at zero.
+            if (j.contains("stepCounter"))
+            {
+                r.stepCounter = j.at("stepCounter").get<unsigned int>();
+            }
+            return r;
         }
         if (kind == "resurrecting")
         {
@@ -620,6 +628,7 @@ namespace rwe
                     {"runOutDistance", saveSimScalar(a.runOutDistance)},
                     {"phase", saveEnum(a.phase)},
                     {"bombsDroppedThisPass", a.bombsDroppedThisPass},
+                    {"releasePoint", a.releasePoint ? saveSimVector(*a.releasePoint) : json()},
                     {"strafingPass", a.strafingPass},
                     {"breakWaypoint", saveSimVector(a.breakWaypoint)},
                     {"currentVelocity", saveSimVector(a.currentVelocity)}};
@@ -683,6 +692,10 @@ namespace rwe
             a.runOutDistance = loadSimScalar(j.at("runOutDistance"));
             a.phase = loadEnum<AirMovementStateAttackRun::Phase>(j.at("phase"));
             a.bombsDroppedThisPass = j.at("bombsDroppedThisPass").get<unsigned int>();
+            if (j.contains("releasePoint") && !j.at("releasePoint").is_null())
+            {
+                a.releasePoint = loadSimVector(j.at("releasePoint"));
+            }
             a.strafingPass = j.at("strafingPass").get<bool>();
             a.breakWaypoint = loadSimVector(j.at("breakWaypoint"));
             a.currentVelocity = loadSimVector(j.at("currentVelocity"));

@@ -460,6 +460,62 @@ namespace rwe
          * kept for a moho)? A deposit whose best placement is refused is
          * passed over, rather than settled with a lesser placement beside it.
          */
+        /**
+         * Why the search came back empty, counted by deposit rather than by
+         * cell.
+         *
+         * The refusal used to be logged from a tally the caller built for
+         * itself, re-walking the patches and asking its own predicates of
+         * each cell centre. That tally could not see the two tests that
+         * actually decide the search -- whether a footprint can be placed at
+         * all (`canBeBuiltAt`) and whether the deposit is waiting for
+         * something to step off it -- so on a map whose deposits were all
+         * taken it reported ninety cells in range with nothing wrong with
+         * any of them, every half second, for the length of the game. Issue
+         * #202. A diagnostic that cannot see the reason it is being asked
+         * about is worse than none, because it sends the reader somewhere
+         * else.
+         */
+        struct MexSiteTally
+        {
+            /** Distinct deposits with a cell inside the ring radius. */
+            int depositsInRange{0};
+            /** The ground rules threw the whole deposit out. */
+            int notAdmitted{0};
+            /** Nothing could be placed on it with patch metal underneath. */
+            int noPlacement{0};
+            /**
+             * And why not, counted over the cells of those deposits. A
+             * deposit already carrying an extractor and a deposit on ground
+             * no extractor can ever stand on both land in `noPlacement`, and
+             * they mean opposite things -- the first is the AI working
+             * correctly and the second is a patch it will refuse for ever.
+             */
+            int cellsOffMap{0};
+            /**
+             * Ground no extractor can ever stand on, with nothing on it.
+             * This is the only one of the four that means the patch is
+             * permanently lost, and it is the one the old diagnostic could
+             * not tell from the other three.
+             */
+            int cellsUnbuildable{0};
+            /**
+             * A building already stands here -- ours, usually our own
+             * extractor. `buildableIgnoringUnits` keeps buildings blocking
+             * on purpose, so without this these counted as unbuildable
+             * ground and "the AI has taken everything in reach" was
+             * indistinguishable from "the AI can never take any of it".
+             */
+            int cellsBlockedByBuilding{0};
+            /** Something that can walk is standing here; it may move. */
+            int cellsBlockedByUnit{0};
+            int cellsNoMetalUnder{0};
+            /** Something is standing on its heart; the deposit is waiting. */
+            int heartBlocked{0};
+            /** A placement was found and the site rules refused it. */
+            int siteRefused{0};
+        };
+
         std::optional<SimVector> chooseMexSite(
             const GameSimulation& sim,
             const std::string& unitType,
@@ -467,7 +523,8 @@ namespace rwe
             SimScalar radius,
             std::minstd_rand& rng,
             const std::function<bool(const SimVector&)>& accept = nullptr,
-            const std::function<bool(const SimVector&)>& admit = nullptr) const;
+            const std::function<bool(const SimVector&)>& admit = nullptr,
+            MexSiteTally* tally = nullptr) const;
     private:
         /**
          * Everything the site search knows about the builder it is planning

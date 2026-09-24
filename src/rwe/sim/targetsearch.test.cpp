@@ -495,6 +495,64 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a teammate's unit is never chosen as a target", "[targetsearch]")
+    {
+        // 0x40AA40 builds the candidate list and, at 0x40AB05, skips any
+        // unit whose player's ally byte is set for the searcher, before the
+        // can-see test at 0x40AB11 is even asked. The spatial index only
+        // ever dropped the searcher's own side, so a unit on Fire At Will
+        // opened up on its teammate's units the moment they came in range
+        // (issue #237).
+        auto script = makeBattleScript();
+        GameSimulation sim(makeDetectionTerrain(), 0u, 0, 0);
+        auto us = addBattlePlayer(sim, "us");
+        auto friend_ = addBattlePlayer(sim, "friend");
+        auto them = addBattlePlayer(sim, "them");
+        sim.getPlayer(us).teamId = 1;
+        sim.getPlayer(friend_).teamId = 1;
+
+        WeaponDefinition rocket{};
+        rocket.maxRange = 1300_ss;
+        rocket.reloadTime = 270_ss;
+        rocket.burst = 1;
+        rocket.velocity = 400_ss / 30_ss;
+        rocket.damageRadius = 96_ss;
+        rocket.damage["DEFAULT"] = 10;
+        sim.weaponDefinitions["CORMSHIP_ROCKET"] = rocket;
+
+        defineDetectionUnit(sim, "CORMSHIP", DetectionUnitSpec{245u, 1250u, 0u, "CORMSHIP_ROCKET"});
+        defineDetectionUnit(sim, "ARMPW", DetectionUnitSpec{280u, 0u, 0u, ""});
+
+        auto shipId = spawnDetectionUnit(sim, "CORMSHIP", us, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        SECTION("a teammate in plain sight and range is passed over")
+        {
+            auto allyId = spawnDetectionUnit(sim, "ARMPW", friend_, SimVector(200_ss, 0_ss, 0_ss), script);
+            sim.tick();
+            sim.tick();
+            REQUIRE(sim.canSeeUnit(us, allyId));
+            REQUIRE_FALSE(weaponTargetOf(sim, shipId).has_value());
+        }
+
+        SECTION("an enemy standing beside that teammate is taken, and the teammate still is not")
+        {
+            spawnDetectionUnit(sim, "ARMPW", friend_, SimVector(200_ss, 0_ss, 0_ss), script);
+            auto enemyId = spawnDetectionUnit(sim, "ARMPW", them, SimVector(200_ss, 0_ss, 60_ss), script);
+            sim.tick();
+            sim.tick();
+            REQUIRE(weaponTargetOf(sim, shipId) == std::optional<UnitId>(enemyId));
+        }
+
+        SECTION("a player on a different team is an enemy like any other")
+        {
+            sim.getPlayer(friend_).teamId = 2;
+            auto otherId = spawnDetectionUnit(sim, "ARMPW", friend_, SimVector(200_ss, 0_ss, 0_ss), script);
+            sim.tick();
+            sim.tick();
+            REQUIRE(weaponTargetOf(sim, shipId) == std::optional<UnitId>(otherId));
+        }
+    }
+
     TEST_CASE("sonar is what lets anything engage a submerged unit at all", "[targetsearch]")
     {
         // The sonar bit is read by 0x465AC0 at 0x465B38, and it is a veto

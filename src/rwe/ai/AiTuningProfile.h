@@ -328,6 +328,35 @@ namespace rwe
          */
         int starvedMetalMakerCount{6};
         /**
+         * When every deposit on our own side is taken, look past the halfway
+         * line for the next one.
+         *
+         * `expansionStaysOnOurSide` refuses any patch nearer the enemy's base
+         * than ours, which is right while there is anything left at home: it
+         * keeps a constructor from wandering into the other side's base to
+         * build an extractor, which is a thing the original is notorious for.
+         * It is wrong once home is full, and it was costing whole games.
+         *
+         * Measured on Coast To Coast, the map the play-test was watched on:
+         * a constructor sees ten deposits, five already carrying our own
+         * extractors and five refused -- and the five refused are refused for
+         * being past the midpoint. So the AI took its five, sat at about
+         * eleven metal a second from the eight-minute mark, and never grew
+         * again for the remaining twenty-two minutes of a thirty-minute game,
+         * while filing a refusal twice a second saying so (#202).
+         *
+         * The retry keeps every other rule. `underGuns` still applies, so
+         * this reaches for ground nobody is holding and not into a defended
+         * base, and the reachability test still applies, so it will not send
+         * a walking builder across water. It only fires when the first search
+         * failed AND the side rule is what refused something, so a map with
+         * spare patches at home never reaches it.
+         *
+         * False keeps the halfway line absolute.
+         */
+        bool expansionContestsMiddleWhenBoxedIn{true};
+
+        /**
          * Planning passes of unbroken metal starvation with energy to spare
          * before starvedMetalMakerCount applies. The planner runs every
          * buildPlannerTickInterval ticks, so 120 passes is about two minutes
@@ -2285,6 +2314,37 @@ namespace rwe
          * the sim's vision cells at 32 world units.
          */
         float ferryLandingThreatRadius{300.0f};
+        /**
+         * Scoring the CROSSING as well as the landing was tried and does not
+         * work. Recorded here so it is not tried again without a better idea
+         * behind it.
+         *
+         * The case for it was a traced loss: Coast To Coast seed 1, a
+         * transport finished at 505 seconds, loaded four units, and was
+         * killed at 601 by an enemy destroyer at (643, 58) with eight enemies
+         * within reach. Its whole cargo died in the same tick -- the
+         * simulation's own cause for that is `carrier_died`. The beach it was
+         * aiming at was quiet; the sea in front of it was not, and nothing
+         * looked at the sea.
+         *
+         * So the landing score took the worst of six interior points along
+         * the course as well as the beach. Measured paired asymmetric over
+         * eleven seeds, both seats, on `carrier_died` -- the count of cargo
+         * that went down with a transport, which is the loss it targets:
+         *
+         *   cargo lost with a carrier   13.0 scored v 10.6 unscored
+         *   transports lost              5.3 scored v  4.8 unscored
+         *
+         * Worse in twelve games of twenty-one, better in nine. It made things
+         * worse, and there are two likely reasons, either of which would have
+         * to be dealt with first. Going round costs distance, so the ferry is
+         * under the guns for longer and may lose more than the detour saves.
+         * And the field it consults is the anti-GROUND one, which is the
+         * wrong question for an air transport -- `antiAirCoverAt` is the
+         * field that decides whether an Atlas gets across, and the unit that
+         * actually did the killing in the traced case was a ship.
+         */
+
         /**
          * Whether the want for an army ferry outlives the sighting that
          * raised it. False restores the old behaviour, in which the decision

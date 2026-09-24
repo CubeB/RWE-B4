@@ -342,6 +342,85 @@ namespace rwe
         localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::SetCloak{cloaked}));
     }
 
+    namespace
+    {
+        /**
+         * One entry per selected unit for gatherToggle: the unit's own state
+         * where its definition offers the button, nothing where it does not.
+         * A unit that has just died and not yet left the selection is
+         * skipped the same way.
+         */
+        template <typename T, typename Offers, typename Read>
+        std::vector<std::optional<T>> toggleStates(const GameSimulation& simulation, const std::unordered_set<UnitId>& selection, Offers offers, Read read)
+        {
+            std::vector<std::optional<T>> states;
+            states.reserve(selection.size());
+            for (const auto& unitId : selection)
+            {
+                auto unit = simulation.tryGetUnitState(unitId);
+                if (!unit)
+                {
+                    continue;
+                }
+                const auto& definition = simulation.unitDefinitions.at(unit->get().unitType);
+                states.push_back(offers(definition) ? std::optional<T>(read(unit->get())) : std::nullopt);
+            }
+            return states;
+        }
+    }
+
+    GatheredToggle<UnitFireOrders> GameScene::gatherFireOrders() const
+    {
+        return gatherToggle(toggleStates<UnitFireOrders>(
+            simulation, selectedUnits, [](const UnitDefinition& d) { return d.fireStandOrders; }, [](const UnitState& u) { return u.fireOrders; }));
+    }
+
+    GatheredToggle<UnitMovementOrders> GameScene::gatherMoveOrders() const
+    {
+        return gatherToggle(toggleStates<UnitMovementOrders>(
+            simulation, selectedUnits, [](const UnitDefinition& d) { return d.mobileStandOrders; }, [](const UnitState& u) { return u.moveOrders; }));
+    }
+
+    GatheredToggle<bool> GameScene::gatherOnOff() const
+    {
+        return gatherToggle(toggleStates<bool>(
+            simulation, selectedUnits, [](const UnitDefinition& d) { return d.onOffable; }, [](const UnitState& u) { return u.activated; }));
+    }
+
+    GatheredToggle<bool> GameScene::gatherCloak() const
+    {
+        // The request rather than the cloak itself, for the reason on the
+        // `cloak` subject: a unit decloaked by an enemy walking past still
+        // has the order standing.
+        return gatherToggle(toggleStates<bool>(
+            simulation, selectedUnits, [](const UnitDefinition& d) { return d.cloakable; }, [](const UnitState& u) { return u.cloakRequested; }));
+    }
+
+    void GameScene::refreshToggleButtons()
+    {
+        // Each face shows the gathered state, disagreement included: the
+        // original keeps a state of its own for it (3 for the two three-way
+        // toggles, 2 for the two-way pair) and the art has a frame for it.
+        // Nothing offering a button leaves its face alone; the gating greys
+        // it.
+        if (auto shown = gatherFireOrders(); shown.offered)
+        {
+            fireOrders.next(shown);
+        }
+        if (auto shown = gatherMoveOrders(); shown.offered)
+        {
+            moveOrders.next(shown);
+        }
+        if (auto shown = gatherOnOff(); shown.offered)
+        {
+            onOff.next(shown);
+        }
+        if (auto shown = gatherCloak(); shown.offered)
+        {
+            cloak.next(shown);
+        }
+    }
+
     void GameScene::localPlayerModifyBuildQueue(UnitId unitId, const std::string& unitType, int count)
     {
         localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::ModifyBuildQueue{count, unitType}));
@@ -1197,8 +1276,10 @@ namespace rwe
 
     bool GameScene::isEnemy(UnitId id) const
     {
-        // TODO: consider allies/teams here
-        return !getUnit(id).isOwnedBy(localPlayerId);
+        // The original reads one byte out of the ordering player's ally table
+        // and ALLIED and ENEMY are its complements (0x43F0EC-0x43F12D). RWE's
+        // ally relation is the lobby team, the same one shared vision runs on.
+        return !simulation.arePlayersAllied(getUnit(id).owner, localPlayerId);
     }
 
     bool GameScene::isFriendly(UnitId id) const
@@ -1295,9 +1376,9 @@ namespace rwe
                     {
                         playUnitNotificationSound(unit->get().owner, unit->get().unitType, UnitSoundType::Activate);
 
-                        if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit && *selectedUnit == e.unitId)
+                        if (selectedUnits.count(e.unitId) != 0)
                         {
-                            onOff.next(true);
+                            refreshToggleButtons();
                         }
                     }
                 },
@@ -1307,9 +1388,9 @@ namespace rwe
                     {
                         playUnitNotificationSound(unit->get().owner, unit->get().unitType, UnitSoundType::Deactivate);
 
-                        if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit && *selectedUnit == e.unitId)
+                        if (selectedUnits.count(e.unitId) != 0)
                         {
-                            onOff.next(false);
+                            refreshToggleButtons();
                         }
                     }
                 },
@@ -1856,33 +1937,44 @@ namespace rwe
             p->get().addSubscription(cursorMode.subscribe([&p = p->get()](const auto& v) { p.setToggledOn(std::holds_alternative<UnloadCursorMode>(v)); }));
         }
 
+        // The four toggles draw the state gathered over the selection, and
+        // the shipped art has a face for a disagreeing selection one frame
+        // past the last state (toggleFace). Art without that frame falls
+        // back to the first offerer's own face rather than throwing.
+        auto showFace = [](UiStagedButton& button, unsigned int face, unsigned int fallback) {
+            auto count = button.getStageCount();
+            if (face < count)
+            {
+                button.setStage(face);
+            }
+            else if (fallback < count)
+            {
+                button.setStage(fallback);
+            }
+        };
+
         if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "FIREORD"))
         {
-            p->get().addSubscription(fireOrders.subscribe([&p = p->get()](const auto& v) {
-                switch (v)
-                {
-                    case UnitFireOrders::HoldFire:
-                        p.setStage(0);
-                        break;
-                    case UnitFireOrders::ReturnFire:
-                        p.setStage(1);
-                        break;
-                    case UnitFireOrders::FireAtWill:
-                        p.setStage(2);
-                        break;
-                    default:
-                        throw std::logic_error("Invalid FireOrders value");
-                } }));
+            p->get().addSubscription(fireOrders.subscribe([&p = p->get(), showFace](const auto& v) {
+                showFace(p, toggleFace(v, 3), static_cast<unsigned int>(v.value)); }));
+        }
+
+        if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "MOVEORD"))
+        {
+            p->get().addSubscription(moveOrders.subscribe([&p = p->get(), showFace](const auto& v) {
+                showFace(p, toggleFace(v, 3), static_cast<unsigned int>(v.value)); }));
         }
 
         if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "ONOFF"))
         {
-            p->get().addSubscription(onOff.subscribe([&p = p->get()](const auto& v) { p.setStage(v ? 1 : 0); }));
+            p->get().addSubscription(onOff.subscribe([&p = p->get(), showFace](const auto& v) {
+                showFace(p, toggleFace(v, 2), v.value ? 1u : 0u); }));
         }
 
         if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "CLOAK"))
         {
-            p->get().addSubscription(cloak.subscribe([&p = p->get()](const auto& v) { p.setStage(v ? 1 : 0); }));
+            p->get().addSubscription(cloak.subscribe([&p = p->get(), showFace](const auto& v) {
+                showFace(p, toggleFace(v, 2), v.value ? 1u : 0u); }));
         }
 
         currentPanel->groupMessages().subscribe([this](const auto& msg) {
@@ -1890,21 +1982,6 @@ namespace rwe
             {
                 onMessage(msg.controlName, activateMessage->type);
             } });
-    }
-
-    UnitFireOrders nextFireOrders(UnitFireOrders orders)
-    {
-        switch (orders)
-        {
-            case UnitFireOrders::HoldFire:
-                return UnitFireOrders::ReturnFire;
-            case UnitFireOrders::ReturnFire:
-                return UnitFireOrders::FireAtWill;
-            case UnitFireOrders::FireAtWill:
-                return UnitFireOrders::HoldFire;
-            default:
-                throw std::logic_error("Invalid UnitFireOrders value");
-        }
     }
 
     void GameScene::onMessage(const std::string& message, ActivateMessage::Type type)
@@ -2089,22 +2166,28 @@ namespace rwe
                 sceneContext.audioService->playSound(*sounds.setFireOrders);
             }
 
-            for (const auto& selectedUnit : selectedUnits)
+            // One order for the whole selection, advanced from the state the
+            // button shows rather than from where each unit happened to be.
+            // 0x41A5EF reads the gathered state, jumps through the table at
+            // 0x41A910 (hold -> return -> at will -> hold, and a disagreeing
+            // selection -> hold), issues STANDING_FIREORDER once to the
+            // selection, and writes the value it issued back into the shown
+            // state. The issuer skips a unit without FireStandOrders
+            // (0x48D0D7), so a transport picked up along with an escort keeps
+            // its own order instead of being dragged round the cycle.
+            if (auto shown = gatherFireOrders(); shown.offered)
             {
-                // FIXME: should set all to a consistent single fire order rather than advancing all
-                auto& u = getUnit(selectedUnit);
-
-                // The original gathers this button out of FireStandOrders and
-                // skips any unit in the selection that does not name it, so a
-                // transport picked up along with an escort keeps its own order
-                // instead of being dragged round the cycle with everything else.
-                if (!simulation.unitDefinitions.at(u.unitType).fireStandOrders)
+                auto next = fireOrdersAfterClick(shown);
+                for (const auto& selectedUnit : selectedUnits)
                 {
-                    continue;
+                    auto unit = tryGetUnit(selectedUnit);
+                    if (!unit || !simulation.unitDefinitions.at(unit->get().unitType).fireStandOrders)
+                    {
+                        continue;
+                    }
+                    localPlayerSetFireOrders(selectedUnit, next);
                 }
-
-                auto newFireOrders = nextFireOrders(u.fireOrders);
-                localPlayerSetFireOrders(selectedUnit, newFireOrders);
+                fireOrders.next(GatheredToggle<UnitFireOrders>{true, false, next});
             }
         }
         else if (matchesWithSidePrefix("MOVEORD", message))
@@ -2114,22 +2197,22 @@ namespace rwe
                 sceneContext.audioService->playSound(*sounds.setMoveOrders);
             }
 
-            for (const auto& selectedUnit : selectedUnits)
+            // The same shape as FIREORD: 0x41A4F0 and the table at 0x41A900,
+            // hold position -> maneuver -> roam -> hold position, mixed ->
+            // hold position, gated on MobileStandOrders at 0x48D104.
+            if (auto shown = gatherMoveOrders(); shown.offered)
             {
-                auto& u = getUnit(selectedUnit);
-
-                // Gathered from MobileStandOrders the way FIREORD comes from
-                // FireStandOrders: a unit that does not name it keeps its own
-                // order instead of being dragged round the cycle.
-                if (!simulation.unitDefinitions.at(u.unitType).mobileStandOrders)
+                auto next = moveOrdersAfterClick(shown);
+                for (const auto& selectedUnit : selectedUnits)
                 {
-                    continue;
+                    auto unit = tryGetUnit(selectedUnit);
+                    if (!unit || !simulation.unitDefinitions.at(unit->get().unitType).mobileStandOrders)
+                    {
+                        continue;
+                    }
+                    localPlayerSetMovementOrders(selectedUnit, next);
                 }
-
-                auto next = u.moveOrders == UnitMovementOrders::HoldPosition
-                    ? UnitMovementOrders::Maneuver
-                    : (u.moveOrders == UnitMovementOrders::Maneuver ? UnitMovementOrders::Roam : UnitMovementOrders::HoldPosition);
-                localPlayerSetMovementOrders(selectedUnit, next);
+                moveOrders.next(GatheredToggle<UnitMovementOrders>{true, false, next});
             }
         }
         else if (matchesWithSidePrefix("ONOFF", message))
@@ -2139,11 +2222,23 @@ namespace rwe
                 sceneContext.audioService->playSound(*sounds.immediateOrders);
             }
 
-            for (const auto& selectedUnit : selectedUnits)
+            // 0x41A7DB: all off -> ACTIVATE, all on -> DEACTIVATE, and a
+            // selection that disagrees is switched on. The ACTIVATE and
+            // DEACTIVATE handlers (0x403010, 0x403040) read onoffable
+            // themselves, so a unit without it is left alone here too.
+            if (auto shown = gatherOnOff(); shown.offered)
             {
-                auto& u = getUnit(selectedUnit);
-                auto newOnOff = !u.activated;
-                localPlayerSetOnOff(selectedUnit, newOnOff);
+                auto next = onOffAfterClick(shown);
+                for (const auto& selectedUnit : selectedUnits)
+                {
+                    auto unit = tryGetUnit(selectedUnit);
+                    if (!unit || !simulation.unitDefinitions.at(unit->get().unitType).onOffable)
+                    {
+                        continue;
+                    }
+                    localPlayerSetOnOff(selectedUnit, next);
+                }
+                onOff.next(GatheredToggle<bool>{true, false, next});
             }
         }
         else if (matchesWithSidePrefix("CLOAK", message))
@@ -2153,23 +2248,23 @@ namespace rwe
                 sceneContext.audioService->playSound(*sounds.immediateOrders);
             }
 
-            for (const auto& selectedUnit : selectedUnits)
+            // 0x41A743 tests the two state bits together: only a selection
+            // with every cloak off gets CLOAK_ON; all on, or mixed, gets
+            // CLOAK_OFF. The original offers the button only where CloakCost
+            // is set, so everything else in a mixed selection is left alone.
+            if (auto shown = gatherCloak(); shown.offered)
             {
-                auto& u = getUnit(selectedUnit);
-
-                // The original offers the button only where CloakCost is set,
-                // so a mixed selection leaves everything else alone.
-                if (!simulation.unitDefinitions.at(u.unitType).cloakable)
+                auto next = cloakAfterClick(shown);
+                for (const auto& selectedUnit : selectedUnits)
                 {
-                    continue;
+                    auto unit = tryGetUnit(selectedUnit);
+                    if (!unit || !simulation.unitDefinitions.at(unit->get().unitType).cloakable)
+                    {
+                        continue;
+                    }
+                    localPlayerSetCloak(selectedUnit, next);
                 }
-
-                auto newCloak = !u.cloakRequested;
-                localPlayerSetCloak(selectedUnit, newCloak);
-                if (auto singleUnit = getSingleSelectedUnit(); singleUnit && *singleUnit == selectedUnit)
-                {
-                    cloak.next(newCloak);
-                }
+                cloak.next(GatheredToggle<bool>{true, false, next});
             }
         }
         else if (matchesWithSidePrefix("NEXT", message))
@@ -2476,6 +2571,8 @@ namespace rwe
 
     void GameScene::onSelectedUnitsChanged()
     {
+        refreshToggleButtons();
+
         if (selectedUnits.empty())
         {
             const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
@@ -2493,9 +2590,6 @@ namespace rwe
                 return;
             }
             const auto& unit = unitRef->get();
-            fireOrders.next(unit.fireOrders);
-            onOff.next(unit.activated);
-            cloak.next(unit.cloakRequested);
 
             const auto& guiInfo = getGuiInfo(*unitId);
             auto buildPanelDefinition = getBuilderGui(builderGuisDatabase, unit.unitType, guiInfo.currentBuildPage);
@@ -2778,7 +2872,13 @@ namespace rwe
             [&](const PlayerUnitCommand::SetFireOrders& c) {
                 if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit && *selectedUnit == unitCommand.unit)
                 {
-                    fireOrders.next(c.orders);
+                    fireOrders.next(GatheredToggle<UnitFireOrders>{true, false, c.orders});
+                }
+            },
+            [&](const PlayerUnitCommand::SetMovementOrders& c) {
+                if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit && *selectedUnit == unitCommand.unit)
+                {
+                    moveOrders.next(GatheredToggle<UnitMovementOrders>{true, false, c.orders});
                 }
             },
             [](const auto&) {});
@@ -2823,6 +2923,7 @@ namespace rwe
         Particle particle;
         particle.position = position;
         particle.velocity = Vector3f(0.0f, 0.5f, 0.0f);
+        particle.driftsWithWind = true;
         particle.renderType = ParticleRenderTypeSprite{
             gaf,
             anim,
@@ -2849,6 +2950,10 @@ namespace rwe
         // which is the right answer for all but a handful of maps and saves
         // threading the map's gravity through to reach.
         particle.velocity = Vector3f(0.0f, riseRate, 0.0f);
+
+        // And sideways with the wind, damage smoke and vent steam alike
+        // (0x475380 and 0x475640 differ only in the lift).
+        particle.driftsWithWind = true;
 
         particle.renderType = ParticleRenderTypeSprite{
             "FX",

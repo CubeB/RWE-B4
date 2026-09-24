@@ -135,6 +135,7 @@ namespace rwe
             {"phase", phaseName},
             {"lastKnownTargetPos", dumpJson(p.lastKnownTargetPos)},
             {"runOutDirection", dumpJson(p.runOutDirection)},
+            {"releasePoint", p.releasePoint ? dumpJson(*p.releasePoint) : nlohmann::json(nullptr)},
         };
     }
 
@@ -373,7 +374,8 @@ namespace rwe
     {
         return nlohmann::json{
             {"target", dumpJson(s.target)},
-            {"nanoParticleOrigin", dumpJson(s.nanoParticleOrigin)}};
+            {"nanoParticleOrigin", dumpJson(s.nanoParticleOrigin)},
+            {"stepCounter", s.stepCounter}};
     }
     nlohmann::json dumpJson(const UnitBehaviorStateResurrecting& s)
     {

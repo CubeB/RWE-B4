@@ -275,36 +275,27 @@ namespace rwe
         }
     }
 
-    namespace
+    void GameScene::rebuildMusicMoods()
     {
-        /**
-         * The default track types, decoded from the exe: when the original
-         * recognises the game disc it types MCI tracks 1-7 Battle and 8-16
-         * Building (0x42F7xx area), and the GOG shim plays music/<n>.mp3 by
-         * raw track number. Matching the GOG rips to the tagged soundtrack by
-         * duration gives these names. A file the table does not know plays as
-         * Building; the title theme -- which the game itself never plays, it
-         * belongs to the intro -- is left out entirely.
-         */
-        bool isBattleTrackName(const std::string& lowerName)
+        auto moods = splitMusicMoods(allMusicTracks, musicTrackTypes);
+        buildingTracks = std::move(moods.building);
+        battleTracks = std::move(moods.battle);
+        // A retyped track may have left the bag it was drawn into.
+        musicBag.clear();
+    }
+
+    std::optional<std::size_t> GameScene::currentMusicTrackIndex() const
+    {
+        if (lastMusicTrack.empty())
         {
-            static const char* const battleNames[] = {
-                "brutal battle",
-                "fire and ice",
-                "attack",
-                "warpath",
-                "march unto death",
-                "ambush in the passage",
-            };
-            for (const auto* name : battleNames)
-            {
-                if (lowerName.find(name) != std::string::npos)
-                {
-                    return true;
-                }
-            }
-            return false;
+            return std::nullopt;
         }
+        auto it = std::find(allMusicTracks.begin(), allMusicTracks.end(), lastMusicTrack);
+        if (it == allMusicTracks.end())
+        {
+            return std::nullopt;
+        }
+        return static_cast<std::size_t>(it - allMusicTracks.begin());
     }
 
     void GameScene::addBattlePoints(int points)
@@ -328,26 +319,8 @@ namespace rwe
         if (!musicPlaylistBuilt)
         {
             musicPlaylistBuilt = true;
-            for (const auto& path : sceneContext.audioService->getMusicPlaylist())
-            {
-                auto lower = path;
-                std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                if (lower.find("theme") != std::string::npos)
-                {
-                    continue;
-                }
-                allMusicTracks.push_back(path);
-                (isBattleTrackName(lower) ? battleTracks : buildingTracks).push_back(path);
-            }
-            // A one-sided soundtrack plays whatever it has in both moods.
-            if (battleTracks.empty())
-            {
-                battleTracks = buildingTracks;
-            }
-            if (buildingTracks.empty())
-            {
-                buildingTracks = battleTracks;
-            }
+            allMusicTracks = buildMusicAlbum(sceneContext.audioService->getMusicPlaylist());
+            rebuildMusicMoods();
         }
         if (buildingTracks.empty() || !sceneContext.audioService->isMusicEnabled())
         {

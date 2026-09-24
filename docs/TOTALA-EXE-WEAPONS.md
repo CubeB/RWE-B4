@@ -453,8 +453,8 @@ At Brain Coral's `maxwindspeed` of 3000 this is 0.092 world units a tick, which
 carries a Crusader shell about six units over its flight against a damage radius
 of 24 — a real nudge rather than a dominant force. Note that nothing compensates
 for it: the original's bombsight does not model the wind either, so a bomber's
-aim drifts very slightly downwind, and `predictBombImpactPoint` matches it by
-also ignoring it.
+aim drifts very slightly downwind, and RWE's release, taken from the mission's
+own fall-time arithmetic (#110), ignores it too.
 
 Smoke uses the same two words, scaled by 8 per tick (§4), and that is still not
 ported — every puff in the original leans downwind together. Nothing about it is
@@ -640,6 +640,26 @@ idle sighting into an attack: it returns without doing anything when bits 18–1
 are zero (`0x43B211`), and when they are exactly 1 (`0x43B25D`) it plants a
 second order at the unit's own position, `unit+0x6a`, before the attack — the
 leash that makes Maneuver come home and Roam not.
+
+Every reader of those two bits in the binary, for the record (issue #109):
+
+| Site | What it is | What the mode does there |
+|---|---|---|
+| `0x43B211`, `0x43B25D` | `0x43B1F0(unit, target, forced)`, the sighting-to-attack routine; nine callers (`0x4033EB`, `0x40600F`, `0x4063F5`, `0x4070DD`, `0x40F999`, `0x40FD9B`, `0x410608`, `0x41072A`, `0x411079`), Standby, the patrols, guard and the return-fire path among them, and every one passes `forced = 0` | 0: no mission at all; 1: a move back to `unit+0x6A` planted before the attack; 2: the attack alone. The same test right after it (`0x43B224`) refuses when the fire mode is 0, Hold Fire |
+| `0x43B431`, `0x43B563` | `0x43B400`, the repair patrols' job issuer (called from `RepairPatrol` at `0x405ACA` and `VTOL_RepairPatrol` at `0x41554E`) | 0 **and** 1 plant the move back to where the unit stood before the job; 2 does not |
+| `0x46A9CD` | the unit-info string builder, format `0x507914` | displayed |
+| `0x4807AA` | the COB `get` handler `0x480770`, one of ids 1-20 | returned to the script (`0x4807BD` beside it returns the fire mode) |
+| `0x487CA9` | the `InitialMission` interpreter's `o` letter (§105) | read back as the two standing orders a mission file wrote |
+| `0x41B435` | the order panel's accumulator (§19) | shown on MOVEORD |
+
+> **RWE, 2026-09-24 (#109):** the patrol break-off and the idle aircraft's
+> sighting both read the unit's own `moveOrders` now, refuse on Hold
+> Position and plant the return move on Maneuver; the patrol used to read
+> the definition's standing order, so the MOVEORD button changed nothing,
+> and the idle aircraft ignored the mode altogether. Still RWE's own: an idle
+> **ground** unit never goes after a sighting at all, where the original's
+> Standby hands it to `0x43B1F0` like the patrols do, and the repair patrols'
+> return move (`0x43B400`) is not planted.
 
 In the shipped data **every mobile unit names a `StandingMoveOrder`**; the 67
 that stay silent are all buildings, so the default of 2 is never what a moving
@@ -918,6 +938,13 @@ construction**: `0x40AA40` rebuilds it and puts every enemy through `0x465AC0`
 before appending (the call at `0x40AB11`). Cloak, the waterline and line of
 sight have all been applied one call upstream, which is why the scan itself
 does not repeat them. See §17a for the chain.
+
+The list builder also asks who the candidate belongs to before it asks
+whether it can be seen: `0x40AB05` reads the searcher's ally byte for the
+candidate's player (`player+0x108+idx`, the same table §103's click ladder
+consults) and skips the unit when it is set, so an ally's units are never
+candidates at all. RWE ported that on 2026-09-24 (#237): `chooseTarget`
+rejects a candidate whose owner `arePlayersAllied` with the searcher's.
 
 What keeps ground units off aircraft is the **preference**, and only the
 preference: sixty of the shipped units name `wpri_badTargetCategory=VTOL` and

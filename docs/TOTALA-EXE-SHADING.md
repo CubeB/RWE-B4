@@ -7,7 +7,7 @@ release, 1,178,624 bytes, MD5 `8e74a1dffa1f5988624c52048f5b20cd`, image base
 
 The headline, up front, because it inverts the previous pass's advice:
 
-**The arithmetic in `FINDINGS-VISUALOPTIONS.md` section 05 is correct. Every
+**The previous pass's shade-table arithmetic is correct. Every
 constant, the truncation, the mask, the un-renormalised average -- all of it
 byte-verified again here, and it reproduces ARMSOLAR's black right panel
 exactly. What is wrong is everything around it.** The exe computes the level
@@ -19,11 +19,13 @@ face normal, normalises both the normal and the light, and models the table as
 a straight `0.06875 * k`. Section 15 lists the corrections one by one, with the
 numbers each produces on ARMSOLAR.
 
-> **`FINDINGS-VISUALOPTIONS.md` is not in this repository** and never has
-> been; it is cited here and again in section 16.1. Its shade-table
-> arithmetic is restated in full below, so nothing in this document depends
-> on finding it. The nearest checked-in equivalents are `TOTALA-EXE.md`
-> §50-§59 — §53 and §54 of which this document supersedes.
+> **The previous pass's working document, `FINDINGS-VISUALOPTIONS.md`, was
+> never checked in and is not recoverable** (issue #141). Nothing here
+> depends on it: the arithmetic it settled is restated in full in sections
+> 05 to 08, and the two pieces of its advice this document argues with are
+> quoted in section 15. Its checked-in residue is
+> [TOTALA-EXE-RENDER.md](TOTALA-EXE-RENDER.md) §53 and §54, both of which
+> this document supersedes.
 
 ---
 
@@ -937,9 +939,9 @@ Do not "fix" one of the two normalisations and leave the other. Remove both.
 Each item is a concrete correction, in rough order of visible impact.
 
 **1. Its implementation advice inverted its own finding, and RWE followed the
-advice.** `FINDINGS-VISUALOPTIONS.md` section 16.1 says "**Do not** port the
-`& 0x1F` wrap literally" and proposes a centred monotone ramp
-`row = clamp(14.55 + 16*t, 0, 31)`. Section 08 of that document called its own
+advice.** The previous pass's implementation notes said "**Do not** port the
+`& 0x1F` wrap literally" and proposed a centred monotone ramp
+`row = clamp(14.55 + 16*t, 0, 31)`. The same notes called their own
 correct decode "harsher than the original is remembered to look". It is not
 harsher. ARMSOLAR right panel really is solid black, and the wrap is the only
 thing that produces that. The current `unitTexture.frag` has since restored the
@@ -947,7 +949,7 @@ wrap, so this one is already half-fixed; the note is here so it does not get
 re-argued.
 
 **2. It did not notice that the level is computed per VERTEX and the ROW is
-what gets interpolated.** Section 07 of that document described the span table
+what gets interpolated.** The previous pass described the span table
 correctly but drew the wrong conclusion -- "the level is Gouraud-interpolated
 across the face and applied per pixel" is true, and RWE implemented it as
 "compute the level per pixel from an interpolated normal", which is a different

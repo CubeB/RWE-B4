@@ -646,7 +646,10 @@ namespace rwe
             RWE_RENDERPROF("u.particles");
             // On the same clock the drawing uses, or a particle is thrown
             // away a tick before its last frame is shown. See renderTime.
-            updateParticles(gameMediaDatabase, simulation.terrain, renderTime(), particles);
+            // Smoke rides the wind at eight times the drift a shell gets
+            // (0x475340, 0x475620); the vector has no Y term.
+            auto windDrift = simVectorToFloat(simulation.currentWindVector) * 8.0f;
+            updateParticles(gameMediaDatabase, simulation.terrain, renderTime(), windDrift, particles);
         }
 
         {

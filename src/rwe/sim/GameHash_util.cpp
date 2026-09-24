@@ -184,6 +184,7 @@ namespace rwe
             p.runOutDistance,
             static_cast<uint32_t>(p.phase),
             p.bombsDroppedThisPass,
+            p.releasePoint,
             p.strafingPass,
             p.breakWaypoint);
     }
@@ -261,7 +262,7 @@ namespace rwe
 
     GameHash computeHashOf(const UnitBehaviorStateReclaiming& s)
     {
-        return combineHashes(s.target, s.nanoParticleOrigin);
+        return combineHashes(s.target, s.nanoParticleOrigin, s.stepCounter);
     }
 
     GameHash computeHashOf(const UnitBehaviorStateCreatingUnit& s)

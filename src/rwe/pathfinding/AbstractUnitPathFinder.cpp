@@ -1,4 +1,5 @@
 #include "AbstractUnitPathFinder.h"
+#include <algorithm>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/movement.h>
 
@@ -6,14 +7,17 @@ namespace rwe
 {
     namespace
     {
-        unsigned int computeRoughSlope(const GameSimulation& simulation, UnitId self)
+        MovementClassDefinition movementClassOf(const GameSimulation& simulation, UnitId self)
         {
-            // Half the unit's slope limit: climbable, but slow going.
-            // Units that can go anywhere (max slope 255) never see rough terrain.
             const auto& unit = simulation.getUnitState(self);
             const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
-            auto maxSlope = simulation.getAdHocMovementClass(unitDefinition.movementCollisionInfo).maxSlope;
-            return maxSlope >= 255 ? 255 : maxSlope / 2;
+            return simulation.getAdHocMovementClass(unitDefinition.movementCollisionInfo);
+        }
+
+        /** The lowest of a cell's four corners, which is what the original's cell test reads at square+0x06. */
+        unsigned int lowCorner(const Grid<unsigned char>& heights, unsigned int x, unsigned int y)
+        {
+            return std::min({heights.get(x, y), heights.get(x + 1, y), heights.get(x, y + 1), heights.get(x + 1, y + 1)});
         }
 
         bool computeWaterIsSlow(const GameSimulation& simulation, UnitId self)
@@ -96,7 +100,8 @@ namespace rwe
           footprintX(footprintX),
           footprintZ(footprintZ),
           selfRegion(simulation->computeFootprintRegion(simulation->getUnitState(self).position, footprintX, footprintZ)),
-          roughSlope(computeRoughSlope(*simulation, self)),
+          roughSlopeDry(movementClassOf(*simulation, self).badSlope),
+          roughSlopeWet(movementClassOf(*simulation, self).badWaterSlope),
           waterIsSlow(computeWaterIsSlow(*simulation, self))
     {
         // The scratch is indexed by occupied-grid position, which is the only
@@ -256,7 +261,7 @@ namespace rwe
             return true;
         }
 
-        if (roughSlope >= 255 || p.x < 0 || p.y < 0)
+        if ((roughSlopeDry >= 255 && roughSlopeWet >= 255) || p.x < 0 || p.y < 0)
         {
             return false;
         }
@@ -269,15 +274,17 @@ namespace rwe
             return false;
         }
 
-        // This is isMaxSlopeGreaterThan with the same limit above and below the
-        // waterline, which is how it has always been called from here. With the
-        // two limits equal its underwater test cannot change the answer, and
-        // running it was scanning the footprint a second time for nothing.
+        // The original's cell test (0x47E145-0x47E19E) picks the dry or the
+        // wet pair per cell: a cell whose lowest corner is at or above sea
+        // level is dry and measured against BadSlope, anything else is wet
+        // and measured against BadWaterSlope. It used to be one threshold,
+        // half of MaxSlope, above and below the waterline.
         for (unsigned int dy = 0; dy < footprintZ; ++dy)
         {
             for (unsigned int dx = 0; dx < footprintX; ++dx)
             {
-                if (getSlope(*heights, x + dx, y + dy) > roughSlope)
+                auto threshold = lowCorner(*heights, x + dx, y + dy) >= seaLevel ? roughSlopeDry : roughSlopeWet;
+                if (getSlope(*heights, x + dx, y + dy) > threshold)
                 {
                     return true;
                 }

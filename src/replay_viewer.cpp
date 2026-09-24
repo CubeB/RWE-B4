@@ -180,6 +180,7 @@ int main(int argc, char* argv[])
         config.soundMode = std::min(2u, args.getUint("sound-mode", 2));
         config.unitSpeech = std::min(2u, args.getUint("unit-speech", 2));
         config.musicTrackMode = std::min(3u, args.getUint("music-mode", 3));
+        config.musicTrackTypes = rwe::parseMusicTrackTypes(args.getString("music-track-types", ""));
         config.gamma = std::clamp(args.getUint("gamma", 100), 50u, 133u);
         auto shadingWasOn = args.getString("shading", "true") != "false";
         config.shadingMode = std::min(3u, args.getUint("shading-mode", shadingWasOn ? 2u : 0u));

@@ -216,16 +216,26 @@ differ only in `digger`: with a plane a digger's copy is cut at height
 `0x32 + 0x4B` (`0x4594D8`-`0x459503`), without one it takes the plain copy.
 So the plane is not a gate either; it only changes how a digger is cut.
 
-**So the code and the look agree that the shadow is drawn. What is still
-open is what keeps it out of the frame's outline**, and the listing has
-not settled it. The likeliest place is the blit. Both shadows go through
-`0x4B8500` at `x + 0x85`, before the unit image, and the image is the
-display's scratch copy with its erased pixels written as the transparent
-key (`0x458DA8`). If the frame's own shadow is masked by the whole cached
-bitmap, which is the finished model, or the blitter treats the shadow's
-single index against the frame's key, the shadow would be hidden exactly
-within the model's outline and nowhere else. Other units' shadows would be
-untouched, which is what play shows.
+**The blit is not it either (B4 #40, 2026-09-24).** `0x4B8500` was
+followed to its span blitters. Both, `0x4CBF2C` and `0x4CC057`, remap every
+pixel through `PALETTE.ALP` at `[display+0xC0]` by `(source, destination)`
+and skip only the drawable's own key (§100 has the loop). The copied shadow
+is a silhouette of index 0 (`0x4B96A0` writes 0 over every non-key pixel of
+the copy) and the projected one is filled flat, so a shadow pixel is
+`ALP[0][dest]`, the darkening, wherever the silhouette is; nothing in the
+blitter looks at what is drawn later, and nothing masks one drawable by
+another. The frame's own image is then blitted with its erased pixels
+written as the key (`0x458DA8`), which the blitter skips. **So the code says
+the frame's own shadow is visible through its erased interior**, exactly as
+another unit's is. What was seen in play on 2026-09-11 says it is not. One of
+the two is wrong, and the listing has now been read end to end on this
+path: the draw order (`0x459200`, shadow then image), the two shadow
+builders, the blitter and its table. The look that would settle it is the
+earliest phase, "a bare line sweeping down" (remaining 236-255), when the
+whole interior is erased: is the ground inside the outline darkened where the
+frame's own shadow falls, or not? If it is, the observation was of a later
+phase and the code is right; if it is not, the mask is somewhere outside the
+unit draw, in how the frame's pixels reach the screen.
 
 RWE does not wait on that: it cuts the frame's own shadow by the model's
 outline, which is the look. The mobile case the issue asked about goes the
@@ -1495,9 +1505,35 @@ the game and belongs in its own pass with a play-test, so it has been left as
 it is and recorded here.
 
 `ReclaimUnit` is a different mechanism again: state 4 (`0x4048D2`) applies
-`0x489BB0(reclaimer, target, mission+0x36, type 5, 0)` — ordinary damage, of a
-type all its own — once every fifteen ticks, so a unit being reclaimed is
-visibly taken apart rather than dissolved on a timer.
+`0x489BB0(reclaimer, target, mission+0x36, type 5, 0)`, ordinary damage of a
+type all its own, so a unit being reclaimed is visibly taken apart rather than
+dissolved on a timer, and its health bar in the info panel's second slot is
+the progress (§99). The bite is sized once, as the work starts, by
+`0x438650(reclaimer, target, 15)`:
+
+```
+trunc( workertime(reclaimer, def+0x1FE)
+       * ((kills(reclaimer, unit+0xB8) + 5) / 5)         ; integer veterancy
+       * maxdamage(target, def+0x1FA) * 15
+       / (300 * max(buildcostmetal(target, def+0x18A), 10.0)) ), at least 1
+```
+
+and it lands every sixteen ticks, not fifteen: each pass sleeps two ticks and
+adds two to `mission+0x3A`, and the bite is taken once that has reached
+fifteen (`0x40496E`), so the count runs 0, 2, ... 14, 16. `MaxDamage` cancels
+out of the total, so a unit is reclaimed in `300 * buildcostmetal /
+(workertime * veterancy)` ticks of bites whatever its hit points: ten seconds
+per metal-per-workertime, plus the sixteenth.
+
+**Ported 2026-09-24 (#19):** `computeUnitReclaimStep` is the formula and
+`GameSimulation::reclaimUnitStep` the bite, on `UnitBehaviorStateReclaiming`'s
+sixteen-tick `stepCounter`; `UnitState::reclaimProgress`, the drained
+work-count it replaced, is gone. Two things stay RWE's own and are §88's: the
+bite is taken bare off the hit points, without asking whether cause-5 damage
+skips armour the way the cause-10 repair does (not read), and the payback is
+still credited a bite at a time in both resources, where the original pays
+`trunc((1 - progress) * buildcostmetal)` in one lump as the unit dies, metal
+only (`0x402666`).
 
 ### `autoreclaimable` has exactly one reader
 
@@ -2131,8 +2167,8 @@ Checked against `GameSimulation::updateResources`, `settleResourcePool`,
 | 3 | RWE's `EnergyUse` request went through `UnitState::addResourceDelta`, which refuses a unit owing **metal** as well; the original's settle sweep checks energy owed only. | No. | **Fixed 2026-09-20.** `ResourceDebtGate` names the two gates apart: the settle sweep's `EnergyUse` request passes `EnergyOnly` and reads the unit's energy owed alone (`0x4013F9`, `0x40164F`), while every other caller keeps `EnergyOrMetal`, which is what the request routine a builder goes through does (`0x4011C0`). A unit that owes metal but has the energy now stays powered. Pinned by "a unit that owes metal but has the energy stays powered" in `economy.test.cpp`. |
 | 4 | RWE treats a negative `EnergyUse` as production **and** reports the unit powered, so it still extracts or makes metal; the original leaves it unpowered. | No. | None on Escalation's data: no unit has both a negative `EnergyUse` and an extractor or metal maker. |
 | 5 | RWE runs the make-and-use pass for any `activated` unit; the original runs the extraction/maker/wind/tidal chain only on the bit-29 path and charges a no-switch unit's `EnergyUse` while it is on **or moving**. | No. | Open while bit 29 is unconfirmed; see the four Escalation metal makers above. **Decided 2026-09-17: not chased.** It moves four units in one mod and nothing depends on it; the bit stays an open question. |
-| 6 | **Cloak**: RWE compares the untruncated cost with the stockpile and then *requests* it through `addResourceDelta`, so a cloak joins the throttled pool, can become debt, and is not charged at all while the unit already owes. The original subtracts the truncated cost from the stockpile directly. The comment in `updateResources` describes the original, not the code under it. | No. | Small. Not changed: nothing in the corpus pins it. |
-| 7 | **Weapons** (`energypershot`, `metalpershot`): RWE checks the stockpile, then *requests* the cost through `addResourceDelta` rather than subtracting it (`UnitBehaviorService.cpp`, the non-stockpile fire path). Several shots in one second each see the unreduced stockpile and can overdraw it into a throttle for every builder, and a shooter that already owes fires for **free**, because the refused request's return value is ignored. The original takes it from the stockpile on the spot (`0x401220`, `0x401260`, `0x4012A0`). | No; the comment at the call site says it is asked against the stores directly, which the code does not do. | **Reads as a bug.** Heavy energy-weapon fire can overdraw the stockpile and throttle every builder the player has for a second. **Decided 2026-09-17: recorded, not fixed.** The corpus tests do not cover it and a fix moves every energy weapon's economy, so it waits for a pass of its own with its own tests and a play-test. |
+| 6 | ~~**Cloak**: RWE compares the untruncated cost with the stockpile and then *requests* it through `addResourceDelta`~~ **Fixed 2026-09-24** (#143): `GameSimulation::chargeStockpile` truncates the cost, compares it with the stockpile and subtracts it there and then, booking it as demand for the display. Pinned in `concealment.test.cpp`. | Yes. | Hashed state moves: a cloak used to reach `player.energy` at the settle, now on the tick. |
+| 7 | ~~**Weapons** (`energypershot`, `metalpershot`): RWE checks the stockpile, then *requests* the cost through `addResourceDelta`~~ **Fixed 2026-09-24** (#143): the fire path calls `chargeStockpile`, which takes the price from the stockpile on the spot or refuses the shot (`0x401220`, `0x401260`, `0x4012A0`). Several shots in one second each see the stock the last one left, and a shooter that owes for earlier work pays rather than firing for free. Pinned in `economy.test.cpp`. | Yes. | Hashed state moves: every energy weapon's cost lands on the fire tick instead of the settle, and never throttles the builders. |
 | 8 | Debt carried as `owed * (1 - f)` in float against the original's `owed - owed * f` at 80 bits. | No. | Sub-ulp. A fully paid debt is exactly zero in both. |
 | 9 | RWE clamps a negative supply to zero before settling. | In the code. | None: the original's stockpile cannot go negative. |
 | 10 | The computer player's production handicap. | §23, not ported. | Tuning, not compatibility. |

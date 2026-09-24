@@ -142,6 +142,8 @@ namespace rwe
         mc.maxWaterDepth = tdf.maxWaterDepth;
         mc.maxSlope = tdf.maxSlope;
         mc.maxWaterSlope = tdf.maxWaterSlope;
+        mc.badSlope = tdf.badSlope;
+        mc.badWaterSlope = tdf.badWaterSlope;
 
         return mc;
     }
@@ -465,6 +467,7 @@ namespace rwe
         u.buildCostMetal = Metal(fbi.buildCostMetal);
 
         u.workerTimePerTick = fbi.workerTime / 30;
+        u.workerTime = fbi.workerTime;
 
         u.buildDistance = SimScalar(fbi.buildDistance);
         u.buildAngle = SimAngle(static_cast<uint16_t>(fbi.buildAngle));
