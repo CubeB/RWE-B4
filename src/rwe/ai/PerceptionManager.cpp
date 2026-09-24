@@ -5,7 +5,7 @@
 #include <map>
 
 namespace rwe
-{
+{
     std::optional<std::reference_wrapper<const UnitState>>
         contactStillStanding(const GameSimulation& sim, const KnownEnemy& enemy)
     {
