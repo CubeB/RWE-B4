@@ -1205,7 +1205,8 @@ namespace rwe
         SimScalar radius,
         std::minstd_rand& rng,
         const std::function<bool(const SimVector&)>& accept,
-        const std::function<bool(const SimVector&)>& admit) const
+        const std::function<bool(const SimVector&)>& admit,
+        MexSiteTally* tally) const
     {
         const auto& metalGrid = sim.metalGrid;
         const auto anchorHm = sim.terrain.worldToHeightmapCoordinate(anchor);
@@ -1377,6 +1378,10 @@ namespace rwe
                 continue;
             }
             decided[static_cast<std::size_t>(deposit)] = 1;
+            if (tally)
+            {
+                ++tally->depositsInRange;
+            }
 
             // Its cells within reach of where it was met. The list is in ring
             // order, so they are all here or later.
@@ -1392,6 +1397,10 @@ namespace rwe
 
             if (admit && std::none_of(cells.begin(), cells.end(), [&](std::size_t j) { return admit(cellSite(ringCells[j])); }))
             {
+                if (tally)
+                {
+                    ++tally->notAdmitted;
+                }
                 continue;
             }
 
@@ -1409,6 +1418,10 @@ namespace rwe
                     || !footprintInsideVisibleMap(sim.terrain, rect)
                     || !clearsStandingBuildings(factories, rect, 0))
                 {
+                    if (tally)
+                    {
+                        ++tally->cellsOffMap;
+                    }
                     continue;
                 }
                 if (!sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
@@ -1416,6 +1429,21 @@ namespace rwe
                     if (buildableIgnoringUnits(sim, mc, def, rect))
                     {
                         bestIgnoringUnits = std::max(bestIgnoringUnits, patchMetalUnder(rect));
+                        if (tally)
+                        {
+                            ++tally->cellsBlockedByUnit;
+                        }
+                    }
+                    else if (tally)
+                    {
+                        // Told apart because they are opposite conclusions.
+                        // A building standing on the rock is the AI having
+                        // already taken it; ground that will not hold an
+                        // extractor is a patch it can never have.
+                        auto region = sim.occupiedGrid.tryToRegion(rect);
+                        auto hasBuilding = region
+                            && sim.occupiedGrid.any(*region, [&](const auto& cell) { return cell.buildingInfo.has_value(); });
+                        ++(hasBuilding ? tally->cellsBlockedByBuilding : tally->cellsUnbuildable);
                     }
                     continue;
                 }
@@ -1423,6 +1451,10 @@ namespace rwe
                 bestIgnoringUnits = std::max(bestIgnoringUnits, metal);
                 if (metal == 0)
                 {
+                    if (tally)
+                    {
+                        ++tally->cellsNoMetalUnder;
+                    }
                     continue;
                 }
                 auto offset = patchOffsetUnder(rect);
@@ -1456,6 +1488,10 @@ namespace rwe
                 auto [since, fresh] = depositHeartBlockedSince.try_emplace(deposit, sim.gameTime);
                 if (fresh || sim.gameTime.value - since->second.value < DepositHeartWaitTicks)
                 {
+                    if (tally)
+                    {
+                        ++tally->heartBlocked;
+                    }
                     continue;
                 }
             }
@@ -1463,6 +1499,7 @@ namespace rwe
             {
                 depositHeartBlockedSince.erase(deposit);
             }
+            const bool hadPlacement = !tiedCandidates.empty();
             if (accept)
             {
                 tiedCandidates.erase(
@@ -1471,6 +1508,13 @@ namespace rwe
             }
             if (tiedCandidates.empty())
             {
+                if (tally)
+                {
+                    // Told apart because they send the reader to different
+                    // places: nothing could stand on the deposit at all, or
+                    // something could and the site rules said no.
+                    ++(hadPlacement ? tally->siteRefused : tally->noPlacement);
+                }
                 continue;
             }
             return tiedCandidates[randomBelow(rng, static_cast<unsigned int>(tiedCandidates.size()))];
@@ -4480,17 +4524,50 @@ namespace rwe
                     }
                     return sim.isExploredBy(aiOwner, p) || sim.isOnRadarOf(aiOwner, p);
                 };
+                // Counted from inside the predicate, so these are the calls
+                // the search actually made rather than a re-walk of the
+                // patches under different rules (#202).
+                int refusedOffSide = 0, refusedUnknown = 0, refusedUnwalkable = 0;
                 auto acceptable = [&](const SimVector& p) {
-                    return onOurSide(p) && known(p) && walkable(p);
+                    if (!onOurSide(p))
+                    {
+                        ++refusedOffSide;
+                        return false;
+                    }
+                    if (!known(p))
+                    {
+                        ++refusedUnknown;
+                        return false;
+                    }
+                    if (!walkable(p))
+                    {
+                        ++refusedUnwalkable;
+                        return false;
+                    }
+                    return true;
                 };
-                result.site = chooseMexSite(sim, next, *bb.baseAnchor, radius, rng, siteFree, acceptable);
+                MexSiteTally tally;
+                result.site = chooseMexSite(sim, next, *bb.baseAnchor, radius, rng, siteFree, acceptable, &tally);
 
                 if (!result.site)
                 {
-                    // Why not, for the log: which test threw out the
-                    // patches within reach. This is what showed the
-                    // plateau was the radius and the exploration gate
-                    // rather than a shortage of patches.
+                    // Why not, for the log. Two tallies, and they answer
+                    // different questions: the deposit tally above comes
+                    // from inside the search and says what the search
+                    // actually rejected, and the cell tally below re-walks
+                    // the patches asking only the ground rules.
+                    //
+                    // Only the first can be read as a reason. The second
+                    // cannot see whether a footprint fits, whether a
+                    // building already stands on the rock, or whether the
+                    // deposit is waiting for a unit to step off it -- and
+                    // on a map where every deposit in reach was already
+                    // taken it therefore reported ninety cells with nothing
+                    // wrong with any of them, twice a second, for the rest
+                    // of the game (#202). It is kept because "the ground
+                    // rules threw out forty of ninety" is worth knowing
+                    // when that is what happened, and it is now labelled
+                    // for what it is.
                     indexMetalPatches(sim);
                     int inRange = 0, offSide = 0, unknown = 0, guarded = 0, unwalkable = 0;
                     auto radiusSquared = radius * radius;
@@ -4520,12 +4597,31 @@ namespace rwe
                         }
                     }
                     LOG_DEBUG << "AI build: expansion found no patch for unit " << ctx.builderId.value << " within " << radius.value
-                              << ": " << inRange << " patch cells in range, " << offSide << " on the enemy's side, " << unknown << " unexplored, "
-                              << guarded << " under enemy guns, " << unwalkable << " unreachable or beyond the commander's leash, the rest taken or unbuildable";
+                              << ": " << tally.depositsInRange << " deposits in range, " << tally.notAdmitted << " outside the ground rules, "
+                              << tally.noPlacement << " with nowhere to stand, " << tally.heartBlocked << " waiting for something to move off, "
+                              << tally.siteRefused << " refused by the site rules"
+                              << " (of the cells with nowhere to stand: " << tally.cellsBlockedByBuilding << " already built on, "
+                              << tally.cellsUnbuildable << " on ground that will not hold one, " << tally.cellsBlockedByUnit << " under a unit)"
+                              << " (ground rules over cells: " << inRange << " in range, " << offSide << " on the enemy's side, " << unknown
+                              << " unexplored, " << guarded << " under enemy guns, " << unwalkable << " unreachable or beyond the leash)";
                     sim.eventLog.event(sim.gameTime.value, "build_refusal")
                         .set("player", aiOwner.value)
                         .set("unit", ctx.builderId.value)
                         .set("subject", next)
+                        .set("deposits_in_range", tally.depositsInRange)
+                        .set("not_admitted", tally.notAdmitted)
+                        .set("refused_off_side", refusedOffSide)
+                        .set("refused_unknown", refusedUnknown)
+                        .set("refused_unwalkable", refusedUnwalkable)
+                        .set("no_placement", tally.noPlacement)
+                        .set("cells_off_map", tally.cellsOffMap)
+                        .set("cells_unbuildable", tally.cellsUnbuildable)
+                        .set("cells_blocked_by_building", tally.cellsBlockedByBuilding)
+                        .set("cells_blocked_by_unit", tally.cellsBlockedByUnit)
+                        .set("cells_no_metal_under", tally.cellsNoMetalUnder)
+                        .set("submerged_patches", submergedMetalPatches)
+                        .set("heart_blocked", tally.heartBlocked)
+                        .set("site_refused", tally.siteRefused)
                         .set("patch_cells_in_range", inRange)
                         .set("off_side", offSide)
                         .set("unknown", unknown)
