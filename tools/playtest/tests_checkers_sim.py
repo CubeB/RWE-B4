@@ -80,6 +80,23 @@ def write_events(path, events):
             )
 
 
+EVENTS_HEADER_EXT = EVENTS_HEADER + ["deathCause", "killerType", "killerPlayer"]
+
+
+def write_events_ext(path, events):
+    """``write_events`` for newer run roots, with the appended death-cause columns."""
+    with open(path, "w") as fh:
+        fh.write(",".join(EVENTS_HEADER_EXT) + "\n")
+        for event in events:
+            fh.write(
+                ",".join(
+                    "" if event.get(col) is None else str(event.get(col))
+                    for col in EVENTS_HEADER_EXT
+                )
+                + "\n"
+            )
+
+
 def event(player=0, unitType="ARMX", category="army", **overrides):
     row = {
         "player": player,
@@ -271,6 +288,51 @@ class UnitDeathTests(SimCheckerTestCase):
         run_dir = self.make_dir()
         self.copy(run_dir, "ai-arena-events.csv", "death-clean.csv")
         self.assertEqual(rules(unitdeath.check(run_dir), "D1:"), [])
+
+    def test_d1_attributed_killer_does_not_fire(self):
+        # An enemy builder or nanoframe on the extractor site cannot attack,
+        # so enemiesNear misses it, but the killer columns name the kill.
+        run_dir = self.make_dir()
+        write_events_ext(run_dir / "ai-arena-events.csv", [
+            event(0, "ARMMEX", "economy", diedTick=3000, diedSeconds=300,
+                  enemiesNear=0, killerType="CORROY", killerPlayer=3),
+        ])
+        self.assertEqual(rules(unitdeath.check(run_dir), "D1:"), [])
+
+    def test_d1_killer_type_alone_does_not_fire(self):
+        run_dir = self.make_dir()
+        write_events_ext(run_dir / "ai-arena-events.csv", [
+            event(1, "COREMEX", "economy", diedTick=3000, diedSeconds=300,
+                  enemiesNear=0, killerType="ARMPW"),
+        ])
+        self.assertEqual(rules(unitdeath.check(run_dir), "D1:"), [])
+
+    def test_d1_unfinished_decay_does_not_fire(self):
+        run_dir = self.make_dir()
+        write_events_ext(run_dir / "ai-arena-events.csv", [
+            event(0, "ARMMEX", "economy", diedTick=3000, diedSeconds=300,
+                  enemiesNear=0, deathCause="unfinished"),
+        ])
+        self.assertEqual(rules(unitdeath.check(run_dir), "D1:"), [])
+
+    def test_d1_self_destruct_does_not_fire(self):
+        run_dir = self.make_dir()
+        write_events_ext(run_dir / "ai-arena-events.csv", [
+            event(0, "ARMMEX", "economy", diedTick=3000, diedSeconds=300,
+                  enemiesNear=0, deathCause="self_destruct"),
+        ])
+        self.assertEqual(rules(unitdeath.check(run_dir), "D1:"), [])
+
+    def test_d1_alone_weapon_death_still_fires(self):
+        run_dir = self.make_dir()
+        write_events_ext(run_dir / "ai-arena-events.csv", [
+            event(0, "ARMMEX", "economy", diedTick=3000, diedSeconds=300,
+                  enemiesNear=0, deathCause="weapon"),
+        ])
+        found = rules(unitdeath.check(run_dir), "D1:")
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].severity, "suspicious")
+        self.assertEqual(found[0].evidence["count"], 1)
 
     def test_d2_five_detached_suspicious(self):
         run_dir = self.make_dir()
