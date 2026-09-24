@@ -2917,6 +2917,16 @@ namespace rwe
                 continue;
             }
 
+            // A teammate's unit is not a candidate. The original's list
+            // builder 0x40AA40 tests the searcher's ally byte for the
+            // candidate's player (0x40AB05) before it asks whether the
+            // candidate can even be seen, and skips the unit when it is set.
+            // The index only dropped the searcher's own side (issue #237).
+            if (sim->arePlayersAllied(unit.owner, otherUnit.owner))
+            {
+                continue;
+            }
+
             const auto& otherUnitDefinition = sim->unitDefinitions.at(otherUnit.unitType);
 
             // Buildings that do not ask to be shot at are left alone unless
