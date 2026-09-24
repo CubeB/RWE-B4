@@ -320,6 +320,10 @@ int main(int argc, char* argv[])
             replay = std::move(readReplay);
             gameParametersHolder = gameParametersFromReplayHeader(replay->header);
             gameParametersHolder->replayFile = replayPath.string();
+            // The point of replaying here is to review the game, and the
+            // review wants what each computer player decided and why. So its
+            // AI thinks in the shadow of the recording: see the loop.
+            gameParametersHolder->replayShadowAi = true;
         }
         else
         {
@@ -632,6 +636,13 @@ int main(int argc, char* argv[])
                 // The recording is every player's command source, computer
                 // seats included: see pushReplayCommandsForTick above.
                 pushReplayCommandsForTick(loaded.simulation, *playerCommandService, *replay, sceneTime);
+
+                // The shadow AI's own orders are the ones the recording
+                // already holds; drop them, or they pile up unread.
+                for (Index i = 0; i < getSize(loaded.simulation.players); ++i)
+                {
+                    loaded.simulation.takeAiCommandsForPlayer(PlayerId(static_cast<unsigned int>(i)));
+                }
             }
             else
             {

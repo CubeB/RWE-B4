@@ -908,7 +908,7 @@ namespace rwe
                 }
                 LOG_INFO << "Player " << i << " AI knob " << knob << " = " << value;
             }
-            if (gameParameters.replayFile)
+            if (gameParameters.replayFile && !gameParameters.replayShadowAi)
             {
                 // Watching rather than playing: the commands come out of the
                 // file, so a thinking AI would only add its own on top.
