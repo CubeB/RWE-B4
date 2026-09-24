@@ -136,6 +136,66 @@ namespace rwe
         REQUIRE(sim.getUnitState(unitId).energyConsumptionBuffer.value == Catch::Approx(1.0f));
     }
 
+    TEST_CASE("a shot's price comes off the stockpile on the spot", "[economy]")
+    {
+        // 0x401220, 0x401260 and 0x4012A0 subtract energypershot, metalpershot
+        // and the cloak cost from the player's stockpile there and then, or
+        // refuse when it will not cover them. Nothing about them goes through
+        // the once-a-second settle.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
+        auto player = addPlayerWithResources(sim, 1000.0f, 1000.0f);
+        sim.unitDefinitions["inert"] = makeInertDef();
+        auto unitId = addUnitOfType(sim, "inert", player, SimVector(100_ss, 0_ss, 100_ss), script);
+
+        SECTION("what is covered is taken at once, and never becomes a request or a debt")
+        {
+            REQUIRE(sim.chargeStockpile(unitId, Energy(400.0f), Metal(10.0f)));
+            REQUIRE(sim.getPlayer(player).energy.value == Catch::Approx(600.0f));
+            REQUIRE(sim.getPlayer(player).metal.value == Catch::Approx(990.0f));
+            REQUIRE(sim.getUnitState(unitId).energyRequestBuffer.value == Catch::Approx(0.0f));
+            REQUIRE(sim.getUnitState(unitId).metalRequestBuffer.value == Catch::Approx(0.0f));
+
+            // Booked as demand for the display, on the unit and the player.
+            REQUIRE(sim.getUnitState(unitId).energyConsumptionBuffer.value == Catch::Approx(400.0f));
+            REQUIRE(sim.getPlayer(player).desiredEnergyConsumptionBuffer.value == Catch::Approx(400.0f));
+
+            tickOneSecond(sim);
+            REQUIRE(sim.getUnitState(unitId).energyDebt.value == Catch::Approx(0.0f));
+            REQUIRE_FALSE(sim.getPlayer(player).energyStalled);
+        }
+
+        SECTION("several shots in one second each see the stock the last one left")
+        {
+            // Used to be: three checks against an untouched 1000, three
+            // requests of 400, and every builder throttled at the settle.
+            REQUIRE(sim.chargeStockpile(unitId, Energy(400.0f), Metal(0)));
+            REQUIRE(sim.chargeStockpile(unitId, Energy(400.0f), Metal(0)));
+            REQUIRE_FALSE(sim.chargeStockpile(unitId, Energy(400.0f), Metal(0)));
+            REQUIRE(sim.getPlayer(player).energy.value == Catch::Approx(200.0f));
+        }
+
+        SECTION("a price the stock will not cover is refused whole, in either resource")
+        {
+            REQUIRE_FALSE(sim.chargeStockpile(unitId, Energy(1000.5f), Metal(0)));
+            REQUIRE_FALSE(sim.chargeStockpile(unitId, Energy(0), Metal(1001.0f)));
+            REQUIRE(sim.getPlayer(player).energy.value == Catch::Approx(1000.0f));
+            REQUIRE(sim.getPlayer(player).metal.value == Catch::Approx(1000.0f));
+            REQUIRE(sim.getUnitState(unitId).energyConsumptionBuffer.value == Catch::Approx(0.0f));
+        }
+
+        SECTION("a unit that owes for earlier work still pays for its shot")
+        {
+            // The request path turns such a unit away, and the fire path used
+            // to ignore that refusal and fire for free. The original's shot
+            // routine never looks at the unit's debt at all.
+            sim.getUnitState(unitId).energyDebt = Energy(50.0f);
+            REQUIRE_FALSE(sim.addResourceDelta(unitId, Energy(-1.0f), Metal(0)));
+            REQUIRE(sim.chargeStockpile(unitId, Energy(400.0f), Metal(0)));
+            REQUIRE(sim.getPlayer(player).energy.value == Catch::Approx(600.0f));
+        }
+    }
+
     TEST_CASE("a unit that owes for earlier work still earns", "[economy]")
     {
         auto script = makeEmptyCobScript();

@@ -1188,18 +1188,19 @@ namespace rwe
         }
         else
         {
-            // Asked against the stores directly rather than through the
-            // ordinary request-and-settle path. That path pays every consumer
-            // a share of whatever there is and carries the rest as debt, which
-            // is right for a builder but not for a shot: the original settles
-            // the price before the round leaves the barrel, and a weapon that
-            // cannot cover it in full simply does not fire.
-            const auto& player = sim->getPlayer(unit.owner);
-            if (player.energy < weaponDefinition.energyPerShot || player.metal < weaponDefinition.metalPerShot)
+            // Taken from the stores directly rather than through the ordinary
+            // request-and-settle path. That path pays every consumer a share
+            // of whatever there is and carries the rest as debt, which is
+            // right for a builder but not for a shot: the original subtracts
+            // the price before the round leaves the barrel (0x401220,
+            // 0x401260, 0x4012A0), so the next shot this second sees the
+            // smaller stock, a weapon that cannot cover it in full simply does
+            // not fire, and a shooter that owes for something else still pays
+            // rather than firing for free.
+            if (!sim->chargeStockpile(id, weaponDefinition.energyPerShot, weaponDefinition.metalPerShot))
             {
                 return;
             }
-            sim->addResourceDelta(id, -weaponDefinition.energyPerShot, -weaponDefinition.metalPerShot);
         }
 
         if (!fireInfo->firingPiece)
