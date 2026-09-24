@@ -272,7 +272,8 @@ namespace rwe
                 return json{
                     {"kind", "reclaiming"},
                     {"target", saveReclaimTarget(r.target, ctx)},
-                    {"nanoParticleOrigin", saveOptional(r.nanoParticleOrigin, saveSimVector)}};
+                    {"nanoParticleOrigin", saveOptional(r.nanoParticleOrigin, saveSimVector)},
+                    {"stepCounter", r.stepCounter}};
             },
             [&](const UnitBehaviorStateResurrecting& r) {
                 return json{
@@ -305,9 +306,16 @@ namespace rwe
         }
         if (kind == "reclaiming")
         {
-            return UnitBehaviorStateReclaiming{
+            UnitBehaviorStateReclaiming r{
                 loadReclaimTarget(j.at("target"), ctx),
                 loadOptional(j.at("nanoParticleOrigin"), loadSimVector)};
+            // Hashed, so a save taken between two bites must bring the
+            // count back; a save from before it existed starts at zero.
+            if (j.contains("stepCounter"))
+            {
+                r.stepCounter = j.at("stepCounter").get<unsigned int>();
+            }
+            return r;
         }
         if (kind == "resurrecting")
         {

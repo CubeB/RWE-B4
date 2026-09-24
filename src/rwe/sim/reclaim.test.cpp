@@ -1,7 +1,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
+#include <rwe/game/save_util.h>
 #include <rwe/io/cob/Cob.h>
+#include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitDefinition.h>
@@ -239,6 +241,55 @@ namespace rwe
         const auto& info = sim.getPlayer(player);
         REQUIRE(info.metal.value + info.metalProductionBuffer.value == Catch::Approx(100.0f));
         REQUIRE(sim.getPlayer(enemy).metalProductionBuffer.value == Catch::Approx(0.0f));
+    }
+
+    TEST_CASE("a game saved between two reclaim bites comes back on the same count", "[reclaim][saveload]")
+    {
+        // The count to the next bite is hashed, so a save that dropped it
+        // would load into a different game: the next bite up to fifteen
+        // ticks late.
+        auto script = makeEmptyCobScript();
+        auto define = [&](GameSimulation& sim) {
+            // Neither unit moves, and a building needs a yardmap to be put
+            // back on the map.
+            auto solar = makeSolarDef();
+            solar.yardMap = Grid<YardMapCell>(2, 2, YardMapCell::Ground);
+            sim.unitDefinitions["solar"] = solar;
+            auto builder = makeBuilderDef(10u);
+            builder.yardMap = Grid<YardMapCell>(2, 2, YardMapCell::Ground);
+            sim.unitDefinitions["builder"] = builder;
+            sim.unitScriptDefinitions["solar"] = *script;
+            sim.unitScriptDefinitions["builder"] = *script;
+        };
+
+        GameSimulation simA(makeFlatTerrain(64, 64), 0u, 0, 0);
+        define(simA);
+        auto player = addPlayerWithNothing(simA);
+        auto enemy = addPlayerWithNothing(simA);
+        auto solarPosition = SimVector(200_ss, 0_ss, 200_ss);
+        auto solarId = addUnitOfType(simA, "solar", enemy, solarPosition, script);
+        auto builderId = addUnitOfType(simA, "builder", player, solarPosition + SimVector(40_ss, 0_ss, 0_ss), script);
+        simA.getUnitState(builderId).inBuildStance = true;
+        simA.getUnitState(builderId).orders.push_back(ReclaimOrder(solarId));
+        while (simA.getUnitState(solarId).hitPoints == 100u)
+        {
+            simA.tick();
+        }
+        tick(simA, 7);
+
+        auto saved = saveSimulationToJson(simA);
+        GameSimulation simB(makeFlatTerrain(64, 64), 0u, 0, 0);
+        define(simB);
+        loadSimulationFromJson(saved, simB);
+        REQUIRE(computeHashOf(simA) == computeHashOf(simB));
+
+        for (int i = 0; i < 40; ++i)
+        {
+            simA.tick();
+            simB.tick();
+            INFO("tick " << i << " after the load");
+            REQUIRE(computeHashOf(simA) == computeHashOf(simB));
+        }
     }
 
     TEST_CASE("a unit ignores an order to reclaim itself", "[reclaim]")
