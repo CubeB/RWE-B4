@@ -1312,8 +1312,19 @@ namespace rwe
         /**
          * As above, but `paralyzer` selects TA's damage type 2 (0x499E20): the
          * number is spent on stun time instead of hit points.
+         *
+         * `sourceOwner` is the player whose simulation ran the hit, for the
+         * demo recorder's benefit: a hit with no attacker -- a dying unit's
+         * `explodeAs`, which the peer that owns the dying unit broadcasts --
+         * still has a peer that would have sent it, and the corpus shows it is
+         * not the victim's.
          */
-        void applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer);
+        void applyDamage(
+            UnitId unitId,
+            unsigned int damagePoints,
+            std::optional<UnitId> attacker,
+            bool paralyzer,
+            std::optional<PlayerId> sourceOwner = std::nullopt);
 
         void applyDamageInRadius(const SimVector& position, SimScalar radius, const Projectile& projectile);
 

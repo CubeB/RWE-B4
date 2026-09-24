@@ -1,5 +1,6 @@
 #include "UnitBehaviorService.h"
 #include <rwe/sim/AirMovement.h>
+#include <rwe/sim/DemoRecorder.h>
 #include <rwe/sim/SimRandom.h>
 #include <algorithm>
 #include <limits>
@@ -1337,6 +1338,21 @@ namespace rwe
             .targetPosition = fireInfo->targetPosition,
             .targetProjectile = targetProjectileOption,
         });
+
+        // The demo's 0x0d, and the only place the ids exist: the event carries
+        // the weapon type and the fire point and nothing that names a unit or a
+        // slot. `direction` is the round's launch direction after the aim error
+        // the turret handler above scattered it by, which is the attitude the
+        // corpus's rotation triple records.
+        if (sim->demoRecorder)
+        {
+            std::optional<UnitId> targetUnit;
+            if (auto unitTarget = std::get_if<UnitId>(&attackInfo->target))
+            {
+                targetUnit = *unitTarget;
+            }
+            sim->demoRecorder->shotFired(*sim, id, weaponIndex, targetUnit, firingPoint, fireInfo->targetPosition, direction);
+        }
 
         sim->events.push_back(FireWeaponEvent{weapon->weaponType, fireInfo->burstsFired, firingPoint});
 

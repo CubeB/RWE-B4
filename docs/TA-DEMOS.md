@@ -85,6 +85,26 @@ What is written faithfully:
   bytes; a pause is a `0x19` record and not a gap in the file.
 - **The decoded payloads.** `0x09`, `0x0b`, `0x0c`, `0x0d`, `0x12`, `0x28` and
   the `0x2c` bit streams, as read out below.
+- **Every event's sender.** The corpus settles each one and the recorder
+  follows it: a `0x0d` and the `0x0b` its damage caused are sent by the
+  **attacker's** owner (797,783 to 0 across the corpus), a `0x0c` by the
+  **victim's** owner (measured over 754 deaths: all 298 with a killer in
+  another block, and all 53 with no killer), and a `0x28` carries the
+  **sender's own** state. Damage with no attacker to attribute goes to the
+  victim's owner, which the corpus cannot distinguish -- its no-attacker
+  records carry no id to compare against.
+- **Death causes and corpse levels** are the engine's own: `computeKilledSeverity`
+  and the `Killed` script's answer, with the cause tags RWE records mapped onto
+  the eleven decoded causes -- 1 weapon, 3 self-destruct, 4 owner change,
+  5 reclaim, 6 carrier died, 9 unfinished removed. An ownership change is the
+  original's destroy-and-replace (ADR D10): a cause-4 death for the old id and
+  a fresh id in the captor's block.
+- **The `0x28` cadence** is the corpus's 120 ticks, landing on a settle; the
+  six cumulative floats are RWE's produced and excess figures, since which
+  corpus slot is which is not settled (see the `0x28` section).
+- **One `0x19` per sender** at game start, value 256 -- normal speed -- which
+  is what the corpus's first record carries (demo 14724 tick 0). RWE has no
+  pause and no speed setting, so there is nothing later to say.
 
 What is a recorded divergence (ADR-0001):
 

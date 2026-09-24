@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <rwe/sim/PlayerId.h>
+#include <rwe/sim/SimVector.h>
 #include <rwe/sim/UnitId.h>
 
 namespace rwe
@@ -104,19 +105,18 @@ namespace rwe
      *
      * A pure observer: it holds no simulation state, the simulation never
      * reads it back, and nothing it does can change a tick. It is attached to
-     * the simulation by `GameSimulation::attachDemoRecorder` and driven by
-     * four calls the simulation already makes -- unit creation, nanoframe
-     * creation, unit removal, and the end of a tick. See
-     * docs/adr/0001-demo-recorder-is-a-pure-observer.md.
+     * the simulation by `GameSimulation::attachDemoRecorder` and driven by the
+     * calls the simulation already makes -- unit creation, nanoframe creation,
+     * a shot, a hit, a death, an ownership change, unit removal, and the end
+     * of a tick. See docs/adr/0001-demo-recorder-is-a-pure-observer.md.
      *
      * **The ordering convention is load-bearing.** Per sender per tick the
      * packet is: the unit pass's records (0x09 build started, 0x12 build
-     * finished, and later 0x0d/0x10), then the 0x2c, then the projectile
-     * pass's (0x0b/0x0c), then the settle's (0x28). The corpus oracles read a
-     * shot queued before the 0x2c one tick early, and a build's first
-     * increment on a multiple of thirty; get it wrong and every cell they
-     * score on RWE output reads a tick off. M3 writes the 0x09, 0x12 and 0x2c
-     * and leaves the other slots standing empty; M4 fills them.
+     * finished, 0x0d shots), then the 0x2c, then the projectile pass's
+     * (0x0b damage, 0x0c deaths), then the settle's (0x28 resources, every 120
+     * ticks). The corpus oracles read a shot queued before the 0x2c one tick
+     * early, and a build's first increment on a multiple of thirty; get it
+     * wrong and every cell they score on RWE output reads a tick off.
      *
      * One packet per sender per tick, no watcher seat: the recorder is a wire
      * tap, not a player (ADR D1).
@@ -151,6 +151,78 @@ namespace rwe
          * with the builder remembered so the completion can name it.
          */
         void buildStarted(const GameSimulation& simulation, UnitId builder, UnitId unit);
+
+        /**
+         * A weapon fired: a 0x0d, sent by the shooter's owner.
+         *
+         * `weaponSlot` is the 0-based index into the shooter's own
+         * Weapon1/Weapon2/Weapon3 -- the wire's trailing byte, which the corpus
+         * pins by slot occupancy rather than by weapon count. `targetUnit` is
+         * nothing where the shot was aimed at a place or at a projectile,
+         * which the wire writes as a target id of zero. `direction` is the
+         * launch direction the round actually left on, after the aim error the
+         * original's turret handler scatters a shot by (0x49D6D7), which is
+         * what the corpus's rotation triple records a real aiming error from.
+         */
+        void shotFired(
+            const GameSimulation& simulation,
+            UnitId shooter,
+            unsigned int weaponSlot,
+            std::optional<UnitId> targetUnit,
+            const SimVector& origin,
+            const SimVector& aimPoint,
+            const SimVector& direction);
+
+        /**
+         * `victim` took `damage` from `attacker`, or from nothing where the
+         * engine knows of no attacking unit: a 0x0b, sent by the attacker's
+         * owner.
+         *
+         * The corpus is what settles the sender: 797,783 damage records are
+         * sent by the peer that owns the attacker and not one by the peer that
+         * owns the victim (docs/TA-DEMOS.md, "Pairing a 0x0d to the 0x0b it
+         * caused"), so a shot and the damage it caused share one tick clock.
+         * A record with no attacker to attribute -- a dying unit's `explodeAs`
+         * is the only one RWE has -- goes to `sourceOwner`, the player whose
+         * simulation ran the blast; the corpus's own no-attacker records carry
+         * no id to compare against, but the one real recording they could be
+         * checked in shows they are not the victim's owner's.
+         */
+        void damageApplied(
+            const GameSimulation& simulation,
+            UnitId victim,
+            std::optional<UnitId> attacker,
+            unsigned int damage,
+            std::optional<PlayerId> sourceOwner);
+
+        /**
+         * `unit` died, with the severity and cause the engine itself worked
+         * out: a 0x0c, sent by the victim's owner.
+         *
+         * The victim's owner is the sender on the one real recording this
+         * could be measured against: of 754 deaths, all 298 whose killer is in
+         * another block are sent by the victim's block, and all 53 with no
+         * killer at all likewise. `cause` is the original's damage-type nibble
+         * (TOTALA-EXE-WRECKS.md, the eleven causes) and `corpseLevel` the low
+         * nibble: 0 leaves nothing, 1 the intact wreck.
+         */
+        void unitDied(
+            const GameSimulation& simulation,
+            UnitId unit,
+            std::optional<UnitId> killer,
+            unsigned int severity,
+            unsigned int cause,
+            unsigned int corpseLevel);
+
+        /**
+         * `unit` changed hands, which a demo cannot express as the same id
+         * changing owner (ADR-0001 D10). The original's own answer is
+         * destroy-and-replace -- cause 4 is "the unit changed owner" and
+         * 0x488570 kills the old record and creates a new one under the
+         * captor -- so this emits the cause-4 death for the old id, frees its
+         * slot and gives the unit a fresh id in `newOwner`'s block.
+         */
+        void unitCaptured(const GameSimulation& simulation, UnitId unit, PlayerId newOwner);
 
         /**
          * End of a tick: a 0x2c per sender, then the packet. Called once per
