@@ -558,8 +558,16 @@ quirks of the original that RWE reproduces although they look like defects.
   seconds). **Ported**: RWE credits a construction aircraft twice on the tick it
   first has a frame to lathe and never makes one wait for its stance, and the
   airborne cells are in the build fixture on the ordinary §88 delta.
-- The exact tick at which the original commits a **bomb release** inside its
-  weapon code is still not pinned down; RWE uses its own bombsight.
+- ~~The exact tick at which the original commits a bomb release inside its
+  weapon code is still not pinned down; RWE uses its own bombsight.~~
+  **Pinned and ported, 2026-09-24 (#110).** The weapon code has no bombsight:
+  a bomb fires on the ordinary fire check the first weapon pass after
+  `AirStrike` state 5 hands it the target, and keeps firing on every reload
+  until state 6 clears it `attackrunlength` past the release point. The
+  mission's trigger, `1 + attackrunlength + trunc(falltime * speed)`, is the
+  whole of the aiming (`TOTALA-EXE-MISSIONS.md` §11). RWE's own bombsight and
+  its stick of three are gone; `bombReleaseTrigger` and the run-length stick
+  replace them.
 - **`unit+0x110` bits 2–3.** They pick the loose 2000 default over the tight 150
   when a weapon names no tolerance (§11), and are tested at only three places —
   `0x40458A`, `0x4057D9` and `0x49D899` — none of which says what they mean. RWE

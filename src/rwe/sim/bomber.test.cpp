@@ -179,11 +179,31 @@ namespace rwe
 
         // It leaves from the bomber itself...
         REQUIRE(flatDistance(first.spawnPosition, first.bomberPosition) < 40_ss);
-        // ...while the bomber is still short of the target, on the way in...
-        REQUIRE(flatDistance(first.bomberPosition, targetPosition) > 100_ss);
-        REQUIRE(flatDistance(first.bomberPosition, targetPosition) < 900_ss);
-        // ...and comes down close to the target.
-        REQUIRE(flatDistance(first.lastPosition, targetPosition) < 64_ss);
+        // ...the moment the target comes within the mission's trigger
+        // (AirStrike state 4, 0x412394): 1 + attackrunlength + the distance
+        // a bomb travels while it falls from cruise altitude at the current
+        // speed, sqrt(2 * 200 / 112) * 30 * 9 = 510, so 631 for this Thunder,
+        // give or take the two ticks the weapon pass can lag the mission...
+        auto releaseDistance = flatDistance(first.bomberPosition, targetPosition);
+        REQUIRE(releaseDistance <= 631_ss);
+        REQUIRE(releaseDistance > 631_ss - 27_ss);
+        // ...so the first bomb comes down 1 + attackrunlength short of the
+        // target, not on it: the original has no bombsight, and the stick it
+        // drops walks up to the target from there.
+        // Along the run that is 121; a pass that committed up to twenty
+        // degrees off the line adds an across-track error on top of it.
+        auto firstMiss = flatDistance(first.lastPosition, targetPosition);
+        REQUIRE(firstMiss > 90_ss);
+        REQUIRE(firstMiss < 200_ss);
+        // The stick keeps coming on every reload until the aircraft is
+        // attackrunlength past where it started, and the last of it lands
+        // on the target.
+        SimScalar closest = 100000_ss;
+        for (const auto& [_, bomb] : bombs)
+        {
+            closest = rweMin(closest, flatDistance(bomb.lastPosition, targetPosition));
+        }
+        REQUIRE(closest < 64_ss);
     }
 
     TEST_CASE("a bomber keeps hitting on pass after pass", "[bomber]")

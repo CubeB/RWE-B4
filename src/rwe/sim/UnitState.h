@@ -325,8 +325,18 @@ namespace rwe
 
         Phase phase{Phase::Approaching};
 
-        /** Bombs let go on the current pass; a run drops a stick of three once the sight opens. */
+        /** Bombs let go on the current pass. */
         unsigned int bombsDroppedThisPass{0};
+
+        /**
+         * Where the aircraft was when the pass's first bomb left it. The
+         * original's AirStrike releases when the target comes within
+         * `1 + attackrunlength + falltime * speed` (state 4, 0x412394) and
+         * then lets the weapon drop on every reload until the aircraft is
+         * `attackrunlength` past that point (states 5 and 6). Nothing while
+         * the pass has not released yet.
+         */
+        std::optional<SimVector> releasePoint;
 
         /**
          * True for the original's `AirToGround` strafing pass -- a gun-armed

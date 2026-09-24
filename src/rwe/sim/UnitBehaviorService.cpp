@@ -936,12 +936,22 @@ namespace rwe
             }
             else if (std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType))
             {
-                // Bombsight semantics: we ignore the COB AimWeapon dance and
-                // fire directly from the IdleInfo state when the predicted
-                // ballistic-impact point is within the release window of the
-                // target. This avoids the degenerate aim case where the
-                // bomber is overhead (vertical XZ vector ~0) which would
-                // confuse computeBallisticHeadingAndPitch.
+                // There is no bombsight in the original's weapon code at all.
+                // The bomb handler 0x49DD60 spawns the round on the first fire
+                // check with the reload run down, with no aim script, no
+                // tolerance test and no look at the ground: the round simply
+                // inherits the aircraft's heading and speed. What decides
+                // WHERE the bombs fall is the mission. AirStrike's state 4
+                // (0x412394) withholds the target until the aircraft is within
+                //   1 + attackrunlength + ftol(sqrt(2 * cruisealt / g) * 30 * speed)
+                // of it, the second term being how far a bomb dropped now
+                // travels while it falls from cruise altitude; state 5 then
+                // hands weapon 0 the ground point and the weapon drops on
+                // every reload; state 6 takes it away again attackrunlength
+                // world units past the release point. So the stick starts
+                // 1 + attackrunlength short of the target and walks up to it.
+                // The COB aim dance is skipped for the same reason it is in
+                // the original: a bomb is neither turret nor vlaunch.
                 if (std::holds_alternative<UnitWeaponStateAttacking::IdleInfo>(aimingState->attackInfo)
                     && sim->gameTime >= weapon->readyTime)
                 {
@@ -959,19 +969,29 @@ namespace rwe
                             [&](const AirMovementStateLanding&) {});
                     }
 
-                    // Use the weapon's damageRadius as the release tolerance.
-                    // damageRadius is half the TA areaOfEffect (see
-                    // LoadingScene_util.cpp), which is roughly the splash
-                    // radius — a reasonable bombsight gate.
-                    auto releaseRadius = rweMax(weaponDefinition.damageRadius, 16_ss);
+                    const auto& bomberDefinition = sim->unitDefinitions.at(unit.unitType);
+                    SimVector flatToTarget(targetPosition->x - unit.position.x, 0_ss, targetPosition->z - unit.position.z);
+                    SimVector flatVelocity(bomberVelocity.x, 0_ss, bomberVelocity.z);
+                    auto trigger = bombReleaseTrigger(bomberDefinition, flatVelocity.length());
 
-                    // Once the sight opens, a run lets go of a stick of three
-                    // bombs as fast as the weapon reloads, then holds until
-                    // the next pass.
-                    const unsigned int bombsPerRun = 3;
-                    bool stickStarted = runState && runState->bombsDroppedThisPass > 0;
-                    bool stickFinished = runState && runState->bombsDroppedThisPass >= bombsPerRun;
-                    if (!stickFinished && (stickStarted || bombsightInReleaseWindow(unit.position, bomberVelocity, *targetPosition, releaseRadius)))
+                    bool releasing = false;
+                    if (runState && runState->releasePoint)
+                    {
+                        // Mid-stick: state 5's run, which state 6 ends
+                        // attackrunlength past where the first bomb left.
+                        SimVector flatFromRelease(unit.position.x - runState->releasePoint->x, 0_ss, unit.position.z - runState->releasePoint->z);
+                        releasing = flatFromRelease.lengthSquared() < bomberDefinition.attackRunLength * bomberDefinition.attackRunLength;
+                    }
+                    else if (flatToTarget.lengthSquared() <= trigger * trigger)
+                    {
+                        releasing = true;
+                        if (runState)
+                        {
+                            runState->releasePoint = unit.position;
+                        }
+                    }
+
+                    if (releasing)
                     {
                         if (runState)
                         {

@@ -453,8 +453,8 @@ At Brain Coral's `maxwindspeed` of 3000 this is 0.092 world units a tick, which
 carries a Crusader shell about six units over its flight against a damage radius
 of 24 — a real nudge rather than a dominant force. Note that nothing compensates
 for it: the original's bombsight does not model the wind either, so a bomber's
-aim drifts very slightly downwind, and `predictBombImpactPoint` matches it by
-also ignoring it.
+aim drifts very slightly downwind, and RWE's release, taken from the mission's
+own fall-time arithmetic (#110), ignores it too.
 
 Smoke uses the same two words, scaled by 8 per tick (§4), and that is still not
 ported — every puff in the original leans downwind together. Nothing about it is
