@@ -108,6 +108,7 @@ namespace rwe
             j["schema"] = 1;
             j["generatedBy"] = metadata.generatedBy;
             j["gitDescribe"] = GitDescription;
+            j["gitHash"] = GitHash;
             j["buildType"] = ProjectBuildType;
             j["map"] = parameters.mapName;
             j["seed"] = parameters.randomSeed.value_or(0);

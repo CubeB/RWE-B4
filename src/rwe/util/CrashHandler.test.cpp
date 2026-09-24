@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <rwe/config.h>
 #include <rwe/util/CrashHandler.h>
 #include <sstream>
 #include <string>
@@ -91,6 +92,8 @@ namespace rwe
             REQUIRE_THAT(report, ContainsSubstring("RWE crash report"));
             REQUIRE_THAT(report, ContainsSubstring("SIGSEGV (segmentation fault)"));
             REQUIRE_THAT(report, ContainsSubstring("deadbeef"));
+            REQUIRE_THAT(report, ContainsSubstring("commit:"));
+            REQUIRE_THAT(report, ContainsSubstring(GitHash));
             REQUIRE_THAT(report, ContainsSubstring("SimTick"));
             REQUIRE_THAT(report, ContainsSubstring("GameScene"));
             REQUIRE_THAT(report, ContainsSubstring("Coast To Coast"));

@@ -237,6 +237,10 @@ namespace rwe
         a.str(RevivalTitle.c_str());
         a.str(")\n");
 
+        a.field("commit");
+        a.str(GitHash.c_str());
+        a.ch('\n');
+
         a.field("fault");
         a.str(faultName);
         a.ch('\n');

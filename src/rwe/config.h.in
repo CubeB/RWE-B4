@@ -6,6 +6,7 @@
 namespace rwe
 {
     static const std::string GitDescription("@RWE_GIT_DESCRIPTION@");
+    static const std::string GitHash("@RWE_GIT_HASH@");
     static const std::string ProjectName("@PROJECT_NAME@");
     static const std::string ProjectBuildType("@CMAKE_BUILD_TYPE@");
 
