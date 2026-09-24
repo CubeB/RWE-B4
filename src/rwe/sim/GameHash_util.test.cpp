@@ -248,7 +248,6 @@ namespace rwe
             u.nanoframeDecayTime = GameTime(4321);
             u.nanoframeWorkedOn = true;
             u.nanoframeDecayRemainder = 7;
-            u.reclaimProgress = 12;
             u.selfDestructTime = GameTime(555);
             u.paralyzedUntil = GameTime(666);
             u.moveRateBand = 3;
@@ -436,8 +435,10 @@ namespace rwe
         // The hash, save and dump walks are derived from one field table, so
         // a slip in the table moves the bytes. This is the pin: the value is
         // what the pre-table hand-written hash produced for this unit, and
-        // the walks must agree with it from now on.
-        REQUIRE(computeHashOf(makePopulatedUnitState()) == GameHash(469200823u));
+        // the walks must agree with it from now on. It was 469200823 until
+        // 2026-09-24, when reclaimProgress left the table (#19: a unit is
+        // reclaimed through its hit points now, and had nothing to keep here).
+        REQUIRE(computeHashOf(makePopulatedUnitState()) == GameHash(469200811u));
     }
 
 }

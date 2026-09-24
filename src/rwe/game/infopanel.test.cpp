@@ -133,6 +133,19 @@ namespace rwe
         unit.orders.clear();
         unit.orders.push_back(AttackOrder(UnitId(11)));
         REQUIRE(unitOrderTargetUnit(unit) == UnitId(11));
+
+        // A unit being reclaimed is the mission's target like any other, so
+        // its name and health fill the slot and the health, which the reclaim
+        // takes off a bite at a time, is the progress. A feature has no unit
+        // record for mission+0x16 to point at, so a feature reclaim shows
+        // nothing there (issue #19).
+        unit.orders.clear();
+        unit.orders.push_back(ReclaimOrder(UnitId(13)));
+        REQUIRE(unitOrderTargetUnit(unit) == UnitId(13));
+
+        unit.orders.clear();
+        unit.orders.push_back(ReclaimOrder(FeatureId(2)));
+        REQUIRE(!unitOrderTargetUnit(unit).has_value());
     }
 
     TEST_CASE("unitOrderTargetUnit: an attack on a place has no target unit", "[infopanel]")
