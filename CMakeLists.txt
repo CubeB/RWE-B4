@@ -437,6 +437,8 @@ set(SOURCE_FILES
     src/rwe/io/smk/SmkDecoder.h
     src/rwe/io/tad/TadReader.cpp
     src/rwe/io/tad/TadReader.h
+    src/rwe/io/tad/TadWriter.cpp
+    src/rwe/io/tad/TadWriter.h
     src/rwe/io/tad/tad_events.cpp
     src/rwe/io/tad/tad_events.h
     src/rwe/io/tad/tad_headers.h
@@ -1010,6 +1012,7 @@ set(TEST_FILES
     src/rwe/io/ota/ota.test.cpp
     src/rwe/io/tad/tad.test.cpp
     src/rwe/io/tad/tad_events.test.cpp
+    src/rwe/io/tad/tad_writer.test.cpp
     src/rwe/io/pcx/pcx.test.cpp
     src/rwe/scene/Screenshot.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp
