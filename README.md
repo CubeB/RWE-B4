@@ -83,6 +83,14 @@ locations. If it cannot find yours, point it at the directory holding
 rwe_setup --from "C:/GOG Games/Total Annihilation"
 ```
 
+The Linux AppImage is a single file with a single entry point, so there
+`rwe_setup` is reached through it — the word `setup` first, then its own
+arguments:
+
+```
+./Robot_War_Engine-*.AppImage setup --from "/path/to/Total Annihilation"
+```
+
 | Flag | What it does |
 |---|---|
 | `--dry-run` | Says what it would do and changes nothing. |

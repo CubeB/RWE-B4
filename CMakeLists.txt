@@ -1140,7 +1140,7 @@ add_test(NAME rwe_test COMMAND rwe_test)
 add_dependencies(rwe_test crash_probe)
 target_compile_definitions(rwe_test PRIVATE RWE_CRASH_PROBE_PATH="$<TARGET_FILE:crash_probe>")
 
-install(TARGETS rwe rwe_bridge
+install(TARGETS rwe rwe_bridge rwe_setup
     RUNTIME DESTINATION .
     )
 install(FILES LICENSE README.md DESTINATION .)
