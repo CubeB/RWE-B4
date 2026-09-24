@@ -399,6 +399,13 @@ namespace rwe
             gameScene->enableReplayRecording(*gameParameters.recordReplayFile, replayHeaderFromParameters(gameParameters));
         }
 
+        // Independent of the replay branch above: a replay and a demo can be
+        // recorded in the same game.
+        if (gameParameters.recordDemoFile)
+        {
+            gameScene->enableDemoRecording(*gameParameters.recordDemoFile, loaded.dataMaps.unitLoadOrder);
+        }
+
         return gameScene;
     }
 

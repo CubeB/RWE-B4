@@ -45,6 +45,7 @@
 namespace rwe
 {
     class AiPlayerController;
+    class DemoRecorder;
 
     constexpr int MaxUtilizableWindSpeed = 5000;
 
@@ -618,6 +619,16 @@ namespace rwe
          * simulation, and so incapable of changing an outcome.
          */
         std::map<unsigned int, UnitDeathObservation> unitDeathObservations;
+
+        /**
+         * The demo recorder, when one is attached. A pure observer, pointed-to
+         * rather than held by value for the same two reasons AiPlayerController
+         * is: the demo subsystem header stays out of every translation unit
+         * that includes this one, and the COFF section budget with it. Nothing
+         * it holds is hashed, saved or dumped, and the simulation never reads
+         * it back -- see docs/adr/0001-demo-recorder-is-a-pure-observer.md.
+         */
+        std::unique_ptr<DemoRecorder> demoRecorder;
 
         explicit GameSimulation(MapTerrain&& terrain, unsigned char surfaceMetal, int minWindSpeed, int maxWindSpeed);
 
@@ -1413,5 +1424,19 @@ namespace rwe
         // `aiPendingCommands[playerId]`.
         // Called once per sim tick at the top of `tick()`.
         void runAiControllers();
+
+        /**
+         * Attaches a demo recorder: from here on every unit creation, build,
+         * removal and completed tick is offered to it, and it writes the
+         * demo. Takes ownership.
+         *
+         * Pure observation in the sense of ADR-0001 -- the recorder holds no
+         * simulation state, nothing it does is hashed, saved or dumped, and
+         * the simulation never reads it back. It is attached after the game
+         * has loaded and before the first tick so the whole game is captured;
+         * a unit already standing is given an id but has no 0x09, having
+         * never been built under this recording.
+         */
+        void attachDemoRecorder(std::unique_ptr<DemoRecorder> recorder);
     };
 }

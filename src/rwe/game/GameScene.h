@@ -1087,6 +1087,14 @@ namespace rwe
         /** Write every command issued in this game to a replay file. */
         void enableReplayRecording(const std::filesystem::path& path, const ReplayHeader& header);
 
+        /**
+         * Write a TA demo of this game as it is played. `unitLoadOrder` is
+         * the data set's listing in TA's order, which the loader captured;
+         * the recorder needs it because a demo names unit types by their
+         * position in it.
+         */
+        void enableDemoRecording(const std::filesystem::path& path, const std::vector<std::string>& unitLoadOrder);
+
         bool isReplayPlayback() const { return replayPlayback.has_value(); }
 
         /** Whose resources the top bar reads out; the local player unless a replay says otherwise. */
