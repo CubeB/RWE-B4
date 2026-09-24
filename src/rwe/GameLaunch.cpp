@@ -51,9 +51,20 @@ namespace rwe
 
     void doGlLoaderInit()
     {
-        if (!gladLoadGL(reinterpret_cast<GLADloadfunc>(SDL_GL_GetProcAddress)))
+        int version = gladLoadGL(reinterpret_cast<GLADloadfunc>(SDL_GL_GetProcAddress));
+        if (version == 0)
         {
-            throw std::runtime_error("Failed to initialize OpenGL function loader");
+            throw std::runtime_error("Failed to load OpenGL functions");
+        }
+        if (!GLAD_GL_VERSION_3_0)
+        {
+            throw std::runtime_error("OpenGL 3.0 required, got " + std::to_string(GLAD_VERSION_MAJOR(version)) + "." + std::to_string(GLAD_VERSION_MINOR(version)));
+        }
+        // glTexStorage3D, used to build a map's texture array, is GL 4.2 core
+        // or this extension; without it the pointer is null and map load dies.
+        if (!GLAD_GL_ARB_texture_storage)
+        {
+            throw std::runtime_error("GL_ARB_texture_storage is required");
         }
     }
 
