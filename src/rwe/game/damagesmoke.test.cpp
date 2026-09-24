@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/cob/CobOpCode.h>
+#include <rwe/game/GameMediaDatabase.h>
+#include <rwe/game/GameScene_util.h>
 #include <rwe/game/Particle.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
@@ -9,6 +11,7 @@
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/cob.h>
+#include <rwe/sim/sim_test_util.h>
 #include <algorithm>
 #include <functional>
 #include <memory>
@@ -398,5 +401,39 @@ namespace rwe
         REQUIRE(particle.getFrameIndex(GameTime(107), plain, 12) == 3u);
         REQUIRE(!particle.isFinished(GameTime(123), plain, 12));
         REQUIRE(particle.isFinished(GameTime(124), plain, 12));
+    }
+
+    TEST_CASE("smoke drifts with the wind, and nothing else does", "[damagesmoke]")
+    {
+        // 0x475340 adds windX*8 and windZ*8 to every puff each tick on top of
+        // its lift; the wake and nano steppers have no wind term at all. The
+        // scaling is the caller's, so here the drift arrives ready to add.
+        GameMediaDatabase media;
+        auto series = std::make_shared<SpriteSeries>();
+        series->sprites.resize(12);
+        media.addSpriteSeries("FX", "smoke 1", series);
+        auto terrain = makeFlatTerrain(8, 8);
+
+        Particle puff;
+        puff.position = Vector3f(10.0f, 0.0f, 10.0f);
+        puff.velocity = Vector3f(0.0f, 0.5f, 0.0f);
+        puff.driftsWithWind = true;
+        puff.startTime = GameTime(0);
+        puff.renderType = ParticleRenderTypeSprite{"FX", "smoke 1", ParticleFinishTimeEndOfFrames(), GameTime(2), true, false, {}};
+
+        Particle spray;
+        spray.position = Vector3f(10.0f, 0.0f, 10.0f);
+        spray.velocity = Vector3f(1.0f, 0.0f, 0.0f);
+        spray.startTime = GameTime(0);
+        spray.renderType = ParticleRenderTypeNano{GameTime(100), 0, 1.0f, 0.0f};
+
+        std::vector<Particle> particles{puff, spray};
+        auto windDrift = Vector3f(0.7f, 0.0f, -0.3f);
+
+        updateParticles(media, terrain, GameTime(1), windDrift, particles);
+
+        REQUIRE(particles.size() == 2);
+        REQUIRE(particles[0].position == Vector3f(10.7f, 0.5f, 9.7f));
+        REQUIRE(particles[1].position == Vector3f(11.0f, 0.0f, 10.0f));
     }
 }

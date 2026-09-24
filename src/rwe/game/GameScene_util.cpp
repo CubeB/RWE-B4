@@ -1353,7 +1353,7 @@ namespace rwe
         }
     }
 
-    void updateParticles(const GameMediaDatabase& gameMediaDatabase, const MapTerrain& terrain, GameTime currentTime, std::vector<Particle>& particles)
+    void updateParticles(const GameMediaDatabase& gameMediaDatabase, const MapTerrain& terrain, GameTime currentTime, const Vector3f& windDrift, std::vector<Particle>& particles)
     {
         auto end = particles.end();
         for (auto it = particles.begin(); it != end;)
@@ -1396,6 +1396,10 @@ namespace rwe
             }
 
             particle.position += particle.velocity;
+            if (particle.driftsWithWind)
+            {
+                particle.position += windDrift;
+            }
 
             ++it;
         }

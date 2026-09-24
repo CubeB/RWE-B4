@@ -571,16 +571,17 @@ quirks of the original that RWE reproduces although they look like defects.
   same thing. Hold Position is still honoured only in that such a unit is never
   given an attack order to begin with, and the mode is still not consulted
   anywhere else the original consults it.
-- ~~Smoke does not drift downwind~~ **The wind is ported; the smoke still
-  ignores it** (#111). `GameSimulation::currentWindVector` exists and is hashed
-  (commit 72f8b402), and it pushes ballistic rounds and bombs off course, the
-  shape of `0x49BD10`. The smoke particles have not been wired to it:
-  `updateParticles` (`src/rwe/game/GameScene_util.cpp`) adds only the
-  particle's own velocity, and every smoke spawn sets that purely vertical, so
-  a puff still goes straight up. Issue #111. The lift itself is right: RWE's
-  half a unit a tick is the original's gravity × 4 on the 112 that nearly
-  every map uses, though it will not track a map that sets gravity to
-  something else.
+- ~~Smoke does not drift downwind~~ **Ported, 2026-09-24** (#111).
+  `GameSimulation::currentWindVector` was already hashed and pushing ballistic
+  rounds and bombs off course (commit 72f8b402, the shape of `0x49BD10`); the
+  smoke now rides the same vector at eight times that drift a tick, which is
+  the `x += windX × 8`, `z += windZ × 8` of the puff stepper at `0x475340`
+  and the vent's at `0x475620` (§4, §23). `Particle::driftsWithWind` opts a
+  puff in; wake dots stay out, since `0x474580` has no wind term, and so does
+  anything flying under its own velocity. The lift is unchanged and still
+  right for the 112 that nearly every map uses: RWE's half a unit a tick is
+  the original's gravity × 4 there, though it will not track a map that sets
+  gravity to something else.
 - The **explosion smoke** (`0x472630` from `0x420AE1`, three puffs seven ticks
   apart) and the **30-second burning wreck plume** (`0x48644B`) are decoded but
   not ported; RWE's explosions and wreckage do not smoke afterwards.

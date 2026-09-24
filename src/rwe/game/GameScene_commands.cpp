@@ -2812,6 +2812,7 @@ namespace rwe
         Particle particle;
         particle.position = position;
         particle.velocity = Vector3f(0.0f, 0.5f, 0.0f);
+        particle.driftsWithWind = true;
         particle.renderType = ParticleRenderTypeSprite{
             gaf,
             anim,
@@ -2838,6 +2839,10 @@ namespace rwe
         // which is the right answer for all but a handful of maps and saves
         // threading the map's gravity through to reach.
         particle.velocity = Vector3f(0.0f, riseRate, 0.0f);
+
+        // And sideways with the wind, damage smoke and vent steam alike
+        // (0x475380 and 0x475640 differ only in the lift).
+        particle.driftsWithWind = true;
 
         particle.renderType = ParticleRenderTypeSprite{
             "FX",
