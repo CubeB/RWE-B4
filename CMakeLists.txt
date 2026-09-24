@@ -618,6 +618,8 @@ set(SOURCE_FILES
     src/rwe/sim/ProjectilePhysicsType.h
     src/rwe/sim/AirMovement.cpp
     src/rwe/sim/AirMovement.h
+    src/rwe/sim/DemoRecorder.cpp
+    src/rwe/sim/DemoRecorder.h
     src/rwe/sim/ResourceSettler.cpp
     src/rwe/sim/ResourceSettler.h
     src/rwe/sim/SimAngle.cpp
@@ -1036,6 +1038,7 @@ set(TEST_FILES
     src/rwe/render/WireframeScan.test.cpp
     src/rwe/rc_gen_optional.h
     src/rwe/sim/GameHash_util.test.cpp
+    src/rwe/sim/demorecorder.test.cpp
     src/rwe/sim/accuracy.test.cpp
     src/rwe/sim/waterline.test.cpp
     src/rwe/game/screenshake.test.cpp

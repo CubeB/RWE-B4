@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <rwe/ai/AiPlayerController.h>
+#include <rwe/sim/DemoRecorder.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/SimScalar.h>
 #include <rwe/sim/SimTicksPerSecond.h>
@@ -161,6 +162,11 @@ namespace rwe
     // simulation has const wind-speed members.
     GameSimulation::~GameSimulation() = default;
     GameSimulation::GameSimulation(GameSimulation&&) noexcept = default;
+
+    void GameSimulation::attachDemoRecorder(std::unique_ptr<DemoRecorder> recorder)
+    {
+        demoRecorder = std::move(recorder);
+    }
 
     void GameSimulation::addAiController(PlayerId playerId, std::unique_ptr<AiPlayerController> controller)
     {
@@ -1519,6 +1525,15 @@ namespace rwe
 
         if (unitId)
         {
+            // Give the unit its demo id before anything else can look at it:
+            // a build's 0x09 needs the frame to have one, and an already
+            // complete unit -- a commander, a resurrection -- needs it to
+            // appear in the 0x2c round robin at all.
+            if (demoRecorder)
+            {
+                demoRecorder->unitCreated(*this, *unitId);
+            }
+
             UnitBehaviorService(this).onCreate(*unitId);
 
             // The original hangs a `GetBuilt` mission off the frame as it is
@@ -4299,6 +4314,16 @@ namespace rwe
             // now belongs to somebody else.
             invalidateUnitSpatialIndex();
 
+            // The recorder has to hear about the removal before the slot is
+            // reused, and it is reused inside this same tick: spawnNewUnits
+            // runs a few phases further down. A recorder that only noticed at
+            // the end of the tick would still name the old unit for a new one
+            // standing in its id.
+            if (demoRecorder)
+            {
+                demoRecorder->unitRemoved(it->first);
+            }
+
             it = units.erase(it);
         }
 
@@ -4415,6 +4440,11 @@ namespace rwe
                     continue;
                 }
 
+                if (demoRecorder)
+                {
+                    demoRecorder->buildStarted(*this, unitId, *newUnitId);
+                }
+
                 events.push_back(UnitStartedBuildingEvent{unitId});
 
                 s->status = UnitCreationStatusDone{*newUnitId};
@@ -4442,6 +4472,14 @@ namespace rwe
                     // on the next tick and every tick after it.
                     s->status = retryBlockedSite(unitId, std::get<UnitCreationStatusPending>(s->status));
                     continue;
+                }
+
+                // A factory's frame is a build start like a builder's: the
+                // 0x09 names the frame and the 0x12 names the yard that
+                // finished it.
+                if (demoRecorder)
+                {
+                    demoRecorder->buildStarted(*this, unitId, *newUnitId);
                 }
 
                 s->status = UnitCreationStatusDone{*newUnitId};
@@ -4687,6 +4725,14 @@ namespace rwe
         {
             RWE_SIMPROF("visibility");
             updateVisibility();
+        }
+
+        // Last, once every phase has left its mark on the tick: the recorder
+        // reads the end-of-tick state, which is the state TA's sender would
+        // have serialised. Nothing here can change what the tick did.
+        if (demoRecorder)
+        {
+            demoRecorder->endOfTick(*this);
         }
     }
 
