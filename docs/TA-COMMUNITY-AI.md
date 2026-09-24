@@ -153,10 +153,36 @@ but each is a one-knob paired arena run, which is cheap.
 
 | Knob | RWE default | Community consensus | Note |
 |---|---|---|---|
-| `targetMetalExtractorCount` | **8** | 32–40 in the two best-tested profiles | The largest single gap. Also the likeliest reading of the parked CORE-deficit finding: an AI holding only eight extractors has no margin when a raid takes three |
+| `targetMetalExtractorCount` | **8** (10 on Hard) | 32–40 in the two best-tested profiles | **Measured 2026-09-24, and the answer was not a tuning answer** — see below |
 | `targetSolarCount` | **10** | 12–40 | Softened by `solarOnDemand`, so measure rather than assume |
 | anti-air: `baseAntiAirTowerCount` 1, `reactiveAntiAirTowerCount` 3, `antiAirMobileCount` 2 | ~6 total | Defender alone limited 98–100 | Their strongest agreement after economy, and our smallest number |
 | `targetVehiclePlantCount` 1, `targetAirPlantCount` 1, `surplusLabCount` 1 | 1 of each | 3–5 vehicle, 3–4 kbot | Factory count is what sets the resupply rate Switeck says decides fights |
+
+### The first test, and what it actually found
+
+`targetMetalExtractorCount` 8 → 24, paired asymmetric, ten seeds, both seats,
+`Coast To Coast`, hard, ARM vs ARM. Every pair came back **byte-identical with
+the labels swapped**: the knob changed nothing whatever.
+
+It changed nothing because the cap was never the constraint. Metal income
+reaches 10–13 a second at the eight-minute mark in all twenty player-games and
+is still 9–16 at thirty — four or five extractors, for the length of the match,
+against a community consensus of thirty-two to forty and Switeck's benchmark of
+4–7k metal in the first ten minutes. Meanwhile the AI's own event log carries
+between 223 and 1434 `build_refusal` / `no_patch` events per player per game,
+each one reporting that of the patch cells in range, **three dozen pass every
+test the refusal itself tallies** — on our side, explored, unguarded, walkable,
+free — and `chooseMexSite` returns nothing for them anyway.
+
+Filed as issue #202. The lesson for the rest of this list is worth stating
+before any of it is measured: **a knob that does nothing is the cheapest
+possible result and the paired design surfaced it in one run.** Check that a
+knob binds at all before reading anything into a null result, and prefer the
+event log over the CSV for finding out why it does not.
+
+It also reframes the parked CORE-deficit investigation. The question there was
+why CORE loses extractors to raids; the prior question is why either side only
+ever holds five.
 
 ## 5. What not to take from this
 
