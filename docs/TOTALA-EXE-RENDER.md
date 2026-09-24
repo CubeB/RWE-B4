@@ -1234,18 +1234,72 @@ relocated to pointers at load), the dispatch at `0x4585D7`:
 
 And at `0x458568`: **if the piece declares a selection primitive
 (header `+0x0C` != -1), primitive 0 is skipped** — the loop simply starts at
-index 1. The index stored in the header is not consulted for the skip. On
-every stock construction-unit model the selection plate *is* primitive 0, so
-this is invisible; on the wreckage models (`1x1D.3do`, `2x2A.3do`, ..., where
-`selprim` is 20, 44, 109...) the original genuinely drops one real textured
-face and draws the actual selection plate as a flat colour-0 quad. RWE
-skipping `prims[selectionPrimitiveIndex]` instead is the saner reading —
-worth listing as a deliberate difference, not "correcting".
+index 1. The index stored in the header is not consulted for the skip.
 
-There is **no backface culling** anywhere in this path — no cross product,
-no winding test. A quad facing away from the camera still rasterizes; its
-vertex order is reversed on screen, so it appears with its texture mirrored.
-Closed models never show this; single-sided decorative quads do.
+> **Corrected 2026-09-24: this drops nothing, because the loader has already
+> moved the plate to index 0.** This section used to conclude that on the
+> wreckage models (`1x1D.3do`, `2x2A.3do`, ..., where `selprim` is 20, 44,
+> 109...) "the original genuinely drops one real textured face", and §58
+> listed RWE's skip-the-declared-index as a deliberate improvement. Both are
+> wrong. The 3DO relocation pass at `0x4CB370`, called once per object from
+> the recursive tree walk at `0x4CB552` — which also relocates the sibling,
+> child, vertex and primitive pointers, so every object of every loaded model
+> goes through it — does this before anything is ever drawn:
+>
+> ```
+> 4cb37b:  mov  eax,[ebp+0xc]      ; selprim
+> 4cb37e:  cmp  eax,0xffffffff
+> 4cb381:  je   0x4cb3be           ; sentinel -> nothing to do
+> 4cb383:  mov  ecx,[ebp+0x8]      ; primitive count
+> 4cb388:  jle  0x4cb3be
+> 4cb38a:  mov  edx,[ebp+0x28]     ; primitive array
+> 4cb392:  shl  eax,0x5            ; selprim * 0x20
+> 4cb395:  add  eax,edx            ; &prims[selprim]
+>          ; three 8-dword rep movs: tmp <- prims[selprim],
+>          ; prims[selprim] <- prims[0], prims[0] <- tmp
+> 4cb3b7:  mov  DWORD PTR [ebp+0xc],0x0   ; selprim = 0
+> ```
+>
+> A 32-byte three-way exchange with primitive 0, and the index rewritten to
+> zero. So by draw time `prims[0]` **is** the declared selection plate on
+> every model, and skipping index 0 is exactly equivalent to skipping
+> `prims[selprim]` — which is what RWE already does. No real face is dropped
+> on wreck models, and there is no divergence here to keep or to fix. Found by
+> Nanolathe's independent reading, which had the loader where ours had only
+> the draw loop; confirmed here.
+
+There is no explicit backface test in this path — no cross product, no normal,
+no signed area. **There is nevertheless a backface cull, and it is the edge
+walk itself.**
+
+> **Corrected 2026-09-24.** This section used to say a quad facing away from
+> the camera "still rasterizes ... with its texture mirrored". It does not; it
+> paints nothing. `0x4C7580` builds its two edge chains from the topmost
+> vertex by index direction and never compares them: the chain stepping
+> **backwards** through the four indices (`eax-1`, wrapping to 3, at
+> `0x4C775A`) writes its x into span slot `+0x00`, and the chain stepping
+> **forwards** (`(ecx+1) & 3`, at `0x4C789F`) writes its x into slot `+0x04`.
+> The emission loop is then
+>
+> ```
+> 4c79d6:  mov  ecx,[edi+0x4]      ; the forward chain's x
+> 4c79d9:  mov  edx,[edi]          ; the backward chain's x
+> 4c79db:  sub  ecx,edx
+> 4c79dd:  test ecx,ecx
+> 4c79df:  jle  0x4c79f8           ; width <= 0 -> row skipped entirely
+> 4c79f3:  call 0x4c7310           ; otherwise fill the span
+> ```
+>
+> A quad whose projected winding runs the other way puts the geometric right
+> edge in the left slot, so `width <= 0` on every row and the whole primitive
+> is skipped. That is a signed-area cull written as a loop bound. Two details
+> worth carrying into any port: the test is `<= 0`, so an exactly edge-on or
+> degenerate face vanishes rather than drawing a one-pixel sliver; and the
+> sense is fixed by the projection's handedness rather than by a configurable
+> front face. Found by Nanolathe's independent reading and confirmed here.
+
+Closed models are unaffected either way. Single-sided decorative quads
+authored the wrong way round are invisible in the original, not mirrored.
 
 Painter order only: pieces in tree order, primitives in file order, later
 draws overwrite earlier ones. No depth buffer, consistent with section 5 of
@@ -1436,10 +1490,10 @@ across the face in the original.
 |---|---|---|---|
 | 1 | textured quads split into two affine triangles | scanline quad interpolation, seamless | **the ARMSOLAR bug — fix** |
 | 2 | shades buildings with `0.72 + 0.36*(0.5+0.5*dot(N,L))`, `L = norm(-1.3, 1.0, 0.3)` | ~~no lighting whatsoever~~ **wrong, see [TOTALA-EXE-SHADING.md](TOTALA-EXE-SHADING.md)**: a per-vertex level off an un-normalised smoothed normal, Gouraud-interpolated, through `PALETTE.SHD` | fix, to the shading document's model |
-| 3 | draws every primitive including the selection plate | skips primitive 0 whenever a selection primitive is declared | fix — but skip `prims[selprim]`, see above |
+| 3 | draws every primitive including the selection plate | skips primitive 0 whenever a selection primitive is declared — and the loader has already swapped the declared plate *into* index 0 (`0x4CB370`), so this is the declared index | fix, by skipping `prims[selprim]`: that is what the exe does, not a divergence from it |
 | 4 | textured triangle / n-gon falls through to the flat-colour path with a garbage colour | never drawn at all | fix (stock data has zero of these; mods will) |
 | 5 | `isColored` = whole `+0x1C` dword truthy | bit 0 only | align while touching the parser; agrees on all 3,287 stock faces |
-| 6 | backface culling | none — backfaces drawn mirrored | keep RWE's culling (deliberate difference; closed stock models are unaffected) |
+| 6 | backface culling | ~~none — backfaces drawn mirrored~~ **wrong**: an implicit winding cull, the span loop's `width <= 0` skip at `0x4C79DF` | keep RWE's culling — it **agrees** with the exe; not a divergence. Match the `<= 0` sense so edge-on faces vanish too |
 | 7 | missing texture drawn flat via atlas miss fallback | flat grey `0xD1` (209) | cosmetic, align if convenient |
 
 ---

@@ -15,6 +15,23 @@ how it flies there — lives in a companion document,
 attack run, the gunship pendulum, and what `hoverattack` and
 `maneuverleashlength` really do.
 
+**Two documents here were not read by this project**, and are marked so on
+every page:
+
+- [TOTALA-EXE-EXTERNAL.md](TOTALA-EXE-EXTERNAL.md) — findings from the
+  Nanolathe project's independent clean-room reading of the same binary, taken
+  in as a cross-check. It settled **six** disagreements against this corpus,
+  every one of them in their favour, and closed five questions these documents
+  had left open in writing. Read its first section before relying on anything
+  in it; nothing there has been verified here unless it says so.
+- [TOTALA-EXE-AI.md](TOTALA-EXE-AI.md) — the retail computer player, which
+  this project never decoded. Its headline is that the original has **no
+  transport policy at all** and **never gives an aircraft an attack order**,
+  which reclassifies a good deal of RWE's AI work from conformance to
+  deliberate divergence. Corroborated from an unrelated direction by
+  [TA-COMMUNITY-AI.md](TA-COMMUNITY-AI.md), the profile-modding community's
+  own account of the same faults.
+
 ## The binary
 
 | | |
@@ -357,14 +374,22 @@ quirks of the original that RWE reproduces although they look like defects.
   under construction nowhere at all -- no bar, no percentage, no format string
   (§29). RWE borrows the `RELOAD1` rectangle, which `SIDEDATA.TDF` defines and
   the original parses and then never reads.
-- **The selection plate is skipped by its declared index.** The original
-  skips primitive 0 whenever a selection primitive is declared (§51), which
-  on the wreckage models drops a real face; RWE skips the index the header
-  names instead.
-- **Backface culling stays on.** The original has none -- a single-sided quad
-  facing away rasterizes with its texture mirrored (§51). Culling matches on
-  every closed model and only hides faces the artists never meant to show
-  twice.
+- ~~**The selection plate is skipped by its declared index.**~~
+  **Retracted 2026-09-24 -- this was never a divergence.** The entry said the
+  original skips primitive 0 whenever a selection primitive is declared and
+  so "on the wreckage models drops a real face". It does skip index 0, but the
+  3DO relocation pass at `0x4CB370` has already **exchanged the declared plate
+  with primitive 0** and rewritten the index to zero, on every object of every
+  model, before anything is drawn. Skipping index 0 therefore *is* skipping
+  the declared index, which is what RWE does. See §51.
+- ~~**Backface culling stays on.**~~ **Retracted 2026-09-24 -- also never a
+  divergence.** The entry said the original has none. It has no explicit test,
+  but `0x4C7580` assigns its two edge chains by vertex-index direction and
+  emits a row only when `right - left > 0` (`0x4C79DF`), so a quad with the
+  opposite projected winding paints nothing at all. That is a signed-area
+  backface cull written as a loop bound, and RWE's culling agrees with it. The
+  one thing still to match is the `<= 0` sense, which drops edge-on faces too.
+  See §51.
 - **Skewed textured quads are tessellated, not scan-converted.** The original
   interpolates the texture along the quad's own edges per scanline; RWE
   approximates that warp with a 4x4 bilinear patch on non-parallelogram faces

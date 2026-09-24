@@ -38,23 +38,32 @@ namespace rwe
         REQUIRE(computeAccuracyCone(VulcanAccuracy, 0, 1400, 0) == SimAngle(800 + 0x800));
     }
 
-    TEST_CASE("computeAccuracyCone: kills tighten the cone, but only past six", "[accuracy]")
+    TEST_CASE("computeAccuracyCone: kills tighten the cone, but only past twenty-four", "[accuracy]")
     {
-        // veterancy = kills / 3, and it only divides when that is more than 1.
-        for (unsigned int kills = 0; kills < 6; ++kills)
+        // veterancy = (uint16)kills / 12, and it only divides when that is
+        // more than 1 -- so nothing at all happens below twenty-four. This
+        // test said "past six" until 2026-09-24, from reading the divide as
+        // /3; the magic number at the site is 0x2AAAAAAB taken at bit 33,
+        // which is 1/12.
+        for (unsigned int kills = 0; kills < 24; ++kills)
         {
             REQUIRE(computeAccuracyCone(VulcanAccuracy, 1400, 1400, kills) == VulcanAccuracy);
         }
 
-        REQUIRE(computeAccuracyCone(VulcanAccuracy, 1400, 1400, 6) == SimAngle(400));
-        REQUIRE(computeAccuracyCone(VulcanAccuracy, 1400, 1400, 9) == SimAngle(266));
-        REQUIRE(computeAccuracyCone(VulcanAccuracy, 1400, 1400, 30) == SimAngle(80));
+        REQUIRE(computeAccuracyCone(VulcanAccuracy, 1400, 1400, 24) == SimAngle(400));
+        REQUIRE(computeAccuracyCone(VulcanAccuracy, 1400, 1400, 36) == SimAngle(266));
+        REQUIRE(computeAccuracyCone(VulcanAccuracy, 1400, 1400, 120) == SimAngle(80));
 
         // It is an integer divide with no floor under it, so a preposterous
         // kill count really does close the cone completely and the weapon
         // stops straying at all. Nothing in a game ever gets there, but it is
         // what the original's idiv does and we match it rather than clamping.
         REQUIRE(computeAccuracyCone(VulcanAccuracy, 1400, 1400, 30000) == SimAngle(0));
+
+        // And the count really is taken as a word: 65548 kills is 12 after the
+        // truncation, which divides by exactly one and so does nothing, where
+        // an untruncated count would have divided by 5462.
+        REQUIRE(computeAccuracyCone(VulcanAccuracy, 1400, 1400, 65548) == VulcanAccuracy);
     }
 
     TEST_CASE("computeAccuracyCone: damage and veterancy compose the way the original composes them", "[accuracy]")
@@ -62,7 +71,7 @@ namespace rwe
         // The health term goes on first and the divide second, so a hurt
         // veteran is not the same as a healthy one: 800 + 1024 = 1824, then
         // divided by three.
-        REQUIRE(computeAccuracyCone(VulcanAccuracy, 700, 1400, 9) == SimAngle(1824 / 3));
+        REQUIRE(computeAccuracyCone(VulcanAccuracy, 700, 1400, 36) == SimAngle(1824 / 3));
     }
 
     TEST_CASE("computeAccuracyCone: a perfect weapon on a damaged unit still strays", "[accuracy]")

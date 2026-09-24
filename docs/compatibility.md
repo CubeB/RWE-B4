@@ -176,9 +176,14 @@ exactly on parallelograms and to within a texel elsewhere. Splitting such a quad
 into two affine triangles instead is what made the solar collector's panels kink
 along the diagonal.
 
-**Backface culling stays on.** The original has none: a single-sided quad facing
-away rasterizes with its texture mirrored. Culling matches on every closed model
-and only hides faces the artists never meant to be seen twice.
+**Backface culling stays on — and so does the original's.** This section used
+to say the original has none, and that a single-sided quad facing away from the
+camera rasterizes with its texture mirrored. It does not: the original's
+scanline rasterizer assigns its left and right edges by the order the model
+lists its vertices and draws a row only where the right edge is further right
+than the left, so a face wound the other way round on screen paints nothing.
+That is a backface cull by another name. RWE's culling agrees with it, and this
+is no longer a difference.
 
 **The fog raster is windowed on the camera.** At one texel per world unit a
 640×640-cell map would be 400 MB. RWE holds a 2.6 MB window a few tiles larger
@@ -240,8 +245,11 @@ original in every case.
 
 ## Smaller differences, one line each
 
-- **The selection plate is skipped by the index the model header names**, not by
-  assuming primitive 0, which on the wreckage models drops a real face.
+- **The selection plate is skipped by the index the model header names.** This
+  was listed as a difference on the grounds that the original assumes primitive
+  0 and so drops a real face on the wreckage models. It does read index 0 — but
+  it has already swapped the declared plate into that position while loading the
+  model, so the two come to the same thing and no face is lost. Not a difference.
 - **A finished `ZBuffer=0` unit's flat-coloured faces are unshaded** along with
   its textured ones; the difference is nine faces of CORFAV and one of CORTRUCK.
 - **Nanolathe spray lands on the roof**, not inside the model, because RWE's

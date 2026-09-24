@@ -1247,8 +1247,21 @@ for `tan(pitch)` but for the **square of the vertical launch speed**:
 vy² = d²·(s² + G·dy ± √D) / (2·(d² + dy²))
 ```
 
-taking `√` of that and dividing by the speed to get a sine, then `asin`
-(`0x4E67F0`, at `0x49A9C8` and `0x49A9FE`). Written out with `dy` flipped to the
+taking `√` of that and dividing by the speed, then `acos` (`0x4E67F0`, at
+`0x49A9C8` and `0x49A9FE`).
+
+> **Corrected 2026-09-24.** This paragraph said "to get a sine, then `asin`",
+> which contradicted §11's reading of the same call — and §11 was right.
+> `0x4E67F0` computes `fld1; fadd` → `(1+x)`, `fld1; fsub` → `(1−x)`, `fmulp`,
+> `fsqrt` → `√(1−x²)`, then `fxch; fpatan` → `atan2(√(1−x²), x)`, which is
+> **`acos`**; the |x|=1 arms return `fldz` (0) and `fldpi` (π), and the
+> rejected-argument fallback at `0x49A9D9` writes `0x3FF921FB54442D11` = π/2,
+> all three of which are `acos` values and none of them `asin` values. The
+> quantity being solved for is therefore the **horizontal** launch speed
+> squared, not the vertical — which also falls out of the algebra: solving
+> `dy·p = D·√(p·(V²−p)) − ½·g·D²` for `p` gives exactly the form above, and
+> that `p` is `V²cos²θ`. Nanolathe's independent reading agrees. The
+> discriminant, the root choice and the 45° ceiling below are unaffected. Written out with `dy` flipped to the
 usual "target minus muzzle" sense, `D` is `s⁴ − 2gs²y − g²x²` — **exactly the
 discriminant RWE's `computeFiringAngles` already computes**, arrived at by a
 different factoring.
@@ -1307,7 +1320,7 @@ The whole of it, `0x49D6BC`–`0x49D73E`:
 acc  = WORD[wdef+0x104]                        ; accuracy
 acc -= (health << 11) / maxdamage              ; 0x49D6C2-0x49D6CE, 0x49D6E7
 acc += 0x800                                   ; 0x49D6F5
-vet  = killcount / 3                           ; 0x49D6E0-0x49D700
+vet  = (uint16)killcount / 12                  ; 0x49D6E0-0x49D700
 if (vet > 1) acc /= vet                        ; 0x49D702-0x49D711
 if (acc != 0) {
     heading += rand(acc) - acc/2               ; 0x49D723-0x49D72F
@@ -1336,8 +1349,23 @@ Three things fall out of that:
   accidental, but it is worth flagging as the one part of this section with a
   large blast radius.
 - **Kills make a unit more accurate.** This is the veterancy the original
-  actually has: three kills do nothing, six halve the cone, nine divide it by
-  three. It is an integer divide, so it never reaches zero.
+  actually has: twenty-three kills do nothing, twenty-four halve the cone,
+  thirty-six divide it by three. It is an integer divide, so it never reaches
+  zero.
+
+  > **Corrected 2026-09-24: the divisor is 12, not 3.** This section read the
+  > divide as `/3` and put the first effect at six kills. The site is
+  > `mov eax,0x2AAAAAAB; imul edx; sar edx,1`, and `0x2AAAAAAB` is
+  > `2^33/12` rounded up: the `imul` leaves the high half in `edx`
+  > (product ≫ 32) and the `sar edx,1` takes it to product ≫ 33, so the
+  > result is `n · 715827883 / 2^33` = `n/12`. A `/3` would have been magic
+  > `0x55555556` with no shift, and a `/6` the same magic with no shift.
+  > The kill count is zero-extended from a word (`xor edx,edx;
+  > mov dx,WORD PTR [edi+0xb8]`), so it is `(uint16)kills / 12`. With the
+  > `if (vet > 1)` gate at `0x49D702` the first effect is therefore at
+  > **24 kills**, not 6 — four times further away than this document said, and
+  > far enough that on stock content it almost never fires. Found by
+  > Nanolathe's independent reading and confirmed here.
 - **Heading and pitch are drawn independently**, each uniform on
   `[−acc/2, acc/2)` — two separate calls to `0x4B6C30`, which returns
   `[0, n)`. The error is not a cone around the aim line; it is a rectangle in

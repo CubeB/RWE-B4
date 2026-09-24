@@ -134,9 +134,26 @@ the job rather than on the flight path.
   dogfight, which already flew through the flying state's function, had it
   from the first port, and the attack run, which steers its own heading, now
   runs the brake step before that swing.
-- **Pitch.** The original also pitches aircraft from the longitudinal component
-  of the same accumulator, via `PitchScale` (`def+0x1A6`) into `unit+0x68`. RWE
-  has no pitch for units at all and the renderer applies only yaw and roll.
+- **Pitch.** The original also pitches aircraft via `PitchScale`
+  (`def+0x1A6`) into `unit+0x68`. RWE has no pitch for units at all and the
+  renderer applies only yaw and roll.
+
+  **This bullet said "from the longitudinal component of the same
+  accumulator" until 2026-09-24, and that was wrong: pitch is taken from the
+  SAME component as bank.** The two are computed back to back and the
+  disassembly settles it by counting the stack. `0x43D1A0` reads the
+  component from `[esp+0x8]`, negates it, multiplies by `BankScale`
+  (`def+0x1A2`), shifts down 16 and hands it to `atan2` against the gravity
+  term held in `edi`, storing the result in `unit+0x64`. `0x43D1CE` then
+  pushes `edi` again -- one push, so `esp` drops by four -- and `0x43D1D5`
+  reads `[esp+0xc]`. The displacement grew by exactly the amount `esp` fell,
+  so **both reads name the same slot**; only the scale field and the
+  destination differ. Whatever longitudinal component the rotation produces is
+  never consumed. Found by comparing this section against an independent
+  reading of the same binary, which had it right; see
+  [`TOTALA-EXE-EXTERNAL.md`](TOTALA-EXE-EXTERNAL.md). It is inert in shipped
+  content, where every `PitchScale` is 0, and it matters the moment pitch is
+  ported -- doing it "the longitudinal way" would look wrong in play.
 
 ---
 

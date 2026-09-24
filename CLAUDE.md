@@ -270,6 +270,22 @@ of `TotalA.exe` instead of guessed at.
   changes the simulation in exactly one place (the pathfinding budget, raised
   fifty-fold), which RWE is already past. What is left is a handful of v3.1
   interface features, listed there and in the roadmap.
+- `docs/TOTALA-EXE-EXTERNAL.md` and `docs/TOTALA-EXE-AI.md` — **not read by
+  this project.** The first holds findings from the Nanolathe project's
+  independent clean-room reading of the same binary, taken in on 2026-09-24 as
+  a cross-check; it settled six disagreements, every one against our corpus,
+  and closed five questions ours had left open. The second is the retail
+  computer player, a subject ours never decoded, whose headline is that the
+  original has no transport policy and never gives an aircraft an attack order.
+  Read `-EXTERNAL`'s opening sections before relying on either: nothing in them
+  is verified here unless it says so at the point of use.
+- `docs/TA-COMMUNITY-AI.md` — what the original's AI *modders* learned, from
+  Switeck's design guide and nine shipped community AI packs: the profile
+  grammar, the benchmark timings an AI was judged by, and what five expert
+  profiles independently agreed to build. Corroborates the AI decode from a
+  direction that owes nothing to a disassembler. The lists do not transfer to
+  RWE — their whole method is subtraction from a catalogue — but the economic
+  doctrine and the benchmarks do.
 - `docs/TA-DEMOS.md` — the `.tad`/`.ted` demo format, and why a demo is a stream
   of *state and effects* rather than of orders: TA is owner-authoritative, not
   lockstep, so a demo cannot be fed to `GameSimulation` and playback would

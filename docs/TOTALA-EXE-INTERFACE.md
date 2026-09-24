@@ -1662,9 +1662,21 @@ the same gui worn differently.
 **The score** (`0x41DDBE`-`0x41DE11`) is
 
 ```
-score = (int)(kills * killmul) + (int)((gameTicks / 30) * timemul)
+score = (int)(kills * killmul) + (int)((gameTicks / 60) * timemul)
 if (score < 0) score = 0
 ```
+
+**That divisor was 30 here until 2026-09-24, and it was wrong.** The division
+is not written as one: `0x41DDC4` loads `0x88888889`, `0x41DDCD` multiplies
+the tick count by it and `0x41DDD9` shifts the high dword right by five, which
+is the compiler'''s idiom for an unsigned divide by a constant. The constant is
+`2^37 / 0x88888889`, and that is 59.99999998777639 -- sixty, not thirty. The
+quotient is then loaded with `fild QWORD` (the high dword at `esp+0x1c` having
+been zeroed at `0x41DDC9`), so the time term is a 64-bit integer count of
+*seconds at sixty a second* rather than of ticks at thirty. Caught by comparing
+this section against an independent reading of the same binary; see
+[`TOTALA-EXE-EXTERNAL.md`](TOTALA-EXE-EXTERNAL.md). It changes nothing in the
+shipped data, where `timemul` is 0, and everything for a map that sets it.
 
 `killmul` and `timemul` are floats read out of the **map's OTA** at `0x4365EB`
 and `0x436603` into `[gametype+0xD54]` and `[gametype+0xD58]`. Each term is

@@ -88,9 +88,18 @@ namespace rwe
         // rather than clamping, and we have to wrap with it.
         auto cone = static_cast<uint16_t>(static_cast<uint16_t>(accuracy.value - healthTerm) + 0x800u);
 
-        // Three kills buy nothing; six halve the cone, nine divide it by three.
-        // An integer divide, so it never quite closes.
-        auto veterancy = kills / 3;
+        // Twenty-three kills buy nothing; twenty-four halve the cone,
+        // thirty-six divide it by three. An integer divide, so it never quite
+        // closes.
+        //
+        // The divisor is twelve, and the site says so obliquely: it is
+        // `mov eax,0x2AAAAAAB; imul edx; sar edx,1`, which is the compiler's
+        // unsigned-divide-by-constant idiom with the product taken at bit 33
+        // rather than bit 32 -- 715827883 / 2^33 is 1/12. This was read as
+        // `/3` until 2026-09-24, which put the first effect at six kills
+        // instead of twenty-four. The count is zero-extended from a word, so
+        // it is (uint16)kills.
+        auto veterancy = static_cast<uint16_t>(kills) / 12u;
         if (veterancy > 1)
         {
             cone = static_cast<uint16_t>(cone / veterancy);
