@@ -295,11 +295,14 @@ namespace rwe
         REQUIRE_FALSE(sim.canLoadUnitIntoTransport(kbotId, transportId));
     }
 
-    TEST_CASE("a ship sends the unit it is collecting towards itself", "[transport]")
+    TEST_CASE("a ship collects a unit where it stands, and never sends it to meet it", "[transport]")
     {
-        // A ship cannot come ashore, so the unit walks down to meet it. The
-        // bug this guards against had the unit setting off in the opposite
-        // direction, then further away again each time it arrived.
+        // Ground_Pickup (0x406780) installs a move goal at the passenger's
+        // position for the transport and nothing for the passenger: the
+        // engine never moves the passenger at all (TOTALA-EXE-TRANSPORTS.md
+        // S:34). RWE used to walk the passenger out to a meeting point
+        // measured from the hull, which on a coast sent it wading into the
+        // sea after a ship still far out (issue #193).
         auto script = makeEmptyCobScript({"base"});
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayer(sim, "hauler");
@@ -314,18 +317,18 @@ namespace rwe
         auto kbotStart = sim.getUnitState(kbotId).position;
 
         sim.getUnitState(shipId).orders.push_back(LoadOrder(kbotId));
-        REQUIRE(tickUntil(sim, 60, [&] { return !sim.getUnitState(kbotId).orders.empty(); }));
 
-        auto move = std::get_if<MoveOrder>(&sim.getUnitState(kbotId).orders.front());
-        REQUIRE(move != nullptr);
+        // While the hull closes, the passenger has no order and stays put.
+        for (int i = 0; i < 40; ++i)
+        {
+            sim.tick();
+            REQUIRE(sim.getUnitState(kbotId).orders.empty());
+            REQUIRE((sim.getUnitState(kbotId).position == kbotStart));
+        }
 
-        auto shipPosition = sim.getUnitState(shipId).position;
-        auto distanceFromStart = shipPosition.distanceSquared(kbotStart);
-        auto distanceFromDestination = shipPosition.distanceSquared(move->destination);
-        // The meeting point is nearer the ship than the unit was.
-        REQUIRE(distanceFromDestination < distanceFromStart);
-        // And it is on the ship's side of the unit, not the far side.
-        REQUIRE(move->destination.x < kbotStart.x);
+        // And the hull comes to it instead: it is nearer the passenger than
+        // it started, and the passenger has still not moved.
+        REQUIRE(sim.getUnitState(shipId).position.distanceSquared(kbotStart) < SimVector(-400_ss, 0_ss, 0_ss).distanceSquared(kbotStart));
     }
 
     TEST_CASE("one unload order sets down one unit", "[transport]")

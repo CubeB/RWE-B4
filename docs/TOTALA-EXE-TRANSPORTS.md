@@ -218,6 +218,13 @@ passenger itself -- the COB script does everything (see 10), and the actual
 attachment happens when the script executes `ATTACH_UNIT`. The engine merely
 polls `target+0x86`.
 
+> **RWE, 2026-09-25 (#193):** RWE used to give the passenger a move order to
+> a meeting point measured out from the hull, which on a coast sent it wading
+> into the sea after a ship that was still far out and moving. That move was
+> RWE's own and is gone; only the transport moves, as here. A passenger far
+> inland is out of the crane's reach from the water's edge in the original
+> too, which is why getting the army to the shore is the AI's job (#194).
+
 The footprint check here and in `VTOL_Pickup` reads the *instance* copy
 `unit+0x7E`, which `0x485AAA` fills from `def+0x14A` at spawn -- the same
 number `0x489A90` checks.

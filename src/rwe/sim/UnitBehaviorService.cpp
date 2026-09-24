@@ -2435,24 +2435,15 @@ namespace rwe
         auto pickupRange = isShip ? CraneReach : 24_ss + SimScalar(static_cast<float>(std::max(footprintX, footprintZ))) * MapTerrain::HeightTileWidthInWorldUnits;
         if (flatDistanceSquared > pickupRange * pickupRange)
         {
+            // Only the transport moves. The original's Ground_Pickup
+            // (0x406780, state 4) installs a move goal at the passenger's
+            // position and nothing else: the passenger is never given an
+            // order, and the crane reaches it from wherever the hull's own
+            // path stops, which for a ship is the water's edge (TOTALA-EXE-
+            // TRANSPORTS.md S:34). RWE used to walk the passenger out to a
+            // point measured from the hull, which sent it wading into the sea
+            // after a ship that was still far out and moving (issue #193).
             navigateTo(unitInfo, loadOrder.target);
-
-            // A ship cannot come ashore, so the unit walks down to the water's
-            // edge to meet it. Its own path stops at the last point it can
-            // actually reach, which is the shore.
-            //
-            // The meeting point is measured out from the ship towards the
-            // unit, not the other way about: working from the unit's end sent
-            // it marching away from the transport, and then further away again
-            // each time it arrived.
-            if (isShip && target.orders.empty() && !target.carriedBy)
-            {
-                SimVector towardsTarget(-dx, 0_ss, -dz);
-                auto direction = towardsTarget.normalizedOr(SimVector(0_ss, 0_ss, 0_ss));
-                auto meetingPoint = unitInfo.state->position + (direction * (pickupRange * 0.75_ssf));
-                meetingPoint.y = sim->terrain.getHeightAt(meetingPoint.x, meetingPoint.z);
-                target.addOrder(createMoveOrder(meetingPoint));
-            }
             return false;
         }
 
