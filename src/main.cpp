@@ -121,6 +121,7 @@ int main(int argc, char* argv[])
                       << "                        Balanced, Rush, Turtle, Tech Rush, Easy, Medium, Hard,\n"
                       << "                        or one written in the local data folder's ai directory\n"
                       << "  --record-replay <f>   write every command to a replay file as you play\n"
+                      << "  --record-demo <f>     write a TA demo of the game to this file as you play\n"
                       << "  --replay <file>       watch a replay instead of playing\n"
                       << "  --rejoin <file>       rejoin a game in progress from its recording so far\n"
                       << "  --rejoin-tick <n>     the tick that recording ends at, and this peer resumes at\n"
@@ -207,6 +208,13 @@ int main(int argc, char* argv[])
                 }
                 gameParameters = rwe::gameParametersFromReplayHeader(replay->header);
                 gameParameters->replayFile = replayPath.string();
+                if (!args.getString("record-demo", "").empty())
+                {
+                    // The offline path to a demo (ADR-0001 D2): the replay is
+                    // re-run through the real simulation, so the recorder sees
+                    // the same game the live run would have.
+                    gameParameters->recordDemoFile = args.getString("record-demo", "");
+                }
 
                 // A replay can be run through the arena as well, which is how
                 // you check that it reproduces the game it recorded: the
@@ -272,6 +280,13 @@ int main(int argc, char* argv[])
                     // where the viewer looks; a path is left alone.
                     gameParameters->recordReplayFile =
                         rwe::replayPathForName(args.getString("record-replay", "")).string();
+                }
+                if (!args.getString("record-demo", "").empty())
+                {
+                    // The path exactly as given, unlike --record-replay: a
+                    // bare replay name lands in the folder the viewer lists,
+                    // and nothing lists demos.
+                    gameParameters->recordDemoFile = args.getString("record-demo", "");
                 }
                 auto difficulty = args.getString("ai-difficulty", "standard");
                 for (auto& c : difficulty)
