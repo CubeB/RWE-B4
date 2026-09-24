@@ -285,6 +285,61 @@ namespace rwe
         REQUIRE(reachedEast);
     }
 
+    TEST_CASE("a bomber on patrol does not loiter beside a flying enemy parked on its route", "[patrol][bomber]")
+    {
+        // The case the crossing test above leaves open (issue #70): a flyer
+        // that stays inside sight and weapon range. Before, every poll found
+        // it, pushed an attack, was refused, and asked again, and the bomber
+        // milled about beside it for as long as it stayed. The original's
+        // patrol never breaks off for it at all -- 0x43F2AA refuses the
+        // mission and the poll costs the patrol nothing -- so the bomber
+        // flies its leg as if the flyer were not there, and never bombs it.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto us = addPlayer(sim, "us");
+        auto them = addPlayer(sim, "them");
+        sim.unitDefinitions["bomber"] = makeBomberDef();
+        auto flyer = makeTargetDef();
+        flyer.canFly = true;
+        sim.unitDefinitions["flyer"] = flyer;
+        registerModel(sim);
+        defineBomb(sim);
+
+        auto west = SimVector(-800_ss, 0_ss, 0_ss);
+        auto east = SimVector(800_ss, 0_ss, 0_ss);
+        auto targetId = spawnUnit(sim, "flyer", them, SimVector(0_ss, 200_ss, 0_ss), script);
+        auto startingHitPoints = sim.getUnitState(targetId).hitPoints;
+
+        auto bomberId = launchBomber(sim, us, SimVector(west.x, 200_ss, west.z), script);
+        {
+            auto& bomber = sim.getUnitState(bomberId);
+            bomber.orders.push_back(PatrolOrder(east));
+            bomber.orders.push_back(PatrolOrder(west));
+        }
+
+        // The crossing test's bomber, sighting nothing it may attack, is
+        // past x=700 well inside its 2000-tick allowance; a bomber that
+        // stops to argue with the flyer every tick never gets there.
+        int reachedEastAt = -1;
+        for (int tick = 0; tick < 2000; ++tick)
+        {
+            sim.tick();
+            if (sim.getUnitState(bomberId).position.x > 700_ss)
+            {
+                reachedEastAt = tick;
+                break;
+            }
+        }
+
+        REQUIRE(sim.getUnitState(targetId).hitPoints == startingHitPoints);
+        REQUIRE(reachedEastAt >= 0);
+        // And it never stopped: the patrol order is still the one at the
+        // front, with no attack ever pushed in front of it.
+        const auto& bomber = sim.getUnitState(bomberId);
+        REQUIRE_FALSE(bomber.orders.empty());
+        REQUIRE(std::holds_alternative<PatrolOrder>(bomber.orders.front()));
+    }
+
     TEST_CASE("a bomber that ships on Hold Fire is given Fire At Will", "[patrol][bomber]")
     {
         // DELIBERATE DIVERGENCE. The engine's patrol engage check is Fire At
