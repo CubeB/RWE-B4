@@ -365,6 +365,39 @@ class InvariantTests(SimCheckerTestCase):
         self.write(run_dir, "game.log", result_line("decided", {0: 0, 1: 1}))
         self.assertEqual(rules(invariant.check(run_dir), "I3:"), [])
 
+    def test_commander_death_timeout_multiplayer_run_json_clean(self):
+        run_dir = self.make_dir()
+        self.copy(run_dir, "ai-arena-events.csv", "inv-commander-dead-events.csv")
+        self.write(run_dir, "game.log", result_line("timeout", {0: 0, 1: 1, 2: 1, 3: 1}))
+        self.write(run_dir, "run.json", json.dumps({
+            "schema": 1,
+            "players": [{"index": i} for i in range(4)],
+        }))
+        self.assertEqual(rules(invariant.check(run_dir), "I3:"), [])
+
+    def test_commander_death_timeout_multiplayer_events_fallback_clean(self):
+        run_dir = self.make_dir()
+        write_events(run_dir / "ai-arena-events.csv", [
+            event(0, "ARMCOM", "commander", diedTick=4000, diedSeconds=400,
+                  enemiesNear=2, nearestEnemyType="CORCOM"),
+            event(1, "COREMEX", "economy"),
+            event(2, "COREMEX", "economy"),
+        ])
+        self.write(run_dir, "game.log", result_line("timeout", {0: 0, 1: 1}))
+        self.assertEqual(rules(invariant.check(run_dir), "I3:"), [])
+
+    def test_commander_death_timeout_two_player_run_json_still_fires(self):
+        run_dir = self.make_dir()
+        self.copy(run_dir, "ai-arena-events.csv", "inv-commander-dead-events.csv")
+        self.write(run_dir, "game.log", result_line("timeout", {0: 0, 1: 1}))
+        self.write(run_dir, "run.json", json.dumps({
+            "schema": 1,
+            "players": [{"index": 0}, {"index": 1}],
+        }))
+        found = rules(invariant.check(run_dir), "I3:")
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].severity, "suspicious")
+
     def test_run_json_zero_suspicious(self):
         run_dir = self.make_dir()
         self.copy(run_dir, "run.json", "inv-run-zero.json")
