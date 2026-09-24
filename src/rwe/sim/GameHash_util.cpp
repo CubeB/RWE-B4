@@ -184,6 +184,7 @@ namespace rwe
             p.runOutDistance,
             static_cast<uint32_t>(p.phase),
             p.bombsDroppedThisPass,
+            p.releasePoint,
             p.strafingPass,
             p.breakWaypoint);
     }

@@ -620,6 +620,7 @@ namespace rwe
                     {"runOutDistance", saveSimScalar(a.runOutDistance)},
                     {"phase", saveEnum(a.phase)},
                     {"bombsDroppedThisPass", a.bombsDroppedThisPass},
+                    {"releasePoint", a.releasePoint ? saveSimVector(*a.releasePoint) : json()},
                     {"strafingPass", a.strafingPass},
                     {"breakWaypoint", saveSimVector(a.breakWaypoint)},
                     {"currentVelocity", saveSimVector(a.currentVelocity)}};
@@ -683,6 +684,10 @@ namespace rwe
             a.runOutDistance = loadSimScalar(j.at("runOutDistance"));
             a.phase = loadEnum<AirMovementStateAttackRun::Phase>(j.at("phase"));
             a.bombsDroppedThisPass = j.at("bombsDroppedThisPass").get<unsigned int>();
+            if (j.contains("releasePoint") && !j.at("releasePoint").is_null())
+            {
+                a.releasePoint = loadSimVector(j.at("releasePoint"));
+            }
             a.strafingPass = j.at("strafingPass").get<bool>();
             a.breakWaypoint = loadSimVector(j.at("breakWaypoint"));
             a.currentVelocity = loadSimVector(j.at("currentVelocity"));

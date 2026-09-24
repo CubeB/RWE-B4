@@ -1043,7 +1043,6 @@ set(TEST_FILES
     src/rwe/sim/buildangle.test.cpp
     src/rwe/sim/buildtime.test.cpp
     src/rwe/sim/aircraftbuild.test.cpp
-    src/rwe/sim/bombsight.test.cpp
     src/rwe/sim/brakerate.test.cpp
     src/rwe/sim/cob.test.cpp
     src/rwe/sim/SimAngle.test.cpp

@@ -3794,8 +3794,8 @@ namespace rwe
                     // the aircraft at release time; gravity does the rest.
                     // They take the wind from that same branch of 0x49BD10,
                     // which is why a bomber's aim is now slightly off downwind
-                    // -- predictBombImpactPoint does not model the wind, and
-                    // neither does the original's own bombsight.
+                    // -- the release trigger (bombReleaseTrigger) does not
+                    // model the wind, and neither does the original's.
                     projectile.position += currentWindVector;
                     projectile.velocity.y -= 112_ss / (30_ss * 30_ss);
                 },
