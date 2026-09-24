@@ -176,6 +176,21 @@ orders: the original is owner-authoritative, so a demo cannot be fed to the
 sim as input. Conformance data, not playback material.
 _Avoid_: recording, replay
 
+**Demo recorder**:
+The output side of a demo: an observer attached to a game RWE is simulating
+that writes every player's DirectPlay traffic as that player's TA peer would
+have sent it. A wire tap and not a seat, and a pure observer — never hashed,
+saved, dumped or read back.
+_Avoid_: replay writer (`ReplayWriter` records a seed and a command stream,
+and only RWE can play it), capture
+
+**Demo output**:
+A `.tad` RWE wrote rather than recorded from TA. Readable and mineable by the
+same tools as a real one, with three recorded divergences: the `0x1a` ids are
+synthetic, the status-message body is zero beyond the DirectPlay id, and the
+`0x10` echo is absent until the closeout work.
+_Avoid_: recording, capture
+
 **Corpus**:
 The set of real demos mined together — thirteen games today. Evidence is
 counted over it, so "the corpus found" is a claim about all of them, not
