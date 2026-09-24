@@ -58,9 +58,13 @@ player's TA peer would have sent. It is a wire tap of every sender and not a
 recording of one seat, because that is what a real capture contains -- the
 settle fan-out alone is the corpus's `numPlayers - 1` identical `0x28` copies.
 A replay is a different thing and stays RWE's own: seed plus a command stream,
-which only RWE can play. `rwe --record-demo <file>` records a live game, and
-`rwe --replay <file> --record-demo <out>` re-runs one through the real
-simulation, which is how the writer is debugged.
+which only RWE can play. `rwe --map "Coast To Coast" --record-demo <file>`
+records a live game, `ai_arena --record-demo <file>` records a headless
+measurement run, and `rwe --replay <file> --record-demo <out>` re-runs a
+recording through the real simulation, which is how the writer is debugged.
+The file goes exactly where it is named, with no folder of its own: a bare
+replay name lands in the Replays folder because the viewer lists it, and
+nothing lists demos.
 
 The target is the first two rungs of the fidelity ladder. **L1** is parseable:
 `tad_probe --file` walks it clean, the status checksums verify and nothing is

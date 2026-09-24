@@ -62,6 +62,16 @@ export interface RweArgs {
    */
   recordReplay?: string;
 
+  /**
+   * Record the game as a TA Demo Recorder compatible `.tad` at this path.
+   *
+   * Not set for lobby games the way recordReplay is: a replay is what makes
+   * a game rejoitable, and a demo is state and effects for the conformance
+   * tools instead, so it stays off unless a caller asks for it. The path is
+   * passed through exactly as given.
+   */
+  recordDemo?: string;
+
   /** A recording of the game so far, for joining one already in progress. */
   rejoinFile?: string;
 
@@ -139,6 +149,9 @@ function serializeRweArgs(args: RweArgs): string[] {
   }
   if (args.recordReplay !== undefined) {
     out.push("--record-replay", args.recordReplay);
+  }
+  if (args.recordDemo !== undefined) {
+    out.push("--record-demo", args.recordDemo);
   }
   if (args.rejoinFile !== undefined && args.rejoinTick !== undefined) {
     out.push("--rejoin", args.rejoinFile);
