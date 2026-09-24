@@ -1088,6 +1088,7 @@ set(TEST_FILES
     src/rwe/game/noshadow.test.cpp
     src/rwe/sim/missile.test.cpp
     src/rwe/sim/aircraft.test.cpp
+    src/rwe/sim/groundtilt.test.cpp
     src/rwe/sim/selfdestruct.test.cpp
     src/rwe/sim/damage.test.cpp
     src/rwe/sim/stockpile.test.cpp

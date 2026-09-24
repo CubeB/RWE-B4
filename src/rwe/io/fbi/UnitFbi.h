@@ -222,6 +222,16 @@ namespace rwe
         float bankScale;
 
         /**
+         * How far an aircraft pitches, off the same lateral lean as the bank
+         * (TOTALA-EXE-MOVEMENT.md S:13). Zero unless the FBI says otherwise,
+         * and every shipped unit leaves it at zero.
+         */
+        float pitchScale;
+
+        /** A ground unit that stays vertical on a slope instead of tilting to it. */
+        bool upright;
+
+        /**
          * The two speed thresholds that pick which of the MoveRate1 / MoveRate2
          * / MoveRate3 script callbacks fires while the unit is moving. Both
          * default in the original to twice MaxVelocity (0x42C1E6, 0x42C206), a

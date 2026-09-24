@@ -1593,6 +1593,29 @@ namespace rwe
             });
     }
 
+    void UnitBehaviorService::updateGroundTilt(UnitInfo unitInfo, UnitPhysicsInfoGround& physics)
+    {
+        // The original's per-tick placement (0x48A870): an `upright` unit
+        // stays vertical off one sample under its centre (0x48A8BF), anything
+        // else tilts to the slope under four rotated footprint corners
+        // (0x48A490 writes unit+0x68 and unit+0x64). Every tick, moving or
+        // not, since the ground can change under a standing unit.
+        physics.previousPitch = physics.pitch;
+        physics.previousRoll = physics.roll;
+        if (unitInfo.definition->upright)
+        {
+            physics.pitch = 0_ss;
+            physics.roll = 0_ss;
+            return;
+        }
+        auto [footprintX, footprintZ] = sim->getFootprintXZ(unitInfo.definition->movementCollisionInfo);
+        auto halfWidth = SimScalar(static_cast<float>(footprintX) * 8.0f);
+        auto halfLength = SimScalar(static_cast<float>(footprintZ) * 8.0f);
+        auto tilt = computeGroundTilt(sim->terrain, unitInfo.state->position, unitInfo.state->rotation, halfLength, halfWidth, unitInfo.definition->floater || unitInfo.definition->canHover);
+        physics.pitch = tilt.pitch;
+        physics.roll = tilt.roll;
+    }
+
     void UnitBehaviorService::updateGroundUnitPosition(UnitInfo unitInfo, const UnitPhysicsInfoGround& physics)
     {
         auto direction = UnitState::toDirection(unitInfo.state->rotation);
@@ -1651,8 +1674,9 @@ namespace rwe
 
         match(
             unitInfo.state->physics,
-            [&](const UnitPhysicsInfoGround& p) {
+            [&](UnitPhysicsInfoGround& p) {
                 updateGroundUnitPosition(unitInfo, p);
+                updateGroundTilt(unitInfo, p);
             },
             [&](const UnitPhysicsInfoAir& p) {
                 match(
