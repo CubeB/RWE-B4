@@ -1,9 +1,9 @@
 #include "Screenshot.h"
 
-#include <GL/glew.h>
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <glad/gl.h>
 #include <rwe/io/pcx/pcx.h>
 
 namespace rwe

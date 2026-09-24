@@ -3,28 +3,28 @@
 // the scenes deliver them, printing which gadget takes each event and what
 // message comes out. Diagnoses layout/dispatch faults without launching the
 // game.
-#include <GL/glew.h>
+#include <cstdio>
+#include <glad/gl.h>
 #include <iostream>
-#include <rwe/render/GraphicsContext.h>
-#include <rwe/render/OpenGlVersion.h>
-#include <rwe/util/Result.h>
+#include <rwe/AudioService.h>
+#include <rwe/ColorPalette.h>
+#include <rwe/PathMapping.h>
+#include <rwe/ShaderService.h>
+#include <rwe/TextureService.h>
+#include <rwe/UiRenderService.h>
+#include <rwe/Viewport.h>
 #include <rwe/events.h>
 #include <rwe/io/gui/gui.h>
 #include <rwe/io/tdf/tdf.h>
+#include <rwe/render/GraphicsContext.h>
+#include <rwe/render/OpenGlVersion.h>
 #include <rwe/rwe_time.h>
 #include <rwe/sdl/SdlContextManager.h>
-#include <rwe/TextureService.h>
-#include <rwe/AudioService.h>
-#include <rwe/PathMapping.h>
-#include <rwe/ShaderService.h>
-#include <rwe/UiRenderService.h>
-#include <rwe/Viewport.h>
-#include <cstdio>
 #include <rwe/ui/UiFactory.h>
 #include <rwe/ui/UiPanel.h>
 #include <rwe/ui/UiStagedButton.h>
+#include <rwe/util/Result.h>
 #include <rwe/vfs/CompositeVirtualFileSystem.h>
-#include <rwe/ColorPalette.h>
 
 using namespace rwe;
 
@@ -33,11 +33,15 @@ namespace
     rwe::Result<rwe::SdlContext::GlContextUniquePtr, const char*> makeGl(rwe::SdlContext* sdlContext, SDL_Window* window, const rwe::OpenGlVersionInfo& v)
     {
         using namespace rwe;
-        if (!sdlContext->glSetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, v.version.majorVersion)) return Err(SDL_GetError());
-        if (!sdlContext->glSetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, v.version.minorVersion)) return Err(SDL_GetError());
-        if (!sdlContext->glSetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, getSdlProfileMask(v.profile))) return Err(SDL_GetError());
+        if (!sdlContext->glSetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, v.version.majorVersion))
+            return Err(SDL_GetError());
+        if (!sdlContext->glSetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, v.version.minorVersion))
+            return Err(SDL_GetError());
+        if (!sdlContext->glSetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, getSdlProfileMask(v.profile)))
+            return Err(SDL_GetError());
         auto glContext = sdlContext->glCreateContext(window);
-        if (glContext == nullptr) return Err(SDL_GetError());
+        if (glContext == nullptr)
+            return Err(SDL_GetError());
         return Ok(std::move(glContext));
     }
 }
@@ -114,8 +118,10 @@ int main(int argc, char* argv[])
             throw std::runtime_error("no GL context");
         }
         auto glContext = std::move(*glContextResult);
-        glewExperimental = GL_TRUE;
-        glewInit();
+        if (!gladLoadGL(reinterpret_cast<GLADloadfunc>(SDL_GL_GetProcAddress)))
+        {
+            throw std::runtime_error("Failed to initialize OpenGL function loader");
+        }
 
         // Everything that is not `--panel NAME` is a path to add to the VFS,
         // which is what this took before the option existed.

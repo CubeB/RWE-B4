@@ -99,8 +99,6 @@ if(NOT MSVC)
     set(CMAKE_CXX_STANDARD 20)
 endif()
 
-find_package(OpenGL REQUIRED)
-
 if(MSVC)
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         set(Protobuf_LIBRARY "${CMAKE_SOURCE_DIR}/libs/_msvc/protobuf-3.21.12/lib/libprotobufd.lib")
@@ -109,10 +107,6 @@ if(MSVC)
     endif()
     set(Protobuf_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/libs/_msvc/protobuf-3.21.12/include")
     set(Protobuf_PROTOC_EXECUTABLE "${CMAKE_SOURCE_DIR}/libs/_msvc/protobuf-3.21.12/bin/protoc.exe")
-
-    set(GLEW_DLL "${CMAKE_SOURCE_DIR}/libs/_msvc/glew-2.1.0/bin/Release/x64/glew32.dll")
-    set(GLEW_LIBRARIES "${CMAKE_SOURCE_DIR}/libs/_msvc/glew-2.1.0/lib/Release/x64/glew32.lib")
-    set(GLEW_INCLUDE_DIRS "libs/_msvc/glew-2.1.0/include")
 
     # SDL3 and SDL3_mixer built from submodules above
 
@@ -138,9 +132,6 @@ else()
         set(Protobuf_LIBRARY protobuf::libprotobuf)
         set(Protobuf_INCLUDE_DIR ${Protobuf_INCLUDE_DIRS})
     endif()
-
-    find_package(GLEW REQUIRED)
-    find_windows_dll(GLEW_DLL "glew32.dll")
 
     # SDL3 and SDL3_mixer built from submodules above
 
@@ -714,6 +705,9 @@ else()
     add_definitions(-DRWE_PLATFORM_LINUX)
 endif()
 
+add_library(glad STATIC libs/glad/src/gl.c)
+target_include_directories(glad PUBLIC ${CMAKE_SOURCE_DIR}/libs/glad/include)
+
 add_library(librwe STATIC ${SOURCE_FILES} ${PROTO_SOURCE_FILES} ${PROTO_HEADER_FILES})
 set_target_properties(librwe PROPERTIES PREFIX "")
 if(MSVC)
@@ -796,20 +790,7 @@ target_precompile_headers(librwe PRIVATE
     <vector>
 )
 
-target_link_libraries(librwe OpenGL::GL)
-
-target_copy_file(librwe ${GLEW_DLL})
-if(MSVC)
-    target_link_libraries(librwe ${GLEW_LIBRARIES})
-    target_include_directories(librwe PUBLIC ${GLEW_INCLUDE_DIRS})
-elseif(TARGET GLEW::glew)
-    target_link_libraries(librwe GLEW::glew)
-elseif(TARGET GLEW::GLEW)
-    target_link_libraries(librwe GLEW::GLEW)
-else()
-    target_link_libraries(librwe ${GLEW_LIBRARIES})
-    target_include_directories(librwe PUBLIC ${GLEW_INCLUDE_DIRS})
-endif()
+target_link_libraries(librwe glad)
 
 target_link_libraries(librwe SDL3::SDL3-static)
 target_link_libraries(librwe SDL3_mixer::SDL3_mixer)

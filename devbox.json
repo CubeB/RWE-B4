@@ -3,7 +3,6 @@
   "packages": [
     "cmake",
     "protobuf",
-    "glew",
     "libpng",
     "zlib",
     "pkg-config",

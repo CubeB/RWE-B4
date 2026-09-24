@@ -19,7 +19,6 @@ pacman -Sq --needed --noconfirm \
     mingw-w64-x86_64-SDL2 \
     mingw-w64-x86_64-SDL2_image \
     mingw-w64-x86_64-SDL2_mixer \
-    mingw-w64-x86_64-glew \
     mingw-w64-x86_64-smpeg2 \
     mingw-w64-x86_64-zlib \
     mingw-w64-x86_64-libpng \

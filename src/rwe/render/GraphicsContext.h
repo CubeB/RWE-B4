@@ -1,14 +1,14 @@
 #pragma once
 
-#include <GL/glew.h>
 #include <SDL3/SDL.h>
+#include <glad/gl.h>
 #include <memory>
+#include <optional>
 #include <rwe/ColorPalette.h>
 #include <rwe/Mesh.h>
 #include <rwe/geometry/CollisionMesh.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/math/Vector3f.h>
-#include <optional>
 #include <rwe/render/FrameBufferHandle.h>
 #include <rwe/render/GlMesh.h>
 #include <rwe/render/RenderBufferHandle.h>

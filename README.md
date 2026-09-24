@@ -199,7 +199,6 @@ Install [MSYS2](https://www.msys2.org/), then in the terminal it opens:
 pacman -S git make unzip autoconf automake libtool \
   mingw-w64-x86_64-cmake \
   mingw-w64-x86_64-toolchain \
-  mingw-w64-x86_64-glew \
   mingw-w64-x86_64-zlib \
   mingw-w64-x86_64-libpng
 ```
@@ -289,7 +288,8 @@ LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH ./rwe
 ```bash
 sudo apt-get install -y \
   gcc-14 g++-14 cmake \
-  libglew-dev zlib1g-dev libpng-dev \
+  libgl-dev libglx-dev libegl-dev libx11-dev \
+  zlib1g-dev libpng-dev \
   libasound2-dev libpulse-dev libpipewire-0.3-dev \
   libwayland-dev wayland-protocols libxkbcommon-dev libdecor-0-dev
 
