@@ -122,6 +122,18 @@ five of one that another unit is standing on. At a hundred units in `path_bench`
 RWE keeps the name, the folder, the numbering and the format family and widens
 the pixels. The cursor is left out.
 
+**A transport's 1.0-era `transportmaxunits` is read as well as
+`transportcapacity`.** The v3.1 patch renamed the key and dropped the old one
+from the executable, so a transport whose only capacity key is the old one
+parses as zero and can never load. RWE takes the old key when the new one is
+absent and says so in the log, because a data set patched only in the executable
+is a real install and a silent one-seat ferry is worse than a warning. A patched
+install is unaffected: the `.gp3` is searched before the `.hpi`, and the new key
+wins when both are present. This restores the 1.0 number rather than the 3.1 one
+for units the patch changed, and a transport with neither key still gets one
+unit rather than being unable to load — that second difference predates this
+change.
+
 ---
 
 ## Changed: because the simulation has to stay deterministic

@@ -142,7 +142,10 @@ Three corrections to the folk numbers the task brief carried:
   rule does the limiting.)
 
 A transport with no `transportcapacity` key parses as capacity 0 and can never
-be ordered to load (0 < 0 fails) -- mods beware.
+be ordered to load (0 < 0 fails) -- mods beware. **RWE deliberately differs
+here**: it reads the dead 1.0 key as a fallback when the current one is absent,
+and warns, so an unpatched data set still carries its units; see
+TOTALA-EXE.md S:88.
 
 ---
 

@@ -166,9 +166,9 @@ namespace rwe
 
         bool canFly;
         /** How many units it can carry; 0 unless it is a transport. */
-        unsigned int transportCapacity;
+        unsigned int transportCapacity{0};
         /** Largest footprint it can carry (TA: the unit's footprint must not exceed this). */
-        unsigned int transportSize;
+        unsigned int transportSize{0};
 
         /**
          * Refuses to be picked up by anything. The first thing the original's

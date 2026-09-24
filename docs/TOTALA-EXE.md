@@ -456,6 +456,24 @@ quirks of the original that RWE reproduces although they look like defects.
   house rule kept for want of evidence rather than in defiance of it: the test
   lives once, in `canLoad` in `src/rwe/game/DefaultAction.cpp`, so that
   removing it later is one edit rather than a hunt.
+- **A transport's 1.0-era `transportmaxunits` is read as a fallback for
+  `transportcapacity`.** The 3.1 string table contains no `transportmaxunits`
+  at all -- it was the 1.0 key, and the patch renamed it in the FBIs
+  (`TOTALA-EXE-DATA.md` §30). A transport silent about `transportcapacity`
+  therefore parses as capacity 0 and can never be ordered to load (§32). RWE
+  now takes the old key when the new one is absent and logs a warning naming
+  the unit and the unpatched data, so an install patched only in the executable
+  keeps working instead of silently turning every sea transport into a one-seat
+  ferry. Two things to be honest about: the fallback restores the 1.0 *number*,
+  so a unit whose capacity the patch changed gets the old value -- the Bear and
+  Turtle were 6 and are 5 -- and a transport with neither key still gets a
+  default capacity rather than the original's refusal, which was already RWE's
+  answer before this change and is a second, smaller divergence this entry now
+  covers.
+  On a patched install nothing moves: `rev31.gp3`'s `transportcapacity` wins
+  both because `CompositeVirtualFileSystem` searches a `.gp3` before a `.hpi`
+  and because the parser prefers the new key when both are present. Tested in
+  `src/rwe/io/fbi/io.test.cpp`.
 - **A resurrect shows the reclaim cursor.** The original has `cursorrevive`,
   id 10, for it (§103). The base game's `CURSORS.GAF` does not contain that
   sequence — only `rev31.gp3`'s does — and RWE has never loaded it, so the

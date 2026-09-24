@@ -1,5 +1,6 @@
 #include "io.h"
 #include <rwe/util/OpaqueId_io.h>
+#include <rwe/util/SimpleLogger.h>
 
 namespace rwe
 {
@@ -112,8 +113,34 @@ namespace rwe
         tdf.readOrDefault("HealTime", u.healTime);
 
         tdf.readOrDefault("CanFly", u.canFly);
-        tdf.readOrDefault("TransportCapacity", u.transportCapacity);
+
+        // The 1.0 data spells a transport's capacity `transportmaxunits`; the
+        // v3.1 patch renamed the key to `transportcapacity` and dropped the old
+        // string from the exe, so the original silently ignores it
+        // (TOTALA-EXE-DATA.md S:30; TOTALA-EXE-TRANSPORTS.md S:32). Reading the
+        // old key as a fallback is RWE being kinder than the original -- see
+        // TOTALA-EXE.md S:88 -- and is what keeps an install whose data was
+        // never patched from turning every sea transport into a one-seat ferry.
+        auto capacityValue = tdf.extract<unsigned int>("TransportCapacity");
+        auto legacyCapacityValue = tdf.extract<unsigned int>("TransportMaxUnits");
+        if (capacityValue)
+        {
+            u.transportCapacity = *capacityValue;
+        }
+        else if (legacyCapacityValue)
+        {
+            u.transportCapacity = *legacyCapacityValue;
+        }
+
         tdf.readOrDefault("TransportSize", u.transportSize);
+        if (!capacityValue && u.canLoad && u.transportSize > 0)
+        {
+            LOG_WARN << "Unit " << u.unitName << " names CanLoad and TransportSize but no TransportCapacity"
+                     << (legacyCapacityValue
+                                ? " (using the 1.0-era TransportMaxUnits=" + std::to_string(*legacyCapacityValue) + ")"
+                                : " (it will carry one unit)")
+                     << "; its data is pre-3.1 and unpatched, so install rev31.gp3 to restore its real capacity";
+        }
         tdf.readOrDefault("CantBeTransported", u.cantBeTransported);
         tdf.readOrDefault("IsAirBase", u.isAirBase);
         tdf.readOrDefault("NoShadow", u.noShadow);

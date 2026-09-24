@@ -194,7 +194,12 @@ namespace rwe
 
         bool canFly;
 
-        /** Units it can carry at once; 0 for anything that is not a transport. */
+        /**
+         * Units it can carry at once; 0 for anything that is not a transport.
+         * The FBI reader takes it from TransportCapacity, or from the 1.0-era
+         * TransportMaxUnits when that key is absent, which is a deliberate
+         * divergence recorded in TOTALA-EXE.md S:88.
+         */
         unsigned int transportCapacity{0};
         /** Largest footprint (in tiles) it can carry; 0 means no limit. */
         unsigned int transportSize{0};
