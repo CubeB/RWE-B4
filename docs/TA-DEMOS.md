@@ -71,7 +71,9 @@ The target is the first two rungs of the fidelity ladder. **L1** is parseable:
 unknown. **L2** is mineable: the four oracles score RWE's output against the
 same TA-derived models they score the corpus with. **L3** -- every subpacket a
 real recording of that game would contain, and a TA client able to load it and
-watch -- is roadmap.
+watch -- is roadmap. `tools/demo-selfcheck.py` runs L1 and L2 over a fresh
+arena recording and reports which oracle cells resolved; see "The tools, mode
+by mode".
 
 What is written faithfully:
 
@@ -2890,6 +2892,67 @@ lateness a stall should fix to a residue. Exits non-zero on a miss, on a
 named exception moving, or on nothing to score. It needs the episodes with
 `--all` and `--emit-resources` beside them; `docs/TA-DEMOS.md`, "What a
 stalled settle costs a factory".
+
+### `tools/demo-selfcheck.py`
+
+points the whole set at RWE's own output: `ai_arena --record-demo` writes a
+demo of a game RWE has just played, and this script runs `tad_probe` and
+`tad_episodes --unit-state` over it and then the three reference scorers, so
+the recorder is checked by the same machinery that checks the TA corpus.
+
+    tools/demo-selfcheck.py
+    tools/demo-selfcheck.py --seconds 300 --seed 3
+    tools/demo-selfcheck.py --demo game.tad --units /path/to/data-set --keep
+
+It records 900 seconds of "The Cold Place" with two ARM computer players on
+seed 7 (`--map`, `--seconds`, `--seed`, `--player`, `--ai-arena` and
+`--watchdog` change that). The default map is the one whose AI game puts enough
+shots on the wire for the weapon oracle to score -- a 900-second "Coast To
+Coast" game yields a few hundred and no cell meets `--min-n` -- so that the
+default run exercises the check rather than reporting it not yet scoreable. It
+writes everything into `$TMPDIR/rwe-demo-selfcheck`
+(`--work-dir`; `--keep` stops it clearing the directory first), and `--demo`
+checks an existing file instead of recording one.
+
+**The units directory is the non-obvious part.** The scorers name a `0x09`'s
+type index from the 1-based sorted `units/*.FBI` order of the data set the
+game was played on, and the recorder writes that same order, so both sides
+must be built from the same data. Without `--units` the script derives one
+from `--data-path` (default `~/.rwe/Data`) by extracting every archive with
+`hpi_test extract-all` in the engine's own priority order -- `.hpi`, then
+`.ufo`, then `.ccx`, then `.gpf`, then `.gp3`, each tier name-sorted -- and
+overwriting earlier archives with later ones **case-insensitively** into one
+tree. The case folding is what the VFS does and a raw extract does not: the
+shipped data set's archives carry both `units/` and `UNITS/`, so a plain
+extract-all gives 435 `*.FBI` files across the two directories for the 278
+types the VFS sees and the demo's own `0x1a` table declares. The merged tree
+carries the `weapons/` TDFs too,
+because `tools/tad-weapontime.py` reads weapon definitions through the same
+`--units` path. The `*.FBI` count is then checked against the demo's `0x1a`
+count, and a disagreement stops the run with both numbers: `tad_episodes`
+only warns, skips the `0x2c` pass and drops the demo from the build cells, so
+a mismatch would quietly score the wrong thing.
+
+**What the summary means.** `tad_probe` must be clean (no unknown code, no
+truncated walk, no desync, every status checksum verified) and `--unit-state`
+must decode every `0x2c`. Each oracle is then `PASS`, `NOT YET SCOREABLE` or
+`FAILED`. Not yet scoreable means the demo does not carry the records the
+scorer needs (M3 writes only `0x09`/`0x12`/`0x2c`; M4 adds shots, damage,
+deaths and `0x28`) or that no cell met its floor -- the scorers exit non-zero
+for that too, so the message is read and not just the status -- and only a
+scored cell that disagrees sets the exit status. The storage half has no
+script at all: its cases live in `rwe_test`'s `[economy][corpus]` over
+`src/rwe/sim/tad_economy_episodes.h`, so the summary says so rather than
+inventing a fifth scorer.
+
+**A factory's build cells read two ticks late on M3's output**, and the
+self-check reports that as a scored disagreement rather than hiding it. RWE
+lays the nanoframe down two ticks before the first lathe credit -- the
+creation request is serviced later in the tick and the next tick starts the
+`StartBuilding` thread and returns without lathing -- where TA's first
+increment lands on the `0x09`'s own tick. That is the engine's pipeline
+latency, not the recorder; `src/rwe/sim/buildtime.test.cpp` says why the
+corpus fixture measures the accumulator rather than the pipeline.
 
 ## What this is not
 
