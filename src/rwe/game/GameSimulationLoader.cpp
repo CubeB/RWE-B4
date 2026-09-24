@@ -439,6 +439,10 @@ namespace rwe
                     std::string fbiString(bytes->data(), bytes->size());
                     auto fbi = parseUnitFbi(parseTdfFromString(fbiString));
 
+                    if (auto warning = transportCapacityWarning(fbi))
+                    {
+                        LOG_WARN << *warning;
+                    }
                     auto unitDefinition = parseUnitDefinition(fbi, dataMaps.movementClassDatabase);
                     dataMaps.unitDefinitions.insert({toUpper(fbi.unitName), std::move(unitDefinition)});
 

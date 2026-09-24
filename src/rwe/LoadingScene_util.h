@@ -53,6 +53,23 @@ namespace rwe
 
     UnitDefinition parseUnitDefinition(const UnitFbi& fbi, MovementClassDatabase& movementClassDatabase);
 
+    /**
+     * How many units a transport carries, from whichever key its FBI has.
+     * TransportCapacity when it is there; the 1.0 key TransportMaxUnits when
+     * only that is (TOTALA-EXE.md §88); and for a transport that names
+     * neither, six at sea and one in the air. 0 for anything that is not a
+     * transport.
+     */
+    unsigned int transportCapacityFromFbi(const UnitFbi& fbi);
+
+    /**
+     * What to tell the player about a transport whose capacity did not come
+     * from the key the 3.1 exe reads, or nothing. Unpatched data is the
+     * usual cause, and it is otherwise silent: the transport loads, just not
+     * the number the patched game would load.
+     */
+    std::optional<std::string> transportCapacityWarning(const UnitFbi& fbi);
+
     WeaponMediaInfo parseWeaponMediaInfo(const std::vector<Color>& palette, const std::vector<Color>& guiPalette, const WeaponTdf& tdf);
 
     FeatureDefinitionId getFeatureId(FeatureDefinitionId& nextId, const std::unordered_map<std::string, FeatureDefinitionId>& featureNameIndex, std::deque<std::string>& openQueue, std::unordered_map<std::string, FeatureDefinitionId>& openSet, const std::string& featureName);
