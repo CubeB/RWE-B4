@@ -2625,9 +2625,16 @@ namespace rwe
     {
         auto& unit = getUnitState(unitId);
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
-        auto footprintRect = computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
+        emitBuggerOff(computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo));
+    }
+
+    void GameSimulation::emitBuggerOff(const DiscreteRect& footprintRect)
+    {
         auto footprintRegion = occupiedGrid.tryToRegion(footprintRect);
-        assert(!!footprintRegion);
+        if (!footprintRegion)
+        {
+            return;
+        }
 
         occupiedGrid.forEach(*footprintRegion, [&](const auto& e) {
             if (e.mobileUnitId)
@@ -4586,6 +4593,11 @@ namespace rwe
                     // dropping the order on the spot with only a log line --
                     // which is what this did, and why a builder whose site was
                     // briefly straddled by a passing unit silently gave up.
+                    // The site is the new unit's footprint, not the builder's
+                    // own: a mobile unit parked where the frame is to go is
+                    // outside the builder's cells and would never hear about
+                    // it otherwise.
+                    emitBuggerOff(computeFootprintRegion(s->position, newUnitDefinition.movementCollisionInfo));
                     s->status = retryBlockedSite(unitId, std::get<UnitCreationStatusPending>(s->status));
                     continue;
                 }
@@ -4619,7 +4631,12 @@ namespace rwe
                     // A factory had it worst of all: this set Failed without
                     // even a log line, and handleBuild dropped straight back
                     // into Building, which re-requested the same blocked spot
-                    // on the next tick and every tick after it.
+                    // on the next tick and every tick after it. It is also the
+                    // case the sweep exists for: a hull left standing on the
+                    // pad is nobody's order, so without this the yard gives up
+                    // on a queue entry every time and the blocker never moves.
+                    const auto& blockedDefinition = unitDefinitions.at(s->unitType);
+                    emitBuggerOff(computeFootprintRegion(s->position, blockedDefinition.movementCollisionInfo));
                     s->status = retryBlockedSite(unitId, std::get<UnitCreationStatusPending>(s->status));
                     continue;
                 }

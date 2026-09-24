@@ -50,6 +50,45 @@ namespace rwe
             return d;
         }
 
+        UnitDefinition makeFactoryDef()
+        {
+            UnitDefinition d{};
+            d.objectName = "model";
+            d.isMobile = false;
+            d.canMove = false;
+            d.builder = true;
+            d.workerTimePerTick = 10;
+            d.maxHitPoints = 1000;
+            d.buildTime = 0u;
+            d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{6u, 6u, 255u, 255u, 0u, 0u};
+            d.yardMap = Grid<YardMapCell>(6, 6, YardMapCell::GroundPassable);
+            return d;
+        }
+
+        UnitDefinition makeMobileDef(unsigned int buildTime)
+        {
+            UnitDefinition d{};
+            d.objectName = "model";
+            d.isMobile = true;
+            d.canMove = true;
+            d.maxVelocity = 6_ss;
+            d.acceleration = 1_ss;
+            d.brakeRate = 1_ss;
+            d.turnRate = 1000_ss;
+            d.maxHitPoints = 100;
+            d.buildTime = buildTime;
+            d.buildCostMetal = Metal(1.0f);
+            d.buildCostEnergy = Energy(1.0f);
+            d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
+            return d;
+        }
+
+        void registerTestModel(GameSimulation& sim)
+        {
+            std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+            sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(pieces));
+        }
+
         template <typename Event>
         int countEvents(const GameSimulation& sim)
         {
@@ -281,5 +320,78 @@ namespace rwe
         REQUIRE(all[1].unitId == builderId);
         REQUIRE(all[1].message == "Target area was blocked");
         REQUIRE(sim.getUnitState(builderId).orders.empty());
+    }
+
+    TEST_CASE("a factory tells a unit on its pad to move, and production continues", "[unitnotifications]")
+    {
+        // The original's BUGGER_OFF is write-only -- the only reader of bit 3
+        // of unit+0x10f is the COB `get` (0x480A96) -- and its site check
+        // (0x47DB70) only waits, so a friendly unit parked on a spawn point
+        // costs it ten tries and its queue entry. RWE tells the blocker to
+        // leave instead, which is a deliberate divergence (TOTALA-EXE.md 112).
+        // The sweep is over the site the yard is trying to use, not the yard's
+        // own footprint: a hull standing at the pad is outside the building's
+        // cells and would never hear about it otherwise.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto player = addWellStockedPlayer(sim, "CORE");
+        registerTestModel(sim);
+
+        sim.unitDefinitions["FACT"] = makeFactoryDef();
+        sim.unitScriptDefinitions["FACT"] = *script;
+        sim.unitDefinitions["TANK"] = makeMobileDef(100u);
+        sim.unitScriptDefinitions["TANK"] = *script;
+        sim.unitDefinitions["BLOCKER"] = makeMobileDef(0u);
+        sim.unitScriptDefinitions["BLOCKER"] = *script;
+
+        auto pad = SimVector(600_ss, 0_ss, 600_ss);
+        auto factoryId = addUnitOfType(sim, "FACT", player, pad, script);
+        sim.getUnitState(factoryId).inBuildStance = true;
+        sim.getUnitState(factoryId).buildQueue.emplace_back("TANK", 1);
+
+        // The yard starts -- one tick takes it from Idle to Building -- and
+        // only then does a friendly unit park exactly on its pad. Spawned the
+        // real way, so it stamps the occupancy grid the site check reads.
+        sim.tick();
+        auto blockerId = sim.trySpawnUnit("BLOCKER", player, pad, std::nullopt).value();
+
+        // The yard asks for the frame, finds the pad occupied, and tells the
+        // blocker to move off it. That order is the whole of the fix.
+        bool told = false;
+        for (int i = 0; i < 10 && !told; ++i)
+        {
+            sim.tick();
+            for (const auto& order : sim.getUnitState(blockerId).orders)
+            {
+                told = told || std::holds_alternative<BuggerOffOrder>(order);
+            }
+        }
+        REQUIRE(told);
+
+        // And it walks off: the frame goes down, without the yard ever giving
+        // the queue entry up.
+        auto productExists = [&]() {
+            for (const auto& entry : sim.units)
+            {
+                if (entry.second.unitType == "TANK")
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        bool produced = false;
+        for (int i = 0; i < 600 && !produced; ++i)
+        {
+            sim.tick();
+            produced = productExists();
+        }
+        REQUIRE(produced);
+
+        for (const auto& e : eventsOf<UnitCannotComplyEvent>(sim))
+        {
+            REQUIRE(e.message != "Target area was blocked");
+        }
     }
 }

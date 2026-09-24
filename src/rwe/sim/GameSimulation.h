@@ -1218,6 +1218,8 @@ namespace rwe
 
         void emitBuggerOff(const UnitId& unitId);
 
+        void emitBuggerOff(const DiscreteRect& footprintRect);
+
         void tellToBuggerOff(const UnitId& unitId, const DiscreteRect& rect);
 
         GameHash computeHash() const;

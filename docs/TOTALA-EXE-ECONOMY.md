@@ -2174,3 +2174,55 @@ Checked against `GameSimulation::updateResources`, `settleResourcePool`,
 | 10 | The computer player's production handicap. | §23, not ported. | Tuning, not compatibility. |
 
 Nothing in the table was changed. Row 7 is the one worth a decision.
+
+## 112. `BUGGER_OFF` is write-only, and a blocked site only waits
+
+The factory scripts all `set BUGGER_OFF`, in the same breath as `YARD_OPEN`:
+eighteen of the 157 scripts in `totala1.hpi` do, four times apiece -- every
+land lab, vehicle plant, aircraft plant and shipyard, plus the moho mine and
+the solar collector. It is the community's "get off the pad" command. The
+binary does not act on it.
+
+`set BUGGER_OFF` reaches the COB set callback `0x480B20`, whose dispatch is
+the 20-byte table at `0x480C18` into the seven-entry jump table at `0x480BFC`.
+Port 19's byte is 4, which selects handler `0x480BBE`:
+
+```
+480bbe  mov  dl,[esp+0xc]      ; the value
+480bc2  mov  al,[esi+0x10f]    ; the unit's flag byte
+480bc8  and  dl,1
+480bcb  and  al,0xf7           ; clear bit 3
+480bd0  shl  dl,3
+480bd2  or   byte [esi+0xba],4 ; the "a script set something" event bit
+480bd9  mov  [esi+0x10f],dl    ; write bit 3
+```
+
+That is the whole of it. A census of every access to `unit+0x10f` in the
+image finds **one reader of bit 3**: `0x480A96`, the COB `get BUGGER_OFF` arm
+of the getter dispatcher `0x480770` (`shr eax,3` / `and eax,1`). Every other
+reader masks bits 0-2: `0x4807EF` (INBUILDSTANCE, bit 0), `0x4807FF` (BUSY,
+bit 1), `0x480A83` (YARD_OPEN, bit 2), the yard tests at `0x47C804` and
+`0x47CD88`, and `0x48768E`. The unit constructor clears the low nibble
+(`0x485B3E`, `and al,0xf0`), and the state serialiser round-trips bits 0-3
+(`0x4872DF`-`0x487346`) for save and network only. Nothing in the engine moves
+a unit because of the flag. The Nanolathe project's independent census reached
+the same conclusion (`TOTALA-EXE-EXTERNAL.md`, "COB"), and the byte-level
+census here confirms it.
+
+**A blocked build site waits, and says so.** Both creation sites check the
+site through `0x47DB70`, a pure occupancy scan that returns 0 or 1 and issues
+no order to anyone. The ground path (`0x403CC7`) and the aircraft path
+(`0x414004`) then do the same thing: on the first failure they play cant slot
+7 with `0x50155C` "Waiting for target area to clear" and set the mission's
+retry counter and a thirty-tick timer; on the next nine they wait quietly;
+after the tenth they play `0x501544` "Target area was blocked" and return 8.
+The captions are the `cant` sites `0x403CDF`/`0x414020` and
+`0x403D10`/`0x414055` listed in §97. RWE's `retryBlockedSite` already matches
+that ladder, message for message and thirty ticks a try.
+
+So the original neither sweeps on the set nor re-sweeps while the flag is up:
+`BUGGER_OFF` is inert, and a friendly unit left on a spawn point stalls the
+yard until its ten tries are gone. RWE's one-shot sweep on the set was an
+invention of 2019 (commit 6191923a) rather than a port. What RWE does instead
+-- sweep the site on every blocked attempt, so the blocker is told to move --
+is recorded as a divergence in §88.
