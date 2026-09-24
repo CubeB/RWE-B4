@@ -574,8 +574,12 @@ namespace rwe
         GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto arm = addPlayer(sim, "arm");
         auto core = addPlayer(sim, "core");
+        std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+        sim.unitModelDefinitions["model"] = createUnitModelDefinition(20_ss, std::move(pieces));
         sim.unitDefinitions["ARMCOM"] = makeGroundUnit(0);
+        sim.unitDefinitions["ARMCOM"].objectName = "model";
         sim.unitDefinitions["CORCOM"] = makeGroundUnit(0);
+        sim.unitDefinitions["CORCOM"].objectName = "model";
 
         auto script = makeEmptyCobScript();
         auto attacker = addUnitOfType(sim, "ARMCOM", arm, SimVector(100_ss, 0_ss, 200_ss), script);
@@ -635,6 +639,73 @@ namespace rwe
             REQUIRE(death);
             REQUIRE(death->killerId == 0);
             REQUIRE(death->killerDplayId == 0xffffffffu);
+        }
+
+        SECTION("a dying unit's blast is sent by the peer whose unit it was")
+        {
+            // RWE's only no-attacker damage is an explodeAs, and the projectile
+            // carries the dying unit's owner. The one real recording this could
+            // be checked in sends all 89 of its no-attacker records from the
+            // peer that is not the victim's, so that owner is the sender.
+            //
+            // A scene of its own, because a blast walks the occupied grid and
+            // the hand-placed units above were never stamped onto it.
+            GameSimulation blastSim(makeFlatTerrain(32, 32), 0u, 0, 0);
+            auto blastArm = addPlayer(blastSim, "arm");
+            auto blastCore = addPlayer(blastSim, "core");
+            std::vector<UnitPieceDefinition> blastPieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+            blastSim.unitModelDefinitions["model"] = createUnitModelDefinition(20_ss, std::move(blastPieces));
+            blastSim.unitDefinitions["ARMCOM"] = makeGroundUnit(0);
+            blastSim.unitDefinitions["ARMCOM"].objectName = "model";
+            blastSim.unitDefinitions["ARMCOM"].explodeAs = "BLAST";
+            blastSim.unitDefinitions["ARMCOM"].movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
+            blastSim.unitDefinitions["CORCOM"] = makeGroundUnit(0);
+            blastSim.unitDefinitions["CORCOM"].objectName = "model";
+            blastSim.unitDefinitions["CORCOM"].movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
+
+            WeaponDefinition blast{};
+            blast.physicsType = ProjectilePhysicsTypeLineOfSight();
+            blast.maxRange = 32_ss;
+            blast.velocity = 1_ss;
+            blast.damageRadius = 64_ss;
+            blast.damage["DEFAULT"] = 50;
+            blastSim.weaponDefinitions["BLAST"] = blast;
+
+            auto blastScript = makeEmptyCobScript({"base"});
+            blastSim.unitScriptDefinitions["ARMCOM"] = *blastScript;
+            blastSim.unitScriptDefinitions["CORCOM"] = *blastScript;
+
+            auto bomber = blastSim.trySpawnUnit("ARMCOM", blastArm, SimVector(100_ss, 0_ss, 200_ss), std::nullopt);
+            REQUIRE(bomber);
+            auto caught = blastSim.trySpawnUnit("CORCOM", blastCore, SimVector(120_ss, 0_ss, 200_ss), std::nullopt);
+            REQUIRE(caught);
+
+            std::ostringstream blastStream;
+            DemoRecorderSettings blastSettings;
+            blastSettings.maxUnits = 4;
+            blastSettings.mapName = "Coast To Coast";
+            blastSettings.unitLoadOrder = {"ARMCOM", "CORCOM"};
+            attachDemoRecorder(blastSim, blastStream, blastSettings);
+
+            blastSim.killUnit(*bomber);
+            blastSim.demoRecorder->endOfTick(blastSim);
+            blastSim.demoRecorder->close();
+
+            auto handler = readDemo(blastStream.str());
+
+            // The blast caught the enemy twenty units away, and the record is
+            // the ARM sender's even though it names no attacker.
+            auto damage = tadDecodeDamage(*firstSubPacketOf(handler.subPackets[0], static_cast<uint8_t>(TadSubPacketCode::UnitTakeDamage)));
+            REQUIRE(damage);
+            REQUIRE(damage->victimId == 5);
+            REQUIRE(damage->attackerId == 0);
+            REQUIRE(damage->damage > 0);
+            REQUIRE(packetWithCode(handler, static_cast<uint8_t>(TadSubPacketCode::UnitTakeDamage)) == 0);
+
+            // And the dying unit's own death is on that side too.
+            auto death = tadDecodeDeath(*firstSubPacketOf(handler.subPackets[0], static_cast<uint8_t>(TadSubPacketCode::UnitKilled)));
+            REQUIRE(death);
+            REQUIRE(death->unitId == 1);
         }
 
         SECTION("reclaim is cause 5 and leaves nothing")

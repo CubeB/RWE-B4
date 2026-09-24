@@ -3291,7 +3291,7 @@ namespace rwe
         applyDamage(unitId, damagePoints, attacker, false);
     }
 
-    void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer)
+    void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer, std::optional<PlayerId> sourceOwner)
     {
         {
             // Scored by the music evaluator; carries owners so the scene
@@ -3313,7 +3313,7 @@ namespace rwe
         // weapon's own [DAMAGE] default.
         if (demoRecorder)
         {
-            demoRecorder->damageApplied(*this, unitId, attacker, damagePoints);
+            demoRecorder->damageApplied(*this, unitId, attacker, damagePoints, sourceOwner);
         }
 
         if (attacker)
@@ -3607,7 +3607,7 @@ namespace rwe
           auto damageScale = blastDamageScale(rweSqrt(unitDistanceSquared), radius, projectile.edgeEffectiveness);
           auto rawDamage = projectile.getDamage(unit.unitType);
           auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * damageScale);
-          applyDamage(*u, scaledDamage, projectile.attacker, paralyzer); });
+          applyDamage(*u, scaledDamage, projectile.attacker, paralyzer, projectile.owner); });
 
         for (const auto& flyingUnitId : flyingUnitsSet)
         {
@@ -3633,7 +3633,7 @@ namespace rwe
             auto damageScale = blastDamageScale(rweSqrt(unitDistanceSquared), radius, projectile.edgeEffectiveness);
             auto rawDamage = projectile.getDamage(unit.unitType);
             auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * damageScale);
-            applyDamage(flyingUnitId, scaledDamage, projectile.attacker, paralyzer);
+            applyDamage(flyingUnitId, scaledDamage, projectile.attacker, paralyzer, projectile.owner);
         }
     }
 

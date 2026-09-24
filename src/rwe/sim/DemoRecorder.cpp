@@ -489,7 +489,7 @@ namespace rwe
                 static_cast<uint8_t>(weaponSlot)}));
         }
 
-        void damageApplied(UnitId victim, std::optional<UnitId> attacker, unsigned int damage)
+        void damageApplied(UnitId victim, std::optional<UnitId> attacker, unsigned int damage, std::optional<PlayerId> sourceOwner)
         {
             auto victimRecordIt = records.find(victim);
             auto victimId = ids.idOf(victim);
@@ -499,9 +499,10 @@ namespace rwe
             }
 
             // The attacker's owner sends it, so a shot and the damage it caused
-            // share one tick clock. With no attacker to name, the victim's
-            // owner is the only peer left.
-            auto sender = victimRecordIt->second.owner;
+            // share one tick clock. With no attacker to name, the peer that ran
+            // the blast sends it, and the victim's owner only where even that
+            // is unknown.
+            auto sender = sourceOwner.value_or(victimRecordIt->second.owner);
             uint16_t attackerId = 0;
             if (attacker)
             {
@@ -968,9 +969,14 @@ namespace rwe
         impl->shotFired(shooter, weaponSlot, targetUnit, origin, aimPoint, direction);
     }
 
-    void DemoRecorder::damageApplied(const GameSimulation& /*simulation*/, UnitId victim, std::optional<UnitId> attacker, unsigned int damage)
+    void DemoRecorder::damageApplied(
+        const GameSimulation& /*simulation*/,
+        UnitId victim,
+        std::optional<UnitId> attacker,
+        unsigned int damage,
+        std::optional<PlayerId> sourceOwner)
     {
-        impl->damageApplied(victim, attacker, damage);
+        impl->damageApplied(victim, attacker, damage, sourceOwner);
     }
 
     void DemoRecorder::unitDied(

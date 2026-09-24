@@ -182,12 +182,18 @@ namespace rwe
          * sent by the peer that owns the attacker and not one by the peer that
          * owns the victim (docs/TA-DEMOS.md, "Pairing a 0x0d to the 0x0b it
          * caused"), so a shot and the damage it caused share one tick clock.
-         * A record with no attacker to attribute -- terrain, decay, a blast
-         * from a projectile whose owner is gone -- goes to the victim's owner,
-         * which the corpus cannot distinguish because its no-attacker records
-         * carry no id to compare against.
+         * A record with no attacker to attribute -- a dying unit's `explodeAs`
+         * is the only one RWE has -- goes to `sourceOwner`, the player whose
+         * simulation ran the blast; the corpus's own no-attacker records carry
+         * no id to compare against, but the one real recording they could be
+         * checked in shows they are not the victim's owner's.
          */
-        void damageApplied(const GameSimulation& simulation, UnitId victim, std::optional<UnitId> attacker, unsigned int damage);
+        void damageApplied(
+            const GameSimulation& simulation,
+            UnitId victim,
+            std::optional<UnitId> attacker,
+            unsigned int damage,
+            std::optional<PlayerId> sourceOwner);
 
         /**
          * `unit` died, with the severity and cause the engine itself worked
