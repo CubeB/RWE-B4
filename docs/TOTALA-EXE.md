@@ -584,19 +584,19 @@ quirks of the original that RWE reproduces although they look like defects.
 - The **explosion smoke** (`0x472630` from `0x420AE1`, three puffs seven ticks
   apart) and the **30-second burning wreck plume** (`0x48644B`) are decoded but
   not ported; RWE's explosions and wreckage do not smoke afterwards.
-- **`BadSlope` and `BadWaterSlope` are not parsed.** §95 decodes them: they
-  are the movement class's *free* slope threshold, with `MaxSlope` /
-  `MaxWaterSlope` above them admitting the cell as "tight" at an extra 30 of
-  path cost, and they default to half the corresponding max. RWE reaches the
-  same default by hand (`computeRoughSlope`, `maxSlope / 2`) but ignores the
-  keys, and only the two hover classes name them in the shipped data --
-  `TANKHOVER3` and `TANKHOVER4` set `BadSlope=12` equal to their `MaxSlope`,
-  so the original charges a hovercraft nothing for ground RWE calls rough.
-  RWE's rough test also uses one threshold above and below the waterline
-  where the original picks the dry or the wet pair per cell. Path cost only:
-  neither changes what is passable. Left alone because a change to path cost
-  moves every route, and that deserves its own pass with `path_bench` and the
-  pathing tests watched.
+- ~~**`BadSlope` and `BadWaterSlope` are not parsed.**~~ **Ported, 2026-09-24**
+  (#112). §95 decodes them: the movement class's *free* slope threshold, with
+  `MaxSlope` / `MaxWaterSlope` above them admitting the cell as "tight" at an
+  extra 30 of path cost, each defaulting to half the corresponding max and
+  clamped to it. The movement class parser reads both with those defaults
+  and clamps, an FBI-built class gets the halves, and the pathfinder's rough
+  test reads them, picking the dry or the wet threshold per cell by whether
+  the cell's lowest corner is at or above sea level, as `0x47E145` does. Only
+  the two hover classes name them in the shipped data, `TANKHOVER3` and
+  `TANKHOVER4` with `BadSlope=12` equal to their `MaxSlope`, so a hovercraft
+  now pays nothing for ground a tank calls rough. Path cost only: nothing
+  about what is passable changed, and `path_bench`'s three scenarios agree
+  hash for hash before and after (the bench's own class is 255 everywhere).
 - **The work sounds are played. Ported, 2026-09-10.** Sound slot 11,
   `working` (`reclaim1` in every construction unit's category), is played once
   when reclaim or capture work starts, and slot 16 `capture` when a capture

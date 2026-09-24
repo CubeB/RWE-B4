@@ -1182,8 +1182,9 @@ rows of `y` to a dword, indexed `width*(y>>4) + x` with the pair at
 
 RWE has the same idea in a different place: `AbstractUnitPathFinder::computeRoughTerrain`
 calls `isAdjacentToObstacle` and adds a cost, which is the clearance half, and
-uses `maxSlope / 2` as its rough threshold — which is exactly the original's
-default for `BadSlope`, arrived at independently and now confirmed.
+its rough threshold used to be `maxSlope / 2`, exactly the original's default
+for `BadSlope`, arrived at independently. Since 2026-09-24 (#112) it reads the
+class's `badSlope` and `badWaterSlope` instead, dry or wet per cell as above.
 
 ### The wreck, specifically
 
@@ -1221,9 +1222,9 @@ item:
 later reader tempted to "fix" the play-test's complaint has to argue with the
 binary first.
 
-Two smaller things fell out and are recorded in §91 rather than acted on:
-`BadSlope`/`BadWaterSlope` are keys RWE does not parse, and the original's
-"tight" band is wet-or-dry aware where RWE's rough test is not.
+Two smaller things fell out and were recorded in §91: `BadSlope`/`BadWaterSlope`
+were keys RWE did not parse, and the original's "tight" band is wet-or-dry
+aware where RWE's rough test was not. Both were ported on 2026-09-24 (#112).
 
 ---
 

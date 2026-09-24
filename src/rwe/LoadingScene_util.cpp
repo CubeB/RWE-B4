@@ -142,6 +142,8 @@ namespace rwe
         mc.maxWaterDepth = tdf.maxWaterDepth;
         mc.maxSlope = tdf.maxSlope;
         mc.maxWaterSlope = tdf.maxWaterSlope;
+        mc.badSlope = tdf.badSlope;
+        mc.badWaterSlope = tdf.badWaterSlope;
 
         return mc;
     }

@@ -45,8 +45,14 @@ namespace rwe
          * while leaving every other cell blocking. See TOTALA-EXE.md §95.
          */
         const DiscreteRect selfRegion;
-        /** Slopes steeper than this count as rough terrain (double cost). */
-        const unsigned int roughSlope;
+        /**
+         * The movement class's free-slope thresholds, BadSlope for a dry cell
+         * and BadWaterSlope for a wet one (TOTALA-EXE-MOVEMENT.md, section
+         * 95). A cell steeper than the one that applies to it is passable but
+         * rough, and costs double to cross.
+         */
+        const unsigned int roughSlopeDry;
+        const unsigned int roughSlopeWet;
         /**
          * True for land units that can wade: water costs them double,
          * so a dry route is preferred when one exists.
