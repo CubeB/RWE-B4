@@ -206,4 +206,109 @@ namespace rwe
         REQUIRE_FALSE(orderButtonFromName("ORDERS").has_value());
         REQUIRE_FALSE(orderButtonFromName("HEADER").has_value());
     }
+
+    TEST_CASE("a toggle's state is gathered once for the selection", "[orderbuttons]")
+    {
+        using F = UnitFireOrders;
+
+        SECTION("nobody offering it leaves the button without a state")
+        {
+            auto shown = gatherToggle<F>({std::nullopt, std::nullopt});
+            REQUIRE_FALSE(shown.offered);
+            REQUIRE_FALSE(shown.mixed);
+        }
+
+        SECTION("one offerer sets the state")
+        {
+            auto shown = gatherToggle<F>({F::ReturnFire});
+            REQUIRE(shown.offered);
+            REQUIRE_FALSE(shown.mixed);
+            REQUIRE(shown.value == F::ReturnFire);
+        }
+
+        SECTION("offerers that agree keep it")
+        {
+            auto shown = gatherToggle<F>({F::FireAtWill, std::nullopt, F::FireAtWill});
+            REQUIRE(shown.offered);
+            REQUIRE_FALSE(shown.mixed);
+            REQUIRE(shown.value == F::FireAtWill);
+        }
+
+        SECTION("a disagreement collapses it to mixed, keeping the first offerer's value")
+        {
+            auto shown = gatherToggle<F>({F::HoldFire, F::FireAtWill});
+            REQUIRE(shown.offered);
+            REQUIRE(shown.mixed);
+            REQUIRE(shown.value == F::HoldFire);
+        }
+
+        SECTION("a unit that does not name the flag cannot drag the state")
+        {
+            // A transport (FireStandOrders=0) boxed in with two Peewees on
+            // fire at will: the accumulator never looks at the transport, so
+            // the button shows fire at will, not mixed.
+            auto shown = gatherToggle<F>({F::FireAtWill, std::nullopt, F::FireAtWill});
+            REQUIRE_FALSE(shown.mixed);
+        }
+    }
+
+    TEST_CASE("a click on a toggle sets one order for the whole selection", "[orderbuttons]")
+    {
+        using F = UnitFireOrders;
+        using M = UnitMovementOrders;
+
+        SECTION("fire orders cycle hold -> return -> at will -> hold")
+        {
+            REQUIRE(fireOrdersAfterClick(gatherToggle<F>({F::HoldFire})) == F::ReturnFire);
+            REQUIRE(fireOrdersAfterClick(gatherToggle<F>({F::ReturnFire})) == F::FireAtWill);
+            REQUIRE(fireOrdersAfterClick(gatherToggle<F>({F::FireAtWill})) == F::HoldFire);
+        }
+
+        SECTION("a mixed fire-order selection converges on hold fire")
+        {
+            // 0x41A910: entry 3, the disagreement state, shares entry 2's
+            // target. Two units on return fire and at will used to step to
+            // at will and hold fire, and stay mixed for ever.
+            REQUIRE(fireOrdersAfterClick(gatherToggle<F>({F::ReturnFire, F::FireAtWill})) == F::HoldFire);
+            REQUIRE(fireOrdersAfterClick(gatherToggle<F>({F::HoldFire, F::ReturnFire})) == F::HoldFire);
+        }
+
+        SECTION("move orders cycle hold position -> maneuver -> roam -> hold position, and mixed holds")
+        {
+            REQUIRE(moveOrdersAfterClick(gatherToggle<M>({M::HoldPosition})) == M::Maneuver);
+            REQUIRE(moveOrdersAfterClick(gatherToggle<M>({M::Maneuver})) == M::Roam);
+            REQUIRE(moveOrdersAfterClick(gatherToggle<M>({M::Roam})) == M::HoldPosition);
+            REQUIRE(moveOrdersAfterClick(gatherToggle<M>({M::Roam, M::Maneuver})) == M::HoldPosition);
+        }
+
+        SECTION("on/off: all off goes on, all on goes off, mixed goes on")
+        {
+            REQUIRE(onOffAfterClick(gatherToggle<bool>({false, false})));
+            REQUIRE_FALSE(onOffAfterClick(gatherToggle<bool>({true, true})));
+            REQUIRE(onOffAfterClick(gatherToggle<bool>({true, false})));
+        }
+
+        SECTION("cloak: all off goes on, anything else goes off")
+        {
+            REQUIRE(cloakAfterClick(gatherToggle<bool>({false, false})));
+            REQUIRE_FALSE(cloakAfterClick(gatherToggle<bool>({true, true})));
+            REQUIRE_FALSE(cloakAfterClick(gatherToggle<bool>({true, false})));
+        }
+    }
+
+    TEST_CASE("a toggle draws the frame for its state, and the extra frame when the selection disagrees", "[orderbuttons]")
+    {
+        using F = UnitFireOrders;
+
+        // ARMFIREORD: HOLD FIRE, RETURN FIRE, FIRE AT WILL, then FIRE ORDERS
+        // with every light lit for a selection that disagrees.
+        REQUIRE(toggleFace(gatherToggle<F>({F::HoldFire}), 3) == 0);
+        REQUIRE(toggleFace(gatherToggle<F>({F::FireAtWill}), 3) == 2);
+        REQUIRE(toggleFace(gatherToggle<F>({F::HoldFire, F::FireAtWill}), 3) == 3);
+
+        // ARMONOFF: OFF, ON, OFF/ON ORDERS.
+        REQUIRE(toggleFace(gatherToggle<bool>({false}), 2) == 0);
+        REQUIRE(toggleFace(gatherToggle<bool>({true, true}), 2) == 1);
+        REQUIRE(toggleFace(gatherToggle<bool>({true, false}), 2) == 2);
+    }
 }
