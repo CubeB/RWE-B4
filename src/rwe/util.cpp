@@ -29,9 +29,11 @@ namespace rwe
         }
 
         // The specification says a relative or empty $XDG_DATA_HOME is
-        // invalid and the default applies.
+        // invalid and the default applies. Absolute in the POSIX sense, a
+        // leading slash: std::filesystem's is_absolute asks the host, and on
+        // Windows "/mnt/data" has no drive and is relative.
         std::filesystem::path dataHome;
-        if (xdgDataHome != nullptr && *xdgDataHome != '\0' && std::filesystem::path(xdgDataHome).is_absolute())
+        if (xdgDataHome != nullptr && *xdgDataHome == '/')
         {
             dataHome = xdgDataHome;
         }

@@ -313,14 +313,15 @@ export function rweUserPathCandidates(
   if (home === undefined || home === "") {
     throw new Error("Failed to find home directory");
   }
+  // POSIX paths whatever the host, so the rule reads the same when the
+  // tests run on Windows.
+  const posix = path.posix;
   const xdgDataHome = env["XDG_DATA_HOME"];
   const dataHome =
-    xdgDataHome !== undefined &&
-    xdgDataHome !== "" &&
-    path.isAbsolute(xdgDataHome)
+    xdgDataHome !== undefined && posix.isAbsolute(xdgDataHome)
       ? xdgDataHome
-      : path.join(home, ".local", "share");
-  return [path.join(dataHome, "rwe"), path.join(home, ".rwe")];
+      : posix.join(home, ".local", "share");
+  return [posix.join(dataHome, "rwe"), posix.join(home, ".rwe")];
 }
 
 /**
