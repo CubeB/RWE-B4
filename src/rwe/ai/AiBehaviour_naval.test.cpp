@@ -2024,4 +2024,57 @@ namespace rwe
             REQUIRE(bb.phase == GamePhase::Attack);
         }
     }
+
+    TEST_CASE("naval: a lone hull with navalAttackFleetSize=1 is not recalled the pass after it sails", "[ai]")
+    {
+        // The fleet size is a threshold on both sides: sail when a whole
+        // fleet has gathered, recall when the survivors fall below half of
+        // one. The recall threshold had a floor of two of its own, which at
+        // navalAttackFleetSize=1 put recall (2) above sail (1). The state
+        // then flipped every tactical pass -- one 900-second game logged 238
+        // "the fleet sails" and 237 "the fleet is recalled" -- and the same
+        // floor made the home group want a second hull, so a lone hull was
+        // never actually sailed either.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMSY", ai, SimVector(-90_ss, 0_ss, 0_ss), script);
+        auto hull = addUnit(sim, "ARMROY", ai, SimVector(-100_ss, 0_ss, 20_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+        profile.tacticalTickInterval = 1;
+        // ScoutManager borrows a hull, and a borrowed hull is skipped by
+        // updateNavy, which would leave the fleet of one with no ship in it.
+        profile.navalScouting = false;
+        // The knob this is about: a fleet of one.
+        profile.navalAttackFleetSize = 1;
+
+        AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+        const auto& bb = controller.getBlackboard();
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 5, commands);
+
+        REQUIRE(bb.navalCombatUnits.size() == 1);
+        REQUIRE(bb.navalSortieActive);
+
+        // Passes enough that the old floor of two would have recalled it on
+        // the even ones, and driven one pass at a time so the assertion
+        // reads the flag the same pass updateNavy set it.
+        for (int i = 0; i < 25; ++i)
+        {
+            std::vector<PlayerCommand> pass;
+            runTicks(sim, controller, 1, pass);
+            REQUIRE(bb.navalSortieActive);
+        }
+        REQUIRE(std::find(bb.navalCombatUnits.begin(), bb.navalCombatUnits.end(), hull) != bb.navalCombatUnits.end());
+    }
 }
