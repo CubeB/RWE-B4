@@ -357,30 +357,13 @@ namespace rwe
     SimScalar defaultAttackRunOutDistance(const UnitDefinition& unitDefinition, SimScalar weaponMaxRange);
 
     /**
-     * Predicts where a bomb dropped right now would land, given the bomber's
-     * current world position and per-tick velocity. Uses the same gravity
-     * model as ProjectilePhysicsTypeBallistic / Bomb (-112 / (30*30) per tick).
-     *
-     * Returns the world XZ point of impact at altitude `groundY`, computed
-     * deterministically with rweSqrt. Falls back to the bomber's XZ position
-     * if the unit is at or below the ground (degenerate case).
+     * How close the target has to be before a bomber's stick starts:
+     * `1 + attackrunlength + trunc(falltime * speed)`, the arrival tolerance
+     * AirStrike's state 4 hands its goal (0x412394). The fall time is from
+     * cruise altitude, not the aircraft's actual height, and the speed is
+     * the current one, so the trigger is recomputed every tick.
      */
-    SimVector predictBombImpactPoint(const SimVector& bomberPosition, const SimVector& bomberVelocity, SimScalar groundY);
-
-    /**
-     * Bombsight release predicate. Returns true if a bomb dropped now would
-     * land within `releaseRadius` (XZ) of the target. The predicate is
-     * deterministic and uses fixed-point math throughout.
-     *
-     * The release radius should typically be the weapon's damage radius plus
-     * a tolerance — too small and bombers never find a release window; too
-     * large and bombs miss visibly. The caller is responsible for picking it.
-     */
-    bool bombsightInReleaseWindow(
-        const SimVector& bomberPosition,
-        const SimVector& bomberVelocity,
-        const SimVector& targetPosition,
-        SimScalar releaseRadius);
+    SimScalar bombReleaseTrigger(const UnitDefinition& unitDefinition, SimScalar speed);
 
     /**
      * Pure state-machine step for an aircraft attack run. Given the unit's

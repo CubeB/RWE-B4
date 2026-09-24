@@ -460,9 +460,9 @@ is born, so most die small. That is now `makeSmokePuffFrameSchedule` in
 `game/Particle.h`, with `game/damagesmoke.test.cpp` covering the threshold, the
 rate and the frame walk.
 
-Still open from the same reading: smoke does not drift downwind (the wind vector
-is decoded, RWE has no map wind), and neither explosions nor wreckage smoke
-afterwards. Both are noted in `TOTALA-EXE.md` §26.
+Still open from the same reading: neither explosions nor wreckage smoke
+afterwards (#113). The downwind drift followed once the wind itself was ported
+(#111, 2026-09-24). Both are noted in `TOTALA-EXE.md` §26.
 
 ### 9. Radar jammers, stealth, sonar jamming — DONE
 

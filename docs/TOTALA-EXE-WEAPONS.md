@@ -453,8 +453,8 @@ At Brain Coral's `maxwindspeed` of 3000 this is 0.092 world units a tick, which
 carries a Crusader shell about six units over its flight against a damage radius
 of 24 — a real nudge rather than a dominant force. Note that nothing compensates
 for it: the original's bombsight does not model the wind either, so a bomber's
-aim drifts very slightly downwind, and `predictBombImpactPoint` matches it by
-also ignoring it.
+aim drifts very slightly downwind, and RWE's release, taken from the mission's
+own fall-time arithmetic (#110), ignores it too.
 
 Smoke uses the same two words, scaled by 8 per tick (§4), and that is still not
 ported — every puff in the original leans downwind together. Nothing about it is
@@ -938,6 +938,13 @@ construction**: `0x40AA40` rebuilds it and puts every enemy through `0x465AC0`
 before appending (the call at `0x40AB11`). Cloak, the waterline and line of
 sight have all been applied one call upstream, which is why the scan itself
 does not repeat them. See §17a for the chain.
+
+The list builder also asks who the candidate belongs to before it asks
+whether it can be seen: `0x40AB05` reads the searcher's ally byte for the
+candidate's player (`player+0x108+idx`, the same table §103's click ladder
+consults) and skips the unit when it is set, so an ally's units are never
+candidates at all. RWE ported that on 2026-09-24 (#237): `chooseTarget`
+rejects a candidate whose owner `arePlayersAllied` with the searcher's.
 
 What keeps ground units off aircraft is the **preference**, and only the
 preference: sixty of the shipped units name `wpri_badTargetCategory=VTOL` and

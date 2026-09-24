@@ -498,6 +498,14 @@ quirks of the original that RWE reproduces although they look like defects.
   alternatives are a guess between two unknowns.
 
 ---
+- **A unit reclaim pays out as it goes, in both resources.** The original pays
+  `trunc((1 - progress) * buildcostmetal)` in one lump as the reclaimed unit
+  dies, metal only (`0x402666`, §97). RWE credits each sixteen-tick bite its
+  share of the metal *and* the energy that went into the unit. The bite
+  itself and its cadence are the original's (#19, 2026-09-24); the payback
+  schedule was RWE's before and stays so, because changing it moves every
+  reclaim's economy and wants its own pass with a play-test.
+
 
 ## 91. Still unknown or unported
 
@@ -550,8 +558,16 @@ quirks of the original that RWE reproduces although they look like defects.
   seconds). **Ported**: RWE credits a construction aircraft twice on the tick it
   first has a frame to lathe and never makes one wait for its stance, and the
   airborne cells are in the build fixture on the ordinary §88 delta.
-- The exact tick at which the original commits a **bomb release** inside its
-  weapon code is still not pinned down; RWE uses its own bombsight.
+- ~~The exact tick at which the original commits a bomb release inside its
+  weapon code is still not pinned down; RWE uses its own bombsight.~~
+  **Pinned and ported, 2026-09-24 (#110).** The weapon code has no bombsight:
+  a bomb fires on the ordinary fire check the first weapon pass after
+  `AirStrike` state 5 hands it the target, and keeps firing on every reload
+  until state 6 clears it `attackrunlength` past the release point. The
+  mission's trigger, `1 + attackrunlength + trunc(falltime * speed)`, is the
+  whole of the aiming (`TOTALA-EXE-MISSIONS.md` §11). RWE's own bombsight and
+  its stick of three are gone; `bombReleaseTrigger` and the run-length stick
+  replace them.
 - **`unit+0x110` bits 2–3.** They pick the loose 2000 default over the tight 150
   when a weapon names no tolerance (§11), and are tested at only three places —
   `0x40458A`, `0x4057D9` and `0x49D899` — none of which says what they mean. RWE
@@ -577,32 +593,33 @@ quirks of the original that RWE reproduces although they look like defects.
   definition's. Left: an idle ground unit does not chase a sighting at all
   in RWE, where the original's Standby does through `0x43B1F0`, and the
   repair patrols do not plant `0x43B400`'s return move.
-- ~~Smoke does not drift downwind~~ **The wind is ported; the smoke still
-  ignores it** (#111). `GameSimulation::currentWindVector` exists and is hashed
-  (commit 72f8b402), and it pushes ballistic rounds and bombs off course, the
-  shape of `0x49BD10`. The smoke particles have not been wired to it:
-  `updateParticles` (`src/rwe/game/GameScene_util.cpp`) adds only the
-  particle's own velocity, and every smoke spawn sets that purely vertical, so
-  a puff still goes straight up. Issue #111. The lift itself is right: RWE's
-  half a unit a tick is the original's gravity × 4 on the 112 that nearly
-  every map uses, though it will not track a map that sets gravity to
-  something else.
+- ~~Smoke does not drift downwind~~ **Ported, 2026-09-24** (#111).
+  `GameSimulation::currentWindVector` was already hashed and pushing ballistic
+  rounds and bombs off course (commit 72f8b402, the shape of `0x49BD10`); the
+  smoke now rides the same vector at eight times that drift a tick, which is
+  the `x += windX × 8`, `z += windZ × 8` of the puff stepper at `0x475340`
+  and the vent's at `0x475620` (§4, §23). `Particle::driftsWithWind` opts a
+  puff in; wake dots stay out, since `0x474580` has no wind term, and so does
+  anything flying under its own velocity. The lift is unchanged and still
+  right for the 112 that nearly every map uses: RWE's half a unit a tick is
+  the original's gravity × 4 there, though it will not track a map that sets
+  gravity to something else.
 - The **explosion smoke** (`0x472630` from `0x420AE1`, three puffs seven ticks
   apart) and the **30-second burning wreck plume** (`0x48644B`) are decoded but
   not ported; RWE's explosions and wreckage do not smoke afterwards.
-- **`BadSlope` and `BadWaterSlope` are not parsed.** §95 decodes them: they
-  are the movement class's *free* slope threshold, with `MaxSlope` /
-  `MaxWaterSlope` above them admitting the cell as "tight" at an extra 30 of
-  path cost, and they default to half the corresponding max. RWE reaches the
-  same default by hand (`computeRoughSlope`, `maxSlope / 2`) but ignores the
-  keys, and only the two hover classes name them in the shipped data --
-  `TANKHOVER3` and `TANKHOVER4` set `BadSlope=12` equal to their `MaxSlope`,
-  so the original charges a hovercraft nothing for ground RWE calls rough.
-  RWE's rough test also uses one threshold above and below the waterline
-  where the original picks the dry or the wet pair per cell. Path cost only:
-  neither changes what is passable. Left alone because a change to path cost
-  moves every route, and that deserves its own pass with `path_bench` and the
-  pathing tests watched.
+- ~~**`BadSlope` and `BadWaterSlope` are not parsed.**~~ **Ported, 2026-09-24**
+  (#112). §95 decodes them: the movement class's *free* slope threshold, with
+  `MaxSlope` / `MaxWaterSlope` above them admitting the cell as "tight" at an
+  extra 30 of path cost, each defaulting to half the corresponding max and
+  clamped to it. The movement class parser reads both with those defaults
+  and clamps, an FBI-built class gets the halves, and the pathfinder's rough
+  test reads them, picking the dry or the wet threshold per cell by whether
+  the cell's lowest corner is at or above sea level, as `0x47E145` does. Only
+  the two hover classes name them in the shipped data, `TANKHOVER3` and
+  `TANKHOVER4` with `BadSlope=12` equal to their `MaxSlope`, so a hovercraft
+  now pays nothing for ground a tank calls rough. Path cost only: nothing
+  about what is passable changed, and `path_bench`'s three scenarios agree
+  hash for hash before and after (the bench's own class is 255 everywhere).
 - **The work sounds are played. Ported, 2026-09-10.** Sound slot 11,
   `working` (`reclaim1` in every construction unit's category), is played once
   when reclaim or capture work starts, and slot 16 `capture` when a capture
@@ -629,3 +646,12 @@ quirks of the original that RWE reproduces although they look like defects.
   returns 0 while its static 3 is set. What lowers the bit when a unit changes
   target has not been read, and asking again cannot strand a gun the original
   would have freed, so the wait is not ported.
+- **Self-destruct's tail and its corpse.** The original blasts a
+  self-destructing unit `150 + rand(15)` ticks after the order (`0x402117`),
+  with thirty thousand points of ordinary damage from the unit to itself
+  (`0x402147`, cause 3), so the death runs the `Killed` ladder and leaves the
+  corpse it picks. RWE blasts at exactly 150 ticks and removes the unit with
+  no corpse (`GameSimulation::selfDestructUnit`). Both are hashed behaviour;
+  decoded under issue #29, not ported there because that issue was the
+  presentation.
+

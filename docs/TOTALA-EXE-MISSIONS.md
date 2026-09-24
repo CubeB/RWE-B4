@@ -769,15 +769,26 @@ Relevant FBI values, for reference:
 
 ## 11. Not confirmed
 
-* **Exactly when the bomb leaves the aircraft.** The mission's part is fully
-  decoded: state 5 hands weapon 0 a ground aim point (`0x48A0A0` at `0x41248F`)
-  and state 6 takes it away again (`0x48A0F0` at `0x41253F`). The bombs
-  therefore fall during the state-5 run, whose length is `attackrunlength`. The
-  actual trigger inside the weapon update (reload, aim convergence) was not
-  traced. What *is* certain is that the release **range** is set by the mission,
-  not the weapon: the bomb's `range` is 1280 for all four bombers, while the
-  mission withholds the target until `1 + attackrunlength + falltime·speed`
-  (631 for a Thunder), so the mission is what decides where the run begins.
+* ~~**Exactly when the bomb leaves the aircraft.**~~ **Settled 2026-09-24
+  (#110).** There is no bombsight in the weapon code. `dropped` (`wdef+0x111`
+  bit 8) is tested in exactly two places in the binary, the mission builder
+  (`0x43F29D`) and the order cursor (`0x43E555`), and nowhere in the weapon
+  update. The fire check at `0x49E3AE` is the ordinary one: reload counter
+  zero, the eligibility test `0x49AA80`, the stockpile or the stores, then the
+  handler in `wdef+0x60`, which for a bomb is `0x49DD60`. That handler takes a
+  projectile slot, initialises it at the muzzle (`0x49C740`), gives it the
+  aircraft's heading and its current speed (`-sin`/`-cos` of `unit+0x66` times
+  `mover+0x20`, `0x49DDF3`-`0x49DE19`), and returns; no aim script, no
+  tolerance test (§11 of the weapons document), no look at the ground. So the
+  first bomb leaves on the first weapon pass after state 5 hands weapon 0 the
+  target, and the weapon pass runs *before* the mission pass in the unit tick
+  (`0x48ADDA` against `0x48AF98`), so that is the tick after the trigger is
+  reached. The bombs then keep coming every reload until state 6 clears the
+  target `attackrunlength` past the release point. The stick therefore starts
+  `1 + attackrunlength` short of the target and walks up to it; the mission
+  is the whole of the bombsight. RWE's `bombReleaseTrigger` is state 4's
+  trigger and its weapon update drops on the reload while the run is inside
+  `attackrunlength` of the release point.
 * **The off-map special case.** `[unit+0x82]` is the unit's spatial-hash bucket
   (`0x47CBB9` writes it when a unit is linked into a bucket, chained through
   `unit+0x8E`), and `[gs+0x142B7]` is a single bucket object created once during

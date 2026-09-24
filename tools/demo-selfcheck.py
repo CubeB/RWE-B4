@@ -21,7 +21,8 @@ THE UNITS DIRECTORY. The scorers name a 0x09's type index from the 1-based
 sorted `units/*.FBI` order of the data set the game was played on, and the
 recorder writes that same order, so both have to come from the same data.
 `--units` takes a directory of the data set's unit files; without it the script
-builds one by extracting every archive of `--data-path` (default `~/.rwe/Data`)
+builds one by extracting every archive of `--data-path` (default the user data
+directory's `Data`, see rwe_user_dir)
 in the engine's own priority order -- .hpi, then .ufo, .ccx, .gpf, .gp3, each
 tier name-sorted -- with each archive overwriting the ones before it. The
 overwrite is CASE-INSENSITIVE into one tree, because the engine's VFS resolves
@@ -127,6 +128,22 @@ def classify(result):
     return FAILED
 
 
+def rwe_user_dir() -> Path:
+    """The engine's user data directory, by the engine's own rule (src/rwe/util.cpp).
+
+    Windows: %APPDATA%\\RWE. Elsewhere "rwe" under the XDG data home
+    (~/.local/share unless XDG_DATA_HOME is set and absolute), except that an
+    existing ~/.rwe from before that move keeps being used until the new
+    location exists (issue #216).
+    """
+    if os.name == "nt":
+        return Path(os.environ["APPDATA"]) / "RWE"
+    xdg = os.environ.get("XDG_DATA_HOME")
+    data_home = Path(xdg) if xdg and os.path.isabs(xdg) else Path.home() / ".local" / "share"
+    candidates = [data_home / "rwe", Path.home() / ".rwe"]
+    return next((c for c in candidates if c.is_dir()), candidates[0])
+
+
 def archives_in_priority_order(data_path: Path) -> list[Path]:
     by_extension = {}
     for entry in sorted(data_path.iterdir(), key=lambda p: p.name.lower()):
@@ -209,7 +226,7 @@ def main() -> int:
     parser.add_argument("--keep", action="store_true", help="keep the work directory instead of clearing it first")
     parser.add_argument("--demo", type=Path, help="check this demo instead of recording one")
     parser.add_argument("--units", type=Path, help="a data set's unit files; built from --data-path when absent")
-    parser.add_argument("--data-path", type=Path, help="the data set's archives (default: ~/.rwe/Data)")
+    parser.add_argument("--data-path", type=Path, help="the data set's archives (default: the user data directory's Data)")
     parser.add_argument("--ai-arena", type=Path, help="the ai_arena binary (default: <repo>/build/ai_arena)")
     parser.add_argument("--tad-probe", type=Path, help="the tad_probe binary (default: <repo>/build/tad_probe)")
     parser.add_argument("--tad-episodes", type=Path, help="the tad_episodes binary (default: <repo>/build/tad_episodes)")
@@ -330,7 +347,7 @@ def main() -> int:
             raise SystemExit(f"no such units directory: {units_dir}")
         origin = "--units"
     else:
-        data_path = (args.data_path or Path.home() / ".rwe" / "Data").resolve()
+        data_path = (args.data_path or rwe_user_dir() / "Data").resolve()
         if not data_path.is_dir():
             raise SystemExit(f"no such data path: {data_path} (pass --units or --data-path)")
         if not hpi_test.is_file():

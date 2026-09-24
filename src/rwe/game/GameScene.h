@@ -50,6 +50,7 @@
 #include <rwe/sim/UnitId.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/ui/UiFactory.h>
+#include <rwe/game/OrderButtons.h>
 #include <rwe/ui/UiPanel.h>
 #include <rwe/ui/UiStagedButton.h>
 #include <unordered_set>
@@ -525,8 +526,9 @@ namespace rwe
         std::vector<PlayerCommand> localPlayerCommandBuffer;
         bool commandWasQueued{false};
 
-        BehaviorSubject<UnitFireOrders> fireOrders{UnitFireOrders::HoldFire};
-        BehaviorSubject<bool> onOff{false};
+        BehaviorSubject<GatheredToggle<UnitFireOrders>> fireOrders{};
+        BehaviorSubject<GatheredToggle<UnitMovementOrders>> moveOrders{};
+        BehaviorSubject<GatheredToggle<bool>> onOff{};
 
         /**
          * Whether the selected unit is asking for its cloak. It is what the
@@ -534,7 +536,7 @@ namespace rwe
          * cloak itself: a unit that has been decloaked by an enemy walking past
          * still has the order standing.
          */
-        BehaviorSubject<bool> cloak{false};
+        BehaviorSubject<GatheredToggle<bool>> cloak{};
 
         UiFactory uiFactory;
 
@@ -555,6 +557,15 @@ namespace rwe
         UnitSpeechLevel unitSpeechSetting{UnitSpeechLevel::Full};
         /** MUSICRT's TRACKMODE, TOTALA-EXE.md S:68. Only Custom lets the situational music choose. */
         MusicTrackMode musicTrackModeSetting{MusicTrackMode::Custom};
+
+        /** MUSICRT's TRACKTYPE list, one MusicTrackType per album track; see GlobalConfig::musicTrackTypes. */
+        std::vector<unsigned int> musicTrackTypes;
+
+        /** Re-splits the album into the Building and Battle moods from musicTrackTypes. */
+        void rebuildMusicMoods();
+
+        /** The album index of the track MUSICRT calls current: the one playing, or last played. */
+        std::optional<std::size_t> currentMusicTrackIndex() const;
         unsigned int gammaSetting{100};
         ShadingMode shadingMode{ShadingMode::BuildingsOnly};
         bool antiAliasEnabled{true};
@@ -571,6 +582,9 @@ namespace rwe
 
         /** Pushes the current settings back into the menu widgets: a staged button does not advance its own display. */
         void refreshInGameOptionControls();
+
+        /** TRACKNUM and TRACKTYPE, from the track MUSICRT calls current. */
+        void refreshInGameTrackControls();
 
         /**
          * How much of the measured PALETTE.SHD ramp a model of each kind
@@ -1479,6 +1493,20 @@ namespace rwe
         void localPlayerSetFireOrders(UnitId unitId, UnitFireOrders orders);
 
         void localPlayerSetMovementOrders(UnitId unitId, UnitMovementOrders orders);
+
+        /**
+         * The state each of the four toggle buttons shows for the current
+         * selection, gathered the way the original's accumulator gathers it:
+         * a unit whose definition does not offer the button is skipped, the
+         * first offerer's value is taken, a disagreement makes it mixed.
+         */
+        GatheredToggle<UnitFireOrders> gatherFireOrders() const;
+        GatheredToggle<UnitMovementOrders> gatherMoveOrders() const;
+        GatheredToggle<bool> gatherOnOff() const;
+        GatheredToggle<bool> gatherCloak() const;
+
+        /** Re-reads the four toggles' shown state from the selection. */
+        void refreshToggleButtons();
 
         /** Select every owned live unit the predicate admits; false leaves the selection alone if nothing matched. */
         bool selectAllWhere(const std::function<bool(const UnitState&, const UnitDefinition&)>& predicate);

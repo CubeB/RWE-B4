@@ -1064,56 +1064,19 @@ namespace rwe
         return dot > 0_ss;
     }
 
-    SimVector predictBombImpactPoint(const SimVector& bomberPosition, const SimVector& bomberVelocity, SimScalar groundY)
+    SimScalar bombReleaseTrigger(const UnitDefinition& unitDefinition, SimScalar speed)
     {
-        // The bomb's per-tick fall is governed by the ballistic gravity used
-        // in updateProjectiles: dvy/dt = -112/(30*30) (per-tick²). Integrating
-        // y(t) = h - (1/2) g t² with h = bomberPosition.y - groundY gives
-        //   t_impact = sqrt(2h / g).
-        auto h = bomberPosition.y - groundY;
-        if (h <= 0_ss)
-        {
-            // Aircraft is at or below the ground — bomb impacts immediately
-            // at the bomber's current XZ.
-            return SimVector(bomberPosition.x, groundY, bomberPosition.z);
-        }
-
-        auto gravity = 112_ss / (30_ss * 30_ss);
-        // Solve t for h - (1/2) g t² = 0 => t = sqrt(2 h / g).
-        auto tSquared = (2_ss * h) / gravity;
-        auto t = rweSqrt(tSquared);
-
-        SimVector impact(
-            bomberPosition.x + (bomberVelocity.x * t),
-            groundY,
-            bomberPosition.z + (bomberVelocity.z * t));
-        return impact;
-    }
-
-    bool bombsightInReleaseWindow(
-        const SimVector& bomberPosition,
-        const SimVector& bomberVelocity,
-        const SimVector& targetPosition,
-        SimScalar releaseRadius)
-    {
-        auto impact = predictBombImpactPoint(bomberPosition, bomberVelocity, targetPosition.y);
-        SimVector dxz(impact.x - targetPosition.x, 0_ss, impact.z - targetPosition.z);
-
-        SimVector heading(bomberVelocity.x, 0_ss, bomberVelocity.z);
-        if (heading.lengthSquared() == 0_ss)
-        {
-            return dxz.lengthSquared() <= (releaseRadius * releaseRadius);
-        }
-        heading = heading.normalized();
-
-        // Split the miss into along-track (timing, which the bombsight controls
-        // precisely) and across-track (line-up, which it cannot fix at release).
-        // Timing must be within the blast; a run that is slightly wide still
-        // drops rather than wasting the whole pass.
-        auto along = (dxz.x * heading.x) + (dxz.z * heading.z);
-        auto across = (dxz.x * heading.z) - (dxz.z * heading.x);
-        auto acrossTolerance = rweMax(releaseRadius * 2_ss, 48_ss);
-        return along * along <= releaseRadius * releaseRadius && across * across <= acrossTolerance * acrossTolerance;
+        // AirStrike state 4, 0x4123A8-0x412402: the fall time from cruise
+        // altitude, sqrt(2h / g) in seconds with g the map's gravity per
+        // second squared, times 30 for ticks (the float at 0x4FCC50), times
+        // the aircraft's current speed per tick, truncated to whole world
+        // units, plus attackrunlength, plus one. RWE's gravity is the
+        // original's 112 in per-tick units already, which is the same number
+        // once the 30 is folded in.
+        auto gravityPerTick = 112_ss / (30_ss * 30_ss);
+        auto fallTicks = rweSqrt((2_ss * unitDefinition.cruiseAltitude) / gravityPerTick);
+        auto lead = SimScalar(static_cast<float>(static_cast<int>(simScalarToFloat(fallTicks * speed))));
+        return 1_ss + unitDefinition.attackRunLength + lead;
     }
 
     bool stepAttackRunPhase(
@@ -1195,6 +1158,7 @@ namespace rwe
                 {
                     runState.phase = AirMovementStateAttackRun::Phase::Approaching;
                     runState.bombsDroppedThisPass = 0;
+                    runState.releasePoint.reset();
                 }
                 return true;
             }
@@ -1210,6 +1174,7 @@ namespace rwe
                     // because only it has the simulation's own dice.
                     runState.phase = AirMovementStateAttackRun::Phase::Approaching;
                     runState.bombsDroppedThisPass = 0;
+                    runState.releasePoint.reset();
                 }
                 // A gun holds its aim through the run-out: the original's
                 // handler never clears the weapon target between states.

@@ -151,4 +151,50 @@ namespace rwe
 
         return anyOffers(button);
     }
+
+    UnitFireOrders fireOrdersAfterClick(const GatheredToggle<UnitFireOrders>& shown)
+    {
+        if (shown.mixed)
+        {
+            return UnitFireOrders::HoldFire;
+        }
+        switch (shown.value)
+        {
+            case UnitFireOrders::HoldFire:
+                return UnitFireOrders::ReturnFire;
+            case UnitFireOrders::ReturnFire:
+                return UnitFireOrders::FireAtWill;
+            case UnitFireOrders::FireAtWill:
+                return UnitFireOrders::HoldFire;
+        }
+        return UnitFireOrders::HoldFire;
+    }
+
+    UnitMovementOrders moveOrdersAfterClick(const GatheredToggle<UnitMovementOrders>& shown)
+    {
+        if (shown.mixed)
+        {
+            return UnitMovementOrders::HoldPosition;
+        }
+        switch (shown.value)
+        {
+            case UnitMovementOrders::HoldPosition:
+                return UnitMovementOrders::Maneuver;
+            case UnitMovementOrders::Maneuver:
+                return UnitMovementOrders::Roam;
+            case UnitMovementOrders::Roam:
+                return UnitMovementOrders::HoldPosition;
+        }
+        return UnitMovementOrders::HoldPosition;
+    }
+
+    bool onOffAfterClick(const GatheredToggle<bool>& shown)
+    {
+        return shown.mixed || !shown.value;
+    }
+
+    bool cloakAfterClick(const GatheredToggle<bool>& shown)
+    {
+        return !shown.mixed && !shown.value;
+    }
 }

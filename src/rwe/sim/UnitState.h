@@ -113,6 +113,14 @@ namespace rwe
     {
         std::variant<UnitId, FeatureId> target;
         std::optional<SimVector> nanoParticleOrigin;
+
+        /**
+         * Ticks of work towards the next bite out of a unit target, the
+         * original's mission+0x3A: a unit is reclaimed as a damage step every
+         * sixteen ticks (0x4048D2), not as a smooth drain. Unused for a
+         * feature target, which is worked a tick at a time.
+         */
+        unsigned int stepCounter{0};
     };
 
     /**
@@ -317,8 +325,18 @@ namespace rwe
 
         Phase phase{Phase::Approaching};
 
-        /** Bombs let go on the current pass; a run drops a stick of three once the sight opens. */
+        /** Bombs let go on the current pass. */
         unsigned int bombsDroppedThisPass{0};
+
+        /**
+         * Where the aircraft was when the pass's first bomb left it. The
+         * original's AirStrike releases when the target comes within
+         * `1 + attackrunlength + falltime * speed` (state 4, 0x412394) and
+         * then lets the weapon drop on every reload until the aircraft is
+         * `attackrunlength` past that point (states 5 and 6). Nothing while
+         * the pass has not released yet.
+         */
+        std::optional<SimVector> releasePoint;
 
         /**
          * True for the original's `AirToGround` strafing pass -- a gun-armed
@@ -679,9 +697,6 @@ namespace rwe
          * cost says it should.
          */
         unsigned int nanoframeDecayRemainder{0};
-
-        /** Reclaim work applied to this unit so far, see GameSimulation::reclaimUnit. */
-        unsigned int reclaimProgress{0};
 
 
         /** When set, the game time at which this unit will self-destruct. */

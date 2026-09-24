@@ -291,20 +291,62 @@ function createMod(outPath: string, filePaths: Map<string, string>): void {
   );
 }
 
-export function getRweUserPath(): string {
-  if (process.platform === "win32") {
-    const appData = process.env["APPDATA"];
+/**
+ * The places the user's RWE directory may be, most preferred first.
+ * Windows: %APPDATA%\RWE. Elsewhere: "rwe" under the XDG data home, which is
+ * ~/.local/share unless XDG_DATA_HOME is set and absolute (issue #216), then
+ * the legacy ~/.rwe. The engine applies the same rule in src/rwe/util.cpp;
+ * keep the two in step.
+ */
+export function rweUserPathCandidates(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv
+): string[] {
+  if (platform === "win32") {
+    const appData = env["APPDATA"];
     if (appData === undefined) {
       throw new Error("Failed to find AppData path");
     }
-    return path.join(appData, "RWE");
-  } else {
-    const home = process.env["HOME"];
-    if (home === undefined) {
-      throw new Error("Failed to find home directory");
-    }
-    return path.join(home, ".rwe");
+    return [path.join(appData, "RWE")];
   }
+  const home = env["HOME"];
+  if (home === undefined || home === "") {
+    throw new Error("Failed to find home directory");
+  }
+  // POSIX paths whatever the host, so the rule reads the same when the
+  // tests run on Windows.
+  const posix = path.posix;
+  const xdgDataHome = env["XDG_DATA_HOME"];
+  const dataHome =
+    xdgDataHome !== undefined && posix.isAbsolute(xdgDataHome)
+      ? xdgDataHome
+      : posix.join(home, ".local", "share");
+  return [posix.join(dataHome, "rwe"), posix.join(home, ".rwe")];
+}
+
+/**
+ * The first candidate that exists, or the first candidate when none does: a
+ * fresh install lands in the new place, an old one stays where its files are.
+ */
+export function chooseRweUserPath(
+  candidates: string[],
+  exists: (p: string) => boolean
+): string {
+  const found = candidates.find(exists);
+  return found !== undefined ? found : candidates[0];
+}
+
+export function getRweUserPath(): string {
+  return chooseRweUserPath(
+    rweUserPathCandidates(process.platform, process.env),
+    (p) => {
+      try {
+        return fs.statSync(p).isDirectory();
+      } catch {
+        return false;
+      }
+    }
+  );
 }
 
 export function getRweModsPath(): string {

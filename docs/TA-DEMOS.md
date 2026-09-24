@@ -2918,7 +2918,8 @@ checks an existing file instead of recording one.
 type index from the 1-based sorted `units/*.FBI` order of the data set the
 game was played on, and the recorder writes that same order, so both sides
 must be built from the same data. Without `--units` the script derives one
-from `--data-path` (default `~/.rwe/Data`) by extracting every archive with
+from `--data-path` (default the user data directory's `Data`, `~/.local/share/rwe/Data`
+or a pre-existing `~/.rwe/Data`) by extracting every archive with
 `hpi_test extract-all` in the engine's own priority order -- `.hpi`, then
 `.ufo`, then `.ccx`, then `.gpf`, then `.gp3`, each tier name-sorted -- and
 overwriting earlier archives with later ones **case-insensitively** into one

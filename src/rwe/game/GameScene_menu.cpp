@@ -524,6 +524,7 @@ namespace rwe
         {
             toggle->setStage(static_cast<unsigned int>(state.musicTrackMode));
         }
+        refreshInGameTrackControls();
 
         if (auto toggle = findInGameMenu<UiStagedButton>("BSHADOWS"))
         {
@@ -644,7 +645,8 @@ namespace rwe
             shadingMode,
             antiAliasEnabled,
             buildingHaloEnabled,
-            antiAliasUnitsEnabled};
+            antiAliasUnitsEnabled,
+            musicTrackTypes};
     }
 
     void GameScene::applyInGameOptions(const GameOptions& state)
@@ -659,6 +661,8 @@ namespace rwe
         soundModeSetting = state.soundMode;
         unitSpeechSetting = state.unitSpeech;
         musicTrackModeSetting = state.musicTrackMode;
+        musicTrackTypes = state.musicTrackTypes;
+        rebuildMusicMoods();
         audio->setSoundEnabled(state.soundMode != SoundMode::Off);
         gammaSetting = state.gamma;
         applyGamma();
@@ -1009,6 +1013,24 @@ namespace rwe
                 // playing is left to finish (TOTALA-EXE.md S:68).
                 musicTrackModeSetting = nextStage(musicTrackModeSetting);
             }
+            else if (control == "TRACKTYPE")
+            {
+                // Building | Battle | Victory | Defeat | Unused, cycled by the
+                // button itself and written to the current track's entry
+                // (0x4CE7C0 at 0x45D753). Only offered while music is on and
+                // the mode is Custom, the one mode that reads the types
+                // (TOTALA-EXE-INTERFACE.md S:68).
+                if (auto index = currentMusicTrackIndex();
+                    index && sceneContext.audioService->isMusicEnabled() && musicTrackModeSetting == MusicTrackMode::Custom)
+                {
+                    for (auto i = musicTrackTypes.size(); i < allMusicTracks.size(); ++i)
+                    {
+                        musicTrackTypes.push_back(static_cast<unsigned int>(defaultMusicTrackType(allMusicTracks[i])));
+                    }
+                    musicTrackTypes[*index] = static_cast<unsigned int>(nextStage(musicTrackTypeOf(musicTrackTypes, *index, allMusicTracks[*index])));
+                    rebuildMusicMoods();
+                }
+            }
             else if (control == "CDPLAY")
             {
                 sceneContext.audioService->setMusicEnabled(true);
@@ -1039,6 +1061,27 @@ namespace rwe
         refreshInGameOptionControls();
     }
 
+    void GameScene::refreshInGameTrackControls()
+    {
+        // TRACKNUM is display only: the current track's number, or NO DISC
+        // when there is none. TRACKTYPE shows that track's type, and is
+        // greyed except in Custom with music on (0x45D234).
+        auto index = currentMusicTrackIndex();
+        if (auto label = findInGameMenu<UiLabel>("TRACKNUM"))
+        {
+            label->setText(musicTrackNumberCaption(index));
+        }
+        if (auto toggle = findInGameMenu<UiStagedButton>("TRACKTYPE"))
+        {
+            auto type = index ? musicTrackTypeOf(musicTrackTypes, *index, allMusicTracks[*index]) : MusicTrackType::Building;
+            if (static_cast<unsigned int>(type) < toggle->getStageCount())
+            {
+                toggle->setStage(static_cast<unsigned int>(type));
+            }
+            toggle->setEnabled(index.has_value() && sceneContext.audioService->isMusicEnabled() && musicTrackModeSetting == MusicTrackMode::Custom);
+        }
+    }
+
     void GameScene::refreshInGameOptionControls()
     {
         auto* audio = sceneContext.audioService;
@@ -1046,6 +1089,7 @@ namespace rwe
         {
             toggle->setStage(audio->isMusicEnabled() ? 1 : 0);
         }
+        refreshInGameTrackControls();
         if (auto toggle = findInGameMenu<UiStagedButton>("MODE"))
         {
             toggle->setStage(static_cast<unsigned int>(soundModeSetting));

@@ -7,18 +7,14 @@ namespace rwe
     namespace
     {
         /**
-         * The preamble the original runs before either ladder
-         * (0x43F0EC-0x43F12D): one byte out of the ordering player's ally
-         * table decides ALLIED and ENEMY, and the two are complements.
-         *
-         * RWE has no separate ally relation at this layer -- GameScene's
-         * isEnemy is "not mine", with a TODO on it -- so allied here means
-         * the orderer's own player, which is also what makes the load rule
-         * below an own-units rule rather than an allied-units one.
+         * The ladder's own test, 0x43F0EC-0x43F12D: one byte out of the
+         * ordering player's ally table decides ALLIED and ENEMY, and the two
+         * are complements. RWE's ally table is the lobby team, which is what
+         * shared vision runs on too, so a teammate's unit is allied here.
          */
-        bool isAlliedTarget(const UnitState& orderer, const UnitState& target)
+        bool isAlliedTarget(const GameSimulation& sim, const UnitState& orderer, const UnitState& target)
         {
-            return target.isOwnedBy(orderer.owner);
+            return sim.arePlayersAllied(orderer.owner, target.owner);
         }
 
         bool isUnderConstruction(const GameSimulation& sim, const UnitState& target)
@@ -70,12 +66,13 @@ namespace rwe
          * Neither CanLoadUnit (0x489A90) nor any of its five call sites
          * applies an ownership or an alliance test, so the original will
          * happily aim a pickup at an enemy unit (S:103). RWE's house rule is
-         * own units only, stated here once rather than repeated at each of
-         * the click handlers -- see S:88.
+         * own units only -- not allied ones, a teammate's units are theirs
+         * to move -- stated here once rather than repeated at each of the
+         * click handlers; see S:88.
          */
         bool canLoad(const GameSimulation& sim, const UnitState& orderer, UnitId ordererId, const UnitState& target, UnitId targetId)
         {
-            if (!isAlliedTarget(orderer, target))
+            if (!target.isOwnedBy(orderer.owner))
             {
                 return false;
             }
@@ -101,7 +98,7 @@ namespace rwe
             UnitId targetId,
             const UnitState& target)
         {
-            auto allied = isAlliedTarget(orderer, target);
+            auto allied = isAlliedTarget(sim, orderer, target);
             const auto& targetDefinition = sim.unitDefinitions.at(target.unitType);
 
             if (!allied && ordererDefinition.canCapture)
@@ -167,7 +164,7 @@ namespace rwe
             UnitId targetId,
             const UnitState& target)
         {
-            auto allied = isAlliedTarget(orderer, target);
+            auto allied = isAlliedTarget(sim, orderer, target);
 
             if (!allied && ordererDefinition.canAttack)
             {
@@ -285,7 +282,7 @@ namespace rwe
                     {
                         return CursorType::Select;
                     }
-                    return isAlliedTarget(orderer, target) ? CursorType::Green : CursorType::Red;
+                    return isAlliedTarget(sim, orderer, target) ? CursorType::Green : CursorType::Red;
                 };
 
                 switch (scheme)

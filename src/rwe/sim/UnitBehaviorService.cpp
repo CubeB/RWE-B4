@@ -949,12 +949,22 @@ namespace rwe
             }
             else if (std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType))
             {
-                // Bombsight semantics: we ignore the COB AimWeapon dance and
-                // fire directly from the IdleInfo state when the predicted
-                // ballistic-impact point is within the release window of the
-                // target. This avoids the degenerate aim case where the
-                // bomber is overhead (vertical XZ vector ~0) which would
-                // confuse computeBallisticHeadingAndPitch.
+                // There is no bombsight in the original's weapon code at all.
+                // The bomb handler 0x49DD60 spawns the round on the first fire
+                // check with the reload run down, with no aim script, no
+                // tolerance test and no look at the ground: the round simply
+                // inherits the aircraft's heading and speed. What decides
+                // WHERE the bombs fall is the mission. AirStrike's state 4
+                // (0x412394) withholds the target until the aircraft is within
+                //   1 + attackrunlength + ftol(sqrt(2 * cruisealt / g) * 30 * speed)
+                // of it, the second term being how far a bomb dropped now
+                // travels while it falls from cruise altitude; state 5 then
+                // hands weapon 0 the ground point and the weapon drops on
+                // every reload; state 6 takes it away again attackrunlength
+                // world units past the release point. So the stick starts
+                // 1 + attackrunlength short of the target and walks up to it.
+                // The COB aim dance is skipped for the same reason it is in
+                // the original: a bomb is neither turret nor vlaunch.
                 if (std::holds_alternative<UnitWeaponStateAttacking::IdleInfo>(aimingState->attackInfo)
                     && sim->gameTime >= weapon->readyTime)
                 {
@@ -972,19 +982,29 @@ namespace rwe
                             [&](const AirMovementStateLanding&) {});
                     }
 
-                    // Use the weapon's damageRadius as the release tolerance.
-                    // damageRadius is half the TA areaOfEffect (see
-                    // LoadingScene_util.cpp), which is roughly the splash
-                    // radius — a reasonable bombsight gate.
-                    auto releaseRadius = rweMax(weaponDefinition.damageRadius, 16_ss);
+                    const auto& bomberDefinition = sim->unitDefinitions.at(unit.unitType);
+                    SimVector flatToTarget(targetPosition->x - unit.position.x, 0_ss, targetPosition->z - unit.position.z);
+                    SimVector flatVelocity(bomberVelocity.x, 0_ss, bomberVelocity.z);
+                    auto trigger = bombReleaseTrigger(bomberDefinition, flatVelocity.length());
 
-                    // Once the sight opens, a run lets go of a stick of three
-                    // bombs as fast as the weapon reloads, then holds until
-                    // the next pass.
-                    const unsigned int bombsPerRun = 3;
-                    bool stickStarted = runState && runState->bombsDroppedThisPass > 0;
-                    bool stickFinished = runState && runState->bombsDroppedThisPass >= bombsPerRun;
-                    if (!stickFinished && (stickStarted || bombsightInReleaseWindow(unit.position, bomberVelocity, *targetPosition, releaseRadius)))
+                    bool releasing = false;
+                    if (runState && runState->releasePoint)
+                    {
+                        // Mid-stick: state 5's run, which state 6 ends
+                        // attackrunlength past where the first bomb left.
+                        SimVector flatFromRelease(unit.position.x - runState->releasePoint->x, 0_ss, unit.position.z - runState->releasePoint->z);
+                        releasing = flatFromRelease.lengthSquared() < bomberDefinition.attackRunLength * bomberDefinition.attackRunLength;
+                    }
+                    else if (flatToTarget.lengthSquared() <= trigger * trigger)
+                    {
+                        releasing = true;
+                        if (runState)
+                        {
+                            runState->releasePoint = unit.position;
+                        }
+                    }
+
+                    if (releasing)
                     {
                         if (runState)
                         {
@@ -1201,18 +1221,19 @@ namespace rwe
         }
         else
         {
-            // Asked against the stores directly rather than through the
-            // ordinary request-and-settle path. That path pays every consumer
-            // a share of whatever there is and carries the rest as debt, which
-            // is right for a builder but not for a shot: the original settles
-            // the price before the round leaves the barrel, and a weapon that
-            // cannot cover it in full simply does not fire.
-            const auto& player = sim->getPlayer(unit.owner);
-            if (player.energy < weaponDefinition.energyPerShot || player.metal < weaponDefinition.metalPerShot)
+            // Taken from the stores directly rather than through the ordinary
+            // request-and-settle path. That path pays every consumer a share
+            // of whatever there is and carries the rest as debt, which is
+            // right for a builder but not for a shot: the original subtracts
+            // the price before the round leaves the barrel (0x401220,
+            // 0x401260, 0x4012A0), so the next shot this second sees the
+            // smaller stock, a weapon that cannot cover it in full simply does
+            // not fire, and a shooter that owes for something else still pays
+            // rather than firing for free.
+            if (!sim->chargeStockpile(id, weaponDefinition.energyPerShot, weaponDefinition.metalPerShot))
             {
                 return;
             }
-            sim->addResourceDelta(id, -weaponDefinition.energyPerShot, -weaponDefinition.metalPerShot);
         }
 
         if (!fireInfo->firingPiece)
@@ -2930,6 +2951,16 @@ namespace rwe
                 continue;
             }
 
+            // A teammate's unit is not a candidate. The original's list
+            // builder 0x40AA40 tests the searcher's ally byte for the
+            // candidate's player (0x40AB05) before it asks whether the
+            // candidate can even be seen, and skips the unit when it is set.
+            // The index only dropped the searcher's own side (issue #237).
+            if (sim->arePlayersAllied(unit.owner, otherUnit.owner))
+            {
+                continue;
+            }
+
             const auto& otherUnitDefinition = sim->unitDefinitions.at(otherUnit.unitType);
 
             // Buildings that do not ask to be shot at are left alone unless
@@ -4105,7 +4136,32 @@ namespace rwe
             return std::nullopt;
         }
 
-        return chooseTarget(unitInfo.id, 0, TargetSearchMode::SightDistance);
+        auto candidate = chooseTarget(unitInfo.id, 0, TargetSearchMode::SightDistance);
+        if (!candidate)
+        {
+            return std::nullopt;
+        }
+
+        // A bomb is never handed a mission against anything that can fly:
+        // the mission builder skips AIRSTRIKE for an air target at 0x43F2AA
+        // and falls through to no mission at all (S:86). Refusing the
+        // candidate here, where the patrol polls, is what keeps that refusal
+        // free: a bomber that broke off for a fighter parked beside its
+        // route, was refused, and broke off again next tick, would mill
+        // about beside it instead of carrying on (issue #70). The chooser is
+        // the ordinary one, so a flying candidate is declined rather than
+        // replaced; the poll simply asks again next tick.
+        const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[0]->weaponType);
+        if (std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType))
+        {
+            auto target = sim->tryGetUnitState(*candidate);
+            if (target && sim->unitDefinitions.at(target->get().unitType).canFly)
+            {
+                return std::nullopt;
+            }
+        }
+
+        return candidate;
     }
 
     bool UnitBehaviorService::handleDgunOrder(UnitInfo unitInfo, const DgunOrder& order)
@@ -5453,7 +5509,30 @@ namespace rwe
                 return match(
                     target,
                     [&](const UnitId& targetUnitId) {
-                        auto finished = sim->reclaimUnit(targetUnitId, unitInfo.state->owner, unitInfo.definition->workerTimePerTick);
+                        // ReclaimUnit's state 4 (0x4048D2) takes the unit
+                        // apart a bite at a time: a pass every two ticks
+                        // counts mission+0x3A up by two, and once it has
+                        // reached fifteen the step 0x438650 sized is applied
+                        // as damage and the count starts again. Sixteen ticks
+                        // a bite, then, and the target's health bar is what
+                        // the info panel shows for the progress.
+                        auto targetRef = sim->tryGetUnitState(targetUnitId);
+                        if (!targetRef || targetRef->get().isDead())
+                        {
+                            changeState(*unitInfo.state, UnitBehaviorStateIdle());
+                            return true;
+                        }
+
+                        reclaimingState.stepCounter += 1;
+                        if (reclaimingState.stepCounter < 16)
+                        {
+                            return false;
+                        }
+                        reclaimingState.stepCounter = 0;
+
+                        const auto& targetDefinition = sim->unitDefinitions.at(targetRef->get().unitType);
+                        auto damage = computeUnitReclaimStep(unitInfo.definition->workerTime, unitInfo.state->kills, targetDefinition.maxHitPoints, targetDefinition.buildCostMetal);
+                        auto finished = sim->reclaimUnitStep(targetUnitId, unitInfo.state->owner, damage);
                         if (finished)
                         {
                             changeState(*unitInfo.state, UnitBehaviorStateIdle());
