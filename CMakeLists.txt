@@ -437,6 +437,8 @@ set(SOURCE_FILES
     src/rwe/io/smk/SmkDecoder.h
     src/rwe/io/tad/TadReader.cpp
     src/rwe/io/tad/TadReader.h
+    src/rwe/io/tad/TadWriter.cpp
+    src/rwe/io/tad/TadWriter.h
     src/rwe/io/tad/tad_events.cpp
     src/rwe/io/tad/tad_events.h
     src/rwe/io/tad/tad_headers.h
