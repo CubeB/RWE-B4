@@ -153,6 +153,68 @@ namespace rwe
             sim.unitDefinitions["ARMTSHIP"] = ship;
         }
 
+        /** ARMATLAS "Atlas", the air lift: capacity one, whatever the FBI says. */
+        void defineAirTransport(GameSimulation& sim)
+        {
+            auto atlas = makeDef(false, false, true, "", 100u);
+            atlas.canFly = true;
+            atlas.transportCapacity = 1u;
+            atlas.transportSize = 3u;
+            sim.unitDefinitions["ARMATLAS"] = atlas;
+        }
+
+        /**
+         * An anti-air picket that cannot touch the ground. Its weapon reaches
+         * aircraft but deals no DEFAULT damage, which is what lets a test tell
+         * the carrier's field from the cargo's: the anti-ground layer sums
+         * every weapon's DEFAULT damage without asking whether it can target
+         * ground at all, so a flak gun with ordinary damage would show up on
+         * both layers and the two questions would be indistinguishable.
+         */
+        void defineFlak(GameSimulation& sim)
+        {
+            WeaponDefinition flak{};
+            flak.toAirWeapon = true;
+            // Short enough to cover only the tile it stands on: the
+            // anti-air layer spreads a gun over ceil(range / cellSize) cells,
+            // and a range that reaches the next candidate would make the
+            // whole bank quiet and pin nothing.
+            flak.maxRange = 30_ss;
+            flak.reloadTime = 1_ss;
+            flak.burst = 1;
+            flak.damage["DEFAULT"] = 0u;
+            sim.weaponDefinitions["FLAK"] = flak;
+
+            auto turret = makeDef(false, false, true, "FLAK", 200u);
+            sim.unitDefinitions["FLAKBAT"] = turret;
+        }
+
+        /**
+         * Two shores far enough apart that the walk-back has candidates to
+         * choose between: the west bank is heightmap x in [0, 10), the east
+         * is x >= 38, so east-bank ground runs from world 96 to 512 -- three
+         * 48-unit steps' worth for a search walking back from a target at the
+         * far edge. A wider bank than makeWideChannelTerrain's is the point:
+         * with one dry candidate "quietest" and "nearest" are the same pick
+         * and a test pins nothing.
+         */
+        MapTerrain makeWideFarShoreTerrain()
+        {
+            Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(0));
+            for (int y = 0; y < 64; ++y)
+            {
+                for (int x = 0; x < 10; ++x)
+                {
+                    heights.set(x, y, static_cast<unsigned char>(90));
+                }
+                for (int x = 38; x < 64; ++x)
+                {
+                    heights.set(x, y, static_cast<unsigned char>(90));
+                }
+            }
+            return MapTerrain(std::move(heights), 60_ss);
+        }
+
         template <typename Order>
         std::vector<Order> ordersFor(const std::vector<PlayerCommand>& commands, UnitId unit)
         {
@@ -561,6 +623,110 @@ namespace rwe
             // Exactly the booked passenger's worth of unloads -- one, here.
             auto unloads = ordersFor<UnloadOrder>(commands, shipId);
             REQUIRE(unloads.size() == 1);
+        }
+    }
+
+    TEST_CASE("a landing is scored against what the carrier is, not what the cargo is", "[ai]")
+    {
+        // Issue #228. Both landing searches used to score every candidate with
+        // antiGroundInRadius, which for an air lift is the wrong question -- an
+        // Atlas is killed by anti-air, not by guns that cannot reach it. A
+        // beach with a flak battery over it and nothing else scored as
+        // perfectly quiet and the lift flew into it.
+        //
+        // The picket here can reach aircraft and deals no ground damage, so
+        // the two fields disagree: the carrier's field says "one gun covers
+        // this spot", the cargo's says "nothing can hurt you here". An air
+        // lift must walk past it; a hull, which the gun cannot touch, must
+        // not move at all.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeWideFarShoreTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineLandUnits(sim);
+        defineSeaTransport(sim);
+        defineAirTransport(sim);
+        defineFlak(sim);
+
+        // Only the commander may cross; a kbot stops at depth 20 and the
+        // channel is 60 deep, so the east bank is a real barrier and a ferry
+        // is wanted.
+        sim.unitDefinitions.at("ARMCOM").movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 100u};
+
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-440_ss, 90_ss, 40_ss), script);
+        for (auto z : {0_ss, 24_ss, 48_ss, 72_ss})
+        {
+            addUnit(sim, "ARMPW", ai, SimVector(-420_ss, 90_ss, z), script);
+        }
+        // The objective at the far edge, unarmed so it is only a place to go.
+        addUnit(sim, "ARMSOLAR", human, SimVector(450_ss, 90_ss, 0_ss), script);
+        // The picket exactly on the walk-back's first dry step: 450 less
+        // 4 * 48 is 258, and 258 is east-bank ground.
+        auto flakId = addUnit(sim, "FLAKBAT", human, SimVector(258_ss, 90_ss, 0_ss), script);
+
+        auto profile = makeDefaultBrutalProfile();
+        profile.cheatModeOmniscient = true;
+        profile.scoutCount = 0;
+        profile.attackArmySize = 1;
+        profile.tacticalTickInterval = 1;
+        profile.attackInWaves = false;
+        // See the sea case above for why the phase must stay in Attack and
+        // why the enemy has to be outside defendRadius.
+        profile.retreatArmySize = 0;
+        profile.defendRadius = 200_ss;
+        // antiGroundInRadius is a flat box sum, so at the shipped 300 a picket
+        // a hundred units away counts the same as one underfoot. One cell
+        // isolates the picket's own tile from the objective's.
+        profile.ferryLandingThreatRadius = 16.0f;
+
+        SECTION("the air lift will not be put down under the anti-air")
+        {
+            auto atlasId = addUnit(sim, "ARMATLAS", ai, SimVector(-400_ss, 150_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 90, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.knownEnemies.count(flakId.value) == 1);
+            REQUIRE(bb.phase == GamePhase::Attack);
+            REQUIRE(bb.enemyAcrossWater);
+            REQUIRE(controller.getThreatMap().antiAirCoverAt(SimVector(258_ss, 90_ss, 0_ss)) >= 1.0f);
+
+            auto unloads = ordersFor<UnloadOrder>(commands, atlasId);
+            REQUIRE(!unloads.empty());
+            auto drop = unloads.front().destination;
+            // The carrier's own field, which is the fix: nothing can shoot at
+            // an aircraft where it is being set down. This is the whole
+            // assertion. Before the field was chosen by carrier, anti-ground
+            // was flat -- the picket deals no ground damage -- so the search
+            // took the quiet point nearest home, which is the walk-back's
+            // first step and sits in the picket's anti-air cover.
+            REQUIRE(controller.getThreatMap().antiAirCoverAt(drop) == 0.0f);
+            // Said as a distance too, so the failure reads as "put down under
+            // the gun" rather than as a bare nought.
+            auto gun = SimVector(258_ss, 90_ss, 0_ss);
+            REQUIRE(drop.distanceSquared(gun) >= SimScalar(48.0f * 48.0f));
+        }
+
+        SECTION("a hull ignores anti-air it cannot be hurt by")
+        {
+            auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 90, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.knownEnemies.count(flakId.value) == 1);
+            REQUIRE(bb.phase == GamePhase::Attack);
+            REQUIRE(bb.enemyAcrossWater);
+            REQUIRE(std::find(bb.transports.begin(), bb.transports.end(), shipId) != bb.transports.end());
+
+            auto unloads = ordersFor<UnloadOrder>(commands, shipId);
+            REQUIRE(!unloads.empty());
+            // Still the nearest quiet point, 258: for a surface hull the
+            // carrier's field is anti-ground, and this gun cannot touch it.
+            REQUIRE(unloads.front().destination.x > 240_ss);
         }
     }
 }
