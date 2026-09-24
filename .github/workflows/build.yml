@@ -144,6 +144,8 @@ jobs:
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome.* /etc/apt/sources.list.d/microsoft-prod.*
           sudo apt-get update -y -o Acquire::Retries=3
+      # SDL3's windowing and GL backends are built from the submodule and
+      # need these headers; libglew-dev used to pull them in transitively.
       - name: install apt packages
         run: sudo apt-get install -y -o Acquire::Retries=3
           gcc-14
@@ -151,8 +153,6 @@ jobs:
           clang-18
           ccache
           imagemagick
-          # SDL3's windowing and GL backends are built from the submodule and
-          # need these headers; libglew-dev used to pull them in transitively.
           libgl-dev
           libglx-dev
           libegl-dev
