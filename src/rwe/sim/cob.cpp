@@ -450,8 +450,8 @@ namespace rwe
                     // FIXME: unsure if correct return value when unit does not exist
                     return 0;
                 }
-                // TODO: real allied check including teams/alliances
-                return static_cast<int>(targetUnitOption->get().isOwnedBy(unit.owner));
+                // The lobby team is the ally relation, as everywhere else.
+                return static_cast<int>(sim.arePlayersAllied(unit.owner, targetUnitOption->get().owner));
             });
     }
 

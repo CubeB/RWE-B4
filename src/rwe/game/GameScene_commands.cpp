@@ -1197,8 +1197,10 @@ namespace rwe
 
     bool GameScene::isEnemy(UnitId id) const
     {
-        // TODO: consider allies/teams here
-        return !getUnit(id).isOwnedBy(localPlayerId);
+        // The original reads one byte out of the ordering player's ally table
+        // and ALLIED and ENEMY are its complements (0x43F0EC-0x43F12D). RWE's
+        // ally relation is the lobby team, the same one shared vision runs on.
+        return !simulation.arePlayersAllied(getUnit(id).owner, localPlayerId);
     }
 
     bool GameScene::isFriendly(UnitId id) const
