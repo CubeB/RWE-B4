@@ -7,6 +7,7 @@ synthetic event logs under ``testdata/`` with the pinned field names.
 
 import contextlib
 import io
+import json
 import shutil
 import sys
 import tempfile
@@ -141,11 +142,15 @@ class QCountTests(QTestCase):
         _rc, out, _ = run_q([str(self.root), "--count"])
         lines = out.splitlines()
         self.assertEqual(lines[0], "2\tai_status")
-        self.assertIn("2\tbuild_refusal", lines)
+        self.assertNotIn("2\tbuild_refusal", lines)
         self.assertIn("1\tai_transition", lines)
 
+    def test_count_level_all_includes_trace(self):
+        _rc, out, _ = run_q([str(self.root), "--count", "--level", "all"])
+        self.assertIn("2\tbuild_refusal", out.splitlines())
+
     def test_count_by_field(self):
-        _rc, out, _ = run_q([str(self.root), "--count", "why"])
+        _rc, out, _ = run_q([str(self.root), "--count", "why", "--level", "all"])
         mapping = {key: count for count, key in
                    (line.split("\t", 1) for line in out.splitlines())}
         self.assertEqual(mapping.get("no_site"), "1")
@@ -158,6 +163,64 @@ class QCountTests(QTestCase):
     def test_count_limit_caps_groups(self):
         _rc, out, _ = run_q([str(self.root), "--count", "--limit", "2"])
         self.assertEqual(len(out.splitlines()), 2)
+
+
+class QLevelTests(QTestCase):
+    def setUp(self):
+        self.root = self.make_root({"s/seed1-control": "ev-decisions.jsonl"})
+
+    def _events(self, out):
+        return [
+            json.loads(line.split(": ", 1)[1])["ev"]
+            for line in out.splitlines()
+        ]
+
+    def test_trace_events_are_classified(self):
+        for name in ("build_unaffordable", "build_refusal", "factory_hold",
+                     "factory_hold_t2", "transport_refusal"):
+            self.assertIn(name, q.TRACE_EVENTS)
+        for name in ("ai_status", "path_stats", "unit_death"):
+            self.assertNotIn(name, q.TRACE_EVENTS)
+
+    def test_default_hides_trace_events(self):
+        _rc, out, _ = run_q([str(self.root), "--limit", "100"])
+        events = self._events(out)
+        self.assertNotIn("build_refusal", events)
+        self.assertNotIn("transport_refusal", events)
+        self.assertIn("build_order", events)
+
+    def test_level_all_shows_trace_events(self):
+        _rc, out, _ = run_q([str(self.root), "--level", "all", "--limit", "100"])
+        events = self._events(out)
+        self.assertIn("build_refusal", events)
+        self.assertIn("transport_refusal", events)
+
+    def test_level_trace_shows_only_trace_events(self):
+        _rc, out, _ = run_q([str(self.root), "--level", "trace", "--limit", "100"])
+        self.assertEqual(set(self._events(out)), {"build_refusal", "transport_refusal"})
+
+    def test_level_all_is_a_superset_of_the_default(self):
+        _rc, default_out, _ = run_q([str(self.root), "--limit", "100"])
+        _rc, all_out, _ = run_q([str(self.root), "--level", "all", "--limit", "100"])
+        default_events = self._events(default_out)
+        all_events = self._events(all_out)
+        self.assertTrue(set(default_events) <= set(all_events))
+        self.assertEqual(set(all_events) - set(default_events),
+                         {"build_refusal", "transport_refusal"})
+
+    def test_explicit_ev_overrides_level(self):
+        _rc, out, _ = run_q([str(self.root), "--ev", "build_refusal", "--limit", "100"])
+        events = self._events(out)
+        self.assertTrue(events)
+        self.assertEqual(set(events), {"build_refusal"})
+
+    def test_explicit_why_overrides_level(self):
+        _rc, out, _ = run_q([str(self.root), "--why", "unaffordable", "--limit", "100"])
+        self.assertIn("\"ev\":\"build_refusal\"", out)
+
+    def test_explicit_grep_overrides_level(self):
+        _rc, out, _ = run_q([str(self.root), "--grep", "metal short", "--limit", "100"])
+        self.assertIn("\"ev\":\"build_refusal\"", out)
 
 
 class QMalformedTests(QTestCase):
@@ -189,6 +252,11 @@ class QUsageTests(unittest.TestCase):
         doc = q.__doc__
         for name in ("path_stats", "ai_status", "ai_transition", "ai_perf",
                      "build_refusal", "transport_refusal", "scout_assigned"):
+            self.assertIn(name, doc)
+
+    def test_docstring_documents_levels_and_new_fields(self):
+        doc = q.__doc__
+        for name in ("--level", "region_unreachable", "trace"):
             self.assertIn(name, doc)
 
 

@@ -19,11 +19,31 @@ Filters (all combinable):
     --to <secs>          keep events with ``secs`` <= this
     --why <tag>          keep events whose ``why`` tag is this
     --grep <substr>      keep events whose ``detail`` contains this substring
+    --level <lvl>        all, info (default) or trace -- see "Levels" below
     --count [FIELD]      print counts instead of lines: grouped by FIELD, or by
                          ``ev`` when FIELD is omitted, sorted by count descending
     --limit <n>          cap printed lines (or count groups); default 50
 
+An explicit ``--ev``, ``--grep`` or ``--why`` shows whatever it matches even
+if the level would otherwise hide it, so ``q.py --ev build_unaffordable``
+still returns those events.
+
 Stdlib only: json, argparse, pathlib.
+
+Levels
+======
+
+``--level`` partitions the vocabulary; it is a selection, not a threshold:
+
+    all     every event (what the writer kept, and what q.py printed before
+            ``--level`` existed)
+    info    every event except the trace-level ones (the default)
+    trace   only the trace-level ones
+
+The high-frequency decision events are trace: ``build_unaffordable``,
+``build_refusal``, ``factory_hold``, ``factory_hold_t2``,
+``transport_refusal``. The periodic ``ai_status`` and ``path_stats`` telemetry
+stay info -- they are the backbone of a scan and are not a decision flood.
 
 Event vocabulary
 ================
@@ -42,7 +62,7 @@ Event types and their own fields:
         searches, expansions, suspended, abandoned, exhausted, relaxed,
         bugwalk, wasted_stand_in, wasted_other, worst, goalblocked,
         goalblocked_total, walkstuck, queued_per_tick, ticks_with_queue,
-        ticks_total, deepest_ever                      (all numbers)
+        ticks_total, deepest_ever, region_unreachable  (all numbers)
 
     ai_status      emitted every 30 sim seconds
         player, phase, metal_stalled, energy_stalled, metal_income,
@@ -94,6 +114,17 @@ from pathlib import Path
 
 EVENT_LOG_NAME = "event-log.jsonl"
 
+# The high-frequency decision events. They are written like every other event
+# -- the log keeps everything -- but q.py's default level hides them so a scan
+# sees the milestones, deaths and transitions first.
+TRACE_EVENTS = frozenset({
+    "build_unaffordable",
+    "build_refusal",
+    "factory_hold",
+    "factory_hold_t2",
+    "transport_refusal",
+})
+
 
 def run_id_for(run_dir: Path) -> str:
     """``<scenario>/seed<N>-<arm>`` from the run dir's path."""
@@ -130,6 +161,10 @@ def _as_float(value):
         return None
 
 
+def _explicit_selection(args) -> bool:
+    return bool(args.ev) or args.grep is not None or args.why is not None
+
+
 def matches(event: dict, args) -> bool:
     if args.ev and event.get("ev") not in args.ev:
         return False
@@ -147,6 +182,14 @@ def matches(event: dict, args) -> bool:
         return False
     if args.grep is not None and args.grep not in str(event.get("detail", "")):
         return False
+    # An explicit selector asks for its matches by name, so the level does not
+    # get to hide them.
+    if not _explicit_selection(args):
+        is_trace = event.get("ev") in TRACE_EVENTS
+        if args.level == "info" and is_trace:
+            return False
+        if args.level == "trace" and not is_trace:
+            return False
     return True
 
 
@@ -191,6 +234,8 @@ def main(argv=None) -> int:
                         metavar="SECS", help="keep events at or before this sim time")
     parser.add_argument("--why", default=None, help="keep events with this why tag")
     parser.add_argument("--grep", default=None, help="substring in detail")
+    parser.add_argument("--level", choices=("all", "info", "trace"), default="info",
+                        help="event level: all, info (default) or trace only")
     parser.add_argument("--count", nargs="?", const="ev", default=None,
                         metavar="FIELD",
                         help="print counts grouped by FIELD (default: ev)")
