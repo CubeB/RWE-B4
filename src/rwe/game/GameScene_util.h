@@ -1,9 +1,9 @@
 #pragma once
 
 #include <rwe/AudioService.h>
+#include <rwe/ColorPalette.h>
 #include <rwe/GlobalConfig.h>
 #include <rwe/RenderService.h>
-#include <rwe/ColorPalette.h>
 #include <rwe/collections/VectorMap.h>
 #include <rwe/game/BuilderGuisDatabase.h>
 #include <rwe/game/GameCameraState.h>
@@ -408,7 +408,12 @@ namespace rwe
     /** frac is the fraction of the current tick that has elapsed, for smooth motion between ticks. */
     void drawNanoParticle(GameTime currentTime, float frac, const Particle& particle, ColoredMeshBatch& batch);
 
-    void updateParticles(const GameMediaDatabase& gameMediaDatabase, const MapTerrain& terrain, GameTime currentTime, std::vector<Particle>& particles);
+    /**
+     * Steps every particle a tick and drops the finished ones. windDrift is what
+     * a puff of smoke moves by on top of its own velocity, already scaled: the
+     * simulation's wind vector times eight (0x475340).
+     */
+    void updateParticles(const GameMediaDatabase& gameMediaDatabase, const MapTerrain& terrain, GameTime currentTime, const Vector3f& windDrift, std::vector<Particle>& particles);
 
     /**
      * A thermal vent puffs once every this many ticks, for as long as the map

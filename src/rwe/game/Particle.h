@@ -113,6 +113,15 @@ namespace rwe
         ParticleRenderType renderType;
         GameTime startTime;
 
+        /**
+         * Smoke is carried by the map's wind: the puff stepper at 0x475340
+         * (and the vent's at 0x475620) adds windX*8 and windZ*8 to every
+         * puff each tick, the same two words the ballistic rounds use. A wake
+         * dot is not (0x474580 has no wind term), and neither is anything
+         * that flies under its own velocity, so it is opt-in.
+         */
+        bool driftsWithWind{false};
+
         bool isStarted(GameTime currentTime) const;
         unsigned int getFrameIndex(GameTime currentTime, const ParticleRenderTypeSprite& renderType, int totalFrames) const;
         bool isFinished(GameTime currentTime, const ParticleRenderTypeSprite& renderType, int numberOfFrames) const;
