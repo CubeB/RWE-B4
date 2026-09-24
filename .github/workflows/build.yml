@@ -599,7 +599,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release view nightly --json assets --jq '.assets[].name' 2>/dev/null \
+          # Nothing to clear before the first nightly exists, and saying so
+          # is not optional: the step runs under `-e -o pipefail`, so
+          # `gh release view` failing took the whole job down -- before the
+          # step that would have created the release it was looking for. The
+          # notes step above already handles a first run; this one did not,
+          # which is why the first real nightly never published.
+          #
+          # The tag is not the test. `move nightly tag` runs before this, so
+          # by now refs/tags/nightly exists whether or not anything has ever
+          # been released against it.
+          if ! gh release view nightly >/dev/null 2>&1; then
+            echo "no previous nightly release; nothing to clear"
+            exit 0
+          fi
+          gh release view nightly --json assets --jq '.assets[].name' \
             | while IFS= read -r asset; do
                 gh release delete-asset nightly "$asset" --yes
               done
