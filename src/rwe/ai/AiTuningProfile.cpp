@@ -459,6 +459,11 @@ namespace rwe
             || setScalar("engageRadius", p.engageRadius)
             || setScalar("rallyDistance", p.rallyDistance)
             || setScalar("navalRallyDistance", p.navalRallyDistance)
+            || setBool("armyFerryWantFromMap", p.armyFerryWantFromMap)
+            || setInt("ferryLandingSearchSteps", p.ferryLandingSearchSteps)
+            || setBool("ferryLandingFan", p.ferryLandingFan)
+            || setBool("ferryLandingAvoidsThreat", p.ferryLandingAvoidsThreat)
+            || setFloat("ferryLandingThreatRadius", p.ferryLandingThreatRadius)
             || setScalar("threatAversion", p.threatAversion)
             || setScalar("resourceCheatMultiplier", p.resourceCheatMultiplier);
     }

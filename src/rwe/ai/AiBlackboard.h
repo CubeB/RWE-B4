@@ -581,6 +581,27 @@ namespace rwe
          */
         bool hasExpansionSite{false};
         bool enemyAcrossWater{false};
+        /**
+         * The same question as enemyAcrossWater, asked of the MAP instead of
+         * of what can be seen. enemyAcrossWater needs bb.attackTarget, which
+         * ArmyManager resets and rebuilds every tactical pass and leaves
+         * unset outside the Attack phase and whenever nothing is currently
+         * remembered -- so it is the right question for deciding where to
+         * send a ferry that exists, and the wrong one for deciding whether to
+         * spend 919 metal building one. Measured, one 900s game on Coast To
+         * Coast: enemyAcrossWater tracked known_enemies exactly and was false
+         * for two thirds of it, while a single sea transport took 223 seconds
+         * to build. A want that flaps faster than the thing it wants can be
+         * made never gets it made.
+         *
+         * Read from the last answer enemyAcrossWater had a target to give,
+         * and before there has ever been one from landRouteToEnemy. UNLIKE
+         * enemyAcrossWater this may be true with no attack target at all, so
+         * nothing that dereferences bb.attackTarget may branch on it. See
+         * TransportManager::lastArmyFerryAnswer and
+         * AiTuningProfile::armyFerryWantFromMap.
+         */
+        bool armyNeedsFerry{false};
         std::optional<SimVector> rallyPoint;
         std::optional<SimVector> attackTarget;
         int armySize{0};

@@ -2237,6 +2237,67 @@ namespace rwe
         SimScalar defendRadius{900_ss};
         /** How far from a known enemy an army unit will pick a fight. */
         SimScalar engageRadius{450_ss};
+        /**
+         * How far back from the attack target a ferry will look for somewhere
+         * to put the cargo down, in 48-unit steps. The search has always
+         * begun at step 4; this is where it stops.
+         *
+         * It was 12, which is 576 world units, and that is inside the reach
+         * of most of what stands at the objective -- so the furthest point it
+         * could ever choose was still close enough to be shot at on arrival,
+         * and it usually chose the nearest one instead. Measured on Coast To
+         * Coast, ten seeds at 1200s, it also simply FAILED: between 0 and
+         * 1365 ticks a game of "army ferry blocked, no landing near the
+         * attack target", because a band 384 units wide is not a search.
+         */
+        int ferryLandingSearchSteps{24};
+        /**
+         * Whether the landing search tries a fan of bearings about the way
+         * home, or only the single ray straight back along it. False is the
+         * ray, which is what this did before.
+         *
+         * The ray assumes the cargo's shore lies on the line between the
+         * objective and the ferry's origin. Measured on Coast To Coast it
+         * usually does not: a refusal logged at 514 s reported steps 21, wet
+         * 21, refused 0 -- every one of the twenty-one points that stayed on
+         * the map was open sea, the objective being on a headland. The fan
+         * took the "no landing near the attack target" count across ten
+         * seeds from a mean of 834 ticks a game to 189.
+         */
+        bool ferryLandingFan{true};
+        /**
+         * Whether a landing point is chosen for survivability rather than for
+         * proximity. False takes the first dry, walkable, water-adjacent
+         * point the walk-back finds, which is what this did before and is the
+         * beach in front of the guns.
+         *
+         * With it on, every candidate is scored and the quietest wins, ties
+         * going to the one nearest the target so the army still has a march
+         * it can make. Reported from play: "transport ship dumped the units
+         * at the most populated part of the enemies landmass instead of a bit
+         * away from the base, so they all instantly died and the ship was
+         * destroyed wasting resources."
+         */
+        bool ferryLandingAvoidsThreat{true};
+        /**
+         * How far around a candidate landing point enemy damage is totalled.
+         * ThreatMap::antiGroundInRadius is the question, and its cells are
+         * the sim's vision cells at 32 world units.
+         */
+        float ferryLandingThreatRadius{300.0f};
+        /**
+         * Whether the want for an army ferry outlives the sighting that
+         * raised it. False restores the old behaviour, in which the decision
+         * to build a 919-metal transport switched off within one pass of
+         * losing sight of everybody -- measured on one 900s Coast To Coast
+         * game as off for about two thirds of it, against a 223-second build
+         * time for the hull.
+         *
+         * It changes what is BUILT and not where anything is sent: the
+         * dispatch gate still wants bb.attackTarget, because a ferry has to
+         * have somewhere to go. See TransportManager::lastArmyFerryAnswer.
+         */
+        bool armyFerryWantFromMap{true};
         /** Rally point sits this far from the base anchor, towards the enemy. */
         SimScalar rallyDistance{220_ss};
         /**

@@ -488,7 +488,8 @@ namespace rwe
                      << ", unreachable ground " << (blackboard.hasUnreachableGround ? "yes" : "no")
                      << ", wants transport " << (blackboard.wantsTransport ? "yes" : "no")
                      << " (expansion site " << (blackboard.hasExpansionSite ? "yes" : "no")
-                     << ", enemy across water " << (blackboard.enemyAcrossWater ? "yes" : "no") << ")"
+                     << ", enemy across water " << (blackboard.enemyAcrossWater ? "yes" : "no")
+                     << ", army needs ferry " << (blackboard.armyNeedsFerry ? "yes" : "no") << ")"
                      << ", naval scout " << (blackboard.navalScoutUnitId ? "yes" : "no")
                      << ", units:" << counts << "; " << commanderDoing;
 
@@ -509,6 +510,7 @@ namespace rwe
                 .set("wants_transport", blackboard.wantsTransport)
                 .set("expansion_site", blackboard.hasExpansionSite)
                 .set("enemy_across_water", blackboard.enemyAcrossWater)
+                .set("army_needs_ferry", blackboard.armyNeedsFerry)
                 .set("commander", commanderDoing)
                 .set("types", blackboard.ownedTotalCounts)
                 .detail("status");
@@ -544,7 +546,7 @@ namespace rwe
 
         // 6. Eyes, lift and fists.
         timed("scout", [&] { scout.update(sim, profile, threatMap, reachability, blackboard, outCommands); });
-        timed("transport", [&] { transport.update(sim, playerId, profile, reachability, build, blackboard, rng, outCommands); });
+        timed("transport", [&] { transport.update(sim, playerId, profile, reachability, threatMap, build, blackboard, rng, outCommands); });
         timed("army", [&] { army.update(sim, playerId, profile, threatMap, blackboard, outCommands); });
         timed("air", [&] { air.update(sim, playerId, profile, threatMap, blackboard, outCommands); });
 

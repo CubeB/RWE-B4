@@ -187,34 +187,148 @@ namespace rwe
         });
     }
 
-    std::optional<SimVector> TransportManager::landingNear(const GameSimulation& sim, const ReachabilityMap& reachability, const SimVector& target, const SimVector& from) const
+    /**
+     * The walk-back both landing searches share, with the test that tells
+     * them apart handed in.
+     *
+     * A template rather than a std::function because the predicate for the
+     * naval case probes the terrain eight times per candidate, and this runs
+     * once per ferry per tactical pass -- but mostly because that is what
+     * ThreatMap does for the same reason, and one convention is better than
+     * two.
+     */
+    template <typename Usable>
+    std::optional<SimVector> searchLandingAlongRay(
+        const GameSimulation& sim,
+        const AiTuningProfile& profile,
+        const ThreatMap& threatMap,
+        const SimVector& target,
+        const SimVector& from,
+        TransportManager::LandingSearchTally& tally,
+        Usable&& usable)
     {
-        // Walk back from the target towards home until there is ground to set
-        // down on that is not in the enemy's lap.
         auto back = (from - target);
         back.y = 0_ss;
         auto direction = back.normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
-        for (int step = 4; step <= 12; ++step)
+
+        // A FAN rather than a single ray, and this is the part that decides
+        // whether the search finds anything at all.
+        //
+        // Walking straight back towards the ferry's origin assumes the cargo's
+        // shore lies on that line. Measured on Coast To Coast it usually does
+        // not: a refusal logged at 514s reported `steps: 21, wet: 21,
+        // refused: 0` -- every one of the twenty-one points that stayed on the
+        // map was open sea, because the objective sat on a headland and the
+        // line home left it over water immediately. Widening that ray from 576
+        // to 1152 units changed the refusal count in one seed of ten, which is
+        // what a wrong direction looks like when you make it longer.
+        //
+        // So each radius is tried at nine bearings spread through a half-turn
+        // about the direction home, nearest-to-home first. Fixed unit vectors
+        // and a complex multiply, not std::cos -- this chooses where units are
+        // put down, so it is sim arithmetic and has to be the same on every
+        // machine (see updateNavy's bearings table and CLAUDE.md's
+        // determinism rules).
+        static const float fan[9][2] = {
+            {1.0f, 0.0f},
+            {0.9239f, 0.3827f},
+            {0.9239f, -0.3827f},
+            {0.7071f, 0.7071f},
+            {0.7071f, -0.7071f},
+            {0.3827f, 0.9239f},
+            {0.3827f, -0.9239f},
+            {0.0f, 1.0f},
+            {0.0f, -1.0f}};
+
+        std::optional<SimVector> best;
+        float bestThreat = 0.0f;
+        SimScalar bestHomeward(0_ss);
+
+        auto lastStep = std::max(4, profile.ferryLandingSearchSteps);
+        for (int step = 4; step <= lastStep; ++step)
         {
-            auto candidate = target + (direction * SimScalar(static_cast<float>(step) * 48.0f));
-            // tryGetHeightAt is the terrain's own answer to "is this point on
-            // the map", and it is asked here rather than compared against the
-            // width because world space is CENTRED: x runs from -width/2 to
-            // +width/2. Testing against 0..width, as this did, is a window
-            // shifted by half a map -- and since the walk-back is a ray
-            // leaving a rectangle, the break below meant a target anywhere in
-            // the negative half gave up at its very first step.
-            auto height = sim.terrain.tryGetHeightAt(candidate.x, candidate.z);
-            if (!height)
+            auto radius = SimScalar(static_cast<float>(step) * 48.0f);
+            auto bearingCount = profile.ferryLandingFan ? static_cast<int>(std::size(fan)) : 1;
+            for (int bearingIndex = 0; bearingIndex < bearingCount; ++bearingIndex)
             {
+                const auto& b = fan[bearingIndex];
+                // direction rotated by the bearing, as a complex product.
+                SimVector bearing(
+                    (direction.x * SimScalar(b[0])) - (direction.z * SimScalar(b[1])),
+                    0_ss,
+                    (direction.x * SimScalar(b[1])) + (direction.z * SimScalar(b[0])));
+                auto candidate = target + (bearing * radius);
+
+                // tryGetHeightAt is the terrain's own answer to "is this point
+                // on the map", and it is asked here rather than compared
+                // against the width because world space is CENTRED: x runs
+                // from -width/2 to +width/2. Testing against 0..width, as this
+                // did, is a window shifted by half a map. It is a `continue`
+                // and not a `break` now that there is a fan: one bearing
+                // leaving the map says nothing about the next.
+                auto height = sim.terrain.tryGetHeightAt(candidate.x, candidate.z);
+                if (!height)
+                {
+                    continue;
+                }
+                ++tally.stepsTried;
+                candidate.y = *height;
+                if (candidate.y < sim.terrain.getSeaLevel())
+                {
+                    ++tally.wet;
+                    continue;
+                }
+                if (!usable(candidate))
+                {
+                    ++tally.refused;
+                    continue;
+                }
+
+                if (!profile.ferryLandingAvoidsThreat)
+                {
+                    return candidate;
+                }
+
+                // The quietest wins; among equally quiet points, the one
+                // nearest home. That second half is not decoration. The
+                // threat field already accounts for weapon reach, so a
+                // defended shore has a wide skirt and the quiet points are
+                // all some way out -- and without a tie-break the first zero
+                // the ring happens to reach wins, which on the test map was a
+                // bearing of ninety degrees: out of everything's range, and
+                // exactly as far from home as the objective it was supposed
+                // to be short of.
+                //
+                // Comparing floats for equality is safe for the case that
+                // matters, which is nought against nought.
+                auto threat = threatMap.antiGroundInRadius(candidate, profile.ferryLandingThreatRadius);
+                auto homeward = candidate.distanceSquared(from);
+                if (!best || threat < bestThreat || (threat == bestThreat && homeward < bestHomeward))
+                {
+                    best = candidate;
+                    bestThreat = threat;
+                    bestHomeward = homeward;
+                }
+            }
+            if (best && bestThreat <= 0.0f)
+            {
+                // This ring has a landing nothing can shoot at, so there is
+                // no reason to look further out. The whole ring is scored
+                // first, though, and the ring runs nearest-the-way-home
+                // outwards: returning on the first zero found took a bearing
+                // of ninety degrees -- a point abreast of the objective, no
+                // nearer home than the objective is -- over one at
+                // forty-five that was just as quiet and genuinely short of
+                // it. That is the bug this whole search exists to avoid,
+                // rediscovered one loop in.
                 break;
             }
-            candidate.y = *height;
-            if (candidate.y >= sim.terrain.getSeaLevel() && reachability.isWalkable(sim, candidate))
-            {
-                return candidate;
-            }
         }
+        if (best)
+        {
+            return best;
+        }
+
         // getHeightAt would answer 0 for a point off the map, which on a map
         // at sea level 0 passes the test below and lands the cargo nowhere.
         auto fallbackHeight = sim.terrain.tryGetHeightAt(target.x, target.z);
@@ -223,14 +337,30 @@ namespace rwe
             return std::nullopt;
         }
         SimVector fallback(target.x, *fallbackHeight, target.z);
-        if (fallback.y >= sim.terrain.getSeaLevel() && reachability.isWalkable(sim, fallback))
+        if (fallback.y >= sim.terrain.getSeaLevel() && usable(fallback))
         {
             return fallback;
         }
         return std::nullopt;
     }
 
-    std::optional<SimVector> TransportManager::navalLandingNear(const GameSimulation& sim, const ReachabilityMap& reachability, const SimVector& target, const SimVector& from) const
+    std::optional<SimVector> TransportManager::landingNear(const GameSimulation& sim, const ReachabilityMap& reachability, const AiTuningProfile& profile, const ThreatMap& threatMap, const SimVector& target, const SimVector& from, LandingSearchTally& tally) const
+    {
+        // Walk back from the target towards home until there is ground to set
+        // down on that is not in the enemy's lap -- which used to mean the
+        // first dry cell it came to, and now means the quietest.
+        return searchLandingAlongRay(sim, profile, threatMap, target, from, tally, [&](const SimVector& p) {
+            // Walkable, and not somewhere the army could have walked to by
+            // itself -- a ferry that sets its cargo down on our own side of
+            // the water has carried it nowhere. The old search was bounded at
+            // 576 units and could not reach back across a channel; widening
+            // it made this an ordinary case rather than an impossible one,
+            // and the air-ferry test caught it on the first run.
+            return reachability.isWalkable(sim, p) && !reachability.isReachable(sim, p);
+        });
+    }
+
+    std::optional<SimVector> TransportManager::navalLandingNear(const GameSimulation& sim, const ReachabilityMap& reachability, const AiTuningProfile& profile, const ThreatMap& threatMap, const SimVector& target, const SimVector& from, LandingSearchTally& tally) const
     {
         // A ship cannot cross the strip of dry land landingNear would happily
         // land an Atlas on: the drop point still has to be dry ground the
@@ -241,6 +371,9 @@ namespace rwe
         // layer is homed on our base the same way the ground one is.
         if (!reachability.isNavalValid())
         {
+            // Nothing was even looked at: no naval labelling exists, so
+            // "no landing" here means "no navy", which is a different
+            // complaint entirely.
             return std::nullopt;
         }
 
@@ -277,32 +410,10 @@ namespace rwe
             return false;
         };
 
-        for (int step = 4; step <= 12; ++step)
-        {
-            auto candidate = target + (direction * SimScalar(static_cast<float>(step) * 48.0f));
-            // Same bounds reasoning as landingNear above.
-            auto height = sim.terrain.tryGetHeightAt(candidate.x, candidate.z);
-            if (!height)
-            {
-                break;
-            }
-            candidate.y = *height;
-            if (candidate.y >= sim.terrain.getSeaLevel() && reachability.isWalkable(sim, candidate) && hasReachableWaterNearby(candidate))
-            {
-                return candidate;
-            }
-        }
-        auto fallbackHeight = sim.terrain.tryGetHeightAt(target.x, target.z);
-        if (!fallbackHeight)
-        {
-            return std::nullopt;
-        }
-        SimVector fallback(target.x, *fallbackHeight, target.z);
-        if (fallback.y >= sim.terrain.getSeaLevel() && reachability.isWalkable(sim, fallback) && hasReachableWaterNearby(fallback))
-        {
-            return fallback;
-        }
-        return std::nullopt;
+        return searchLandingAlongRay(sim, profile, threatMap, target, from, tally, [&](const SimVector& p) {
+            // See landingNear for why unreachable-on-foot is part of the test.
+            return reachability.isWalkable(sim, p) && !reachability.isReachable(sim, p) && hasReachableWaterNearby(p);
+        });
     }
 
     void TransportManager::update(
@@ -310,6 +421,7 @@ namespace rwe
         PlayerId aiOwner,
         const AiTuningProfile& profile,
         const ReachabilityMap& reachability,
+        const ThreatMap& threatMap,
         const BuildManager& build,
         AiBlackboard& bb,
         std::minstd_rand& rng,
@@ -334,11 +446,55 @@ namespace rwe
 
         // Is there anywhere worth going that needs a lift?
         bool enemyAcrossWater = bb.groundReachabilityValid && bb.attackTarget && !reachability.isReachable(sim, *bb.attackTarget);
+
+        // Whether a ferry is WANTED is a different question from where to
+        // send one, and the difference is a horizon. enemyAcrossWater answers
+        // the second: it needs bb.attackTarget, which ArmyManager rebuilds
+        // from scratch every tactical pass and leaves unset outside the Attack
+        // phase and whenever nothing is currently remembered. Asked of a build
+        // decision that takes 223 seconds to carry out, it flaps with
+        // visibility and the hull never gets made.
+        //
+        // So the build decision reads a LATCH -- the last answer this question
+        // actually had a target to ask about -- and falls back on the map only
+        // before there has ever been one.
+        //
+        // Nothing below may dereference bb.attackTarget on the strength of
+        // armyNeedsFerry: it can be true with no target at all, which is the
+        // entire point of it.
+        if (bb.attackTarget && bb.groundReachabilityValid)
+        {
+            lastArmyFerryAnswer = enemyAcrossWater;
+        }
+
+        bool armyNeedsFerry = enemyAcrossWater;
+        if (profile.armyFerryWantFromMap)
+        {
+            if (lastArmyFerryAnswer)
+            {
+                armyNeedsFerry = *lastArmyFerryAnswer;
+            }
+            else if (bb.landRouteToEnemy && !*bb.landRouteToEnemy)
+            {
+                // Nothing has ever been seen, so there is no latched answer
+                // and the map is all there is. landRouteToEnemy is "can the
+                // army walk to ANY other declared start position", which on a
+                // map that deals ten seats is usually yes even when the enemy
+                // it actually drew is across water -- so this only ever opens
+                // the question on a genuinely isolated map, and never closes
+                // it. Measured: on Coast To Coast it is true from tick 1 and
+                // this branch does nothing at all, which is why the latch and
+                // not the map is what makes this work.
+                armyNeedsFerry = true;
+            }
+        }
+
         bb.hasExpansionSite = expansionSite.has_value();
         bb.enemyAcrossWater = enemyAcrossWater;
-        bb.wantsTransport = expansionSite.has_value() || enemyAcrossWater;
+        bb.armyNeedsFerry = armyNeedsFerry;
+        bb.wantsTransport = expansionSite.has_value() || armyNeedsFerry;
 
-        if (enemyAcrossWater && bb.phase == GamePhase::Attack && bb.transports.empty())
+        if (armyNeedsFerry && bb.phase == GamePhase::Attack && bb.transports.empty())
         {
             LOG_DEBUG << "AI transport: army ferry wanted, but nothing is classified as a transport";
             sim.eventLog.event(sim.gameTime.value, "transport_refusal")
@@ -445,9 +601,10 @@ namespace rwe
                 // perfectly well for other targets. See
                 // AiBlackboard::groundAnchor.
                 const SimVector& ferryOrigin = bb.groundAnchor ? *bb.groundAnchor : *bb.baseAnchor;
+                LandingSearchTally tally;
                 auto landing = transportDef.canFly
-                    ? landingNear(sim, reachability, *bb.attackTarget, ferryOrigin)
-                    : navalLandingNear(sim, reachability, *bb.attackTarget, ferryOrigin);
+                    ? landingNear(sim, reachability, profile, threatMap, *bb.attackTarget, ferryOrigin, tally)
+                    : navalLandingNear(sim, reachability, profile, threatMap, *bb.attackTarget, ferryOrigin, tally);
                 if (!landing)
                 {
                     LOG_DEBUG << "AI transport " << transportId.value << ": army ferry blocked, no landing near "
@@ -461,6 +618,10 @@ namespace rwe
                         .set("air", transportDef.canFly)
                         .set("from_x", static_cast<double>(ferryOrigin.x.value))
                         .set("from_z", static_cast<double>(ferryOrigin.z.value))
+                        .set("steps", tally.stepsTried)
+                        .set("wet", tally.wet)
+                        .set("refused", tally.refused)
+                        .set("naval_layer", reachability.isNavalValid())
                         .set("why", "no_landing")
                         .detail("army ferry blocked, no landing near the attack target");
                     continue;
