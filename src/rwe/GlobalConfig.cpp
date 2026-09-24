@@ -1,4 +1,6 @@
 #include "GlobalConfig.h"
+#include <cctype>
+#include <algorithm>
 
 #include <rwe/util.h>
 
@@ -43,6 +45,72 @@ namespace rwe
             default:
                 return MusicTrackMode::PlayAll;
         }
+    }
+
+    MusicTrackType nextStage(MusicTrackType type)
+    {
+        switch (type)
+        {
+            case MusicTrackType::Building:
+                return MusicTrackType::Battle;
+            case MusicTrackType::Battle:
+                return MusicTrackType::Victory;
+            case MusicTrackType::Victory:
+                return MusicTrackType::Defeat;
+            case MusicTrackType::Defeat:
+                return MusicTrackType::Unused;
+            default:
+                return MusicTrackType::Building;
+        }
+    }
+
+    std::vector<unsigned int> parseMusicTrackTypes(const std::string& value)
+    {
+        std::vector<unsigned int> types;
+        std::string field;
+        auto flush = [&]() {
+            if (!field.empty())
+            {
+                try
+                {
+                    types.push_back(std::min(4u, static_cast<unsigned int>(std::stoul(field))));
+                }
+                catch (const std::exception&)
+                {
+                    // A field that is not a number reads as the default type,
+                    // so the list keeps its alignment with the album.
+                    types.push_back(0u);
+                }
+                field.clear();
+            }
+        };
+        for (auto c : value)
+        {
+            if (c == ',')
+            {
+                flush();
+            }
+            else if (!std::isspace(static_cast<unsigned char>(c)))
+            {
+                field.push_back(c);
+            }
+        }
+        flush();
+        return types;
+    }
+
+    std::string formatMusicTrackTypes(const std::vector<unsigned int>& types)
+    {
+        std::string out;
+        for (std::size_t i = 0; i < types.size(); ++i)
+        {
+            if (i > 0)
+            {
+                out.push_back(',');
+            }
+            out += std::to_string(types[i]);
+        }
+        return out;
     }
 
     ShadingMode nextStage(ShadingMode mode)
@@ -106,6 +174,7 @@ namespace rwe
         options.soundMode = static_cast<SoundMode>(config.soundMode);
         options.unitSpeech = static_cast<UnitSpeechLevel>(config.unitSpeech);
         options.musicTrackMode = static_cast<MusicTrackMode>(config.musicTrackMode);
+        options.musicTrackTypes = config.musicTrackTypes;
         options.gamma = config.gamma;
         options.shading = static_cast<ShadingMode>(config.shadingMode);
         options.antiAlias = config.antiAlias;
@@ -139,6 +208,7 @@ namespace rwe
                                          {"sound-mode", std::to_string(static_cast<unsigned int>(options.soundMode))},
                                          {"unit-speech", std::to_string(static_cast<unsigned int>(options.unitSpeech))},
                                          {"music-mode", std::to_string(static_cast<unsigned int>(options.musicTrackMode))},
+                                         {"music-track-types", formatMusicTrackTypes(options.musicTrackTypes)},
                                          {"gamma", std::to_string(options.gamma)},
                                          {"shading-mode", std::to_string(static_cast<unsigned int>(options.shading))},
                                          {"anti-alias", options.antiAlias ? "true" : "false"},

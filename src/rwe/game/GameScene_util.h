@@ -640,6 +640,43 @@ namespace rwe
      */
     std::size_t nextMusicTrackIndex(MusicTrackMode mode, const std::vector<std::string>& tracks, const std::string& last, int step, unsigned int randomValue);
 
+    /**
+     * RWE's one album: the music folder's playlist in its sorted order with
+     * the title theme taken out, which the game itself never plays (it
+     * belongs to the intro). Track n of MUSICRT's TRACKNUM is entry n-1.
+     */
+    std::vector<std::string> buildMusicAlbum(const std::vector<std::string>& playlist);
+
+    /**
+     * The type a track has when nothing has been chosen for it: Battle for
+     * the six tracks the original's disc recognition types 1-7 (matched to
+     * the GOG rips by duration), Building for everything else.
+     */
+    MusicTrackType defaultMusicTrackType(const std::string& path);
+
+    /**
+     * The type of album track `index`: the chosen one where the list has
+     * an entry for it, else the default for its name.
+     */
+    MusicTrackType musicTrackTypeOf(const std::vector<unsigned int>& types, std::size_t index, const std::string& path);
+
+    /** TRACKNUM's text: the one-based track number, or "NO DISC" when there is no track. */
+    std::string musicTrackNumberCaption(std::optional<std::size_t> index);
+
+    struct MusicMoods
+    {
+        std::vector<std::string> building;
+        std::vector<std::string> battle;
+    };
+
+    /**
+     * Splits the album by type for Custom mode. Victory, Defeat and Unused
+     * are in neither list; an album with nothing of one mood plays the
+     * other's tracks in both, so the music never falls silent for want of a
+     * label.
+     */
+    MusicMoods splitMusicMoods(const std::vector<std::string>& album, const std::vector<unsigned int>& types);
+
     bool shouldShowAllBuildBoxes(const GameSimulation& sim, PlayerId localPlayerId, std::optional<UnitId> singleSelectedUnit, std::optional<UnitId> hoveredUnit);
 
     /**

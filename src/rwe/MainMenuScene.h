@@ -27,6 +27,7 @@ namespace rwe
         SoundMode pendingSoundMode{SoundMode::Stereo};
         UnitSpeechLevel pendingUnitSpeech{UnitSpeechLevel::Full};
         MusicTrackMode pendingMusicTrackMode{MusicTrackMode::Custom};
+        std::vector<unsigned int> pendingMusicTrackTypes;
         unsigned int pendingGamma{100};
         ShadingMode pendingShading{ShadingMode::BuildingsOnly};
         bool pendingAntiAlias{true};
@@ -43,6 +44,9 @@ namespace rwe
 
         /** Starts the title music, or whatever the CD controls have picked. */
         void playMenuMusic();
+
+        /** TRACKNUM and TRACKTYPE for the track the CD controls are on. */
+        void refreshTrackControls(UiPanel& active);
 
         UiRenderService scaledUiRenderService;
         UiRenderService nativeUiRenderService;

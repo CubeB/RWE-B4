@@ -613,8 +613,19 @@ flag.
 > the current track again, and Custom, the default, is the situational music;
 > the evaluator keeps counting in every mode but only Custom acts on it.
 > CDNEXT and CDPREV step Play All and Repeat through the album. The mode is
-> saved to `rwe.cfg` as `music-mode`. TRACKTYPE and TRACKNUM are not ported
-> (fork issue #20).
+> saved to `rwe.cfg` as `music-mode`. **TRACKTYPE and TRACKNUM followed on
+> 2026-09-24 (#20):** the types live in `rwe.cfg` as `music-track-types`, one
+> number per track of RWE's one album (the music folder's sorted playlist
+> less the title theme), Building / Battle / Victory / Defeat / Unused as
+> 0-4; a track with no entry keeps its name-table default. Custom mode splits
+> the album by those types and Victory, Defeat and Unused sit out of both
+> moods. TRACKTYPE shows the current track's type, cycles and assigns it on
+> a click, and is greyed unless music is on and the mode is Custom; TRACKNUM
+> shows the track number or NO DISC. In game the current track is the one
+> playing; in the front end it is the one the CD controls are on, stepped by
+> CDNEXT and CDPREV. Undo snapshots the list with the other options and
+> Restore Defaults clears it. Not ported: playing a Victory or Defeat track
+> at the end of a game, which nothing in RWE's gameplay triggers either.
 
 Layout (panel 150x352 at (128,128), background GAF entry `MUSICRT`):
 `NOTRAK` "Off|On" (CD music on/off), `MUSICVOL` slider, `TRACKMODE`

@@ -64,11 +64,37 @@ namespace rwe
         Both = 3,
     };
 
-    /** All three buttons cycle through their stages and wrap, as the original's do. */
+    /**
+     * MUSICRT's TRACKTYPE: what a track is for (TOTALA-EXE-INTERFACE.md S:68).
+     * The original keeps a 100-entry table of these, one per CD track, and
+     * Custom mode picks tracks by it: Building while the base is quiet,
+     * Battle when the ring of combat points says so. Victory and Defeat are
+     * kept as the original keeps them, and Unused takes a track out of the
+     * rotation. Stored per track of RWE's one album in rwe.cfg.
+     */
+    enum class MusicTrackType
+    {
+        Building = 0,
+        Battle = 1,
+        Victory = 2,
+        Defeat = 3,
+        Unused = 4,
+    };
+
+    /** All the buttons cycle through their stages and wrap, as the original's do. */
     SoundMode nextStage(SoundMode mode);
     UnitSpeechLevel nextStage(UnitSpeechLevel level);
     MusicTrackMode nextStage(MusicTrackMode mode);
+    MusicTrackType nextStage(MusicTrackType type);
     ShadingMode nextStage(ShadingMode mode);
+
+    /**
+     * The rwe.cfg form of the per-track types: the numbers above, one per
+     * album track in order, comma separated. Anything unparsable is ignored,
+     * and an empty string is no overrides at all.
+     */
+    std::vector<unsigned int> parseMusicTrackTypes(const std::string& value);
+    std::string formatMusicTrackTypes(const std::vector<unsigned int>& types);
 
     /** The label the Shading button shows for each stage. */
     const char* shadingModeDisplayName(ShadingMode mode);
@@ -147,6 +173,13 @@ namespace rwe
 
         /** MUSICRT's track mode: 0 Play All, 1 Random, 2 Repeat, 3 Custom. */
         unsigned int musicTrackMode{3};
+
+        /**
+         * MUSICRT's per-track types, one MusicTrackType number per album
+         * track in order; a track past the end of the list, or an empty
+         * list, takes the name-table default. Written as music-track-types.
+         */
+        std::vector<unsigned int> musicTrackTypes{};
 
         /** Screen gamma percentage, 50 to 133 (the original's own range); 100 is untouched. */
         unsigned int gamma{100};
@@ -317,6 +350,9 @@ namespace rwe
         bool antiAlias{true};
         bool buildingHalo{true};
         bool antiAliasUnits{false};
+
+        /** The per-track types, as GlobalConfig::musicTrackTypes. Last so the positional initialisers above keep working. */
+        std::vector<unsigned int> musicTrackTypes{};
     };
 
     /** The settings as the config file last left them. */
