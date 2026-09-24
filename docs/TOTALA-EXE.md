@@ -623,3 +623,12 @@ quirks of the original that RWE reproduces although they look like defects.
   returns 0 while its static 3 is set. What lowers the bit when a unit changes
   target has not been read, and asking again cannot strand a gun the original
   would have freed, so the wait is not ported.
+- **Self-destruct's tail and its corpse.** The original blasts a
+  self-destructing unit `150 + rand(15)` ticks after the order (`0x402117`),
+  with thirty thousand points of ordinary damage from the unit to itself
+  (`0x402147`, cause 3), so the death runs the `Killed` ladder and leaves the
+  corpse it picks. RWE blasts at exactly 150 ticks and removes the unit with
+  no corpse (`GameSimulation::selfDestructUnit`). Both are hashed behaviour;
+  decoded under issue #29, not ported there because that issue was the
+  presentation.
+
