@@ -360,6 +360,50 @@ namespace rwe
             REQUIRE(sim.getPlayer(us).energy.value == Catch::Approx(50.0f));
             REQUIRE(sim.getPlayer(us).energyDebt.value == Catch::Approx(0.0f));
         }
+
+        SECTION("the price is taken from the stockpile the tick it is charged, not at the settle")
+        {
+            sim.getUnitState(unitId).cloakRequested = true;
+            tickTo(sim, FirstEconomyTick - 1);
+            auto before = sim.getPlayer(us).energy;
+            sim.tick();
+            // 0x4017CB subtracts on the spot; it was a request to the settle
+            // pool here before, which could throttle every builder instead.
+            REQUIRE(sim.getPlayer(us).energy.value == Catch::Approx(before.value - 200.0f));
+            REQUIRE(sim.getUnitState(unitId).energyRequestBuffer.value == Catch::Approx(0.0f));
+        }
+
+        SECTION("a unit that owes for earlier work still cloaks when the stock covers it")
+        {
+            sim.getUnitState(unitId).cloakRequested = true;
+            sim.getUnitState(unitId).energyDebt = Energy(50.0f);
+            auto before = sim.getPlayer(us).energy;
+            tickTo(sim, FirstEconomyTick);
+            REQUIRE(sim.getUnitState(unitId).cloaked);
+            // Before, the debt gate refused the request and the unit cloaked
+            // for free. The stockpile is charged the cloak, and the settle
+            // then works its own way through the debt it already carried.
+            REQUIRE(sim.getPlayer(us).energy.value < before.value);
+        }
+    }
+
+    TEST_CASE("a cloak's cost is truncated to a whole number before it is compared or taken", "[concealment]")
+    {
+        // 0x4017CB truncates the cost, so a 200.7 cloak against a stock of
+        // 200.5 cloaks and costs 200. Comparing the untruncated cost refused it.
+        auto script = makeConcealmentScript();
+        GameSimulation sim(makeConcealmentTerrain(), 0u, 0, 0);
+        auto us = addConcealmentPlayer(sim, "us");
+        registerConcealmentModel(sim);
+        defineUnit(sim, "oddcloak", UnitSpec{.cloakable = true, .cloakCost = 200.7f, .cloakCostMoving = 200.7f, .minCloakDistance = 40u});
+        auto unitId = spawn(sim, "oddcloak", us, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        sim.getUnitState(unitId).cloakRequested = true;
+        tickTo(sim, FirstEconomyTick - 1);
+        sim.getPlayer(us).energy = Energy(200.5f);
+        sim.tick();
+        REQUIRE(sim.getUnitState(unitId).cloaked);
+        REQUIRE(sim.getPlayer(us).energy.value == Catch::Approx(0.5f));
     }
 
     TEST_CASE("an enemy inside MinCloakDistance breaks the cloak for three seconds", "[concealment]")

@@ -733,9 +733,10 @@ Everything tagged `[tad]` alone is still a decoder test.
       positions go out once every `maxUnits` ticks -- but a replicated-path
       stream and the shape puppet playback would need.
 - [ ] The ten RWE settle differences in §111. Decided 2026-09-17: recorded, not
-      acted on. The weapon `energypershot` one reads as a bug and wants a pass of
-      its own; the make-and-use gate waits on flag bit 29, which is not being
-      chased.
+      acted on, except that the weapon `energypershot` one and the cloak's cost
+      (rows 6 and 7) were fixed on 2026-09-24 (#143): both come off the
+      stockpile on the spot now. The make-and-use gate waits on flag bit 29,
+      which is not being chased.
 
 Demos and mod files never enter the repository; only extracted numbers do, and
 `rwe_test` goes on reading no files. Every demo-derived test asserts the known

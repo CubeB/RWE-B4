@@ -2542,6 +2542,29 @@ namespace rwe
         return unit.addResourceDelta(apparentEnergy, apparentMetal, actualEnergy, actualMetal, gate);
     }
 
+    bool GameSimulation::chargeStockpile(const UnitId& unitId, const Energy& energy, const Metal& metal)
+    {
+        auto& unit = getUnitState(unitId);
+        auto& player = getPlayer(unit.owner);
+
+        if (player.energy < energy || player.metal < metal)
+        {
+            return false;
+        }
+
+        player.energy -= energy;
+        player.metal -= metal;
+
+        // Booked as consumption for the display, on the player and on the
+        // unit, the way a request is; nothing goes into the request buffers,
+        // so the settle never sees it.
+        player.recordDesire(-energy);
+        player.recordDesire(-metal);
+        unit.addEnergyDelta(-energy);
+        unit.addMetalDelta(-metal);
+        return true;
+    }
+
     bool GameSimulation::addEnergyRequest(const UnitId& unitId, const Energy& amount)
     {
         auto& unit = getUnitState(unitId);
@@ -4113,25 +4136,22 @@ namespace rwe
                     // standing still, so this is the same test the COB
                     // StartMoving and StopMoving callbacks use.
                     auto moving = !areCloserThan(unit.previousPosition, unit.position, 0.1_ssf);
-                    auto cost = moving ? unitDefinition.cloakCostMoving : unitDefinition.cloakCost;
+                    // Truncated to a whole number first, which is what the
+                    // original compares and takes (0x4017CB, 0x40182F): a
+                    // cost of 200.7 against a stock of 200.5 cloaks and costs
+                    // 200.
+                    auto cost = Energy(std::trunc((moving ? unitDefinition.cloakCostMoving : unitDefinition.cloakCost).value));
 
                     // Cloak does not go through the ordinary request-and-settle
                     // path, which pays every consumer a share of whatever there
                     // is and carries the rest as debt. The original checks the
-                    // whole cost against the stock on the spot (0x4017CB) and,
-                    // when it will not cover it, takes nothing and leaves the
-                    // unit visible. Half a cloak is not a thing, and a unit that
+                    // whole cost against the stock on the spot and, when it
+                    // will not cover it, takes nothing and leaves the unit
+                    // visible. Half a cloak is not a thing, and a unit that
                     // cannot afford one should not be dragging the player into
-                    // debt for it either.
-                    if (getPlayer(unit.owner).energy >= cost)
-                    {
-                        addResourceDelta(unitId, -cost, Metal(0));
-                        unit.cloaked = true;
-                    }
-                    else
-                    {
-                        unit.cloaked = false;
-                    }
+                    // debt for it either; nor does owing for something else
+                    // stop a unit that can pay from cloaking.
+                    unit.cloaked = chargeStockpile(unitId, cost, Metal(0));
                 }
                 else
                 {

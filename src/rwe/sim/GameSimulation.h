@@ -1158,6 +1158,18 @@ namespace rwe
         bool addResourceDelta(const UnitId& unitId, const Energy& energy, const Metal& metal, ResourceDebtGate gate = ResourceDebtGate::EnergyOrMetal);
 
         /**
+         * A price that never goes near the throttle: a shot's `energypershot`
+         * and `metalpershot`, and a cloak's cost. The original takes these
+         * straight out of the stockpile if it covers them and refuses them if
+         * it does not (0x401220, 0x401260, 0x4012A0), so they neither slow the
+         * builders nor turn into debt, and a unit that already owes for
+         * something else still pays and fires. The amount is booked as demand
+         * for the resource display when it is taken, as the cloak's is at
+         * 0x40182F. Returns whether it was taken.
+         */
+        bool chargeStockpile(const UnitId& unitId, const Energy& energy, const Metal& metal);
+
+        /**
          * The single-resource request, `0x401180`. A repair asks through this
          * rather than through `0x4011C0`, the two-resource one the build path
          * uses, and the difference is which debt is consulted: this one looks
