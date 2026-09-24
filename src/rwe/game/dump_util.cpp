@@ -135,6 +135,7 @@ namespace rwe
             {"phase", phaseName},
             {"lastKnownTargetPos", dumpJson(p.lastKnownTargetPos)},
             {"runOutDirection", dumpJson(p.runOutDirection)},
+            {"releasePoint", p.releasePoint ? dumpJson(*p.releasePoint) : nlohmann::json(nullptr)},
         };
     }
 
