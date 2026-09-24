@@ -736,7 +736,11 @@ namespace rwe
                 return json{
                     {"kind", "ground"},
                     {"steeringInfo", saveSteeringInfo(g.steeringInfo)},
-                    {"currentSpeed", saveSimScalar(g.currentSpeed)}};
+                    {"currentSpeed", saveSimScalar(g.currentSpeed)},
+                    {"pitch", saveSimScalar(g.pitch)},
+                    {"roll", saveSimScalar(g.roll)},
+                    {"previousPitch", saveSimScalar(g.previousPitch)},
+                    {"previousRoll", saveSimScalar(g.previousRoll)}};
             },
             [&](const UnitPhysicsInfoAir& a) {
                 return json{
@@ -744,7 +748,9 @@ namespace rwe
                     {"movementState", saveAirMovementState(a.movementState, ctx)},
                     {"roll", saveSimScalar(a.roll)},
                     {"previousRoll", saveSimScalar(a.previousRoll)},
-                    {"bankAccum", saveSimVector(a.bankAccum)}};
+                    {"bankAccum", saveSimVector(a.bankAccum)},
+                    {"pitch", saveSimScalar(a.pitch)},
+                    {"previousPitch", saveSimScalar(a.previousPitch)}};
             });
     }
 
@@ -756,6 +762,13 @@ namespace rwe
             UnitPhysicsInfoGround g;
             g.steeringInfo = loadSteeringInfo(j.at("steeringInfo"));
             g.currentSpeed = loadSimScalar(j.at("currentSpeed"));
+            if (j.contains("pitch"))
+            {
+                g.pitch = loadSimScalar(j.at("pitch"));
+                g.roll = loadSimScalar(j.at("roll"));
+                g.previousPitch = loadSimScalar(j.at("previousPitch"));
+                g.previousRoll = loadSimScalar(j.at("previousRoll"));
+            }
             return g;
         }
         if (kind == "air")
@@ -765,6 +778,11 @@ namespace rwe
             a.roll = loadSimScalar(j.at("roll"));
             a.previousRoll = loadSimScalar(j.at("previousRoll"));
             a.bankAccum = loadSimVector(j.at("bankAccum"));
+            if (j.contains("pitch"))
+            {
+                a.pitch = loadSimScalar(j.at("pitch"));
+                a.previousPitch = loadSimScalar(j.at("previousPitch"));
+            }
             return a;
         }
         throw std::runtime_error("bad UnitPhysicsInfo kind: " + kind);

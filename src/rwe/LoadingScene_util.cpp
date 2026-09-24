@@ -450,6 +450,8 @@ namespace rwe
 
         u.cruiseAltitude = SimScalar(fbi.cruiseAlt);
         u.bankScale = SimScalar(fbi.bankScale);
+        u.pitchScale = SimScalar(fbi.pitchScale);
+        u.upright = fbi.upright;
         u.hoverAttack = fbi.hoverAttack;
         u.attackRunLength = SimScalar(static_cast<float>(fbi.attackRunLength));
         u.maneuverLeashLength = SimScalar(static_cast<float>(fbi.maneuverLeashLength));

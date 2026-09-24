@@ -96,6 +96,8 @@ namespace rwe
         return nlohmann::json{
             {"steeringInfo", dumpJson(p.steeringInfo)},
             {"currentSpeed", dumpJson(p.currentSpeed)},
+            {"pitch", dumpJson(p.pitch)},
+            {"roll", dumpJson(p.roll)},
         };
     }
 

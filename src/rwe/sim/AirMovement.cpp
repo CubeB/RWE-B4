@@ -35,13 +35,36 @@ namespace rwe
 
         // Accelerating to the right drops the right wing, so the model rolls
         // the other way about its nose.
-        auto angle = atan2(-unitDefinition.bankScale * lateral, gravityOverLagGain);
+        return attitudeAngle(unitDefinition.bankScale, lateral, gravityOverLagGain);
+    }
+
+    SimScalar AirMovement::attitudeAngle(SimScalar scale, SimScalar lateral, SimScalar gravityOverLagGain)
+    {
+        auto angle = atan2(-scale * lateral, gravityOverLagGain);
         auto radians = toRadians(angle).value;
         if (radians > Pif)
         {
             radians -= 2.0f * Pif;
         }
         return SimScalar(radians);
+    }
+
+    SimScalar AirMovement::pitchAngle(const UnitState& unit, const UnitDefinition& unitDefinition, const UnitPhysicsInfoAir& physics)
+    {
+        // 0x43D1CE pushes edi and 0x43D1D5 reads [esp+0xc], which after that
+        // push is the slot 0x43D1A0 read as [esp+0x8]: the SAME lateral
+        // component the bank used, scaled by PitchScale (def+0x1A6) instead
+        // of BankScale and stored in unit+0x68. Whatever longitudinal term
+        // the rotation produced is never consumed. bankAngle has already
+        // advanced the accumulator this tick, so this reads it as it stands.
+        if (unitDefinition.pitchScale == 0_ss)
+        {
+            return 0_ss;
+        }
+        auto heading = unit.rotation;
+        auto lateral = (physics.bankAccum.x * cos(heading)) - (physics.bankAccum.z * sin(heading));
+        const SimScalar gravityOverLagGain((112.0f / 900.0f) / (1.0f - 0.9499817f));
+        return attitudeAngle(unitDefinition.pitchScale, lateral, gravityOverLagGain);
     }
 
     AirMovementState AirMovement::step(const AirMovementState& state, const AirFrameCommand& command, const UnitState& unit, const UnitDefinition& unitDefinition)
@@ -111,6 +134,8 @@ namespace rwe
         physics.movementState = step(physics.movementState, AirFrameCommand{}, unit, unitDefinition);
 
         physics.roll = bankAngle(unit, unitDefinition, physics, airVelocity(physics.movementState) - velocityBefore);
+        physics.previousPitch = physics.pitch;
+        physics.pitch = pitchAngle(unit, unitDefinition, physics);
     }
 
     bool AirMovement::takeoffReachedCruise(const AirMovementStateTakingOff& /*state*/, SimScalar unitY, SimScalar targetHeight)
