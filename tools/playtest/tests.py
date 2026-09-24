@@ -70,7 +70,7 @@ class MatrixTests(unittest.TestCase):
 
     def test_tuned_scenario_tune_table(self):
         tuned = self.matrix["scenarios"][1]
-        self.assertEqual(tuned["tune"], {"0": {"navalAggression": 1.5}})
+        self.assertEqual(tuned["tune"], {"0": {"navalAttackFleetSize": 1}})
 
     def test_players_normalized(self):
         players = runner.normalize_players(self.matrix["scenarios"][0])
@@ -118,7 +118,7 @@ class PlanTests(unittest.TestCase):
         control = next(r for r in runner.expand(self.matrix) if r.arm == "control")
         cmd = runner.build_command("/bin/ai_arena", tuned, "/tmp/x")
         self.assertIn("--ai-tune", cmd)
-        self.assertIn("0:navalAggression=1.5", cmd)
+        self.assertIn("0:navalAttackFleetSize=1", cmd)
         self.assertIn("A;Computer;ARM;0", cmd)
         self.assertIn("B;Computer;CORE;1", cmd)
         self.assertIn("--ai-difficulty", cmd)
