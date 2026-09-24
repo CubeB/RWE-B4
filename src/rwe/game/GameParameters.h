@@ -147,6 +147,14 @@ namespace rwe
         std::optional<std::string> recordReplayFile;
 
         /**
+         * Write a TA demo of this game to this file as it is played. A demo
+         * is a stream of state and effects, readable by tools that have never
+         * heard of RWE, where a replay is RWE's own command stream; both can
+         * be recorded at once.
+         */
+        std::optional<std::string> recordDemoFile;
+
+        /**
          * Watch this replay instead of playing. The parameters around it are
          * rebuilt from the replay's own header, so the simulation stands up
          * exactly as it did when the game was recorded; this field is what
