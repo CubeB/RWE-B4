@@ -63,6 +63,52 @@ namespace rwe
             sim.unitDeathObservations[unitId.value] = std::move(observation);
         }
 
+        /**
+         * The wire's death cause for the engine's own tag: the high nibble of
+         * a 0x0c, in the vocabulary of the eleven decoded causes
+         * (TOTALA-EXE-WRECKS.md, "What each death cause is"). A kill with no
+         * observation recorded is an ordinary weapon hit -- the only paths
+         * that reach killUnit without writing one are tests and the game-end
+         * wipe, and the wipe writes its own.
+         */
+        unsigned int demoDeathCause(const GameSimulation& sim, UnitId unitId)
+        {
+            auto it = sim.unitDeathObservations.find(unitId.value);
+            if (it == sim.unitDeathObservations.end())
+            {
+                return 1;
+            }
+
+            const auto& cause = it->second.cause;
+            if (cause == "self_destruct")
+            {
+                return 3;
+            }
+            if (cause == "reclaimed")
+            {
+                return 5;
+            }
+            if (cause == "carrier_died")
+            {
+                return 6;
+            }
+            if (cause == "unfinished")
+            {
+                return 9;
+            }
+            return 1;
+        }
+
+        /** The corpse level a dead unit will actually leave: 0 when it leaves nothing. */
+        unsigned int demoCorpseLevel(const UnitState& unit)
+        {
+            if (auto dead = std::get_if<UnitState::LifeStateDead>(&unit.lifeState); dead != nullptr && dead->leaveCorpse)
+            {
+                return dead->corpseLevel;
+            }
+            return 0;
+        }
+
     }
 
     bool GamePlayerInfo::addResourceDelta(const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal)
@@ -1047,6 +1093,12 @@ namespace rwe
         }
 
         events.push_back(UnitDiedEvent{targetId, unit.unitType, unit.position, UnitDiedEvent::DeathType::Deleted});
+        if (demoRecorder)
+        {
+            // Cause 5, reclaimed: it leaves nothing, and the corpus reads
+            // severity 0 and level 0 on every cause-5 death.
+            demoRecorder->unitDied(*this, targetId, std::nullopt, 0, 5, 0);
+        }
         return true;
     }
 
@@ -1098,6 +1150,16 @@ namespace rwe
         }
 
         auto previousOwner = unit.owner;
+
+        // Before the change, so the recorder can still read the old owner from
+        // its own table and tell the two blocks apart. D10's answer is the
+        // original's own: a cause-4 death for the old id and a new unit in the
+        // captor's block.
+        if (demoRecorder)
+        {
+            demoRecorder->unitCaptured(*this, targetId, captor);
+        }
+
         unit.owner = captor;
 
         // The spatial index carries owners so a target search can drop its
@@ -1161,6 +1223,13 @@ namespace rwe
         // see, and by the time it reads the event the unit is gone.
         recordUnitDeath(*this, unitId, "self_destruct", std::nullopt);
         events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, UnitDiedEvent::DeathType::SelfDestructed, unit.owner});
+        if (demoRecorder)
+        {
+            // Cause 3, self-destruct: RWE leaves nothing to reclaim, so the
+            // record is the level-0 shape the corpus gives the skipped-script
+            // causes rather than the wreck the original's Killed might pick.
+            demoRecorder->unitDied(*this, unitId, std::nullopt, 0, 3, 0);
+        }
 
         const auto& explosion = unitDefinition.selfDestructAs.empty() ? unitDefinition.explodeAs : unitDefinition.selfDestructAs;
         if (!explosion.empty())
@@ -2711,6 +2780,11 @@ namespace rwe
     {
         recordUnitDeath(*this, unitId, "unfinished", std::nullopt);
         quietlyKillUnit(unitId, false);
+        if (demoRecorder)
+        {
+            // Cause 9, an unfinished unit removed: no script, no corpse.
+            demoRecorder->unitDied(*this, unitId, std::nullopt, 0, 9, 0);
+        }
     }
 
     void GameSimulation::quietlyKillUnit(UnitId unitId, bool countAsLoss)
@@ -3094,20 +3168,21 @@ namespace rwe
         auto deathType = unit.position.y < terrain.getSeaLevel() ? UnitDiedEvent::DeathType::WaterExploded : UnitDiedEvent::DeathType::NormalExploded;
         events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, deathType, unit.owner, killerOwner});
 
+        // The severity is `clamp(1, 100, (100*overkill/maxdamage + X) / 2)`,
+        // where X is `unit+0xF7` -- the one term in this formula with no
+        // known writer anywhere in the binary, so it is taken as zero.
+        // What the script does with the number is its own business: a
+        // shipped `Killed` is a three-band ladder that picks a corpse
+        // level from it and throws a different amount of the unit about
+        // on the way.
+        const int severity = computeKilledSeverity(overkill, unitDefinition.maxHitPoints);
+
         // Run the script's Killed(severity, corpsetype) now, while the unit
         // still exists: the piece explosions it fires before its first sleep
         // become debris. Anything it does after a sleep is lost, as the unit
         // is removed at the end of the tick.
         if (unit.cobEnvironment)
         {
-            // The severity is `clamp(1, 100, (100*overkill/maxdamage + X) / 2)`,
-            // where X is `unit+0xF7` -- the one term in this formula with no
-            // known writer anywhere in the binary, so it is taken as zero.
-            // What the script does with the number is its own business: a
-            // shipped `Killed` is a three-band ladder that picks a corpse
-            // level from it and throws a different amount of the unit about
-            // on the way.
-            const int severity = computeKilledSeverity(overkill, unitDefinition.maxHitPoints);
             auto killedThread = unit.cobEnvironment->createThread("Killed", {severity, 0});
             runUnitCobScripts(*this, unitId);
 
@@ -3177,6 +3252,19 @@ namespace rwe
             });
             doProjectileImpact(projectile, impactType);
         }
+
+        // After the corpse rules have all had their say, so the level the
+        // record carries is the one the spawner will use.
+        if (demoRecorder)
+        {
+            demoRecorder->unitDied(
+                *this,
+                unitId,
+                attacker,
+                static_cast<unsigned int>(severity),
+                demoDeathCause(*this, unitId),
+                demoCorpseLevel(unit));
+        }
     }
 
     void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints)
@@ -3218,6 +3306,14 @@ namespace rwe
                 }
             }
             events.push_back(UnitDamagedEvent{unitId, getUnitState(unitId).owner, attackerOwner, paralyzer});
+        }
+
+        // The figure on the wire is the one that arrived, before veterancy and
+        // armour scale it: the corpus's modal damage per (shooter, slot) is the
+        // weapon's own [DAMAGE] default.
+        if (demoRecorder)
+        {
+            demoRecorder->damageApplied(*this, unitId, attacker, damagePoints);
         }
 
         if (attacker)
@@ -3302,6 +3398,14 @@ namespace rwe
                 // rule: both the veterancy counter and the player's Kills sit
                 // behind the build-progress test at 0x4869A7. See §5.
                 quietlyKillUnit(unitId);
+                if (demoRecorder)
+                {
+                    // A nanoframe runs no Killed script, so it leaves no corpse
+                    // and has no severity: cause 1 with both nibbles empty,
+                    // which is what the corpus's cause-9 and cause-5 deaths
+                    // read too.
+                    demoRecorder->unitDied(*this, unitId, attacker, 0, 1, 0);
+                }
             }
             else
             {

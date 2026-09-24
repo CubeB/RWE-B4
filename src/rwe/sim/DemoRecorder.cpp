@@ -27,6 +27,23 @@ namespace rwe
          */
         const std::size_t MaxUnitStateSubPacketBytes = 512;
 
+        /**
+         * One 0x28 every this many ticks, which is the corpus's sampling
+         * interval: 47,880 of its 56,535 gaps are exactly 120, and the samples
+         * land on a multiple of thirty -- a settle -- for 99.7% of them.
+         */
+        const uint32_t ResourceSampleTicks = 120;
+
+        /**
+         * The one 0x19 a sender emits at the start of a game, which is what
+         * the corpus's first record reads: demo 14724 tick 0, bytes
+         * `19 00 01`, a 16-bit 256 -- normal speed in the 8.8 fixed point the
+         * field is written in. RWE has no pause and no speed setting, so this
+         * initial record is all there is to say; a real stream's later records
+         * are pauses and speed changes RWE does not have.
+         */
+        const uint16_t NormalSpeedValue = 256;
+
         /** What a ground or air mover serialiser will write, as the recorder stores it. */
         using Mover = std::variant<TadGroundPath, TadAirMover>;
 
@@ -66,6 +83,20 @@ namespace rwe
         TadRotation toTadRotation(const UnitState& unit)
         {
             return TadRotation{0, static_cast<int16_t>(unit.rotation.value), 0};
+        }
+
+        /**
+         * A shot's launch attitude from the direction it actually left on:
+         * yaw and elevation, roll left zero. The corpus's 0x0d rotation triple
+         * tracks the aim line's bearing and elevation, and its departure from
+         * the aim line is a real aiming error, so it is the post-scatter
+         * direction that belongs here and not the mount's pre-scatter aim.
+         */
+        TadRotation launchRotation(const SimVector& direction)
+        {
+            auto yaw = atan2(direction.x, direction.z);
+            auto pitch = atan2(direction.y, hypot(direction.x, direction.z));
+            return TadRotation{static_cast<int16_t>(pitch.value), static_cast<int16_t>(yaw.value), 0};
         }
 
         SimVector airVelocity(const UnitPhysicsInfoAir& air)
@@ -415,6 +446,155 @@ namespace rwe
             ids.release(unit);
         }
 
+        /** The DirectPlay id the header gave a player, for a 0x0c's killer. */
+        std::optional<uint32_t> dplayIdOf(PlayerId player) const
+        {
+            for (const auto& [candidate, sender] : playerOrder)
+            {
+                if (candidate == player)
+                {
+                    return static_cast<uint32_t>(sender) + 1;
+                }
+            }
+            return std::nullopt;
+        }
+
+        void shotFired(
+            UnitId shooter,
+            unsigned int weaponSlot,
+            std::optional<UnitId> targetUnit,
+            const SimVector& origin,
+            const SimVector& aimPoint,
+            const SimVector& direction)
+        {
+            auto recordIt = records.find(shooter);
+            auto shooterId = ids.idOf(shooter);
+            if (recordIt == records.end() || !shooterId)
+            {
+                return;
+            }
+
+            uint16_t targetId = 0;
+            if (targetUnit)
+            {
+                targetId = ids.idOf(*targetUnit).value_or(0);
+            }
+
+            tickRecords[recordIt->second.owner].unitPass.push_back(tadEncodeShot(TadShot{
+                toTadPosition(origin),
+                toTadPosition(aimPoint),
+                launchRotation(direction),
+                targetId,
+                *shooterId,
+                static_cast<uint8_t>(weaponSlot)}));
+        }
+
+        void damageApplied(UnitId victim, std::optional<UnitId> attacker, unsigned int damage)
+        {
+            auto victimRecordIt = records.find(victim);
+            auto victimId = ids.idOf(victim);
+            if (victimRecordIt == records.end() || !victimId)
+            {
+                return;
+            }
+
+            // The attacker's owner sends it, so a shot and the damage it caused
+            // share one tick clock. With no attacker to name, the victim's
+            // owner is the only peer left.
+            auto sender = victimRecordIt->second.owner;
+            uint16_t attackerId = 0;
+            if (attacker)
+            {
+                if (auto attackerRecordIt = records.find(*attacker); attackerRecordIt != records.end())
+                {
+                    sender = attackerRecordIt->second.owner;
+                    attackerId = ids.idOf(*attacker).value_or(0);
+                }
+            }
+
+            tickRecords[sender].projectilePass.push_back(tadEncodeDamage(TadDamage{
+                *victimId,
+                attackerId,
+                static_cast<uint16_t>(std::min(damage, 0xffffu)),
+                // Not remaining health and not identified (tad_events.h); RWE
+                // has nothing to derive it from and writes the zero a fresh
+                // record would carry.
+                0}));
+        }
+
+        void unitDied(UnitId unit, std::optional<UnitId> killer, unsigned int severity, unsigned int cause, unsigned int corpseLevel)
+        {
+            auto recordIt = records.find(unit);
+            auto unitId = ids.idOf(unit);
+            if (recordIt == records.end() || !unitId)
+            {
+                return;
+            }
+
+            uint16_t killerId = 0;
+            uint32_t killerDplayId = 0xffffffffu;
+            if (killer)
+            {
+                killerId = ids.idOf(*killer).value_or(0);
+                if (auto killerRecordIt = records.find(*killer); killerRecordIt != records.end())
+                {
+                    if (auto dplay = dplayIdOf(killerRecordIt->second.owner))
+                    {
+                        killerDplayId = *dplay;
+                    }
+                }
+            }
+
+            tickRecords[recordIt->second.owner].projectilePass.push_back(tadEncodeDeath(TadDeath{
+                *unitId,
+                killerDplayId,
+                killerId,
+                static_cast<uint8_t>(std::min(severity, 255u)),
+                static_cast<uint8_t>(((cause & 0xfu) << 4) | (corpseLevel & 0xfu))}));
+        }
+
+        void unitCaptured(UnitId unit, PlayerId newOwner)
+        {
+            auto recordIt = records.find(unit);
+            if (recordIt == records.end())
+            {
+                return;
+            }
+
+            auto previousOwner = recordIt->second.owner;
+            if (previousOwner == newOwner)
+            {
+                return;
+            }
+
+            // Cause 4, severity 0, level 0: the original's own owner-change
+            // record, and the corpus's 0x0c section says every cause-4 death
+            // reads exactly that.
+            if (auto oldId = ids.idOf(unit))
+            {
+                tickRecords[previousOwner].projectilePass.push_back(tadEncodeDeath(TadDeath{
+                    *oldId,
+                    0xffffffffu,
+                    0,
+                    0,
+                    4u << 4u}));
+            }
+
+            // The new owner's block seats it under a new id. It has no 0x09 --
+            // a capture is not a nanoframe -- so a receiver learns of it from
+            // the new block's next 0x2c, which is why the mover is marked
+            // unsent: that record is the only one that will carry its type.
+            ids.release(unit);
+            if (!ids.allocate(newOwner, unit))
+            {
+                throw std::runtime_error(
+                    "DemoRecorder: player " + std::to_string(newOwner.value) + "'s unit block is full (maxUnits="
+                    + std::to_string(settings.maxUnits) + "); this game cannot be recorded as a demo");
+            }
+            recordIt->second.owner = newOwner;
+            recordIt->second.moverSent = false;
+        }
+
         void buildStarted(const GameSimulation& simulation, UnitId builder, UnitId unit)
         {
             auto builderId = ids.idOf(builder);
@@ -581,12 +761,42 @@ namespace rwe
             }
         }
 
+        /**
+         * A sender's own resource state for the 0x28: the four settled slots
+         * exactly, and the two cumulative triples from the produced and excess
+         * figures the end-of-game chart reads.
+         *
+         * WHICH TRIPLE SLOT IS WHICH is not settled anywhere -- the corpus's
+         * six floats are named only by position (TadResourceStats) -- so the
+         * first slot is the produced total, the second what the cap threw
+         * away, and the third the difference, which is what was actually put
+         * to use. No L2 tool reads them; the JSON dump carries them for the
+         * argument that would name them.
+         */
+        TadResourceStats resourceStatsFor(const GameSimulation& simulation, PlayerId player) const
+        {
+            const auto& info = simulation.getPlayer(player);
+            TadResourceStats stats{};
+            stats.metalStored = info.metal.value;
+            stats.energyStored = info.energy.value;
+            stats.metalStorage = info.maxMetal.value;
+            stats.energyStorage = info.maxEnergy.value;
+            stats.energyCounters[0] = info.energyProduced.value;
+            stats.energyCounters[1] = info.energyExcess.value;
+            stats.energyCounters[2] = info.energyProduced.value - info.energyExcess.value;
+            stats.metalCounters[0] = info.metalProduced.value;
+            stats.metalCounters[1] = info.metalExcess.value;
+            stats.metalCounters[2] = info.metalProduced.value - info.metalExcess.value;
+            return stats;
+        }
+
         void endOfTick(const GameSimulation& simulation)
         {
             emitBuildFinished(simulation);
 
             const auto tick = static_cast<uint32_t>(simulation.gameTime.value);
             const auto syncIndex = static_cast<uint16_t>(tick % settings.maxUnits);
+            const bool sampleResources = tick != 0 && tick % ResourceSampleTicks == 0;
 
             for (const auto& [player, sender] : playerOrder)
             {
@@ -667,8 +877,20 @@ namespace rwe
                     throw std::runtime_error("DemoRecorder: a unit state record would not encode");
                 }
 
+                if (sampleResources)
+                {
+                    tickRecordsForPlayer.settle.push_back(tadEncodeResourceStats(resourceStatsFor(simulation, player)));
+                }
+
                 std::vector<TadBytes> payload;
-                payload.reserve(tickRecordsForPlayer.unitPass.size() + tickRecordsForPlayer.projectilePass.size() + tickRecordsForPlayer.settle.size() + 1);
+                payload.reserve(tickRecordsForPlayer.unitPass.size() + tickRecordsForPlayer.projectilePass.size() + tickRecordsForPlayer.settle.size() + 2);
+                // The initial speed record goes out before everything else,
+                // which is where the corpus's is: its game-start 0x19s sit in
+                // packets with no 0x2c at all, so a consumer stamps them tick 0.
+                if (!speedSent)
+                {
+                    payload.push_back(tadEncodeSpeed(TadSpeed{NormalSpeedValue}));
+                }
                 payload.insert(payload.end(), tickRecordsForPlayer.unitPass.begin(), tickRecordsForPlayer.unitPass.end());
                 payload.push_back(std::move(stateBytes));
                 payload.insert(payload.end(), tickRecordsForPlayer.projectilePass.begin(), tickRecordsForPlayer.projectilePass.end());
@@ -677,6 +899,7 @@ namespace rwe
                 writer.writePacket(static_cast<uint16_t>(SimMillisecondsPerTick), sender, payload);
             }
 
+            speedSent = true;
             tickRecords.clear();
         }
 
@@ -701,6 +924,9 @@ namespace rwe
 
         std::vector<std::pair<PlayerId, uint8_t>> playerOrder;
         std::unordered_map<PlayerId, TickRecords> tickRecords;
+
+        /** The game-start 0x19 goes out once, in each sender's first packet. */
+        bool speedSent{false};
     };
 
     DemoRecorder::DemoRecorder(const std::filesystem::path& path, const GameSimulation& simulation, DemoRecorderSettings settings)
@@ -728,6 +954,39 @@ namespace rwe
     void DemoRecorder::buildStarted(const GameSimulation& simulation, UnitId builder, UnitId unit)
     {
         impl->buildStarted(simulation, builder, unit);
+    }
+
+    void DemoRecorder::shotFired(
+        const GameSimulation& /*simulation*/,
+        UnitId shooter,
+        unsigned int weaponSlot,
+        std::optional<UnitId> targetUnit,
+        const SimVector& origin,
+        const SimVector& aimPoint,
+        const SimVector& direction)
+    {
+        impl->shotFired(shooter, weaponSlot, targetUnit, origin, aimPoint, direction);
+    }
+
+    void DemoRecorder::damageApplied(const GameSimulation& /*simulation*/, UnitId victim, std::optional<UnitId> attacker, unsigned int damage)
+    {
+        impl->damageApplied(victim, attacker, damage);
+    }
+
+    void DemoRecorder::unitDied(
+        const GameSimulation& /*simulation*/,
+        UnitId unit,
+        std::optional<UnitId> killer,
+        unsigned int severity,
+        unsigned int cause,
+        unsigned int corpseLevel)
+    {
+        impl->unitDied(unit, killer, severity, cause, corpseLevel);
+    }
+
+    void DemoRecorder::unitCaptured(const GameSimulation& /*simulation*/, UnitId unit, PlayerId newOwner)
+    {
+        impl->unitCaptured(unit, newOwner);
     }
 
     void DemoRecorder::endOfTick(const GameSimulation& simulation)
