@@ -340,6 +340,55 @@ namespace rwe
         REQUIRE(std::holds_alternative<PatrolOrder>(bomber.orders.front()));
     }
 
+    TEST_CASE("an idle aircraft on Hold Position does not go after what it sees", "[patrol][bomber]")
+    {
+        // Standby is one of 0x43B1F0's nine callers, and none of them forces
+        // the call, so a unit whose movement mode is Hold Position gets no
+        // mission out of a sighting (0x43B211). Maneuver gets the attack and
+        // the move back to where it was; Roam just the attack.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto us = addPlayer(sim, "us");
+        auto them = addPlayer(sim, "them");
+        sim.unitDefinitions["bomber"] = makeBomberDef();
+        sim.unitDefinitions["target"] = makeTargetDef();
+        registerModel(sim);
+        defineBomb(sim);
+
+        spawnUnit(sim, "target", them, SimVector(200_ss, 0_ss, 0_ss), script);
+        auto bomberId = launchBomber(sim, us, SimVector(0_ss, 200_ss, 0_ss), script);
+
+        auto frontIs = [&](auto kind) {
+            const auto& orders = sim.getUnitState(bomberId).orders;
+            return !orders.empty() && std::holds_alternative<decltype(kind)>(orders.front());
+        };
+
+        SECTION("Hold Position")
+        {
+            sim.setMoveOrders(bomberId, UnitMovementOrders::HoldPosition);
+            tick(sim, 3);
+            REQUIRE(sim.getUnitState(bomberId).orders.empty());
+        }
+
+        SECTION("Roam")
+        {
+            sim.setMoveOrders(bomberId, UnitMovementOrders::Roam);
+            tick(sim, 3);
+            REQUIRE(frontIs(AttackOrder(UnitId(0))));
+            REQUIRE(sim.getUnitState(bomberId).orders.size() == 1);
+        }
+
+        SECTION("Maneuver")
+        {
+            sim.setMoveOrders(bomberId, UnitMovementOrders::Maneuver);
+            tick(sim, 3);
+            const auto& orders = sim.getUnitState(bomberId).orders;
+            REQUIRE(orders.size() == 2);
+            REQUIRE(std::holds_alternative<AttackOrder>(orders[0]));
+            REQUIRE(std::holds_alternative<MoveOrder>(orders[1]));
+        }
+    }
+
     TEST_CASE("a bomber that ships on Hold Fire is given Fire At Will", "[patrol][bomber]")
     {
         // DELIBERATE DIVERGENCE. The engine's patrol engage check is Fire At

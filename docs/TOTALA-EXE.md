@@ -584,9 +584,15 @@ quirks of the original that RWE reproduces although they look like defects.
   that leaves its post now carries the leash `0x43B1F0` gives it —
   `maneuverleashlength` from the spot where it saw the target — and Maneuver
   walks back to that spot afterwards, so Maneuver and Roam are no longer the
-  same thing. Hold Position is still honoured only in that such a unit is never
-  given an attack order to begin with, and the mode is still not consulted
-  anywhere else the original consults it.
+  same thing. **2026-09-24 (#109):** every reader of the mode in the binary
+  is now listed in §9 of the weapons document. The two that decide behaviour
+  are `0x43B1F0` (sighting to attack: Hold Position refuses, Maneuver comes
+  home, Roam goes) and `0x43B400` (the repair patrols' job issuer: Hold
+  Position and Maneuver come home); RWE's patrol break-off and idle-aircraft
+  sighting follow the first and read the unit's own mode rather than the
+  definition's. Left: an idle ground unit does not chase a sighting at all
+  in RWE, where the original's Standby does through `0x43B1F0`, and the
+  repair patrols do not plant `0x43B400`'s return move.
 - ~~Smoke does not drift downwind~~ **Ported, 2026-09-24** (#111).
   `GameSimulation::currentWindVector` was already hashed and pushing ballistic
   rounds and bombs off course (commit 72f8b402, the shape of `0x49BD10`); the
