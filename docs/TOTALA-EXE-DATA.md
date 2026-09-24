@@ -855,14 +855,36 @@ keys come through `0x4C46C0` with the default shown, strings through
 | `lavaworld` / `nosealeveltrigger` / `waterdoesdamage` / `waterdamage` | int | 0 | `waterdamage` is the per-tick damage when `waterdoesdamage` is set; the shipped missions all say `waterdoesdamage=0`, `waterdamage=100` |
 
 **Win and lose conditions** are not read by the mission reader at all. The
-rule evaluator at `0x48E040`-`0x48E720` reads them straight off the header
-block when the mission starts, each as an integer with default 0, and for
-each that is set allocates a rule object (`0x4B4F10`): `DestroyAllUnits`
-(`0x48E06B`), `KillAllMobileUnits` (`0x48E0A9`, which no shipped mission
-sets), `CommanderKilled` (`0x48E67C`) and `AllUnitsKilled` (`0x48E6C3`).
-The shipped missions set `CommanderKilled=1` and `AllUnitsKilled=1` in all
-26 and `DestroyAllUnits=1` in 22. What each rule tests, tick by tick, is not
-followed here; it is the next piece.
+rule evaluator at `0x48E040`-`0x48E940` reads them straight off the header
+block when the mission starts and, for each that is set, allocates a rule
+object (`0x4B4F10`). This section first named four; there are twenty
+(corrected 2026-09-25, B4 #55). In the evaluator's order, with the reader
+each goes through and, where it is a string, the `sscanf` format it is then
+scanned with:
+
+| Key | Read as | Side | Shipped missions using it (of 76, base and Core Contingency) |
+|---|---|---|---|
+| `KillEnemyCommander` (`0x48E029`) | int | victory | 4 |
+| `DestroyAllUnits` (`0x48E06B`) | int | victory | 52 |
+| `KillAllMobileUnits` (`0x48E0A9`) | int | victory | 0 |
+| `BuildUnitType` (`0x48E105`) | unit name | victory | 5 |
+| `CaptureUnitType` (`0x48E196`) | unit name | victory | 23 |
+| `KillAllOfType` (`0x48E215`) | unit name | victory | 4 |
+| `KillUnitType` (`0x48E2A2`) | `%[a-zA-Z],%i` | victory | 4 |
+| `MoveUnitToRadius` (`0x48E353`) | `%[a-zA-Z],%i,%i,%i`, the type may be `ANYTYPE` | victory | 6 |
+| `UnitTypePassesX` / `UnitTypePassesZ` (`0x48E46C`, `0x48E555`) | `%[a-zA-Z],%i`, or `ANYTYPE` | victory | 2 |
+| `VictoryTimerRunsOut` (`0x48E631`) | int | victory | 1 |
+| `CommanderKilled` (`0x48E67C`) | int | defeat | 75 |
+| `AllUnitsKilled` (`0x48E6C3`) | int | defeat | 76 |
+| `AllUnitsKilledOfType` (`0x48E725`) | unit name | defeat | 27 |
+| `UnitTypeKilled` (`0x48E7BB`) | `%[a-zA-Z],%i` | defeat | 3 |
+| `DeathTimerRunsOut` (`0x48E86B`) | int | defeat | 2 |
+| `AnyUnitPassesX` / `AnyUnitPassesZ` (`0x48E8C0`, `0x48E91E`) | int | defeat | 0 |
+
+Each rule is then registered under a `VictoryCondition_<key>` or
+`DefeatCondition_<key>` name with `Satisfied` and `Celebrated` flags
+(`0x48EAC8` onwards). What each tests, tick by tick, is not followed here;
+it is the next piece.
 
 **Which schema is played.** A skirmish map's schemas are `Network n`; a
 mission's are `Easy`, `Medium` and `Hard` (25, 25 and 26 of the shipped 26).
@@ -933,6 +955,21 @@ The shipped missions use twelve shapes, the commonest being `w N,p X Z,`
 `w N,a ARMCOM,` (142): wait, then patrol; or wait, then hunt the enemy
 commander.
 
+Across all 76 shipped missions, the Core Contingency ones included (22,103
+starting units, 12,181 of them with orders), three more things show up:
+
+- **`b` is also a factory queue.** Core Contingency writes `b ARMAMPH 4` and
+  the like, a name and a count with no point, to have a plant build; the
+  format's `%f %f` then scan nothing.
+- **`u` is used**, in Core Contingency (`EXP1AC10`, `EXP1AC12`); "no shipped
+  mission" above was true of the original 26 only.
+- **The data has typos the original reads literally**: `P P 502 1224` (AC01),
+  `m 1557,` with one coordinate (AC06), `w 444,m` (AC05), and
+  `w 600u 4682 2762` with a comma missing (EXP1AC10), where the unload is
+  swallowed into the wait's text and never happens. The scanner stops at
+  commas and `sscanf` stops at the first thing it cannot read, so each of
+  these orders simply has fewer arguments than its format asks for.
+
 ### `[specials]` and `[features]`
 
 The schema's `[specials]` (`0x437010`, tagged `"MISSIONRULE DATA"`) are the
@@ -940,6 +977,17 @@ The schema's `[specials]` (`0x437010`, tagged `"MISSIONRULE DATA"`) are the
 missions. `[features]` (`0x437183`, `"MISSIONFEATURE DATA"`) are
 `Featurename` / `XPos` / `ZPos` with `-1` as the coordinate default, as RWE
 reads them for skirmish; the shipped missions place 91.
+
+> **Ported 2026-09-25 (#55):** the readers. `parseOta` now reads the campaign
+> header keys (`maxunits`, `glamoursound`, `nomovie`, `nosealeveltrigger`,
+> `waterdoesdamage`, `waterdamage`), all twenty conditions as data
+> (`OtaMissionRules`), and each schema's `[units]` (`OtaMissionUnit`), with
+> `parseInitialMission` reading the order list as `sscanf` would, typos
+> included. `io/campaign` reads a campaign file: `campaignside` and the
+> `MISSION%d` list, with `campaignMissionName` for the localised name. All
+> 76 shipped missions and the six campaign files parse. Not yet: acting on
+> any of it (the interpreter's missions, the conditions, the schema choice
+> by difficulty, the briefing).
 
 ### What RWE has, and what the port is
 

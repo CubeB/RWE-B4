@@ -1,6 +1,8 @@
 #include "ota.h"
 
 #include <algorithm>
+#include <cstdlib>
+#include <cctype>
 #include <rwe/io/tdf/tdf.h>
 
 namespace rwe
@@ -51,6 +53,17 @@ namespace rwe
         tdf.readOrDefault("memory", r.memory);
         tdf.readOrDefault("useonlyunits", r.useOnlyUnits);
 
+        // The campaign keys the mission reader adds (0x435F00-0x437300,
+        // TOTALA-EXE-DATA.md S:105). A skirmish map names none of them and
+        // takes the defaults.
+        tdf.readOrDefault("maxunits", r.maxUnits, 200);
+        tdf.readOrDefault("glamoursound", r.glamourSound);
+        r.noMovie = tdf.extractInt("nomovie").value_or(0) != 0;
+        r.noSeaLevelTrigger = tdf.extractInt("nosealeveltrigger").value_or(0) != 0;
+        r.waterDoesDamage = tdf.extractInt("waterdoesdamage").value_or(0) != 0;
+        tdf.readOrDefault("waterdamage", r.waterDamage);
+        r.rules = parseOtaMissionRules(tdf);
+
         r.schemaCount = tdf.expectInt("SCHEMACOUNT");
 
         for (int i = 0; i < r.schemaCount; ++i)
@@ -100,6 +113,21 @@ namespace rwe
             }
         }
 
+        // A mission's starting units, [unit0], [unit1], ... until one is
+        // missing (0x436C7E).
+        if (auto unitsBlock = tdf.findBlock("units"))
+        {
+            for (int i = 0;; ++i)
+            {
+                auto block = unitsBlock->get().findBlock("unit" + std::to_string(i));
+                if (!block)
+                {
+                    break;
+                }
+                s.units.push_back(parseOtaMissionUnit(*block));
+            }
+        }
+
         auto specialsBlockOption = tdf.findBlock("specials");
         if (specialsBlockOption)
         {
@@ -116,6 +144,283 @@ namespace rwe
         }
 
         return s;
+    }
+
+    namespace
+    {
+        /** sscanf's `%[a-zA-Z]`: the leading run of letters. */
+        std::string scanLetters(const std::string& text, std::size_t& at)
+        {
+            auto start = at;
+            while (at < text.size() && std::isalpha(static_cast<unsigned char>(text[at])))
+            {
+                ++at;
+            }
+            return text.substr(start, at - start);
+        }
+
+        /** sscanf's `%[a-zA-Z0-9_.]`, after any spaces. */
+        std::string scanName(const std::string& text, std::size_t& at)
+        {
+            while (at < text.size() && std::isspace(static_cast<unsigned char>(text[at])))
+            {
+                ++at;
+            }
+            auto start = at;
+            while (at < text.size() && (std::isalnum(static_cast<unsigned char>(text[at])) || text[at] == '_' || text[at] == '.'))
+            {
+                ++at;
+            }
+            return text.substr(start, at - start);
+        }
+
+        /** sscanf's ` %f` or ` %d`: nothing when the text does not start (after spaces) with a number. */
+        std::optional<float> scanNumber(const std::string& text, std::size_t& at)
+        {
+            auto p = at;
+            while (p < text.size() && std::isspace(static_cast<unsigned char>(text[p])))
+            {
+                ++p;
+            }
+            const char* begin = text.c_str() + p;
+            char* end = nullptr;
+            auto value = std::strtof(begin, &end);
+            if (end == begin)
+            {
+                return std::nullopt;
+            }
+            at = p + static_cast<std::size_t>(end - begin);
+            return value;
+        }
+
+        /** Up to `count` numbers, stopping at the first that is not there, as sscanf does. */
+        std::vector<float> scanNumbers(const std::string& text, std::size_t& at, int count)
+        {
+            std::vector<float> numbers;
+            for (int i = 0; i < count; ++i)
+            {
+                auto n = scanNumber(text, at);
+                if (!n)
+                {
+                    break;
+                }
+                numbers.push_back(*n);
+            }
+            return numbers;
+        }
+
+        /** `%[a-zA-Z],%i[,%i,%i]`: a unit type and up to three integers after it. */
+        std::optional<std::pair<std::string, std::vector<int>>> scanTypeAndIntegers(const std::string& text, int count)
+        {
+            std::size_t at = 0;
+            auto type = scanLetters(text, at);
+            if (type.empty())
+            {
+                return std::nullopt;
+            }
+            std::vector<int> values;
+            for (int i = 0; i < count; ++i)
+            {
+                if (at >= text.size() || text[at] != ',')
+                {
+                    break;
+                }
+                ++at;
+                auto n = scanNumber(text, at);
+                if (!n)
+                {
+                    break;
+                }
+                values.push_back(static_cast<int>(*n));
+            }
+            return std::make_pair(type, values);
+        }
+
+        std::optional<OtaUnitTypeAndNumber> readTypeAndNumber(const TdfBlock& tdf, const std::string& key)
+        {
+            auto value = tdf.findValue(key);
+            if (!value)
+            {
+                return std::nullopt;
+            }
+            auto scanned = scanTypeAndIntegers(value->get(), 1);
+            if (!scanned || scanned->second.size() < 1)
+            {
+                return std::nullopt;
+            }
+            return OtaUnitTypeAndNumber{scanned->first, scanned->second[0]};
+        }
+
+        std::optional<std::string> readName(const TdfBlock& tdf, const std::string& key)
+        {
+            auto value = tdf.findValue(key);
+            if (!value || value->get().empty())
+            {
+                return std::nullopt;
+            }
+            return value->get();
+        }
+    }
+
+    std::vector<MissionOrder> parseInitialMission(const std::string& text)
+    {
+        std::vector<MissionOrder> orders;
+        std::size_t at = 0;
+        while (at < text.size())
+        {
+            // Each order runs to the next comma (0x487C3D).
+            auto comma = text.find(',', at);
+            auto piece = text.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
+            at = comma == std::string::npos ? text.size() : comma + 1;
+
+            std::size_t p = 0;
+            while (p < piece.size() && std::isspace(static_cast<unsigned char>(piece[p])))
+            {
+                ++p;
+            }
+            if (p >= piece.size())
+            {
+                continue;
+            }
+            auto letter = static_cast<char>(std::tolower(static_cast<unsigned char>(piece[p])));
+            ++p;
+
+            MissionOrder order;
+            switch (letter)
+            {
+                case 'm':
+                    order.kind = MissionOrder::Kind::Move;
+                    order.numbers = scanNumbers(piece, p, 2);
+                    break;
+                case 'p':
+                    order.kind = MissionOrder::Kind::Patrol;
+                    order.numbers = scanNumbers(piece, p, 3);
+                    break;
+                case 'u':
+                    order.kind = MissionOrder::Kind::Unload;
+                    order.numbers = scanNumbers(piece, p, 2);
+                    break;
+                case 'a':
+                {
+                    // A point first; failing that, a unit type name (0x487FEC).
+                    auto numbers = scanNumbers(piece, p, 2);
+                    if (!numbers.empty())
+                    {
+                        order.kind = MissionOrder::Kind::AttackPoint;
+                        order.numbers = numbers;
+                    }
+                    else
+                    {
+                        order.kind = MissionOrder::Kind::AttackType;
+                        order.name = scanName(piece, p);
+                    }
+                    break;
+                }
+                case 'g':
+                    order.kind = MissionOrder::Kind::Guard;
+                    order.name = scanName(piece, p);
+                    break;
+                case 'i':
+                    order.kind = MissionOrder::Kind::Link;
+                    order.name = scanName(piece, p);
+                    break;
+                case 'o':
+                    order.kind = MissionOrder::Kind::StandingOrders;
+                    order.numbers = scanNumbers(piece, p, 2);
+                    break;
+                case 'w':
+                {
+                    // "wa" waits to be attacked; anything else is a timed wait.
+                    auto q = p;
+                    while (q < piece.size() && std::isspace(static_cast<unsigned char>(piece[q])))
+                    {
+                        ++q;
+                    }
+                    if (q < piece.size() && std::tolower(static_cast<unsigned char>(piece[q])) == 'a')
+                    {
+                        order.kind = MissionOrder::Kind::WaitForAttack;
+                    }
+                    else
+                    {
+                        order.kind = MissionOrder::Kind::Wait;
+                        order.numbers = scanNumbers(piece, p, 2);
+                    }
+                    break;
+                }
+                case 'b':
+                    order.kind = MissionOrder::Kind::Build;
+                    order.name = scanName(piece, p);
+                    order.numbers = scanNumbers(piece, p, 3);
+                    break;
+                case 'd':
+                    order.kind = MissionOrder::Kind::SelfDestruct;
+                    break;
+                default:
+                    // s, and any letter the table does not know (0x487E50).
+                    order.kind = MissionOrder::Kind::MakeSelectable;
+                    break;
+            }
+            orders.push_back(std::move(order));
+        }
+        return orders;
+    }
+
+    OtaMissionRules parseOtaMissionRules(const TdfBlock& tdf)
+    {
+        OtaMissionRules r;
+        tdf.readOrDefault("KillEnemyCommander", r.killEnemyCommander);
+        tdf.readOrDefault("DestroyAllUnits", r.destroyAllUnits);
+        tdf.readOrDefault("KillAllMobileUnits", r.killAllMobileUnits);
+        r.buildUnitType = readName(tdf, "BuildUnitType");
+        r.captureUnitType = readName(tdf, "CaptureUnitType");
+        r.killAllOfType = readName(tdf, "KillAllOfType");
+        r.killUnitType = readTypeAndNumber(tdf, "KillUnitType");
+        if (auto value = tdf.findValue("MoveUnitToRadius"))
+        {
+            auto scanned = scanTypeAndIntegers(value->get(), 3);
+            if (scanned && scanned->second.size() == 3)
+            {
+                r.moveUnitToRadius = OtaMoveUnitToRadius{scanned->first, scanned->second[0], scanned->second[1], scanned->second[2]};
+            }
+        }
+        r.unitTypePassesX = readTypeAndNumber(tdf, "UnitTypePassesX");
+        r.unitTypePassesZ = readTypeAndNumber(tdf, "UnitTypePassesZ");
+        tdf.readOrDefault("VictoryTimerRunsOut", r.victoryTimerRunsOut);
+
+        tdf.readOrDefault("CommanderKilled", r.commanderKilled);
+        tdf.readOrDefault("AllUnitsKilled", r.allUnitsKilled);
+        r.allUnitsKilledOfType = readName(tdf, "AllUnitsKilledOfType");
+        r.unitTypeKilled = readTypeAndNumber(tdf, "UnitTypeKilled");
+        tdf.readOrDefault("DeathTimerRunsOut", r.deathTimerRunsOut);
+        tdf.readOrDefault("AnyUnitPassesX", r.anyUnitPassesX);
+        tdf.readOrDefault("AnyUnitPassesZ", r.anyUnitPassesZ);
+        return r;
+    }
+
+    OtaMissionUnit parseOtaMissionUnit(const TdfBlock& tdf)
+    {
+        OtaMissionUnit u;
+        tdf.readOrDefault("Unitname", u.unitName);
+        tdf.readOrDefault("Ident", u.ident);
+        tdf.readOrDefault("InitialMission", u.initialMission);
+        u.orders = parseInitialMission(u.initialMission);
+        tdf.readOrDefault("XPos", u.xPos);
+        tdf.readOrDefault("YPos", u.yPos);
+        tdf.readOrDefault("ZPos", u.zPos);
+        tdf.readOrDefault("Angle", u.angle);
+        tdf.readOrDefault("Player", u.player);
+        tdf.readOrDefault("HealthPercentage", u.healthPercentage, 100);
+        tdf.readOrDefault("BuildPriority", u.buildPriority);
+        tdf.readOrDefault("CreationCountdown", u.creationCountdown);
+        // The four flags and the group share one byte at +0x23; the group
+        // is its low four bits.
+        u.initialGroup = tdf.extractInt("InitialGroup").value_or(0) & 0xF;
+        u.missionCriticalUnit = tdf.extractInt("MissionCriticalUnit").value_or(0) != 0;
+        u.aiIgnore = tdf.extractInt("AiIgnore").value_or(0) != 0;
+        u.aiPriorityTarget = tdf.extractInt("AiPriorityTarget").value_or(0) != 0;
+        u.immunity = tdf.extractInt("Immunity").value_or(0) != 0;
+        // Kills is on every shipped [unit] and read by nothing.
+        return u;
     }
 
     OtaFeature parseOtaFeature(const TdfBlock& tdf)
