@@ -336,7 +336,7 @@ namespace rwe
         }
     }
 
-    Matrix4f unitRenderTransform(const UnitState& unit, const UnitDefinition& unitDefinition, const Vector3f& position, float rotation, float frac)
+    Matrix4f unitRenderTransform(const UnitState& unit, const Vector3f& position, float rotation, float frac)
     {
         auto transform = Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
 
@@ -671,7 +671,7 @@ namespace rwe
     {
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
+        auto transform = unitRenderTransform(unit, position, rotation, frac);
         if (unit.isBeingBuilt(unitDefinition))
         {
             auto buildPhase = computeBuildPhase(unit.getPreciseCompletePercent(unitDefinition), unitIndex, gameTime);
@@ -738,7 +738,7 @@ namespace rwe
     {
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
+        auto transform = unitRenderTransform(unit, position, rotation, frac);
 
         drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, PlayerColorIndex(0), frac, 0.0f, atlases, false, out);
     }
@@ -756,7 +756,7 @@ namespace rwe
     {
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
+        auto transform = unitRenderTransform(unit, position, rotation, frac);
 
         // Which of the original's two shadow passes this unit belongs to. It
         // sorts on unit+0x113 bit 5, whose meaning is not established -- "is a
@@ -998,7 +998,7 @@ namespace rwe
 
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
+        auto transform = unitRenderTransform(unit, position, rotation, frac);
 
         // Lift each pixel towards the camera so it passes the depth test
         // against the surface it lies on, while anything the model itself
