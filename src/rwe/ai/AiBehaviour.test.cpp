@@ -1372,4 +1372,252 @@ namespace rwe
             CHECK(shares.artilleryKbot == profile.labArtilleryKbotShare);
         }
     }
+
+    TEST_CASE("the wreckage a raid leaves in the base is reclaimed, when metal is short and by difficulty", "[ai]")
+    {
+        // Issue #42, point 2. A base loses two solar collectors and their
+        // wrecks lie where they stood. There is a free metal patch, so the
+        // planner still wants another extractor, and extractors are
+        // exempt from the affordability test: with the rule off a builder
+        // goes straight back to building and the metal in the wrecks is
+        // never taken. With nothing it could build, the ordinary harvest
+        // would have taken them; that is not the case that happens in a
+        // game, where there is always another extractor to want.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        // The patch: cells 28-29 by 20-21, about (-64, -192) in world units.
+        for (int y = 20; y < 22; ++y)
+        {
+            for (int x = 28; x < 30; ++x)
+            {
+                sim.metalGrid.set(x, y, static_cast<unsigned char>(200));
+            }
+        }
+        sim.unitDefinitions["ARMCOM"].canReclamate = true;
+        sim.unitDefinitions["ARMCK"].canReclamate = true;
+        // Circular sight, for the same reason as the rock above: a bare
+        // simulation carries no ray tables.
+        sim.lineOfSightMode = LineOfSightMode::Circular;
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        std::vector<UnitId> solars;
+        for (int i = 0; i < 5; ++i)
+        {
+            solars.push_back(addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(100.0f + i * 40.0f), 0_ss, 0_ss), script));
+        }
+        for (int i = 0; i < 3; ++i)
+        {
+            addUnit(sim, "ARMMEX", ai, SimVector(0_ss, 0_ss, SimScalar(100.0f + i * 40.0f)), script);
+        }
+        sim.getPlayer(ai).maxMetal = Metal(1000.0f);
+
+        FeatureDefinition wreck{};
+        wreck.name = "ARMSOLAR_DEAD";
+        wreck.footprintX = 1;
+        wreck.footprintZ = 1;
+        wreck.reclaimable = true;
+        wreck.metal = 50;
+        auto wreckDef = sim.featureDefinitions.insert(wreck);
+
+        // The profile the controller in hand was built with.
+        AiTuningProfile playing;
+        auto run = [&](const AiTuningProfile& profile, float metal) {
+            playing = profile;
+            sim.getPlayer(ai).metal = Metal(metal);
+            auto controller = std::make_unique<AiPlayerController>(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            // Standing, then two of the five gone and their wrecks where
+            // they stood: the way a death is noticed, by diff.
+            runTicks(sim, *controller, 2, commands);
+            std::vector<FeatureId> wrecks;
+            for (auto i : {3, 4})
+            {
+                auto site = sim.getUnitState(solars[i]).position;
+                sim.getUnitState(solars[i]).markAsDead();
+                MapFeature w{};
+                w.featureName = wreckDef;
+                w.position = site;
+                wrecks.push_back(sim.addFeature(std::move(w)).value());
+            }
+            runTicks(sim, *controller, 2, commands);
+            REQUIRE(controller->getBlackboard().ownWreckSites.size() == 2);
+            return std::make_pair(std::move(controller), wrecks);
+        };
+        auto reclaimsOf = [&](const std::vector<PlayerCommand>& commands, UnitId unit, const std::vector<FeatureId>& wrecks) {
+            int n = 0;
+            for (const auto& r : ordersFor<ReclaimOrder>(commands, unit))
+            {
+                auto target = std::get_if<FeatureId>(&r.target);
+                if (target && std::find(wrecks.begin(), wrecks.end(), *target) != wrecks.end())
+                {
+                    ++n;
+                }
+            }
+            return n;
+        };
+        const auto standardDelayTicks = makeDefaultStandardProfile().ownWreckageDelaySeconds * 30;
+        // The harness collects orders and never carries them out, so a
+        // builder is idle again on every pass and what a second pass does is
+        // coloured by the first one's order having come to nothing. Each
+        // check is therefore one planning pass: time is moved on with the
+        // simulation alone, and the controller is ticked only across the
+        // pass being looked at.
+        auto waitWithoutPlanning = [&](int ticks) {
+            for (int i = 0; i < ticks; ++i)
+            {
+                sim.tick();
+            }
+        };
+        // One planning pass and no more: the first comes at the profile's
+        // interval from the controller's start, four ticks of which run()
+        // has used, and the next one an interval after that.
+        auto onePass = [&](AiPlayerController& controller) {
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, playing.buildPlannerTickInterval + 1, commands);
+            return commands;
+        };
+
+        SECTION("Standard, short of metal: not at once, and then the wrecks before the extractor")
+        {
+            auto [controller, wrecks] = run(makeDefaultStandardProfile(), 50.0f);
+            auto first = onePass(*controller);
+            REQUIRE(reclaimsOf(first, commanderId, wrecks) == 0);
+            REQUIRE(buildOrderTypes(first) == std::vector<std::string>{"ARMMEX"});
+
+            waitWithoutPlanning(standardDelayTicks);
+            auto second = onePass(*controller);
+            REQUIRE(buildOrderTypes(second).empty());
+            auto reclaims = ordersFor<ReclaimOrder>(second, commanderId);
+            REQUIRE(reclaims.size() == 2);
+            REQUIRE(reclaimsOf(second, commanderId, wrecks) == 2);
+            // Nearest first: the collector that stood at 220 before the one at 260.
+            REQUIRE(std::get<FeatureId>(reclaims.front().target) == wrecks[0]);
+        }
+
+        SECTION("switched off, the builder goes back to building")
+        {
+            auto profile = makeDefaultStandardProfile();
+            profile.ownWreckageReclaimers = 0;
+            auto [controller, wrecks] = run(profile, 50.0f);
+            waitWithoutPlanning(standardDelayTicks);
+            auto commands = onePass(*controller);
+            REQUIRE(reclaimsOf(commands, commanderId, wrecks) == 0);
+            REQUIRE(buildOrderTypes(commands) == std::vector<std::string>{"ARMMEX"});
+        }
+
+        SECTION("with metal in hand, Standard still takes them and Easy leaves them")
+        {
+            SECTION("Standard")
+            {
+                auto [controller, wrecks] = run(makeDefaultStandardProfile(), 900.0f);
+                waitWithoutPlanning(standardDelayTicks);
+                auto commands = onePass(*controller);
+                REQUIRE(buildOrderTypes(commands).empty());
+                REQUIRE(reclaimsOf(commands, commanderId, wrecks) == 2);
+            }
+
+            SECTION("Easy")
+            {
+                auto easy = makeProfileForDifficulty(AiDifficulty::Easy);
+                auto [controller, wrecks] = run(easy, 900.0f);
+                waitWithoutPlanning(easy.ownWreckageDelaySeconds * 30);
+                auto commands = onePass(*controller);
+                REQUIRE(reclaimsOf(commands, commanderId, wrecks) == 0);
+                REQUIRE(!buildOrderTypes(commands).empty());
+            }
+        }
+
+        SECTION("Hard takes them whatever the metal, and at once")
+        {
+            auto [controller, wrecks] = run(makeProfileForDifficulty(AiDifficulty::Hard), 900.0f);
+            auto commands = onePass(*controller);
+            REQUIRE(buildOrderTypes(commands).empty());
+            REQUIRE(reclaimsOf(commands, commanderId, wrecks) == 2);
+        }
+
+        SECTION("Easy waits longer than Standard")
+        {
+            auto easy = makeProfileForDifficulty(AiDifficulty::Easy);
+            REQUIRE(easy.ownWreckageDelaySeconds > makeDefaultStandardProfile().ownWreckageDelaySeconds);
+            auto [controller, wrecks] = run(easy, 50.0f);
+            waitWithoutPlanning(standardDelayTicks);
+            auto early = onePass(*controller);
+            REQUIRE(reclaimsOf(early, commanderId, wrecks) == 0);
+
+            waitWithoutPlanning((easy.ownWreckageDelaySeconds * 30) - standardDelayTicks);
+            auto late = onePass(*controller);
+            REQUIRE(reclaimsOf(late, commanderId, wrecks) == 2);
+        }
+
+        SECTION("one builder on it is enough on Standard; Hard sends a second, and never to the same wreck")
+        {
+            auto kbotId = addUnit(sim, "ARMCK", ai, SimVector(-60_ss, 0_ss, 60_ss), script);
+            auto sendWithCommanderBusy = [&](const AiTuningProfile& profile) {
+                auto [controller, wrecks] = run(profile, 50.0f);
+                sim.getUnitState(commanderId).orders.push_back(ReclaimOrder(wrecks[0]));
+                waitWithoutPlanning(standardDelayTicks);
+                auto commands = onePass(*controller);
+                return std::make_tuple(commands, ordersFor<ReclaimOrder>(commands, kbotId), wrecks);
+            };
+
+            SECTION("Standard")
+            {
+                auto [commands, reclaims, wrecks] = sendWithCommanderBusy(makeDefaultStandardProfile());
+                REQUIRE(reclaims.empty());
+                REQUIRE(buildOrderTypes(commands) == std::vector<std::string>{"ARMMEX"});
+            }
+
+            SECTION("Hard")
+            {
+                auto [commands, reclaims, wrecks] = sendWithCommanderBusy(makeProfileForDifficulty(AiDifficulty::Hard));
+                REQUIRE(reclaims.size() == 1);
+                REQUIRE(std::get<FeatureId>(reclaims.front().target) == wrecks[1]);
+            }
+        }
+
+        SECTION("not while the raid is still standing over it")
+        {
+            auto [controller, wrecks] = run(makeProfileForDifficulty(AiDifficulty::Hard), 50.0f);
+            addUnit(sim, "ARMPW", human, SimVector(290_ss, 0_ss, 0_ss), script);
+            auto commands = onePass(*controller);
+            REQUIRE(!controller->getBlackboard().knownEnemies.empty());
+            REQUIRE(reclaimsOf(commands, commanderId, wrecks) == 0);
+            REQUIRE(controller->getBlackboard().ownWreckSites.size() == 2);
+        }
+
+        SECTION("a site is forgotten once its wreck has gone")
+        {
+            auto [controller, wrecks] = run(makeDefaultStandardProfile(), 900.0f);
+            sim.deleteFeature(wrecks[1]);
+            waitWithoutPlanning(static_cast<int>(OwnWreckSpawnGraceTicks));
+            onePass(*controller);
+            const auto& sites = controller->getBlackboard().ownWreckSites;
+            REQUIRE(sites.size() == 1);
+            REQUIRE((sites.front().position == sim.getFeature(wrecks[0]).position));
+        }
+    }
+
+    TEST_CASE("a unit of ours that dies out on the field is not the base's wreckage", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(256, 256), /*surfaceMetal*/ 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto nearId = addUnit(sim, "ARMPW", ai, SimVector(300_ss, 0_ss, 0_ss), script);
+        auto farId = addUnit(sim, "ARMPW", ai, SimVector(1500_ss, 0_ss, 0_ss), script);
+
+        AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, MapIntel{});
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 2, commands);
+        sim.getUnitState(nearId).markAsDead();
+        sim.getUnitState(farId).markAsDead();
+        runTicks(sim, controller, 2, commands);
+
+        const auto& sites = controller.getBlackboard().ownWreckSites;
+        REQUIRE(sites.size() == 1);
+        REQUIRE(sites.front().position.x == 300_ss);
+    }
 }

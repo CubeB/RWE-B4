@@ -2237,6 +2237,48 @@ namespace rwe
         /** How many wrecks a builder is given at once when it is sent to clear a field. */
         int battlefieldReclaimBatch{6};
         /**
+         * How many builders at once may be reclaiming the base's own
+         * wreckage: whatever lies where one of our buildings or units died
+         * within reach of the base (bb.ownWreckSites). 0 turns it off.
+         *
+         * Issue #42 asked for it: the AI carried on down its build list after
+         * a raid as if nothing had happened, and the rubble stayed where it
+         * fell. The ordinary harvest at the bottom of the planning pass would
+         * take it, but that is reached only by a builder with nothing else to
+         * build, and tryBattlefieldReclaim records that measured over six
+         * games it never once ran. So this sits above the build priorities,
+         * beside the battlefield rule, and like it takes a bounded number of
+         * builders off the economy rather than every idle one.
+         *
+         * Only the base's own wreck sites, never every feature in the base,
+         * so the rocks a commander walks to in the opening are still the
+         * ordinary harvest's and the opening is unchanged.
+         */
+        int ownWreckageReclaimers{1};
+        /**
+         * Reclaim the base's own wreckage only while metal is short: the
+         * stall flag, or under a tenth of storage, the test the build
+         * priorities already use. On for Easy only.
+         *
+         * It was the first choice for Standard too, and measured to do
+         * nothing there: over ten games on Great Divide the rule fired twice.
+         * A base is raided late, by which time the AI is not short of metal
+         * -- at every death near the base in those games the store was more
+         * than a fifth full -- so the gate never opened. Off, the wreckage is
+         * taken whenever it is there, which is metal for the walk and clears
+         * the ground the replacement will want.
+         */
+        bool ownWreckageOnlyWhenMetalShort{false};
+        /**
+         * How long a death must be past before its wreck is sent for, in
+         * seconds. The raid that caused it is usually still there for a
+         * while (the site is also refused while under an armed enemy's guns,
+         * whatever this says), and a longer wait is how Easy recovers slowly.
+         */
+        int ownWreckageDelaySeconds{10};
+        /** How many wrecks a builder is given at once when it is sent to the base's own. */
+        int ownWreckageBatch{4};
+        /**
          * How far ahead of the wave's own centre a unit may get before it is
          * sent back to it. Every member of a wave is given the same
          * destination and paths to it alone, so a wave of mixed speeds
