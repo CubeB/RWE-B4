@@ -4092,7 +4092,32 @@ namespace rwe
             return std::nullopt;
         }
 
-        return chooseTarget(unitInfo.id, 0, TargetSearchMode::SightDistance);
+        auto candidate = chooseTarget(unitInfo.id, 0, TargetSearchMode::SightDistance);
+        if (!candidate)
+        {
+            return std::nullopt;
+        }
+
+        // A bomb is never handed a mission against anything that can fly:
+        // the mission builder skips AIRSTRIKE for an air target at 0x43F2AA
+        // and falls through to no mission at all (S:86). Refusing the
+        // candidate here, where the patrol polls, is what keeps that refusal
+        // free: a bomber that broke off for a fighter parked beside its
+        // route, was refused, and broke off again next tick, would mill
+        // about beside it instead of carrying on (issue #70). The chooser is
+        // the ordinary one, so a flying candidate is declined rather than
+        // replaced; the poll simply asks again next tick.
+        const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[0]->weaponType);
+        if (std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType))
+        {
+            auto target = sim->tryGetUnitState(*candidate);
+            if (target && sim->unitDefinitions.at(target->get().unitType).canFly)
+            {
+                return std::nullopt;
+            }
+        }
+
+        return candidate;
     }
 
     bool UnitBehaviorService::handleDgunOrder(UnitInfo unitInfo, const DgunOrder& order)

@@ -821,6 +821,13 @@ target and the fall-through produces no mission at all — and **a bomb never
 auto-acquires**, because `0x408A7F` excludes `dropped` weapons from the
 per-tick scan. The break-off is the only way a bomber ever drops anything.
 
+> **RWE, 2026-09-24 (#70):** the patrol poll declines a flying candidate for
+> a `dropped` weapon before it breaks off (`findEnemyToEngage`), so the
+> refusal costs the patrol nothing here too. Before, the poll pushed the
+> attack, the air prologue refused it a tick later, and the poll found the
+> same aircraft again, so a bomber milled about beside a fighter parked on
+> its route for as long as it stayed there.
+
 **Two of the shipped bombers patrol without ever attacking, correctly.**
 `ARMTHUND` and `CORSHAD` carry `StandingFireOrder=0`, so `0x43B700` fails on
 every poll. `ARMPNIX` and `CORHURC` carry 2 and do engage. This is the same
