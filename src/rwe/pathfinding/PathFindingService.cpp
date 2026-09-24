@@ -343,6 +343,7 @@ namespace rwe
             .set("suspended", counters.searchesSuspended - last.searchesSuspended)
             .set("abandoned", counters.searchesAbandoned - last.searchesAbandoned)
             .set("exhausted", counters.searchesExhausted - last.searchesExhausted)
+            .set("region_unreachable", counters.searchesRegionUnreachable - last.searchesRegionUnreachable)
             .set("relaxed", counters.searchesRelaxed - last.searchesRelaxed)
             .set("bugwalk", counters.bugWalkSteps - last.bugWalkSteps)
             .set("wasted_stand_in", counters.expansionsExhausted - last.expansionsExhausted)
@@ -366,6 +367,7 @@ namespace rwe
                      << " suspended=" << (counters.searchesSuspended - last.searchesSuspended)
                      << " abandoned=" << (counters.searchesAbandoned - last.searchesAbandoned)
                      << " exhausted=" << (counters.searchesExhausted - last.searchesExhausted)
+                     << " region_unreachable=" << (counters.searchesRegionUnreachable - last.searchesRegionUnreachable)
                      << " relaxed=" << (counters.searchesRelaxed - last.searchesRelaxed)
                      << " bugwalk=" << (counters.bugWalkSteps - last.bugWalkSteps)
                      << " wasted=" << (counters.expansionsExhausted - last.expansionsExhausted) << "+" << (counters.expansionsAbandoned - last.expansionsAbandoned)
@@ -497,7 +499,10 @@ namespace rwe
     UnitPath PathFindingService::finishSearch(const GameSimulation& simulation)
     {
         auto& search = *activeSearch;
-        auto path = search.immediateResult
+        // The one source of immediateResult is the terrain-region early-out in
+        // beginSearch; read it before the move below empties it.
+        const bool fromTerrainRegions = search.immediateResult.has_value();
+        auto path = fromTerrainRegions
             ? std::move(*search.immediateResult)
             : search.pathFinder->takeResult();
         lastPathDebugInfo = AStarPathInfo<Point, PathCost>{path.type, path.path, std::move(path.closedVertices), path.exhausted};
@@ -514,7 +519,17 @@ namespace rwe
         bool unreachable = path.type == AStarPathType::Partial;
         if (unreachable)
         {
-            ++counters.searchesExhausted;
+            // The terrain-region answer is not an exhausted search: it says
+            // so from the first pass's walk and never starts an A*, so it
+            // must not be counted as one. See searchesRegionUnreachable.
+            if (fromTerrainRegions)
+            {
+                ++counters.searchesRegionUnreachable;
+            }
+            else
+            {
+                ++counters.searchesExhausted;
+            }
         }
 
         LOG_DEBUG << "Path for unit " << search.unitId.value << " from " << search.start.x << "," << search.start.y
