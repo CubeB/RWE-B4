@@ -303,6 +303,7 @@ namespace rwe
 
             movingState->path = PathFollowingInfo(std::move(path), simulation.gameTime);
             movingState->pathRequested = false;
+            movingState->pathIsStandIn = false;
 
             activeSearch.reset();
             requests.pop_front();

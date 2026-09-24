@@ -312,7 +312,10 @@ namespace rwe
         return combineHashes(
             m.pathDestination,
             m.pathRequested,
-            m.reachableDestination);
+            m.reachableDestination,
+            m.pathIsStandIn,
+            m.wantsPath,
+            m.lastPathRequestTime);
     }
 
     GameHash computeHashOf(const NavigationStateMovingToLandingSpot& m)

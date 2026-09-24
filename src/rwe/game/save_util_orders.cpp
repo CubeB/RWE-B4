@@ -508,7 +508,10 @@ namespace rwe
                     {"pathDestination", savePathDestination(m.pathDestination)},
                     {"path", saveOptional(m.path, savePathFollowingInfo)},
                     {"pathRequested", m.pathRequested},
-                    {"reachableDestination", saveOptional(m.reachableDestination, saveSimVector)}};
+                    {"reachableDestination", saveOptional(m.reachableDestination, saveSimVector)},
+                    {"pathIsStandIn", m.pathIsStandIn},
+                    {"wantsPath", m.wantsPath},
+                    {"lastPathRequestTime", saveOptional(m.lastPathRequestTime, [](GameTime t) { return saveGameTime(t); })}};
             },
             [](const NavigationStateMovingToLandingSpot& m) {
                 return json{
@@ -531,7 +534,10 @@ namespace rwe
                 loadPathDestination(j.at("pathDestination")),
                 loadOptional(j.at("path"), loadPathFollowingInfo),
                 j.at("pathRequested").get<bool>(),
-                loadOptional(j.at("reachableDestination"), loadSimVector)};
+                loadOptional(j.at("reachableDestination"), loadSimVector),
+                j.at("pathIsStandIn").get<bool>(),
+                j.at("wantsPath").get<bool>(),
+                loadOptional(j.at("lastPathRequestTime"), loadGameTime)};
         }
         if (kind == "movingToLandingSpot")
         {
