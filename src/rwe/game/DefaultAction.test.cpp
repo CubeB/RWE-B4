@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
+#include <memory>
 #include <rwe/game/DefaultAction.h>
 #include <rwe/sim/sim_test_util.h>
-#include <memory>
 
 namespace rwe
 {
@@ -308,6 +308,55 @@ namespace rwe
             auto action = computeDefaultAction(f.sim, DefaultActionScheme::LeftClickDefault, peewee, std::nullopt, std::nullopt);
             REQUIRE(isMove(action));
             REQUIRE(action.cursor == CursorType::Move);
+        }
+    }
+
+    TEST_CASE("a teammate's unit is an ally, not an enemy", "[defaultaction]")
+    {
+        // 0x43F0EC-0x43F12D reads the ally table, not the owner, so a unit
+        // belonging to a player on the same team takes the allied arms of
+        // the ladder: no capture, no reclaim, no attack, and the feedback
+        // cursor is the green one an ally gets rather than the red one.
+        Fixture f;
+        auto ally = addPlayer(f.sim, "friend");
+        f.sim.getPlayer(f.player).teamId = 1;
+        f.sim.getPlayer(ally).teamId = 1;
+
+        auto commander = f.spawn("commander", f.player, 0_ss);
+        auto theirs = f.spawn("peewee", ally, 100_ss);
+        auto enemys = f.spawn("peewee", f.enemy, 200_ss);
+        // At full health, so the builder's repair arm (also an allied arm)
+        // does not answer before the guard arm this case is about.
+        f.sim.getUnitState(theirs).hitPoints = 200;
+
+        SECTION("right-click on a teammate's unit guards it, where the same click on an enemy's captures it")
+        {
+            auto onAlly = f.act(DefaultActionScheme::RightClickDefault, commander, theirs);
+            REQUIRE(orderOf<CaptureOrder>(onAlly) == nullptr);
+            REQUIRE(orderOf<AttackOrder>(onAlly) == nullptr);
+            REQUIRE(orderOf<GuardOrder>(onAlly) != nullptr);
+            REQUIRE(onAlly.cursor == CursorType::Green);
+
+            auto onEnemy = f.act(DefaultActionScheme::RightClickDefault, commander, enemys);
+            REQUIRE(orderOf<CaptureOrder>(onEnemy) != nullptr);
+            REQUIRE(onEnemy.cursor == CursorType::Red);
+        }
+
+        SECTION("left-click on a teammate's unit does not attack it")
+        {
+            auto onAlly = f.act(DefaultActionScheme::LeftClickDefault, commander, theirs);
+            REQUIRE(orderOf<AttackOrder>(onAlly) == nullptr);
+            REQUIRE(orderOf<ReclaimOrder>(onAlly) == nullptr);
+
+            auto onEnemy = f.act(DefaultActionScheme::LeftClickDefault, commander, enemys);
+            REQUIRE(orderOf<AttackOrder>(onEnemy) != nullptr);
+        }
+
+        SECTION("a transport still only loads its own units")
+        {
+            auto atlas = f.spawn("atlas", f.player, 300_ss);
+            auto onAlly = f.act(DefaultActionScheme::RightClickDefault, atlas, theirs);
+            REQUIRE(orderOf<LoadOrder>(onAlly) == nullptr);
         }
     }
 
