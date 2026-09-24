@@ -103,8 +103,12 @@ namespace rwe
 
     nlohmann::json dumpJson(const UnitPhysicsInfoAir& p)
     {
+        // Everything the hash reads, so a desync in the lean shows up here.
         return nlohmann::json{
             {"movementState", dumpJson(p.movementState)},
+            {"roll", dumpJson(p.roll)},
+            {"pitch", dumpJson(p.pitch)},
+            {"bankAccum", dumpJson(p.bankAccum)},
         };
     }
 
