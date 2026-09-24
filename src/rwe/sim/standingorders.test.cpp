@@ -259,4 +259,58 @@ namespace rwe
         REQUIRE(weaponTarget(sim, tankId)->value == preyId.value);
         REQUIRE_FALSE(weaponTarget(sim, siloId).has_value());
     }
+
+    TEST_CASE("a patrol breaks off on the movement mode the unit is on now", "[standingorders]")
+    {
+        // 0x43B1F0 reads unit+0x110 bits 18-19, the unit's own mode, which the
+        // MOVEORD button and the COB SET move after the FBI seeds it. Hold
+        // Position never leaves the route (0x43B211); Maneuver plants a move
+        // back to where it stood before the attack (0x43B25D-0x43B2B1); Roam
+        // just goes. It used to read the definition's standing order, so the
+        // button did nothing to a patroller (issue #109).
+        auto script = makeStandingOrdersScript();
+        GameSimulation sim(makeStandingOrdersTerrain(), 0u, 0, 0);
+        auto us = addStandingOrdersPlayer(sim, "us");
+        auto them = addStandingOrdersPlayer(sim, "them");
+        registerStandingOrdersModel(sim);
+        defineStandingOrdersWeapon(sim, "gun");
+        // Built roaming; the cases below change the mode on the unit itself.
+        sim.unitDefinitions["TANK"] = makeShooterDef(UnitFireOrders::FireAtWill, UnitMovementOrders::Roam);
+        sim.unitDefinitions["PREY"] = makeShooterDef(UnitFireOrders::HoldFire, UnitMovementOrders::HoldPosition);
+        sim.unitScriptDefinitions["TANK"] = *script;
+        sim.unitScriptDefinitions["PREY"] = *script;
+
+        auto tankId = spawnThroughTheOrdinaryPath(sim, "TANK", us, SimVector(100_ss, 0_ss, 0_ss));
+        spawnThroughTheOrdinaryPath(sim, "PREY", them, SimVector(0_ss, 0_ss, 200_ss));
+        armWith(sim, tankId, "gun");
+        sim.getUnitState(tankId).orders.push_back(PatrolOrder(SimVector(100_ss, 0_ss, 800_ss)));
+
+        SECTION("Hold Position stays on the route")
+        {
+            sim.setMoveOrders(tankId, UnitMovementOrders::HoldPosition);
+            tickTwice(sim);
+            const auto& orders = sim.getUnitState(tankId).orders;
+            REQUIRE(orders.size() == 1);
+            REQUIRE(std::holds_alternative<PatrolOrder>(orders.front()));
+        }
+
+        SECTION("Roam goes after it")
+        {
+            tickTwice(sim);
+            const auto& orders = sim.getUnitState(tankId).orders;
+            REQUIRE(orders.size() == 2);
+            REQUIRE(std::holds_alternative<AttackOrder>(orders.front()));
+        }
+
+        SECTION("Maneuver goes after it and comes back first")
+        {
+            sim.setMoveOrders(tankId, UnitMovementOrders::Maneuver);
+            tickTwice(sim);
+            const auto& orders = sim.getUnitState(tankId).orders;
+            REQUIRE(orders.size() == 3);
+            REQUIRE(std::holds_alternative<AttackOrder>(orders[0]));
+            REQUIRE(std::holds_alternative<MoveOrder>(orders[1]));
+            REQUIRE(std::holds_alternative<PatrolOrder>(orders[2]));
+        }
+    }
 }

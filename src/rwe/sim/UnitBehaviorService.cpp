@@ -311,8 +311,14 @@ namespace rwe
                 // weapon path and then either shot at it from wherever it
                 // happened to be or broke off to land while still firing,
                 // which is not something either of these two ever does.
+                //
+                // Not on Hold Position, though: every one of 0x43B1F0's nine
+                // callers, Standby included, gets nothing back for a unit
+                // whose movement mode is 0 (0x43B211), so such a unit shoots
+                // from where it is and never goes after anything (issue #109).
                 std::optional<UnitId> freeTarget;
-                if (unitInfo.definition->canAttack && unitInfo.state->fireOrders != UnitFireOrders::HoldFire)
+                if (unitInfo.definition->canAttack && unitInfo.state->fireOrders != UnitFireOrders::HoldFire
+                    && unitInfo.state->moveOrders != UnitMovementOrders::HoldPosition)
                 {
                     freeTarget = findEnemyToEngage(unitInfo);
                     // Only go after something the owner can actually see. The
@@ -338,6 +344,13 @@ namespace rwe
                     // reach its station, lose the target it was already
                     // shooting at, and go looking for somewhere to land.
                     unitInfo.state->orders.push_back(createAttackOrder(*freeTarget));
+                    if (unitInfo.state->moveOrders == UnitMovementOrders::Maneuver)
+                    {
+                        // Maneuver comes back to where it was when it saw
+                        // the target (0x43B25D-0x43B2B1): the same return
+                        // move the patrol break-off plants, behind the attack.
+                        unitInfo.state->orders.push_back(MoveOrder(unitInfo.state->position));
+                    }
                 }
                 else if (unitInfo.state->airLoiter && unitInfo.state->airLoiter->reason == UnitState::AirLoiterState::Reason::AttackEnded)
                 {
@@ -4188,7 +4201,14 @@ namespace rwe
         // Fire At Will exactly: 0x43B700 is `cmp ecx,0x200000 / jne`, so a
         // unit on Return Fire shoots back at whatever shoots first but never
         // leaves its route for a target it merely saw.
-        if (!repairs && unitInfo.state->fireOrders == UnitFireOrders::FireAtWill)
+        //
+        // And not at all on Hold Position: 0x43B1F0 returns without a
+        // mission when the unit's movement mode is 0 and the call was not
+        // forced (0x43B211), and the poll never forces. The mode is the
+        // unit's own, the one the MOVEORD button and the COB SET move, not
+        // the definition's standing order it started on (issue #109).
+        if (!repairs && unitInfo.state->fireOrders == UnitFireOrders::FireAtWill
+            && unitInfo.state->moveOrders != UnitMovementOrders::HoldPosition)
         {
             if (auto enemy = findEnemyToEngage(unitInfo))
             {
@@ -4199,7 +4219,7 @@ namespace rwe
                 // was already heading for. Doing it per tick instead meant
                 // re-picking a target every tick -- and the chooser is
                 // deliberately random -- which an attack run cannot survive.
-                if (unitInfo.definition->standingMoveOrder == UnitMovementOrders::Maneuver)
+                if (unitInfo.state->moveOrders == UnitMovementOrders::Maneuver)
                 {
                     // Maneuver walks back to where it was standing when it
                     // saw the target, before carrying on with the route
