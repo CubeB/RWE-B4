@@ -17,6 +17,20 @@
 # said struct, which split contactStillStanding and tryGetUnitState in two and
 # failed all four Windows jobs of 5428ffd4 while every Linux job passed.
 #
+# Every pattern below strips a trailing carriage return first, and that is not
+# tidiness. Two files in the tree were committed with CRLF endings, and a
+# \r is neither space nor tab, so `[ \t]*$` did not match a single line in
+# either of them -- declaration or definition. The check therefore never
+# learned that GameSimulation is a struct, and skipped all twenty-odd
+# forward declarations of it as "defined elsewhere". It passed 54aeed98's
+# parent green while that commit's `class GameSimulation;` in DemoRecorder.h
+# failed both MSVC jobs, which is the exact bug this file exists to catch.
+#
+# It went unnoticed because MSYS2's tools strip the CR on the way in, so the
+# same script run on the same bytes reported 93 declarations and a failure on
+# Windows and 91 and success on Linux. The two files are LF now; this keeps
+# the check honest if CRLF ever comes back.
+#
 # Usage: tools/class-key.sh [source-dir]
 
 set -eu
@@ -43,7 +57,7 @@ fi
 report=$(
     # shellcheck disable=SC2086
     awk '
-        { line = $0; sub(/\/\/.*$/, "", line) }
+        { line = $0; sub(/\r$/, "", line); sub(/\/\/.*$/, "", line) }
 
         # A forward declaration: the whole statement on one line.
         line ~ /^[ \t]*(class|struct)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*;[ \t]*$/ {
