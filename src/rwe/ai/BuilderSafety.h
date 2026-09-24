@@ -38,6 +38,14 @@ namespace rwe
         float commanderCoverMetal{600.0f};
         /** How far beyond the longest threat's range a retreating builder goes. */
         SimScalar retreatExtraDistance{150_ss};
+        /**
+         * Whether the AI sees everything. Not tuning but a mode: an
+         * omniscient profile learns of a death at once, and everyone else
+         * keeps a remembered threat until something looks where it was. The
+         * carrier is here rather than a parameter because this module is
+         * deliberately kept clear of AiTuningProfile.
+         */
+        bool omniscient{false};
     };
 
     /**

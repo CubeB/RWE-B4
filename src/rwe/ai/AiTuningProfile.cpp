@@ -133,6 +133,7 @@ namespace rwe
         params.coverRadius = p.builderSafetyCoverRadius;
         params.protectionRatio = p.builderSafetyProtectionRatio;
         params.commanderCoverMetal = static_cast<float>(p.commanderFightsUpToMetal);
+        params.omniscient = p.cheatModeOmniscient;
         return params;
     }
 

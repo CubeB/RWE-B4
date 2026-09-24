@@ -194,8 +194,7 @@ namespace rwe
                 {
                     continue;
                 }
-                auto enemyRef = contactStillStanding(sim, enemy);
-                if (!enemyRef)
+                if (!contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy))
                 {
                     continue;
                 }
@@ -254,8 +253,7 @@ namespace rwe
                     {
                         continue;
                     }
-                    auto unitRef = contactStillStanding(sim, enemy);
-                    if (!unitRef)
+                    if (!contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy))
                     {
                         continue;
                     }
@@ -320,8 +318,7 @@ namespace rwe
                     {
                         continue;
                     }
-                    auto unitRef = contactStillStanding(sim, enemy);
-                    if (!unitRef)
+                    if (!contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy))
                     {
                         continue;
                     }
@@ -336,8 +333,7 @@ namespace rwe
                         {
                             continue;
                         }
-                        auto otherRef = sim.tryGetUnitState(other.unitId);
-                        if (!otherRef || otherRef->get().isDead())
+                        if (!contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, other))
                         {
                             continue;
                         }
@@ -412,8 +408,7 @@ namespace rwe
                     {
                         continue;
                     }
-                    auto enemyRef = contactStillStanding(sim, enemy);
-                    if (!enemyRef)
+                    if (!contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy))
                     {
                         continue;
                     }
@@ -476,8 +471,7 @@ namespace rwe
                     {
                         continue;
                     }
-                    auto enemyRef = contactStillStanding(sim, enemy);
-                    if (!enemyRef)
+                    if (!contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy))
                     {
                         continue;
                     }
@@ -534,8 +528,7 @@ namespace rwe
                 {
                     continue;
                 }
-                auto enemyRef = contactStillStanding(sim, enemy);
-                if (!enemyRef)
+                if (!contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy))
                 {
                     continue;
                 }
