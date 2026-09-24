@@ -92,13 +92,18 @@ transport `BeginTransport` and friends -- and no complete call-site inventory
 exists. No L2 oracle reads the code, so it is omitted and an inventory pass is
 scoped for the closeout, rather than guessed at now.
 
-**D10 -- Ownership changes are settled before real-game recording.** Capture
-moves a unit between owner blocks and a demo cannot express "the same id
-changed hands". The leaning is to emit the transfer record the original does,
-and where there is none, destroy and re-create the unit in the new owner's
-block -- settled with the ownership hook, against `capture.test.cpp`
-scenarios. Rare in arena games, but it must be handled before the writer is
-honest for real games.
+**D10 -- Ownership changes are destroy-and-replace, with the original's own
+cause-4 record.** Capture moves a unit between owner blocks and a demo cannot
+express "the same id changed hands". The original does not express it either:
+`0x488570` implements an owner change as a new record under the captor plus
+the old one killed with cause 4, and the corpus reads severity 0 and corpse
+level 0 on every cause-4 death (`TOTALA-EXE-WRECKS.md`, "What each death cause
+is"). So the recorder emits that death for the old id, sends it from the old
+owner, and gives the unit a fresh id in the captor's block, where the ids
+recycle exactly as a death's do. There is deliberately no `0x09` -- a capture
+is not a nanoframe -- so a receiver learns of the new unit from the captor
+block's next `0x2c`. Settled with the ownership hook against the
+`capture.test.cpp` scenarios.
 
 **D11 -- Not in scope.** Playing `.tad` in RWE (puppet playback), inferring
 orders from demos, SmartPak coalescing in the writer, and reproducing TA's
