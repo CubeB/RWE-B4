@@ -1,9 +1,57 @@
 #include "ShaderService.h"
+#include <SDL3/SDL_filesystem.h>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
 namespace rwe
 {
+    namespace
+    {
+        /**
+         * Where a shader actually lives.
+         *
+         * The names below are relative, so they resolved against the working
+         * directory and nothing else. That works when the game is launched
+         * from the build directory or the repo root, and it fails everywhere
+         * else -- the AppImage puts the binary in usr/bin and the shaders in
+         * usr/share/rwe, and a player starts it from wherever they downloaded
+         * it, so the first shader was not found and the engine died after
+         * "Initializing services" with no menu.
+         *
+         * Tried in order: the working directory, so anything that worked
+         * before still works unchanged; beside the executable, which is where
+         * CMake copies them for a development build; and the layout the
+         * AppImage installs. If none of them has it, the original name is
+         * returned so that the error still names what was asked for rather
+         * than whichever guess happened to be last.
+         */
+        std::string resolveShaderPath(const std::string& name)
+        {
+            std::error_code ec;
+            if (std::filesystem::exists(name, ec))
+            {
+                return name;
+            }
+
+            const char* base = SDL_GetBasePath();
+            if (base == nullptr)
+            {
+                return name;
+            }
+
+            std::filesystem::path baseDir(base);
+            for (const auto& candidate : {baseDir / name, baseDir / ".." / "share" / "rwe" / name})
+            {
+                if (std::filesystem::exists(candidate, ec))
+                {
+                    return candidate.string();
+                }
+            }
+
+            return name;
+        }
+    }
     ShaderService ShaderService::createShaderService(GraphicsContext& graphics)
     {
         ShaderService s;
@@ -118,10 +166,10 @@ namespace rwe
         const std::string& fragmentShaderName,
         const std::vector<AttribMapping>& attribs)
     {
-        auto vertexShaderSource = slurpFile(vertexShaderName);
+        auto vertexShaderSource = slurpFile(resolveShaderPath(vertexShaderName));
         auto vertexShader = graphics.compileVertexShader(vertexShaderSource);
 
-        auto fragmentShaderSource = slurpFile(fragmentShaderName);
+        auto fragmentShaderSource = slurpFile(resolveShaderPath(fragmentShaderName));
         auto fragmentShader = graphics.compileFragmentShader(fragmentShaderSource);
 
         return graphics.linkShaderProgram(vertexShader.get(), fragmentShader.get(), attribs);
