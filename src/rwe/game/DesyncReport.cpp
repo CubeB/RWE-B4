@@ -97,6 +97,7 @@ namespace rwe
                     {"detectedAtTick", detectedAt.value},
                     {"hashes", hashes},
                     {"build", ProjectNameVersion},
+                    {"commit", GitHash},
                 }},
             {"state", dumpJson(simulation)},
         };

@@ -499,3 +499,96 @@ jobs:
           # a called workflow's github context is the caller's throughout, so
           # github.ref_name here is the tag release.yml was pushed for.
           prerelease: ${{ contains(github.ref_name, '-pre') }}
+
+  # A rolling pre-release of the newest `revival` build, so the community can
+  # playtest without waiting for a version tag. One release under a fixed
+  # `nightly` tag, its three assets replaced on every push: the tag is moved to
+  # the built commit so it names the revision, and the body says which hash it
+  # is and what changed since the previous nightly. The tag is lightweight on
+  # purpose -- CMake's `git describe` sees only annotated tags, so it never
+  # leaks into the version the binaries report.
+  nightly:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/revival'
+    needs: [launcher, build-linux, build-windows-msvc]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Full history and tags: the notes are the commits since the last
+          # nightly, and that commit is read back from the `nightly` tag.
+          fetch-depth: 0
+      - name: download MSVC Release zip
+        uses: actions/download-artifact@v7
+        with:
+          name: RWE Zip Windows MSVC Release
+          path: dist
+      - name: download MSVC Release installer
+        uses: actions/download-artifact@v7
+        with:
+          name: RWE Installer Windows MSVC Release
+          path: dist
+      - name: download AppImage
+        uses: actions/download-artifact@v7
+        with:
+          name: RWE AppImage
+          path: dist
+      # Read before the tag moves, so the range is the commits since the last
+      # nightly rather than since the last version tag, which only grows.
+      - name: write release notes
+        id: notes
+        shell: bash
+        run: |
+          sha=$(git rev-parse HEAD)
+          short=$(git rev-parse --short HEAD)
+          echo "short=$short" >> "$GITHUB_OUTPUT"
+          old=$(git rev-parse -q --verify refs/tags/nightly || true)
+          {
+            echo "Rolling playtest build of \`revival\`."
+            echo
+            echo "**Commit:** [\`$sha\`](https://github.com/${{ github.repository }}/commit/$sha)"
+            echo
+            echo "Built $(date -u '+%Y-%m-%d %H:%M UTC')."
+            echo
+            if [ -z "$old" ]; then
+              echo "_First nightly build._"
+            elif [ "$old" = "$sha" ]; then
+              echo "_Rebuild of the same commit._"
+            else
+              echo "### Changes since the previous nightly"
+              echo
+              git log --no-merges --pretty='- %s (%h)' "$old..HEAD"
+            fi
+          } > "$RUNNER_TEMP/nightly-notes.md"
+      - name: move nightly tag
+        shell: bash
+        run: |
+          git tag -f nightly "$GITHUB_SHA"
+          git push --force origin refs/tags/nightly
+      # The release is identified by its tag and each asset's name carries the
+      # commit (`git describe`), so every build's files have new names. The
+      # upload only overwrites identical names, so without this the rolling
+      # release would accumulate one set of assets per commit.
+      - name: clear previous nightly assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view nightly --json assets --jq '.assets[].name' 2>/dev/null \
+            | while IFS= read -r asset; do
+                gh release delete-asset nightly "$asset" --yes
+              done
+      - name: publish nightly pre-release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: nightly
+          name: Nightly ${{ steps.notes.outputs.short }}
+          target_commitish: ${{ github.sha }}
+          # Published rather than draft so the community can download it, and a
+          # pre-release so it never takes the "Latest" badge from a real one.
+          prerelease: true
+          make_latest: "false"
+          body_path: ${{ runner.temp }}/nightly-notes.md
+          files: dist/*
+          fail_on_unmatched_files: true

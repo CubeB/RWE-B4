@@ -741,6 +741,8 @@ The simulation half of this phase was brought forward and largely done — see "
 ## Release cadence
 
 - Pre-release tag on every merged phase milestone; changelog generated from commit titles.
+- **A rolling `nightly` pre-release of `revival`** (2026-09-24). Every push that builds green publishes or updates one pre-release under the lightweight `nightly` tag: the Windows MSVC zip and installer plus the Linux AppImage, the tag force-moved to the built commit and the body naming the full hash and the commits since the previous nightly. Stale assets are deleted first, because each build's filenames carry the commit (`git describe`) and so never collide on their own. The tag is lightweight on purpose — CMake's `git describe` reads only annotated tags, so `nightly` stays out of the version the binaries report. This is for playtesting the latest build without waiting for a version tag; real releases still come from `v*` tags through `release.yml`.
+- **The commit hash is a build fact in its own right** (2026-09-24). CMake reads `git rev-parse HEAD` into `rwe::GitHash`, and it is written to the crash report (`commit:`), the desync dump (`commit`), the arena report (`gitHash`) and the startup log. `git describe` alone drops the hash whenever HEAD is exactly on a tag, which is every release build, so a bug report could otherwise name a version and no revision.
 - Keep `CLAUDE.md` accurate — it is the onboarding doc for AI-assisted work on the codebase.
 - Public announcement (TAUniverse thread t=45555, upstream issues) is deliberately deferred until the project is playable.
 

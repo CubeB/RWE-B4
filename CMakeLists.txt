@@ -34,6 +34,20 @@ if(NOT RWE_GIT_DESCRIPTION MATCHES "^v([0-9]+\\.[0-9]+\\.[0-9]+)")
     message(FATAL_ERROR "Failed to parse version from Git")
 endif()
 
+# The commit on its own, because `git describe` drops it when HEAD is exactly
+# on a tag -- which is every release build. Bug reports want the revision
+# whether or not a tag happens to name it.
+execute_process(
+    COMMAND "${GIT_EXECUTABLE}" "rev-parse" "HEAD"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_VARIABLE RWE_GIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+if(NOT RWE_GIT_HASH)
+    message(FATAL_ERROR "Failed to get the Git commit hash")
+endif()
+
 project("Robot War Engine" VERSION ${CMAKE_MATCH_1})
 enable_testing()
 

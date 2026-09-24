@@ -127,6 +127,7 @@ namespace rwe
     int run(const std::vector<fs::path>& searchPath, const PathMapping& pathMapping, const std::optional<GameParameters>& gameParameters, unsigned int desiredWindowWidth, unsigned int desiredWindowHeight, WindowMode windowMode, const std::string& imGuiIniPath, GlobalConfig& globalConfig)
     {
         LOG_INFO << ProjectNameVersion;
+        LOG_INFO << "Commit: " << GitHash;
         LOG_INFO << "Current directory: " << fs::current_path().string();
 
         TimeService timeService(getTimestamp());
