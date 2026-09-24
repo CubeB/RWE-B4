@@ -21,21 +21,44 @@
  *       [--ai-tune 0:knob=value] [--out <dir>] [--data-path <dir>]
  *
  * RWE_HASH_LOG and RWE_STATE_DUMP work here as they do in the game.
+ *
+ * `ai_arena --replay <file.rwereplay> [--ai-arena <seconds>]` plays a
+ * recorded game back through the same loader and tick loop rather than a
+ * fresh --map/--player one: the map, players, seed and options all come out
+ * of the replay's own header, so --map and --player cannot be given
+ * alongside it. GameSimulationLoader idles every computer player's
+ * AiPlayerController when a replay is in force (it is still constructed,
+ * because building one draws a value from the sim RNG that has to land the
+ * same as it did live) and this harness feeds every player's recorded
+ * commands instead of calling feedAiCommands, the same substitution
+ * GameScene::pushReplayCommandsForTick makes for a windowed viewer.
+ * Without --ai-arena the whole recording plays;
+ * with it, playback stops at min(given, the replay's own length). The usual
+ * ai-arena.csv, ai-arena-events.csv, event-log.jsonl, run.json and
+ * AI-ARENA-RESULT line are written exactly as for an ordinary run.
+ *
+ * `ai_arena --list-knobs [--json]` prints every AI tuning knob applyAiTuning
+ * accepts -- name, type and default value -- and exits without needing
+ * --map; add --json for a JSON array instead of tab-separated lines.
  */
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <rwe/ColorPalette.h>
 #include <rwe/GameLaunch.h>
 #include <rwe/PathMapping.h>
 #include <rwe/ai/AiPersonality.h>
+#include <rwe/ai/AiTuningProfile.h>
 #include <rwe/game/AiArenaReport.h>
 #include <rwe/game/GameSimulationLoader.h>
 #include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/game/PlayerCommandService.h>
+#include <rwe/game/ReplayFile.h>
 #include <rwe/game/SimDiagnostics.h>
 #include <rwe/io/ota/ota.h>
 #include <rwe/io/sidedatatdf/SideData.h>
@@ -140,6 +163,67 @@ namespace
         }
     }
 
+    /**
+     * GameScene::pushReplayCommandsForTick, without a scene: one set per
+     * player for the tick about to run, out of the recording rather than out
+     * of a thinking AI. A replay's computer players are watched, not
+     * replayed by a fresh decision -- GameSimulationLoader idles their
+     * AiPlayerController for exactly this reason -- so this is the only
+     * source of commands in a replay run, in place of feedAiCommands.
+     *
+     * Pause, unpause and game-speed commands are dropped, matching the
+     * viewer: whoever recorded the game may have paused it, and a headless
+     * arena run has no clock of its own for that to mean anything to.
+     */
+    void pushReplayCommandsForTick(rwe::GameSimulation& simulation, rwe::PlayerCommandService& playerCommandService, const rwe::Replay& replay, unsigned int tick)
+    {
+        auto tickIt = replay.commands.find(tick);
+        for (rwe::Index i = 0; i < rwe::getSize(simulation.players); ++i)
+        {
+            if (!playerCommandService.needsCommandsForTick(rwe::PlayerId(i), tick + 1))
+            {
+                continue;
+            }
+
+            std::vector<rwe::PlayerCommand> commands;
+            if (tickIt != replay.commands.end())
+            {
+                auto playerIt = tickIt->second.find(static_cast<unsigned int>(i));
+                if (playerIt != tickIt->second.end())
+                {
+                    commands = playerIt->second;
+                }
+            }
+
+            commands.erase(
+                std::remove_if(commands.begin(), commands.end(), [](const rwe::PlayerCommand& c) {
+                    return std::holds_alternative<rwe::PlayerPauseGameCommand>(c)
+                        || std::holds_alternative<rwe::PlayerUnpauseGameCommand>(c)
+                        || std::holds_alternative<rwe::PlayerSetGameSpeedCommand>(c);
+                }),
+                commands.end());
+
+            playerCommandService.pushCommands(rwe::PlayerId(i), commands);
+        }
+    }
+
+    void printAiKnobsPlain()
+    {
+        for (const auto& knob : rwe::listAiKnobs())
+        {
+            std::cout << knob.name << '\t' << knob.type << '\t' << knob.defaultValue << '\n';
+        }
+    }
+
+    void printAiKnobsJson()
+    {
+        auto j = nlohmann::json::array();
+        for (const auto& knob : rwe::listAiKnobs())
+        {
+            j.push_back({{"name", knob.name}, {"type", knob.type}, {"default", knob.defaultValue}});
+        }
+        std::cout << j.dump(2) << '\n';
+    }
 }
 
 int main(int argc, char* argv[])
@@ -163,8 +247,10 @@ int main(int argc, char* argv[])
         if (args.isHelpRequested())
         {
             std::cout << "Usage: ai_arena --map <name> --ai-arena <seconds> [options]\n"
+                      << "       ai_arena --replay <file.rwereplay> [--ai-arena <seconds>] [options]\n"
+                      << "       ai_arena --list-knobs [--json]\n"
                       << "  --map <name>            map to play on\n"
-                      << "  --ai-arena <seconds>    game length cap\n"
+                      << "  --ai-arena <seconds>    game length cap (with --replay: caps the replay's own length)\n"
                       << "  --player <spec>         name;Computer;SIDE;colour[;team] (repeatable)\n"
                       << "  --seed <n>              vary the simulation seed\n"
                       << "  --ai-difficulty <d>     idle | easy | standard | hard | brutal\n"
@@ -175,128 +261,189 @@ int main(int argc, char* argv[])
                       << "  --record-demo <f>       write a TA demo of the game to <f>\n"
                       << "  --watchdog <seconds>    abort after this much wall-clock time\n"
                       << "  --strict                exit 1 if no AI-ARENA-RESULT was produced or the watchdog fired\n"
-                      << "  --data-path <path>      game data search path (repeatable)\n";
+                      << "  --data-path <path>      game data search path (repeatable)\n"
+                      << "  --replay <file>         play a recorded .rwereplay headlessly instead of --map/--player\n"
+                      << "  --list-knobs            print every AI tuning knob (name, type, default) and exit\n"
+                      << "  --json                  with --list-knobs, print a JSON array instead of tab-separated text\n";
             return 0;
         }
 
-        auto arenaSeconds = args.getUint("ai-arena", 0);
-        if (arenaSeconds == 0)
+        if (args.contains("list-knobs"))
         {
-            throw std::runtime_error("ai_arena needs --ai-arena <seconds>");
+            if (args.getBool("json"))
+            {
+                printAiKnobsJson();
+            }
+            else
+            {
+                printAiKnobsPlain();
+            }
+            return 0;
         }
-        if (!args.contains("map"))
+
+        if (args.contains("load"))
+        {
+            throw std::runtime_error("ai_arena does not support --load yet; use rwe for that");
+        }
+
+        const bool isReplay = args.contains("replay");
+
+        if (!isReplay && !args.contains("map"))
         {
             throw std::runtime_error("ai_arena needs --map <name>");
         }
-        // Watching a replay or resuming a save needs the command source and
-        // the load path wired up here as well; until then, say so rather than
-        // run the game as an arena and quietly measure the wrong thing.
-        if (args.contains("replay") || args.contains("load"))
+        if (isReplay && args.contains("map"))
         {
-            throw std::runtime_error("ai_arena does not support --replay or --load yet; use rwe for those");
+            throw std::runtime_error("ai_arena --replay takes its map from the replay; --map cannot be given alongside it");
+        }
+        if (isReplay && !args.getMulti("player").empty())
+        {
+            throw std::runtime_error("ai_arena --replay takes its players from the replay; --player cannot be given alongside it");
         }
 
-        GameParameters gameParameters{args.getString("map"), 0};
-        gameParameters.aiArenaSeconds = arenaSeconds;
-        if (args.getUint("seed", 0) > 0)
+        auto arenaSecondsArg = args.getUint("ai-arena", 0);
+        if (arenaSecondsArg == 0 && !isReplay)
         {
-            gameParameters.randomSeed = args.getUint("seed", 0);
+            throw std::runtime_error("ai_arena needs --ai-arena <seconds>");
         }
+
+        std::optional<Replay> replay;
+        std::optional<GameParameters> gameParametersHolder;
+        if (isReplay)
+        {
+            auto replayPath = fs::path(args.getString("replay"));
+            auto readReplay = readReplayFile(replayPath);
+            if (!readReplay)
+            {
+                throw std::runtime_error("Could not read replay file: " + replayPath.string());
+            }
+            replay = std::move(readReplay);
+            gameParametersHolder = gameParametersFromReplayHeader(replay->header);
+            gameParametersHolder->replayFile = replayPath.string();
+            // The point of replaying here is to review the game, and the
+            // review wants what each computer player decided and why. So its
+            // AI thinks in the shadow of the recording: see the loop.
+            gameParametersHolder->replayShadowAi = true;
+        }
+        else
+        {
+            gameParametersHolder = GameParameters{args.getString("map"), 0};
+        }
+        GameParameters& gameParameters = *gameParametersHolder;
+
         if (args.contains("record-demo"))
         {
             gameParameters.recordDemoFile = args.getString("record-demo");
         }
 
-        auto difficulty = args.getString("ai-difficulty", "standard");
-        for (auto& c : difficulty)
-        {
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        }
-        if (difficulty == "idle" || difficulty == "none" || difficulty == "off")
-        {
-            gameParameters.aiDifficulty = AiDifficulty::Idle;
-        }
-        else if (difficulty == "easy")
-        {
-            gameParameters.aiDifficulty = AiDifficulty::Easy;
-        }
-        else if (difficulty == "hard")
-        {
-            gameParameters.aiDifficulty = AiDifficulty::Hard;
-        }
-        else if (difficulty == "brutal")
-        {
-            gameParameters.aiDifficulty = AiDifficulty::Brutal;
-        }
-        else
-        {
-            gameParameters.aiDifficulty = AiDifficulty::Standard;
-        }
-
-        auto startLocation = args.getString("start-location", "fixed");
-        for (auto& c : startLocation)
-        {
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        }
-        if (startLocation == "random")
-        {
-            gameParameters.startLocation = StartLocationMode::Random;
-        }
-
         // A batch cares whether a run actually produced its numbers; the
         // default stays exit 0 so nothing that runs this today is affected.
+        // Both apply to a replay run as much as an ordinary one.
         const bool strict = args.getBool("strict");
         const unsigned int watchdogSeconds = args.getUint("watchdog", 0);
 
-        for (const auto& tuning : args.getMulti("ai-tune"))
+        // Everything below chooses the game: the map, the players, the
+        // difficulty, the seed, the start-location deal. A replay carries all
+        // of that in its own header already -- reapplying the command line on
+        // top would play a different game from the one recorded, which is
+        // the opposite of what watching a replay is for.
+        if (!isReplay)
         {
-            gameParameters.aiTuning.push_back(tuning);
-        }
-
-        const auto players = args.getMulti("player");
-        if (players.size() > gameParameters.players.size())
-        {
-            throw std::runtime_error("too many players");
-        }
-        for (Index i = 0; i < getSize(players); ++i)
-        {
-            gameParameters.players[i] = parsePlayerInfoFromArg(players[i]);
-        }
-
-        const auto personalityArgs = args.getMulti("ai-personality");
-        if (!personalityArgs.empty())
-        {
-            auto personalities = loadAiPersonalities(aiPersonalityDirectory());
-            for (const auto& entry : personalityArgs)
+            gameParameters.aiArenaSeconds = arenaSecondsArg;
+            if (args.getUint("seed", 0) > 0)
             {
-                auto colon = entry.find(':');
-                if (colon == std::string::npos)
-                {
-                    throw std::runtime_error("--ai-personality wants <player>:<name>, got " + entry);
-                }
-                auto slot = std::stoul(entry.substr(0, colon));
-                if (slot >= gameParameters.players.size() || !gameParameters.players[slot])
-                {
-                    throw std::runtime_error("--ai-personality: there is no player " + entry.substr(0, colon));
-                }
-                auto personality = findAiPersonality(personalities, entry.substr(colon + 1));
-                if (!personality)
-                {
-                    throw std::runtime_error("--ai-personality: no such personality: " + entry.substr(colon + 1));
-                }
-                gameParameters.players[slot]->aiPersonality = personality->name;
+                gameParameters.randomSeed = args.getUint("seed", 0);
             }
-        }
 
-        // The harness has no interface to drive a human, so every seat must be
-        // a computer. The windowed arena is the same game for the same reason.
-        for (const auto& p : gameParameters.players)
-        {
-            if (p && std::visit(IsHumanVisitor(), p->controller))
+            auto difficulty = args.getString("ai-difficulty", "standard");
+            for (auto& c : difficulty)
             {
-                throw std::runtime_error("ai_arena only plays computer players");
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             }
-        }
+            if (difficulty == "idle" || difficulty == "none" || difficulty == "off")
+            {
+                gameParameters.aiDifficulty = AiDifficulty::Idle;
+            }
+            else if (difficulty == "easy")
+            {
+                gameParameters.aiDifficulty = AiDifficulty::Easy;
+            }
+            else if (difficulty == "hard")
+            {
+                gameParameters.aiDifficulty = AiDifficulty::Hard;
+            }
+            else if (difficulty == "brutal")
+            {
+                gameParameters.aiDifficulty = AiDifficulty::Brutal;
+            }
+            else
+            {
+                gameParameters.aiDifficulty = AiDifficulty::Standard;
+            }
+
+            auto startLocation = args.getString("start-location", "fixed");
+            for (auto& c : startLocation)
+            {
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+            if (startLocation == "random")
+            {
+                gameParameters.startLocation = StartLocationMode::Random;
+            }
+
+            for (const auto& tuning : args.getMulti("ai-tune"))
+            {
+                gameParameters.aiTuning.push_back(tuning);
+            }
+
+            const auto players = args.getMulti("player");
+            if (players.size() > gameParameters.players.size())
+            {
+                throw std::runtime_error("too many players");
+            }
+            for (Index i = 0; i < getSize(players); ++i)
+            {
+                gameParameters.players[i] = parsePlayerInfoFromArg(players[i]);
+            }
+
+            const auto personalityArgs = args.getMulti("ai-personality");
+            if (!personalityArgs.empty())
+            {
+                auto personalities = loadAiPersonalities(aiPersonalityDirectory());
+                for (const auto& entry : personalityArgs)
+                {
+                    auto colon = entry.find(':');
+                    if (colon == std::string::npos)
+                    {
+                        throw std::runtime_error("--ai-personality wants <player>:<name>, got " + entry);
+                    }
+                    auto slot = std::stoul(entry.substr(0, colon));
+                    if (slot >= gameParameters.players.size() || !gameParameters.players[slot])
+                    {
+                        throw std::runtime_error("--ai-personality: there is no player " + entry.substr(0, colon));
+                    }
+                    auto personality = findAiPersonality(personalities, entry.substr(colon + 1));
+                    if (!personality)
+                    {
+                        throw std::runtime_error("--ai-personality: no such personality: " + entry.substr(colon + 1));
+                    }
+                    gameParameters.players[slot]->aiPersonality = personality->name;
+                }
+            }
+
+            // The harness has no interface to drive a human, so every seat must be
+            // a computer. The windowed arena is the same game for the same reason.
+            // A replay is watched rather than played, so a human slot in its
+            // header is no obstacle: its commands come out of the recording like
+            // everyone else's, not out of a controller nobody is driving.
+            for (const auto& p : gameParameters.players)
+            {
+                if (p && std::visit(IsHumanVisitor(), p->controller))
+                {
+                    throw std::runtime_error("ai_arena only plays computer players");
+                }
+            }
+        } // !isReplay
 
         auto pathMapping = defaultPathMapping();
 
@@ -408,8 +555,29 @@ int main(int argc, char* argv[])
         const unsigned int sampleIntervalTicks = 10u * static_cast<unsigned int>(SimTicksPerSecond);
         AiArenaReport arenaReport(sampleIntervalTicks);
         loaded.simulation.eventLog.setRecording(true);
-        const unsigned int arenaEndTick = arenaSeconds * static_cast<unsigned int>(SimTicksPerSecond);
-        LOG_INFO << "AI arena: running for " << arenaSeconds << " seconds of game time (" << arenaEndTick << " ticks)";
+
+        // A replay's own length is the default cap, and --ai-arena only ever
+        // shortens it: min(given, replay length), never the other way, since
+        // a replay has nothing recorded past its own end to run on. An
+        // ordinary game has no such ceiling, so --ai-arena is the whole of
+        // it there.
+        unsigned int arenaEndTick;
+        if (replay)
+        {
+            arenaEndTick = replay->lastTick;
+            if (arenaSecondsArg > 0)
+            {
+                arenaEndTick = std::min(arenaEndTick, arenaSecondsArg * static_cast<unsigned int>(SimTicksPerSecond));
+            }
+            gameParameters.aiArenaSeconds = (arenaEndTick + static_cast<unsigned int>(SimTicksPerSecond) - 1) / static_cast<unsigned int>(SimTicksPerSecond);
+        }
+        else
+        {
+            arenaEndTick = arenaSecondsArg * static_cast<unsigned int>(SimTicksPerSecond);
+        }
+        LOG_INFO << "AI arena: running for " << (arenaEndTick / static_cast<unsigned int>(SimTicksPerSecond))
+                 << " seconds of game time (" << arenaEndTick << " ticks)"
+                 << (replay ? " [replay]" : "");
 
         SimDiagnostics diagnostics;
 
@@ -463,11 +631,27 @@ int main(int argc, char* argv[])
                 break;
             }
 
-            // aiCommandBufferDepth rather than a figure of the arena's own: the
-            // depth decides which tick an AI order lands on, so an arena that
-            // chose differently would diverge from a windowed run on the first
-            // order given.
-            feedAiCommands(loaded.simulation, *playerCommandService, aiCommandBufferDepth());
+            if (replay)
+            {
+                // The recording is every player's command source, computer
+                // seats included: see pushReplayCommandsForTick above.
+                pushReplayCommandsForTick(loaded.simulation, *playerCommandService, *replay, sceneTime);
+
+                // The shadow AI's own orders are the ones the recording
+                // already holds; drop them, or they pile up unread.
+                for (Index i = 0; i < getSize(loaded.simulation.players); ++i)
+                {
+                    loaded.simulation.takeAiCommandsForPlayer(PlayerId(static_cast<unsigned int>(i)));
+                }
+            }
+            else
+            {
+                // aiCommandBufferDepth rather than a figure of the arena's own:
+                // the depth decides which tick an AI order lands on, so an
+                // arena that chose differently would diverge from a windowed
+                // run on the first order given.
+                feedAiCommands(loaded.simulation, *playerCommandService, aiCommandBufferDepth());
+            }
 
             auto playerCommands = playerCommandService->tryPopCommands();
             if (!playerCommands)

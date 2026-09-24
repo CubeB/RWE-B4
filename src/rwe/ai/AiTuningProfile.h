@@ -3,6 +3,7 @@
 #include <rwe/ai/BuilderSafety.h>
 #include <rwe/sim/SimScalar.h>
 #include <string>
+#include <vector>
 
 namespace rwe
 {
@@ -2411,6 +2412,27 @@ namespace rwe
      * know; the caller decides whether that is fatal.
      */
     bool applyAiTuning(AiTuningProfile& profile, const std::string& knob, const std::string& value);
+
+    /**
+     * One knob applyAiTuning accepts, for listing rather than setting:
+     * its name, its type ("int", "bool", "float" or "scalar") and its
+     * default value from a default-constructed profile, formatted the way
+     * applyAiTuning would read it back.
+     */
+    struct AiKnobInfo
+    {
+        std::string name;
+        std::string type;
+        std::string defaultValue;
+    };
+
+    /**
+     * Every knob applyAiTuning will accept, sorted by name. Built from the
+     * same table applyAiTuning matches against (AiTuningProfile.cpp), so a
+     * knob cannot be listed here and refused there, or the other way round.
+     * `ai_arena --list-knobs` is what asks for this.
+     */
+    std::vector<AiKnobInfo> listAiKnobs();
 
     /**
      * What one faction plays differently from the other, laid over the
