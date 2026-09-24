@@ -44,7 +44,8 @@ namespace rwe
     MaxWaterSlope=20;
 }
 )");
-            const auto& c = parseMoveInfoTdf(tdf)[0].second;
+            auto classes = parseMoveInfoTdf(tdf);
+            const auto& c = classes[0].second;
             REQUIRE(c.badSlope == 7u);
             REQUIRE(c.badWaterSlope == 10u);
         }
@@ -59,7 +60,8 @@ namespace rwe
     FootprintZ=1;
 }
 )");
-            const auto& c = parseMoveInfoTdf(tdf)[0].second;
+            auto classes = parseMoveInfoTdf(tdf);
+            const auto& c = classes[0].second;
             REQUIRE(c.maxSlope == 255u);
             REQUIRE(c.badSlope == 127u);
             REQUIRE(c.badWaterSlope == 127u);
@@ -79,7 +81,8 @@ namespace rwe
     BadWaterSlope=9;
 }
 )");
-            const auto& c = parseMoveInfoTdf(tdf)[0].second;
+            auto classes = parseMoveInfoTdf(tdf);
+            const auto& c = classes[0].second;
             REQUIRE(c.badSlope == 10u);
             REQUIRE(c.badWaterSlope == 8u);
         }
