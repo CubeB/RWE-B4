@@ -154,6 +154,55 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a class whose BadSlope equals its MaxSlope pays nothing for ground a tank calls rough", "[pathing]")
+    {
+        // TANKHOVER3 and TANKHOVER4 in the shipped data: MaxSlope=12,
+        // BadSlope=12. The original's cell test admits a dry cell free up to
+        // BadSlope and only "tight" between that and MaxSlope (0x47E145), so
+        // for a hovercraft the corrugated band above is ordinary ground and
+        // the straight line through it is the route. A class left at the
+        // seeded default, half the max, still goes round.
+        auto script = makeEmptyCobScript();
+        auto corrugated = [](int x, int y) { return (x >= 4 && x <= 10 && y >= 4 && y <= 6) ? static_cast<unsigned char>((x % 2) * 6) : static_cast<unsigned char>(0); };
+
+        auto routeThroughBand = [&](const MovementClassDefinition& definition) {
+            GameSimulation sim(makeTerrain(16, 12, corrugated), 0u, 0, 0);
+            auto player = addPlayer(sim);
+            auto classId = sim.movementClassDatabase.registerMovementClass(definition);
+            sim.movementClassCollisionService.registerMovementClass(classId, computeWalkableGrid(sim.terrain, definition));
+
+            UnitDefinition hover = makeTankDef(definition.maxSlope);
+            hover.movementCollisionInfo = UnitDefinition::NamedMovementClass{classId};
+            sim.unitDefinitions["tank"] = hover;
+            auto unitId = addUnitOfType(sim, "tank", player, cellCenter(sim, 1, 5), script);
+
+            UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, unitId, classId, 1u, 1u, Point(12, 5));
+            auto result = pathFinder.findPath(Point(1, 5));
+            REQUIRE(result.type == AStarPathType::Complete);
+            std::ostringstream pathText;
+            for (const auto& p : result.path)
+            {
+                pathText << "(" << p.x << "," << p.y << ") ";
+            }
+            INFO("path: " << pathText.str());
+            bool crossesBand = false;
+            for (const auto& p : result.path)
+            {
+                if (p.x >= 4 && p.x <= 9 && p.y >= 3 && p.y <= 6)
+                {
+                    crossesBand = true;
+                }
+            }
+            return crossesBand;
+        };
+
+        // {name, footprintX, footprintZ, minWaterDepth, maxWaterDepth, maxSlope, maxWaterSlope, badSlope, badWaterSlope}
+        REQUIRE(routeThroughBand(MovementClassDefinition{"TANKHOVER3", 1u, 1u, 0u, 255u, 12u, 12u, 12u, 12u}));
+        // The band's cells are slope 6 exactly, and a cell is rough only
+        // above the threshold, so the control sits one below it.
+        REQUIRE_FALSE(routeThroughBand(MovementClassDefinition{"TANK", 1u, 1u, 0u, 255u, 12u, 12u, 5u, 5u}));
+    }
+
     namespace
     {
         /**

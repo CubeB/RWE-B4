@@ -1006,6 +1006,7 @@ set(TEST_FILES
     src/rwe/grid/Grid.test.cpp
     src/rwe/grid/Point.test.cpp
     src/rwe/io/featuretdf/io.test.cpp
+    src/rwe/io/moveinfotdf/io.test.cpp
     src/rwe/io/gui/gui.test.cpp
     src/rwe/io/hpi/hpi_util.test.cpp
     src/rwe/io/ota/ota.test.cpp

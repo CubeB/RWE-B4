@@ -2884,6 +2884,8 @@ namespace rwe
         return match(
             info,
             [&](const UnitDefinition::AdHocMovementClass& mc) {
+                // An FBI names no BadSlope, so a class built from one gets
+                // the original's seeded default: half the corresponding max.
                 return MovementClassDefinition{
                     "",
                     mc.footprintX,
@@ -2891,7 +2893,9 @@ namespace rwe
                     mc.minWaterDepth,
                     mc.maxWaterDepth,
                     mc.maxSlope,
-                    mc.maxWaterSlope};
+                    mc.maxWaterSlope,
+                    mc.maxSlope / 2,
+                    mc.maxWaterSlope / 2};
             },
             [&](const UnitDefinition::NamedMovementClass& mc) {
                 return movementClassDatabase.getMovementClass(mc.movementClassId);

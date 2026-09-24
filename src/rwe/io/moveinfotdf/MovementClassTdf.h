@@ -13,5 +13,7 @@ namespace rwe
         unsigned int maxWaterDepth;
         unsigned int maxSlope;
         unsigned int maxWaterSlope;
+        unsigned int badSlope;
+        unsigned int badWaterSlope;
     };
 }
