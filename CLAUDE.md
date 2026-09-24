@@ -172,6 +172,23 @@ The fix was to split the file, and the rule it leaves behind is a size one: no t
 
 Two things that pass measurement teaches, both worth knowing before making any of these bigger. **The section count is a budget, not a free win**: the standard library's floor is paid once per translation unit, so a split adds to the total even as it takes the peak down. Taking the debug harness out of `GameScene.cpp` cost 2216 sections across the pair to take 2623 off the larger; taking the menu out of `_commands` cost 8365 to take 4740 off. And **that floor is not a constant** — `_debug` came out at 4839 against the 9500 quoted above, because its include list is what it uses rather than what it would inherit, while `_menu` at 13105 pays for `MainMenuScene.h`, `LoadingScene.h` and `SaveFile.h`, which it genuinely needs. Keeping a new file's includes tight is most of what decides where it lands.
 
+**A forward declaration that says `class` where the definition says `struct`
+breaks MSVC and nothing else.** MSVC mangles the class-key into the symbol
+name and keeps whichever tag the translation unit saw first, so a header that
+forward-declares `class GameSimulation;` makes every object compiled through it
+mangle `class` while `GameSimulation.obj` mangles `struct`, and the two never
+meet. gcc, clang and MinGW ignore the tag when mangling, so the only sign is a
+Windows-MSVC link failure while every other job is green.
+
+`DemoRecorder.h` did this and took `revival` red on 2026-09-24: four unresolved
+externals on `DemoRecorder`'s own methods, in a file that had plainly compiled.
+Clang had said so in the same run and the warning scrolled past --
+`-Wmismatched-tags`, "may result in linker errors under the Microsoft C++
+ABI". **That warning is the check**, and it is worth reading Linux clang's
+output for it whenever MSVC alone fails to link. The engine's aggregates are
+`struct` far more often than `class`, so `struct` is the safer guess when
+adding a forward declaration, and matching the definition is the rule.
+
 ## Code Conventions
 
 - All C++ code is in the `rwe::` namespace

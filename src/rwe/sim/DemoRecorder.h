@@ -13,7 +13,7 @@
 
 namespace rwe
 {
-    class GameSimulation;
+    struct GameSimulation;
 
     /**
      * The id blocks a demo's unit ids partition into.
