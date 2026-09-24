@@ -936,6 +936,47 @@ recorded on the victim at `unit+0xF5` (§5), and ends up in the high nibble of
 | 10 | A repair | `0x41BDC7`; `0x489BB0` short-circuits it into adding hit points |
 | 11 | — | `0x48AF32`; the one Return Fire refuses (§5) |
 
+**The game-end wipe, `0x486F10(player)` (issue #258, 2026-09-24).** When a
+unit dies, the death routine `0x4864B0` compares its definition's name
+(`def+0x20`) with its side's commander name in the side records at
+`globals+0x37F5F` (`0x4F8A70`, a string compare; `0x48650B`-`0x48650F` turn a
+match into 1). At the end of the routine (`0x48667E`-`0x4866B3`), if the unit
+was that commander, **and** the commander rule at `globals+0x37EF6` is not 0,
+**and** the owner's record is live with type byte `player+0x73` 1 or 2 (an
+active player), it calls `0x491D70(1)` and then `0x486F10(owner)`.
+
+`0x486F10` walks the owner's unit array and, for every unit that is alive
+(`unit+0x110` bit 28) and not already being removed (bit 14):
+
+- if the unit's owner is an active player (type 1 or 2 again), applies
+  `0x489BB0(unit, unit, 30000, cause 3, 0)` (`0x486F94`): thirty thousand
+  points of ordinary damage from the unit to itself, so each unit dies
+  through the ordinary path, `Killed` ladder, death explosion and corpse
+  included;
+- otherwise sets its explosion off directly (`0x49B000(unit, 1)`, which reads
+  `def+0x224`) and removes it with cause 3 (`0x4864B0(unit, 3)`), setting
+  bit 14 first.
+
+The commander rule is the lobby's 0 continue / 1 game ends / 2 game ends
+with a respawn, written at `0x449DF1`. So under "game ends" **the defeated
+player's whole army and base are destroyed** the moment the commander dies,
+every unit a cause-3 death with no killer. The four other callers
+(`0x4164DF`, `0x416A00`, `0x416A58`, `0x452E17`) are the resign and
+player-left paths, which run the same wipe.
+
+**RWE matches it.** `GameSimulation::killPlayer`, reached from
+`processVictoryCondition` under `CommanderDeathMode::GameEnds`, kills every
+unit the player owns through `killUnit` and records the cause as
+`self_destruct`, which is cause 3. So a burst of economy buildings dying on
+the commander's tick with that cause is the original's behaviour, not a
+fault; a checker that flags it (the playtest D1 rule, issue #261) should
+exempt a player's deaths on the tick their commander died. Two details are
+not matched and are recorded rather than changed: RWE kills outright where
+the original applies 30000 damage (a unit with more than 30000 hit points
+would survive the original's wipe; no shipped unit has that many), and the
+non-player branch's direct removal has no counterpart because RWE has no
+players of other types.
+
 **Cause 4 is a unit changing hands**, and the reason it needs a cause of its own
 is that the original implements an owner change as *destroy and replace*:
 `0x488570` copies the three weapon-slot bytes (`+0x1E`, `+0x3A`, `+0x56`) across
