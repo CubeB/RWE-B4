@@ -1012,6 +1012,7 @@ set(TEST_FILES
     src/rwe/io/ota/ota.test.cpp
     src/rwe/io/tad/tad.test.cpp
     src/rwe/io/tad/tad_events.test.cpp
+    src/rwe/io/tad/tad_writer.test.cpp
     src/rwe/io/pcx/pcx.test.cpp
     src/rwe/scene/Screenshot.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp
