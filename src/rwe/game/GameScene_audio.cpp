@@ -623,7 +623,12 @@ namespace rwe
         }
         if (effects.smoke)
         {
-            createLightSmoke(position);
+            // Three puffs seven ticks apart (0x420AE1 asks 0x472630 for
+            // interval 7, lifetime 15), not the single puff this used to be.
+            // The underwater case never gets here: computeWeaponImpactEffects
+            // drops the smoke off a splash, which is the sea level test the
+            // original makes at 0x420AD4.
+            startSmokeEmitter(position, explosionSmokeIntervalTicks, explosionSmokeLifetimeTicks);
         }
         if (effects.flash)
         {

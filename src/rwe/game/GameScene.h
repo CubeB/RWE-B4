@@ -826,6 +826,12 @@ namespace rwe
 
         std::vector<Particle> particles;
 
+        /** The explosion and wreck smoke still being emitted. Presentation only. */
+        std::vector<SmokeEmitter> smokeEmitters;
+
+        /** The tick the emitters were last stepped on, so a frame that does not advance the sim does not puff again. */
+        std::optional<GameTime> smokeEmittersSteppedAt;
+
         /**
          * Where the wake dots' geometry is built, kept between frames for its
          * capacity alone. A wake dot is six vertices and a busy water map has
@@ -1831,6 +1837,12 @@ namespace rwe
 
         /** This tick's steam from every thermal vent on the map. */
         void spawnGeoVentSteam();
+
+        /** Starts a 0x472630-class emitter: a puff now, then one every interval ticks until lifetime runs out. */
+        void startSmokeEmitter(const Vector3f& position, unsigned int intervalTicks, unsigned int lifetimeTicks);
+
+        /** This tick's puffs from the explosion and wreck emitters. */
+        void updateSmokeEmitters();
 
         void spawnWake(const Vector3f& position, const Vector3f& velocity, GameTime duration, unsigned int rampPeriod, GameTime startTime, bool reverseRamp = false);
 

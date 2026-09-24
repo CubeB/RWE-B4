@@ -373,6 +373,20 @@ namespace rwe
         SimVector position;
     };
 
+    /**
+     * A dead unit's wreck has just been placed. Scene-facing, never hashed.
+     *
+     * mayBurn is the original's flag of the same name: set when the ground
+     * under the corpse is above sea level (0x4863E9, greater-than only) and
+     * the unit was not `isfeature` (cause 7 clears it at 0x486D66), and it is
+     * what fires the thirty-second plume at 0x48644B.
+     */
+    struct WreckSpawnedEvent
+    {
+        SimVector position;
+        bool mayBurn;
+    };
+
     /** A unit script exploded one of its pieces (the COB `explode` command). */
     struct PieceExplodedEvent
     {
@@ -389,6 +403,7 @@ namespace rwe
 
     using GameEvent = std::variant<
         FeatureReclaimedEvent,
+        WreckSpawnedEvent,
         PieceExplodedEvent,
         FireWeaponEvent,
         UnitArrivedEvent,

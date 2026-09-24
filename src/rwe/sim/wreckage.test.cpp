@@ -93,6 +93,11 @@ namespace rwe
             sim.trySpawnFeature("HULK", surface, SimAngle(0), false);
             REQUIRE(sim.features.begin() != sim.features.end());
 
+            // And the wet branch zeroes mayBurn (0x486420): no plume at sea.
+            auto wreckEvent = std::get_if<WreckSpawnedEvent>(&sim.events.back());
+            REQUIRE(wreckEvent != nullptr);
+            REQUIRE_FALSE(wreckEvent->mayBurn);
+
             auto featureId = sim.features.begin()->first;
             REQUIRE(sim.features.tryGet(featureId)->get().velocity.y < 0_ss);
 
@@ -117,6 +122,11 @@ namespace rwe
 
             auto ground = sim.terrain.getHeightAt(200_ss, 200_ss);
             sim.trySpawnFeature("HULK", SimVector(200_ss, ground, 200_ss), SimAngle(0), false);
+
+            // Dry ground keeps mayBurn: this is the wreck that smoulders.
+            auto wreckEvent = std::get_if<WreckSpawnedEvent>(&sim.events.back());
+            REQUIRE(wreckEvent != nullptr);
+            REQUIRE(wreckEvent->mayBurn);
 
             auto featureId = sim.features.begin()->first;
             auto before = sim.features.tryGet(featureId)->get().position;
@@ -143,6 +153,11 @@ namespace rwe
 
             auto featureId = sim.features.begin()->first;
             REQUIRE(sim.features.tryGet(featureId)->get().velocity.y == 0_ss);
+
+            // Cause 7 clears mayBurn too (0x486D66): the teeth do not burn.
+            auto wreckEvent = std::get_if<WreckSpawnedEvent>(&sim.events.back());
+            REQUIRE(wreckEvent != nullptr);
+            REQUIRE_FALSE(wreckEvent->mayBurn);
 
             for (int i = 0; i < 120; ++i)
             {

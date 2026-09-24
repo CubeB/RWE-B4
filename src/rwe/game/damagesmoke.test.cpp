@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/cob/CobOpCode.h>
+#include <rwe/game/GameScene_util.h>
 #include <rwe/game/Particle.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
@@ -398,5 +399,38 @@ namespace rwe
         REQUIRE(particle.getFrameIndex(GameTime(107), plain, 12) == 3u);
         REQUIRE(!particle.isFinished(GameTime(123), plain, 12));
         REQUIRE(particle.isFinished(GameTime(124), plain, 12));
+    }
+
+    TEST_CASE("an explosion smokes three times and a wreck smoulders for thirty seconds", "[damagesmoke]")
+    {
+        // 0x472630 emits at Init and then every interval, and refuses an
+        // emission that would fall past the end (0x475440): interval 7 and
+        // lifetime 15 is puffs at 0, 7 and 14; interval 15 and lifetime 900
+        // is one every half second for thirty seconds.
+        std::vector<SmokeEmitter> emitters{
+            SmokeEmitter{Vector3f(1.0f, 0.0f, 0.0f), GameTime(100), GameTime(100 + explosionSmokeLifetimeTicks), GameTime(explosionSmokeIntervalTicks)},
+            SmokeEmitter{Vector3f(2.0f, 0.0f, 0.0f), GameTime(100), GameTime(100 + wreckPlumeLifetimeTicks), GameTime(wreckPlumeIntervalTicks)},
+        };
+
+        std::vector<unsigned int> explosionPuffs;
+        unsigned int wreckPuffs = 0;
+        for (unsigned int t = 100; t < 1100; ++t)
+        {
+            for (const auto& p : stepSmokeEmitters(emitters, GameTime(t)))
+            {
+                if (p.x == 1.0f)
+                {
+                    explosionPuffs.push_back(t - 100);
+                }
+                else
+                {
+                    ++wreckPuffs;
+                }
+            }
+        }
+
+        REQUIRE(explosionPuffs == std::vector<unsigned int>{0, 7, 14});
+        REQUIRE(wreckPuffs == 61);
+        REQUIRE(emitters.empty());
     }
 }

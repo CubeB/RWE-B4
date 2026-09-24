@@ -656,6 +656,8 @@ namespace rwe
 
         spawnGeoVentSteam();
 
+        updateSmokeEmitters();
+
         updateDebris();
 
         updateBuildBoxAppearances();

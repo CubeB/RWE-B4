@@ -606,7 +606,7 @@ Item by item against the original:
 | Above the waterline | free-falls at map gravity | **hangs in the air** |
 | Resting height | the cell's `(min+max)/2` | never rests; never moves |
 | `isfeature` exemption | wreck does not sink | n/a — no sink, and `isfeature` is not parsed at all |
-| Burning wreck | 30 s plume, suppressed in water | no burning wreck at all (§90 already lists this) |
+| Burning wreck | 30 s plume, suppressed in water | **matched** since 2026-09-24 (#113): `WreckSpawnedEvent::mayBurn` carries the wet-branch and cause-7 clears, and the scene runs a fifteen-tick, nine-hundred-tick emitter off it |
 | Corpse level from `Killed` | 1/2/3, walking `featuredead` | **matched** since September 2026: the severity is computed from the overkill and the level the script writes back is read and walked |
 | No `Corpse` key | no wreck | the same — **already correct** |
 | Placement blocked by an indestructible feature | no wreck | `addFeature` refuses on `anyFeatureOccupies` (`GameSimulation.cpp:259`) — close, but it refuses on *any* standing feature rather than only on indestructible ones, and never clears a destructible one |

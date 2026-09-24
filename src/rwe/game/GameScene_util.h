@@ -436,6 +436,38 @@ namespace rwe
     const float geoVentSteamRiseRate = 2.0f;
 
     /**
+     * A smoke emitter of the original's 0x472630 class, which does the
+     * explosion smoke and the burning wreck: one puff of `smoke 1` at Init
+     * and one more every `interval` ticks, refused once the next emission
+     * would fall past `end` (0x475440). The damage smoke and the vents use
+     * the same class with a lifetime of zero, which is why they are one puff
+     * a call and need no record here.
+     */
+    struct SmokeEmitter
+    {
+        Vector3f position;
+        GameTime nextPuff;
+        GameTime end;
+        GameTime interval;
+    };
+
+    /**
+     * Steps the emitters one tick: returns where a puff is due this tick, and
+     * drops the emitters that have nothing left to emit. Deliberately one puff
+     * per emitter per call, so a tick that is stepped twice in one frame or a
+     * replay wound forward neither doubles nor floods.
+     */
+    std::vector<Vector3f> stepSmokeEmitters(std::vector<SmokeEmitter>& emitters, GameTime now);
+
+    /** An impact's smoke: 0x420AE1 asks for interval 7, lifetime 15, so three puffs. */
+    const unsigned int explosionSmokeIntervalTicks = 7;
+    const unsigned int explosionSmokeLifetimeTicks = 15;
+
+    /** A land wreck's plume: 0x48644B asks for interval 15, lifetime 900, thirty seconds. */
+    const unsigned int wreckPlumeIntervalTicks = 15;
+    const unsigned int wreckPlumeLifetimeTicks = 900;
+
+    /**
      * Where on the map steam is coming out of the ground.
      *
      * One point per geothermal feature, at the centre of its footprint on the
