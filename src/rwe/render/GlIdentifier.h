@@ -1,7 +1,7 @@
 #pragma once
 
-#include <GL/glew.h>
 #include <functional>
+#include <glad/gl.h>
 #include <rwe/util/OpaqueId.h>
 
 namespace rwe

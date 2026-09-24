@@ -151,7 +151,6 @@ jobs:
           clang-18
           ccache
           imagemagick
-          libglew-dev
           zlib1g-dev
           libpng-dev
           libasound2-dev
@@ -384,7 +383,6 @@ jobs:
             make
             unzip
             mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-glew
             mingw-w64-x86_64-zlib
             mingw-w64-x86_64-libpng
             mingw-w64-x86_64-ccache

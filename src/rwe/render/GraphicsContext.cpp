@@ -2,7 +2,7 @@
 #include <rwe/render/render_prof.h>
 #include <rwe/util/rwe_string.h>
 
-#include <GL/glew.h>
+#include <glad/gl.h>
 
 namespace rwe
 {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <GL/glew.h>
+#include <glad/gl.h>
 #include <rwe/render/GlIdentifier.h>
 #include <rwe/util/SharedHandle.h>
 

@@ -11,7 +11,7 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        # Libraries that SDL3, SDL3_mixer, and GLEW dlopen at runtime.
+        # Libraries that SDL3 and SDL3_mixer dlopen at runtime.
         # They aren't pulled in by the linker so they must be reachable via
         # LD_LIBRARY_PATH when running ./build/rwe inside the dev shell.
         runtimeLibs = with pkgs; [
@@ -44,7 +44,6 @@
 
             protobuf
 
-            glew
             libpng
             zlib
 
