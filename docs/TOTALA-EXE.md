@@ -15,6 +15,23 @@ how it flies there — lives in a companion document,
 attack run, the gunship pendulum, and what `hoverattack` and
 `maneuverleashlength` really do.
 
+**Two documents here were not read by this project**, and are marked so on
+every page:
+
+- [TOTALA-EXE-EXTERNAL.md](TOTALA-EXE-EXTERNAL.md) — findings from the
+  Nanolathe project's independent clean-room reading of the same binary, taken
+  in as a cross-check. It settled **six** disagreements against this corpus,
+  every one of them in their favour, and closed five questions these documents
+  had left open in writing. Read its first section before relying on anything
+  in it; nothing there has been verified here unless it says so.
+- [TOTALA-EXE-AI.md](TOTALA-EXE-AI.md) — the retail computer player, which
+  this project never decoded. Its headline is that the original has **no
+  transport policy at all** and **never gives an aircraft an attack order**,
+  which reclassifies a good deal of RWE's AI work from conformance to
+  deliberate divergence. Corroborated from an unrelated direction by
+  [TA-COMMUNITY-AI.md](TA-COMMUNITY-AI.md), the profile-modding community's
+  own account of the same faults.
+
 ## The binary
 
 | | |
@@ -231,11 +248,20 @@ quirks of the original that RWE reproduces although they look like defects.
   candidate list (§17a) is appended *outside* the can-see gate, on `unit+0x110`
   bit 8 — "on my radar picture at all" — walked only when the first list is
   empty and only when the player owns a unit with `istargetingupgrade`. RWE has
-  neither the list nor the flag. Two reasons it should stay that way: the units
-  that carry the flag (`ARMTARG`/`CORTARG`) are Core Contingency and are not in
-  the shipped data here, and the radar picture the list is built from is
-  recomputed for **one** player per tick (§17, the visibility pass), so feeding it into a simulation
-  decision would make the outcome depend on who is sitting at the keyboard.
+  neither the list nor the flag. The reason it should stay that way is the radar
+  picture the list is built from: it is recomputed for **one** player per tick
+  (§17, the visibility pass), so feeding it into a simulation decision would
+  make the outcome depend on who is sitting at the keyboard.
+
+  This entry used to give a second reason, and that reason is **wrong**
+  (checked 2026-09-23): it said `ARMTARG`/`CORTARG` are Core Contingency and
+  so are not in the shipped data here. Core Contingency *is* installed on this
+  machine -- `ccdata.ccx` sits in the engine's own data directory beside the
+  base game, `.ccx` is in the VFS extension list, and `hpi_test list` finds
+  `ARMTARG.FBI` and `CORTARG.FBI` in it along with their models, gadgets and
+  sounds. Every arena run and play-test in this repo has had them loaded. The
+  determinism reason stands on its own and is why nothing changes, but "the
+  units are not here" must not be repeated.
   RWE's radar and sonar contacts therefore reach the minimap (`canDetectUnit`)
   and nothing else; every simulation decision goes through `canSeeUnit`.
 
@@ -348,14 +374,22 @@ quirks of the original that RWE reproduces although they look like defects.
   under construction nowhere at all -- no bar, no percentage, no format string
   (§29). RWE borrows the `RELOAD1` rectangle, which `SIDEDATA.TDF` defines and
   the original parses and then never reads.
-- **The selection plate is skipped by its declared index.** The original
-  skips primitive 0 whenever a selection primitive is declared (§51), which
-  on the wreckage models drops a real face; RWE skips the index the header
-  names instead.
-- **Backface culling stays on.** The original has none -- a single-sided quad
-  facing away rasterizes with its texture mirrored (§51). Culling matches on
-  every closed model and only hides faces the artists never meant to show
-  twice.
+- ~~**The selection plate is skipped by its declared index.**~~
+  **Retracted 2026-09-24 -- this was never a divergence.** The entry said the
+  original skips primitive 0 whenever a selection primitive is declared and
+  so "on the wreckage models drops a real face". It does skip index 0, but the
+  3DO relocation pass at `0x4CB370` has already **exchanged the declared plate
+  with primitive 0** and rewritten the index to zero, on every object of every
+  model, before anything is drawn. Skipping index 0 therefore *is* skipping
+  the declared index, which is what RWE does. See §51.
+- ~~**Backface culling stays on.**~~ **Retracted 2026-09-24 -- also never a
+  divergence.** The entry said the original has none. It has no explicit test,
+  but `0x4C7580` assigns its two edge chains by vertex-index direction and
+  emits a row only when `right - left > 0` (`0x4C79DF`), so a quad with the
+  opposite projected winding paints nothing at all. That is a signed-area
+  backface cull written as a loop bound, and RWE's culling agrees with it. The
+  one thing still to match is the `<= 0` sense, which drops edge-on faces too.
+  See §51.
 - **Skewed textured quads are tessellated, not scan-converted.** The original
   interpolates the texture along the quad's own edges per scanline; RWE
   approximates that warp with a 4x4 bilinear patch on non-parallelogram faces

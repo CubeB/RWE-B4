@@ -304,6 +304,55 @@ namespace rwe
         bool hasUnreachableGround{false};
 
         /**
+         * Where the ground reachability layer was actually homed this pass.
+         *
+         * Usually `baseAnchor`, and then this says nothing new. It differs on
+         * exactly the map that made it necessary: the commander wades deeper
+         * and climbs steeper than the constructor the ground layer is
+         * labelled for, so it can walk off its spawn island and build the
+         * whole base where no kbot it produces can ever follow, and
+         * `baseAnchor` -- set from `homePosition` the first tick the
+         * commander is seen, and never revised -- goes on naming the island
+         * the AI abandoned. AiPlayerController re-homes the layer on a
+         * factory's own ground when not one factory is reachable; this is
+         * the position it settled on.
+         *
+         * What it is for is any question of the form "which way is home",
+         * where home means where the army stands rather than where the game
+         * began. A transport's landing search is the first: it walks back
+         * from the attack target towards home looking for a shore, and
+         * setting off in the wrong direction is how the same impossible
+         * point came to be probed 1426 times in one game.
+         *
+         * `baseAnchor` is deliberately still the answer for the rally point,
+         * the defence facing and the mex leash. Those mean "the base we are
+         * defending", which is a different question, and moving them is a
+         * larger change kept separate.
+         */
+        std::optional<SimVector> groundAnchor;
+
+        /**
+         * Whether our army could walk to any start position but our own.
+         *
+         * Asked of the map's declared start positions, which is what a player
+         * reads off the preview before the game begins: ours, and the ones an
+         * opponent might be sitting on. False means no land unit we ever
+         * build can arrive anywhere by walking, which is a different game --
+         * see AiTuningProfile::seaAirFactoriesWhenIsolated, which turns the
+         * factory tier towards the yard and the air plant while it holds.
+         *
+         * Unset until the ground layer is valid, and left unset for good on
+         * a map that declares fewer than two start positions. Every reader
+         * must treat unset as "assume there is a route", which is the
+         * behaviour there was before this existed.
+         *
+         * Answered for the constructor's movement class, like everything
+         * else the ground layer answers. That is the convention throughout
+         * and not a claim that every combat unit shares its class.
+         */
+        std::optional<bool> landRouteToEnemy;
+
+        /**
          * Whether aircraft are worth spending a tier on, judged this pass
          * rather than decided once.
          *
@@ -532,6 +581,27 @@ namespace rwe
          */
         bool hasExpansionSite{false};
         bool enemyAcrossWater{false};
+        /**
+         * The same question as enemyAcrossWater, asked of the MAP instead of
+         * of what can be seen. enemyAcrossWater needs bb.attackTarget, which
+         * ArmyManager resets and rebuilds every tactical pass and leaves
+         * unset outside the Attack phase and whenever nothing is currently
+         * remembered -- so it is the right question for deciding where to
+         * send a ferry that exists, and the wrong one for deciding whether to
+         * spend 919 metal building one. Measured, one 900s game on Coast To
+         * Coast: enemyAcrossWater tracked known_enemies exactly and was false
+         * for two thirds of it, while a single sea transport took 223 seconds
+         * to build. A want that flaps faster than the thing it wants can be
+         * made never gets it made.
+         *
+         * Read from the last answer enemyAcrossWater had a target to give,
+         * and before there has ever been one from landRouteToEnemy. UNLIKE
+         * enemyAcrossWater this may be true with no attack target at all, so
+         * nothing that dereferences bb.attackTarget may branch on it. See
+         * TransportManager::lastArmyFerryAnswer and
+         * AiTuningProfile::armyFerryWantFromMap.
+         */
+        bool armyNeedsFerry{false};
         std::optional<SimVector> rallyPoint;
         std::optional<SimVector> attackTarget;
         int armySize{0};

@@ -908,6 +908,54 @@ namespace rwe
          */
         bool earlyShipyard{true};
         /**
+         * On a map where the army cannot walk to anybody, put the factory
+         * tier into the yard and the air plant instead of the kbot lab and
+         * the vehicle plant.
+         *
+         * The AI opened with a lab on every map, because that is what the
+         * plan does on land and nothing asked whether the units it makes
+         * could ever arrive. On a map of islands they cannot: they are born
+         * on our own shore and stay there, and the one factory that can
+         * reach anybody -- the yard -- was made to wait for the lab before
+         * it could even be wanted (earlyShipyard tests `total(lab) >= 1`).
+         * With this on, the lab is not wanted while the map says the army
+         * has nowhere to walk, and the yard no longer waits for it.
+         *
+         * **It is a deferral and not a ban**, which is the whole of the
+         * request it came from. Three things lift it, each of them the
+         * moment land units stop being pointless: owning a transport, so
+         * they can be carried over; something armed of theirs standing at
+         * our own base, so they are needed at home; and having no sea
+         * factory to build instead, so that a mod with no shipyard, or a map
+         * whose water does not carry a fleet, never leaves the AI with no
+         * factory at all.
+         *
+         * Three settings, because the two halves of the idea measured very
+         * differently and one of them is a regression:
+         *
+         * - 0 restores the old ordering exactly.
+         * - 1 puts the yard first and defers the VEHICLE plant, leaving the
+         *   kbot lab where it was. The lab is the AI's land builder and its
+         *   base defence as well as its army, and taking it away costs both.
+         * - 2 defers the kbot lab as well, which is the literal reading of
+         *   "other factory types than vehicle and bot".
+         *
+         * **Measured 2026-09-23 and both settings are a regression**, so
+         * the default is 0 and the machinery is kept. Paired asymmetric
+         * arena run -- the knob on p0 for thirty seeds, then on p1 for
+         * thirty -- because a symmetric run measures how evenly matched
+         * the two are and not whether either is stronger. The full
+         * numbers are in docs/ROADMAP.md.
+         *
+         * A play-test the same day says the opposite in play, and issue
+         * #197 is that disagreement: every other fault that play-test
+         * found is a reason a sea-first opening cannot pay off yet --
+         * one transport, no muster, a landing point in front of the
+         * defences, hulls parked on their own yard. Re-measure once
+         * those are closed, then set this or record the second result.
+         */
+        int seaAirFactoriesWhenIsolated{0};
+        /**
          * Land combat units the AI will go on making while there is
          * ground it cannot walk to. Above this every factory that makes
          * them goes quiet -- the kbot lab its raiders and rocket kbots,
@@ -1230,9 +1278,21 @@ namespace rwe
          * turns out warships and they sit beside it for the rest of the
          * game while the enemy does as it likes.
          *
-         * Three is a first guess and has not been through the arena. It is
-         * the smallest number that is a fleet rather than a scout, and small
-         * enough to matter on a map whose economy supports few hulls.
+         * Three was a first guess. It has been through the arena now
+         * (2026-09-23) and it stands: Brain Coral, ARM against ARM, 2400s,
+         * both players tuned to the same value, thirty seeds at 3 and at 5
+         * and ten at 8, judged on games decided and commanders killed. 3
+         * decided 18 of 30, 5 decided 13 of 30, 8 decided 3 of 10. Raising it
+         * does what it was meant to at the mechanism level and still loses --
+         * at 5 the fleet sails 97 times against 142 and is recalled 61
+         * against 105, so the sorties that happen stick better -- but fewer
+         * games end, and at 8 both sides merely finish bigger, which is what
+         * a game that never resolves looks like.
+         *
+         * Do not re-measure this on ten games. On the first ten seeds it read
+         * the other way round, 4 of 10 against 6 of 10, and the two arms
+         * swung about thirty points between seeds 1-10 and 11-30. Thirty is
+         * the minimum on this map.
          */
         int navalAttackFleetSize{3};
 
@@ -2177,8 +2237,88 @@ namespace rwe
         SimScalar defendRadius{900_ss};
         /** How far from a known enemy an army unit will pick a fight. */
         SimScalar engageRadius{450_ss};
+        /**
+         * How far back from the attack target a ferry will look for somewhere
+         * to put the cargo down, in 48-unit steps. The search has always
+         * begun at step 4; this is where it stops.
+         *
+         * It was 12, which is 576 world units, and that is inside the reach
+         * of most of what stands at the objective -- so the furthest point it
+         * could ever choose was still close enough to be shot at on arrival,
+         * and it usually chose the nearest one instead. Measured on Coast To
+         * Coast, ten seeds at 1200s, it also simply FAILED: between 0 and
+         * 1365 ticks a game of "army ferry blocked, no landing near the
+         * attack target", because a band 384 units wide is not a search.
+         */
+        int ferryLandingSearchSteps{24};
+        /**
+         * Whether the landing search tries a fan of bearings about the way
+         * home, or only the single ray straight back along it. False is the
+         * ray, which is what this did before.
+         *
+         * The ray assumes the cargo's shore lies on the line between the
+         * objective and the ferry's origin. Measured on Coast To Coast it
+         * usually does not: a refusal logged at 514 s reported steps 21, wet
+         * 21, refused 0 -- every one of the twenty-one points that stayed on
+         * the map was open sea, the objective being on a headland. The fan
+         * took the "no landing near the attack target" count across ten
+         * seeds from a mean of 834 ticks a game to 189.
+         */
+        bool ferryLandingFan{true};
+        /**
+         * Whether a landing point is chosen for survivability rather than for
+         * proximity. False takes the first dry, walkable, water-adjacent
+         * point the walk-back finds, which is what this did before and is the
+         * beach in front of the guns.
+         *
+         * With it on, every candidate is scored and the quietest wins, ties
+         * going to the one nearest the target so the army still has a march
+         * it can make. Reported from play: "transport ship dumped the units
+         * at the most populated part of the enemies landmass instead of a bit
+         * away from the base, so they all instantly died and the ship was
+         * destroyed wasting resources."
+         */
+        bool ferryLandingAvoidsThreat{true};
+        /**
+         * How far around a candidate landing point enemy damage is totalled.
+         * ThreatMap::antiGroundInRadius is the question, and its cells are
+         * the sim's vision cells at 32 world units.
+         */
+        float ferryLandingThreatRadius{300.0f};
+        /**
+         * Whether the want for an army ferry outlives the sighting that
+         * raised it. False restores the old behaviour, in which the decision
+         * to build a 919-metal transport switched off within one pass of
+         * losing sight of everybody -- measured on one 900s Coast To Coast
+         * game as off for about two thirds of it, against a 223-second build
+         * time for the hull.
+         *
+         * It changes what is BUILT and not where anything is sent: the
+         * dispatch gate still wants bb.attackTarget, because a ferry has to
+         * have somewhere to go. See TransportManager::lastArmyFerryAnswer.
+         */
+        bool armyFerryWantFromMap{true};
         /** Rally point sits this far from the base anchor, towards the enemy. */
         SimScalar rallyDistance{220_ss};
+        /**
+         * How far off its own shipyard a hull with nothing to do waits. 0
+         * puts it back at the yard, which is where every idle hull used to
+         * stand and is the bug this exists for: a new hull's BuggerOffOrder
+         * clears the pad by one footprint, and updateNavy then measured
+         * "home" against the shipyard itself, so a hull at the doors read as
+         * already in place and stayed there. Two waiting on a third block
+         * the yard that is building it, and a blocked spawn point costs ten
+         * failed tries and the queue entry.
+         *
+         * 320 rather than something tighter because the clearance a hull
+         * needs is not its own size: a factory hands the unit it built a
+         * bugger-off rect expanded by (footprint * 3) - 4 CELLS at 16 world
+         * units each, so a destroyer can legitimately come to rest 150 units
+         * out and still be on the next one's spawn point. And it has to stay
+         * inside the gather radius, which is twice rallyDistance (440), or a
+         * hull standing by would stop counting towards the fleet that sails.
+         */
+        SimScalar navalRallyDistance{320_ss};
         /** Weighting of enemy anti-ground threat against economic value when choosing targets. */
         SimScalar threatAversion{1_ss};
 

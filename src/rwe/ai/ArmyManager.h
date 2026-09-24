@@ -115,6 +115,29 @@ namespace rwe
         };
         mutable std::optional<NavalWaypointMemo> navalWaypointMemo;
 
+        /**
+         * Where an idle hull waits, and the yard it was worked out for. See
+         * updateNavy and AiTuningProfile::navalRallyDistance.
+         */
+        struct NavalRallyMemo
+        {
+            SimVector home;
+            std::optional<SimVector> station;
+        };
+        mutable std::optional<NavalRallyMemo> navalRallyMemo;
+
+        /**
+         * Open water navalRallyDistance off the yard, for hulls with nothing
+         * to do. std::nullopt when the yard sits in a notch with no clear
+         * water round it at that distance, in which case the caller falls
+         * back to the yard itself and behaves as it did before this existed.
+         */
+        std::optional<SimVector> navalRallyPoint(
+            const GameSimulation& sim,
+            const AiTuningProfile& profile,
+            const AiBlackboard& bb,
+            const SimVector& navalHome) const;
+
         void updateCommanderSafety(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, AiBlackboard& bb, std::vector<PlayerCommand>& outCommands) const;
         /**
          * Whether the commander, about to fight, stays on the frame it is

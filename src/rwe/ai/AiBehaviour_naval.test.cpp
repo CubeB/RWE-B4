@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/ai/ai_test_util.h>
 
@@ -493,6 +494,205 @@ namespace rwe
             auto builds = ordersFor<BuildOrder>(commands, commanderId);
             REQUIRE(!builds.empty());
             REQUIRE(builds.front().unitType != "ARMSY");
+        }
+    }
+
+    TEST_CASE("naval: with nobody to walk to, the yard is the opening factory and not the lab", "[ai]")
+    {
+        // The AI opened with a kbot lab on every map, because that is what the
+        // plan does on land, and nothing asked whether what it produces could
+        // ever arrive. On a map of islands it cannot: every unit is born on our
+        // own shore and stays there. Worse, the one factory that CAN reach
+        // anybody was made to wait for it -- earlyShipyard tests
+        // `total(lab) >= 1` -- so the yard queued behind a factory building
+        // units for a war they could not attend.
+        //
+        // Two shores with water between them and a declared start position on
+        // each: the smallest map on which "our army cannot walk to anybody" is
+        // true and readable the way a player reads it off the preview.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeTwoShoresTerrain();
+
+        // 64 tiles of 16 world units, centred: the west shore is heightmap x in
+        // [0, 10), world -512 to -352, and the east shore x in [54, 64), world
+        // 352 to 512.
+        auto westStart = SimVector(-420_ss, 90_ss, 0_ss);
+        auto eastStart = SimVector(420_ss, 90_ss, 0_ss);
+
+        GameSimulation sim(makeTwoShoresTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        // Nothing that walks may cross 60-deep water. makeDef leaves
+        // maxWaterDepth at 255, which wades the whole ocean and makes the far
+        // shore perfectly reachable -- the test would then pin nothing, which
+        // is exactly how it failed the first time it was run. The constructor
+        // is the one that decides it, the ground layer being labelled for it,
+        // but all three are constrained so the fixture says what it means.
+        for (auto* type : {"ARMCOM", "ARMCK", "ARMPW"})
+        {
+            sim.unitDefinitions.at(type).movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 20u};
+        }
+
+        auto commanderId = addUnit(sim, "ARMCOM", ai, westStart, script);
+        // The opening economy, pre-built for the same reason the ordering test
+        // above pre-builds it: with the opening unmet the first want is an
+        // extractor and the ordering under test is never reached. Deliberately
+        // NO lab -- whether one is wanted at all is the question.
+        for (int i = 0; i < 3; ++i)
+        {
+            addUnit(sim, "ARMMEX", ai, SimVector(SimScalar(-470.0f + static_cast<float>(i) * 24.0f), 90_ss, 48_ss), script);
+        }
+        for (int i = 0; i < 4; ++i)
+        {
+            addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(-470.0f + static_cast<float>(i) * 24.0f), 90_ss, -48_ss), script);
+        }
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.targetMetalExtractorCount = 3;
+        REQUIRE(profile.navalFleetSize > 0);
+
+        SECTION("a start position on the far shore is not walkable, and the yard goes down first")
+        {
+            // At 2 the lab is deferred as well, which is the literal reading
+            // of the request this came from. It is not the default -- see the
+            // knob's comment and the roadmap -- so the test says so.
+            profile.seaAirFactoriesWhenIsolated = 2;
+
+            auto mapIntel = analyseMap(makeTwoShoresTerrain(), {westStart, eastStart});
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.landRouteToEnemy.has_value());
+            REQUIRE_FALSE(*bb.landRouteToEnemy);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType == "ARMSY");
+        }
+
+        SECTION("at 1 the yard goes first, and the lab still gets built")
+        {
+            // The milder of the two settings. The yard no longer queues
+            // behind a factory whose units cannot attend the war, but the lab
+            // is still wanted, because it is the AI's land builder and its
+            // base defence and not only its army.
+            profile.seaAirFactoriesWhenIsolated = 1;
+
+            auto mapIntel = analyseMap(makeTwoShoresTerrain(), {westStart, eastStart});
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType == "ARMSY");
+        }
+
+        SECTION("and once the yard stands, the lab is what comes next")
+        {
+            // The deferral is an ordering and not a ban, and this is the
+            // assertion that says so. Asked with the yard already built
+            // rather than by running on and hoping: the commander is busy
+            // with a 615-metal yard for far longer than a test wants to sit
+            // through, and "it did not appear in 400 ticks" would pin the
+            // build time and not the plan.
+            //
+            // The water between the shores is 60 deep everywhere, which
+            // clears ARMSY's MinWaterDepth=30 with room to spare.
+            profile.seaAirFactoriesWhenIsolated = 1;
+            // One yard is the target here, so the naval want is satisfied and
+            // what comes next is the question being asked.
+            profile.targetShipyardCount = 1;
+            addUnit(sim, "ARMSY", ai, SimVector(-300_ss, 0_ss, 0_ss), script);
+
+            auto mapIntel = analyseMap(makeTwoShoresTerrain(), {westStart, eastStart});
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType == "ARMLAB");
+        }
+
+        SECTION("the default is off, and the ordering is exactly what it was")
+        {
+            // Measured 2026-09-23 as a regression at both settings, so the
+            // machinery ships switched off and the lab opens on every map the
+            // way it always did. This is the assertion that says the knob
+            // costs nothing when nobody sets it; see its own comment for the
+            // numbers and for issue #197, which is the disagreement between
+            // that measurement and a play-test.
+            REQUIRE(profile.seaAirFactoriesWhenIsolated == 0);
+
+            auto mapIntel = analyseMap(makeTwoShoresTerrain(), {westStart, eastStart});
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            // The map is still read -- the blackboard says so -- and the plan
+            // still ignores it, which is the whole of what 0 means.
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.landRouteToEnemy.has_value());
+            REQUIRE_FALSE(*bb.landRouteToEnemy);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType == "ARMLAB");
+        }
+
+        SECTION("at 2 the lab is not wanted even once the yard stands")
+        {
+            profile.seaAirFactoriesWhenIsolated = 2;
+            profile.targetShipyardCount = 1;
+            addUnit(sim, "ARMSY", ai, SimVector(-300_ss, 0_ss, 0_ss), script);
+
+            auto mapIntel = analyseMap(makeTwoShoresTerrain(), {westStart, eastStart});
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType != "ARMLAB");
+        }
+
+        SECTION("with the other start on our own shore it is business as usual")
+        {
+            // The control, and it has to be the map telling the difference
+            // rather than the knob: same terrain, same profile, both starts
+            // walkable from each other.
+            auto mapIntel = analyseMap(makeTwoShoresTerrain(), {westStart, SimVector(-380_ss, 90_ss, 96_ss)});
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.landRouteToEnemy.has_value());
+            REQUIRE(*bb.landRouteToEnemy);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType == "ARMLAB");
+        }
+
+        SECTION("seaAirFactoriesWhenIsolated=0 restores the old ordering exactly")
+        {
+            profile.seaAirFactoriesWhenIsolated = 0;
+
+            auto mapIntel = analyseMap(makeTwoShoresTerrain(), {westStart, eastStart});
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            auto builds = ordersFor<BuildOrder>(commands, commanderId);
+            REQUIRE(!builds.empty());
+            REQUIRE(builds.front().unitType == "ARMLAB");
         }
     }
 
@@ -1309,6 +1509,140 @@ namespace rwe
         REQUIRE(controller.getTransportManager().getFerries().count(transportId.value) == 1);
     }
 
+    namespace
+    {
+        /**
+         * A far shore wide enough for the landing search to have a CHOICE.
+         *
+         * makeChannelTerrain and makeTwoShoresTerrain both leave a far bank
+         * only a step or two across, so the walk-back finds one acceptable
+         * point and picking the quietest is the same as picking the first --
+         * which pins nothing. Here the west shore is heightmap x in [0, 10)
+         * and the east shore is x >= 38, so at 16 world units a tile the east
+         * bank runs from world 96 to 512: four candidates at the 48-unit step
+         * the search uses.
+         */
+        MapTerrain makeWideFarShoreTerrain()
+        {
+            Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(0));
+            for (int y = 0; y < 64; ++y)
+            {
+                for (int x = 0; x < 10; ++x)
+                {
+                    heights.set(x, y, static_cast<unsigned char>(90));
+                }
+                for (int x = 38; x < 64; ++x)
+                {
+                    heights.set(x, y, static_cast<unsigned char>(90));
+                }
+            }
+            return MapTerrain(std::move(heights), 60_ss);
+        }
+    }
+
+    TEST_CASE("an air ferry puts the army down where less can shoot at it", "[ai]")
+    {
+        // Reported from play: "transport ship dumped the units at the most
+        // populated part of the enemies landmass instead of a bit away from
+        // the base, so they all instantly died and the ship was destroyed
+        // wasting resources."
+        //
+        // The search returned the FIRST dry, walkable point on the way back
+        // from the target, which on a defended shore is the beach in front of
+        // the defences, and it never asked what was standing there.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWideFarShoreTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        for (auto* type : {"ARMCOM", "ARMCK", "ARMPW"})
+        {
+            sim.unitDefinitions.at(type).movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 20u};
+        }
+
+        // Base on the west shore, the objective at the far east edge.
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-440_ss, 90_ss, 40_ss), script);
+        auto atlasId = addUnit(sim, "ARMATLAS", ai, SimVector(-400_ss, 150_ss, 0_ss), script);
+        for (auto z : {0_ss, 24_ss, 48_ss, 72_ss})
+        {
+            addUnit(sim, "ARMPW", ai, SimVector(-420_ss, 90_ss, z), script);
+        }
+
+        // The objective, and a picket standing exactly where the walk-back's
+        // first step lands: target 450 less 4 * 48 is 258.
+        addUnit(sim, "ARMPW", human, SimVector(450_ss, 90_ss, 0_ss), script);
+        for (auto z : {-40_ss, 0_ss, 40_ss})
+        {
+            addUnit(sim, "ARMPW", human, SimVector(258_ss, 90_ss, z), script);
+        }
+
+        auto profile = makeDefaultStandardProfile();
+        profile.cheatModeOmniscient = true;
+        profile.tacticalTickInterval = 1;
+        profile.attackArmySize = 2;
+        profile.attackInWaves = false;
+        // See the test above for both of these.
+        profile.retreatArmySize = 0;
+        profile.defendRadius = 200_ss;
+        // ThreatMap::antiGroundInRadius is a flat box sum over cells, so at
+        // the shipped 300 a picket 144 units away counts exactly as much as
+        // one underfoot and every candidate scores the same. 60 is two cells
+        // either side, which separates the four candidates this map offers.
+        profile.ferryLandingThreatRadius = 60.0f;
+
+        SECTION("the drop moves off the picket")
+        {
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 40, commands);
+
+            REQUIRE(controller.getBlackboard().phase == GamePhase::Attack);
+            auto unloads = ordersFor<UnloadOrder>(commands, atlasId);
+            REQUIRE(!unloads.empty());
+            // Past the picket at 258 and its 64-unit skirt, and still on the
+            // far shore rather than back across the water at 96.
+            auto drop = unloads.front().destination;
+            // On the far shore rather than back across the water at 96, and
+            // out of reach of everything armed: the three pickets at 258 and
+            // the objective at 450.
+            //
+            // It is not pinned to a band of x, and the reason is worth
+            // writing down. The threat field already accounts for weapon
+            // reach, so a picket line has a wide skirt; on this map the
+            // pickets sit across the whole approach, and there is no quiet
+            // point SHORT of them at all. The search therefore goes round,
+            // which is the right answer and is what the fan exists to make
+            // possible. What is pinned is that it ends up somewhere nothing
+            // can shoot it, on the shore it was sent to, and inside the
+            // search radius rather than off in a corner of the map.
+            REQUIRE(drop.x > 96_ss);
+            for (auto z : {-40_ss, 0_ss, 40_ss})
+            {
+                REQUIRE(drop.distanceSquared(SimVector(258_ss, drop.y, z)) > (200_ss * 200_ss));
+            }
+            REQUIRE(drop.distanceSquared(SimVector(450_ss, drop.y, 0_ss)) > (200_ss * 200_ss));
+            auto reach = SimScalar(static_cast<float>(profile.ferryLandingSearchSteps) * 48.0f);
+            REQUIRE(drop.distanceSquared(SimVector(450_ss, drop.y, 0_ss)) <= (reach * reach));
+        }
+
+        SECTION("ferryLandingAvoidsThreat=false takes the first point as it always did")
+        {
+            profile.ferryLandingAvoidsThreat = false;
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 40, commands);
+
+            auto unloads = ordersFor<UnloadOrder>(commands, atlasId);
+            REQUIRE(!unloads.empty());
+            REQUIRE(unloads.front().destination.x > 230_ss);
+        }
+    }
+
     TEST_CASE("an air ferry sets the army down short of the target", "[ai]")
     {
         // The other half of the same fault, on the other side of the
@@ -1377,6 +1711,258 @@ namespace rwe
         // target at -300: the first step of the walk-back lands near -108.
         REQUIRE(unloads.front().destination.x > -200_ss);
         REQUIRE(unloads.front().destination.x < -64_ss);
+    }
+
+    TEST_CASE("naval: the want for an army ferry does not flap with what can be seen", "[ai]")
+    {
+        // bb.wantsTransport is what the shipyard and the air plant read before
+        // building a transport, and it was derived from bb.attackTarget --
+        // which ArmyManager resets and rebuilds every tactical pass, and
+        // leaves unset outside the Attack phase and whenever nothing is
+        // currently remembered. Measured on one 900s Coast To Coast game the
+        // want tracked known_enemies exactly and was off for about two thirds
+        // of it, against a 223-second build time for the hull it was asking
+        // for. A want that flaps faster than the thing it wants can be built
+        // never gets it built.
+        //
+        // The same two shores as the factory-ordering case above, and for the
+        // same reason: the smallest map on which "our army cannot walk to
+        // anybody" is true. There is no enemy unit anywhere in this fixture,
+        // which is the whole point -- nothing is in sight, and the map still
+        // says the army will need carrying.
+        auto script = makeEmptyCobScript();
+        auto westStart = SimVector(-420_ss, 90_ss, 0_ss);
+        auto eastStart = SimVector(420_ss, 90_ss, 0_ss);
+
+        GameSimulation sim(makeTwoShoresTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        // As above: makeDef leaves maxWaterDepth at 255, which wades the
+        // whole ocean and would make the far shore reachable.
+        for (auto* type : {"ARMCOM", "ARMCK", "ARMPW"})
+        {
+            sim.unitDefinitions.at(type).movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 20u};
+        }
+
+        addUnit(sim, "ARMCOM", ai, westStart, script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+
+        auto mapIntel = analyseMap(makeTwoShoresTerrain(), {westStart, eastStart});
+
+        SECTION("with nothing in sight, the map still says the army needs carrying")
+        {
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            const auto& bb = controller.getBlackboard();
+            // The premise: nothing is known and there is therefore no target.
+            REQUIRE(bb.knownEnemies.empty());
+            REQUIRE_FALSE(bb.attackTarget.has_value());
+            // So the old question answers no, exactly as it did before.
+            REQUIRE_FALSE(bb.enemyAcrossWater);
+            // And the new one answers yes, off the map.
+            REQUIRE(bb.landRouteToEnemy.has_value());
+            REQUIRE_FALSE(*bb.landRouteToEnemy);
+            REQUIRE(bb.armyNeedsFerry);
+            REQUIRE(bb.wantsTransport);
+        }
+
+        SECTION("once it has been established, losing sight of everybody does not unsay it")
+        {
+            // The case the map fallback above cannot cover, and the one that
+            // actually matters in a game: landRouteToEnemy is "can the army
+            // walk to ANY other declared start position", so on a map that
+            // deals several seats it is true even when the enemy we drew is
+            // across water. Measured on Coast To Coast it is true from tick 1,
+            // and a fallback resting on it did precisely nothing there -- ten
+            // seeds came out byte-identical to the control. What makes this
+            // work is the latch.
+            //
+            // Three declared starts, two of them on our own shore: the west
+            // pair is walkable between, so landRouteToEnemy is true, and the
+            // enemy is on the east one.
+            auto westSecond = SimVector(-420_ss, 90_ss, 300_ss);
+            auto threeStarts = analyseMap(makeTwoShoresTerrain(), {westStart, westSecond, eastStart});
+
+            auto human = sim.players.empty() ? PlayerId(0) : PlayerId(0);
+            auto enemyId = addUnit(sim, "ARMPW", human, eastStart, script);
+            // The opening is over once a factory stands, and the phase has to
+            // get past Opening before it can reach Attack at all.
+            addUnit(sim, "ARMLAB", ai, SimVector(-470_ss, 90_ss, -120_ss), script);
+            // Enough of an army to reach the Attack phase, which is what puts
+            // an attack target on the blackboard at all.
+            for (int i = 0; i < 4; ++i)
+            {
+                addUnit(sim, "ARMPW", ai, SimVector(SimScalar(-460.0f + static_cast<float>(i) * 20.0f), 90_ss, 100_ss), script);
+            }
+
+            auto p = profile;
+            p.cheatModeOmniscient = true;
+            p.tacticalTickInterval = 1;
+            p.attackArmySize = 3;
+            // The far shore is 840 units off and defendRadius is 900, so
+            // without this the enemy across the water reads as an enemy at
+            // the door and the phase comes out Defend rather than Attack.
+            p.defendRadius = 200_ss;
+
+            AiPlayerController controller(ai, p, 42u, threeStarts, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 40, commands);
+
+            const auto& bb = controller.getBlackboard();
+            // The premise: the map says a land route exists, and it is only
+            // the enemy we actually drew that is across water.
+            REQUIRE(bb.landRouteToEnemy.has_value());
+            REQUIRE(*bb.landRouteToEnemy);
+            REQUIRE(bb.phase == GamePhase::Attack);
+            REQUIRE(bb.enemyAcrossWater);
+            REQUIRE(bb.armyNeedsFerry);
+
+            // Now take the enemy away, which is what a unit walking out of
+            // sight amounts to as far as the blackboard is concerned.
+            sim.getUnitState(enemyId).markAsDeadNoCorpse();
+            std::vector<PlayerCommand> after;
+            runTicks(sim, controller, 40, after);
+
+            const auto& bb2 = controller.getBlackboard();
+            REQUIRE(bb2.knownEnemies.empty());
+            REQUIRE_FALSE(bb2.attackTarget.has_value());
+            // The live question goes quiet, as it always did...
+            REQUIRE_FALSE(bb2.enemyAcrossWater);
+            // ...and the answer the yard reads does not.
+            REQUIRE(bb2.armyNeedsFerry);
+            REQUIRE(bb2.wantsTransport);
+        }
+
+        SECTION("armyFerryWantFromMap=false restores the old behaviour exactly")
+        {
+            profile.armyFerryWantFromMap = false;
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE_FALSE(bb.armyNeedsFerry);
+            // hasExpansionSite is the other half of wantsTransport and is
+            // asked separately, so this says the ARMY half is off rather than
+            // that the whole want is.
+            REQUIRE(bb.armyNeedsFerry == bb.enemyAcrossWater);
+        }
+
+        SECTION("on a map the army can walk across, nothing changes")
+        {
+            // One shore, both starts on it: landRouteToEnemy is true and the
+            // fallback must not fire. Without this the knob would want a
+            // transport on every map there is.
+            GameSimulation land(makeFlatTerrain(64, 64), 0u, 0, 0);
+            addPlayer(land, "human", GamePlayerType::Human, "ARM");
+            auto landAi = addPlayer(land, "ai", GamePlayerType::Computer, "ARM");
+            defineWorld(land);
+            auto a = SimVector(-420_ss, 0_ss, 0_ss);
+            auto b = SimVector(420_ss, 0_ss, 0_ss);
+            addUnit(land, "ARMCOM", landAi, a, script);
+
+            auto landIntel = analyseMap(makeFlatTerrain(64, 64), {a, b});
+            AiPlayerController controller(landAi, profile, 42u, landIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(land, controller, 31, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.landRouteToEnemy.has_value());
+            REQUIRE(*bb.landRouteToEnemy);
+            REQUIRE_FALSE(bb.armyNeedsFerry);
+        }
+    }
+
+    TEST_CASE("naval: an idle hull stands off its own yard rather than on it", "[ai]")
+    {
+        // Reported from play, twice over: "boats were blocking the factory
+        // after being made", and "core shipyard stopped building as it got
+        // blocked by a scout ship".
+        //
+        // A finished hull is handed a BuggerOffOrder, which clears the pad by
+        // one footprint and no further. updateNavy then measured both of its
+        // "come back" tests against navalHome -- which IS the shipyard -- so a
+        // hull at the doors was already home and was never told anything
+        // again. It stood there until the fleet sailed, and a friendly hull on
+        // a spawn point costs the yard ten failed tries and its queue entry
+        // (GameSimulation::retryBlockedSite).
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 0_ss, 0_ss), script);
+        auto yard = SimVector(-90_ss, 0_ss, 0_ss);
+        addUnit(sim, "ARMSY", ai, yard, script);
+        // One hull, just off the doors, with nothing to do. One and not three
+        // so that the fleet never gathers and the sortie never fires: what is
+        // under test is the hull that is NOT going anywhere.
+        auto hull = addUnit(sim, "ARMROY", ai, SimVector(-90_ss, 0_ss, 40_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.cheatModeOmniscient = true;
+        profile.tacticalTickInterval = 1;
+        // The scout borrows a hull, and a borrowed hull is not updateNavy's
+        // to command -- it skips it by name.
+        profile.navalScouting = false;
+
+        SECTION("it is sent out to the station, clear of the pad")
+        {
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            auto moves = ordersFor<MoveOrder>(commands, hull);
+            REQUIRE(!moves.empty());
+            // Far enough out that the next hull off the slipway has room.
+            // Measured from the yard, which is what the clearance is about.
+            auto out = moves.back().destination;
+            REQUIRE(out.distanceSquared(yard) >= (profile.navalRallyDistance * profile.navalRallyDistance) * 0.9_ssf);
+            // And still inside the radius the gather count uses, or a hull
+            // standing by would stop counting towards the fleet that sails.
+            auto gatherRadius = profile.rallyDistance * 2_ss;
+            REQUIRE(out.distanceSquared(yard) <= gatherRadius * gatherRadius);
+        }
+
+        SECTION("and it is not sent out again once it is there")
+        {
+            // The station is navalRallyDistance out and the "on the yard"
+            // test is half of that, so a hull standing by reads as neither
+            // on the pad nor drifted. Without that gap it would be ordered
+            // to the same point on every tactical pass for the whole game.
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> first;
+            runTicks(sim, controller, 20, first);
+            auto moves = ordersFor<MoveOrder>(first, hull);
+            REQUIRE(!moves.empty());
+
+            // Put it where it was told to go, with nothing left to do.
+            sim.getUnitState(hull).position = moves.back().destination;
+            sim.getUnitState(hull).orders.clear();
+
+            std::vector<PlayerCommand> second;
+            runTicks(sim, controller, 20, second);
+            REQUIRE(ordersFor<MoveOrder>(second, hull).empty());
+        }
+
+        SECTION("navalRallyDistance=0 restores the old behaviour exactly")
+        {
+            profile.navalRallyDistance = 0_ss;
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(ordersFor<MoveOrder>(commands, hull).empty());
+        }
     }
 
     TEST_CASE("a fleet can call the attack, but only when asked to", "[ai]")

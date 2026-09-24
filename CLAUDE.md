@@ -172,6 +172,23 @@ The fix was to split the file, and the rule it leaves behind is a size one: no t
 
 Two things that pass measurement teaches, both worth knowing before making any of these bigger. **The section count is a budget, not a free win**: the standard library's floor is paid once per translation unit, so a split adds to the total even as it takes the peak down. Taking the debug harness out of `GameScene.cpp` cost 2216 sections across the pair to take 2623 off the larger; taking the menu out of `_commands` cost 8365 to take 4740 off. And **that floor is not a constant** — `_debug` came out at 4839 against the 9500 quoted above, because its include list is what it uses rather than what it would inherit, while `_menu` at 13105 pays for `MainMenuScene.h`, `LoadingScene.h` and `SaveFile.h`, which it genuinely needs. Keeping a new file's includes tight is most of what decides where it lands.
 
+**A forward declaration that says `class` where the definition says `struct`
+breaks MSVC and nothing else.** MSVC mangles the class-key into the symbol
+name and keeps whichever tag the translation unit saw first, so a header that
+forward-declares `class GameSimulation;` makes every object compiled through it
+mangle `class` while `GameSimulation.obj` mangles `struct`, and the two never
+meet. gcc, clang and MinGW ignore the tag when mangling, so the only sign is a
+Windows-MSVC link failure while every other job is green.
+
+`DemoRecorder.h` did this and took `revival` red on 2026-09-24: four unresolved
+externals on `DemoRecorder`'s own methods, in a file that had plainly compiled.
+Clang had said so in the same run and the warning scrolled past --
+`-Wmismatched-tags`, "may result in linker errors under the Microsoft C++
+ABI". **That warning is the check**, and it is worth reading Linux clang's
+output for it whenever MSVC alone fails to link. The engine's aggregates are
+`struct` far more often than `class`, so `struct` is the safer guess when
+adding a forward declaration, and matching the definition is the rule.
+
 ## Code Conventions
 
 - All C++ code is in the `rwe::` namespace
@@ -270,6 +287,22 @@ of `TotalA.exe` instead of guessed at.
   changes the simulation in exactly one place (the pathfinding budget, raised
   fifty-fold), which RWE is already past. What is left is a handful of v3.1
   interface features, listed there and in the roadmap.
+- `docs/TOTALA-EXE-EXTERNAL.md` and `docs/TOTALA-EXE-AI.md` — **not read by
+  this project.** The first holds findings from the Nanolathe project's
+  independent clean-room reading of the same binary, taken in on 2026-09-24 as
+  a cross-check; it settled six disagreements, every one against our corpus,
+  and closed five questions ours had left open. The second is the retail
+  computer player, a subject ours never decoded, whose headline is that the
+  original has no transport policy and never gives an aircraft an attack order.
+  Read `-EXTERNAL`'s opening sections before relying on either: nothing in them
+  is verified here unless it says so at the point of use.
+- `docs/TA-COMMUNITY-AI.md` — what the original's AI *modders* learned, from
+  Switeck's design guide and nine shipped community AI packs: the profile
+  grammar, the benchmark timings an AI was judged by, and what five expert
+  profiles independently agreed to build. Corroborates the AI decode from a
+  direction that owes nothing to a disassembler. The lists do not transfer to
+  RWE — their whole method is subtraction from a catalogue — but the economic
+  doctrine and the benchmarks do.
 - `docs/TA-DEMOS.md` — the `.tad`/`.ted` demo format, and why a demo is a stream
   of *state and effects* rather than of orders: TA is owner-authoritative, not
   lockstep, so a demo cannot be fed to `GameSimulation` and playback would

@@ -327,6 +327,17 @@ namespace rwe
             // Without the re-homing this is false, and with it false every
             // unit built here is refused a lift for the rest of the game.
             REQUIRE(reach.isReachable(sim, labPosition));
+
+            // And it says so out loud. The layer is not the only thing that
+            // wants to know where home moved to: anything asking "which way
+            // is home" -- a landing search walks back along exactly that --
+            // gets the wrong direction off baseAnchor, which still names the
+            // spawn tile.
+            // Compared by distance rather than by ==: Catch2 stringifies a
+            // failed comparison and SimVector has no stream operator.
+            REQUIRE(controller.getBlackboard().groundAnchor.has_value());
+            REQUIRE(controller.getBlackboard().groundAnchor->distanceSquared(labPosition) == 0_ss);
+            REQUIRE(controller.getBlackboard().baseAnchor->distanceSquared(commanderPosition) == 0_ss);
         }
 
         SECTION("a base on the anchor's own island leaves the homing alone")
@@ -346,6 +357,87 @@ namespace rwe
             REQUIRE(reach.isReachable(sim, labPosition));
             REQUIRE(reach.isReachable(sim, commanderPosition));
             REQUIRE_FALSE(reach.isReachable(sim, SimVector(400_ss, 60_ss, 0_ss)));
+
+            // Nothing moved, so home is the anchor and the two agree. A
+            // reader of groundAnchor never has to ask which case it is in.
+            REQUIRE(controller.getBlackboard().groundAnchor->distanceSquared(commanderPosition) == 0_ss);
+        }
+    }
+
+    TEST_CASE("the landing search walks back towards the base the army has, not the spawn", "[ai]")
+    {
+        // The other half of the same defect. navalLandingNear steps from the
+        // attack target back along the direction of home looking for a shore
+        // to put the cargo on, so the origin decides which side of the target
+        // it looks at -- and with baseAnchor still naming an island the AI
+        // abandoned in its opening minutes, it sets off the wrong way and the
+        // fallback probes with it.
+        //
+        // Measured on Hundred Isles before this, with the re-homing already
+        // in: four 1800s games, 15 ferries started and 6 completed, but 1494
+        // "no landing near" refusals -- and 1426 of them the SAME point,
+        // 52,-157, asked again every tactical pass for the whole game. The
+        // search is not broken in general; the same runs found landings at
+        // five other targets.
+        //
+        // The geometry here is the smallest one that can tell the two origins
+        // apart. The commander spawns on the west bank and the base ends up
+        // on the east, so groundAnchor and baseAnchor are on opposite sides
+        // of the channel; the enemy is back on the west bank, across water
+        // from the base, which is what makes a ferry wanted at all.
+        //
+        // Run against the old origin this test does not merely land somewhere
+        // else -- it finds NO landing and dispatches no ferry, which is the
+        // reported symptom exactly: a target refused every tactical pass for
+        // the length of the game while the transport stands idle. Walking
+        // back towards the base that exists carries the drop point east,
+        // towards the water the hull is coming over, and the ferry goes.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeWideChannelTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineLandUnits(sim);
+        defineSeaTransport(sim);
+
+        // Only the commander may cross, as on the map this came from.
+        sim.unitDefinitions.at("ARMCOM").movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 100u};
+
+        auto commanderPosition = SimVector(-400_ss, 60_ss, -400_ss);
+        addUnit(sim, "ARMCOM", ai, commanderPosition, script);
+
+        // The base the commander actually built, on the far bank.
+        auto labPosition = SimVector(400_ss, 60_ss, 0_ss);
+        addUnit(sim, "ARMLAB", ai, labPosition, script);
+
+        auto targetPosition = SimVector(-400_ss, 60_ss, 400_ss);
+        addUnit(sim, "ARMSOLAR", human, targetPosition, script);
+
+        auto profile = makeDefaultBrutalProfile();
+        profile.scoutCount = 0;
+        profile.attackArmySize = 1;
+
+        AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
+        std::vector<PlayerCommand> commands;
+
+        // The army is born where the base is, which is the point: every unit
+        // the AI owns stands on the bank the spawn anchor knows nothing about.
+        addUnit(sim, "ARMPW", ai, SimVector(360_ss, 60_ss, 0_ss), script);
+        auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        runTicks(sim, controller, 90, commands);
+        REQUIRE(controller.getBlackboard().groundAnchor->distanceSquared(labPosition) == 0_ss);
+
+        commands.clear();
+        runTicks(sim, controller, profile.tacticalTickInterval, commands);
+
+        auto unloads = ordersFor<UnloadOrder>(commands, shipId);
+        REQUIRE(!unloads.empty());
+        for (const auto& u : unloads)
+        {
+            // Walking back towards the spawn is due north along the west
+            // bank and leaves x exactly where the target is. Walking back
+            // towards the base carries it east.
+            REQUIRE(u.destination.x > targetPosition.x);
         }
     }
 

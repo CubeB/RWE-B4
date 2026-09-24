@@ -147,6 +147,7 @@ namespace rwe
             {
                 timed("reachability", [&] {
                     reachability.rebuild(sim, moverDef->second.movementCollisionInfo, *blackboard.baseAnchor);
+                    blackboard.groundAnchor = *blackboard.baseAnchor;
 
                     // Home on the base we ACTUALLY have, not on the tile the
                     // commander happened to spawn on.
@@ -194,10 +195,59 @@ namespace rwe
                                 if (reachability.isWalkable(sim, factoryPosition))
                                 {
                                     reachability.rebuild(sim, moverDef->second.movementCollisionInfo, factoryPosition);
+                                    // Published, because the layer is not the
+                                    // only thing that wants to know where home
+                                    // moved to: a landing search walks back
+                                    // towards home and has to set off the right
+                                    // way. See AiBlackboard::groundAnchor.
+                                    blackboard.groundAnchor = factoryPosition;
                                     break;
                                 }
                             }
                         }
+                    }
+
+                    // Can our army walk to anybody at all?
+                    //
+                    // Asked of the declared start positions, which is what a
+                    // player reads off the preview before the game starts:
+                    // ours, and the ones an opponent might be on. If not one
+                    // of the others is on ground this labelling can reach,
+                    // no land unit we ever build arrives anywhere by walking,
+                    // and the factory plan has a different answer to give
+                    // (seaAirFactoriesWhenIsolated).
+                    //
+                    // Left unset on a map declaring fewer than two starts,
+                    // and every reader takes unset as "assume a route", so
+                    // such a map behaves exactly as it did before.
+                    if (blackboard.mapIntel.valid && blackboard.mapIntel.startPositions.size() >= 2)
+                    {
+                        const auto& home = blackboard.homePosition ? *blackboard.homePosition : *blackboard.baseAnchor;
+                        auto ownIndex = nearestStartPosition(blackboard.mapIntel, home);
+                        auto anyReachable = false;
+                        for (Index i = 0; i < getSize(blackboard.mapIntel.startPositions); ++i)
+                        {
+                            if (ownIndex && i == *ownIndex)
+                            {
+                                continue;
+                            }
+                            if (reachability.isReachable(sim, blackboard.mapIntel.startPositions[i]))
+                            {
+                                anyReachable = true;
+                                break;
+                            }
+                        }
+                        if (blackboard.landRouteToEnemy != anyReachable)
+                        {
+                            LOG_INFO << "AI player " << playerId.value << ": land route to another start position: " << (anyReachable ? "yes" : "no");
+                            sim.eventLog.event(sim.gameTime.value, "ai_land_route")
+                                .set("player", playerId.value)
+                                .set("reachable", anyReachable)
+                                .set("starts", static_cast<int>(blackboard.mapIntel.startPositions.size()))
+                                .set("why", anyReachable ? "walkable" : "isolated")
+                                .detail("whether the army can walk to any other start position");
+                        }
+                        blackboard.landRouteToEnemy = anyReachable;
                     }
 
                     blackboard.groundReachabilityValid = reachability.isValid();
@@ -438,7 +488,8 @@ namespace rwe
                      << ", unreachable ground " << (blackboard.hasUnreachableGround ? "yes" : "no")
                      << ", wants transport " << (blackboard.wantsTransport ? "yes" : "no")
                      << " (expansion site " << (blackboard.hasExpansionSite ? "yes" : "no")
-                     << ", enemy across water " << (blackboard.enemyAcrossWater ? "yes" : "no") << ")"
+                     << ", enemy across water " << (blackboard.enemyAcrossWater ? "yes" : "no")
+                     << ", army needs ferry " << (blackboard.armyNeedsFerry ? "yes" : "no") << ")"
                      << ", naval scout " << (blackboard.navalScoutUnitId ? "yes" : "no")
                      << ", units:" << counts << "; " << commanderDoing;
 
@@ -459,6 +510,7 @@ namespace rwe
                 .set("wants_transport", blackboard.wantsTransport)
                 .set("expansion_site", blackboard.hasExpansionSite)
                 .set("enemy_across_water", blackboard.enemyAcrossWater)
+                .set("army_needs_ferry", blackboard.armyNeedsFerry)
                 .set("commander", commanderDoing)
                 .set("types", blackboard.ownedTotalCounts)
                 .detail("status");
@@ -494,7 +546,7 @@ namespace rwe
 
         // 6. Eyes, lift and fists.
         timed("scout", [&] { scout.update(sim, profile, threatMap, reachability, blackboard, outCommands); });
-        timed("transport", [&] { transport.update(sim, playerId, profile, reachability, build, blackboard, rng, outCommands); });
+        timed("transport", [&] { transport.update(sim, playerId, profile, reachability, threatMap, build, blackboard, rng, outCommands); });
         timed("army", [&] { army.update(sim, playerId, profile, threatMap, blackboard, outCommands); });
         timed("air", [&] { air.update(sim, playerId, profile, threatMap, blackboard, outCommands); });
 
