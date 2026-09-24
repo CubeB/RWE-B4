@@ -3247,10 +3247,10 @@ namespace rwe
         // death cause to 7 -- 0x41B9FE and 0x486167 both test bit 24 of
         // `def+0x241`, which is `isfeature`, and write the cause onto the unit
         // -- and the packer then short-circuits the level at 0x486525. Cause 7
-        // also clears `mayBurn` at 0x486D66, which has nothing to attach to
-        // here yet: RWE lights a wreck from a `firestarter` weapon rather than
-        // lighting a plume as the wreck spawns, so nothing would have burnt
-        // anyway. See TOTALA-EXE-WRECKS.md, "What each death cause is".
+        // also clears `mayBurn` at 0x486D66; trySpawnFeature carries that
+        // through as the isFeature half of WreckSpawnedEvent::mayBurn, so
+        // such a wreck never gets the plume. See TOTALA-EXE-WRECKS.md, "What
+        // each death cause is".
         //
         // Before the nanoframe rule below, deliberately: 0x486525 runs ahead of
         // 0x4865D2, so a half-built fort still leaves nothing.
@@ -4328,12 +4328,21 @@ namespace rwe
         // on the surface -- the original carving out exactly the one thing
         // built to float is the clearest evidence the sink rule is real.
         auto ground = terrain.getHeightAt(position.x, position.z);
-        if (ground <= terrain.getSeaLevel() && !isFeature)
+        auto wet = ground <= terrain.getSeaLevel() && !isFeature;
+        if (wet)
         {
             feature.velocity = SimVector(0_ss, -WreckSinkSpeed, 0_ss);
         }
 
         addFeature(std::move(feature));
+
+        // The same test decides the plume: the wet branch zeroes mayBurn
+        // (0x486420) and cause 7 clears it for an isfeature unit, and the
+        // scene lights the thirty-second plume off whatever is left. The
+        // original fires it even when the placement itself was refused (the
+        // flag is cleared inside the feature != null test), which is why this
+        // does not wait on addFeature succeeding.
+        events.push_back(WreckSpawnedEvent{position, !wet && !isFeature});
     }
 
     void GameSimulation::updateFallingFeatures()

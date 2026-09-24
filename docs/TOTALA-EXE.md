@@ -604,9 +604,17 @@ quirks of the original that RWE reproduces although they look like defects.
   right for the 112 that nearly every map uses: RWE's half a unit a tick is
   the original's gravity × 4 there, though it will not track a map that sets
   gravity to something else.
-- The **explosion smoke** (`0x472630` from `0x420AE1`, three puffs seven ticks
-  apart) and the **30-second burning wreck plume** (`0x48644B`) are decoded but
-  not ported; RWE's explosions and wreckage do not smoke afterwards.
+- ~~The **explosion smoke** and the **30-second burning wreck plume** are
+  decoded but not ported~~ **Ported, 2026-09-24** (#113). Both are one
+  `SmokeEmitter` on the game scene, the shape of `0x472630`: an impact that
+  smokes gets three puffs seven ticks apart (`0x420AE1`, interval 7, lifetime
+  15), and a wreck placed on ground above sea level gets a puff every fifteen
+  ticks for nine hundred (`0x48644B`). The sim says which wrecks may burn
+  through `WreckSpawnedEvent::mayBurn`, the original's flag: cleared by the
+  wet branch and by death cause 7, so a sea wreck and an `isfeature` unit's
+  never smoke. RWE's own: each puff is gated on the fog like the vents' steam,
+  and the original's quirk of smoking over a refused placement is kept only in
+  that the event fires whether or not the wreck was placed.
 - ~~**`BadSlope` and `BadWaterSlope` are not parsed.**~~ **Ported, 2026-09-24**
   (#112). §95 decodes them: the movement class's *free* slope threshold, with
   `MaxSlope` / `MaxWaterSlope` above them admitting the cell as "tight" at an

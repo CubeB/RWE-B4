@@ -1407,6 +1407,29 @@ namespace rwe
         particles.erase(end, particles.end());
     }
 
+    std::vector<Vector3f> stepSmokeEmitters(std::vector<SmokeEmitter>& emitters, GameTime now)
+    {
+        std::vector<Vector3f> puffs;
+        auto end = emitters.end();
+        for (auto it = emitters.begin(); it != end;)
+        {
+            auto& emitter = *it;
+            if (emitter.nextPuff > emitter.end)
+            {
+                *it = std::move(*--end);
+                continue;
+            }
+            if (now >= emitter.nextPuff)
+            {
+                puffs.push_back(emitter.position);
+                emitter.nextPuff += emitter.interval;
+            }
+            ++it;
+        }
+        emitters.erase(end, emitters.end());
+        return puffs;
+    }
+
     std::vector<Vector3f> findGeoVentSteamPoints(const GameSimulation& simulation)
     {
         std::vector<Vector3f> points;

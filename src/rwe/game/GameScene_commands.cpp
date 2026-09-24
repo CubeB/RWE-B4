@@ -1319,6 +1319,17 @@ namespace rwe
         {
             match(
                 event,
+                [&](const WreckSpawnedEvent& e) {
+                    // A land wreck smoulders for thirty seconds: one puff
+                    // every fifteen ticks for nine hundred (0x48644B). A sea
+                    // wreck, and an isfeature unit's, never does. Whether a
+                    // puff is drawn is decided puff by puff against the fog,
+                    // so a wreck found later still smokes when it is found.
+                    if (e.mayBurn)
+                    {
+                        startSmokeEmitter(simVectorToFloat(e.position), wreckPlumeIntervalTicks, wreckPlumeLifetimeTicks);
+                    }
+                },
                 [&](const FeatureReclaimedEvent& e) {
                     // The feature's reclaim sequence (TA's golden swirl) plays once where it stood.
                     if (!positionIsVisibleToLocalPlayer(e.position))
@@ -2976,6 +2987,32 @@ namespace rwe
                 continue;
             }
             spawnSmokePuff(point, "smoke 1", geoVentSteamRiseRate);
+        }
+    }
+
+    void GameScene::startSmokeEmitter(const Vector3f& position, unsigned int intervalTicks, unsigned int lifetimeTicks)
+    {
+        // Init emits once directly (0x474DCA) and the end time is now plus
+        // the lifetime, so the first puff is this tick's.
+        smokeEmitters.push_back(SmokeEmitter{position, simulation.gameTime, simulation.gameTime + GameTime(lifetimeTicks), GameTime(intervalTicks)});
+    }
+
+    void GameScene::updateSmokeEmitters()
+    {
+        if (smokeEmittersSteppedAt == simulation.gameTime)
+        {
+            return;
+        }
+        smokeEmittersSteppedAt = simulation.gameTime;
+
+        for (const auto& point : stepSmokeEmitters(smokeEmitters, simulation.gameTime))
+        {
+            // The same fog gate the vents and the damage smoke apply.
+            if (!positionIsVisibleToLocalPlayer(SimVector(SimScalar(point.x), SimScalar(point.y), SimScalar(point.z))))
+            {
+                continue;
+            }
+            spawnSmokePuff(point, "smoke 1", 0.5f);
         }
     }
 
