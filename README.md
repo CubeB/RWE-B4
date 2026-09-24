@@ -280,6 +280,7 @@ LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH ./rwe
 ```bash
 sudo apt-get install -y \
   gcc-14 g++-14 cmake \
+  libgl-dev libglx-dev libegl-dev libx11-dev \
   zlib1g-dev libpng-dev \
   libasound2-dev libpulse-dev libpipewire-0.3-dev \
   libwayland-dev wayland-protocols libxkbcommon-dev libdecor-0-dev

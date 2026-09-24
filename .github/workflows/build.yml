@@ -151,6 +151,12 @@ jobs:
           clang-18
           ccache
           imagemagick
+          # SDL3's windowing and GL backends are built from the submodule and
+          # need these headers; libglew-dev used to pull them in transitively.
+          libgl-dev
+          libglx-dev
+          libegl-dev
+          libx11-dev
           zlib1g-dev
           libpng-dev
           libasound2-dev
