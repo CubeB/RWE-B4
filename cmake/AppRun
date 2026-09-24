@@ -1,0 +1,16 @@
+#!/bin/sh
+# The AppImage has a single entry point, so rwe_setup -- which the engine's
+# "no game data" message tells the player to run -- is reached through it:
+# `./Robot_War_Engine-*.AppImage setup`. Everything else runs the engine.
+HERE="$(dirname "$(readlink -f "$0")")"
+export LD_LIBRARY_PATH="$HERE/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+case "$1" in
+    setup|rwe_setup)
+        shift
+        exec "$HERE/usr/bin/rwe_setup" "$@"
+        ;;
+    *)
+        exec "$HERE/usr/bin/rwe" "$@"
+        ;;
+esac

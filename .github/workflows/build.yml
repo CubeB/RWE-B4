@@ -207,7 +207,7 @@ jobs:
         if: matrix.cc == 'gcc-14' && matrix.configuration == 'Release'
         run: |
           mkdir -p AppDir/usr/bin AppDir/usr/share/rwe
-          cp build/rwe build/rwe_bridge AppDir/usr/bin/
+          cp build/rwe build/rwe_bridge build/rwe_setup AppDir/usr/bin/
           cp -r shaders AppDir/usr/share/rwe/
           cp LICENSE README.md AppDir/usr/share/rwe/
 
@@ -240,6 +240,7 @@ jobs:
           ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
             --desktop-file AppDir/usr/share/applications/rwe.desktop \
+            --custom-apprun cmake/AppRun \
             --output appimage
       - name: upload AppImage artifact
         if: matrix.cc == 'gcc-14' && matrix.configuration == 'Release'
