@@ -4549,6 +4549,37 @@ namespace rwe
                 MexSiteTally tally;
                 result.site = chooseMexSite(sim, next, *bb.baseAnchor, radius, rng, siteFree, acceptable, &tally);
 
+                // Home is full and the only thing refusing the rest is the
+                // halfway line. Take the middle: a player would, and the
+                // alternative measured on Coast To Coast is eleven metal a
+                // second for the last twenty-two minutes of the game (#202).
+                //
+                // Every other rule still stands -- a gun's reach and the
+                // builder's own reachability are in `walkable`, not here --
+                // so this reaches for ground nobody is holding, and it can
+                // only fire when the side rule is what refused something.
+                bool contestedMiddle = false;
+                if (!result.site && profile.expansionContestsMiddleWhenBoxedIn && refusedOffSide > 0)
+                {
+                    auto pastTheLine = [&](const SimVector& p) {
+                        return known(p) && walkable(p);
+                    };
+                    MexSiteTally retry;
+                    result.site = chooseMexSite(sim, next, *bb.baseAnchor, radius, rng, siteFree, pastTheLine, &retry);
+                    contestedMiddle = result.site.has_value();
+                    if (contestedMiddle)
+                    {
+                        sim.eventLog.event(sim.gameTime.value, "build_expansion")
+                            .set("player", aiOwner.value)
+                            .set("unit", ctx.builderId.value)
+                            .set("subject", next)
+                            .set("x", result.site->x.value)
+                            .set("z", result.site->z.value)
+                            .set("why", "contested_middle")
+                            .detail("no free deposit on our own side, taking one past the halfway line");
+                    }
+                }
+
                 if (!result.site)
                 {
                     // Why not, for the log. Two tallies, and they answer
