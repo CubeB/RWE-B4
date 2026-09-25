@@ -2,6 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <rwe/io/campaign/campaign.h>
+#include <rwe/io/gui/gui.h>
+#include <rwe/sim/SimTicksPerSecond.h>
+#include <rwe/ui/UiListBox.h>
 #include <rwe/ui/UiStagedButton.h>
 
 namespace rwe
@@ -77,6 +81,16 @@ namespace rwe
 
         /** A bar is full after fifteen steps whatever it counts (0x4FD008 is 1/15). */
         constexpr float EndGameBarSteps = 15.0f;
+
+        /**
+         * The glamour picture takes no click for its first second (0x41FE5D
+         * against the deadline 0x41FE02 sets) and says "Click to continue."
+         * five seconds after that, twenty pixels up from the bottom (0x41FED4
+         * onwards).
+         */
+        constexpr unsigned int EndGameGlamourDeafTicks = SimTicksPerSecond;
+        constexpr unsigned int EndGameGlamourPromptTicks = 6 * SimTicksPerSecond;
+        constexpr float EndGameGlamourPromptY = EndGameScreenHeight - 20.0f;
     }
 
     Rectangle2f GameScene::EndGameLayout::rect(float x, float y, float w, float h) const
@@ -108,6 +122,13 @@ namespace rwe
         endGamePhase = EndGamePhase::Banner;
         endGamePhaseStart = sceneTime;
 
+        // The mission's letter in the campaign's run, written as the game is
+        // torn down (0x41DC81).
+        if (gameParameters.campaign)
+        {
+            gameParameters.campaign->recordResult(localPlayerWon());
+        }
+
         // Two beeps, a beat apart. Which sound the original reaches for is the
         // one piece of this sequence that is not written down anywhere we can
         // read: the endgame code plays nothing by name, `sounds/BEEP1..6.WAV`
@@ -124,6 +145,66 @@ namespace rwe
     bool GameScene::endGameChartVisible() const
     {
         return gameOver && endGamePhase == EndGamePhase::Chart;
+    }
+
+    bool GameScene::endGameCoversWorld() const
+    {
+        return gameOver && (endGamePhase == EndGamePhase::Glamour || endGamePhase == EndGamePhase::Chart);
+    }
+
+    bool GameScene::campaignContinues() const
+    {
+        const auto& campaign = gameParameters.campaign;
+        return campaign && (!localPlayerWon() || campaign->hasNextMission);
+    }
+
+    bool GameScene::beginGlamour()
+    {
+        // Only for a picture that is there: the original falls back to a
+        // literal "glamour\Arm01.PCX" that has no bitmaps directory in front
+        // of it (0x41DB7E), and every shipped glamour names a file.
+        const auto& campaign = *gameParameters.campaign;
+        if (campaign.glamour.empty() || !sceneContext.vfs->readFile("bitmaps/glamour/" + campaign.glamour + ".pcx"))
+        {
+            return false;
+        }
+        endGameGlamour = sceneContext.textureService->getBitmapRegion(
+            "glamour/" + campaign.glamour,
+            0,
+            0,
+            static_cast<int>(EndGameScreenWidth),
+            static_cast<int>(EndGameScreenHeight));
+
+        if (!campaign.glamourSound.empty())
+        {
+            if (auto sound = sceneContext.audioService->loadSoundFromPath("camps/briefs/" + campaign.glamourSound + ".wav"))
+            {
+                endGameGlamourChannel = sceneContext.audioService->playSound(*sound);
+            }
+        }
+
+        endGamePhase = EndGamePhase::Glamour;
+        endGamePhaseStart = sceneTime;
+        return true;
+    }
+
+    void GameScene::glamourClicked()
+    {
+        if (sceneTime - endGamePhaseStart < SceneTime(EndGameGlamourDeafTicks))
+        {
+            return;
+        }
+        sceneContext.audioService->stopChannel(endGameGlamourChannel);
+        endGameGlamourChannel = -1;
+        endGameGlamour.reset();
+        enterEndGameChart();
+    }
+
+    void GameScene::enterEndGameChart()
+    {
+        endGamePhase = EndGamePhase::Chart;
+        endGamePhaseStart = sceneTime;
+        buildEndGameChart();
     }
 
     void GameScene::finishEndGameBars()
@@ -157,16 +238,28 @@ namespace rwe
         endGameColumnsStarted = 0;
         endGameNextColumn = sceneTime;
 
+        // The face the artwork's own column headings are set in, and the one
+        // every gui label in the game uses.
+        endGameChartFont = sceneContext.textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+
+        // A campaign that carries on has the whole of ENDMSN, background and
+        // all; anything else keeps OUTCOME0 and its one button (0x41F18B,
+        // 0x41F1C8).
+        if (campaignContinues())
+        {
+            buildCampaignEndPanel();
+        }
+        if (endGameCampaignPanel)
+        {
+            return;
+        }
+
         endGameBackground = sceneContext.textureService->getBitmapRegion(
             "OUTCOME0",
             0,
             0,
             static_cast<int>(EndGameScreenWidth),
             static_cast<int>(EndGameScreenHeight));
-
-        // The face the artwork's own column headings are set in, and the one
-        // every gui label in the game uses.
-        endGameChartFont = sceneContext.textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
 
         // The same face every other 120x20 button in the game wears, resolved
         // the way UiFactory resolves one: anims/ENDMSN.GAF first, then
@@ -188,9 +281,101 @@ namespace rwe
         });
     }
 
+    void GameScene::buildCampaignEndPanel()
+    {
+        auto raw = sceneContext.vfs->readFile(sceneContext.pathMapping->guis + "/ENDMSN.GUI");
+        auto entries = raw ? parseGuiFromBytes(*raw) : std::nullopt;
+        if (!entries || entries->empty())
+        {
+            return;
+        }
+
+        // The gui itself, over OUTCOME1, whose frame has the list's surround
+        // and the button column painted into it.
+        auto panel = uiFactory.panelFromGuiFile("ENDMSN", "OUTCOME1", *entries);
+        const auto& progress = *gameParameters.campaign;
+
+        // Saving and loading between missions are still to come.
+        for (const auto* name : {"LoadGame", "SaveGame"})
+        {
+            if (auto button = panel->find<UiStagedButton>(name))
+            {
+                button->get().setEnabled(false);
+            }
+        }
+
+        endGameCampaignDifficulty = progress.difficulty;
+        if (auto difficulty = panel->find<UiStagedButton>("Difficulty"))
+        {
+            difficulty->get().setStage(endGameCampaignDifficulty);
+        }
+
+        if (auto list = panel->find<UiListBox>("Missions"))
+        {
+            if (auto campaign = readCampaign(*sceneContext.vfs, progress.campaign))
+            {
+                auto& missions = list->get();
+                for (std::size_t i = 0; i < campaign->missions.size(); ++i)
+                {
+                    auto status = i < progress.thumbs.size() ? progress.thumbs[i] : 'U';
+                    missions.appendItem(campaignMissionListEntry(status, campaignMissionName(campaign->missions[i], std::string())));
+                }
+                // The next mission after a win, the same one again after a
+                // loss (0x41F2D4).
+                auto selected = localPlayerWon() ? progress.missionIndex + 1 : progress.missionIndex;
+                if (selected < missions.getItems().size())
+                {
+                    missions.setSelectedItem(missions.getItems()[selected]);
+                }
+            }
+        }
+
+        panel->groupMessages().subscribe([this](const auto& msg) {
+            if (std::get_if<ActivateMessage>(&msg.message) != nullptr)
+            {
+                // Deferred, as the game menu's are: Start leaves the scene
+                // from inside the panel's own dispatch.
+                pendingMenuActions.push_back([this, control = msg.controlName]() { campaignEndMessage(control); });
+            }
+        });
+        endGameCampaignPanel = std::move(panel);
+    }
+
+    void GameScene::campaignEndMessage(const std::string& control)
+    {
+        if (control == "Start")
+        {
+            auto list = endGameCampaignPanel->find<UiListBox>("Missions");
+            auto selected = list ? list->get().getSelectedIndex() : std::nullopt;
+            if (!selected)
+            {
+                return;
+            }
+            // Any mission on the list can be picked, won or not (0x41EFBA).
+            auto progress = *gameParameters.campaign;
+            progress.missionIndex = *selected;
+            progress.difficulty = endGameCampaignDifficulty;
+            continueCampaign(progress);
+        }
+        else if (control == "Difficulty")
+        {
+            endGameCampaignDifficulty = (endGameCampaignDifficulty + 1) % 3;
+            if (auto difficulty = endGameCampaignPanel->find<UiStagedButton>("Difficulty"))
+            {
+                difficulty->get().setStage(endGameCampaignDifficulty);
+            }
+        }
+        else if (control == "MainMenu")
+        {
+            returnToMainMenu();
+        }
+    }
+
     void GameScene::updateEndGameSequence()
     {
-        if (!gameOver)
+        // Leaving for the films or the menu is a frame away; nothing more to
+        // decide here meanwhile.
+        if (!gameOver || leavingScene)
         {
             return;
         }
@@ -215,9 +400,26 @@ namespace rwe
                     return;
                 }
 
-                endGamePhase = EndGamePhase::Chart;
-                endGamePhaseStart = sceneTime;
-                buildEndGameChart();
+                // 0x41FC2A: the last mission of a campaign won ends on its
+                // films, and any other campaign win shows its picture first.
+                const auto& campaign = gameParameters.campaign;
+                if (campaign && localPlayerWon())
+                {
+                    if (!campaign->hasNextMission && !campaign->noMovie)
+                    {
+                        playCampaignEnding();
+                        return;
+                    }
+                    if (beginGlamour())
+                    {
+                        return;
+                    }
+                }
+                enterEndGameChart();
+                return;
+            }
+            case EndGamePhase::Glamour:
+            {
                 return;
             }
             case EndGamePhase::Chart:
@@ -310,6 +512,30 @@ namespace rwe
                     Color(0, 0, 0, static_cast<unsigned char>(alpha)));
                 return;
             }
+            case EndGamePhase::Glamour:
+            {
+                auto layout = endGameLayout();
+                chromeUiRenderService.fillColor(
+                    0.0f,
+                    0.0f,
+                    static_cast<float>(sceneContext.viewport->width()),
+                    static_cast<float>(sceneContext.viewport->height()),
+                    Color(0, 0, 0));
+                chromeUiRenderService.pushMatrix();
+                chromeUiRenderService.multiplyMatrix(
+                    Matrix4f::translation(Vector3f(layout.offsetX, layout.offsetY, 0.0f))
+                    * Matrix4f::scale(Vector3f(layout.scale, layout.scale, 1.0f)));
+                if (endGameGlamour)
+                {
+                    chromeUiRenderService.drawSpriteAbs(Rectangle2f::fromTopLeft(0.0f, 0.0f, EndGameScreenWidth, EndGameScreenHeight), *endGameGlamour);
+                }
+                if (sceneTime - endGamePhaseStart >= SceneTime(EndGameGlamourPromptTicks))
+                {
+                    chromeUiRenderService.drawTextCentered(EndGameScreenWidth / 2.0f, EndGameGlamourPromptY, "Click to continue.", *guiFont);
+                }
+                chromeUiRenderService.popMatrix();
+                return;
+            }
             case EndGamePhase::Chart:
             {
                 renderEndGameChart();
@@ -338,7 +564,13 @@ namespace rwe
             Matrix4f::translation(Vector3f(layout.offsetX, layout.offsetY, 0.0f))
             * Matrix4f::scale(Vector3f(layout.scale, layout.scale, 1.0f)));
 
-        if (endGameBackground)
+        if (endGameCampaignPanel)
+        {
+            // OUTCOME1 and ENDMSN's controls, none of which the chart's rows
+            // reach down to.
+            endGameCampaignPanel->render(chromeUiRenderService);
+        }
+        else if (endGameBackground)
         {
             chromeUiRenderService.drawSpriteAbs(Rectangle2f::fromTopLeft(0.0f, 0.0f, EndGameScreenWidth, EndGameScreenHeight), *endGameBackground);
         }

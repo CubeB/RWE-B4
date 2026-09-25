@@ -62,4 +62,12 @@ namespace rwe
         REQUIRE(campaign.side == "ALL");
         REQUIRE(campaignMissionName(campaign.missions[0], "") == "Error -- Unnamed Mission");
     }
+
+    TEST_CASE("a mission between missions wears the thumb for how it went", "[campaign]")
+    {
+        // The list font's glyphs 0xFE, 0xFF and 0xFD, as UTF-8.
+        REQUIRE(campaignMissionListEntry('W', "1: A Hero Returns") == "\xC3\xBE 1: A Hero Returns");
+        REQUIRE(campaignMissionListEntry('L', "2: Destroy It") == "\xC3\xBF 2: Destroy It");
+        REQUIRE(campaignMissionListEntry('U', "3: Next") == "\xC3\xBD 3: Next");
+    }
 }

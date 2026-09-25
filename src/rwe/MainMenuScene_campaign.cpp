@@ -107,24 +107,6 @@ namespace rwe
         return names;
     }
 
-    std::optional<Campaign> MainMenuScene::readCampaign(const std::string& name)
-    {
-        auto raw = sceneContext.vfs->readFile("camps/" + name + ".tdf");
-        if (!raw)
-        {
-            return std::nullopt;
-        }
-        try
-        {
-            return parseCampaign(parseTdfFromString(std::string(raw->begin(), raw->end())));
-        }
-        catch (const std::exception& e)
-        {
-            LOG_WARN << "Campaign " << name << " could not be read: " << e.what();
-            return std::nullopt;
-        }
-    }
-
     void MainMenuScene::goToCampaignMenu()
     {
         auto raw = sceneContext.vfs->readFile(sceneContext.pathMapping->guis + "/NEWGAME.GUI");
@@ -236,7 +218,7 @@ namespace rwe
         {
             return;
         }
-        if (auto campaign = readCampaign(*selectedCampaign))
+        if (auto campaign = readCampaign(*sceneContext.vfs, *selectedCampaign))
         {
             for (const auto& mission : campaign->missions)
             {
@@ -278,23 +260,35 @@ namespace rwe
         {
             return;
         }
-        auto campaign = readCampaign(*selectedCampaign);
-        if (!campaign || campaign->missions.empty())
-        {
-            openMessageBox("That campaign has no missions");
-            return;
-        }
-
         std::size_t missionIndex = 0;
         if (auto list = panelStack.back()->find<UiListBox>("Missions"))
         {
             missionIndex = list->get().getSelectedIndex().value_or(0);
         }
-        if (missionIndex >= campaign->missions.size())
+
+        // A campaign started from this screen starts with every mission
+        // untried (0x41DA30).
+        CampaignProgress progress;
+        progress.campaign = *selectedCampaign;
+        progress.missionIndex = static_cast<unsigned int>(missionIndex);
+        progress.difficulty = campaignDifficulty;
+        progress.side = campaignSide;
+        openCampaignMission(progress);
+    }
+
+    void MainMenuScene::openCampaignMission(CampaignProgress progress)
+    {
+        auto campaign = readCampaign(*sceneContext.vfs, progress.campaign);
+        if (!campaign || campaign->missions.empty())
+        {
+            openMessageBox("That campaign has no missions");
+            return;
+        }
+        if (progress.missionIndex >= campaign->missions.size())
         {
             return;
         }
-        const auto& mission = campaign->missions[missionIndex];
+        const auto& mission = campaign->missions[progress.missionIndex];
 
         // The campaign file names the map with its extension (EXP1AC01.ota);
         // a game is started by the map's bare name.
@@ -322,23 +316,35 @@ namespace rwe
             openMessageBox("Could not read the mission " + mapName + ": " + e.what());
             return;
         }
-        auto schema = chooseCampaignSchema(ota.schemas, static_cast<int>(campaignDifficulty));
+        auto schema = chooseCampaignSchema(ota.schemas, static_cast<int>(progress.difficulty));
         if (!schema)
         {
             openMessageBox("No suitable schema type");
             return;
         }
 
+        // What the screens after the game will want to know.
+        progress.glamour = ota.glamour;
+        progress.glamourSound = ota.glamourSound;
+        progress.noMovie = ota.noMovie;
+        progress.hasNextMission = progress.missionIndex + 1 < campaign->missions.size();
+
         GameParameters params{mapName, static_cast<unsigned int>(*schema)};
         params.mission = true;
-        params.aiDifficulty = skirmishDifficultyToAiDifficulty(campaignDifficulty);
+        params.aiDifficulty = skirmishDifficultyToAiDifficulty(progress.difficulty);
         // The player is player 0 on the chosen side in colour 0, the
         // computer player 1 on the other in colour 1 (0x477C79, 0x477C8B);
         // what each starts with is the mission's, which the loader reads.
-        params.players[0] = PlayerInfo{std::nullopt, PlayerControllerTypeHuman(), campaignSideNames[campaignSide], PlayerColorIndex(0), Metal(0), Energy(0)};
-        params.players[1] = PlayerInfo{std::nullopt, PlayerControllerTypeComputer(), campaignSideNames[1 - campaignSide], PlayerColorIndex(1), Metal(0), Energy(0)};
+        params.players[0] = PlayerInfo{std::nullopt, PlayerControllerTypeHuman(), campaignSideNames[progress.side], PlayerColorIndex(0), Metal(0), Energy(0)};
+        params.players[1] = PlayerInfo{std::nullopt, PlayerControllerTypeComputer(), campaignSideNames[1 - progress.side], PlayerColorIndex(1), Metal(0), Energy(0)};
+        params.campaign = progress;
 
         goToCampaignBriefing(params, ota);
+    }
+
+    void MainMenuScene::resumeCampaign(const CampaignProgress& progress)
+    {
+        pendingCampaign = progress;
     }
 
     void MainMenuScene::goToCampaignBriefing(const GameParameters& params, const OtaRecord& ota)
@@ -353,12 +359,13 @@ namespace rwe
             return;
         }
 
-        const auto& side = sceneContext.sideData->at(campaignSideNames[campaignSide]);
+        auto sideIndex = params.campaign ? params.campaign->side : campaignSide;
+        const auto& side = sceneContext.sideData->at(campaignSideNames[sideIndex]);
         auto panel = uiFactory.panelFromGuiFile("MSNBRIEF", "mbrief" + side.namePrefix, *entries);
 
         // The text, in the side's font (FONT gadget side+1, 0x476DC7), a page
         // at a time in TextRegion's rectangle.
-        auto font = sceneContext.textureService->getFont(campaignSide == 0 ? "fonts/ARMFONT.FNT" : "fonts/COREFONT.FNT");
+        auto font = sceneContext.textureService->getFont(sideIndex == 0 ? "fonts/ARMFONT.FNT" : "fonts/COREFONT.FNT");
         for (const auto& entry : *entries)
         {
             const auto& c = entry.common;
@@ -378,7 +385,7 @@ namespace rwe
                 // The globe turns. The panorama is its first strip fitted to
                 // the window, where the original scrolls the strips across it
                 // (0x478790) and prints the wind and gravity over them.
-                auto art = briefingPlanet(ota.planet, campaignSide == 1);
+                auto art = briefingPlanet(ota.planet, sideIndex == 1);
                 auto gaf = std::string("anims/") + art.gaf + ".GAF";
                 // The art is decoration: a mod's planet with no GAF shows none.
                 auto sequence = [&](const char* name) -> std::shared_ptr<SpriteSeries> {

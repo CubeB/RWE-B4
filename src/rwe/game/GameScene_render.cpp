@@ -104,7 +104,7 @@ namespace rwe
             // copy of the last frame to fade, and that is gone too -- so there
             // is nothing to draw underneath and no reason to spend a frame
             // drawing it.
-            if (endGameChartVisible())
+            if (endGameCoversWorld())
             {
                 renderEndGameSequence();
             }

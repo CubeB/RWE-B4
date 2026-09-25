@@ -216,6 +216,23 @@ namespace rwe
         header["mapping"] = enumToName(save.parameters.mapping, MappingNames, "unmapped");
         header["startLocation"] = enumToName(save.parameters.startLocation, StartLocationNames, "fixed");
         header["commanderDeath"] = enumToName(save.parameters.commanderDeath, CommanderDeathNames, "gameends");
+        header["mission"] = save.parameters.mission;
+        if (const auto& c = save.parameters.campaign)
+        {
+            // The original's header keys, Campaign, Mission, Difficulty, Side
+            // and Thumbs (0x4326B0), and what the screens after the game need.
+            header["campaign"] = {
+                {"campaign", c->campaign},
+                {"mission", c->missionIndex},
+                {"difficulty", c->difficulty},
+                {"side", c->side},
+                {"thumbs", c->thumbs},
+                {"glamour", c->glamour},
+                {"glamourSound", c->glamourSound},
+                {"noMovie", c->noMovie},
+                {"hasNextMission", c->hasNextMission},
+            };
+        }
         auto& players = header["players"];
         players = nlohmann::json::array();
         for (const auto& p : save.parameters.players)
@@ -253,6 +270,28 @@ namespace rwe
         parameters.mapping = enumFromName(header.value("mapping", "unmapped"), MappingNames, MappingMode::Unmapped);
         parameters.startLocation = enumFromName(header.value("startLocation", "fixed"), StartLocationNames, StartLocationMode::Fixed);
         parameters.commanderDeath = enumFromName(header.value("commanderDeath", "gameends"), CommanderDeathNames, CommanderDeathMode::GameEnds);
+        parameters.mission = header.value("mission", false);
+        if (header.contains("campaign") && header.at("campaign").is_object())
+        {
+            const auto& c = header.at("campaign");
+            CampaignProgress progress;
+            progress.campaign = c.value("campaign", std::string());
+            progress.missionIndex = c.value("mission", 0u);
+            progress.difficulty = std::min(c.value("difficulty", 0u), 2u);
+            progress.side = std::min(c.value("side", 0u), 1u);
+            progress.thumbs = c.value("thumbs", std::string());
+            // A string of the wrong length is started again, as the loader
+            // does (0x49282C).
+            if (progress.thumbs.size() != 25)
+            {
+                progress.thumbs = std::string(25, 'U');
+            }
+            progress.glamour = c.value("glamour", std::string());
+            progress.glamourSound = c.value("glamourSound", std::string());
+            progress.noMovie = c.value("noMovie", false);
+            progress.hasNextMission = c.value("hasNextMission", false);
+            parameters.campaign = progress;
+        }
         const auto& players = header.at("players");
         for (std::size_t i = 0; i < parameters.players.size() && i < players.size(); ++i)
         {

@@ -133,4 +133,77 @@ namespace rwe
             REQUIRE(!loaded->gameTimeSeconds.has_value());
         }
     }
+
+    TEST_CASE("SaveFile's header round-trips a campaign's progress", "[saveload][savefile][campaign]")
+    {
+        CampaignProgress progress;
+        progress.campaign = "Core Campaign";
+        progress.missionIndex = 3;
+        progress.difficulty = 2;
+        progress.side = 1;
+        progress.recordResult(false);
+        progress.missionIndex = 4;
+        progress.recordResult(true);
+        progress.glamour = "cor05";
+        progress.glamourSound = "cor05g";
+        progress.hasNextMission = true;
+
+        SECTION("a mission's result is its letter in the run")
+        {
+            REQUIRE(progress.thumbs.size() == 25u);
+            REQUIRE(progress.thumbs.substr(0, 6) == "UUULWU");
+        }
+
+        SECTION("everything the screens after the game read comes back")
+        {
+            TempFile file;
+            auto save = makeSaveFile();
+            save.parameters.mission = true;
+            save.parameters.campaign = progress;
+
+            writeSaveFile(file.path, save);
+            auto loaded = readSaveFile(file.path);
+
+            REQUIRE(loaded.has_value());
+            REQUIRE(loaded->parameters.mission);
+            REQUIRE(loaded->parameters.campaign.has_value());
+            const auto& c = *loaded->parameters.campaign;
+            REQUIRE(c.campaign == "Core Campaign");
+            REQUIRE(c.missionIndex == 4u);
+            REQUIRE(c.difficulty == 2u);
+            REQUIRE(c.side == 1u);
+            REQUIRE(c.thumbs == progress.thumbs);
+            REQUIRE(c.glamour == "cor05");
+            REQUIRE(c.glamourSound == "cor05g");
+            REQUIRE_FALSE(c.noMovie);
+            REQUIRE(c.hasNextMission);
+        }
+
+        SECTION("a skirmish save has none")
+        {
+            TempFile file;
+            auto save = makeSaveFile();
+
+            writeSaveFile(file.path, save);
+            auto loaded = readSaveFile(file.path);
+
+            REQUIRE(loaded.has_value());
+            REQUIRE_FALSE(loaded->parameters.mission);
+            REQUIRE_FALSE(loaded->parameters.campaign.has_value());
+        }
+
+        SECTION("a run of the wrong length starts again, as the original's loader does")
+        {
+            TempFile file;
+            auto save = makeSaveFile();
+            progress.thumbs = "WWL";
+            save.parameters.campaign = progress;
+
+            writeSaveFile(file.path, save);
+            auto loaded = readSaveFile(file.path);
+
+            REQUIRE(loaded.has_value());
+            REQUIRE(loaded->parameters.campaign->thumbs == std::string(25, 'U'));
+        }
+    }
 }

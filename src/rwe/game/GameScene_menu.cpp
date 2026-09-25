@@ -17,6 +17,7 @@
 #include <rwe/GlobalConfig.h>
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuScene.h>
+#include <rwe/MovieScene.h>
 #include <rwe/game/SaveFile.h>
 #include <rwe/game/save_util.h>
 #include <rwe/io/gui/gui.h>
@@ -1181,6 +1182,35 @@ namespace rwe
             [this](const auto&) {
                 cursorMode.next(NormalCursorMode());
             });
+    }
+
+    void GameScene::continueCampaign(const CampaignProgress& progress)
+    {
+        auto scene = std::make_shared<MainMenuScene>(
+            sceneContext,
+            audioLookup,
+            static_cast<float>(sceneContext.viewport->width()),
+            static_cast<float>(sceneContext.viewport->height()));
+        scene->resumeCampaign(progress);
+        leaveFor(scene);
+    }
+
+    void GameScene::playCampaignEnding()
+    {
+        // Arm's ending or Core's by the player's side, then the credits,
+        // then the main menu (0x427247, 0x42729B). The original plays them
+        // only full-screen and goes straight to the menu in a window
+        // (0x41FCE6); RWE plays its films in either, as it does the intro.
+        std::vector<std::string> films{gameParameters.campaign->side == 0 ? "movies/3.zrb" : "movies/4.zrb", "movies/5.zrb"};
+        auto context = sceneContext;
+        auto lookup = audioLookup;
+        leaveFor(filmsThen(sceneContext, std::move(films), [context, lookup]() -> std::shared_ptr<Scene> {
+            return std::make_shared<MainMenuScene>(
+                context,
+                lookup,
+                static_cast<float>(context.viewport->width()),
+                static_cast<float>(context.viewport->height()));
+        }));
     }
 
     void GameScene::returnToMainMenu()

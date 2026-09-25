@@ -185,4 +185,25 @@ namespace rwe
         sceneContext.audioService->stopMusic();
         onFinish();
     }
+
+    std::shared_ptr<Scene> filmsThen(const SceneContext& sceneContext, std::vector<std::string> vfsPaths, std::function<std::shared_ptr<Scene>()> then)
+    {
+        for (std::size_t i = 0; i < vfsPaths.size(); ++i)
+        {
+            auto bytes = sceneContext.vfs->readFile(vfsPaths[i]);
+            if (!bytes)
+            {
+                continue;
+            }
+            std::vector<std::string> rest(vfsPaths.begin() + static_cast<std::ptrdiff_t>(i) + 1, vfsPaths.end());
+            auto context = sceneContext;
+            return std::make_shared<MovieScene>(
+                sceneContext,
+                std::move(*bytes),
+                [context, rest = std::move(rest), then = std::move(then)]() {
+                    context.sceneManager->setNextScene(filmsThen(context, rest, then));
+                });
+        }
+        return then();
+    }
 }

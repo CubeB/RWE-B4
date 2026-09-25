@@ -59,6 +59,18 @@ namespace rwe
 
         bgm = startBgm();
         goToMainMenu();
+
+        if (pendingCampaign)
+        {
+            // Carrying on from the screen after a campaign game: straight to
+            // the next briefing, with the single-player menu behind it.
+            campaignSide = pendingCampaign->side;
+            campaignDifficulty = pendingCampaign->difficulty;
+            goToSingleMenu();
+            auto progress = *pendingCampaign;
+            pendingCampaign.reset();
+            openCampaignMission(progress);
+        }
     }
 
     void MainMenuScene::render()
