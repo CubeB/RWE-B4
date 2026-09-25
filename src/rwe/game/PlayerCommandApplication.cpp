@@ -52,8 +52,32 @@ namespace rwe
             // arm is stowed and the nano spray ends; a later order to the same
             // target starts cleanly with StartBuilding.
             UnitBehaviorService(&simulation).interruptCurrentTask(unitId);
+
+            // A patrol keeps a move the unit is walking as the route's first
+            // waypoint instead of replacing the queue, so a move then a patrol
+            // patrols between the two points. UnitState::addOrder turns the
+            // move into a patrol node. Every other order replaces the queue.
+            std::optional<MoveOrder> move;
+            if (std::holds_alternative<PatrolOrder>(order) && !unit->get().orders.empty())
+            {
+                if (auto m = std::get_if<MoveOrder>(&unit->get().orders.back()))
+                {
+                    move = *m;
+                }
+            }
+
             unit->get().clearOrders();
+            if (move)
+            {
+                unit->get().addOrder(*move);
+            }
             unit->get().addOrder(order);
+            if (!move && std::holds_alternative<PatrolOrder>(order))
+            {
+                // A fresh patrol loops between the clicked point and where the
+                // unit stands now. One waypoint alone would park it.
+                unit->get().addOrder(PatrolOrder(unit->get().position));
+            }
         }
 
         void enqueueOrder(GameSimulation& simulation, UnitId unitId, const UnitOrder& order)

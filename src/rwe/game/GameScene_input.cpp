@@ -719,10 +719,10 @@ namespace rwe
                             }
                             else
                             {
-                                // A fresh patrol loops between the clicked point
-                                // and wherever the unit is standing now.
+                                // A move the unit is walking becomes the route's
+                                // first waypoint, otherwise its own position
+                                // does. See issueOrder.
                                 localPlayerIssueUnitOrder(selectedUnit, PatrolOrder(*coord));
-                                localPlayerEnqueueUnitOrder(selectedUnit, PatrolOrder(getUnit(selectedUnit).position));
                             }
                         }
                         if (!isShiftDown())

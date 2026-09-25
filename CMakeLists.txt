@@ -994,6 +994,7 @@ set(TEST_FILES
     src/rwe/game/infopanel.test.cpp
     src/rwe/game/orderbuttons.test.cpp
     src/rwe/game/PlayerCommand_hotkey.test.cpp
+    src/rwe/game/PlayerCommand_patrol.test.cpp
     src/rwe/game/PlayerCommand_speed.test.cpp
     src/rwe/game/EndGameStats.test.cpp
     src/rwe/game/dump_util.test.cpp
