@@ -124,8 +124,13 @@ namespace rwe
 
     CobEnvironment::Status CobExecutionContext::execute()
     {
+        unsigned int instructionsRun = 0;
         while (!thread->callStack.empty())
         {
+            if (++instructionsRun > MaxInstructionsPerRun)
+            {
+                throw std::runtime_error("script ran " + std::to_string(MaxInstructionsPerRun) + " instructions without yielding");
+            }
             auto instruction = nextInstruction();
             switch (static_cast<OpCode>(instruction))
             {
@@ -326,14 +331,14 @@ namespace rwe
 
                 case OpCode::WAIT_FOR_MOVE:
                 {
-                    auto object = nextInstruction();
+                    auto object = checkedPiece(nextInstruction());
                     auto axis = nextInstructionAsAxis();
 
                     return CobEnvironment::BlockedStatus(CobEnvironment::BlockedStatus::Move(object, axis));
                 }
                 case OpCode::WAIT_FOR_TURN:
                 {
-                    auto object = nextInstruction();
+                    auto object = checkedPiece(nextInstruction());
                     auto axis = nextInstructionAsAxis();
 
                     return CobEnvironment::BlockedStatus(CobEnvironment::BlockedStatus::Turn(object, axis));
@@ -355,8 +360,18 @@ namespace rwe
                     break;
 
                 case OpCode::SIGNAL:
-                    sendSignal();
-                    break;
+                    // Handed back to the scheduler rather than sent from
+                    // here, which is what SignalStatus is for: a thread whose
+                    // own mask the signal matches is killed by it, and a
+                    // killed thread must stop. Sent from inside this loop,
+                    // the signal took the thread off every queue and the loop
+                    // ran on regardless -- so a following sleep popped some
+                    // other thread off the ready queue in its place and filed
+                    // this one, which was about to be freed, as sleeping. A
+                    // mod's script could corrupt the heap that way, and so
+                    // could an honest one that set its mask before signalling
+                    // instead of after. Issue #75.
+                    return CobEnvironment::SignalStatus{popSignal()};
                 case OpCode::SET_SIGNAL_MASK:
                     setSignalMask();
                     break;
@@ -448,6 +463,19 @@ namespace rwe
     {
         auto b = pop();
         auto a = pop();
+        // Zero, where the original's unguarded idiv faults the process, and
+        // the one other quotient an int cannot hold wraps as the hardware's
+        // would. TOTALA-EXE.md §88. Issue #75.
+        if (b == 0)
+        {
+            push(0);
+            return;
+        }
+        if (b == -1)
+        {
+            push(static_cast<int>(0u - static_cast<unsigned int>(a)));
+            return;
+        }
         push(a / b);
     }
 
@@ -573,7 +601,11 @@ namespace rwe
     void CobExecutionContext::callScript()
     {
         auto functionId = nextInstruction();
-        auto paramCount = nextInstruction();
+        auto paramCount = checkedParamCount(nextInstruction());
+        if (thread->callStack.size() >= MaxCallDepth)
+        {
+            throw std::runtime_error("call-script nested deeper than " + std::to_string(MaxCallDepth));
+        }
 
         // Arguments were pushed first to last, so they pop off last to first:
         // fill the callee's locals from the back so local 0 is the first argument.
@@ -590,7 +622,7 @@ namespace rwe
     void CobExecutionContext::startScript()
     {
         auto functionId = nextInstruction();
-        auto paramCount = nextInstruction();
+        auto paramCount = checkedParamCount(nextInstruction());
 
         // Arguments were pushed first to last, so they pop off last to first:
         // fill the callee's locals from the back so local 0 is the first argument.
@@ -600,13 +632,32 @@ namespace rwe
             params[paramCount - 1 - i] = pop();
         }
 
+        if (env->threads.size() >= MaxThreadsPerUnit)
+        {
+            // The original has eight thread slots a unit and a full table
+            // simply starts nothing, so this is refused rather than fatal.
+            LOG_WARN << "start-script refused: the unit already runs " << env->threads.size() << " script threads";
+            return;
+        }
         env->createThread(functionId, params, thread->signalMask);
     }
 
-    void CobExecutionContext::sendSignal()
+    unsigned int CobExecutionContext::checkedParamCount(unsigned int paramCount) const
     {
-        auto signal = popSignal();
-        env->sendSignal(signal);
+        if (paramCount > MaxScriptParams)
+        {
+            throw std::runtime_error("call with " + std::to_string(paramCount) + " arguments");
+        }
+        return paramCount;
+    }
+
+    unsigned int CobExecutionContext::checkedPiece(unsigned int piece) const
+    {
+        if (piece >= env->script()->pieces.size())
+        {
+            throw std::runtime_error("piece " + std::to_string(piece) + " is not in the script");
+        }
+        return piece;
     }
 
     void CobExecutionContext::setSignalMask()
@@ -729,6 +780,10 @@ namespace rwe
 
     void CobExecutionContext::push(int val)
     {
+        if (thread->stack.size() >= MaxStackDepth)
+        {
+            throw std::runtime_error("stack deeper than " + std::to_string(MaxStackDepth));
+        }
         thread->stack.push(val);
     }
 

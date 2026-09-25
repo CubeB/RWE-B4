@@ -327,6 +327,10 @@ original in every case.
   the Hulk's file gives its capacity under the old 1.0 key, which the patched
   game ignores, leaving a ship that cannot load. RWE reads the old key, and
   says at load which units it had to.
+- **A broken unit script stops itself, not the game.** A script that divides by
+  zero gets 0, and one that runs away (endless loops, huge argument lists) or
+  otherwise faults loses that one script thread. The original crashes on the
+  first and hangs on the second.
 
 ---
 

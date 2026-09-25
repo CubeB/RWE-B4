@@ -17,11 +17,35 @@ namespace rwe
         CobThread* const thread;
 
     public:
+        /**
+         * Limits on what one script thread may do, none of which a script
+         * the original would run comes near. Past any of them execute()
+         * throws, and the scheduler kills the thread (sim/cob.cpp), as the
+         * original kills one that meets an opcode it does not know. Before
+         * these, a mod's script could ask for a sixteen-gigabyte argument
+         * list, recurse or push until memory ran out, or loop without ever
+         * yielding, and every peer of a network game hung or died together.
+         * Issue #75.
+         *
+         * The original gives a thread a 32-word window, so no function has
+         * more than that many arguments; the rest are generous multiples of
+         * anything a shipped script does between sleeps.
+         */
+        static constexpr unsigned int MaxScriptParams = 64;
+        static constexpr std::size_t MaxCallDepth = 256;
+        static constexpr std::size_t MaxStackDepth = 4096;
+        static constexpr unsigned int MaxInstructionsPerRun = 1000000;
+        static constexpr std::size_t MaxThreadsPerUnit = 256;
+
         CobExecutionContext(CobEnvironment* env, CobThread* thread);
 
         CobEnvironment::Status execute();
 
     private:
+        unsigned int checkedParamCount(unsigned int paramCount) const;
+
+        unsigned int checkedPiece(unsigned int piece) const;
+
         // arithmetic
         void add();
 
@@ -77,7 +101,6 @@ namespace rwe
         void startScript();
 
         // signalling
-        void sendSignal();
 
         void setSignalMask();
 

@@ -123,6 +123,18 @@ namespace rwe
         }
     }
 
+    void CobEnvironment::killThread(const CobThread* thread)
+    {
+        auto it = std::find_if(threads.begin(), threads.end(), [thread](const auto& t) { return t.get() == thread; });
+        if (it == threads.end())
+        {
+            return;
+        }
+        removeThreadFromQueues(thread);
+        deadThreads.push_back(std::move(*it));
+        threads.erase(it);
+    }
+
     std::optional<int> CobEnvironment::tryReapThread(const CobThread* thread)
     {
         auto it = std::find(finishedQueue.begin(), finishedQueue.end(), thread);

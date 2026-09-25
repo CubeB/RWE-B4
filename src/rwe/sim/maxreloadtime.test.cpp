@@ -8,6 +8,7 @@
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/WeaponDefinition.h>
+#include <rwe/sim/cob.h>
 #include <memory>
 #include <rwe/sim/sim_test_util.h>
 
@@ -337,5 +338,168 @@ namespace rwe
         // for the next thing to shoot at.
         tick(sim, 120);
         REQUIRE(readStatic(sim, *shipId, StaticHatchOpen) == 1);
+    }
+
+    TEST_CASE("a script fault costs its thread and never the game", "[cob]")
+    {
+        // Issue #75. Each of these used to end the game on every peer at
+        // once, and the first corrupted the heap on the way.
+        GameSimulation sim(makeFlatTerrain(16, 16), 0u, 0, 0);
+        auto owner = addPlayer(sim, "owner");
+        UnitDefinition d{};
+        sim.unitDefinitions["TESTUNIT"] = d;
+
+        auto script = std::make_shared<CobScript>();
+        script->staticVariableCount = 3;
+        script->pieces.push_back("base");
+
+        // 0: SignalsItself { set-signal-mask 1; signal 1; sleep 1; static1 = 1; }
+        beginFunction(*script, "SignalsItself");
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 1u);
+        push(*script, OpCode::SET_SIGNAL_MASK);
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 1u);
+        push(*script, OpCode::SIGNAL);
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 1u);
+        push(*script, OpCode::SLEEP);
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 1u);
+        push(*script, OpCode::POP_STATIC);
+        push(*script, 1u);
+        endFunction(*script, 0u);
+
+        // 1: Other { static0 = 1; }
+        beginFunction(*script, "Other");
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 1u);
+        push(*script, OpCode::POP_STATIC);
+        push(*script, 0u);
+        endFunction(*script, 0u);
+
+        // 2: DividesByZero { static2 = 7 / 0 + 5; }
+        beginFunction(*script, "DividesByZero");
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 7u);
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 0u);
+        push(*script, OpCode::DIV);
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 5u);
+        push(*script, OpCode::ADD);
+        push(*script, OpCode::POP_STATIC);
+        push(*script, 2u);
+        endFunction(*script, 0u);
+
+        // 3: HugeCall { call-script Other with 0xFFFFFFFF arguments; static1 = 2; }
+        beginFunction(*script, "HugeCall");
+        push(*script, OpCode::CALL_SCRIPT);
+        push(*script, 1u);
+        push(*script, 0xFFFFFFFFu);
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 2u);
+        push(*script, OpCode::POP_STATIC);
+        push(*script, 1u);
+        endFunction(*script, 0u);
+
+        // 4: Spins { top: jump top; }
+        const auto spinsAt = static_cast<uint32_t>(script->instructions.size());
+        beginFunction(*script, "Spins");
+        push(*script, OpCode::JUMP);
+        push(*script, spinsAt);
+
+        // 5: AsksForNoPiece { static1 = get PIECE_XZ(99); static0 = 3; }
+        beginFunction(*script, "AsksForNoPiece");
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 7u);
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 99u);
+        for (int i = 0; i < 3; ++i)
+        {
+            push(*script, OpCode::PUSH_CONSTANT);
+            push(*script, 0u);
+        }
+        push(*script, OpCode::GET_VALUE_WITH_ARGS);
+        push(*script, OpCode::POP_STATIC);
+        push(*script, 1u);
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 3u);
+        push(*script, OpCode::POP_STATIC);
+        push(*script, 0u);
+        endFunction(*script, 0u);
+
+        // 6: AsksForever { top: static2 = get ACTIVATION; jump top; }
+        const auto asksAt = static_cast<uint32_t>(script->instructions.size());
+        beginFunction(*script, "AsksForever");
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 1u);
+        push(*script, OpCode::GET_VALUE);
+        push(*script, OpCode::POP_STATIC);
+        push(*script, 2u);
+        push(*script, OpCode::JUMP);
+        push(*script, asksAt);
+
+        auto unitId = addUnitOfType(sim, "TESTUNIT", owner, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto& env = *sim.getUnitState(unitId).cobEnvironment;
+
+        SECTION("a thread that signals itself dies there, and the thread behind it still runs")
+        {
+            env.createThread(0u, {});
+            env.createThread(1u, {});
+            runUnitCobScripts(sim, unitId);
+            REQUIRE(env.getStatic(0) == 1);
+            for (int i = 0; i < 5; ++i)
+            {
+                sim.gameTime = GameTime(sim.gameTime.value + 1);
+                runUnitCobScripts(sim, unitId);
+            }
+            REQUIRE(env.getStatic(1) == 0);
+            REQUIRE(env.readyQueue.empty());
+            REQUIRE(env.sleepingQueue.empty());
+        }
+
+        SECTION("division by zero is zero")
+        {
+            env.createThread(2u, {});
+            runUnitCobScripts(sim, unitId);
+            REQUIRE(env.getStatic(2) == 5);
+        }
+
+        SECTION("an argument count past any real one kills the calling thread")
+        {
+            env.createThread(3u, {});
+            env.createThread(1u, {});
+            runUnitCobScripts(sim, unitId);
+            REQUIRE(env.getStatic(1) == 0);
+            REQUIRE(env.getStatic(0) == 1);
+        }
+
+        SECTION("asking where a piece the model does not have is answers 0, and the thread goes on")
+        {
+            env.setStatic(1, 42);
+            env.createThread(5u, {});
+            REQUIRE_NOTHROW(runUnitCobScripts(sim, unitId));
+            REQUIRE(env.getStatic(1) == 0);
+            REQUIRE(env.getStatic(0) == 3);
+        }
+
+        SECTION("a loop that asks for a value every pass, and so never runs out of instructions, is stopped")
+        {
+            env.createThread(6u, {});
+            env.createThread(1u, {});
+            runUnitCobScripts(sim, unitId);
+            REQUIRE(env.getStatic(0) == 1);
+            REQUIRE(env.readyQueue.empty());
+        }
+
+        SECTION("a loop that never yields is stopped")
+        {
+            env.createThread(4u, {});
+            env.createThread(1u, {});
+            runUnitCobScripts(sim, unitId);
+            REQUIRE(env.getStatic(0) == 1);
+            REQUIRE(env.readyQueue.empty());
+        }
     }
 }
