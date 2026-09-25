@@ -357,6 +357,41 @@ namespace rwe
         return sound;
     }
 
+    void AudioService::stopChannel(int channel)
+    {
+        if (channel >= 0)
+        {
+            haltChannel(channel);
+        }
+    }
+
+    std::optional<AudioService::SoundHandle> AudioService::loadSoundFromPath(const std::string& path)
+    {
+        // Kept apart from the sounds/ names, which are bare.
+        auto key = "path:" + path;
+        if (auto it = soundBank.find(key); it != soundBank.end())
+        {
+            return it->second;
+        }
+
+        auto bytes = fileSystem->readFile(path);
+        if (!bytes)
+        {
+            return std::nullopt;
+        }
+
+        auto rwOps = sdlContext->rwFromConstMem(bytes->data(), bytes->size());
+        auto audio = sdlMixerContext->loadAudioIO(rwOps.get(), true, false);
+        if (!audio)
+        {
+            return std::nullopt;
+        }
+
+        std::shared_ptr<MIX_Audio> sound(audio.release(), [](MIX_Audio* a) { MIX_DestroyAudio(a); });
+        soundBank[key] = sound;
+        return sound;
+    }
+
     void AudioService::reserveChannels(unsigned int count)
     {
         if (count > tracks.size())
