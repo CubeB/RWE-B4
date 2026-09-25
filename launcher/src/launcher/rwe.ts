@@ -128,50 +128,67 @@ function serializeRweController(controller: RweArgsPlayerController): string {
   }
 }
 
-function serializeRweArgs(args: RweArgs): string[] {
-  const out = [];
+/**
+ * The engine's arguments, every one that carries a value written as a single
+ * `--key=value` element.
+ *
+ * The engine's parser (OpaqueArgs) takes an element that starts with `--` as
+ * a new option, so `--map` followed by a separate value that itself began
+ * with `--` made `--map` a flag and the value an option of its own choosing.
+ * Map names, player names and the rejoin tick come from the lobby, which is
+ * other people, so a room's map name could open a file of its owner's
+ * choosing for writing on every player's machine. Joined to its key, a value
+ * is split only at the first `=` and can only ever be that key's value.
+ * Issue #75.
+ */
+export function serializeRweArgs(args: RweArgs): string[] {
+  const out: string[] = [];
+  const option = (key: string, value: string) => {
+    out.push(`--${key}=${value}`);
+  };
   if (args.dataPaths) {
     for (const path of args.dataPaths) {
-      out.push("--data-path", path);
+      option("data-path", path);
     }
   }
   if (args.map !== undefined) {
-    out.push("--map", args.map);
+    option("map", args.map);
   }
   if (args.interface !== undefined) {
-    out.push("--interface", args.interface);
+    option("interface", args.interface);
   }
   if (args.port !== undefined) {
-    out.push("--port", args.port.toString());
+    option("port", args.port.toString());
   }
   if (args.bridge) {
     out.push("--bridge");
   }
   if (args.recordReplay !== undefined) {
-    out.push("--record-replay", args.recordReplay);
+    option("record-replay", args.recordReplay);
   }
   if (args.recordDemo !== undefined) {
-    out.push("--record-demo", args.recordDemo);
+    option("record-demo", args.recordDemo);
   }
   if (args.rejoinFile !== undefined && args.rejoinTick !== undefined) {
-    out.push("--rejoin", args.rejoinFile);
-    out.push("--rejoin-tick", args.rejoinTick.toString());
+    option("rejoin", args.rejoinFile);
+    option("rejoin-tick", args.rejoinTick.toString());
   }
   if (args.players) {
     for (const p of args.players) {
       switch (p.state) {
         case "filled": {
           const controllerString = serializeRweController(p.controller);
-          out.push(
-            "--player",
-            `${p.name.replace(";", "_")};${controllerString};${p.side};${
+          // Every semicolon, not just the first: it is the field separator.
+          option(
+            "player",
+            `${p.name.replace(/;/g, "_")};${controllerString};${p.side};${
               p.color
             }`
           );
           break;
         }
         case "empty": {
-          out.push("--player", "empty");
+          option("player", "empty");
           break;
         }
         default:

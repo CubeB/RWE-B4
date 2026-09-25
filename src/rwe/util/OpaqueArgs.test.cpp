@@ -53,6 +53,31 @@ namespace rwe
             REQUIRE(oa.getBool("fullscreen") == false);
         }
 
+        SECTION("a --key=value element is that key's value, whatever the value says")
+        {
+            // What the launcher relies on (issue #75): lobby strings reach the
+            // engine as --map=..., --player=... and --rejoin-tick=..., and a
+            // value that begins with -- or holds an = must not become an
+            // option of its own. Written as two elements, it would: see the
+            // next case.
+            ArgBuilder args{"rwe", "--map=--log=/tmp/x", "--player=--load=y;Human;ARM;0"};
+            OpaqueArgs oa;
+            oa.parse(args.argc(), args.argv());
+            REQUIRE(oa.getString("map", "") == "--log=/tmp/x");
+            REQUIRE(oa.getMulti("player") == std::vector<std::string>{"--load=y;Human;ARM;0"});
+            REQUIRE(oa.getString("log", "none") == "none");
+            REQUIRE(oa.getString("load", "none") == "none");
+        }
+
+        SECTION("a separate value that begins with -- is read as an option, which is why the launcher never sends one")
+        {
+            ArgBuilder args{"rwe", "--map", "--log=/tmp/x"};
+            OpaqueArgs oa;
+            oa.parse(args.argc(), args.argv());
+            REQUIRE(oa.getString("map", "") == "true");
+            REQUIRE(oa.getString("log", "none") == "/tmp/x");
+        }
+
         SECTION("parses bool flags")
         {
             ArgBuilder args{"rwe", "--fullscreen"};

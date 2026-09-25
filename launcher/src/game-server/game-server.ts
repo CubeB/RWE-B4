@@ -4,6 +4,7 @@ import type { Namespace, Socket } from "socket.io";
 import { ModFingerprint, checkArchiveAgreement } from "../common/archives";
 import { assertNever, choose, findAndMap, getAddr } from "../common/util";
 import * as protocol from "./protocol";
+import * as valid from "./validation";
 
 type PlayerSide = "ARM" | "CORE";
 type PlayerColor = number;
@@ -90,7 +91,19 @@ export interface Room {
    * say yes. See rejoinHostFor.
    */
   droppedPlayerIds: number[];
+
+  /** When the room was made, so one nobody ever joins can be cleared away. */
+  createdAt: number;
 }
+
+/**
+ * Rooms at most, and how long one may stand with nobody in it. A room is
+ * deleted when its last player leaves, but one that nobody ever joined had no
+ * last player, and creating them was unauthenticated and unlimited: a loop of
+ * create-game grew the server without bound. Issue #75.
+ */
+const MaxRooms = 1000;
+const UnjoinedRoomLifetimeMs = 5 * 60 * 1000;
 
 /**
  * The player whose game may let `playerId` back in: the lowest-numbered slot
@@ -162,14 +175,36 @@ export class GameServer {
     return this.rooms.entries();
   }
 
-  createRoom(description: string, maxPlayers: number): GameCreatedInfo {
+  /**
+   * A room, or nothing if the request is not one the server will honour: a
+   * description that is not a short string, a seat count outside 1 to 10,
+   * or no room left under MaxRooms once the unjoined ones have been swept.
+   */
+  createRoom(
+    rawDescription: unknown,
+    rawMaxPlayers: unknown
+  ): GameCreatedInfo | undefined {
+    const description = valid.lobbyString(
+      rawDescription,
+      valid.MaxDescriptionLength
+    );
+    const maxPlayers = valid.intInRange(rawMaxPlayers, 1, valid.MaxPlayers);
+    if (description === undefined || maxPlayers === undefined) {
+      this.log("Refused to create a room: bad description or player count");
+      return undefined;
+    }
+    this.sweepUnjoinedRooms();
+    if (this.rooms.size >= MaxRooms) {
+      this.log("Refused to create a room: the server is full");
+      return undefined;
+    }
     const id = this.nextRoomId++;
     const adminKey = generateAdminKey();
-    const players: PlayerSlot[] = new Array(10);
+    const players: PlayerSlot[] = new Array(valid.MaxPlayers);
     for (let i = 0; i < maxPlayers; ++i) {
       players[i] = { state: "empty" };
     }
-    for (let i = maxPlayers; i < 10; ++i) {
+    for (let i = maxPlayers; i < valid.MaxPlayers; ++i) {
       players[i] = { state: "closed" };
     }
     this.rooms.set(id, {
@@ -179,9 +214,23 @@ export class GameServer {
       adminState: { state: "unclaimed", adminKey },
       activeMods: [],
       droppedPlayerIds: [],
+      createdAt: Date.now(),
     });
 
     return { gameId: id, adminKey };
+  }
+
+  /** Deletes rooms that nobody has joined within UnjoinedRoomLifetimeMs. */
+  private sweepUnjoinedRooms() {
+    const now = Date.now();
+    for (const [id, room] of Array.from(this.rooms.entries())) {
+      if (
+        room.nextPlayerId === 1 &&
+        now - room.createdAt > UnjoinedRoomLifetimeMs
+      ) {
+        this.deleteRoom(id);
+      }
+    }
   }
 
   deleteRoom(id: number) {
@@ -218,14 +267,51 @@ export class GameServer {
     this.ns.on("connection", (socket: Socket) => {
       const address = getAddr(socket, this.reverseProxy);
       this.log(`Received connection from ${address}`);
-      socket.on(protocol.Handshake, (data: protocol.HandshakePayload) => {
-        this.log(`Received handshake from ${address} with name "${data.name}"`);
 
-        const roomId = data.gameId;
+      // Every handler runs inside this, so that a message it did not expect
+      // costs that message and not the process. socket.io calls listeners
+      // from process.nextTick, where a throw is an uncaught exception and
+      // takes the master server and every lobby down with it. Issue #75.
+      const on = (event: string, handler: (...args: unknown[]) => void) => {
+        socket.on(event, (...args: unknown[]) => {
+          try {
+            handler(...args);
+          } catch (e) {
+            this.log(`Error handling "${event}" from ${address}: ${e}`);
+          }
+        });
+      };
+
+      on(protocol.Handshake, (rawData: unknown) => {
+        const data = valid.payload(rawData);
+        const name = valid.playerName(data?.name);
+        const roomId = valid.intInRange(
+          data?.gameId,
+          1,
+          Number.MAX_SAFE_INTEGER
+        );
+        const ipv4Address = valid.ipv4Address(data?.ipv4Address);
+        const installedMods = valid.stringList(
+          data?.installedMods,
+          valid.MaxMods,
+          valid.MaxMapNameLength
+        );
+        if (
+          name === undefined ||
+          roomId === undefined ||
+          ipv4Address === undefined ||
+          installedMods === undefined
+        ) {
+          this.log(`Rejected a malformed handshake from ${address}`);
+          socket.disconnect();
+          return;
+        }
+        this.log(`Received handshake from ${address} with name "${name}"`);
+
         const room = this.rooms.get(roomId);
         if (!room) {
           this.log(
-            `Received handshake to connect to room ${data.gameId}, but room does not exist`
+            `Received handshake to connect to room ${roomId}, but room does not exist`
           );
           socket.disconnect();
           return;
@@ -245,20 +331,20 @@ export class GameServer {
           state: "filled",
           player: {
             id: playerId,
-            name: data.name,
+            name,
             host: address,
-            ipv4Address: data.ipv4Address,
+            ipv4Address,
             side: "ARM",
             color: 0,
             team: 0,
             ready: false,
-            installedMods: data.installedMods,
+            installedMods,
             archives: undefined,
           },
         };
 
         if (room.adminState.state === "unclaimed") {
-          if (data.adminKey === room.adminState.adminKey) {
+          if (data?.adminKey === room.adminState.adminKey) {
             room.adminState = { state: "claimed", adminPlayerId: playerId };
           }
         }
@@ -279,8 +365,8 @@ export class GameServer {
 
         const playerJoined: protocol.PlayerJoinedPayload = {
           playerId: playerId,
-          name: data.name,
-          installedMods: data.installedMods,
+          name,
+          installedMods,
         };
 
         this.sendToRoom(roomId, protocol.PlayerJoined, playerJoined);
@@ -288,64 +374,52 @@ export class GameServer {
         socket.join(this.getRoomString(roomId));
         socket.join(this.getPlayerString(roomId, playerId));
 
-        socket.on(protocol.ChatMessage, (data: protocol.ChatMessagePayload) => {
-          this.onChatMessage(roomId, playerId, data);
+        on(protocol.ChatMessage, (message: unknown) => {
+          this.onChatMessage(roomId, playerId, message);
         });
-        socket.on(protocol.ChangeSide, (data: protocol.ChangeSidePayload) => {
-          this.onChangeSide(roomId, playerId, data);
+        on(protocol.ChangeSide, (d: unknown) => {
+          this.onChangeSide(roomId, playerId, d);
         });
-        socket.on(protocol.ChangeTeam, (data: protocol.ChangeTeamPayload) => {
-          this.onChangeTeam(roomId, playerId, data);
+        on(protocol.ChangeTeam, (d: unknown) => {
+          this.onChangeTeam(roomId, playerId, d);
         });
-        socket.on(protocol.ChangeColor, (data: protocol.ChangeColorPayload) => {
-          this.onChangeColor(roomId, playerId, data);
+        on(protocol.ChangeColor, (d: unknown) => {
+          this.onChangeColor(roomId, playerId, d);
         });
-        socket.on(protocol.Ready, (data: protocol.ReadyPayload) => {
-          this.onPlayerReady(roomId, playerId, data);
+        on(protocol.Ready, (value: unknown) => {
+          this.onPlayerReady(roomId, playerId, value);
         });
-        socket.on(protocol.SetArchives, (data: protocol.SetArchivesPayload) => {
-          this.onSetArchives(roomId, playerId, data);
+        on(protocol.SetArchives, (d: unknown) => {
+          this.onSetArchives(roomId, playerId, d);
         });
-        socket.on(protocol.OpenSlot, (data: protocol.OpenSlotPayload) => {
-          this.onOpenSlot(roomId, playerId, data);
+        on(protocol.OpenSlot, (d: unknown) => {
+          this.onOpenSlot(roomId, playerId, d);
         });
-        socket.on(protocol.CloseSlot, (data: protocol.CloseSlotPayload) => {
-          this.onCloseSlot(roomId, playerId, data);
+        on(protocol.CloseSlot, (d: unknown) => {
+          this.onCloseSlot(roomId, playerId, d);
         });
-        socket.on(
-          protocol.SetActiveMods,
-          (data: protocol.SetActiveModsPayload) => {
-            this.onSetActiveMods(roomId, playerId, data);
-          }
-        );
-        socket.on(protocol.ChangeMap, (data: protocol.ChangeMapPayload) => {
-          this.onChangeMap(roomId, playerId, data);
+        on(protocol.SetActiveMods, (d: unknown) => {
+          this.onSetActiveMods(roomId, playerId, d);
         });
-        socket.on(protocol.RequestStartGame, () => {
+        on(protocol.ChangeMap, (d: unknown) => {
+          this.onChangeMap(roomId, playerId, d);
+        });
+        on(protocol.RequestStartGame, () => {
           this.onPlayerRequestStartGame(roomId, playerId);
         });
-        socket.on(
-          protocol.PlayerDroppedFromGame,
-          (data: protocol.PlayerDroppedFromGamePayload) => {
-            this.onPlayerDroppedFromGame(roomId, data);
-          }
-        );
-        socket.on(protocol.RequestRejoin, () => {
+        on(protocol.PlayerDroppedFromGame, (d: unknown) => {
+          this.onPlayerDroppedFromGame(roomId, playerId, d);
+        });
+        on(protocol.RequestRejoin, () => {
           this.onRequestRejoin(roomId, playerId);
         });
-        socket.on(
-          protocol.RejoinBundle,
-          (data: protocol.RejoinBundlePayload) => {
-            this.onRejoinBundle(roomId, playerId, data);
-          }
-        );
-        socket.on(
-          protocol.RejoinRefused,
-          (data: protocol.RejoinRefusedPayload) => {
-            this.onRejoinRefused(roomId, playerId, data);
-          }
-        );
-        socket.on("disconnect", () => {
+        on(protocol.RejoinBundle, (d: unknown) => {
+          this.onRejoinBundle(roomId, playerId, d);
+        });
+        on(protocol.RejoinRefused, (d: unknown) => {
+          this.onRejoinRefused(roomId, playerId, d);
+        });
+        on("disconnect", () => {
           this.onDisconnected(roomId, playerId);
         });
       });
@@ -382,12 +456,32 @@ export class GameServer {
 
   private onPlayerDroppedFromGame(
     roomId: number,
-    data: protocol.PlayerDroppedFromGamePayload
+    reporterId: number,
+    rawData: unknown
   ) {
     const room = this.rooms.get(roomId);
     if (!room) {
       return;
     }
+
+    // A player this room has actually seated, and not the one reporting:
+    // the list decides who may ask to rejoin and who is asked to let them
+    // in, so an arbitrary id from any client used to be enough to poison it.
+    const raw = valid.payload(rawData);
+    const droppedId = valid.intInRange(raw?.playerId, 1, room.nextPlayerId - 1);
+    const tick = valid.tick(raw?.tick);
+    if (
+      droppedId === undefined ||
+      tick === undefined ||
+      droppedId === reporterId
+    ) {
+      this.log(`Ignoring a malformed drop report from player ${reporterId}`);
+      return;
+    }
+    const data: protocol.PlayerDroppedFromGamePayload = {
+      playerId: droppedId,
+      tick,
+    };
 
     // Said by every peer that is still in the game, so it arrives once per
     // peer and is remembered once. The tick they agreed on is the same tick,
@@ -436,15 +530,31 @@ export class GameServer {
     this.sendToPlayer(roomId, host, protocol.RejoinRequested, payload);
   }
 
-  private onRejoinBundle(
-    roomId: number,
-    playerId: number,
-    data: protocol.RejoinBundlePayload
-  ) {
+  private onRejoinBundle(roomId: number, playerId: number, rawData: unknown) {
     const room = this.rooms.get(roomId);
     if (!room) {
       return;
     }
+
+    // The tick goes on the returning player's engine command line, so it is
+    // held to being a tick; the recording itself is the engine's to judge.
+    const raw = valid.payload(rawData);
+    const targetId = valid.intInRange(raw?.playerId, 1, room.nextPlayerId - 1);
+    const tick = valid.tick(raw?.tick);
+    const bytes = raw?.data;
+    if (
+      targetId === undefined ||
+      tick === undefined ||
+      !(bytes instanceof ArrayBuffer || ArrayBuffer.isView(bytes))
+    ) {
+      this.log(`Ignoring a malformed rejoin bundle from player ${playerId}`);
+      return;
+    }
+    const data: protocol.RejoinBundlePayload = {
+      playerId: targetId,
+      tick,
+      data: bytes as ArrayBuffer,
+    };
 
     if (rejoinHostFor(room, data.playerId) !== playerId) {
       this.log(
@@ -466,15 +576,19 @@ export class GameServer {
     this.sendToPlayer(roomId, data.playerId, protocol.RejoinBundle, data);
   }
 
-  private onRejoinRefused(
-    roomId: number,
-    playerId: number,
-    data: protocol.RejoinRefusedPayload
-  ) {
+  private onRejoinRefused(roomId: number, playerId: number, rawData: unknown) {
     const room = this.rooms.get(roomId);
     if (!room) {
       return;
     }
+
+    const raw = valid.payload(rawData);
+    const targetId = valid.intInRange(raw?.playerId, 1, room.nextPlayerId - 1);
+    const reason = valid.lobbyString(raw?.reason, valid.MaxReasonLength);
+    if (targetId === undefined || reason === undefined) {
+      return;
+    }
+    const data: protocol.RejoinRefusedPayload = { playerId: targetId, reason };
 
     if (rejoinHostFor(room, data.playerId) !== playerId) {
       return;
@@ -483,16 +597,16 @@ export class GameServer {
     this.sendToPlayer(roomId, data.playerId, protocol.RejoinRefused, data);
   }
 
-  private onChatMessage(roomId: number, playerId: number, message: string) {
+  private onChatMessage(roomId: number, playerId: number, rawMessage: unknown) {
+    const message = valid.lobbyString(rawMessage, valid.MaxChatLength);
+    if (message === undefined) {
+      return;
+    }
     const payload: protocol.PlayerChatMessagePayload = { playerId, message };
     this.sendToRoom(roomId, protocol.PlayerChatMessage, payload);
   }
 
-  private onChangeSide(
-    roomId: number,
-    playerId: number,
-    data: protocol.ChangeSidePayload
-  ) {
+  private onChangeSide(roomId: number, playerId: number, rawData: unknown) {
     const room = this.rooms.get(roomId);
     if (!room) {
       throw new Error("onChangeSide triggered for non-existent room");
@@ -501,19 +615,19 @@ export class GameServer {
     if (!player) {
       throw new Error(`Failed to find player ${playerId}`);
     }
-    player.side = data.side;
+    const side = valid.side(valid.payload(rawData)?.side);
+    if (side === undefined) {
+      return;
+    }
+    player.side = side;
     const payload: protocol.PlayerChangedSidePayload = {
       playerId,
-      side: data.side,
+      side,
     };
     this.sendToRoom(roomId, protocol.PlayerChangedSide, payload);
   }
 
-  private onChangeTeam(
-    roomId: number,
-    playerId: number,
-    data: protocol.ChangeTeamPayload
-  ) {
+  private onChangeTeam(roomId: number, playerId: number, rawData: unknown) {
     const room = this.rooms.get(roomId);
     if (!room) {
       throw new Error("onChangeTeam triggered for non-existent room");
@@ -522,40 +636,45 @@ export class GameServer {
     if (!player) {
       throw new Error(`Failed to find player ${playerId}`);
     }
-    player.team = data.team;
+    // No team is a choice as well: the menu's first entry is blank.
+    const rawTeam = valid.payload(rawData)?.team;
+    const team =
+      rawTeam === undefined
+        ? undefined
+        : valid.intInRange(rawTeam, 0, valid.MaxPlayers);
+    if (rawTeam !== undefined && team === undefined) {
+      return;
+    }
+    player.team = team;
     const payload: protocol.PlayerChangedTeamPayload = {
       playerId,
-      team: data.team,
+      team,
     };
     this.sendToRoom(roomId, protocol.PlayerChangedTeam, payload);
   }
 
-  private onChangeColor(
-    roomId: number,
-    playerId: number,
-    data: protocol.ChangeColorPayload
-  ) {
+  private onChangeColor(roomId: number, playerId: number, rawData: unknown) {
     const room = this.rooms.get(roomId);
     if (!room) {
-      throw new Error("onChangeSide triggered for non-existent room");
+      throw new Error("onChangeColor triggered for non-existent room");
     }
     const player = findPlayer(room.players, playerId);
     if (!player) {
       throw new Error(`Failed to find player ${playerId}`);
     }
-    player.color = data.color;
+    const color = valid.color(valid.payload(rawData)?.color);
+    if (color === undefined) {
+      return;
+    }
+    player.color = color;
     const payload: protocol.PlayerChangedColorPayload = {
       playerId,
-      color: data.color,
+      color,
     };
     this.sendToRoom(roomId, protocol.PlayerChangedColor, payload);
   }
 
-  private onOpenSlot(
-    roomId: number,
-    playerId: number,
-    data: protocol.OpenSlotPayload
-  ) {
+  private onOpenSlot(roomId: number, playerId: number, rawData: unknown) {
     const room = this.rooms.get(roomId);
     if (!room) {
       throw new Error("onOpenSlot triggered for non-existent room");
@@ -569,7 +688,12 @@ export class GameServer {
       );
       return;
     }
-    const state = room.players[data.slotId].state;
+    const slotId = valid.slotId(valid.payload(rawData)?.slotId);
+    if (slotId === undefined) {
+      return;
+    }
+    const data = { slotId };
+    const state = room.players[slotId].state;
     switch (state) {
       case "filled":
         this.log(
@@ -589,11 +713,7 @@ export class GameServer {
     }
   }
 
-  private onCloseSlot(
-    roomId: number,
-    playerId: number,
-    data: protocol.CloseSlotPayload
-  ) {
+  private onCloseSlot(roomId: number, playerId: number, rawData: unknown) {
     const room = this.rooms.get(roomId);
     if (!room) {
       throw new Error("onCloseSlot triggered for non-existent room");
@@ -607,7 +727,12 @@ export class GameServer {
       );
       return;
     }
-    const state = room.players[data.slotId].state;
+    const slotId = valid.slotId(valid.payload(rawData)?.slotId);
+    if (slotId === undefined) {
+      return;
+    }
+    const data = { slotId };
+    const state = room.players[slotId].state;
     switch (state) {
       case "filled":
         this.log(
@@ -627,34 +752,34 @@ export class GameServer {
     }
   }
 
-  onSetActiveMods(
-    roomId: number,
-    playerId: number,
-    data: protocol.SetActiveModsPayload
-  ) {
+  onSetActiveMods(roomId: number, playerId: number, rawData: unknown) {
     const room = this.rooms.get(roomId);
     if (!room) {
-      throw new Error("onCloseSlot triggered for non-existent room");
+      throw new Error("onSetActiveMods triggered for non-existent room");
     }
     if (
       room.adminState.state !== "claimed" ||
       room.adminState.adminPlayerId !== playerId
     ) {
       this.log(
-        `Received close-slot from player ${playerId}, but that player is not admin!`
+        `Received set-active-mods from player ${playerId}, but that player is not admin!`
       );
       return;
     }
-    const payload: protocol.ActiveModsChangedPayload = { mods: data.mods };
+    const mods = valid.stringList(
+      valid.payload(rawData)?.mods,
+      valid.MaxMods,
+      valid.MaxMapNameLength
+    );
+    if (mods === undefined) {
+      return;
+    }
+    const payload: protocol.ActiveModsChangedPayload = { mods };
     this.sendToRoom(roomId, protocol.ActiveModsChanged, payload);
-    room.activeMods = data.mods;
+    room.activeMods = mods;
   }
 
-  private onChangeMap(
-    roomId: number,
-    playerId: number,
-    data: protocol.ChangeMapPayload
-  ) {
+  private onChangeMap(roomId: number, playerId: number, rawData: unknown) {
     const room = this.rooms.get(roomId);
     if (!room) {
       throw new Error("onChangeMap triggered for non-existent room");
@@ -668,12 +793,25 @@ export class GameServer {
       );
       return;
     }
-    room.mapName = data.mapName;
-    const payload: protocol.MapChangedPayload = { mapName: data.mapName };
+    // Every player's engine is launched with this map name, so it is held
+    // to being a short line of text.
+    const mapName = valid.lobbyString(
+      valid.payload(rawData)?.mapName,
+      valid.MaxMapNameLength
+    );
+    if (mapName === undefined) {
+      return;
+    }
+    room.mapName = mapName;
+    const payload: protocol.MapChangedPayload = { mapName };
     this.sendToRoom(roomId, protocol.MapChanged, payload);
   }
 
-  private onPlayerReady(roomId: number, playerId: number, value: boolean) {
+  private onPlayerReady(roomId: number, playerId: number, rawValue: unknown) {
+    if (typeof rawValue !== "boolean") {
+      return;
+    }
+    const value = rawValue;
     const room = this.rooms.get(roomId);
     if (!room) {
       throw new Error("onPlayerReady triggered for non-existent room");
@@ -687,11 +825,7 @@ export class GameServer {
     this.sendToRoom(roomId, protocol.PlayerReady, payload);
   }
 
-  private onSetArchives(
-    roomId: number,
-    playerId: number,
-    data: protocol.SetArchivesPayload
-  ) {
+  private onSetArchives(roomId: number, playerId: number, rawData: unknown) {
     const room = this.rooms.get(roomId);
     if (!room) {
       throw new Error("onSetArchives triggered for non-existent room");
@@ -700,10 +834,14 @@ export class GameServer {
     if (!player) {
       throw new Error(`Failed to find player ${playerId}`);
     }
-    player.archives = data.mods;
+    const mods = valid.modFingerprints(valid.payload(rawData)?.mods);
+    if (mods === undefined) {
+      return;
+    }
+    player.archives = mods;
     const payload: protocol.PlayerArchivesChangedPayload = {
       playerId,
-      mods: data.mods,
+      mods,
     };
     this.sendToRoom(roomId, protocol.PlayerArchivesChanged, payload);
   }
