@@ -537,12 +537,22 @@ quirks of the original that RWE reproduces although they look like defects.
   the route was built for. That number is chosen to sit well outside the
   eight units an attack's stand-off point drifts by when it follows a target,
   and to be far short of the distances a new order is given over, so a new
-  order still takes its straight-line stand-in on the tick it arrives. A
-  configuration that never repaths is byte-identical; over four Crystal Maze
-  seeds the change halved searches and first-pass walk steps a tick, cut
-  expansions a tick by a quarter to a half, and took `expansionsAbandoned`
-  down by 99%. Recorded here because the tolerance and the queue in place of
-  the original's round robin are RWE's, and because the change is
+  order still takes its straight-line stand-in on the tick it arrives.
+
+  Measured on Crystal Maze seeds 7 and 8, tick for tick over the window both
+  games reach -- the change ends a game at a different tick, so whole-run
+  totals are not comparable -- searches per tick fall by a third to a half,
+  expansions per tick by about a third, the first-pass walk steps by about a
+  third, and `expansionsAbandoned` by 86-95%. The saving is in the throwaway
+  searches and the stand-in walk. Since #272 counts the terrain-region
+  early-out apart from exhausted searches, the expensive A\* `exhausted` tail
+  is roughly flat, and a third to a half of the figure the issue read as that
+  tail was the cheap early-out, which spends no expansions. The `path_bench`
+  scenarios that do not repath (`spread`, `crowd`) keep identical pathfinder
+  counters, though their hashes move because the new fields are hashed;
+  `pressed-water` and `pressed-wall` do repath and show the reduced counts
+  too. Recorded here because the tolerance and the queue in place of the
+  original's round robin are RWE's, and because the change is
   replay-breaking.
 
 - **A transport's capacity is read from the 1.0 key when the 3.1 one is

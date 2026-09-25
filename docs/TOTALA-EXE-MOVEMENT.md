@@ -961,11 +961,18 @@ through one rate-limited ask. A goal that has moved less than
 `PathGoalRetargetTolerance` (64 world units, RWE's number) from the one the
 route was built for keeps that route while it waits, which is the same idea as
 `SetGoal`'s ladder -- keep a path whose tail already answers the new goal -- at
-a distance RWE picked rather than one the original states. Over four Crystal
-Maze seeds this halved searches and the first-pass walk per tick, cut
-expansions per tick by a quarter to a half, and took `expansionsAbandoned` down
-by 99%; the `path_bench` spread and `pressed-water` scenarios, which never
-repath, come out byte-identical.
+a distance RWE picked rather than one the original states. On Crystal Maze
+seeds 7 and 8, compared tick for tick over the window both games reach (the
+change ends a game at a different tick, so whole-run totals are not
+comparable), this cuts searches per tick by a third to a half, expansions and
+the first-pass walk per tick by about a third each, and `expansionsAbandoned`
+by 86-95%. Since #272 counts the terrain-region early-out apart from exhausted
+searches, the expensive A\* tail is roughly flat: a third to a half of what
+the issue called `exhausted` is that cheap early-out, which spends no
+expansions. The `path_bench` `spread` and `crowd` scenarios keep identical
+pathfinder counters, though their hashes move because the new fields are
+hashed; `pressed-water` and `pressed-wall` do repath and show the reduced
+counts too.
 
 Repathing has exactly three triggers (`0x44F239`): a new or changed goal, the
 path running down to fewer than two waypoints, and the mover's "blocked" bit.
