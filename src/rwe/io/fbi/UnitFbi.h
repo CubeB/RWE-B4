@@ -167,6 +167,15 @@ namespace rwe
         bool canFly;
         /** How many units it can carry; 0 unless it is a transport. */
         unsigned int transportCapacity;
+        /**
+         * The 1.0 spelling of transportCapacity. The 3.1 exe does not read it
+         * (its string table does not contain the key, TOTALA-EXE-DATA.md
+         * §30), and the 3.1 patch rewrote the shipped FBIs to the new key --
+         * but an install without the patch data still has the old files, and
+         * totala1.hpi's ARMTSHIP names only this. RWE reads it when the new
+         * key is absent (TOTALA-EXE.md §88); see parseUnitDefinition.
+         */
+        unsigned int transportMaxUnits;
         /** Largest footprint it can carry (TA: the unit's footprint must not exceed this). */
         unsigned int transportSize;
 

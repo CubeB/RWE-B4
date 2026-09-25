@@ -113,6 +113,7 @@ namespace rwe
 
         tdf.readOrDefault("CanFly", u.canFly);
         tdf.readOrDefault("TransportCapacity", u.transportCapacity);
+        tdf.readOrDefault("TransportMaxUnits", u.transportMaxUnits);
         tdf.readOrDefault("TransportSize", u.transportSize);
         tdf.readOrDefault("CantBeTransported", u.cantBeTransported);
         tdf.readOrDefault("IsAirBase", u.isAirBase);

@@ -142,7 +142,11 @@ Three corrections to the folk numbers the task brief carried:
   rule does the limiting.)
 
 A transport with no `transportcapacity` key parses as capacity 0 and can never
-be ordered to load (0 < 0 fails) -- mods beware.
+be ordered to load (0 < 0 fails) -- mods beware. RWE departs from this on
+purpose (§88): it reads `transportmaxunits` when `transportcapacity` is
+absent, which is what an install without `rev31.gp3` needs for the Hulk,
+falls back to six for a ship and one for an aircraft when neither key is
+there, and warns at load in both cases.
 
 ---
 
