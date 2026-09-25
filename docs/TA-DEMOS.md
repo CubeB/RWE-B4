@@ -2948,11 +2948,48 @@ named exception moving, or on nothing to score. It needs the episodes with
 `--all` and `--emit-resources` beside them; `docs/TA-DEMOS.md`, "What a
 stalled settle costs a factory".
 
+### `tools/tad-storagecapacity.py`
+
+the reference for the storage oracle (#229). The model is the one the
+`[economy][corpus]` cases assert: a player's capacity is the lobby's base plus
+each **finished** unit's own `MetalStorage`/`EnergyStorage`, summed in float32
+in completion order, with a nanoframe contributing nothing. The base is read
+off the player's first `0x28`, so a recording that joined a game in progress
+has no base and is not scored. Each player is walked from its first sample to
+the first one the sum stops explaining. Where that is, is sorted into two
+kinds:
+
+- **A loss.** The capacity falls below the prediction and stays there, because
+  a storage unit died or was captured, which the build stream does not record.
+  This is a counted rejection.
+- **A move.** The capacity rises above the prediction, or dips below and is
+  explained again on the next sample. No death, capture or unfinished frame
+  can do either. This is the scored failure.
+
+The other rejections, all counted, are a demo recorded on another data set, a
+watcher, a recording that joined in progress, and a build the unit table cannot
+name. It needs the episodes with `--all`, because a build rejected as a
+duration still holds its storage, and `--emit-resources` beside them. Exits
+non-zero on a move, or on nothing to score.
+
+    ./build/tad_episodes --dir ~/ta-demos --units ~/ta-mods/x-esc --all \
+        --emit-json /tmp/ep.json --emit-resources /tmp/res.json
+    tools/tad-storagecapacity.py --episodes /tmp/ep.json --resources /tmp/res.json \
+        --units ~/ta-mods/x-esc
+
+`--list` prints every sample at which a capacity changed, which is the set
+`tad_episodes --emit-cpp` chooses its episodes from. The two agree: on a
+600-second RWE arena game the five episodes the emitter kept are all on the
+list, at the same ticks and capacities. On that game every one of the 300
+samples is explained. Raising one sample by 50, or dipping one that the next
+sample explains again, exits non-zero naming it. A drop that lasts is counted
+as a loss and nothing more.
+
 ### `tools/demo-selfcheck.py`
 
 points the whole set at RWE's own output: `ai_arena --record-demo` writes a
 demo of a game RWE has just played, and this script runs `tad_probe` and
-`tad_episodes --unit-state` over it and then the three reference scorers, so
+`tad_episodes --unit-state` over it and then the four reference scorers, so
 the recorder is checked by the same machinery that checks the TA corpus.
 
     tools/demo-selfcheck.py
@@ -2996,10 +3033,9 @@ must decode every `0x2c`. Each oracle is then `PASS`, `NOT YET SCOREABLE` or
 scorer needs (M3 writes only `0x09`/`0x12`/`0x2c`; M4 adds shots, damage,
 deaths and `0x28`) or that no cell met its floor -- the scorers exit non-zero
 for that too, so the message is read and not just the status -- and only a
-scored cell that disagrees sets the exit status. The storage half has no
-script at all: its cases live in `rwe_test`'s `[economy][corpus]` over
-`src/rwe/sim/tad_economy_episodes.h`, so the summary says so rather than
-inventing a fifth scorer.
+scored cell that disagrees sets the exit status. Storage is scored by
+`tools/tad-storagecapacity.py`; its C++ half is `rwe_test`'s
+`[economy][corpus]` over `src/rwe/sim/tad_economy_episodes.h`.
 
 **A factory's build cells read two ticks late on M3's output**, and the
 self-check reports that as a scored disagreement rather than hiding it. RWE
