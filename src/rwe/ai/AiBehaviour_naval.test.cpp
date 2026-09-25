@@ -1512,6 +1512,89 @@ namespace rwe
     namespace
     {
         /**
+         * Two shores, a shipyard, one hull already standing, and eight
+         * combat units waiting on the home bank. `ferryArmyRuns` decides how
+         * many runs the yard is told to cross them in, so it is the only
+         * thing that differs between the two cases below.
+         */
+        std::vector<PlayerCommand> planSeaTransports(int ferryArmyRuns, int reserve = 1)
+        {
+            auto script = makeEmptyCobScript();
+            auto terrain = makeTwoShoresTerrain();
+            auto mapIntel = analyseMap(terrain, {});
+
+            GameSimulation sim(std::move(terrain), 0u, 0, 0);
+            auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+            auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+            defineWorld(sim);
+            for (auto* type : {"ARMCOM", "ARMCK", "ARMPW"})
+            {
+                sim.unitDefinitions.at(type).movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 20u};
+            }
+            // Two berths, so the scaling shows with a handful of units: at
+            // one run, eight units ask for four hulls.
+            auto tship = makeDef(false, false, true, "", 200u);
+            tship.movementCollisionInfo = UnitDefinition::AdHocMovementClass{6u, 6u, 255u, 255u, 12u, 255u};
+            tship.transportCapacity = 2;
+            tship.transportSize = 3;
+            tship.buildCostMetal = Metal(919.0f);
+            sim.unitDefinitions["ARMTSHIP"] = tship;
+
+            addUnit(sim, "ARMCOM", ai, SimVector(400_ss, 90_ss, 0_ss), script);
+            addUnit(sim, "ARMSY", ai, SimVector(192_ss, 0_ss, 0_ss), script);
+            // One hull already standing, which is where the old constant
+            // stopped: it would build destroyers from here.
+            addUnit(sim, "ARMTSHIP", ai, SimVector(224_ss, 0_ss, 0_ss), script);
+            for (int i = 0; i < 8; ++i)
+            {
+                addUnit(sim, "ARMPW", ai, SimVector(400_ss, 90_ss, SimScalar(16.0f * i)), script);
+            }
+            addUnit(sim, "ARMPW", human, SimVector(-400_ss, 90_ss, 0_ss), script);
+
+            auto profile = makeDefaultStandardProfile();
+            profile.cheatModeOmniscient = true;
+            profile.tacticalTickInterval = 1;
+            profile.attackArmySize = 2;
+            profile.attackInWaves = false;
+            profile.retreatArmySize = 0;
+            profile.defendRadius = 200_ss;
+            profile.targetScoutShipCount = 0;
+            profile.tierTwoEconomyReserve = false;
+            profile.ferryArmyRuns = ferryArmyRuns;
+            profile.seaTransportReserve = reserve;
+
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 40, commands);
+            REQUIRE(controller.getBlackboard().armyNeedsFerry);
+            return commands;
+        }
+    }
+
+    TEST_CASE("the sea transport target scales with the army waiting to cross", "[ai]")
+    {
+        // Issue #195: one hull was a constant whatever the army. Crossing
+        // eight units in one run over two-berth hulls asks for four, plus a
+        // reserve of one, so the yard queues another even though one already
+        // stands.
+        auto commands = planSeaTransports(1);
+        REQUIRE(countQueueCommands(commands, "ARMTSHIP") >= 1);
+        REQUIRE(countQueueCommands(commands, "ARMROY") == 0);
+    }
+
+    TEST_CASE("without the scaling the yard stops at the one hull and moves to destroyers", "[ai]")
+    {
+        // The same army over the same hulls, but told to cross in two hundred
+        // runs with no reserve: the target is the one hull already standing,
+        // so the yard moves on to the destroyer exactly as it did before.
+        auto commands = planSeaTransports(200, 0);
+        REQUIRE(countQueueCommands(commands, "ARMTSHIP") == 0);
+        REQUIRE(countQueueCommands(commands, "ARMROY") >= 1);
+    }
+
+    namespace
+    {
+        /**
          * A far shore wide enough for the landing search to have a CHOICE.
          *
          * makeChannelTerrain and makeTwoShoresTerrain both leave a far bank

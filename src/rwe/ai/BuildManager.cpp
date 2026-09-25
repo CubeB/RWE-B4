@@ -3799,6 +3799,53 @@ namespace rwe
         auto landArmyCapped = profile.isolatedLandArmyCap > 0 && bb.hasUnreachableGround && waterDominates
             && bb.armySize >= profile.isolatedLandArmyCap;
 
+        // How many units one sea transport of this side's own takes. Read
+        // from the shipped definition rather than assumed: the FBI's
+        // transportcapacity is what the simulation will enforce, and the two
+        // factions' hulls need not agree.
+        auto seaTransportBerths = [&]() -> int {
+            if (s.seaTransport.empty())
+            {
+                return 1;
+            }
+            auto it = sim.unitDefinitions.find(s.seaTransport);
+            if (it == sim.unitDefinitions.end())
+            {
+                return 1;
+            }
+            return std::max(1, static_cast<int>(it->second.effectiveTransportCapacity()));
+        }();
+
+        // Enough hulls for the army waiting to cross in a few runs, not the
+        // one hull the constant used to be (issue #195). A constant one left
+        // the land army accumulating on its own beach while a single Hulk
+        // shuttled a load at a time. bb.armySize is the waiting army -- units
+        // aboard a ferry have left it -- and the berths are the shipped
+        // data's, so this asks the map rather than guessing.
+        auto seaTransportTarget = profile.targetSeaTransportCount;
+        if (bb.armyNeedsFerry && !s.seaTransport.empty())
+        {
+            auto runs = std::max(1, profile.ferryArmyRuns);
+            auto perHull = std::max(1, seaTransportBerths * runs);
+            auto forQueue = (bb.armySize + perHull - 1) / perHull;
+            // One beyond the queue, so a sunk or away hull does not leave the
+            // army with no lift at all.
+            seaTransportTarget = std::max(seaTransportTarget, std::max(0, profile.seaTransportReserve) + forQueue);
+            seaTransportTarget = std::min(seaTransportTarget, std::max(1, profile.maxSeaTransportCount));
+        }
+
+        // The "less army" half: stop the land factories once the army
+        // outgrows the hulls standing by ferryArmyRuns. Counted from hulls
+        // that exist (or are being built) rather than from the target, so it
+        // releases by itself as the yard lays more down, and gated on
+        // armyNeedsFerry so a land map is untouched.
+        auto hullsStanding = total(s.seaTransport);
+        if (profile.ferryBoundArmyCap && bb.armyNeedsFerry && !s.seaTransport.empty()
+            && hullsStanding > 0 && bb.armySize > hullsStanding * seaTransportBerths * std::max(1, profile.ferryArmyRuns))
+        {
+            landArmyCapped = true;
+        }
+
         // Fighters to match the raid: as many as the most armed aircraft of
         // theirs ever known at once, between the standing pair and the cap.
         auto fighterTarget = std::clamp(bb.enemyArmedAirPeak, profile.targetFighterCount, std::max(profile.targetFighterCount, profile.maxReactiveFighterCount));
@@ -4143,7 +4190,7 @@ namespace rwe
                     {
                         next = s.constructionShip;
                     }
-                    else if (!s.seaTransport.empty() && bb.wantsTransport && hasCargo && total(s.seaTransport) < profile.targetSeaTransportCount)
+                    else if (!s.seaTransport.empty() && bb.wantsTransport && hasCargo && total(s.seaTransport) < seaTransportTarget)
                     {
                         next = s.seaTransport;
                     }

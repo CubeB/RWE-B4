@@ -2445,11 +2445,59 @@ namespace rwe
             // unit, not the other way about: working from the unit's end sent
             // it marching away from the transport, and then further away again
             // each time it arrived.
+            //
+            // While the hull is still well offshore that point lands in open
+            // water, so the unit wades as far as it can and waits there while
+            // the ship heads for where the unit used to be -- both ends
+            // chasing. Walk the point back along the ray towards the unit
+            // until it is ground the passenger's OWN movement class can stand
+            // on, and leave the hull to cover the rest; a hover passenger,
+            // which can stand on water, keeps the point exactly where it was.
+            //
+            // This is RWE's own staging and not a decoded behaviour: the
+            // original never orders the passenger anywhere, and its crane
+            // mission walks the TRANSPORT at the target instead
+            // (TOTALA-EXE-TRANSPORTS.md S:34, state 4).
             if (isShip && target.orders.empty() && !target.carriedBy)
             {
                 SimVector towardsTarget(-dx, 0_ss, -dz);
                 auto direction = towardsTarget.normalizedOr(SimVector(0_ss, 0_ss, 0_ss));
                 auto meetingPoint = unitInfo.state->position + (direction * (pickupRange * 0.75_ssf));
+
+                const auto& passengerMovement = sim->getAdHocMovementClass(targetDefinition.movementCollisionInfo);
+                auto standable = [&](const SimVector& p) {
+                    auto cell = sim->terrain.worldToHeightmapCoordinateNearest(p);
+                    const auto& heights = sim->terrain.getHeightMap();
+                    if (cell.x < 0 || cell.y < 0
+                        || cell.x + static_cast<int>(passengerMovement.footprintX) > static_cast<int>(heights.getWidth()) - 1
+                        || cell.y + static_cast<int>(passengerMovement.footprintZ) > static_cast<int>(heights.getHeight()) - 1)
+                    {
+                        return false;
+                    }
+                    return isGridPointWalkable(sim->terrain, passengerMovement, static_cast<unsigned int>(cell.x), static_cast<unsigned int>(cell.y));
+                };
+
+                if (!standable(meetingPoint))
+                {
+                    auto toTarget = target.position - meetingPoint;
+                    toTarget.y = 0_ss;
+                    auto remaining = toTarget.length();
+                    for (auto walked = 16_ss; walked <= remaining; walked += 16_ss)
+                    {
+                        auto candidate = meetingPoint + (direction * walked);
+                        if (standable(candidate))
+                        {
+                            meetingPoint = candidate;
+                            break;
+                        }
+                    }
+                    if (!standable(meetingPoint))
+                    {
+                        // No shore between the rendezvous and the passenger:
+                        // it is already as near the water as it can stand.
+                        meetingPoint = target.position;
+                    }
+                }
                 meetingPoint.y = sim->terrain.getHeightAt(meetingPoint.x, meetingPoint.z);
                 target.addOrder(createMoveOrder(meetingPoint));
             }

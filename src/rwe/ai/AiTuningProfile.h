@@ -1103,11 +1103,87 @@ namespace rwe
          * never speculatively lays one down before there is an army to
          * ferry. Kept as its own count instead of sharing
          * targetTransportCount because the two draw on different factories
-         * and answer different crossings: the air plant's answers ground
-         * the base cannot walk to at all, this one answers water in the
-         * way.
+         * and answer different crossings: the air plant's answers ground the
+         * base cannot walk to at all, this one answers water in the way.
+         *
+         * This is the FLOOR, not the whole target. A constant one is what the
+         * issue was about: it is one hull whatever the army waiting for it,
+         * so a land army grows to dozens on its own beach while a single
+         * 900-metal Hulk shuttles a load at a time. The target scales with
+         * bb.armySize under ferryArmyRuns below; this is what it never drops
+         * below while a crossing is wanted.
          */
         int targetSeaTransportCount{1};
+        /**
+         * How many runs the army waiting for a lift is meant to cross in.
+         *
+         * The shipyard's sea-transport target is
+         * `armySize / (berths * ferryArmyRuns)`, rounded up, and the berths
+         * are read from the side's own sea transport rather than assumed.
+         * Issue #195 put the hull at "four to six berths", which is why it
+         * read as one hull never being enough; the shipped Hulk is twenty,
+         * so one run -- the whole waiting army in a single lift -- is the
+         * setting that actually scales the target with the army on the maps
+         * this bites. On the shipped Hulk a 38-unit army asks for two hulls
+         * where the old constant asked for one.
+         *
+         * This is also the slack in the lift-derived army cap below: the
+         * land factories keep producing until the army outgrows the hulls
+         * that exist by this many runs, then stop until more hulls are
+         * standing.
+         */
+        int ferryArmyRuns{1};
+        /**
+         * Sea transports kept beyond what the waiting queue needs, so the
+         * lift survives a hull being sunk or out on a run.
+         *
+         * One is the smallest reserve and the one that measured: a single
+         * hull is not a lift, it is a single point of failure, and the arena
+         * records `no transport` -- the army wanting a crossing and nothing
+         * classified as a transport to make it in -- for thousands of ticks a
+         * game while the one Hulk is dead or away. The reserve is added to
+         * the capacity term rather than replacing it, so an army that needs
+         * more still gets more.
+         *
+         * OFF by default after measuring it on Coast To Coast. Paired
+         * asymmetric over six seeds, reserve one against the same binary with
+         * none: `no transport` refusals fell 8771 -> 4804, which is what it
+         * is for, but completed ferries fell 11 -> 9 and cargo booked 203 ->
+         * 197. The spare hulls did not deliver, because the thing refusing
+         * the ferry on this map is the landing search (`no landing` 95 ->
+         * 908), not the lack of a hull -- so the reserve only buys more
+         * failed dispatch attempts. Turn it on where the yard is the
+         * constraint and the landings are not.
+         */
+        int seaTransportReserve{0};
+        /**
+         * A ceiling on the sea transports the yard will lay down for the
+         * army, so a runaway army cannot turn the whole economy into hulls.
+         * One Hulk is ~900 metal; six is a fleet's worth.
+         */
+        int maxSeaTransportCount{6};
+        /**
+         * Whether land production stops once the army waiting for a lift
+         * outgrows the hulls that exist by ferryArmyRuns.
+         *
+         * This is the "less army" half of issue #195, and it is deliberately
+         * NOT isolatedLandArmyCap: that one is gated on how much of the map
+         * is water, which the maps this bites on -- Coast To Coast at 54% --
+         * do not meet, and it is off besides. This one is derived from the
+         * lift, which is the thing actually failing, and fires only while
+         * bb.armyNeedsFerry says a crossing is wanted, so a land map is
+         * unaffected without needing its own gate.
+         *
+         * OFF by default after measuring it on Coast To Coast. Paired
+         * asymmetric over four seeds, the cap-on arm against the same binary
+         * with it off: income 12.0 -> 17.25 a second and cargo booked 157 ->
+         * 173, but army 49.2 -> 35.2, units 98.5 -> 85.8 and losses 44.0 ->
+         * 55.2 -- it buys economy and lift with the army, and the standard
+         * arena margin counts the army. The lift scaling above is the half
+         * that measured clean; this is the half to turn on deliberately, on
+         * the map and with the numbers in hand.
+         */
+        bool ferryBoundArmyCap{false};
         /**
          * Construction ships the shipyard makes once the map has metal under
          * its water. 0 leaves the commander to mine the sea by itself.

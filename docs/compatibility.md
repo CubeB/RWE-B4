@@ -223,6 +223,13 @@ or alliance test anywhere on the load path. Whether the pickup then completes wa
 never traced and never play-tested, so this is a house rule kept for want of
 evidence rather than in defiance of it.
 
+**A passenger walks to the shore to meet a sea transport.** The original never
+moves the passenger; its crane mission walks the *transport* at the unit instead.
+RWE's AI books a unit wherever it stands rather than parking it on the beach, so
+RWE keeps a passenger-side meeting point, but it is clamped to ground the
+passenger can stand on, so a land unit waits on the shoreline instead of wading
+into the sea. A hover passenger, which can stand on water, is left alone.
+
 **A weapon that names no `tolerance` gets 256.** The original picks 2000 or 150
 depending on two flag bits whose meaning is still unknown, so neither figure can
 be chosen without a guess about which units carry them.

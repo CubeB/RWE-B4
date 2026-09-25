@@ -47,6 +47,24 @@ namespace rwe
             return d;
         }
 
+        /**
+         * A beach running north-south: water west of heightmap x = 32, dry
+         * land east of it, sea level 60. World space is centred, so the
+         * shoreline is world x = 0 and a hull at tile 5 is world -432.
+         */
+        MapTerrain makeBeachTerrain()
+        {
+            Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(0));
+            for (int y = 0; y < 64; ++y)
+            {
+                for (int x = 32; x < 64; ++x)
+                {
+                    heights.set(x, y, static_cast<unsigned char>(90));
+                }
+            }
+            return MapTerrain(std::move(heights), 60_ss);
+        }
+
         UnitId spawnUnit(GameSimulation& sim, const std::string& unitType, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
         {
             auto env = std::make_unique<CobEnvironment>(script.get());
@@ -326,6 +344,85 @@ namespace rwe
         REQUIRE(distanceFromDestination < distanceFromStart);
         // And it is on the ship's side of the unit, not the far side.
         REQUIRE(move->destination.x < kbotStart.x);
+    }
+
+    TEST_CASE("a sea transport's passenger waits on the shore, not in the water", "[transport]")
+    {
+        // Issue #193: the rendezvous is measured out from the hull, so while
+        // it is still well offshore the point falls in open water and the
+        // passenger wades as far as it can and waits there. It should be sent
+        // to the shoreline instead, on ground its own movement class can
+        // stand on.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeBeachTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim, "hauler");
+        auto shipDef = makeTransportDef();
+        shipDef.floater = true;
+        shipDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 10u, 255u};
+        sim.unitDefinitions["ship"] = shipDef;
+        sim.unitDefinitions["kbot"] = makeMobileDef(2u); // may stand in no water at all
+        registerModel(sim, "model");
+
+        auto shipId = spawnUnit(sim, "ship", player, SimVector(-432_ss, 0_ss, 0_ss), script);
+        auto kbotId = spawnUnit(sim, "kbot", player, SimVector(288_ss, 90_ss, 0_ss), script);
+        auto kbotStart = sim.getUnitState(kbotId).position;
+
+        sim.getUnitState(shipId).orders.push_back(LoadOrder(kbotId));
+        REQUIRE(tickUntil(sim, 60, [&] { return !sim.getUnitState(kbotId).orders.empty(); }));
+
+        auto move = std::get_if<MoveOrder>(&sim.getUnitState(kbotId).orders.front());
+        REQUIRE(move != nullptr);
+
+        auto seaLevel = sim.terrain.getSeaLevel();
+        auto oldMeeting = SimVector(-432_ss + 150_ss, 0_ss, 0_ss);
+        // The point the old code aimed at was out in the sea.
+        REQUIRE(sim.terrain.getHeightAt(oldMeeting.x, oldMeeting.z) < seaLevel);
+
+        // The order it gets instead is on dry land at the waterline, between
+        // the hull and where the unit was standing.
+        REQUIRE(move->destination.y >= seaLevel);
+        REQUIRE(move->destination.x > oldMeeting.x);
+        REQUIRE(move->destination.x < kbotStart.x);
+        REQUIRE(move->destination.x < 16_ss);
+
+        // It walks there without wading: no tick puts it in water.
+        for (int i = 0; i < 60; ++i)
+        {
+            sim.tick();
+            REQUIRE(sim.getUnitState(kbotId).position.y >= seaLevel);
+        }
+    }
+
+    TEST_CASE("a hover passenger is not clamped to the shore", "[transport]")
+    {
+        // The hover transports route through the same ground-pickup path
+        // (canfly = 0), but a hover passenger can stand on water: the clamp
+        // above is asked of the passenger's own movement class, so it keeps
+        // the rendezvous it was given rather than being sent ashore.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeBeachTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim, "hauler");
+        auto shipDef = makeTransportDef();
+        shipDef.floater = true;
+        shipDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 10u, 255u};
+        sim.unitDefinitions["ship"] = shipDef;
+        auto hoverDef = makeMobileDef(2u);
+        hoverDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
+        sim.unitDefinitions["hover"] = hoverDef;
+        registerModel(sim, "model");
+
+        auto shipId = spawnUnit(sim, "ship", player, SimVector(-432_ss, 0_ss, 0_ss), script);
+        auto hoverId = spawnUnit(sim, "hover", player, SimVector(288_ss, 90_ss, 0_ss), script);
+
+        sim.getUnitState(shipId).orders.push_back(LoadOrder(hoverId));
+        REQUIRE(tickUntil(sim, 60, [&] { return !sim.getUnitState(hoverId).orders.empty(); }));
+
+        auto move = std::get_if<MoveOrder>(&sim.getUnitState(hoverId).orders.front());
+        REQUIRE(move != nullptr);
+        // Three quarters of the crane's reach out from the hull, unchanged.
+        auto expected = SimVector(-432_ss + 150_ss, 0_ss, 0_ss);
+        REQUIRE(move->destination.distanceSquared(expected) < (16_ss * 16_ss));
+        REQUIRE(move->destination.y < sim.terrain.getSeaLevel());
     }
 
     TEST_CASE("one unload order sets down one unit", "[transport]")

@@ -4426,8 +4426,11 @@ namespace rwe
             // and it is a real case rather than a defensive one: an attack
             // run carries an edge check for the same reason, and a dogfight
             // breaks two weapon ranges out, which off a corner is over the
-            // edge. The assertion stands where it is still an invariant.
-            assert(!!footprintRegion || isFlying(unit.physics));
+            // edge. A unit that died in a transport's grip is the third case,
+            // and the one below already handles it: it holds no ground, and
+            // its last position can be anywhere the carrier was, edge
+            // included. The assertion stands where it is still an invariant.
+            assert(!!footprintRegion || isFlying(unit.physics) || unit.carriedBy);
 
             // Out of the flying set first, and whatever else is true of it:
             // the projectile pass walks that set and asks for each unit by

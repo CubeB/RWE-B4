@@ -456,6 +456,17 @@ quirks of the original that RWE reproduces although they look like defects.
   house rule kept for want of evidence rather than in defiance of it: the test
   lives once, in `canLoad` in `src/rwe/game/DefaultAction.cpp`, so that
   removing it later is one edit rather than a hunt.
+- **A passenger walks to the shore to meet a sea transport.** The original
+  never orders the passenger anywhere. Its crane mission runs on the transport,
+  and when the crane cannot reach it installs a ground move goal at the
+  target's own position and walks the hull at it (`Ground_Pickup` state 4,
+  `0x406893`-`0x40689b`, S:34; the goal is `target+0x6a`, tolerance 0, called
+  with the mission as the unit). RWE keeps the passenger-side meeting point it
+  added for its own AI, which books a unit wherever it stands rather than
+  parking it on the beach, but the point is clamped to the last cell along the
+  ray the passenger's own movement class can stand on, so a ground unit waits
+  on the shoreline instead of wading into open water (issue #193). A hover
+  passenger, which can stand on water, keeps the original meeting point.
 - **A resurrect shows the reclaim cursor.** The original has `cursorrevive`,
   id 10, for it (§103). The base game's `CURSORS.GAF` does not contain that
   sequence — only `rev31.gp3`'s does — and RWE has never loaded it, so the
