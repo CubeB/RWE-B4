@@ -106,19 +106,7 @@ namespace rwe
     bool shadingModeCoversUnits(ShadingMode mode);
     bool shadingModeCoversBuildings(ShadingMode mode);
 
-    /** The four zoom stages, in button order: 50, 100, 150 and 200 percent. */
-    std::vector<unsigned int> cameraZoomStages();
-
-    /** The label each zoom stage shows; the active stage's label is the readout. */
-    std::vector<std::string> cameraZoomLabels();
-
-    /** The next zoom stage, wrapping. A value not in the stages starts from 100 and advances. */
-    unsigned int nextCameraZoom(unsigned int percent);
-
-    /** The stage index for a zoom percentage; anything not a stage reads as 100. */
-    unsigned int cameraZoomStageIndex(unsigned int percent);
-
-    /** The four UI scale stages, in button order: Auto, 1x, 2x and 3x. */
+    /** The six UI scale stages, in button order: Auto and 100 to 300 percent. */
     std::vector<unsigned int> uiScaleStages();
 
     /** The label each UI scale stage shows; the active stage's label is the readout. */
@@ -131,12 +119,12 @@ namespace rwe
     unsigned int uiScaleStageIndex(unsigned int setting);
 
     /**
-     * Turns a UI scale setting into the integer scale to draw at. Auto (0)
-     * follows the display density, so on a 2x display the interface is
-     * physically the same size as on a 1x one; an explicit setting is itself.
-     * Both are clamped to 1..3.
+     * Turns a UI scale setting into the scale to draw at. Auto (0) follows
+     * the display density, snapped to the nearest half, so on a 2x display
+     * the interface is physically the same size as on a 1x one; an explicit
+     * percentage is divided by 100. Both are clamped to 0.5..3.
      */
-    unsigned int resolveUiScale(unsigned int setting, float displayScale);
+    float resolveUiScale(unsigned int setting, float displayScale);
 
     class GlobalConfig
     {
@@ -202,14 +190,15 @@ namespace rwe
         unsigned int cameraZoom{100};
 
         /**
-         * How big the interface is drawn, as an integer multiple: 0 Auto, or
-         * 1, 2, 3. Auto follows the display density, so on a high-density
-         * display the interface is physically the same size as it was on a
-         * 1x one. It is deliberately distinct from both cameraZoom (how much
-         * battlefield is visible) and pixelSize (how chunky everything is):
-         * this is the legibility control. Whole numbers only, because the UI
-         * textures are drawn with GL_NEAREST and a fractional scale would
-         * blur the pixel art. Stored globally as ui-scale.
+         * How big the interface is drawn, as a percentage: 0 Auto, or 100,
+         * 150, 200, 250, 300. Auto follows the display density, snapped to
+         * the nearest half, so on a high-density display the interface is
+         * physically the same size as it was on a 1x one. It is deliberately
+         * distinct from both cameraZoom (how much battlefield is visible) and
+         * pixelSize (how chunky everything is): this is the legibility
+         * control. A whole-number scale is pixel-exact under GL_NEAREST; a
+         * half step is what a 1.5x display needs and is offered for it.
+         * Stored globally as ui-scale.
          */
         unsigned int uiScale{0};
 
@@ -416,7 +405,7 @@ namespace rwe
         /** Camera zoom percentage; last so adding it left the positional initialisers above valid. */
         unsigned int cameraZoom{100};
 
-        /** UI scale setting: 0 Auto, or 1, 2, 3. Final field, appending after cameraZoom. */
+        /** UI scale setting as a percentage: 0 Auto, or 100 to 300. Final field. */
         unsigned int uiScale{0};
     };
 

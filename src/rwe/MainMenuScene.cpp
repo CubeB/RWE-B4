@@ -8,6 +8,7 @@
 #include <rwe/util/CrashHandler.h>
 #include <rwe/util/SimpleLogger.h>
 #include <algorithm>
+#include <cmath>
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuModel.h>
 #include <rwe/MultiplayerSetup.h>
@@ -28,6 +29,15 @@
 namespace rwe
 {
     const Viewport MainMenuViewport(0, 0, 640, 480);
+
+    namespace
+    {
+        /** The camera zoom slider's readout, which has no gadget of its own. */
+        std::string formatZoomLabel(unsigned int percent)
+        {
+            return "Zoom " + std::to_string(percent) + "%";
+        }
+    }
 
     MainMenuScene::MainMenuScene(
         const SceneContext& sceneContext,
@@ -310,13 +320,23 @@ namespace rwe
         // there a line ago, so it lands one row under it on whichever page it
         // finds them, and is absent from the pages that carry neither.
         uiFactory.addStagedButtonBelow(active, "STARTOPT", "BSHADOWS", "AAUNITS", BuildingHaloWired ? "HALO" : "BSHADOWS", BuildingHaloWired ? "BSHADOWS" : "ANTI", {"Units Sharp", "Units Smooth"}, pendingAntiAliasUnits ? 1 : 0);
-        // ...and camera zoom, one row under AAUNITS, placed the same derived
-        // way as the in-game one. See GameScene::addCameraZoomButton for why
-        // the position wants confirming with ui_probe.
-        uiFactory.addStagedButtonBelow(active, "STARTOPT", "SHADINGMODE", "CAMZOOM", "AAUNITS", "BSHADOWS", cameraZoomLabels(), cameraZoomStageIndex(pendingCameraZoom));
-        // ...and the UI scale, one row under camera zoom, on the same derived
-        // geometry as the in-game page. See GameScene::addUiScaleButton.
-        uiFactory.addStagedButtonBelow(active, "STARTOPT", "SHADINGMODE", "UISCALE", "CAMZOOM", "AAUNITS", uiScaleLabels(), uiScaleStageIndex(pendingUiScale));
+        // ...and camera zoom, one row under AAUNITS, a horizontal slider
+        // built from the SLIDERS art the page's own sliders use. The row is
+        // placed the same derived way as the in-game one; see
+        // GameScene::addCameraZoomSlider for why the position wants a
+        // ui_probe confirmation.
+        uiFactory.addSliderBelow(active, "STARTOPT", "CAMZOOM", "GAMMA", "AAUNITS", "BSHADOWS", (static_cast<float>(pendingCameraZoom) - 50.0f) / 150.0f);
+        if (auto slider = active.find<UiScrollBar>("CAMZOOM"))
+        {
+            auto& s = slider->get();
+            auto label = uiFactory.createLabel(s.getX(), s.getY() - 14, static_cast<int>(s.getWidth()), 12, formatZoomLabel(pendingCameraZoom), UiLabel::Alignment::Left);
+            label->setName("CAMZOOMVAL");
+            active.appendChild(std::move(label));
+        }
+        // ...and the UI scale, which belongs on the interface page rather
+        // than here, one row under LEFTCLICK. The call no-ops on pages
+        // without those anchors. See GameScene::addUiScaleButton.
+        uiFactory.addStagedButtonBelow(active, "STARTOPT", "SHADINGMODE", "UISCALE", "LEFTCLICK", "UNITCHAT", uiScaleLabels(), uiScaleStageIndex(pendingUiScale));
 
         auto state = currentOptions();
 
@@ -404,6 +424,23 @@ namespace rwe
             bar->get().setScrollPercent((static_cast<float>(pendingScrollSpeed) - 25.0f) / 175.0f);
             auto sub = bar->get().scrollChanged().subscribe([this](float v) {
                 pendingScrollSpeed = 25u + static_cast<unsigned int>(v * 175.0f);
+            });
+            bar->get().addSubscription(std::move(sub));
+        }
+
+        // Camera zoom, 50 to 200 percent; takes effect in the next game.
+        if (auto bar = active.find<UiScrollBar>("CAMZOOM"))
+        {
+            bar->get().setScrollPercent((static_cast<float>(pendingCameraZoom) - 50.0f) / 150.0f);
+            auto sub = bar->get().scrollChanged().subscribe([this](float v) {
+                pendingCameraZoom = std::clamp(50u + static_cast<unsigned int>(std::lround(v * 150.0f)), 50u, 200u);
+                if (!panelStack.empty())
+                {
+                    if (auto label = panelStack.back()->find<UiLabel>("CAMZOOMVAL"))
+                    {
+                        label->get().setText(formatZoomLabel(pendingCameraZoom));
+                    }
+                }
             });
             bar->get().addSubscription(std::move(sub));
         }
@@ -854,10 +891,6 @@ namespace rwe
             {
                 pendingAntiAliasUnits = !pendingAntiAliasUnits;
             }
-            else if (message == "CAMZOOM")
-            {
-                pendingCameraZoom = nextCameraZoom(pendingCameraZoom);
-            }
             else if (message == "UISCALE")
             {
                 pendingUiScale = nextUiScale(pendingUiScale);
@@ -1041,9 +1074,13 @@ namespace rwe
         {
             toggle->get().setStage(pendingAntiAliasUnits ? 1 : 0);
         }
-        if (auto toggle = active.find<UiStagedButton>("CAMZOOM"))
+        if (auto bar = active.find<UiScrollBar>("CAMZOOM"))
         {
-            toggle->get().setStage(cameraZoomStageIndex(pendingCameraZoom));
+            bar->get().setScrollPercent((static_cast<float>(pendingCameraZoom) - 50.0f) / 150.0f);
+        }
+        if (auto label = active.find<UiLabel>("CAMZOOMVAL"))
+        {
+            label->get().setText(formatZoomLabel(pendingCameraZoom));
         }
         if (auto toggle = active.find<UiStagedButton>("UISCALE"))
         {

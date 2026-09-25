@@ -1,6 +1,7 @@
 #include "GameScene.h"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <functional>
@@ -2457,11 +2458,15 @@ namespace rwe
                 // Coming back with the panel already slid away would otherwise
                 // put the inset back to full width underneath it. The GuiSize
                 // constants are raw UI units; the world inset is in frame
-                // pixels, so they scale with the UI.
-                auto scale = static_cast<int>(effectiveUiScale());
-                appliedUiScale = static_cast<unsigned int>(scale);
-                appliedLeftInset = (panelSlide > 0.0f ? 0 : GuiSizeLeft) * scale;
-                worldViewport.setInset(appliedLeftInset, GuiSizeTop * scale, GuiSizeRight * scale, GuiSizeBottom * scale);
+                // pixels, so they scale with the UI and each side rounds.
+                auto scale = effectiveUiScale();
+                appliedUiScale = scale;
+                appliedLeftInset = panelSlide > 0.0f ? 0 : static_cast<int>(std::lround(GuiSizeLeft * scale));
+                worldViewport.setInset(
+                    appliedLeftInset,
+                    static_cast<int>(std::lround(GuiSizeTop * scale)),
+                    static_cast<int>(std::lround(GuiSizeRight * scale)),
+                    static_cast<int>(std::lround(GuiSizeBottom * scale)));
             }
             else
             {

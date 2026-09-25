@@ -458,14 +458,19 @@ namespace rwe
         // underneath it.
         // The HUD is laid out in raw UI coordinates, which the chrome
         // projection scales up by uiScale; the world inset is in frame
-        // pixels, so the GuiSize constants are scaled with it.
-        auto scale = static_cast<int>(effectiveUiScale());
-        auto desiredLeft = (panelSlide > 0.0f ? 0 : GuiSizeLeft) * scale;
-        if (desiredLeft != appliedLeftInset || static_cast<unsigned int>(scale) != appliedUiScale)
+        // pixels, so the GuiSize constants are scaled with it. The scale can
+        // be fractional, so each side rounds.
+        auto scale = effectiveUiScale();
+        auto desiredLeft = panelSlide > 0.0f ? 0 : static_cast<int>(std::lround(GuiSizeLeft * scale));
+        if (desiredLeft != appliedLeftInset || scale != appliedUiScale)
         {
             appliedLeftInset = desiredLeft;
-            appliedUiScale = static_cast<unsigned int>(scale);
-            worldViewport.setInset(desiredLeft, GuiSizeTop * scale, GuiSizeRight * scale, GuiSizeBottom * scale);
+            appliedUiScale = scale;
+            worldViewport.setInset(
+                desiredLeft,
+                static_cast<int>(std::lround(GuiSizeTop * scale)),
+                static_cast<int>(std::lround(GuiSizeRight * scale)),
+                static_cast<int>(std::lround(GuiSizeBottom * scale)));
             recreateWorldRenderTextures();
         }
     }

@@ -608,16 +608,19 @@ namespace rwe
         void widenShadingButton();
         void addBuildingHaloButton(UiPanel& panel);
         void addAntiAliasUnitsButton(UiPanel& panel);
-        void addCameraZoomButton(UiPanel& panel);
+        void addCameraZoomSlider(UiPanel& panel);
         void addUiScaleButton(UiPanel& panel);
 
         /**
-         * The integer UI scale to draw chrome at this frame: the staged
-         * setting resolved against the display density, so Auto follows a
-         * high-density display. Re-read every frame because a monitor move
-         * can change the display scale under a running game.
+         * The scale to draw chrome at this frame: the staged setting resolved
+         * against the display density, so Auto follows a high-density display.
+         * Re-read every frame because a monitor move can change the display
+         * scale under a running game.
          */
-        unsigned int effectiveUiScale() const { return resolveUiScale(uiScaleSetting, sceneContext.sceneManager->displayScale()); }
+        float effectiveUiScale() const { return resolveUiScale(uiScaleSetting, sceneContext.sceneManager->displayScale()); }
+
+        /** The camera zoom slider's position, 0 at 50% and 1 at 200%. */
+        float zoomPercent() const { return (static_cast<float>(cameraZoomSetting) - 50.0f) / 150.0f; }
 
         /** Finds a control by name across every open menu panel. */
         template <typename T>
@@ -648,7 +651,7 @@ namespace rwe
         unsigned int buildingHaloRedShift{50};
         unsigned int scrollSpeedSetting{100};
         unsigned int cameraZoomSetting{100};
-        /** The staged UI scale: 0 Auto, or 1, 2, 3. See GlobalConfig::uiScale. */
+        /** The staged UI scale as a percentage: 0 Auto, or 100 to 300. See GlobalConfig::uiScale. */
         unsigned int uiScaleSetting{0};
 
         /** What this game was started with, kept for the save-game header. */
@@ -1069,7 +1072,7 @@ namespace rwe
         int appliedLeftInset{GuiSizeLeft};
 
         /** The effective UI scale the last world inset was built for. */
-        unsigned int appliedUiScale{0};
+        float appliedUiScale{0.0f};
 
         FrameBufferInfo worldFrameBuffer;
 

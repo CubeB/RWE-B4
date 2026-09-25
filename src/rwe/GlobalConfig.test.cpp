@@ -1,3 +1,4 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/GlobalConfig.h>
 
@@ -79,88 +80,39 @@ namespace rwe
         SECTION("carries the UI scale across")
         {
             GlobalConfig config;
-            config.uiScale = 2;
-            REQUIRE(optionsFromConfig(config).uiScale == 2u);
-        }
-    }
-
-    TEST_CASE("camera zoom helpers")
-    {
-        SECTION("stages are the four percentages in order")
-        {
-            auto stages = cameraZoomStages();
-            REQUIRE(stages.size() == 4);
-            REQUIRE(stages[0] == 50u);
-            REQUIRE(stages[1] == 100u);
-            REQUIRE(stages[2] == 150u);
-            REQUIRE(stages[3] == 200u);
-        }
-
-        SECTION("next cycles through every stage and wraps")
-        {
-            REQUIRE(nextCameraZoom(50u) == 100u);
-            REQUIRE(nextCameraZoom(100u) == 150u);
-            REQUIRE(nextCameraZoom(150u) == 200u);
-            REQUIRE(nextCameraZoom(200u) == 50u);
-        }
-
-        SECTION("a value not in the stages starts from 100 and advances")
-        {
-            REQUIRE(nextCameraZoom(0u) == 150u);
-            REQUIRE(nextCameraZoom(120u) == 150u);
-            REQUIRE(nextCameraZoom(1000u) == 150u);
-        }
-
-        SECTION("stage index round trips every stage")
-        {
-            auto stages = cameraZoomStages();
-            for (unsigned int i = 0; i < stages.size(); ++i)
-            {
-                REQUIRE(cameraZoomStageIndex(stages[i]) == i);
-            }
-        }
-
-        SECTION("an unknown value reads as the 100 stage")
-        {
-            REQUIRE(cameraZoomStageIndex(0u) == cameraZoomStageIndex(100u));
-            REQUIRE(cameraZoomStageIndex(120u) == cameraZoomStageIndex(100u));
-        }
-
-        SECTION("labels are in stage order and name the percentage")
-        {
-            auto labels = cameraZoomLabels();
-            REQUIRE(labels.size() == cameraZoomStages().size());
-            REQUIRE(labels[0] == "Zoom 50%");
-            REQUIRE(labels[1] == "Zoom 100%");
-            REQUIRE(labels[2] == "Zoom 150%");
-            REQUIRE(labels[3] == "Zoom 200%");
+            config.uiScale = 150;
+            REQUIRE(optionsFromConfig(config).uiScale == 150u);
         }
     }
 
     TEST_CASE("UI scale helpers")
     {
-        SECTION("stages are Auto and the three integer scales in order")
+        SECTION("stages are Auto and the five percentages in order")
         {
             auto stages = uiScaleStages();
-            REQUIRE(stages.size() == 4);
+            REQUIRE(stages.size() == 6);
             REQUIRE(stages[0] == 0u);
-            REQUIRE(stages[1] == 1u);
-            REQUIRE(stages[2] == 2u);
-            REQUIRE(stages[3] == 3u);
+            REQUIRE(stages[1] == 100u);
+            REQUIRE(stages[2] == 150u);
+            REQUIRE(stages[3] == 200u);
+            REQUIRE(stages[4] == 250u);
+            REQUIRE(stages[5] == 300u);
         }
 
         SECTION("next cycles through every stage and wraps")
         {
-            REQUIRE(nextUiScale(0u) == 1u);
-            REQUIRE(nextUiScale(1u) == 2u);
-            REQUIRE(nextUiScale(2u) == 3u);
-            REQUIRE(nextUiScale(3u) == 0u);
+            REQUIRE(nextUiScale(0u) == 100u);
+            REQUIRE(nextUiScale(100u) == 150u);
+            REQUIRE(nextUiScale(150u) == 200u);
+            REQUIRE(nextUiScale(200u) == 250u);
+            REQUIRE(nextUiScale(250u) == 300u);
+            REQUIRE(nextUiScale(300u) == 0u);
         }
 
         SECTION("a value not in the stages starts from Auto and advances")
         {
-            REQUIRE(nextUiScale(4u) == 1u);
-            REQUIRE(nextUiScale(99u) == 1u);
+            REQUIRE(nextUiScale(400u) == 100u);
+            REQUIRE(nextUiScale(99u) == 100u);
         }
 
         SECTION("stage index round trips every stage")
@@ -174,7 +126,7 @@ namespace rwe
 
         SECTION("an unknown value reads as the Auto stage")
         {
-            REQUIRE(uiScaleStageIndex(4u) == uiScaleStageIndex(0u));
+            REQUIRE(uiScaleStageIndex(400u) == uiScaleStageIndex(0u));
             REQUIRE(uiScaleStageIndex(99u) == uiScaleStageIndex(0u));
         }
 
@@ -184,26 +136,32 @@ namespace rwe
             REQUIRE(labels.size() == uiScaleStages().size());
             REQUIRE(labels[0] == "UI Auto");
             REQUIRE(labels[1] == "UI 1x");
-            REQUIRE(labels[2] == "UI 2x");
-            REQUIRE(labels[3] == "UI 3x");
+            REQUIRE(labels[2] == "UI 1.5x");
+            REQUIRE(labels[3] == "UI 2x");
+            REQUIRE(labels[4] == "UI 2.5x");
+            REQUIRE(labels[5] == "UI 3x");
         }
 
-        SECTION("Auto follows the display density, rounded and clamped to 1..3")
+        SECTION("Auto snaps the display density to the nearest half")
         {
-            REQUIRE(resolveUiScale(0u, 1.0f) == 1u);
-            REQUIRE(resolveUiScale(0u, 2.0f) == 2u);
-            REQUIRE(resolveUiScale(0u, 1.5f) == 2u);
-            REQUIRE(resolveUiScale(0u, 3.0f) == 3u);
-            REQUIRE(resolveUiScale(0u, 4.0f) == 3u);
-            REQUIRE(resolveUiScale(0u, 0.0f) == 1u);
+            REQUIRE(resolveUiScale(0u, 1.0f) == Catch::Approx(1.0f));
+            REQUIRE(resolveUiScale(0u, 1.2f) == Catch::Approx(1.0f));
+            REQUIRE(resolveUiScale(0u, 1.3f) == Catch::Approx(1.5f));
+            REQUIRE(resolveUiScale(0u, 1.5f) == Catch::Approx(1.5f));
+            REQUIRE(resolveUiScale(0u, 2.0f) == Catch::Approx(2.0f));
+            REQUIRE(resolveUiScale(0u, 3.0f) == Catch::Approx(3.0f));
+            REQUIRE(resolveUiScale(0u, 4.0f) == Catch::Approx(3.0f));
+            REQUIRE(resolveUiScale(0u, 0.0f) == Catch::Approx(0.5f));
         }
 
-        SECTION("an explicit scale passes through and clamps out of range")
+        SECTION("an explicit percentage is the scale, clamped")
         {
-            REQUIRE(resolveUiScale(1u, 2.0f) == 1u);
-            REQUIRE(resolveUiScale(2u, 1.0f) == 2u);
-            REQUIRE(resolveUiScale(3u, 1.0f) == 3u);
-            REQUIRE(resolveUiScale(4u, 1.0f) == 3u);
+            REQUIRE(resolveUiScale(100u, 2.0f) == Catch::Approx(1.0f));
+            REQUIRE(resolveUiScale(150u, 1.0f) == Catch::Approx(1.5f));
+            REQUIRE(resolveUiScale(250u, 1.0f) == Catch::Approx(2.5f));
+            REQUIRE(resolveUiScale(300u, 1.0f) == Catch::Approx(3.0f));
+            REQUIRE(resolveUiScale(30u, 1.0f) == Catch::Approx(0.5f));
+            REQUIRE(resolveUiScale(500u, 1.0f) == Catch::Approx(3.0f));
         }
     }
 }

@@ -415,6 +415,58 @@ namespace rwe
         panel.appendChild(std::move(button));
     }
 
+    void UiFactory::addSliderBelow(UiPanel& panel, const std::string& guiName, const std::string& name, const std::string& templateName, const std::string& anchorName, const std::string& aboveAnchorName, float percent)
+    {
+        // The same derived-placement and anchor guard as addStagedButtonBelow,
+        // for a slider instead of a button. The template supplies the x,
+        // width and height because the slider is not in the GUI data and so
+        // has no geometry of its own; either the page carries all three or
+        // this stays off it.
+        auto templ = panel.find<UiScrollBar>(templateName);
+        auto anchor = panel.find<UiStagedButton>(anchorName);
+        auto above = panel.find<UiStagedButton>(aboveAnchorName);
+        if (!templ || !anchor || !above)
+        {
+            return;
+        }
+
+        if (panel.find<UiScrollBar>(name))
+        {
+            return;
+        }
+
+        auto& t = templ->get();
+        auto rowStep = anchor->get().getY() - above->get().getY();
+
+        auto slider = createSizedSlider(
+            t.getX(),
+            anchor->get().getY() + rowStep,
+            t.getWidth(),
+            t.getHeight(),
+            guiName);
+        slider->setName(name);
+        slider->setScrollPercent(percent);
+        panel.appendChild(std::move(slider));
+    }
+
+    std::unique_ptr<UiSlider>
+    UiFactory::createSizedSlider(int x, int y, unsigned int width, unsigned int height, const std::string& guiName)
+    {
+        auto sprites = textureService->getGuiTexture(guiName, "SLIDERS");
+        if (!sprites)
+        {
+            // The page's own GAF carries no SLIDERS entry; the common set
+            // stands in, as it does for a gui-declared slider.
+            sprites = textureService->getGuiTexture("COMMONGUI", "SLIDERS");
+        }
+        if (!sprites)
+        {
+            throw std::runtime_error("Missing SLIDERS gaf entry");
+        }
+
+        return std::make_unique<UiSlider>(x, y, width, height, *sprites);
+    }
+
     std::unique_ptr<UiStagedButton>
     UiFactory::createStagedButton(int x, int y, int width, int height, const std::string& guiName, const std::string& name, const std::vector<std::string>& labels, unsigned int stages)
     {

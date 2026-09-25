@@ -163,57 +163,14 @@ namespace rwe
         return mode == ShadingMode::BuildingsOnly || mode == ShadingMode::Both;
     }
 
-    std::vector<unsigned int> cameraZoomStages()
-    {
-        return {50u, 100u, 150u, 200u};
-    }
-
-    std::vector<std::string> cameraZoomLabels()
-    {
-        std::vector<std::string> labels;
-        for (auto percent : cameraZoomStages())
-        {
-            labels.push_back("Zoom " + std::to_string(percent) + "%");
-        }
-        return labels;
-    }
-
-    unsigned int nextCameraZoom(unsigned int percent)
-    {
-        auto stages = cameraZoomStages();
-        auto index = cameraZoomStageIndex(percent);
-        return stages[(index + 1) % stages.size()];
-    }
-
-    unsigned int cameraZoomStageIndex(unsigned int percent)
-    {
-        auto stages = cameraZoomStages();
-        for (std::size_t i = 0; i < stages.size(); ++i)
-        {
-            if (stages[i] == percent)
-            {
-                return static_cast<unsigned int>(i);
-            }
-        }
-        // 100 is the default and the stage an unrecognised value reads as.
-        for (std::size_t i = 0; i < stages.size(); ++i)
-        {
-            if (stages[i] == 100u)
-            {
-                return static_cast<unsigned int>(i);
-            }
-        }
-        return 0u;
-    }
-
     std::vector<unsigned int> uiScaleStages()
     {
-        return {0u, 1u, 2u, 3u};
+        return {0u, 100u, 150u, 200u, 250u, 300u};
     }
 
     std::vector<std::string> uiScaleLabels()
     {
-        return {"UI Auto", "UI 1x", "UI 2x", "UI 3x"};
+        return {"UI Auto", "UI 1x", "UI 1.5x", "UI 2x", "UI 2.5x", "UI 3x"};
     }
 
     unsigned int nextUiScale(unsigned int setting)
@@ -237,13 +194,13 @@ namespace rwe
         return 0u;
     }
 
-    unsigned int resolveUiScale(unsigned int setting, float displayScale)
+    float resolveUiScale(unsigned int setting, float displayScale)
     {
         if (setting != 0u)
         {
-            return std::clamp(setting, 1u, 3u);
+            return std::clamp(static_cast<float>(setting) / 100.0f, 0.5f, 3.0f);
         }
-        return std::clamp(static_cast<unsigned int>(std::lround(displayScale)), 1u, 3u);
+        return std::clamp(std::round(displayScale * 2.0f) / 2.0f, 0.5f, 3.0f);
     }
 
     GameOptions optionsFromConfig(const GlobalConfig& config)
