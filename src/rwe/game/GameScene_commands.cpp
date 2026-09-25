@@ -2653,6 +2653,16 @@ namespace rwe
 
     void GameScene::onSelectedUnitsChanged()
     {
+        // An armed order mode with nothing selected is a cursor promising an
+        // action the click can no longer perform, because the unit it was
+        // armed for has died or been captured. Return to the default mode.
+        // Gated on the mode being armed so a selection click does not discard
+        // the NormalCursorMode's own selecting state.
+        if (selectedUnits.empty() && !std::holds_alternative<NormalCursorMode>(cursorMode.getValue()))
+        {
+            cursorMode.next(NormalCursorMode());
+        }
+
         refreshToggleButtons();
 
         if (selectedUnits.empty())
