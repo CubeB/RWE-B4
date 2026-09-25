@@ -929,17 +929,14 @@ namespace rwe
         }
     }
 
-    TEST_CASE("a fogged target is kept until something better can actually be seen", "[targeting]")
+    TEST_CASE("a fogged target is kept unless its slot names it a bad target", "[targeting]")
     {
-        // The scan at 0x4089A0 drops a held target that is in its slot's
-        // bad-target set and 0x40B7B0 picks again. A bad target category is a
-        // preference, not a veto, and the pick can only offer what the owner
-        // can see, so a fogged target with nothing else about has to be kept:
-        // dropping first and picking after lost it for good. The Skeeter is
-        // the case in point -- its secondary missile carries
-        // wsec_badTargetCategory=NOTAIR while its 604 reach outruns its own
-        // 280 sight, so the tower it is engaging can sit in fog it cannot see
-        // its way out of.
+        // Visibility plays no part in 0x4089A0's decision to keep a held
+        // target, but a bad-target one sends it to 0x40B7B0, whose candidates
+        // are can-see filtered; an empty pick clears the slot (0x48A0F0). The
+        // Skeeter shows it: its secondary missile carries
+        // wsec_badTargetCategory=NOTAIR and its 604 reach outruns its 280
+        // sight, so the tower it holds can sit in fog it cannot see into.
         auto script = makeTargetingScript();
         GameSimulation sim(makeTargetingTerrain(), 0u, 0, 0);
         auto us = addTargetingPlayer(sim, "us", GamePlayerType::Human);
@@ -976,25 +973,25 @@ namespace rwe
         REQUIRE_FALSE(sim.canSeeUnit(us, lltId));
 
         // Four scans' worth of ticks, the first of which lands on the phase
-        // the shooter's own id picks out. Fogged with nothing else visible,
-        // the missile slot must keep the target it already had.
-        auto tickAndCheckKept = [&]() {
+        // the shooter's own id picks out.
+        auto tickFourScans = [&]() {
             for (int i = 0; i < 121; ++i)
             {
                 sim.tick();
             }
-            REQUIRE(weaponTargetOfSlot(sim, shooterId, 1) == std::optional<UnitId>(lltId));
         };
 
-        SECTION("even when the slot names the target's category as a bad one")
+        SECTION("a slot that objects to nothing keeps it")
         {
-            sim.unitDefinitions["skeeter"].badTargetCategory[1] = "NOTAIR";
-            tickAndCheckKept();
+            tickFourScans();
+            REQUIRE(weaponTargetOfSlot(sim, shooterId, 1) == std::optional<UnitId>(lltId));
         }
 
-        SECTION("and when no slot objects to it at all")
+        SECTION("a slot that names it a bad target drops it, with nothing visible to replace it")
         {
-            tickAndCheckKept();
+            sim.unitDefinitions["skeeter"].badTargetCategory[1] = "NOTAIR";
+            tickFourScans();
+            REQUIRE_FALSE(weaponTargetOfSlot(sim, shooterId, 1).has_value());
         }
     }
 }

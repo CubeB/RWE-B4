@@ -976,20 +976,7 @@ namespace rwe
                         if (targetUnitState
                             && categoryListContains(sim->unitDefinitions.at(targetUnitState->get().unitType).category, badCategory))
                         {
-                            // 0x40B7B0 re-picks straight after the drop, and
-                            // that pick sees only what the owner sees, so a
-                            // fogged target with nothing else about is kept.
-                            // Consistent with §9's preference-not-veto; what
-                            // the original writes back on an empty re-pick is
-                            // not decoded, only observed in play.
-                            auto replacement = chooseTarget(id, weaponIndex);
-                            if (!replacement)
-                            {
-                                return;
-                            }
-
                             unit.clearWeaponTarget(weaponIndex);
-                            weapon->state = UnitWeaponStateAttacking(*replacement);
                             return;
                         }
                     }

@@ -1083,6 +1083,27 @@ distance is measured anywhere on that path. Dropping a target that has walked
 out of range must happen in the weapon's own service, if it happens at all;
 it is not part of the re-acquire decision.
 
+None of the three conditions clears the slot by itself. Each falls through to
+the same re-pick as an empty slot does, and what the pick returns decides:
+
+```
+408b76  call 0x40b7b0(unit, slot, 1)
+408b7e  je   408b89
+408b82  call 0x48a060(unit, target, slot)   ; write the pick, which may be the same unit
+408b8a  call 0x48a0f0(unit, slot)           ; nothing came back: clear the slot
+```
+
+`0x48A0F0` writes the empty marker `{0, 0x8000}` and, unless the slot was
+already empty, runs the unit's `TargetCleared` script (string `0x508D58`).
+The pick's candidates are can-see filtered (§17a), so **a held target in the
+slot's bad-target set is lost as soon as it is in fog with nothing else
+visible**: it cannot come back out of the bad bucket, the pick is empty, and
+the slot is cleared. A held target that trips none of the three conditions
+never reaches the pick, which is why fog alone does not cost a target. The ARM
+Skeeter is where this shows in play: its secondary missile names
+`wsec_badTargetCategory=NOTAIR` and reaches 604 on 280 of sight, so a tower it
+is shooting can go into fog it cannot see into, and the missile falls silent.
+
 ## 11. `turret`, and what a hull-mounted gun waits for
 
 `turret` is **bit 19 of `wdef+0x111`**, parsed at `0x42E8F9` — the key string is
