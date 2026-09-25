@@ -30,7 +30,7 @@ namespace rwe
 
         void issue(GameSimulation& sim, UnitId unit, const UnitOrder& order, Kind kind)
         {
-            REQUIRE(applyUnitCommandToSimulation(sim, PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(order, kind))));
+            REQUIRE(applyUnitCommandToSimulation(sim, sim.getUnitState(unit).owner, PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(order, kind))));
         }
     }
 
