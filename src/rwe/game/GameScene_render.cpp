@@ -979,8 +979,8 @@ namespace rwe
                 topLeftWorld.z + ((SimScalar(footprintRect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
 
             auto topLeftUi = worldToUi * simVectorToFloat(topLeftWorld);
-            auto boxWidth = footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
-            auto boxHeight = footprintRect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits);
+            auto boxWidth = footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits) * worldUiScale();
+            auto boxHeight = footprintRect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits) * worldUiScale();
 
             // Two nested one-pixel outlines with the darker line INSIDE.
             // The exact colours came out of the binary at last: the
@@ -1148,8 +1148,8 @@ namespace rwe
             topLeftWorld.z + ((SimScalar(footprintRect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
 
         auto topLeftUi = worldToUi * simVectorToFloat(topLeftWorld);
-        auto width = footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
-        auto height = footprintRect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits);
+        auto width = footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits) * worldUiScale();
+        auto height = footprintRect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits) * worldUiScale();
 
         auto t = static_cast<float>(std::min(age, BuildBoxSweepTicks)) / static_cast<float>(BuildBoxSweepTicks);
         auto dx = width * t;
@@ -2194,8 +2194,8 @@ namespace rwe
             worldUiRenderService.drawBoxOutline(
                 topLeftUi.x,
                 topLeftUi.y,
-                hoverBuildInfo->rect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits),
-                hoverBuildInfo->rect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits),
+                hoverBuildInfo->rect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits) * worldUiScale(),
+                hoverBuildInfo->rect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits) * worldUiScale(),
                 color,
                 2.0f);
         }

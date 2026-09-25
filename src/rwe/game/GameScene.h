@@ -1817,6 +1817,13 @@ namespace rwe
         void renderBuildBoxes(UnitId unitId, const UnitState& unit, const Color& outerColor, const Color& innerColor);
 
         /**
+         * World units to UI pixels for worldUiRenderService: one world unit
+         * spans zoom * density UI pixels there, so world-space dimensions
+         * passed to it must be multiplied by this to keep their true size.
+         */
+        float worldUiScale() const { return worldCameraState.zoom * worldCameraState.density; }
+
+        /**
          * The white ring the v3.1 patch draws around a cloaked unit while
          * SHIFT is held: its MinCloakDistance, the radius inside which an
          * enemy unit forces it back into view.
