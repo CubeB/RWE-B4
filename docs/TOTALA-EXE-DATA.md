@@ -617,7 +617,7 @@ named; the class wins.
 |---|---|
 | mover object (null for buildings) | `unit+0x00` |
 | position x/y/z, 16.16 | `unit+0x6A`/`+0x6E`/`+0x72` |
-| packed current cell (x<<16 or z) | `unit+0x76` |
+| packed current cell: X cell in the low word `unit+0x76`, Z cell in the high word `unit+0x78` (`0x485B99`-`0x485BD3`; corrected 2026-09-25, §113) | `unit+0x76` |
 | footprint X (low word) / Z, copied from `def+0x14A` at spawn (`0x485AAA`) | `unit+0x7E` dword |
 | **carrier** (the transport holding this unit), 0 if none | `unit+0x86` |
 | **passenger list head** (units I am carrying) | `unit+0x8A` |
@@ -625,7 +625,7 @@ named; the class wins.
 | unit definition / player | `unit+0x92` / `+0x96` |
 | COB context | `unit+0x9A` |
 | unit id word | `unit+0xA8` |
-| build fraction, float, 1.0f when complete (`0x485B27` stores `0x3f800000`) | `unit+0x104` |
+| build fraction **remaining**, float: 1.0f for a fresh nanoframe (`0x485B27`), 0.0 when finished (`0x485B11`, and the finisher at `0x41B933`). Corrected 2026-09-25 (§113); this row used to say 1.0f meant complete | `unit+0x104` |
 | COB **busy** flag | bit 1 of the byte at `unit+0x10F` |
 | placement state, bits 0-1 of `unit+0x110`; 2 = airborne | written by the SetPosition family (`0x43DA26`, `0x48B69E`) |
 | **hidden-while-carried**, bit 17 of `unit+0x110` | set iff attached to piece -1 (`0x48AC99`) |
@@ -857,16 +857,17 @@ keys come through `0x4C46C0` with the default shown, strings through
 **Win and lose conditions** are not read by the mission reader at all. The
 rule evaluator at `0x48E040`-`0x48E940` reads them straight off the header
 block when the mission starts and, for each that is set, allocates a rule
-object (`0x4B4F10`). This section first named four; there are twenty
-(corrected 2026-09-25, B4 #55). In the evaluator's order, with the reader
-each goes through and, where it is a string, the `sscanf` format it is then
-scanned with:
+object (`0x4B4F10`). This section first named four; there are eighteen,
+eleven victory and seven defeat (corrected 2026-09-25, B4 #55, and the
+count again the same day: the table below always had eighteen, in sixteen
+rows). In the evaluator's order, with the reader each goes through and,
+where it is a string, the `sscanf` format it is then scanned with:
 
 | Key | Read as | Side | Shipped missions using it (of 76, base and Core Contingency) |
 |---|---|---|---|
 | `KillEnemyCommander` (`0x48E029`) | int | victory | 4 |
 | `DestroyAllUnits` (`0x48E06B`) | int | victory | 52 |
-| `KillAllMobileUnits` (`0x48E0A9`) | int | victory | 0 |
+| `KillAllMobileUnits` (`0x48E0A9`) | int | victory | 2 (EXP1AC02, EXP1AC04) |
 | `BuildUnitType` (`0x48E105`) | unit name | victory | 5 |
 | `CaptureUnitType` (`0x48E196`) | unit name | victory | 23 |
 | `KillAllOfType` (`0x48E215`) | unit name | victory | 4 |
@@ -879,12 +880,12 @@ scanned with:
 | `AllUnitsKilledOfType` (`0x48E725`) | unit name | defeat | 27 |
 | `UnitTypeKilled` (`0x48E7BB`) | `%[a-zA-Z],%i` | defeat | 3 |
 | `DeathTimerRunsOut` (`0x48E86B`) | int | defeat | 2 |
-| `AnyUnitPassesX` / `AnyUnitPassesZ` (`0x48E8C0`, `0x48E91E`) | int | defeat | 0 |
+| `AnyUnitPassesX` / `AnyUnitPassesZ` (`0x48E8C0`, `0x48E91E`) | int | defeat | 1 (CC19, `AnyUnitPassesZ=60`) |
 
 Each rule is then registered under a `VictoryCondition_<key>` or
 `DefeatCondition_<key>` name with `Satisfied` and `Celebrated` flags
-(`0x48EAC8` onwards). What each tests, tick by tick, is not followed here;
-it is the next piece.
+(`0x48EAC8` onwards). What each tests, how often, and how they combine is
+§113.
 
 **Which schema is played.** A skirmish map's schemas are `Network n`; a
 mission's are `Easy`, `Medium` and `Hard` (25, 25 and 26 of the shipped 26).
@@ -913,7 +914,7 @@ into a record tagged `"MISSIONUNIT DATA"` (`0x436DA4`):
 | `InitialMission` | string, 1024 | | | the unit's first orders, the mini-language below |
 | `XPos` / `YPos` / `ZPos` | int | 0 | `+0x0C` / `+0x10` / `+0x14` | position |
 | `Angle` | int, degrees | 0 | `+0x18` | heading; `0x436EF9`-`0x436F0A` converts degrees to the 16-bit angle |
-| `Player` | int | 0 | byte `+0x22` | owning player index |
+| `Player` | int | 0 | byte `+0x22` | owning player, **1-based**: the spawner subtracts one (`0x4883B2`-`0x4883B7`), so `Player=1` is player index 0, the human, and `Player=2` is index 1, the computer the rules count (§113). The shipped missions use only 1 and 2 |
 | `HealthPercentage` | int | 100 (`0x64`) | word `+0x1A` | starting health |
 | `BuildPriority` | int | 0 | word `+0x20` | |
 | `CreationCountdown` | int | 0 | `+0x1C` | ticks before the unit appears; the shipped data only ever says 0 |
@@ -1178,3 +1179,169 @@ lesson for the next dead end is the one this section was written to record: the
 thing the work was blocked on was not the thing it was chasing, and an hour
 spent testing whether the blocker was real would have been worth more than the
 day spent on the checksum.
+
+## 113. Mission rules at runtime: what each tests, how often, and how they combine
+
+§105 lists the eighteen `[GlobalHeader]` win and lose keys and where the
+builder `0x48E010` reads them. This is what happens to them afterwards.
+Decoded 2026-09-25 for the campaign (B4 #38). The claims that decide how a
+port behaves were checked against the listing a second time: the
+combination rules, the order, the cadence, the countdown, DestroyAllUnits,
+KillEnemyCommander and the build fraction. The rest is one reading.
+
+### The manager
+
+`0x435DD6` allocates it (0x8C bytes, constructor `0x48DF90`) and stores it
+at `[g+0x391ED]`, where `g` is the globals block `[0x511DE8]`.
+
+| Offset | Contents |
+|---|---|
+| `+0x00`..`+0x3C` | victory rules, up to 16 |
+| `+0x40` | victory count |
+| `+0x44`..`+0x80` | defeat rules |
+| `+0x84` | defeat count |
+| `+0x88` | checks enabled, 1 at construction |
+
+If no victory key was set, the builder adds a `DestroyAllUnits` rule. If no
+defeat key was set, it adds an `AllUnitsKilled` rule (`0x48E977`-`0x48E9F1`,
+and again lazily in the checks). A rule is `+0 vtable`, `+4 Satisfied`,
+`+8 Celebrated`, then its own fields. Its six virtual slots are:
+
+| Slot | Default | Meaning | Called from |
+|---|---|---|---|
+| 0 | `0x48EA00`, return `Satisfied` | poll: is the rule true now | the victory and defeat checks, `0x490230` and `0x490360` |
+| 1 | `0x48EA10`, nothing | a unit is being killed | `0x4904C0`, from the death handler `0x4866D0` at `0x486799` |
+| 2 | `0x48EA20`, nothing | a unit is about to change owner | `0x490520`, first thing in `0x488570` |
+| 3 | `0x48EA30`, nothing | a unit was created | `0x490580`, from the creators `0x485F50` and `0x4861D0`; no rule overrides it |
+| 4 / 5 | per rule | save / load `Satisfied`, `Celebrated` and any counter, under `VictoryCondition_<key>` or `DefeatCondition_<key>` | `0x48FDF0` / `0x48FE60`, from the save writer and reader |
+
+The kill event is sent **before** the dying unit leaves its owner's array
+and before the owner's unit count drops (`0x486799` against `0x486DC7` and
+`0x486DFC`). That is why the count rules below test "at most one left".
+Every cause of death reaches it, including a nanoframe given up and the
+cause-4 death that ends an owner change. `0x4904B0` switches both checks
+off for good: the `Kill` cheat calls it, and so does a campaign mission with
+no `[units]` records (`0x488531`-`0x488547`), which can then never be won or
+lost by its rules.
+
+### How often, in what order, and how they combine
+
+The per-player pass `0x464F80` runs a player's block once every 30 ticks,
+on that player's settle tick (`player+0xF0`, `0x465077`-`0x465092`). Only
+for the local player (`0x46509D`) does it check the rules. **Victory and
+defeat are checked once a second.**
+
+In a campaign game (game type 1, `0x435100`):
+
+- **Victory needs every victory rule, polled in builder order, stopping at
+  the first that is false** (`0x490329`-`0x490332`). A rule that only looks
+  when it is polled cannot be seen true until every rule before it is true
+  in the same second.
+- **Any one defeat rule is a defeat** (`0x490481`-`0x490489`).
+- **Victory is checked first, and when it holds defeat is not checked that
+  second** (`0x4650C9`-`0x4650D5`). So victory wins a tie. Skirmish and
+  multiplayer check defeat first (`0x465167`).
+
+A result does not end the game at once. Both outcomes drive one signed word,
+`g+0x39239`, which starts at -1 (`0x498199`). The first second a result
+holds, the word is set to 4 and nothing else happens. Each later second it
+holds, the word counts down. When it goes negative the game ends:
+`g+0x3923B |= 4`, then `|= 0x10 | 0x20` for a win (`0x465881`-`0x4658D3`) or
+`&= ~0x10, |= 0x40` for a loss (`0x4650EE`-`0x465147`). Bits 5 and 6 are the
+`igvictory` and `igdefeat` banners, and the main loop leaves the battle on
+`& 0x14` (`0x499608`). Three consequences:
+
+- **It takes five more seconds** in which the result holds.
+- **The countdown is never reset.** If the result stops holding, the count
+  pauses and later carries on from where it was. DestroyAllUnits and the
+  timers do not latch, so this can happen.
+- **Every player's economy freezes while it runs.** The settle `0x401360`
+  runs only while the word is negative (`0x46554F`-`0x46555A`).
+
+`Celebrated` is set by a victory rule the first time it is seen true, and
+each time the rule plays `0x47F1A0("Victory Condition", 0)`. That is
+`ALLSOUND.TDF`'s `[Victory Condition]`, `sound=victory2`, played locally.
+**Each victory objective plays VICTORY2 once when it is met**, even while
+others remain. No defeat rule and neither timer plays anything, and there
+is no text.
+
+### The eighteen rules
+
+**P0** is player index 0, the human (`Player=1` in the file), and **P1** is
+index 1 (`Player=2`). The rules know no other players and no alliances. A
+unit's owner is the byte `unit+0xFF`. Names compare with `_stricmp`
+(`0x4F8A70`) against the FBI `UnitName`. Where a rule wants a **usable** unit
+it means the selection predicate (`0x48F283`-`0x48F2BD`): selectable
+(`unit+0x110` bit 5, which a unit with an `InitialMission` lacks until its
+`MAKESELECTABLE`), finished (`unit+0x104 == 0.0`), not under the 150-tick
+owner-transfer lock (`+0xFB`), and not carried unless by an air base.
+
+| Key | Side | Parameters | True when | How it is seen | Latches |
+|---|---|---|---|---|---|
+| `KillEnemyCommander` | victory | flag | a P1 unit dies whose name is the commander of **its owner's** side (`0x48EA40`) | kill event | yes |
+| `DestroyAllUnits` (and the default) | victory | flag | P1's unit count word `g+0x1DF2` is 0, nanoframes and carried units included (`0x48EB40`) | poll | **no** |
+| `KillAllMobileUnits` | victory | flag | a P1 unit with a mover dies and P1 then has at most one such unit, the dying one included. A mobile nanoframe has a mover and counts (`0x48EC20`) | kill event | yes |
+| `BuildUnitType` | victory | type | P0 owns a **finished** unit of the type, however it got it (`0x48EDB0`) | poll | yes |
+| `CaptureUnitType` | victory | type | a P1 unit of the type is about to change owner, to anyone (slot 2, `0x48EEB0`). It fires before the transfer can fail | owner-change event | yes |
+| `KillAllOfType` | victory | type | a P1 unit of the type dies and P1 then holds at most one, the dying one included (`0x48EFB0`) | kill event | yes |
+| `KillUnitType` | victory | `type,count` | each P1 unit of the type that dies counts the number down, while it is above 0; at 0 (`0x48F0F0`) | kill event | yes |
+| `MoveUnitToRadius` | victory | `type,x,z,radius`, or `ANYTYPE` | a usable P0 unit of the type has its centre within the radius of (x, z) in world units, flat and inclusive. The point is clamped to the map on the first poll (`0x48F200`, `0x48F250`) | poll | yes |
+| `UnitTypePassesX` / `Z` | victory | `type,n`, or `ANYTYPE` | a P0 unit of the type has its X (or Z) cell word within 2 of `n >> 4`. A band five cells wide, not a crossing test; any build state (`0x48F370`, `0x48F4C0`) | poll | yes |
+| `VictoryTimerRunsOut` | victory | seconds (`n * 30` ticks, `0x48E64F`) | the game tick `g+0x38A47` has reached it | poll | no |
+| `CommanderKilled` | defeat | flag | a P0 unit dies whose name is its side's commander (`0x48F6B0`) | kill event | yes |
+| `AllUnitsKilled` (and the default) | defeat | flag | P0 has **no usable unit**: nanoframes, scripted units still unselectable and passengers do not keep a player alive (`0x48F7E0`) | poll | recomputed |
+| `AllUnitsKilledOfType` | defeat | type | a unit of the type owned by **anyone** dies, and P0 and P1 together then hold at most one (`0x48F9D0`) | kill event | yes |
+| `UnitTypeKilled` | defeat | `type,count` | each unit of the type owned by **anyone** that dies counts the number down, with no floor; at 0 (`0x48F8C0`) | kill event | yes |
+| `DeathTimerRunsOut` | defeat | seconds | the game tick has reached `n * 30` (`0x48FD50`) | poll | no |
+| `AnyUnitPassesX` / `Z` | defeat | `n`, built when `n >= 0` | any P1 unit has its X (or Z) cell within 2 of `n >> 4` (`0x48FB60`, `0x48FC70`) | poll | yes |
+
+The cell words are the footprint's corner cell, `unit+0x76` for X and
+`unit+0x78` for Z, not the unit's centre.
+
+### What a port has to copy
+
+1. **All victory rules, in order, short-circuiting.** A polled rule counts
+   only at a moment when every earlier rule already holds. The shipped
+   missions depend on it. EXP1AC11 pairs `DestroyAllUnits` with
+   `UnitTypePassesZ=ARMCOM, 800`, so the commander must stand in the band
+   after the last Core unit dies. AC06, CC02, CC09, EXP1CC02 and EXP1CC04
+   pair `DestroyAllUnits` with `BuildUnitType`, so the built unit must still
+   exist then.
+2. **Timers are ANDed like anything else.** EXP1CC12 has
+   `KillEnemyCommander`, `DestroyAllUnits` and `VictoryTimerRunsOut=3600`.
+   Surviving sixty minutes is not enough by this code, although the briefing
+   mentions only the sixty minutes. Worth confirming in play.
+3. **Victory before defeat, and any defeat.** CC13 has
+   `CaptureUnitType=ARMARAD` and `UnitTypeKilled=ARMARAD, 1`. A capture kills
+   the original with cause 4, so both latch on the same event, and victory
+   wins only because it is checked first.
+4. **A capture is a kill.** The owner-change event fires, then the original
+   dies with cause 4, so every kill rule counts a capture. The capture event
+   fires even if the transfer then fails for want of a free unit slot
+   (`0x488709`).
+5. **Counts include the dying unit** (the "at most one" tests).
+6. **Once a second, then five more before it ends**, with the countdown
+   shared, never reset, and the economy frozen while it runs.
+7. **Usable-unit rules and count rules differ.** `MoveUnitToRadius` and
+   `AllUnitsKilled` want usable units. `DestroyAllUnits`,
+   `KillAllMobileUnits`, `KillAllOfType`, `AllUnitsKilledOfType` and the
+   band rules take any unit, nanoframes included. `BuildUnitType` wants a
+   finished unit and nothing more.
+8. **No owner test** in `AllUnitsKilledOfType` and `UnitTypeKilled`, and no
+   new-owner test in `CaptureUnitType`.
+9. **One VICTORY2 per victory objective.**
+10. **Parsing.** `%[a-zA-Z]` stops a type name at the first digit or
+    underscore, and a missing `%i` in `KillUnitType` leaves whatever was on
+    the stack. `ANYTYPE` works only for `MoveUnitToRadius` and the victory
+    band rules. The name is copied into a 32-byte field with no length check,
+    which a port should refuse rather than copy.
+
+**Not to port:** a copy-protection branch in the defeat check
+(`0x490373`-`0x4903C9`). If the CD check at `0x41D6A0` sets `0x511DE4`, it
+arms a random deadline five to ten minutes out and then reports a defeat.
+A legitimate copy never sets the flag.
+
+**Open:** what the network handler at `0x4576C5` uses the victory check for,
+the multiplayer victory test `0x490080`, whether the commander-death wipe
+can run in a campaign, and whether the banners are on screen for any frame
+before the battle closes.

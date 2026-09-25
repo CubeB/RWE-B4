@@ -1827,6 +1827,11 @@ sound field that reaches them. `0x46C620`, which the endgame calls with 7 at
 `0x41F897`, turns out to be the statistics recorder rather than a sound call.
 RWE plays `BEEP6` twice and says so at the call site.
 
+**Found since (§113):** `VICTORY2` is reached through `ALLSOUND.TDF`'s
+`[Victory Condition]` entry, which the campaign's mission rules play with
+`0x47F1A0("Victory Condition", 0)` the first time each victory objective is
+met. It is a campaign sound, not the endgame's.
+
 ---
 
 ## 107. Download menus: how a patch adds a button to a builder it does not ship
