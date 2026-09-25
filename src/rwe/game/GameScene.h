@@ -633,9 +633,6 @@ namespace rwe
                 sceneContext.viewport->height());
         }
 
-        /** The camera zoom slider's position, 0 at 50% and 1 at 200%. */
-        float zoomPercent() const { return (static_cast<float>(cameraZoomSetting) - 50.0f) / 150.0f; }
-
         /** Finds a control by name across every open menu panel. */
         template <typename T>
         T* findInGameMenu(const std::string& name)

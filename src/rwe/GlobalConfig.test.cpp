@@ -85,6 +85,33 @@ namespace rwe
         }
     }
 
+    TEST_CASE("camera zoom slider mapping")
+    {
+        SECTION("the ends of the slider are the ends of the range")
+        {
+            REQUIRE(cameraZoomToSlider(50u) == 0.0f);
+            REQUIRE(cameraZoomToSlider(300u) == 1.0f);
+            REQUIRE(cameraZoomFromSlider(0.0f) == 50u);
+            REQUIRE(cameraZoomFromSlider(1.0f) == 300u);
+        }
+
+        SECTION("every percentage survives the round trip")
+        {
+            for (auto percent = MinCameraZoom; percent <= MaxCameraZoom; ++percent)
+            {
+                REQUIRE(cameraZoomFromSlider(cameraZoomToSlider(percent)) == percent);
+            }
+        }
+
+        SECTION("out of range clamps")
+        {
+            REQUIRE(cameraZoomToSlider(10u) == 0.0f);
+            REQUIRE(cameraZoomToSlider(500u) == 1.0f);
+            REQUIRE(cameraZoomFromSlider(-1.0f) == 50u);
+            REQUIRE(cameraZoomFromSlider(2.0f) == 300u);
+        }
+    }
+
     TEST_CASE("UI scale helpers")
     {
         SECTION("stages are Auto and the three whole steps in order")

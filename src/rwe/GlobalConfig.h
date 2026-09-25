@@ -130,6 +130,15 @@ namespace rwe
      */
     float resolveUiScale(unsigned int setting, float contentScale, int frameWidth, int frameHeight);
 
+    constexpr unsigned int MinCameraZoom = 50;
+    constexpr unsigned int MaxCameraZoom = 300;
+
+    /** A camera zoom percentage as a slider position, 0 at MinCameraZoom and 1 at MaxCameraZoom. */
+    float cameraZoomToSlider(unsigned int percent);
+
+    /** A slider position as a whole camera zoom percentage, clamped to the range. */
+    unsigned int cameraZoomFromSlider(float position);
+
     /** resolveUiScale before the fit: the whole step the setting asks for, 1..3. */
     unsigned int requestedUiScale(unsigned int setting, float contentScale);
 
@@ -191,7 +200,8 @@ namespace rwe
         unsigned int scrollSpeed{100};
 
         /**
-         * Camera zoom as a percentage, 50 to 200; 100 is the original view.
+         * Camera zoom as a percentage, MinCameraZoom to MaxCameraZoom (50 to
+         * 300); 100 is the original view.
          * It is how much battlefield is visible -- the world projection
          * divides by it -- and is deliberately distinct from pixelSize,
          * which changes how chunky the pixels are rather than how much world

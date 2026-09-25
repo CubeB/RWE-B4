@@ -322,7 +322,7 @@ namespace rwe
         // placed the same derived way as the in-game one; see
         // GameScene::addCameraZoomSlider for why the position wants a
         // ui_probe confirmation.
-        uiFactory.addSliderBelow(active, "STARTOPT", "CAMZOOM", "GAMMA", "AAUNITS", "BSHADOWS", (static_cast<float>(pendingCameraZoom) - 50.0f) / 150.0f);
+        uiFactory.addSliderBelow(active, "STARTOPT", "CAMZOOM", "GAMMA", "AAUNITS", "BSHADOWS", cameraZoomToSlider(pendingCameraZoom));
         if (auto slider = active.find<UiScrollBar>("CAMZOOM"))
         {
             auto& s = slider->get();
@@ -425,12 +425,12 @@ namespace rwe
             bar->get().addSubscription(std::move(sub));
         }
 
-        // Camera zoom, 50 to 200 percent; takes effect in the next game.
+        // Camera zoom; takes effect in the next game.
         if (auto bar = active.find<UiScrollBar>("CAMZOOM"))
         {
-            bar->get().setScrollPercent((static_cast<float>(pendingCameraZoom) - 50.0f) / 150.0f);
+            bar->get().setScrollPercent(cameraZoomToSlider(pendingCameraZoom));
             auto sub = bar->get().scrollChanged().subscribe([this](float v) {
-                pendingCameraZoom = std::clamp(50u + static_cast<unsigned int>(std::lround(v * 150.0f)), 50u, 200u);
+                pendingCameraZoom = cameraZoomFromSlider(v);
                 if (!panelStack.empty())
                 {
                     if (auto label = panelStack.back()->find<UiLabel>("CAMZOOMVAL"))
@@ -1073,7 +1073,7 @@ namespace rwe
         }
         if (auto bar = active.find<UiScrollBar>("CAMZOOM"))
         {
-            bar->get().setScrollPercent((static_cast<float>(pendingCameraZoom) - 50.0f) / 150.0f);
+            bar->get().setScrollPercent(cameraZoomToSlider(pendingCameraZoom));
         }
         if (auto label = active.find<UiLabel>("CAMZOOMVAL"))
         {

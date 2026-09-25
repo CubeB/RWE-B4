@@ -176,7 +176,7 @@ int main(int argc, char* argv[])
             config.vehicleShadows = args.getString("vehicle-shadows", "true") != "false";
             config.pixelSize = std::clamp(args.getUint("pixel-size", args.getUint("screen-scale", 1)), 1u, 4u);
             config.scrollSpeed = std::clamp(args.getUint("scroll-speed", 100), 25u, 200u);
-            config.cameraZoom = std::clamp(args.getUint("camera-zoom", 100), 50u, 200u);
+            config.cameraZoom = std::clamp(args.getUint("camera-zoom", 100), rwe::MinCameraZoom, rwe::MaxCameraZoom);
             config.uiScale = std::min(300u, args.getUint("ui-scale", 0));
             config.dropTimeoutSeconds = std::min(600u, args.getUint("drop-timeout", 10));
             config.soundMode = std::min(2u, args.getUint("sound-mode", 2));

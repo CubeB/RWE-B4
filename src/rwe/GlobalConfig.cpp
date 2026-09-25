@@ -212,6 +212,19 @@ namespace rwe
         return static_cast<float>(std::min(requestedUiScale(setting, contentScale), largestFittingUiScale(frameWidth, frameHeight)));
     }
 
+    float cameraZoomToSlider(unsigned int percent)
+    {
+        auto clamped = std::clamp(percent, MinCameraZoom, MaxCameraZoom);
+        return static_cast<float>(clamped - MinCameraZoom) / static_cast<float>(MaxCameraZoom - MinCameraZoom);
+    }
+
+    unsigned int cameraZoomFromSlider(float position)
+    {
+        auto span = static_cast<float>(MaxCameraZoom - MinCameraZoom);
+        auto offset = std::lround(std::clamp(position, 0.0f, 1.0f) * span);
+        return MinCameraZoom + static_cast<unsigned int>(offset);
+    }
+
     GameOptions optionsFromConfig(const GlobalConfig& config)
     {
         GameOptions options;

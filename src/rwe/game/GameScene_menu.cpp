@@ -495,7 +495,7 @@ namespace rwe
         // AAUNITS and BSHADOWS above it, so it lands before RESTORE and UNDO
         // without either page's coordinates appearing here. The position is
         // derived rather than measured and wants a ui_probe confirmation.
-        uiFactory.addSliderBelow(panel, "VISUALRT", "CAMZOOM", "GAMMA", "AAUNITS", "BSHADOWS", zoomPercent());
+        uiFactory.addSliderBelow(panel, "VISUALRT", "CAMZOOM", "GAMMA", "AAUNITS", "BSHADOWS", cameraZoomToSlider(cameraZoomSetting));
 
         auto slider = panel.find<UiScrollBar>("CAMZOOM");
         if (!slider || panel.find<UiLabel>("CAMZOOMVAL"))
@@ -591,13 +591,13 @@ namespace rwe
             bar->addSubscription(std::move(sub));
         }
 
-        // Camera zoom across 50..200 percent. The setting is live, eased into
-        // the camera each frame by update().
+        // Camera zoom. The setting is live, eased into the camera each frame
+        // by update().
         if (auto bar = findInGameMenu<UiScrollBar>("CAMZOOM"))
         {
-            bar->setScrollPercent(zoomPercent());
+            bar->setScrollPercent(cameraZoomToSlider(cameraZoomSetting));
             auto sub = bar->scrollChanged().subscribe([this](float v) {
-                cameraZoomSetting = std::clamp(50u + static_cast<unsigned int>(std::lround(v * 150.0f)), 50u, 200u);
+                cameraZoomSetting = cameraZoomFromSlider(v);
                 if (auto label = findInGameMenu<UiLabel>("CAMZOOMVAL"))
                 {
                     label->setText(formatZoomLabel(cameraZoomSetting));
@@ -1197,7 +1197,7 @@ namespace rwe
         }
         if (auto bar = findInGameMenu<UiScrollBar>("CAMZOOM"))
         {
-            bar->setScrollPercent(zoomPercent());
+            bar->setScrollPercent(cameraZoomToSlider(cameraZoomSetting));
         }
         if (auto label = findInGameMenu<UiLabel>("CAMZOOMVAL"))
         {
