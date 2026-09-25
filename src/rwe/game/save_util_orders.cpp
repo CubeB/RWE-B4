@@ -535,9 +535,13 @@ namespace rwe
                 loadOptional(j.at("path"), loadPathFollowingInfo),
                 j.at("pathRequested").get<bool>(),
                 loadOptional(j.at("reachableDestination"), loadSimVector),
-                j.at("pathIsStandIn").get<bool>(),
-                j.at("wantsPath").get<bool>(),
-                loadOptional(j.at("lastPathRequestTime"), loadGameTime)};
+                // The unit field table's mayBeMissing walk does not reach into
+                // this nested object, so a save written before the repath limit
+                // carries none of these and must fall back to the old
+                // behaviour rather than throwing on j.at.
+                j.value("pathIsStandIn", false),
+                j.value("wantsPath", false),
+                j.contains("lastPathRequestTime") ? loadOptional(j.at("lastPathRequestTime"), loadGameTime) : std::optional<GameTime>{}};
         }
         if (kind == "movingToLandingSpot")
         {

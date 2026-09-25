@@ -482,6 +482,59 @@ namespace rwe
         REQUIRE(!simB.getUnitState(markedId).commandFireShotFired);
     }
 
+    TEST_CASE("a moving unit saved before the repath limit loads its defaults", "[saveload]")
+    {
+        // pathIsStandIn, wantsPath and lastPathRequestTime arrived with the
+        // repath rate limit, and no mayBeMissing row reaches into the nested
+        // navigation-state object. A save written before them has to load
+        // through guards: every moving unit in it lacks all three.
+        auto simA = makeBaseSim();
+        buildScenario(simA);
+
+        auto moverId = spawnUnit(simA, "TANK", PlayerId(0), SimVector(0_ss, 0_ss, -400_ss));
+        simA.getUnitState(moverId).orders.push_back(createMoveOrder(SimVector(0_ss, 0_ss, 400_ss)));
+
+        for (int i = 0; i < 120; ++i)
+        {
+            simA.tick();
+            if (std::get_if<NavigationStateMoving>(&simA.getUnitState(moverId).navigationState.state) != nullptr)
+            {
+                break;
+            }
+        }
+        auto* moving = std::get_if<NavigationStateMoving>(&simA.getUnitState(moverId).navigationState.state);
+        REQUIRE(moving != nullptr);
+        moving->pathIsStandIn = true;
+        moving->wantsPath = true;
+        moving->lastPathRequestTime = GameTime(123);
+
+        auto saved = saveSimulationToJson(simA);
+
+        bool erased = false;
+        for (auto& uj : saved.at("units"))
+        {
+            auto& state = uj.at("navigationState").at("state");
+            if (state.at("kind").get<std::string>() != "moving")
+            {
+                continue;
+            }
+            state.erase("pathIsStandIn");
+            state.erase("wantsPath");
+            state.erase("lastPathRequestTime");
+            erased = true;
+        }
+        REQUIRE(erased);
+
+        auto simB = makeBaseSim();
+        REQUIRE_NOTHROW(loadSimulationFromJson(saved, simB));
+
+        auto* loaded = std::get_if<NavigationStateMoving>(&simB.getUnitState(moverId).navigationState.state);
+        REQUIRE(loaded != nullptr);
+        REQUIRE_FALSE(loaded->pathIsStandIn);
+        REQUIRE_FALSE(loaded->wantsPath);
+        REQUIRE_FALSE(loaded->lastPathRequestTime.has_value());
+    }
+
     TEST_CASE("an old save's units from before mobile units were shaded come back shaded", "[saveload]")
     {
         // Until 2026-09-06 every piece of a mobile unit was made unshaded, and
