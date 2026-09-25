@@ -10,8 +10,22 @@ namespace rwe
         std::optional<std::string> parentPiece = pieceName;
         auto matrix = Matrix4x<SimScalar>::identity();
 
+        // Parents are found by name, and a model can give an ancestor and one
+        // of its descendants the same name. The name then finds the
+        // descendant, whose parents lead back to it, and the walk went round
+        // for ever -- in the simulation, on every peer. A real chain visits
+        // each piece at most once, so no walk needs more steps than there are
+        // pieces; one that does stops there with the transform so far, which
+        // is the same wrong answer everywhere rather than a hang. Issue #75.
+        auto stepsLeft = pieces.size();
+
         do
         {
+            if (stepsLeft-- == 0)
+            {
+                break;
+            }
+
             auto pieceIndexIt = modelDefinition.pieceIndicesByName.find(toUpper(*parentPiece));
             if (pieceIndexIt == modelDefinition.pieceIndicesByName.end())
             {

@@ -65,9 +65,30 @@ namespace rwe
         const PcxHeader* header;
 
     public:
+        /**
+         * The largest image, in bytes of decoded rows, this will decode: an
+         * eight-thousand-pixel square. TA's own are unit pictures and
+         * screens, a few hundred pixels across. Issue #75.
+         */
+        static constexpr std::size_t MaxDecodedBytes = std::size_t(8192) * 8192;
+
+        /**
+         * Everything here reads bytes a mod supplies. The header, the row
+         * lengths and the palette used to be taken on trust, and a run could
+         * write past the end of the image. Each is checked now, and a file
+         * that fails any check throws PcxException. Issue #75.
+         */
         PcxDecoder(It begin, It end) : begin(begin), end(end)
         {
+            if (end - begin < static_cast<std::ptrdiff_t>(sizeof(PcxHeader)))
+            {
+                throw PcxException("file too short for a header");
+            }
             header = reinterpret_cast<const PcxHeader*>(&*begin);
+            if (header->window.xMax < header->window.xMin || header->window.yMax < header->window.yMin)
+            {
+                throw PcxException("image window is inside out");
+            }
         }
 
         unsigned int getWidth()
@@ -80,11 +101,43 @@ namespace rwe
             return (header->window.yMax - header->window.yMin) + 1u;
         }
 
+        /**
+         * The image as width * height palette indices, which is what every
+         * texture made from one expects: rows cropped to the width, and the
+         * format held to the eight-bit, one-plane kind a palette applies to.
+         * decodeImage gives rows as stored, padding and all.
+         */
+        std::vector<char> decodePalettedImage()
+        {
+            if (header->numberOfPlanes != 1 || header->bitsPerPixel != 8)
+            {
+                throw PcxException("not an eight-bit paletted image");
+            }
+            auto width = static_cast<std::size_t>(getWidth());
+            auto height = static_cast<std::size_t>(getHeight());
+            auto stride = static_cast<std::size_t>(header->bytesPerLine);
+            if (stride < width)
+            {
+                throw PcxException("rows are shorter than the image is wide");
+            }
+            auto rows = decodeImage();
+            std::vector<char> out(width * height);
+            for (std::size_t y = 0; y < height; ++y)
+            {
+                std::copy_n(rows.data() + (y * stride), width, out.data() + (y * width));
+            }
+            return out;
+        }
+
         std::vector<char> decodeImage()
         {
-            auto ySize = getHeight();
+            auto ySize = static_cast<std::size_t>(getHeight());
 
-            auto totalBytesPerRow = header->numberOfPlanes * header->bytesPerLine;
+            auto totalBytesPerRow = static_cast<std::size_t>(header->numberOfPlanes) * header->bytesPerLine;
+            if (totalBytesPerRow == 0 || totalBytesPerRow * ySize > MaxDecodedBytes)
+            {
+                throw PcxException("image dimensions out of range");
+            }
             auto totalBytes = totalBytesPerRow * ySize;
 
             std::vector<char> vec(totalBytes);
@@ -96,7 +149,7 @@ namespace rwe
             {
                 auto rowBuf = buf + (y * totalBytesPerRow);
 
-                auto bytesWritten = 0;
+                std::size_t bytesWritten = 0;
                 while (bytesWritten < totalBytesPerRow)
                 {
                     if (it == end)
@@ -106,7 +159,9 @@ namespace rwe
                     auto byte = *(it++);
                     if ((byte & 0b11000000) == 0b11000000)
                     {
-                        auto count = byte & 0b00111111;
+                        // A run is no longer than what is left of the row. The
+                        // last row's used to run on past the image.
+                        auto count = std::min(static_cast<std::size_t>(byte & 0b00111111), totalBytesPerRow - bytesWritten);
                         if (it == end)
                         {
                             throw PcxException("malformed row");
@@ -127,7 +182,12 @@ namespace rwe
 
         std::vector<PcxPaletteColor> decodePalette()
         {
-            auto it = end - ((sizeof(PcxPaletteColor) * 256) + 1);
+            const auto paletteBytes = static_cast<std::ptrdiff_t>((sizeof(PcxPaletteColor) * 256) + 1);
+            if (end - begin < static_cast<std::ptrdiff_t>(sizeof(PcxHeader)) + paletteBytes)
+            {
+                throw PcxException("file too short for a palette");
+            }
+            auto it = end - paletteBytes;
             if (*(it++) != 12)
             {
                 throw PcxException("invalid palette");
