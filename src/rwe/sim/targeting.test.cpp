@@ -117,11 +117,16 @@ namespace rwe
             return sim.tryAddUnit(std::move(unit)).value();
         }
 
-        void armWith(GameSimulation& sim, UnitId id, const std::string& weaponType)
+        void armSlotWith(GameSimulation& sim, UnitId id, unsigned int slot, const std::string& weaponType)
         {
             UnitWeapon weapon;
             weapon.weaponType = weaponType;
-            sim.getUnitState(id).weapons[0] = weapon;
+            sim.getUnitState(id).weapons[slot] = weapon;
+        }
+
+        void armWith(GameSimulation& sim, UnitId id, const std::string& weaponType)
+        {
+            armSlotWith(sim, id, 0, weaponType);
         }
 
         void putInTheAir(GameSimulation& sim, UnitId id)
@@ -140,9 +145,9 @@ namespace rwe
             sim.flyingUnitsSet.insert(id);
         }
 
-        std::optional<UnitId> weaponTarget(const GameSimulation& sim, UnitId id)
+        std::optional<UnitId> weaponTargetOfSlot(const GameSimulation& sim, UnitId id, unsigned int slot)
         {
-            const auto& weapon = sim.getUnitState(id).weapons[0];
+            const auto& weapon = sim.getUnitState(id).weapons[slot];
             if (!weapon)
             {
                 return std::nullopt;
@@ -156,6 +161,11 @@ namespace rwe
 
             auto target = std::get_if<UnitId>(&attacking->target);
             return target == nullptr ? std::nullopt : std::optional<UnitId>(*target);
+        }
+
+        std::optional<UnitId> weaponTarget(const GameSimulation& sim, UnitId id)
+        {
+            return weaponTargetOfSlot(sim, id, 0);
         }
 
         /**
@@ -916,6 +926,75 @@ namespace rwe
             auto target = weaponTarget(sim, shooterId);
             REQUIRE(target.has_value());
             REQUIRE(target->value == tankId.value);
+        }
+    }
+
+    TEST_CASE("a fogged target is kept until something better can actually be seen", "[targeting]")
+    {
+        // The scan at 0x4089A0 drops a held target that is in its slot's
+        // bad-target set and 0x40B7B0 picks again. A bad target category is a
+        // preference, not a veto, and the pick can only offer what the owner
+        // can see, so a fogged target with nothing else about has to be kept:
+        // dropping first and picking after lost it for good. The Skeeter is
+        // the case in point -- its secondary missile carries
+        // wsec_badTargetCategory=NOTAIR while its 604 reach outruns its own
+        // 280 sight, so the tower it is engaging can sit in fog it cannot see
+        // its way out of.
+        auto script = makeTargetingScript();
+        GameSimulation sim(makeTargetingTerrain(), 0u, 0, 0);
+        auto us = addTargetingPlayer(sim, "us", GamePlayerType::Human);
+        auto them = addTargetingPlayer(sim, "them", GamePlayerType::Human);
+        registerTargetingModel(sim);
+
+        // A short-ranged laser on the primary, a missile on the secondary, and
+        // no eyes of its own: everything it knows comes from the watcher.
+        defineShooter(sim, "skeeter", std::string());
+        sim.unitDefinitions["skeeter"].sightDistance = 0;
+        defineTarget(sim, "watcher", "CORE LEVEL1 NOTAIR NOTSUB", false);
+        defineTarget(sim, "llt", "ARM DEFENSIVE WEAPON LEVEL1 NOTAIR NOTSUB", true);
+
+        defineWeapon(sim, "laser", false);
+        sim.weaponDefinitions["laser"].maxRange = 180_ss;
+        defineWeapon(sim, "missile", false);
+        sim.weaponDefinitions["missile"].maxRange = 604_ss;
+
+        auto shooterId = spawnTargetingUnit(sim, "skeeter", us, SimVector(0_ss, 0_ss, 0_ss), script);
+        armSlotWith(sim, shooterId, 0, "laser");
+        armSlotWith(sim, shooterId, 1, "missile");
+        auto watcherId = spawnTargetingUnit(sim, "watcher", us, SimVector(0_ss, 0_ss, 64_ss), script);
+        auto lltId = spawnTargetingUnit(sim, "llt", them, SimVector(250_ss, 0_ss, 0_ss), script);
+
+        tickTwice(sim);
+        REQUIRE(sim.canSeeUnit(us, lltId));
+
+        // The laser cannot reach; the missile holds the tower.
+        REQUIRE_FALSE(weaponTargetOfSlot(sim, shooterId, 0).has_value());
+        REQUIRE(weaponTargetOfSlot(sim, shooterId, 1) == std::optional<UnitId>(lltId));
+
+        sim.getUnitState(watcherId).markAsDeadNoCorpse();
+        sim.tick();
+        REQUIRE_FALSE(sim.canSeeUnit(us, lltId));
+
+        // Four scans' worth of ticks, the first of which lands on the phase
+        // the shooter's own id picks out. Fogged with nothing else visible,
+        // the missile slot must keep the target it already had.
+        auto tickAndCheckKept = [&]() {
+            for (int i = 0; i < 121; ++i)
+            {
+                sim.tick();
+            }
+            REQUIRE(weaponTargetOfSlot(sim, shooterId, 1) == std::optional<UnitId>(lltId));
+        };
+
+        SECTION("even when the slot names the target's category as a bad one")
+        {
+            sim.unitDefinitions["skeeter"].badTargetCategory[1] = "NOTAIR";
+            tickAndCheckKept();
+        }
+
+        SECTION("and when no slot objects to it at all")
+        {
+            tickAndCheckKept();
         }
     }
 }

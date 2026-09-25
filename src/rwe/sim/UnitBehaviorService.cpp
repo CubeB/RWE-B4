@@ -976,7 +976,21 @@ namespace rwe
                         if (targetUnitState
                             && categoryListContains(sim->unitDefinitions.at(targetUnitState->get().unitType).category, badCategory))
                         {
+                            // The drop is only ever half of it: 0x40B7B0 picks
+                            // again straight afterwards, and that pick can only
+                            // offer what the owner can see. A bad-target
+                            // category is a preference, not a veto, so a
+                            // fogged target with nothing else about has to be
+                            // kept -- dropping first and picking after lost it
+                            // for good when the re-pick could not see it.
+                            auto replacement = chooseTarget(id, weaponIndex);
+                            if (!replacement)
+                            {
+                                return;
+                            }
+
                             unit.clearWeaponTarget(weaponIndex);
+                            weapon->state = UnitWeaponStateAttacking(*replacement);
                             return;
                         }
                     }
