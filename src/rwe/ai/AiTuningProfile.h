@@ -3,6 +3,7 @@
 #include <rwe/ai/BuilderSafety.h>
 #include <rwe/sim/SimScalar.h>
 #include <string>
+#include <vector>
 
 namespace rwe
 {
@@ -2019,12 +2020,22 @@ namespace rwe
          *
          * The third candidate from the diagnosis: the commander is armed, it
          * survives what kills the frames, and while the yard is feeding a
-         * gun it is usually idle. Off by default because it has not been
-         * measured, and because the map this is for is the one where it is
-         * most likely to go wrong -- a commander sent at a hull in deep water
-         * is a commander walking towards something it cannot reach. It is
-         * leashed to engageRadius and only fires when the army and the fleet
-         * have nothing that can go instead.
+         * gun it is usually idle. It is leashed to engageRadius and only
+         * fires when the army and the fleet have nothing that can go instead.
+         *
+         * Off, and measured to do nothing either way (issue #114,
+         * 2026-09-25). Thirty paired games on Brain Coral, the map it was
+         * written for, 900 s, ARM against ARM at Standard, the knob on for
+         * player 0 in fifteen seeds and for player 1 in fifteen: not one
+         * sortie, and every tuned game byte-identical to its control. A
+         * factory was besieged in five of the fifteen seeds, 272 times in
+         * all, but by then the side always had a combat unit or a warship,
+         * so the "nothing else to send" gate never opened. Turning it on
+         * would change nothing today; making it matter would mean loosening
+         * that gate, which is a new design, not this switch. The old reason
+         * for leaving it off still stands for whoever tries: a commander sent
+         * at a hull in deep water is walking towards something it cannot
+         * reach.
          */
         bool commanderAnswersHarassment{false};
         /**
@@ -2411,6 +2422,27 @@ namespace rwe
      * know; the caller decides whether that is fatal.
      */
     bool applyAiTuning(AiTuningProfile& profile, const std::string& knob, const std::string& value);
+
+    /**
+     * One knob applyAiTuning accepts, for listing rather than setting:
+     * its name, its type ("int", "bool", "float" or "scalar") and its
+     * default value from a default-constructed profile, formatted the way
+     * applyAiTuning would read it back.
+     */
+    struct AiKnobInfo
+    {
+        std::string name;
+        std::string type;
+        std::string defaultValue;
+    };
+
+    /**
+     * Every knob applyAiTuning will accept, sorted by name. Built from the
+     * same table applyAiTuning matches against (AiTuningProfile.cpp), so a
+     * knob cannot be listed here and refused there, or the other way round.
+     * `ai_arena --list-knobs` is what asks for this.
+     */
+    std::vector<AiKnobInfo> listAiKnobs();
 
     /**
      * What one faction plays differently from the other, laid over the

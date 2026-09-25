@@ -439,6 +439,10 @@ namespace rwe
                     std::string fbiString(bytes->data(), bytes->size());
                     auto fbi = parseUnitFbi(parseTdfFromString(fbiString));
 
+                    if (auto warning = transportCapacityWarning(fbi))
+                    {
+                        LOG_WARN << *warning;
+                    }
                     auto unitDefinition = parseUnitDefinition(fbi, dataMaps.movementClassDatabase);
                     dataMaps.unitDefinitions.insert({toUpper(fbi.unitName), std::move(unitDefinition)});
 
@@ -908,7 +912,7 @@ namespace rwe
                 }
                 LOG_INFO << "Player " << i << " AI knob " << knob << " = " << value;
             }
-            if (gameParameters.replayFile)
+            if (gameParameters.replayFile && !gameParameters.replayShadowAi)
             {
                 // Watching rather than playing: the commands come out of the
                 // file, so a thinking AI would only add its own on top.

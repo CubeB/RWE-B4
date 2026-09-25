@@ -382,6 +382,47 @@ namespace rwe
         }
     }
 
+    unsigned int transportCapacityFromFbi(const UnitFbi& fbi)
+    {
+        if (fbi.transportCapacity > 0)
+        {
+            return fbi.transportCapacity;
+        }
+        // Unpatched data. totala1.hpi's ARMTSHIP says transportmaxunits=20
+        // and nothing else; rev31.gp3's says transportcapacity=20. The 3.1
+        // exe reads only the second, so on an install without the patch
+        // data it would leave the Hulk unable to load at all.
+        if (fbi.transportMaxUnits > 0)
+        {
+            return fbi.transportMaxUnits;
+        }
+        if (fbi.transportSize > 0)
+        {
+            // Neither key, which the original reads as capacity 0 and a
+            // transport that can never be ordered to load
+            // (TOTALA-EXE-TRANSPORTS.md §32). Air transports carry one
+            // unit, a ship six (the crane loads units onto the deck).
+            return fbi.floater ? 6u : 1u;
+        }
+        return 0;
+    }
+
+    std::optional<std::string> transportCapacityWarning(const UnitFbi& fbi)
+    {
+        if (fbi.transportCapacity > 0 || fbi.transportSize == 0)
+        {
+            return std::nullopt;
+        }
+        if (fbi.transportMaxUnits > 0)
+        {
+            return "Unit " + fbi.unitName + " names only the 1.0 key TransportMaxUnits=" + std::to_string(fbi.transportMaxUnits)
+                + ", which the 3.1 game ignores; carrying " + std::to_string(fbi.transportMaxUnits)
+                + " as if it said TransportCapacity. The 3.1 patch data (rev31.gp3) is probably missing.";
+        }
+        return "Unit " + fbi.unitName + " is a transport with no TransportCapacity, which the 3.1 game reads as unable to load; carrying "
+            + std::to_string(transportCapacityFromFbi(fbi)) + " instead.";
+    }
+
     UnitDefinition parseUnitDefinition(const UnitFbi& fbi, MovementClassDatabase& movementClassDatabase)
     {
         UnitDefinition u;
@@ -435,14 +476,8 @@ namespace rwe
         u.healTime = fbi.healTime;
 
         u.canFly = fbi.canFly;
-        u.transportCapacity = fbi.transportCapacity;
+        u.transportCapacity = transportCapacityFromFbi(fbi);
         u.transportSize = fbi.transportSize;
-        if (u.transportSize > 0 && u.transportCapacity == 0)
-        {
-            // TA gives no capacity in the FBI: air transports carry one unit,
-            // the Hulk and Envoy six (the crane loads units onto the deck).
-            u.transportCapacity = fbi.floater ? 6u : 1u;
-        }
         u.cantBeTransported = fbi.cantBeTransported;
         u.isAirBase = fbi.isAirBase;
         u.noShadow = fbi.noShadow;
@@ -450,6 +485,8 @@ namespace rwe
 
         u.cruiseAltitude = SimScalar(fbi.cruiseAlt);
         u.bankScale = SimScalar(fbi.bankScale);
+        u.pitchScale = SimScalar(fbi.pitchScale);
+        u.upright = fbi.upright;
         u.hoverAttack = fbi.hoverAttack;
         u.attackRunLength = SimScalar(static_cast<float>(fbi.attackRunLength));
         u.maneuverLeashLength = SimScalar(static_cast<float>(fbi.maneuverLeashLength));

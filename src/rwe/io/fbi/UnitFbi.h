@@ -167,6 +167,15 @@ namespace rwe
         bool canFly;
         /** How many units it can carry; 0 unless it is a transport. */
         unsigned int transportCapacity;
+        /**
+         * The 1.0 spelling of transportCapacity. The 3.1 exe does not read it
+         * (its string table does not contain the key, TOTALA-EXE-DATA.md
+         * §30), and the 3.1 patch rewrote the shipped FBIs to the new key --
+         * but an install without the patch data still has the old files, and
+         * totala1.hpi's ARMTSHIP names only this. RWE reads it when the new
+         * key is absent (TOTALA-EXE.md §88); see parseUnitDefinition.
+         */
+        unsigned int transportMaxUnits;
         /** Largest footprint it can carry (TA: the unit's footprint must not exceed this). */
         unsigned int transportSize;
 
@@ -220,6 +229,16 @@ namespace rwe
          * otherwise, and the construction aircraft ship 1.5.
          */
         float bankScale;
+
+        /**
+         * How far an aircraft pitches, off the same lateral lean as the bank
+         * (TOTALA-EXE-MOVEMENT.md S:13). Zero unless the FBI says otherwise,
+         * and every shipped unit leaves it at zero.
+         */
+        float pitchScale;
+
+        /** A ground unit that stays vertical on a slope instead of tilting to it. */
+        bool upright;
 
         /**
          * The two speed thresholds that pick which of the MoveRate1 / MoveRate2
