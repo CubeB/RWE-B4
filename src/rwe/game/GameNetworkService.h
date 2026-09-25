@@ -40,6 +40,33 @@ namespace rwe
          */
         static constexpr std::size_t MaxPendingChatMessages = 32;
 
+        /**
+         * How many command sets, and how many hashes, a peer may have waiting
+         * in this peer's buffers before more are refused: thirty seconds'
+         * worth. An honest peer is a command buffer's depth ahead, a few
+         * ticks; without a ceiling a peer could send a stream far into the
+         * future and have this machine hold all of it. Issue #75.
+         */
+        static constexpr unsigned int MaxSetsAheadOfTheGame = 900;
+
+        /**
+         * The most one command set may come to on the wire. A set is a tick's
+         * commands and cannot be split across packets, and a packet is 1500
+         * bytes with a header and every unacked set in it; this leaves room
+         * for both. A move order costs about 30 bytes a unit, so this is some
+         * thirty units a tick. See GameScene, which holds the rest of a
+         * larger order for the next tick. Issue #75.
+         */
+        static constexpr std::size_t MaxCommandSetBytes = 1000;
+
+        /**
+         * How many commands from the front of `commands` make one set no
+         * bigger than MaxCommandSetBytes; at least one while there are any.
+         * Here rather than in the scene so that the scene does not have to
+         * include the protobuf headers to ask.
+         */
+        static std::size_t commandsFittingOneSet(const std::vector<PlayerCommand>& commands);
+
         struct EndpointInfo
         {
             PlayerId playerId;

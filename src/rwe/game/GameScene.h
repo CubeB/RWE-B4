@@ -1660,7 +1660,7 @@ namespace rwe
 
         void processPlayerCommand(PlayerId issuingPlayer, const PlayerCommand& playerCommand);
 
-        void processUnitCommand(const PlayerUnitCommand& unitCommand);
+        void processUnitCommand(PlayerId issuingPlayer, const PlayerUnitCommand& unitCommand);
 
         template <typename T>
         void delay(SceneTime interval, T&& f)

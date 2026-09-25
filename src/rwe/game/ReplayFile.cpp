@@ -416,7 +416,19 @@ namespace rwe
         {
             return std::nullopt;
         }
-        auto header = headerFromJson(parsed);
+        // A field of the wrong type throws out of nlohmann's get<> and
+        // value(). A rejoin bundle is written by another peer and relayed by
+        // the lobby, so a malformed one is refused like any other unreadable
+        // replay rather than ending the game. Issue #75.
+        std::optional<ReplayHeader> header;
+        try
+        {
+            header = headerFromJson(parsed);
+        }
+        catch (const nlohmann::json::exception&)
+        {
+            return std::nullopt;
+        }
         if (!header)
         {
             return std::nullopt;

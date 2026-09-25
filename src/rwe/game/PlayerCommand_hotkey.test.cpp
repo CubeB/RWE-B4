@@ -1,4 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
+#include <limits>
+#include <network.pb.h>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/proto/serialization.h>
 #include <rwe/sim/UnitId.h>
@@ -191,5 +193,51 @@ namespace rwe
         auto recalled = recallGroup(group, live);
 
         REQUIRE(recalled == selection);
+    }
+
+    TEST_CASE("a tick's commands are split into sets a packet can carry", "[network]")
+    {
+        // Issue #75. An order to a hundred units is three kilobytes, twice a
+        // datagram, and sent as one set it stopped the game.
+        std::vector<PlayerCommand> commands;
+        for (int i = 0; i < 100; ++i)
+        {
+            commands.push_back(PlayerUnitCommand(UnitId(1000 + i), PlayerUnitCommand::IssueOrder(MoveOrder(SimVector(SimScalar(1234.5f), SimScalar(87.25f), SimScalar(-987.75f))), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)));
+        }
+
+        std::size_t taken = 0;
+        int sets = 0;
+        while (taken < commands.size())
+        {
+            std::vector<PlayerCommand> rest(commands.begin() + static_cast<std::ptrdiff_t>(taken), commands.end());
+            auto count = commandsFittingOneSet(rest, 1000);
+            REQUIRE(count >= 1);
+
+            proto::GameUpdateMessage_PlayerCommandSet set;
+            for (std::size_t i = 0; i < count; ++i)
+            {
+                serializePlayerCommand(rest[i], *set.add_command());
+            }
+            REQUIRE(set.ByteSizeLong() <= 1000);
+            taken += count;
+            ++sets;
+        }
+        REQUIRE(sets >= 3);
+        REQUIRE(commandsFittingOneSet({}, 1000) == 0);
+    }
+
+    TEST_CASE("a command naming a position that is not a number is refused", "[network]")
+    {
+        // Issue #75: NaN and infinity reach float-to-int conversions in the
+        // terrain lookups, which are undefined for them.
+        proto::PlayerCommand wire;
+        serializePlayerCommand(PlayerUnitCommand(UnitId(7), PlayerUnitCommand::IssueOrder(MoveOrder(SimVector(SimScalar(1.0f), SimScalar(2.0f), SimScalar(3.0f))), PlayerUnitCommand::IssueOrder::IssueKind::Immediate)), wire);
+        REQUIRE_NOTHROW(deserializeCommand(wire));
+
+        wire.mutable_unit_command()->mutable_order()->mutable_move()->mutable_destination()->set_x(std::numeric_limits<float>::quiet_NaN());
+        REQUIRE_THROWS(deserializeCommand(wire));
+
+        wire.mutable_unit_command()->mutable_order()->mutable_move()->mutable_destination()->set_x(std::numeric_limits<float>::infinity());
+        REQUIRE_THROWS(deserializeCommand(wire));
     }
 }
