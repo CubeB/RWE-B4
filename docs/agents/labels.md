@@ -12,6 +12,7 @@ or the same two `--label` flags on create.
 - `scope:sim` — Deterministic simulation: hashed state, unit, weapon and economy behaviour.
 - `scope:presentation` — Engine code outside the simulation: renderer, sound, UI, camera, effects. Previously `scope:client`, which collided with network-client usage in multiplayer contexts.
 - `scope:launcher` — The Electron launcher and lobby: its app, master server and game server.
+- `scope:net` — The engine's side of multiplayer: the lockstep transport, `src/rwe/proto`, `GameNetworkService`, and what the engine says to the launcher over its control channel.
 - `scope:demos` — Reading `.tad` recordings and mining them into fixtures: tools, decodes, episodes.
 - `scope:tests` — Test code and the harness it runs on: `*.test.cpp`, the shared fixtures, the `rwe_test` target.
 - `scope:tooling` — Scripts run by hand: the arena and `TotalA.exe` probes in `tools/`, the root format and fixup scripts.
