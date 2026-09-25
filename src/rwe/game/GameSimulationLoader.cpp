@@ -1008,7 +1008,7 @@ namespace rwe
          * handed back -- `s,m 1500 900` is the player's at once,
          * `m 1500 900,s` is not.
          */
-        bool startsHeld(const GameSimulation& simulation, const OtaMissionUnit& record, const std::unordered_set<std::string>& spawnedIdents)
+        bool startsHeld(const GameSimulation& simulation, const OtaMissionUnit& record, const std::unordered_set<std::string>& spawnedNames)
         {
             using K = MissionOrder::Kind;
             for (const auto& order : record.orders)
@@ -1030,8 +1030,9 @@ namespace rwe
                     case K::Guard:
                         // Looked up among the units the mission has made, which
                         // by now is all of them: the orders are read in a
-                        // second pass (0x4884F1).
-                        if (spawnedIdents.count(toUpper(order.name)) == 0)
+                        // second pass (0x4884F1). A name is a record's Ident
+                        // or its unit type (0x487AF0).
+                        if (spawnedNames.count(toUpper(order.name)) == 0)
                         {
                             continue;
                         }
@@ -1137,17 +1138,18 @@ namespace rwe
 
         // The orders, in a second pass once every unit is made, as the
         // original reads them.
-        std::unordered_set<std::string> spawnedIdents;
+        std::unordered_set<std::string> spawnedNames;
         for (auto i : spawnedRecords)
         {
             if (!schema.units[i].ident.empty())
             {
-                spawnedIdents.insert(toUpper(schema.units[i].ident));
+                spawnedNames.insert(toUpper(schema.units[i].ident));
             }
+            spawnedNames.insert(toUpper(schema.units[i].unitName));
         }
         for (std::size_t n = 0; n < spawnedRecords.size(); ++n)
         {
-            simulation.getUnitState(result.spawned[n]).heldByMission = startsHeld(simulation, schema.units[spawnedRecords[n]], spawnedIdents);
+            simulation.getUnitState(result.spawned[n]).heldByMission = startsHeld(simulation, schema.units[spawnedRecords[n]], spawnedNames);
         }
         return result;
     }

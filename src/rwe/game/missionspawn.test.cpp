@@ -185,10 +185,13 @@ namespace rwe
         guard.orders = parseInitialMission("g BOSS,");
         auto boss = missionUnit("BLDG", 1, 900, 100);
         boss.ident = "boss";
-        schema.units = {scripted, standing, plain, selectableFirst, selectableLast, linkOnly, unknownThings, guard, boss};
+        // Or by a unit type, the first of it in the file.
+        auto guardByType = missionUnit("KBOT", 1, 150, 300);
+        guardByType.orders = parseInitialMission("g bldg,");
+        schema.units = {scripted, standing, plain, selectableFirst, selectableLast, linkOnly, unknownThings, guard, boss, guardByType};
 
         auto result = spawnMissionUnits(world.sim, schema, world.slots);
-        REQUIRE(result.spawned.size() == 9);
+        REQUIRE(result.spawned.size() == 10);
         auto held = [&](std::size_t i) { return world.sim.getUnitState(result.spawned[i]).heldByMission; };
         REQUIRE(held(0));
         REQUIRE_FALSE(held(1));
@@ -199,5 +202,6 @@ namespace rwe
         REQUIRE_FALSE(held(6));
         REQUIRE(held(7));
         REQUIRE_FALSE(held(8));
+        REQUIRE(held(9));
     }
 }
