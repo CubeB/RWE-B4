@@ -12,23 +12,31 @@ namespace rwe
     class UnitState;
 
     /**
-     * The live unit behind a remembered contact, if it is still standing.
+     * A remembered contact the AI is entitled to act on.
      *
-     * Thirteen sites across ArmyManager, AirManager and BuilderSafety spelled
-     * this out by hand as `!ref || ref->get().isDead()`. It is one rule and it
-     * belongs in one place, beside the memory it reads.
-     *
-     * Note what it does, because it is not what PerceptionManager::refresh
-     * does. This asks the *live* simulation whether the unit is dead, which
-     * is more than the AI is entitled to know: refresh deliberately keeps a
-     * contact it cannot see, so that a unit blowing up out of sight does not
-     * vanish off the AI's map the instant it dies. Every caller of this
-     * function learns about that death immediately anyway. The behaviour is
-     * unchanged from when it was written out thirteen times; stating it once
-     * is what makes it one edit to change.
+     * `unit` is the live unit when the AI can see it now. It is null when the
+     * contact has gone quiet -- last seen somewhere we are not watching -- and
+     * the caller then has only the remembered fields of the KnownEnemy it
+     * asked about: where it was and what it was when seen. Reading live state
+     * in that case would be knowledge the AI does not have.
      */
-    std::optional<std::reference_wrapper<const UnitState>>
-        contactStillStanding(const GameSimulation& sim, const KnownEnemy& enemy);
+    struct StandingContact
+    {
+        const UnitState* unit{nullptr};
+    };
+
+    /**
+     * Whether the AI may still act on a remembered contact, and the live unit
+     * if it can see it.
+     *
+     * A contact is gone only once we have looked where we last saw it and it
+     * was not there -- the same rule PerceptionManager::refresh uses to forget
+     * one -- so a unit that dies out of sight stays on the AI's map until
+     * something of ours goes and looks. An omniscient profile sees everything
+     * and drops a dead contact at once.
+     */
+    std::optional<StandingContact>
+        contactStillStanding(const GameSimulation& sim, PlayerId aiOwner, bool omniscient, const KnownEnemy& enemy);
 
     /**
      * Keeps the blackboard's memory of enemy units in step with what the AI
