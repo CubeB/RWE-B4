@@ -1,4 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
+#include <map>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
@@ -218,6 +220,70 @@ namespace rwe
             REQUIRE(distanceAtDeath.has_value());
             REQUIRE(*distanceAtDeath <= 80_ss);
             REQUIRE(*distanceAtDeath > 40_ss);
+        }
+
+        SECTION("a bomb killed by its neighbour's blast dies once, and does not go off as well")
+        {
+            // Two Roaches side by side are at the target on the same tick. The
+            // first to go off kills the second with CRAWL_BLAST, and the
+            // second's own orders must not then run for it: the original's
+            // death handler takes a unit out of play there and then
+            // (0x486706 turns away a unit that is not alive), where RWE ran
+            // the dead Roach's kamikaze order anyway and it self-destructed a
+            // second time -- two deaths, two losses and two blasts for one
+            // unit.
+            defineRoach(sim, "roach", true, 40u);
+
+            auto victim = spawnKamikazeUnit(sim, "victim", defender, SimVector(200_ss, 0_ss, 0_ss), script);
+            // Both already inside kamikazedistance, sixteen apart.
+            auto first = spawnKamikazeUnit(sim, "roach", attacker, SimVector(170_ss, 0_ss, 0_ss), script);
+            auto second = spawnKamikazeUnit(sim, "roach", attacker, SimVector(170_ss, 0_ss, 16_ss), script);
+            sim.getUnitState(first).addOrder(AttackOrder(victim));
+            sim.getUnitState(second).addOrder(AttackOrder(victim));
+
+            std::map<unsigned int, int> deaths;
+            for (int i = 0; i < 900 && (sim.tryGetUnitState(first) || sim.tryGetUnitState(second)); ++i)
+            {
+                sim.tick();
+                for (const auto& e : sim.events)
+                {
+                    if (auto died = std::get_if<UnitDiedEvent>(&e))
+                    {
+                        deaths[died->unitId.value] += 1;
+                    }
+                }
+                sim.events.clear();
+            }
+
+            REQUIRE(deaths[first.value] == 1);
+            REQUIRE(deaths[second.value] == 1);
+            REQUIRE(sim.getPlayer(attacker).unitsLost == 2);
+        }
+
+        SECTION("no path kills a unit twice, and a dead unit's orders do not run")
+        {
+            defineRoach(sim, "roach", true, 40u);
+            auto victim = spawnKamikazeUnit(sim, "victim", defender, SimVector(200_ss, 0_ss, 0_ss), script);
+            auto roach = spawnKamikazeUnit(sim, "roach", attacker, SimVector(0_ss, 0_ss, 0_ss), script);
+
+            sim.killUnit(roach);
+            sim.killUnit(roach);
+            sim.quietlyKillUnit(roach);
+            sim.selfDestructUnit(roach);
+            sim.removeUnfinishedUnit(roach);
+            REQUIRE(sim.getPlayer(attacker).unitsLost == 1);
+            auto died = std::count_if(sim.events.begin(), sim.events.end(), [&](const auto& e) {
+                auto d = std::get_if<UnitDiedEvent>(&e);
+                return d != nullptr && d->unitId == roach;
+            });
+            REQUIRE(died == 1);
+
+            // Still in the map until the end of the tick, with an order to go
+            // and blow up the victim: it must stay where it fell.
+            sim.getUnitState(roach).addOrder(AttackOrder(victim));
+            UnitBehaviorService(&sim).update(roach);
+            REQUIRE((sim.getUnitState(roach).position == SimVector(0_ss, 0_ss, 0_ss)));
+            REQUIRE_FALSE(sim.getUnitState(roach).orders.empty());
         }
 
         SECTION("a weaponless unit that is not a kamikaze just drops the order")

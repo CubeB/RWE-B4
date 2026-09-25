@@ -209,6 +209,15 @@ namespace rwe
     {
         auto unitInfo = sim->getUnitInfo(unitId);
 
+        // A unit killed earlier in this pass is still in the map until the
+        // end of the tick, but it is out of play: the original's death
+        // handler takes it off the board at once. Its orders must not run --
+        // a Roach killed by its neighbour's blast went on to detonate as well.
+        if (unitInfo.state->isDead())
+        {
+            return;
+        }
+
         // A unit in a transport's grip just rides along (see updateCarriedUnits).
         if (unitInfo.state->carriedBy)
         {
@@ -4918,7 +4927,7 @@ namespace rwe
         // arena), and a player cancelling at the same moment met it too.
         // A frame that is still there is removed as before.
         auto removeFrameIfStanding = [&](UnitId frameId) {
-            if (sim->tryGetUnitState(frameId))
+            if (auto frame = sim->tryGetUnitState(frameId); frame && !frame->get().isDead())
             {
                 sim->removeUnfinishedUnit(frameId);
             }
