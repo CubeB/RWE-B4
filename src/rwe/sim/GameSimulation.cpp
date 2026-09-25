@@ -1246,6 +1246,10 @@ namespace rwe
     {
         auto& unit = getUnitState(unitId);
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+        if (unit.isDead())
+        {
+            return;
+        }
 
         if (missionRules)
         {
@@ -2823,6 +2827,10 @@ namespace rwe
 
     void GameSimulation::removeUnfinishedUnit(UnitId unitId)
     {
+        if (getUnitState(unitId).isDead())
+        {
+            return;
+        }
         recordUnitDeath(*this, unitId, "unfinished", std::nullopt);
         quietlyKillUnit(unitId, false);
         if (demoRecorder)
@@ -2835,6 +2843,15 @@ namespace rwe
     void GameSimulation::quietlyKillUnit(UnitId unitId, bool countAsLoss)
     {
         auto& unit = getUnitState(unitId);
+        // A unit dies once. The original's death handler turns away one that
+        // is not alive (0x486706) before it does anything else, and this and
+        // the other ways a unit is killed do the same: a unit killed earlier
+        // in the tick is still in the map until deleteDeadUnits, and a second
+        // death would count a second loss and raise a second event.
+        if (unit.isDead())
+        {
+            return;
+        }
         if (missionRules)
         {
             missionRules->unitDying(*this, unitId, unit.owner);
@@ -3154,6 +3171,10 @@ namespace rwe
     {
         auto& unit = getUnitState(unitId);
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+        if (unit.isDead())
+        {
+            return;
+        }
 
         if (missionRules)
         {
