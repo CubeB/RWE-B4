@@ -223,8 +223,11 @@ namespace rwe
     {
         MissionWorld world;
         auto enemy = world.unit("KBOT", world.computer);
+        // P0 needs something standing, or the default AllUnitsKilled loses
+        // the game under every section here.
+        world.unit("KBOT", world.human, -400.0f, -400.0f);
 
-        SECTION("a timer alone does not win (EXP1CC12)")
+        SECTION("a timer alone does not win, and does once the rest holds too (EXP1CC12)")
         {
             OtaMissionRules r;
             r.killEnemyCommander = 1;
@@ -233,6 +236,34 @@ namespace rwe
             auto& m = world.install(r);
             world.seconds(120);
             REQUIRE(m.countdown == -1);
+            REQUIRE_FALSE(m.outcome);
+
+            // The commander dies, then the last of the army: now the timer,
+            // long run out, is what the poll reaches and it holds.
+            auto commander = world.unit("CORCOM", world.computer);
+            world.sim.killUnit(commander);
+            world.sim.units.remove(commander);
+            world.second();
+            REQUIRE(m.countdown == -1);
+            world.sim.killUnit(enemy);
+            world.sim.units.remove(enemy);
+            world.second();
+            REQUIRE(m.countdown == 4);
+        }
+
+        SECTION("the timer is still ANDed: all else holding does not win before it")
+        {
+            OtaMissionRules r;
+            r.destroyAllUnits = 1;
+            r.victoryTimerRunsOut = 60;
+            auto& m = world.install(r);
+            world.sim.killUnit(enemy);
+            world.sim.units.remove(enemy);
+            world.seconds(59);
+            REQUIRE(m.countdown == -1);
+            REQUIRE_FALSE(m.outcome);
+            world.second();
+            REQUIRE(m.countdown == 4);
         }
 
         SECTION("a unit that passed the line before the last enemy died does not count (EXP1AC11)")
@@ -253,6 +284,7 @@ namespace rwe
             world.sim.units.remove(enemy);
             world.seconds(10);
             REQUIRE(m.countdown == -1);
+            REQUIRE_FALSE(m.outcome);
 
             // Back on the line with the enemy gone, it latches.
             world.sim.getUnitState(commander).position.z = 304_ss;
@@ -362,10 +394,12 @@ namespace rwe
             OtaMissionRules r;
             r.captureUnitType = "ARMGATE";
             r.allUnitsKilledOfType = "ARMGATE";
-            auto& captured = world.install(r);
             auto gate = world.unit("ARMGATE", world.computer);
-            world.sim.captureUnit(gate, world.human, std::nullopt);
-            REQUIRE_FALSE(captured.defeat[0].satisfied);
+            {
+                auto& captured = world.install(r);
+                world.sim.captureUnit(gate, world.human, std::nullopt);
+                REQUIRE_FALSE(captured.defeat[0].satisfied);
+            }
 
             auto& destroyed = world.install(r);
             auto other = world.unit("ARMGATE", world.computer);
@@ -374,6 +408,20 @@ namespace rwe
             REQUIRE_FALSE(destroyed.defeat[0].satisfied);
             world.sim.killUnit(other);
             REQUIRE(destroyed.defeat[0].satisfied);
+        }
+
+        SECTION("a capture by some third player still meets CaptureUnitType, and is a kill")
+        {
+            OtaMissionRules r;
+            r.captureUnitType = "ARMARAD";
+            r.killEnemyCommander = 1;
+            auto& m = world.install(r);
+            auto third = addWellStockedPlayer(world.sim, "ARM");
+            world.sim.captureUnit(world.unit("ARMARAD", world.computer), third, std::nullopt);
+            REQUIRE(m.victory[1].satisfied);
+            // Taking P1's commander is killing it, as far as the rules go.
+            world.sim.captureUnit(world.unit("CORCOM", world.computer), world.human, std::nullopt);
+            REQUIRE(m.victory[0].satisfied);
         }
     }
 
@@ -541,5 +589,164 @@ namespace rwe
         REQUIRE(loaded.missionRules);
         REQUIRE(*loaded.missionRules == m);
         REQUIRE(loaded.missionRules->victory[0].number == 2);
+    }
+
+    TEST_CASE("every way a unit dies reaches the rules, and only once", "[mission]")
+    {
+        MissionWorld world;
+        OtaMissionRules r;
+        r.killUnitType = OtaUnitTypeAndNumber{"KBOT", 10};
+        r.unitTypeKilled = OtaUnitTypeAndNumber{"KBOT", 10};
+        auto& m = world.install(r);
+        auto left = [&]() { return m.victory[0].number; };
+
+        SECTION("a weapon's kill, a scuttle, a reclaim and a frame given up")
+        {
+            world.sim.killUnit(world.unit("KBOT", world.computer));
+            REQUIRE(left() == 9);
+            world.sim.selfDestructUnit(world.unit("KBOT", world.computer));
+            REQUIRE(left() == 8);
+            auto eaten = world.unit("KBOT", world.computer);
+            world.sim.reclaimUnitStep(eaten, world.human, 1000u);
+            REQUIRE(left() == 7);
+            auto frame = world.unit("KBOT", world.computer);
+            world.sim.getUnitState(frame).buildTimeCompleted = 0;
+            world.sim.removeUnfinishedUnit(frame);
+            REQUIRE(left() == 6);
+            // UnitTypeKilled counts the same deaths, with no owner test.
+            REQUIRE(m.defeat[0].number == 6);
+        }
+
+        SECTION("a unit already dead is not counted again (0x486706)")
+        {
+            auto frame = world.unit("KBOT", world.computer);
+            world.sim.getUnitState(frame).buildTimeCompleted = 0;
+            world.sim.quietlyKillUnit(frame);
+            REQUIRE(left() == 9);
+            // A factory clearing a frame that died earlier in the same tick.
+            world.sim.removeUnfinishedUnit(frame);
+            REQUIRE(left() == 9);
+            REQUIRE(m.defeat[0].number == 9);
+        }
+    }
+
+    TEST_CASE("the rules run inside the tick, once a second, before the settle", "[mission]")
+    {
+        MissionWorld world;
+        world.unit("KBOT", world.human);
+        auto& m = world.install(OtaMissionRules{});
+        tick(world.sim, 29);
+        REQUIRE(m.countdown == -1);
+        tick(world.sim, 1);
+        REQUIRE(m.countdown == 4);
+        tick(world.sim, 5 * 30 - 1);
+        REQUIRE_FALSE(m.outcome);
+        tick(world.sim, 1);
+        REQUIRE(m.outcome == MissionOutcome::Victory);
+        REQUIRE(world.sim.gameTime == GameTime(180));
+    }
+
+    TEST_CASE("the rest of the rules", "[mission]")
+    {
+        MissionWorld world;
+        world.unit("KBOT", world.human, -400.0f, -400.0f);
+
+        SECTION("UnitTypeKilled has no floor and no owner test")
+        {
+            OtaMissionRules r;
+            r.unitTypeKilled = OtaUnitTypeAndNumber{"KBOT", 1};
+            auto& m = world.install(r);
+            world.sim.killUnit(world.unit("KBOT", world.human));
+            REQUIRE(m.defeat[0].satisfied);
+            world.sim.killUnit(world.unit("KBOT", world.computer));
+            REQUIRE(m.defeat[0].number == -1);
+        }
+
+        SECTION("AnyUnitPassesZ: any P1 unit at all in the band, a frame included")
+        {
+            OtaMissionRules r;
+            r.anyUnitPassesZ = 0;
+            auto& m = world.install(r);
+            // Z cell 0 to 2 is the top edge: a 2x2 unit's centre at world z
+            // -512 + 16 + 16 * 2 = -464 has its corner in cell 2.
+            auto frame = world.unit("ARMZEUS", world.computer, 0.0f, -464.0f + 16.0f);
+            world.sim.getUnitState(frame).buildTimeCompleted = 0;
+            world.second();
+            REQUIRE_FALSE(m.defeat[0].satisfied);
+            world.sim.getUnitState(frame).position.z = -464_ss;
+            world.second();
+            REQUIRE(m.defeat[0].satisfied);
+        }
+
+        SECTION("DeathTimerRunsOut is seconds, compared against the tick")
+        {
+            OtaMissionRules r;
+            r.deathTimerRunsOut = 2;
+            auto& m = world.install(r);
+            world.unit("KBOT", world.computer);
+            world.second();
+            REQUIRE(m.countdown == -1);
+            world.second();
+            REQUIRE(m.countdown == 4);
+        }
+
+        SECTION("BuildUnitType wants a finished unit, and ANYTYPE is no type at all")
+        {
+            OtaMissionRules r;
+            r.buildUnitType = "BLDG";
+            auto& m = world.install(r);
+            world.unit("KBOT", world.computer);
+            auto frame = world.unit("BLDG", world.human);
+            world.sim.getUnitState(frame).buildTimeCompleted = 0;
+            world.second();
+            REQUIRE_FALSE(m.victory[0].satisfied);
+            world.sim.getUnitState(frame).buildTimeCompleted = 100;
+            world.second();
+            REQUIRE(m.victory[0].satisfied);
+
+            r.buildUnitType = "ANYTYPE";
+            auto& anyType = world.install(r);
+            REQUIRE(anyType.victory[0].unitType == "ANYTYPE");
+            world.second();
+            REQUIRE_FALSE(anyType.victory[0].satisfied);
+        }
+    }
+
+    TEST_CASE("MoveUnitToRadius's pick follows a slope the way 0x484B50 does", "[mission]")
+    {
+        // Height 2 per cell southward: a spot at z shows at z - z/16. The
+        // walk stops at 416, which shows at 390, and interpolates towards
+        // 432, which shows at 405: 416 + 10 * 16 / 15.
+        Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(0));
+        for (int z = 0; z < 64; ++z)
+        {
+            for (int x = 0; x < 64; ++x)
+            {
+                heights.set(x, z, static_cast<unsigned char>(z * 2));
+            }
+        }
+        MapTerrain terrain(std::move(heights), 0_ss);
+        auto p = missionPointOnGround(terrain, 500, 400);
+        REQUIRE(std::abs(p.z.value - (416.0f + (10.0f * 16.0f / 15.0f))) < 0.001f);
+        // The height at the whole unit of that, 426: 52 + (54 - 52) * 10 / 16,
+        // truncated.
+        REQUIRE(p.y == 53_ss);
+    }
+
+    TEST_CASE("the rules' hash sees a count latching and an outcome", "[mission]")
+    {
+        MissionRules m;
+        MissionRule rule;
+        rule.kind = MissionRule::Kind::UnitTypeKilled;
+        rule.number = 1;
+        m.defeat.push_back(rule);
+        auto before = computeHashOf(m);
+        m.defeat[0].number = 0;
+        m.defeat[0].satisfied = true;
+        REQUIRE(computeHashOf(m) != before);
+
+        auto undecided = computeHashOf(m);
+        m.outcome = MissionOutcome::Victory;
+        REQUIRE(computeHashOf(m) != undecided);
     }
 }

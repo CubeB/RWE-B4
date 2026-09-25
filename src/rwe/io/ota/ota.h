@@ -48,22 +48,26 @@ namespace rwe
             AttackType,
             /** g IDENT: guard the unit with that Ident (mission 7). */
             Guard,
-            /** i IDENT: a link to the unit with that Ident; what it does is not followed. */
+            /** i IDENT: start the mission aboard the transport with that Ident (0x48AAC0, at once; nothing is queued). */
             Link,
-            /** o fire move: the standing orders (inferred from the shipped `o 0 1`). */
+            /** o move fire: the standing orders, written straight into the unit (bits 18-19 move, 20-21 fire); nothing is queued. */
             StandingOrders,
-            /** w ticks [n]: wait (WAIT). */
+            /** w seconds [radius]: wait that long, or until an enemy comes within the radius (WAIT). */
             Wait,
-            /** wa: wait to be attacked (WAITFORATTACK). */
+            /** wa [IDENT]: wait until the unit, or the one named, is hit (WAITFORATTACK). */
             WaitForAttack,
             /** u x z: by its shape, unload at the point (mission 5); no shipped mission uses it. */
             Unload,
-            /** b NAME n x z: build the named unit at the point. */
+            /** b NAME n x z: build the named unit at the point, or n of them from a plant. */
             Build,
+            /** bw n: stockpile n missiles (BUILDWEAPON); nothing that makes the unit held. */
+            BuildWeapon,
             /** d: self-destruct (SELFDESTRUCTFG). */
             SelfDestruct,
-            /** s, any other letter, and the end of the list: hand the unit to the player (MAKESELECTABLE). */
+            /** s: hand the unit to the player (MAKESELECTABLE), at that point in the list. */
             MakeSelectable,
+            /** Any other letter: 0x487E50 skips it and nothing happens. */
+            Skip,
         };
 
         Kind kind{Kind::MakeSelectable};
@@ -74,9 +78,10 @@ namespace rwe
     };
 
     /**
-     * Parses an InitialMission string. The terminating MAKESELECTABLE the
-     * interpreter adds at the end of the list (0x487E50) is not included:
-     * the list is what the mission file says.
+     * Parses an InitialMission string. The MAKESELECTABLE the interpreter
+     * appends at the end of a list that queued anything and had no `s`, `p`,
+     * point `a` or `d` in it (0x487E76) is not included: the list is what the
+     * mission file says.
      */
     std::vector<MissionOrder> parseInitialMission(const std::string& text);
 

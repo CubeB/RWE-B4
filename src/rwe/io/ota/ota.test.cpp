@@ -648,8 +648,21 @@ namespace rwe
             REQUIRE(orders[1].numbers == std::vector<float>{1.0f, 300.0f, 400.0f});
             REQUIRE(orders[2].kind == K::SelfDestruct);
             REQUIRE(orders[3].kind == K::MakeSelectable);
-            // Any letter the table does not know is MAKESELECTABLE too.
-            REQUIRE(orders[4].kind == K::MakeSelectable);
+            // A letter the table does not know is skipped: 0x487E50 is only
+            // the loop going round.
+            REQUIRE(orders[4].kind == K::Skip);
+        }
+
+        SECTION("a silo's stockpile, and an attack with one number is a name")
+        {
+            auto orders = parseInitialMission("bw 10,a 100,");
+            REQUIRE(orders.size() == 2);
+            REQUIRE(orders[0].kind == K::BuildWeapon);
+            REQUIRE(orders[0].numbers == std::vector<float>{10.0f});
+            // The point form wants both numbers (0x487F4F); otherwise the
+            // same text is read again as a type name.
+            REQUIRE(orders[1].kind == K::AttackType);
+            REQUIRE(orders[1].name == "100");
         }
     }
 

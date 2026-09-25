@@ -365,17 +365,27 @@ namespace rwe
     {
         // The rules' own state only. The parameters are the mission's, the
         // same on every peer from the start; what the rules have seen is what
-        // two peers can disagree about. Folded in order, because the order
-        // decides which rule a short-circuited poll looks at.
+        // two peers can disagree about. Every field is folded in by position
+        // rather than summed: a count going from 1 to 0 as its rule latches
+        // would otherwise leave the sum exactly where it was, and that is the
+        // commonest thing a defeat rule does.
         uint32_t accumulator = 0;
+        auto fold = [&](GameHash h) { accumulator = (accumulator * 31u) + h.value; };
         for (const auto* rules : {&m.victory, &m.defeat})
         {
             for (const auto& r : *rules)
             {
-                accumulator = (accumulator * 31u) + combineHashes(r.kind, r.number, r.satisfied, r.celebrated).value;
+                fold(computeHashOf(r.kind));
+                fold(computeHashOf(r.number));
+                fold(computeHashOf(r.satisfied));
+                fold(computeHashOf(r.celebrated));
             }
         }
-        return combineHashes(GameHash(accumulator), m.enabled, m.countdown, m.outcome);
+        fold(computeHashOf(m.enabled));
+        fold(computeHashOf(m.countdown));
+        // Victory is the enum's zero, so an outcome is one more than it.
+        fold(GameHash(m.outcome ? 1u + static_cast<uint32_t>(*m.outcome) : 0u));
+        return GameHash(accumulator);
     }
 
     GameHash computeHashOf(const Grid<ExploredMask>& grid)

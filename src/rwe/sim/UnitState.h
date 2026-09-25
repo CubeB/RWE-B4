@@ -741,11 +741,13 @@ namespace rwe
         std::optional<UnitId> carriedBy;
 
         /**
-         * A mission unit whose InitialMission has not run out yet. The
-         * interpreter clears the unit's selectable bit (`unit+0x110` bit 5,
-         * 0x487E69) once it has queued an order, and the MAKESELECTABLE that
-         * ends every order list sets it again. RWE does not run those orders
-         * yet, so for now the flag stays set; the mission rules read it, since
+         * A mission unit its InitialMission holds out of the player's hands.
+         * The interpreter clears the unit's selectable bit (`unit+0x110` bit
+         * 5, 0x487E69) once it has queued an order, and a MAKESELECTABLE sets
+         * it again when that order runs: an `s` in the list, or the one
+         * appended to a list with no `s`, `p`, point `a` or `d` in it. RWE
+         * does not run those orders yet, so a unit whose list starts with
+         * anything but `s` is held for now; the mission rules read it, since
          * a held unit is not one the player can use (0x48F283).
          */
         bool heldByMission{false};

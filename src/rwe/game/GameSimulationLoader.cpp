@@ -993,9 +993,63 @@ namespace rwe
             std::move(dataMaps)};
     }
 
+    namespace
+    {
+        /**
+         * Whether a mission unit starts out of the player's hands.
+         *
+         * The interpreter 0x487BF0 clears the selectable bit once it has
+         * queued an order (0x487E5B), and a MAKESELECTABLE hands the unit
+         * back when it runs: an `s` where it stands in the list, or the one
+         * appended at the end. `i`, `o`, `bw` and letters it does not know
+         * queue nothing, and `a NAME`, `b NAME` and `g IDENT` queue only when
+         * the name resolves. RWE runs none of the orders yet, so a unit is
+         * held from the start unless the first thing it would do is be
+         * handed back -- `s,m 1500 900` is the player's at once,
+         * `m 1500 900,s` is not.
+         */
+        bool startsHeld(const GameSimulation& simulation, const OtaMissionUnit& record, const std::unordered_set<std::string>& spawnedIdents)
+        {
+            using K = MissionOrder::Kind;
+            for (const auto& order : record.orders)
+            {
+                switch (order.kind)
+                {
+                    case K::Link:
+                    case K::StandingOrders:
+                    case K::BuildWeapon:
+                    case K::Skip:
+                        continue;
+                    case K::AttackType:
+                    case K::Build:
+                        if (simulation.unitDefinitions.find(toUpper(order.name)) == simulation.unitDefinitions.end())
+                        {
+                            continue;
+                        }
+                        return true;
+                    case K::Guard:
+                        // Looked up among the units the mission has made, which
+                        // by now is all of them: the orders are read in a
+                        // second pass (0x4884F1).
+                        if (spawnedIdents.count(toUpper(order.name)) == 0)
+                        {
+                            continue;
+                        }
+                        return true;
+                    case K::MakeSelectable:
+                        return false;
+                    default:
+                        return true;
+                }
+            }
+            return false;
+        }
+    }
+
     MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers)
     {
         MissionSpawnResult result;
+        std::vector<std::size_t> spawnedRecords;
         for (std::size_t i = 0; i < schema.units.size(); ++i)
         {
             const auto& record = schema.units[i];
@@ -1077,14 +1131,23 @@ namespace rwe
             // 0x48848E: the maximum times the percentage over a hundred,
             // truncated.
             unit.hitPoints = static_cast<unsigned int>((static_cast<uint64_t>(def.maxHitPoints) * static_cast<uint64_t>(std::max(0, record.healthPercentage))) / 100u);
-            // 0x487E69: an InitialMission that queues anything takes the unit
-            // out of the player's hands until the list runs out. The standing
-            // orders line alone queues nothing, and a bare `s` hands it
-            // straight back.
-            unit.heldByMission = std::any_of(record.orders.begin(), record.orders.end(), [](const MissionOrder& o) {
-                return o.kind != MissionOrder::Kind::StandingOrders && o.kind != MissionOrder::Kind::MakeSelectable;
-            });
             result.spawned.push_back(*unitId);
+            spawnedRecords.push_back(i);
+        }
+
+        // The orders, in a second pass once every unit is made, as the
+        // original reads them.
+        std::unordered_set<std::string> spawnedIdents;
+        for (auto i : spawnedRecords)
+        {
+            if (!schema.units[i].ident.empty())
+            {
+                spawnedIdents.insert(toUpper(schema.units[i].ident));
+            }
+        }
+        for (std::size_t n = 0; n < spawnedRecords.size(); ++n)
+        {
+            simulation.getUnitState(result.spawned[n]).heldByMission = startsHeld(simulation, schema.units[spawnedRecords[n]], spawnedIdents);
         }
         return result;
     }
@@ -1107,11 +1170,16 @@ namespace rwe
         m.humanCommander = toUpper(humanCommander);
         m.computerCommander = toUpper(computerCommander);
 
+        // ANYTYPE is any type only where the rule's own test says so:
+        // MoveUnitToRadius and UnitTypePassesX/Z compare an empty name as a
+        // match. Everywhere else the name is looked up or compared as it
+        // stands, and a unit called ANYTYPE is what it would take to meet it.
         auto rule = [](K kind, const std::string& unitType = std::string(), int number = 0) {
             MissionRule r;
             r.kind = kind;
             auto upper = toUpper(unitType);
-            r.unitType = upper == "ANYTYPE" ? std::string() : upper;
+            auto anyTypeMeansAny = kind == K::MoveUnitToRadius || kind == K::UnitTypePassesX || kind == K::UnitTypePassesZ;
+            r.unitType = (anyTypeMeansAny && upper == "ANYTYPE") ? std::string() : upper;
             r.number = number;
             return r;
         };

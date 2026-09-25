@@ -168,12 +168,36 @@ namespace rwe
         auto standing = missionUnit("KBOT", 1, 200, 100);
         standing.orders = parseInitialMission("o 0 1,");
         auto plain = missionUnit("KBOT", 1, 300, 100);
-        schema.units = {scripted, standing, plain};
+        // An `s` first hands the unit back before it does anything else.
+        auto selectableFirst = missionUnit("KBOT", 1, 400, 100);
+        selectableFirst.orders = parseInitialMission("s,m 1500 900,");
+        auto selectableLast = missionUnit("KBOT", 1, 500, 100);
+        selectableLast.orders = parseInitialMission("m 1500 900,s,");
+        // `i` puts the unit aboard a transport at once and queues nothing, and
+        // neither do a letter the table does not know or a type nobody has.
+        auto linkOnly = missionUnit("KBOT", 1, 600, 100);
+        linkOnly.orders = parseInitialMission("i CHRIS,");
+        auto unknownThings = missionUnit("KBOT", 1, 700, 100);
+        unknownThings.orders = parseInitialMission("x,a NOSUCHTYPE,");
+        // A guard resolves against every unit the mission made, including
+        // one further down the list.
+        auto guard = missionUnit("KBOT", 1, 800, 100);
+        guard.orders = parseInitialMission("g BOSS,");
+        auto boss = missionUnit("BLDG", 1, 900, 100);
+        boss.ident = "boss";
+        schema.units = {scripted, standing, plain, selectableFirst, selectableLast, linkOnly, unknownThings, guard, boss};
 
         auto result = spawnMissionUnits(world.sim, schema, world.slots);
-        REQUIRE(result.spawned.size() == 3);
-        REQUIRE(world.sim.getUnitState(result.spawned[0]).heldByMission);
-        REQUIRE_FALSE(world.sim.getUnitState(result.spawned[1]).heldByMission);
-        REQUIRE_FALSE(world.sim.getUnitState(result.spawned[2]).heldByMission);
+        REQUIRE(result.spawned.size() == 9);
+        auto held = [&](std::size_t i) { return world.sim.getUnitState(result.spawned[i]).heldByMission; };
+        REQUIRE(held(0));
+        REQUIRE_FALSE(held(1));
+        REQUIRE_FALSE(held(2));
+        REQUIRE_FALSE(held(3));
+        REQUIRE(held(4));
+        REQUIRE_FALSE(held(5));
+        REQUIRE_FALSE(held(6));
+        REQUIRE(held(7));
+        REQUIRE_FALSE(held(8));
     }
 }

@@ -77,6 +77,7 @@ namespace rwe
             return countUnits(sim, player, std::nullopt, std::forward<Test>(test)) > 0;
         }
 
+        /** The Passes rules and MoveUnitToRadius, where an empty name is ANYTYPE. */
         bool typeMatches(const MissionRule& rule, const UnitState& unit)
         {
             return rule.unitType.empty() || rule.unitType == unit.unitType;
@@ -231,7 +232,9 @@ namespace rwe
             case K::BuildUnitType:
             {
                 // 0x48EDB0: a finished P0 unit of the type.
-                if (!rule.satisfied && anyUnit(sim, human, [&](const UnitState& u) { return typeMatches(rule, u) && !u.isBeingBuilt(sim.unitDefinitions.at(u.unitType)); }))
+                // The name is resolved to a type (0x488B10) and ANYTYPE is not
+                // one, so it is an exact match and nothing else.
+                if (!rule.satisfied && anyUnit(sim, human, [&](const UnitState& u) { return u.unitType == rule.unitType && !u.isBeingBuilt(sim.unitDefinitions.at(u.unitType)); }))
                 {
                     rule.satisfied = true;
                     celebrate(rule);
@@ -338,8 +341,18 @@ namespace rwe
         // 0x490230: all victory rules, in the builder's order, stopping at
         // the first that does not hold. A later rule is not even looked at
         // until every earlier one holds in the same poll, which matters for
-        // the rules that latch on what they see.
-        auto won = std::all_of(victory.begin(), victory.end(), [&](auto& rule) { return isSatisfied(sim, rule); });
+        // the rules that latch on what they see. Written out as a loop rather
+        // than std::all_of: the standard does not promise that algorithm
+        // stops in order, and here the order is the rule.
+        auto won = true;
+        for (auto& rule : victory)
+        {
+            if (!isSatisfied(sim, rule))
+            {
+                won = false;
+                break;
+            }
+        }
         if (won)
         {
             // Victory wins a tie: defeat is not checked in a second that
@@ -348,8 +361,16 @@ namespace rwe
             return;
         }
 
-        // 0x490360: any defeat rule.
-        auto lost = std::any_of(defeat.begin(), defeat.end(), [&](auto& rule) { return isSatisfied(sim, rule); });
+        // 0x490360: any defeat rule, again stopping at the first.
+        auto lost = false;
+        for (auto& rule : defeat)
+        {
+            if (isSatisfied(sim, rule))
+            {
+                lost = true;
+                break;
+            }
+        }
         if (lost)
         {
             stepCountdown(MissionOutcome::Defeat);
@@ -363,8 +384,17 @@ namespace rwe
             return;
         }
 
-        using K = MissionRule::Kind;
+        // The death handler turns away a unit that is not alive (0x486706)
+        // before it tells the rules, so a unit dies to them once. RWE has
+        // paths that can reach a unit already killed earlier in the same
+        // tick; without this they would count it twice.
         const auto& unit = sim.getUnitState(unitId);
+        if (unit.isDead())
+        {
+            return;
+        }
+
+        using K = MissionRule::Kind;
         const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
         Dying dying{unitId, owner};
         auto ofType = [](const std::string& unitType) { return [unitType](const UnitState& u) { return u.unitType == unitType; }; };
