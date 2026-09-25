@@ -2217,8 +2217,8 @@ a unit because of the flag. The Nanolathe project's independent census reached
 the same conclusion (`TOTALA-EXE-EXTERNAL.md`, "COB"), and the byte-level
 census here confirms it.
 
-**A blocked build site waits, and says so.** Both creation sites check the
-site through `0x47DB70`, a pure occupancy scan that returns 0 or 1 and issues
+**A blocked build site waits, and says so.** Both constructor creation sites
+check the site through `0x47DB70`, a pure occupancy scan that returns 0 or 1 and issues
 no order to anyone. The ground path (`0x403CC7`) and the aircraft path
 (`0x414004`) then do the same thing: on the first failure they play cant slot
 7 with `0x50155C` "Waiting for target area to clear" and set the mission's
@@ -2228,9 +2228,29 @@ The captions are the `cant` sites `0x403CDF`/`0x414020` and
 `0x403D10`/`0x414055` listed in §97. RWE's `retryBlockedSite` already matches
 that ladder, message for message and thirty ticks a try.
 
+**A factory's blocked pad waits silently, and for ever.** The ladder belongs to
+`MobileBuild` and `VTOL_MobileBuild` alone. The factory mission,
+`BuildingBuild` (`0x402640`), runs the same scan at `0x402899`, passing the
+yard's `unit+0x110 & 3` as the mode, and on a refusal does only this:
+
+```
+4028a2  push 0xf
+4028a6  call 0x439e80          ; the mission timer: fifteen ticks
+4028ab  or   dword [esi+0x6],2
+4028b8  ... ret 0xc            ; return 2, stay in this state
+```
+
+No counter, no caption and no give-up: the yard looks at its pad every fifteen
+ticks until it is clear. The only `cant` site in the routine is `0x402907`,
+"Unable to create any more units", on the unit-limit branch. So the ordinary
+case -- the unit just finished still rolling off to the yard's move location --
+passes without a word, and RWE's yard does the same (#334). It had shared the
+constructors' ladder, announcing the wait and dropping the queue entry after
+ten tries, neither of which the original does.
+
 So the original neither sweeps on the set nor re-sweeps while the flag is up:
 `BUGGER_OFF` is inert, and a friendly unit left on a spawn point stalls the
-yard until its ten tries are gone. RWE's one-shot sweep on the set was an
+yard for as long as it stands there. RWE's one-shot sweep on the set was an
 invention of 2019 (commit 6191923a) rather than a port. What RWE does instead
 -- sweep the site on every blocked attempt, so the blocker is told to move --
 is recorded as a divergence in §88.

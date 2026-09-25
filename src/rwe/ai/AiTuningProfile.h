@@ -2459,8 +2459,8 @@ namespace rwe
          * clears the pad by one footprint, and updateNavy then measured
          * "home" against the shipyard itself, so a hull at the doors read as
          * already in place and stayed there. Two waiting on a third block
-         * the yard that is building it, and a blocked spawn point costs ten
-         * failed tries and the queue entry.
+         * the yard that is building it, and a blocked spawn point stalls the
+         * yard until it clears.
          *
          * 320 rather than something tighter because the clearance a hull
          * needs is not its own size: a factory hands the unit it built a

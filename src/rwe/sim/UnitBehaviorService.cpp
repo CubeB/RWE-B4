@@ -4788,14 +4788,9 @@ namespace rwe
                         return false;
                     },
                     [&](const UnitCreationStatusFailed&) {
-                        // Given up on: the site stayed blocked for the whole
-                        // of the original's ten tries, and spawnNewUnits has
-                        // said so. Returning true pops this entry off the
-                        // build queue, so the yard moves on to the next thing
-                        // in it instead of spinning on a spot it cannot use.
-                        // It used to drop straight back into Building, which
-                        // re-requested the same blocked site on the very next
-                        // tick, for ever, and never told anyone.
+                        // Nothing sets this for a yard, which waits out a
+                        // blocked pad however long it takes (spawnNewUnits);
+                        // if something ever does, drop the queue entry.
                         unitInfo.state->factoryState = FactoryBehaviorStateIdle();
                         sim->deactivateUnit(unitInfo.id);
                         return true;
