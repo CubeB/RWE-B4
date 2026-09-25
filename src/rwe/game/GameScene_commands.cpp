@@ -1244,29 +1244,14 @@ namespace rwe
         drawColumn(rightColumn, boxX + 12.0f + columnWidth);
     }
 
-    UnitState& GameScene::getUnit(UnitId id)
-    {
-        return simulation.getUnitState(id);
-    }
-
     const UnitState& GameScene::getUnit(UnitId id) const
     {
         return simulation.getUnitState(id);
     }
 
-    std::optional<std::reference_wrapper<UnitState>> GameScene::tryGetUnit(UnitId id)
-    {
-        return simulation.tryGetUnitState(id);
-    }
-
     std::optional<std::reference_wrapper<const UnitState>> GameScene::tryGetUnit(UnitId id) const
     {
         return simulation.tryGetUnitState(id);
-    }
-
-    GamePlayerInfo& GameScene::getPlayer(PlayerId player)
-    {
-        return simulation.getPlayer(player);
     }
 
     const GamePlayerInfo& GameScene::getPlayer(PlayerId player) const

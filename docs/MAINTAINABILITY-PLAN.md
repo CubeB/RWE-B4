@@ -210,6 +210,16 @@ that clamp is a divergence and wants a line in `TOTALA-EXE.md` section 88.
       what decided how much work each was.
 - [x] **#116, the half that is a leak** 2026-09-21. `setMoveOrders` and
       `setCloakRequested` join `setBuildStance`. See the correction below.
+- [x] **#116, the rest** 2026-09-25. `spawnCompletedUnit` hands back a
+      `UnitId`, through the new `GameSimulation::trySpawnCompletedUnit`. The
+      battle test's orders and fire orders go through
+      `applyUnitCommandToSimulation`, the same function a player's command
+      lands in, and the debug spawner's hit points through `setHitPoints`.
+      `GameScene::getUnit`, `tryGetUnit` and `getPlayer` are const only now,
+      so the next write from presentation is a compile error. The ownership
+      question below turned out to be answered already: the eight order
+      calls all sit in `applyUnitCommandToSimulation`, which takes the
+      simulation itself and never went through `getUnit`.
 - [x] **#119, as far as it survives measurement.** Done 2026-09-21, and most
       of what the issue asks for turned out to exist already.
 
@@ -253,8 +263,9 @@ field writes in `GameScene_debug.cpp`** (`fireOrders` and `hitPoints`, both from
 the debug spawner, and `hitPoints` is hashed), and eight through `UnitState`'s
 own methods (`addOrder`, `clearOrders`, `setFireOrders`, `modifyBuildQueue`).
 
-The two named are fixed. The debug pair cannot route through the simulation
-until `spawnCompletedUnit` returns a `UnitId` rather than a reference, because
+The two named are fixed, and so, since 2026-09-25, is the debug pair (see
+"#116, the rest" above). The debug pair could not route through the simulation
+until `spawnCompletedUnit` returned a `UnitId` rather than a reference, because
 `UnitState` carries no id of its own. The eight method calls are not a leak at
 all -- issuing an order is what a scene does when the player clicks -- but
 `getUnit` cannot become const until someone decides whether `GameSimulation`

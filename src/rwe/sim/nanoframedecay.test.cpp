@@ -234,6 +234,33 @@ namespace rwe
         REQUIRE(progressOf(sim, frameId) < 2000u - 36u);
     }
 
+    TEST_CASE("a unit spawned completed is no nanoframe, and does not fall apart", "[nanoframe]")
+    {
+        // trySpawnCompletedUnit is what the debug spawner, the battle test and
+        // a replay's opening commanders place: trySpawnUnit and then finished
+        // on the spot. The frame's GetBuilt timer is wound either way, so this
+        // is the check that finishing it is what stops the decay.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        registerTestModel(sim);
+        defineUnit(sim, "ARMSOLAR", ArmSolarKeys, *script);
+        auto player = addWellStockedPlayer(sim, "ARM");
+
+        auto unitId = sim.trySpawnCompletedUnit("ARMSOLAR", player, SimVector(100_ss, 0_ss, 100_ss), std::nullopt).value();
+        const auto& definition = sim.unitDefinitions.at("ARMSOLAR");
+        REQUIRE_FALSE(sim.getUnitState(unitId).isBeingBuilt(definition));
+        REQUIRE(sim.getUnitState(unitId).hitPoints == definition.maxHitPoints);
+
+        REQUIRE_FALSE(ticksUntilGone(sim, unitId, 1200).has_value());
+        REQUIRE(progressOf(sim, unitId) == definition.buildTime);
+
+        SECTION("and the debug spawner's health slider comes through the simulation")
+        {
+            sim.setHitPoints(unitId, 163u);
+            REQUIRE(sim.getUnitState(unitId).hitPoints == 163u);
+        }
+    }
+
     TEST_CASE("a nanoframe decays at one energy-point of its build cost per tick", "[nanoframe]")
     {
         // The build time cancels out of TA's `buildtime * 11 / buildCostEnergy`
