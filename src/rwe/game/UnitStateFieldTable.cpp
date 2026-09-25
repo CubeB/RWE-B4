@@ -393,6 +393,9 @@ namespace rwe
             {"airLoiter", hashed<&UnitState::airLoiter>(saveOptionalAirLoiterUnitStateField<&UnitState::airLoiter>, loadOptionalAirLoiterUnitStateField<&UnitState::airLoiter>)},
             {"slowFacePoint", hashed<&UnitState::slowFacePoint>(saveOptionalSimVectorUnitStateField<&UnitState::slowFacePoint>, loadOptionalSimVectorUnitStateField<&UnitState::slowFacePoint>)},
             {"activated", hashedPlain<&UnitState::activated>()},
+            // Only a mission unit is ever held, and a save from before the
+            // flag existed holds none.
+            {"heldByMission", hashedPlain<&UnitState::heldByMission>(), true},
             {"isSufficientlyPowered", hashedPlain<&UnitState::isSufficientlyPowered>()},
             {"cloakRequested", hashedPlain<&UnitState::cloakRequested>()},
             {"cloaked", hashedPlain<&UnitState::cloaked>()},

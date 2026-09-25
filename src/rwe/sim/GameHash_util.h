@@ -32,6 +32,9 @@ namespace rwe
 
     GameHash computeHashOf(const GamePlayerInfo& p);
 
+    struct MissionRules;
+    GameHash computeHashOf(const MissionRules& m);
+
     GameHash computeHashOf(const UnitState& u);
 
     /**

@@ -156,4 +156,24 @@ namespace rwe
         REQUIRE((dx * dx) + (dz * dz) > 0_ss);
         REQUIRE((dx * dx) + (dz * dz) <= 48_ss * 48_ss * 2_ss);
     }
+
+    TEST_CASE("a mission unit with orders to run is not the player's yet", "[mission]")
+    {
+        // 0x487E69 clears the selectable bit once the interpreter has queued
+        // an order; the standing-orders line queues none.
+        MissionWorld world;
+        OtaSchema schema{};
+        auto scripted = missionUnit("KBOT", 1, 100, 100);
+        scripted.orders = parseInitialMission("w 30,p 1500 900,");
+        auto standing = missionUnit("KBOT", 1, 200, 100);
+        standing.orders = parseInitialMission("o 0 1,");
+        auto plain = missionUnit("KBOT", 1, 300, 100);
+        schema.units = {scripted, standing, plain};
+
+        auto result = spawnMissionUnits(world.sim, schema, world.slots);
+        REQUIRE(result.spawned.size() == 3);
+        REQUIRE(world.sim.getUnitState(result.spawned[0]).heldByMission);
+        REQUIRE_FALSE(world.sim.getUnitState(result.spawned[1]).heldByMission);
+        REQUIRE_FALSE(world.sim.getUnitState(result.spawned[2]).heldByMission);
+    }
 }

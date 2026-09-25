@@ -91,6 +91,19 @@ not cut at the water line, and the only water test in either pass is the one tha
 stops a submerged map feature casting at all. Nothing here departs from the
 original. End of `TOTALA-EXE-RENDER.md` §100.
 
+**A mission is won and lost by the original's rules, quirks and all.** Victory
+needs every victory condition to hold in the same once-a-second check, polled in
+the file's order and stopping at the first that does not, so a unit that crossed
+EXP1AC11's line before the last enemy died does not count, and surviving
+EXP1CC12's hour does not win it while the enemy lives. Defeat is any one
+condition, looked at only in a second when victory does not hold, which is what
+makes capturing CC13's radar a win rather than a loss: a capture is also a kill
+of the old unit. The result lands five checks after it is first seen, on a
+countdown that pauses when the result lapses, never starts over, and stops
+every player's economy while it runs. MoveUnitToRadius's point is on the screen
+plane, not the map, so on high ground its circle is south of the numbers.
+`TOTALA-EXE-DATA.md` §113.
+
 ---
 
 ## Changed: because the original's limit is gone
@@ -280,6 +293,17 @@ original in every case.
 - **A resurrect shows the reclaim cursor**, the base game's `CURSORS.GAF` not
   containing the `cursorrevive` sequence that `rev31.gp3` adds.
 - **Aircraft have no pitch** (§1); the `BrakeRate` nose re-aim is in.
+- **Mission units are the player's from the start.** InitialMission orders do
+  not run yet, so the original's "not selectable until MAKESELECTABLE" never
+  applies, and the rules that want a usable unit (AllUnitsKilled,
+  MoveUnitToRadius) count those units. There is no 150-tick lock after a unit
+  changes hands either. §113.
+- **A mission rule with no count or an empty name is not built.** The original
+  builds KillUnitType and UnitTypeKilled with whatever its stack held, and an
+  empty BuildUnitType as a rule nothing can meet. No shipped mission has either.
+- **MoveUnitToRadius compares in floating point**, where the original floors
+  each squared distance to whole units first; they differ only within a unit of
+  the edge.
 - **A transport from unpatched data still loads.** Without the v3.1 patch data
   the Hulk's file gives its capacity under the old 1.0 key, which the patched
   game ignores, leaving a ship that cannot load. RWE reads the old key, and

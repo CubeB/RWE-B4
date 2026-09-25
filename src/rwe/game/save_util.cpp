@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstring>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/MissionRules.h>
 #include <rwe/util/match.h>
 #include <sstream>
 #include <stdexcept>
@@ -98,6 +99,97 @@ namespace rwe
                 return WinStatusUndecided();
             }
             throw std::runtime_error("bad WinStatus kind: " + kind);
+        }
+
+        // ---- mission rules ----------------------------------------------
+
+        json saveMissionRule(const MissionRule& r)
+        {
+            return json{
+                {"kind", saveEnum(r.kind)},
+                {"unitType", r.unitType},
+                {"number", r.number},
+                {"x", saveSimScalar(r.x)},
+                {"z", saveSimScalar(r.z)},
+                {"radius", saveSimScalar(r.radius)},
+                {"satisfied", r.satisfied},
+                {"celebrated", r.celebrated},
+            };
+        }
+
+        MissionRule loadMissionRule(const json& j)
+        {
+            MissionRule r;
+            r.kind = loadEnum<MissionRule::Kind>(j.at("kind"));
+            if (r.kind > MissionRule::Kind::AnyUnitPassesZ)
+            {
+                throw std::runtime_error("bad mission rule kind");
+            }
+            r.unitType = j.at("unitType").get<std::string>();
+            r.number = j.at("number").get<int>();
+            r.x = loadSimScalar(j.at("x"));
+            r.z = loadSimScalar(j.at("z"));
+            r.radius = loadSimScalar(j.at("radius"));
+            r.satisfied = j.at("satisfied").get<bool>();
+            r.celebrated = j.at("celebrated").get<bool>();
+            return r;
+        }
+
+        json saveMissionRules(const MissionRules& m)
+        {
+            json victory = json::array();
+            for (const auto& r : m.victory)
+            {
+                victory.push_back(saveMissionRule(r));
+            }
+            json defeat = json::array();
+            for (const auto& r : m.defeat)
+            {
+                defeat.push_back(saveMissionRule(r));
+            }
+            auto savePlayer = [](PlayerId p) { return json(p.value); };
+            return json{
+                {"victory", victory},
+                {"defeat", defeat},
+                {"enabled", m.enabled},
+                {"countdown", m.countdown},
+                {"outcome", saveOptional(m.outcome, [](MissionOutcome o) { return saveEnum(o); })},
+                {"human", saveOptional(m.human, savePlayer)},
+                {"computer", saveOptional(m.computer, savePlayer)},
+                {"humanCommander", m.humanCommander},
+                {"computerCommander", m.computerCommander},
+            };
+        }
+
+        MissionRules loadMissionRules(const json& j, std::size_t playerCount)
+        {
+            MissionRules m;
+            for (const auto& r : j.at("victory"))
+            {
+                m.victory.push_back(loadMissionRule(r));
+            }
+            for (const auto& r : j.at("defeat"))
+            {
+                m.defeat.push_back(loadMissionRule(r));
+            }
+            m.enabled = j.at("enabled").get<bool>();
+            m.countdown = j.at("countdown").get<int>();
+            m.outcome = loadOptional(j.at("outcome"), [](const json& v) { return loadEnum<MissionOutcome>(v); });
+            // The rules look players up by id, so an id the save does not
+            // seat is refused here rather than trusted.
+            auto loadPlayer = [&](const json& v) {
+                auto id = v.get<unsigned int>();
+                if (id >= playerCount)
+                {
+                    throw std::runtime_error("mission rules name a player the save does not have");
+                }
+                return PlayerId(id);
+            };
+            m.human = loadOptional(j.at("human"), loadPlayer);
+            m.computer = loadOptional(j.at("computer"), loadPlayer);
+            m.humanCommander = j.at("humanCommander").get<std::string>();
+            m.computerCommander = j.at("computerCommander").get<std::string>();
+            return m;
         }
 
         // ---- players ----------------------------------------------------
@@ -488,6 +580,10 @@ namespace rwe
         j["timeMul"] = sim.timeMul;
         j["nextWindSpeedChange"] = saveGameTime(sim.nextWindSpeedChange);
         j["featureRegrowthCursor"] = sim.featureRegrowthCursor;
+        if (sim.missionRules)
+        {
+            j["missionRules"] = saveMissionRules(*sim.missionRules);
+        }
 
         json players = json::array();
         for (const auto& p : sim.players)
@@ -620,6 +716,17 @@ namespace rwe
         }
         sim.nextWindSpeedChange = loadGameTime(j.at("nextWindSpeedChange"));
         sim.featureRegrowthCursor = j.at("featureRegrowthCursor").get<int>();
+        // Only a mission's save has them, and they are the whole of what the
+        // mission's rules have seen: the counts left, what has latched and
+        // the countdown.
+        if (j.contains("missionRules"))
+        {
+            sim.missionRules = std::make_unique<MissionRules>(loadMissionRules(j.at("missionRules"), sim.players.size()));
+        }
+        else
+        {
+            sim.missionRules.reset();
+        }
 
         // The fresh sim has the map's initial features standing. Sweep them
         // all away -- grid cells included -- and put the saved ones down in

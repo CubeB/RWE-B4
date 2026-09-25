@@ -5,6 +5,7 @@
 #include <deque>
 #include <filesystem>
 #include <iterator>
+#include <limits>
 #include <random>
 #include <set>
 #include <rwe/LoadingScene_util.h>
@@ -24,6 +25,7 @@
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/weapontdf/WeaponTdf.h>
+#include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
 
@@ -1075,8 +1077,164 @@ namespace rwe
             // 0x48848E: the maximum times the percentage over a hundred,
             // truncated.
             unit.hitPoints = static_cast<unsigned int>((static_cast<uint64_t>(def.maxHitPoints) * static_cast<uint64_t>(std::max(0, record.healthPercentage))) / 100u);
+            // 0x487E69: an InitialMission that queues anything takes the unit
+            // out of the player's hands until the list runs out. The standing
+            // orders line alone queues nothing, and a bare `s` hands it
+            // straight back.
+            unit.heldByMission = std::any_of(record.orders.begin(), record.orders.end(), [](const MissionOrder& o) {
+                return o.kind != MissionOrder::Kind::StandingOrders && o.kind != MissionOrder::Kind::MakeSelectable;
+            });
             result.spawned.push_back(*unitId);
         }
         return result;
+    }
+
+    MissionRules buildMissionRules(
+        const OtaMissionRules& rules,
+        const MapTerrain& terrain,
+        bool hasUnits,
+        const std::optional<PlayerId>& human,
+        const std::optional<PlayerId>& computer,
+        const std::string& humanCommander,
+        const std::string& computerCommander)
+    {
+        using K = MissionRule::Kind;
+
+        MissionRules m;
+        m.enabled = hasUnits;
+        m.human = human;
+        m.computer = computer;
+        m.humanCommander = toUpper(humanCommander);
+        m.computerCommander = toUpper(computerCommander);
+
+        auto rule = [](K kind, const std::string& unitType = std::string(), int number = 0) {
+            MissionRule r;
+            r.kind = kind;
+            auto upper = toUpper(unitType);
+            r.unitType = upper == "ANYTYPE" ? std::string() : upper;
+            r.number = number;
+            return r;
+        };
+        // Seconds to ticks, without overflowing on a silly value.
+        auto ticks = [](int seconds) { return static_cast<int>(std::min<int64_t>(static_cast<int64_t>(seconds) * SimTicksPerSecond, std::numeric_limits<int>::max())); };
+
+        if (rules.killEnemyCommander != 0)
+        {
+            m.victory.push_back(rule(K::KillEnemyCommander));
+        }
+        if (rules.destroyAllUnits != 0)
+        {
+            m.victory.push_back(rule(K::DestroyAllUnits));
+        }
+        if (rules.killAllMobileUnits != 0)
+        {
+            m.victory.push_back(rule(K::KillAllMobileUnits));
+        }
+        if (rules.buildUnitType)
+        {
+            m.victory.push_back(rule(K::BuildUnitType, *rules.buildUnitType));
+        }
+        if (rules.captureUnitType)
+        {
+            m.victory.push_back(rule(K::CaptureUnitType, *rules.captureUnitType));
+        }
+        if (rules.killAllOfType)
+        {
+            m.victory.push_back(rule(K::KillAllOfType, *rules.killAllOfType));
+        }
+        if (rules.killUnitType)
+        {
+            m.victory.push_back(rule(K::KillUnitType, rules.killUnitType->unitType, rules.killUnitType->number));
+        }
+        if (rules.moveUnitToRadius)
+        {
+            auto r = rule(K::MoveUnitToRadius, rules.moveUnitToRadius->unitType);
+            auto centre = terrain.topLeftCoordinateToWorld(missionPointOnGround(terrain, rules.moveUnitToRadius->x, rules.moveUnitToRadius->z));
+            r.x = centre.x;
+            r.z = centre.z;
+            r.radius = intToSimScalar(rules.moveUnitToRadius->radius);
+            m.victory.push_back(r);
+        }
+        if (rules.unitTypePassesX)
+        {
+            m.victory.push_back(rule(K::UnitTypePassesX, rules.unitTypePassesX->unitType, rules.unitTypePassesX->number >> 4));
+        }
+        if (rules.unitTypePassesZ)
+        {
+            m.victory.push_back(rule(K::UnitTypePassesZ, rules.unitTypePassesZ->unitType, rules.unitTypePassesZ->number >> 4));
+        }
+        if (rules.victoryTimerRunsOut > 0)
+        {
+            m.victory.push_back(rule(K::VictoryTimerRunsOut, std::string(), ticks(rules.victoryTimerRunsOut)));
+        }
+
+        if (rules.commanderKilled != 0)
+        {
+            m.defeat.push_back(rule(K::CommanderKilled));
+        }
+        if (rules.allUnitsKilled != 0)
+        {
+            m.defeat.push_back(rule(K::AllUnitsKilled));
+        }
+        if (rules.allUnitsKilledOfType)
+        {
+            m.defeat.push_back(rule(K::AllUnitsKilledOfType, *rules.allUnitsKilledOfType));
+        }
+        if (rules.unitTypeKilled)
+        {
+            m.defeat.push_back(rule(K::UnitTypeKilled, rules.unitTypeKilled->unitType, rules.unitTypeKilled->number));
+        }
+        if (rules.deathTimerRunsOut > 0)
+        {
+            m.defeat.push_back(rule(K::DeathTimerRunsOut, std::string(), ticks(rules.deathTimerRunsOut)));
+        }
+        if (rules.anyUnitPassesX >= 0)
+        {
+            m.defeat.push_back(rule(K::AnyUnitPassesX, std::string(), rules.anyUnitPassesX >> 4));
+        }
+        if (rules.anyUnitPassesZ >= 0)
+        {
+            m.defeat.push_back(rule(K::AnyUnitPassesZ, std::string(), rules.anyUnitPassesZ >> 4));
+        }
+
+        // 0x4902F3 and 0x49041D add these on the first poll; the rules are
+        // the same either way.
+        if (m.victory.empty())
+        {
+            m.victory.push_back(rule(K::DestroyAllUnits));
+        }
+        if (m.defeat.empty())
+        {
+            m.defeat.push_back(rule(K::AllUnitsKilled));
+        }
+
+        return m;
+    }
+
+    void installMissionRules(
+        GameSimulation& simulation,
+        const OtaRecord& ota,
+        const OtaSchema& schema,
+        const std::array<std::optional<PlayerId>, 10>& slotPlayers,
+        const std::unordered_map<std::string, SideData>& sideData)
+    {
+        auto commanderOf = [&](const std::optional<PlayerId>& player) {
+            if (!player)
+            {
+                return std::string();
+            }
+            auto it = sideData.find(simulation.getPlayer(*player).side);
+            return it == sideData.end() ? std::string() : it->second.commander;
+        };
+        simulation.missionRules = std::make_unique<MissionRules>(buildMissionRules(
+            ota.rules,
+            simulation.terrain,
+            !schema.units.empty(),
+            slotPlayers[0],
+            slotPlayers[1],
+            commanderOf(slotPlayers[0]),
+            commanderOf(slotPlayers[1])));
+        const auto& rules = *simulation.missionRules;
+        LOG_INFO << "Mission rules: " << rules.victory.size() << " to win, " << rules.defeat.size() << " to lose" << (rules.enabled ? "" : ", switched off: the mission has no [units]");
     }
 }

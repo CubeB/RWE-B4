@@ -740,6 +740,16 @@ namespace rwe
         /** The transport carrying this unit, if any. While set the unit does nothing and follows the transport. */
         std::optional<UnitId> carriedBy;
 
+        /**
+         * A mission unit whose InitialMission has not run out yet. The
+         * interpreter clears the unit's selectable bit (`unit+0x110` bit 5,
+         * 0x487E69) once it has queued an order, and the MAKESELECTABLE that
+         * ends every order list sets it again. RWE does not run those orders
+         * yet, so for now the flag stays set; the mission rules read it, since
+         * a held unit is not one the player can use (0x48F283).
+         */
+        bool heldByMission{false};
+
         /** The transport piece this unit hangs from (empty: the transport's own position). */
         std::string carriedPiece;
 

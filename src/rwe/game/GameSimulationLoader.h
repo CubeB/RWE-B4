@@ -19,7 +19,9 @@
 #include <rwe/io/tnt/TntArchive.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/LosTables.h>
+#include <rwe/io/sidedatatdf/SideData.h>
 #include <rwe/sim/MapTerrain.h>
+#include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MovementClassDatabase.h>
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/WeaponDefinition.h>
@@ -160,4 +162,37 @@ namespace rwe
      * eight cells, and a building whose spot is taken is not made.
      */
     MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers);
+
+    /**
+     * A mission's rules as the builder at 0x48E010 makes them from the
+     * [GlobalHeader], in its order: the eleven victory keys, then the seven
+     * defeat keys, with DestroyAllUnits standing in when no victory rule is
+     * given and AllUnitsKilled when no defeat rule is. Type names are
+     * compared without case, so they are kept in upper case; ANYTYPE becomes
+     * the empty name. The Passes rules keep N >> 4, a cell, and the timers N
+     * seconds as ticks.
+     *
+     * `hasUnits` is whether the mission has any [units]: without them the
+     * rules are switched off for good (0x488547), as in the original.
+     */
+    MissionRules buildMissionRules(
+        const OtaMissionRules& rules,
+        const MapTerrain& terrain,
+        bool hasUnits,
+        const std::optional<PlayerId>& human,
+        const std::optional<PlayerId>& computer,
+        const std::string& humanCommander,
+        const std::string& computerCommander);
+
+    /**
+     * Gives the simulation the mission's rules: slot 0 as P0, slot 1 as P1,
+     * and each one's commander from its side. For a new mission only; a
+     * loaded save brings its own.
+     */
+    void installMissionRules(
+        GameSimulation& simulation,
+        const OtaRecord& ota,
+        const OtaSchema& schema,
+        const std::array<std::optional<PlayerId>, 10>& slotPlayers,
+        const std::unordered_map<std::string, SideData>& sideData);
 }

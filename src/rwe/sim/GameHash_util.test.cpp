@@ -259,6 +259,7 @@ namespace rwe
             u.airLoiter = UnitState::AirLoiterState{UnitState::AirLoiterState::Reason::Guarding, SimVector(63_ss, 0_ss, 64_ss), SimAngle(65)};
             u.slowFacePoint = SimVector(66_ss, 0_ss, 67_ss);
             u.activated = true;
+            u.heldByMission = true;
             u.isSufficientlyPowered = true;
             u.cloakRequested = true;
             u.cloaked = true;
@@ -437,8 +438,10 @@ namespace rwe
         // what the pre-table hand-written hash produced for this unit, and
         // the walks must agree with it from now on. It was 469200823 until
         // 2026-09-24, when reclaimProgress left the table (#19: a unit is
-        // reclaimed through its hit points now, and had nothing to keep here).
-        REQUIRE(computeHashOf(makePopulatedUnitState()) == GameHash(469200811u));
+        // reclaimed through its hit points now, and had nothing to keep here),
+        // and then 469200811 until heldByMission joined it (#38), adding its
+        // one.
+        REQUIRE(computeHashOf(makePopulatedUnitState()) == GameHash(469200812u));
     }
 
 }

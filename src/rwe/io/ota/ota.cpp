@@ -392,8 +392,8 @@ namespace rwe
         r.allUnitsKilledOfType = readName(tdf, "AllUnitsKilledOfType");
         r.unitTypeKilled = readTypeAndNumber(tdf, "UnitTypeKilled");
         tdf.readOrDefault("DeathTimerRunsOut", r.deathTimerRunsOut);
-        tdf.readOrDefault("AnyUnitPassesX", r.anyUnitPassesX);
-        tdf.readOrDefault("AnyUnitPassesZ", r.anyUnitPassesZ);
+        tdf.readOrDefault("AnyUnitPassesX", r.anyUnitPassesX, -1);
+        tdf.readOrDefault("AnyUnitPassesZ", r.anyUnitPassesZ, -1);
         return r;
     }
 

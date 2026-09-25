@@ -547,7 +547,9 @@ int main(int argc, char* argv[])
 
         if (loaded.gameParameters.mission)
         {
-            auto result = spawnMissionUnits(loaded.simulation, loaded.ota.schemas.at(loaded.gameParameters.schemaIndex), loaded.gamePlayers);
+            const auto& schema = loaded.ota.schemas.at(loaded.gameParameters.schemaIndex);
+            auto result = spawnMissionUnits(loaded.simulation, schema, loaded.gamePlayers);
+            installMissionRules(loaded.simulation, loaded.ota, schema, loaded.gamePlayers, sideData);
             LOG_INFO << "Mission: " << result.spawned.size() << " units placed, " << result.skipped.size() << " not";
             for (const auto& line : result.skipped)
             {

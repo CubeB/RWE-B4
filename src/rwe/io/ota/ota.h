@@ -122,9 +122,10 @@ namespace rwe
 
     /**
      * A mission's win and lose conditions. The mission reader does not read
-     * these; the rule evaluator at 0x48E040 reads them off the GlobalHeader
-     * when the mission starts, integers defaulting to 0 and strings to
-     * absent. Victory conditions first, then defeat, in the evaluator's order.
+     * these; the rule builder at 0x48E010 reads them off the GlobalHeader
+     * when the mission starts, integers defaulting to 0 (AnyUnitPassesX and
+     * Z to -1) and strings to absent. Victory conditions first, then defeat,
+     * in the builder's order. buildMissionRules makes the rules of them.
      */
     struct OtaMissionRules
     {
@@ -145,8 +146,9 @@ namespace rwe
         std::optional<std::string> allUnitsKilledOfType;
         std::optional<OtaUnitTypeAndNumber> unitTypeKilled;
         int deathTimerRunsOut{0};
-        int anyUnitPassesX{0};
-        int anyUnitPassesZ{0};
+        /** Unlike the other integers these default to -1, and 0 is a real line (0x48E8CE). */
+        int anyUnitPassesX{-1};
+        int anyUnitPassesZ{-1};
     };
 
     struct OtaSchema

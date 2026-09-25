@@ -788,6 +788,9 @@ namespace rwe
         /** Players whose defeat has already been announced. */
         std::unordered_set<unsigned int> defeatAnnounced;
 
+        /** How many mission objectives have had their sound; see updateMissionNotifications. */
+        unsigned int missionCelebrationsHeard{0};
+
         std::vector<std::pair<GameTime, GameHash>> gameHashes;
 
         std::optional<std::ofstream> stateLogStream;
@@ -1176,6 +1179,12 @@ namespace rwe
         void updateSelfDestructNotifications();
 
         void updateDefeatNotifications();
+
+        /** How many mission objectives the simulation says are met and celebrated; 0 outside a mission. */
+        unsigned int missionCelebrations() const;
+
+        /** Plays "Victory Condition" for each mission objective met since the last call. */
+        void updateMissionNotifications();
 
         void renderConsole();
 

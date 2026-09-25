@@ -565,6 +565,9 @@ namespace rwe
         REQUIRE(ota.rules.allUnitsKilledOfType == std::optional<std::string>("ARMGATE"));
         REQUIRE(ota.rules.commanderKilled == 0);
         REQUIRE_FALSE(ota.rules.killUnitType.has_value());
+        // Absent, these two are -1 rather than 0, which is a real line.
+        REQUIRE(ota.rules.anyUnitPassesX == -1);
+        REQUIRE(ota.rules.anyUnitPassesZ == -1);
 
         const auto& units = ota.schemas.at(0).units;
         REQUIRE(units.size() == 2);
@@ -580,6 +583,16 @@ namespace rwe
         REQUIRE(units[1].orders.size() == 1);
         REQUIRE(units[1].orders[0].kind == MissionOrder::Kind::Patrol);
         REQUIRE(units[1].orders[0].numbers == std::vector<float>{1750.0f, 1828.0f});
+    }
+
+    TEST_CASE("AnyUnitPassesZ=0 is a line at the map's top edge, not a missing key", "[ota][campaign]")
+    {
+        // CC19's is AnyUnitPassesZ=60, a few cells from the top; 0x48E92C
+        // builds the rule for anything from 0 up.
+        auto tdf = parseTdfFromString("[GlobalHeader]\n{\nAnyUnitPassesZ=0;\nAnyUnitPassesX=60;\n}\n");
+        auto rules = parseOtaMissionRules(tdf.findBlock("GlobalHeader")->get());
+        REQUIRE(rules.anyUnitPassesZ == 0);
+        REQUIRE(rules.anyUnitPassesX == 60);
     }
 
     TEST_CASE("InitialMission is read the way 0x487BF0 reads it", "[ota][campaign]")

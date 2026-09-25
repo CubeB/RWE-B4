@@ -46,6 +46,7 @@ namespace rwe
 {
     class AiPlayerController;
     class DemoRecorder;
+    struct MissionRules;
 
     constexpr int MaxUtilizableWindSpeed = 5000;
 
@@ -660,6 +661,17 @@ namespace rwe
          * it back -- see docs/adr/0001-demo-recorder-is-a-pure-observer.md.
          */
         std::unique_ptr<DemoRecorder> demoRecorder;
+
+        /**
+         * A campaign mission's win and lose rules (TOTALA-EXE-DATA.md §113),
+         * present only when the game is a mission. They replace the skirmish
+         * rules outright: no commander death ends a mission, and
+         * computeWinStatus answers from them alone. Pointed-to for the section
+         * budget, like demoRecorder, but unlike it this is game state: saved,
+         * hashed and dumped when present, and absent from all three in a
+         * skirmish so that nothing there changes.
+         */
+        std::unique_ptr<MissionRules> missionRules;
 
         explicit GameSimulation(MapTerrain&& terrain, unsigned char surfaceMetal, int minWindSpeed, int maxWindSpeed);
 

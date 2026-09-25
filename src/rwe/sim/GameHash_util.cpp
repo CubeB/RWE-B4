@@ -1,5 +1,6 @@
 #include "GameHash_util.h"
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/MissionRules.h>
 
 #include <rwe/game/UnitStateFieldTable.h>
 
@@ -360,6 +361,23 @@ namespace rwe
             f.nextSpark);
     }
 
+    GameHash computeHashOf(const MissionRules& m)
+    {
+        // The rules' own state only. The parameters are the mission's, the
+        // same on every peer from the start; what the rules have seen is what
+        // two peers can disagree about. Folded in order, because the order
+        // decides which rule a short-circuited poll looks at.
+        uint32_t accumulator = 0;
+        for (const auto* rules : {&m.victory, &m.defeat})
+        {
+            for (const auto& r : *rules)
+            {
+                accumulator = (accumulator * 31u) + combineHashes(r.kind, r.number, r.satisfied, r.celebrated).value;
+            }
+        }
+        return combineHashes(GameHash(accumulator), m.enabled, m.countdown, m.outcome);
+    }
+
     GameHash computeHashOf(const Grid<ExploredMask>& grid)
     {
         std::uint32_t accumulator = 0;
@@ -384,6 +402,9 @@ namespace rwe
             // in Permanent mode, where it decides targets. A peer that disagrees
             // about what it has seen is a desync to catch, not player-facing
             // state to leave out.
-            simulation.explored);
+            simulation.explored,
+            // Absent in a skirmish, and then it adds nothing, so a skirmish's
+            // hashes are what they were.
+            simulation.missionRules ? computeHashOf(*simulation.missionRules) : GameHash(0));
     }
 }

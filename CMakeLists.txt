@@ -604,6 +604,8 @@ set(SOURCE_FILES
     src/rwe/sim/LosTables.h
     src/rwe/sim/MapFeature.cpp
     src/rwe/sim/MapFeature.h
+    src/rwe/sim/MissionRules.cpp
+    src/rwe/sim/MissionRules.h
     src/rwe/sim/PlayerVisibility.cpp
     src/rwe/sim/PlayerVisibility.h
     src/rwe/sim/MapTerrain.cpp
@@ -1045,6 +1047,7 @@ set(TEST_FILES
     src/rwe/game/screenshake.test.cpp
     src/rwe/game/shatter.test.cpp
     src/rwe/game/missionspawn.test.cpp
+    src/rwe/game/missionrules.test.cpp
     src/rwe/game/wake.test.cpp
     src/rwe/game/viewcull.test.cpp
     src/rwe/game/animationclock.test.cpp
