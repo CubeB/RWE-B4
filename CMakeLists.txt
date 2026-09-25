@@ -617,6 +617,8 @@ set(SOURCE_FILES
     src/rwe/sim/MovementClassDefinition.h
     src/rwe/sim/MovementClassId.h
     src/rwe/sim/OccupiedGrid.h
+    src/rwe/sim/PieceController.cpp
+    src/rwe/sim/PieceController.h
     src/rwe/sim/PlayerId.h
     src/rwe/sim/Projectile.cpp
     src/rwe/sim/Projectile.h

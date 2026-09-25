@@ -941,35 +941,7 @@ namespace rwe
         return true;
     }
 
-    void GameSimulation::attachUnitToTransportPiece(UnitId transportId, UnitId unitId, const std::string& piece)
-    {
-        auto unitRef = tryGetUnitState(unitId);
-        if (!unitRef)
-        {
-            return;
-        }
-        auto& unit = unitRef->get();
-        if (unit.carriedBy == transportId)
-        {
-            unit.carriedPiece = piece;
-            return;
-        }
-        if (unit.carriedBy || !unit.isAlive() || !unit.isOwnedBy(getUnitState(transportId).owner))
-        {
-            return;
-        }
-        loadUnitIntoTransport(transportId, unitId, piece);
-    }
 
-    void GameSimulation::dropUnitFromTransport(UnitId transportId, UnitId unitId)
-    {
-        auto unitRef = tryGetUnitState(unitId);
-        if (!unitRef || unitRef->get().carriedBy != transportId)
-        {
-            return;
-        }
-        unloadUnitFromTransport(transportId, unitId, unitRef->get().position);
-    }
 
     void GameSimulation::updateCarriedUnits()
     {
@@ -2022,59 +1994,11 @@ namespace rwe
             || isCollisionAt(right);
     }
 
-    void GameSimulation::showObject(UnitId unitId, const std::string& name)
-    {
-        auto mesh = getUnitState(unitId).findPiece(name);
-        if (mesh)
-        {
-            mesh->get().visible = true;
-        }
-    }
 
-    void GameSimulation::hideObject(UnitId unitId, const std::string& name)
-    {
-        auto mesh = getUnitState(unitId).findPiece(name);
-        if (mesh)
-        {
-            mesh->get().visible = false;
-        }
-    }
 
-    void GameSimulation::enableShading(UnitId unitId, const std::string& name)
-    {
-        auto mesh = getUnitState(unitId).findPiece(name);
-        if (mesh)
-        {
-            mesh->get().shaded = true;
-        }
-    }
 
-    void GameSimulation::disableShading(UnitId unitId, const std::string& name)
-    {
-        auto mesh = getUnitState(unitId).findPiece(name);
-        if (mesh)
-        {
-            mesh->get().shaded = false;
-        }
-    }
 
-    void GameSimulation::enableCaching(UnitId unitId, const std::string& name)
-    {
-        auto mesh = getUnitState(unitId).findPiece(name);
-        if (mesh)
-        {
-            mesh->get().cached = true;
-        }
-    }
 
-    void GameSimulation::disableCaching(UnitId unitId, const std::string& name)
-    {
-        auto mesh = getUnitState(unitId).findPiece(name);
-        if (mesh)
-        {
-            mesh->get().cached = false;
-        }
-    }
 
     UnitState& GameSimulation::getUnitState(UnitId id)
     {
@@ -2189,15 +2113,7 @@ namespace rwe
         getUnitState(unitId).stopSpinObject(name, axis, deceleration);
     }
 
-    bool GameSimulation::isPieceMoving(UnitId unitId, const std::string& name, SimAxis axis) const
-    {
-        return getUnitState(unitId).isMoveInProgress(name, axis);
-    }
 
-    bool GameSimulation::isPieceTurning(UnitId unitId, const std::string& name, SimAxis axis) const
-    {
-        return getUnitState(unitId).isTurnInProgress(name, axis);
-    }
 
     std::optional<SimVector> GameSimulation::intersectLineWithTerrain(const Line3x<SimScalar>& line) const
     {
@@ -2880,24 +2796,8 @@ namespace rwe
         getUnitState(unitId).cloakRequested = value;
     }
 
-    void GameSimulation::setBuildStance(UnitId unitId, bool value)
-    {
-        getUnitState(unitId).inBuildStance = value;
-    }
 
-    void GameSimulation::setYardOpen(UnitId unitId, bool value)
-    {
-        trySetYardOpen(unitId, value);
-    }
 
-    void GameSimulation::setBuggerOff(UnitId unitId, bool value)
-    {
-        getUnitState(unitId).buggerOffActive = value;
-        if (value)
-        {
-            emitBuggerOff(unitId);
-        }
-    }
 
     MovementClassDefinition GameSimulation::getAdHocMovementClass(const UnitDefinition::MovementCollisionInfo& info) const
     {
