@@ -3,7 +3,7 @@
 Split out of [TOTALA-EXE.md](TOTALA-EXE.md) on 2026-09-21, which had reached
 14,000 lines. **The section numbers are the stable identifier and do not**
 **change** -- every `§n` reference in the tree, the commit log and the other
-documents still resolves. This file holds §6, §7, §9, §10, §11, §12, §14, §21, §22, §85, §90, §92.
+documents still resolves. This file holds §6, §7, §9, §10, §11, §12, §14, §21, §22, §85, §90, §92, §116.
 
 The full index across every file, and §88 (where RWE deliberately differs)
 and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
@@ -22,6 +22,7 @@ and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
 85. [The D-gun: `ATTACKSPECIAL`, and what `commandfire` really costs you](#85-the-d-gun-attackspecial-and-what-commandfire-really-costs-you)
 90. [`AirToAir`: a pursuit, and the twenty units that are not a hop](#90-airtoair-a-pursuit-and-the-twenty-units-that-are-not-a-hop)
 92. [The D-gun's projectile: `noexplode`, the full-range flight, and who gets hurt](#92-the-d-guns-projectile-noexplode-the-full-range-flight-and-who-gets-hurt)
+116. [What a round aims at on a unit, and why the water comes after it](#116-what-a-round-aims-at-on-a-unit-and-why-the-water-comes-after-it)
 
 ## 6. The damage pipeline
 
@@ -294,7 +295,8 @@ Called at `0x49BD88`, after every kind's move. It takes the map square the round
 now stands in (`0x4815A0`) and tests, in order: the square's first unit slot
 (`WORD sq+0x0`) -- a unit not owned by the round's owner, with the round below
 `unit+0x6E + def+0x16E`, the top of its model; the second slot (`WORD sq+0x2`),
-the same with a floor at `def+0x162`; the feature (§24); then the ground. Any hit
+the same with a floor at `def+0x162`; the feature (§24); then the ground; then the sea (§116, which has the
+rest of the routine). Any hit
 goes to `0x499EB0`. A unit fills the slots of the squares its footprint covers,
 so a round detonates **on the victim's footprint, about half a footprint short
 of the point it was aimed at**, and not at that point. Against the demo corpus
@@ -2484,3 +2486,103 @@ this weapon:
 
 `src/rwe/sim/dgun.test.cpp` builds `ARM_DISINTEGRATOR` by parsing its actual
 `WEAPONS.TDF` block rather than transcribing the numbers.
+
+## 116. What a round aims at on a unit, and why the water comes after it
+
+Reported as a Skeeter (`ARMPT`) firing its `ARMKBOT_MISSILE` at a Storm
+(`CORSTORM`) wading in the sea: the missiles went into the water short of it.
+The question was whether the original aims at the foot of the target. It does,
+and it splashes them too. RWE had only the order of the collision tests wrong,
+and it matters in the last half footprint before the target.
+
+### The aim point is the unit's origin
+
+`0x49B3E0` (§7, "The aim point") returns, for a round with a target unit and no
+target projectile:
+
+```
+49b48e  mov  eax,[esi+0x4e]            ; target unit
+49b495  test [eax+0x110],0x10000000    ; alive
+49b4a1  add  eax,0x6a                  ; &unit.position
+```
+
+`unit+0x6A`/`+0x6E`/`+0x72` is the position, 16.16. The original does not add
+half the model height, the model top or a waterline offset. A ground unit's `y`
+is the ground under it, so a kbot standing in water is aimed at on the
+**seabed**. A floater's `y` is `seaLevel - waterline` (§12), just under the
+surface.
+
+The one floor in the routine is not on this path. A **`cruise`** round with no
+live target unit, once inside its 1024-unit handover, re-aims at its stored
+point with `Y` set to `max(seaLevel, 0x485070(point))`, the ground height or
+the sea, whichever is higher (`0x49B4AE`-`0x49B501`; the test is of `bl`, the
+`cruise` bit read at the top). Any other round with no target unit steers at
+the stored point unchanged, and a live unit is always aimed at wherever it
+stands.
+
+### The order the stop tests run in, `0x49B090`
+
+§7, "Where a round stops", has the unit slots. The rest of the routine, in the
+order it runs, for the square the round now stands in:
+
+1. **The two unit slots** (`WORD sq+0x0`, `WORD sq+0x2`) and then **the
+   feature**, as §7 describes.
+2. **`unitsonly`** (bit 14 of `wdef+0x111`, `0x49B294`): a round that has it
+   returns here and never tests the ground or the sea.
+3. **The ground** (`0x49B36D`): `BYTE sq+0x6` above the round's integer `y`.
+   With `groundbounce` (bit 15, `0x49B37F`) the round is not detonated. Its `vy`
+   becomes `-(vy >> 2)` and it flies on.
+4. **The sea** (`0x49B3A1`): the round's integer `y` below `BYTE
+   [globals+0x1427F]`, skipped for a `waterweapon` (bit 16) and when
+   `[[globals+0x391E9]+0xD48]` is set. That word is the map's
+   `nosealeveltrigger`, stored from the OTA at `0x4365A1` (the key string is
+   `0x504BD0`).
+
+Every hit goes to `0x499EB0`. Whether a detonation plays the water art does not
+depend on which of these tests fired. `0x499ECF` compares the square's
+`BYTE sq+0x5`, its high corner, with sea level. So a round that hits a wading
+unit in a wet square still throws up spray.
+
+### What that makes of a wading target
+
+The round steers at the origin under the water, so its path crosses the surface
+before it reaches the origin. The unit is tested first, but only in squares its
+footprint covers. So the round hits the unit only if it is still above sea
+level when it enters the footprint, about half a footprint from the origin. The
+same geometry decides the per-tick sample, and a round moving 15 to 22 units a
+tick often jumps that last half footprint in one step.
+
+Take a muzzle `h` over the water, a target whose base is `d` under it, and a
+footprint half-width `f`. A near-straight guided shot at range `D` enters the
+footprint still above the water only when `D < f·(h + d) / d`. For the Storm
+(`f` = 16) with its base 10 under and a muzzle 10 over, that is about 32 units,
+which is point-blank. So against a kbot in water deeper than a few units,
+**the original's missiles land in the sea**, and so do RWE's. The shallower the
+water, the longer the range at which they get through.
+
+### Ported
+
+- `checkProjectileCollision` tests the square's units and features, then the
+  flying units, **before** the sea and the ground. It used to test the sea
+  first, so a round that went below the surface inside a wading unit's
+  footprint splashed where the original hits the unit. RWE keeps its sea test
+  ahead of its ground test; §88 does not need an entry, because the art comes
+  from the square either way (above) and the two differ only for
+  `groundbounce`, below.
+- `nosealeveltrigger` reaches `GameSimulation::noSeaLevelTrigger` from the OTA
+  and switches the sea test off. It is saved with the other map constants and
+  is not hashed, as they are not.
+- `src/rwe/sim/seacollision.test.cpp` fires the real `ARMKBOT_MISSILE` at a
+  wading `CORSTORM` (2x2, `MaxWaterDepth=21`, model top 25.94) under twenty
+  units of water: it hits from just outside the footprint, splashes from 80
+  units out, and reaches the Storm from 80 units out on a
+  `nosealeveltrigger` map.
+
+### Not ported
+
+- **`unitsonly`** is not parsed. No round in RWE skips the ground and the sea.
+- **`groundbounce`** zeroes `vy` and puts the round back at its previous height.
+  The original sets `vy` to minus a quarter of itself and leaves the position
+  alone.
+
+Both are in §91.
