@@ -1,5 +1,6 @@
 #include "cob.h"
 #include <rwe/sim/SimRandom.h>
+#include <rwe/sim/PieceController.h>
 #include <rwe/util/SimpleLogger.h>
 #include <optional>
 #include <rwe/cob/CobAxis.h>
@@ -177,22 +178,22 @@ namespace rwe
                 simulation.stopSpinObject(unitId, objectName, toSimAxis(s.axis), toSimScalar(s.deceleration));
             },
             [&](const CobEnvironment::PieceCommandStatus::Show&) {
-                simulation.showObject(unitId, objectName);
+                PieceController(simulation).showObject(unitId, objectName);
             },
             [&](const CobEnvironment::PieceCommandStatus::Hide&) {
-                simulation.hideObject(unitId, objectName);
+                PieceController(simulation).hideObject(unitId, objectName);
             },
             [&](const CobEnvironment::PieceCommandStatus::EnableShading&) {
-                simulation.enableShading(unitId, objectName);
+                PieceController(simulation).enableShading(unitId, objectName);
             },
             [&](const CobEnvironment::PieceCommandStatus::DisableShading&) {
-                simulation.disableShading(unitId, objectName);
+                PieceController(simulation).disableShading(unitId, objectName);
             },
             [&](const CobEnvironment::PieceCommandStatus::EnableCaching&) {
-                simulation.enableCaching(unitId, objectName);
+                PieceController(simulation).enableCaching(unitId, objectName);
             },
             [&](const CobEnvironment::PieceCommandStatus::DisableCaching&) {
-                simulation.disableCaching(unitId, objectName);
+                PieceController(simulation).disableCaching(unitId, objectName);
             },
             [&](const CobEnvironment::PieceCommandStatus::Explode& e) {
                 const auto& unit = simulation.getUnitState(unitId);
@@ -215,17 +216,17 @@ namespace rwe
                 const unsigned int bitmapOnly = 32u;
                 if (pieceExists && (e.flags & bitmapOnly) == 0u)
                 {
-                    simulation.hideObject(unitId, objectName);
+                    PieceController(simulation).hideObject(unitId, objectName);
                 }
             },
             [&](const CobEnvironment::PieceCommandStatus::AttachUnit& a) {
                 // The transport's script has the unit on its crane or pad now.
                 LOG_DEBUG << "COB attach-unit: transport " << unitId.value << " takes unit " << a.unit << " on piece " << objectName;
-                simulation.attachUnitToTransportPiece(unitId, UnitId(a.unit), objectName);
+                PieceController(simulation).attachUnitToTransportPiece(unitId, UnitId(a.unit), objectName);
             },
             [&](const CobEnvironment::PieceCommandStatus::DropUnit& d) {
                 LOG_DEBUG << "COB drop-unit: transport " << unitId.value << " lets go of unit " << d.unit;
-                simulation.dropUnitFromTransport(unitId, UnitId(d.unit));
+                PieceController(simulation).dropUnitFromTransport(unitId, UnitId(d.unit));
             },
             [&](const CobEnvironment::PieceCommandStatus::EmitSfx& s) {
                 switch (s.sfxType)
@@ -504,17 +505,17 @@ namespace rwe
                 }
             },
             [&](const CobEnvironment::SetQueryStatus::InBuildStance& q) {
-                sim.setBuildStance(unitId, q.value);
+                PieceController(sim).setBuildStance(unitId, q.value);
             },
             [&](const CobEnvironment::SetQueryStatus::Busy& q) {
                 auto& unit = sim.getUnitState(unitId);
                 unit.cobBusy = q.value;
             },
             [&](const CobEnvironment::SetQueryStatus::YardOpen& q) {
-                sim.setYardOpen(unitId, q.value);
+                PieceController(sim).setYardOpen(unitId, q.value);
             },
             [&](const CobEnvironment::SetQueryStatus::BuggerOff& q) {
-                sim.setBuggerOff(unitId, q.value);
+                PieceController(sim).setBuggerOff(unitId, q.value);
             },
             [&](const CobEnvironment::SetQueryStatus::Armored& q) {
                 auto& unit = sim.getUnitState(unitId);
@@ -549,11 +550,11 @@ namespace rwe
                 status.condition,
                 [&env, &simulation, unitId](const CobEnvironment::BlockedStatus::Move& condition) {
                     const auto& pieceName = env._script->pieces.at(condition.object);
-                    return !simulation.isPieceMoving(unitId, pieceName, toSimAxis(condition.axis));
+                    return !PieceController(simulation).isPieceMoving(unitId, pieceName, toSimAxis(condition.axis));
                 },
                 [&env, &simulation, unitId](const CobEnvironment::BlockedStatus::Turn& condition) {
                     const auto& pieceName = env._script->pieces.at(condition.object);
-                    return !simulation.isPieceTurning(unitId, pieceName, toSimAxis(condition.axis));
+                    return !PieceController(simulation).isPieceTurning(unitId, pieceName, toSimAxis(condition.axis));
                 });
 
             if (isUnblocked)

@@ -1060,19 +1060,6 @@ namespace rwe
 
         bool isAdjacentToObstacle(const DiscreteRect& rect) const;
 
-        void showObject(UnitId unitId, const std::string& name);
-
-        void hideObject(UnitId unitId, const std::string& name);
-
-        void enableShading(UnitId unitId, const std::string& name);
-
-        void disableShading(UnitId unitId, const std::string& name);
-
-        /** The COB cache / dont-cache state of a piece; see UnitMesh::cached. */
-        void enableCaching(UnitId unitId, const std::string& name);
-
-        void disableCaching(UnitId unitId, const std::string& name);
-
         UnitState& getUnitState(UnitId id);
 
         const UnitState& getUnitState(UnitId id) const;
@@ -1129,15 +1116,6 @@ namespace rwe
          */
         bool unloadUnitFromTransport(UnitId transportId, UnitId unitId, const SimVector& position);
 
-        /**
-         * A transport script's attach-unit: takes the unit aboard if it is not
-         * yet carried, or moves it to another of the transport's pieces if it is.
-         */
-        void attachUnitToTransportPiece(UnitId transportId, UnitId unitId, const std::string& piece);
-
-        /** A transport script's drop-unit: sets the unit down where it hangs right now. */
-        void dropUnitFromTransport(UnitId transportId, UnitId unitId);
-
         /** Moves carried units along with their transports; run after unit behaviour each tick. */
         void updateCarriedUnits();
 
@@ -1173,9 +1151,6 @@ namespace rwe
 
         void stopSpinObject(UnitId unitId, const std::string& name, SimAxis axis, SimScalar deceleration);
 
-        bool isPieceMoving(UnitId unitId, const std::string& name, SimAxis axis) const;
-
-        bool isPieceTurning(UnitId unitId, const std::string& name, SimAxis axis) const;
 
         std::optional<SimVector> intersectLineWithTerrain(const Line3x<SimScalar>& line) const;
 
@@ -1316,12 +1291,6 @@ namespace rwe
         void setMoveOrders(UnitId unitId, UnitMovementOrders orders);
 
         void setCloakRequested(UnitId unitId, bool value);
-
-        void setBuildStance(UnitId unitId, bool value);
-
-        void setYardOpen(UnitId unitId, bool value);
-
-        void setBuggerOff(UnitId unitId, bool value);
 
         MovementClassDefinition getAdHocMovementClass(const UnitDefinition::MovementCollisionInfo& info) const;
 
