@@ -409,7 +409,7 @@ namespace rwe
                     for (const auto& unitId : controlGroups[idx])
                     {
                         auto unitRef = tryGetUnit(unitId);
-                        if (unitRef && unitRef->get().isAlive() && unitRef->get().isOwnedBy(localPlayerId))
+                        if (unitRef && unitRef->get().isAlive() && unitRef->get().isOwnedBy(localPlayerId) && !unitRef->get().heldByMission)
                         {
                             liveUnits.insert(unitId);
                         }

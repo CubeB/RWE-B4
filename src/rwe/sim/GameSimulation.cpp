@@ -9,6 +9,7 @@
 #include <rwe/sim/DemoRecorder.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/MissionRules.h>
+#include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/SimScalar.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitBehaviorService.h>
@@ -1040,6 +1041,13 @@ namespace rwe
         // and a reclaimed unit leaves none of those. Whether the original's
         // cause-5 damage skips armour the way its cause-10 repair does is
         // not read; it is applied bare here.
+        // Reclaiming is damage in the original, cause 5 through the same
+        // applier (0x489CE0), so it tells a watching WAITFORATTACK too.
+        if (missionScripts)
+        {
+            missionScripts->unitDamaged(targetId);
+        }
+
         auto before = unit.hitPoints;
         auto after = damage >= before ? 0u : before - damage;
         unit.hitPoints = after;
@@ -1163,6 +1171,16 @@ namespace rwe
         if (missionRules)
         {
             missionRules->unitDying(*this, targetId, previousOwner);
+        }
+
+        // The captor's copy is a new unit: selectable like every new one
+        // (0x485B61), with no list and no mission Immunity (the spawner is
+        // what sets that, 0x488475).
+        unit.heldByMission = false;
+        unit.immune = false;
+        if (missionScripts)
+        {
+            missionScripts->unitChangedOwner(targetId);
         }
 
         // The spatial index carries owners so a target search can drop its
@@ -3339,6 +3357,14 @@ namespace rwe
             demoRecorder->damageApplied(*this, unitId, attacker, damagePoints, sourceOwner);
         }
 
+        // The same handler's first act is to tell whoever is watching the
+        // unit that it was hit (0x406F89), whoever the attacker, which is
+        // what a mission unit's WAITFORATTACK is waiting for.
+        if (missionScripts && !getUnitState(unitId).isDead())
+        {
+            missionScripts->unitDamaged(unitId);
+        }
+
         if (attacker)
         {
             // The original shoots back from inside the damage message
@@ -4801,6 +4827,17 @@ namespace rwe
 
         // The three unit passes are timed separately -- each is its own
         // scope because RWE_SIMPROF names its variables, one to a scope.
+        // A mission unit's list hands out its next order before the unit
+        // looks at its queue.
+        if (missionScripts)
+        {
+            missionScripts->update(*this);
+            if (missionScripts->scripts.empty())
+            {
+                missionScripts.reset();
+            }
+        }
+
         {
             RWE_SIMPROF("behaviour");
 

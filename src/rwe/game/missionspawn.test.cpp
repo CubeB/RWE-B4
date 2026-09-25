@@ -7,6 +7,7 @@
 #include <rwe/io/ota/ota.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/MovementClassDatabase.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitModelDefinition.h>
@@ -196,12 +197,19 @@ namespace rwe
         REQUIRE(held(0));
         REQUIRE_FALSE(held(1));
         REQUIRE_FALSE(held(2));
-        REQUIRE_FALSE(held(3));
+        // Held once its list is read, like any other that queued something,
+        // and handed back by the `s` as soon as the list starts to run.
+        REQUIRE(held(3));
         REQUIRE(held(4));
         REQUIRE_FALSE(held(5));
         REQUIRE_FALSE(held(6));
         REQUIRE(held(7));
         REQUIRE_FALSE(held(8));
         REQUIRE(held(9));
+
+        REQUIRE(world.sim.missionScripts);
+        world.sim.missionScripts->update(world.sim);
+        REQUIRE_FALSE(held(3));
+        REQUIRE(held(4));
     }
 }

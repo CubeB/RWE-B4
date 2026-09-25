@@ -761,6 +761,14 @@ namespace rwe
          */
         bool heldByMission{false};
 
+        /**
+         * A mission's `Immunity`, `unit+0x110` bit 15: the unit is left off
+         * the list weapon auto-acquire picks from (0x40AB24) and out of the
+         * computer's search for something to attack (0x407297). It can still
+         * be hit by splash or by a direct order. MAKESELECTABLE clears it.
+         */
+        bool immune{false};
+
         /** The transport piece this unit hangs from (empty: the transport's own position). */
         std::string carriedPiece;
 

@@ -47,6 +47,7 @@ namespace rwe
     class AiPlayerController;
     class DemoRecorder;
     struct MissionRules;
+    struct MissionScripts;
 
     constexpr int MaxUtilizableWindSpeed = 5000;
 
@@ -672,6 +673,13 @@ namespace rwe
          * skirmish so that nothing there changes.
          */
         std::unique_ptr<MissionRules> missionRules;
+
+        /**
+         * A mission's units' InitialMission lists (TOTALA-EXE-DATA.md §114),
+         * present only in a mission, and only while any unit still has
+         * steps left. Held and kept like missionRules, for the same reasons.
+         */
+        std::unique_ptr<MissionScripts> missionScripts;
 
         explicit GameSimulation(MapTerrain&& terrain, unsigned char surfaceMetal, int minWindSpeed, int maxWindSpeed);
 

@@ -592,7 +592,9 @@ namespace rwe
     {
         // A unit riding in a transport is cargo, not a unit on the field: it
         // has no hitbox to click and takes no orders until it is set down.
-        return !isDead() && isOwnedBy(player) && !isBeingBuilt(unitDefinition) && !carriedBy;
+        // Nor is a mission unit its script still holds (0x487E69): the
+        // selection code tests the selectable bit before anything else.
+        return !isDead() && isOwnedBy(player) && !isBeingBuilt(unitDefinition) && !carriedBy && !heldByMission;
     }
 
     void UnitState::activate()

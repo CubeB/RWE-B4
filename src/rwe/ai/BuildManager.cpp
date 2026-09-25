@@ -2073,7 +2073,7 @@ namespace rwe
         std::optional<SimScalar> anyDistanceSquared;
         for (const auto& [unitId, unit] : sim.units)
         {
-            if (unit.owner != aiOwner || !unit.isAlive() || unitId == *bb.commanderUnitId)
+            if (unit.owner != aiOwner || !unit.isAlive() || unitId == *bb.commanderUnitId || unit.heldByMission)
             {
                 continue;
             }

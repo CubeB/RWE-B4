@@ -3,12 +3,14 @@
 #include <algorithm>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <filesystem>
 #include <iterator>
 #include <limits>
 #include <random>
 #include <set>
 #include <rwe/LoadingScene_util.h>
+#include <rwe/sim/MissionScripts.h>
 #include <rwe/ai/AiPersonality.h>
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/ai/AiTuningProfile.h>
@@ -1000,54 +1002,211 @@ namespace rwe
     namespace
     {
         /**
-         * Whether a mission unit starts out of the player's hands.
-         *
-         * The interpreter 0x487BF0 clears the selectable bit once it has
-         * queued an order (0x487E5B), and a MAKESELECTABLE hands the unit
-         * back when it runs: an `s` where it stands in the list, or the one
-         * appended at the end. `i`, `o`, `bw` and letters it does not know
-         * queue nothing, and `a NAME`, `b NAME` and `g IDENT` queue only when
-         * the name resolves. RWE runs none of the orders yet, so a unit is
-         * held from the start unless the first thing it would do is be
-         * handed back -- `s,m 1500 900` is the player's at once,
-         * `m 1500 900,s` is not.
+         * The standing orders an `o` writes: 0, 1, 2 for hold, maneuver,
+         * roam and hold, return, at will. The original stores two bits of
+         * each; a 3 there is nothing the order buttons know, and is read
+         * here as the last of the three.
          */
-        bool startsHeld(const GameSimulation& simulation, const OtaMissionUnit& record, const std::unordered_set<std::string>& spawnedNames)
+        UnitMovementOrders missionMoveOrders(float n)
         {
-            using K = MissionOrder::Kind;
+            switch (static_cast<int>(n) & 3)
+            {
+                case 0:
+                    return UnitMovementOrders::HoldPosition;
+                case 1:
+                    return UnitMovementOrders::Maneuver;
+                default:
+                    return UnitMovementOrders::Roam;
+            }
+        }
+
+        UnitFireOrders missionFireOrders(float n)
+        {
+            switch (static_cast<int>(n) & 3)
+            {
+                case 0:
+                    return UnitFireOrders::HoldFire;
+                case 1:
+                    return UnitFireOrders::ReturnFire;
+                default:
+                    return UnitFireOrders::FireAtWill;
+            }
+        }
+
+        /**
+         * A unit's InitialMission, read the way the interpreter 0x487BF0 reads
+         * it (TOTALA-EXE-DATA.md §114), into its standing orders, a transport
+         * to start aboard, and the list of steps its script will run.
+         *
+         * The unit is held -- out of the player's hands and the computer's --
+         * from the moment the list queues anything (0x487E69), until a
+         * MAKESELECTABLE runs: an `s`, or the one appended to a list with no
+         * `s`, `p`, point `a` or `d` in it (0x487E76).
+         */
+        void readInitialMission(
+            GameSimulation& simulation,
+            UnitId unitId,
+            const OtaMissionUnit& record,
+            const std::function<std::optional<UnitId>(const std::string&)>& resolveName,
+            MissionScript& script)
+        {
+            using OK = MissionOrder::Kind;
+            using SK = MissionStep::Kind;
+            auto& unit = simulation.getUnitState(unitId);
+            const auto& def = simulation.unitDefinitions.at(unit.unitType);
+
+            // The interpreter's x and z are locals it never clears, so an
+            // order missing a coordinate takes the last one given (and, for
+            // the first order in the string, whatever was on the stack: 0
+            // here).
+            float lastX = 0.0f;
+            float lastZ = 0.0f;
+            auto pointFrom = [&](const std::vector<float>& numbers, std::size_t first) {
+                if (numbers.size() > first)
+                {
+                    lastX = numbers[first];
+                }
+                if (numbers.size() > first + 1)
+                {
+                    lastZ = numbers[first + 1];
+                }
+                auto world = simulation.terrain.topLeftCoordinateToWorld(SimVector(SimScalar(lastX), 0_ss, SimScalar(lastZ)));
+                world.y = simulation.terrain.getHeightAt(world.x, world.z);
+                return world;
+            };
+            auto typeKnown = [&](const std::string& name) { return simulation.unitDefinitions.find(toUpper(name)) != simulation.unitDefinitions.end(); };
+
+            bool queued = false;
+            bool sticky = false;
+            auto push = [&](SK kind) -> MissionStep& {
+                MissionStep step;
+                step.kind = kind;
+                script.steps.push_back(std::move(step));
+                return script.steps.back();
+            };
+
             for (const auto& order : record.orders)
             {
                 switch (order.kind)
                 {
-                    case K::Link:
-                    case K::StandingOrders:
-                    case K::BuildWeapon:
-                    case K::Skip:
-                        continue;
-                    case K::AttackType:
-                    case K::Build:
-                        if (simulation.unitDefinitions.find(toUpper(order.name)) == simulation.unitDefinitions.end())
+                    case OK::Move:
+                        push(SK::Move).position = pointFrom(order.numbers, 0);
+                        queued = true;
+                        break;
+                    case OK::Patrol:
+                        push(SK::Patrol).position = pointFrom(order.numbers, 0);
+                        queued = true;
+                        sticky = true;
+                        break;
+                    case OK::AttackPoint:
+                        push(SK::AttackPoint).position = pointFrom(order.numbers, 0);
+                        queued = true;
+                        sticky = true;
+                        break;
+                    case OK::AttackType:
+                        if (typeKnown(order.name))
                         {
-                            continue;
+                            push(SK::AttackType).unitType = toUpper(order.name);
+                            queued = true;
                         }
-                        return true;
-                    case K::Guard:
-                        // Looked up among the units the mission has made, which
-                        // by now is all of them: the orders are read in a
-                        // second pass (0x4884F1). A name is a record's Ident
-                        // or its unit type (0x487AF0).
-                        if (spawnedNames.count(toUpper(order.name)) == 0)
+                        break;
+                    case OK::Guard:
+                        if (auto target = resolveName(order.name))
                         {
-                            continue;
+                            push(SK::Guard).target = *target;
+                            queued = true;
                         }
-                        return true;
-                    case K::MakeSelectable:
-                        return false;
-                    default:
-                        return true;
+                        break;
+                    case OK::Link:
+                        // Aboard that transport from the start, queuing
+                        // nothing (0x48AAC0 at once).
+                        if (auto carrier = resolveName(order.name))
+                        {
+                            simulation.loadUnitIntoTransport(*carrier, unitId, std::string());
+                        }
+                        break;
+                    case OK::StandingOrders:
+                        if (!order.numbers.empty())
+                        {
+                            unit.moveOrders = missionMoveOrders(order.numbers[0]);
+                        }
+                        if (order.numbers.size() > 1)
+                        {
+                            unit.fireOrders = missionFireOrders(order.numbers[1]);
+                        }
+                        break;
+                    case OK::Wait:
+                    {
+                        auto& step = push(SK::Wait);
+                        auto seconds = order.numbers.empty() ? 0.0f : order.numbers[0];
+                        step.ticks = static_cast<int>(seconds * 30.0f);
+                        step.radius = order.numbers.size() > 1 ? static_cast<int>(order.numbers[1]) : 0;
+                        queued = true;
+                        break;
+                    }
+                    case OK::WaitForAttack:
+                        // Watching the unit named, or itself.
+                        push(SK::WaitForAttack).target = order.name.empty() ? std::nullopt : resolveName(order.name);
+                        queued = true;
+                        break;
+                    case OK::Unload:
+                        push(SK::Unload).position = pointFrom(order.numbers, 0);
+                        queued = true;
+                        break;
+                    case OK::Build:
+                        if (typeKnown(order.name))
+                        {
+                            if (def.isMobile)
+                            {
+                                auto& step = push(SK::Build);
+                                step.unitType = toUpper(order.name);
+                                step.position = pointFrom(order.numbers, 1);
+                            }
+                            else
+                            {
+                                auto& step = push(SK::FactoryBuild);
+                                step.unitType = toUpper(order.name);
+                                step.count = order.numbers.empty() ? 1 : static_cast<int>(order.numbers[0]);
+                            }
+                            queued = true;
+                        }
+                        break;
+                    case OK::BuildWeapon:
+                        // Queued, but not an order that holds the unit (0x488115).
+                        push(SK::BuildWeapon).count = order.numbers.empty() ? 1 : static_cast<int>(order.numbers[0]);
+                        break;
+                    case OK::SelfDestruct:
+                        push(SK::SelfDestruct);
+                        queued = true;
+                        sticky = true;
+                        break;
+                    case OK::MakeSelectable:
+                        push(SK::MakeSelectable);
+                        queued = true;
+                        sticky = true;
+                        break;
+                    case OK::Skip:
+                        break;
                 }
             }
-            return false;
+
+            if (queued)
+            {
+                unit.heldByMission = true;
+                if (!sticky)
+                {
+                    push(SK::MakeSelectable);
+                }
+            }
+            else if (simulation.getPlayer(unit.owner).type == GamePlayerType::Computer)
+            {
+                // Not held, so the computer's AI has it from the first second
+                // and gives it its own standing orders (0x408830), whatever
+                // an `o` said: maneuver if it can capture, else roam, and fire
+                // at will.
+                unit.moveOrders = def.canCapture ? UnitMovementOrders::Maneuver : UnitMovementOrders::Roam;
+                unit.fireOrders = UnitFireOrders::FireAtWill;
+            }
         }
     }
 
@@ -1141,19 +1300,42 @@ namespace rwe
         }
 
         // The orders, in a second pass once every unit is made, as the
-        // original reads them.
-        std::unordered_set<std::string> spawnedNames;
-        for (auto i : spawnedRecords)
-        {
-            if (!schema.units[i].ident.empty())
+        // original reads them (0x4884F1). A name is the Ident or the unit
+        // type of the first record, in file order, that produced a unit
+        // (0x487AF0).
+        auto resolveName = [&](const std::string& name) -> std::optional<UnitId> {
+            // A name that did not scan resolves to nothing, not to the first
+            // record that has no Ident.
+            if (name.empty())
             {
-                spawnedNames.insert(toUpper(schema.units[i].ident));
+                return std::nullopt;
             }
-            spawnedNames.insert(toUpper(schema.units[i].unitName));
-        }
+            auto wanted = toUpper(name);
+            for (std::size_t n = 0; n < spawnedRecords.size(); ++n)
+            {
+                const auto& record = schema.units[spawnedRecords[n]];
+                if (toUpper(record.ident) == wanted || toUpper(record.unitName) == wanted)
+                {
+                    return result.spawned[n];
+                }
+            }
+            return std::nullopt;
+        };
         for (std::size_t n = 0; n < spawnedRecords.size(); ++n)
         {
-            simulation.getUnitState(result.spawned[n]).heldByMission = startsHeld(simulation, schema.units[spawnedRecords[n]], spawnedNames);
+            const auto& record = schema.units[spawnedRecords[n]];
+            // Immunity is the one record flag the spawner copies (0x488475).
+            simulation.getUnitState(result.spawned[n]).immune = record.immunity;
+            MissionScript script;
+            readInitialMission(simulation, result.spawned[n], record, resolveName, script);
+            if (!script.steps.empty())
+            {
+                if (!simulation.missionScripts)
+                {
+                    simulation.missionScripts = std::make_unique<MissionScripts>();
+                }
+                simulation.missionScripts->scripts[result.spawned[n].value] = std::move(script);
+            }
         }
         return result;
     }

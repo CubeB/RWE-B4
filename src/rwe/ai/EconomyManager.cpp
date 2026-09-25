@@ -162,6 +162,14 @@ namespace rwe
             const auto& def = sim.unitDefinitions.at(unit.unitType);
             ++bb.ownedTotalCounts[unit.unitType];
 
+            // A mission unit its script still holds is the mission's, not
+            // the AI's: the original's AI takes on only selectable units
+            // (0x408830). Counted, but never planned for or sent anywhere.
+            if (unit.heldByMission)
+            {
+                continue;
+            }
+
             const bool isCompleted = !unit.isBeingBuilt(def);
             if (!isCompleted || def.isMobile)
             {

@@ -305,7 +305,9 @@ namespace rwe
         std::vector<UnitId> matches;
         for (const auto& [unitId, unit] : simulation.units)
         {
-            if (!unit.isAlive() || !unit.isOwnedBy(localPlayerId))
+            // A mission unit its script holds is not selectable by any path,
+            // the category hotkeys included (0x48BF30).
+            if (!unit.isAlive() || !unit.isOwnedBy(localPlayerId) || unit.heldByMission)
             {
                 continue;
             }
