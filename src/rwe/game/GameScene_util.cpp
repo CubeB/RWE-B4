@@ -1233,15 +1233,9 @@ namespace rwe
         pushTriangle(batch.triangles, topLeft, bottomRight, topRight, color);
     }
 
-    void drawWakeParticle(const GameMediaDatabase& /*gameMediaDatabase*/, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, ColoredMeshBatch& batch)
+    void drawWakeDot(GameTime currentTime, const Matrix4f& viewProjectionMatrix, const WakeDot& dot, ColoredMeshBatch& batch)
     {
-        auto wakeRenderInfo = std::get_if<ParticleRenderTypeWake>(&particle.renderType);
-        if (wakeRenderInfo == nullptr)
-        {
-            return;
-        }
-
-        if (!particle.isStarted(currentTime) || currentTime >= wakeRenderInfo->finishTime)
+        if (currentTime < dot.startTime || currentTime >= dot.finishTime)
         {
             return;
         }
@@ -1255,23 +1249,23 @@ namespace rwe
         // GPU to clip. The projection is orthographic, so a point transforms
         // straight to clip space with no divide, and the dot is two world
         // units across -- far inside the margin.
-        auto clipPosition = viewProjectionMatrix * particle.position;
+        auto clipPosition = viewProjectionMatrix * dot.position;
         if (clipPosition.x < -1.05f || clipPosition.x > 1.05f || clipPosition.y < -1.05f || clipPosition.y > 1.05f)
         {
             return;
         }
 
-        const auto topLeft = particle.position + Vector3f(-1.0f, 0.0f, -1.0f);
-        const auto topRight = particle.position + Vector3f(1.0f, 0.0f, -1.0f);
-        const auto bottomLeft = particle.position + Vector3f(-1.0f, 0.0f, 1.0f);
-        const auto bottomRight = particle.position + Vector3f(1.0f, 0.0f, 1.0f);
+        const auto topLeft = dot.position + Vector3f(-1.0f, 0.0f, -1.0f);
+        const auto topRight = dot.position + Vector3f(1.0f, 0.0f, -1.0f);
+        const auto bottomLeft = dot.position + Vector3f(-1.0f, 0.0f, 1.0f);
+        const auto bottomRight = dot.position + Vector3f(1.0f, 0.0f, 1.0f);
 
         // A discrete step along the seven water blues rather than a fade. The
         // original advances the palette index by one every rampPeriod ticks
         // and never wraps, because the life is exactly six steps long.
-        auto age = static_cast<unsigned int>((currentTime - particle.startTime).value);
-        auto colorIndex = wakeColorIndex(age, wakeRenderInfo->rampPeriod);
-        if (wakeRenderInfo->reverseRamp)
+        auto age = static_cast<unsigned int>((currentTime - dot.startTime).value);
+        auto colorIndex = wakeColorIndex(age, dot.rampPeriod);
+        if (dot.reverseRamp)
         {
             colorIndex = (WakeColors.size() - 1) - colorIndex;
         }
@@ -1365,9 +1359,51 @@ namespace rwe
 
             return SimScalar(highest) < terrain.getSeaLevel();
         }
+
+        /**
+         * groundIsCertainlyBelowSeaLevel for every point of a rectangle at
+         * once: the highest heightmap corner under any of the blocks that
+         * test would read for a point inside it is still under water.
+         */
+        bool regionIsCertainlyBelowSeaLevel(const MapTerrain& terrain, float minX, float minZ, float maxX, float maxZ)
+        {
+            const auto& heights = terrain.getHeightMap();
+            auto low = terrain.worldToHeightmapCoordinate(SimVector(SimScalar(minX), 0_ss, SimScalar(minZ)));
+            auto high = terrain.worldToHeightmapCoordinate(SimVector(SimScalar(maxX), 0_ss, SimScalar(maxZ)));
+            if (low.x < 1 || low.y < 1 || high.x + 2 >= heights.getWidth() || high.y + 2 >= heights.getHeight())
+            {
+                return false;
+            }
+            unsigned char highest = 0;
+            for (int y = low.y - 1; y <= high.y + 2; ++y)
+            {
+                for (int x = low.x - 1; x <= high.x + 2; ++x)
+                {
+                    highest = std::max(highest, heights.get(x, y));
+                }
+            }
+            return SimScalar(highest) < terrain.getSeaLevel();
+        }
     }
 
-    void updateParticles(const GameMediaDatabase& gameMediaDatabase, const MapTerrain& terrain, GameTime currentTime, const Vector3f& windDrift, std::vector<Particle>& particles)
+    WakeDot spawnWakeDot(const MapTerrain& terrain, const Vector3f& position, const Vector3f& velocity, GameTime startTime, GameTime finishTime, unsigned int rampPeriod, bool reverseRamp)
+    {
+        WakeDot dot{position, velocity, startTime, finishTime, false, rampPeriod, reverseRamp};
+        // Everywhere the dot will be when it is next asked about the shore:
+        // it is stepped once per tick from its birth up to its last tick, so
+        // the far end is one step past the last position it is drawn at.
+        auto steps = static_cast<float>((finishTime.value > startTime.value ? finishTime.value - startTime.value : 0u) + 1u);
+        auto end = position + (velocity * steps);
+        dot.overOpenWaterForLife = regionIsCertainlyBelowSeaLevel(
+            terrain,
+            std::min(position.x, end.x),
+            std::min(position.z, end.z),
+            std::max(position.x, end.x),
+            std::max(position.z, end.z));
+        return dot;
+    }
+
+    void updateParticles(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Vector3f& windDrift, std::vector<Particle>& particles)
     {
         auto end = particles.end();
         for (auto it = particles.begin(); it != end;)
@@ -1378,26 +1414,6 @@ namespace rwe
                 [&](const ParticleRenderTypeSprite& s) {
                     const auto anim = gameMediaDatabase.getSpriteSeries(s.gafName, s.animName).value();
                     return particle.isFinished(currentTime, s, anim->sprites.size());
-                },
-                [&](const ParticleRenderTypeWake& w) {
-                    if (currentTime >= w.finishTime)
-                    {
-                        return true;
-                    }
-
-                    // The original kills a wake dot the moment the ground
-                    // under it comes up to sea level, which is what makes a
-                    // wake stop cleanly at a shoreline instead of running up
-                    // the beach behind the ship.
-                    if (groundIsCertainlyBelowSeaLevel(terrain, particle.position.x, particle.position.z))
-                    {
-                        return false;
-                    }
-
-                    auto groundHeight = terrain.getHeightAt(
-                        SimScalar(particle.position.x),
-                        SimScalar(particle.position.z));
-                    return groundHeight >= terrain.getSeaLevel();
                 },
                 [&](const ParticleRenderTypeNano& n) {
                     return currentTime >= n.finishTime;
@@ -1418,6 +1434,41 @@ namespace rwe
             ++it;
         }
         particles.erase(end, particles.end());
+    }
+
+    void updateWakeDots(const MapTerrain& terrain, GameTime currentTime, std::vector<WakeDot>& dots)
+    {
+        // Compacted in place, in order, rather than filled from the back:
+        // the dots stay in the order they were laid, which keeps each trail
+        // together in memory, and the renderer's cull, which walks every dot
+        // a frame, then sees long runs of dots on screen and off it instead
+        // of a shuffle.
+        std::size_t kept = 0;
+        for (std::size_t i = 0; i < dots.size(); ++i)
+        {
+            auto& dot = dots[i];
+            auto finished = currentTime >= dot.finishTime;
+            // The original kills a wake dot the moment the ground under it
+            // comes up to sea level, which is what makes a wake stop cleanly
+            // at a shoreline instead of running up the beach behind the ship.
+            if (!finished && !dot.overOpenWaterForLife && !groundIsCertainlyBelowSeaLevel(terrain, dot.position.x, dot.position.z))
+            {
+                auto groundHeight = terrain.getHeightAt(SimScalar(dot.position.x), SimScalar(dot.position.z));
+                finished = groundHeight >= terrain.getSeaLevel();
+            }
+            if (finished)
+            {
+                continue;
+            }
+            // No wind: 0x474580, the wake stepper, has no wind term.
+            dot.position += dot.velocity;
+            if (kept != i)
+            {
+                dots[kept] = dot;
+            }
+            ++kept;
+        }
+        dots.resize(kept);
     }
 
     std::vector<Vector3f> stepSmokeEmitters(std::vector<SmokeEmitter>& emitters, GameTime now)

@@ -403,7 +403,7 @@ namespace rwe
 
     void drawSpriteParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, SpriteBatch& batch);
 
-    void drawWakeParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, ColoredMeshBatch& batch);
+    void drawWakeDot(GameTime currentTime, const Matrix4f& viewProjectionMatrix, const WakeDot& dot, ColoredMeshBatch& batch);
 
     /** frac is the fraction of the current tick that has elapsed, for smooth motion between ticks. */
     void drawNanoParticle(GameTime currentTime, float frac, const Particle& particle, ColoredMeshBatch& batch);
@@ -413,7 +413,13 @@ namespace rwe
      * a puff of smoke moves by on top of its own velocity, already scaled: the
      * simulation's wind vector times eight (0x475340).
      */
-    void updateParticles(const GameMediaDatabase& gameMediaDatabase, const MapTerrain& terrain, GameTime currentTime, const Vector3f& windDrift, std::vector<Particle>& particles);
+    void updateParticles(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Vector3f& windDrift, std::vector<Particle>& particles);
+
+    /** A wake dot laid now, with whether its whole path is over open water settled once. */
+    WakeDot spawnWakeDot(const MapTerrain& terrain, const Vector3f& position, const Vector3f& velocity, GameTime startTime, GameTime finishTime, unsigned int rampPeriod, bool reverseRamp);
+
+    /** Steps every wake dot a tick and drops the finished ones: those past their life, and those the shore has come up under. */
+    void updateWakeDots(const MapTerrain& terrain, GameTime currentTime, std::vector<WakeDot>& dots);
 
     /**
      * A thermal vent puffs once every this many ticks, for as long as the map

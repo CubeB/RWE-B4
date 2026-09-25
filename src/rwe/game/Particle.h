@@ -60,10 +60,30 @@ namespace rwe
      * with a palette index and walks that index up entries 97..103, one step
      * every `rampPeriod` ticks, over a life of exactly six steps -- so the dot
      * reaches the deepest blue on the tick it dies.
+     *
+     * Kept in a list of its own rather than as a kind of Particle (issue
+     * #10). A wake is most of the particles in a naval or hover fight --
+     * eight hundred hovercraft keep some ninety thousand dots alive -- and a
+     * Particle carries the sprite alternative's two strings in its variant,
+     * so walking them all to find the few hundred on screen spent most of
+     * its time moving memory: measured at 1920x1080 with eight hundred
+     * hovercraft, 1.5 ms a frame building the batch against 0.2 ms drawing
+     * it.
      */
-    struct ParticleRenderTypeWake
+    struct WakeDot
     {
+        Vector3f position;
+        Vector3f velocity;
+        GameTime startTime;
         GameTime finishTime;
+
+        /**
+         * Settled when the dot is laid: the whole of the path it can cover
+         * before finishTime lies over ground certainly below sea level, so
+         * the shore can never come up under it and the per-tick test that
+         * would find that out is skipped. See spawnWakeDot.
+         */
+        bool overOpenWaterForLife{false};
 
         /** Ticks between colour steps: 16 for Wake1, 8 for the faster Wake2. */
         unsigned int rampPeriod{16};
@@ -104,7 +124,7 @@ namespace rwe
         float depthNudge{0.0f};
     };
 
-    using ParticleRenderType = std::variant<ParticleRenderTypeSprite, ParticleRenderTypeWake, ParticleRenderTypeNano>;
+    using ParticleRenderType = std::variant<ParticleRenderTypeSprite, ParticleRenderTypeNano>;
 
     struct Particle
     {
