@@ -522,6 +522,64 @@ namespace rwe
         REQUIRE(controller.getBlackboard().standingBuildings.empty());
     }
 
+    TEST_CASE("an armed aircraft over a factory losing its frames besieges it, and refuses no build site", "[ai]")
+    {
+        // Issue #152. The two answers to "is an armed enemy on this place"
+        // differ on aircraft, and on purpose; see the besieged-factory pass
+        // in PerceptionManager and siteUnderEnemyGuns in BuildManager. The
+        // besieged answer is only ever asked of a factory that has already
+        // lost frames on its own pad, and there the aeroplane over it is the
+        // likeliest thing doing it. The site answer has no such evidence to
+        // lean on, and an aeroplane is somewhere else by the time a builder
+        // arrives.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), /*surfaceMetal*/ 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        auto bomber = sim.unitDefinitions["ARMPEEP"];
+        bomber.weapon1 = "LASER";
+        sim.unitDefinitions["ARMTHUND"] = bomber;
+
+        addUnit(sim, "ARMCOM", ai, SimVector(-300_ss, 0_ss, 0_ss), script);
+        auto labId = addUnit(sim, "ARMLAB", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto frameId = addUnit(sim, "ARMPW", ai, SimVector(0_ss, 0_ss, 30_ss), script);
+        sim.getUnitState(frameId).buildTimeCompleted = 0;
+        sim.getUnitState(frameId).hitPoints = 0;
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+        profile.tacticalTickInterval = 1;
+        const SimVector overTheLab(60_ss, 0_ss, 0_ss);
+
+        auto besiegedAndRefused = [&](const std::string& attackerType) {
+            addUnit(sim, attackerType, human, overTheLab, script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 2, commands);
+            sim.getUnitState(frameId).markAsDead();
+            runTicks(sim, controller, 2, commands);
+            const auto& bb = controller.getBlackboard();
+            BuildManager planner;
+            return std::make_pair(bb.besiegedFactories == std::vector<UnitId>{labId}, planner.siteUnderEnemyGuns(sim, profile, bb, overTheLab));
+        };
+
+        SECTION("an aircraft: besieged, and the ground under it is not refused")
+        {
+            auto [besieged, refused] = besiegedAndRefused("ARMTHUND");
+            REQUIRE(besieged);
+            REQUIRE_FALSE(refused);
+        }
+
+        SECTION("a gun on the ground: both")
+        {
+            auto [besieged, refused] = besiegedAndRefused("ARMPW");
+            REQUIRE(besieged);
+            REQUIRE(refused);
+        }
+    }
+
     TEST_CASE("A building that is still standing is not reported lost", "[ai]")
     {
         auto script = makeEmptyCobScript();

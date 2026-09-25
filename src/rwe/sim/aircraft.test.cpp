@@ -509,4 +509,64 @@ namespace rwe
             REQUIRE(sim.terrain.getHeightAt(plane.position.x, plane.position.z) >= sim.terrain.getSeaLevel());
         }
     }
+
+    TEST_CASE("an aircraft pitches off the same lean as its bank, by PitchScale", "[aircraft]")
+    {
+        // 0x43D1D5 reads the slot 0x43D1A0 read, so pitch and bank are the
+        // same lateral component through two scales. With the scales equal
+        // the two angles are equal every tick; with PitchScale at its
+        // shipped zero the nose never moves however hard the aircraft banks.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto airBuilder = makeBuilderDef();
+        airBuilder.canFly = true;
+        airBuilder.cruiseAltitude = 60_ss;
+        airBuilder.maxVelocity = 5_ss;
+        airBuilder.acceleration = 0.06_ssf;
+        airBuilder.bankScale = 1.5_ssf;
+        airBuilder.buildDistance = 40_ss;
+        sim.unitDefinitions["STRUCTURE"] = makeStructureDef(false);
+        sim.unitScriptDefinitions["STRUCTURE"] = *script;
+        registerModel(sim);
+
+        SECTION("equal scales give equal angles")
+        {
+            airBuilder.pitchScale = 1.5_ssf;
+            sim.unitDefinitions["AIRBUILDER"] = airBuilder;
+            sim.unitDefinitions["plane"] = airBuilder;
+            auto planeId = spawnPlane(sim, player, SimVector(-150_ss, 60_ss, 0_ss), script);
+            sim.getUnitState(planeId).orders.push_back(BuildOrder("STRUCTURE", SimVector(0_ss, 0_ss, 0_ss)));
+            bool leaned = false;
+            for (int i = 0; i < 600; ++i)
+            {
+                sim.tick();
+                if (auto air = std::get_if<UnitPhysicsInfoAir>(&sim.getUnitState(planeId).physics))
+                {
+                    REQUIRE(air->pitch == air->roll);
+                    leaned = leaned || rweAbs(air->roll) > SimScalar(0.05f);
+                }
+            }
+            REQUIRE(leaned);
+        }
+
+        SECTION("the shipped zero keeps the nose level")
+        {
+            sim.unitDefinitions["AIRBUILDER"] = airBuilder;
+            sim.unitDefinitions["plane"] = airBuilder;
+            auto planeId = spawnPlane(sim, player, SimVector(-150_ss, 60_ss, 0_ss), script);
+            sim.getUnitState(planeId).orders.push_back(BuildOrder("STRUCTURE", SimVector(0_ss, 0_ss, 0_ss)));
+            bool leaned = false;
+            for (int i = 0; i < 600; ++i)
+            {
+                sim.tick();
+                if (auto air = std::get_if<UnitPhysicsInfoAir>(&sim.getUnitState(planeId).physics))
+                {
+                    REQUIRE(air->pitch == 0_ss);
+                    leaned = leaned || rweAbs(air->roll) > SimScalar(0.05f);
+                }
+            }
+            REQUIRE(leaned);
+        }
+    }
 }

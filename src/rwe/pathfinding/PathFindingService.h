@@ -83,6 +83,15 @@ namespace rwe
              * out of is the tick, not the search.
              */
             long long searchesExhausted{0};
+            /**
+             * Answered unreachable from the terrain regions alone, without
+             * running A\*: the goal is on another landmass or in another body
+             * of water. A healthy outcome, and the one most requests on a
+             * water map get, so it is kept apart from searchesExhausted --
+             * counting it there made H1 fire on a pathfinder that was doing
+             * exactly this. See finishSearch.
+             */
+            long long searchesRegionUnreachable{0};
             long long expansions{0};
             /** Requests still queued when the tick's budget ran out. */
             long long deferredRequests{0};

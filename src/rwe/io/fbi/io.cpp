@@ -113,6 +113,7 @@ namespace rwe
 
         tdf.readOrDefault("CanFly", u.canFly);
         tdf.readOrDefault("TransportCapacity", u.transportCapacity);
+        tdf.readOrDefault("TransportMaxUnits", u.transportMaxUnits);
         tdf.readOrDefault("TransportSize", u.transportSize);
         tdf.readOrDefault("CantBeTransported", u.cantBeTransported);
         tdf.readOrDefault("IsAirBase", u.isAirBase);
@@ -126,6 +127,8 @@ namespace rwe
         // The original defaults this to one, so an aircraft whose FBI is
         // silent still banks like an aircraft.
         tdf.readOrDefault("BankScale", u.bankScale, 1.0f);
+        tdf.readOrDefault("PitchScale", u.pitchScale, 0.0f);
+        tdf.readOrDefault("Upright", u.upright);
 
         // Zero means absent: no shipped unit names a MoveRate of nought, and
         // the original substitutes twice MaxVelocity when the key is missing.

@@ -644,7 +644,7 @@ definition layout:
 | `brakerate` | `def+0x19A` | used by the nose re-aim only |
 | `acceleration` | `def+0x19E` | |
 | `bankscale` | `def+0x1A2` | default `0x10000` = 1.0 |
-| `pitchscale` | `def+0x1A6` | not implemented in RWE |
+| `pitchscale` | `def+0x1A6` | `UnitDefinition::pitchScale`, since 2026-09-24 (#24) |
 | `turnrate` | `def+0x1BA` | |
 | `sightdistance` | `def+0x202` | |
 | `mincloakdistance` | `def+0x208` | |

@@ -288,6 +288,19 @@ namespace rwe
         // because this is the pass that knows what we can see. A factory
         // that lost hulls a minute ago and has nothing near it now is not
         // besieged, and its queue goes back to being topped up.
+        //
+        // Any armed enemy counts, aircraft included, and that differs from
+        // BuildManager::siteUnderEnemyGuns on purpose (issue #152). That test
+        // leaves aircraft out because an aeroplane is over a site for a
+        // moment and somewhere else by the time a builder gets there, so
+        // refusing ground on account of one refuses the whole map in turn.
+        // This one is only asked of a factory that has already lost frames on
+        // its own pad, and there an armed aeroplane over it is the likeliest
+        // thing doing it: a bomber kills a frame as surely as a gunboat does.
+        // What follows from the answer lasts only as long as the aeroplane is
+        // there -- the queue is left alone and the enemy counts as near the
+        // base -- and enemiesNearBase already counts armed aircraft near the
+        // anchor, so leaving them out here would be the odd one.
         bb.besiegedFactories.clear();
         auto harassRadiusSquared = profile.productionHarassRadius * profile.productionHarassRadius;
         if (profile.noticeProductionHarassment)

@@ -153,12 +153,12 @@ namespace rwe
 
     GameHash computeHashOf(const UnitPhysicsInfoGround& p)
     {
-        return combineHashes(p.steeringInfo, p.currentSpeed);
+        return combineHashes(p.steeringInfo, p.currentSpeed, p.pitch, p.roll);
     }
 
     GameHash computeHashOf(const UnitPhysicsInfoAir& p)
     {
-        return combineHashes(p.movementState, p.roll, p.bankAccum);
+        return combineHashes(p.movementState, p.roll, p.bankAccum, p.pitch);
     }
 
     GameHash computeHashOf(const AirMovementStateTakingOff& p)

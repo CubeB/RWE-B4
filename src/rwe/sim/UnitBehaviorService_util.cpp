@@ -1079,6 +1079,42 @@ namespace rwe
         return 1_ss + unitDefinition.attackRunLength + lead;
     }
 
+    GroundTilt computeGroundTilt(const MapTerrain& terrain, const SimVector& position, SimAngle rotation, SimScalar halfLength, SimScalar halfWidth, bool holdAtSeaLevel)
+    {
+        auto forward = UnitState::toDirection(rotation);
+        // The unit's right hand: the heading turned a quarter clockwise.
+        SimVector right(forward.z, 0_ss, -forward.x);
+
+        auto sample = [&](SimScalar along, SimScalar across) {
+            auto x = position.x + (forward.x * along) + (right.x * across);
+            auto z = position.z + (forward.z * along) + (right.z * across);
+            auto h = terrain.getHeightAt(x, z);
+            return holdAtSeaLevel ? rweMax(h, terrain.getSeaLevel()) : h;
+        };
+
+        auto frontLeft = sample(halfLength, -halfWidth);
+        auto frontRight = sample(halfLength, halfWidth);
+        auto backLeft = sample(-halfLength, -halfWidth);
+        auto backRight = sample(-halfLength, halfWidth);
+
+        auto front = (frontLeft + frontRight) / 2_ss;
+        auto back = (backLeft + backRight) / 2_ss;
+        auto leftSide = (frontLeft + backLeft) / 2_ss;
+        auto rightSide = (frontRight + backRight) / 2_ss;
+
+        GroundTilt tilt;
+        tilt.pitch = SimScalar(toRadians(atan2(front - back, halfLength * 2_ss)).value);
+        tilt.roll = SimScalar(toRadians(atan2(rightSide - leftSide, halfWidth * 2_ss)).value);
+        for (auto* a : {&tilt.pitch, &tilt.roll})
+        {
+            if (a->value > Pif)
+            {
+                a->value -= 2.0f * Pif;
+            }
+        }
+        return tilt;
+    }
+
     bool stepAttackRunPhase(
         const SimVector& unitPosition,
         const SimVector& unitHeading,

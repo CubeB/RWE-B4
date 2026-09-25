@@ -246,6 +246,22 @@ namespace rwe
         SimScalar bankScale{1_ss};
 
         /**
+         * How far the aircraft pitches, as a multiple of the same lateral
+         * lean the bank comes from (0x43D1D5 reads the slot 0x43D1A0 did).
+         * Zero on every shipped unit, so the nose stays level unless a mod
+         * asks otherwise.
+         */
+        SimScalar pitchScale{0_ss};
+
+        /**
+         * A ground unit that stays vertical on a slope. The original's only
+         * reader is the per-tick ground placement (0x48A8BF): set, the unit
+         * takes its height from one sample under its centre; clear, four
+         * rotated footprint corners give it a pitch and a roll.
+         */
+        bool upright{false};
+
+        /**
          * Set on the gunships. The Brawler and the Rapier are the only two
          * units in the original data that carry it, and it makes them hold a
          * standoff ring and work their way around a target rather than

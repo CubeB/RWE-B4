@@ -73,7 +73,12 @@ p3_factory_minutes = 6
 
 [unitdeath]
 # D1 extractors dying with enemiesNear == 0: suspicious at this many deaths in
-# one game, likely-bug at twice this many.
+# one game, likely-bug at twice this many. enemiesNear counts only canAttack
+# units, so deaths already explained are set aside before counting: a row with
+# an attributed killer (killerPlayer/killerType -- the enemy builder or
+# nanoframe on the site is invisible to enemiesNear), and a deathCause of
+# unfinished, self_destruct, reclaimed or carrier_died. The count is of deaths
+# that are genuinely unexplained.
 # initial guess -- tune against first real runs
 d1_extractor_deaths = 1
 

@@ -1,9 +1,333 @@
 #include "AiTuningProfile.h"
+#include <algorithm>
 #include <cctype>
+#include <iterator>
+#include <sstream>
 #include <stdexcept>
 
 namespace rwe
 {
+    namespace
+    {
+        struct IntKnob
+        {
+            const char* name;
+            int AiTuningProfile::*field;
+        };
+        struct BoolKnob
+        {
+            const char* name;
+            bool AiTuningProfile::*field;
+        };
+        struct FloatKnob
+        {
+            const char* name;
+            float AiTuningProfile::*field;
+        };
+        struct ScalarKnob
+        {
+            const char* name;
+            SimScalar AiTuningProfile::*field;
+        };
+
+        bool parseAiTuningBool(const std::string& value)
+        {
+            return value == "1" || value == "true" || value == "on" || value == "yes";
+        }
+
+        /**
+         * One knob, one entry, in one of the four tables below by its field's
+         * type -- this is the single table applyAiTuning matches against and
+         * listAiKnobs reads back, so the two cannot drift apart. Order is the
+         * order --ai-tune has always matched in (largely declaration order);
+         * listAiKnobs sorts its own output rather than relying on it.
+         */
+        constexpr IntKnob intKnobs[] = {
+            {"openingMetalExtractorCount", &AiTuningProfile::openingMetalExtractorCount},
+            {"openingSolarCount", &AiTuningProfile::openingSolarCount},
+            {"targetSolarCount", &AiTuningProfile::targetSolarCount},
+            {"targetMetalExtractorCount", &AiTuningProfile::targetMetalExtractorCount},
+            {"targetConstructorCount", &AiTuningProfile::targetConstructorCount},
+            {"expansionConstructors", &AiTuningProfile::expansionConstructors},
+            {"seaAirFactoriesWhenIsolated", &AiTuningProfile::seaAirFactoriesWhenIsolated},
+            {"stalledAttackSeconds", &AiTuningProfile::stalledAttackSeconds},
+            {"stalledAttackForgetSeconds", &AiTuningProfile::stalledAttackForgetSeconds},
+            {"stalledAttackRepositionTries", &AiTuningProfile::stalledAttackRepositionTries},
+            {"counterShareBonus", &AiTuningProfile::counterShareBonus},
+            {"capacitySurplusSeconds", &AiTuningProfile::capacitySurplusSeconds},
+            {"surplusConstructors", &AiTuningProfile::surplusConstructors},
+            {"surplusFactories", &AiTuningProfile::surplusFactories},
+            {"freeDepositsPerExpansionConstructor", &AiTuningProfile::freeDepositsPerExpansionConstructor},
+            {"targetDefenceCount", &AiTuningProfile::targetDefenceCount},
+            {"outpostDefenceCount", &AiTuningProfile::outpostDefenceCount},
+            {"outpostTowerIncomeStep", &AiTuningProfile::outpostTowerIncomeStep},
+            {"outpostDefenceMax", &AiTuningProfile::outpostDefenceMax},
+            {"outpostDefenceMinExtractors", &AiTuningProfile::outpostDefenceMinExtractors},
+            {"outpostRaidMemorySeconds", &AiTuningProfile::outpostRaidMemorySeconds},
+            {"baseAntiAirTowerCount", &AiTuningProfile::baseAntiAirTowerCount},
+            {"reactiveAntiAirTowerCount", &AiTuningProfile::reactiveAntiAirTowerCount},
+            {"antiAirMobileCount", &AiTuningProfile::antiAirMobileCount},
+            {"targetRadarCount", &AiTuningProfile::targetRadarCount},
+            {"targetMetalMakerCount", &AiTuningProfile::targetMetalMakerCount},
+            {"starvedMetalMakerCount", &AiTuningProfile::starvedMetalMakerCount},
+            {"starvedMetalMakerPasses", &AiTuningProfile::starvedMetalMakerPasses},
+            {"targetAirPlantCount", &AiTuningProfile::targetAirPlantCount},
+            {"targetVehiclePlantCount", &AiTuningProfile::targetVehiclePlantCount},
+            {"targetTidalCount", &AiTuningProfile::targetTidalCount},
+            {"targetSonarCount", &AiTuningProfile::targetSonarCount},
+            {"targetTorpedoLauncherCount", &AiTuningProfile::targetTorpedoLauncherCount},
+            {"surplusLabCount", &AiTuningProfile::surplusLabCount},
+            {"techMinMetalIncome", &AiTuningProfile::techMinMetalIncome},
+            {"labRaiderShare", &AiTuningProfile::labRaiderShare},
+            {"labRocketKbotShare", &AiTuningProfile::labRocketKbotShare},
+            {"labArtilleryKbotShare", &AiTuningProfile::labArtilleryKbotShare},
+            {"vehicleTankShare", &AiTuningProfile::vehicleTankShare},
+            {"vehicleMissileTruckShare", &AiTuningProfile::vehicleMissileTruckShare},
+            {"vehicleMediumTankShare", &AiTuningProfile::vehicleMediumTankShare},
+            {"fortifyTeethPerTower", &AiTuningProfile::fortifyTeethPerTower},
+            {"fortifyWrapGapTiles", &AiTuningProfile::fortifyWrapGapTiles},
+            {"fortifyWrapTeeth", &AiTuningProfile::fortifyWrapTeeth},
+            {"fortifyExtraConstructors", &AiTuningProfile::fortifyExtraConstructors},
+            {"fortifyRepeatAttacks", &AiTuningProfile::fortifyRepeatAttacks},
+            {"fortifyReactiveTeeth", &AiTuningProfile::fortifyReactiveTeeth},
+            {"fortifyAttackGapSeconds", &AiTuningProfile::fortifyAttackGapSeconds},
+            {"fortifyAttackMemorySeconds", &AiTuningProfile::fortifyAttackMemorySeconds},
+            {"rebuildDelaySeconds", &AiTuningProfile::rebuildDelaySeconds},
+            {"maxDefenceRebuilds", &AiTuningProfile::maxDefenceRebuilds},
+            {"lostDefenceMemorySeconds", &AiTuningProfile::lostDefenceMemorySeconds},
+            {"repairStructuresBelowPercent", &AiTuningProfile::repairStructuresBelowPercent},
+            {"repairersPerStructure", &AiTuningProfile::repairersPerStructure},
+            {"repairCommanderBelowPercent", &AiTuningProfile::repairCommanderBelowPercent},
+            {"commanderRepairers", &AiTuningProfile::commanderRepairers},
+            {"techSaveUpSeconds", &AiTuningProfile::techSaveUpSeconds},
+            {"targetAdvancedLabCount", &AiTuningProfile::targetAdvancedLabCount},
+            {"targetAdvancedConstructorCount", &AiTuningProfile::targetAdvancedConstructorCount},
+            {"targetAdvancedRadarCount", &AiTuningProfile::targetAdvancedRadarCount},
+            {"heavyDefenceCount", &AiTuningProfile::heavyDefenceCount},
+            {"targetFusionCount", &AiTuningProfile::targetFusionCount},
+            {"targetScoutPlaneCount", &AiTuningProfile::targetScoutPlaneCount},
+            {"targetScoutVehicleCount", &AiTuningProfile::targetScoutVehicleCount},
+            {"navalFleetSize", &AiTuningProfile::navalFleetSize},
+            {"targetShipyardCount", &AiTuningProfile::targetShipyardCount},
+            {"isolatedLandArmyCap", &AiTuningProfile::isolatedLandArmyCap},
+            {"targetScoutShipCount", &AiTuningProfile::targetScoutShipCount},
+            {"targetSeaTransportCount", &AiTuningProfile::targetSeaTransportCount},
+            {"targetConstructionShipCount", &AiTuningProfile::targetConstructionShipCount},
+            {"targetSubmarineCount", &AiTuningProfile::targetSubmarineCount},
+            {"submarineMinDestroyerCount", &AiTuningProfile::submarineMinDestroyerCount},
+            {"targetAdvancedShipyardCount", &AiTuningProfile::targetAdvancedShipyardCount},
+            {"navalTechMinMetalIncome", &AiTuningProfile::navalTechMinMetalIncome},
+            {"targetCruiserCount", &AiTuningProfile::targetCruiserCount},
+            {"targetBattleshipCount", &AiTuningProfile::targetBattleshipCount},
+            {"targetAntiAirShipCount", &AiTuningProfile::targetAntiAirShipCount},
+            {"targetSeaplanePlatformCount", &AiTuningProfile::targetSeaplanePlatformCount},
+            {"maxSurplusMetalMakerCount", &AiTuningProfile::maxSurplusMetalMakerCount},
+            {"tierTwoReserveMinArmySize", &AiTuningProfile::tierTwoReserveMinArmySize},
+            {"tierTwoReserveCoversLabAfterSeconds", &AiTuningProfile::tierTwoReserveCoversLabAfterSeconds},
+            {"tierTwoReserveMaxSeconds", &AiTuningProfile::tierTwoReserveMaxSeconds},
+            {"targetUnderwaterFusionCount", &AiTuningProfile::targetUnderwaterFusionCount},
+            {"targetMetalStorageCount", &AiTuningProfile::targetMetalStorageCount},
+            {"targetEnergyStorageCount", &AiTuningProfile::targetEnergyStorageCount},
+            {"maxReactiveFighterCount", &AiTuningProfile::maxReactiveFighterCount},
+            {"targetTorpedoSeaplaneCount", &AiTuningProfile::targetTorpedoSeaplaneCount},
+            {"attackNavalSize", &AiTuningProfile::attackNavalSize},
+            {"navalAttackFleetSize", &AiTuningProfile::navalAttackFleetSize},
+            {"saveUpSeconds", &AiTuningProfile::saveUpSeconds},
+            {"failedSiteMemorySeconds", &AiTuningProfile::failedSiteMemorySeconds},
+            {"commanderFightsUpToMetal", &AiTuningProfile::commanderFightsUpToMetal},
+            {"commanderRetreatBelowPercent", &AiTuningProfile::commanderRetreatBelowPercent},
+            {"retreatRaiderBelowPercent", &AiTuningProfile::retreatRaiderBelowPercent},
+            {"retreatLineBelowPercent", &AiTuningProfile::retreatLineBelowPercent},
+            {"rejoinAbovePercent", &AiTuningProfile::rejoinAbovePercent},
+            {"mendWaitSeconds", &AiTuningProfile::mendWaitSeconds},
+            {"finishBuildAbovePercent", &AiTuningProfile::finishBuildAbovePercent},
+            {"mendBelowPercent", &AiTuningProfile::mendBelowPercent},
+            {"builderShelterSeconds", &AiTuningProfile::builderShelterSeconds},
+            {"commanderFrameAbsenceSeconds", &AiTuningProfile::commanderFrameAbsenceSeconds},
+            {"perimeterDefenceCount", &AiTuningProfile::perimeterDefenceCount},
+            {"radarWarningMinContacts", &AiTuningProfile::radarWarningMinContacts},
+            {"navalStalledAttackSeconds", &AiTuningProfile::navalStalledAttackSeconds},
+            {"surplusFactoryIncomeStep", &AiTuningProfile::surplusFactoryIncomeStep},
+            {"surplusFactoryCap", &AiTuningProfile::surplusFactoryCap},
+            {"surplusFleetMultiplier", &AiTuningProfile::surplusFleetMultiplier},
+            {"surplusBomberMultiplier", &AiTuningProfile::surplusBomberMultiplier},
+            {"extractorUpgradeTimeoutSeconds", &AiTuningProfile::extractorUpgradeTimeoutSeconds},
+            {"buildPlannerTickInterval", &AiTuningProfile::buildPlannerTickInterval},
+            {"scoutTickInterval", &AiTuningProfile::scoutTickInterval},
+            {"tacticalTickInterval", &AiTuningProfile::tacticalTickInterval},
+            {"attackArmySize", &AiTuningProfile::attackArmySize},
+            {"retreatArmySize", &AiTuningProfile::retreatArmySize},
+            {"attackPatienceSeconds", &AiTuningProfile::attackPatienceSeconds},
+            {"commanderDefendsAloneMaxIntruders", &AiTuningProfile::commanderDefendsAloneMaxIntruders},
+            {"reinforcementGroupSize", &AiTuningProfile::reinforcementGroupSize},
+            {"raidPartySize", &AiTuningProfile::raidPartySize},
+            {"targetFighterCount", &AiTuningProfile::targetFighterCount},
+            {"targetBomberCount", &AiTuningProfile::targetBomberCount},
+            {"airWorthItEnemyDefences", &AiTuningProfile::airWorthItEnemyDefences},
+            {"targetAirRepairPadCount", &AiTuningProfile::targetAirRepairPadCount},
+            {"targetAdvancedAirPlantCount", &AiTuningProfile::targetAdvancedAirPlantCount},
+            {"targetGunshipCount", &AiTuningProfile::targetGunshipCount},
+            {"gunshipPackSize", &AiTuningProfile::gunshipPackSize},
+            {"bomberMaxAntiAirCover", &AiTuningProfile::bomberMaxAntiAirCover},
+            {"bomberMinClusterSize", &AiTuningProfile::bomberMinClusterSize},
+            {"targetAirConstructorCount", &AiTuningProfile::targetAirConstructorCount},
+            {"battlefieldReclaimEscortCount", &AiTuningProfile::battlefieldReclaimEscortCount},
+            {"battlefieldReclaimBatch", &AiTuningProfile::battlefieldReclaimBatch},
+            {"waveMeetEnemyCount", &AiTuningProfile::waveMeetEnemyCount},
+            {"defenceValueMaxPaybackSeconds", &AiTuningProfile::defenceValueMaxPaybackSeconds},
+            {"outpostDefenceValueSecondsPerExtractor", &AiTuningProfile::outpostDefenceValueSecondsPerExtractor},
+            {"buildSiteGuardSize", &AiTuningProfile::buildSiteGuardSize},
+            {"buildSiteGuardTimeoutSeconds", &AiTuningProfile::buildSiteGuardTimeoutSeconds},
+            {"targetMemoryTicks", &AiTuningProfile::targetMemoryTicks},
+            {"ferryLandingSearchSteps", &AiTuningProfile::ferryLandingSearchSteps},
+        };
+
+        constexpr BoolKnob boolKnobs[] = {
+            {"expansionContestsMiddleWhenBoxedIn", &AiTuningProfile::expansionContestsMiddleWhenBoxedIn},
+            {"dgunByValue", &AiTuningProfile::dgunByValue},
+            {"kiteWithLongerRange", &AiTuningProfile::kiteWithLongerRange},
+            {"answerStalledAttacks", &AiTuningProfile::answerStalledAttacks},
+            {"answerBlockedShots", &AiTuningProfile::answerBlockedShots},
+            {"enemyGunRangeFromWeapon", &AiTuningProfile::enemyGunRangeFromWeapon},
+            {"counterEnemyComposition", &AiTuningProfile::counterEnemyComposition},
+            {"spendSurplusOnCapacity", &AiTuningProfile::spendSurplusOnCapacity},
+            {"answerOutpostRaids", &AiTuningProfile::answerOutpostRaids},
+            {"techLevelTwo", &AiTuningProfile::techLevelTwo},
+            {"fortifyTowers", &AiTuningProfile::fortifyTowers},
+            {"fortifyAtTierTwo", &AiTuningProfile::fortifyAtTierTwo},
+            {"fortifyTeethWrap", &AiTuningProfile::fortifyTeethWrap},
+            {"fortifyMissileTower", &AiTuningProfile::fortifyMissileTower},
+            {"fortifyWhereAttacked", &AiTuningProfile::fortifyWhereAttacked},
+            {"rebuildLostDefences", &AiTuningProfile::rebuildLostDefences},
+            {"fortifyRebuiltDefences", &AiTuningProfile::fortifyRebuiltDefences},
+            {"reinforceTwiceLostDefences", &AiTuningProfile::reinforceTwiceLostDefences},
+            {"energyInRows", &AiTuningProfile::energyInRows},
+            {"repairStructures", &AiTuningProfile::repairStructures},
+            {"repairUnderFire", &AiTuningProfile::repairUnderFire},
+            {"repairCommander", &AiTuningProfile::repairCommander},
+            {"earlyShipyard", &AiTuningProfile::earlyShipyard},
+            {"navalBuildersPlanForBase", &AiTuningProfile::navalBuildersPlanForBase},
+            {"solarOnDemand", &AiTuningProfile::solarOnDemand},
+            {"vehiclePlantFirst", &AiTuningProfile::vehiclePlantFirst},
+            {"tierTwoEconomyReserve", &AiTuningProfile::tierTwoEconomyReserve},
+            {"surplusExpansion", &AiTuningProfile::surplusExpansion},
+            {"commanderStandsItsGround", &AiTuningProfile::commanderStandsItsGround},
+            {"retreatDamagedUnits", &AiTuningProfile::retreatDamagedUnits},
+            {"mendNeedsMender", &AiTuningProfile::mendNeedsMender},
+            {"resumeAfterBackingOff", &AiTuningProfile::resumeAfterBackingOff},
+            {"mendDamagedUnits", &AiTuningProfile::mendDamagedUnits},
+            {"commanderUsesDgun", &AiTuningProfile::commanderUsesDgun},
+            {"commanderKeepsFrames", &AiTuningProfile::commanderKeepsFrames},
+            {"builderSafety", &AiTuningProfile::builderSafety},
+            {"commanderPrefersNearSites", &AiTuningProfile::commanderPrefersNearSites},
+            {"commanderMends", &AiTuningProfile::commanderMends},
+            {"firstDefencesOnPerimeter", &AiTuningProfile::firstDefencesOnPerimeter},
+            {"outpostTowersLeftToConstructors", &AiTuningProfile::outpostTowersLeftToConstructors},
+            {"extractorUpgrades", &AiTuningProfile::extractorUpgrades},
+            {"attackInWaves", &AiTuningProfile::attackInWaves},
+            {"holdWhenOutnumbered", &AiTuningProfile::holdWhenOutnumbered},
+            {"reserveAnswersIntruders", &AiTuningProfile::reserveAnswersIntruders},
+            {"noticeProductionHarassment", &AiTuningProfile::noticeProductionHarassment},
+            {"commanderAnswersHarassment", &AiTuningProfile::commanderAnswersHarassment},
+            {"raidingParties", &AiTuningProfile::raidingParties},
+            {"huntEnemyCommander", &AiTuningProfile::huntEnemyCommander},
+            {"focusOneEnemy", &AiTuningProfile::focusOneEnemy},
+            {"spreadDefences", &AiTuningProfile::spreadDefences},
+            {"commanderUsesOwnReachability", &AiTuningProfile::commanderUsesOwnReachability},
+            {"navalScouting", &AiTuningProfile::navalScouting},
+            {"defenceFacesRecentLosses", &AiTuningProfile::defenceFacesRecentLosses},
+            {"cheatModeOmniscient", &AiTuningProfile::cheatModeOmniscient},
+            {"expansionNeedsExploredGround", &AiTuningProfile::expansionNeedsExploredGround},
+            {"expansionStaysOnOurSide", &AiTuningProfile::expansionStaysOnOurSide},
+            {"armyFerryWantFromMap", &AiTuningProfile::armyFerryWantFromMap},
+            {"ferryLandingFan", &AiTuningProfile::ferryLandingFan},
+            {"ferryLandingAvoidsThreat", &AiTuningProfile::ferryLandingAvoidsThreat},
+        };
+
+        constexpr FloatKnob floatKnobs[] = {
+            {"counterShareTrigger", &AiTuningProfile::counterShareTrigger},
+            {"capacityIncomeRatio", &AiTuningProfile::capacityIncomeRatio},
+            {"outpostResponseStrength", &AiTuningProfile::outpostResponseStrength},
+            {"isolatedLandArmyCapMinWaterFraction", &AiTuningProfile::isolatedLandArmyCapMinWaterFraction},
+            {"techMinArmyValueRatio", &AiTuningProfile::techMinArmyValueRatio},
+            {"buildSiteGuardThreat", &AiTuningProfile::buildSiteGuardThreat},
+            {"buildSiteGuardThreatRadius", &AiTuningProfile::buildSiteGuardThreatRadius},
+            {"builderSafetyProtectionRatio", &AiTuningProfile::builderSafetyProtectionRatio},
+            {"radarWarningRings", &AiTuningProfile::radarWarningRings},
+            {"extractorUpgradeMinMetalFraction", &AiTuningProfile::extractorUpgradeMinMetalFraction},
+            {"bomberFactoryWeight", &AiTuningProfile::bomberFactoryWeight},
+            {"bomberCoverPenalty", &AiTuningProfile::bomberCoverPenalty},
+            {"bomberArmyReachDiscount", &AiTuningProfile::bomberArmyReachDiscount},
+            {"ferryLandingThreatRadius", &AiTuningProfile::ferryLandingThreatRadius},
+        };
+
+        constexpr ScalarKnob scalarKnobs[] = {
+            {"stalledAttackSidestep", &AiTuningProfile::stalledAttackSidestep},
+            {"kiteRangeMargin", &AiTuningProfile::kiteRangeMargin},
+            {"enemyGunRangeMargin", &AiTuningProfile::enemyGunRangeMargin},
+            {"outpostRaidRadius", &AiTuningProfile::outpostRaidRadius},
+            {"outpostResponseRadius", &AiTuningProfile::outpostResponseRadius},
+            {"fortifyTeethDistance", &AiTuningProfile::fortifyTeethDistance},
+            {"fortifyMissileDistance", &AiTuningProfile::fortifyMissileDistance},
+            {"fortifyMissileCoverRadius", &AiTuningProfile::fortifyMissileCoverRadius},
+            {"fortifyAttackerRadius", &AiTuningProfile::fortifyAttackerRadius},
+            {"repairSearchRadius", &AiTuningProfile::repairSearchRadius},
+            {"repairCommanderRadius", &AiTuningProfile::repairCommanderRadius},
+            {"commanderDangerRadius", &AiTuningProfile::commanderDangerRadius},
+            {"mendMaxWalkHome", &AiTuningProfile::mendMaxWalkHome},
+            {"mendStandRadius", &AiTuningProfile::mendStandRadius},
+            {"claimedSiteRadius", &AiTuningProfile::claimedSiteRadius},
+            {"mendHavenRadius", &AiTuningProfile::mendHavenRadius},
+            {"mendRadius", &AiTuningProfile::mendRadius},
+            {"builderSafetyMargin", &AiTuningProfile::builderSafetyMargin},
+            {"builderSafetyCoverRadius", &AiTuningProfile::builderSafetyCoverRadius},
+            {"commanderFrameCoverRadius", &AiTuningProfile::commanderFrameCoverRadius},
+            {"commanderFrameHandoverRadius", &AiTuningProfile::commanderFrameHandoverRadius},
+            {"commanderAssistRadius", &AiTuningProfile::commanderAssistRadius},
+            {"commanderLeashRadius", &AiTuningProfile::commanderLeashRadius},
+            {"perimeterDefenceMargin", &AiTuningProfile::perimeterDefenceMargin},
+            {"commanderGuardRadius", &AiTuningProfile::commanderGuardRadius},
+            {"builderAvoidsContestedRadius", &AiTuningProfile::builderAvoidsContestedRadius},
+            {"shipyardSpacing", &AiTuningProfile::shipyardSpacing},
+            {"productionHarassRadius", &AiTuningProfile::productionHarassRadius},
+            {"raidAvoidBaseRadius", &AiTuningProfile::raidAvoidBaseRadius},
+            {"attackBaseRadius", &AiTuningProfile::attackBaseRadius},
+            {"focusSwitchMargin", &AiTuningProfile::focusSwitchMargin},
+            {"gunshipSupportRadius", &AiTuningProfile::gunshipSupportRadius},
+            {"fighterLeash", &AiTuningProfile::fighterLeash},
+            {"bomberHomeDefenseRadius", &AiTuningProfile::bomberHomeDefenseRadius},
+            {"bomberClusterRadius", &AiTuningProfile::bomberClusterRadius},
+            {"bomberSortieScale", &AiTuningProfile::bomberSortieScale},
+            {"bomberLeaveToArmyRadius", &AiTuningProfile::bomberLeaveToArmyRadius},
+            {"battlefieldReclaimRadius", &AiTuningProfile::battlefieldReclaimRadius},
+            {"waveCohesionRadius", &AiTuningProfile::waveCohesionRadius},
+            {"waveMeetEnemyRadius", &AiTuningProfile::waveMeetEnemyRadius},
+            {"buildSiteGuardMinDistance", &AiTuningProfile::buildSiteGuardMinDistance},
+            {"defenceDistanceFromBase", &AiTuningProfile::defenceDistanceFromBase},
+            {"radarDistanceFromBase", &AiTuningProfile::radarDistanceFromBase},
+            {"nearMexSearchRadius", &AiTuningProfile::nearMexSearchRadius},
+            {"maxMexSearchRadius", &AiTuningProfile::maxMexSearchRadius},
+            {"buildSiteFallbackRadius", &AiTuningProfile::buildSiteFallbackRadius},
+            {"expansionMexSearchRadius", &AiTuningProfile::expansionMexSearchRadius},
+            {"commanderMexSearchRadius", &AiTuningProfile::commanderMexSearchRadius},
+            {"mexAvoidsEnemyGunsRadius", &AiTuningProfile::mexAvoidsEnemyGunsRadius},
+            {"defendRadius", &AiTuningProfile::defendRadius},
+            {"engageRadius", &AiTuningProfile::engageRadius},
+            {"rallyDistance", &AiTuningProfile::rallyDistance},
+            {"navalRallyDistance", &AiTuningProfile::navalRallyDistance},
+            {"threatAversion", &AiTuningProfile::threatAversion},
+            {"resourceCheatMultiplier", &AiTuningProfile::resourceCheatMultiplier},
+        };
+
+        template <typename Value>
+        std::string formatKnobDefault(Value value)
+        {
+            std::ostringstream out;
+            out << value;
+            return out.str();
+        }
+    }
+
     AiTuningProfile makeDefaultStandardProfile()
     {
         AiTuningProfile p;
@@ -166,308 +490,74 @@ namespace rwe
 
     bool applyAiTuning(AiTuningProfile& p, const std::string& knob, const std::string& value)
     {
-        auto asInt = [&] { return std::stoi(value); };
-        auto asBool = [&] { return value == "1" || value == "true" || value == "on" || value == "yes"; };
-        auto asScalar = [&] { return SimScalar(std::stof(value)); };
+        for (const auto& k : intKnobs)
+        {
+            if (knob == k.name)
+            {
+                p.*(k.field) = std::stoi(value);
+                return true;
+            }
+        }
+        for (const auto& k : boolKnobs)
+        {
+            if (knob == k.name)
+            {
+                p.*(k.field) = parseAiTuningBool(value);
+                return true;
+            }
+        }
+        for (const auto& k : floatKnobs)
+        {
+            if (knob == k.name)
+            {
+                p.*(k.field) = std::stof(value);
+                return true;
+            }
+        }
+        for (const auto& k : scalarKnobs)
+        {
+            if (knob == k.name)
+            {
+                p.*(k.field) = SimScalar(std::stof(value));
+                return true;
+            }
+        }
+        return false;
+    }
 
-        auto setInt = [&](const char* name, int& field) {
-            if (knob != name)
-            {
-                return false;
-            }
-            field = asInt();
-            return true;
-        };
-        auto setBool = [&](const char* name, bool& field) {
-            if (knob != name)
-            {
-                return false;
-            }
-            field = asBool();
-            return true;
-        };
-        auto setFloat = [&](const char* name, float& field) {
-            if (knob != name)
-            {
-                return false;
-            }
-            field = std::stof(value);
-            return true;
-        };
-        auto setScalar = [&](const char* name, SimScalar& field) {
-            if (knob != name)
-            {
-                return false;
-            }
-            field = asScalar();
-            return true;
-        };
+    std::vector<AiKnobInfo> listAiKnobs()
+    {
+        // A default-constructed profile, not makeDefaultStandardProfile's:
+        // --ai-tune reads and writes AiTuningProfile's own fields, and those
+        // are the defaults a knob's value is relative to. The STANDARD name
+        // and a couple of derived fields are the only difference and neither
+        // is a knob.
+        AiTuningProfile p;
 
-        return setInt("openingMetalExtractorCount", p.openingMetalExtractorCount)
-            || setInt("openingSolarCount", p.openingSolarCount)
-            || setInt("targetSolarCount", p.targetSolarCount)
-            || setInt("targetMetalExtractorCount", p.targetMetalExtractorCount)
-            || setBool("expansionContestsMiddleWhenBoxedIn", p.expansionContestsMiddleWhenBoxedIn)
-            || setInt("targetConstructorCount", p.targetConstructorCount)
-            || setInt("expansionConstructors", p.expansionConstructors)
-            || setInt("seaAirFactoriesWhenIsolated", p.seaAirFactoriesWhenIsolated)
-            || setBool("dgunByValue", p.dgunByValue)
-            || setBool("kiteWithLongerRange", p.kiteWithLongerRange)
-            || setBool("answerStalledAttacks", p.answerStalledAttacks)
-            || setInt("stalledAttackSeconds", p.stalledAttackSeconds)
-            || setInt("stalledAttackForgetSeconds", p.stalledAttackForgetSeconds)
-            || setBool("answerBlockedShots", p.answerBlockedShots)
-            || setInt("stalledAttackRepositionTries", p.stalledAttackRepositionTries)
-            || setScalar("stalledAttackSidestep", p.stalledAttackSidestep)
-            || setScalar("kiteRangeMargin", p.kiteRangeMargin)
-            || setBool("enemyGunRangeFromWeapon", p.enemyGunRangeFromWeapon)
-            || setScalar("enemyGunRangeMargin", p.enemyGunRangeMargin)
-            || setBool("counterEnemyComposition", p.counterEnemyComposition)
-            || setInt("counterShareBonus", p.counterShareBonus)
-            || setFloat("counterShareTrigger", p.counterShareTrigger)
-            || setBool("spendSurplusOnCapacity", p.spendSurplusOnCapacity)
-            || setFloat("capacityIncomeRatio", p.capacityIncomeRatio)
-            || setInt("capacitySurplusSeconds", p.capacitySurplusSeconds)
-            || setInt("surplusConstructors", p.surplusConstructors)
-            || setInt("surplusFactories", p.surplusFactories)
-            || setInt("freeDepositsPerExpansionConstructor", p.freeDepositsPerExpansionConstructor)
-            || setInt("targetDefenceCount", p.targetDefenceCount)
-            || setInt("outpostDefenceCount", p.outpostDefenceCount)
-            || setInt("outpostTowerIncomeStep", p.outpostTowerIncomeStep)
-            || setInt("outpostDefenceMax", p.outpostDefenceMax)
-            || setBool("answerOutpostRaids", p.answerOutpostRaids)
-            || setScalar("outpostRaidRadius", p.outpostRaidRadius)
-            || setScalar("outpostResponseRadius", p.outpostResponseRadius)
-            || setFloat("outpostResponseStrength", p.outpostResponseStrength)
-            || setInt("outpostDefenceMinExtractors", p.outpostDefenceMinExtractors)
-            || setInt("outpostRaidMemorySeconds", p.outpostRaidMemorySeconds)
-            || setInt("baseAntiAirTowerCount", p.baseAntiAirTowerCount)
-            || setInt("reactiveAntiAirTowerCount", p.reactiveAntiAirTowerCount)
-            || setInt("antiAirMobileCount", p.antiAirMobileCount)
-            || setInt("targetRadarCount", p.targetRadarCount)
-            || setInt("targetMetalMakerCount", p.targetMetalMakerCount)
-            || setInt("starvedMetalMakerCount", p.starvedMetalMakerCount)
-            || setInt("starvedMetalMakerPasses", p.starvedMetalMakerPasses)
-            || setInt("targetAirPlantCount", p.targetAirPlantCount)
-            || setInt("targetVehiclePlantCount", p.targetVehiclePlantCount)
-            || setFloat("isolatedLandArmyCapMinWaterFraction", p.isolatedLandArmyCapMinWaterFraction)
-            || setInt("targetTidalCount", p.targetTidalCount)
-            || setInt("targetSonarCount", p.targetSonarCount)
-            || setInt("targetTorpedoLauncherCount", p.targetTorpedoLauncherCount)
-            || setInt("surplusLabCount", p.surplusLabCount)
-            || setBool("techLevelTwo", p.techLevelTwo)
-            || setInt("techMinMetalIncome", p.techMinMetalIncome)
-            || setFloat("techMinArmyValueRatio", p.techMinArmyValueRatio)
-            || setInt("labRaiderShare", p.labRaiderShare)
-            || setInt("labRocketKbotShare", p.labRocketKbotShare)
-            || setInt("labArtilleryKbotShare", p.labArtilleryKbotShare)
-            || setInt("vehicleTankShare", p.vehicleTankShare)
-            || setInt("vehicleMissileTruckShare", p.vehicleMissileTruckShare)
-            || setInt("vehicleMediumTankShare", p.vehicleMediumTankShare)
-            || setBool("fortifyTowers", p.fortifyTowers)
-            || setBool("fortifyAtTierTwo", p.fortifyAtTierTwo)
-            || setInt("fortifyTeethPerTower", p.fortifyTeethPerTower)
-            || setScalar("fortifyTeethDistance", p.fortifyTeethDistance)
-            || setBool("fortifyTeethWrap", p.fortifyTeethWrap)
-            || setInt("fortifyWrapGapTiles", p.fortifyWrapGapTiles)
-            || setInt("fortifyWrapTeeth", p.fortifyWrapTeeth)
-            || setBool("fortifyMissileTower", p.fortifyMissileTower)
-            || setScalar("fortifyMissileDistance", p.fortifyMissileDistance)
-            || setScalar("fortifyMissileCoverRadius", p.fortifyMissileCoverRadius)
-            || setInt("fortifyExtraConstructors", p.fortifyExtraConstructors)
-            || setBool("fortifyWhereAttacked", p.fortifyWhereAttacked)
-            || setInt("fortifyRepeatAttacks", p.fortifyRepeatAttacks)
-            || setInt("fortifyReactiveTeeth", p.fortifyReactiveTeeth)
-            || setInt("fortifyAttackGapSeconds", p.fortifyAttackGapSeconds)
-            || setInt("fortifyAttackMemorySeconds", p.fortifyAttackMemorySeconds)
-            || setScalar("fortifyAttackerRadius", p.fortifyAttackerRadius)
-            || setBool("rebuildLostDefences", p.rebuildLostDefences)
-            || setInt("rebuildDelaySeconds", p.rebuildDelaySeconds)
-            || setInt("maxDefenceRebuilds", p.maxDefenceRebuilds)
-            || setInt("lostDefenceMemorySeconds", p.lostDefenceMemorySeconds)
-            || setBool("fortifyRebuiltDefences", p.fortifyRebuiltDefences)
-            || setBool("reinforceTwiceLostDefences", p.reinforceTwiceLostDefences)
-            || setBool("energyInRows", p.energyInRows)
-            || setBool("repairStructures", p.repairStructures)
-            || setInt("repairStructuresBelowPercent", p.repairStructuresBelowPercent)
-            || setScalar("repairSearchRadius", p.repairSearchRadius)
-            || setInt("repairersPerStructure", p.repairersPerStructure)
-            || setBool("repairUnderFire", p.repairUnderFire)
-            || setBool("repairCommander", p.repairCommander)
-            || setInt("repairCommanderBelowPercent", p.repairCommanderBelowPercent)
-            || setScalar("repairCommanderRadius", p.repairCommanderRadius)
-            || setInt("commanderRepairers", p.commanderRepairers)
-            || setInt("techSaveUpSeconds", p.techSaveUpSeconds)
-            || setInt("targetAdvancedLabCount", p.targetAdvancedLabCount)
-            || setInt("targetAdvancedConstructorCount", p.targetAdvancedConstructorCount)
-            || setInt("targetAdvancedRadarCount", p.targetAdvancedRadarCount)
-            || setInt("heavyDefenceCount", p.heavyDefenceCount)
-            || setInt("targetFusionCount", p.targetFusionCount)
-            || setInt("targetScoutPlaneCount", p.targetScoutPlaneCount)
-            || setInt("targetScoutVehicleCount", p.targetScoutVehicleCount)
-            || setInt("navalFleetSize", p.navalFleetSize)
-            || setInt("targetShipyardCount", p.targetShipyardCount)
-            || setBool("earlyShipyard", p.earlyShipyard)
-            || setFloat("buildSiteGuardThreat", p.buildSiteGuardThreat)
-            || setFloat("buildSiteGuardThreatRadius", p.buildSiteGuardThreatRadius)
-            || setInt("isolatedLandArmyCap", p.isolatedLandArmyCap)
-            || setInt("targetScoutShipCount", p.targetScoutShipCount)
-            || setInt("targetSeaTransportCount", p.targetSeaTransportCount)
-            || setInt("targetConstructionShipCount", p.targetConstructionShipCount)
-            || setInt("targetSubmarineCount", p.targetSubmarineCount)
-            || setInt("submarineMinDestroyerCount", p.submarineMinDestroyerCount)
-            || setInt("targetAdvancedShipyardCount", p.targetAdvancedShipyardCount)
-            || setBool("navalBuildersPlanForBase", p.navalBuildersPlanForBase)
-            || setInt("navalTechMinMetalIncome", p.navalTechMinMetalIncome)
-            || setInt("targetCruiserCount", p.targetCruiserCount)
-            || setInt("targetBattleshipCount", p.targetBattleshipCount)
-            || setInt("targetAntiAirShipCount", p.targetAntiAirShipCount)
-            || setInt("targetSeaplanePlatformCount", p.targetSeaplanePlatformCount)
-            || setInt("maxSurplusMetalMakerCount", p.maxSurplusMetalMakerCount)
-            || setBool("solarOnDemand", p.solarOnDemand)
-            || setBool("vehiclePlantFirst", p.vehiclePlantFirst)
-            || setBool("tierTwoEconomyReserve", p.tierTwoEconomyReserve)
-            || setInt("tierTwoReserveMinArmySize", p.tierTwoReserveMinArmySize)
-            || setInt("tierTwoReserveCoversLabAfterSeconds", p.tierTwoReserveCoversLabAfterSeconds)
-            || setInt("tierTwoReserveMaxSeconds", p.tierTwoReserveMaxSeconds)
-            || setInt("targetUnderwaterFusionCount", p.targetUnderwaterFusionCount)
-            || setInt("targetMetalStorageCount", p.targetMetalStorageCount)
-            || setInt("targetEnergyStorageCount", p.targetEnergyStorageCount)
-            || setInt("maxReactiveFighterCount", p.maxReactiveFighterCount)
-            || setInt("targetTorpedoSeaplaneCount", p.targetTorpedoSeaplaneCount)
-            || setInt("attackNavalSize", p.attackNavalSize)
-            || setInt("navalAttackFleetSize", p.navalAttackFleetSize)
-            || setInt("saveUpSeconds", p.saveUpSeconds)
-            || setInt("failedSiteMemorySeconds", p.failedSiteMemorySeconds)
-            || setBool("surplusExpansion", p.surplusExpansion)
-            || setScalar("commanderDangerRadius", p.commanderDangerRadius)
-            || setBool("commanderStandsItsGround", p.commanderStandsItsGround)
-            || setInt("commanderFightsUpToMetal", p.commanderFightsUpToMetal)
-            || setInt("commanderRetreatBelowPercent", p.commanderRetreatBelowPercent)
-            || setBool("retreatDamagedUnits", p.retreatDamagedUnits)
-            || setInt("retreatRaiderBelowPercent", p.retreatRaiderBelowPercent)
-            || setInt("retreatLineBelowPercent", p.retreatLineBelowPercent)
-            || setInt("rejoinAbovePercent", p.rejoinAbovePercent)
-            || setInt("mendWaitSeconds", p.mendWaitSeconds)
-            || setBool("mendNeedsMender", p.mendNeedsMender)
-            || setScalar("mendMaxWalkHome", p.mendMaxWalkHome)
-            || setScalar("mendStandRadius", p.mendStandRadius)
-            || setScalar("claimedSiteRadius", p.claimedSiteRadius)
-            || setInt("finishBuildAbovePercent", p.finishBuildAbovePercent)
-            || setBool("resumeAfterBackingOff", p.resumeAfterBackingOff)
-            || setScalar("mendHavenRadius", p.mendHavenRadius)
-            || setBool("mendDamagedUnits", p.mendDamagedUnits)
-            || setInt("mendBelowPercent", p.mendBelowPercent)
-            || setScalar("mendRadius", p.mendRadius)
-            || setBool("commanderUsesDgun", p.commanderUsesDgun)
-            || setBool("commanderKeepsFrames", p.commanderKeepsFrames)
-            || setBool("builderSafety", p.builderSafety)
-            || setScalar("builderSafetyMargin", p.builderSafetyMargin)
-            || setScalar("builderSafetyCoverRadius", p.builderSafetyCoverRadius)
-            || setFloat("builderSafetyProtectionRatio", p.builderSafetyProtectionRatio)
-            || setInt("builderShelterSeconds", p.builderShelterSeconds)
-            || setInt("commanderFrameAbsenceSeconds", p.commanderFrameAbsenceSeconds)
-            || setScalar("commanderFrameCoverRadius", p.commanderFrameCoverRadius)
-            || setScalar("commanderFrameHandoverRadius", p.commanderFrameHandoverRadius)
-            || setScalar("commanderAssistRadius", p.commanderAssistRadius)
-            || setScalar("commanderLeashRadius", p.commanderLeashRadius)
-            || setBool("commanderPrefersNearSites", p.commanderPrefersNearSites)
-            || setBool("commanderMends", p.commanderMends)
-            || setBool("firstDefencesOnPerimeter", p.firstDefencesOnPerimeter)
-            || setInt("perimeterDefenceCount", p.perimeterDefenceCount)
-            || setScalar("perimeterDefenceMargin", p.perimeterDefenceMargin)
-            || setBool("outpostTowersLeftToConstructors", p.outpostTowersLeftToConstructors)
-            || setScalar("commanderGuardRadius", p.commanderGuardRadius)
-            || setFloat("radarWarningRings", p.radarWarningRings)
-            || setInt("radarWarningMinContacts", p.radarWarningMinContacts)
-            || setInt("navalStalledAttackSeconds", p.navalStalledAttackSeconds)
-            || setScalar("builderAvoidsContestedRadius", p.builderAvoidsContestedRadius)
-            || setScalar("shipyardSpacing", p.shipyardSpacing)
-            || setInt("surplusFactoryIncomeStep", p.surplusFactoryIncomeStep)
-            || setInt("surplusFactoryCap", p.surplusFactoryCap)
-            || setInt("surplusFleetMultiplier", p.surplusFleetMultiplier)
-            || setInt("surplusBomberMultiplier", p.surplusBomberMultiplier)
-            || setBool("extractorUpgrades", p.extractorUpgrades)
-            || setFloat("extractorUpgradeMinMetalFraction", p.extractorUpgradeMinMetalFraction)
-            || setInt("extractorUpgradeTimeoutSeconds", p.extractorUpgradeTimeoutSeconds)
-            || setInt("buildPlannerTickInterval", p.buildPlannerTickInterval)
-            || setInt("scoutTickInterval", p.scoutTickInterval)
-            || setInt("tacticalTickInterval", p.tacticalTickInterval)
-            || setInt("attackArmySize", p.attackArmySize)
-            || setInt("retreatArmySize", p.retreatArmySize)
-            || setInt("attackPatienceSeconds", p.attackPatienceSeconds)
-            || setBool("attackInWaves", p.attackInWaves)
-            || setBool("holdWhenOutnumbered", p.holdWhenOutnumbered)
-            || setInt("commanderDefendsAloneMaxIntruders", p.commanderDefendsAloneMaxIntruders)
-            || setBool("reserveAnswersIntruders", p.reserveAnswersIntruders)
-            || setBool("noticeProductionHarassment", p.noticeProductionHarassment)
-            || setScalar("productionHarassRadius", p.productionHarassRadius)
-            || setBool("commanderAnswersHarassment", p.commanderAnswersHarassment)
-            || setInt("reinforcementGroupSize", p.reinforcementGroupSize)
-            || setBool("raidingParties", p.raidingParties)
-            || setInt("raidPartySize", p.raidPartySize)
-            || setScalar("raidAvoidBaseRadius", p.raidAvoidBaseRadius)
-            || setScalar("attackBaseRadius", p.attackBaseRadius)
-            || setBool("huntEnemyCommander", p.huntEnemyCommander)
-            || setBool("focusOneEnemy", p.focusOneEnemy)
-            || setScalar("focusSwitchMargin", p.focusSwitchMargin)
-            || setInt("targetFighterCount", p.targetFighterCount)
-            || setInt("targetBomberCount", p.targetBomberCount)
-            || setInt("airWorthItEnemyDefences", p.airWorthItEnemyDefences)
-            || setInt("targetAirRepairPadCount", p.targetAirRepairPadCount)
-            || setInt("targetAdvancedAirPlantCount", p.targetAdvancedAirPlantCount)
-            || setInt("targetGunshipCount", p.targetGunshipCount)
-            || setInt("gunshipPackSize", p.gunshipPackSize)
-            || setScalar("gunshipSupportRadius", p.gunshipSupportRadius)
-            || setScalar("fighterLeash", p.fighterLeash)
-            || setInt("bomberMaxAntiAirCover", p.bomberMaxAntiAirCover)
-            || setScalar("bomberHomeDefenseRadius", p.bomberHomeDefenseRadius)
-            || setScalar("bomberClusterRadius", p.bomberClusterRadius)
-            || setInt("bomberMinClusterSize", p.bomberMinClusterSize)
-            || setFloat("bomberFactoryWeight", p.bomberFactoryWeight)
-            || setFloat("bomberCoverPenalty", p.bomberCoverPenalty)
-            || setScalar("bomberSortieScale", p.bomberSortieScale)
-            || setScalar("bomberLeaveToArmyRadius", p.bomberLeaveToArmyRadius)
-            || setFloat("bomberArmyReachDiscount", p.bomberArmyReachDiscount)
-            || setInt("targetAirConstructorCount", p.targetAirConstructorCount)
-            || setScalar("battlefieldReclaimRadius", p.battlefieldReclaimRadius)
-            || setInt("battlefieldReclaimEscortCount", p.battlefieldReclaimEscortCount)
-            || setInt("battlefieldReclaimBatch", p.battlefieldReclaimBatch)
-            || setScalar("waveCohesionRadius", p.waveCohesionRadius)
-            || setScalar("waveMeetEnemyRadius", p.waveMeetEnemyRadius)
-            || setInt("waveMeetEnemyCount", p.waveMeetEnemyCount)
-            || setBool("spreadDefences", p.spreadDefences)
-            || setBool("commanderUsesOwnReachability", p.commanderUsesOwnReachability)
-            || setBool("navalScouting", p.navalScouting)
-            || setBool("defenceFacesRecentLosses", p.defenceFacesRecentLosses)
-            || setInt("defenceValueMaxPaybackSeconds", p.defenceValueMaxPaybackSeconds)
-            || setInt("outpostDefenceValueSecondsPerExtractor", p.outpostDefenceValueSecondsPerExtractor)
-            || setInt("buildSiteGuardSize", p.buildSiteGuardSize)
-            || setScalar("buildSiteGuardMinDistance", p.buildSiteGuardMinDistance)
-            || setInt("buildSiteGuardTimeoutSeconds", p.buildSiteGuardTimeoutSeconds)
-            || setBool("cheatModeOmniscient", p.cheatModeOmniscient)
-            || setInt("targetMemoryTicks", p.targetMemoryTicks)
-            || setScalar("defenceDistanceFromBase", p.defenceDistanceFromBase)
-            || setScalar("radarDistanceFromBase", p.radarDistanceFromBase)
-            || setScalar("nearMexSearchRadius", p.nearMexSearchRadius)
-            || setScalar("maxMexSearchRadius", p.maxMexSearchRadius)
-            || setScalar("buildSiteFallbackRadius", p.buildSiteFallbackRadius)
-            || setScalar("expansionMexSearchRadius", p.expansionMexSearchRadius)
-            || setScalar("commanderMexSearchRadius", p.commanderMexSearchRadius)
-            || setScalar("mexAvoidsEnemyGunsRadius", p.mexAvoidsEnemyGunsRadius)
-            || setBool("expansionNeedsExploredGround", p.expansionNeedsExploredGround)
-            || setBool("expansionStaysOnOurSide", p.expansionStaysOnOurSide)
-            || setScalar("defendRadius", p.defendRadius)
-            || setScalar("engageRadius", p.engageRadius)
-            || setScalar("rallyDistance", p.rallyDistance)
-            || setScalar("navalRallyDistance", p.navalRallyDistance)
-            || setBool("armyFerryWantFromMap", p.armyFerryWantFromMap)
-            || setInt("ferryLandingSearchSteps", p.ferryLandingSearchSteps)
-            || setBool("ferryLandingFan", p.ferryLandingFan)
-            || setBool("ferryLandingAvoidsThreat", p.ferryLandingAvoidsThreat)
-            || setFloat("ferryLandingThreatRadius", p.ferryLandingThreatRadius)
-            || setScalar("threatAversion", p.threatAversion)
-            || setScalar("resourceCheatMultiplier", p.resourceCheatMultiplier);
+        std::vector<AiKnobInfo> result;
+        result.reserve(std::size(intKnobs) + std::size(boolKnobs) + std::size(floatKnobs) + std::size(scalarKnobs));
+
+        for (const auto& k : intKnobs)
+        {
+            result.push_back({k.name, "int", std::to_string(p.*(k.field))});
+        }
+        for (const auto& k : boolKnobs)
+        {
+            result.push_back({k.name, "bool", (p.*(k.field)) ? "true" : "false"});
+        }
+        for (const auto& k : floatKnobs)
+        {
+            result.push_back({k.name, "float", formatKnobDefault(p.*(k.field))});
+        }
+        for (const auto& k : scalarKnobs)
+        {
+            result.push_back({k.name, "scalar", formatKnobDefault(simScalarToFloat(p.*(k.field)))});
+        }
+
+        std::sort(result.begin(), result.end(), [](const AiKnobInfo& a, const AiKnobInfo& b) {
+            return a.name < b.name;
+        });
+        return result;
     }
 
     const char* aiDifficultyName(AiDifficulty difficulty)
