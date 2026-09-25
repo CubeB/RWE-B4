@@ -970,7 +970,13 @@ namespace rwe
         }
         for (unsigned int i = stagesToCopyCount; i < stages; ++i)
         {
-            normalSprites.push_back(defaultSprite);
+            // More stages than the art carries: borrow the faces again
+            // rather than fall to the blank default. The stage faces are
+            // interchangeable (the label is what distinguishes them), so a
+            // cycle keeps every stage looking like the button it is. The UI
+            // scale's six stages need this; without it the top two were
+            // text on a blank plate.
+            normalSprites.push_back(stagesPresentCount > 0 ? sprites[i % stagesPresentCount] : defaultSprite);
         }
         assert(normalSprites.size() == stages);
 
