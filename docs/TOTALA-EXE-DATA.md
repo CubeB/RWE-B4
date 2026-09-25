@@ -970,6 +970,50 @@ starting units, 12,181 of them with orders), three more things show up:
   commas and `sscanf` stops at the first thing it cannot read, so each of
   these orders simply has fewer arguments than its format asks for.
 
+### Mission start: `0x488310`
+
+Called from `0x497B40`. It walks the unit records the reader above filled,
+36 bytes each in the array at `[game+0x391E9]+0xDAC` (count at `+0xDB0`), in
+two passes.
+
+**The first makes the units.** For each record:
+
+- `0x488A50(Unitname)` finds the definition. An unknown name makes nothing.
+- `Player` N is player index N-1 (`0x4883B2`). If the index is 10 or more,
+  or the slot is empty, or its type byte (`player+0x73`) is not 1, 2 or 3,
+  or `player+0x146` is 10, `0x48841D` formats "Player number %d invalid for
+  unit %s" (`0x508CE8`) for `0x4B6290`. **The unit is made anyway.**
+- `0x47DDC0(def, &pos)` places it. The position is the record's, in 16.16
+  world units from the map's top-left corner. For `bmcode` 0 (`def+0x22F`),
+  the centre is snapped to the build grid for the footprint:
+  `cell = floor((x - fx*8 + 8) / 16)` and `x = cell*16 + fx*8` (the same for
+  z with fz). The height then comes from the terrain under the footprint
+  (`0x47D820`). A mobile unit is left exactly where the record puts it.
+- `0x485F50(index, def+0x21E, pos, 1, 1, 0)` creates it, finished.
+- Hit points become `def+0x1FA` (max damage) × `HealthPercentage` / 100,
+  truncated (`0x48848E`, the `0x51EB851F` reciprocal). The heading word
+  `unit+0x66` takes `Angle`, which the reader turned from degrees into
+  `trunc(degrees × 65536 / 360)` (`0x436EF9`). `Immunity` (record `+0x23`
+  bit 7) goes to bit 15 of `unit+0x110`.
+
+**The second pass** runs each made unit's `InitialMission` through `0x487BF0`
+(`0x488514`). With no unit records at all, `0x4904B0` is called instead.
+
+The other record fields (`BuildPriority`, `CreationCountdown`, `InitialGroup`,
+`MissionCriticalUnit`, `AiIgnore`, `AiPriorityTarget`) are not read here.
+
+> **Ported 2026-09-25 (#293):** `spawnMissionUnits`, behind `--mission`
+> alongside `--map` and `--player`, with the players seated in the slots the
+> units name. Two departures: a unit whose slot has no player is skipped
+> rather than made (RWE has no player to give it to), and `Immunity` is not
+> applied yet. The schema's `HumanMetal`/`HumanEnergy` and
+> `ComputerMetal`/`ComputerEnergy` are each player's starting stockpile and
+> also a base storage of its own (`GamePlayerInfo::hasBaseStorage`, the
+> original's `player+0x149` bit 0, ECONOMY "Storage and overflow"). A mission
+> player usually has no commander, and without a base its stockpile would be
+> clamped away at the first settle. Not yet: the orders, the flags, the
+> conditions, and choosing the schema by difficulty.
+
 ### `[specials]` and `[features]`
 
 The schema's `[specials]` (`0x437010`, tagged `"MISSIONRULE DATA"`) are the

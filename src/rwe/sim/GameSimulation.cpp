@@ -4075,8 +4075,8 @@ namespace rwe
         {
             for (auto& player : players)
             {
-                player.maxEnergy = Energy(0);
-                player.maxMetal = Metal(0);
+                player.maxEnergy = player.hasBaseStorage ? player.startingEnergy : Energy(0);
+                player.maxMetal = player.hasBaseStorage ? player.startingMetal : Metal(0);
             }
 
             for (auto& entry : units)
@@ -4086,7 +4086,7 @@ namespace rwe
                 if (!unit.isBeingBuilt(unitDefinition))
                 {
                     auto& playerInfo = getPlayer(unit.owner);
-                    if (unitDefinition.commander)
+                    if (unitDefinition.commander && !playerInfo.hasBaseStorage)
                     {
                         playerInfo.maxMetal += playerInfo.startingMetal;
                         playerInfo.maxEnergy += playerInfo.startingEnergy;

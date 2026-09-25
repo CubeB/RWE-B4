@@ -132,4 +132,29 @@ namespace rwe
         const GameParameters& gameParameters,
         MapData mapData,
         const OtaRecord& ota);
+
+    /** What spawnMissionUnits did, for the log and the tests. */
+    struct MissionSpawnResult
+    {
+        /** The units made, in the order of the schema's [unitN] blocks. */
+        std::vector<UnitId> spawned;
+        /** One line for each [unitN] that was not spawned, and why. */
+        std::vector<std::string> skipped;
+    };
+
+    /**
+     * A mission's starting units, as the original lays them out at mission
+     * start (0x488310): each [unitN] of the schema becomes a finished unit of
+     * `Player` N's slot N-1. A building is snapped to the build grid for its
+     * footprint and set on the ground (0x47DDC0, bmcode 0); a mobile unit is
+     * put where the file says and on the ground. Hit points are the maximum
+     * times HealthPercentage over a hundred (0x48848E) and the heading is
+     * Angle in degrees (0x436EF9).
+     *
+     * Two departures, both because RWE has nothing to spawn into: a name no
+     * unit definition carries is skipped, as the original skips it, and so
+     * is a unit whose slot has no player in it, where the original logs
+     * "Player number %d invalid" and makes the unit anyway.
+     */
+    MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers);
 }

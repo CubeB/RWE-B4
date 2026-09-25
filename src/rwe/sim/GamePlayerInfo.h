@@ -45,6 +45,19 @@ namespace rwe
          */
         std::optional<int> teamId{};
 
+        /**
+         * The player's storage has a base of its own, startingMetal and
+         * startingEnergy, on top of what its finished units hold, whether or
+         * not it has a commander. That is the original's rule when bit 0 of
+         * `player+0x149` is set (`0x401988`, TOTALA-EXE-ECONOMY.md "Storage
+         * and overflow"). A mission sets it (issue #293): a mission player
+         * usually has no commander, and without a base the stockpile the
+         * schema gives it would be clamped away at the first settle. A
+         * skirmish leaves it clear and keeps RWE's older rule, which gives
+         * the commander the starting stockpile as its storage instead.
+         */
+        bool hasBaseStorage{false};
+
         bool metalStalled{false};
         bool energyStalled{false};
 

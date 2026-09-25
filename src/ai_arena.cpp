@@ -330,6 +330,10 @@ int main(int argc, char* argv[])
             gameParametersHolder = GameParameters{args.getString("map"), 0};
         }
         GameParameters& gameParameters = *gameParametersHolder;
+        if (args.contains("mission"))
+        {
+            gameParameters.mission = true;
+        }
 
         if (args.contains("record-demo"))
         {
@@ -541,7 +545,19 @@ int main(int argc, char* argv[])
             LOG_INFO << "Recording demo to " << *gameParameters.recordDemoFile;
         }
 
-        spawnCommanders(loaded.simulation, loaded, sideData);
+        if (loaded.gameParameters.mission)
+        {
+            auto result = spawnMissionUnits(loaded.simulation, loaded.ota.schemas.at(loaded.gameParameters.schemaIndex), loaded.gamePlayers);
+            LOG_INFO << "Mission: " << result.spawned.size() << " units placed, " << result.skipped.size() << " not";
+            for (const auto& line : result.skipped)
+            {
+                LOG_WARN << "Mission unit not placed: " << line;
+            }
+        }
+        else
+        {
+            spawnCommanders(loaded.simulation, loaded, sideData);
+        }
 
         auto playerCommandService = std::make_unique<PlayerCommandService>();
         for (const auto& playerId : loaded.gamePlayers)

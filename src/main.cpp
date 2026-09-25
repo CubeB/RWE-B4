@@ -247,6 +247,10 @@ int main(int argc, char* argv[])
                 const auto& players = args.getMulti("player");
 
                 gameParameters = rwe::GameParameters{mapName, 0};
+                if (args.contains("mission"))
+                {
+                    gameParameters->mission = true;
+                }
                 if (args.contains("state-log"))
                 {
                     gameParameters->stateLogFile = args.getString("state-log");

@@ -740,7 +740,21 @@ namespace rwe
             if (params)
             {
                 auto playerType = std::visit(IsComputerVisitor(), params->controller) ? GamePlayerType::Computer : GamePlayerType::Human;
-                GamePlayerInfo gpi{params->name, playerType, params->color, GamePlayerStatus::Alive, params->side, params->metal, params->energy, params->metal, params->energy, params->metal, params->energy, params->teamId};
+                auto metal = params->metal;
+                auto energy = params->energy;
+                if (gameParameters.mission)
+                {
+                    // The mission, not the lobby, says what everyone starts
+                    // with: the schema's HumanMetal and HumanEnergy for a
+                    // player at the keyboard and ComputerMetal and
+                    // ComputerEnergy for the rest.
+                    const auto& schema = ota.schemas.at(gameParameters.schemaIndex);
+                    auto isComputer = playerType == GamePlayerType::Computer;
+                    metal = Metal(static_cast<float>(isComputer ? schema.computerMetal : schema.humanMetal));
+                    energy = Energy(static_cast<float>(isComputer ? schema.computerEnergy : schema.humanEnergy));
+                }
+                GamePlayerInfo gpi{params->name, playerType, params->color, GamePlayerStatus::Alive, params->side, metal, energy, metal, energy, metal, energy, params->teamId};
+                gpi.hasBaseStorage = gameParameters.mission;
                 auto playerId = simulation.addPlayer(gpi);
                 gamePlayers[i] = playerId;
 
@@ -975,5 +989,68 @@ namespace rwe
             std::move(mapIntel),
             std::move(buildTree),
             std::move(dataMaps)};
+    }
+
+    MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers)
+    {
+        MissionSpawnResult result;
+        for (std::size_t i = 0; i < schema.units.size(); ++i)
+        {
+            const auto& record = schema.units[i];
+            auto describe = [&](const std::string& why) {
+                return "[unit" + std::to_string(i) + "] " + record.unitName + " for player " + std::to_string(record.player) + ": " + why;
+            };
+
+            // 0x488A50: the definition by name. An unknown one makes nothing.
+            auto unitType = toUpper(record.unitName);
+            auto defIt = simulation.unitDefinitions.find(unitType);
+            if (defIt == simulation.unitDefinitions.end())
+            {
+                result.skipped.push_back(describe("no such unit"));
+                continue;
+            }
+            const auto& def = defIt->second;
+
+            // Player N is slot N-1 (0x4883B2). The original logs an unseated
+            // one and spawns it regardless; RWE has no player to give it to.
+            auto slot = record.player - 1;
+            if (slot < 0 || slot >= static_cast<int>(slotPlayers.size()) || !slotPlayers[slot])
+            {
+                result.skipped.push_back(describe("no player in that slot"));
+                continue;
+            }
+
+            // Positions are world units from the map's top-left corner, as a
+            // start position is.
+            auto position = simulation.terrain.topLeftCoordinateToWorld(SimVector(SimScalar(static_cast<float>(record.xPos)), 0_ss, SimScalar(static_cast<float>(record.zPos))));
+            if (!def.isMobile)
+            {
+                // 0x47DDC0: a building goes on the build grid, its footprint
+                // on the nearest whole cells, as a building placed by hand
+                // does.
+                auto rect = simulation.computeFootprintRegion(position, def.movementCollisionInfo);
+                auto topLeft = simulation.terrain.heightmapIndexToWorldCorner(rect.x, rect.y);
+                position.x = topLeft.x + ((SimScalar(rect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss);
+                position.z = topLeft.z + ((SimScalar(rect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss);
+            }
+            position.y = simulation.terrain.getHeightAt(position.x, position.z);
+
+            // 0x436EF9: degrees to the sixteen-bit angle, truncated.
+            auto heading = SimAngle(static_cast<uint16_t>(static_cast<int32_t>((static_cast<int64_t>(record.angle) * 65536) / 360)));
+
+            auto unitId = simulation.trySpawnUnit(unitType, *slotPlayers[slot], position, heading);
+            if (!unitId)
+            {
+                result.skipped.push_back(describe("could not be placed"));
+                continue;
+            }
+            auto& unit = simulation.getUnitState(*unitId);
+            unit.finishBuilding(def);
+            // 0x48848E: the maximum times the percentage over a hundred,
+            // truncated.
+            unit.hitPoints = static_cast<unsigned int>((static_cast<uint64_t>(def.maxHitPoints) * static_cast<uint64_t>(std::max(0, record.healthPercentage))) / 100u);
+            result.spawned.push_back(*unitId);
+        }
+        return result;
     }
 }

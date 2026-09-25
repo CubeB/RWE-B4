@@ -120,6 +120,15 @@ namespace rwe
         std::string mapName;
         unsigned int schemaIndex;
         std::array<std::optional<PlayerInfo>, 10> players;
+
+        /**
+         * Play the map as a mission (--mission): the schema's [units] for the
+         * players seated in its slots, `Player` N in slot N-1, instead of a
+         * commander at each start position, and the schema's HumanMetal /
+         * ComputerMetal (and the energy pair) as the starting resources. See
+         * spawnMissionUnits and issue #293.
+         */
+        bool mission{false};
         std::string localNetworkPort{"1337"};
         std::optional<std::string> stateLogFile;
         /** Tuning profile given to every computer player in this game. */
