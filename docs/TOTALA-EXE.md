@@ -66,7 +66,7 @@ conversion, string reads at an address, pointer-table dumps) are in `tools/exe/`
 
 ## Index
 
-The 109 findings, numbered to 111: §83 and §84 do not exist, so the count is
+The 110 findings, numbered to 112: §83 and §84 do not exist, so the count is
 two short of the last number. The two to read before changing anything are
 **§88**, where RWE deliberately differs from the original on purpose, and
 **§91**, what is decoded but not ported; both are in this file, below.
@@ -183,6 +183,7 @@ Everything else lives in a subject file. **The numbers never move**, so a
 109. [`0x46d630`, the unit-table packet builder, and the checksum behind it that got away](TOTALA-EXE-DATA.md#109-0x46d630-the-unit-table-packet-builder-and-the-checksum-behind-it-that-got-away)
 110. [Why a construction aircraft finishes a build one tick early: a second lathe on the creation tick](TOTALA-EXE-ECONOMY.md#110-why-a-construction-aircraft-finishes-a-build-one-tick-early-a-second-lathe-on-the-creation-tick)
 111. [The settle, re-read: one phase for every player, and what a refusal costs](TOTALA-EXE-ECONOMY.md#111-the-settle-re-read-one-phase-for-every-player-and-what-a-refusal-costs)
+112. [`BUGGER_OFF` is write-only, and a blocked site only waits](TOTALA-EXE-ECONOMY.md#112-bugger_off-is-write-only-and-a-blocked-site-only-waits)
 
 ## 88. Where RWE deliberately differs
 
@@ -496,6 +497,20 @@ quirks of the original that RWE reproduces although they look like defects.
   from before the decode, loosened from 182 for playability, and no recorded
   rationale ties it to anything; it is left standing because the honest
   alternatives are a guess between two unknowns.
+- **A unit blocking a build site is told to move, and the site is swept again
+  on every failed attempt.** The original's `BUGGER_OFF` is write-only -- the
+  only reader of `unit+0x10f` bit 3 is the COB `get` (§112) -- and its site
+  check `0x47DB70` only waits: ten tries thirty ticks apart, then the queue
+  entry is given up. A friendly unit left on a spawn point therefore stalls the
+  yard for good, which is what a Coast To Coast play-test saw as "Core shipyard
+  stopped building as it got blocked by a scout ship". RWE sweeps the *site* --
+  the new unit's footprint at the spawn point, not the building's own cells,
+  where a hull at the pad is outside the building and would never hear about it
+  -- and hands any mobile unit standing there a `BuggerOffOrder`, on every
+  blocked attempt rather than only when the script set the flag. The one-shot
+  sweep on the set was itself an invention of 2019 (commit 6191923a) rather
+  than a port. The AI half of the same report -- an idle hull should not stand
+  on its own yard's pad in the first place -- is #189, the naval rally station.
 
 ---
 - **A unit reclaim pays out as it goes, in both resources.** The original pays

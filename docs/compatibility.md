@@ -122,6 +122,16 @@ five of one that another unit is standing on. At a hundred units in `path_bench`
 RWE keeps the name, the folder, the numbering and the format family and widens
 the pixels. The cursor is left out.
 
+**A unit parked on a factory's spawn point is told to move.** Every factory
+script sets `BUGGER_OFF`, the "get off the pad" command, and the original's
+engine ignores it: the flag has no reader but the script's own `get`, and a
+blocked build site just waits ten tries and gives the job up. A friendly hull
+left on a shipyard's pad therefore stops the yard producing for good. RWE
+sweeps the spawn point whenever the site is found blocked and hands the unit
+standing there a move-off order, so the yard clears and carries on. This is a
+deliberate departure, not a reproduction — §112 is the reading that the
+original does nothing with the flag, and §88 records the choice.
+
 ---
 
 ## Changed: because the simulation has to stay deterministic
