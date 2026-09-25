@@ -2077,4 +2077,104 @@ namespace rwe
         }
         REQUIRE(std::find(bb.navalCombatUnits.begin(), bb.navalCombatUnits.end(), hull) != bb.navalCombatUnits.end());
     }
+    TEST_CASE("an air ferry keeps its drop out from under a flak battery", "[ai]")
+    {
+        // Issue #228. The landing search scores a drop by anti-ground threat,
+        // which is the right question for a hull and for the cargo, and the
+        // wrong one for the aircraft carrying it: an Atlas is killed by
+        // anti-air. A missile battery whose damage is all against aircraft
+        // -- no DEFAULT damage, as an anti-air weapon's often is -- adds
+        // nothing to anti-ground, and a drop under it read as perfectly
+        // quiet. The battery here stands on the point the search picks with
+        // nothing about.
+        // Reported from play: "transport ship dumped the units at the most
+        // populated part of the enemies landmass instead of a bit away from
+        // the base, so they all instantly died and the ship was destroyed
+        // wasting resources."
+        //
+        // The search returned the FIRST dry, walkable point on the way back
+        // from the target, which on a defended shore is the beach in front of
+        // the defences, and it never asked what was standing there.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWideFarShoreTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        for (auto* type : {"ARMCOM", "ARMCK", "ARMPW"})
+        {
+            sim.unitDefinitions.at(type).movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 20u};
+        }
+
+        // Base on the west shore, the objective at the far east edge.
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-440_ss, 90_ss, 40_ss), script);
+        auto atlasId = addUnit(sim, "ARMATLAS", ai, SimVector(-400_ss, 150_ss, 0_ss), script);
+        for (auto z : {0_ss, 24_ss, 48_ss, 72_ss})
+        {
+            addUnit(sim, "ARMPW", ai, SimVector(-420_ss, 90_ss, z), script);
+        }
+
+        // The objective, and a picket standing exactly where the walk-back's
+        // first step lands: target 450 less 4 * 48 is 258.
+        addUnit(sim, "ARMPW", human, SimVector(450_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMSOLAR", human, SimVector(450_ss, 90_ss, 60_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.cheatModeOmniscient = true;
+        profile.tacticalTickInterval = 1;
+        profile.attackArmySize = 2;
+        profile.attackInWaves = false;
+        // See the test above for both of these.
+        profile.retreatArmySize = 0;
+        profile.defendRadius = 200_ss;
+        // ThreatMap::antiGroundInRadius is a flat box sum over cells, so at
+        // the shipped 300 a picket 144 units away counts exactly as much as
+        // one underfoot and every candidate scores the same. 60 is two cells
+        // either side, which separates the four candidates this map offers.
+        profile.ferryLandingThreatRadius = 60.0f;
+
+        WeaponDefinition flak{};
+        flak.maxRange = 150_ss;
+        flak.reloadTime = 1_ss;
+        flak.burst = 1;
+        flak.toAirWeapon = true;
+        flak.damage["VTOL"] = 100u;
+        sim.weaponDefinitions["FLAK"] = flak;
+        // Worth next to nothing, so the objective stays the objective and
+        // the search walks back from the same place with or without it.
+        auto battery_def = makeDef(false, false, false, "FLAK", 200u);
+        battery_def.buildCostMetal = Metal(1.0f);
+        sim.unitDefinitions["ARMFLAK"] = battery_def;
+        const SimVector battery(250_ss, 90_ss, 240_ss);
+        addUnit(sim, "ARMFLAK", human, battery, script);
+
+        auto drop = [&]() {
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 40, commands);
+            auto unloads = ordersFor<UnloadOrder>(commands, atlasId);
+            REQUIRE(!unloads.empty());
+            return unloads.front().destination;
+        };
+        auto flatDistanceSquared = [](const SimVector& a, const SimVector& b) {
+            auto dx = a.x - b.x;
+            auto dz = a.z - b.z;
+            return (dx * dx) + (dz * dz);
+        };
+
+        SECTION("the drop moves out of the battery's reach")
+        {
+            REQUIRE(flatDistanceSquared(drop(), battery) > 150_ss * 150_ss);
+        }
+
+        SECTION("scored on anti-ground alone, it lands under the battery")
+        {
+            profile.ferryLandingAirLiftFearsAntiAir = false;
+            REQUIRE(flatDistanceSquared(drop(), battery) <= 150_ss * 150_ss);
+        }
+    }
 }

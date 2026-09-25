@@ -2316,6 +2316,13 @@ namespace rwe
          */
         float ferryLandingThreatRadius{300.0f};
         /**
+         * An air lift's landing is scored on the anti-air over the drop
+         * first, and on anti-ground only to break ties (issue #228): what
+         * kills an Atlas is a flak battery, which anti-ground does not see.
+         * Off scores it on anti-ground alone, as a hull's is.
+         */
+        bool ferryLandingAirLiftFearsAntiAir{true};
+        /**
          * Scoring the CROSSING as well as the landing was tried and does not
          * work. Recorded here so it is not tried again without a better idea
          * behind it.

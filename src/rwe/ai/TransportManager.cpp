@@ -1,5 +1,6 @@
 #include "TransportManager.h"
 #include <algorithm>
+#include <tuple>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitDefinition.h>
@@ -205,6 +206,7 @@ namespace rwe
         const SimVector& target,
         const SimVector& from,
         TransportManager::LandingSearchTally& tally,
+        bool carriedByAir,
         Usable&& usable)
     {
         auto back = (from - target);
@@ -241,8 +243,18 @@ namespace rwe
             {0.0f, -1.0f}};
 
         std::optional<SimVector> best;
+        float bestAirThreat = 0.0f;
         float bestThreat = 0.0f;
         SimScalar bestHomeward(0_ss);
+
+        // What kills the carrier comes first (issue #228). A hull is a
+        // surface target and its cargo walks off onto the same ground, so
+        // anti-ground answers both; an aircraft is killed by anti-air, which
+        // anti-ground does not see at all, so a landing with a flak battery
+        // over it and nothing else scored as perfectly quiet. For an air
+        // lift the anti-air cover over the drop decides, and anti-ground --
+        // the cargo's own exposure once it is down -- only breaks ties.
+        const bool fearsAntiAir = carriedByAir && profile.ferryLandingAirLiftFearsAntiAir;
 
         auto lastStep = std::max(4, profile.ferryLandingSearchSteps);
         for (int step = 4; step <= lastStep; ++step)
@@ -301,16 +313,19 @@ namespace rwe
                 //
                 // Comparing floats for equality is safe for the case that
                 // matters, which is nought against nought.
+                auto airThreat = fearsAntiAir ? threatMap.antiAirCoverAt(candidate) : 0.0f;
                 auto threat = threatMap.antiGroundInRadius(candidate, profile.ferryLandingThreatRadius);
                 auto homeward = candidate.distanceSquared(from);
-                if (!best || threat < bestThreat || (threat == bestThreat && homeward < bestHomeward))
+                if (!best || std::tie(airThreat, threat) < std::tie(bestAirThreat, bestThreat)
+                    || (airThreat == bestAirThreat && threat == bestThreat && homeward < bestHomeward))
                 {
                     best = candidate;
+                    bestAirThreat = airThreat;
                     bestThreat = threat;
                     bestHomeward = homeward;
                 }
             }
-            if (best && bestThreat <= 0.0f)
+            if (best && bestAirThreat <= 0.0f && bestThreat <= 0.0f)
             {
                 // This ring has a landing nothing can shoot at, so there is
                 // no reason to look further out. The whole ring is scored
@@ -349,7 +364,7 @@ namespace rwe
         // Walk back from the target towards home until there is ground to set
         // down on that is not in the enemy's lap -- which used to mean the
         // first dry cell it came to, and now means the quietest.
-        return searchLandingAlongRay(sim, profile, threatMap, target, from, tally, [&](const SimVector& p) {
+        return searchLandingAlongRay(sim, profile, threatMap, target, from, tally, true, [&](const SimVector& p) {
             // Walkable, and not somewhere the army could have walked to by
             // itself -- a ferry that sets its cargo down on our own side of
             // the water has carried it nowhere. The old search was bounded at
@@ -410,7 +425,7 @@ namespace rwe
             return false;
         };
 
-        return searchLandingAlongRay(sim, profile, threatMap, target, from, tally, [&](const SimVector& p) {
+        return searchLandingAlongRay(sim, profile, threatMap, target, from, tally, false, [&](const SimVector& p) {
             // See landingNear for why unreachable-on-foot is part of the test.
             return reachability.isWalkable(sim, p) && !reachability.isReachable(sim, p) && hasReachableWaterNearby(p);
         });
