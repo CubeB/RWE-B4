@@ -66,8 +66,9 @@ namespace rwe
         auto mesh = meshFrom3do(atlasMap, teamAtlasMap, atlasColorMap, o);
         auto shaderMesh = convertMesh(graphics, mesh);
         auto polygons = std::make_shared<std::vector<WireframePolygon>>(wireframePolygonsFrom3do(o));
+        auto fragments = std::make_shared<std::vector<PieceFragmentSource>>(fragmentSourcesFrom3do(atlasMap, teamAtlasMap, o));
 
-        v.push_back(std::make_pair(o.name, UnitPieceMeshInfo{std::make_shared<ShaderMesh>(std::move(shaderMesh)), firstVertex, secondVertex, std::move(polygons)}));
+        v.push_back(std::make_pair(o.name, UnitPieceMeshInfo{std::make_shared<ShaderMesh>(std::move(shaderMesh)), firstVertex, secondVertex, std::move(polygons), std::move(fragments)}));
 
         for (const auto& c : o.children)
         {
@@ -299,6 +300,60 @@ namespace rwe
         }
 
         return m;
+    }
+
+    std::vector<PieceFragmentSource> fragmentSourcesFrom3do(
+        const std::unordered_map<std::string, Rectangle2f>& atlasMap,
+        const std::unordered_map<std::string, Rectangle2f>& teamAtlasMap,
+        const _3do::Object& o)
+    {
+        std::vector<PieceFragmentSource> fragments;
+        for (std::size_t pi = 0; pi < o.primitives.size(); ++pi)
+        {
+            const auto& p = o.primitives[pi];
+            if (o.selectionPrimitiveIndex && *o.selectionPrimitiveIndex == pi)
+            {
+                continue;
+            }
+            if (p.vertices.size() != 4 || !p.textureName)
+            {
+                continue;
+            }
+            bool valid = true;
+            for (auto index : p.vertices)
+            {
+                valid = valid && index < o.vertices.size();
+            }
+            if (!valid)
+            {
+                continue;
+            }
+
+            Vector3f corners[4];
+            for (int i = 0; i < 4; ++i)
+            {
+                corners[i] = vertexToVector(o.vertices[p.vertices[i]]);
+            }
+            auto centre = (corners[0] + corners[1] + corners[2] + corners[3]) / 4.0f;
+            // One normal for the whole fragment: it is a single flat quad
+            // tumbling through the air, not part of a smoothed surface.
+            auto normal = (corners[2] - corners[0]).cross(corners[1] - corners[0]).normalizedOr(Vector3f(0.0f, 1.0f, 0.0f));
+
+            auto bounds = getTextureRegion(atlasMap, teamAtlasMap, *p.textureName);
+            Mesh::Vertex c00(corners[0] - centre, bounds.region.topLeft(), normal);
+            Mesh::Vertex c10(corners[1] - centre, bounds.region.topRight(), normal);
+            Mesh::Vertex c11(corners[2] - centre, bounds.region.bottomRight(), normal);
+            Mesh::Vertex c01(corners[3] - centre, bounds.region.bottomLeft(), normal);
+
+            PieceFragmentSource fragment;
+            fragment.centre = centre;
+            auto& target = bounds.isTeamColor ? fragment.mesh.teamFaces : fragment.mesh.faces;
+            // The same winding meshFrom3do gives an undivided quad.
+            target.emplace_back(c11, c10, c00);
+            target.emplace_back(c01, c11, c00);
+            fragments.push_back(std::move(fragment));
+        }
+        return fragments;
     }
 
     SelectionMesh selectionMeshFrom3do(const _3do::Object& o)

@@ -1837,6 +1837,13 @@ namespace rwe
             {
                 if (d.shard)
                 {
+                    if (d.fragmentMesh)
+                    {
+                        auto position = d.position + (d.velocity * interpolationFraction);
+                        auto rotation = d.rotation + (d.angularVelocity * interpolationFraction);
+                        auto matrix = Matrix4f::translation(position) * Matrix4f::rotationZXY(rotation);
+                        drawDebrisFragment(viewProjectionMatrix, *d.fragmentMesh, matrix, d.color, shadeStrengthFor(false), unitAtlases, unitMeshBatch);
+                    }
                     continue;
                 }
                 auto position = d.position + (d.velocity * interpolationFraction);
@@ -1976,7 +1983,7 @@ namespace rwe
             }
             for (const auto& d : debris)
             {
-                if (d.shard)
+                if (d.shard && !d.fragmentMesh)
                 {
                     drawDebrisShard(d.position + (d.velocity * interpolationFraction), nanoParticlesBatch);
                 }

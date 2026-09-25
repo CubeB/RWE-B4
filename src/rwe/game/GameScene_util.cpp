@@ -940,6 +940,18 @@ namespace rwe
         drawShaderMesh(viewProjectionMatrix, *pieceMesh->get().mesh, matrix, shadeStrength, playerColorIndex, atlases, 0.5f, batch.meshes);
     }
 
+    void drawDebrisFragment(
+        const Matrix4f& viewProjectionMatrix,
+        const ShaderMesh& mesh,
+        const Matrix4f& matrix,
+        PlayerColorIndex playerColorIndex,
+        float shadeStrength,
+        const UnitTextureAtlases& atlases,
+        UnitMeshBatch& batch)
+    {
+        drawShaderMesh(viewProjectionMatrix, mesh, matrix, shadeStrength, playerColorIndex, atlases, 0.5f, batch.meshes);
+    }
+
     void drawDebrisShard(const Vector3f& position, ColoredMeshBatch& batch)
     {
         const Vector3f color(0.22f, 0.2f, 0.18f);
@@ -1987,6 +1999,58 @@ namespace rwe
         }
 
         return simulation.tryGetFeature(*hoveredFeature);
+    }
+
+    ShatterFragmentMotion throwShatterFragment(const Vector3f& position, const Vector3f& unitVelocity, float gravityPerTick, const std::function<unsigned int(unsigned int)>& r)
+    {
+        // 16.16 world units: (80 - rand(160)) << 9 is (80 - rand(160)) / 128.
+        auto scatter = [&]() { return (80.0f - static_cast<float>(r(160))) / 128.0f; };
+        // Angle units, 65536 to a turn.
+        auto twist = [&]() { return (800.0f - static_cast<float>(r(1600))) * (2.0f * Pif / 65536.0f); };
+
+        ShatterFragmentMotion m;
+        m.position = position;
+        m.velocity = (unitVelocity / 2.0f) + Vector3f(0.0f, gravityPerTick * 30.0f, 0.0f);
+        m.velocity.x += scatter();
+        m.velocity.z += scatter();
+        m.velocity.y += scatter();
+        m.rotation = Vector3f(0.0f, 0.0f, 0.0f);
+        m.spin = Vector3f(twist(), twist(), twist());
+        return m;
+    }
+
+    ShatterFragmentFate stepShatterFragment(ShatterFragmentMotion& m, float gravityPerTick, float seaLevel, const std::function<float(float, float)>& groundAt)
+    {
+        auto previous = m.position;
+        m.position += m.velocity;
+        m.velocity.y -= gravityPerTick;
+        m.rotation += m.spin;
+
+        auto ground = groundAt(m.position.x, m.position.z);
+
+        // The water test comes first (0x421010-0x421014): at or below sea
+        // level over ground that is below it.
+        if (m.position.y <= seaLevel && ground < seaLevel)
+        {
+            return ShatterFragmentFate::Sank;
+        }
+
+        // Still above the ground: flying.
+        if (m.position.y > ground)
+        {
+            return ShatterFragmentFate::Flying;
+        }
+
+        // Hit it: back to the last position and up at half the speed
+        // (0x421062-0x42107A); a rebound under one unit a tick is the end
+        // (0x42107D, the high word of the 16.16 velocity).
+        m.position = previous;
+        m.velocity.y = -m.velocity.y / 2.0f;
+        if (m.velocity.y < 1.0f)
+        {
+            return ShatterFragmentFate::Stopped;
+        }
+        return ShatterFragmentFate::Flying;
     }
 
     bool shouldStartNextMusicTrack(bool leavingScene, bool musicPlaying, GameTime gameTime, GameTime holdOffUntil)

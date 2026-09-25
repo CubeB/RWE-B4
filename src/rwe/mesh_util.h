@@ -43,6 +43,17 @@ namespace rwe
         const std::vector<Vector2f>& atlasColorMap,
         const _3do::Object& o);
 
+    /**
+     * The quads SHATTER throws: every textured quad but the selection plate
+     * (0x421784 wants exactly four corners, 0x42178E skips a flat-coloured
+     * primitive, 0x42179F the selection plate), each as its own two-triangle
+     * mesh centred on the quad.
+     */
+    std::vector<PieceFragmentSource> fragmentSourcesFrom3do(
+        const std::unordered_map<std::string, Rectangle2f>& atlasMap,
+        const std::unordered_map<std::string, Rectangle2f>& teamAtlasMap,
+        const _3do::Object& o);
+
     SelectionMesh selectionMeshFrom3do(const _3do::Object& o);
 
     ShaderMesh convertMesh(GraphicsContext& graphics, const Mesh& mesh);

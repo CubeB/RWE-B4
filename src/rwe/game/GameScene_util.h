@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <rwe/AudioService.h>
 #include <rwe/ColorPalette.h>
 #include <rwe/GlobalConfig.h>
@@ -339,6 +340,16 @@ namespace rwe
         const UnitTextureAtlases& atlases,
         UnitMeshBatch& batch);
 
+    /** One SHATTER fragment: its own quad mesh at the given transform. */
+    void drawDebrisFragment(
+        const Matrix4f& viewProjectionMatrix,
+        const ShaderMesh& mesh,
+        const Matrix4f& matrix,
+        PlayerColorIndex playerColorIndex,
+        float shadeStrength,
+        const UnitTextureAtlases& atlases,
+        UnitMeshBatch& batch);
+
     /** A small dark square: a fragment of a shattered piece. */
     void drawDebrisShard(const Vector3f& position, ColoredMeshBatch& batch);
 
@@ -652,6 +663,47 @@ namespace rwe
 
     /** True for particles drawn among the world's geometry rather than over the finished frame. */
     bool particleDrawsInWorld(const Particle& particle);
+
+    /**
+     * A SHATTER fragment in flight, as the original's effects pool keeps it
+     * (0x421700 sets it up, 0x420F30 steps it). Presentation only: none of
+     * it touches the simulation, and the draws come from the scene's own
+     * generator.
+     */
+    struct ShatterFragmentMotion
+    {
+        Vector3f position;
+        Vector3f velocity;
+        Vector3f rotation;
+        Vector3f spin;
+    };
+
+    /**
+     * The throw, in world units and radians a tick. `r` returns 0..n-1 like
+     * the original's rand(n). Half the unit's own velocity (0x421830) plus
+     * `(80 - rand(160)) << 9` in each axis in 16.16, which is -0.625..0.617;
+     * upward, thirty ticks of gravity on top (0x42188E); and a spin of
+     * `800 - rand(1600)` angle units a tick about each axis (0x4218AA-0x4218E6).
+     */
+    ShatterFragmentMotion throwShatterFragment(const Vector3f& position, const Vector3f& unitVelocity, float gravityPerTick, const std::function<unsigned int(unsigned int)>& r);
+
+    enum class ShatterFragmentFate
+    {
+        Flying,
+        /** Came to rest on the ground: the original removes it, with an explosion if EXPLODE_ON_HIT. */
+        Stopped,
+        /** Went into the sea. */
+        Sank,
+    };
+
+    /**
+     * One tick of 0x420F30 for a fragment: move, fall by gravity, spin; into
+     * the sea where the fragment is at or below sea level over ground below
+     * it; off the ground, back to where it was and up again at half the speed
+     * it came down, until the rebound is under one world unit a tick
+     * (0x42105A-0x421082).
+     */
+    ShatterFragmentFate stepShatterFragment(ShatterFragmentMotion& m, float gravityPerTick, float seaLevel, const std::function<float(float, float)>& groundAt);
 
     /**
      * Whether the situational music driver should put the next track on.
