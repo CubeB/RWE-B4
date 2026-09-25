@@ -68,7 +68,7 @@ Severity is by impact:
 | 23 | Low | Header counts sized allocations before anything behind them was read: HPI file and chunk sizes, GAF entries and frame sizes, COB code, function, piece and static counts, TNT tile and feature counts. | #303 |
 | 24 | Low | PCX headers, palettes and short rows were read without length checks. The texture loaders gave GL `width * height` texels from a smaller buffer. | #303 |
 | 25 | Low | A palette shorter than 1024 bytes was read past its end. | #303 |
-| 26 | Low | `VectorMap::tryGet` read an id's slot with no bounds check. Projectile target ids from a save reach it. | #304 |
+| 26 | Low | `VectorMap::tryGet` read an id's slot with no bounds check. Projectile target ids from a save reach it. A saved path search's start rectangle indexed the A* scratch without a check that it was on the map. | #304 |
 | 27 | Low | NaN and infinite positions reached float-to-int conversions. Hash and chat indices past `INT_MAX` became negative. | #301 |
 | 28 | Low | Lobby hardening: unbounded unjoined rooms; unvalidated side, colour, team, address, mod lists and archive fingerprints; a drop report naming any player; `getAddr` throwing without the forwarded-for header. | #300 |
 | 29 | Low | CI: third-party actions pinned by movable tags, linuxdeploy fetched from a build replaced in place with no checksum, and no default token permissions. | #305 |
@@ -123,8 +123,10 @@ not shipped. They are recorded so that nobody mistakes them for oversights.
   - `tad_probe` prints player names raw, terminal escapes included.
 
   Worth fixing if the tools ever process demos from strangers in bulk.
-- **Saved games** were reviewed for their id tables only. The hunter assigned
-  to them was cut short, and a fuller pass over `save_util.cpp` is still owed.
+- **Saved games** were reviewed by hand after the hunter assigned to them was
+  cut short. The review covered the id tables, the explored grid, the
+  suspended path search, and the unit-type and player lookups. The per-field
+  restore of every order and behaviour state was sampled, not read in full.
 
 ### Checked and found sound
 
