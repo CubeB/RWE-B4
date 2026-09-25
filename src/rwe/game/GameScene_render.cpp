@@ -2208,12 +2208,9 @@ namespace rwe
         {
             if (auto selectingState = std::get_if<NormalCursorMode::SelectingState>(&normalCursorMode->state))
             {
-                const auto& start = selectingState->startPosition;
-                const auto cameraPosition = worldCameraState.getRoundedPosition();
-                Point cameraRelativeStart(start.x - cameraPosition.x, start.y - cameraPosition.z);
-
+                auto start = cameraPlaneToWorldViewport(selectingState->startPosition);
                 auto worldViewportPos = sceneContext.viewport->toOtherViewport(worldViewport, getMousePosition());
-                auto rect = DiscreteRect::fromPoints(cameraRelativeStart, worldViewportPos);
+                auto rect = DiscreteRect::fromPoints(start, worldViewportPos);
 
                 worldUiRenderService.drawBoxOutline(rect.x, rect.y, rect.width, rect.height, Color(255, 255, 255));
                 if (rect.width > 2 && rect.height > 2)

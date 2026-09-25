@@ -141,9 +141,9 @@ namespace rwe
         struct SelectingState
         {
             SceneTime startTime;
-            Point startPosition;
-            explicit SelectingState(SceneTime startTime, const Point& startPosition) : startTime(startTime), startPosition(startPosition) {}
-            SelectingState(int x, int y) : startPosition(x, y) {}
+            /** On the camera plane in world units, so it stays put while the camera scrolls or zooms. */
+            Vector2f startPosition;
+            explicit SelectingState(SceneTime startTime, const Vector2f& startPosition) : startTime(startTime), startPosition(startPosition) {}
             bool operator==(const SelectingState& rhs) const
             {
                 return startTime == rhs.startTime && startPosition == rhs.startPosition;
@@ -1833,6 +1833,9 @@ namespace rwe
          * passed to it must be multiplied by this to keep their true size.
          */
         float worldUiScale() const { return worldCameraState.zoom * worldCameraState.density; }
+
+        Vector2f worldViewportToCameraPlane(const Point& p) const;
+        Point cameraPlaneToWorldViewport(const Vector2f& p) const;
 
         /**
          * The white ring the v3.1 patch draws around a cloaked unit while

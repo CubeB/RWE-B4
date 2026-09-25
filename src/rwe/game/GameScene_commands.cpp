@@ -1,6 +1,7 @@
 #include "GameScene.h"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <functional>
@@ -2511,10 +2512,22 @@ namespace rwe
             : std::nullopt;
     }
 
-    void GameScene::selectUnitsInBandbox(const DiscreteRect& box)
+    Vector2f GameScene::worldViewportToCameraPlane(const Point& p) const
     {
         const auto cameraPos = worldCameraState.getRoundedPosition();
-        auto cameraBox = box.translate(-cameraPos.x, -cameraPos.z);
+        return Vector2f(cameraPos.x + p.x / worldUiScale(), cameraPos.z + p.y / worldUiScale());
+    }
+
+    Point GameScene::cameraPlaneToWorldViewport(const Vector2f& p) const
+    {
+        const auto cameraPos = worldCameraState.getRoundedPosition();
+        return Point(
+            static_cast<int>(std::round((p.x - cameraPos.x) * worldUiScale())),
+            static_cast<int>(std::round((p.y - cameraPos.z) * worldUiScale())));
+    }
+
+    void GameScene::selectUnitsInBandbox(const DiscreteRect& box)
+    {
         const auto& matrix = computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
         std::unordered_set<UnitId> units;
 
@@ -2529,7 +2542,7 @@ namespace rwe
             const auto& worldPos = e.second.position;
             auto clipPos = matrix * simVectorToFloat(worldPos);
             Point viewportPos = worldViewport.toViewportSpace(clipPos.x, clipPos.y);
-            if (!cameraBox.contains(viewportPos))
+            if (!box.contains(viewportPos))
             {
                 continue;
             }

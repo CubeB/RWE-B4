@@ -857,11 +857,8 @@ namespace rwe
                     }
                     else if (isCursorOverWorld())
                     {
-                        Point p(event.x, event.y);
-                        auto worldViewportPos = sceneContext.viewport->toOtherViewport(worldViewport, p);
-                        const auto cameraPosition = worldCameraState.getRoundedPosition();
-                        Point originRelativePos(cameraPosition.x + worldViewportPos.x, cameraPosition.z + worldViewportPos.y);
-                        cursorMode.next(NormalCursorMode{NormalCursorMode::SelectingState(sceneTime, originRelativePos)});
+                        auto worldViewportPos = sceneContext.viewport->toOtherViewport(worldViewport, Point(event.x, event.y));
+                        cursorMode.next(NormalCursorMode{NormalCursorMode::SelectingState(sceneTime, worldViewportToCameraPlane(worldViewportPos))});
                     }
                 });
         }
@@ -974,12 +971,10 @@ namespace rwe
                     match(
                         normalCursor.state,
                         [&](const NormalCursorMode::SelectingState& state) {
-                            Point p(event.x, event.y);
-                            auto worldViewportPos = sceneContext.viewport->toOtherViewport(worldViewport, p);
-                            const auto cameraPosition = worldCameraState.getRoundedPosition();
-                            Point originRelativePos(cameraPosition.x + worldViewportPos.x, cameraPosition.z + worldViewportPos.y);
+                            auto worldViewportPos = sceneContext.viewport->toOtherViewport(worldViewport, Point(event.x, event.y));
+                            auto startViewportPos = cameraPlaneToWorldViewport(state.startPosition);
 
-                            if (sceneTime - state.startTime < SceneTime(30) && state.startPosition.maxSingleDimensionDistance(originRelativePos) < 32)
+                            if (sceneTime - state.startTime < SceneTime(30) && startViewportPos.maxSingleDimensionDistance(worldViewportPos) < 32)
                             {
                                 if (hoveredUnit && getUnit(*hoveredUnit).isSelectableBy(simulation.unitDefinitions.at(getUnit(*hoveredUnit).unitType), localPlayerId))
                                 {
@@ -1018,7 +1013,7 @@ namespace rwe
                             }
                             else
                             {
-                                selectUnitsInBandbox(DiscreteRect::fromPoints(state.startPosition, originRelativePos));
+                                selectUnitsInBandbox(DiscreteRect::fromPoints(startViewportPos, worldViewportPos));
                             }
 
                             cursorMode.next(NormalCursorMode{NormalCursorMode::UpState()});
