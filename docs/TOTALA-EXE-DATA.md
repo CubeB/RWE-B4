@@ -938,18 +938,26 @@ through `0x43F0E0(id, x, z, ...)`; named ones through `0x438760(name)`.
 
 | Letter | Scans | Issues | Read as |
 |---|---|---|---|
-| `m` | ` %f %f` | mission 2 at the point | move to (x, z) |
-| `p` | ` %f %f %f` | mission 9 at the point | patrol to (x, z) |
-| `a` | ` %f %f`, else ` %[a-zA-Z0-9_.]` | mission 3 at the point, else `ATTACKUTYPE` with the name (`0x487FEC`) | attack the point, or attack every unit of that type: `a CORCOM,` |
-| `g` | ` %[a-zA-Z0-9_.]` | `0x487AF0` looks the name up, then mission 7 | guard the unit whose `Ident` this is (inferred from mission 7's use) |
-| `i` | ` %[a-zA-Z0-9_.]` | `0x487AF0` on the name (`0x48822C`) | a link to the unit whose `Ident` this is: `i CHRIS,` in the shipped data; what the link does is not followed |
-| `o` | ` %d %d` | (`0x487C9D`) | the standing orders, read as (fire, move) from the shipped `o 0 1,` (inferred; the consumer is not followed) |
-| `w` | ` %f %d`, else `a` | `WAIT` with the number (`0x48816B`); `wa` is `WAITFORATTACK` (`0x4881C7`) | wait that long, or wait to be attacked |
-| `u` | ` %f %f` | mission 5 at the point | no shipped mission uses it; by its shape, unload at the point |
-| `b` | ` %[a-zA-Z0-9_.] %d %f %f` | `MOBILEBUILD` / `BUILDINGBUILD` / `BUILDWEAPON` (`0x4880A1`, `0x4880C8`, `0x488106`) | build the named unit at the point |
-| `d` | | `SELFDESTRUCTFG` (`0x4881E0`) | self-destruct |
-| `s` | | `MAKESELECTABLE` (`0x488206`) | make the unit selectable |
-| any other letter, and the end of the string | | `MAKESELECTABLE` (`0x487E50`) | the unit is handed to the player once its orders are done |
+| `m` | ` %f %f` | order-builder command 2 at the point | move to (x, z) |
+| `p` | ` %f %f %f` | command 9 at the point | patrol to (x, z) |
+| `a` | ` %f %f`, taken only when both scan (`0x487F4F`); else ` %[a-zA-Z0-9_.]` | command 3 at the point, else `ATTACKUTYPE` with the name (`0x487FEC`) | attack the point, or every unit of that type: `a CORCOM,` |
+| `g` | ` %[a-zA-Z0-9_.]` | `0x487AF0` looks the name up, then command 7 | guard that unit (§114) |
+| `i` | ` %[a-zA-Z0-9_.]` | `0x487AF0`, then the attach `0x48AAC0` at once; nothing queued | start the mission aboard that transport: `i CHRIS,` (§114) |
+| `o` | ` %d %d` | nothing queued: `unit+0x110` bits 18-19 and 20-21 (`0x487C9D`) | the standing orders, **move then fire** (§114) |
+| `w` | ` %f %d`, else `a` | `WAIT` (`0x48816B`); `wa` is `WAITFORATTACK` (`0x4881C7`) | wait N **seconds**, or until an enemy comes within the second number; `wa`: until hit (§114) |
+| `u` | ` %f %f` | command 5 at the point | unload at the point |
+| `b` | ` %[a-zA-Z0-9_.] %d %f %f`; `bw %d` | `MOBILEBUILD` / `BUILDINGBUILD` / `BUILDWEAPON` (`0x4880A1`, `0x4880C8`, `0x488106`) | build the named unit at the point, n of it from a plant; `bw n` stockpiles n missiles |
+| `d` | | `SELFDESTRUCTFG` (`0x4881E0`) | blow up, at once |
+| `s` | | `MAKESELECTABLE` (`0x488206`) | hand the unit to the player, at that point in the list |
+| any other letter | | nothing: `0x487E50` is the loop going round | skipped |
+
+The "mission" numbers 2, 3, 5, 7 and 9 an earlier reading gave these are the
+right-click order builder's command ids (`0x43F0E0`), which it turns into the
+unit's own mission. At the end of the string the interpreter clears the
+unit's selectable bit if it queued anything, and appends a MAKESELECTABLE
+unless the list had an `s`, `p`, point `a` or `d` in it: §114, which also
+corrects three readings this table first had (`o`'s order, `w`'s units, and
+the last row, which was MAKESELECTABLE).
 
 The shipped missions use twelve shapes, the commonest being `w N,p X Z,`
 (958 units), `p X Z,` (206), `o N N,w N,` (175) and `w N,a CORCOM,` /
@@ -1376,3 +1384,108 @@ take its army with it.
 **Open:** what the network handler at `0x4576C5` uses the victory check for,
 the multiplayer victory test `0x490080`, and whether the banners are on
 screen for any frame before the battle closes.
+
+## 114. A mission unit's scripted orders at runtime
+
+Read out of `TotalA.exe` on 2026-09-25 for the campaign port (#38), after
+§105's grammar and §113's rules. `g` is the globals block `[0x511DE8]`.
+Anything not read directly is marked **[inferred]**.
+
+### The interpreter's end, and who is held
+
+`0x487BF0(unit, text, madeUnits)` runs in a second pass, after every
+`[units]` record has been made (`0x4884F1`-`0x488514`). Each handler that
+queues something sets `edi`; four also set a "sticky" flag `[esp+0x2C]`
+that is never cleared: `p` (`0x487F2A`), point `a` (`0x487FAA`), `d`
+(`0x4881FD`) and `s` (`0x488223`). At the end (`0x487E5B`-`0x487E8A`):
+
+- if `edi`, clear `unit+0x110` bit 5, the selectable bit, even when sticky;
+- if `edi` and not sticky, append `MAKESELECTABLE`.
+
+So a unit whose list queues anything is taken out of the player's hands, and
+comes back when a MAKESELECTABLE runs: an `s` in the list, or the appended
+one after the rest. A list with `p` or point `a` in it has no appended one,
+and those orders do not finish, so **such a unit is held for good**. `i`,
+`o`, `bw` and unknown letters queue nothing; `a NAME`, `b NAME` and `g NAME`
+queue only when the name resolves (`0x487FD4`, `0x487DF4`-`0x487E49`).
+
+Orders are appended in string order (`0x43ADC0` with `append = 1`). The
+coordinates of `m`, `p`, `u` and `b` are 16.16 from floats; their locals are
+never initialised, so a missing coordinate keeps what the previous order in
+the string left there, or stack garbage for the first. The shipped `m 1557`,
+`w 444,m`, the 32 bare `u` and every point-less `b` read that way.
+
+### Names: `0x487AF0`
+
+`g`, `i` and `wa` resolve a name against the `[units]` records in file
+order, comparing (`stricmp`) the record's `Ident` first and then its
+`Unitname` (`0x487B58`-`0x487B9C`), and return the first match whose record
+produced a unit. So a name is an Ident **or a unit type**, and names resolve
+only at mission start, against the units that were made.
+
+### What each order does
+
+- **`o M F`** writes the move order into bits 18-19 and the fire order into
+  bits 20-21 of `unit+0x110` (`0x487CD6`-`0x487CFC`): move 0 hold, 1
+  maneuver, 2 roam; fire 0 hold, 1 return, 2 at will. §105's table read it
+  the other way round. A single number sets the move order only.
+- **`w N R`**: `WAIT` with N x 30 ticks and R (`0x48814F`, `0x48815C`), so N
+  is **seconds**. Handler `0x401CE0`. With R = 0 it is a timer from the
+  moment WAIT first runs. With R > 0 it looks for an enemy within R world
+  units at once (`0x40AD80`, the weapon auto-acquire's gather, so only units
+  the player can see, alive, not allied, not Immune) and ends if it finds
+  one; otherwise it takes `rand(30) + 150` off the budget and looks again that
+  many ticks later, ending when the budget was already spent
+  (`0x401D66`-`0x401DB4`). A wait can overrun by one step.
+- **`wa [NAME]`**: `WAITFORATTACK` (`0x401FD0`), watching NAME, or the unit
+  itself when there is no name or it does not resolve (`0x4881B7`). It ends
+  when the watched unit takes any damage (event 0x10, posted by
+  `0x406F80` from the damage applier `0x489CE0` for any cause but heal) or
+  dies (event 8, `0x489740`). Not on sight of an enemy, and with no timer.
+- **`a NAME`**: `ATTACKUTYPE` (`0x401E00`). A unit without `canattack` flushes
+  its whole list, the appended MAKESELECTABLE with it. Otherwise it waits
+  `rand(90) + 1` ticks, then picks the enemy unit of that type anywhere on the
+  map (no sight, radar or Immunity test) with the lowest `d² - rand(d²/2)`,
+  pushes an attack on it to the front of the list, and scans again when that
+  ends. With none left it ends, and the next order runs.
+- **`g NAME`**: the guard (`FOLLOW_GROUND` `0x406300` / `VTOL_FOLLOW`), which
+  ends when the guarded unit dies.
+- **`i NAME`**: the attach `0x48AAC0(unit, carrier, -1, 0)` at once, hidden
+  in the hull; the rest of the list runs once the unit is set down
+  [inferred].
+- **`d`**: `SELFDESTRUCTFG` with `+0x36 = 1`, which skips the countdown and
+  kills the unit at once (`0x40213C`).
+- **`s`**: `MakeSelectable` (`0x401CC0`) sets bit 5 and clears bit 15,
+  **Immunity**. That is the only runtime writer of bit 5 besides the creator
+  (every new unit is selectable, `0x485B61`), the `Selectable` console
+  command (`0x416460`, every unit of every player) and a save load.
+
+### What a held unit is
+
+The selectable bit is the first test of the "usable" predicate (§113), so a
+held unit cannot be selected by any path (click, box, hotkey, squad), is
+deselected by the per-unit tick if it becomes held, and counts as unusable
+for MoveUnitToRadius and AllUnitsKilled. It does two other things:
+
+- **The computer player does not adopt it.** The AI's once-a-second walk
+  `0x408830` takes only units with bit 5 set: it resets their standing
+  orders (maneuver or roam, fire at will) and files them into an AI group
+  (`0x480250`). A held computer unit keeps the mission's `o` orders and is in
+  no group, so the scripted units are the mission's, not the AI's, until
+  their script ends.
+- **It still defends itself from where it stands.** Neither weapon
+  auto-acquire nor return fire reads bit 5, so with fire order 1 or 2 it
+  shoots what comes in range and whoever hits it. It does not leave to chase:
+  that needs an empty list or a Standby head mission.
+
+The AI's target search `0x4071F0` skips Immune units but not held ones.
+
+### The per-record flags
+
+Of `[units]`'s flags only `Immunity` is used: the spawner copies it into
+`unit+0x110` bit 15 (`0x488475`-`0x488482`), and MakeSelectable clears it.
+`CreationCountdown`, `BuildPriority`, `MissionCriticalUnit`, `AiIgnore`,
+`AiPriorityTarget` and `InitialGroup` are read by the mission reader and by
+nothing after it (the only code that walks the record array is the reader,
+the frees, `0x487AF0` and the spawner). The shipped `AiIgnore=1` always
+comes with `Immunity=1`, which is where the behaviour is.
