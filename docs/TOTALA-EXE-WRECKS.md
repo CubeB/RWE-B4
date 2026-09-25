@@ -1062,6 +1062,73 @@ wreck from a `firestarter` weapon striking it rather than lighting a plume as
 the corpse spawns, so there is no spawn-time `mayBurn` to clear. The sinking
 exemption was already in, from the other read.
 
+## NN. `Killed` never runs past its first sleep
+
+Issue #28 asked why RWE shows only the explosions a `Killed` script issues
+before its first `sleep`. The original is the same (2026-09-25).
+
+`0x4864B0` runs `Killed` through `0x4B0BC0`, which takes a free thread slot
+(`0x4B08C0`), pushes the four arguments, runs the thread once through
+`0x4B0DA0` until it ends or sleeps, and copies the by-reference arguments back,
+which is how the corpse level reaches `pkt+0xA`. The death packet then goes to
+`0x4866D0` **in the same call** (`0x486679`). That handler sets off the death
+explosion, spawns the corpse, and then deletes the unit's COB object
+(`0x486D86`, the object's own virtual destructor), frees `unit+0x9E`, deletes
+the mover at `unit+0` and clears the type index `unit+0xA6` (`0x486DC7`), which
+is what takes the slot out of the per-tick unit pass (`0x48ADB0` skips a slot
+whose type index is 0). So a sleeping `Killed` thread is destroyed with its
+host before it can wake; an `explode` after the first `sleep` never happens in
+TA either. RWE matches, and nothing needs changing.
+
+## NN. What SHATTER does
+
+The COB `explode` opcode (`0x10071000`, dispatched at `0x4B1B1F`) calls slot
+`+0x34` of the unit's script-host vtable at `0x4FD698`: `0x481140(piece,
+flags)`. (objdump's flat listing loses alignment just before it; disassemble
+from `--start-address=0x481140`.) With BITMAPONLY (32) clear it builds one
+debris record for the piece: three random spin rates `rand(3000)`, a throw of
+`(20 - rand(40)) << 14` sideways and `rand(10) << 16` up, a lifetime of 900,
+and flag bits folded from the explode flags, SHATTER becoming bit 2 of
+`record+0x28` and EXPLODE_ON_HIT bit 5. `0x421620` then takes one of two
+paths:
+
+- **Without SHATTER** the whole piece goes into one of 100 debris slots at
+  `0x511DF0` and flies as a piece (the per-tick step is `0x4213B0`, not
+  followed here).
+- **With SHATTER**, `0x421700` breaks the piece up. It walks the piece's
+  primitives and takes each one that has **exactly four corners**
+  (`0x421784`), is **not flat-coloured** (`0x42178E`, flags bit 0) and is
+  **not the selection plate** (`0x42179F`), into the shared effects pool at
+  `globals+0x1491B` (84-byte records), stopping when the pool holds 300
+  (`0x42176F`). Each fragment starts at the unit's position plus the piece's
+  offset, carries **half the unit's own velocity** (`0x421830`), and gets
+  `(80 - rand(160)) << 9` more in each axis (about -0.625 to 0.617 world units
+  a tick) with thirty ticks of the map's gravity added upward (`0x42188E`),
+  and a spin of `800 - rand(1600)` angle units a tick about each axis
+  (`0x4218AA`-`0x4218E6`). The quad's four corners are copied into it.
+
+The pool's per-tick step is `0x420F30`. For a fragment: position += inherited
+velocity + own velocity; vertical velocity -= gravity; the three angles +=
+their spins. Then, in order: at or below sea level over ground below sea
+level, it is removed (with a splash sprite from `globals+0x147EB`/`0x147EF` if
+EXPLODE_ON_HIT); at or below the ground (`0x485140`), it goes back to where it
+was and its vertical velocity is reversed and halved (`0x42107A`), and if the
+rebound's integer part is no longer positive it is removed, with the explosion
+sprite at `globals+0x147F7` if EXPLODE_ON_HIT (`0x42108A`). There is no clock:
+a fragment lives until it settles or sinks.
+
+The BITMAP1-5 flags (bits 8-13 of the flags word as the handler tests them,
+`0x48126F`-`0x481313`) each add an explosion sprite at the piece through
+`0x420A30`, independently of the debris.
+
+> **RWE, 2026-09-25 (#28):** SHATTER is ported. `fragmentSourcesFrom3do` keeps
+> each piece's textured quads at load, the scene builds a GL mesh per quad the
+> first time the piece shatters, and `throwShatterFragment` /
+> `stepShatterFragment` are the throw and the step above (gravity 112/900, a
+> 900-tick backstop, no splash sprite in the sea). It applies to any unit, as
+> the original's handler does; the whole-piece path keeps its old numbers and
+> RWE's own buildings-only gate, and is its own pass.
+
 ## NN. Loose ends
 
 - **`unit+0xF7`**, the second term in the `Killed` severity, is still

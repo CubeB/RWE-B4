@@ -1,6 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
 #include <rwe/game/GameScene_util.h>
+#include <rwe/grid/Grid.h>
+#include <rwe/sim/MapTerrain.h>
+#include <vector>
 
 namespace rwe
 {
@@ -109,5 +112,79 @@ namespace rwe
         // that outlives its schedule from flashing white.
         REQUIRE(wakeColorIndex(10000, Wake1Period) == 6);
         REQUIRE(wakeColorIndex(5, 0) == 0);
+    }
+
+    namespace
+    {
+        // Sea on the west half of a 64-wide map, land on the east. World x 0
+        // is heightmap column 32, sixteen world units a column, so the shore
+        // runs down world x 0.
+        MapTerrain makeShoreTerrain()
+        {
+            Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(0));
+            for (int y = 0; y < 64; ++y)
+            {
+                for (int x = 32; x < 64; ++x)
+                {
+                    heights.set(x, y, static_cast<unsigned char>(60));
+                }
+            }
+            return MapTerrain(std::move(heights), 30_ss);
+        }
+    }
+
+    TEST_CASE("a wake dot laid far out at sea skips the shore test for its whole life", "[wake]")
+    {
+        // Issue #10: the per-tick shore test was most of what a wake cost,
+        // and over open water it can only ever answer "still at sea".
+        auto terrain = makeShoreTerrain();
+        auto farOut = spawnWakeDot(terrain, Vector3f(-300.0f, 30.0f, 0.0f), Vector3f(0.5f, 0.0f, 0.0f), GameTime(0), GameTime(96), Wake1Period, false);
+        REQUIRE(farOut.overOpenWaterForLife);
+
+        // One whose drift over its life reaches the shore is still asked.
+        auto nearShore = spawnWakeDot(terrain, Vector3f(-40.0f, 30.0f, 0.0f), Vector3f(0.5f, 0.0f, 0.0f), GameTime(0), GameTime(96), Wake1Period, false);
+        REQUIRE_FALSE(nearShore.overOpenWaterForLife);
+    }
+
+    TEST_CASE("a wake dot still dies where the shore comes up under it", "[wake]")
+    {
+        auto terrain = makeShoreTerrain();
+        std::vector<WakeDot> dots{
+            spawnWakeDot(terrain, Vector3f(-40.0f, 30.0f, 0.0f), Vector3f(1.0f, 0.0f, 0.0f), GameTime(0), GameTime(96), Wake1Period, false),
+        };
+        int ticks = 0;
+        while (!dots.empty() && ticks < 96)
+        {
+            updateWakeDots(terrain, GameTime(static_cast<unsigned int>(ticks)), dots);
+            ++ticks;
+        }
+        // Gone well before its life ran out, at the waterline rather than on
+        // the beach: the ground here is sea until the column at world x -16
+        // starts rising towards the land.
+        REQUIRE(dots.empty());
+        REQUIRE(ticks < 96);
+        REQUIRE(ticks > 20);
+    }
+
+    TEST_CASE("wake dots that are left keep the order they were laid in", "[wake]")
+    {
+        auto terrain = makeShoreTerrain();
+        std::vector<WakeDot> dots;
+        for (int i = 0; i < 6; ++i)
+        {
+            // Every other one is short-lived, so the update removes from the
+            // middle of the list as well as the front.
+            auto life = GameTime(i % 2 == 0 ? 10u : 96u);
+            dots.push_back(spawnWakeDot(terrain, Vector3f(-300.0f + static_cast<float>(i), 30.0f, 0.0f), Vector3f(0.0f, 0.0f, 0.5f), GameTime(0), life, Wake1Period, false));
+        }
+        updateWakeDots(terrain, GameTime(10), dots);
+        REQUIRE(dots.size() == 3);
+        for (std::size_t i = 0; i < dots.size(); ++i)
+        {
+            // The survivors are the odd ones, 1, 3 and 5, in that order, and
+            // each has taken its step.
+            REQUIRE(dots[i].position.x == -300.0f + static_cast<float>((i * 2) + 1));
+            REQUIRE(dots[i].position.z == 0.5f);
+        }
     }
 }

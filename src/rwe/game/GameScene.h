@@ -839,6 +839,8 @@ namespace rwe
         std::unordered_set<int> playingUnitChannels;
 
         std::vector<Particle> particles;
+        /** Wake foam, apart from the particles; see WakeDot. */
+        std::vector<WakeDot> wakeDots;
 
         /** The explosion and wreck smoke still being emitted. Presentation only. */
         std::vector<SmokeEmitter> smokeEmitters;
@@ -869,10 +871,21 @@ namespace rwe
             GameTime endTime;
             GameTime nextTrail;
             unsigned int flags{0};
-            /** A fragment of a shattered piece, drawn as a small dark square instead of a mesh. */
+            /** A fragment of a shattered piece: one of its own textured quads, moving by the original's rules. */
             bool shard{false};
+            /** The quad a shard draws, centred on the shard's position. */
+            std::shared_ptr<ShaderMesh> fragmentMesh;
         };
         std::vector<Debris> debris;
+
+        /** The original's effects pool holds 300 (0x42176F); a shatter past that throws no more. */
+        static constexpr std::size_t MaxShatterFragments = 300;
+
+        /** GL meshes for each piece's SHATTER quads, built the first time that piece shatters. */
+        std::unordered_map<std::string, std::vector<std::shared_ptr<ShaderMesh>>> shatterMeshes;
+
+        /** Throws the piece's textured quads as fragments (0x421700). */
+        void spawnShatterFragments(const PieceExplodedEvent& e, const Vector3f& piecePosition);
 
         /** Scatter for purely visual effects; never feeds the simulation. */
         std::minstd_rand effectsRng{20260828u};

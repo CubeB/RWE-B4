@@ -412,7 +412,6 @@ namespace rwe
         auto series = std::make_shared<SpriteSeries>();
         series->sprites.resize(12);
         media.addSpriteSeries("FX", "smoke 1", series);
-        auto terrain = makeFlatTerrain(8, 8);
 
         Particle puff;
         puff.position = Vector3f(10.0f, 0.0f, 10.0f);
@@ -430,7 +429,7 @@ namespace rwe
         std::vector<Particle> particles{puff, spray};
         auto windDrift = Vector3f(0.7f, 0.0f, -0.3f);
 
-        updateParticles(media, terrain, GameTime(1), windDrift, particles);
+        updateParticles(media, GameTime(1), windDrift, particles);
 
         REQUIRE(particles.size() == 2);
         REQUIRE(particles[0].position == Vector3f(10.7f, 0.5f, 9.7f));

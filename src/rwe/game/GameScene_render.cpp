@@ -1617,11 +1617,12 @@ namespace rwe
             RWE_RENDERPROF("w.wake");
             wakeBatch.lines.clear();
             wakeBatch.triangles.clear();
-            for (const auto& particle : particles)
+            for (const auto& dot : wakeDots)
             {
-                drawWakeParticle(gameMediaDatabase, renderTime(), viewProjectionMatrix, particle, wakeBatch);
+                drawWakeDot(renderTime(), viewProjectionMatrix, dot, wakeBatch);
             }
             RWE_RENDERPROF_COUNT("n.particles", particles.size());
+            RWE_RENDERPROF_COUNT("n.wakedots", wakeDots.size());
             RWE_RENDERPROF_COUNT("n.waketri", wakeBatch.triangles.size());
             worldRenderService.drawBatch(wakeBatch, viewProjectionMatrix);
         }
@@ -1836,6 +1837,13 @@ namespace rwe
             {
                 if (d.shard)
                 {
+                    if (d.fragmentMesh)
+                    {
+                        auto position = d.position + (d.velocity * interpolationFraction);
+                        auto rotation = d.rotation + (d.angularVelocity * interpolationFraction);
+                        auto matrix = Matrix4f::translation(position) * Matrix4f::rotationZXY(rotation);
+                        drawDebrisFragment(viewProjectionMatrix, *d.fragmentMesh, matrix, d.color, shadeStrengthFor(false), unitAtlases, unitMeshBatch);
+                    }
                     continue;
                 }
                 auto position = d.position + (d.velocity * interpolationFraction);
@@ -1975,7 +1983,7 @@ namespace rwe
             }
             for (const auto& d : debris)
             {
-                if (d.shard)
+                if (d.shard && !d.fragmentMesh)
                 {
                     drawDebrisShard(d.position + (d.velocity * interpolationFraction), nanoParticlesBatch);
                 }

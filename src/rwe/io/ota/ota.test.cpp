@@ -488,4 +488,181 @@ namespace rwe
             REQUIRE(countStartPositions(empty) == 0);
         }
     }
+
+    TEST_CASE("a mission's header keys, conditions and starting units are read", "[ota][campaign]")
+    {
+        // Cut down from totala4.hpi Maps/AC01.OTA, the first Arm mission, as
+        // shipped; nomovie and the water keys added to exercise them.
+        auto tdf = parseTdfFromString(R"(
+[GlobalHeader]
+	{
+	missionname=1: A Hero Returns;
+	missiondescription=;
+	planet=Green planet;
+	missionhint=Ac01hint0.txt;
+	brief=ArmCampaign1;
+	narration=arm01;
+	glamour=arm01;
+	useonlyunits=AC01.tdf;
+	nomovie=1;
+	waterdoesdamage=0;
+	waterdamage=100;
+	MoveUnitToRadius=ANYTYPE, 992, 656, 64;
+	AllUnitsKilled=1;
+	AllUnitsKilledOfType=ARMGATE;
+	SCHEMACOUNT=1;
+	[Schema 0]
+		{
+		Type=Easy;
+		aiprofile=MISSIONS;
+		[units]
+			{
+			[unit0]
+				{
+				Unitname=ARMFAV;
+				Ident=;
+				XPos=1099;
+				YPos=85;
+				ZPos=2402;
+				Player=1;
+				HealthPercentage=100;
+				Angle=0;
+				Kills=0;
+				}
+			[unit1]
+				{
+				Unitname=CORAK;
+				Ident=;
+				XPos=372;
+				YPos=85;
+				ZPos=1813;
+				Player=2;
+				HealthPercentage=100;
+				Angle=0;
+				Kills=0;
+				InitialMission=p 1750 1828;
+				}
+			}
+		}
+	}
+)");
+        auto ota = parseOta(tdf);
+
+        REQUIRE(ota.maxUnits == 200);
+        REQUIRE(ota.noMovie);
+        REQUIRE_FALSE(ota.waterDoesDamage);
+        REQUIRE(ota.waterDamage == 100);
+        REQUIRE(ota.useOnlyUnits == "AC01.tdf");
+
+        // MoveUnitToRadius is `%[a-zA-Z],%i,%i,%i`; the spaces after the
+        // commas are what %i skips.
+        REQUIRE(ota.rules.moveUnitToRadius.has_value());
+        REQUIRE(ota.rules.moveUnitToRadius->unitType == "ANYTYPE");
+        REQUIRE(ota.rules.moveUnitToRadius->x == 992);
+        REQUIRE(ota.rules.moveUnitToRadius->z == 656);
+        REQUIRE(ota.rules.moveUnitToRadius->radius == 64);
+        REQUIRE(ota.rules.allUnitsKilled == 1);
+        REQUIRE(ota.rules.allUnitsKilledOfType == std::optional<std::string>("ARMGATE"));
+        REQUIRE(ota.rules.commanderKilled == 0);
+        REQUIRE_FALSE(ota.rules.killUnitType.has_value());
+
+        const auto& units = ota.schemas.at(0).units;
+        REQUIRE(units.size() == 2);
+        REQUIRE(units[0].unitName == "ARMFAV");
+        REQUIRE(units[0].xPos == 1099);
+        REQUIRE(units[0].yPos == 85);
+        REQUIRE(units[0].zPos == 2402);
+        REQUIRE(units[0].player == 1);
+        REQUIRE(units[0].healthPercentage == 100);
+        REQUIRE(units[0].orders.empty());
+
+        REQUIRE(units[1].player == 2);
+        REQUIRE(units[1].orders.size() == 1);
+        REQUIRE(units[1].orders[0].kind == MissionOrder::Kind::Patrol);
+        REQUIRE(units[1].orders[0].numbers == std::vector<float>{1750.0f, 1828.0f});
+    }
+
+    TEST_CASE("InitialMission is read the way 0x487BF0 reads it", "[ota][campaign]")
+    {
+        using K = MissionOrder::Kind;
+
+        SECTION("the shapes the shipped missions use")
+        {
+            auto waitThenPatrol = parseInitialMission("w 30,p 1500 900,");
+            REQUIRE(waitThenPatrol.size() == 2);
+            REQUIRE(waitThenPatrol[0].kind == K::Wait);
+            REQUIRE(waitThenPatrol[0].numbers == std::vector<float>{30.0f});
+            REQUIRE(waitThenPatrol[1].kind == K::Patrol);
+
+            auto huntCommander = parseInitialMission("w 10,a CORCOM,");
+            REQUIRE(huntCommander[1].kind == K::AttackType);
+            REQUIRE(huntCommander[1].name == "CORCOM");
+
+            auto standing = parseInitialMission("o 0 1,w 5,");
+            REQUIRE(standing[0].kind == K::StandingOrders);
+            REQUIRE(standing[0].numbers == std::vector<float>{0.0f, 1.0f});
+
+            REQUIRE(parseInitialMission("wa")[0].kind == K::WaitForAttack);
+            REQUIRE(parseInitialMission("i CHRIS,")[0].name == "CHRIS");
+        }
+
+        SECTION("the letter is either case")
+        {
+            auto upper = parseInitialMission("P 502 1223");
+            REQUIRE(upper[0].kind == K::Patrol);
+            REQUIRE(upper[0].numbers == std::vector<float>{502.0f, 1223.0f});
+        }
+
+        SECTION("a typo in the shipped data scans nothing, as sscanf would")
+        {
+            // AC01 carries `InitialMission=P P 502 1224;` three times. The
+            // arguments are scanned from just after the letter, and the
+            // second P stops the first %f.
+            auto typo = parseInitialMission("P P 502 1224");
+            REQUIRE(typo.size() == 1);
+            REQUIRE(typo[0].kind == K::Patrol);
+            REQUIRE(typo[0].numbers.empty());
+        }
+
+        SECTION("a point attack, a build, and the orders with no arguments")
+        {
+            auto orders = parseInitialMission("a 100 200,b ARMLLT 1 300 400,d,s,z");
+            REQUIRE(orders.size() == 5);
+            REQUIRE(orders[0].kind == K::AttackPoint);
+            REQUIRE(orders[0].numbers == std::vector<float>{100.0f, 200.0f});
+            REQUIRE(orders[1].kind == K::Build);
+            REQUIRE(orders[1].name == "ARMLLT");
+            REQUIRE(orders[1].numbers == std::vector<float>{1.0f, 300.0f, 400.0f});
+            REQUIRE(orders[2].kind == K::SelfDestruct);
+            REQUIRE(orders[3].kind == K::MakeSelectable);
+            // Any letter the table does not know is MAKESELECTABLE too.
+            REQUIRE(orders[4].kind == K::MakeSelectable);
+        }
+    }
+
+    TEST_CASE("a unit's flags and its group come out of their keys", "[ota][campaign]")
+    {
+        auto tdf = parseTdfFromString(R"(
+[unit0]
+	{
+	Unitname=ARMCOM;
+	Ident=HERO;
+	InitialGroup=3;
+	MissionCriticalUnit=1;
+	AiPriorityTarget=1;
+	Immunity=1;
+	CreationCountdown=90;
+	}
+)");
+        auto u = parseOtaMissionUnit(tdf.findBlock("unit0")->get());
+        REQUIRE(u.ident == "HERO");
+        REQUIRE(u.initialGroup == 3);
+        REQUIRE(u.missionCriticalUnit);
+        REQUIRE_FALSE(u.aiIgnore);
+        REQUIRE(u.aiPriorityTarget);
+        REQUIRE(u.immunity);
+        REQUIRE(u.creationCountdown == 90);
+        // HealthPercentage defaults to 100.
+        REQUIRE(u.healthPercentage == 100);
+    }
 }

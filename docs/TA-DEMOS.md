@@ -130,6 +130,61 @@ What is a recorded divergence (ADR-0001):
 Recording never reaches back into the simulation: nothing the recorder holds
 is hashed or saved, and no wall-clock or frame-rate value crosses the divide.
 
+### Read back by an independent reader (#224, 2026-09-25)
+
+Every check above goes through RWE's own reader, and a writer agreeing with
+its own reader proves less than it seems. So a written demo was also read with
+`tapacket` from [ta-forever/gpgnet4ta](https://github.com/ta-forever/gpgnet4ta)
+(MIT), the reference implementation `src/rwe/io/tad/` was ported from. It is
+a second reader with its own record walk, its own decrypt and decompress, its
+own status-message checksum test (`TADemoParser.cpp`, the
+`PlayerStatusMessage` warning) and its own table of subpacket sizes
+(`TAPacketParser::parseTaPacket`, which warns on any subpacket whose size
+disagrees).
+
+**Result: it accepts the writer's output completely.** Two `ai_arena`
+recordings on Coast To Coast, ARM against CORE, seed 3:
+
+| | 120 s | 900 s |
+|---|---|---|
+| header | version 5, 2 players, maxUnits 1000 | same |
+| records | 4 extra sectors, 2 status messages, 1 unit table | same |
+| packets | 7,200 | 54,000 |
+| subpackets | 7,286 | 55,039 |
+| codes | `0x09` 12, `0x12` 12, `0x19` 2, `0x28` 60, `0x2c` 7,200 | adds `0x0b` 153, `0x0c` 23, `0x0d` 184 |
+| `tapacket` warnings (checksums, sizes) | **0** | **0** |
+
+Both status-message checksums verified, every subpacket was the size
+`tapacket` expects for its code, and the packet, subpacket and per-code counts
+match `tad_probe` on the same files exactly. The known divergences above do
+not show up as errors, as expected: the `0x1a` table parses (its ids are not
+compared), the status body's zero bytes still checksum, and `0x10` is simply
+absent.
+
+What this does not cover: `tapacket` is a *reader*. It does not replay the
+game, so a payload whose bytes are well formed but mean the wrong thing is
+invisible to it. That is L2's job, and L3 (a TA client loading the file) is
+still roadmap.
+
+**To repeat it.** `tapacket` is a static library that needs Qt Core only for
+`qWarning`; Qt 6 works. Clone the repository outside this tree and compile
+`libs/tapacket/{DPlayPacket,TADemoParser,TAPacketParser,TPacket,UnitDataRepo,TestPackets}.cpp`
+with `libs/taflib/{HexDump,Logger,DuplicateDetection,Watchdog,nswfl_crc32}.cpp`
+(`CMAKE_AUTOMOC ON`, include paths `libs`, `libs/tapacket`, `libs/taflib`,
+link `Qt6::Core`), plus a driver that subclasses `tapacket::DemoParser`,
+counts what each `handle` overload receives, and installs a
+`qInstallMessageHandler` to count the warnings. Then:
+
+```
+ai_arena --map "Coast To Coast" --ai-arena 900 --seed 3 \
+  --player "A;Computer;ARM;0" --player "B;Computer;CORE;1" --record-demo game.tad
+tapacket_check game.tad      # the driver
+tad_probe --file game.tad    # the same counts from RWE's reader
+```
+
+It is not a CI step: it needs a clone and a Qt, and the result is a statement
+about the container that stays true until the writer's framing changes.
+
 ## The short version
 
 A `.tad` is a capture of the DirectPlay traffic seen by **one peer**, framed
@@ -2893,11 +2948,48 @@ named exception moving, or on nothing to score. It needs the episodes with
 `--all` and `--emit-resources` beside them; `docs/TA-DEMOS.md`, "What a
 stalled settle costs a factory".
 
+### `tools/tad-storagecapacity.py`
+
+the reference for the storage oracle (#229). The model is the one the
+`[economy][corpus]` cases assert: a player's capacity is the lobby's base plus
+each **finished** unit's own `MetalStorage`/`EnergyStorage`, summed in float32
+in completion order, with a nanoframe contributing nothing. The base is read
+off the player's first `0x28`, so a recording that joined a game in progress
+has no base and is not scored. Each player is walked from its first sample to
+the first one the sum stops explaining. Where that is, is sorted into two
+kinds:
+
+- **A loss.** The capacity falls below the prediction and stays there, because
+  a storage unit died or was captured, which the build stream does not record.
+  This is a counted rejection.
+- **A move.** The capacity rises above the prediction, or dips below and is
+  explained again on the next sample. No death, capture or unfinished frame
+  can do either. This is the scored failure.
+
+The other rejections, all counted, are a demo recorded on another data set, a
+watcher, a recording that joined in progress, and a build the unit table cannot
+name. It needs the episodes with `--all`, because a build rejected as a
+duration still holds its storage, and `--emit-resources` beside them. Exits
+non-zero on a move, or on nothing to score.
+
+    ./build/tad_episodes --dir ~/ta-demos --units ~/ta-mods/x-esc --all \
+        --emit-json /tmp/ep.json --emit-resources /tmp/res.json
+    tools/tad-storagecapacity.py --episodes /tmp/ep.json --resources /tmp/res.json \
+        --units ~/ta-mods/x-esc
+
+`--list` prints every sample at which a capacity changed, which is the set
+`tad_episodes --emit-cpp` chooses its episodes from. The two agree: on a
+600-second RWE arena game the five episodes the emitter kept are all on the
+list, at the same ticks and capacities. On that game every one of the 300
+samples is explained. Raising one sample by 50, or dipping one that the next
+sample explains again, exits non-zero naming it. A drop that lasts is counted
+as a loss and nothing more.
+
 ### `tools/demo-selfcheck.py`
 
 points the whole set at RWE's own output: `ai_arena --record-demo` writes a
 demo of a game RWE has just played, and this script runs `tad_probe` and
-`tad_episodes --unit-state` over it and then the three reference scorers, so
+`tad_episodes --unit-state` over it and then the four reference scorers, so
 the recorder is checked by the same machinery that checks the TA corpus.
 
     tools/demo-selfcheck.py
@@ -2941,10 +3033,9 @@ must decode every `0x2c`. Each oracle is then `PASS`, `NOT YET SCOREABLE` or
 scorer needs (M3 writes only `0x09`/`0x12`/`0x2c`; M4 adds shots, damage,
 deaths and `0x28`) or that no cell met its floor -- the scorers exit non-zero
 for that too, so the message is read and not just the status -- and only a
-scored cell that disagrees sets the exit status. The storage half has no
-script at all: its cases live in `rwe_test`'s `[economy][corpus]` over
-`src/rwe/sim/tad_economy_episodes.h`, so the summary says so rather than
-inventing a fifth scorer.
+scored cell that disagrees sets the exit status. Storage is scored by
+`tools/tad-storagecapacity.py`; its C++ half is `rwe_test`'s
+`[economy][corpus]` over `src/rwe/sim/tad_economy_episodes.h`.
 
 **A factory's build cells read two ticks late on M3's output**, and the
 self-check reports that as a scored disagreement rather than hiding it. RWE

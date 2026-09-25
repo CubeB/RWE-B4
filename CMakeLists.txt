@@ -469,6 +469,8 @@ set(SOURCE_FILES
     src/rwe/io/moveinfotdf/MovementClassTdf.h
     src/rwe/io/moveinfotdf/io.cpp
     src/rwe/io/moveinfotdf/io.h
+    src/rwe/io/campaign/campaign.cpp
+    src/rwe/io/campaign/campaign.h
     src/rwe/io/ota/ota.cpp
     src/rwe/io/ota/ota.h
     src/rwe/io/pcx/pcx.cpp
@@ -1010,6 +1012,7 @@ set(TEST_FILES
     src/rwe/io/moveinfotdf/io.test.cpp
     src/rwe/io/gui/gui.test.cpp
     src/rwe/io/hpi/hpi_util.test.cpp
+    src/rwe/io/campaign/campaign.test.cpp
     src/rwe/io/ota/ota.test.cpp
     src/rwe/io/tad/tad.test.cpp
     src/rwe/io/tad/tad_encoders.test.cpp
@@ -1040,6 +1043,7 @@ set(TEST_FILES
     src/rwe/sim/accuracy.test.cpp
     src/rwe/sim/waterline.test.cpp
     src/rwe/game/screenshake.test.cpp
+    src/rwe/game/shatter.test.cpp
     src/rwe/game/wake.test.cpp
     src/rwe/game/viewcull.test.cpp
     src/rwe/game/animationclock.test.cpp

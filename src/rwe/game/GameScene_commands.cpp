@@ -18,6 +18,7 @@
 #include <rwe/camera_util.h>
 #include <rwe/game/GameScene_util.h>
 #include <rwe/game/OrderButtons.h>
+#include <rwe/mesh_util.h>
 #include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/game/dump_util.h>
 #include <rwe/game/matrix_util.h>
@@ -930,9 +931,23 @@ namespace rwe
                 break;
             }
         }
-        // Only buildings break into flying pieces; mobile units just get the
-        // explosion sprites. A piece the model does not have cannot fly either.
-        if ((e.flags & bitmapOnly) || unitDefinition.isMobile || e.pieceName.empty())
+        if ((e.flags & bitmapOnly) || e.pieceName.empty())
+        {
+            return;
+        }
+
+        // SHATTER breaks the piece into its own textured quads, for any unit:
+        // the original's explode handler (0x481140) has no test on what kind
+        // of unit the piece belongs to.
+        if (e.flags & shatter)
+        {
+            spawnShatterFragments(e, position);
+            return;
+        }
+
+        // Only buildings throw a whole piece; mobile units just get the
+        // explosion sprites. That gate is RWE's own and not the original's.
+        if (unitDefinition.isMobile)
         {
             return;
         }
@@ -958,17 +973,66 @@ namespace rwe
             debris.push_back(d);
         };
 
-        if (e.flags & shatter)
+        makeDebris(false);
+    }
+
+    void GameScene::spawnShatterFragments(const PieceExplodedEvent& e, const Vector3f& piecePosition)
+    {
+        const auto& unitDefinition = simulation.unitDefinitions.at(e.unitType);
+        auto pieceMesh = gameMediaDatabase.getUnitPieceMesh(unitDefinition.objectName, e.pieceName);
+        if (!pieceMesh || !pieceMesh->get().fragments)
         {
-            // The piece breaks up: a handful of fragments instead of the mesh.
-            for (int i = 0; i < 6; ++i)
-            {
-                makeDebris(true);
-            }
+            return;
         }
-        else
+        const auto& sources = *pieceMesh->get().fragments;
+
+        auto key = unitDefinition.objectName + "/" + e.pieceName;
+        auto meshes = shatterMeshes.find(key);
+        if (meshes == shatterMeshes.end())
         {
-            makeDebris(false);
+            std::vector<std::shared_ptr<ShaderMesh>> built;
+            built.reserve(sources.size());
+            for (const auto& source : sources)
+            {
+                built.push_back(std::make_shared<ShaderMesh>(convertMesh(*sceneContext.graphics, source.mesh)));
+            }
+            meshes = shatterMeshes.emplace(key, std::move(built)).first;
+        }
+
+        // Half the unit's own velocity rides with each fragment (0x421830);
+        // a unit already gone from the list contributes none.
+        Vector3f unitVelocity(0.0f, 0.0f, 0.0f);
+        if (auto unit = tryGetUnit(e.unitId))
+        {
+            unitVelocity = simVectorToFloat(unit->get().position - unit->get().previousPosition);
+        }
+
+        auto heading = toRadians(e.rotation).value;
+        auto turn = Matrix4f::rotationY(heading);
+        auto gravity = 112.0f / 900.0f;
+        auto draw = [this](unsigned int n) { return n < 2 ? 0u : static_cast<unsigned int>(effectsRng() % n); };
+
+        auto shards = static_cast<std::size_t>(std::count_if(debris.begin(), debris.end(), [](const Debris& d) { return d.shard; }));
+        for (std::size_t i = 0; i < sources.size() && shards < MaxShatterFragments; ++i, ++shards)
+        {
+            auto motion = throwShatterFragment(piecePosition + (turn * sources[i].centre), unitVelocity, gravity, draw);
+
+            Debris d;
+            d.objectName = unitDefinition.objectName;
+            d.pieceName = e.pieceName;
+            d.color = getPlayer(e.owner).color;
+            d.position = motion.position;
+            d.velocity = motion.velocity;
+            d.rotation = Vector3f(0.0f, heading, 0.0f);
+            d.angularVelocity = motion.spin;
+            // No clock in the original: a fragment lives until it settles or
+            // sinks. This is only a backstop for one that never lands.
+            d.endTime = simulation.gameTime + GameTime(900);
+            d.nextTrail = simulation.gameTime;
+            d.flags = e.flags;
+            d.shard = true;
+            d.fragmentMesh = meshes->second[i];
+            debris.push_back(d);
         }
     }
 
@@ -984,10 +1048,41 @@ namespace rwe
         auto mapWidth = static_cast<float>(simulation.terrain.getHeightMap().getWidth()) * tile;
         auto mapHeight = static_cast<float>(simulation.terrain.getHeightMap().getHeight()) * tile;
 
+        auto seaLevel = simScalarToFloat(simulation.terrain.getSeaLevel());
+        auto groundAt = [this](float x, float z) { return simScalarToFloat(simulation.terrain.getHeightAt(SimScalar(x), SimScalar(z))); };
+
         auto end = debris.end();
         for (auto it = debris.begin(); it != end;)
         {
             auto& d = *it;
+
+            if (d.shard && d.fragmentMesh)
+            {
+                // The original's effects-pool step (0x420F30), gravity the
+                // 112 nearly every map uses.
+                ShatterFragmentMotion m{d.position, d.velocity, d.rotation, d.angularVelocity};
+                bool onMap = m.position.x > corner.x + tile && m.position.x < corner.x + mapWidth - tile
+                    && m.position.z > corner.z + tile && m.position.z < corner.z + mapHeight - tile;
+                auto fate = onMap ? stepShatterFragment(m, 112.0f / 900.0f, seaLevel, groundAt) : ShatterFragmentFate::Stopped;
+                d.position = m.position;
+                d.velocity = m.velocity;
+                d.rotation = m.rotation;
+                if (fate != ShatterFragmentFate::Flying || simulation.gameTime >= d.endTime)
+                {
+                    // EXPLODE_ON_HIT goes off where a fragment comes to rest
+                    // (0x42108A); in the sea the original picks a splash
+                    // sprite this does not reproduce.
+                    if (fate == ShatterFragmentFate::Stopped && onMap && (d.flags & explodeOnHit) && gameMediaDatabase.getSpriteSeries("FX", "Explode2"))
+                    {
+                        spawnExplosion(d.position, AnimLocation{"FX", "Explode2"});
+                    }
+                    *it = std::move(*--end);
+                    continue;
+                }
+                ++it;
+                continue;
+            }
+
             d.velocity.y -= gravity;
             d.position += d.velocity;
             d.rotation += d.angularVelocity;
@@ -3018,13 +3113,7 @@ namespace rwe
 
     void GameScene::spawnWake(const Vector3f& position, const Vector3f& velocity, GameTime duration, unsigned int rampPeriod, GameTime startTime, bool reverseRamp)
     {
-        Particle particle;
-        particle.position = position;
-        particle.velocity = velocity;
-        particle.renderType = ParticleRenderTypeWake{startTime + duration, rampPeriod, reverseRamp};
-        particle.startTime = startTime;
-
-        particles.push_back(particle);
+        wakeDots.push_back(spawnWakeDot(simulation.terrain, position, velocity, startTime, startTime + duration, rampPeriod, reverseRamp));
     }
 
     void GameScene::spawnNanoParticles()
