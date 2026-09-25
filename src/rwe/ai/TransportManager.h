@@ -70,8 +70,8 @@ namespace rwe
              * walk to, and the water beside it the hull loads from. Unset for
              * an air ferry and for one sent with seaFerryMuster off.
              */
-            std::optional<SimVector> muster;
-            std::optional<SimVector> station;
+            std::optional<SimVector> muster{};
+            std::optional<SimVector> station{};
             /** The hull has come near enough its station and been sent on to the loads. */
             bool atStation{false};
         };
