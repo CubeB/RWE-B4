@@ -222,6 +222,33 @@ namespace rwe
             REQUIRE_FALSE(loaded->betweenMissions);
         }
 
+        SECTION("a save written before the campaign keys existed loads as no campaign")
+        {
+            // Written with them and then taken back out, as the
+            // gameTimeSeconds case above does, so this fails the moment the
+            // reader starts expecting either key.
+            TempFile file;
+            auto save = makeSaveFile();
+            save.parameters.mission = true;
+            save.parameters.campaign = progress;
+            writeSaveFile(file.path, save);
+
+            std::ifstream in(file.path, std::ios::binary);
+            auto j = nlohmann::json::parse(in);
+            in.close();
+            j.at("header").erase("campaign");
+            j.at("header").erase("mission");
+            std::ofstream out(file.path, std::ios::binary | std::ios::trunc);
+            out << j.dump();
+            out.close();
+
+            auto loaded = readSaveFile(file.path);
+
+            REQUIRE(loaded.has_value());
+            REQUIRE_FALSE(loaded->parameters.mission);
+            REQUIRE_FALSE(loaded->parameters.campaign.has_value());
+        }
+
         SECTION("a run of the wrong length starts again, as the original's loader does")
         {
             TempFile file;
