@@ -585,10 +585,9 @@ quirks of the original that RWE reproduces although they look like defects.
   InitialMission list's WAIT, WAITFORATTACK, ATTACKUTYPE, guard, transport
   start and MAKESELECTABLE, and the selectable bit that holds a scripted
   unit out of the player's hands and out of the computer AI's.
-- **Two small pieces of the campaign flow** (§115) are not ported: Enter
-  choosing Start on ENDMSN (`0x41F198`), and a campaign mission restarted from
-  the game menu counting as lost, which the teardown's `L` would do
-  [inferred]. The rest of §115 is ported.
+- **One small piece of the campaign flow** (§115) is not ported: a campaign
+  mission restarted from the game menu counting as lost, which the teardown's
+  `L` would do [inferred]. The rest of §115 is ported.
 - TA's **Permanent** LOS mode has not been looked at.
 - **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not
   implemented; RWE always uses True.

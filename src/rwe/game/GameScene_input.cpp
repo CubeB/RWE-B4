@@ -53,9 +53,8 @@ namespace rwe
 
         // The game menu owns the keyboard while it is up. Tab and F2 toggle
         // it (the original's keys: Tab opens GAME OPTIONS in single player,
-        // F2 anywhere) and Escape closes it.
-        // Not once the game has given way to the picture or the chart, whose
-        // dialogs are ENDMSN's own.
+        // F2 anywhere), though not once the game has given way to the picture
+        // or the chart, whose dialogs are ENDMSN's own; Escape closes it.
         if ((keysym.key == SDLK_TAB || keysym.key == SDLK_F2) && !endGameCoversWorld())
         {
             toggleGameMenu();
@@ -72,6 +71,13 @@ namespace rwe
             {
                 panel->keyDown(KeyEvent(keysym.key));
             }
+            return;
+        }
+
+        // Between missions Enter is Start (0x41F198).
+        if ((keysym.key == SDLK_RETURN || keysym.key == SDLK_KP_ENTER) && endGameChartVisible() && endGameCampaignPanel)
+        {
+            campaignEndMessage("Start");
             return;
         }
 
