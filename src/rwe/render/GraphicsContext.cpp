@@ -842,6 +842,17 @@ namespace rwe
         glViewport(x, y, width, height);
     }
 
+    void GraphicsContext::enableScissor(int x, int y, int width, int height)
+    {
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(x, y, width, height);
+    }
+
+    void GraphicsContext::disableScissor()
+    {
+        glDisable(GL_SCISSOR_TEST);
+    }
+
     FrameBufferInfo GraphicsContext::createFrameBuffer(int width, int height)
     {
         GLuint texture;
