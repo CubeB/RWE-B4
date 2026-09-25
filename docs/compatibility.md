@@ -280,6 +280,10 @@ original in every case.
 - **A resurrect shows the reclaim cursor**, the base game's `CURSORS.GAF` not
   containing the `cursorrevive` sequence that `rev31.gp3` adds.
 - **Aircraft have no pitch** (§1); the `BrakeRate` nose re-aim is in.
+- **A transport from unpatched data still loads.** Without the v3.1 patch data
+  the Hulk's file gives its capacity under the old 1.0 key, which the patched
+  game ignores, leaving a ship that cannot load. RWE reads the old key, and
+  says at load which units it had to.
 
 ---
 

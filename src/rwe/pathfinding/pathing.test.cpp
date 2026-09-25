@@ -567,6 +567,12 @@ namespace rwe
         // cell the unit can get to.
         REQUIRE(sim.pathFindingService.counters.expansions < 200);
 
+        // And it is the terrain-region answer that said so, not an exhausted
+        // search: the two used to be counted together, which made the playtest
+        // H1 rule fire on a pathfinder that was doing exactly this.
+        REQUIRE(sim.pathFindingService.counters.searchesRegionUnreachable >= 1);
+        REQUIRE(sim.pathFindingService.counters.searchesExhausted == 0);
+
         // The order completed, and the unit stopped on its own bank.
         REQUIRE(sim.getUnitState(tankId).orders.empty());
         auto cell = sim.terrain.worldToHeightmapCoordinate(sim.getUnitState(tankId).position);

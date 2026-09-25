@@ -101,11 +101,11 @@ namespace rwe
      *
      * with the veterancy factor in integer arithmetic and never less than one.
      * Everything but the target's hit points cancels out of the total, so a
-     * unit is reclaimed in 300 * buildCostMetal / (workerTime * veterancy)
-     * ticks whatever its MaxDamage: ten seconds per metal-per-workertime. The
-     * step is sized for fifteen ticks but lands every sixteen (the handler
-     * sleeps two ticks a pass and counts to fifteen), so the real rate is a
-     * sixteenth slower than that.
+     * unit is reclaimed in 320 * buildCostMetal / (workerTime * veterancy)
+     * ticks whatever its MaxDamage: ten and two-thirds seconds per
+     * metal-per-workertime. The step is sized for fifteen ticks but lands
+     * every sixteen (the handler sleeps two ticks a pass and counts to
+     * fifteen), so the real rate is a sixteenth slower than the nominal 300.
      */
     unsigned int computeUnitReclaimStep(unsigned int workerTime, unsigned int kills, unsigned int targetMaxHitPoints, const Metal& targetBuildCostMetal);
 

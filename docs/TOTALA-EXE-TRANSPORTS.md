@@ -142,7 +142,11 @@ Three corrections to the folk numbers the task brief carried:
   rule does the limiting.)
 
 A transport with no `transportcapacity` key parses as capacity 0 and can never
-be ordered to load (0 < 0 fails) -- mods beware.
+be ordered to load (0 < 0 fails) -- mods beware. RWE departs from this on
+purpose (§88): it reads `transportmaxunits` when `transportcapacity` is
+absent, which is what an install without `rev31.gp3` needs for the Hulk,
+falls back to six for a ship and one for an aircraft when neither key is
+there, and warns at load in both cases.
 
 ---
 
@@ -217,6 +221,13 @@ either), up to three attempts per cycle.** The engine never moves the
 passenger itself -- the COB script does everything (see 10), and the actual
 attachment happens when the script executes `ATTACH_UNIT`. The engine merely
 polls `target+0x86`.
+
+> **RWE, 2026-09-25 (#193):** RWE used to give the passenger a move order to
+> a meeting point measured out from the hull, which on a coast sent it wading
+> into the sea after a ship that was still far out and moving. That move was
+> RWE's own and is gone; only the transport moves, as here. A passenger far
+> inland is out of the crane's reach from the water's edge in the original
+> too, which is why getting the army to the shore is the AI's job (#194).
 
 The footprint check here and in `VTOL_Pickup` reads the *instance* copy
 `unit+0x7E`, which `0x485AAA` fills from `def+0x14A` at spawn -- the same
