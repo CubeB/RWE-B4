@@ -244,6 +244,7 @@ namespace rwe
             {"expansionNeedsExploredGround", &AiTuningProfile::expansionNeedsExploredGround},
             {"expansionStaysOnOurSide", &AiTuningProfile::expansionStaysOnOurSide},
             {"armyFerryWantFromMap", &AiTuningProfile::armyFerryWantFromMap},
+            {"navalStandOff", &AiTuningProfile::navalStandOff},
             {"ferryLandingFan", &AiTuningProfile::ferryLandingFan},
             {"ferryLandingAvoidsThreat", &AiTuningProfile::ferryLandingAvoidsThreat},
         };

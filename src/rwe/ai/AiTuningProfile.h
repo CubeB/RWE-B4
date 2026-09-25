@@ -179,6 +179,16 @@ namespace rwe
          */
         bool kiteWithLongerRange{true};
         SimScalar kiteRangeMargin{40_ss};
+        /**
+         * The same for a hull, and from buildings too (issue #191): a ship
+         * that outranges what it is attacking lies off near the outer edge
+         * of its own reach, kiteRangeMargin inside it and never inside the
+         * target's, counting only the weapons that could hit that target.
+         * It had no kite at all: every naval order was a bare move or
+         * attack, and a destroyer told to attack closed to whatever range
+         * the attack behaviour picked. Needs kiteWithLongerRange as well.
+         */
+        bool navalStandOff{true};
 
         /**
          * What a remembered enemy gun keeps us off is read from its own

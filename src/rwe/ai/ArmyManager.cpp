@@ -468,6 +468,101 @@ namespace rwe
             return clampInsideVisibleMap(sim.terrain, target.position + (away * standOff), 64_ss);
         }
 
+        /**
+         * The longest reach among a unit's weapons that could hit the target
+         * where it stands, asked of the simulation's own eligibility test
+         * (GameSimulation::weaponCanHitUnit, 0x49ABB0): no torpedo at
+         * something out of the water, nothing but a torpedo at a submerged
+         * hull, an anti-air weapon only at something flying. A destroyer's
+         * depth charge is not what it can hit a floating tower's gunner
+         * with, so it must not be what sets its distance.
+         */
+        SimScalar longestRangeAgainst(const GameSimulation& sim, const UnitState& shooter, const UnitState& target)
+        {
+            const auto& def = sim.unitDefinitions.at(shooter.unitType);
+            SimScalar best = 0_ss;
+            for (const auto& weaponName : {def.weapon1, def.weapon2, def.weapon3})
+            {
+                auto it = weaponName.empty() ? sim.weaponDefinitions.end() : sim.weaponDefinitions.find(weaponName);
+                if (it == sim.weaponDefinitions.end() || !sim.weaponCanHitUnit(it->second, shooter, target))
+                {
+                    continue;
+                }
+                best = rweMax(best, it->second.maxRange);
+            }
+            return best;
+        }
+
+        /**
+         * Where a hull that outranges what it is attacking should lie: near
+         * the outer edge of its own reach, straight back from the target,
+         * and never inside the target's (issue #191). Nothing when it is
+         * already that far out, when it has nothing that can hit the target
+         * -- a submarine at a shipyard's dry corner -- when the target
+         * reaches as far, or when the water there is too shallow for the
+         * hull or is some other sea.
+         *
+         * Unlike kiteBackFrom this stands off from buildings too. Backing a
+         * land unit away from a tower is walking away from the job; a hull's
+         * whole advantage over a torpedo launcher or a floating tower is that
+         * it can choose its distance.
+         */
+        std::optional<SimVector> hullStandOff(
+            const GameSimulation& sim,
+            const AiTuningProfile& profile,
+            const AiBlackboard& bb,
+            const UnitState& ship,
+            const UnitDefinition& shipDef,
+            UnitId targetId)
+        {
+            if (!profile.kiteWithLongerRange || !profile.navalStandOff)
+            {
+                return std::nullopt;
+            }
+            auto targetRef = sim.tryGetUnitState(targetId);
+            if (!targetRef)
+            {
+                return std::nullopt;
+            }
+            const auto& target = targetRef->get();
+            auto targetDefIt = sim.unitDefinitions.find(target.unitType);
+            if (targetDefIt == sim.unitDefinitions.end())
+            {
+                return std::nullopt;
+            }
+            const auto seaLevel = sim.terrain.getSeaLevel();
+
+            auto ours = longestRangeAgainst(sim, ship, target);
+            if (ours <= 0_ss)
+            {
+                return std::nullopt;
+            }
+            auto theirs = longestRangeAgainst(sim, target, ship);
+            if (ours <= theirs + profile.kiteRangeMargin)
+            {
+                return std::nullopt;
+            }
+
+            auto offset = ship.position - target.position;
+            offset.y = 0_ss;
+            auto distance = rweSqrt(offset.lengthSquared());
+            auto standOff = rweMax(theirs + profile.kiteRangeMargin, ours - profile.kiteRangeMargin);
+            if (distance >= standOff)
+            {
+                return std::nullopt;
+            }
+            auto away = offset.normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+            auto spot = clampInsideVisibleMap(sim.terrain, target.position + (away * standOff), 64_ss);
+            auto groundAtSpot = sim.terrain.tryGetHeightAt(spot.x, spot.z);
+            auto draught = SimScalar(static_cast<float>(sim.getAdHocMovementClass(shipDef.movementCollisionInfo).minWaterDepth));
+            if (!groundAtSpot || *groundAtSpot > seaLevel - draught || !sameWaterBody(bb.mapIntel, sim.terrain, ship.position, spot))
+            {
+                return std::nullopt;
+            }
+            spot.y = seaLevel;
+            return spot;
+        }
+
         std::optional<UnitId> chooseDgunTarget(
             const GameSimulation& sim,
             PlayerId aiOwner,
@@ -1408,6 +1503,25 @@ namespace rwe
                     }
                 }
 
+                // Outranging it: lie off at the edge of our own reach, where
+                // it cannot answer, and fire from there next pass
+                // (navalStandOff).
+                if (auto standOff = hullStandOff(sim, profile, bb, ship, sim.unitDefinitions.at(ship.unitType), *enemy))
+                {
+                    if (!isMovingTo(ship, *standOff))
+                    {
+                        sim.eventLog.event(sim.gameTime.value, "navy_reposition")
+                            .set("player", aiOwner.value)
+                            .set("unit", shipId.value)
+                            .set("target_id", enemy->value)
+                            .set("x", static_cast<double>(standOff->x.value))
+                            .set("z", static_cast<double>(standOff->z.value))
+                            .set("why", "stand_off")
+                            .detail("ship lies off at the edge of its own reach");
+                        outCommands.push_back(moveCommand(shipId, *standOff));
+                    }
+                    continue;
+                }
                 if (!isAttackingUnit(ship, *enemy))
                 {
                     outCommands.push_back(attackCommand(shipId, *enemy));

@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/ai/ai_test_util.h>
+#include <rwe/sim/UnitModelDefinition.h>
+#include <rwe/sim/UnitPieceDefinition.h>
 
 /**
  * The naval half: shipyards, hulls, what goes under the water, and getting
@@ -1248,7 +1250,7 @@ namespace rwe
 
         addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 0_ss, 0_ss), script);
         addUnit(sim, "ARMSY", ai, SimVector(-90_ss, 0_ss, 0_ss), script);
-        auto destroyerId = addUnit(sim, "ARMROY", ai, SimVector(-100_ss, 0_ss, 0_ss), script);
+        auto destroyerId = addUnit(sim, "ARMROY", ai, SimVector(-100_ss, 60_ss, 0_ss), script);
         auto enemyId = addUnit(sim, "ARMPW", human, SimVector(-450_ss, 0_ss, 0_ss), script);
 
         auto profile = makeDefaultStandardProfile();
@@ -1367,7 +1369,7 @@ namespace rwe
         // condition the borrow is gated on.
         addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 0_ss, 0_ss), script);
         addUnit(sim, "ARMSY", ai, SimVector(-90_ss, 0_ss, 0_ss), script);
-        auto destroyerId = addUnit(sim, "ARMROY", ai, SimVector(-100_ss, 0_ss, 0_ss), script);
+        auto destroyerId = addUnit(sim, "ARMROY", ai, SimVector(-100_ss, 60_ss, 0_ss), script);
 
         auto profile = makeDefaultStandardProfile();
         profile.tacticalTickInterval = 1;
@@ -2076,5 +2078,112 @@ namespace rwe
             REQUIRE(bb.navalSortieActive);
         }
         REQUIRE(std::find(bb.navalCombatUnits.begin(), bb.navalCombatUnits.end(), hull) != bb.navalCombatUnits.end());
+    }
+
+    TEST_CASE("naval: a hull that outranges what it attacks lies off at the edge of its own reach", "[ai]")
+    {
+        // Issue #191. Every naval order used to be a bare move or attack, so
+        // a destroyer told to attack closed to whatever range the attack
+        // behaviour picked. The target here is a floating tower, a building:
+        // the land kite refuses those, and a hull must not.
+        auto script = makeEmptyCobScript();
+        auto terrain = makeWaterMapTerrain();
+        auto mapIntel = analyseMap(terrain, {});
+
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        WeaponDefinition longGun{};
+        longGun.maxRange = 500_ss;
+        longGun.reloadTime = 1_ss;
+        longGun.damage["DEFAULT"] = 30u;
+        sim.weaponDefinitions["LONGGUN"] = longGun;
+        auto antiAir = longGun;
+        antiAir.maxRange = 800_ss;
+        antiAir.toAirWeapon = true;
+        sim.weaponDefinitions["LONGAA"] = antiAir;
+
+        // Whether a gun can hit something on the water is the simulation's
+        // own test (weaponCanHitUnit), which asks whether the top of each
+        // model stands above the surface: so both have a model, and both
+        // float, as the shipped destroyer does (Floater=1).
+        std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+        sim.unitModelDefinitions["hullmodel"] = createUnitModelDefinition(20_ss, std::move(pieces));
+        sim.unitDefinitions["ARMROY"].objectName = "hullmodel";
+        sim.unitDefinitions["ARMROY"].floater = true;
+
+        // A floating tower with the test laser's reach of 200.
+        auto tower = makeDef(false, false, false, "LASER", 200u);
+        tower.floater = true;
+        tower.objectName = "hullmodel";
+        sim.unitDefinitions["ARMFHLT"] = tower;
+
+        addUnit(sim, "ARMCOM", ai, SimVector(-420_ss, 0_ss, 300_ss), script);
+        addUnit(sim, "ARMSY", ai, SimVector(200_ss, 0_ss, 300_ss), script);
+        addUnit(sim, "ARMFHLT", human, SimVector(0_ss, 60_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+        profile.tacticalTickInterval = 1;
+        profile.commanderDangerRadius = 0_ss;
+
+        auto firstOrders = [&](UnitId destroyerId) {
+            AiPlayerController controller(ai, profile, 42u, mapIntel, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 10, commands);
+            return std::make_pair(ordersFor<MoveOrder>(commands, destroyerId), ordersFor<AttackOrder>(commands, destroyerId));
+        };
+
+        SECTION("a long gun: lie off, out past the tower's reach and inside our own")
+        {
+            sim.unitDefinitions["ARMROY"].weapon1 = "LONGGUN";
+            auto destroyerId = addUnit(sim, "ARMROY", ai, SimVector(100_ss, 60_ss, 0_ss), script);
+            auto [moves, attacks] = firstOrders(destroyerId);
+            REQUIRE(!moves.empty());
+            REQUIRE(attacks.empty());
+            const auto& spot = moves.front().destination;
+            // Straight back from the tower, the side the hull was on.
+            REQUIRE(spot.x > 100_ss);
+            auto reach = spot.x.value;
+            REQUIRE(reach > 240.0f);
+            REQUIRE(reach <= 460.0f);
+            auto ground = sim.terrain.tryGetHeightAt(spot.x, spot.z);
+            REQUIRE(ground.has_value());
+            REQUIRE(ground->value < sim.terrain.getSeaLevel().value);
+        }
+
+        SECTION("an anti-air missile does not count: the gun that can hit it reaches no further than the tower, so it closes as before")
+        {
+            sim.unitDefinitions["ARMROY"].weapon2 = "LONGAA";
+            auto destroyerId = addUnit(sim, "ARMROY", ai, SimVector(100_ss, 60_ss, 0_ss), script);
+            auto [moves, attacks] = firstOrders(destroyerId);
+            REQUIRE(moves.empty());
+            REQUIRE(!attacks.empty());
+        }
+
+        SECTION("where lying off would put it on dry land, it attacks from where it is")
+        {
+            sim.unitDefinitions["ARMROY"].weapon1 = "LONGGUN";
+            // The shore is at world x -352, so 460 back from the tower
+            // towards the west is ashore.
+            auto destroyerId = addUnit(sim, "ARMROY", ai, SimVector(-100_ss, 60_ss, 0_ss), script);
+            auto [moves, attacks] = firstOrders(destroyerId);
+            REQUIRE(moves.empty());
+            REQUIRE(!attacks.empty());
+        }
+
+        SECTION("switched off, it closes as before")
+        {
+            profile.navalStandOff = false;
+            sim.unitDefinitions["ARMROY"].weapon1 = "LONGGUN";
+            auto destroyerId = addUnit(sim, "ARMROY", ai, SimVector(100_ss, 60_ss, 0_ss), script);
+            auto [moves, attacks] = firstOrders(destroyerId);
+            REQUIRE(moves.empty());
+            REQUIRE(!attacks.empty());
+        }
+        (void)human;
     }
 }
