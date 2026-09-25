@@ -1285,7 +1285,7 @@ owner-transfer lock (`+0xFB`), and not carried unless by an air base.
 | `CaptureUnitType` | victory | type | a P1 unit of the type is about to change owner, to anyone (slot 2, `0x48EEB0`). It fires before the transfer can fail | owner-change event | yes |
 | `KillAllOfType` | victory | type | a P1 unit of the type dies and P1 then holds at most one, the dying one included (`0x48EFB0`) | kill event | yes |
 | `KillUnitType` | victory | `type,count` | each P1 unit of the type that dies counts the number down, while it is above 0; at 0 (`0x48F0F0`) | kill event | yes |
-| `MoveUnitToRadius` | victory | `type,x,z,radius`, or `ANYTYPE` | a usable P0 unit of the type has its centre within the radius of (x, z) in world units, flat and inclusive. The point is clamped to the map on the first poll (`0x48F200`, `0x48F250`) | poll | yes |
+| `MoveUnitToRadius` | victory | `type,x,z,radius`, or `ANYTYPE` | a usable P0 unit of the type has its centre within the radius of the ground under (x, z), flat and inclusive, each squared distance floored to whole units (`0x48F200`, `0x48F250`, `0x47E995`). (x, z) is a point of the screen plane, not the map: see below | poll | yes |
 | `UnitTypePassesX` / `Z` | victory | `type,n`, or `ANYTYPE` | a P0 unit of the type has its X (or Z) cell word within 2 of `n >> 4`. A band five cells wide, not a crossing test; any build state (`0x48F370`, `0x48F4C0`) | poll | yes |
 | `VictoryTimerRunsOut` | victory | seconds (`n * 30` ticks, `0x48E64F`) | the game tick `g+0x38A47` has reached it | poll | no |
 | `CommanderKilled` | defeat | flag | a P0 unit dies whose name is its side's commander (`0x48F6B0`) | kill event | yes |
@@ -1297,6 +1297,30 @@ owner-transfer lock (`+0xFB`), and not carried unless by an air base.
 
 The cell words are the footprint's corner cell, `unit+0x76` for X and
 `unit+0x78` for Z, not the unit's centre.
+
+**MoveUnitToRadius's point is picked onto the ground** (corrected
+2026-09-25). The first poll passes (x, z) to `0x484B50`, which is not a plain
+clamp: it is the routine that finds the ground under a point of the screen,
+where a spot at height h shows h/2 further north than it is
+(`screenY = z - y/2`). It clamps x to `[0, width-1]` and z to
+`[0, height-1]` (`g+0x14223`, `g+0x14227`), then walks north from
+`(z & ~0xF) + 128` in 16-unit steps, at most nine of them, to the first spot
+whose `z - h/2` is at or above the point, h being the larger of the ground
+and the sea level `g+0x1427F` (`0x484BB2`-`0x484BED`). It interpolates back
+towards the spot before it, `z + ((point - shown) << 20) / (shownNext - shown)`
+in 16.16 (`0x484C5F`-`0x484C86`). The height sampler `0x485070` is a
+bilinear over the height map in sixteenths, each step truncated toward zero,
+and -1 off the map. So on ground of height h the circle is h/2 south of the
+numbers in the file.
+
+**Which scripted units are held** (added 2026-09-25). The interpreter
+`0x487BF0` clears the selectable bit only when it has queued at least one
+order: each order handler that queues something sets `edi` (`0x487D75`,
+`0x487DED`, `0x487E44`, `0x48817A`, `0x4881D6`, ...), and `0x487E5B` skips
+the clear when it is still 0. An empty string, or a bare `o` standing-orders
+line, leaves the unit selectable. AC01's own gate, `InitialMission=o 0 0,w
+3600 0,`, stands on its `MoveUnitToRadius` point and is held by its wait,
+which is why the mission is not won at the first poll.
 
 ### What a port has to copy
 
@@ -1341,7 +1365,14 @@ The cell words are the footprint's corner cell, `unit+0x76` for X and
 arms a random deadline five to ten minutes out and then reports a defeat.
 A legitimate copy never sets the flag.
 
+**The commander-death wipe never runs in a campaign** (settled 2026-09-25).
+The wipe at `0x48667E` is skipped when `[g+0x37EF6]` is 0
+(`0x486688`). For game type 1 the setup copies that word from `g+0x39219`
+(`0x497468`-`0x497474`), and the mission reader has just set `g+0x39219` to
+0 (`0x4363EA`, `ebx` zeroed at `0x436198`). So a campaign commander's death
+matters only through `CommanderKilled`, and killing the enemy's does not
+take its army with it.
+
 **Open:** what the network handler at `0x4576C5` uses the victory check for,
-the multiplayer victory test `0x490080`, whether the commander-death wipe
-can run in a campaign, and whether the banners are on screen for any frame
-before the battle closes.
+the multiplayer victory test `0x490080`, and whether the banners are on
+screen for any frame before the battle closes.
