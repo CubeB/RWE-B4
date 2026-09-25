@@ -25,6 +25,7 @@ namespace rwe
           socket(ioContext),
           sendTimer(ioContext),
           endpoints(endpoints),
+          remotePeersPresent(!endpoints.empty()),
           nextSendSequence(resumeFromSequence),
           nextHashSequence(resumeFromSequence),
           playerCommandService(playerCommandService)
@@ -255,6 +256,11 @@ namespace rwe
         });
 
         return result.get_future().get();
+    }
+
+    bool GameNetworkService::hasRemotePeers() const
+    {
+        return remotePeersPresent;
     }
 
     void GameNetworkService::run()

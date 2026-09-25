@@ -794,7 +794,11 @@ namespace rwe
         // itself a computer, so its commands arrive through the drain below
         // like everybody else's. Pushing here as well would put two entries a
         // tick into one player's queue and take it out of step with the rest.
-        if (simulation.getPlayer(localPlayerId).type == GamePlayerType::Human)
+        //
+        // And in a game with no peers at all the human is fed a tick at a time
+        // in tryTickGame instead -- see localHumanCommandsAreFedPerTick -- so
+        // pushing here as well would put two entries a tick into their queue.
+        if (simulation.getPlayer(localPlayerId).type == GamePlayerType::Human && !localHumanCommandsAreFedPerTick())
         {
             // If we have too many commands buffered,
             // defer submitting commands this frame

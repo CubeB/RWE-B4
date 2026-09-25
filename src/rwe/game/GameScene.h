@@ -1245,6 +1245,19 @@ namespace rwe
         bool onlyComputerPlayersAreNotReady() const;
 
         /**
+         * Whether the local human's orders are handed over a tick at a time
+         * instead of through the round-trip command buffer.
+         *
+         * The buffer exists to hold an order until every peer has it, which in
+         * a game with nobody else in it is a wait with nothing on the other
+         * side of it: the original applies an order the tick it is given, and
+         * a lone player should feel that. A game with any remote peer keeps
+         * the buffer, as does a recording, which feeds every player from the
+         * file. See GameScene::update and tryTickGame.
+         */
+        bool localHumanCommandsAreFedPerTick() const;
+
+        /**
          * The tick a drop cuts the lost peer's stream at: beyond the furthest
          * any peer has said it had got, plus DropTickMargin.
          */

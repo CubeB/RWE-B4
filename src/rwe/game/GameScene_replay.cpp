@@ -474,24 +474,42 @@ namespace rwe
             // ticks this frame is about to dispatch.
             pushReplayCommandsForTick(sceneTime.value);
         }
-        else if (onlyComputerPlayersAreNotReady())
+        else
         {
-            // What the computer players asked for on the tick just run, a tick
-            // at a time. Here rather than in update() because the buffer is
-            // drained a set per player per tick and has to be filled the same
-            // way: fed per frame, the delay on an AI order became a function
-            // of how many ticks that frame dispatched, which is not the same
-            // number on two peers of a network game. A recording feeds every
-            // player from the file above instead, this one included.
-            //
-            // And only when the tick is about to run, which is what the guard
-            // is for. This function is reached once a frame while a tick is
-            // held up waiting for a peer, and topping the buffer up on each of
-            // those attempts would push a set for a tick that never happened --
-            // so an AI order would land later on the peer whose packet was late
-            // than on the peer whose packet was not. A stall is a property of
-            // one machine's network and must not reach the simulation.
-            feedAiCommands(simulation, *playerCommandService, aiCommandBufferDepth());
+            // A lone human's orders are handed over here, one set a tick, so
+            // they land on the tick about to run rather than behind a
+            // round-trip buffer with no peer on the other side of it. Before
+            // the readiness check below, because this feed is what makes that
+            // check true. Only when the buffer is empty, so a tick held up for
+            // any reason does not stack another set on top.
+            if (localHumanCommandsAreFedPerTick() && playerCommandService->bufferedCommandCount(localPlayerId) == 0)
+            {
+                auto count = GameNetworkService::commandsFittingOneSet(localPlayerCommandBuffer);
+                std::vector<PlayerCommand> set(localPlayerCommandBuffer.begin(), localPlayerCommandBuffer.begin() + static_cast<std::ptrdiff_t>(count));
+                playerCommandService->pushCommands(localPlayerId, set);
+                ++localSetsSubmitted;
+                localPlayerCommandBuffer.erase(localPlayerCommandBuffer.begin(), localPlayerCommandBuffer.begin() + static_cast<std::ptrdiff_t>(count));
+            }
+
+            if (onlyComputerPlayersAreNotReady())
+            {
+                // What the computer players asked for on the tick just run, a tick
+                // at a time. Here rather than in update() because the buffer is
+                // drained a set per player per tick and has to be filled the same
+                // way: fed per frame, the delay on an AI order became a function
+                // of how many ticks that frame dispatched, which is not the same
+                // number on two peers of a network game. A recording feeds every
+                // player from the file above instead, this one included.
+                //
+                // And only when the tick is about to run, which is what the guard
+                // is for. This function is reached once a frame while a tick is
+                // held up waiting for a peer, and topping the buffer up on each of
+                // those attempts would push a set for a tick that never happened --
+                // so an AI order would land later on the peer whose packet was late
+                // than on the peer whose packet was not. A stall is a property of
+                // one machine's network and must not reach the simulation.
+                feedAiCommands(simulation, *playerCommandService, aiCommandBufferDepth());
+            }
         }
 
         if (auto desync = playerCommandService->checkHashes(); desync)

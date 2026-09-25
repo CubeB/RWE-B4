@@ -10,6 +10,7 @@
 #include <rwe/sim/GameHash.h>
 #include <rwe/sim/GameTime.h>
 #include <rwe/sim/PlayerId.h>
+#include <rwe/sim/SimTicksPerSecond.h>
 #include <unordered_map>
 #include <vector>
 
@@ -26,7 +27,7 @@ namespace rwe
     {
         auto maxRtt = std::clamp(maxAverageRttMillis, 16.0f, 2000.0f);
         auto highCommandLatencyMillis = maxRtt + (maxRtt / 4.0f) + 200.0f;
-        return static_cast<unsigned int>(highCommandLatencyMillis / 16.0f) + 1;
+        return static_cast<unsigned int>(highCommandLatencyMillis / static_cast<float>(SimMillisecondsPerTick)) + 1;
     }
 
     /**
