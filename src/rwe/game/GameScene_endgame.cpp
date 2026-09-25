@@ -86,8 +86,11 @@ namespace rwe
 
     GameScene::EndGameLayout GameScene::endGameLayout() const
     {
-        auto windowWidth = static_cast<float>(sceneContext.viewport->width());
-        auto windowHeight = static_cast<float>(sceneContext.viewport->height());
+        // The chart is chrome, drawn through the scaled projection, so it is
+        // laid out against the raw UI viewport rather than the frame.
+        auto uiScale = static_cast<float>(effectiveUiScale());
+        auto windowWidth = static_cast<float>(sceneContext.viewport->width()) / uiScale;
+        auto windowHeight = static_cast<float>(sceneContext.viewport->height()) / uiScale;
         auto scale = std::min(windowWidth / EndGameScreenWidth, windowHeight / EndGameScreenHeight);
         return EndGameLayout{
             scale,
@@ -98,9 +101,11 @@ namespace rwe
     Point GameScene::endGameScreenPoint(int windowX, int windowY) const
     {
         auto layout = endGameLayout();
+        // The event arrives in frame pixels; the layout is in raw UI space.
+        auto scale = static_cast<float>(effectiveUiScale());
         return Point(
-            static_cast<int>((static_cast<float>(windowX) - layout.offsetX) / layout.scale),
-            static_cast<int>((static_cast<float>(windowY) - layout.offsetY) / layout.scale));
+            static_cast<int>(((static_cast<float>(windowX) / scale) - layout.offsetX) / layout.scale),
+            static_cast<int>(((static_cast<float>(windowY) / scale) - layout.offsetY) / layout.scale));
     }
 
     void GameScene::beginEndGameSequence()
@@ -281,8 +286,8 @@ namespace rwe
                 // because in the original it is the same code path: 0x46A107
                 // draws whichever of `igpaused`, `igvictory` and `igdefeat` its
                 // flags ask for.
-                float centerX = static_cast<float>(sceneContext.viewport->width()) / 2.0f;
-                float centerY = static_cast<float>(sceneContext.viewport->height()) / 2.0f;
+                float centerX = static_cast<float>(sceneContext.viewport->width()) / (2.0f * static_cast<float>(effectiveUiScale()));
+                float centerY = static_cast<float>(sceneContext.viewport->height()) / (2.0f * static_cast<float>(effectiveUiScale()));
                 auto title = gameMediaDatabase.getSpriteSeries("IGTITLES", localPlayerWon() ? "igvictory" : "igdefeat");
                 if (title && !(*title)->sprites.empty())
                 {
@@ -302,11 +307,12 @@ namespace rwe
             {
                 auto step = std::min(EndGameFadeTicks, (sceneTime - endGamePhaseStart).value + 1);
                 auto alpha = static_cast<int>((255.0f * static_cast<float>(step)) / static_cast<float>(EndGameFadeTicks));
+                auto uiScale = static_cast<float>(effectiveUiScale());
                 chromeUiRenderService.fillColor(
                     0.0f,
                     0.0f,
-                    static_cast<float>(sceneContext.viewport->width()),
-                    static_cast<float>(sceneContext.viewport->height()),
+                    static_cast<float>(sceneContext.viewport->width()) / uiScale,
+                    static_cast<float>(sceneContext.viewport->height()) / uiScale,
                     Color(0, 0, 0, static_cast<unsigned char>(alpha)));
                 return;
             }
@@ -323,11 +329,12 @@ namespace rwe
         auto layout = endGameLayout();
 
         // Whatever shape the window is, everything outside the 4:3 box is black.
+        auto uiScale = static_cast<float>(effectiveUiScale());
         chromeUiRenderService.fillColor(
             0.0f,
             0.0f,
-            static_cast<float>(sceneContext.viewport->width()),
-            static_cast<float>(sceneContext.viewport->height()),
+            static_cast<float>(sceneContext.viewport->width()) / uiScale,
+            static_cast<float>(sceneContext.viewport->height()) / uiScale,
             Color(0, 0, 0));
 
         // Everything from here down is drawn in the original's own 640x480

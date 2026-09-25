@@ -62,6 +62,11 @@ namespace rwe
 
         std::shared_ptr<SpriteSeries> getCursor(CursorType type) const;
 
+        /**
+         * Not rescaled by the UI scale: the sprite hotspot is in cursor art
+         * pixels, and keeping it exact matters more than a cursor a little
+         * small on a high-density display.
+         */
         void render(UiRenderService& renderer) const;
 
         /**

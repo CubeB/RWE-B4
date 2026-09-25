@@ -118,6 +118,26 @@ namespace rwe
     /** The stage index for a zoom percentage; anything not a stage reads as 100. */
     unsigned int cameraZoomStageIndex(unsigned int percent);
 
+    /** The four UI scale stages, in button order: Auto, 1x, 2x and 3x. */
+    std::vector<unsigned int> uiScaleStages();
+
+    /** The label each UI scale stage shows; the active stage's label is the readout. */
+    std::vector<std::string> uiScaleLabels();
+
+    /** The next UI scale stage, wrapping. A value not in the stages starts from Auto and advances. */
+    unsigned int nextUiScale(unsigned int setting);
+
+    /** The stage index for a UI scale setting; anything not a stage reads as Auto. */
+    unsigned int uiScaleStageIndex(unsigned int setting);
+
+    /**
+     * Turns a UI scale setting into the integer scale to draw at. Auto (0)
+     * follows the display density, so on a 2x display the interface is
+     * physically the same size as on a 1x one; an explicit setting is itself.
+     * Both are clamped to 1..3.
+     */
+    unsigned int resolveUiScale(unsigned int setting, float displayScale);
+
     class GlobalConfig
     {
     public:
@@ -180,6 +200,18 @@ namespace rwe
          * they show. Stored globally as camera-zoom.
          */
         unsigned int cameraZoom{100};
+
+        /**
+         * How big the interface is drawn, as an integer multiple: 0 Auto, or
+         * 1, 2, 3. Auto follows the display density, so on a high-density
+         * display the interface is physically the same size as it was on a
+         * 1x one. It is deliberately distinct from both cameraZoom (how much
+         * battlefield is visible) and pixelSize (how chunky everything is):
+         * this is the legibility control. Whole numbers only, because the UI
+         * textures are drawn with GL_NEAREST and a fractional scale would
+         * blur the pixel art. Stored globally as ui-scale.
+         */
+        unsigned int uiScale{0};
 
         /**
          * How long a peer of a network game may go quiet before the rest
@@ -383,6 +415,9 @@ namespace rwe
 
         /** Camera zoom percentage; last so adding it left the positional initialisers above valid. */
         unsigned int cameraZoom{100};
+
+        /** UI scale setting: 0 Auto, or 1, 2, 3. Final field, appending after cameraZoom. */
+        unsigned int uiScale{0};
     };
 
     /** The settings as the config file last left them. */

@@ -453,12 +453,17 @@ namespace rwe
 
         if (aspectViewport == nullptr)
         {
+            // The box is the viewport's own, and the scale is applied by the
+            // matrix below: raw content up to viewport/uiScale fills the
+            // frame and anything past that is cropped.
             return UiOrthoBounds{0.0f, contentWidth, contentHeight, 0.0f};
         }
 
+        // The scaled content is what has to keep its proportions in the
+        // window, so the aspect fit is computed at the scaled size.
         return computeUiOrthoBounds(
-            contentWidth,
-            contentHeight,
+            contentWidth * static_cast<float>(uiScale),
+            contentHeight * static_cast<float>(uiScale),
             static_cast<float>(aspectViewport->width()),
             static_cast<float>(aspectViewport->height()));
     }
@@ -466,15 +471,20 @@ namespace rwe
     Matrix4f UiRenderService::getViewProjectionMatrix() const
     {
         auto b = getOrthoBounds();
-        return Matrix4f::orthographicProjection(b.left, b.right, b.bottom, b.top, 100.0f, -100.0f);
+        // clip = O * S * raw, so the raw coordinates are scaled into the
+        // box's own space before the orthographic projection.
+        return Matrix4f::orthographicProjection(b.left, b.right, b.bottom, b.top, 100.0f, -100.0f)
+            * Matrix4f::scale(Vector3f(static_cast<float>(uiScale), static_cast<float>(uiScale), 1.0f));
     }
 
     Matrix4f UiRenderService::getInverseViewProjectionMatrix() const
     {
-        // The same box as above, which is what keeps the mouse on the buttons:
-        // a click is turned into UI coordinates by inverting this projection,
-        // so the padding has to be in both or in neither.
+        // The exact inverse of the forward, which is what keeps the mouse on
+        // the buttons: a click is turned into raw UI coordinates by inverting
+        // this projection, so the pad and the scale have to be in both or in
+        // neither.
         auto b = getOrthoBounds();
-        return Matrix4f::inverseOrthographicProjection(b.left, b.right, b.bottom, b.top, 100.0f, -100.0f);
+        return Matrix4f::scale(Vector3f(1.0f / static_cast<float>(uiScale), 1.0f / static_cast<float>(uiScale), 1.0f))
+            * Matrix4f::inverseOrthographicProjection(b.left, b.right, b.bottom, b.top, 100.0f, -100.0f);
     }
 }

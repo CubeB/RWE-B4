@@ -44,6 +44,9 @@ namespace rwe
           dialogStack(),
           bgm()
     {
+        scaledUiRenderService.setUiScale(resolveUiScale(
+            sceneContext.globalConfig->uiScale,
+            sceneContext.sceneManager->displayScale()));
     }
 
     void MainMenuScene::init()
@@ -168,7 +171,8 @@ namespace rwe
             pendingBuildingHalo,
             pendingAntiAliasUnits,
             pendingMusicTrackTypes,
-            pendingCameraZoom};
+            pendingCameraZoom,
+            pendingUiScale};
     }
 
     void MainMenuScene::applyOptions(const GameOptions& state)
@@ -190,6 +194,7 @@ namespace rwe
         pendingBuildingHalo = state.buildingHalo;
         pendingAntiAliasUnits = state.antiAliasUnits;
         pendingCameraZoom = state.cameraZoom;
+        pendingUiScale = state.uiScale;
         audio->setSoundEnabled(state.soundMode != SoundMode::Off);
     }
 
@@ -216,6 +221,7 @@ namespace rwe
             pendingMusicTrackTypes = sceneContext.globalConfig->musicTrackTypes;
             pendingGamma = sceneContext.globalConfig->gamma;
             pendingCameraZoom = sceneContext.globalConfig->cameraZoom;
+            pendingUiScale = sceneContext.globalConfig->uiScale;
             pendingShading = static_cast<ShadingMode>(sceneContext.globalConfig->shadingMode);
             pendingAntiAlias = sceneContext.globalConfig->antiAlias;
             pendingBuildingHalo = sceneContext.globalConfig->buildingHalo;
@@ -308,6 +314,9 @@ namespace rwe
         // way as the in-game one. See GameScene::addCameraZoomButton for why
         // the position wants confirming with ui_probe.
         uiFactory.addStagedButtonBelow(active, "STARTOPT", "SHADINGMODE", "CAMZOOM", "AAUNITS", "BSHADOWS", cameraZoomLabels(), cameraZoomStageIndex(pendingCameraZoom));
+        // ...and the UI scale, one row under camera zoom, on the same derived
+        // geometry as the in-game page. See GameScene::addUiScaleButton.
+        uiFactory.addStagedButtonBelow(active, "STARTOPT", "SHADINGMODE", "UISCALE", "CAMZOOM", "AAUNITS", uiScaleLabels(), uiScaleStageIndex(pendingUiScale));
 
         auto state = currentOptions();
 
@@ -849,6 +858,10 @@ namespace rwe
             {
                 pendingCameraZoom = nextCameraZoom(pendingCameraZoom);
             }
+            else if (message == "UISCALE")
+            {
+                pendingUiScale = nextUiScale(pendingUiScale);
+            }
             else if (message == "UNDO")
             {
                 applyOptions(optionsUndo);
@@ -1031,6 +1044,10 @@ namespace rwe
         if (auto toggle = active.find<UiStagedButton>("CAMZOOM"))
         {
             toggle->get().setStage(cameraZoomStageIndex(pendingCameraZoom));
+        }
+        if (auto toggle = active.find<UiStagedButton>("UISCALE"))
+        {
+            toggle->get().setStage(uiScaleStageIndex(pendingUiScale));
         }
         if (auto bar = active.find<UiScrollBar>("FXVOL"))
         {

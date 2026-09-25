@@ -276,6 +276,12 @@ namespace rwe
         /** palettes/PALETTE.ALP; the building halo in worldPost.frag reads it. */
         SharedTextureHandle alphaTableTexture;
 
+        /**
+         * The in-world overlays -- selection boxes, waypoint lines, unit
+         * health bars, cloak radius -- are deliberately not scaled with the
+         * UI: their positions come from the world projection, so a scale on
+         * this service would move them off the things they annotate.
+         */
         UiRenderService worldUiRenderService;
         UiRenderService chromeUiRenderService;
 
@@ -603,6 +609,15 @@ namespace rwe
         void addBuildingHaloButton(UiPanel& panel);
         void addAntiAliasUnitsButton(UiPanel& panel);
         void addCameraZoomButton(UiPanel& panel);
+        void addUiScaleButton(UiPanel& panel);
+
+        /**
+         * The integer UI scale to draw chrome at this frame: the staged
+         * setting resolved against the display density, so Auto follows a
+         * high-density display. Re-read every frame because a monitor move
+         * can change the display scale under a running game.
+         */
+        unsigned int effectiveUiScale() const { return resolveUiScale(uiScaleSetting, sceneContext.sceneManager->displayScale()); }
 
         /** Finds a control by name across every open menu panel. */
         template <typename T>
@@ -633,6 +648,8 @@ namespace rwe
         unsigned int buildingHaloRedShift{50};
         unsigned int scrollSpeedSetting{100};
         unsigned int cameraZoomSetting{100};
+        /** The staged UI scale: 0 Auto, or 1, 2, 3. See GlobalConfig::uiScale. */
+        unsigned int uiScaleSetting{0};
 
         /** What this game was started with, kept for the save-game header. */
         GameParameters gameParameters;
@@ -1051,6 +1068,9 @@ namespace rwe
          */
         int appliedLeftInset{GuiSizeLeft};
 
+        /** The effective UI scale the last world inset was built for. */
+        unsigned int appliedUiScale{0};
+
         FrameBufferInfo worldFrameBuffer;
 
         TextureHandle dodgeMask;
@@ -1442,6 +1462,15 @@ namespace rwe
         void updatePanelSlide(int millisecondsElapsed);
 
         Point getMousePosition() const;
+
+        /**
+         * A point in frame pixels turned into raw UI coordinates by inverting
+         * the chrome projection. This is the one conversion for everything
+         * the interface tests against: panels, the minimap and the build
+         * buttons are all laid out in raw 640x480 space and are drawn through
+         * the scaled projection. World logic keeps frame-space points.
+         */
+        Point toUiCoordinates(int x, int y) const;
 
         std::optional<UnitId> getFirstCollidingUnit(const Ray3f& ray) const;
         std::optional<FeatureId> getFirstCollidingFeature(const Ray3f& ray) const;

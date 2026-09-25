@@ -75,6 +75,13 @@ namespace rwe
             config.cameraZoom = 150;
             REQUIRE(optionsFromConfig(config).cameraZoom == 150u);
         }
+
+        SECTION("carries the UI scale across")
+        {
+            GlobalConfig config;
+            config.uiScale = 2;
+            REQUIRE(optionsFromConfig(config).uiScale == 2u);
+        }
     }
 
     TEST_CASE("camera zoom helpers")
@@ -127,6 +134,76 @@ namespace rwe
             REQUIRE(labels[1] == "Zoom 100%");
             REQUIRE(labels[2] == "Zoom 150%");
             REQUIRE(labels[3] == "Zoom 200%");
+        }
+    }
+
+    TEST_CASE("UI scale helpers")
+    {
+        SECTION("stages are Auto and the three integer scales in order")
+        {
+            auto stages = uiScaleStages();
+            REQUIRE(stages.size() == 4);
+            REQUIRE(stages[0] == 0u);
+            REQUIRE(stages[1] == 1u);
+            REQUIRE(stages[2] == 2u);
+            REQUIRE(stages[3] == 3u);
+        }
+
+        SECTION("next cycles through every stage and wraps")
+        {
+            REQUIRE(nextUiScale(0u) == 1u);
+            REQUIRE(nextUiScale(1u) == 2u);
+            REQUIRE(nextUiScale(2u) == 3u);
+            REQUIRE(nextUiScale(3u) == 0u);
+        }
+
+        SECTION("a value not in the stages starts from Auto and advances")
+        {
+            REQUIRE(nextUiScale(4u) == 1u);
+            REQUIRE(nextUiScale(99u) == 1u);
+        }
+
+        SECTION("stage index round trips every stage")
+        {
+            auto stages = uiScaleStages();
+            for (unsigned int i = 0; i < stages.size(); ++i)
+            {
+                REQUIRE(uiScaleStageIndex(stages[i]) == i);
+            }
+        }
+
+        SECTION("an unknown value reads as the Auto stage")
+        {
+            REQUIRE(uiScaleStageIndex(4u) == uiScaleStageIndex(0u));
+            REQUIRE(uiScaleStageIndex(99u) == uiScaleStageIndex(0u));
+        }
+
+        SECTION("labels are in stage order")
+        {
+            auto labels = uiScaleLabels();
+            REQUIRE(labels.size() == uiScaleStages().size());
+            REQUIRE(labels[0] == "UI Auto");
+            REQUIRE(labels[1] == "UI 1x");
+            REQUIRE(labels[2] == "UI 2x");
+            REQUIRE(labels[3] == "UI 3x");
+        }
+
+        SECTION("Auto follows the display density, rounded and clamped to 1..3")
+        {
+            REQUIRE(resolveUiScale(0u, 1.0f) == 1u);
+            REQUIRE(resolveUiScale(0u, 2.0f) == 2u);
+            REQUIRE(resolveUiScale(0u, 1.5f) == 2u);
+            REQUIRE(resolveUiScale(0u, 3.0f) == 3u);
+            REQUIRE(resolveUiScale(0u, 4.0f) == 3u);
+            REQUIRE(resolveUiScale(0u, 0.0f) == 1u);
+        }
+
+        SECTION("an explicit scale passes through and clamps out of range")
+        {
+            REQUIRE(resolveUiScale(1u, 2.0f) == 1u);
+            REQUIRE(resolveUiScale(2u, 1.0f) == 2u);
+            REQUIRE(resolveUiScale(3u, 1.0f) == 3u);
+            REQUIRE(resolveUiScale(4u, 1.0f) == 3u);
         }
     }
 }

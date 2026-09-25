@@ -30,6 +30,7 @@ namespace rwe
         std::vector<unsigned int> pendingMusicTrackTypes;
         unsigned int pendingGamma{100};
         unsigned int pendingCameraZoom{100};
+        unsigned int pendingUiScale{0};
         ShadingMode pendingShading{ShadingMode::BuildingsOnly};
         bool pendingAntiAlias{true};
         bool pendingBuildingHalo{true};

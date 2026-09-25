@@ -516,16 +516,24 @@ namespace rwe
             return;
         }
 
+        // The UI is drawn through a scaled projection, so a panel takes its
+        // events in raw UI coordinates. The world logic below keeps the
+        // frame-space event.
         if (isGameMenuOpen())
         {
+            auto ui = toUiCoordinates(event.x, event.y);
+            MouseButtonEvent uiEvent(ui.x, ui.y, event.button);
             for (auto& panel : gameMenuPanels)
             {
-                panel->mouseDown(event);
+                panel->mouseDown(uiEvent);
             }
             return;
         }
 
-        currentPanel->mouseDown(event);
+        {
+            auto ui = toUiCoordinates(event.x, event.y);
+            currentPanel->mouseDown(MouseButtonEvent(ui.x, ui.y, event.button));
+        }
 
         // Debug placing mode: clicks drop units on the map instead of
         // selecting and ordering, so a test scenario can be set up quickly.
@@ -942,14 +950,19 @@ namespace rwe
 
         if (isGameMenuOpen())
         {
+            auto ui = toUiCoordinates(event.x, event.y);
+            MouseButtonEvent uiEvent(ui.x, ui.y, event.button);
             for (auto& panel : gameMenuPanels)
             {
-                panel->mouseUp(event);
+                panel->mouseUp(uiEvent);
             }
             return;
         }
 
-        currentPanel->mouseUp(event);
+        {
+            auto ui = toUiCoordinates(event.x, event.y);
+            currentPanel->mouseUp(MouseButtonEvent(ui.x, ui.y, event.button));
+        }
 
         if (event.button == MouseButtonEvent::MouseButton::Left)
         {
@@ -1128,9 +1141,11 @@ namespace rwe
 
         if (isGameMenuOpen())
         {
+            auto ui = toUiCoordinates(event.x, event.y);
+            MouseMoveEvent uiEvent(ui.x, ui.y);
             for (auto& panel : gameMenuPanels)
             {
-                panel->mouseMove(event);
+                panel->mouseMove(uiEvent);
             }
             return;
         }
@@ -1149,11 +1164,17 @@ namespace rwe
 
             middleMousePanningState->previousCursorPosition = currentCursorPosition;
         }
-        currentPanel->mouseMove(event);
+
+        {
+            auto ui = toUiCoordinates(event.x, event.y);
+            currentPanel->mouseMove(MouseMoveEvent(ui.x, ui.y));
+        }
     }
 
     void GameScene::onMouseWheel(MouseWheelEvent event)
     {
+        // A wheel event carries scroll amounts rather than a position, so
+        // there is nothing to convert.
         if (isGameMenuOpen())
         {
             for (auto& panel : gameMenuPanels)

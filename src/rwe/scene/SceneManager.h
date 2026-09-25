@@ -60,7 +60,7 @@ namespace rwe
          * window.
          */
         unsigned int pixelSize{1};
-        float displayScale{1.0f};
+        float windowDisplayScale{1.0f};
         int outputWidth{0};
         int outputHeight{0};
         int logicalWidth{0};
@@ -97,7 +97,14 @@ namespace rwe
          * projection so a sharper display shows the same battlefield rather
          * than more of it, and use it to map mouse points into the frame.
          */
-        float frameDensity() const { return frameDensityFor(displayScale, pixelSize); }
+        float frameDensity() const { return frameDensityFor(windowDisplayScale, pixelSize); }
+
+        /**
+         * Output pixels per logical point, as the window's display reports
+         * it. The UI's Auto scale follows this so the interface keeps its
+         * physical size across displays of different density.
+         */
+        float displayScale() const { return windowDisplayScale; }
 
     private:
         void renderDebugWindow();

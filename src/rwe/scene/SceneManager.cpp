@@ -31,10 +31,10 @@ namespace rwe
 
     void SceneManager::refreshWindowMetrics()
     {
-        displayScale = sdl->getWindowDisplayScale(window);
-        if (!(displayScale > 0.0f))
+        windowDisplayScale = sdl->getWindowDisplayScale(window);
+        if (!(windowDisplayScale > 0.0f))
         {
-            displayScale = 1.0f;
+            windowDisplayScale = 1.0f;
         }
         sdl->getWindowSize(window, &logicalWidth, &logicalHeight);
         sdl->getWindowSizeInPixels(window, &outputWidth, &outputHeight);
@@ -226,6 +226,8 @@ namespace rwe
                 {
                     imGuiContext->io->ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
                 }
+                // ImGui is deliberately not scaled with the UI: it already
+                // follows the display's framebuffer scale and is a debug tool.
                 imGuiContext->newFrame(window);
             }
             {

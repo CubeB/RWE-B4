@@ -435,6 +435,7 @@ namespace rwe
             }
             addAntiAliasUnitsButton(*panel);
             addCameraZoomButton(*panel);
+            addUiScaleButton(*panel);
         }
     }
 
@@ -490,6 +491,16 @@ namespace rwe
         // with ui_probe on a machine with the game data, which this one has
         // not.
         uiFactory.addStagedButtonBelow(panel, "VISUALRT", "SHADINGMODE", "CAMZOOM", "AAUNITS", "BSHADOWS", cameraZoomLabels(), cameraZoomStageIndex(cameraZoomSetting));
+    }
+
+    void GameScene::addUiScaleButton(UiPanel& panel)
+    {
+        // How big the interface is drawn, another gadget no GUI file has. It
+        // sits one row below camera zoom and takes its position from the same
+        // derived geometry, so it lands on both options pages without either
+        // page's coordinates appearing here. The art is the Shading button's,
+        // as camera zoom uses it, so the row looks like the switch above.
+        uiFactory.addStagedButtonBelow(panel, "VISUALRT", "SHADINGMODE", "UISCALE", "CAMZOOM", "AAUNITS", uiScaleLabels(), uiScaleStageIndex(uiScaleSetting));
     }
 
     void GameScene::wireInGameOptionControls()
@@ -660,7 +671,8 @@ namespace rwe
             buildingHaloEnabled,
             antiAliasUnitsEnabled,
             musicTrackTypes,
-            cameraZoomSetting};
+            cameraZoomSetting,
+            uiScaleSetting};
     }
 
     void GameScene::applyInGameOptions(const GameOptions& state)
@@ -677,6 +689,7 @@ namespace rwe
         musicTrackModeSetting = state.musicTrackMode;
         musicTrackTypes = state.musicTrackTypes;
         cameraZoomSetting = state.cameraZoom;
+        uiScaleSetting = state.uiScale;
         rebuildMusicMoods();
         audio->setSoundEnabled(state.soundMode != SoundMode::Off);
         gammaSetting = state.gamma;
@@ -1014,6 +1027,10 @@ namespace rwe
             {
                 cameraZoomSetting = nextCameraZoom(cameraZoomSetting);
             }
+            else if (control == "UISCALE")
+            {
+                uiScaleSetting = nextUiScale(uiScaleSetting);
+            }
             else if (control == "MODE")
             {
                 // Off | Mono | 3D, cycled by the button itself.
@@ -1145,6 +1162,10 @@ namespace rwe
         if (auto toggle = findInGameMenu<UiStagedButton>("CAMZOOM"))
         {
             toggle->setStage(cameraZoomStageIndex(cameraZoomSetting));
+        }
+        if (auto toggle = findInGameMenu<UiStagedButton>("UISCALE"))
+        {
+            toggle->setStage(uiScaleStageIndex(uiScaleSetting));
         }
         if (auto bar = findInGameMenu<UiScrollBar>("FXVOL"))
         {

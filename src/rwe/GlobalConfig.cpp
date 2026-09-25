@@ -1,6 +1,7 @@
 #include "GlobalConfig.h"
 #include <cctype>
 #include <algorithm>
+#include <cmath>
 
 #include <rwe/util.h>
 
@@ -205,6 +206,46 @@ namespace rwe
         return 0u;
     }
 
+    std::vector<unsigned int> uiScaleStages()
+    {
+        return {0u, 1u, 2u, 3u};
+    }
+
+    std::vector<std::string> uiScaleLabels()
+    {
+        return {"UI Auto", "UI 1x", "UI 2x", "UI 3x"};
+    }
+
+    unsigned int nextUiScale(unsigned int setting)
+    {
+        auto stages = uiScaleStages();
+        auto index = uiScaleStageIndex(setting);
+        return stages[(index + 1) % stages.size()];
+    }
+
+    unsigned int uiScaleStageIndex(unsigned int setting)
+    {
+        auto stages = uiScaleStages();
+        for (std::size_t i = 0; i < stages.size(); ++i)
+        {
+            if (stages[i] == setting)
+            {
+                return static_cast<unsigned int>(i);
+            }
+        }
+        // Auto is the default and the stage an unrecognised value reads as.
+        return 0u;
+    }
+
+    unsigned int resolveUiScale(unsigned int setting, float displayScale)
+    {
+        if (setting != 0u)
+        {
+            return std::clamp(setting, 1u, 3u);
+        }
+        return std::clamp(static_cast<unsigned int>(std::lround(displayScale)), 1u, 3u);
+    }
+
     GameOptions optionsFromConfig(const GlobalConfig& config)
     {
         GameOptions options;
@@ -224,6 +265,7 @@ namespace rwe
         options.buildingHalo = config.buildingHalo;
         options.antiAliasUnits = config.antiAliasUnits;
         options.cameraZoom = config.cameraZoom;
+        options.uiScale = config.uiScale;
         return options;
     }
 
@@ -259,6 +301,7 @@ namespace rwe
                                          {"building-halo", options.buildingHalo ? "true" : "false"},
                                          {"anti-alias-units", options.antiAliasUnits ? "true" : "false"},
                                          {"camera-zoom", std::to_string(options.cameraZoom)},
+                                         {"ui-scale", std::to_string(options.uiScale)},
                                      });
     }
 }

@@ -161,6 +161,11 @@ namespace rwe
     {
         renderMinimap();
 
+        // The HUD is laid out in raw UI coordinates, which the chrome
+        // projection scales up; anything here taken from the frame-space
+        // viewport has to come back down before it is drawn.
+        const auto uiScale = static_cast<float>(effectiveUiScale());
+
         const auto& localSideData = sceneContext.sideData->at(getPlayer(hudPlayerId()).side);
 
         // render top bar
@@ -180,7 +185,7 @@ namespace rwe
             for (float x = GuiSizeLeft - panelSlide; x < GuiSizeLeft; x += filler.bounds.width())
             {
                 chromeUiRenderService.drawSpriteAbs(x, 0.0f, filler);
-                chromeUiRenderService.drawSpriteAbs(x, worldViewport.bottom(), filler);
+                chromeUiRenderService.drawSpriteAbs(x, static_cast<float>(worldViewport.bottom()) / uiScale, filler);
             }
         }
 
@@ -193,7 +198,7 @@ namespace rwe
         }
         if (bottomPanelBackground)
         {
-            while (topXBuffer < sceneContext.viewport->width())
+            while (topXBuffer < static_cast<float>(sceneContext.viewport->width()) / uiScale)
             {
                 const auto& sprite = *(*bottomPanelBackground)->sprites.at(0);
                 chromeUiRenderService.drawSpriteAbs(topXBuffer, 0.0f, sprite);
@@ -293,15 +298,15 @@ namespace rwe
         float bottomXBuffer = GuiSizeLeft;
         if (bottomPanelBackground)
         {
-            while (bottomXBuffer < sceneContext.viewport->width())
+            while (bottomXBuffer < static_cast<float>(sceneContext.viewport->width()) / uiScale)
             {
                 const auto& sprite = *(*bottomPanelBackground)->sprites.at(0);
-                chromeUiRenderService.drawSpriteAbs(bottomXBuffer, worldViewport.bottom(), sprite);
+                chromeUiRenderService.drawSpriteAbs(bottomXBuffer, static_cast<float>(worldViewport.bottom()) / uiScale, sprite);
                 bottomXBuffer += sprite.bounds.width();
             }
         }
 
-        auto extraBottom = sceneContext.viewport->height() - 480;
+        auto extraBottom = sceneContext.viewport->height() / effectiveUiScale() - 480;
         if (hoveredUnit)
         {
             const auto& unit = getUnit(*hoveredUnit);
@@ -510,7 +515,7 @@ namespace rwe
         {
             int offset = gameSpeed.displayOffset();
             std::string speedText = (offset > 0 ? "+" : "") + std::to_string(offset);
-            float centerX = static_cast<float>(sceneContext.viewport->width()) / 2.0f;
+            float centerX = static_cast<float>(sceneContext.viewport->width()) / (2.0f * static_cast<float>(effectiveUiScale()));
             chromeUiRenderService.drawTextCenteredX(centerX, GuiSizeTop + 8, speedText, *guiFont);
         }
 
@@ -532,8 +537,8 @@ namespace rwe
 
         if (paused)
         {
-            float centerX = static_cast<float>(sceneContext.viewport->width()) / 2.0f;
-            float centerY = static_cast<float>(sceneContext.viewport->height()) / 2.0f;
+            float centerX = static_cast<float>(sceneContext.viewport->width()) / (2.0f * static_cast<float>(effectiveUiScale()));
+            float centerY = static_cast<float>(sceneContext.viewport->height()) / (2.0f * static_cast<float>(effectiveUiScale()));
             // TA's own title from anims/IGTITLES.GAF, centred on the screen.
             auto title = gameMediaDatabase.getSpriteSeries("IGTITLES", "igpaused");
             if (title && !(*title)->sprites.empty())
@@ -556,8 +561,10 @@ namespace rwe
         // top right on the SAME slide, and a strip with the game time, the
         // local player's unit count and the game speed rises from the bottom
         // on a slide of its own.
-        const auto screenWidth = static_cast<float>(sceneContext.viewport->width());
-        const auto screenHeight = static_cast<float>(sceneContext.viewport->height());
+        // Both strips are chrome, so the screen they are laid out against is
+        // the raw UI viewport rather than the frame.
+        const auto screenWidth = static_cast<float>(sceneContext.viewport->width()) / static_cast<float>(effectiveUiScale());
+        const auto screenHeight = static_cast<float>(sceneContext.viewport->height()) / static_cast<float>(effectiveUiScale());
 
         if (statsBarSlide > 0)
         {
@@ -2448,9 +2455,13 @@ namespace rwe
             if (guiVisible)
             {
                 // Coming back with the panel already slid away would otherwise
-                // put the inset back to full width underneath it.
-                appliedLeftInset = panelSlide > 0.0f ? 0 : GuiSizeLeft;
-                worldViewport.setInset(appliedLeftInset, GuiSizeTop, GuiSizeRight, GuiSizeBottom);
+                // put the inset back to full width underneath it. The GuiSize
+                // constants are raw UI units; the world inset is in frame
+                // pixels, so they scale with the UI.
+                auto scale = static_cast<int>(effectiveUiScale());
+                appliedUiScale = static_cast<unsigned int>(scale);
+                appliedLeftInset = (panelSlide > 0.0f ? 0 : GuiSizeLeft) * scale;
+                worldViewport.setInset(appliedLeftInset, GuiSizeTop * scale, GuiSizeRight * scale, GuiSizeBottom * scale);
             }
             else
             {

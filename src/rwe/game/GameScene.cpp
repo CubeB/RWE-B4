@@ -254,6 +254,7 @@ namespace rwe
           buildingHaloRedShift(sceneContext.globalConfig->buildingHaloRedShift),
           scrollSpeedSetting(sceneContext.globalConfig->scrollSpeed),
           cameraZoomSetting(sceneContext.globalConfig->cameraZoom),
+          uiScaleSetting(sceneContext.globalConfig->uiScale),
           gameParameters(gameParameters),
           audioLookup(audioLookup),
           stateLogStream(std::move(stateLogStream))
@@ -365,8 +366,11 @@ namespace rwe
     {
         // The panel's live bounds, not its resting ones: once it has started
         // moving the cursor is no longer on it, which is what keeps a held
-        // Space from arguing with itself part way through the slide.
-        auto p = getMousePosition();
+        // Space from arguing with itself part way through the slide. The
+        // panel is laid out in raw UI coordinates; the mouse arrives in frame
+        // pixels.
+        auto frame = getMousePosition();
+        auto p = toUiCoordinates(frame.x, frame.y);
         auto x = currentPanel->getX();
         auto y = currentPanel->getY();
         return p.x >= x
@@ -452,17 +456,27 @@ namespace rwe
         // panel is home again, costs two reallocations per round trip and
         // means the panel always slides across a world that is already drawn
         // underneath it.
-        auto desiredLeft = panelSlide > 0.0f ? 0 : GuiSizeLeft;
-        if (desiredLeft != appliedLeftInset)
+        // The HUD is laid out in raw UI coordinates, which the chrome
+        // projection scales up by uiScale; the world inset is in frame
+        // pixels, so the GuiSize constants are scaled with it.
+        auto scale = static_cast<int>(effectiveUiScale());
+        auto desiredLeft = (panelSlide > 0.0f ? 0 : GuiSizeLeft) * scale;
+        if (desiredLeft != appliedLeftInset || static_cast<unsigned int>(scale) != appliedUiScale)
         {
             appliedLeftInset = desiredLeft;
-            worldViewport.setInset(desiredLeft, GuiSizeTop, GuiSizeRight, GuiSizeBottom);
+            appliedUiScale = static_cast<unsigned int>(scale);
+            worldViewport.setInset(desiredLeft, GuiSizeTop * scale, GuiSizeRight * scale, GuiSizeBottom * scale);
             recreateWorldRenderTextures();
         }
     }
 
     void GameScene::update(int millisecondsElapsed)
     {
+        // The chrome is drawn through the scaled projection from here on.
+        // The world inset follows in updatePanelSlide, once the panel's own
+        // slide has been worked out.
+        chromeUiRenderService.setUiScale(effectiveUiScale());
+
         // The battle harness, if one was asked for: keep both sides at
         // strength and send every replacement at the enemy. Gated on the
         // harness being enabled rather than on the count, since a count of
@@ -583,7 +597,8 @@ namespace rwe
             if (std::holds_alternative<NormalCursorMode::DraggingMinimapState>(cursor->state))
             {
                 auto minimapToWorld = minimapToWorldMatrix(simulation.terrain, minimapRect);
-                auto mousePos = getMousePosition();
+                auto frame = getMousePosition();
+                auto mousePos = toUiCoordinates(frame.x, frame.y);
                 auto worldPos = minimapToWorld * Vector3f(static_cast<float>(mousePos.x) + 0.5f, static_cast<float>(mousePos.y) + 0.5, 0.0f);
 
                 relocateCamera(cameraConstraint, worldPos.x, worldPos.z);

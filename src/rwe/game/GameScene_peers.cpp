@@ -187,8 +187,8 @@ namespace rwe
             return;
         }
 
-        auto centerX = static_cast<float>(sceneContext.viewport->width()) / 2.0f;
-        auto centerY = static_cast<float>(sceneContext.viewport->height()) / 2.0f;
+        auto centerX = static_cast<float>(sceneContext.viewport->width()) / (2.0f * static_cast<float>(effectiveUiScale()));
+        auto centerY = static_cast<float>(sceneContext.viewport->height()) / (2.0f * static_cast<float>(effectiveUiScale()));
 
         // The pause banner's own presentation, which is where a player's eye
         // already goes when the game stops, with the reason written under it.

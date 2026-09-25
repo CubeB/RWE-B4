@@ -45,7 +45,9 @@ namespace rwe
     {
         if (isCursorOverMinimap())
         {
-            auto mousePos = getMousePosition();
+            // The minimap is chrome, laid out in raw UI coordinates.
+            auto frame = getMousePosition();
+            auto mousePos = toUiCoordinates(frame.x, frame.y);
 
             auto worldToMinimap = worldToMinimapMatrix(simulation.terrain, minimapRect);
 
@@ -107,7 +109,8 @@ namespace rwe
 
     bool GameScene::isCursorOverMinimap() const
     {
-        auto mousePos = getMousePosition();
+        auto frame = getMousePosition();
+        auto mousePos = toUiCoordinates(frame.x, frame.y);
         return minimapRect.contains(mousePos.x, mousePos.y);
     }
 
@@ -125,6 +128,12 @@ namespace rwe
         // pixels, frameDensity per point. See SceneManager::frameDensity.
         auto density = sceneContext.sceneManager->frameDensity();
         return Point(static_cast<int>(fx * density), static_cast<int>(fy * density));
+    }
+
+    Point GameScene::toUiCoordinates(int x, int y) const
+    {
+        auto ray = screenToWorldRayUtil(chromeUiRenderService.getInverseViewProjectionMatrix(), sceneContext.viewport->toClipSpace(x, y));
+        return Point(static_cast<int>(ray.origin.x), static_cast<int>(ray.origin.y));
     }
 
     std::optional<UnitId> GameScene::getFirstCollidingUnit(const Ray3f& ray) const
@@ -198,7 +207,8 @@ namespace rwe
         if (isCursorOverMinimap())
         {
             auto transform = minimapToWorldMatrix(simulation.terrain, minimapRect);
-            auto mousePos = getMousePosition();
+            auto frame = getMousePosition();
+            auto mousePos = toUiCoordinates(frame.x, frame.y);
             auto mouseX = static_cast<float>(mousePos.x) + 0.5f;
             auto mouseY = static_cast<float>(mousePos.y) + 0.5f;
 
@@ -1320,8 +1330,11 @@ namespace rwe
         auto rows = std::max(leftColumn.size(), rightColumn.size());
         const float boxWidth = (columnWidth * 2.0f) + 24.0f;
         const float boxHeight = (rows + 3) * lineHeight;
-        auto centerX = worldViewport.left() + (worldViewport.width() / 2.0f);
-        auto centerY = worldViewport.top() + (worldViewport.height() / 2.0f);
+        // Centred on the world view, but drawn through chrome, so the
+        // frame-space centre is turned back into raw UI coordinates.
+        auto uiScale = static_cast<float>(effectiveUiScale());
+        auto centerX = (worldViewport.left() + (worldViewport.width() / 2.0f)) / uiScale;
+        auto centerY = (worldViewport.top() + (worldViewport.height() / 2.0f)) / uiScale;
         auto boxX = centerX - (boxWidth / 2.0f);
         auto boxY = centerY - (boxHeight / 2.0f);
 
@@ -3397,7 +3410,8 @@ namespace rwe
 
     std::optional<std::string> GameScene::getUnitBuildButtonUnderCursor() const
     {
-        auto cursorPosition = getMousePosition();
+        auto frame = getMousePosition();
+        auto cursorPosition = toUiCoordinates(frame.x, frame.y);
         auto control = currentPanel->findAtPosition<UiStagedButton>(cursorPosition.x, cursorPosition.y);
         if (!control)
         {
