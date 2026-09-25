@@ -976,13 +976,12 @@ namespace rwe
                         if (targetUnitState
                             && categoryListContains(sim->unitDefinitions.at(targetUnitState->get().unitType).category, badCategory))
                         {
-                            // The drop is only ever half of it: 0x40B7B0 picks
-                            // again straight afterwards, and that pick can only
-                            // offer what the owner can see. A bad-target
-                            // category is a preference, not a veto, so a
-                            // fogged target with nothing else about has to be
-                            // kept -- dropping first and picking after lost it
-                            // for good when the re-pick could not see it.
+                            // 0x40B7B0 re-picks straight after the drop, and
+                            // that pick sees only what the owner sees, so a
+                            // fogged target with nothing else about is kept.
+                            // Consistent with §9's preference-not-veto; what
+                            // the original writes back on an empty re-pick is
+                            // not decoded, only observed in play.
                             auto replacement = chooseTarget(id, weaponIndex);
                             if (!replacement)
                             {
