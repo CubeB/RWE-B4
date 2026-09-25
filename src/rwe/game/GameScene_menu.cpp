@@ -496,11 +496,18 @@ namespace rwe
     void GameScene::addUiScaleButton(UiPanel& panel)
     {
         // How big the interface is drawn, another gadget no GUI file has. It
-        // sits one row below camera zoom and takes its position from the same
-        // derived geometry, so it lands on both options pages without either
-        // page's coordinates appearing here. The art is the Shading button's,
-        // as camera zoom uses it, so the row looks like the switch above.
-        uiFactory.addStagedButtonBelow(panel, "VISUALRT", "SHADINGMODE", "UISCALE", "CAMZOOM", "AAUNITS", uiScaleLabels(), uiScaleStageIndex(uiScaleSetting));
+        // sits below camera zoom and takes its position from the same derived
+        // geometry, so it lands on both options pages without either page's
+        // coordinates appearing here. The art is the Shading button's, as
+        // camera zoom uses it, so the row looks like the switch above.
+        //
+        // The two-row step is deliberate: one row would land on RESTORE on the
+        // in-game VISUALRT page, where the rows below camera zoom are already
+        // spoken for (RESTORE 269, UNDO 304, panel 352). Spanning from
+        // CAMZOOM to BSHADOWS instead puts it at the bottom of the page, clear
+        // of both. The front end's VISUALS page has taller rows and neither
+        // button, so it keeps the single-row step there -- see MainMenuScene.
+        uiFactory.addStagedButtonBelow(panel, "VISUALRT", "SHADINGMODE", "UISCALE", "CAMZOOM", "BSHADOWS", uiScaleLabels(), uiScaleStageIndex(uiScaleSetting));
     }
 
     void GameScene::wireInGameOptionControls()
