@@ -178,7 +178,9 @@ namespace rwe
         else if (keysym.key >= SDLK_F5 && keysym.key <= SDLK_F8)
         {
             // F5-F8 recall the camera bookmarks; with Ctrl held they store
-            // the current view instead, as the original does.
+            // the current view instead, as the original does. A bookmark
+            // holds the position only: recalling one deliberately leaves the
+            // current zoom alone.
             auto slot = static_cast<std::size_t>(keysym.key - SDLK_F5);
             if (isCtrlDown())
             {
