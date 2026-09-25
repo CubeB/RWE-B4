@@ -77,6 +77,7 @@ namespace rwe
          * the side panel's F4/Space slide rides on.
          */
         void setX(int x) { posX = x; }
+        void setY(int y) { posY = y; }
 
         virtual void mouseDown(MouseButtonEvent /*event*/) {}
 

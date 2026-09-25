@@ -513,14 +513,14 @@ namespace rwe
 
     void GameScene::addUiScaleButton(UiPanel& panel)
     {
-        // How big the interface is drawn, another gadget no GUI file has. It
-        // was on the visuals page beside camera zoom; it belongs on the
-        // interface page, where the other legibility controls are. It hangs
-        // one row below LEFTCLICK, the step taken from LEFTCLICK's gap to
-        // UNITCHAT above it, which puts it before RESTORE and UNDO -- those
-        // must stay the last rows on the page. The position is derived rather
-        // than measured and wants a ui_probe confirmation.
-        uiFactory.addStagedButtonBelow(panel, "SPEEDSRT", "SHADINGMODE", "UISCALE", "LEFTCLICK", "UNITCHAT", uiScaleLabels(), uiScaleStageIndex(uiScaleSetting));
+        // How big the interface is drawn, another gadget no GUI file has, on
+        // the interface page with the other legibility controls. SPEEDSRT has
+        // no free row for it: LEFTCLICK is at 219 and RESTORE at 269, with
+        // UNDO at 304 and the page ending at 352. A row below LEFTCLICK
+        // stepped from UNITCHAT (at 101) landed at 337, under both. So it
+        // goes between LEFTCLICK and RESTORE, and those four rows are spread
+        // evenly between LEFTCLICK and UNDO: 219, 247, 276, 304.
+        uiFactory.insertStagedButtonBetween(panel, "SPEEDSRT", "SHADINGMODE", "UISCALE", "LEFTCLICK", "RESTORE", "UNDO", uiScaleLabels(), uiScaleStageIndex(uiScaleSetting));
     }
 
     void GameScene::wireInGameOptionControls()

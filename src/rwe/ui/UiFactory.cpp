@@ -1,5 +1,6 @@
 #include "UiFactory.h"
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <rwe/ui/UiSlider.h>
 #include <rwe/ui/UiTextBox.h>
@@ -413,6 +414,40 @@ namespace rwe
         button->setName(name);
         button->setStage(stage);
         panel.appendChild(std::move(button));
+    }
+
+    void UiFactory::insertStagedButtonBetween(UiPanel& panel, const std::string& guiName, const std::string& artName, const std::string& name, const std::string& afterName, const std::string& beforeName, const std::string& lastName, const std::vector<std::string>& labels, unsigned int stage)
+    {
+        auto after = panel.find<UiStagedButton>(afterName);
+        auto before = panel.find<UiStagedButton>(beforeName);
+        auto last = panel.find<UiStagedButton>(lastName);
+        if (!after || !before || !last || panel.find<UiStagedButton>(name))
+        {
+            return;
+        }
+
+        auto& afterButton = after->get();
+        auto firstY = afterButton.getY();
+        auto lastY = last->get().getY();
+
+        auto button = createStagedButton(
+            afterButton.getX(),
+            firstY,
+            static_cast<int>(afterButton.getWidth()),
+            static_cast<int>(afterButton.getHeight()),
+            guiName,
+            artName,
+            labels,
+            static_cast<unsigned int>(labels.size()));
+        button->setName(name);
+        button->setStage(stage);
+        auto& inserted = *button;
+        panel.appendChild(std::move(button));
+
+        // Four rows, three gaps: the first and last rows stay put.
+        auto step = static_cast<float>(lastY - firstY) / 3.0f;
+        inserted.setY(firstY + static_cast<int>(std::lround(step)));
+        before->get().setY(firstY + static_cast<int>(std::lround(step * 2.0f)));
     }
 
     void UiFactory::addSliderBelow(UiPanel& panel, const std::string& guiName, const std::string& name, const std::string& templateName, const std::string& anchorName, const std::string& aboveAnchorName, float percent)

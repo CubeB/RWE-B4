@@ -127,6 +127,16 @@ namespace rwe
         void addStagedButtonBelow(UiPanel& panel, const std::string& guiName, const std::string& artName, const std::string& name, const std::string& anchorName, const std::string& aboveAnchorName, const std::vector<std::string>& labels, unsigned int stage);
 
         /**
+         * Adds a staged button the GUI data does not contain between
+         * afterName and beforeName, shaped like afterName, and spaces the
+         * rows afterName, the new button, beforeName and lastName evenly
+         * between where afterName and lastName already are. For a page with
+         * no free row where the button belongs. Does nothing unless the
+         * panel has all three, and is idempotent.
+         */
+        void insertStagedButtonBetween(UiPanel& panel, const std::string& guiName, const std::string& artName, const std::string& name, const std::string& afterName, const std::string& beforeName, const std::string& lastName, const std::vector<std::string>& labels, unsigned int stage);
+
+        /**
          * Adds a horizontal slider the GUI data does not contain, one row
          * below anchorName, taking the row step from the gap between
          * anchorName and aboveAnchorName. `templateName` is an existing
