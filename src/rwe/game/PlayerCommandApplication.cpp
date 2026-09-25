@@ -1,5 +1,6 @@
 #include "PlayerCommandApplication.h"
 
+#include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/UnitBehaviorService.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/util/Index.h>
@@ -116,12 +117,28 @@ namespace rwe
             return false;
         }
 
+        // A mission unit its script still holds takes no orders from anyone:
+        // no selection reaches it (0x487E69 cleared the bit every selection
+        // path tests), and the computer's AI does not take it on (0x408830).
+        // Refused here, on every peer alike, whoever sent it.
+        if (simulation.getUnitState(unitCommand.unit).heldByMission)
+        {
+            return false;
+        }
+
         match(
             unitCommand.command,
             [&](const PlayerUnitCommand::IssueOrder& c) {
                 switch (c.issueKind)
                 {
                     case PlayerUnitCommand::IssueOrder::IssueKind::Immediate:
+                        // An order that replaces the unit's own replaces what
+                        // is left of its mission list with them: in the
+                        // original the list is the unit's order list.
+                        if (simulation.missionScripts)
+                        {
+                            simulation.missionScripts->scripts.erase(unitCommand.unit.value);
+                        }
                         issueOrder(simulation, unitCommand.unit, c.order);
                         break;
                     case PlayerUnitCommand::IssueOrder::IssueKind::Queued:

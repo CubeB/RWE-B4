@@ -396,6 +396,7 @@ namespace rwe
             // Only a mission unit is ever held, and a save from before the
             // flag existed holds none.
             {"heldByMission", hashedPlain<&UnitState::heldByMission>(), true},
+            {"immune", hashedPlain<&UnitState::immune>(), true},
             {"isSufficientlyPowered", hashedPlain<&UnitState::isSufficientlyPowered>()},
             {"cloakRequested", hashedPlain<&UnitState::cloakRequested>()},
             {"cloaked", hashedPlain<&UnitState::cloaked>()},

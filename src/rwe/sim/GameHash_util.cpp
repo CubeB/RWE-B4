@@ -1,6 +1,7 @@
 #include "GameHash_util.h"
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MissionRules.h>
+#include <rwe/sim/MissionScripts.h>
 
 #include <rwe/game/UnitStateFieldTable.h>
 
@@ -388,6 +389,29 @@ namespace rwe
         return GameHash(accumulator);
     }
 
+    GameHash computeHashOf(const MissionScripts& m)
+    {
+        // Folded by position, for the reason the rules are: the state is
+        // mostly small counts and flags that a sum would cancel.
+        uint32_t accumulator = 0;
+        auto fold = [&](GameHash h) { accumulator = (accumulator * 31u) + h.value; };
+        for (const auto& [id, script] : m.scripts)
+        {
+            fold(computeHashOf(id));
+            fold(computeHashOf(script.started));
+            fold(computeHashOf(script.wakeAt));
+            fold(computeHashOf(static_cast<uint32_t>(script.steps.size())));
+            for (const auto& step : script.steps)
+            {
+                fold(computeHashOf(step.kind));
+                fold(computeHashOf(step.ticks));
+                fold(computeHashOf(step.count));
+                fold(computeHashOf(step.hit));
+            }
+        }
+        return GameHash(accumulator);
+    }
+
     GameHash computeHashOf(const Grid<ExploredMask>& grid)
     {
         std::uint32_t accumulator = 0;
@@ -415,6 +439,7 @@ namespace rwe
             simulation.explored,
             // Absent in a skirmish, and then it adds nothing, so a skirmish's
             // hashes are what they were.
-            simulation.missionRules ? computeHashOf(*simulation.missionRules) : GameHash(0));
+            simulation.missionRules ? computeHashOf(*simulation.missionRules) : GameHash(0),
+            simulation.missionScripts ? computeHashOf(*simulation.missionScripts) : GameHash(0));
     }
 }

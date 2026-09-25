@@ -9,6 +9,7 @@
 #include <rwe/sim/DemoRecorder.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/MissionRules.h>
+#include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/SimScalar.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitBehaviorService.h>
@@ -3410,6 +3411,14 @@ namespace rwe
             demoRecorder->damageApplied(*this, unitId, attacker, damagePoints, sourceOwner);
         }
 
+        // The same handler's first act is to tell whoever is watching the
+        // unit that it was hit (0x406F89), whoever the attacker, which is
+        // what a mission unit's WAITFORATTACK is waiting for.
+        if (missionScripts && !getUnitState(unitId).isDead())
+        {
+            missionScripts->unitDamaged(unitId);
+        }
+
         if (attacker)
         {
             // The original shoots back from inside the damage message
@@ -4872,6 +4881,13 @@ namespace rwe
 
         // The three unit passes are timed separately -- each is its own
         // scope because RWE_SIMPROF names its variables, one to a scope.
+        // A mission unit's list hands out its next order before the unit
+        // looks at its queue.
+        if (missionScripts)
+        {
+            missionScripts->update(*this);
+        }
+
         {
             RWE_SIMPROF("behaviour");
 

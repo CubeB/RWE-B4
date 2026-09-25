@@ -293,12 +293,16 @@ original in every case.
 - **A resurrect shows the reclaim cursor**, the base game's `CURSORS.GAF` not
   containing the `cursorrevive` sequence that `rev31.gp3` adds.
 - **Aircraft have no pitch** (§1); the `BrakeRate` nose re-aim is in.
-- **A scripted mission unit stays held.** InitialMission orders do not run
-  yet, so a unit the original would hand back to the player once its orders
-  ran out stays out of the player's hands for the whole mission, as far as the
-  rules that want a usable unit (AllUnitsKilled, MoveUnitToRadius) go; the
-  player can still select it. There is no 150-tick lock after a unit changes
-  hands either. §113.
+- **No 150-tick lock after a unit changes hands**, which the mission rules'
+  usable test also reads in the original. §113.
+- **A mission unit's first order with a coordinate missing starts from 0**,
+  where the original's interpreter reads whatever its stack held; a later
+  one takes the previous order's, as there. An `i` (start aboard a
+  transport) keeps any order written before it, which the original drops
+  for a unit whose carrier is not an air base. A `g` does not check that the
+  unit it names is an ally. And a computer's unit handed back by its script
+  gets the AI's standing orders once, at that moment, where the original's
+  AI rewrites them every second. §114.
 - **A mission rule with no count or an empty name is not built.** The original
   builds KillUnitType and UnitTypeKilled with whatever its stack held, and an
   empty BuildUnitType as a rule nothing can meet. No shipped mission has either.

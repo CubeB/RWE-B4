@@ -1,6 +1,7 @@
 #include "dump_util.h"
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MissionRules.h>
+#include <rwe/sim/MissionScripts.h>
 
 #include "UnitStateFieldTable.h"
 
@@ -495,6 +496,32 @@ namespace rwe
         };
     }
 
+    nlohmann::json dumpJson(const MissionScripts& m)
+    {
+        // What the hash covers, by name.
+        auto out = nlohmann::json::array();
+        for (const auto& [id, script] : m.scripts)
+        {
+            auto steps = nlohmann::json::array();
+            for (const auto& step : script.steps)
+            {
+                steps.push_back(nlohmann::json{
+                    {"kind", static_cast<int>(step.kind)},
+                    {"ticks", step.ticks},
+                    {"count", step.count},
+                    {"hit", step.hit},
+                });
+            }
+            out.push_back(nlohmann::json{
+                {"unit", id},
+                {"started", script.started},
+                {"wakeAt", script.wakeAt.value},
+                {"steps", steps},
+            });
+        }
+        return out;
+    }
+
     nlohmann::json dumpJson(const GameSimulation& simulation)
     {
         auto j = nlohmann::json{
@@ -511,6 +538,10 @@ namespace rwe
         if (simulation.missionRules)
         {
             j["missionRules"] = dumpJson(*simulation.missionRules);
+        }
+        if (simulation.missionScripts)
+        {
+            j["missionScripts"] = dumpJson(*simulation.missionScripts);
         }
         return j;
     }

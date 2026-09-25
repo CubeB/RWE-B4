@@ -260,6 +260,7 @@ namespace rwe
             u.slowFacePoint = SimVector(66_ss, 0_ss, 67_ss);
             u.activated = true;
             u.heldByMission = true;
+            u.immune = true;
             u.isSufficientlyPowered = true;
             u.cloakRequested = true;
             u.cloaked = true;
@@ -439,9 +440,9 @@ namespace rwe
         // the walks must agree with it from now on. It was 469200823 until
         // 2026-09-24, when reclaimProgress left the table (#19: a unit is
         // reclaimed through its hit points now, and had nothing to keep here),
-        // and then 469200811 until heldByMission joined it (#38), adding its
-        // one.
-        REQUIRE(computeHashOf(makePopulatedUnitState()) == GameHash(469200812u));
+        // and then 469200811 until heldByMission and immune joined it (#38),
+        // adding one each.
+        REQUIRE(computeHashOf(makePopulatedUnitState()) == GameHash(469200813u));
     }
 
 }

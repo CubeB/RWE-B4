@@ -1,6 +1,7 @@
 #include "UnitBehaviorService.h"
 #include <rwe/sim/AirMovement.h>
 #include <rwe/sim/DemoRecorder.h>
+#include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/SimRandom.h>
 #include <algorithm>
 #include <limits>
@@ -299,6 +300,15 @@ namespace rwe
                     unitInfo.state->orders.pop_front();
                     unitInfo.state->buildOrderUnitId = std::nullopt;
                 }
+            }
+            else if (sim->missionScripts && sim->missionScripts->isRunning(unitId))
+            {
+                // A mission unit whose list is on a wait, a hunt's pause or
+                // any other step of its own has an empty queue and is still
+                // not idle: the original's head mission is the WAIT, and only
+                // an empty list or a Standby looks for a fight (0x407069). It
+                // does not go after what it sees, or off to land; its weapons
+                // still answer from where it stands.
             }
             else if (auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics); airPhysics != nullptr)
             {
@@ -2972,6 +2982,14 @@ namespace rwe
             // candidate can even be seen, and skips the unit when it is set.
             // The index only dropped the searcher's own side (issue #237).
             if (sim->arePlayersAllied(unit.owner, otherUnit.owner))
+            {
+                continue;
+            }
+
+            // Nor is a mission's Immune unit (0x40AB24): the gates the
+            // campaign puts down on the map are not something to shoot at
+            // unprompted.
+            if (otherUnit.immune)
             {
                 continue;
             }

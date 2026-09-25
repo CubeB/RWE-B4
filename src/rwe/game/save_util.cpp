@@ -11,6 +11,7 @@
 #include <cstring>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MissionRules.h>
+#include <rwe/sim/MissionScripts.h>
 #include <rwe/util/match.h>
 #include <sstream>
 #include <stdexcept>
@@ -189,6 +190,67 @@ namespace rwe
             m.computer = loadOptional(j.at("computer"), loadPlayer);
             m.humanCommander = j.at("humanCommander").get<std::string>();
             m.computerCommander = j.at("computerCommander").get<std::string>();
+            return m;
+        }
+
+        // ---- mission scripts --------------------------------------------
+
+        json saveMissionScripts(const MissionScripts& m)
+        {
+            json scripts = json::array();
+            for (const auto& [id, script] : m.scripts)
+            {
+                json steps = json::array();
+                for (const auto& step : script.steps)
+                {
+                    steps.push_back(json{
+                        {"kind", saveEnum(step.kind)},
+                        {"position", saveSimVector(step.position)},
+                        {"unitType", step.unitType},
+                        {"target", saveOptional(step.target, [](UnitId u) { return json(u.value); })},
+                        {"count", step.count},
+                        {"ticks", step.ticks},
+                        {"radius", step.radius},
+                        {"hit", step.hit},
+                    });
+                }
+                scripts.push_back(json{
+                    {"unit", id},
+                    {"started", script.started},
+                    {"wakeAt", saveGameTime(script.wakeAt)},
+                    {"steps", steps},
+                });
+            }
+            return scripts;
+        }
+
+        MissionScripts loadMissionScripts(const json& j)
+        {
+            MissionScripts m;
+            for (const auto& sj : j)
+            {
+                MissionScript script;
+                script.started = sj.at("started").get<bool>();
+                script.wakeAt = loadGameTime(sj.at("wakeAt"));
+                for (const auto& stepJson : sj.at("steps"))
+                {
+                    MissionStep step;
+                    step.kind = loadEnum<MissionStep::Kind>(stepJson.at("kind"));
+                    if (step.kind > MissionStep::Kind::MakeSelectable)
+                    {
+                        throw std::runtime_error("bad mission step kind");
+                    }
+                    step.position = loadSimVector(stepJson.at("position"));
+                    step.unitType = stepJson.at("unitType").get<std::string>();
+                    step.target = loadOptional(stepJson.at("target"), [](const json& v) { return UnitId(v.get<unsigned int>()); });
+                    step.count = stepJson.at("count").get<int>();
+                    step.ticks = stepJson.at("ticks").get<int>();
+                    step.radius = stepJson.at("radius").get<int>();
+                    step.hit = stepJson.at("hit").get<bool>();
+                    script.steps.push_back(std::move(step));
+                }
+                m.scripts[sj.at("unit").get<unsigned int>()] = std::move(script);
+            }
             return m;
         }
 
@@ -584,6 +646,10 @@ namespace rwe
         {
             j["missionRules"] = saveMissionRules(*sim.missionRules);
         }
+        if (sim.missionScripts)
+        {
+            j["missionScripts"] = saveMissionScripts(*sim.missionScripts);
+        }
 
         json players = json::array();
         for (const auto& p : sim.players)
@@ -726,6 +792,14 @@ namespace rwe
         else
         {
             sim.missionRules.reset();
+        }
+        if (j.contains("missionScripts"))
+        {
+            sim.missionScripts = std::make_unique<MissionScripts>(loadMissionScripts(j.at("missionScripts")));
+        }
+        else
+        {
+            sim.missionScripts.reset();
         }
 
         // The fresh sim has the map's initial features standing. Sweep them

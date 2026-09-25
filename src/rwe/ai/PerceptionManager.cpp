@@ -103,6 +103,12 @@ namespace rwe
             {
                 continue;
             }
+            // A mission's Immune unit is not something the computer goes
+            // looking for: its search for a target skips them (0x407297).
+            if (unit.immune)
+            {
+                continue;
+            }
             if (!profile.cheatModeOmniscient && !sim.canSeeUnit(aiOwner, unitId))
             {
                 continue;

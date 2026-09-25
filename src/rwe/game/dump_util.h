@@ -36,6 +36,9 @@ namespace rwe
     struct MissionRules;
     nlohmann::json dumpJson(const MissionRules& m);
 
+    struct MissionScripts;
+    nlohmann::json dumpJson(const MissionScripts& m);
+
     nlohmann::json dumpJson(const UnitState& u);
 
     /** Only the stockpile counters, to match what the hash covers. */

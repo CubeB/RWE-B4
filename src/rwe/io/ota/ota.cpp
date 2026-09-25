@@ -341,7 +341,10 @@ namespace rwe
                     }
                     if (q < piece.size() && std::tolower(static_cast<unsigned char>(piece[q])) == 'a')
                     {
+                        // `wa NAME` watches that unit instead of itself.
                         order.kind = MissionOrder::Kind::WaitForAttack;
+                        ++q;
+                        order.name = scanName(piece, q);
                     }
                     else
                     {
