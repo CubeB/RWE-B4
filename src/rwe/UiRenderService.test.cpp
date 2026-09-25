@@ -192,15 +192,10 @@ namespace rwe
             REQUIRE(service.getViewProjectionMatrix() == expected);
         }
 
-        SECTION("a scale below one half clamps to one half")
+        SECTION("a scale below one clamps to one")
         {
             service.setUiScale(0.0f);
-            // The clamp is to 0.5, so raw content up to twice the viewport
-            // fills the frame; the raw viewport centre still lands at the
-            // frame centre.
-            auto clip = service.getViewProjectionMatrix() * Vector3f(1280.0f, 960.0f, 0.0f);
-            REQUIRE(clip.x == Catch::Approx(0.0f));
-            REQUIRE(clip.y == Catch::Approx(0.0f));
+            REQUIRE(service.getViewProjectionMatrix() == Matrix4f::orthographicProjection(0.0f, 1280.0f, 960.0f, 0.0f, 100.0f, -100.0f));
         }
 
         SECTION("no aspect viewport: the raw centre maps to the physical centre at 2x")
@@ -217,24 +212,6 @@ namespace rwe
             auto clip = service.getViewProjectionMatrix() * Vector3f(320.0f, 240.0f, 0.0f);
             REQUIRE(clip.x == Catch::Approx(0.0f));
             REQUIRE(clip.y == Catch::Approx(0.0f));
-        }
-
-        SECTION("a fractional scale maps the raw centre and inverts exactly")
-        {
-            service.setUiScale(1.5f);
-
-            // At 1.5x the raw box that fills the frame is viewport / 1.5, so
-            // its own centre is the frame centre.
-            auto clip = service.getViewProjectionMatrix() * Vector3f(1280.0f / 1.5f / 2.0f, 960.0f / 1.5f / 2.0f, 0.0f);
-            REQUIRE(clip.x == Catch::Approx(0.0f).margin(1e-4f));
-            REQUIRE(clip.y == Catch::Approx(0.0f).margin(1e-4f));
-
-            auto forward = service.getViewProjectionMatrix();
-            auto inverse = service.getInverseViewProjectionMatrix();
-            Vector3f raw(123.0f, 234.0f, 0.0f);
-            auto back = inverse * (forward * raw);
-            REQUIRE(back.x == Catch::Approx(raw.x));
-            REQUIRE(back.y == Catch::Approx(raw.y));
         }
 
         SECTION("no aspect viewport: the inverse round trips a raw point at 3x")

@@ -165,12 +165,12 @@ namespace rwe
 
     std::vector<unsigned int> uiScaleStages()
     {
-        return {0u, 100u, 150u, 200u, 250u, 300u};
+        return {0u, 100u, 200u, 300u};
     }
 
     std::vector<std::string> uiScaleLabels()
     {
-        return {"UI Auto", "UI 1x", "UI 1.5x", "UI 2x", "UI 2.5x", "UI 3x"};
+        return {"UI Auto", "UI 1x", "UI 2x", "UI 3x"};
     }
 
     unsigned int nextUiScale(unsigned int setting)
@@ -180,31 +180,29 @@ namespace rwe
         return stages[(index + 1) % stages.size()];
     }
 
+    namespace
+    {
+        unsigned int wholeUiScale(float scale)
+        {
+            return std::clamp(static_cast<unsigned int>(std::lround(std::max(0.0f, scale))), 1u, 3u);
+        }
+    }
+
     unsigned int uiScaleStageIndex(unsigned int setting)
     {
-        auto stages = uiScaleStages();
-        for (std::size_t i = 0; i < stages.size(); ++i)
-        {
-            if (stages[i] == setting)
-            {
-                return static_cast<unsigned int>(i);
-            }
-        }
-        // Auto is the default and the stage an unrecognised value reads as.
-        return 0u;
+        // A percentage between the stages -- 150 and 250 were stages once --
+        // reads as the whole step it rounds to, which is also what it draws at.
+        return setting == 0u ? 0u : wholeUiScale(static_cast<float>(setting) / 100.0f);
     }
 
     float resolveUiScale(unsigned int setting, float contentScale, int frameWidth, int frameHeight)
     {
-        auto wanted = setting != 0u
-            ? std::clamp(static_cast<float>(setting) / 100.0f, 0.5f, 3.0f)
-            : std::clamp(std::round(contentScale * 2.0f) / 2.0f, 0.5f, 3.0f);
+        auto wanted = wholeUiScale(setting != 0u ? static_cast<float>(setting) / 100.0f : contentScale);
 
         // The sidebar alone is 480 tall, so a scale that leaves less than
         // 640x480 of layout crops the HUD rather than enlarging it.
-        auto fitsExactly = std::min(static_cast<float>(frameWidth) / 640.0f, static_cast<float>(frameHeight) / 480.0f);
-        auto fits = std::max(0.5f, std::floor(fitsExactly * 2.0f) / 2.0f);
-        return std::min(wanted, fits);
+        auto fits = static_cast<unsigned int>(std::max(1, std::min(frameWidth / 640, frameHeight / 480)));
+        return static_cast<float>(std::min(wanted, fits));
     }
 
     GameOptions optionsFromConfig(const GlobalConfig& config)

@@ -80,39 +80,29 @@ namespace rwe
         SECTION("carries the UI scale across")
         {
             GlobalConfig config;
-            config.uiScale = 150;
-            REQUIRE(optionsFromConfig(config).uiScale == 150u);
+            config.uiScale = 200;
+            REQUIRE(optionsFromConfig(config).uiScale == 200u);
         }
     }
 
     TEST_CASE("UI scale helpers")
     {
-        SECTION("stages are Auto and the five percentages in order")
+        SECTION("stages are Auto and the three whole steps in order")
         {
             auto stages = uiScaleStages();
-            REQUIRE(stages.size() == 6);
+            REQUIRE(stages.size() == 4);
             REQUIRE(stages[0] == 0u);
             REQUIRE(stages[1] == 100u);
-            REQUIRE(stages[2] == 150u);
-            REQUIRE(stages[3] == 200u);
-            REQUIRE(stages[4] == 250u);
-            REQUIRE(stages[5] == 300u);
+            REQUIRE(stages[2] == 200u);
+            REQUIRE(stages[3] == 300u);
         }
 
         SECTION("next cycles through every stage and wraps")
         {
             REQUIRE(nextUiScale(0u) == 100u);
-            REQUIRE(nextUiScale(100u) == 150u);
-            REQUIRE(nextUiScale(150u) == 200u);
-            REQUIRE(nextUiScale(200u) == 250u);
-            REQUIRE(nextUiScale(250u) == 300u);
+            REQUIRE(nextUiScale(100u) == 200u);
+            REQUIRE(nextUiScale(200u) == 300u);
             REQUIRE(nextUiScale(300u) == 0u);
-        }
-
-        SECTION("a value not in the stages starts from Auto and advances")
-        {
-            REQUIRE(nextUiScale(400u) == 100u);
-            REQUIRE(nextUiScale(99u) == 100u);
         }
 
         SECTION("stage index round trips every stage")
@@ -124,10 +114,14 @@ namespace rwe
             }
         }
 
-        SECTION("an unknown value reads as the Auto stage")
+        SECTION("a percentage between stages reads as the whole step it rounds to")
         {
-            REQUIRE(uiScaleStageIndex(400u) == uiScaleStageIndex(0u));
-            REQUIRE(uiScaleStageIndex(99u) == uiScaleStageIndex(0u));
+            REQUIRE(uiScaleStageIndex(150u) == uiScaleStageIndex(200u));
+            REQUIRE(uiScaleStageIndex(140u) == uiScaleStageIndex(100u));
+            REQUIRE(uiScaleStageIndex(250u) == uiScaleStageIndex(300u));
+            REQUIRE(uiScaleStageIndex(30u) == uiScaleStageIndex(100u));
+            REQUIRE(uiScaleStageIndex(400u) == uiScaleStageIndex(300u));
+            REQUIRE(nextUiScale(150u) == 300u);
         }
 
         SECTION("labels are in stage order")
@@ -136,49 +130,44 @@ namespace rwe
             REQUIRE(labels.size() == uiScaleStages().size());
             REQUIRE(labels[0] == "UI Auto");
             REQUIRE(labels[1] == "UI 1x");
-            REQUIRE(labels[2] == "UI 1.5x");
-            REQUIRE(labels[3] == "UI 2x");
-            REQUIRE(labels[4] == "UI 2.5x");
-            REQUIRE(labels[5] == "UI 3x");
+            REQUIRE(labels[2] == "UI 2x");
+            REQUIRE(labels[3] == "UI 3x");
         }
 
-        // A 4K frame, big enough that only the 0.5..3 clamp applies.
+        // A 4K frame, big enough that only the 1..3 clamp applies.
         const int w = 3840;
         const int h = 2160;
 
-        SECTION("Auto snaps the content scale to the nearest half")
+        SECTION("Auto rounds the content scale to a whole step")
         {
-            REQUIRE(resolveUiScale(0u, 1.0f, w, h) == Catch::Approx(1.0f));
-            REQUIRE(resolveUiScale(0u, 1.2f, w, h) == Catch::Approx(1.0f));
-            REQUIRE(resolveUiScale(0u, 1.3f, w, h) == Catch::Approx(1.5f));
-            REQUIRE(resolveUiScale(0u, 1.5f, w, h) == Catch::Approx(1.5f));
-            REQUIRE(resolveUiScale(0u, 2.0f, w, h) == Catch::Approx(2.0f));
-            REQUIRE(resolveUiScale(0u, 3.0f, w, h) == Catch::Approx(3.0f));
-            REQUIRE(resolveUiScale(0u, 4.0f, w, h) == Catch::Approx(3.0f));
-            REQUIRE(resolveUiScale(0u, 0.0f, w, h) == Catch::Approx(0.5f));
+            REQUIRE(resolveUiScale(0u, 1.0f, w, h) == 1.0f);
+            REQUIRE(resolveUiScale(0u, 1.25f, w, h) == 1.0f);
+            REQUIRE(resolveUiScale(0u, 1.5f, w, h) == 2.0f);
+            REQUIRE(resolveUiScale(0u, 2.0f, w, h) == 2.0f);
+            REQUIRE(resolveUiScale(0u, 3.0f, w, h) == 3.0f);
+            REQUIRE(resolveUiScale(0u, 4.0f, w, h) == 3.0f);
+            REQUIRE(resolveUiScale(0u, 0.0f, w, h) == 1.0f);
         }
 
-        SECTION("an explicit percentage is the scale, clamped")
+        SECTION("an explicit percentage rounds to a whole step, clamped")
         {
-            REQUIRE(resolveUiScale(100u, 2.0f, w, h) == Catch::Approx(1.0f));
-            REQUIRE(resolveUiScale(150u, 1.0f, w, h) == Catch::Approx(1.5f));
-            REQUIRE(resolveUiScale(250u, 1.0f, w, h) == Catch::Approx(2.5f));
-            REQUIRE(resolveUiScale(300u, 1.0f, w, h) == Catch::Approx(3.0f));
-            REQUIRE(resolveUiScale(30u, 1.0f, w, h) == Catch::Approx(0.5f));
-            REQUIRE(resolveUiScale(500u, 1.0f, w, h) == Catch::Approx(3.0f));
+            REQUIRE(resolveUiScale(100u, 2.0f, w, h) == 1.0f);
+            REQUIRE(resolveUiScale(200u, 1.0f, w, h) == 2.0f);
+            REQUIRE(resolveUiScale(300u, 1.0f, w, h) == 3.0f);
+            REQUIRE(resolveUiScale(150u, 1.0f, w, h) == 2.0f);
+            REQUIRE(resolveUiScale(30u, 1.0f, w, h) == 1.0f);
+            REQUIRE(resolveUiScale(500u, 1.0f, w, h) == 3.0f);
         }
 
         SECTION("no scale leaves less than 640x480 of layout")
         {
-            // 1080p holds 2x (960x540) and 2.25x, but not 2.5x (768x432).
-            REQUIRE(resolveUiScale(300u, 1.0f, 1920, 1080) == Catch::Approx(2.0f));
-            REQUIRE(resolveUiScale(250u, 1.0f, 1920, 1080) == Catch::Approx(2.0f));
-            REQUIRE(resolveUiScale(0u, 3.0f, 1920, 1080) == Catch::Approx(2.0f));
-            REQUIRE(resolveUiScale(200u, 1.0f, 1280, 960) == Catch::Approx(2.0f));
-            REQUIRE(resolveUiScale(200u, 1.0f, 1279, 960) == Catch::Approx(1.5f));
-            // A frame smaller than the layout shrinks it as far as 0.5x.
-            REQUIRE(resolveUiScale(100u, 1.0f, 320, 240) == Catch::Approx(0.5f));
-            REQUIRE(resolveUiScale(100u, 1.0f, 100, 100) == Catch::Approx(0.5f));
+            // 1080p holds 2x (960x540) but not 3x (640x360).
+            REQUIRE(resolveUiScale(300u, 1.0f, 1920, 1080) == 2.0f);
+            REQUIRE(resolveUiScale(0u, 3.0f, 1920, 1080) == 2.0f);
+            REQUIRE(resolveUiScale(200u, 1.0f, 1280, 960) == 2.0f);
+            REQUIRE(resolveUiScale(200u, 1.0f, 1279, 960) == 1.0f);
+            // A frame smaller than the layout still draws at 1x.
+            REQUIRE(resolveUiScale(200u, 1.0f, 320, 240) == 1.0f);
         }
     }
 }

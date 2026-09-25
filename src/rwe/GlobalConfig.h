@@ -106,25 +106,27 @@ namespace rwe
     bool shadingModeCoversUnits(ShadingMode mode);
     bool shadingModeCoversBuildings(ShadingMode mode);
 
-    /** The six UI scale stages, in button order: Auto and 100 to 300 percent. */
+    /** The four UI scale stages, in button order: Auto, 100, 200 and 300 percent. */
     std::vector<unsigned int> uiScaleStages();
 
     /** The label each UI scale stage shows; the active stage's label is the readout. */
     std::vector<std::string> uiScaleLabels();
 
-    /** The next UI scale stage, wrapping. A value not in the stages starts from Auto and advances. */
+    /** The next UI scale stage, wrapping, from the stage uiScaleStageIndex reads the setting as. */
     unsigned int nextUiScale(unsigned int setting);
 
-    /** The stage index for a UI scale setting; anything not a stage reads as Auto. */
+    /** The stage index for a UI scale setting; a percentage between stages reads as the nearest, 1x to 3x. */
     unsigned int uiScaleStageIndex(unsigned int setting);
 
     /**
-     * Turns a UI scale setting into the scale to draw at. Auto (0) follows
-     * the content scale, snapped to the nearest half, so on a 2x display
-     * the interface is physically the same size as on a 1x one; an explicit
-     * percentage is divided by 100. Both are clamped to 0.5..3, and then to
-     * the largest half step at which the 640x480 layout still fits the
-     * frame, never below 0.5.
+     * Turns a UI scale setting into the whole-number scale to draw at. Auto
+     * (0) follows the content scale, rounded, so on a 2x display the
+     * interface is physically the same size as on a 1x one; an explicit
+     * percentage rounds to the nearest whole step. Both are clamped to 1..3,
+     * and then to the largest scale at which the 640x480 layout still fits
+     * the frame, never below 1. Whole numbers only: the art is sampled
+     * GL_NEAREST, and at 1.5x alternate art pixels come out one and two
+     * screen pixels wide.
      */
     float resolveUiScale(unsigned int setting, float contentScale, int frameWidth, int frameHeight);
 
@@ -193,14 +195,13 @@ namespace rwe
 
         /**
          * How big the interface is drawn, as a percentage: 0 Auto, or 100,
-         * 150, 200, 250, 300. Auto follows the display density, snapped to
-         * the nearest half, so on a high-density display the interface is
-         * physically the same size as it was on a 1x one. It is deliberately
-         * distinct from both cameraZoom (how much battlefield is visible) and
-         * pixelSize (how chunky everything is): this is the legibility
-         * control. A whole-number scale is pixel-exact under GL_NEAREST; a
-         * half step is what a 1.5x display needs and is offered for it.
-         * Stored globally as ui-scale.
+         * 200, 300. Auto follows the display density, so on a high-density
+         * display the interface is physically the same size as it was on a
+         * 1x one. It is deliberately distinct from both cameraZoom (how much
+         * battlefield is visible) and pixelSize (how chunky everything is):
+         * this is the legibility control. Whole steps only, because the art
+         * is sampled GL_NEAREST; see resolveUiScale. Stored globally as
+         * ui-scale.
          */
         unsigned int uiScale{0};
 
@@ -407,7 +408,7 @@ namespace rwe
         /** Camera zoom percentage; last so adding it left the positional initialisers above valid. */
         unsigned int cameraZoom{100};
 
-        /** UI scale setting as a percentage: 0 Auto, or 100 to 300. Final field. */
+        /** UI scale setting as a percentage: 0 Auto, or 100, 200, 300. Final field. */
         unsigned int uiScale{0};
     };
 

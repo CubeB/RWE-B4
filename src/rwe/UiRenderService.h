@@ -89,9 +89,9 @@ namespace rwe
         /**
          * Multiplier on every raw UI coordinate, so a fixed 640x480 layout
          * can be drawn larger without moving a single gadget. It is folded
-         * into the view-projection as a scale term; a whole number keeps the
-         * pixel art exact under GL_NEAREST, and a half step is offered for a
-         * 1.5x display. 1 is the identity.
+         * into the view-projection as a scale term, and kept to whole
+         * numbers by its callers because that is what keeps the pixel art
+         * exact under GL_NEAREST. 1 is the identity.
          */
         float uiScale{1.0f};
 
@@ -107,11 +107,11 @@ namespace rwe
         UiRenderService(GraphicsContext* graphics, ShaderService* shaders, const AbstractViewport* viewport, const AbstractViewport* aspectViewport);
 
         /**
-         * Sets the raw-coordinate multiplier; anything below 0.5 clamps to
-         * 0.5. A service with an aspect viewport ignores it: its content is
+         * Sets the raw-coordinate multiplier; anything below 1 clamps to 1.
+         * A service with an aspect viewport ignores it: its content is
          * already fitted to fill the window.
          */
-        void setUiScale(float scale) { uiScale = std::max(0.5f, scale); }
+        void setUiScale(float scale) { uiScale = std::max(1.0f, scale); }
 
         void fillScreen(const Color& color);
 
