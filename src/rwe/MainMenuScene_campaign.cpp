@@ -309,7 +309,19 @@ namespace rwe
             openMessageBox("Could not read the mission " + mapName);
             return;
         }
-        auto ota = parseOta(parseTdfFromString(std::string(otaRaw->begin(), otaRaw->end())));
+        // A mission map whose OTA does not parse is a message, not a crash, as
+        // it is in the skirmish map list (setCandidateSelectedMap).
+        OtaRecord ota;
+        try
+        {
+            ota = parseOta(parseTdfFromString(std::string(otaRaw->begin(), otaRaw->end())));
+        }
+        catch (const std::exception& e)
+        {
+            LOG_ERROR << "Could not read mission " << mapName << ": " << e.what();
+            openMessageBox("Could not read the mission " + mapName + ": " + e.what());
+            return;
+        }
         auto schema = chooseCampaignSchema(ota.schemas, static_cast<int>(campaignDifficulty));
         if (!schema)
         {
