@@ -326,6 +326,11 @@ set(SOURCE_FILES
     src/rwe/game/GameMediaDatabase.h
     src/rwe/game/GameNetworkService.cpp
     src/rwe/game/GameNetworkService.h
+    src/rwe/game/LockstepStats.cpp
+    src/rwe/game/LockstepStats.h
+    src/rwe/game/NetworkHistory.cpp
+    src/rwe/game/NetworkHistory.h
+    src/rwe/game/RoundTripWindow.h
     src/rwe/game/GameScene.cpp
     src/rwe/game/GameScene.h
     src/rwe/game/GameScene_audio.cpp
@@ -1003,6 +1008,7 @@ set(TEST_FILES
     src/rwe/game/DesyncReport.test.cpp
     src/rwe/game/aicommandfeed.test.cpp
     src/rwe/game/playerdrop.test.cpp
+    src/rwe/game/LockstepStats.test.cpp
     src/rwe/game/playerrejoin.test.cpp
     src/rwe/game/chat_util.test.cpp
     src/rwe/game/SimEventLog.test.cpp

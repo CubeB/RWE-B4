@@ -148,10 +148,39 @@ namespace rwe
                     ? std::chrono::duration_cast<std::chrono::milliseconds>(now - *since)
                     : std::chrono::milliseconds(0);
 
+                // Each send time is keyed by the sequence number just past the
+                // last set that packet carried, so the first packet to carry
+                // the oldest unacked set is the first key beyond it.
+                auto oldestUnackedAge = std::chrono::milliseconds(0);
+                auto firstSend = std::find_if(e.sendTimes.begin(), e.sendTimes.end(), [&](const auto& t) { return t.first > e.nextCommandToSend; });
+                if (firstSend != e.sendTimes.end())
+                {
+                    oldestUnackedAge = std::chrono::duration_cast<std::chrono::milliseconds>(now - firstSend->second);
+                }
+
+                // Carried forward across the ordinary gap between packets and
+                // no further: a peer that has gone quiet may have stopped, and
+                // assuming it kept running would hide exactly that. At 1x speed
+                // only; a packet does not say its sender's speed yet (#354).
+                std::optional<float> estimatedNow;
+                if (e.lastKnownSceneTime)
+                {
+                    auto sinceReport = std::min(now - e.lastKnownSceneTime->second, std::chrono::duration_cast<Timestamp::duration>(2 * SendInterval));
+                    auto ticks = std::chrono::duration<float, std::milli>(sinceReport).count() / static_cast<float>(SimMillisecondsPerTick);
+                    estimatedNow = static_cast<float>(e.lastKnownSceneTime->first.value) + ticks;
+                }
+
                 statuses.push_back(PeerStatus{
                     e.playerId,
                     silence,
-                    e.lastKnownSceneTime ? std::optional<SceneTime>(e.lastKnownSceneTime->first) : std::nullopt});
+                    e.lastKnownSceneTime ? std::optional<SceneTime>(e.lastKnownSceneTime->first) : std::nullopt,
+                    estimatedNow,
+                    e.averageRoundTripTime,
+                    e.recentRoundTripTimes.latest(),
+                    e.recentRoundTripTimes.min(),
+                    e.recentRoundTripTimes.max(),
+                    e.sendBuffer.size(),
+                    oldestUnackedAge});
             }
 
             result.set_value(std::move(statuses));
@@ -362,7 +391,7 @@ namespace rwe
     void GameNetworkService::sendLoop()
     {
         sendToAll();
-        sendTimer.expires_after(std::chrono::milliseconds(100));
+        sendTimer.expires_after(SendInterval);
         sendTimer.async_wait([this](const asio::error_code& error) {
             if (error)
             {
@@ -538,6 +567,7 @@ namespace rwe
             roundTripTime = roundTripTime > ackDelay ? roundTripTime - ackDelay : std::chrono::milliseconds(0);
             auto rttMillis = std::chrono::duration_cast<std::chrono::milliseconds>(roundTripTime).count();
             endpoint.averageRoundTripTime = ema(rttMillis, endpoint.averageRoundTripTime, 0.1f);
+            endpoint.recentRoundTripTimes.add(static_cast<float>(rttMillis));
             LOG_DEBUG << "Average RTT: " << endpoint.averageRoundTripTime << "ms";
         }
 

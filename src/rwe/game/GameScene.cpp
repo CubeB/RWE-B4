@@ -957,6 +957,8 @@ namespace rwe
 
         renderReplayWindow();
         renderDebugWindow();
+        recordNetworkHistory();
+        renderNetworkOverlay();
     }
 
     void GameScene::setCameraPosition(const Vector3f& newPosition)

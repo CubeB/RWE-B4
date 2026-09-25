@@ -136,6 +136,10 @@ namespace rwe
         {
             showDebugWindow = !showDebugWindow;
         }
+        else if (keysym.key == SDLK_F9 && !isCtrlDown())
+        {
+            networkOverlayVisible = !networkOverlayVisible;
+        }
         else if (keysym.key == SDLK_F1)
         {
             helpVisible = !helpVisible;

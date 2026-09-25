@@ -9,6 +9,7 @@
 #include <random>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/game/PlayerCommandService.h>
+#include <rwe/game/RoundTripWindow.h>
 #include <rwe/rwe_time.h>
 #include <rwe/sim/GameHash.h>
 #include <rwe/sim/GameTime.h>
@@ -58,6 +59,12 @@ namespace rwe
          * larger order for the next tick. Issue #75.
          */
         static constexpr std::size_t MaxCommandSetBytes = 1000;
+
+        /**
+         * How often every peer is sent a packet, whether there is anything new
+         * or not. It is also the longest a peer holds an ack before sending it.
+         */
+        static constexpr std::chrono::milliseconds SendInterval{100};
 
         /**
          * How many commands from the front of `commands` make one set no
@@ -134,6 +141,8 @@ namespace rwe
              * for communication between us and the remote peer.
              */
             float averageRoundTripTime{0};
+
+            RoundTripWindow recentRoundTripTimes;
 
             EndpointInfo(const PlayerId& playerId, const asio::ip::udp::endpoint& endpoint)
                 : playerId(playerId), endpoint(endpoint)
@@ -254,6 +263,30 @@ namespace rwe
 
             /** The scene time it last reported, adjusted for the round trip. */
             std::optional<SceneTime> lastKnownSceneTime;
+
+            /**
+             * The same, carried forward by the ticks it will have run since
+             * that report arrived, for comparing with our own tick now. Kept
+             * apart because a drop is cut at what the peer actually said.
+             */
+            std::optional<float> estimatedSceneTimeNow;
+
+            float averageRoundTripMillis;
+            float latestRoundTripMillis;
+
+            /** Over the last few seconds; zero until a sample has been taken. */
+            float minRoundTripMillis;
+            float maxRoundTripMillis;
+
+            /** Command sets sent and not yet acknowledged. A count that keeps growing is packets being lost. */
+            std::size_t unackedCommandSets;
+
+            /**
+             * How long the oldest unacknowledged set has been out; zero when
+             * nothing is. A round trip is only measured when an ack arrives,
+             * so while a peer is not acking this is the only figure that moves.
+             */
+            std::chrono::milliseconds oldestUnackedAge;
         };
 
         /**
