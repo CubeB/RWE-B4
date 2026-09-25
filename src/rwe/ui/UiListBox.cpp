@@ -58,6 +58,19 @@ namespace rwe
         itemsChangedSubject.next(true);
     }
 
+    void UiListBox::clearItems()
+    {
+        items.clear();
+        selectedIndexSubject.next(std::nullopt);
+        scrollPositionSubject.next(0);
+        itemsChangedSubject.next(true);
+    }
+
+    std::optional<unsigned int> UiListBox::getSelectedIndex() const
+    {
+        return selectedIndexSubject.getValue();
+    }
+
     void UiListBox::mouseDown(MouseButtonEvent event)
     {
         auto line = pixelToLine(event.y);

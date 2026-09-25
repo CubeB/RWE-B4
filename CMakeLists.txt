@@ -244,6 +244,7 @@ set(SOURCE_FILES
     src/rwe/MainMenuModel.cpp
     src/rwe/MainMenuModel.h
     src/rwe/MainMenuScene.cpp
+    src/rwe/MainMenuScene_campaign.cpp
     src/rwe/MultiplayerSetup.cpp
     src/rwe/MultiplayerSetup.h
     src/rwe/MainMenuScene.h
@@ -456,6 +457,8 @@ set(SOURCE_FILES
     src/rwe/ui/UiSlider.cpp
     src/rwe/ui/UiSlider.h
     src/rwe/ui/UiTextBox.cpp
+    src/rwe/ui/UiTextRegion.cpp
+    src/rwe/ui/UiTextRegion.h
     src/rwe/ui/UiTextBox.h
     src/rwe/game/SaveFile.cpp
     src/rwe/game/SaveFile.h
@@ -1149,6 +1152,7 @@ set(TEST_FILES
     src/rwe/util/rwe_string.test.cpp
     src/rwe/ui/UiComponent.test.cpp
     src/rwe/ui/UiTextBox.test.cpp
+    src/rwe/ui/UiTextRegion.test.cpp
     src/rwe/ui/UiPanelFocus.test.cpp
     src/rwe/UiRenderService.test.cpp
     )

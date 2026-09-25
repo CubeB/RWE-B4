@@ -323,6 +323,10 @@ original in every case.
 - **MoveUnitToRadius compares in floating point**, where the original floors
   each squared distance to whole units first; they differ only within a unit of
   the edge.
+- **The campaign briefing's panorama stands still**, its first strip fitted to
+  the window, where the original scrolls the strips across it and prints the
+  wind and gravity over them. The `*` the briefings put round a heading is
+  left out, its effect not decoded; the colour codes are drawn. §115.
 - **A transport from unpatched data still loads.** Without the v3.1 patch data
   the Hulk's file gives its capacity under the old 1.0 key, which the patched
   game ignores, leaving a ship that cannot load. RWE reads the old key, and

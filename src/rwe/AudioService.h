@@ -185,7 +185,17 @@ namespace rwe
 
         int playSound(const SoundHandle& sound);
 
+        /** Stops what playSound started on that channel; -1, its "nothing played", is ignored. */
+        void stopChannel(int channel);
+
         std::optional<SoundHandle> loadSound(const std::string& soundName);
+
+        /**
+         * A sound read from anywhere in the virtual file system, kept by its
+         * path. loadSound looks only in sounds/, and a campaign's narration
+         * lives in camps/briefs.
+         */
+        std::optional<SoundHandle> loadSoundFromPath(const std::string& path);
 
         void reserveChannels(unsigned int count);
 
