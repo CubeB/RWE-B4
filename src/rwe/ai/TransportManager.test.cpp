@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
 #include <rwe/ai/AiPlayerController.h>
@@ -676,6 +678,74 @@ namespace rwe
             REQUIRE(bb.rallyPoint.has_value());
             REQUIRE((*bb.rallyPoint == *bb.ferryMuster));
         }
+    }
+
+    TEST_CASE("a ferry that delivers after the timeout is complete, not overdue", "[ai]")
+    {
+        // The timeout is for a pickup that never happened. It used to fire on
+        // any empty transport past the deadline, so a trip of a little over
+        // two minutes that had loaded everyone, crossed and set them down was
+        // logged "overdue" at the moment it succeeded (issue #194).
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeWideChannelTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineLandUnits(sim);
+        defineSeaTransport(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(-300_ss, 60_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-320_ss, 60_ss, 40_ss), script);
+        addUnit(sim, "ARMSOLAR", human, SimVector(450_ss, 60_ss, 0_ss), script);
+        auto kbot = addUnit(sim, "ARMPW", ai, SimVector(-250_ss, 60_ss, 0_ss), script);
+        auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultBrutalProfile();
+        profile.scoutCount = 0;
+        profile.attackArmySize = 1;
+        profile.ferryTimeoutSeconds = 1;
+        sim.eventLog.setRecording(true);
+
+        AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 90, commands);
+        REQUIRE(controller.getTransportManager().getFerries().count(shipId.value) == 1);
+
+        // Aboard, well past the one-second deadline: the harness never
+        // carries orders out, so the pickup is done by hand.
+        sim.getUnitState(shipId).carriedUnits.push_back(kbot);
+        sim.getUnitState(kbot).carriedBy = shipId;
+        runTicks(sim, controller, profile.tacticalTickInterval, commands);
+        REQUIRE(controller.getTransportManager().getFerries().at(shipId.value).loaded);
+        // The one-second deadline has already called off the unloaded
+        // bookings of the warm-up; only what happens from here counts.
+        sim.eventLog.clear();
+
+        // And set down again on the far side.
+        sim.getUnitState(shipId).carriedUnits.clear();
+        sim.getUnitState(kbot).carriedBy = std::nullopt;
+        sim.getUnitState(kbot).position = SimVector(300_ss, 60_ss, 0_ss);
+        sim.getUnitState(shipId).orders.clear();
+        runTicks(sim, controller, profile.tacticalTickInterval, commands);
+        REQUIRE(controller.getTransportManager().getFerries().count(shipId.value) == 0);
+
+        auto path = std::filesystem::temp_directory_path() / "rwe-ferry-complete-test.jsonl";
+        sim.eventLog.write(path);
+        std::ifstream in(path);
+        std::string line;
+        int complete = 0;
+        int overdue = 0;
+        while (std::getline(in, line))
+        {
+            if (line.find("\"transport_ferry\"") == std::string::npos)
+            {
+                continue;
+            }
+            complete += line.find("\"why\":\"complete\"") != std::string::npos ? 1 : 0;
+            overdue += line.find("\"why\":\"overdue\"") != std::string::npos ? 1 : 0;
+        }
+        in.close();
+        std::filesystem::remove(path);
+        REQUIRE(complete == 1);
+        REQUIRE(overdue == 0);
     }
 
     TEST_CASE("with the muster switched off, the hull goes to each passenger where it stands", "[ai]")

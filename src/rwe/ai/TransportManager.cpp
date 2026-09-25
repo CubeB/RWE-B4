@@ -228,7 +228,13 @@ namespace rwe
                 }
             }
 
-            bool overdue = sim.gameTime >= ferry.startedAt + timeout;
+            // The timeout is for a pickup that never happened, and only that.
+            // It used to fire on any empty transport past the deadline, which
+            // included one that had loaded everybody, crossed and set them all
+            // down: a trip that took a little over two minutes was reported
+            // "overdue" at the moment it succeeded, and the arena counted a
+            // delivery as a failure (issue #194, measured on Coast To Coast).
+            bool overdue = sim.gameTime >= ferry.startedAt + timeout && !ferry.loaded;
             if (ferry.passengers.empty() || (overdue && !carryingAny))
             {
                 // Nothing left to carry, or the pickup never happened: call it off.
