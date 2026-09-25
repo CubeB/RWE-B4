@@ -182,6 +182,21 @@ namespace rwe
             return;
         }
 
+        // A saved game says where the search began, and the search's scratch
+        // is indexed by map cell. A start that is not this unit's own
+        // footprint, or not on the map, is not a search this game could have
+        // suspended, so it is not restored; the unit asks again as it would
+        // after an older save. Issue #75.
+        const auto& definition = simulation.unitDefinitions.at(unit->get().unitType);
+        auto footprint = simulation.computeFootprintRegion(unit->get().position, definition.movementCollisionInfo);
+        const auto& heights = simulation.terrain.getHeightMap();
+        if (start.width != footprint.width || start.height != footprint.height
+            || start.x < 0 || start.y < 0
+            || start.x + start.width > heights.getWidth() || start.y + start.height > heights.getHeight())
+        {
+            return;
+        }
+
         beginSearch(simulation, unitId, movingState->pathDestination, start);
 
         // Deterministic, so running the expansions again lands on exactly the
