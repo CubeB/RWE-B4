@@ -49,9 +49,10 @@ decode every 0x2c. Each of the four corpus oracles is then one of three things:
   * FAILED -- cells were scored and disagree. A scored cell that moves is the
     check failing, and sets the exit status.
 
-There is no fourth script for the storage half of the corpus checks: its cases
-live in `rwe_test`'s [economy][corpus] over src/rwe/sim/tad_economy_episodes.h,
-so the summary says that rather than inventing a scorer.
+The fourth, storage, is tools/tad-storagecapacity.py over the same episode and
+resource dumps (issue #229). Its C++ half is still `rwe_test`'s
+[economy][corpus] over src/rwe/sim/tad_economy_episodes.h, which holds the
+engine to the model; the script is what makes it measurable per demo.
 
 ONE EXPECTED DISAGREEMENT ON M3's OUTPUT. A factory's build cells score two
 ticks late against the model. RWE lays the nanoframe down two ticks before the
@@ -449,13 +450,26 @@ def main() -> int:
     else:
         summary.append(("stalls", NOT_SCOREABLE, "the demo carries no 0x28 resource samples (M4)"))
 
-    summary.append(
-        (
-            "storage/economy",
-            NO_SCORER,
-            "rwe_test's [economy][corpus] over src/rwe/sim/tad_economy_episodes.h, not a demo scorer",
+    if samples > 0:
+        storage = run(
+            [
+                sys.executable,
+                REPO / "tools" / "tad-storagecapacity.py",
+                "--episodes", episodes,
+                "--resources", resources,
+                "--units", units_dir,
+            ]
         )
-    )
+        storage_state = classify(storage)
+        if storage_state == PASS:
+            summary.append(("storage", PASS, "every scored sample's capacity is explained"))
+        elif storage_state == NOT_SCOREABLE:
+            summary.append(("storage", NOT_SCOREABLE, "no player could be scored"))
+        else:
+            failures.append("tad-storagecapacity.py: a scored sample disagrees with the model")
+            summary.append(("storage", FAILED, "a scored sample disagrees; see its list above"))
+    else:
+        summary.append(("storage", NOT_SCOREABLE, "the demo carries no 0x28 resource samples (M4)"))
 
     return report(summary, failures, records, work)
 
