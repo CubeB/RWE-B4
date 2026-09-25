@@ -1,5 +1,7 @@
 #include "serialization.h"
+#include <cmath>
 #include <rwe/util/match.h>
+#include <stdexcept>
 
 
 namespace rwe
@@ -328,6 +330,22 @@ namespace rwe
         return out;
     }
 
+    std::size_t commandsFittingOneSet(const std::vector<PlayerCommand>& commands, std::size_t byteBudget)
+    {
+        proto::GameUpdateMessage_PlayerCommandSet set;
+        std::size_t count = 0;
+        for (const auto& command : commands)
+        {
+            serializePlayerCommand(command, *set.add_command());
+            if (count > 0 && set.ByteSizeLong() > byteBudget)
+            {
+                break;
+            }
+            ++count;
+        }
+        return count;
+    }
+
     PlayerCommand deserializeCommand(const proto::PlayerCommand& cmd)
     {
         if (cmd.has_pause())
@@ -586,6 +604,13 @@ namespace rwe
 
     SimVector deserializeVector(const proto::SimVector& v)
     {
+        // A position is a place on the map. NaN and infinity are neither, and
+        // the float-to-int conversions the terrain lookups make of them are
+        // undefined, so they are refused with the rest of a malformed command.
+        if (!std::isfinite(v.x()) || !std::isfinite(v.y()) || !std::isfinite(v.z()))
+        {
+            throw std::runtime_error("Failed to deserialize vector: not a finite position");
+        }
         return SimVector(SimScalar(v.x()), SimScalar(v.y()), SimScalar(v.z()));
     }
 }

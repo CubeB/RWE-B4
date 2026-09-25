@@ -292,7 +292,7 @@ namespace rwe
                     continue;
                 }
 
-                applyUnitCommandToSimulation(simulation, PlayerUnitCommand(*unitId, PlayerUnitCommand::SetFireOrders{UnitFireOrders::FireAtWill}));
+                applyUnitCommandToSimulation(simulation, battleTestPlayers[i], PlayerUnitCommand(*unitId, PlayerUnitCommand::SetFireOrders{UnitFireOrders::FireAtWill}));
                 queueBattleTestOrder(*unitId, MoveOrder(enemy));
                 ++battleTestAlive[i];
                 ++battleTestSpawned;
@@ -685,6 +685,8 @@ namespace rwe
         // The same queued order a player's shift-click sends, applied
         // straight away: the battle test's players have nobody at a
         // keyboard, so there is no command buffer for it to wait out.
-        applyUnitCommandToSimulation(simulation, PlayerUnitCommand(unitId, PlayerUnitCommand::IssueOrder(order, PlayerUnitCommand::IssueOrder::IssueKind::Queued)));
+        // On behalf of the unit's own player, which is who the order is
+        // entitled to come from.
+        applyUnitCommandToSimulation(simulation, simulation.getUnitState(unitId).owner, PlayerUnitCommand(unitId, PlayerUnitCommand::IssueOrder(order, PlayerUnitCommand::IssueOrder::IssueKind::Queued)));
     }
 }

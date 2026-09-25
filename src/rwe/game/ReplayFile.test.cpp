@@ -315,6 +315,25 @@ namespace rwe
             out.close();
             REQUIRE(!readReplayFile(file.path).has_value());
         }
+
+        SECTION("a header whose fields have the wrong types")
+        {
+            // Issue #75: a rejoin bundle comes from another peer through the
+            // lobby, and nlohmann's get<> throws on a field of the wrong type.
+            // That used to end the game; it is an unreadable replay.
+            std::string header = R"({"mapName": 5, "players": [{"side": 1, "color": "red"}]})";
+            std::ofstream out(file.path, std::ios::binary);
+            out << "RWEREPLAY" << '\1';
+            auto size = static_cast<std::uint32_t>(header.size());
+            for (int i = 0; i < 4; ++i)
+            {
+                out.put(static_cast<char>((size >> (8 * i)) & 0xFFu));
+            }
+            out << header;
+            out.close();
+            REQUIRE_NOTHROW(readReplayFile(file.path));
+            REQUIRE(!readReplayFile(file.path).has_value());
+        }
     }
 
     TEST_CASE("a replay summarises into something a person can choose from", "[replay]")

@@ -42,6 +42,23 @@ namespace rwe
         unsigned long long sizeLimit,
         const std::function<unsigned long long(std::size_t)>& sizeOf);
 
+    /**
+     * The longest prefix of a stream, up to `available` items, whose packet
+     * is no bigger than `sizeLimit`, found by halving rather than by trying
+     * every length: sizeOf builds and measures a whole packet, and a command
+     * stream can have hundreds of sets waiting on an ack. sizeOf must grow
+     * with the count, as a packet does. 0 if not even one item fits.
+     *
+     * What a packet takes of each stream. Before this existed a packet took
+     * all of them, and one that came to more than a datagram threw on the
+     * network thread and stopped the game: a peer only had to stop acking,
+     * or a player only had to order fifty units at once. Issue #75.
+     */
+    std::size_t longestPrefixThatFits(
+        std::size_t available,
+        unsigned long long sizeLimit,
+        const std::function<unsigned long long(std::size_t)>& sizeOf);
+
     void writeInt(char* sendBuffer, unsigned int crcResult);
 
     unsigned int readInt(const char* buffer);

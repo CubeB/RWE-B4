@@ -281,7 +281,7 @@ namespace rwe
         auto moveTo = PlayerUnitCommand::IssueOrder(MoveOrder(SimVector(0_ss, 0_ss, 0_ss)), PlayerUnitCommand::IssueOrder::IssueKind::Immediate);
 
         REQUIRE_FALSE(world.unit(units[0]).isSelectableBy(world.sim.unitDefinitions.at("KBOT"), *world.slots[0]));
-        REQUIRE_FALSE(applyUnitCommandToSimulation(world.sim, PlayerUnitCommand(units[0], moveTo)));
+        REQUIRE_FALSE(applyUnitCommandToSimulation(world.sim, *world.slots[0], PlayerUnitCommand(units[0], moveTo)));
         REQUIRE(world.unit(units[0]).orders.empty());
 
         // The second is handed back at once and then carries on with its
@@ -289,7 +289,7 @@ namespace rwe
         world.runAt(1);
         REQUIRE_FALSE(world.unit(units[1]).heldByMission);
         REQUIRE(world.running(units[1]));
-        REQUIRE(applyUnitCommandToSimulation(world.sim, PlayerUnitCommand(units[1], moveTo)));
+        REQUIRE(applyUnitCommandToSimulation(world.sim, *world.slots[0], PlayerUnitCommand(units[1], moveTo)));
         REQUIRE_FALSE(world.running(units[1]));
     }
 
@@ -389,7 +389,7 @@ namespace rwe
         auto unit = world.spawn().at(0);
         world.runAt(1);
         REQUIRE_FALSE(world.unit(unit).heldByMission);
-        REQUIRE(applyUnitCommandToSimulation(world.sim, PlayerUnitCommand(unit, PlayerUnitCommand::Stop())));
+        REQUIRE(applyUnitCommandToSimulation(world.sim, *world.slots[0], PlayerUnitCommand(unit, PlayerUnitCommand::Stop())));
         REQUIRE_FALSE(world.running(unit));
         world.runAt(200);
         REQUIRE(world.unit(unit).orders.empty());

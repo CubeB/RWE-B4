@@ -72,6 +72,13 @@ namespace rwe
                 continue;
             }
 
+            if (dropped->fromTick > poppedRounds + MaxDropLeadTicks)
+            {
+                LOG_WARN << "Ignoring a drop of player " << dropped->player.value << " from tick " << dropped->fromTick
+                         << ", which is further ahead of the game (tick " << poppedRounds << ") than any drop is chosen";
+                continue;
+            }
+
             dropPlayerLocked(dropped->player, dropped->fromTick);
         }
 
@@ -87,6 +94,13 @@ namespace rwe
             {
                 LOG_WARN << "Ignoring a rejoin of player " << rejoined->player.value
                          << " issued by player " << player.value << ", who is not the one to issue it";
+                continue;
+            }
+
+            if (rejoined->fromTick > poppedRounds + MaxDropLeadTicks)
+            {
+                LOG_WARN << "Ignoring a rejoin of player " << rejoined->player.value << " from tick " << rejoined->fromTick
+                         << ", which is further ahead of the game (tick " << poppedRounds << ") than any rejoin is chosen";
                 continue;
             }
 
@@ -138,6 +152,14 @@ namespace rwe
         std::scoped_lock<std::mutex> lock(mutex);
 
         return commandBuffers.at(player).size();
+    }
+
+    unsigned int PlayerCommandService::bufferedHashCount(PlayerId player) const
+    {
+        std::scoped_lock<std::mutex> lock(mutex);
+
+        auto it = gameTimeBuffers.find(player);
+        return it == gameTimeBuffers.end() ? 0u : static_cast<unsigned int>(it->second.size());
     }
 
     std::optional<DesyncReport> PlayerCommandService::checkHashes()

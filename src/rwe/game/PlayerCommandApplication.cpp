@@ -4,6 +4,7 @@
 #include <rwe/sim/UnitBehaviorService.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/util/Index.h>
+#include <rwe/util/SimpleLogger.h>
 #include <rwe/util/match.h>
 
 namespace rwe
@@ -106,14 +107,87 @@ namespace rwe
         }
     }
 
-    bool applyUnitCommandToSimulation(GameSimulation& simulation, const PlayerUnitCommand& unitCommand)
+    namespace
+    {
+        /**
+         * The largest single change to a build queue or a stockpile a command
+         * may ask for. The interface's own steps are one, five and twenty; this
+         * is only here so that a count from the wire cannot overflow the
+         * queue's arithmetic.
+         */
+        constexpr int MaxQueueChange = 1000;
+
+        bool isKnownUnitType(const GameSimulation& simulation, const std::string& unitType)
+        {
+            return simulation.unitDefinitions.find(unitType) != simulation.unitDefinitions.end();
+        }
+
+        /**
+         * Why a command has to be refused before any of it reaches the
+         * simulation, or nothing if it may go ahead.
+         *
+         * Every peer runs this over the same command and the same state, so
+         * a refusal is the same refusal everywhere and cannot desync. Nothing
+         * an honest interface sends is refused. Issue #75.
+         */
+        const char* refusalOf(const GameSimulation& simulation, PlayerId issuingPlayer, const PlayerUnitCommand& unitCommand)
+        {
+            // Only a unit's owner commands it. The issuing player is where the
+            // command came from -- the network endpoint, the computer player
+            // or the recording -- and never anything the command says of
+            // itself. Without this any peer could self-destruct, stop or walk
+            // off every unit in the game.
+            if (simulation.getUnitState(unitCommand.unit).owner != issuingPlayer)
+            {
+                return "the unit belongs to another player";
+            }
+
+            // A unit type the game has no definition for reaches
+            // unitDefinitions.at() on every peer the tick the order runs, and
+            // in the renderer before that.
+            if (const auto* issue = std::get_if<PlayerUnitCommand::IssueOrder>(&unitCommand.command))
+            {
+                if (const auto* build = std::get_if<BuildOrder>(&issue->order); build != nullptr && !isKnownUnitType(simulation, build->unitType))
+                {
+                    return "it names an unknown unit type";
+                }
+            }
+            if (const auto* queue = std::get_if<PlayerUnitCommand::ModifyBuildQueue>(&unitCommand.command))
+            {
+                if (!isKnownUnitType(simulation, queue->unitType))
+                {
+                    return "it names an unknown unit type";
+                }
+                if (queue->count < -MaxQueueChange || queue->count > MaxQueueChange)
+                {
+                    return "the count is out of range";
+                }
+            }
+            if (const auto* stockpile = std::get_if<PlayerUnitCommand::ModifyStockpile>(&unitCommand.command))
+            {
+                if (stockpile->count < -MaxQueueChange || stockpile->count > MaxQueueChange)
+                {
+                    return "the count is out of range";
+                }
+            }
+            return nullptr;
+        }
+    }
+
+    bool applyUnitCommandToSimulation(GameSimulation& simulation, PlayerId issuingPlayer, const PlayerUnitCommand& receivedCommand)
     {
         // A command is about half a second old by the time it lands -- it waits
         // out the command buffer like everybody else's -- and the unit it names
         // can have died in the meantime. Asked once here, of the simulation's
         // own state, so every peer drops the same command on the same tick.
-        if (!simulation.unitExists(unitCommand.unit))
+        if (!simulation.unitExists(receivedCommand.unit))
         {
+            return false;
+        }
+
+        if (const auto* refusal = refusalOf(simulation, issuingPlayer, receivedCommand))
+        {
+            LOG_WARN << "Refusing a command from player " << issuingPlayer.value << " to unit " << receivedCommand.unit.value << ": " << refusal;
             return false;
         }
 
@@ -121,9 +195,22 @@ namespace rwe
         // no selection reaches it (0x487E69 cleared the bit every selection
         // path tests), and the computer's AI does not take it on (0x408830).
         // Refused here, on every peer alike, whoever sent it.
-        if (simulation.getUnitState(unitCommand.unit).heldByMission)
+        if (simulation.getUnitState(receivedCommand.unit).heldByMission)
         {
             return false;
+        }
+
+        // An order starts from nothing. A resurrection keeps its progress on
+        // the order, as the original does, and the wire can carry it because
+        // the same message type is used where progress is real; taken from a
+        // command, it would let a peer finish one in a tick.
+        auto unitCommand = receivedCommand;
+        if (auto* issue = std::get_if<PlayerUnitCommand::IssueOrder>(&unitCommand.command))
+        {
+            if (auto* resurrect = std::get_if<ResurrectOrder>(&issue->order))
+            {
+                resurrect->remainingTicks.reset();
+            }
         }
 
         match(

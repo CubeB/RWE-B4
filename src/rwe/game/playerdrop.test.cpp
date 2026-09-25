@@ -302,6 +302,24 @@ namespace rwe
             REQUIRE(!service.isDropped(PlayerId(2)));
         }
 
+        SECTION("is ignored when it names a tick further ahead than any drop is chosen")
+        {
+            // Issue #75. A drop pads the stream a set per tick up to the tick
+            // it names, and a tick near 2^32 from the wire was four billion
+            // sets on every peer.
+            PlayerCommandService service;
+            addPeers(service, 3);
+
+            service.pushCommands(PlayerId(0), {PlayerDroppedCommand{PlayerId(2), 0xFFFFFFFFu}});
+            REQUIRE(!service.isDropped(PlayerId(2)));
+
+            service.pushCommands(PlayerId(0), {PlayerDroppedCommand{PlayerId(2), PlayerCommandService::MaxDropLeadTicks + 1}});
+            REQUIRE(!service.isDropped(PlayerId(2)));
+
+            service.pushCommands(PlayerId(0), {PlayerDroppedCommand{PlayerId(2), PlayerCommandService::MaxDropLeadTicks}});
+            REQUIRE(service.isDropped(PlayerId(2)));
+        }
+
         SECTION("survives a round trip through the wire format")
         {
             proto::PlayerCommand wire;

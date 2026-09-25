@@ -807,11 +807,19 @@ namespace rwe
             // the depth only decides how long an order waits.
             if (bufferedCommandCount <= targetCommandBufferSize || (!waitingForPlayers.empty() && !localPlayerCommandBuffer.empty()))
             {
-                // Queue up commands collected from the local player
-                playerCommandService->pushCommands(localPlayerId, localPlayerCommandBuffer);
-                gameNetworkService->submitCommands(sceneTime, localPlayerCommandBuffer);
+                // Queue up commands collected from the local player, as many
+                // as make one set a packet can carry. An order to a large
+                // selection is more than that -- a hundred units is three
+                // kilobytes against a 1500-byte datagram -- and sending it as
+                // one set used to stop the game. The rest waits for the next
+                // tick, still in order, which puts a tick between the first
+                // thirty or so units moving and the next. Issue #75.
+                auto count = GameNetworkService::commandsFittingOneSet(localPlayerCommandBuffer);
+                std::vector<PlayerCommand> set(localPlayerCommandBuffer.begin(), localPlayerCommandBuffer.begin() + static_cast<std::ptrdiff_t>(count));
+                playerCommandService->pushCommands(localPlayerId, set);
+                gameNetworkService->submitCommands(sceneTime, set);
                 ++localSetsSubmitted;
-                localPlayerCommandBuffer.clear();
+                localPlayerCommandBuffer.erase(localPlayerCommandBuffer.begin(), localPlayerCommandBuffer.begin() + static_cast<std::ptrdiff_t>(count));
                 ++bufferedCommandCount;
             }
 
