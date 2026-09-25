@@ -302,15 +302,18 @@ namespace rwe
                     break;
                 case 'a':
                 {
-                    // A point first; failing that, a unit type name (0x487FEC).
+                    // A point when both numbers scan (0x487F4F); otherwise the
+                    // same text again as a unit type name (0x487FB3).
+                    auto start = p;
                     auto numbers = scanNumbers(piece, p, 2);
-                    if (!numbers.empty())
+                    if (numbers.size() == 2)
                     {
                         order.kind = MissionOrder::Kind::AttackPoint;
                         order.numbers = numbers;
                     }
                     else
                     {
+                        p = start;
                         order.kind = MissionOrder::Kind::AttackType;
                         order.name = scanName(piece, p);
                     }
@@ -338,7 +341,10 @@ namespace rwe
                     }
                     if (q < piece.size() && std::tolower(static_cast<unsigned char>(piece[q])) == 'a')
                     {
+                        // `wa NAME` watches that unit instead of itself.
                         order.kind = MissionOrder::Kind::WaitForAttack;
+                        ++q;
+                        order.name = scanName(piece, q);
                     }
                     else
                     {
@@ -348,16 +354,31 @@ namespace rwe
                     break;
                 }
                 case 'b':
-                    order.kind = MissionOrder::Kind::Build;
-                    order.name = scanName(piece, p);
-                    order.numbers = scanNumbers(piece, p, 3);
+                    // `bw n` is the silo's form (0x488005 tests the second
+                    // letter); anything else is a unit to build.
+                    if (p < piece.size() && std::tolower(static_cast<unsigned char>(piece[p])) == 'w')
+                    {
+                        ++p;
+                        order.kind = MissionOrder::Kind::BuildWeapon;
+                        order.numbers = scanNumbers(piece, p, 1);
+                    }
+                    else
+                    {
+                        order.kind = MissionOrder::Kind::Build;
+                        order.name = scanName(piece, p);
+                        order.numbers = scanNumbers(piece, p, 3);
+                    }
                     break;
                 case 'd':
                     order.kind = MissionOrder::Kind::SelfDestruct;
                     break;
-                default:
-                    // s, and any letter the table does not know (0x487E50).
+                case 's':
                     order.kind = MissionOrder::Kind::MakeSelectable;
+                    break;
+                default:
+                    // A letter the table does not know: 0x487E50 is only the
+                    // loop going round, so nothing happens.
+                    order.kind = MissionOrder::Kind::Skip;
                     break;
             }
             orders.push_back(std::move(order));
@@ -392,8 +413,8 @@ namespace rwe
         r.allUnitsKilledOfType = readName(tdf, "AllUnitsKilledOfType");
         r.unitTypeKilled = readTypeAndNumber(tdf, "UnitTypeKilled");
         tdf.readOrDefault("DeathTimerRunsOut", r.deathTimerRunsOut);
-        tdf.readOrDefault("AnyUnitPassesX", r.anyUnitPassesX);
-        tdf.readOrDefault("AnyUnitPassesZ", r.anyUnitPassesZ);
+        tdf.readOrDefault("AnyUnitPassesX", r.anyUnitPassesX, -1);
+        tdf.readOrDefault("AnyUnitPassesZ", r.anyUnitPassesZ, -1);
         return r;
     }
 

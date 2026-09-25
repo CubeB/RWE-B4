@@ -1,5 +1,7 @@
 #include "dump_util.h"
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/MissionRules.h>
+#include <rwe/sim/MissionScripts.h>
 
 #include "UnitStateFieldTable.h"
 
@@ -40,6 +42,7 @@ namespace rwe
             {"maxMetal", dumpJson(p.maxMetal)},
             {"energy", dumpJson(p.energy)},
             {"maxEnergy", dumpJson(p.maxEnergy)},
+            {"hasBaseStorage", dumpJson(p.hasBaseStorage)},
             {"metalStalled", dumpJson(p.metalStalled)},
             {"energyStalled", dumpJson(p.energyStalled)},
             {"unitsKilled", dumpJson(p.unitsKilled)},
@@ -471,9 +474,60 @@ namespace rwe
         }
         return cells;
     }
+    nlohmann::json dumpJson(const MissionRules& m)
+    {
+        // What the hash covers, by name.
+        auto dumpRules = [](const std::vector<MissionRule>& rules) {
+            auto out = nlohmann::json::array();
+            for (const auto& r : rules)
+            {
+                out.push_back(nlohmann::json{
+                    {"kind", static_cast<int>(r.kind)},
+                    {"number", r.number},
+                    {"satisfied", r.satisfied},
+                    {"celebrated", r.celebrated},
+                });
+            }
+            return out;
+        };
+        return nlohmann::json{
+            {"victory", dumpRules(m.victory)},
+            {"defeat", dumpRules(m.defeat)},
+            {"enabled", m.enabled},
+            {"countdown", m.countdown},
+            {"outcome", m.outcome ? nlohmann::json(static_cast<int>(*m.outcome)) : nlohmann::json()},
+        };
+    }
+
+    nlohmann::json dumpJson(const MissionScripts& m)
+    {
+        // What the hash covers, by name.
+        auto out = nlohmann::json::array();
+        for (const auto& [id, script] : m.scripts)
+        {
+            auto steps = nlohmann::json::array();
+            for (const auto& step : script.steps)
+            {
+                steps.push_back(nlohmann::json{
+                    {"kind", static_cast<int>(step.kind)},
+                    {"ticks", step.ticks},
+                    {"count", step.count},
+                    {"hit", step.hit},
+                });
+            }
+            out.push_back(nlohmann::json{
+                {"unit", id},
+                {"started", script.started},
+                {"wakeAt", script.wakeAt.value},
+                {"steps", steps},
+            });
+        }
+        return out;
+    }
+
     nlohmann::json dumpJson(const GameSimulation& simulation)
     {
-        return nlohmann::json{
+        auto j = nlohmann::json{
             {"gameTime", dumpJson(simulation.gameTime)},
             {"players", dumpJson(simulation.players)},
             {"units", dumpJson(simulation.units)},
@@ -483,5 +537,15 @@ namespace rwe
             {"featureRegrowthCursor", simulation.featureRegrowthCursor},
             {"explored", dumpJson(simulation.explored)},
         };
+        // Only in a mission, so a skirmish's dump is what it was.
+        if (simulation.missionRules)
+        {
+            j["missionRules"] = dumpJson(*simulation.missionRules);
+        }
+        if (simulation.missionScripts)
+        {
+            j["missionScripts"] = dumpJson(*simulation.missionScripts);
+        }
+        return j;
     }
 }

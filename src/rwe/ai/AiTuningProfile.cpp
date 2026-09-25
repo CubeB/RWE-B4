@@ -121,6 +121,7 @@ namespace rwe
             {"targetBattleshipCount", &AiTuningProfile::targetBattleshipCount},
             {"targetAntiAirShipCount", &AiTuningProfile::targetAntiAirShipCount},
             {"targetSeaplanePlatformCount", &AiTuningProfile::targetSeaplanePlatformCount},
+            {"targetHoverPlatformCount", &AiTuningProfile::targetHoverPlatformCount},
             {"maxSurplusMetalMakerCount", &AiTuningProfile::maxSurplusMetalMakerCount},
             {"tierTwoReserveMinArmySize", &AiTuningProfile::tierTwoReserveMinArmySize},
             {"tierTwoReserveCoversLabAfterSeconds", &AiTuningProfile::tierTwoReserveCoversLabAfterSeconds},
@@ -245,6 +246,7 @@ namespace rwe
             {"expansionStaysOnOurSide", &AiTuningProfile::expansionStaysOnOurSide},
             {"armyFerryWantFromMap", &AiTuningProfile::armyFerryWantFromMap},
             {"navalStandOff", &AiTuningProfile::navalStandOff},
+            {"seaFerryMuster", &AiTuningProfile::seaFerryMuster},
             {"ferryLandingFan", &AiTuningProfile::ferryLandingFan},
             {"ferryLandingAvoidsThreat", &AiTuningProfile::ferryLandingAvoidsThreat},
         };

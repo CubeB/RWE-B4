@@ -9,9 +9,14 @@ export function masterServer() {
 
 export function getAddr(socket: Socket, reverseProxy: boolean) {
   if (reverseProxy) {
-    const addrs = socket.handshake.headers["x-forwarded-for"] as string;
-    const addrsList = addrs.split(", ");
-    return addrsList[addrsList.length - 1];
+    // The proxy always sets the header; a connection without one did not
+    // come through it, and falls back to the socket's own address rather
+    // than throwing before any handler exists to catch it. Issue #75.
+    const addrs = socket.handshake.headers["x-forwarded-for"];
+    if (typeof addrs === "string" && addrs.length !== 0) {
+      const addrsList = addrs.split(", ");
+      return addrsList[addrsList.length - 1];
+    }
   }
   return socket.handshake.address;
 }

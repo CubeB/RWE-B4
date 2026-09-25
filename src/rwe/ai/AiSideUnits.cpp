@@ -77,6 +77,9 @@ namespace rwe
             units.seaplanePlatform = "CORPLAT";
             units.seaplaneFighter = "CORSFIG";
             units.torpedoSeaplane = "CORSEAP";
+            units.hoverPlatform = "CORHP";
+            units.hoverTank = "CORSNAP";
+            units.hoverAntiAir = "CORAH";
             units.tidalGenerator = "CORTIDE";
             units.sonar = "CORSONAR";
             units.torpedoLauncher = "CORTL";
@@ -140,6 +143,9 @@ namespace rwe
             units.seaplanePlatform = "ARMPLAT";
             units.seaplaneFighter = "ARMSFIG";
             units.torpedoSeaplane = "ARMSEAP";
+            units.hoverPlatform = "ARMHP";
+            units.hoverTank = "ARMANAC";
+            units.hoverAntiAir = "ARMAH";
             units.tidalGenerator = "ARMTIDE";
             units.sonar = "ARMSONAR";
             units.torpedoLauncher = "ARMTL";
@@ -220,6 +226,9 @@ namespace rwe
         check(units.seaplanePlatform);
         check(units.seaplaneFighter);
         check(units.torpedoSeaplane);
+        check(units.hoverPlatform);
+        check(units.hoverTank);
+        check(units.hoverAntiAir);
         check(units.tidalGenerator);
         check(units.sonar);
         check(units.torpedoLauncher);

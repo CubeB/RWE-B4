@@ -252,6 +252,7 @@ namespace rwe
         sounds.selectMultipleUnits = lookUpSound("SelectMultipleUnits");
         sounds.panel = lookUpSound("PANEL");
         sounds.options = lookUpSound("OPTIONS");
+        sounds.victoryCondition = lookUpSound("Victory Condition");
 
         auto consoleFont = sceneContext.textureService->getFont("fonts/CONSOLE.FNT");
         // The original loads exactly two in-game fonts (0x42A320): COMIX for
@@ -264,6 +265,37 @@ namespace rwe
         if (gameParameters.stateLogFile)
         {
             stateLogStream = std::ofstream(*gameParameters.stateLogFile, std::ios::binary);
+        }
+
+        // A mission brings its own units in place of the commanders, and its
+        // own rules in place of the skirmish ones. They are put into the
+        // simulation before it moves into the scene, and the camera goes to
+        // the first of the local player's units.
+        std::optional<SimVector> missionCameraPos;
+        // Not when loading a save: the saved simulation already holds the
+        // mission's units, as it holds a skirmish's commanders, and spawning
+        // them here would put a second set beside the first.
+        if (gameParameters.mission && !gameParameters.loadFromSaveFile)
+        {
+            auto result = spawnMissionUnits(loaded.simulation, ota.schemas.at(schemaIndex), loaded.gamePlayers);
+            installMissionRules(loaded.simulation, ota, ota.schemas.at(schemaIndex), loaded.gamePlayers, *sceneContext.sideData);
+            LOG_INFO << "Mission: " << result.spawned.size() << " units placed, " << result.skipped.size() << " not";
+            for (const auto& line : result.skipped)
+            {
+                LOG_WARN << "Mission unit not placed: " << line;
+            }
+            for (auto unitId : result.spawned)
+            {
+                const auto& unit = loaded.simulation.getUnitState(unitId);
+                if (!missionCameraPos || (loaded.localPlayerId && unit.owner == *loaded.localPlayerId))
+                {
+                    missionCameraPos = unit.position;
+                    if (loaded.localPlayerId && unit.owner == *loaded.localPlayerId)
+                    {
+                        break;
+                    }
+                }
+            }
         }
 
         auto gameScene = std::make_unique<GameScene>(
@@ -310,11 +342,16 @@ namespace rwe
 
         std::optional<SimVector> humanStartPos;
 
+        if (missionCameraPos)
+        {
+            humanStartPos = missionCameraPos;
+        }
+
         // The battle harness wants every start position and no commanders.
         std::vector<PlayerId> battlePlayers;
         std::vector<SimVector> battleSpawns;
 
-        for (Index i = 0; i < getSize(gameParameters.players); ++i)
+        for (Index i = 0; i < getSize(gameParameters.players) && !gameParameters.mission; ++i)
         {
             const auto& player = gameParameters.players[i];
             if (!player)

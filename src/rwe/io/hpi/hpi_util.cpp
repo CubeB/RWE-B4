@@ -215,6 +215,14 @@ namespace rwe
                 throw HpiException("Extracted file larger than expected");
             }
 
+            // A chunk decompresses to at most 64 KiB, and even data that does
+            // not compress is stored at about that size. The compressed size
+            // is allocated before the checksum is looked at. Issue #75.
+            constexpr std::uint32_t MaxChunkBytes = 1024u * 1024u;
+            if (chunkHeader.compressedSize > MaxChunkBytes)
+            {
+                throw HpiException("Chunk too large");
+            }
             auto chunkBuffer = std::make_unique<char[]>(chunkHeader.compressedSize);
             readAndDecrypt(stream, decryptionKey, chunkBuffer.get(), chunkHeader.compressedSize);
 

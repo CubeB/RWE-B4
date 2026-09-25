@@ -565,6 +565,9 @@ namespace rwe
         REQUIRE(ota.rules.allUnitsKilledOfType == std::optional<std::string>("ARMGATE"));
         REQUIRE(ota.rules.commanderKilled == 0);
         REQUIRE_FALSE(ota.rules.killUnitType.has_value());
+        // Absent, these two are -1 rather than 0, which is a real line.
+        REQUIRE(ota.rules.anyUnitPassesX == -1);
+        REQUIRE(ota.rules.anyUnitPassesZ == -1);
 
         const auto& units = ota.schemas.at(0).units;
         REQUIRE(units.size() == 2);
@@ -580,6 +583,16 @@ namespace rwe
         REQUIRE(units[1].orders.size() == 1);
         REQUIRE(units[1].orders[0].kind == MissionOrder::Kind::Patrol);
         REQUIRE(units[1].orders[0].numbers == std::vector<float>{1750.0f, 1828.0f});
+    }
+
+    TEST_CASE("AnyUnitPassesZ=0 is a line at the map's top edge, not a missing key", "[ota][campaign]")
+    {
+        // CC19's is AnyUnitPassesZ=60, a few cells from the top; 0x48E92C
+        // builds the rule for anything from 0 up.
+        auto tdf = parseTdfFromString("[GlobalHeader]\n{\nAnyUnitPassesZ=0;\nAnyUnitPassesX=60;\n}\n");
+        auto rules = parseOtaMissionRules(tdf.findBlock("GlobalHeader")->get());
+        REQUIRE(rules.anyUnitPassesZ == 0);
+        REQUIRE(rules.anyUnitPassesX == 60);
     }
 
     TEST_CASE("InitialMission is read the way 0x487BF0 reads it", "[ota][campaign]")
@@ -635,8 +648,21 @@ namespace rwe
             REQUIRE(orders[1].numbers == std::vector<float>{1.0f, 300.0f, 400.0f});
             REQUIRE(orders[2].kind == K::SelfDestruct);
             REQUIRE(orders[3].kind == K::MakeSelectable);
-            // Any letter the table does not know is MAKESELECTABLE too.
-            REQUIRE(orders[4].kind == K::MakeSelectable);
+            // A letter the table does not know is skipped: 0x487E50 is only
+            // the loop going round.
+            REQUIRE(orders[4].kind == K::Skip);
+        }
+
+        SECTION("a silo's stockpile, and an attack with one number is a name")
+        {
+            auto orders = parseInitialMission("bw 10,a 100,");
+            REQUIRE(orders.size() == 2);
+            REQUIRE(orders[0].kind == K::BuildWeapon);
+            REQUIRE(orders[0].numbers == std::vector<float>{10.0f});
+            // The point form wants both numbers (0x487F4F); otherwise the
+            // same text is read again as a type name.
+            REQUIRE(orders[1].kind == K::AttackType);
+            REQUIRE(orders[1].name == "100");
         }
     }
 

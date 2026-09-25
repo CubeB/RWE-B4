@@ -3,11 +3,14 @@
 #include <algorithm>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <filesystem>
 #include <iterator>
+#include <limits>
 #include <random>
 #include <set>
 #include <rwe/LoadingScene_util.h>
+#include <rwe/sim/MissionScripts.h>
 #include <rwe/ai/AiPersonality.h>
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/ai/AiTuningProfile.h>
@@ -24,6 +27,7 @@
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/weapontdf/WeaponTdf.h>
+#include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
 
@@ -443,6 +447,10 @@ namespace rwe
                     {
                         LOG_WARN << *warning;
                     }
+                    if (auto warning = defaultMissionWarning(fbi))
+                    {
+                        LOG_WARN << *warning;
+                    }
                     auto unitDefinition = parseUnitDefinition(fbi, dataMaps.movementClassDatabase);
                     dataMaps.unitDefinitions.insert({toUpper(fbi.unitName), std::move(unitDefinition)});
 
@@ -740,7 +748,21 @@ namespace rwe
             if (params)
             {
                 auto playerType = std::visit(IsComputerVisitor(), params->controller) ? GamePlayerType::Computer : GamePlayerType::Human;
-                GamePlayerInfo gpi{params->name, playerType, params->color, GamePlayerStatus::Alive, params->side, params->metal, params->energy, params->metal, params->energy, params->metal, params->energy, params->teamId};
+                auto metal = params->metal;
+                auto energy = params->energy;
+                if (gameParameters.mission)
+                {
+                    // The mission, not the lobby, says what everyone starts
+                    // with: the schema's HumanMetal and HumanEnergy for a
+                    // player at the keyboard and ComputerMetal and
+                    // ComputerEnergy for the rest.
+                    const auto& schema = ota.schemas.at(gameParameters.schemaIndex);
+                    auto isComputer = playerType == GamePlayerType::Computer;
+                    metal = Metal(static_cast<float>(isComputer ? schema.computerMetal : schema.humanMetal));
+                    energy = Energy(static_cast<float>(isComputer ? schema.computerEnergy : schema.humanEnergy));
+                }
+                GamePlayerInfo gpi{params->name, playerType, params->color, GamePlayerStatus::Alive, params->side, metal, energy, metal, energy, metal, energy, params->teamId};
+                gpi.hasBaseStorage = gameParameters.mission;
                 auto playerId = simulation.addPlayer(gpi);
                 gamePlayers[i] = playerId;
 
@@ -975,5 +997,500 @@ namespace rwe
             std::move(mapIntel),
             std::move(buildTree),
             std::move(dataMaps)};
+    }
+
+    namespace
+    {
+        /**
+         * The standing orders an `o` writes: 0, 1, 2 for hold, maneuver,
+         * roam and hold, return, at will. The original stores two bits of
+         * each; a 3 there is nothing the order buttons know, and is read
+         * here as the last of the three.
+         */
+        UnitMovementOrders missionMoveOrders(float n)
+        {
+            switch (static_cast<int>(n) & 3)
+            {
+                case 0:
+                    return UnitMovementOrders::HoldPosition;
+                case 1:
+                    return UnitMovementOrders::Maneuver;
+                default:
+                    return UnitMovementOrders::Roam;
+            }
+        }
+
+        UnitFireOrders missionFireOrders(float n)
+        {
+            switch (static_cast<int>(n) & 3)
+            {
+                case 0:
+                    return UnitFireOrders::HoldFire;
+                case 1:
+                    return UnitFireOrders::ReturnFire;
+                default:
+                    return UnitFireOrders::FireAtWill;
+            }
+        }
+
+        /**
+         * A unit's InitialMission, read the way the interpreter 0x487BF0 reads
+         * it (TOTALA-EXE-DATA.md §114), into its standing orders, a transport
+         * to start aboard, and the list of steps its script will run.
+         *
+         * The unit is held -- out of the player's hands and the computer's --
+         * from the moment the list queues anything (0x487E69), until a
+         * MAKESELECTABLE runs: an `s`, or the one appended to a list with no
+         * `s`, `p`, point `a` or `d` in it (0x487E76).
+         */
+        void readInitialMission(
+            GameSimulation& simulation,
+            UnitId unitId,
+            const OtaMissionUnit& record,
+            const std::function<std::optional<UnitId>(const std::string&)>& resolveName,
+            MissionScript& script)
+        {
+            using OK = MissionOrder::Kind;
+            using SK = MissionStep::Kind;
+            auto& unit = simulation.getUnitState(unitId);
+            const auto& def = simulation.unitDefinitions.at(unit.unitType);
+
+            // The interpreter's x and z are locals it never clears, so an
+            // order missing a coordinate takes the last one given (and, for
+            // the first order in the string, whatever was on the stack: 0
+            // here).
+            float lastX = 0.0f;
+            float lastZ = 0.0f;
+            auto pointFrom = [&](const std::vector<float>& numbers, std::size_t first) {
+                if (numbers.size() > first)
+                {
+                    lastX = numbers[first];
+                }
+                if (numbers.size() > first + 1)
+                {
+                    lastZ = numbers[first + 1];
+                }
+                auto world = simulation.terrain.topLeftCoordinateToWorld(SimVector(SimScalar(lastX), 0_ss, SimScalar(lastZ)));
+                world.y = simulation.terrain.getHeightAt(world.x, world.z);
+                return world;
+            };
+            auto typeKnown = [&](const std::string& name) { return simulation.unitDefinitions.find(toUpper(name)) != simulation.unitDefinitions.end(); };
+
+            bool queued = false;
+            bool sticky = false;
+            auto push = [&](SK kind) -> MissionStep& {
+                MissionStep step;
+                step.kind = kind;
+                script.steps.push_back(std::move(step));
+                return script.steps.back();
+            };
+
+            for (const auto& order : record.orders)
+            {
+                switch (order.kind)
+                {
+                    case OK::Move:
+                        push(SK::Move).position = pointFrom(order.numbers, 0);
+                        queued = true;
+                        break;
+                    case OK::Patrol:
+                        push(SK::Patrol).position = pointFrom(order.numbers, 0);
+                        queued = true;
+                        sticky = true;
+                        break;
+                    case OK::AttackPoint:
+                        push(SK::AttackPoint).position = pointFrom(order.numbers, 0);
+                        queued = true;
+                        sticky = true;
+                        break;
+                    case OK::AttackType:
+                        if (typeKnown(order.name))
+                        {
+                            push(SK::AttackType).unitType = toUpper(order.name);
+                            queued = true;
+                        }
+                        break;
+                    case OK::Guard:
+                        if (auto target = resolveName(order.name))
+                        {
+                            push(SK::Guard).target = *target;
+                            queued = true;
+                        }
+                        break;
+                    case OK::Link:
+                        // Aboard that transport from the start, queuing
+                        // nothing (0x48AAC0 at once).
+                        if (auto carrier = resolveName(order.name))
+                        {
+                            simulation.loadUnitIntoTransport(*carrier, unitId, std::string());
+                        }
+                        break;
+                    case OK::StandingOrders:
+                        if (!order.numbers.empty())
+                        {
+                            unit.moveOrders = missionMoveOrders(order.numbers[0]);
+                        }
+                        if (order.numbers.size() > 1)
+                        {
+                            unit.fireOrders = missionFireOrders(order.numbers[1]);
+                        }
+                        break;
+                    case OK::Wait:
+                    {
+                        auto& step = push(SK::Wait);
+                        auto seconds = order.numbers.empty() ? 0.0f : order.numbers[0];
+                        step.ticks = static_cast<int>(seconds * 30.0f);
+                        step.radius = order.numbers.size() > 1 ? static_cast<int>(order.numbers[1]) : 0;
+                        queued = true;
+                        break;
+                    }
+                    case OK::WaitForAttack:
+                        // Watching the unit named, or itself.
+                        push(SK::WaitForAttack).target = order.name.empty() ? std::nullopt : resolveName(order.name);
+                        queued = true;
+                        break;
+                    case OK::Unload:
+                        push(SK::Unload).position = pointFrom(order.numbers, 0);
+                        queued = true;
+                        break;
+                    case OK::Build:
+                        if (typeKnown(order.name))
+                        {
+                            if (def.isMobile)
+                            {
+                                auto& step = push(SK::Build);
+                                step.unitType = toUpper(order.name);
+                                step.position = pointFrom(order.numbers, 1);
+                            }
+                            else
+                            {
+                                auto& step = push(SK::FactoryBuild);
+                                step.unitType = toUpper(order.name);
+                                step.count = order.numbers.empty() ? 1 : static_cast<int>(order.numbers[0]);
+                            }
+                            queued = true;
+                        }
+                        break;
+                    case OK::BuildWeapon:
+                        // Queued, but not an order that holds the unit (0x488115).
+                        push(SK::BuildWeapon).count = order.numbers.empty() ? 1 : static_cast<int>(order.numbers[0]);
+                        break;
+                    case OK::SelfDestruct:
+                        push(SK::SelfDestruct);
+                        queued = true;
+                        sticky = true;
+                        break;
+                    case OK::MakeSelectable:
+                        push(SK::MakeSelectable);
+                        queued = true;
+                        sticky = true;
+                        break;
+                    case OK::Skip:
+                        break;
+                }
+            }
+
+            if (queued)
+            {
+                unit.heldByMission = true;
+                if (!sticky)
+                {
+                    push(SK::MakeSelectable);
+                }
+            }
+            else if (simulation.getPlayer(unit.owner).type == GamePlayerType::Computer)
+            {
+                // Not held, so the computer's AI has it from the first second
+                // and gives it its own standing orders (0x408830), whatever
+                // an `o` said: maneuver if it can capture, else roam, and fire
+                // at will.
+                unit.moveOrders = def.canCapture ? UnitMovementOrders::Maneuver : UnitMovementOrders::Roam;
+                unit.fireOrders = UnitFireOrders::FireAtWill;
+            }
+        }
+    }
+
+    MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers)
+    {
+        MissionSpawnResult result;
+        std::vector<std::size_t> spawnedRecords;
+        for (std::size_t i = 0; i < schema.units.size(); ++i)
+        {
+            const auto& record = schema.units[i];
+            auto describe = [&](const std::string& why) {
+                return "[unit" + std::to_string(i) + "] " + record.unitName + " for player " + std::to_string(record.player) + ": " + why;
+            };
+
+            // 0x488A50: the definition by name. An unknown one makes nothing.
+            auto unitType = toUpper(record.unitName);
+            auto defIt = simulation.unitDefinitions.find(unitType);
+            if (defIt == simulation.unitDefinitions.end())
+            {
+                result.skipped.push_back(describe("no such unit"));
+                continue;
+            }
+            const auto& def = defIt->second;
+
+            // Player N is slot N-1 (0x4883B2). The original logs an unseated
+            // one and spawns it regardless; RWE has no player to give it to.
+            auto slot = record.player - 1;
+            if (slot < 0 || slot >= static_cast<int>(slotPlayers.size()) || !slotPlayers[slot])
+            {
+                result.skipped.push_back(describe("no player in that slot"));
+                continue;
+            }
+
+            // Positions are world units from the map's top-left corner, as a
+            // start position is.
+            auto position = simulation.terrain.topLeftCoordinateToWorld(SimVector(SimScalar(static_cast<float>(record.xPos)), 0_ss, SimScalar(static_cast<float>(record.zPos))));
+            if (!def.isMobile)
+            {
+                // 0x47DDC0: a building goes on the build grid, its footprint
+                // on the nearest whole cells, as a building placed by hand
+                // does.
+                auto rect = simulation.computeFootprintRegion(position, def.movementCollisionInfo);
+                auto topLeft = simulation.terrain.heightmapIndexToWorldCorner(rect.x, rect.y);
+                position.x = topLeft.x + ((SimScalar(rect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss);
+                position.z = topLeft.z + ((SimScalar(rect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss);
+            }
+            position.y = simulation.terrain.getHeightAt(position.x, position.z);
+
+            // 0x436EF9: degrees to the sixteen-bit angle, truncated.
+            auto heading = SimAngle(static_cast<uint16_t>(static_cast<int32_t>((static_cast<int64_t>(record.angle) * 65536) / 360)));
+
+            auto unitId = simulation.trySpawnUnit(unitType, *slotPlayers[slot], position, heading);
+            // The original's creator 0x485F50 fails only for want of a unit
+            // slot or on the per-type limit, never on where the unit goes,
+            // so mission units that overlap -- a truck parked under an
+            // aircraft, a unit on a tree -- simply share the ground. RWE's
+            // occupancy holds one unit to a cell, so a mobile unit that
+            // cannot have its own spot takes the nearest one it can, ring by
+            // ring out to eight cells, in a fixed order. A building keeps its
+            // place or is not made: moving one would redraw the mission.
+            for (int ring = 1; !unitId && def.isMobile && ring <= 8; ++ring)
+            {
+                for (int dz = -ring; !unitId && dz <= ring; ++dz)
+                {
+                    for (int dx = -ring; !unitId && dx <= ring; ++dx)
+                    {
+                        if (std::max(std::abs(dx), std::abs(dz)) != ring)
+                        {
+                            continue;
+                        }
+                        auto nearby = position;
+                        nearby.x += SimScalar(static_cast<float>(dx)) * MapTerrain::HeightTileWidthInWorldUnits;
+                        nearby.z += SimScalar(static_cast<float>(dz)) * MapTerrain::HeightTileHeightInWorldUnits;
+                        nearby.y = simulation.terrain.getHeightAt(nearby.x, nearby.z);
+                        unitId = simulation.trySpawnUnit(unitType, *slotPlayers[slot], nearby, heading);
+                    }
+                }
+            }
+            if (!unitId)
+            {
+                result.skipped.push_back(describe("could not be placed"));
+                continue;
+            }
+            auto& unit = simulation.getUnitState(*unitId);
+            unit.finishBuilding(def);
+            // 0x48848E: the maximum times the percentage over a hundred,
+            // truncated.
+            unit.hitPoints = static_cast<unsigned int>((static_cast<uint64_t>(def.maxHitPoints) * static_cast<uint64_t>(std::max(0, record.healthPercentage))) / 100u);
+            result.spawned.push_back(*unitId);
+            spawnedRecords.push_back(i);
+        }
+
+        // The orders, in a second pass once every unit is made, as the
+        // original reads them (0x4884F1). A name is the Ident or the unit
+        // type of the first record, in file order, that produced a unit
+        // (0x487AF0).
+        auto resolveName = [&](const std::string& name) -> std::optional<UnitId> {
+            // A name that did not scan resolves to nothing, not to the first
+            // record that has no Ident.
+            if (name.empty())
+            {
+                return std::nullopt;
+            }
+            auto wanted = toUpper(name);
+            for (std::size_t n = 0; n < spawnedRecords.size(); ++n)
+            {
+                const auto& record = schema.units[spawnedRecords[n]];
+                if (toUpper(record.ident) == wanted || toUpper(record.unitName) == wanted)
+                {
+                    return result.spawned[n];
+                }
+            }
+            return std::nullopt;
+        };
+        for (std::size_t n = 0; n < spawnedRecords.size(); ++n)
+        {
+            const auto& record = schema.units[spawnedRecords[n]];
+            // Immunity is the one record flag the spawner copies (0x488475).
+            simulation.getUnitState(result.spawned[n]).immune = record.immunity;
+            MissionScript script;
+            readInitialMission(simulation, result.spawned[n], record, resolveName, script);
+            if (!script.steps.empty())
+            {
+                if (!simulation.missionScripts)
+                {
+                    simulation.missionScripts = std::make_unique<MissionScripts>();
+                }
+                simulation.missionScripts->scripts[result.spawned[n].value] = std::move(script);
+            }
+        }
+        return result;
+    }
+
+    MissionRules buildMissionRules(
+        const OtaMissionRules& rules,
+        const MapTerrain& terrain,
+        bool hasUnits,
+        const std::optional<PlayerId>& human,
+        const std::optional<PlayerId>& computer,
+        const std::string& humanCommander,
+        const std::string& computerCommander)
+    {
+        using K = MissionRule::Kind;
+
+        MissionRules m;
+        m.enabled = hasUnits;
+        m.human = human;
+        m.computer = computer;
+        m.humanCommander = toUpper(humanCommander);
+        m.computerCommander = toUpper(computerCommander);
+
+        // ANYTYPE is any type only where the rule's own test says so:
+        // MoveUnitToRadius and UnitTypePassesX/Z compare an empty name as a
+        // match. Everywhere else the name is looked up or compared as it
+        // stands, and a unit called ANYTYPE is what it would take to meet it.
+        auto rule = [](K kind, const std::string& unitType = std::string(), int number = 0) {
+            MissionRule r;
+            r.kind = kind;
+            auto upper = toUpper(unitType);
+            auto anyTypeMeansAny = kind == K::MoveUnitToRadius || kind == K::UnitTypePassesX || kind == K::UnitTypePassesZ;
+            r.unitType = (anyTypeMeansAny && upper == "ANYTYPE") ? std::string() : upper;
+            r.number = number;
+            return r;
+        };
+        // Seconds to ticks, without overflowing on a silly value.
+        auto ticks = [](int seconds) { return static_cast<int>(std::min<int64_t>(static_cast<int64_t>(seconds) * SimTicksPerSecond, std::numeric_limits<int>::max())); };
+
+        if (rules.killEnemyCommander != 0)
+        {
+            m.victory.push_back(rule(K::KillEnemyCommander));
+        }
+        if (rules.destroyAllUnits != 0)
+        {
+            m.victory.push_back(rule(K::DestroyAllUnits));
+        }
+        if (rules.killAllMobileUnits != 0)
+        {
+            m.victory.push_back(rule(K::KillAllMobileUnits));
+        }
+        if (rules.buildUnitType)
+        {
+            m.victory.push_back(rule(K::BuildUnitType, *rules.buildUnitType));
+        }
+        if (rules.captureUnitType)
+        {
+            m.victory.push_back(rule(K::CaptureUnitType, *rules.captureUnitType));
+        }
+        if (rules.killAllOfType)
+        {
+            m.victory.push_back(rule(K::KillAllOfType, *rules.killAllOfType));
+        }
+        if (rules.killUnitType)
+        {
+            m.victory.push_back(rule(K::KillUnitType, rules.killUnitType->unitType, rules.killUnitType->number));
+        }
+        if (rules.moveUnitToRadius)
+        {
+            auto r = rule(K::MoveUnitToRadius, rules.moveUnitToRadius->unitType);
+            auto centre = terrain.topLeftCoordinateToWorld(missionPointOnGround(terrain, rules.moveUnitToRadius->x, rules.moveUnitToRadius->z));
+            r.x = centre.x;
+            r.z = centre.z;
+            r.radius = intToSimScalar(rules.moveUnitToRadius->radius);
+            m.victory.push_back(r);
+        }
+        if (rules.unitTypePassesX)
+        {
+            m.victory.push_back(rule(K::UnitTypePassesX, rules.unitTypePassesX->unitType, rules.unitTypePassesX->number >> 4));
+        }
+        if (rules.unitTypePassesZ)
+        {
+            m.victory.push_back(rule(K::UnitTypePassesZ, rules.unitTypePassesZ->unitType, rules.unitTypePassesZ->number >> 4));
+        }
+        if (rules.victoryTimerRunsOut > 0)
+        {
+            m.victory.push_back(rule(K::VictoryTimerRunsOut, std::string(), ticks(rules.victoryTimerRunsOut)));
+        }
+
+        if (rules.commanderKilled != 0)
+        {
+            m.defeat.push_back(rule(K::CommanderKilled));
+        }
+        if (rules.allUnitsKilled != 0)
+        {
+            m.defeat.push_back(rule(K::AllUnitsKilled));
+        }
+        if (rules.allUnitsKilledOfType)
+        {
+            m.defeat.push_back(rule(K::AllUnitsKilledOfType, *rules.allUnitsKilledOfType));
+        }
+        if (rules.unitTypeKilled)
+        {
+            m.defeat.push_back(rule(K::UnitTypeKilled, rules.unitTypeKilled->unitType, rules.unitTypeKilled->number));
+        }
+        if (rules.deathTimerRunsOut > 0)
+        {
+            m.defeat.push_back(rule(K::DeathTimerRunsOut, std::string(), ticks(rules.deathTimerRunsOut)));
+        }
+        if (rules.anyUnitPassesX >= 0)
+        {
+            m.defeat.push_back(rule(K::AnyUnitPassesX, std::string(), rules.anyUnitPassesX >> 4));
+        }
+        if (rules.anyUnitPassesZ >= 0)
+        {
+            m.defeat.push_back(rule(K::AnyUnitPassesZ, std::string(), rules.anyUnitPassesZ >> 4));
+        }
+
+        // 0x4902F3 and 0x49041D add these on the first poll; the rules are
+        // the same either way.
+        if (m.victory.empty())
+        {
+            m.victory.push_back(rule(K::DestroyAllUnits));
+        }
+        if (m.defeat.empty())
+        {
+            m.defeat.push_back(rule(K::AllUnitsKilled));
+        }
+
+        return m;
+    }
+
+    void installMissionRules(
+        GameSimulation& simulation,
+        const OtaRecord& ota,
+        const OtaSchema& schema,
+        const std::array<std::optional<PlayerId>, 10>& slotPlayers,
+        const std::unordered_map<std::string, SideData>& sideData)
+    {
+        auto commanderOf = [&](const std::optional<PlayerId>& player) {
+            if (!player)
+            {
+                return std::string();
+            }
+            auto it = sideData.find(simulation.getPlayer(*player).side);
+            return it == sideData.end() ? std::string() : it->second.commander;
+        };
+        simulation.missionRules = std::make_unique<MissionRules>(buildMissionRules(
+            ota.rules,
+            simulation.terrain,
+            !schema.units.empty(),
+            slotPlayers[0],
+            slotPlayers[1],
+            commanderOf(slotPlayers[0]),
+            commanderOf(slotPlayers[1])));
+        const auto& rules = *simulation.missionRules;
+        LOG_INFO << "Mission rules: " << rules.victory.size() << " to win, " << rules.defeat.size() << " to lose" << (rules.enabled ? "" : ", switched off: the mission has no [units]");
     }
 }

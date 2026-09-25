@@ -1,6 +1,7 @@
 #include "TransportManager.h"
 #include <algorithm>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
@@ -51,6 +52,158 @@ namespace rwe
 
         // How often to look for a patch across the water.
         const unsigned int ExpansionSiteRefreshTicks = 10u * static_cast<unsigned int>(SimTicksPerSecond);
+
+        PlayerCommand moveCommand(UnitId unit, const SimVector& to, IssueKind kind)
+        {
+            return PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(MoveOrder(to), kind));
+        }
+
+        /**
+         * How near its station a hull must come to be sent on to the loads.
+         * The move there is only staging, and asks for eight units, which a
+         * 96-unit hull alongside a bank may never manage: on Coast To Coast
+         * Arm's Hulk came to rest 44 units off its station with the shore
+         * well inside the crane's reach, and waited there on the move until
+         * the ferry timed out.
+         */
+        const SimScalar StationReach = 64_ss;
+
+        /** The loads and the unloads, the first load now: the hull is where it loads from. */
+        void issueLoadOrders(std::vector<PlayerCommand>& outCommands, UnitId transportId, const TransportManager::Ferry& ferry)
+        {
+            for (std::size_t i = 0; i < ferry.passengers.size(); ++i)
+            {
+                outCommands.push_back(loadCommand(transportId, ferry.passengers[i], i == 0 ? IssueKind::Immediate : IssueKind::Queued));
+            }
+            queueUnloads(outCommands, transportId, ferry.destination, ferry.passengers.size(), IssueKind::Queued);
+        }
+
+        /**
+         * A ferry's orders from a clean start. A mustered sea ferry sends its
+         * passengers to the shore point and its hull to the water beside it
+         * before the loads, so the crane works from a standstill; any other
+         * ferry sends the transport to each passenger where it stands, which
+         * is what an air lift wants.
+         */
+        void issueFerryOrders(std::vector<PlayerCommand>& outCommands, UnitId transportId, const TransportManager::Ferry& ferry)
+        {
+            auto loadKind = IssueKind::Immediate;
+            if (ferry.muster && ferry.station)
+            {
+                for (auto id : ferry.passengers)
+                {
+                    outCommands.push_back(moveCommand(id, *ferry.muster, IssueKind::Immediate));
+                }
+                outCommands.push_back(moveCommand(transportId, *ferry.station, IssueKind::Immediate));
+                loadKind = IssueKind::Queued;
+            }
+            for (std::size_t i = 0; i < ferry.passengers.size(); ++i)
+            {
+                outCommands.push_back(loadCommand(transportId, ferry.passengers[i], i == 0 ? loadKind : IssueKind::Queued));
+            }
+            queueUnloads(outCommands, transportId, ferry.destination, ferry.passengers.size(), IssueKind::Queued);
+        }
+    }
+
+    std::optional<TransportManager::Muster> TransportManager::seaMuster(const GameSimulation& sim, const ReachabilityMap& reachability, const AiBlackboard& bb)
+    {
+        if (!reachability.isNavalValid() || !bb.groundReachabilityValid)
+        {
+            return std::nullopt;
+        }
+
+        // From the shipyard, where a new hull is born and an empty one comes
+        // back to; the ground anchor when there is no yard of ours.
+        std::optional<SimVector> origin;
+        for (auto factoryId : bb.factories)
+        {
+            const auto& factory = sim.getUnitState(factoryId);
+            if ((!bb.sideUnits.shipyard.empty() && factory.unitType == bb.sideUnits.shipyard)
+                || (!bb.sideUnits.advancedShipyard.empty() && factory.unitType == bb.sideUnits.advancedShipyard))
+            {
+                origin = factory.position;
+                break;
+            }
+        }
+        if (!origin)
+        {
+            origin = bb.groundAnchor ? bb.groundAnchor : bb.baseAnchor;
+        }
+        if (!origin)
+        {
+            return std::nullopt;
+        }
+        if (musterMemo && musterMemo->origin.distanceSquared(*origin) == 0_ss)
+        {
+            return musterMemo->muster;
+        }
+
+        // Rings of sixteen bearings, 48 units apart, out to 1440; the first
+        // ring with a hit wins, and within it the first bearing, so every
+        // peer finds the same point. A candidate is dry, walkable and on home
+        // ground, and has water our own navy can reach within 144 of it in
+        // one of eight directions -- inside the crane's reach once the hull
+        // lies alongside, and clear of the shoreline margin that labelling a
+        // hull's footprint by its corner leaves (see navalLandingNear).
+        //
+        // Fixed bearing tables, as ArmyManager's navalRallyPoint uses, and
+        // not std::cos: this decides where units walk, and a trig call is
+        // free to round differently from one standard library to the next.
+        static const float ringBearings[16][2] = {
+            {1.0f, 0.0f}, {0.9239f, 0.3827f}, {0.7071f, 0.7071f}, {0.3827f, 0.9239f},
+            {0.0f, 1.0f}, {-0.3827f, 0.9239f}, {-0.7071f, 0.7071f}, {-0.9239f, 0.3827f},
+            {-1.0f, 0.0f}, {-0.9239f, -0.3827f}, {-0.7071f, -0.7071f}, {-0.3827f, -0.9239f},
+            {0.0f, -1.0f}, {0.3827f, -0.9239f}, {0.7071f, -0.7071f}, {0.9239f, -0.3827f}};
+        static const float waterBearings[8][2] = {
+            {1.0f, 0.0f}, {0.7071f, 0.7071f}, {0.0f, 1.0f}, {-0.7071f, 0.7071f},
+            {-1.0f, 0.0f}, {-0.7071f, -0.7071f}, {0.0f, -1.0f}, {0.7071f, -0.7071f}};
+        std::optional<Muster> found;
+        const auto seaLevel = sim.terrain.getSeaLevel();
+        for (int ring = 1; ring <= 30 && !found; ++ring)
+        {
+            const auto radius = SimScalar(48.0f * static_cast<float>(ring));
+            for (int bearing = 0; bearing < 16 && !found; ++bearing)
+            {
+                SimVector candidate(
+                    origin->x + (radius * SimScalar(ringBearings[bearing][0])),
+                    0_ss,
+                    origin->z + (radius * SimScalar(ringBearings[bearing][1])));
+                auto height = sim.terrain.tryGetHeightAt(candidate.x, candidate.z);
+                if (!height || *height < seaLevel)
+                {
+                    continue;
+                }
+                candidate.y = *height;
+                if (!reachability.isWalkable(sim, candidate) || !reachability.isReachable(sim, candidate))
+                {
+                    continue;
+                }
+                for (int direction = 0; direction < 8 && !found; ++direction)
+                {
+                    for (int step = 1; step <= 3; ++step)
+                    {
+                        const auto reach = SimScalar(48.0f * static_cast<float>(step));
+                        SimVector water(
+                            candidate.x + (reach * SimScalar(waterBearings[direction][0])),
+                            0_ss,
+                            candidate.z + (reach * SimScalar(waterBearings[direction][1])));
+                        auto waterHeight = sim.terrain.tryGetHeightAt(water.x, water.z);
+                        if (!waterHeight || *waterHeight >= seaLevel)
+                        {
+                            continue;
+                        }
+                        water.y = *waterHeight;
+                        if (reachability.isNavalReachable(sim, water))
+                        {
+                            found = Muster{candidate, water};
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        musterMemo = MusterMemo{*origin, found};
+        return found;
     }
 
     void TransportManager::bookPassengers(AiBlackboard& bb, const Ferry& ferry)
@@ -96,7 +249,13 @@ namespace rwe
                 }
             }
 
-            bool overdue = sim.gameTime >= ferry.startedAt + timeout;
+            // The timeout is for a pickup that never happened, and only that.
+            // It used to fire on any empty transport past the deadline, which
+            // included one that had loaded everybody, crossed and set them all
+            // down: a trip that took a little over two minutes was reported
+            // "overdue" at the moment it succeeded, and the arena counted a
+            // delivery as a failure (issue #194, measured on Coast To Coast).
+            bool overdue = sim.gameTime >= ferry.startedAt + timeout && !ferry.loaded;
             if (ferry.passengers.empty() || (overdue && !carryingAny))
             {
                 // Nothing left to carry, or the pickup never happened: call it off.
@@ -106,6 +265,8 @@ namespace rwe
                     .set("unit", transportId.value)
                     .set("passengers", ferry.passengers.size())
                     .set("carried", transport.carriedUnits.size())
+                    .set("at_x", static_cast<double>(transport.position.x.value))
+                    .set("at_z", static_cast<double>(transport.position.z.value))
                     .set("why", overdue ? "overdue" : "called_off")
                     .detail(overdue ? "ferry called off (overdue)" : "ferry called off");
                 if (!transport.orders.empty())
@@ -114,6 +275,22 @@ namespace rwe
                 }
                 it = ferries.erase(it);
                 continue;
+            }
+
+            // The move to the station is staging, and asks for eight units,
+            // which a big hull alongside a bank may never manage. Near enough
+            // is enough: send it on to the loads.
+            if (ferry.station && !ferry.atStation && !ferry.loaded && !carryingAny)
+            {
+                auto distance = SimVector(transport.position.x - ferry.station->x, 0_ss, transport.position.z - ferry.station->z).length();
+                if (distance <= StationReach)
+                {
+                    ferry.atStation = true;
+                    if (!transport.orders.empty() && std::holds_alternative<MoveOrder>(transport.orders.front()))
+                    {
+                        issueLoadOrders(outCommands, transportId, ferry);
+                    }
+                }
             }
 
             if (transport.orders.empty())
@@ -140,13 +317,9 @@ namespace rwe
                 }
                 else
                 {
-                    // Never picked anyone up and has nothing to do: try again from the top.
-                    outCommands.push_back(loadCommand(transportId, ferry.passengers.front(), IssueKind::Immediate));
-                    for (std::size_t i = 1; i < ferry.passengers.size(); ++i)
-                    {
-                        outCommands.push_back(loadCommand(transportId, ferry.passengers[i], IssueKind::Queued));
-                    }
-                    queueUnloads(outCommands, transportId, ferry.destination, ferry.passengers.size(), IssueKind::Queued);
+                    // Never picked anyone up and has nothing to do: try again
+                    // from the top, muster included.
+                    issueFerryOrders(outCommands, transportId, ferry);
                 }
             }
 
@@ -530,6 +703,20 @@ namespace rwe
         bb.armyNeedsFerry = armyNeedsFerry;
         bb.wantsTransport = expansionSite.has_value() || armyNeedsFerry;
 
+        // Where a sea lift gathers its passengers. Published for the rally
+        // point only while the army is waiting on a lift that will come by
+        // sea: an air transport picks a unit up wherever it stands, so with
+        // one of those in hand the army stays where it rallies anyway.
+        std::optional<Muster> muster;
+        if (profile.seaFerryMuster && (armyNeedsFerry || expansionSite))
+        {
+            muster = seaMuster(sim, reachability, bb);
+        }
+        bool haveAirLift = std::any_of(bb.transports.begin(), bb.transports.end(), [&](UnitId id) {
+            return sim.unitDefinitions.at(sim.getUnitState(id).unitType).canFly;
+        });
+        bb.ferryMuster = (armyNeedsFerry && muster && !haveAirLift) ? std::optional<SimVector>(muster->shore) : std::nullopt;
+
         if (armyNeedsFerry && bb.phase == GamePhase::Attack && bb.transports.empty())
         {
             LOG_DEBUG << "AI transport: army ferry wanted, but nothing is classified as a transport";
@@ -601,6 +788,11 @@ namespace rwe
                 if (builder)
                 {
                     Ferry ferry{{*builder}, *expansionSite, sim.gameTime, false};
+                    if (!transportDef.canFly && muster)
+                    {
+                        ferry.muster = muster->shore;
+                        ferry.station = muster->water;
+                    }
                     LOG_DEBUG << "AI transport " << transportId.value << ": ferrying builder " << builder->value << " to " << expansionSite->x.value << "," << expansionSite->z.value;
                     sim.eventLog.event(sim.gameTime.value, "transport_dispatch")
                         .set("player", aiOwner.value)
@@ -610,8 +802,7 @@ namespace rwe
                         .set("z", static_cast<double>(expansionSite->z.value))
                         .set("why", "builder_ferry")
                         .detail("ferrying a builder to a fresh metal patch");
-                    outCommands.push_back(loadCommand(transportId, *builder, IssueKind::Immediate));
-                    outCommands.push_back(unloadCommand(transportId, *expansionSite, IssueKind::Queued));
+                    issueFerryOrders(outCommands, transportId, ferry);
                     bookPassengers(bb, ferry);
                     ferries[transportId.value] = std::move(ferry);
                     // The patch is spoken for; look for another next time
@@ -725,6 +916,13 @@ namespace rwe
                     // booked onto a ferry either: the transport would fly out,
                     // hover over it and never pick it up.
                     if (def.cantBeTransported)
+                    {
+                        continue;
+                    }
+                    // A hovercraft crosses under its own power, so a seat
+                    // given to one is a seat taken from something that
+                    // cannot. It goes with the army instead. Issue #196.
+                    if (def.canHover)
                     {
                         continue;
                     }
@@ -847,21 +1045,31 @@ namespace rwe
                     continue;
                 }
                 Ferry ferry{passengers, *landing, sim.gameTime, false};
+                if (!transportDef.canFly && muster)
+                {
+                    ferry.muster = muster->shore;
+                    ferry.station = muster->water;
+                }
                 LOG_DEBUG << "AI transport " << transportId.value << ": ferrying " << passengers.size() << " units to " << landing->x.value << "," << landing->z.value;
-                sim.eventLog.event(sim.gameTime.value, "transport_dispatch")
-                    .set("player", aiOwner.value)
+                auto dispatch = sim.eventLog.event(sim.gameTime.value, "transport_dispatch");
+                dispatch.set("player", aiOwner.value)
                     .set("unit", transportId.value)
                     .set("passengers", passengers.size())
                     .set("x", static_cast<double>(landing->x.value))
-                    .set("z", static_cast<double>(landing->z.value))
-                    .set("why", "army_ferry")
-                    .detail("ferrying the army to an enemy it cannot walk to");
-                outCommands.push_back(loadCommand(transportId, passengers.front(), IssueKind::Immediate));
-                for (std::size_t i = 1; i < passengers.size(); ++i)
+                    .set("z", static_cast<double>(landing->z.value));
+                if (ferry.muster)
                 {
-                    outCommands.push_back(loadCommand(transportId, passengers[i], IssueKind::Queued));
+                    dispatch.set("muster_x", static_cast<double>(ferry.muster->x.value))
+                        .set("muster_z", static_cast<double>(ferry.muster->z.value));
                 }
-                outCommands.push_back(unloadCommand(transportId, *landing, IssueKind::Queued));
+                if (ferry.station)
+                {
+                    dispatch.set("station_x", static_cast<double>(ferry.station->x.value))
+                        .set("station_z", static_cast<double>(ferry.station->z.value));
+                }
+                dispatch.set("why", "army_ferry")
+                    .detail("ferrying the army to an enemy it cannot walk to");
+                issueFerryOrders(outCommands, transportId, ferry);
                 bookPassengers(bb, ferry);
                 ferries[transportId.value] = std::move(ferry);
             }

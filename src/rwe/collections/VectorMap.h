@@ -159,6 +159,33 @@ namespace rwe
          */
         void restoreLayout(const Layout& l)
         {
+            // A layout comes from a saved game, and emplace writes through
+            // the free chain it describes: a link past the end, to a slot
+            // that is occupied, or round in a circle would have it write out
+            // of bounds or over a live member. Checked before anything is
+            // changed, so a bad layout leaves the map as it was. Issue #75.
+            auto isFreeSlot = [&l](unsigned int index) { return index < l.slots.size() && !l.slots[index].occupied; };
+            std::size_t freeSlots = 0;
+            for (const auto& slot : l.slots)
+            {
+                if (!slot.occupied)
+                {
+                    ++freeSlots;
+                    if (slot.nextFreeIndex && !isFreeSlot(*slot.nextFreeIndex))
+                    {
+                        throw std::runtime_error("restoreLayout: a free slot's link does not lead to a free slot");
+                    }
+                }
+            }
+            std::size_t chainLength = 0;
+            for (auto link = l.firstFreeIndex; link; link = l.slots[*link].nextFreeIndex)
+            {
+                if (!isFreeSlot(*link) || ++chainLength > freeSlots)
+                {
+                    throw std::runtime_error("restoreLayout: the free chain is broken or loops");
+                }
+            }
+
             vec.clear();
             for (const auto& slot : l.slots)
             {
@@ -267,6 +294,13 @@ namespace rwe
         {
             auto index = extractIndex(id);
 
+            // An id can come from a saved game or a replay as well as from
+            // this map, and one whose index is past the end names nothing
+            // rather than whatever memory lies beyond. Issue #75.
+            if (index.value >= vec.size())
+            {
+                return std::nullopt;
+            }
             auto& entry = vec[index.value];
             return match(
                 entry,
@@ -282,6 +316,10 @@ namespace rwe
         {
             auto index = extractIndex(id);
 
+            if (index.value >= vec.size())
+            {
+                return std::nullopt;
+            }
             const auto& entry = vec[index.value];
             return match(
                 entry,

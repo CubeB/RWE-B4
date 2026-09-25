@@ -127,6 +127,15 @@ namespace rwe
 
         std::unique_ptr<TdfAdapter<Result>> adapter;
 
+        /**
+         * How deep blocks may nest. Each level is a C++ frame, and a file of
+         * nothing but opening brackets recursed until the stack ran out,
+         * which no exception handler can catch. TA's deepest files nest a
+         * handful of levels. Issue #75.
+         */
+        static constexpr unsigned int MaxBlockDepth = 64;
+        unsigned int blockDepth{0};
+
     public:
         explicit TdfParser(TdfAdapter<Result>* adapter) : adapter(adapter) {}
 
@@ -165,6 +174,10 @@ namespace rwe
         }
         void block()
         {
+            if (++blockDepth > MaxBlockDepth)
+            {
+                throw TdfParserException(_it.getLine(), _it.getColumn(), "Blocks nested too deep");
+            }
             auto title = blockHead();
 
             adapter->onStartBlock(title);
@@ -173,6 +186,7 @@ namespace rwe
             blockBody();
 
             adapter->onEndBlock();
+            --blockDepth;
         }
 
         std::string blockHead()

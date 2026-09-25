@@ -788,6 +788,9 @@ namespace rwe
         /** Players whose defeat has already been announced. */
         std::unordered_set<unsigned int> defeatAnnounced;
 
+        /** How many mission objectives have had their sound; see updateMissionNotifications. */
+        unsigned int missionCelebrationsHeard{0};
+
         std::vector<std::pair<GameTime, GameHash>> gameHashes;
 
         std::optional<std::ofstream> stateLogStream;
@@ -828,6 +831,8 @@ namespace rwe
          * dead is not a thing anyone wants to test.
          */
         unsigned int debugSpawnHitPoints(const UnitDefinition& unitDefinition) const;
+
+        void queueBattleTestOrder(UnitId unitId, const UnitOrder& order);
 
         void renderUnitSpawnerWindow();
         void buildUnitTypeCategories();
@@ -1109,7 +1114,7 @@ namespace rwe
 
         std::optional<UnitId> spawnUnit(const std::string& unitType, PlayerId owner, const SimVector& position, std::optional<const std::reference_wrapper<SimAngle>> rotation);
 
-        std::optional<std::reference_wrapper<UnitState>> spawnCompletedUnit(const std::string& unitType, PlayerId owner, const SimVector& position);
+        std::optional<UnitId> spawnCompletedUnit(const std::string& unitType, PlayerId owner, const SimVector& position);
 
         /** Applies a saved game's state onto the freshly built simulation. */
         void applyLoadedGame(const SaveFile& save);
@@ -1176,6 +1181,12 @@ namespace rwe
         void updateSelfDestructNotifications();
 
         void updateDefeatNotifications();
+
+        /** How many mission objectives the simulation says are met and celebrated; 0 outside a mission. */
+        unsigned int missionCelebrations() const;
+
+        /** Plays "Victory Condition" for each mission objective met since the last call. */
+        void updateMissionNotifications();
 
         void renderConsole();
 
@@ -1623,15 +1634,9 @@ namespace rwe
 
         bool positionIsExploredByLocalPlayer(const SimVector& position) const;
 
-        UnitState& getUnit(UnitId id);
-
         const UnitState& getUnit(UnitId id) const;
 
-        std::optional<std::reference_wrapper<UnitState>> tryGetUnit(UnitId id);
-
         std::optional<std::reference_wrapper<const UnitState>> tryGetUnit(UnitId id) const;
-
-        GamePlayerInfo& getPlayer(PlayerId player);
 
         const GamePlayerInfo& getPlayer(PlayerId player) const;
 

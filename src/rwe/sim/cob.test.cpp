@@ -5,6 +5,7 @@
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/PieceController.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitFireOrders.h>
 #include <rwe/sim/UnitMovementOrders.h>
@@ -105,18 +106,18 @@ namespace rwe
             REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::Armored{}}) == 0);
         }
 
-        SECTION("BuggerOff round-trips through sim.setBuggerOff(false)")
+        SECTION("BuggerOff round-trips through PieceController(sim).setBuggerOff(false)")
         {
             // initial GET should be false (default)
             REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::BuggerOff{}}) == 0);
 
-            // Set the field directly: sim.setBuggerOff(true) emits a footprint sweep that
+            // Set the field directly: PieceController(sim).setBuggerOff(true) emits a footprint sweep that
             // requires unitDefinitions to be populated, which a bare test unit lacks.
             // The behavior under test is that setBuggerOff(false) clears the field.
             unit.buggerOffActive = true;
             REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::BuggerOff{}}) == 1);
 
-            sim.setBuggerOff(unitId, false);
+            PieceController(sim).setBuggerOff(unitId, false);
             REQUIRE(handleQuery(sim, env, unitId, CobEnvironment::QueryStatus{CobEnvironment::QueryStatus::BuggerOff{}}) == 0);
         }
 
@@ -306,9 +307,9 @@ namespace rwe
             auto& unit = sim.getUnitState(unitId);
             REQUIRE(unit.pieces[1].cached);
 
-            sim.disableCaching(unitId, "turret");
+            PieceController(sim).disableCaching(unitId, "turret");
             REQUIRE(!unit.pieces[1].cached);
-            sim.enableCaching(unitId, "turret");
+            PieceController(sim).enableCaching(unitId, "turret");
             REQUIRE(unit.pieces[1].cached);
         }
     }

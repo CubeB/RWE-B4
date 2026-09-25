@@ -207,6 +207,26 @@ namespace rwe
         /** Torpedo seaplane. ARMSEAP 557 metal, CORSEAP 545. A torpedo, so it can only hurt what is in the water. */
         std::string torpedoSeaplane;
 
+        // Hovercraft, Core Contingency only: none of these is in
+        // totala1.hpi or totala2.hpi, so on the base game every slot below
+        // is cleared and nothing that reads them does anything.
+        //
+        // The platform is much closer than its LEVEL2 category suggests.
+        // download/ARMHP.TDF and CORHP.TDF put it on page five of the
+        // level-one construction kbot's, vehicle's and aircraft's menus
+        // (ARMCK, ARMCV, ARMCA and the Core three), and the loader applies
+        // download menus before the AI's build tree is built -- so a side
+        // with a lab already owns a builder for it. The construction
+        // seaplane's and the construction hovercraft's own fifth pages
+        // carry it as well; neither is needed to reach it. Issue #196.
+
+        /** Hovercraft platform. ARMHP 2007 metal, CORHP 1793, 8x7, MaxWaterDepth=0 -- a land factory, sited on dry ground like the lab. */
+        std::string hoverPlatform;
+        /** Hover tank. ARMANAC 272 metal, CORSNAP 280, 3x3, TANKHOVER3. Crosses water under its own power, so it is an army that needs no ferry. */
+        std::string hoverTank;
+        /** Anti-air hovercraft. ARMAH 120 metal, CORAH 115, 3x3, TANKHOVER3. */
+        std::string hoverAntiAir;
+
         /** Anti-air ship. ARMAAS 1358 metal, CORARCH 1314, 3x3, MinWaterDepth=30. Three missile mounts and nothing else -- the fleet's only answer to a torpedo bomber. */
         std::string antiAirShip;
 

@@ -8,6 +8,7 @@
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuScene.h>
 #include <rwe/game/SaveFile.h>
+#include <rwe/sim/MissionRules.h>
 #include <rwe/io/gui/gui.h>
 #include <rwe/game/save_util.h>
 #include <rwe/ui/UiTextBox.h>
@@ -272,6 +273,31 @@ namespace rwe
             auto side = player.side;
             std::transform(side.begin() + 1, side.end(), side.begin() + 1, [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             printConsole(side + " forces have been obliterated", playerColorToRgb(player.color));
+        }
+    }
+
+    unsigned int GameScene::missionCelebrations() const
+    {
+        return simulation.missionRules ? simulation.missionRules->celebrations() : 0u;
+    }
+
+    void GameScene::updateMissionNotifications()
+    {
+        // The original plays it at the moment each victory rule is first seen
+        // met, locally and without a message (0x47F1A0 with 0), so a mission
+        // of three objectives sounds three times before it is won.
+        auto now = missionCelebrations();
+        if (now < missionCelebrationsHeard)
+        {
+            // A replay wound back to before them.
+            missionCelebrationsHeard = now;
+        }
+        for (; missionCelebrationsHeard < now; ++missionCelebrationsHeard)
+        {
+            if (sounds.victoryCondition)
+            {
+                playUiSound(*sounds.victoryCondition);
+            }
         }
     }
 

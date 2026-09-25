@@ -238,8 +238,10 @@ It now builds the list of selected definitions and applies
 ### Deliberately not ported
 
 - **The cloak accumulator's disagreement bug** at `0x41B485`.
-- **`canresurrect`, `wacky` and `selfdestructcountdown`.** No shipped unit
-  names any of them and RWE has no resurrect order.
+- **`canresurrect` and `wacky`.** No shipped unit names either and RWE has no
+  resurrect order. `selfdestructcountdown` was on this line too, on the same
+  grounds, and the grounds were wrong: the base game names it nowhere, but
+  Core Contingency's twelve mines say 1 and 2. It is parsed now (#108).
 - **`canstop`.** It is parsed and honoured for the button, but the original's
   own STOP mission builder at `0x43F82C` does not check it, so the flag gates
   the button and nothing else.

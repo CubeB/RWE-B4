@@ -305,7 +305,9 @@ namespace rwe
         std::vector<UnitId> matches;
         for (const auto& [unitId, unit] : simulation.units)
         {
-            if (!unit.isAlive() || !unit.isOwnedBy(localPlayerId))
+            // A mission unit its script holds is not selectable by any path,
+            // the category hotkeys included (0x48BF30).
+            if (!unit.isAlive() || !unit.isOwnedBy(localPlayerId) || unit.heldByMission)
             {
                 continue;
             }
@@ -1339,29 +1341,14 @@ namespace rwe
         drawColumn(rightColumn, boxX + 12.0f + columnWidth);
     }
 
-    UnitState& GameScene::getUnit(UnitId id)
-    {
-        return simulation.getUnitState(id);
-    }
-
     const UnitState& GameScene::getUnit(UnitId id) const
     {
         return simulation.getUnitState(id);
     }
 
-    std::optional<std::reference_wrapper<UnitState>> GameScene::tryGetUnit(UnitId id)
-    {
-        return simulation.tryGetUnitState(id);
-    }
-
     std::optional<std::reference_wrapper<const UnitState>> GameScene::tryGetUnit(UnitId id) const
     {
         return simulation.tryGetUnitState(id);
-    }
-
-    GamePlayerInfo& GameScene::getPlayer(PlayerId player)
-    {
-        return simulation.getPlayer(player);
     }
 
     const GamePlayerInfo& GameScene::getPlayer(PlayerId player) const

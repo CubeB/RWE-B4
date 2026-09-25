@@ -1,5 +1,7 @@
 #include "GameHash_util.h"
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/MissionRules.h>
+#include <rwe/sim/MissionScripts.h>
 
 #include <rwe/game/UnitStateFieldTable.h>
 
@@ -61,6 +63,7 @@ namespace rwe
             p.maxMetal,
             p.energy,
             p.maxEnergy,
+            p.hasBaseStorage,
             p.metalStalled,
             p.energyStalled,
             p.unitsKilled,
@@ -362,6 +365,56 @@ namespace rwe
             f.nextSpark);
     }
 
+    GameHash computeHashOf(const MissionRules& m)
+    {
+        // The rules' own state only. The parameters are the mission's, the
+        // same on every peer from the start; what the rules have seen is what
+        // two peers can disagree about. Every field is folded in by position
+        // rather than summed: a count going from 1 to 0 as its rule latches
+        // would otherwise leave the sum exactly where it was, and that is the
+        // commonest thing a defeat rule does.
+        uint32_t accumulator = 0;
+        auto fold = [&](GameHash h) { accumulator = (accumulator * 31u) + h.value; };
+        for (const auto* rules : {&m.victory, &m.defeat})
+        {
+            for (const auto& r : *rules)
+            {
+                fold(computeHashOf(r.kind));
+                fold(computeHashOf(r.number));
+                fold(computeHashOf(r.satisfied));
+                fold(computeHashOf(r.celebrated));
+            }
+        }
+        fold(computeHashOf(m.enabled));
+        fold(computeHashOf(m.countdown));
+        // Victory is the enum's zero, so an outcome is one more than it.
+        fold(GameHash(m.outcome ? 1u + static_cast<uint32_t>(*m.outcome) : 0u));
+        return GameHash(accumulator);
+    }
+
+    GameHash computeHashOf(const MissionScripts& m)
+    {
+        // Folded by position, for the reason the rules are: the state is
+        // mostly small counts and flags that a sum would cancel.
+        uint32_t accumulator = 0;
+        auto fold = [&](GameHash h) { accumulator = (accumulator * 31u) + h.value; };
+        for (const auto& [id, script] : m.scripts)
+        {
+            fold(computeHashOf(id));
+            fold(computeHashOf(script.started));
+            fold(computeHashOf(script.wakeAt));
+            fold(computeHashOf(static_cast<uint32_t>(script.steps.size())));
+            for (const auto& step : script.steps)
+            {
+                fold(computeHashOf(step.kind));
+                fold(computeHashOf(step.ticks));
+                fold(computeHashOf(step.count));
+                fold(computeHashOf(step.hit));
+            }
+        }
+        return GameHash(accumulator);
+    }
+
     GameHash computeHashOf(const Grid<ExploredMask>& grid)
     {
         std::uint32_t accumulator = 0;
@@ -386,6 +439,10 @@ namespace rwe
             // in Permanent mode, where it decides targets. A peer that disagrees
             // about what it has seen is a desync to catch, not player-facing
             // state to leave out.
-            simulation.explored);
+            simulation.explored,
+            // Absent in a skirmish, and then it adds nothing, so a skirmish's
+            // hashes are what they were.
+            simulation.missionRules ? computeHashOf(*simulation.missionRules) : GameHash(0),
+            simulation.missionScripts ? computeHashOf(*simulation.missionScripts) : GameHash(0));
     }
 }

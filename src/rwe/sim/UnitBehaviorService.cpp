@@ -1,6 +1,7 @@
 #include "UnitBehaviorService.h"
 #include <rwe/sim/AirMovement.h>
 #include <rwe/sim/DemoRecorder.h>
+#include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/SimRandom.h>
 #include <algorithm>
 #include <limits>
@@ -338,6 +339,16 @@ namespace rwe
                     unitInfo.state->buildOrderUnitId = std::nullopt;
                 }
             }
+            else if (std::holds_alternative<UnitPhysicsInfoAir>(unitInfo.state->physics) && sim->missionScripts && sim->missionScripts->isRunning(unitId))
+            {
+                // A mission aircraft whose list is on a wait, a hunt's pause
+                // or any other step of its own has an empty queue and is still
+                // not idle: the original's head mission is the WAIT, and only
+                // an empty list or a Standby looks for a fight (0x407069). It
+                // does not go after what it sees, or off to land; its weapons
+                // still answer from where it is. (A ground unit's idle branch
+                // only resets its state, which is right for it either way.)
+            }
             else if (auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics); airPhysics != nullptr)
             {
                 // An aircraft with nothing left to do goes and lands — but not
@@ -458,6 +469,17 @@ namespace rwe
                 // single tick, which is the other half of why the pads never
                 // actually mended anything.
                 changeState(*unitInfo.state, UnitBehaviorStateIdle());
+
+                // The one DefaultMissionType RWE's idle behaviour did not
+                // already amount to. The rest are what an idle unit here
+                // does anyway for the units that name them: VTOL_Standby is
+                // the aircraft branch above, Guard_NoMove and no mission at
+                // all leave a building's weapons to find their own targets,
+                // and Standby's search is what the weapons stand in for.
+                if (unitInfo.definition->defaultMission == DefaultMission::StandbyMine)
+                {
+                    pollMine(unitInfo);
+                }
             }
 
             // A spray that is already running follows its nozzle. Without this
@@ -2916,8 +2938,21 @@ namespace rwe
         RWE_SIMPROF("b.choose");
         const auto& unit = sim->getUnitState(id);
         const auto& unitDefinition = sim->unitDefinitions.at(unit.unitType);
-        const auto& weaponDefinition = sim->weaponDefinitions.at(unit.weapons[weaponIndex]->weaponType);
         const auto& badCategory = unitDefinition.badTargetCategory.at(weaponIndex);
+
+        // A kamikaze unit skips 0x49ABB0, the weapon's range and eligibility
+        // test, altogether ("Kamikaze units skip it entirely",
+        // TOTALA-EXE-WEAPONS.md §9). The only kamikaze units that search are
+        // Core Contingency's mines, which have no weapon at all and ask the
+        // sight-range question from Standby_Mine; for them there is no
+        // weapon to read, and the pool is simply what they can see.
+        const auto& weaponSlot = unit.weapons[weaponIndex];
+        const WeaponDefinition* weaponDefinition = weaponSlot ? &sim->weaponDefinitions.at(weaponSlot->weaponType) : nullptr;
+        const auto skipsEligibility = unitDefinition.kamikaze;
+        if (weaponDefinition == nullptr && !(skipsEligibility && mode == TargetSearchMode::SightDistance))
+        {
+            return std::nullopt;
+        }
 
         // The candidate pool comes out of 0x40AD80 with a radius that depends
         // on what is being asked: the weapon's own range when a gun is looking
@@ -2932,9 +2967,10 @@ namespace rwe
         // its own range check. So the radius a unit will actually leave its
         // post for is the smaller of the two, and for many units that is the
         // gun: a Peewee sees 280 and breaks off at 180.
+        const auto sightRadius = SimScalar(static_cast<float>(unitDefinition.sightDistance));
         auto searchRadius = mode == TargetSearchMode::SightDistance
-            ? rweMin(SimScalar(static_cast<float>(unitDefinition.sightDistance)), weaponDefinition.maxRange)
-            : weaponDefinition.maxRange;
+            ? (skipsEligibility || weaponDefinition == nullptr ? sightRadius : rweMin(sightRadius, weaponDefinition->maxRange))
+            : weaponDefinition->maxRange;
 
         // The original scores each candidate with a random number drawn
         // between zero and the square of the distance to it, and takes the
@@ -3014,6 +3050,14 @@ namespace rwe
                 continue;
             }
 
+            // Nor is a mission's Immune unit (0x40AB24): the gates the
+            // campaign puts down on the map are not something to shoot at
+            // unprompted.
+            if (otherUnit.immune)
+            {
+                continue;
+            }
+
             const auto& otherUnitDefinition = sim->unitDefinitions.at(otherUnit.unitType);
 
             // Buildings that do not ask to be shot at are left alone unless
@@ -3040,7 +3084,8 @@ namespace rwe
             // it on radar: 0x40AA40 puts every candidate through 0x465AC0
             // before the list this scan walks is built, and that predicate
             // never reads the radar bit.
-            if (!sim->canSeeUnit(unit.owner, otherUnitId) || !weaponCanHitUnit(weaponDefinition, unit, otherUnit))
+            if (!sim->canSeeUnit(unit.owner, otherUnitId)
+                || (!skipsEligibility && !weaponCanHitUnit(*weaponDefinition, unit, otherUnit)))
             {
                 continue;
             }
@@ -4172,6 +4217,54 @@ namespace rwe
         }
 
         return repairExistingUnit(unitInfo, repairOrder.target);
+    }
+
+    void UnitBehaviorService::pollMine(UnitInfo unitInfo)
+    {
+        auto& unit = *unitInfo.state;
+
+        // State 0 ends the mission at once for anything that can move
+        // (unit+0x110 bit 29, which 0x485A81 sets when bmcode is zero), and
+        // a mine already counting down has SELFDESTRUCT in front of this
+        // mission, not this.
+        if (unitInfo.definition->isMobile || unit.selfDestructTime)
+        {
+            return;
+        }
+
+        // Installed: free the weapons and sleep a tick (0x40616B-0x406182).
+        if (!unit.minePollAt)
+        {
+            unit.minePollAt = sim->gameTime + GameTime(1);
+            return;
+        }
+        if (sim->gameTime < *unit.minePollAt)
+        {
+            return;
+        }
+
+        // 0x43B700 finds nothing unless the mine is on Fire At Will, which
+        // is how ARMMINE6 and CORMINE6 -- StandingFireOrder=0, with the
+        // button -- sit quiet until the player arms them. What it finds is
+        // the ordinary chooser's pick over the mine's SightDistance, and the
+        // pick has to be standing on the ground (target+0x110 & 3 == 1,
+        // 0x4060BF): an aircraft overhead does not set one off.
+        std::optional<UnitId> sighting;
+        if (unit.fireOrders == UnitFireOrders::FireAtWill)
+        {
+            sighting = chooseTarget(unitInfo.id, 0, TargetSearchMode::SightDistance);
+        }
+        if (sighting && !isFlying(sim->getUnitState(*sighting).physics))
+        {
+            // Push SELFDESTRUCT (0x4060D8-0x406108): the definition's own
+            // countdown, then the blast.
+            unit.minePollAt.reset();
+            sim->startSelfDestruct(unitInfo.id);
+            return;
+        }
+
+        // Nothing: sleep rand(30)+30 and look again (0x40612A-0x406142).
+        unit.minePollAt = sim->gameTime + GameTime(30u + randomBelow(sim->rng, 30u));
     }
 
     std::optional<UnitId> UnitBehaviorService::findEnemyToEngage(UnitInfo unitInfo)

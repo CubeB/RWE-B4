@@ -24,7 +24,8 @@ namespace rwe
      * reused. Re-homing the map on a different base anchor afterwards is a
      * handful of lookups.
      *
-     * There are three independent labellings -- ground, naval and commander --
+     * There are four independent labellings -- ground, naval, commander and
+     * hover (the last is described at rebuildHover) --
      * rather than one that gets replaced. BuildManager, TransportManager and
      * ScoutManager use the original unsuffixed API
      * (rebuild/isValid/isReachable/isWalkable/reachableTileCount/
@@ -108,6 +109,23 @@ namespace rwe
         int commanderReachableTileCount() const { return commander.reachableTiles; }
         int commanderWalkableTileCount() const { return commander.walkableTiles; }
 
+        /**
+         * The hovercraft's counterpart, a fourth independent cache (issue
+         * #196). A hover class stands on dry ground and on water alike, so
+         * neither the ground layer nor the naval one can say where a hover
+         * tank goes. No rule of its own is needed: labelComponents asks
+         * isGridPointWalkable with the layer's movement class, and that
+         * already applies TANKHOVER3's depth and slope limits.
+         */
+        void rebuildHover(const GameSimulation& sim, const UnitDefinition::MovementCollisionInfo& mover, const SimVector& from);
+
+        bool isHoverValid() const { return hover.components.getWidth() > 0; }
+
+        /** True when a hover unit, from the base, can reach this point. */
+        bool isHoverReachable(const GameSimulation& sim, const SimVector& position) const;
+
+        int hoverReachableTileCount() const { return hover.reachableTiles; }
+
     private:
         /**
          * One movement class's labelling: which tiles it can stand on, which
@@ -171,5 +189,6 @@ namespace rwe
         Layer ground;
         Layer naval;
         Layer commander;
+        Layer hover;
     };
 }

@@ -739,6 +739,27 @@ namespace rwe
                     return 0;
             }
         }
+
+        /**
+         * Whether a hovercraft platform is worth having right now: the knob
+         * is on, the data has both the platform and a hover tank (Core
+         * Contingency), the army needs a ferry to reach the enemy, a
+         * hovercraft could make that crossing by itself, and the income
+         * could carry a level-two factory. The want and the factory reserve
+         * both ask it, so the two cannot disagree about when. Issue #196.
+         *
+         * Asked of armyNeedsFerry rather than landRouteToEnemy, because the
+         * map-wide question is the wrong one on the very map this came from:
+         * on Coast To Coast some start position is always walkable, and the
+         * enemy the AI actually drew is across the water all the same.
+         */
+        bool hoverPlatformWorthIt(const AiTuningProfile& profile, const AiBlackboard& bb)
+        {
+            const auto& s = bb.sideUnits;
+            return profile.targetHoverPlatformCount > 0 && !s.hoverPlatform.empty() && !s.hoverTank.empty()
+                && bb.armyNeedsFerry && bb.hoverRouteToEnemy && *bb.hoverRouteToEnemy
+                && bb.metalIncome.value >= static_cast<float>(profile.techMinMetalIncome);
+        }
     }
 
     std::optional<SimVector> BuildManager::chooseBuildSite(
@@ -2073,7 +2094,7 @@ namespace rwe
         std::optional<SimScalar> anyDistanceSquared;
         for (const auto& [unitId, unit] : sim.units)
         {
-            if (unit.owner != aiOwner || !unit.isAlive() || unitId == *bb.commanderUnitId)
+            if (unit.owner != aiOwner || !unit.isAlive() || unitId == *bb.commanderUnitId || unit.heldByMission)
             {
                 continue;
             }
@@ -3398,6 +3419,21 @@ namespace rwe
             want(s.advancedLab);
         }
 
+        // The hovercraft platform, where the army needs a ferry and a
+        // hovercraft could cross by itself (hoverPlatformWorthIt). A hover
+        // tank is the one land army a water map does not have to carry, and
+        // the platform is closer than its tier suggests: Core Contingency's
+        // download menus put it on the level-one constructors' fifth page,
+        // so any side with a lab owns a builder for it (AiSideUnits.h). It
+        // is 2007 metal and goes on the long save-up window with the other
+        // level-two buildings, and the factory reserve holds the lab's army
+        // back while it is owed. Issue #196.
+        if (hoverPlatformWorthIt(profile, bb) && total(s.lab) + total(s.vehiclePlant) >= 1
+            && total(s.hoverPlatform) < profile.targetHoverPlatformCount)
+        {
+            want(s.hoverPlatform);
+        }
+
         // An air plant for scout planes, and for transports when there is
         // ground to reach that no one can walk to. Metal is nearly always
         // short on a poor map, so this is not gated on it: a blind AI is
@@ -3826,17 +3862,27 @@ namespace rwe
                 && bb.advancedArmyValueRatio >= profile.techMinArmyValueRatio
                 && bb.metalIncome.value >= static_cast<float>(profile.techMinMetalIncome)
                 && bb.now.value >= static_cast<unsigned int>(profile.tierTwoReserveCoversLabAfterSeconds) * SimTicksPerSecond;
-            if (mohoOwed || reactorOwed || labOwed)
+            // And the hovercraft platform, on a map where it is worth one.
+            // Measured without this, the want sat on the list for seventeen
+            // minutes of a Coast To Coast game: the lab spends every unit of
+            // metal as it arrives, so canAfford's net income is about zero
+            // and 2007 metal is never within the save-up window. The lab's
+            // army is the one the ferry has to carry, which is what makes
+            // holding it back the cheap side of the trade. Issue #196.
+            auto hoverOwed = hoverPlatformWorthIt(profile, bb) && !hoverPlatformSiteless && completed(s.hoverPlatform) < 1
+                && completed(s.lab) + completed(s.vehiclePlant) >= 1 && completed(s.constructor) >= 1;
+            if (mohoOwed || reactorOwed || labOwed || hoverOwed)
             {
                 if (!tierTwoReserveStarted)
                 {
                     tierTwoReserveStarted = bb.now;
-                    LOG_INFO << "AI build: holding the factories for the tier-two economy (" << (labOwed ? "lab " : "") << (mohoOwed ? "moho " : "") << (reactorOwed ? "reactor" : "") << ")";
+                    LOG_INFO << "AI build: holding the factories for the tier-two economy (" << (labOwed ? "lab " : "") << (mohoOwed ? "moho " : "") << (reactorOwed ? "reactor " : "") << (hoverOwed ? "hover" : "") << ")";
                     sim.eventLog.event(sim.gameTime.value, "build_tier_assessment")
                         .set("player", aiOwner.value)
                         .set("lab", labOwed)
                         .set("moho", mohoOwed)
                         .set("reactor", reactorOwed)
+                        .set("hover", hoverOwed)
                         .set("why", "tier_two_reserve_started")
                         .detail("holding the factories for the tier-two economy");
                 }
@@ -4227,6 +4273,21 @@ namespace rwe
                 else if (!s.torpedoSeaplane.empty() && total(s.torpedoSeaplane) < profile.targetTorpedoSeaplaneCount)
                 {
                     next = s.torpedoSeaplane;
+                }
+            }
+            else if (!s.hoverPlatform.empty() && factory.unitType == s.hoverPlatform)
+            {
+                // Anti-air while something of theirs flies, as the lab
+                // does; otherwise the hover tank. Not held by
+                // landArmyCapped: that cap is for an army that has to be
+                // carried, and this one crosses on its own. Issue #196.
+                if (bb.enemyAirThreat && !s.hoverAntiAir.empty() && total(s.hoverAntiAir) < profile.antiAirMobileCount)
+                {
+                    next = s.hoverAntiAir;
+                }
+                else
+                {
+                    next = s.hoverTank;
                 }
             }
             else if (!s.advancedLab.empty() && factory.unitType == s.advancedLab)
@@ -6148,6 +6209,7 @@ namespace rwe
                 // to something cheap every pass and the AI never techs.
                 auto isLevelTwo = (!sideUnits.advancedLab.empty() && next == sideUnits.advancedLab)
                     || (!sideUnits.seaplanePlatform.empty() && next == sideUnits.seaplanePlatform)
+                    || (!sideUnits.hoverPlatform.empty() && next == sideUnits.hoverPlatform)
                     || (!sideUnits.advancedShipyard.empty() && next == sideUnits.advancedShipyard)
                     || (!sideUnits.fusion.empty() && next == sideUnits.fusion)
                     || (!sideUnits.underwaterFusion.empty() && next == sideUnits.underwaterFusion)
@@ -6471,6 +6533,10 @@ namespace rwe
                 return;
             }
             LOG_DEBUG << "AI build: no site found for " << next << " near " << builder.position.x.value << "," << builder.position.z.value;
+            if (!bb.sideUnits.hoverPlatform.empty() && next == bb.sideUnits.hoverPlatform)
+            {
+                hoverPlatformSiteless = true;
+            }
             sim.eventLog.event(sim.gameTime.value, "build_refusal")
                 .set("player", aiOwner.value)
                 .set("unit", builderId.value)

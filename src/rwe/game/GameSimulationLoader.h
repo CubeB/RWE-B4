@@ -19,7 +19,9 @@
 #include <rwe/io/tnt/TntArchive.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/LosTables.h>
+#include <rwe/io/sidedatatdf/SideData.h>
 #include <rwe/sim/MapTerrain.h>
+#include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MovementClassDatabase.h>
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/WeaponDefinition.h>
@@ -132,4 +134,65 @@ namespace rwe
         const GameParameters& gameParameters,
         MapData mapData,
         const OtaRecord& ota);
+
+    /** What spawnMissionUnits did, for the log and the tests. */
+    struct MissionSpawnResult
+    {
+        /** The units made, in the order of the schema's [unitN] blocks. */
+        std::vector<UnitId> spawned;
+        /** One line for each [unitN] that was not spawned, and why. */
+        std::vector<std::string> skipped;
+    };
+
+    /**
+     * A mission's starting units, as the original lays them out at mission
+     * start (0x488310): each [unitN] of the schema becomes a finished unit of
+     * `Player` N's slot N-1. A building is snapped to the build grid for its
+     * footprint and set on the ground (0x47DDC0, bmcode 0); a mobile unit is
+     * put where the file says and on the ground. Hit points are the maximum
+     * times HealthPercentage over a hundred (0x48848E) and the heading is
+     * Angle in degrees (0x436EF9).
+     *
+     * Two departures because RWE has nothing to spawn into: a name no unit
+     * definition carries is skipped, as the original skips it, and so is a
+     * unit whose slot has no player in it, where the original logs "Player
+     * number %d invalid" and makes the unit anyway. And one because RWE
+     * keeps one unit to a cell where the original lets them overlap: a
+     * mobile unit whose spot is taken goes to the nearest free one within
+     * eight cells, and a building whose spot is taken is not made.
+     */
+    MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers);
+
+    /**
+     * A mission's rules as the builder at 0x48E010 makes them from the
+     * [GlobalHeader], in its order: the eleven victory keys, then the seven
+     * defeat keys, with DestroyAllUnits standing in when no victory rule is
+     * given and AllUnitsKilled when no defeat rule is. Type names are
+     * compared without case, so they are kept in upper case; ANYTYPE becomes
+     * the empty name. The Passes rules keep N >> 4, a cell, and the timers N
+     * seconds as ticks.
+     *
+     * `hasUnits` is whether the mission has any [units]: without them the
+     * rules are switched off for good (0x488547), as in the original.
+     */
+    MissionRules buildMissionRules(
+        const OtaMissionRules& rules,
+        const MapTerrain& terrain,
+        bool hasUnits,
+        const std::optional<PlayerId>& human,
+        const std::optional<PlayerId>& computer,
+        const std::string& humanCommander,
+        const std::string& computerCommander);
+
+    /**
+     * Gives the simulation the mission's rules: slot 0 as P0, slot 1 as P1,
+     * and each one's commander from its side. For a new mission only; a
+     * loaded save brings its own.
+     */
+    void installMissionRules(
+        GameSimulation& simulation,
+        const OtaRecord& ota,
+        const OtaSchema& schema,
+        const std::array<std::optional<PlayerId>, 10>& slotPlayers,
+        const std::unordered_map<std::string, SideData>& sideData);
 }

@@ -823,6 +823,18 @@ namespace rwe
 
         /** When the factories were first held for the tier-two economy; see tierTwoEconomyReserve. */
         mutable std::optional<GameTime> tierTwoReserveStarted;
+
+        /**
+         * Set the first time a site search for the hovercraft platform comes
+         * back empty, and never cleared: the terrain does not change, and an
+         * 8x7 patch of flat dry ground the base did not have is not going to
+         * appear. From then on the factory reserve no longer holds for the
+         * platform. Measured on Hundred Isles, where no such patch lies near
+         * Core's base, the reserve held the factories in thirty games out of
+         * thirty for a building never once placed, and lost ten of them.
+         * Issue #196.
+         */
+        bool hoverPlatformSiteless{false};
         void indexGeothermalVents(const GameSimulation& sim) const;
 
         void indexMetalPatches(const GameSimulation& sim) const;

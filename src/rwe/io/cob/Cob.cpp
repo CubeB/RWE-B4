@@ -1,11 +1,25 @@
 #include "Cob.h"
 #include <rwe/io/io_util.h>
+#include <stdexcept>
 
 namespace rwe
 {
     CobScript parseCob(std::istream& stream)
     {
         auto header = readRaw<CobHeader>(stream);
+
+        // Each count sizes an allocation before a byte behind it is read, and
+        // every scripts/*.cob in every installed archive is loaded at game
+        // start. The static count is allocated again for every unit that
+        // runs the script. TA's scripts are a few kilobytes with a few dozen
+        // functions and pieces; these are far past any. Issue #75.
+        constexpr uint32_t MaxCodeWords = 1u << 20;
+        constexpr uint32_t MaxEntries = 4096;
+        if (!stream || header.codeLength > MaxCodeWords || header.numberOfScripts > MaxEntries
+            || header.numberOfPieces > MaxEntries || header.staticVariableCount > MaxEntries)
+        {
+            throw std::runtime_error("COB header counts out of range");
+        }
 
         CobScript script;
         script.staticVariableCount = header.staticVariableCount;

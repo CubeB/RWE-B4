@@ -378,6 +378,7 @@ namespace rwe
             {"nanoframeWorkedOn", hashedPlain<&UnitState::nanoframeWorkedOn>()},
             {"nanoframeDecayRemainder", hashedPlain<&UnitState::nanoframeDecayRemainder>()},
             {"selfDestructTime", hashed<&UnitState::selfDestructTime>(saveOptionalGameTimeUnitStateField<&UnitState::selfDestructTime>, loadOptionalGameTimeUnitStateField<&UnitState::selfDestructTime>)},
+            {"minePollAt", hashed<&UnitState::minePollAt>(saveOptionalGameTimeUnitStateField<&UnitState::minePollAt>, loadOptionalGameTimeUnitStateField<&UnitState::minePollAt>), true},
             {"paralyzedUntil", hashed<&UnitState::paralyzedUntil>(saveOptionalGameTimeUnitStateField<&UnitState::paralyzedUntil>, loadOptionalGameTimeUnitStateField<&UnitState::paralyzedUntil>)},
             {"moveRateBand", hashedPlain<&UnitState::moveRateBand>()},
             {"carriedBy", hashed<&UnitState::carriedBy>(saveOptionalUnitIdUnitStateField<&UnitState::carriedBy>, loadOptionalUnitIdUnitStateField<&UnitState::carriedBy>)},
@@ -393,6 +394,10 @@ namespace rwe
             {"airLoiter", hashed<&UnitState::airLoiter>(saveOptionalAirLoiterUnitStateField<&UnitState::airLoiter>, loadOptionalAirLoiterUnitStateField<&UnitState::airLoiter>)},
             {"slowFacePoint", hashed<&UnitState::slowFacePoint>(saveOptionalSimVectorUnitStateField<&UnitState::slowFacePoint>, loadOptionalSimVectorUnitStateField<&UnitState::slowFacePoint>)},
             {"activated", hashedPlain<&UnitState::activated>()},
+            // Only a mission unit is ever held, and a save from before the
+            // flag existed holds none.
+            {"heldByMission", hashedPlain<&UnitState::heldByMission>(), true},
+            {"immune", hashedPlain<&UnitState::immune>(), true},
             {"isSufficientlyPowered", hashedPlain<&UnitState::isSufficientlyPowered>()},
             {"cloakRequested", hashedPlain<&UnitState::cloakRequested>()},
             {"cloaked", hashedPlain<&UnitState::cloaked>()},

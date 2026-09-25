@@ -397,6 +397,14 @@ namespace rwe
         std::optional<bool> landRouteToEnemy;
 
         /**
+         * The same question asked of the hover layer: can a hovercraft reach
+         * any other declared start position. Unset unless the side has a
+         * hover tank to label that layer for -- Core Contingency data only --
+         * and the map has water for one to cross. Issue #196.
+         */
+        std::optional<bool> hoverRouteToEnemy;
+
+        /**
          * Whether aircraft are worth spending a tier on, judged this pass
          * rather than decided once.
          *
@@ -653,6 +661,14 @@ namespace rwe
          * AiTuningProfile::armyFerryWantFromMap.
          */
         bool armyNeedsFerry{false};
+        /**
+         * Where the army gathers to be carried by sea: a dry cell on home
+         * ground beside water our navy can reach, near the shipyard. Set by
+         * TransportManager while the army needs a sea lift, and read by
+         * ArmyManager as the rally point then. See
+         * AiTuningProfile::seaFerryMuster.
+         */
+        std::optional<SimVector> ferryMuster;
         std::optional<SimVector> rallyPoint;
         std::optional<SimVector> attackTarget;
         int armySize{0};

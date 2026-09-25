@@ -46,6 +46,8 @@ namespace rwe
 {
     class AiPlayerController;
     class DemoRecorder;
+    struct MissionRules;
+    struct MissionScripts;
 
     constexpr int MaxUtilizableWindSpeed = 5000;
 
@@ -661,6 +663,24 @@ namespace rwe
          */
         std::unique_ptr<DemoRecorder> demoRecorder;
 
+        /**
+         * A campaign mission's win and lose rules (TOTALA-EXE-DATA.md §113),
+         * present only when the game is a mission. They replace the skirmish
+         * rules outright: no commander death ends a mission, and
+         * computeWinStatus answers from them alone. Pointed-to for the section
+         * budget, like demoRecorder, but unlike it this is game state: saved,
+         * hashed and dumped when present, and absent from all three in a
+         * skirmish so that nothing there changes.
+         */
+        std::unique_ptr<MissionRules> missionRules;
+
+        /**
+         * A mission's units' InitialMission lists (TOTALA-EXE-DATA.md §114),
+         * present only in a mission, and only while any unit still has
+         * steps left. Held and kept like missionRules, for the same reasons.
+         */
+        std::unique_ptr<MissionScripts> missionScripts;
+
         explicit GameSimulation(MapTerrain&& terrain, unsigned char surfaceMetal, int minWindSpeed, int maxWindSpeed);
 
         // GameSimulation owns AiPlayerController via unique_ptr. We need an
@@ -755,7 +775,10 @@ namespace rwe
          */
         bool captureUnit(UnitId targetId, PlayerId captor, std::optional<UnitId> captorUnitId = std::nullopt);
 
-        /** Length of the self-destruct countdown, as in TA. */
+        /**
+         * Length of the self-destruct countdown for a unit whose FBI does not
+         * name one, as in TA. See UnitDefinition::selfDestructCountdown.
+         */
         static constexpr unsigned int SelfDestructCountdownTicks = 5 * SimTicksPerSecond;
 
         /**
@@ -797,6 +820,13 @@ namespace rwe
 
         /** Starts a unit's self-destruct countdown, or cancels it if one is already running. */
         void toggleSelfDestruct(UnitId unitId);
+
+        /**
+         * Starts a unit's self-destruct countdown: its definition's
+         * selfDestructCountdown in seconds, or at once when that is 0. Does
+         * nothing to a countdown already running.
+         */
+        void startSelfDestruct(UnitId unitId);
 
         /** Income multiplier for a player: 1 for everyone except cheating computer players. */
         float resourceBonusFor(PlayerId playerId) const;
@@ -975,6 +1005,20 @@ namespace rwe
         std::optional<UnitId> trySpawnUnit(const std::string& unitType, PlayerId owner, const SimVector& position, std::optional<SimAngle> rotation);
 
         /**
+         * trySpawnUnit, finished on the spot rather than left a nanoframe:
+         * the debug spawner's, the battle test's and a replay's opening
+         * commanders.
+         */
+        std::optional<UnitId> trySpawnCompletedUnit(const std::string& unitType, PlayerId owner, const SimVector& position, std::optional<SimAngle> rotation);
+
+        /**
+         * The debug spawner's health slider. Nothing in a game sets hit
+         * points but damage, repair and building; this is here so that the
+         * one writer outside them comes through the simulation too.
+         */
+        void setHitPoints(UnitId unitId, unsigned int hitPoints);
+
+        /**
          * Returns true if the unit was really added, false otherwise.
          * A unit might not be added because it violates collision constraints.
          */
@@ -1060,19 +1104,6 @@ namespace rwe
 
         bool isAdjacentToObstacle(const DiscreteRect& rect) const;
 
-        void showObject(UnitId unitId, const std::string& name);
-
-        void hideObject(UnitId unitId, const std::string& name);
-
-        void enableShading(UnitId unitId, const std::string& name);
-
-        void disableShading(UnitId unitId, const std::string& name);
-
-        /** The COB cache / dont-cache state of a piece; see UnitMesh::cached. */
-        void enableCaching(UnitId unitId, const std::string& name);
-
-        void disableCaching(UnitId unitId, const std::string& name);
-
         UnitState& getUnitState(UnitId id);
 
         const UnitState& getUnitState(UnitId id) const;
@@ -1129,15 +1160,6 @@ namespace rwe
          */
         bool unloadUnitFromTransport(UnitId transportId, UnitId unitId, const SimVector& position);
 
-        /**
-         * A transport script's attach-unit: takes the unit aboard if it is not
-         * yet carried, or moves it to another of the transport's pieces if it is.
-         */
-        void attachUnitToTransportPiece(UnitId transportId, UnitId unitId, const std::string& piece);
-
-        /** A transport script's drop-unit: sets the unit down where it hangs right now. */
-        void dropUnitFromTransport(UnitId transportId, UnitId unitId);
-
         /** Moves carried units along with their transports; run after unit behaviour each tick. */
         void updateCarriedUnits();
 
@@ -1173,9 +1195,6 @@ namespace rwe
 
         void stopSpinObject(UnitId unitId, const std::string& name, SimAxis axis, SimScalar deceleration);
 
-        bool isPieceMoving(UnitId unitId, const std::string& name, SimAxis axis) const;
-
-        bool isPieceTurning(UnitId unitId, const std::string& name, SimAxis axis) const;
 
         std::optional<SimVector> intersectLineWithTerrain(const Line3x<SimScalar>& line) const;
 
@@ -1308,20 +1327,15 @@ namespace rwe
          * Both are hashed, so each was a `nanoPoint` waiting to happen: a
          * write the hash walk knows nothing about, invisible to every test.
          *
-         * Two more remain in GameScene_debug.cpp (fireOrders and hitPoints,
-         * from the debug spawner). They cannot come through here until
-         * spawnCompletedUnit hands back a UnitId rather than a reference;
-         * issue #116 has the measurement.
+         * The debug spawner's two, fire orders and hit points, were the last
+         * (issue #116). Fire orders now go through a player's SetFireOrders
+         * command and hit points through setHitPoints, and GameScene's
+         * getUnit and tryGetUnit hand back const only, so a new write from
+         * presentation fails to compile rather than slipping past the hash.
          */
         void setMoveOrders(UnitId unitId, UnitMovementOrders orders);
 
         void setCloakRequested(UnitId unitId, bool value);
-
-        void setBuildStance(UnitId unitId, bool value);
-
-        void setYardOpen(UnitId unitId, bool value);
-
-        void setBuggerOff(UnitId unitId, bool value);
 
         MovementClassDefinition getAdHocMovementClass(const UnitDefinition::MovementCollisionInfo& info) const;
 

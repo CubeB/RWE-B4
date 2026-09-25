@@ -1,5 +1,6 @@
 {
   "home_allow": [
-    ".rwe"
+    ".rwe",
+    ".local/share/rwe"
   ]
 }

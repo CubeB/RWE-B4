@@ -720,13 +720,49 @@ and a zero id — the value `FromName` returns for a name it does not know, and
 for the 63 units that name nothing — installs no mission and leaves the unit
 idle.
 
-The three names in the data resolve to:
+The four names in the data resolve to:
 
 | Name | Handler | What it is |
 |---|---|---|
 | `Standby` | `0x405FE0` | Call `0x43B700` (the sight-range search) and hand any sighting to `0x43B1F0`; on a miss, clear the weapons' targets and sleep `rand(30)+30` ticks |
 | `Guard_NoMove` | `0x4021F0` | Free all three weapons (`0x489800(unit, 3)`), sleep 30 ticks, and never search |
 | `VTOL_Standby` | `0x40F7D0` | The aircraft equivalent, record 0 of the VTOL table |
+| `Standby_Mine` | `0x406090` | `Standby` for a mine: on a sighting standing on the ground, push `SELFDESTRUCT` instead of attacking |
+
+Across the effective unit set (`rev31.gp3` over `btdata.ccx` and `ccdata.ccx`
+over `totala1.hpi`), 117 units name `Standby` (every mobile ground and sea
+unit), 30 `VTOL_Standby` (every aircraft), 25 `Guard_NoMove` (the armed
+towers), 12 `Standby_Mine` (Core Contingency's `ARMMINE1`-`6` and
+`CORMINE1`-`6`) and 88 nothing (factories, economy, silos). The counts above
+this table were taken over the base game before the Core Contingency files
+were read, which is why they said three names.
+
+**`Standby_Mine`, `0x406090`,** is the record at `0x4FC701`, row 1 of the
+table at `0x4FC6E8` (see `TOTALA-EXE-MISSIONS.md` §1). It differs from
+`Standby` in two places and is otherwise the same code:
+
+```
+state 0 (installed)
+406155  test [unit+0x110], 0x20000000   ; bit 29: set at 0x485A81 when bmcode is 0
+406161  jne ... else return 7           ; a mobile unit ends the mission at once
+40616B  0x489800(unit, 3)               ; free the weapons, as Standby does
+40617D  sleep 1 tick, go to state 1
+state 1
+4060B6  t = 0x43B700(unit)              ; the sight-range search: nothing unless Fire At Will
+4060BF  [t+0x110] & 3 == 1 ?            ; the pick is standing on the ground (2 is airborne)
+4060CC  [unit+0x110] & 0x300000 != 0 ?  ; not on Hold Fire (already true after 0x43B700)
+4060D8  new mission FromName("SELFDESTRUCT" 0x501520), push it, return 5
+40612A  else sleep rand(30)+30, stay in state 1
+```
+
+Where `Standby` hands a sighting to `0x43B1F0` for an attack, the mine blows
+itself up. The chooser behind `0x43B700` is the ordinary one over the unit's
+`SightDistance` (55 to 100 for the mines), and a kamikaze unit skips
+`0x49ABB0`, so a mine, which has no weapon, still has something to choose
+with. `SELFDESTRUCT` then counts `selfdestructcountdown` seconds -- 1 for
+mines one to five, 2 for the sixth -- and a mine on Hold Fire never gets that
+far: `ARMMINE6` and `CORMINE6` start there (`StandingFireOrder=0`, with the
+button) and sit quiet until the player arms them.
 
 `Standby` is therefore the "go and look for a fight about once a second" loop,
 and it is the one place the standing move order earns its keep: `0x43B1F0`'s

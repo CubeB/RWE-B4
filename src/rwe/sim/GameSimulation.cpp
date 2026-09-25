@@ -8,6 +8,8 @@
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/sim/DemoRecorder.h>
 #include <rwe/sim/GameHash_util.h>
+#include <rwe/sim/MissionRules.h>
+#include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/SimScalar.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitBehaviorService.h>
@@ -941,35 +943,7 @@ namespace rwe
         return true;
     }
 
-    void GameSimulation::attachUnitToTransportPiece(UnitId transportId, UnitId unitId, const std::string& piece)
-    {
-        auto unitRef = tryGetUnitState(unitId);
-        if (!unitRef)
-        {
-            return;
-        }
-        auto& unit = unitRef->get();
-        if (unit.carriedBy == transportId)
-        {
-            unit.carriedPiece = piece;
-            return;
-        }
-        if (unit.carriedBy || !unit.isAlive() || !unit.isOwnedBy(getUnitState(transportId).owner))
-        {
-            return;
-        }
-        loadUnitIntoTransport(transportId, unitId, piece);
-    }
 
-    void GameSimulation::dropUnitFromTransport(UnitId transportId, UnitId unitId)
-    {
-        auto unitRef = tryGetUnitState(unitId);
-        if (!unitRef || unitRef->get().carriedBy != transportId)
-        {
-            return;
-        }
-        unloadUnitFromTransport(transportId, unitId, unitRef->get().position);
-    }
 
     void GameSimulation::updateCarriedUnits()
     {
@@ -1067,6 +1041,13 @@ namespace rwe
         // and a reclaimed unit leaves none of those. Whether the original's
         // cause-5 damage skips armour the way its cause-10 repair does is
         // not read; it is applied bare here.
+        // Reclaiming is damage in the original, cause 5 through the same
+        // applier (0x489CE0), so it tells a watching WAITFORATTACK too.
+        if (missionScripts)
+        {
+            missionScripts->unitDamaged(targetId);
+        }
+
         auto before = unit.hitPoints;
         auto after = damage >= before ? 0u : before - damage;
         unit.hitPoints = after;
@@ -1091,6 +1072,10 @@ namespace rwe
         }
 
         // Reclaimed units vanish quietly: no wreck, no explosion.
+        if (missionRules)
+        {
+            missionRules->unitDying(*this, targetId, unit.owner);
+        }
         unit.markAsDeadNoCorpse();
         recordUnitDeath(*this, targetId, "reclaimed", std::nullopt);
 
@@ -1173,7 +1158,30 @@ namespace rwe
             demoRecorder->unitCaptured(*this, targetId, captor);
         }
 
+        // The original's owner change is an event and then a cause-4 death of
+        // the old unit, the captor's copy already made, and the mission rules
+        // hear both: CaptureUnitType the first, and every kill rule the second.
+        if (missionRules)
+        {
+            missionRules->unitChangingOwner(*this, targetId);
+        }
+
         unit.owner = captor;
+
+        if (missionRules)
+        {
+            missionRules->unitDying(*this, targetId, previousOwner);
+        }
+
+        // The captor's copy is a new unit: selectable like every new one
+        // (0x485B61), with no list and no mission Immunity (the spawner is
+        // what sets that, 0x488475).
+        unit.heldByMission = false;
+        unit.immune = false;
+        if (missionScripts)
+        {
+            missionScripts->unitChangedOwner(targetId);
+        }
 
         // The spatial index carries owners so a target search can drop its
         // own side cheaply, and this is the only thing in the game that
@@ -1217,14 +1225,32 @@ namespace rwe
         }
         else
         {
-            unit.selfDestructTime = gameTime + GameTime(SelfDestructCountdownTicks);
+            startSelfDestruct(unitId);
         }
+    }
+
+    void GameSimulation::startSelfDestruct(UnitId unitId)
+    {
+        auto& unit = getUnitState(unitId);
+        if (unit.isDead() || unit.selfDestructTime)
+        {
+            return;
+        }
+        // One step a second (0x4020F6), from the definition's own count; an
+        // explicit 0 goes off at once with no countdown (0x402053).
+        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+        unit.selfDestructTime = gameTime + GameTime(unitDefinition.selfDestructCountdown * SimTicksPerSecond);
     }
 
     void GameSimulation::selfDestructUnit(UnitId unitId)
     {
         auto& unit = getUnitState(unitId);
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+
+        if (missionRules)
+        {
+            missionRules->unitDying(*this, unitId, unit.owner);
+        }
 
         // Self-destruction leaves nothing to reclaim.
         unit.markAsDeadNoCorpse();
@@ -1634,6 +1660,22 @@ namespace rwe
         return unitId;
     }
 
+    std::optional<UnitId> GameSimulation::trySpawnCompletedUnit(const std::string& unitType, PlayerId owner, const SimVector& position, std::optional<SimAngle> rotation)
+    {
+        auto unitId = trySpawnUnit(unitType, owner, position, rotation);
+        if (unitId)
+        {
+            auto& unit = getUnitState(*unitId);
+            unit.finishBuilding(unitDefinitions.at(unit.unitType));
+        }
+        return unitId;
+    }
+
+    void GameSimulation::setHitPoints(UnitId unitId, unsigned int hitPoints)
+    {
+        getUnitState(unitId).hitPoints = hitPoints;
+    }
+
     std::optional<UnitId> GameSimulation::tryAddUnit(UnitState&& unit)
     {
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
@@ -2022,59 +2064,11 @@ namespace rwe
             || isCollisionAt(right);
     }
 
-    void GameSimulation::showObject(UnitId unitId, const std::string& name)
-    {
-        auto mesh = getUnitState(unitId).findPiece(name);
-        if (mesh)
-        {
-            mesh->get().visible = true;
-        }
-    }
 
-    void GameSimulation::hideObject(UnitId unitId, const std::string& name)
-    {
-        auto mesh = getUnitState(unitId).findPiece(name);
-        if (mesh)
-        {
-            mesh->get().visible = false;
-        }
-    }
 
-    void GameSimulation::enableShading(UnitId unitId, const std::string& name)
-    {
-        auto mesh = getUnitState(unitId).findPiece(name);
-        if (mesh)
-        {
-            mesh->get().shaded = true;
-        }
-    }
 
-    void GameSimulation::disableShading(UnitId unitId, const std::string& name)
-    {
-        auto mesh = getUnitState(unitId).findPiece(name);
-        if (mesh)
-        {
-            mesh->get().shaded = false;
-        }
-    }
 
-    void GameSimulation::enableCaching(UnitId unitId, const std::string& name)
-    {
-        auto mesh = getUnitState(unitId).findPiece(name);
-        if (mesh)
-        {
-            mesh->get().cached = true;
-        }
-    }
 
-    void GameSimulation::disableCaching(UnitId unitId, const std::string& name)
-    {
-        auto mesh = getUnitState(unitId).findPiece(name);
-        if (mesh)
-        {
-            mesh->get().cached = false;
-        }
-    }
 
     UnitState& GameSimulation::getUnitState(UnitId id)
     {
@@ -2189,15 +2183,7 @@ namespace rwe
         getUnitState(unitId).stopSpinObject(name, axis, deceleration);
     }
 
-    bool GameSimulation::isPieceMoving(UnitId unitId, const std::string& name, SimAxis axis) const
-    {
-        return getUnitState(unitId).isMoveInProgress(name, axis);
-    }
 
-    bool GameSimulation::isPieceTurning(UnitId unitId, const std::string& name, SimAxis axis) const
-    {
-        return getUnitState(unitId).isTurnInProgress(name, axis);
-    }
 
     std::optional<SimVector> GameSimulation::intersectLineWithTerrain(const Line3x<SimScalar>& line) const
     {
@@ -2475,6 +2461,22 @@ namespace rwe
 
     WinStatus GameSimulation::computeWinStatus() const
     {
+        // A mission is decided by its own rules and nothing else: a victory
+        // is P0's, a defeat P1's.
+        if (missionRules)
+        {
+            if (!missionRules->outcome)
+            {
+                return WinStatusUndecided();
+            }
+            const auto& winner = *missionRules->outcome == MissionOutcome::Victory ? missionRules->human : missionRules->computer;
+            if (!winner)
+            {
+                return WinStatusDraw();
+            }
+            return WinStatusWon{*winner};
+        }
+
         // The first player still standing, and whether anybody still
         // standing is on a different side from them. Allies do not fight
         // each other, so a rule that waits for one player to be left waits
@@ -2833,6 +2835,10 @@ namespace rwe
     void GameSimulation::quietlyKillUnit(UnitId unitId, bool countAsLoss)
     {
         auto& unit = getUnitState(unitId);
+        if (missionRules)
+        {
+            missionRules->unitDying(*this, unitId, unit.owner);
+        }
         unit.markAsDeadNoCorpse();
         if (countAsLoss)
         {
@@ -2880,24 +2886,8 @@ namespace rwe
         getUnitState(unitId).cloakRequested = value;
     }
 
-    void GameSimulation::setBuildStance(UnitId unitId, bool value)
-    {
-        getUnitState(unitId).inBuildStance = value;
-    }
 
-    void GameSimulation::setYardOpen(UnitId unitId, bool value)
-    {
-        trySetYardOpen(unitId, value);
-    }
 
-    void GameSimulation::setBuggerOff(UnitId unitId, bool value)
-    {
-        getUnitState(unitId).buggerOffActive = value;
-        if (value)
-        {
-            emitBuggerOff(unitId);
-        }
-    }
 
     MovementClassDefinition GameSimulation::getAdHocMovementClass(const UnitDefinition::MovementCollisionInfo& info) const
     {
@@ -3165,6 +3155,10 @@ namespace rwe
         auto& unit = getUnitState(unitId);
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
 
+        if (missionRules)
+        {
+            missionRules->unitDying(*this, unitId, unit.owner);
+        }
         unit.markAsDead();
         getPlayer(unit.owner).unitsLost += 1;
         releaseTransportLinks(unitId, attacker);
@@ -3361,6 +3355,14 @@ namespace rwe
         if (demoRecorder)
         {
             demoRecorder->damageApplied(*this, unitId, attacker, damagePoints, sourceOwner);
+        }
+
+        // The same handler's first act is to tell whoever is watching the
+        // unit that it was hit (0x406F89), whoever the attacker, which is
+        // what a mission unit's WAITFORATTACK is waiting for.
+        if (missionScripts && !getUnitState(unitId).isDead())
+        {
+            missionScripts->unitDamaged(unitId);
         }
 
         if (attacker)
@@ -3983,6 +3985,16 @@ namespace rwe
 
     void GameSimulation::processVictoryCondition()
     {
+        // A mission has no commander rule at all: the campaign setup zeroes
+        // the commander-death mode (0x497474 copies g+0x39219, which the
+        // mission reader has just set to 0 at 0x4363EA), so the wipe at
+        // 0x48667E never runs, and CommanderKilled is the only way a
+        // commander's death can matter.
+        if (missionRules)
+        {
+            return;
+        }
+
         if (commanderDeathMode == CommanderDeathMode::GameEnds)
         {
             for (const auto& p : units)
@@ -4070,13 +4082,20 @@ namespace rwe
 
     void GameSimulation::updateResources()
     {
+        // The settle is held back for every player while a mission's
+        // countdown runs (0x46554F).
+        if (missionRules && missionRules->economyFrozen())
+        {
+            return;
+        }
+
         // run resource updates once per second
         if (gameTime % GameTime(SimTicksPerSecond) == GameTime(0))
         {
             for (auto& player : players)
             {
-                player.maxEnergy = Energy(0);
-                player.maxMetal = Metal(0);
+                player.maxEnergy = player.hasBaseStorage ? player.startingEnergy : Energy(0);
+                player.maxMetal = player.hasBaseStorage ? player.startingMetal : Metal(0);
             }
 
             for (auto& entry : units)
@@ -4086,7 +4105,7 @@ namespace rwe
                 if (!unit.isBeingBuilt(unitDefinition))
                 {
                     auto& playerInfo = getPlayer(unit.owner);
-                    if (unitDefinition.commander)
+                    if (unitDefinition.commander && !playerInfo.hasBaseStorage)
                     {
                         playerInfo.maxMetal += playerInfo.startingMetal;
                         playerInfo.maxEnergy += playerInfo.startingEnergy;
@@ -4792,6 +4811,13 @@ namespace rwe
 
         updateWind();
 
+        // Before the settle, which the countdown the rules may start this
+        // second freezes (0x4650A9 comes before 0x46554F in the same pass).
+        if (missionRules)
+        {
+            missionRules->update(*this);
+        }
+
         updateResources();
 
         {
@@ -4801,6 +4827,17 @@ namespace rwe
 
         // The three unit passes are timed separately -- each is its own
         // scope because RWE_SIMPROF names its variables, one to a scope.
+        // A mission unit's list hands out its next order before the unit
+        // looks at its queue.
+        if (missionScripts)
+        {
+            missionScripts->update(*this);
+            if (missionScripts->scripts.empty())
+            {
+                missionScripts.reset();
+            }
+        }
+
         {
             RWE_SIMPROF("behaviour");
 

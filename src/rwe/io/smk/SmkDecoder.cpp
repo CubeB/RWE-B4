@@ -76,6 +76,15 @@ namespace rwe
 
         width = readU32(p + 4);
         height = readU32(p + 8);
+        // The frame buffer is width * height in 32 bits, and a size whose
+        // product wrapped gave a buffer of a few bytes that the block writes
+        // then ran past, indexed by the full width. TA's films are 640x480;
+        // this is far more than any. Issue #75.
+        constexpr unsigned int MaxDimension = 4096;
+        if (width == 0 || height == 0 || width > MaxDimension || height > MaxDimension)
+        {
+            throw std::runtime_error("SMK frame size out of range");
+        }
         frameCount = readU32(p + 12);
         auto frameRate = static_cast<int32_t>(readU32(p + 16));
         auto flags = readU32(p + 20);

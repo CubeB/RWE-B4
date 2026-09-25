@@ -22,6 +22,21 @@ namespace rwe
         {
             throw TntException("Invalid TNT version number");
         }
+
+        // A map is a download, and every size below sizes an allocation or a
+        // loop. A product that wrapped used to give buffers far smaller than
+        // the reads into them. The largest shipped or community map is a few
+        // thousand cells across; these are well past any. Issue #75.
+        constexpr uint32_t MaxDimension = 8192;
+        constexpr uint32_t MaxCount = 65536;
+        if (header.width == 0 || header.height == 0 || header.width > MaxDimension || header.height > MaxDimension)
+        {
+            throw TntException("Map size out of range");
+        }
+        if (header.numberOfTiles > MaxCount || header.numberOfFeatures > MaxCount)
+        {
+            throw TntException("Map tile or feature count out of range");
+        }
     }
 
     void TntArchive::readTiles(std::function<void(const char*)> tileCallback)
@@ -118,8 +133,22 @@ namespace rwe
         stream->seekg(header.minimapOffset);
         auto minimapHeader = readRaw<TntMinimapHeader>(*stream);
 
-        std::vector<char> buffer(minimapHeader.width * minimapHeader.height);
-        stream->read(buffer.data(), minimapHeader.width * minimapHeader.height);
+        // TA's minimaps are at most 252 pixels a side. The product was
+        // taken in 32 bits, and one that wrapped sized a buffer the scan for
+        // the void border then read far past. Issue #75.
+        constexpr uint32_t MaxMinimapDimension = 1024;
+        if (minimapHeader.width > MaxMinimapDimension || minimapHeader.height > MaxMinimapDimension)
+        {
+            throw TntException("Minimap size out of range");
+        }
+        if (minimapHeader.width == 0 || minimapHeader.height == 0)
+        {
+            return TntMinimapInfo{0, 0, std::vector<char>()};
+        }
+
+        auto minimapBytes = static_cast<std::size_t>(minimapHeader.width) * minimapHeader.height;
+        std::vector<char> buffer(minimapBytes);
+        stream->read(buffer.data(), static_cast<std::streamsize>(minimapBytes));
 
         auto realSize = getMinimapActualSize(buffer, minimapHeader.width, minimapHeader.height);
 

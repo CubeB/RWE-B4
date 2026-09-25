@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
 #include <rwe/ai/AiPlayerController.h>
@@ -587,6 +589,34 @@ namespace rwe
             REQUIRE(bb.ferryPassengers.count(kbot2.value) == 1);
         }
 
+        SECTION("a hovercraft is never booked onto the ship: it crosses on its own")
+        {
+            // Issue #196. TANKHOVER3 names no depth at all, so nothing in
+            // the water-depth gate below refuses it; canHover is what does.
+            auto hover = makeDef(false, false, true, "LASER", 200u);
+            hover.canHover = true;
+            hover.movementCollisionInfo = UnitDefinition::AdHocMovementClass{3u, 3u, 12u, 255u, 0u, 255u};
+            sim.unitDefinitions["ARMANAC"] = hover;
+
+            auto kbot = addUnit(sim, "ARMPW", ai, SimVector(-250_ss, 60_ss, 0_ss), script);
+            auto anaconda = addUnit(sim, "ARMANAC", ai, SimVector(-250_ss, 60_ss, 40_ss), script);
+            auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+            runTicks(sim, controller, 90, commands);
+            const auto& bb = controller.getBlackboard();
+            commands.clear();
+            runTicks(sim, controller, profile.tacticalTickInterval, commands);
+
+            auto loads = ordersFor<LoadOrder>(commands, shipId);
+            REQUIRE(!loads.empty());
+            for (const auto& l : loads)
+            {
+                REQUIRE(l.target == kbot);
+            }
+            REQUIRE(bb.ferryPassengers.count(kbot.value) == 1);
+            REQUIRE(bb.ferryPassengers.count(anaconda.value) == 0);
+        }
+
         SECTION("a passenger that needs water is never booked onto the ship")
         {
             auto kbot = addUnit(sim, "ARMPW", ai, SimVector(-250_ss, 60_ss, 0_ss), script);
@@ -626,6 +656,191 @@ namespace rwe
             auto unloads = ordersFor<UnloadOrder>(commands, shipId);
             REQUIRE(unloads.size() == 1);
         }
+
+        SECTION("the passengers gather at one point on the shore, and the hull loads them from the water beside it")
+        {
+            // Issue #194. Since #193 a passenger no longer wades out to its
+            // transport, so a hull sent to each one where it stands is sent
+            // at dry land it cannot reach.
+            auto kbot1 = addUnit(sim, "ARMPW", ai, SimVector(-300_ss, 60_ss, -60_ss), script);
+            auto kbot2 = addUnit(sim, "ARMPW", ai, SimVector(-300_ss, 60_ss, 60_ss), script);
+            auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+            runTicks(sim, controller, 90, commands);
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(controller.getTransportManager().getFerries().count(shipId.value) == 1);
+            const auto& ferry = controller.getTransportManager().getFerries().at(shipId.value);
+            REQUIRE(ferry.muster.has_value());
+            REQUIRE(ferry.station.has_value());
+
+            // The muster is dry home ground on the near bank, within a
+            // crane's reach of the channel (whose near edge is x -192)...
+            REQUIRE(ferry.muster->x < -192_ss);
+            REQUIRE(ferry.muster->x > -192_ss - 144_ss);
+            // ...and the station is in the channel beside it.
+            REQUIRE(ferry.station->x > -192_ss);
+            REQUIRE(ferry.station->x < 192_ss);
+            auto dx = ferry.muster->x - ferry.station->x;
+            auto dz = ferry.muster->z - ferry.station->z;
+            REQUIRE((dx * dx) + (dz * dz) <= 144_ss * 144_ss);
+
+            commands.clear();
+            runTicks(sim, controller, profile.tacticalTickInterval, commands);
+
+            // Both passengers walk to the same point...
+            for (auto kbot : {kbot1, kbot2})
+            {
+                auto moves = ordersFor<MoveOrder>(commands, kbot);
+                REQUIRE(!moves.empty());
+                REQUIRE((moves.back().destination == *ferry.muster));
+            }
+            // ...the hull sails to the water beside it, and then loads both.
+            auto shipMoves = ordersFor<MoveOrder>(commands, shipId);
+            REQUIRE(!shipMoves.empty());
+            REQUIRE((shipMoves.back().destination == *ferry.station));
+            REQUIRE(ordersFor<LoadOrder>(commands, shipId).size() == 2);
+
+            // And an army still waiting on the lift rallies there too.
+            REQUIRE(bb.ferryMuster.has_value());
+            REQUIRE((*bb.ferryMuster == *ferry.muster));
+            REQUIRE(bb.rallyPoint.has_value());
+            REQUIRE((*bb.rallyPoint == *bb.ferryMuster));
+        }
+
+        SECTION("a hull that comes to rest short of its station, but near it, is sent on to the loads")
+        {
+            // The move to the station asks for eight units, and a big hull
+            // alongside a bank may never get that close: on Coast To Coast
+            // Arm's Hulk stopped 44 units off, with the shore well within the
+            // crane's reach, and sat on the move until the ferry timed out.
+            auto kbot1 = addUnit(sim, "ARMPW", ai, SimVector(-300_ss, 60_ss, -60_ss), script);
+            auto kbot2 = addUnit(sim, "ARMPW", ai, SimVector(-300_ss, 60_ss, 60_ss), script);
+            auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(150_ss, 0_ss, 0_ss), script);
+
+            runTicks(sim, controller, 90, commands);
+            REQUIRE(controller.getTransportManager().getFerries().count(shipId.value) == 1);
+            const auto& ferry = controller.getTransportManager().getFerries().at(shipId.value);
+            REQUIRE(ferry.station.has_value());
+            REQUIRE_FALSE(ferry.atStation);
+
+            // Stopped forty units off, still on the staging move.
+            auto& ship = sim.getUnitState(shipId);
+            ship.position = SimVector(ferry.station->x + 40_ss, 0_ss, ferry.station->z);
+            ship.orders.clear();
+            ship.orders.push_back(MoveOrder(*ferry.station));
+
+            commands.clear();
+            runTicks(sim, controller, profile.tacticalTickInterval, commands);
+
+            REQUIRE(ferry.atStation);
+            auto loads = ordersFor<LoadOrder>(commands, shipId);
+            REQUIRE(loads.size() == 2);
+            std::vector<UnitId> loaded{loads[0].target, loads[1].target};
+            REQUIRE(std::find(loaded.begin(), loaded.end(), kbot1) != loaded.end());
+            REQUIRE(std::find(loaded.begin(), loaded.end(), kbot2) != loaded.end());
+            REQUIRE(ordersFor<MoveOrder>(commands, shipId).empty());
+        }
+    }
+
+    TEST_CASE("a ferry that delivers after the timeout is complete, not overdue", "[ai]")
+    {
+        // The timeout is for a pickup that never happened. It used to fire on
+        // any empty transport past the deadline, so a trip of a little over
+        // two minutes that had loaded everyone, crossed and set them down was
+        // logged "overdue" at the moment it succeeded (issue #194).
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeWideChannelTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineLandUnits(sim);
+        defineSeaTransport(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(-300_ss, 60_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-320_ss, 60_ss, 40_ss), script);
+        addUnit(sim, "ARMSOLAR", human, SimVector(450_ss, 60_ss, 0_ss), script);
+        auto kbot = addUnit(sim, "ARMPW", ai, SimVector(-250_ss, 60_ss, 0_ss), script);
+        auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultBrutalProfile();
+        profile.scoutCount = 0;
+        profile.attackArmySize = 1;
+        profile.ferryTimeoutSeconds = 1;
+        sim.eventLog.setRecording(true);
+
+        AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 90, commands);
+        REQUIRE(controller.getTransportManager().getFerries().count(shipId.value) == 1);
+
+        // Aboard, well past the one-second deadline: the harness never
+        // carries orders out, so the pickup is done by hand.
+        sim.getUnitState(shipId).carriedUnits.push_back(kbot);
+        sim.getUnitState(kbot).carriedBy = shipId;
+        runTicks(sim, controller, profile.tacticalTickInterval, commands);
+        REQUIRE(controller.getTransportManager().getFerries().at(shipId.value).loaded);
+        // The one-second deadline has already called off the unloaded
+        // bookings of the warm-up; only what happens from here counts.
+        sim.eventLog.clear();
+
+        // And set down again on the far side.
+        sim.getUnitState(shipId).carriedUnits.clear();
+        sim.getUnitState(kbot).carriedBy = std::nullopt;
+        sim.getUnitState(kbot).position = SimVector(300_ss, 60_ss, 0_ss);
+        sim.getUnitState(shipId).orders.clear();
+        runTicks(sim, controller, profile.tacticalTickInterval, commands);
+        REQUIRE(controller.getTransportManager().getFerries().count(shipId.value) == 0);
+
+        auto path = std::filesystem::temp_directory_path() / "rwe-ferry-complete-test.jsonl";
+        sim.eventLog.write(path);
+        std::ifstream in(path);
+        std::string line;
+        int complete = 0;
+        int overdue = 0;
+        while (std::getline(in, line))
+        {
+            if (line.find("\"transport_ferry\"") == std::string::npos)
+            {
+                continue;
+            }
+            complete += line.find("\"why\":\"complete\"") != std::string::npos ? 1 : 0;
+            overdue += line.find("\"why\":\"overdue\"") != std::string::npos ? 1 : 0;
+        }
+        in.close();
+        std::filesystem::remove(path);
+        REQUIRE(complete == 1);
+        REQUIRE(overdue == 0);
+    }
+
+    TEST_CASE("with the muster switched off, the hull goes to each passenger where it stands", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeWideChannelTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineLandUnits(sim);
+        defineSeaTransport(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(-300_ss, 60_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-320_ss, 60_ss, 40_ss), script);
+        addUnit(sim, "ARMSOLAR", human, SimVector(450_ss, 60_ss, 0_ss), script);
+        auto kbot = addUnit(sim, "ARMPW", ai, SimVector(-250_ss, 60_ss, 0_ss), script);
+        auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultBrutalProfile();
+        profile.scoutCount = 0;
+        profile.attackArmySize = 1;
+        profile.seaFerryMuster = false;
+
+        AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 90, commands);
+        const auto& ferry = controller.getTransportManager().getFerries().at(shipId.value);
+        REQUIRE_FALSE(ferry.muster.has_value());
+        REQUIRE_FALSE(controller.getBlackboard().ferryMuster.has_value());
+
+        commands.clear();
+        runTicks(sim, controller, profile.tacticalTickInterval, commands);
+        REQUIRE(ordersFor<MoveOrder>(commands, kbot).empty());
+        REQUIRE(ordersFor<MoveOrder>(commands, shipId).empty());
+        REQUIRE(ordersFor<LoadOrder>(commands, shipId).size() == 1);
     }
 
     TEST_CASE("a landing is scored against what the carrier is, not what the cargo is", "[ai]")

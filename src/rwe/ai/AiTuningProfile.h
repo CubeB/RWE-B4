@@ -1228,6 +1228,18 @@ namespace rwe
          */
         int targetSeaplanePlatformCount{1};
         /**
+         * Hovercraft platforms wanted while the army needs a ferry to reach
+         * the enemy and a hovercraft could get there on its own
+         * (AiBlackboard::hoverRouteToEnemy). Hover tanks cross water under
+         * their own power, so they are the one land army a water map does
+         * not have to carry. Core Contingency only: on the base game the
+         * slot is empty and this does nothing. Issue #196.
+         *
+         * Zero switches it off, which is the default until a paired arena
+         * run says the platform is worth its 2007 metal (1793 for Core).
+         */
+        int targetHoverPlatformCount{0};
+        /**
          * Hold the factories while the first moho and the first reactor are
          * paid for. Level two was reached in play and never spent: the lab
          * went up, the factories went on taking every unit of metal as it
@@ -2421,6 +2433,23 @@ namespace rwe
          * have somewhere to go. See TransportManager::lastArmyFerryAnswer.
          */
         bool armyFerryWantFromMap{true};
+        /**
+         * Gather a sea ferry's passengers at one shore point and load them
+         * there, instead of sending the hull round the coast to each in turn
+         * (issue #194). The muster is a dry cell on home ground with water
+         * our own navy can reach beside it, the nearest such to the shipyard;
+         * passengers walk there the moment they are booked, the hull sails to
+         * the water beside it, and the crane takes them from a standstill.
+         * While the army is waiting on a sea lift the rally point moves there
+         * too, so the walking is done before a hull is even free.
+         *
+         * Needed more since #193: a passenger no longer wades out to meet its
+         * transport, which is the original's rule (Ground_Pickup never moves
+         * the passenger), so a unit standing inland is one a hull cannot
+         * reach at all. Off restores sending the hull to each passenger where
+         * it stands.
+         */
+        bool seaFerryMuster{true};
         /** Rally point sits this far from the base anchor, towards the enemy. */
         SimScalar rallyDistance{220_ss};
         /**

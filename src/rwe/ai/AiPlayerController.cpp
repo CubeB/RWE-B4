@@ -384,6 +384,55 @@ namespace rwe
                     });
                 }
             }
+
+            // 3d. And where can a hovercraft go? Only asked when the data has
+            // one (Core Contingency) and the map has water for it to cross:
+            // on dry land a hover tank goes where a tank goes, and the ground
+            // layer already answers that. Anchored where the ground layer is,
+            // because the hover platform is a land factory and its units are
+            // born beside the rest of the base. Issue #196.
+            //
+            // One more flood per game and no more, for the same reason as the
+            // commander's: the hover class does not change mid-game, so every
+            // later call only re-homes the layer.
+            if (blackboard.mapIntel.valid && blackboard.mapIntel.character != MapCharacter::Land && !blackboard.sideUnits.hoverTank.empty()
+                && blackboard.mapIntel.startPositions.size() >= 2)
+            {
+                auto hoverDef = sim.unitDefinitions.find(blackboard.sideUnits.hoverTank);
+                if (hoverDef != sim.unitDefinitions.end())
+                {
+                    const auto& hoverAnchor = blackboard.groundAnchor ? *blackboard.groundAnchor : *blackboard.baseAnchor;
+                    timed("hoverReachability", [&] {
+                        reachability.rebuildHover(sim, hoverDef->second.movementCollisionInfo, hoverAnchor);
+                    });
+                    const auto& home = blackboard.homePosition ? *blackboard.homePosition : *blackboard.baseAnchor;
+                    auto ownIndex = nearestStartPosition(blackboard.mapIntel, home);
+                    auto anyReachable = false;
+                    for (Index i = 0; i < getSize(blackboard.mapIntel.startPositions); ++i)
+                    {
+                        if (ownIndex && i == *ownIndex)
+                        {
+                            continue;
+                        }
+                        if (reachability.isHoverReachable(sim, blackboard.mapIntel.startPositions[i]))
+                        {
+                            anyReachable = true;
+                            break;
+                        }
+                    }
+                    if (blackboard.hoverRouteToEnemy != anyReachable)
+                    {
+                        LOG_INFO << "AI player " << playerId.value << ": hover route to another start position: " << (anyReachable ? "yes" : "no");
+                        sim.eventLog.event(sim.gameTime.value, "ai_hover_route")
+                            .set("player", playerId.value)
+                            .set("reachable", anyReachable)
+                            .set("reachable_tiles", reachability.hoverReachableTileCount())
+                            .set("why", anyReachable ? "crossable" : "isolated")
+                            .detail("whether a hovercraft can reach any other start position");
+                    }
+                    blackboard.hoverRouteToEnemy = anyReachable;
+                }
+            }
         }
 
         // Worth a line: it is the one thing the AI reacts to rather than

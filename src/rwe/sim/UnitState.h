@@ -747,6 +747,15 @@ namespace rwe
         std::optional<GameTime> selfDestructTime;
 
         /**
+         * A mine's next look round, when it is idle on Standby_Mine: the
+         * mission sleeps a tick when it is installed and then rand(30)+30
+         * ticks after every look that finds nothing (0x406090). Unset for
+         * anything that is not a mine, and for a mine that has not yet been
+         * idle.
+         */
+        std::optional<GameTime> minePollAt{};
+
+        /**
          * When set, the game time this unit comes round from an EMP hit. The
          * original models the stun as a sleeping order in front of the unit's
          * own (0x402D10), which is why a unit picks up what it was doing rather
@@ -764,6 +773,26 @@ namespace rwe
 
         /** The transport carrying this unit, if any. While set the unit does nothing and follows the transport. */
         std::optional<UnitId> carriedBy;
+
+        /**
+         * A mission unit its InitialMission holds out of the player's hands.
+         * The interpreter clears the unit's selectable bit (`unit+0x110` bit
+         * 5, 0x487E69) once it has queued an order, and a MAKESELECTABLE sets
+         * it again when that order runs: an `s` in the list, or the one
+         * appended to a list with no `s`, `p`, point `a` or `d` in it. RWE
+         * does not run those orders yet, so a unit whose list starts with
+         * anything but `s` is held for now; the mission rules read it, since
+         * a held unit is not one the player can use (0x48F283).
+         */
+        bool heldByMission{false};
+
+        /**
+         * A mission's `Immunity`, `unit+0x110` bit 15: the unit is left off
+         * the list weapon auto-acquire picks from (0x40AB24) and out of the
+         * computer's search for something to attack (0x407297). It can still
+         * be hit by splash or by a direct order. MAKESELECTABLE clears it.
+         */
+        bool immune{false};
 
         /** The transport piece this unit hangs from (empty: the transport's own position). */
         std::string carriedPiece;

@@ -535,6 +535,28 @@ namespace rwe
         REQUIRE_FALSE(loaded->lastPathRequestTime.has_value());
     }
 
+    TEST_CASE("a save from before mines polled loads with no poll pending", "[saveload]")
+    {
+        // minePollAt arrived with the mines' Standby_Mine mission (#280);
+        // every save written before it lacks the key, and must still load.
+        auto simA = makeBaseSim();
+        buildScenario(simA);
+        simA.tick();
+
+        auto saved = saveSimulationToJson(simA);
+        for (auto& uj : saved.at("units"))
+        {
+            uj.erase("minePollAt");
+        }
+
+        auto simB = makeBaseSim();
+        REQUIRE_NOTHROW(loadSimulationFromJson(saved, simB));
+        for (const auto& [id, unit] : simB.units)
+        {
+            REQUIRE_FALSE(unit.minePollAt.has_value());
+        }
+    }
+
     TEST_CASE("an old save's units from before mobile units were shaded come back shaded", "[saveload]")
     {
         // Until 2026-09-06 every piece of a mobile unit was made unshaded, and

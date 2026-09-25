@@ -31,6 +31,12 @@ on:
   # release.yml calls this on a tag, where no path filter applies.
   workflow_call:
 
+# Read-only unless a job says otherwise: the release and nightly jobs ask for
+# contents: write themselves, and no other job needs to write anything with
+# the token. Issue #75.
+permissions:
+  contents: read
+
 # A pull request only needs its newest commit checked, and a branch push only
 # needs its newest push. Tags are exempt: a release run must not be cancelled
 # by anything, and each tag has its own ref anyway.
@@ -237,7 +243,12 @@ jobs:
             -pointsize 72 -annotate 0 'RWE' \
             AppDir/usr/share/icons/hicolor/256x256/apps/rwe.png
 
-          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          # A tagged release and its checksum, not `continuous`: that build is
+          # replaced in place, and the tool runs with the release's files in
+          # reach. To move to a newer one, change the tag and the hash
+          # together. Issue #75.
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+          echo "c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d  linuxdeploy-x86_64.AppImage" | sha256sum --check
           chmod +x linuxdeploy-x86_64.AppImage
 
           VERSION=$(git describe --tags --always)
@@ -398,7 +409,9 @@ jobs:
         run: npm run package
       - name: install nsis
         run: choco install nsis -y
-      - uses: msys2/setup-msys2@v2
+      # Third-party actions are pinned to a commit rather than a tag, which
+      # its owner can move. Bump the hash and the comment together. Issue #75.
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
         with:
           msystem: MINGW64
           path-type: inherit
@@ -514,7 +527,7 @@ jobs:
           name: RWE AppImage
           path: dist
       - name: create release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: dist/*
           generate_release_notes: true
@@ -618,7 +631,7 @@ jobs:
                 gh release delete-asset nightly "$asset" --yes
               done
       - name: publish nightly pre-release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: nightly
           name: Nightly ${{ steps.notes.outputs.short }}

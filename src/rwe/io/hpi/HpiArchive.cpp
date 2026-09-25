@@ -9,8 +9,24 @@
 
 namespace rwe
 {
+    /**
+     * How much of a directory tree may still be walked. Every entry in a
+     * genuine archive is a distinct record in the directory block, so there
+     * can be no more of them than the block has room for; a count past that
+     * means entries that point back at their own ancestors, which used to
+     * recurse until the stack ran out. The depth limit is the same guard for
+     * a chain that is merely very long. Issue #75.
+     */
+    struct DirectoryWalkBudget
+    {
+        std::size_t entriesLeft;
+        unsigned int depth{0};
+    };
+
+    constexpr unsigned int MaxDirectoryDepth = 128;
+
     HpiArchive::DirectoryEntry
-    convertDirectoryEntry(const HpiDirectoryEntry& entry, const char* buffer, std::size_t size);
+    convertDirectoryEntry(const HpiDirectoryEntry& entry, const char* buffer, std::size_t size, DirectoryWalkBudget& budget);
 
     HpiArchive::File convertFile(const HpiFileData& file)
     {
@@ -19,26 +35,42 @@ namespace rwe
     }
 
     HpiArchive::Directory
-    convertDirectory(const HpiDirectoryData& directory, const char* buffer, std::size_t size)
+    convertDirectory(const HpiDirectoryData& directory, const char* buffer, std::size_t size, DirectoryWalkBudget& budget)
     {
         if (directory.entryListOffset + (directory.numberOfEntries * sizeof(HpiDirectoryEntry)) > size)
         {
             throw HpiException("Runaway directory entry list");
+        }
+        if (directory.numberOfEntries > budget.entriesLeft)
+        {
+            throw HpiException("Directory tree has more entries than the archive holds");
+        }
+        budget.entriesLeft -= directory.numberOfEntries;
+        if (++budget.depth > MaxDirectoryDepth)
+        {
+            throw HpiException("Directory tree nested too deep");
         }
 
         std::vector<HpiArchive::DirectoryEntry> v;
         auto p = reinterpret_cast<const HpiDirectoryEntry*>(buffer + directory.entryListOffset);
         for (std::size_t i = 0; i < directory.numberOfEntries; ++i)
         {
-            v.push_back(convertDirectoryEntry(p[i], buffer, size));
+            v.push_back(convertDirectoryEntry(p[i], buffer, size, budget));
         }
 
+        --budget.depth;
         return HpiArchive::Directory{v};
     }
 
     HpiArchive::DirectoryEntry
-    convertDirectoryEntry(const HpiDirectoryEntry& entry, const char* buffer, std::size_t size)
+    convertDirectoryEntry(const HpiDirectoryEntry& entry, const char* buffer, std::size_t size, DirectoryWalkBudget& budget)
     {
+        // Before the scan for the terminator, which walks forward until it
+        // meets the end: started past the end, it never would.
+        if (entry.nameOffset >= size)
+        {
+            throw HpiException("Runaway directory entry name");
+        }
         auto nameSize = stringSize(buffer + entry.nameOffset, buffer + size);
         if (!nameSize)
         {
@@ -54,7 +86,7 @@ namespace rwe
             }
 
             auto d = reinterpret_cast<const HpiDirectoryData*>(buffer + entry.dataOffset);
-            auto data = convertDirectory(*d, buffer, size);
+            auto data = convertDirectory(*d, buffer, size, budget);
             return HpiArchive::DirectoryEntry{name, data};
         }
         else
@@ -87,17 +119,28 @@ namespace rwe
 
         decryptionKey = transformKey(static_cast<unsigned char>(h.headerKey));
 
-        stream->seekg(h.start);
-        auto data = std::make_unique<char[]>(h.directorySize);
-        readAndDecrypt(*stream, decryptionKey, data.get() + h.start, h.directorySize - h.start);
-
-        if (h.start + sizeof(HpiDirectoryData) > h.directorySize)
+        // Both checked before the read, not after it. The read fills from
+        // `start` to `directorySize`, and with `start` past the end that
+        // length wrapped round to four billion: the archive's own bytes were
+        // written past the buffer before anything looked at them. The
+        // directory block of the largest shipped archive is well under a
+        // megabyte. Issue #75.
+        if (h.directorySize > MaxDirectoryBytes)
+        {
+            throw HpiException("Directory block too large");
+        }
+        if (static_cast<std::size_t>(h.start) + sizeof(HpiDirectoryData) > h.directorySize)
         {
             throw HpiException("Runaway root directory");
         }
 
+        stream->seekg(h.start);
+        auto data = std::make_unique<char[]>(h.directorySize);
+        readAndDecrypt(*stream, decryptionKey, data.get() + h.start, h.directorySize - h.start);
+
         auto directory = reinterpret_cast<HpiDirectoryData*>(data.get() + h.start);
-        _root = convertDirectory(*directory, data.get(), h.directorySize);
+        DirectoryWalkBudget budget{h.directorySize / sizeof(HpiDirectoryEntry)};
+        _root = convertDirectory(*directory, data.get(), h.directorySize, budget);
     }
 
     const HpiArchive::Directory& HpiArchive::root() const

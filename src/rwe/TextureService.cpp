@@ -178,7 +178,7 @@ namespace rwe
         }
 
         PcxDecoder<std::vector<char>::const_iterator> decoder(entry->begin(), entry->end());
-        auto decodedData = decoder.decodeImage();
+        auto decodedData = decoder.decodePalettedImage();
         auto palette = decoder.decodePalette();
         auto width = decoder.getWidth();
         auto height = decoder.getHeight();
@@ -248,7 +248,7 @@ namespace rwe
 
         PcxDecoder<std::vector<char>::const_iterator> decoder(entry->begin(), entry->end());
 
-        auto decodedData = decoder.decodeImage();
+        auto decodedData = decoder.decodePalettedImage();
         auto palette = decoder.decodePalette();
 
         auto width = decoder.getWidth();

@@ -136,12 +136,19 @@ record they are all nonsense.
 | 20 | `0x4FCC0C` | `VTOL_GetRepaired` | `0x415250` | Under repair |
 | 21 | `0x4FCC25` | `VTOL_LandIfCan` | `0x40F2A0` | Seeking to land |
 
-A second table of the same shape holds the ground missions, starting at
-`0x4FC490` (`Stop` → `0x401C20`, `Attack_NoMove` → `0x402160`,
-`Attack_Chase` → `0x4034A0`, `Attack_Kamikaze` → `0x403260`,
-`Suppress` → `0x4038A0`, …). Both are merged and sorted into the runtime vector
-at startup, which is why the binary search works on names that are not in
-source order in either table.
+Two more tables of the same shape hold the ground missions. The first
+starts at `0x4FC490` and runs 23 records, `Stop` (`0x401C20`) to `QPatrol`,
+through `Attack_NoMove` (`0x402160`), `SelfDestruct` (`0x402010`),
+`Guard_NoMove` (`0x4021F0`) and the order-setting missions; the record at
+`0x4FC6CF` after it is float data, not a mission. The second starts at
+`0x4FC6E8` and runs 22, `Standby` (`0x405FE0`), `Standby_Mine` (`0x406090`),
+`Move_Ground`, `Follow_Ground`, `Suppress` (`0x4038A0`), `Attack_Chase`
+(`0x4034A0`), `Attack_Kamikaze` (`0x403260`) and the rest to
+`RepairUnitNoMove`. **Corrected 2026-09-25:** this paragraph used to say one
+ground table starting at `0x4FC490`, which walked straight through the float
+record. All three are merged and sorted into the runtime vector at startup,
+which is why the binary search works on names that are not in source order in
+any of them. Sixty-seven names in all; `parseDefaultMission` carries the list.
 
 ### **Answer to question 1**
 
