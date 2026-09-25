@@ -755,7 +755,10 @@ namespace rwe
          */
         bool captureUnit(UnitId targetId, PlayerId captor, std::optional<UnitId> captorUnitId = std::nullopt);
 
-        /** Length of the self-destruct countdown, as in TA. */
+        /**
+         * Length of the self-destruct countdown for a unit whose FBI does not
+         * name one, as in TA. See UnitDefinition::selfDestructCountdown.
+         */
         static constexpr unsigned int SelfDestructCountdownTicks = 5 * SimTicksPerSecond;
 
         /**
@@ -797,6 +800,13 @@ namespace rwe
 
         /** Starts a unit's self-destruct countdown, or cancels it if one is already running. */
         void toggleSelfDestruct(UnitId unitId);
+
+        /**
+         * Starts a unit's self-destruct countdown: its definition's
+         * selfDestructCountdown in seconds, or at once when that is 0. Does
+         * nothing to a countdown already running.
+         */
+        void startSelfDestruct(UnitId unitId);
 
         /** Income multiplier for a player: 1 for everyone except cheating computer players. */
         float resourceBonusFor(PlayerId playerId) const;

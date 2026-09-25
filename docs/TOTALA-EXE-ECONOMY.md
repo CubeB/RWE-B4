@@ -321,8 +321,10 @@ the armour-bypass threshold at `0x489BD1`, tying it to the D-gun finding in
 the damage section. Only six message-table entries exist for a three-bit
 field, so countdowns of 6 or 7 would index past the array; nothing sets them.
 
-What RWE still lacks is the six spoken announcements, the random slop before
-the blast, and the explicit-zero case. The timing is right.
+What RWE still lacks is the six spoken announcements and the random slop
+before the blast. The timing is right, and since #108 (2026-09-25) the count
+is the definition's own, explicit zero included: Core Contingency's mines are
+the only shipped units that name one, at 1 and 2.
 
 ### `healtime`, `WORD def+0x200`
 

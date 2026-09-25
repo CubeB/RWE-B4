@@ -722,6 +722,15 @@ namespace rwe
         std::optional<GameTime> selfDestructTime;
 
         /**
+         * A mine's next look round, when it is idle on Standby_Mine: the
+         * mission sleeps a tick when it is installed and then rand(30)+30
+         * ticks after every look that finds nothing (0x406090). Unset for
+         * anything that is not a mine, and for a mine that has not yet been
+         * idle.
+         */
+        std::optional<GameTime> minePollAt{};
+
+        /**
          * When set, the game time this unit comes round from an EMP hit. The
          * original models the stun as a sleeping order in front of the unit's
          * own (0x402D10), which is why a unit picks up what it was doing rather

@@ -1189,8 +1189,21 @@ namespace rwe
         }
         else
         {
-            unit.selfDestructTime = gameTime + GameTime(SelfDestructCountdownTicks);
+            startSelfDestruct(unitId);
         }
+    }
+
+    void GameSimulation::startSelfDestruct(UnitId unitId)
+    {
+        auto& unit = getUnitState(unitId);
+        if (unit.isDead() || unit.selfDestructTime)
+        {
+            return;
+        }
+        // One step a second (0x4020F6), from the definition's own count; an
+        // explicit 0 goes off at once with no countdown (0x402053).
+        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+        unit.selfDestructTime = gameTime + GameTime(unitDefinition.selfDestructCountdown * SimTicksPerSecond);
     }
 
     void GameSimulation::selfDestructUnit(UnitId unitId)

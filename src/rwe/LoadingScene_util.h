@@ -70,6 +70,18 @@ namespace rwe
      */
     std::optional<std::string> transportCapacityWarning(const UnitFbi& fbi);
 
+    /**
+     * The mission an FBI's DefaultMissionType names, compared without regard
+     * to case as the original's `MissionId::FromName` (0x438760) does. A name
+     * in none of the original's three mission tables is None, which is what
+     * FromName's 0 means; a name in them that is not one of the four the
+     * shipped data uses is Unported.
+     */
+    DefaultMission parseDefaultMission(const std::string& name);
+
+    /** What to tell the player about a DefaultMissionType RWE does not act on, or nothing. */
+    std::optional<std::string> defaultMissionWarning(const UnitFbi& fbi);
+
     WeaponMediaInfo parseWeaponMediaInfo(const std::vector<Color>& palette, const std::vector<Color>& guiPalette, const WeaponTdf& tdf);
 
     FeatureDefinitionId getFeatureId(FeatureDefinitionId& nextId, const std::unordered_map<std::string, FeatureDefinitionId>& featureNameIndex, std::deque<std::string>& openQueue, std::unordered_map<std::string, FeatureDefinitionId>& openSet, const std::string& featureName);

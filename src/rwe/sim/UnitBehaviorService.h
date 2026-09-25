@@ -211,6 +211,14 @@ namespace rwe
          */
         std::optional<UnitId> findEnemyToEngage(UnitInfo unitInfo);
 
+        /**
+         * An idle mine keeping watch: Standby_Mine, 0x406090. Once a tick
+         * after it is installed and then every rand(30)+30 ticks, the
+         * sight-range search 0x43B700 is asked for something to blow up;
+         * a sighting standing on the ground starts the self-destruct.
+         */
+        void pollMine(UnitInfo unitInfo);
+
         bool handleBuild(UnitInfo unitInfo, const std::string& unitType);
 
         void clearBuild(UnitInfo unitInfo);
