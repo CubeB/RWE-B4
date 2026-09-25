@@ -90,6 +90,19 @@ namespace rwe
             return d;
         }
 
+        /** ARMLAB: canmove, so it has a MOVE button, but bmcode=0 and no mover. */
+        UnitDefinition makeFactoryDef()
+        {
+            UnitDefinition d{};
+            d.objectName = "model";
+            d.builder = true;
+            d.canMove = true;
+            d.maxHitPoints = 200;
+            d.buildTime = 0u;
+            d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{6u, 6u, 255u, 255u, 0u, 0u};
+            return d;
+        }
+
         /** ARMASP, a repair pad: builder and isairbase, and switched on. */
         UnitDefinition makeRepairPadDef()
         {
@@ -144,6 +157,7 @@ namespace rwe
                 sim.unitDefinitions["commander"] = makeCommanderDef();
                 sim.unitDefinitions["fighter"] = makeFighterDef();
                 sim.unitDefinitions["pad"] = makeRepairPadDef();
+                sim.unitDefinitions["factory"] = makeFactoryDef();
             }
 
             UnitId spawn(const std::string& unitType, PlayerId owner, SimScalar x)
@@ -308,6 +322,25 @@ namespace rwe
             auto action = computeDefaultAction(f.sim, DefaultActionScheme::LeftClickDefault, peewee, std::nullopt, std::nullopt);
             REQUIRE(isMove(action));
             REQUIRE(action.cursor == CursorType::Move);
+        }
+
+        SECTION("a factory takes a rally point from the MOVE button and from no click")
+        {
+            auto factory = f.spawn("factory", f.player, 0_ss);
+            auto ground = [&](DefaultActionScheme scheme) {
+                return computeDefaultAction(f.sim, scheme, factory, std::nullopt, std::nullopt);
+            };
+
+            REQUIRE(isMove(ground(DefaultActionScheme::MoveButton)));
+
+            auto left = ground(DefaultActionScheme::LeftClickDefault);
+            REQUIRE(std::holds_alternative<DefaultActionNothing>(left.action));
+            REQUIRE(left.cursor == CursorType::Move);
+
+            REQUIRE(std::holds_alternative<DefaultActionNothing>(ground(DefaultActionScheme::RightClickDefault).action));
+
+            auto peewee = f.spawn("peewee", f.enemy, 100_ss);
+            REQUIRE(std::holds_alternative<DefaultActionNothing>(f.act(DefaultActionScheme::RightClickDefault, factory, peewee).action));
         }
     }
 
