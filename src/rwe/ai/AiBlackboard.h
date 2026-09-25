@@ -144,6 +144,50 @@ namespace rwe
     constexpr std::size_t MaxRememberedUnitLosses = 16;
 
     /**
+     * Where something of ours died lately, kept until the wreck it left there
+     * has gone. See AiTuningProfile::ownWreckageReclaimers.
+     *
+     * Not recentLosses, which is the obvious thing to read and the wrong
+     * one: that forgets a loss after LossMemoryTicks because it answers
+     * "what is being hit now", and a wreck lies in the base for as long as
+     * nobody takes it. It also keeps no mobile units, and the defenders that
+     * died answering a raid are where most of a base's own wreckage comes
+     * from.
+     */
+    struct OwnWreckSite
+    {
+        SimVector position;
+        GameTime lostAt;
+    };
+
+    /** Own wreck sites remembered at once, most recent first. */
+    constexpr std::size_t MaxOwnWreckSites = 32;
+
+    /**
+     * How long a site is kept with no wreck on it, in ticks. The corpse is
+     * spawned when the Killed script has run, which can be some ticks after
+     * the unit stopped counting as standing, so a site is not given up the
+     * moment it is first looked at.
+     */
+    constexpr unsigned int OwnWreckSpawnGraceTicks = 5u * 30u;
+
+    /**
+     * How close to a site a feature must lie to be the wreck of what died
+     * there. The corpse spawns at the dying unit's own position, so this is
+     * slack for a wreck that was pushed or a heap that replaced it, and well
+     * short of the next building over.
+     */
+    constexpr float OwnWreckSiteRadius = 32.0f;
+
+    /**
+     * How far from the base anchor a death is still the base's own. The
+     * same reach as the ordinary harvest; an army that dies out on the field
+     * is tryBattlefieldReclaim's, and remembering those sites here would
+     * crowd the base's out of the list.
+     */
+    constexpr float OwnWreckBaseReach = 1200.0f;
+
+    /**
      * Shared scratch state between the AI's managers. Rebuilt from the sim
      * every tick by the perception and economy passes; the managers only
      * ever read it and emit commands.
@@ -400,6 +444,13 @@ namespace rwe
         std::map<unsigned int, StandingUnit> standingUnits;
         /** Mobile and nanoframe losses, most recent first, aged out after UnitLossMemoryTicks. */
         std::vector<LostUnit> recentUnitLosses;
+        /**
+         * Where our buildings and units have died, most recent first, each
+         * kept until no wreck is left there. Fed by the same two diffs as
+         * recentLosses and recentUnitLosses; BuildManager drops a site once
+         * its wreck has gone.
+         */
+        std::vector<OwnWreckSite> ownWreckSites;
         /**
          * Our factories that have lately lost a frame where it was born, in
          * id order. Memory only: it says something was killing our

@@ -14,6 +14,7 @@
 #include <rwe/sim/movement.h>
 #include <rwe/sim/WeaponDefinition.h>
 #include <rwe/util/rwe_string.h>
+#include <set>
 #include <tuple>
 #include <variant>
 
@@ -5266,6 +5267,191 @@ namespace rwe
         return false;
     }
 
+    bool BuildManager::tryReclaimOwnWreckage(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        const AiTuningProfile& profile,
+        AiBlackboard& bb,
+        UnitId builderId,
+        const UnitDefinition& builderDef,
+        bool builderAtBase,
+        std::vector<PlayerCommand>& outCommands)
+    {
+        if (bb.ownWreckSites.empty() || !bb.baseAnchor)
+        {
+            return false;
+        }
+
+        // Which sites still have a wreck on them, and which wrecks are worth
+        // sending for. One walk over the features answers both. A site is
+        // kept whatever the gates below say about sending anyone to it
+        // today -- a wreck under an enemy's guns now is still there to be
+        // taken once the enemy has gone -- and dropped only when nothing
+        // reclaimable is left on it and the corpse has had time to appear.
+        const auto siteRadiusSquared = SimScalar(OwnWreckSiteRadius * OwnWreckSiteRadius);
+        const auto delayTicks = static_cast<unsigned int>(std::max(0, profile.ownWreckageDelaySeconds) * SimTicksPerSecond);
+        std::vector<bool> siteHasWreck(bb.ownWreckSites.size(), false);
+        std::vector<std::pair<SimScalar, FeatureId>> wrecks;
+        for (const auto& [featureId, feature] : sim.features)
+        {
+            const auto& featureDefinition = sim.getFeatureDefinition(feature.featureName);
+            if (!featureDefinition.reclaimable || !(featureDefinition.metal > 0))
+            {
+                continue;
+            }
+            bool ripe = false;
+            for (std::size_t i = 0; i < bb.ownWreckSites.size(); ++i)
+            {
+                const auto& site = bb.ownWreckSites[i];
+                auto dx = site.position.x - feature.position.x;
+                auto dz = site.position.z - feature.position.z;
+                if (dx * dx + dz * dz > siteRadiusSquared)
+                {
+                    continue;
+                }
+                siteHasWreck[i] = true;
+                if (bb.now.value - site.lostAt.value >= delayTicks)
+                {
+                    ripe = true;
+                }
+            }
+            if (!ripe)
+            {
+                continue;
+            }
+            // The same rule as every other site the AI sends a builder to:
+            // a wreck the raid is still standing over is a builder walked
+            // into the raid.
+            if (siteUnderEnemyGuns(sim, profile, bb, feature.position))
+            {
+                continue;
+            }
+            wrecks.emplace_back(0_ss, FeatureId(featureId));
+        }
+        std::size_t kept = 0;
+        for (std::size_t i = 0; i < bb.ownWreckSites.size(); ++i)
+        {
+            if (siteHasWreck[i] || bb.now.value - bb.ownWreckSites[i].lostAt.value < OwnWreckSpawnGraceTicks)
+            {
+                bb.ownWreckSites[kept++] = bb.ownWreckSites[i];
+            }
+        }
+        bb.ownWreckSites.resize(kept);
+
+        if (profile.ownWreckageReclaimers <= 0 || profile.ownWreckageBatch <= 0 || !builderAtBase || !builderDef.canReclamate || wrecks.empty())
+        {
+            return false;
+        }
+
+        // Not while the raid is on. Each wreck is already refused while a gun
+        // stands over it, but a raid moves: measured over eight games on
+        // Great Divide, the side that was raided sent its commander back to
+        // the rubble between D-gun shots, and ended the game some 120 metal
+        // of army behind the same side with the rule off. The wreckage keeps
+        // until the base is quiet.
+        if (!bb.enemiesNearBase.empty())
+        {
+            return false;
+        }
+
+        // The stall flag flickers off for a moment whenever a build
+        // finishes, so the stockpile is asked as well: the same test the
+        // build priorities use.
+        auto metalShort = bb.metalStalled || (bb.metalStorage.value > 0.0f && bb.currentMetal.value < bb.metalStorage.value * 0.1f);
+        if (profile.ownWreckageOnlyWhenMetalShort && !metalShort)
+        {
+            return false;
+        }
+
+        // Who is on it already. A builder whose current order is to reclaim
+        // one of these wrecks counts against the limit, and every wreck named
+        // anywhere in any of our builders' queues is left to that builder,
+        // so two are never sent to the same corpse.
+        std::set<FeatureId> claimed;
+        for (const auto& [otherId, other] : sim.units)
+        {
+            if (other.owner != aiOwner || !other.isAlive())
+            {
+                continue;
+            }
+            for (const auto& order : other.orders)
+            {
+                if (auto reclaim = std::get_if<ReclaimOrder>(&order))
+                {
+                    if (auto featureTarget = std::get_if<FeatureId>(&reclaim->target))
+                    {
+                        claimed.insert(*featureTarget);
+                    }
+                }
+            }
+        }
+        int working = 0;
+        for (const auto& [otherId, other] : sim.units)
+        {
+            if (other.owner != aiOwner || !other.isAlive() || other.orders.empty() || UnitId(otherId) == builderId)
+            {
+                continue;
+            }
+            auto reclaim = std::get_if<ReclaimOrder>(&other.orders.front());
+            if (reclaim == nullptr)
+            {
+                continue;
+            }
+            auto featureTarget = std::get_if<FeatureId>(&reclaim->target);
+            if (featureTarget == nullptr)
+            {
+                continue;
+            }
+            if (std::any_of(wrecks.begin(), wrecks.end(), [&](const auto& w) { return w.second == *featureTarget; }))
+            {
+                ++working;
+            }
+        }
+        if (working >= profile.ownWreckageReclaimers)
+        {
+            return false;
+        }
+
+        const auto& builder = sim.getUnitState(builderId);
+        std::vector<std::pair<SimScalar, FeatureId>> spoil;
+        for (const auto& [unused, featureId] : wrecks)
+        {
+            if (claimed.count(featureId) != 0)
+            {
+                continue;
+            }
+            spoil.emplace_back(builder.position.distanceSquared(sim.getFeature(featureId).position), featureId);
+        }
+        if (spoil.empty())
+        {
+            return false;
+        }
+        // Nearest the builder first, and ties by feature id, so every peer
+        // builds the same queue.
+        std::sort(spoil.begin(), spoil.end(), [](const auto& a, const auto& b) {
+            return std::tie(a.first, a.second) < std::tie(b.first, b.second);
+        });
+
+        auto taken = std::min(spoil.size(), static_cast<std::size_t>(profile.ownWreckageBatch));
+        LOG_INFO << "AI build: unit " << builderId.value << " reclaims the base's own wreckage (" << taken << " of " << spoil.size()
+                 << (metalShort ? ", metal short" : "") << ")";
+        sim.eventLog.event(sim.gameTime.value, "build_order")
+            .set("player", aiOwner.value)
+            .set("unit", builderId.value)
+            .set("taken", taken)
+            .set("wrecks", spoil.size())
+            .set("metal_short", metalShort)
+            .set("why", "own_wreckage")
+            .detail("builder reclaims the wreckage where our own units died");
+        savingFor.clear();
+        for (std::size_t i = 0; i < taken; ++i)
+        {
+            auto kind = i == 0 ? PlayerUnitCommand::IssueOrder::IssueKind::Immediate : PlayerUnitCommand::IssueOrder::IssueKind::Queued;
+            outCommands.emplace_back(PlayerUnitCommand(builderId, PlayerUnitCommand::IssueOrder(ReclaimOrder(spoil[i].second), kind)));
+        }
+        return true;
+    }
+
     void BuildManager::updateAirWorthIt(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, AiBlackboard& bb) const
     {
         // Are aircraft worth spending a tier on? Asked every pass, because
@@ -5772,6 +5958,13 @@ namespace rwe
         // The wall of wrecks the last few waves left behind.
         //
         if (tryBattlefieldReclaim(sim, aiOwner, profile, bb, builderId, builderDef, builderAtBase, outCommands))
+        {
+            return;
+        }
+
+        // What the last raid left in the base, which the harvest at the
+        // bottom of this pass would take and never reaches.
+        if (tryReclaimOwnWreckage(sim, aiOwner, profile, bb, builderId, builderDef, builderAtBase, outCommands))
         {
             return;
         }

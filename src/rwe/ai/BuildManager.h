@@ -585,6 +585,22 @@ namespace rwe
             bool builderAtBase,
             std::vector<PlayerCommand>& outCommands);
 
+        /**
+         * Sends this builder to reclaim the wreckage lying where our own
+         * buildings and units died in the base (bb.ownWreckSites), and drops
+         * the sites whose wreck has gone. True when an order was issued. See
+         * AiTuningProfile::ownWreckageReclaimers.
+         */
+        bool tryReclaimOwnWreckage(
+            const GameSimulation& sim,
+            PlayerId aiOwner,
+            const AiTuningProfile& profile,
+            AiBlackboard& bb,
+            UnitId builderId,
+            const UnitDefinition& builderDef,
+            bool builderAtBase,
+            std::vector<PlayerCommand>& outCommands);
+
         PrioritySite choosePrioritySite(
             const GameSimulation& sim,
             PlayerId aiOwner,
