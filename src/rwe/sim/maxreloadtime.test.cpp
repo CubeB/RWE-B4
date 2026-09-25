@@ -409,6 +409,37 @@ namespace rwe
         push(*script, OpCode::JUMP);
         push(*script, spinsAt);
 
+        // 5: AsksForNoPiece { static1 = get PIECE_XZ(99); static0 = 3; }
+        beginFunction(*script, "AsksForNoPiece");
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 7u);
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 99u);
+        for (int i = 0; i < 3; ++i)
+        {
+            push(*script, OpCode::PUSH_CONSTANT);
+            push(*script, 0u);
+        }
+        push(*script, OpCode::GET_VALUE_WITH_ARGS);
+        push(*script, OpCode::POP_STATIC);
+        push(*script, 1u);
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 3u);
+        push(*script, OpCode::POP_STATIC);
+        push(*script, 0u);
+        endFunction(*script, 0u);
+
+        // 6: AsksForever { top: static2 = get ACTIVATION; jump top; }
+        const auto asksAt = static_cast<uint32_t>(script->instructions.size());
+        beginFunction(*script, "AsksForever");
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 1u);
+        push(*script, OpCode::GET_VALUE);
+        push(*script, OpCode::POP_STATIC);
+        push(*script, 2u);
+        push(*script, OpCode::JUMP);
+        push(*script, asksAt);
+
         auto unitId = addUnitOfType(sim, "TESTUNIT", owner, SimVector(0_ss, 0_ss, 0_ss), script);
         auto& env = *sim.getUnitState(unitId).cobEnvironment;
 
@@ -442,6 +473,24 @@ namespace rwe
             runUnitCobScripts(sim, unitId);
             REQUIRE(env.getStatic(1) == 0);
             REQUIRE(env.getStatic(0) == 1);
+        }
+
+        SECTION("asking where a piece the model does not have is answers 0, and the thread goes on")
+        {
+            env.setStatic(1, 42);
+            env.createThread(5u, {});
+            REQUIRE_NOTHROW(runUnitCobScripts(sim, unitId));
+            REQUIRE(env.getStatic(1) == 0);
+            REQUIRE(env.getStatic(0) == 3);
+        }
+
+        SECTION("a loop that asks for a value every pass, and so never runs out of instructions, is stopped")
+        {
+            env.createThread(6u, {});
+            env.createThread(1u, {});
+            runUnitCobScripts(sim, unitId);
+            REQUIRE(env.getStatic(0) == 1);
+            REQUIRE(env.readyQueue.empty());
         }
 
         SECTION("a loop that never yields is stopped")
