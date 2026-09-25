@@ -192,6 +192,36 @@ namespace rwe
             REQUIRE_FALSE(loaded->parameters.campaign.has_value());
         }
 
+        SECTION("a save between missions says so, and keeps no world")
+        {
+            TempFile file;
+            auto save = makeSaveFile();
+            save.parameters.campaign = progress;
+            save.betweenMissions = true;
+            save.simulation = nlohmann::json();
+
+            writeSaveFile(file.path, save);
+            auto loaded = readSaveFile(file.path);
+
+            REQUIRE(loaded.has_value());
+            REQUIRE(loaded->betweenMissions);
+            REQUIRE(loaded->simulation.is_null());
+            REQUIRE(loaded->parameters.campaign->missionIndex == 4u);
+        }
+
+        SECTION("a save that is not a campaign's is never between missions")
+        {
+            TempFile file;
+            auto save = makeSaveFile();
+            save.betweenMissions = true;
+
+            writeSaveFile(file.path, save);
+            auto loaded = readSaveFile(file.path);
+
+            REQUIRE(loaded.has_value());
+            REQUIRE_FALSE(loaded->betweenMissions);
+        }
+
         SECTION("a run of the wrong length starts again, as the original's loader does")
         {
             TempFile file;

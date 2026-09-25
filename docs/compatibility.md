@@ -104,6 +104,12 @@ every player's economy while it runs. MoveUnitToRadius's point is on the screen
 plane, not the map, so on high ground its circle is south of the numbers.
 `TOTALA-EXE-DATA.md` §113.
 
+**A campaign saved between missions moves on, won or lost.** A save made from
+the screen after a mission points at the next mission, even when the one just
+played was lost, so loading it briefs the mission after the lost one. The list
+on that screen selects the lost mission again; the save does not follow it.
+Any mission can still be started from the campaign screen. §115.
+
 ---
 
 ## Changed: because the original's limit is gone
@@ -329,8 +335,7 @@ original in every case.
   left out, its effect not decoded; the colour codes are drawn. §115.
 - **Back from a briefing reached between missions goes to the single-player
   menu**, where the original goes back to the chart it came from: the game,
-  and its chart with it, is gone by the time the briefing is up. ENDMSN's Load
-  Game and Save Game do nothing yet. §115.
+  and its chart with it, is gone by the time the briefing is up. §115.
 - **A campaign's ending films play in a window too.** The original plays
   `3.zrb` or `4.zrb` and then `5.zrb` only full-screen and goes straight to the
   main menu otherwise; RWE plays every film in either, the intro included.

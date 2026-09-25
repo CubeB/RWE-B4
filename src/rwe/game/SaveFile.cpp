@@ -243,6 +243,10 @@ namespace rwe
         {
             header["gameTimeSeconds"] = *save.gameTimeSeconds;
         }
+        if (save.betweenMissions)
+        {
+            header["betweenMissions"] = true;
+        }
         j["camera"] = {{"x", save.cameraPosition.x}, {"y", save.cameraPosition.y}, {"z", save.cameraPosition.z}};
         j["sim"] = save.simulation;
 
@@ -306,6 +310,8 @@ namespace rwe
         {
             save.gameTimeSeconds = header.at("gameTimeSeconds").get<unsigned int>();
         }
+        // Only a campaign's: there is nothing else to brief.
+        save.betweenMissions = header.value("betweenMissions", false) && save.parameters.campaign.has_value();
         const auto& camera = j.at("camera");
         save.cameraPosition = Vector3f(camera.at("x").get<float>(), camera.at("y").get<float>(), camera.at("z").get<float>());
         save.simulation = j.at("sim");

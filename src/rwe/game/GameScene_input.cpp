@@ -54,7 +54,9 @@ namespace rwe
         // The game menu owns the keyboard while it is up. Tab and F2 toggle
         // it (the original's keys: Tab opens GAME OPTIONS in single player,
         // F2 anywhere) and Escape closes it.
-        if (keysym.key == SDLK_TAB || keysym.key == SDLK_F2)
+        // Not once the game has given way to the picture or the chart, whose
+        // dialogs are ENDMSN's own.
+        if ((keysym.key == SDLK_TAB || keysym.key == SDLK_F2) && !endGameCoversWorld())
         {
             toggleGameMenu();
             return;
@@ -497,6 +499,17 @@ namespace rwe
             if (endGamePhase == EndGamePhase::Glamour && event.button == MouseButtonEvent::MouseButton::Left)
             {
                 glamourClicked();
+                return;
+            }
+
+            if (endGameChartVisible() && isGameMenuOpen())
+            {
+                // A save or load dialog ENDMSN opened, in the chart's space.
+                auto p = endGameScreenPoint(event.x, event.y);
+                for (auto& panel : gameMenuPanels)
+                {
+                    panel->mouseDown(MouseButtonEvent(p.x, p.y, event.button));
+                }
                 return;
             }
 
@@ -947,6 +960,16 @@ namespace rwe
     {
         if (gameOver)
         {
+            if (endGameChartVisible() && isGameMenuOpen())
+            {
+                auto p = endGameScreenPoint(event.x, event.y);
+                for (auto& panel : gameMenuPanels)
+                {
+                    panel->mouseUp(MouseButtonEvent(p.x, p.y, event.button));
+                }
+                return;
+            }
+
             if (endGameChartVisible() && endGameCampaignPanel)
             {
                 auto p = endGameScreenPoint(event.x, event.y);
@@ -1141,7 +1164,15 @@ namespace rwe
     {
         if (gameOver)
         {
-            if (endGameChartVisible() && endGameCampaignPanel)
+            if (endGameChartVisible() && isGameMenuOpen())
+            {
+                auto p = endGameScreenPoint(event.x, event.y);
+                for (auto& panel : gameMenuPanels)
+                {
+                    panel->mouseMove(MouseMoveEvent(p.x, p.y));
+                }
+            }
+            else if (endGameChartVisible() && endGameCampaignPanel)
             {
                 auto p = endGameScreenPoint(event.x, event.y);
                 endGameCampaignPanel->mouseMove(MouseMoveEvent(p.x, p.y));
@@ -1182,7 +1213,7 @@ namespace rwe
 
     void GameScene::onMouseWheel(MouseWheelEvent event)
     {
-        if (endGameChartVisible() && endGameCampaignPanel)
+        if (endGameChartVisible() && endGameCampaignPanel && !isGameMenuOpen())
         {
             endGameCampaignPanel->mouseWheel(event);
             return;
