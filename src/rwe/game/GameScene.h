@@ -245,11 +245,11 @@ namespace rwe
         static constexpr float CameraPanSpeed = 1000.0f;
 
         /**
-         * How fast the side panel slides, in pixels per second. RWE's own
-         * number: 76 pins the endpoints and the sounds but says nothing
-         * about the rate. 850 crosses the 128 pixels in about 150ms.
+         * How fast the side panel and the players' list slide, in pixels per
+         * second. RWE's own number: 76 pins the endpoints and the sounds but
+         * says nothing about the rate. 1280 crosses the 128 pixels in 100ms.
          */
-        static constexpr float PanelSlidePixelsPerSecond = 850.0f;
+        static constexpr float PanelSlidePixelsPerSecond = 1280.0f;
 
         static const Rectangle2f minimapViewport;
 
@@ -1015,11 +1015,19 @@ namespace rwe
         float panelSlide{0.0f};
 
         /**
+         * How far the players' list has come in from the right, 0 to
+         * PanelSlideTravel. Space moves only the list; F4 moves the list and
+         * the side panel together.
+         * Presentation only, like panelSlide.
+         */
+        float playerListSlide{0.0f};
+
+        /**
          * How far the Space key's bottom strip has risen, 0 to
          * StatsBarTravel. TOTALA-EXE.md S:108: a slide of its own
          * (game+0x37e90, 0 to -31), driven by Space alone -- F4, which
          * latches the side panel out, does not touch it -- and eased a third
-         * of what is left at a time, at least a pixel, every fifteen
+         * of what is left at a time, at least a pixel, every ten
          * milliseconds.
          */
         static constexpr int StatsBarTravel = 31;
