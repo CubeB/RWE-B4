@@ -209,6 +209,15 @@ namespace rwe
     {
         auto unitInfo = sim->getUnitInfo(unitId);
 
+        // A unit killed earlier in this pass is still in the map until the
+        // end of the tick, but it is out of play: the original's death
+        // handler takes it off the board at once. Its orders must not run --
+        // a Roach killed by its neighbour's blast went on to detonate as well.
+        if (unitInfo.state->isDead())
+        {
+            return;
+        }
+
         // A unit in a transport's grip just rides along (see updateCarriedUnits).
         if (unitInfo.state->carriedBy)
         {
@@ -1864,10 +1873,31 @@ namespace rwe
             return std::nullopt;
         }
         CobExecutionContext context(unit.cobEnvironment.get(), &*thread);
-        auto status = context.execute();
-        if (std::get_if<CobEnvironment::FinishedStatus>(&status) == nullptr)
+
+        // A query answers or it does not. One that faults, or that tries to
+        // wait on something, gets the caller's fallback -- the same answer a
+        // unit with no such script gets -- rather than ending the game on
+        // every peer. A signal is sent as it always was and the query goes
+        // on: the thread is not a scheduled one, so no signal can kill it.
+        // Issue #75.
+        try
         {
-            throw std::runtime_error("Synchronous cob query thread blocked before completion");
+            auto status = context.execute();
+            while (const auto* signal = std::get_if<CobEnvironment::SignalStatus>(&status))
+            {
+                unit.cobEnvironment->sendSignal(signal->signal);
+                status = context.execute();
+            }
+            if (std::get_if<CobEnvironment::FinishedStatus>(&status) == nullptr)
+            {
+                LOG_WARN << "COB query " << name << " blocked before completing; ignoring it";
+                return std::nullopt;
+            }
+        }
+        catch (const std::exception& e)
+        {
+            LOG_WARN << "COB query " << name << " stopped: " << e.what();
+            return std::nullopt;
         }
 
         auto result = thread->returnLocals[0];
@@ -4918,7 +4948,7 @@ namespace rwe
         // arena), and a player cancelling at the same moment met it too.
         // A frame that is still there is removed as before.
         auto removeFrameIfStanding = [&](UnitId frameId) {
-            if (sim->tryGetUnitState(frameId))
+            if (auto frame = sim->tryGetUnitState(frameId); frame && !frame->get().isDead())
             {
                 sim->removeUnfinishedUnit(frameId);
             }

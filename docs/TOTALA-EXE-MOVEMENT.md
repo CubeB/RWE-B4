@@ -991,23 +991,47 @@ hashed simulation state.
 
 ### What is ported, and how faithfully
 
-The straight-line stand-in is ported exactly. The first pass and the relaxed
-goal are ported in shape rather than instruction for instruction, and the
-difference is worth stating plainly.
+The straight-line stand-in is ported exactly, and so, as of 2026-09-25, is the
+first pass.
 
-`BugWalk.cpp` is a greedy walk with wall following, as the original's is, but
-its wall trace and its leave test are written from the structure of
-`0x40E3D5`-`0x40E445` rather than transcribed: the agent that decoded it could
-not make that section byte-exact, and a reimplementation of a routine one does
-not have exactly will fail on geometries the original would have walked. Three
-consequences follow, and only the first is a real cost:
+`BugWalk.cpp` is the original's walk transcribed (`0x40E160`, the wall at
+`0x40E2AC`-`0x40E600`). It goes along x and then along z. At a wall two tracers
+set off from the hit point in opposite directions, a step each in turn: the
+first starts a quarter turn from the blocked direction and scans all eight
+directions from the wall round one way, the second is its mirror image, held
+as the reverse of the way it moves. Whichever first stands back on the greedy
+line further along -- the hit point's row out to the goal's column, then that
+column to the goal, with the axes flipped so the goal lies ahead -- takes the
+walk on from there, without that cell counting towards the closest. If the two
+meet head on, standing on one cell with one about to leave the way the other
+came, there is no way round and the walk gives up.
 
-  - **RWE relaxes its goal more often than the original would**, because the
-    walk gives up more often. A relaxed goal means a shorter search horizon
-    and another request later, so it trades path optimality for cost. Measured
-    on `path_bench` at 400 units the trade is currently favourable in both
-    directions: expansions fall from 149,199 to 32,292 over 600 ticks, and
-    over 3000 ticks 116 units reach their destination where 96 did before.
+It used to be written from the structure of `0x40E3D5`-`0x40E445` rather than
+transcribed: one tracer, on a side chosen at the wall, a leave test on the
+goal's own row or column, and giving up at any corner where neither quarter
+turn was open. That made the walk disagree with itself. From a cell one short
+of an obstacle it got a cell closer and the search was relaxed to that cell;
+from that cell it got nowhere and the search was not relaxed, so it found the
+real way round, which started by stepping back. A unit in a pocket shuttled
+between the two for as long as its order stood: B4 #309, Arm's sea transport
+beside its own shipyard on Coast To Coast. The transcribed walk backs out of
+the pocket and goes round. Over 30 seeds of that map at 900 seconds, Arm's
+army ferries that timed out with nobody aboard fell from 18 to none, and 4
+completed where none had.
+
+What that did to `path_bench` (400 units, spread, Release): over 3000 ticks 79
+units reach their destination where 69 did, from 3083 searches rather than
+6211, because a reachable goal is now reached by the walk and searched for in
+full instead of relaxed and asked again; searches relaxed fall from 3480 to
+166. The first 600 ticks queue more (264 requests left rather than 145), the
+full searches being longer. On the pressed-water scenario every unit needs one
+search rather than 109 among 85 units, and the pressed-wall and crowd
+scenarios are unchanged. Three differences from the original remain, all
+deliberate:
+
+  - **The start is not asked whether it is walkable.** The original gives up
+    at once if it is not (`0x40E1AD`); RWE's walkability counts other units,
+    and a unit pressed against another would learn nothing.
   - The walk is used **only to relax, never to refuse**. The original abandons
     a search outright when its walk gets no closer than it started
     (`0x40E979`); doing that here would turn a walk that failed spuriously

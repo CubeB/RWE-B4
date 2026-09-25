@@ -595,6 +595,29 @@ namespace rwe
         REQUIRE(rules.anyUnitPassesX == 60);
     }
 
+    TEST_CASE("a campaign mission's schema is picked by difficulty, by type", "[ota][campaign]")
+    {
+        auto schema = [](const std::string& type) {
+            OtaSchema s{};
+            s.type = type;
+            return s;
+        };
+        std::vector<OtaSchema> all{schema("Hard"), schema("easy"), schema("Medium")};
+        REQUIRE(chooseCampaignSchema(all, 0) == std::optional<std::size_t>(1));
+        REQUIRE(chooseCampaignSchema(all, 1) == std::optional<std::size_t>(2));
+        REQUIRE(chooseCampaignSchema(all, 2) == std::optional<std::size_t>(0));
+
+        // The fallbacks: Medium falls back to Easy before Hard, Hard to
+        // Medium before Easy (0x436912, 0x4368F9).
+        std::vector<OtaSchema> easyAndHard{schema("Easy"), schema("Hard")};
+        REQUIRE(chooseCampaignSchema(easyAndHard, 1) == std::optional<std::size_t>(0));
+        std::vector<OtaSchema> easyAndMedium{schema("Easy"), schema("Medium")};
+        REQUIRE(chooseCampaignSchema(easyAndMedium, 2) == std::optional<std::size_t>(1));
+
+        std::vector<OtaSchema> skirmish{schema("Network 1")};
+        REQUIRE_FALSE(chooseCampaignSchema(skirmish, 0));
+    }
+
     TEST_CASE("InitialMission is read the way 0x487BF0 reads it", "[ota][campaign]")
     {
         using K = MissionOrder::Kind;

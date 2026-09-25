@@ -7,6 +7,8 @@
 #include <rwe/SceneContext.h>
 #include <rwe/TextureService.h>
 #include <rwe/game/GameParameters.h>
+#include <rwe/io/campaign/campaign.h>
+#include <rwe/io/ota/ota.h>
 #include <rwe/io/sidedatatdf/SideData.h>
 #include <rwe/io/tdf/TdfBlock.h>
 #include <rwe/scene/Scene.h>
@@ -58,6 +60,17 @@ namespace rwe
         std::vector<std::unique_ptr<UiPanel>> dialogStack;
 
         AudioService::LoopToken bgm;
+
+        /** The campaign screen's choices: 0 Arm or 1 Core, 0 Easy to 2 Hard, and the campaigns the side can play. */
+        unsigned int campaignSide{0};
+        unsigned int campaignDifficulty{0};
+        std::vector<std::string> campaignNames;
+        std::optional<std::string> selectedCampaign;
+
+        /** The mission the briefing on screen is for, and its narration. */
+        std::optional<GameParameters> briefedGame;
+        std::optional<AudioService::SoundHandle> narration;
+        int narrationChannel{-1};
 
     public:
         MainMenuScene(
@@ -126,6 +139,22 @@ namespace rwe
         void goToMainMenu();
 
         void goToSingleMenu();
+
+        /** NEWGAME.GUI, the campaign screen: side, difficulty, campaign and mission (§115). */
+        void goToCampaignMenu();
+        void refreshCampaignMenu();
+        void fillCampaignMissions(unsigned int campaignIndex);
+        void campaignMenuMessage(const std::string& message);
+        void startCampaignMission();
+        std::vector<std::string> campaignNamesForSide(unsigned int side);
+        std::optional<Campaign> readCampaign(const std::string& name);
+
+        /** MSNBRIEF.GUI, the briefing before a mission: its planet, its text and its narration (§115). */
+        void goToCampaignBriefing(const GameParameters& params, const OtaRecord& ota);
+        void campaignBriefingMessage(const std::string& message);
+        void launchBriefedGame();
+        void startNarration();
+        void stopNarration();
 
         void goToSkirmishMenu();
 

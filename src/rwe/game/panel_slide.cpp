@@ -4,7 +4,7 @@
 
 namespace rwe
 {
-    bool panelWantsHiding(bool f4Latch, bool spaceHeld, bool cursorOnPanel)
+    bool playerListWantsOut(bool f4Latch, bool spaceHeld, bool cursorOnPanel)
     {
         if (f4Latch)
         {
@@ -26,5 +26,10 @@ namespace rwe
             return std::max(target, current - step);
         }
         return current;
+    }
+
+    float panelSlideCameraShift(int insetBefore, int insetAfter, float zoom)
+    {
+        return static_cast<float>(insetBefore - insetAfter) / 2.0f / zoom;
     }
 }

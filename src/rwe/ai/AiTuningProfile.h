@@ -2421,6 +2421,42 @@ namespace rwe
          */
 
         /**
+         * Two more tries at the landing, both measured worse or no better, and
+         * recorded here for the same reason (issue #227).
+         *
+         * What the losses are, first. Coast To Coast, thirty seeds at 900
+         * seconds, ARM against CORE, with the first pass walking round walls
+         * the original's way (issue #309, which is what lets ARM's hull leave
+         * home at all): 22 units lost with their carrier, and not one hull was
+         * sunk at sea. Every one died at the landing, to land units -- Peewees,
+         * A.K.s, a commander -- with four to fifteen enemies in reach, and
+         * twelve or more in five of the eight. The landing is the quietest
+         * point on the enemy's ground nearest home, which is the shore facing
+         * us, and that is where the enemy's own army stands; the threat field
+         * had not seen it when the trip was booked.
+         *
+         * Looking at the landing again on the way over, every five seconds,
+         * and moving it when the one it had was under fire and the search
+         * found a quieter one. 38 moves in the thirty games, a median of 1152
+         * units each -- the only quiet points left were far along the enemy
+         * coast -- and the hulls sailed there past the destroyers, patrol
+         * boats and shore towers:
+         *
+         *   cargo lost with a carrier   ARM 27 v 4, CORE 41 v 18
+         *   ferries completed           ARM  2 v 4, CORE 20 v 31
+         *
+         * And scoring every ring of the search, taking the quiet point nearest
+         * home rather than stopping at the first quiet ring out from the
+         * target: 24 seeds of 30 ended identically and the losses were the
+         * same ones, because the fatal landings were already there.
+         *
+         * So the landing is not where this is lost: it is lost in not knowing
+         * the army is there. What is left to try is on the other side of
+         * that -- a look at the landing before the trip is booked, or a load
+         * big enough to win the beach -- rather than another place to put it.
+         */
+
+        /**
          * Whether the want for an army ferry outlives the sighting that
          * raised it. False restores the old behaviour, in which the decision
          * to build a 919-metal transport switched off within one pass of

@@ -17,6 +17,15 @@ namespace rwe
 
     std::vector<PlayerCommand> deserializeCommandSet(const proto::GameUpdateMessage_PlayerCommandSet& set);
 
+    /**
+     * How many commands from the front of `commands` make a set no bigger
+     * than `byteBudget` on the wire, never fewer than one while there are
+     * any. A set is a tick's worth and cannot be split across packets, so a
+     * tick with more than fit is sent over several: an order to a hundred
+     * units is three kilobytes, twice what a datagram carries. Issue #75.
+     */
+    std::size_t commandsFittingOneSet(const std::vector<PlayerCommand>& commands, std::size_t byteBudget);
+
     PlayerCommand deserializeCommand(const proto::PlayerCommand& cmd);
 
     PlayerUnitCommand deserializeUnitCommand(const proto::PlayerUnitCommand& cmd);

@@ -98,8 +98,26 @@ namespace rwe
 
             CobExecutionContext context(&env, thread);
 
+            // A script that faults -- an opcode this VM has no case for, an
+            // index out of range, one of the limits in CobExecutionContext --
+            // loses that thread and nothing more. The original kills a thread
+            // that meets an opcode it does not know; before this, a throw
+            // here ended the game on every peer at once. Deterministic, as a
+            // fault is the same fault on every machine. Issue #75.
+            std::optional<CobEnvironment::Status> status;
+            try
+            {
+                status = context.execute();
+            }
+            catch (const std::exception& e)
+            {
+                LOG_WARN << "COB thread " << thread->name << " stopped: " << e.what();
+                env.killThread(thread);
+                continue;
+            }
+
             auto result = match(
-                context.execute(),
+                *status,
                 [&](const CobEnvironment::BlockedStatus& status) {
                     env.readyQueue.pop_front();
                     env.blockedQueue.emplace_back(status, thread);
@@ -299,12 +317,23 @@ namespace rwe
             },
             [&](const CobEnvironment::QueryStatus::PieceXZ& q) {
                 auto pieceId = q.piece;
+                // The piece number is whatever the script pushed. One the
+                // model does not have answers 0 rather than throwing out of
+                // the tick, as handlePieceCommand's own bound does.
+                if (pieceId < 0 || static_cast<std::size_t>(pieceId) >= env._script->pieces.size())
+                {
+                    return 0;
+                }
                 const auto& pieceName = getObjectName(env, pieceId);
                 auto pos = sim.getUnitPiecePosition(unitId, pieceName);
                 return packCoords(pos.x, pos.z);
             },
             [&](const CobEnvironment::QueryStatus::PieceY& q) {
                 auto pieceId = q.piece;
+                if (pieceId < 0 || static_cast<std::size_t>(pieceId) >= env._script->pieces.size())
+                {
+                    return 0;
+                }
                 const auto& pieceName = getObjectName(env, pieceId);
                 auto pos = sim.getUnitPiecePosition(unitId, pieceName);
                 return simScalarToCobPosition(pos.y).value;
@@ -586,20 +615,56 @@ namespace rwe
 
         assert(env.isNotCorrupt());
 
+        // A thread's instruction cap starts again each time it comes back from
+        // a request, so a loop that asks for a value every pass never trips
+        // it and would hold the tick for ever. Real scripts make a handful of
+        // requests a tick; past this many, the thread asking is stopped.
+        constexpr unsigned int MaxRequestsPerTick = 100000;
+        unsigned int requests = 0;
         while (auto result = executeThreads(env, unitId, simulation.gameTime))
         {
-            match(
-                *result,
-                [&](const CobEnvironment::PieceCommandStatus& s) {
-                    handlePieceCommand(simulation, env, unitId, s);
-                },
-                [&](const CobEnvironment::QueryStatus& s) {
-                    auto result = handleQuery(simulation, env, unitId, s);
-                    env.pushResult(result);
-                },
-                [&](const CobEnvironment::SetQueryStatus& s) {
-                    handleSetQuery(simulation, env, unitId, s);
-                });
+            if (++requests > MaxRequestsPerTick)
+            {
+                if (!env.readyQueue.empty())
+                {
+                    auto thread = env.readyQueue.front();
+                    LOG_WARN << "COB thread " << thread->name << " stopped: more than " << MaxRequestsPerTick << " requests in one tick";
+                    env.killThread(thread);
+                }
+                // Only the thread that ran away pays: the rest of this unit's
+                // threads get a fresh allowance for the remainder of the tick.
+                requests = 0;
+                continue;
+            }
+
+            // The thread that asked is still at the head of the ready queue
+            // while its request is carried out. A request that faults costs
+            // that thread, as a fault inside the interpreter does, and never
+            // the tick (issue #75).
+            try
+            {
+                match(
+                    *result,
+                    [&](const CobEnvironment::PieceCommandStatus& s) {
+                        handlePieceCommand(simulation, env, unitId, s);
+                    },
+                    [&](const CobEnvironment::QueryStatus& s) {
+                        auto result = handleQuery(simulation, env, unitId, s);
+                        env.pushResult(result);
+                    },
+                    [&](const CobEnvironment::SetQueryStatus& s) {
+                        handleSetQuery(simulation, env, unitId, s);
+                    });
+            }
+            catch (const std::exception& e)
+            {
+                if (!env.readyQueue.empty())
+                {
+                    auto thread = env.readyQueue.front();
+                    LOG_WARN << "COB thread " << thread->name << " stopped: " << e.what();
+                    env.killThread(thread);
+                }
+            }
         }
 
         assert(env.isNotCorrupt());

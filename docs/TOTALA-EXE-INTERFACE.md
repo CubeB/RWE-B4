@@ -1988,12 +1988,45 @@ from `+0x104` / `+0x106` instead.
 ### What RWE does
 
 `GameScene::updateStatsBarSlide` and `renderSpaceTabs`. The slides, the gates,
-the strings and formats, the graphic, the box height and the rule that the
-list rides the side panel are the original's. **RWE's own, for want of a
-decode:** the strip is centred under the world view with its three items laid
-left, centre and right on one line; the list is 125 wide on a translucent
-ground with RWE-chosen highlight colours, and uses the `radlogo` colour dots
-as swatches; and `Total Units` stops at the count, because RWE has no unit
-limit to print after it.
+the strings and formats, the graphic and the list's gate (F4, or Space with the
+cursor off the side panel) are the original's. `Total Units` stops at the
+count, because RWE has no unit limit to print after it.
+
+**The side panel does not move for Space.** In play, the original's side panel
+stays where it is while Space is held; only the list slides in. That fits the
+numbers better than §76's reading does: the slide at `ds:0x51F2D8` runs 0 to
+`0x7D`, 125, which is the list's width, and that the side panel is what moves
+on it was inference, not decoding. RWE slides the list on its own
+`playerListSlide` for Space and moves the side panel for F4 alone. What F4 does
+to the side panel in the original has not been checked in play.
+
+**Measured, not decoded.** The rest of the layout was taken off a screenshot of
+the original (about 1.67 times scale, so each figure is good to a pixel):
+
+- **The swatch is the row.** Each player's row is `textures/LOGOS.GAF`
+  `32xlogos` in their colour -- the frame the top bar's side logo also uses --
+  stretched to 112 by 37. The name sits on its upper line and the kills and
+  losses on its lower, kills at the left edge and losses at the right. The
+  plates start 16 pixels below the top bar, one every 40, with the left edge 124
+  pixels in from the screen's right. `Kills` is left-aligned just outside the
+  plates' left edge and `Losses` right-aligned just outside their right edge.
+- **No ground and no visible highlight.** No fill shows behind the list (though the map behind it was black), and
+  the local player's plate looks the same as everyone else's: the two nested
+  rectangles decoded above are drawn under the plate, which covers them.
+- **The face is Haettenschweiler**, the beige outlined font the gui labels
+  use, in both tabs -- not the console font.
+- **The strip rises from behind the bottom bar**, at the world view's left edge,
+  and is clipped to the world view, as a strip drawn by the world render would
+  be. Fully out, it sits directly above the bottom bar. Its three texts are
+  left-aligned columns 25, 189 and 378 pixels in, in the smaller cut,
+  `anims/hattfont11.gaf`; the list uses `hattfont12`.
+
+Still unaccounted for: the decoded box height of `40 * rows + 46` is 30 pixels
+more than the plates occupy.
+
+Because the side panel's reveal changes the world viewport's left inset, the
+camera counter-moves by half that change (`panelSlideCameraShift`) so the map
+does not jump sideways as the panel goes: the wider viewport would otherwise
+re-centre on the camera and drag every world pixel 64 pixels left with it.
 
 ---

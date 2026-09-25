@@ -173,6 +173,17 @@ The fix was to split the file, and the rule it leaves behind is a size one: no t
 
 Two things that pass measurement teaches, both worth knowing before making any of these bigger. **The section count is a budget, not a free win**: the standard library's floor is paid once per translation unit, so a split adds to the total even as it takes the peak down. Taking the debug harness out of `GameScene.cpp` cost 2216 sections across the pair to take 2623 off the larger; taking the menu out of `_commands` cost 8365 to take 4740 off. And **that floor is not a constant** — `_debug` came out at 4839 against the 9500 quoted above, because its include list is what it uses rather than what it would inherit, while `_menu` at 13105 pays for `MainMenuScene.h`, `LoadingScene.h` and `SaveFile.h`, which it genuinely needs. Keeping a new file's includes tight is most of what decides where it lands.
 
+**Anything read from a file or a socket is someone else's.** Maps, mods,
+models, scripts and films come from community sites, peers send packets, and
+the lobby relays other players' strings. `docs/SECURITY-AUDIT.md` (2026-09-25)
+lists what that has cost -- a heap overflow from an archive sitting in the data
+folder, a network game frozen by an honest fifty-unit order -- and the rules
+that came out of it. The short version: every count, size, offset and index
+from outside is checked before it sizes or indexes anything, an `assert` is not
+a check because release builds drop it, every walk over a structure the input
+describes is bounded, a fault in content costs that content and never every
+peer, and a new parser gets a case in `src/rwe/io/malformed_input.test.cpp`.
+
 **A forward declaration that says `class` where the definition says `struct`
 breaks MSVC and nothing else.** MSVC mangles the class-key into the symbol
 name and keeps whichever tag the translation unit saw first, so a header that
@@ -240,7 +251,7 @@ of `TotalA.exe` instead of guessed at.
 
 - `docs/TOTALA-EXE.md` — **the index to the findings**, and the two sections
   everyone is told to read first: §88, where RWE deliberately differs, and
-  §91, what is decoded but not ported. 113 findings numbered to 115 (§83 and
+  §91, what is decoded but not ported. 114 findings numbered to 116 (§83 and
   §84 do not exist). **The numbers never move**, so a §n written anywhere in
   the tree names the same finding for ever; the index says which file holds
   it. The subjects are `-MOVEMENT`, `-VISION`, `-ECONOMY`, `-WEAPONS`,

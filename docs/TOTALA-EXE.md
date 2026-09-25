@@ -66,7 +66,7 @@ conversion, string reads at an address, pointer-table dumps) are in `tools/exe/`
 
 ## Index
 
-The 113 findings, numbered to 115: §83 and §84 do not exist, so the count is
+The 114 findings, numbered to 116: §83 and §84 do not exist, so the count is
 two short of the last number. The two to read before changing anything are
 **§88**, where RWE deliberately differs from the original on purpose, and
 **§91**, what is decoded but not ported; both are in this file, below.
@@ -187,6 +187,7 @@ Everything else lives in a subject file. **The numbers never move**, so a
 113. [Mission rules at runtime: what each tests, how often, and how they combine](TOTALA-EXE-DATA.md#113-mission-rules-at-runtime-what-each-tests-how-often-and-how-they-combine)
 114. [A mission unit's scripted orders at runtime](TOTALA-EXE-DATA.md#114-a-mission-units-scripted-orders-at-runtime)
 115. [The campaign's screens, progression and ending movies](TOTALA-EXE-DATA.md#115-the-campaigns-screens-progression-and-ending-movies)
+116. [What a round aims at on a unit, and why the water comes after it](TOTALA-EXE-WEAPONS.md#116-what-a-round-aims-at-on-a-unit-and-why-the-water-comes-after-it)
 
 ## 88. Where RWE deliberately differs
 
@@ -573,9 +574,27 @@ quirks of the original that RWE reproduces although they look like defects.
   (`transportCapacityFromFbi`, `transportCapacityWarning`; #199). A file that
   carries both keys reads the new one, as the original does.
 
+- **A unit script that faults loses the thread, not the game.** The original's
+  COB interpreter divides without a guard, so `div` by zero faults the whole
+  process, and it has no limit on how long a thread runs between yields
+  (`TOTALA-EXE-EXTERNAL.md`, unverified here). RWE gives a division by zero
+  the answer 0, and `INT_MIN / -1` the wrapped answer the hardware would. A
+  thread that exceeds an argument count, call depth, stack depth or run length
+  far past anything a shipped script reaches (`CobExecutionContext`'s limits)
+  is killed, as the original kills a thread that meets an opcode it does not
+  know, and so is one that faults in any other way. A synchronous query that
+  faults gives the caller's fallback, the answer a unit without the script
+  gets. None of this changes a script the original can run; it is here
+  because a mod's script is untrusted input, and in a network game a fault
+  ended every peer's game at once (#75).
+
 
 ## 91. Still unknown or unported
 
+- **`unitsonly` and `groundbounce`** (§116). `unitsonly` is not parsed, so
+  no RWE round skips the ground and sea tests. RWE's `groundbounce` zeroes
+  `vy` and restores the previous height, where the original sets `vy` to
+  `-(vy >> 2)` and leaves the position alone.
 - **The campaign's win and lose rules** (§113) are decoded and not ported:
   all eighteen `[GlobalHeader]` conditions, checked once a second, all
   victory rules in order and any defeat rule, victory first, then a

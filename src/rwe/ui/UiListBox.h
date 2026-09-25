@@ -61,6 +61,12 @@ namespace rwe
 
         void appendItem(std::string item);
 
+        /** Empties the list, and with it the selection and the scroll. */
+        void clearItems();
+
+        /** The selected row, if any. */
+        std::optional<unsigned int> getSelectedIndex() const;
+
         void setSelectedItem(const std::string& item);
 
         void clearSelectedItem();

@@ -685,7 +685,7 @@ int main(int argc, char* argv[])
                 {
                     if (const auto* unitCommand = std::get_if<PlayerUnitCommand>(&command))
                     {
-                        applyUnitCommandToSimulation(loaded.simulation, *unitCommand);
+                        applyUnitCommandToSimulation(loaded.simulation, issuingPlayer, *unitCommand);
                     }
                 }
             }

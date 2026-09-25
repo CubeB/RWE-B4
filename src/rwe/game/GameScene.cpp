@@ -374,15 +374,16 @@ namespace rwe
 
     void GameScene::updateStatsBarSlide(int millisecondsElapsed)
     {
-        // 0x4689c0. Polled on a fifteen-millisecond throttle, and each poll
-        // moves the strip a third of the way it has left to go, never less
-        // than a pixel -- so it leaves quickly and settles gently, over about
-        // an eighth of a second. The key is read live, not as a press.
+        // 0x4689c0. Each poll moves the strip a third of the way it has left
+        // to go, never less than a pixel, so it leaves quickly and settles
+        // gently. The original polls every fifteen of its timer units; the
+        // unit is not decoded, and 10ms matches it in play better than 15ms.
+        // The key is read live, not as a press.
         statsBarMillisecondsOwed += millisecondsElapsed;
         auto wanted = (spaceDown && !isGameMenuOpen()) ? StatsBarTravel : 0;
-        while (statsBarMillisecondsOwed >= 15)
+        while (statsBarMillisecondsOwed >= 10)
         {
-            statsBarMillisecondsOwed -= 15;
+            statsBarMillisecondsOwed -= 10;
             if (statsBarSlide == wanted)
             {
                 continue;
@@ -414,25 +415,32 @@ namespace rwe
             return;
         }
 
-        auto wantHidden = panelWantsHiding(
+        // Space brings the players' list out and leaves the side panel where
+        // it is, as the original does in play; F4 moves them together.
+        auto wantList = playerListWantsOut(
             panelHiddenLatch,
             spaceDown && !isGameMenuOpen(),
             isCursorOverPanel());
-        auto target = wantHidden ? static_cast<float>(PanelSlideTravel) : 0.0f;
+        auto listTarget = wantList ? static_cast<float>(PanelSlideTravel) : 0.0f;
+        auto panelTarget = panelHiddenLatch ? static_cast<float>(PanelSlideTravel) : 0.0f;
 
-        auto previous = panelSlide;
-        panelSlide = advancePanelSlide(panelSlide, target, PanelSlidePixelsPerSecond, millisecondsElapsed);
+        panelSlide = advancePanelSlide(panelSlide, panelTarget, PanelSlidePixelsPerSecond, millisecondsElapsed);
 
-        if (panelSlide != previous && panelSlide == target)
+        auto previous = playerListSlide;
+        playerListSlide = advancePanelSlide(playerListSlide, listTarget, PanelSlidePixelsPerSecond, millisecondsElapsed);
+
+        if (playerListSlide != previous && playerListSlide == listTarget)
         {
             // Both endpoints play a UI sound. 76 names them and ALLSOUND.TDF
             // has both -- PANEL is servsml6, OPTIONS is butoptn -- but which
             // sound belongs to which end is not decoded, so this pairing is
             // RWE's: the servo as the panel leaves, the button as it returns.
-            const auto& arrival = wantHidden ? sounds.panel : sounds.options;
+            const auto& arrival = wantList ? sounds.panel : sounds.options;
+            // On a free channel rather than the UI one, which drops a sound
+            // while another plays: a quick tap of Space would lose the second.
             if (arrival)
             {
-                playUiSound(*arrival);
+                sceneContext.audioService->playSound(*arrival);
             }
         }
 
@@ -452,6 +460,11 @@ namespace rwe
         auto desiredLeft = panelSlide > 0.0f ? 0 : GuiSizeLeft;
         if (desiredLeft != appliedLeftInset)
         {
+            // The wider viewport re-centres on the camera, which would drag
+            // every world pixel sideways with it. Moving the camera by half
+            // the change keeps the ground still and only adds the strip the
+            // panel has left.
+            worldCameraState.position.x -= panelSlideCameraShift(appliedLeftInset, desiredLeft, worldCameraState.zoom);
             appliedLeftInset = desiredLeft;
             worldViewport.setInset(desiredLeft, GuiSizeTop, GuiSizeRight, GuiSizeBottom);
             recreateWorldRenderTextures();
@@ -807,11 +820,19 @@ namespace rwe
             // the depth only decides how long an order waits.
             if (bufferedCommandCount <= targetCommandBufferSize || (!waitingForPlayers.empty() && !localPlayerCommandBuffer.empty()))
             {
-                // Queue up commands collected from the local player
-                playerCommandService->pushCommands(localPlayerId, localPlayerCommandBuffer);
-                gameNetworkService->submitCommands(sceneTime, localPlayerCommandBuffer);
+                // Queue up commands collected from the local player, as many
+                // as make one set a packet can carry. An order to a large
+                // selection is more than that -- a hundred units is three
+                // kilobytes against a 1500-byte datagram -- and sending it as
+                // one set used to stop the game. The rest waits for the next
+                // tick, still in order, which puts a tick between the first
+                // thirty or so units moving and the next. Issue #75.
+                auto count = GameNetworkService::commandsFittingOneSet(localPlayerCommandBuffer);
+                std::vector<PlayerCommand> set(localPlayerCommandBuffer.begin(), localPlayerCommandBuffer.begin() + static_cast<std::ptrdiff_t>(count));
+                playerCommandService->pushCommands(localPlayerId, set);
+                gameNetworkService->submitCommands(sceneTime, set);
                 ++localSetsSubmitted;
-                localPlayerCommandBuffer.clear();
+                localPlayerCommandBuffer.erase(localPlayerCommandBuffer.begin(), localPlayerCommandBuffer.begin() + static_cast<std::ptrdiff_t>(count));
                 ++bufferedCommandCount;
             }
 
