@@ -5339,6 +5339,17 @@ namespace rwe
             return false;
         }
 
+        // Not while the raid is on. Each wreck is already refused while a gun
+        // stands over it, but a raid moves: measured over eight games on
+        // Great Divide, the side that was raided sent its commander back to
+        // the rubble between D-gun shots, and ended the game some 120 metal
+        // of army behind the same side with the rule off. The wreckage keeps
+        // until the base is quiet.
+        if (!bb.enemiesNearBase.empty())
+        {
+            return false;
+        }
+
         // The stall flag flickers off for a moment whenever a build
         // finishes, so the stockpile is asked as well: the same test the
         // build priorities use.

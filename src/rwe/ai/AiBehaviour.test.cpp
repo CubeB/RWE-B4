@@ -1587,6 +1587,21 @@ namespace rwe
             REQUIRE(controller->getBlackboard().ownWreckSites.size() == 2);
         }
 
+        SECTION("not while the raid is anywhere in the base, even out of reach of the wrecks")
+        {
+            // Metal in hand, so the builder has something to build and the
+            // ordinary harvest, which would take the nearest wreck from a
+            // builder with nothing to do, stays out of it: Hard sends a
+            // builder whatever the metal, so only the raid can be why not.
+            auto [controller, wrecks] = run(makeProfileForDifficulty(AiDifficulty::Hard), 900.0f);
+            // Behind the commander, well away from both wrecks.
+            addUnit(sim, "ARMPW", human, SimVector(-250_ss, 0_ss, 150_ss), script);
+            auto commands = onePass(*controller);
+            REQUIRE(!controller->getBlackboard().enemiesNearBase.empty());
+            REQUIRE(reclaimsOf(commands, commanderId, wrecks) == 0);
+            REQUIRE(!buildOrderTypes(commands).empty());
+        }
+
         SECTION("a site is forgotten once its wreck has gone")
         {
             auto [controller, wrecks] = run(makeDefaultStandardProfile(), 900.0f);
