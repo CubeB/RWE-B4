@@ -70,9 +70,9 @@ namespace rwe
         void render(UiRenderService& renderer) const;
 
         /**
-         * See SceneManager::frameDensity: SDL reports the mouse in logical
-         * points, and the frame the cursor is drawn into is frameDensity
-         * frame pixels per point.
+         * See SceneManager::frameDensity: SDL reports the mouse in window
+         * coordinates, and the frame the cursor is drawn into is
+         * frameDensity frame pixels per coordinate.
          */
         void setFrameDensity(float density);
 

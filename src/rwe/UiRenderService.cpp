@@ -459,13 +459,18 @@ namespace rwe
             return UiOrthoBounds{0.0f, contentWidth, contentHeight, 0.0f};
         }
 
-        // The scaled content is what has to keep its proportions in the
-        // window, so the aspect fit is computed at the scaled size.
         return computeUiOrthoBounds(
-            contentWidth * uiScale,
-            contentHeight * uiScale,
+            contentWidth,
+            contentHeight,
             static_cast<float>(aspectViewport->width()),
             static_cast<float>(aspectViewport->height()));
+    }
+
+    float UiRenderService::effectiveUiScale() const
+    {
+        // Content fitted to the window is already as large as it can be, and
+        // a scale on top of the fit would only cancel out.
+        return aspectViewport == nullptr ? static_cast<float>(uiScale) : 1.0f;
     }
 
     Matrix4f UiRenderService::getViewProjectionMatrix() const
@@ -473,8 +478,9 @@ namespace rwe
         auto b = getOrthoBounds();
         // clip = O * S * raw, so the raw coordinates are scaled into the
         // box's own space before the orthographic projection.
+        auto s = effectiveUiScale();
         return Matrix4f::orthographicProjection(b.left, b.right, b.bottom, b.top, 100.0f, -100.0f)
-            * Matrix4f::scale(Vector3f(uiScale, uiScale, 1.0f));
+            * Matrix4f::scale(Vector3f(s, s, 1.0f));
     }
 
     Matrix4f UiRenderService::getInverseViewProjectionMatrix() const
@@ -484,7 +490,8 @@ namespace rwe
         // this projection, so the pad and the scale have to be in both or in
         // neither.
         auto b = getOrthoBounds();
-        return Matrix4f::scale(Vector3f(1.0f / uiScale, 1.0f / uiScale, 1.0f))
+        auto s = effectiveUiScale();
+        return Matrix4f::scale(Vector3f(1.0f / s, 1.0f / s, 1.0f))
             * Matrix4f::inverseOrthographicProjection(b.left, b.right, b.bottom, b.top, 100.0f, -100.0f);
     }
 }

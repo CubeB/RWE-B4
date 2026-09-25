@@ -120,11 +120,13 @@ namespace rwe
 
     /**
      * Turns a UI scale setting into the scale to draw at. Auto (0) follows
-     * the display density, snapped to the nearest half, so on a 2x display
+     * the content scale, snapped to the nearest half, so on a 2x display
      * the interface is physically the same size as on a 1x one; an explicit
-     * percentage is divided by 100. Both are clamped to 0.5..3.
+     * percentage is divided by 100. Both are clamped to 0.5..3, and then to
+     * the largest half step at which the 640x480 layout still fits the
+     * frame, never below 0.5.
      */
-    float resolveUiScale(unsigned int setting, float displayScale);
+    float resolveUiScale(unsigned int setting, float contentScale, int frameWidth, int frameHeight);
 
     class GlobalConfig
     {

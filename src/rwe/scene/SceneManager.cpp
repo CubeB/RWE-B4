@@ -23,10 +23,10 @@ namespace rwe
                 return std::nullopt;
         }
     }
-    float frameDensityFor(float displayScale, unsigned int pixelSize)
+    float frameDensityFor(float scale, unsigned int pixelSize)
     {
         auto clampedPixelSize = std::max(1u, pixelSize);
-        return displayScale / static_cast<float>(clampedPixelSize);
+        return scale / static_cast<float>(clampedPixelSize);
     }
 
     void SceneManager::refreshWindowMetrics()
@@ -35,6 +35,11 @@ namespace rwe
         if (!(windowDisplayScale > 0.0f))
         {
             windowDisplayScale = 1.0f;
+        }
+        windowPixelDensity = sdl->getWindowPixelDensity(window);
+        if (!(windowPixelDensity > 0.0f))
+        {
+            windowPixelDensity = 1.0f;
         }
         sdl->getWindowSize(window, &logicalWidth, &logicalHeight);
         sdl->getWindowSizeInPixels(window, &outputWidth, &outputHeight);

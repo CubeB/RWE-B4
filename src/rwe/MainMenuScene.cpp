@@ -54,9 +54,6 @@ namespace rwe
           dialogStack(),
           bgm()
     {
-        scaledUiRenderService.setUiScale(resolveUiScale(
-            sceneContext.globalConfig->uiScale,
-            sceneContext.sceneManager->displayScale()));
     }
 
     void MainMenuScene::init()

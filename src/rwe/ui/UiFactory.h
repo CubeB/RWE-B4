@@ -50,6 +50,13 @@ namespace rwe
     public:
         UiFactory(TextureService* textureService, AudioService* audioService, TdfBlock* soundLookup, AbstractVirtualFileSystem* vfs, const PathMapping* const pathMapping, int screenWidth, int screenHeight);
 
+        /** The screen, in the coordinates panels are laid out in, that new panels are kept inside. */
+        void setScreenSize(int width, int height)
+        {
+            screenWidth = width;
+            screenHeight = height;
+        }
+
         std::unique_ptr<UiPanel> panelFromGuiFile(const std::string& name, const std::string& background, const std::vector<GuiEntry>& entries);
 
         std::unique_ptr<UiPanel> panelFromGuiFile(const std::string& name);

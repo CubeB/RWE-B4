@@ -124,8 +124,8 @@ namespace rwe
         float fx;
         float fy;
         sceneContext.sdl->getMouseState(&fx, &fy);
-        // SDL reports the mouse in logical points; the scene is in frame
-        // pixels, frameDensity per point. See SceneManager::frameDensity.
+        // SDL reports the mouse in window coordinates; the scene is in frame
+        // pixels. See SceneManager::frameDensity.
         auto density = sceneContext.sceneManager->frameDensity();
         return Point(static_cast<int>(fx * density), static_cast<int>(fy * density));
     }

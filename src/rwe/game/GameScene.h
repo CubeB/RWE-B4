@@ -611,13 +611,24 @@ namespace rwe
         void addCameraZoomSlider(UiPanel& panel);
         void addUiScaleButton(UiPanel& panel);
 
+        /** Applies effectiveUiScale to the chrome projection and to the screen new panels are kept inside. */
+        void syncUiScale();
+
         /**
          * The scale to draw chrome at this frame: the staged setting resolved
-         * against the display density, so Auto follows a high-density display.
-         * Re-read every frame because a monitor move can change the display
-         * scale under a running game.
+         * against the content scale and the frame, so Auto follows a
+         * high-density display and no setting crops the HUD. Re-read every
+         * frame because a monitor move or a resize can change either under
+         * a running game.
          */
-        float effectiveUiScale() const { return resolveUiScale(uiScaleSetting, sceneContext.sceneManager->displayScale()); }
+        float effectiveUiScale() const
+        {
+            return resolveUiScale(
+                uiScaleSetting,
+                sceneContext.sceneManager->contentScale(),
+                sceneContext.viewport->width(),
+                sceneContext.viewport->height());
+        }
 
         /** The camera zoom slider's position, 0 at 50% and 1 at 200%. */
         float zoomPercent() const { return (static_cast<float>(cameraZoomSetting) - 50.0f) / 150.0f; }

@@ -307,7 +307,10 @@ namespace rwe
             }
         }
 
-        auto extraBottom = sceneContext.viewport->height() / effectiveUiScale() - 480;
+        // Taken from the bar's own row: the inset under it is rounded to
+        // whole frame pixels, so the frame height alone can miss it by a
+        // fraction of a UI pixel.
+        auto extraBottom = static_cast<float>(worldViewport.bottom()) / uiScale + static_cast<float>(GuiSizeBottom) - 480.0f;
         if (hoveredUnit)
         {
             const auto& unit = getUnit(*hoveredUnit);

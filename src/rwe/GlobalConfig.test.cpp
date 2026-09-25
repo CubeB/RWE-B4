@@ -142,26 +142,43 @@ namespace rwe
             REQUIRE(labels[5] == "UI 3x");
         }
 
-        SECTION("Auto snaps the display density to the nearest half")
+        // A 4K frame, big enough that only the 0.5..3 clamp applies.
+        const int w = 3840;
+        const int h = 2160;
+
+        SECTION("Auto snaps the content scale to the nearest half")
         {
-            REQUIRE(resolveUiScale(0u, 1.0f) == Catch::Approx(1.0f));
-            REQUIRE(resolveUiScale(0u, 1.2f) == Catch::Approx(1.0f));
-            REQUIRE(resolveUiScale(0u, 1.3f) == Catch::Approx(1.5f));
-            REQUIRE(resolveUiScale(0u, 1.5f) == Catch::Approx(1.5f));
-            REQUIRE(resolveUiScale(0u, 2.0f) == Catch::Approx(2.0f));
-            REQUIRE(resolveUiScale(0u, 3.0f) == Catch::Approx(3.0f));
-            REQUIRE(resolveUiScale(0u, 4.0f) == Catch::Approx(3.0f));
-            REQUIRE(resolveUiScale(0u, 0.0f) == Catch::Approx(0.5f));
+            REQUIRE(resolveUiScale(0u, 1.0f, w, h) == Catch::Approx(1.0f));
+            REQUIRE(resolveUiScale(0u, 1.2f, w, h) == Catch::Approx(1.0f));
+            REQUIRE(resolveUiScale(0u, 1.3f, w, h) == Catch::Approx(1.5f));
+            REQUIRE(resolveUiScale(0u, 1.5f, w, h) == Catch::Approx(1.5f));
+            REQUIRE(resolveUiScale(0u, 2.0f, w, h) == Catch::Approx(2.0f));
+            REQUIRE(resolveUiScale(0u, 3.0f, w, h) == Catch::Approx(3.0f));
+            REQUIRE(resolveUiScale(0u, 4.0f, w, h) == Catch::Approx(3.0f));
+            REQUIRE(resolveUiScale(0u, 0.0f, w, h) == Catch::Approx(0.5f));
         }
 
         SECTION("an explicit percentage is the scale, clamped")
         {
-            REQUIRE(resolveUiScale(100u, 2.0f) == Catch::Approx(1.0f));
-            REQUIRE(resolveUiScale(150u, 1.0f) == Catch::Approx(1.5f));
-            REQUIRE(resolveUiScale(250u, 1.0f) == Catch::Approx(2.5f));
-            REQUIRE(resolveUiScale(300u, 1.0f) == Catch::Approx(3.0f));
-            REQUIRE(resolveUiScale(30u, 1.0f) == Catch::Approx(0.5f));
-            REQUIRE(resolveUiScale(500u, 1.0f) == Catch::Approx(3.0f));
+            REQUIRE(resolveUiScale(100u, 2.0f, w, h) == Catch::Approx(1.0f));
+            REQUIRE(resolveUiScale(150u, 1.0f, w, h) == Catch::Approx(1.5f));
+            REQUIRE(resolveUiScale(250u, 1.0f, w, h) == Catch::Approx(2.5f));
+            REQUIRE(resolveUiScale(300u, 1.0f, w, h) == Catch::Approx(3.0f));
+            REQUIRE(resolveUiScale(30u, 1.0f, w, h) == Catch::Approx(0.5f));
+            REQUIRE(resolveUiScale(500u, 1.0f, w, h) == Catch::Approx(3.0f));
+        }
+
+        SECTION("no scale leaves less than 640x480 of layout")
+        {
+            // 1080p holds 2x (960x540) and 2.25x, but not 2.5x (768x432).
+            REQUIRE(resolveUiScale(300u, 1.0f, 1920, 1080) == Catch::Approx(2.0f));
+            REQUIRE(resolveUiScale(250u, 1.0f, 1920, 1080) == Catch::Approx(2.0f));
+            REQUIRE(resolveUiScale(0u, 3.0f, 1920, 1080) == Catch::Approx(2.0f));
+            REQUIRE(resolveUiScale(200u, 1.0f, 1280, 960) == Catch::Approx(2.0f));
+            REQUIRE(resolveUiScale(200u, 1.0f, 1279, 960) == Catch::Approx(1.5f));
+            // A frame smaller than the layout shrinks it as far as 0.5x.
+            REQUIRE(resolveUiScale(100u, 1.0f, 320, 240) == Catch::Approx(0.5f));
+            REQUIRE(resolveUiScale(100u, 1.0f, 100, 100) == Catch::Approx(0.5f));
         }
     }
 }

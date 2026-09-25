@@ -290,8 +290,18 @@ namespace rwe
         audioSub->unsubscribe();
     }
 
+    void GameScene::syncUiScale()
+    {
+        auto scale = effectiveUiScale();
+        chromeUiRenderService.setUiScale(scale);
+        uiFactory.setScreenSize(
+            static_cast<int>(static_cast<float>(sceneContext.viewport->width()) / scale),
+            static_cast<int>(static_cast<float>(sceneContext.viewport->height()) / scale));
+    }
+
     void GameScene::init()
     {
+        syncUiScale();
         setCrashScene("GameScene");
         setCrashMap(gameParameters.mapName.c_str());
 
@@ -477,10 +487,9 @@ namespace rwe
 
     void GameScene::update(int millisecondsElapsed)
     {
-        // The chrome is drawn through the scaled projection from here on.
         // The world inset follows in updatePanelSlide, once the panel's own
         // slide has been worked out.
-        chromeUiRenderService.setUiScale(effectiveUiScale());
+        syncUiScale();
 
         // The battle harness, if one was asked for: keep both sides at
         // strength and send every replacement at the enemy. Gated on the
@@ -540,7 +549,7 @@ namespace rwe
 
         // A monitor move can change the density mid-game, so re-read it each
         // frame and let the constraint below follow it live.
-        worldCameraState.density = sceneContext.sceneManager->frameDensity();
+        worldCameraState.density = sceneContext.sceneManager->contentScale();
 
         auto cameraConstraint = computeCameraConstraint(simulation.terrain, worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()));
 

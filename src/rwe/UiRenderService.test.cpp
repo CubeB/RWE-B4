@@ -249,19 +249,20 @@ namespace rwe
             REQUIRE(back.y == Catch::Approx(raw.y));
         }
 
-        SECTION("an aspect viewport fits the scaled content, keeping its aspect")
+        SECTION("an aspect viewport ignores the scale")
         {
             Viewport content(0, 0, 640, 480);
             Viewport window(0, 0, 1920, 1080);
             UiRenderService aspect(nullptr, nullptr, &content, &window);
+            auto unscaled = aspect.getViewProjectionMatrix();
             aspect.setUiScale(2.0f);
 
+            // The content already fills the window; a scale on top of the
+            // fit would draw it past the edges.
+            REQUIRE(aspect.getViewProjectionMatrix() == unscaled);
             auto b = aspect.getOrthoBounds();
-
-            // The scaled content (1280x960) is what is fitted and centred.
-            REQUIRE((b.left + b.right) / 2.0f == Catch::Approx(640.0f));
-            REQUIRE((b.top + b.bottom) / 2.0f == Catch::Approx(480.0f));
-            REQUIRE((b.right - b.left) / (b.bottom - b.top) == Catch::Approx(1920.0f / 1080.0f));
+            REQUIRE(b.top == Catch::Approx(0.0f));
+            REQUIRE(b.bottom == Catch::Approx(480.0f));
         }
     }
 }

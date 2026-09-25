@@ -162,10 +162,7 @@ namespace rwe
 
         GameCameraState worldCameraState;
 
-        // Density folds the display's pixel density into the world
-        // projection so a sharper display shows the same battlefield, not
-        // more of it.
-        worldCameraState.density = sceneContext.sceneManager->frameDensity();
+        worldCameraState.density = sceneContext.sceneManager->contentScale();
 
         auto playerCommandService = std::make_unique<PlayerCommandService>();
 

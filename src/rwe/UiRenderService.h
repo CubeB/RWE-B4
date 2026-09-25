@@ -97,6 +97,8 @@ namespace rwe
 
         std::stack<Matrix4f> matrixStack{{Matrix4f::identity()}};
 
+        float effectiveUiScale() const;
+
     public:
         UiOrthoBounds getOrthoBounds() const;
 
@@ -104,7 +106,11 @@ namespace rwe
         UiRenderService(GraphicsContext* graphics, ShaderService* shaders, const AbstractViewport* viewport);
         UiRenderService(GraphicsContext* graphics, ShaderService* shaders, const AbstractViewport* viewport, const AbstractViewport* aspectViewport);
 
-        /** Sets the raw-coordinate multiplier; anything below 0.5 clamps to 0.5. */
+        /**
+         * Sets the raw-coordinate multiplier; anything below 0.5 clamps to
+         * 0.5. A service with an aspect viewport ignores it: its content is
+         * already fitted to fill the window.
+         */
         void setUiScale(float scale) { uiScale = std::max(0.5f, scale); }
 
         void fillScreen(const Color& color);
