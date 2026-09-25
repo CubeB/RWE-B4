@@ -1508,6 +1508,14 @@ namespace rwe
                 {
                     if (!isMovingTo(ship, *standOff))
                     {
+                        sim.eventLog.event(sim.gameTime.value, "navy_reposition")
+                            .set("player", aiOwner.value)
+                            .set("unit", shipId.value)
+                            .set("target_id", enemy->value)
+                            .set("x", static_cast<double>(standOff->x.value))
+                            .set("z", static_cast<double>(standOff->z.value))
+                            .set("why", "stand_off")
+                            .detail("ship lies off at the edge of its own reach");
                         outCommands.push_back(moveCommand(shipId, *standOff));
                     }
                     continue;
