@@ -1,6 +1,7 @@
 #include "TransportManager.h"
 #include <algorithm>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
@@ -55,6 +56,26 @@ namespace rwe
         PlayerCommand moveCommand(UnitId unit, const SimVector& to, IssueKind kind)
         {
             return PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(MoveOrder(to), kind));
+        }
+
+        /**
+         * How near its station a hull must come to be sent on to the loads.
+         * The move there is only staging, and asks for eight units, which a
+         * 96-unit hull alongside a bank may never manage: on Coast To Coast
+         * Arm's Hulk came to rest 44 units off its station with the shore
+         * well inside the crane's reach, and waited there on the move until
+         * the ferry timed out.
+         */
+        const SimScalar StationReach = 64_ss;
+
+        /** The loads and the unloads, the first load now: the hull is where it loads from. */
+        void issueLoadOrders(std::vector<PlayerCommand>& outCommands, UnitId transportId, const TransportManager::Ferry& ferry)
+        {
+            for (std::size_t i = 0; i < ferry.passengers.size(); ++i)
+            {
+                outCommands.push_back(loadCommand(transportId, ferry.passengers[i], i == 0 ? IssueKind::Immediate : IssueKind::Queued));
+            }
+            queueUnloads(outCommands, transportId, ferry.destination, ferry.passengers.size(), IssueKind::Queued);
         }
 
         /**
@@ -244,6 +265,8 @@ namespace rwe
                     .set("unit", transportId.value)
                     .set("passengers", ferry.passengers.size())
                     .set("carried", transport.carriedUnits.size())
+                    .set("at_x", static_cast<double>(transport.position.x.value))
+                    .set("at_z", static_cast<double>(transport.position.z.value))
                     .set("why", overdue ? "overdue" : "called_off")
                     .detail(overdue ? "ferry called off (overdue)" : "ferry called off");
                 if (!transport.orders.empty())
@@ -252,6 +275,22 @@ namespace rwe
                 }
                 it = ferries.erase(it);
                 continue;
+            }
+
+            // The move to the station is staging, and asks for eight units,
+            // which a big hull alongside a bank may never manage. Near enough
+            // is enough: send it on to the loads.
+            if (ferry.station && !ferry.atStation && !ferry.loaded && !carryingAny)
+            {
+                auto distance = SimVector(transport.position.x - ferry.station->x, 0_ss, transport.position.z - ferry.station->z).length();
+                if (distance <= StationReach)
+                {
+                    ferry.atStation = true;
+                    if (!transport.orders.empty() && std::holds_alternative<MoveOrder>(transport.orders.front()))
+                    {
+                        issueLoadOrders(outCommands, transportId, ferry);
+                    }
+                }
             }
 
             if (transport.orders.empty())
@@ -1015,6 +1054,11 @@ namespace rwe
                 {
                     dispatch.set("muster_x", static_cast<double>(ferry.muster->x.value))
                         .set("muster_z", static_cast<double>(ferry.muster->z.value));
+                }
+                if (ferry.station)
+                {
+                    dispatch.set("station_x", static_cast<double>(ferry.station->x.value))
+                        .set("station_z", static_cast<double>(ferry.station->z.value));
                 }
                 dispatch.set("why", "army_ferry")
                     .detail("ferrying the army to an enemy it cannot walk to");

@@ -678,6 +678,40 @@ namespace rwe
             REQUIRE(bb.rallyPoint.has_value());
             REQUIRE((*bb.rallyPoint == *bb.ferryMuster));
         }
+
+        SECTION("a hull that comes to rest short of its station, but near it, is sent on to the loads")
+        {
+            // The move to the station asks for eight units, and a big hull
+            // alongside a bank may never get that close: on Coast To Coast
+            // Arm's Hulk stopped 44 units off, with the shore well within the
+            // crane's reach, and sat on the move until the ferry timed out.
+            auto kbot1 = addUnit(sim, "ARMPW", ai, SimVector(-300_ss, 60_ss, -60_ss), script);
+            auto kbot2 = addUnit(sim, "ARMPW", ai, SimVector(-300_ss, 60_ss, 60_ss), script);
+            auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(150_ss, 0_ss, 0_ss), script);
+
+            runTicks(sim, controller, 90, commands);
+            REQUIRE(controller.getTransportManager().getFerries().count(shipId.value) == 1);
+            const auto& ferry = controller.getTransportManager().getFerries().at(shipId.value);
+            REQUIRE(ferry.station.has_value());
+            REQUIRE_FALSE(ferry.atStation);
+
+            // Stopped forty units off, still on the staging move.
+            auto& ship = sim.getUnitState(shipId);
+            ship.position = SimVector(ferry.station->x + 40_ss, 0_ss, ferry.station->z);
+            ship.orders.clear();
+            ship.orders.push_back(MoveOrder(*ferry.station));
+
+            commands.clear();
+            runTicks(sim, controller, profile.tacticalTickInterval, commands);
+
+            REQUIRE(ferry.atStation);
+            auto loads = ordersFor<LoadOrder>(commands, shipId);
+            REQUIRE(loads.size() == 2);
+            std::vector<UnitId> loaded{loads[0].target, loads[1].target};
+            REQUIRE(std::find(loaded.begin(), loaded.end(), kbot1) != loaded.end());
+            REQUIRE(std::find(loaded.begin(), loaded.end(), kbot2) != loaded.end());
+            REQUIRE(ordersFor<MoveOrder>(commands, shipId).empty());
+        }
     }
 
     TEST_CASE("a ferry that delivers after the timeout is complete, not overdue", "[ai]")

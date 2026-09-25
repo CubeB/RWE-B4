@@ -72,6 +72,8 @@ namespace rwe
              */
             std::optional<SimVector> muster;
             std::optional<SimVector> station;
+            /** The hull has come near enough its station and been sent on to the loads. */
+            bool atStation{false};
         };
 
         /** A shore point to gather a sea lift at, and the water beside it. */
