@@ -320,7 +320,7 @@ namespace rwe
                 // The piece number is whatever the script pushed. One the
                 // model does not have answers 0 rather than throwing out of
                 // the tick, as handlePieceCommand's own bound does.
-                if (pieceId >= env._script->pieces.size())
+                if (pieceId < 0 || static_cast<std::size_t>(pieceId) >= env._script->pieces.size())
                 {
                     return 0;
                 }
@@ -330,7 +330,7 @@ namespace rwe
             },
             [&](const CobEnvironment::QueryStatus::PieceY& q) {
                 auto pieceId = q.piece;
-                if (pieceId >= env._script->pieces.size())
+                if (pieceId < 0 || static_cast<std::size_t>(pieceId) >= env._script->pieces.size())
                 {
                     return 0;
                 }
