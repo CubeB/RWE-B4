@@ -58,7 +58,7 @@ Severity is by impact:
 | 13 | Medium | A peer could name itself in a rejoin and get 180 seconds of immunity from being dropped. | #301 |
 | 14 | Medium | A peer could buffer an unlimited number of command sets and hashes ahead of the game. | #301 |
 | 15 | Medium | A resurrection order carried its progress from the wire, so a peer could finish one in a tick. | #301 |
-| 16 | Medium | A COB `div` by zero raised SIGFPE. Unbounded argument counts, recursion, stack growth and non-yielding loops hung or ran out of memory. Any other VM fault ended the game on every peer. | #302 |
+| 16 | Medium | A COB `div` by zero raised SIGFPE. Unbounded argument counts, recursion, stack growth and non-yielding loops hung or ran out of memory, and so did a loop that asks for a value every pass, whose instruction count starts again at each request. Any other VM fault ended the game on every peer, including one raised while the engine carried out a thread's request: `get PIECE_XZ`/`PIECE_Y` for a piece the model does not have threw out of the tick. | #302 |
 | 17 | Medium | 3DO models: object trees that point back at themselves loop or recurse for ever. Face vertex indices and flat colours index out of range. The selection plate is read as four vertices regardless. An empty piece dereferences `end()`. | #303 |
 | 18 | Medium | A piece hierarchy that loops by name hangs `getPieceTransform`, in the simulation, on every peer. A saved piece vector shorter than the model is read past its end. | #303 |
 | 19 | Medium | An HPI directory that contains itself recursed until the stack ran out. An entry name past the directory was scanned from past the end. | #303 |
