@@ -17,9 +17,12 @@ namespace rwe
     {
         if (background && absolutePlacement)
         {
-            // The picture-box path: the art fills the gadget rectangle, the
-            // sprite's own anchor offsets neutralised.
-            context.drawSpriteAbs(static_cast<float>(posX), static_cast<float>(posY), static_cast<float>(sizeX), static_cast<float>(sizeY), **background);
+            // The picture-box path: the art sits at the gadget's origin with
+            // its anchor offsets neutralised, at its own size. The GUI
+            // rectangles disagree with the art by a few rows (OPTBG is 354
+            // tall in a 362 gadget), and stretching to them slid the painted
+            // button slots away from the buttons, further down the column.
+            context.drawSpriteAbs(static_cast<float>(posX), static_cast<float>(posY), **background);
             return;
         }
 

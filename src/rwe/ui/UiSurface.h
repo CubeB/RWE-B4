@@ -32,8 +32,8 @@ namespace rwe
         void clearBackground();
 
         /**
-         * Draw the background pinned to the gadget's own rectangle instead
-         * of scaled-to-fit at the sprite's declared bounds. GAF frames carry
+         * Draw the background at its own size from the gadget's origin
+         * instead of scaled-to-fit at the sprite's declared bounds. GAF frames carry
          * anchor offsets, and honouring them here put a picture box's art
          * anywhere but the panel.
          */
