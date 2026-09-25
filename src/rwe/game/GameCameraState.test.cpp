@@ -2,6 +2,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/game/GameCameraState.h>
 #include <rwe/game/GameScene_util.h>
+#include <rwe/grid/Grid.h>
+#include <rwe/sim/MapTerrain.h>
+#include <rwe/sim/SimScalar.h>
+#include <utility>
 
 namespace rwe
 {
@@ -33,6 +37,26 @@ namespace rwe
         // together.
         camera.zoom = 0.5f;
         REQUIRE(camera.scaleDimension(100.0f) == Catch::Approx(100.0f));
+    }
+
+    TEST_CASE("computeCameraConstraint centres a view larger than the map")
+    {
+        Grid<unsigned char> heights(16, 16, static_cast<unsigned char>(0));
+        MapTerrain terrain(std::move(heights), 0_ss);
+
+        auto mapLeft = simScalarToFloat(terrain.leftInWorldUnits());
+        auto mapRight = simScalarToFloat(terrain.rightCutoffInWorldUnits());
+        auto mapTop = simScalarToFloat(terrain.topInWorldUnits());
+        auto mapBottom = simScalarToFloat(terrain.bottomCutoffInWorldUnits());
+
+        // A viewport bigger than the map collapses each axis to its midpoint,
+        // which is what keeps a fully-zoomed-out view centred on the map
+        // rather than pinned to a corner.
+        auto constraint = computeCameraConstraint(terrain, 100000.0f, 100000.0f);
+        REQUIRE(constraint.left() == Catch::Approx(constraint.right()));
+        REQUIRE(constraint.top() == Catch::Approx(constraint.bottom()));
+        REQUIRE(constraint.left() == Catch::Approx((mapLeft + mapRight) / 2.0f));
+        REQUIRE(constraint.top() == Catch::Approx((mapTop + mapBottom) / 2.0f));
     }
 
     TEST_CASE("camera projection round trip")
