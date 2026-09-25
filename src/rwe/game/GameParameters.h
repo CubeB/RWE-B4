@@ -164,6 +164,17 @@ namespace rwe
         std::optional<std::string> replayFile;
 
         /**
+         * With replayFile: keep the computer players thinking instead of
+         * idling them, so their decisions reach the event log. Whoever runs
+         * the replay must then take and discard their commands every tick,
+         * because the recording already carries the ones that were played.
+         * Harmless to the game: the AI reads the simulation through a const
+         * reference and draws only from its own generator, seeded at
+         * construction either way.
+         */
+        bool replayShadowAi{false};
+
+        /**
          * Start a replay already wound forward to here. Seeking backwards
          * means starting the simulation again, because a lockstep game can
          * only be run forwards, and this is how the viewer asks for that.

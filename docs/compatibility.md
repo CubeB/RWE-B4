@@ -223,13 +223,6 @@ or alliance test anywhere on the load path. Whether the pickup then completes wa
 never traced and never play-tested, so this is a house rule kept for want of
 evidence rather than in defiance of it.
 
-**A passenger walks to the shore to meet a sea transport.** The original never
-moves the passenger; its crane mission walks the *transport* at the unit instead.
-RWE's AI books a unit wherever it stands rather than parking it on the beach, so
-RWE keeps a passenger-side meeting point, but it is clamped to ground the
-passenger can stand on, so a land unit waits on the shoreline instead of wading
-into the sea. A hover passenger, which can stand on water, is left alone.
-
 **A weapon that names no `tolerance` gets 256.** The original picks 2000 or 150
 depending on two flag bits whose meaning is still unknown, so neither figure can
 be chosen without a guess about which units carry them.
@@ -277,6 +270,10 @@ original in every case.
 - **A resurrect shows the reclaim cursor**, the base game's `CURSORS.GAF` not
   containing the `cursorrevive` sequence that `rev31.gp3` adds.
 - **Aircraft have no pitch** (§1); the `BrakeRate` nose re-aim is in.
+- **A transport from unpatched data still loads.** Without the v3.1 patch data
+  the Hulk's file gives its capacity under the old 1.0 key, which the patched
+  game ignores, leaving a ship that cannot load. RWE reads the old key, and
+  says at load which units it had to.
 
 ---
 

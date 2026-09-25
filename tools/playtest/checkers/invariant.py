@@ -3,6 +3,9 @@ line's per-player unit count agrees with what the events table says is alive;
 a commander that died while the game was not decided; a run.json that recorded
 no game at all.
 
+I3 applies only to two-player games: in a >2-player game a player can be
+eliminated and the game still legitimately run to a timeout.
+
 No thresholds: every rule here is an invariant, not a tuned share.
 """
 
@@ -130,9 +133,30 @@ def rule_result_units(events_path, result, events_rows: list) -> list:
     )]
 
 
-def rule_commander_timeout(events_path, result, events_rows: list) -> list:
+def _deciding_game(run_json_path, events_rows: list) -> bool:
+    """True when the game is two-player, so a commander death decides it.
+
+    In a game with more than two players, one player can be eliminated and the
+    game still legitimately run to a timeout, so I3 does not apply.
+    """
+    path = Path(run_json_path) if run_json_path is not None else None
+    if path is not None and path.exists():
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, ValueError):
+            data = None
+        if isinstance(data, dict) and isinstance(data.get("players"), list):
+            return len(data["players"]) <= 2
+    players = {num(row, "player") for _lineno, row in events_rows}
+    players.discard(None)
+    return len(players) <= 2
+
+
+def rule_commander_timeout(events_path, result, events_rows: list, run_json_path=None) -> list:
     ended = result[0] if result is not None else None
     if ended is not None and ended != "timeout":
+        return []
+    if not _deciding_game(run_json_path, events_rows):
         return []
 
     dead = [
@@ -210,6 +234,6 @@ def check(run_dir, context=None) -> list:
     if events_path.exists():
         events_rows = read_events(events_path)
         findings += rule_result_units(events_path, result, events_rows)
-        findings += rule_commander_timeout(events_path, result, events_rows)
+        findings += rule_commander_timeout(events_path, result, events_rows, run_json_path)
     findings += rule_run_zero(run_json_path)
     return findings

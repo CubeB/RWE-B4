@@ -1565,6 +1565,10 @@ namespace rwe
             // excludes them: an aeroplane is over the site for a moment and
             // somewhere else by the time the builder arrives, so refusing
             // ground on account of one refuses the whole map in turn.
+            // PerceptionManager's besieged-factory test counts them, and
+            // that is a decision rather than a drift (issue #152): it is
+            // asked only where frames are already dying, which is evidence
+            // this test does not have.
             if (enemy.isArmed && !enemy.isAir && enemy.lastKnownPosition.distanceSquared(site) <= radiusSquared)
             {
                 return true;

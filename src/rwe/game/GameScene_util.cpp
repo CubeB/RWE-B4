@@ -336,23 +336,36 @@ namespace rwe
         }
     }
 
-    Matrix4f unitRenderTransform(const UnitState& unit, const UnitDefinition& unitDefinition, const Vector3f& position, float rotation, float frac)
+    Matrix4f unitRenderTransform(const UnitState& unit, const Vector3f& position, float rotation, float frac)
     {
         auto transform = Matrix4f::translation(position) * Matrix4f::rotationY(rotation);
 
-        // Aircraft fly level except where a task asks for a bank — the
-        // construction aircraft heeling over between the stations of its
-        // work pattern.
-        if (unitDefinition.canFly)
+        // Yaw, then pitch about the unit's own side axis, then roll about its
+        // nose: the original keeps all three on the unit (unit+0x66, +0x68,
+        // +0x64). An aircraft's pitch and roll come from its lean into a turn
+        // (PitchScale and BankScale); a ground unit's from the slope under
+        // its footprint, unless it is `upright`. The model's nose is +z, so a
+        // nose-up pitch is a rotation the other way about x.
+        auto lerp = [&](SimScalar previous, SimScalar current) { return previous.value + ((current.value - previous.value) * frac); };
+        float pitch = 0.0f;
+        float roll = 0.0f;
+        if (auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unit.physics))
         {
-            if (auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unit.physics))
-            {
-                auto roll = airPhysics->previousRoll.value + ((airPhysics->roll.value - airPhysics->previousRoll.value) * frac);
-                if (roll != 0.0f)
-                {
-                    transform = transform * Matrix4f::rotationZ(roll);
-                }
-            }
+            pitch = lerp(airPhysics->previousPitch, airPhysics->pitch);
+            roll = lerp(airPhysics->previousRoll, airPhysics->roll);
+        }
+        else if (auto groundPhysics = std::get_if<UnitPhysicsInfoGround>(&unit.physics))
+        {
+            pitch = lerp(groundPhysics->previousPitch, groundPhysics->pitch);
+            roll = lerp(groundPhysics->previousRoll, groundPhysics->roll);
+        }
+        if (pitch != 0.0f)
+        {
+            transform = transform * Matrix4f::rotationX(-pitch);
+        }
+        if (roll != 0.0f)
+        {
+            transform = transform * Matrix4f::rotationZ(roll);
         }
 
         return transform;
@@ -658,7 +671,7 @@ namespace rwe
     {
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
+        auto transform = unitRenderTransform(unit, position, rotation, frac);
         if (unit.isBeingBuilt(unitDefinition))
         {
             auto buildPhase = computeBuildPhase(unit.getPreciseCompletePercent(unitDefinition), unitIndex, gameTime);
@@ -725,7 +738,7 @@ namespace rwe
     {
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
+        auto transform = unitRenderTransform(unit, position, rotation, frac);
 
         drawUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, PlayerColorIndex(0), frac, 0.0f, atlases, false, out);
     }
@@ -743,7 +756,7 @@ namespace rwe
     {
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
+        auto transform = unitRenderTransform(unit, position, rotation, frac);
 
         // Which of the original's two shadow passes this unit belongs to. It
         // sorts on unit+0x113 bit 5, whose meaning is not established -- "is a
@@ -985,7 +998,7 @@ namespace rwe
 
         auto position = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), frac);
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
-        auto transform = unitRenderTransform(unit, unitDefinition, position, rotation, frac);
+        auto transform = unitRenderTransform(unit, position, rotation, frac);
 
         // Lift each pixel towards the camera so it passes the depth test
         // against the surface it lies on, while anything the model itself

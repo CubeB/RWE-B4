@@ -938,6 +938,7 @@ endif()
 set(TEST_FILES
     src/rwe/GameLaunch.test.cpp
     src/rwe/ai/AiPlayerController.test.cpp
+    src/rwe/ai/AiTuningProfile.test.cpp
     src/rwe/ai/AiBehaviour.test.cpp
     src/rwe/ai/AiBehaviour_army.test.cpp
     src/rwe/ai/AiBehaviour_commander.test.cpp
@@ -1017,6 +1018,7 @@ set(TEST_FILES
     src/rwe/io/pcx/pcx.test.cpp
     src/rwe/scene/Screenshot.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp
+    src/rwe/io/fbi/transportcapacity.test.cpp
     src/rwe/io/tdf/ListTdfAdapter.test.cpp
     src/rwe/io/tdf/NetSchemaTdfAdapter.test.cpp
     src/rwe/io/tdf/SimpleTdfAdapter.test.cpp
@@ -1087,6 +1089,7 @@ set(TEST_FILES
     src/rwe/game/noshadow.test.cpp
     src/rwe/sim/missile.test.cpp
     src/rwe/sim/aircraft.test.cpp
+    src/rwe/sim/groundtilt.test.cpp
     src/rwe/sim/selfdestruct.test.cpp
     src/rwe/sim/damage.test.cpp
     src/rwe/sim/stockpile.test.cpp
