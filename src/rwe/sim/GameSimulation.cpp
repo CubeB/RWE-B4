@@ -3067,39 +3067,36 @@ namespace rwe
             return ProjectileCollisionInfoOutOfBounds();
         }
 
+        // Anything standing in the square is tested before either surface
+        // (0x49B090), so a round that dips below sea level over a wading
+        // unit's footprint hits the unit rather than the water.
+        auto heightMapPos = simulation.terrain.worldToHeightmapCoordinate(projectile.position);
+        auto cellValue = simulation.occupiedGrid.tryGet(heightMapPos);
+        if (cellValue && projectileCollides(simulation, projectile, cellValue->get()))
+        {
+            return ProjectileCollisionInfoUnitOrFeatureOrBuilding();
+        }
+
+        for (auto unitId : simulation.flyingUnitsSet)
+        {
+            if (projectileCollidesWithUnit(simulation, projectile, unitId))
+            {
+                return ProjectileCollisionInfoUnitOrFeatureOrBuilding();
+            }
+        }
+
         auto seaLevel = simulation.terrain.getSeaLevel();
 
-        // test collision with sea; torpedoes and the like live in the water
         auto weaponIt = simulation.weaponDefinitions.find(projectile.weaponType);
         bool waterWeapon = weaponIt != simulation.weaponDefinitions.end() && weaponIt->second.waterWeapon;
-        if (!waterWeapon && seaLevel > *terrainHeight && projectile.position.y <= seaLevel)
+        if (!waterWeapon && !simulation.noSeaLevelTrigger && seaLevel > *terrainHeight && projectile.position.y <= seaLevel)
         {
             return ProjectileCollisionInfoSea();
         }
-        else if (projectile.position.y <= *terrainHeight)
+
+        if (projectile.position.y <= *terrainHeight)
         {
             return ProjectileCollisionInfoTerrain();
-        }
-        else
-        {
-            auto heightMapPos = simulation.terrain.worldToHeightmapCoordinate(projectile.position);
-            auto cellValue = simulation.occupiedGrid.tryGet(heightMapPos);
-            if (cellValue)
-            {
-                auto collides = projectileCollides(simulation, projectile, cellValue->get());
-                if (collides)
-                {
-                    return ProjectileCollisionInfoUnitOrFeatureOrBuilding();
-                }
-            }
-
-            for (auto unitId : simulation.flyingUnitsSet)
-            {
-                if (projectileCollidesWithUnit(simulation, projectile, unitId))
-                {
-                    return ProjectileCollisionInfoUnitOrFeatureOrBuilding();
-                }
-            }
         }
 
         return std::nullopt;

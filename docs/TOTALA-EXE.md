@@ -66,7 +66,7 @@ conversion, string reads at an address, pointer-table dumps) are in `tools/exe/`
 
 ## Index
 
-The 113 findings, numbered to 115: §83 and §84 do not exist, so the count is
+The 114 findings, numbered to 116: §83 and §84 do not exist, so the count is
 two short of the last number. The two to read before changing anything are
 **§88**, where RWE deliberately differs from the original on purpose, and
 **§91**, what is decoded but not ported; both are in this file, below.
@@ -187,6 +187,7 @@ Everything else lives in a subject file. **The numbers never move**, so a
 113. [Mission rules at runtime: what each tests, how often, and how they combine](TOTALA-EXE-DATA.md#113-mission-rules-at-runtime-what-each-tests-how-often-and-how-they-combine)
 114. [A mission unit's scripted orders at runtime](TOTALA-EXE-DATA.md#114-a-mission-units-scripted-orders-at-runtime)
 115. [The campaign's screens, progression and ending movies](TOTALA-EXE-DATA.md#115-the-campaigns-screens-progression-and-ending-movies)
+116. [What a round aims at on a unit, and why the water comes after it](TOTALA-EXE-WEAPONS.md#116-what-a-round-aims-at-on-a-unit-and-why-the-water-comes-after-it)
 
 ## 88. Where RWE deliberately differs
 
@@ -590,6 +591,10 @@ quirks of the original that RWE reproduces although they look like defects.
 
 ## 91. Still unknown or unported
 
+- **`unitsonly` and `groundbounce`** (§116). `unitsonly` is not parsed, so
+  no RWE round skips the ground and sea tests. RWE's `groundbounce` zeroes
+  `vy` and restores the previous height, where the original sets `vy` to
+  `-(vy >> 2)` and leaves the position alone.
 - **The campaign's win and lose rules** (§113) are decoded and not ported:
   all eighteen `[GlobalHeader]` conditions, checked once a second, all
   victory rules in order and any defeat rule, victory first, then a
