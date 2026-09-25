@@ -184,7 +184,7 @@ namespace rwe
          * chasing a moving target re-queued a search every few ticks without
          * it. Empty means the unit has never asked, which is not limited.
          */
-        std::optional<GameTime> lastPathRequestTime;
+        std::optional<GameTime> lastPathRequestTime{};
     };
 
     struct NavigationStateMovingToLandingSpot
