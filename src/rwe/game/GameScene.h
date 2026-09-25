@@ -602,6 +602,7 @@ namespace rwe
         void widenShadingButton();
         void addBuildingHaloButton(UiPanel& panel);
         void addAntiAliasUnitsButton(UiPanel& panel);
+        void addCameraZoomButton(UiPanel& panel);
 
         /** Finds a control by name across every open menu panel. */
         template <typename T>
@@ -631,6 +632,7 @@ namespace rwe
         unsigned int buildingHaloSaturation{65};
         unsigned int buildingHaloRedShift{50};
         unsigned int scrollSpeedSetting{100};
+        unsigned int cameraZoomSetting{100};
 
         /** What this game was started with, kept for the save-game header. */
         GameParameters gameParameters;

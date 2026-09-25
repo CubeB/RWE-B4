@@ -29,6 +29,7 @@ namespace rwe
         MusicTrackMode pendingMusicTrackMode{MusicTrackMode::Custom};
         std::vector<unsigned int> pendingMusicTrackTypes;
         unsigned int pendingGamma{100};
+        unsigned int pendingCameraZoom{100};
         ShadingMode pendingShading{ShadingMode::BuildingsOnly};
         bool pendingAntiAlias{true};
         bool pendingBuildingHalo{true};

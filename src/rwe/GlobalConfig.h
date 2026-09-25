@@ -106,6 +106,18 @@ namespace rwe
     bool shadingModeCoversUnits(ShadingMode mode);
     bool shadingModeCoversBuildings(ShadingMode mode);
 
+    /** The four zoom stages, in button order: 50, 100, 150 and 200 percent. */
+    std::vector<unsigned int> cameraZoomStages();
+
+    /** The label each zoom stage shows; the active stage's label is the readout. */
+    std::vector<std::string> cameraZoomLabels();
+
+    /** The next zoom stage, wrapping. A value not in the stages starts from 100 and advances. */
+    unsigned int nextCameraZoom(unsigned int percent);
+
+    /** The stage index for a zoom percentage; anything not a stage reads as 100. */
+    unsigned int cameraZoomStageIndex(unsigned int percent);
+
     class GlobalConfig
     {
     public:
@@ -153,6 +165,15 @@ namespace rwe
 
         /** Screen scroll speed percentage, 25 to 200; 100 is the old fixed rate. */
         unsigned int scrollSpeed{100};
+
+        /**
+         * Camera zoom as a percentage, 50 to 200; 100 is the original view.
+         * It is how much battlefield is visible -- the world projection
+         * divides by it -- and is deliberately distinct from screenScale,
+         * which changes how chunky the pixels are rather than how much world
+         * they show. Stored globally as camera-zoom.
+         */
+        unsigned int cameraZoom{100};
 
         /**
          * How long a peer of a network game may go quiet before the rest
@@ -351,8 +372,11 @@ namespace rwe
         bool buildingHalo{true};
         bool antiAliasUnits{false};
 
-        /** The per-track types, as GlobalConfig::musicTrackTypes. Last so the positional initialisers above keep working. */
+        /** The per-track types, as GlobalConfig::musicTrackTypes. */
         std::vector<unsigned int> musicTrackTypes{};
+
+        /** Camera zoom percentage; last so adding it left the positional initialisers above valid. */
+        unsigned int cameraZoom{100};
     };
 
     /** The settings as the config file last left them. */

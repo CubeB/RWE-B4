@@ -253,10 +253,13 @@ namespace rwe
           buildingHaloSaturation(sceneContext.globalConfig->buildingHaloSaturation),
           buildingHaloRedShift(sceneContext.globalConfig->buildingHaloRedShift),
           scrollSpeedSetting(sceneContext.globalConfig->scrollSpeed),
+          cameraZoomSetting(sceneContext.globalConfig->cameraZoom),
           gameParameters(gameParameters),
           audioLookup(audioLookup),
           stateLogStream(std::move(stateLogStream))
     {
+        worldCameraState.zoom = static_cast<float>(cameraZoomSetting) / 100.0f;
+
         if (this->gameParameters.aiArenaSeconds)
         {
             // One row every ten seconds of game time: the interesting thing
@@ -511,6 +514,10 @@ namespace rwe
         {
             millisecondsBuffer += (millisecondsElapsed * gameSpeed.perMille()) / 1000;
         }
+
+        // Ease the live zoom toward the setting rather than jumping, and do it
+        // before the constraint so it is computed against the current extent.
+        worldCameraState.zoom = advanceCameraZoom(worldCameraState.zoom, static_cast<float>(cameraZoomSetting) / 100.0f, millisecondsElapsed);
 
         auto cameraConstraint = computeCameraConstraint(simulation.terrain, worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()));
 

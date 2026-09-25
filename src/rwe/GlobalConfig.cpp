@@ -162,6 +162,49 @@ namespace rwe
         return mode == ShadingMode::BuildingsOnly || mode == ShadingMode::Both;
     }
 
+    std::vector<unsigned int> cameraZoomStages()
+    {
+        return {50u, 100u, 150u, 200u};
+    }
+
+    std::vector<std::string> cameraZoomLabels()
+    {
+        std::vector<std::string> labels;
+        for (auto percent : cameraZoomStages())
+        {
+            labels.push_back("Zoom " + std::to_string(percent) + "%");
+        }
+        return labels;
+    }
+
+    unsigned int nextCameraZoom(unsigned int percent)
+    {
+        auto stages = cameraZoomStages();
+        auto index = cameraZoomStageIndex(percent);
+        return stages[(index + 1) % stages.size()];
+    }
+
+    unsigned int cameraZoomStageIndex(unsigned int percent)
+    {
+        auto stages = cameraZoomStages();
+        for (std::size_t i = 0; i < stages.size(); ++i)
+        {
+            if (stages[i] == percent)
+            {
+                return static_cast<unsigned int>(i);
+            }
+        }
+        // 100 is the default and the stage an unrecognised value reads as.
+        for (std::size_t i = 0; i < stages.size(); ++i)
+        {
+            if (stages[i] == 100u)
+            {
+                return static_cast<unsigned int>(i);
+            }
+        }
+        return 0u;
+    }
+
     GameOptions optionsFromConfig(const GlobalConfig& config)
     {
         GameOptions options;
@@ -180,6 +223,7 @@ namespace rwe
         options.antiAlias = config.antiAlias;
         options.buildingHalo = config.buildingHalo;
         options.antiAliasUnits = config.antiAliasUnits;
+        options.cameraZoom = config.cameraZoom;
         return options;
     }
 
@@ -214,6 +258,7 @@ namespace rwe
                                          {"anti-alias", options.antiAlias ? "true" : "false"},
                                          {"building-halo", options.buildingHalo ? "true" : "false"},
                                          {"anti-alias-units", options.antiAliasUnits ? "true" : "false"},
+                                         {"camera-zoom", std::to_string(options.cameraZoom)},
                                      });
     }
 }

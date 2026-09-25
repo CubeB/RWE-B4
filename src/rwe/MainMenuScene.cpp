@@ -167,7 +167,8 @@ namespace rwe
             pendingAntiAlias,
             pendingBuildingHalo,
             pendingAntiAliasUnits,
-            pendingMusicTrackTypes};
+            pendingMusicTrackTypes,
+            pendingCameraZoom};
     }
 
     void MainMenuScene::applyOptions(const GameOptions& state)
@@ -188,6 +189,7 @@ namespace rwe
         pendingAntiAlias = state.antiAlias;
         pendingBuildingHalo = state.buildingHalo;
         pendingAntiAliasUnits = state.antiAliasUnits;
+        pendingCameraZoom = state.cameraZoom;
         audio->setSoundEnabled(state.soundMode != SoundMode::Off);
     }
 
@@ -213,6 +215,7 @@ namespace rwe
             pendingMusicTrackMode = static_cast<MusicTrackMode>(sceneContext.globalConfig->musicTrackMode);
             pendingMusicTrackTypes = sceneContext.globalConfig->musicTrackTypes;
             pendingGamma = sceneContext.globalConfig->gamma;
+            pendingCameraZoom = sceneContext.globalConfig->cameraZoom;
             pendingShading = static_cast<ShadingMode>(sceneContext.globalConfig->shadingMode);
             pendingAntiAlias = sceneContext.globalConfig->antiAlias;
             pendingBuildingHalo = sceneContext.globalConfig->buildingHalo;
@@ -301,6 +304,10 @@ namespace rwe
         // there a line ago, so it lands one row under it on whichever page it
         // finds them, and is absent from the pages that carry neither.
         uiFactory.addStagedButtonBelow(active, "STARTOPT", "BSHADOWS", "AAUNITS", BuildingHaloWired ? "HALO" : "BSHADOWS", BuildingHaloWired ? "BSHADOWS" : "ANTI", {"Units Sharp", "Units Smooth"}, pendingAntiAliasUnits ? 1 : 0);
+        // ...and camera zoom, one row under AAUNITS, placed the same derived
+        // way as the in-game one. See GameScene::addCameraZoomButton for why
+        // the position wants confirming with ui_probe.
+        uiFactory.addStagedButtonBelow(active, "STARTOPT", "SHADINGMODE", "CAMZOOM", "AAUNITS", "BSHADOWS", cameraZoomLabels(), cameraZoomStageIndex(pendingCameraZoom));
 
         auto state = currentOptions();
 
@@ -838,6 +845,10 @@ namespace rwe
             {
                 pendingAntiAliasUnits = !pendingAntiAliasUnits;
             }
+            else if (message == "CAMZOOM")
+            {
+                pendingCameraZoom = nextCameraZoom(pendingCameraZoom);
+            }
             else if (message == "UNDO")
             {
                 applyOptions(optionsUndo);
@@ -1016,6 +1027,10 @@ namespace rwe
         if (auto toggle = active.find<UiStagedButton>("AAUNITS"))
         {
             toggle->get().setStage(pendingAntiAliasUnits ? 1 : 0);
+        }
+        if (auto toggle = active.find<UiStagedButton>("CAMZOOM"))
+        {
+            toggle->get().setStage(cameraZoomStageIndex(pendingCameraZoom));
         }
         if (auto bar = active.find<UiScrollBar>("FXVOL"))
         {

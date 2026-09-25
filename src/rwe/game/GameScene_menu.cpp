@@ -434,6 +434,7 @@ namespace rwe
                 addBuildingHaloButton(*panel);
             }
             addAntiAliasUnitsButton(*panel);
+            addCameraZoomButton(*panel);
         }
     }
 
@@ -477,6 +478,18 @@ namespace rwe
         {
             uiFactory.addStagedButtonBelow(panel, "VISUALRT", "BSHADOWS", "AAUNITS", "BSHADOWS", "ANTI", {"Units Sharp", "Units Smooth"}, antiAliasUnitsEnabled ? 1 : 0);
         }
+    }
+
+    void GameScene::addCameraZoomButton(UiPanel& panel)
+    {
+        // Camera zoom, another gadget no GUI file has. It sits one row below
+        // AAUNITS, with the row step taken from the gap between AAUNITS and
+        // BSHADOWS above it, so the same call lands correctly on both options
+        // pages without either page's coordinates appearing here. That the
+        // position is derived rather than measured should still be confirmed
+        // with ui_probe on a machine with the game data, which this one has
+        // not.
+        uiFactory.addStagedButtonBelow(panel, "VISUALRT", "SHADINGMODE", "CAMZOOM", "AAUNITS", "BSHADOWS", cameraZoomLabels(), cameraZoomStageIndex(cameraZoomSetting));
     }
 
     void GameScene::wireInGameOptionControls()
@@ -646,7 +659,8 @@ namespace rwe
             antiAliasEnabled,
             buildingHaloEnabled,
             antiAliasUnitsEnabled,
-            musicTrackTypes};
+            musicTrackTypes,
+            cameraZoomSetting};
     }
 
     void GameScene::applyInGameOptions(const GameOptions& state)
@@ -662,6 +676,7 @@ namespace rwe
         unitSpeechSetting = state.unitSpeech;
         musicTrackModeSetting = state.musicTrackMode;
         musicTrackTypes = state.musicTrackTypes;
+        cameraZoomSetting = state.cameraZoom;
         rebuildMusicMoods();
         audio->setSoundEnabled(state.soundMode != SoundMode::Off);
         gammaSetting = state.gamma;
@@ -995,6 +1010,10 @@ namespace rwe
             {
                 antiAliasUnitsEnabled = !antiAliasUnitsEnabled;
             }
+            else if (control == "CAMZOOM")
+            {
+                cameraZoomSetting = nextCameraZoom(cameraZoomSetting);
+            }
             else if (control == "MODE")
             {
                 // Off | Mono | 3D, cycled by the button itself.
@@ -1122,6 +1141,10 @@ namespace rwe
         if (auto toggle = findInGameMenu<UiStagedButton>("AAUNITS"))
         {
             toggle->setStage(antiAliasUnitsEnabled ? 1 : 0);
+        }
+        if (auto toggle = findInGameMenu<UiStagedButton>("CAMZOOM"))
+        {
+            toggle->setStage(cameraZoomStageIndex(cameraZoomSetting));
         }
         if (auto bar = findInGameMenu<UiScrollBar>("FXVOL"))
         {

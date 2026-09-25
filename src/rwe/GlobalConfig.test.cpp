@@ -68,5 +68,65 @@ namespace rwe
         {
             REQUIRE(optionsFromConfig(GlobalConfig()).shading == ShadingMode::BuildingsOnly);
         }
+
+        SECTION("carries the camera zoom across")
+        {
+            GlobalConfig config;
+            config.cameraZoom = 150;
+            REQUIRE(optionsFromConfig(config).cameraZoom == 150u);
+        }
+    }
+
+    TEST_CASE("camera zoom helpers")
+    {
+        SECTION("stages are the four percentages in order")
+        {
+            auto stages = cameraZoomStages();
+            REQUIRE(stages.size() == 4);
+            REQUIRE(stages[0] == 50u);
+            REQUIRE(stages[1] == 100u);
+            REQUIRE(stages[2] == 150u);
+            REQUIRE(stages[3] == 200u);
+        }
+
+        SECTION("next cycles through every stage and wraps")
+        {
+            REQUIRE(nextCameraZoom(50u) == 100u);
+            REQUIRE(nextCameraZoom(100u) == 150u);
+            REQUIRE(nextCameraZoom(150u) == 200u);
+            REQUIRE(nextCameraZoom(200u) == 50u);
+        }
+
+        SECTION("a value not in the stages starts from 100 and advances")
+        {
+            REQUIRE(nextCameraZoom(0u) == 150u);
+            REQUIRE(nextCameraZoom(120u) == 150u);
+            REQUIRE(nextCameraZoom(1000u) == 150u);
+        }
+
+        SECTION("stage index round trips every stage")
+        {
+            auto stages = cameraZoomStages();
+            for (unsigned int i = 0; i < stages.size(); ++i)
+            {
+                REQUIRE(cameraZoomStageIndex(stages[i]) == i);
+            }
+        }
+
+        SECTION("an unknown value reads as the 100 stage")
+        {
+            REQUIRE(cameraZoomStageIndex(0u) == cameraZoomStageIndex(100u));
+            REQUIRE(cameraZoomStageIndex(120u) == cameraZoomStageIndex(100u));
+        }
+
+        SECTION("labels are in stage order and name the percentage")
+        {
+            auto labels = cameraZoomLabels();
+            REQUIRE(labels.size() == cameraZoomStages().size());
+            REQUIRE(labels[0] == "Zoom 50%");
+            REQUIRE(labels[1] == "Zoom 100%");
+            REQUIRE(labels[2] == "Zoom 150%");
+            REQUIRE(labels[3] == "Zoom 200%");
+        }
     }
 }
