@@ -156,4 +156,52 @@ namespace rwe
         REQUIRE((dx * dx) + (dz * dz) > 0_ss);
         REQUIRE((dx * dx) + (dz * dz) <= 48_ss * 48_ss * 2_ss);
     }
+
+    TEST_CASE("a mission unit with orders to run is not the player's yet", "[mission]")
+    {
+        // 0x487E69 clears the selectable bit once the interpreter has queued
+        // an order; the standing-orders line queues none.
+        MissionWorld world;
+        OtaSchema schema{};
+        auto scripted = missionUnit("KBOT", 1, 100, 100);
+        scripted.orders = parseInitialMission("w 30,p 1500 900,");
+        auto standing = missionUnit("KBOT", 1, 200, 100);
+        standing.orders = parseInitialMission("o 0 1,");
+        auto plain = missionUnit("KBOT", 1, 300, 100);
+        // An `s` first hands the unit back before it does anything else.
+        auto selectableFirst = missionUnit("KBOT", 1, 400, 100);
+        selectableFirst.orders = parseInitialMission("s,m 1500 900,");
+        auto selectableLast = missionUnit("KBOT", 1, 500, 100);
+        selectableLast.orders = parseInitialMission("m 1500 900,s,");
+        // `i` puts the unit aboard a transport at once and queues nothing, and
+        // neither do a letter the table does not know or a type nobody has.
+        auto linkOnly = missionUnit("KBOT", 1, 600, 100);
+        linkOnly.orders = parseInitialMission("i CHRIS,");
+        auto unknownThings = missionUnit("KBOT", 1, 700, 100);
+        unknownThings.orders = parseInitialMission("x,a NOSUCHTYPE,");
+        // A guard resolves against every unit the mission made, including
+        // one further down the list.
+        auto guard = missionUnit("KBOT", 1, 800, 100);
+        guard.orders = parseInitialMission("g BOSS,");
+        auto boss = missionUnit("BLDG", 1, 900, 100);
+        boss.ident = "boss";
+        // Or by a unit type, the first of it in the file.
+        auto guardByType = missionUnit("KBOT", 1, 150, 300);
+        guardByType.orders = parseInitialMission("g bldg,");
+        schema.units = {scripted, standing, plain, selectableFirst, selectableLast, linkOnly, unknownThings, guard, boss, guardByType};
+
+        auto result = spawnMissionUnits(world.sim, schema, world.slots);
+        REQUIRE(result.spawned.size() == 10);
+        auto held = [&](std::size_t i) { return world.sim.getUnitState(result.spawned[i]).heldByMission; };
+        REQUIRE(held(0));
+        REQUIRE_FALSE(held(1));
+        REQUIRE_FALSE(held(2));
+        REQUIRE_FALSE(held(3));
+        REQUIRE(held(4));
+        REQUIRE_FALSE(held(5));
+        REQUIRE_FALSE(held(6));
+        REQUIRE(held(7));
+        REQUIRE_FALSE(held(8));
+        REQUIRE(held(9));
+    }
 }

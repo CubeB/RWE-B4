@@ -634,6 +634,8 @@ namespace rwe
 
         updateDefeatNotifications();
 
+        updateMissionNotifications();
+
         updateEndGameSequence();
 
         updateProjectiles();

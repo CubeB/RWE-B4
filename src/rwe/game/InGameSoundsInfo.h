@@ -25,5 +25,8 @@ namespace rwe
         /** The two the side panel's slide plays at its endpoints (76). */
         std::optional<AudioService::SoundHandle> panel;
         std::optional<AudioService::SoundHandle> options;
+
+        /** ALLSOUND's "Victory Condition" (VICTORY2), once for each mission objective met. */
+        std::optional<AudioService::SoundHandle> victoryCondition;
     };
 }

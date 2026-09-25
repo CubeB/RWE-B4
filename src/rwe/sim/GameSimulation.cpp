@@ -8,6 +8,7 @@
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/sim/DemoRecorder.h>
 #include <rwe/sim/GameHash_util.h>
+#include <rwe/sim/MissionRules.h>
 #include <rwe/sim/SimScalar.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitBehaviorService.h>
@@ -1063,6 +1064,10 @@ namespace rwe
         }
 
         // Reclaimed units vanish quietly: no wreck, no explosion.
+        if (missionRules)
+        {
+            missionRules->unitDying(*this, targetId, unit.owner);
+        }
         unit.markAsDeadNoCorpse();
         recordUnitDeath(*this, targetId, "reclaimed", std::nullopt);
 
@@ -1145,7 +1150,20 @@ namespace rwe
             demoRecorder->unitCaptured(*this, targetId, captor);
         }
 
+        // The original's owner change is an event and then a cause-4 death of
+        // the old unit, the captor's copy already made, and the mission rules
+        // hear both: CaptureUnitType the first, and every kill rule the second.
+        if (missionRules)
+        {
+            missionRules->unitChangingOwner(*this, targetId);
+        }
+
         unit.owner = captor;
+
+        if (missionRules)
+        {
+            missionRules->unitDying(*this, targetId, previousOwner);
+        }
 
         // The spatial index carries owners so a target search can drop its
         // own side cheaply, and this is the only thing in the game that
@@ -1210,6 +1228,11 @@ namespace rwe
     {
         auto& unit = getUnitState(unitId);
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+
+        if (missionRules)
+        {
+            missionRules->unitDying(*this, unitId, unit.owner);
+        }
 
         // Self-destruction leaves nothing to reclaim.
         unit.markAsDeadNoCorpse();
@@ -2420,6 +2443,22 @@ namespace rwe
 
     WinStatus GameSimulation::computeWinStatus() const
     {
+        // A mission is decided by its own rules and nothing else: a victory
+        // is P0's, a defeat P1's.
+        if (missionRules)
+        {
+            if (!missionRules->outcome)
+            {
+                return WinStatusUndecided();
+            }
+            const auto& winner = *missionRules->outcome == MissionOutcome::Victory ? missionRules->human : missionRules->computer;
+            if (!winner)
+            {
+                return WinStatusDraw();
+            }
+            return WinStatusWon{*winner};
+        }
+
         // The first player still standing, and whether anybody still
         // standing is on a different side from them. Allies do not fight
         // each other, so a rule that waits for one player to be left waits
@@ -2778,6 +2817,10 @@ namespace rwe
     void GameSimulation::quietlyKillUnit(UnitId unitId, bool countAsLoss)
     {
         auto& unit = getUnitState(unitId);
+        if (missionRules)
+        {
+            missionRules->unitDying(*this, unitId, unit.owner);
+        }
         unit.markAsDeadNoCorpse();
         if (countAsLoss)
         {
@@ -3094,6 +3137,10 @@ namespace rwe
         auto& unit = getUnitState(unitId);
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
 
+        if (missionRules)
+        {
+            missionRules->unitDying(*this, unitId, unit.owner);
+        }
         unit.markAsDead();
         getPlayer(unit.owner).unitsLost += 1;
         releaseTransportLinks(unitId, attacker);
@@ -3912,6 +3959,16 @@ namespace rwe
 
     void GameSimulation::processVictoryCondition()
     {
+        // A mission has no commander rule at all: the campaign setup zeroes
+        // the commander-death mode (0x497474 copies g+0x39219, which the
+        // mission reader has just set to 0 at 0x4363EA), so the wipe at
+        // 0x48667E never runs, and CommanderKilled is the only way a
+        // commander's death can matter.
+        if (missionRules)
+        {
+            return;
+        }
+
         if (commanderDeathMode == CommanderDeathMode::GameEnds)
         {
             for (const auto& p : units)
@@ -3999,6 +4056,13 @@ namespace rwe
 
     void GameSimulation::updateResources()
     {
+        // The settle is held back for every player while a mission's
+        // countdown runs (0x46554F).
+        if (missionRules && missionRules->economyFrozen())
+        {
+            return;
+        }
+
         // run resource updates once per second
         if (gameTime % GameTime(SimTicksPerSecond) == GameTime(0))
         {
@@ -4720,6 +4784,13 @@ namespace rwe
         }
 
         updateWind();
+
+        // Before the settle, which the countdown the rules may start this
+        // second freezes (0x4650A9 comes before 0x46554F in the same pass).
+        if (missionRules)
+        {
+            missionRules->update(*this);
+        }
 
         updateResources();
 

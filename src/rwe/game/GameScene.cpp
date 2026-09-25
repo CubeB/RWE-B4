@@ -271,6 +271,9 @@ namespace rwe
             LOG_INFO << "AI arena: running for " << *this->gameParameters.aiArenaSeconds
                      << " seconds of game time (" << *arenaEndTick << " ticks)";
         }
+
+        // A loaded mission has had its sounds already.
+        missionCelebrationsHeard = missionCelebrations();
     }
 
     GameScene::~GameScene()

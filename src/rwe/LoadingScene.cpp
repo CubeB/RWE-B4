@@ -252,6 +252,7 @@ namespace rwe
         sounds.selectMultipleUnits = lookUpSound("SelectMultipleUnits");
         sounds.panel = lookUpSound("PANEL");
         sounds.options = lookUpSound("OPTIONS");
+        sounds.victoryCondition = lookUpSound("Victory Condition");
 
         auto consoleFont = sceneContext.textureService->getFont("fonts/CONSOLE.FNT");
         // The original loads exactly two in-game fonts (0x42A320): COMIX for
@@ -266,9 +267,10 @@ namespace rwe
             stateLogStream = std::ofstream(*gameParameters.stateLogFile, std::ios::binary);
         }
 
-        // A mission brings its own units in place of the commanders. They are
-        // put into the simulation before it moves into the scene, and the
-        // camera goes to the first of the local player's.
+        // A mission brings its own units in place of the commanders, and its
+        // own rules in place of the skirmish ones. They are put into the
+        // simulation before it moves into the scene, and the camera goes to
+        // the first of the local player's units.
         std::optional<SimVector> missionCameraPos;
         // Not when loading a save: the saved simulation already holds the
         // mission's units, as it holds a skirmish's commanders, and spawning
@@ -276,6 +278,7 @@ namespace rwe
         if (gameParameters.mission && !gameParameters.loadFromSaveFile)
         {
             auto result = spawnMissionUnits(loaded.simulation, ota.schemas.at(schemaIndex), loaded.gamePlayers);
+            installMissionRules(loaded.simulation, ota, ota.schemas.at(schemaIndex), loaded.gamePlayers, *sceneContext.sideData);
             LOG_INFO << "Mission: " << result.spawned.size() << " units placed, " << result.skipped.size() << " not";
             for (const auto& line : result.skipped)
             {

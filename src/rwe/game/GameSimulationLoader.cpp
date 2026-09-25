@@ -5,6 +5,7 @@
 #include <deque>
 #include <filesystem>
 #include <iterator>
+#include <limits>
 #include <random>
 #include <set>
 #include <rwe/LoadingScene_util.h>
@@ -24,6 +25,7 @@
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/weapontdf/WeaponTdf.h>
+#include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
 
@@ -995,9 +997,64 @@ namespace rwe
             std::move(dataMaps)};
     }
 
+    namespace
+    {
+        /**
+         * Whether a mission unit starts out of the player's hands.
+         *
+         * The interpreter 0x487BF0 clears the selectable bit once it has
+         * queued an order (0x487E5B), and a MAKESELECTABLE hands the unit
+         * back when it runs: an `s` where it stands in the list, or the one
+         * appended at the end. `i`, `o`, `bw` and letters it does not know
+         * queue nothing, and `a NAME`, `b NAME` and `g IDENT` queue only when
+         * the name resolves. RWE runs none of the orders yet, so a unit is
+         * held from the start unless the first thing it would do is be
+         * handed back -- `s,m 1500 900` is the player's at once,
+         * `m 1500 900,s` is not.
+         */
+        bool startsHeld(const GameSimulation& simulation, const OtaMissionUnit& record, const std::unordered_set<std::string>& spawnedNames)
+        {
+            using K = MissionOrder::Kind;
+            for (const auto& order : record.orders)
+            {
+                switch (order.kind)
+                {
+                    case K::Link:
+                    case K::StandingOrders:
+                    case K::BuildWeapon:
+                    case K::Skip:
+                        continue;
+                    case K::AttackType:
+                    case K::Build:
+                        if (simulation.unitDefinitions.find(toUpper(order.name)) == simulation.unitDefinitions.end())
+                        {
+                            continue;
+                        }
+                        return true;
+                    case K::Guard:
+                        // Looked up among the units the mission has made, which
+                        // by now is all of them: the orders are read in a
+                        // second pass (0x4884F1). A name is a record's Ident
+                        // or its unit type (0x487AF0).
+                        if (spawnedNames.count(toUpper(order.name)) == 0)
+                        {
+                            continue;
+                        }
+                        return true;
+                    case K::MakeSelectable:
+                        return false;
+                    default:
+                        return true;
+                }
+            }
+            return false;
+        }
+    }
+
     MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers)
     {
         MissionSpawnResult result;
+        std::vector<std::size_t> spawnedRecords;
         for (std::size_t i = 0; i < schema.units.size(); ++i)
         {
             const auto& record = schema.units[i];
@@ -1080,7 +1137,178 @@ namespace rwe
             // truncated.
             unit.hitPoints = static_cast<unsigned int>((static_cast<uint64_t>(def.maxHitPoints) * static_cast<uint64_t>(std::max(0, record.healthPercentage))) / 100u);
             result.spawned.push_back(*unitId);
+            spawnedRecords.push_back(i);
+        }
+
+        // The orders, in a second pass once every unit is made, as the
+        // original reads them.
+        std::unordered_set<std::string> spawnedNames;
+        for (auto i : spawnedRecords)
+        {
+            if (!schema.units[i].ident.empty())
+            {
+                spawnedNames.insert(toUpper(schema.units[i].ident));
+            }
+            spawnedNames.insert(toUpper(schema.units[i].unitName));
+        }
+        for (std::size_t n = 0; n < spawnedRecords.size(); ++n)
+        {
+            simulation.getUnitState(result.spawned[n]).heldByMission = startsHeld(simulation, schema.units[spawnedRecords[n]], spawnedNames);
         }
         return result;
+    }
+
+    MissionRules buildMissionRules(
+        const OtaMissionRules& rules,
+        const MapTerrain& terrain,
+        bool hasUnits,
+        const std::optional<PlayerId>& human,
+        const std::optional<PlayerId>& computer,
+        const std::string& humanCommander,
+        const std::string& computerCommander)
+    {
+        using K = MissionRule::Kind;
+
+        MissionRules m;
+        m.enabled = hasUnits;
+        m.human = human;
+        m.computer = computer;
+        m.humanCommander = toUpper(humanCommander);
+        m.computerCommander = toUpper(computerCommander);
+
+        // ANYTYPE is any type only where the rule's own test says so:
+        // MoveUnitToRadius and UnitTypePassesX/Z compare an empty name as a
+        // match. Everywhere else the name is looked up or compared as it
+        // stands, and a unit called ANYTYPE is what it would take to meet it.
+        auto rule = [](K kind, const std::string& unitType = std::string(), int number = 0) {
+            MissionRule r;
+            r.kind = kind;
+            auto upper = toUpper(unitType);
+            auto anyTypeMeansAny = kind == K::MoveUnitToRadius || kind == K::UnitTypePassesX || kind == K::UnitTypePassesZ;
+            r.unitType = (anyTypeMeansAny && upper == "ANYTYPE") ? std::string() : upper;
+            r.number = number;
+            return r;
+        };
+        // Seconds to ticks, without overflowing on a silly value.
+        auto ticks = [](int seconds) { return static_cast<int>(std::min<int64_t>(static_cast<int64_t>(seconds) * SimTicksPerSecond, std::numeric_limits<int>::max())); };
+
+        if (rules.killEnemyCommander != 0)
+        {
+            m.victory.push_back(rule(K::KillEnemyCommander));
+        }
+        if (rules.destroyAllUnits != 0)
+        {
+            m.victory.push_back(rule(K::DestroyAllUnits));
+        }
+        if (rules.killAllMobileUnits != 0)
+        {
+            m.victory.push_back(rule(K::KillAllMobileUnits));
+        }
+        if (rules.buildUnitType)
+        {
+            m.victory.push_back(rule(K::BuildUnitType, *rules.buildUnitType));
+        }
+        if (rules.captureUnitType)
+        {
+            m.victory.push_back(rule(K::CaptureUnitType, *rules.captureUnitType));
+        }
+        if (rules.killAllOfType)
+        {
+            m.victory.push_back(rule(K::KillAllOfType, *rules.killAllOfType));
+        }
+        if (rules.killUnitType)
+        {
+            m.victory.push_back(rule(K::KillUnitType, rules.killUnitType->unitType, rules.killUnitType->number));
+        }
+        if (rules.moveUnitToRadius)
+        {
+            auto r = rule(K::MoveUnitToRadius, rules.moveUnitToRadius->unitType);
+            auto centre = terrain.topLeftCoordinateToWorld(missionPointOnGround(terrain, rules.moveUnitToRadius->x, rules.moveUnitToRadius->z));
+            r.x = centre.x;
+            r.z = centre.z;
+            r.radius = intToSimScalar(rules.moveUnitToRadius->radius);
+            m.victory.push_back(r);
+        }
+        if (rules.unitTypePassesX)
+        {
+            m.victory.push_back(rule(K::UnitTypePassesX, rules.unitTypePassesX->unitType, rules.unitTypePassesX->number >> 4));
+        }
+        if (rules.unitTypePassesZ)
+        {
+            m.victory.push_back(rule(K::UnitTypePassesZ, rules.unitTypePassesZ->unitType, rules.unitTypePassesZ->number >> 4));
+        }
+        if (rules.victoryTimerRunsOut > 0)
+        {
+            m.victory.push_back(rule(K::VictoryTimerRunsOut, std::string(), ticks(rules.victoryTimerRunsOut)));
+        }
+
+        if (rules.commanderKilled != 0)
+        {
+            m.defeat.push_back(rule(K::CommanderKilled));
+        }
+        if (rules.allUnitsKilled != 0)
+        {
+            m.defeat.push_back(rule(K::AllUnitsKilled));
+        }
+        if (rules.allUnitsKilledOfType)
+        {
+            m.defeat.push_back(rule(K::AllUnitsKilledOfType, *rules.allUnitsKilledOfType));
+        }
+        if (rules.unitTypeKilled)
+        {
+            m.defeat.push_back(rule(K::UnitTypeKilled, rules.unitTypeKilled->unitType, rules.unitTypeKilled->number));
+        }
+        if (rules.deathTimerRunsOut > 0)
+        {
+            m.defeat.push_back(rule(K::DeathTimerRunsOut, std::string(), ticks(rules.deathTimerRunsOut)));
+        }
+        if (rules.anyUnitPassesX >= 0)
+        {
+            m.defeat.push_back(rule(K::AnyUnitPassesX, std::string(), rules.anyUnitPassesX >> 4));
+        }
+        if (rules.anyUnitPassesZ >= 0)
+        {
+            m.defeat.push_back(rule(K::AnyUnitPassesZ, std::string(), rules.anyUnitPassesZ >> 4));
+        }
+
+        // 0x4902F3 and 0x49041D add these on the first poll; the rules are
+        // the same either way.
+        if (m.victory.empty())
+        {
+            m.victory.push_back(rule(K::DestroyAllUnits));
+        }
+        if (m.defeat.empty())
+        {
+            m.defeat.push_back(rule(K::AllUnitsKilled));
+        }
+
+        return m;
+    }
+
+    void installMissionRules(
+        GameSimulation& simulation,
+        const OtaRecord& ota,
+        const OtaSchema& schema,
+        const std::array<std::optional<PlayerId>, 10>& slotPlayers,
+        const std::unordered_map<std::string, SideData>& sideData)
+    {
+        auto commanderOf = [&](const std::optional<PlayerId>& player) {
+            if (!player)
+            {
+                return std::string();
+            }
+            auto it = sideData.find(simulation.getPlayer(*player).side);
+            return it == sideData.end() ? std::string() : it->second.commander;
+        };
+        simulation.missionRules = std::make_unique<MissionRules>(buildMissionRules(
+            ota.rules,
+            simulation.terrain,
+            !schema.units.empty(),
+            slotPlayers[0],
+            slotPlayers[1],
+            commanderOf(slotPlayers[0]),
+            commanderOf(slotPlayers[1])));
+        const auto& rules = *simulation.missionRules;
+        LOG_INFO << "Mission rules: " << rules.victory.size() << " to win, " << rules.defeat.size() << " to lose" << (rules.enabled ? "" : ", switched off: the mission has no [units]");
     }
 }
