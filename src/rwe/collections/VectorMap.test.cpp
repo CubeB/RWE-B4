@@ -381,4 +381,60 @@ namespace rwe
             REQUIRE(m.emplace('g') == n.emplace('g'));
         }
     }
+
+    TEST_CASE("VectorMap against ids and layouts it did not make", "[malformed]")
+    {
+        // Issue #75: both arrive from saved games, and an id past the end
+        // used to be read from past the end, and a layout's free chain was
+        // written through by emplace wherever it pointed.
+        using Layout = VectorMap<char, IdTag>::Layout;
+        using Slot = VectorMap<char, IdTag>::SlotLayout;
+
+        SECTION("an id past the end names nothing")
+        {
+            VectorMap<char, IdTag> m;
+            m.emplace('a');
+            REQUIRE(m.tryGet(Id(256 * 1000)) == std::nullopt);
+            const auto& cm = m;
+            REQUIRE(cm.tryGet(Id(256 * 1000)) == std::nullopt);
+        }
+
+        SECTION("a free chain that leads out of the map is refused, and the map is left alone")
+        {
+            VectorMap<char, IdTag> m;
+            auto id = m.emplace('a');
+            Layout bad;
+            bad.slots = {Slot{0, false, std::optional<unsigned int>(99)}};
+            bad.firstFreeIndex = 0;
+            REQUIRE_THROWS(m.restoreLayout(bad));
+            REQUIRE(m.tryGet(id) == 'a');
+        }
+
+        SECTION("a free chain that starts past the end is refused")
+        {
+            VectorMap<char, IdTag> m;
+            Layout bad;
+            bad.slots = {Slot{0, false, std::nullopt}};
+            bad.firstFreeIndex = 5;
+            REQUIRE_THROWS(m.restoreLayout(bad));
+        }
+
+        SECTION("a free chain that leads to an occupied slot is refused")
+        {
+            VectorMap<char, IdTag> m;
+            Layout bad;
+            bad.slots = {Slot{0, false, std::optional<unsigned int>(1)}, Slot{256, true, std::nullopt}};
+            bad.firstFreeIndex = 0;
+            REQUIRE_THROWS(m.restoreLayout(bad));
+        }
+
+        SECTION("a free chain that goes round in a circle is refused")
+        {
+            VectorMap<char, IdTag> m;
+            Layout bad;
+            bad.slots = {Slot{0, false, std::optional<unsigned int>(1)}, Slot{256, false, std::optional<unsigned int>(0)}};
+            bad.firstFreeIndex = 0;
+            REQUIRE_THROWS(m.restoreLayout(bad));
+        }
+    }
 }
