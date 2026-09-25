@@ -45,6 +45,8 @@ namespace rwe
         tdf.readOrDefault("ShootMe", u.shootMe);
         tdf.readOrDefault("kamikaze", u.kamikaze);
         tdf.readOrDefault("kamikazedistance", u.kamikazeDistance, 0u);
+        tdf.readOrDefault("DefaultMissionType", u.defaultMissionType);
+        tdf.readOrDefault("SelfDestructCountdown", u.selfDestructCountdown, 5u);
         tdf.readOrDefault("immunetoparalyzer", u.immuneToParalyzer);
         tdf.readOrDefault("SightDistance", u.sightDistance, 0u);
         tdf.readOrDefault("RadarDistance", u.radarDistance, 0u);

@@ -423,6 +423,64 @@ namespace rwe
             + std::to_string(transportCapacityFromFbi(fbi)) + " instead.";
     }
 
+    DefaultMission parseDefaultMission(const std::string& name)
+    {
+        auto upper = toUpper(name);
+        if (upper == "STANDBY")
+        {
+            return DefaultMission::Standby;
+        }
+        if (upper == "GUARD_NOMOVE")
+        {
+            return DefaultMission::GuardNoMove;
+        }
+        if (upper == "VTOL_STANDBY")
+        {
+            return DefaultMission::VtolStandby;
+        }
+        if (upper == "STANDBY_MINE")
+        {
+            return DefaultMission::StandbyMine;
+        }
+        // Every other name in the three static tables FromName searches:
+        // 23 records at 0x4FC490, 22 at 0x4FC6E8 and the 22 of the VTOL
+        // table at 0x4FCA18, each naming its mission at record+0x15.
+        static const char* const otherMissions[] = {
+            "STOP", "ATTACK_NOMOVE", "ACTIVATE", "DEACTIVATE", "CLOAK_ON", "CLOAK_OFF",
+            "STANDING_MOVEORDER", "STANDING_FIREORDER", "BUILDINGBUILD", "BUILDWEAPON",
+            "SELFDESTRUCT", "SELFDESTRUCTFG", "PARALYZE", "GETBUILT", "BECARRIED",
+            "MAKESELECTABLE", "WAIT", "WAITFORATTACK", "ATTACKUTYPE", "SELFREPAIR", "QMOVE",
+            "QPATROL",
+            "MOVE_GROUND", "FOLLOW_GROUND", "SUPPRESS", "ATTACK_CHASE", "ATTACK_KAMIKAZE",
+            "ATTACKSPECIAL", "PARK", "PATROL", "GROUND_PICKUP", "GROUND_UNLOAD", "TELEPORT",
+            "MOBILEBUILD", "HELPBUILD", "REPAIRPATROL", "REPAIRUNIT", "CAPTURE", "RESURRECT",
+            "RECLAIM", "RECLAIMUNIT", "REPAIRUNITNOMOVE",
+            "VTOL_MOVE", "VTOL_LANDING", "VTOL_PICKUP", "VTOL_UNLOAD", "VTOL_FOLLOW",
+            "VTOL_PATROL", "AIRSTRIKE", "AIRTOAIR", "AIRTOGROUND", "AIRTOGROUNDHOVER",
+            "VTOL_MOBILEBUILD", "VTOL_HELPBUILD", "VTOL_REPAIRPATROL", "VTOL_REPAIRUNIT",
+            "VTOL_RECLAIM", "VTOL_RECLAIMUNIT", "VTOL_EVADE", "VTOL_SEEKATTACK",
+            "VTOL_SEEKGUARD", "VTOL_GETREPAIRED", "VTOL_LANDIFCAN",
+        };
+        for (const auto* other : otherMissions)
+        {
+            if (upper == other)
+            {
+                return DefaultMission::Unported;
+            }
+        }
+        return DefaultMission::None;
+    }
+
+    std::optional<std::string> defaultMissionWarning(const UnitFbi& fbi)
+    {
+        if (parseDefaultMission(fbi.defaultMissionType) != DefaultMission::Unported)
+        {
+            return std::nullopt;
+        }
+        return "Unit " + fbi.unitName + " names DefaultMissionType=" + fbi.defaultMissionType
+            + ", which RWE does not give an idle unit; it idles as if it named nothing.";
+    }
+
     UnitDefinition parseUnitDefinition(const UnitFbi& fbi, MovementClassDatabase& movementClassDatabase)
     {
         UnitDefinition u;
@@ -543,6 +601,8 @@ namespace rwe
         u.shootMe = fbi.shootMe;
         u.kamikaze = fbi.kamikaze;
         u.kamikazeDistance = fbi.kamikazeDistance;
+        u.defaultMission = parseDefaultMission(fbi.defaultMissionType);
+        u.selfDestructCountdown = fbi.selfDestructCountdown;
         u.immuneToParalyzer = fbi.immuneToParalyzer;
         u.sightDistance = fbi.sightDistance;
         u.radarDistance = fbi.radarDistance;

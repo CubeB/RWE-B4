@@ -1054,6 +1054,7 @@ set(TEST_FILES
     src/rwe/sim/autoreclaim.test.cpp
     src/rwe/sim/reclaim.test.cpp
     src/rwe/sim/repair.test.cpp
+    src/rwe/sim/mine.test.cpp
     src/rwe/sim/nanoframedecay.test.cpp
     src/rwe/sim/patrol.test.cpp
     src/rwe/sim/capture.test.cpp

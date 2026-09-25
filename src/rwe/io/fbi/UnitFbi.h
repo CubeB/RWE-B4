@@ -52,11 +52,30 @@ namespace rwe
          * itself up on arrival. `kamikaze` is bit 28 of `def+0x241` in the
          * original (parsed at 0x42CB18), `kamikazedistance` the word at
          * `def+0x218` (0x42CB29). The Roach and the Invader are the only two
-         * units in the shipped data that set them, and neither has a weapon.
+         * units in the base game's data that set them, and neither has a
+         * weapon. Core Contingency's twelve mines set `kamikaze` too, and
+         * neither do they; they go off through Standby_Mine instead.
          */
         bool kamikaze{false};
 
         unsigned int kamikazeDistance{0};
+
+        /**
+         * The mission the unit is given whenever it runs out of orders, by
+         * name. Read at 0x42BFE2 and resolved against the mission tables by
+         * `MissionId::FromName` (0x438760, a case-insensitive binary search);
+         * an absent or unknown name leaves the unit with no mission at all.
+         * See TOTALA-EXE-WEAPONS.md §9 and parseDefaultMission.
+         */
+        std::string defaultMissionType;
+
+        /**
+         * Seconds a self-destruct counts down before the blast: bits 20-22
+         * of `def+0x245`, 5 when the key is absent (0x42CC07) and at once
+         * when it is an explicit 0 (0x402053). The base game names it
+         * nowhere; Core Contingency's mines say 1 and 2.
+         */
+        unsigned int selfDestructCountdown{5};
 
         bool immuneToParalyzer{false};
 

@@ -38,6 +38,27 @@ namespace rwe
      */
     bool categoryListContains(const std::string& categoryList, const std::string& category);
 
+    /**
+     * The four missions the shipped data names as a DefaultMissionType, and
+     * one for anything else. Ground table row 25 and its neighbours;
+     * TOTALA-EXE-WEAPONS.md §9 has the handlers.
+     */
+    enum class DefaultMission
+    {
+        /** Names nothing, or a name the original does not know: no mission, the unit idles. */
+        None,
+        /** 0x405FE0, every mobile ground and sea unit: look for a fight about once a second. */
+        Standby,
+        /** 0x4021F0, the armed towers: free the weapons and never go looking. */
+        GuardNoMove,
+        /** 0x40F7D0, every aircraft: land when there is nothing to do. */
+        VtolStandby,
+        /** 0x406090, the Core Contingency mines: self-destruct when something is near. */
+        StandbyMine,
+        /** A mission the original knows and RWE does not route; warned about at load. */
+        Unported,
+    };
+
     struct UnitDefinition
     {
         struct NamedMovementClass
@@ -383,6 +404,21 @@ namespace rwe
         bool kamikaze{false};
 
         unsigned int kamikazeDistance{0};
+
+        /**
+         * The FBI's DefaultMissionType: what the original gives the unit
+         * whenever its mission list runs empty, build time included
+         * (0x43B9AD). Only StandbyMine changes anything RWE does; the others
+         * are what RWE's idle behaviour already is for the units that name
+         * them. See DefaultMission.
+         */
+        DefaultMission defaultMission{DefaultMission::None};
+
+        /**
+         * Seconds a self-destruct counts down, 0 for at once. Five unless
+         * the FBI says otherwise, which is the original's own default.
+         */
+        unsigned int selfDestructCountdown{5};
 
         /**
          * TA immunetoparalyzer, bit 26 of `def+0x241` (parsed at 0x42C7FA and

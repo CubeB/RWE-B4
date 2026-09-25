@@ -443,6 +443,10 @@ namespace rwe
                     {
                         LOG_WARN << *warning;
                     }
+                    if (auto warning = defaultMissionWarning(fbi))
+                    {
+                        LOG_WARN << *warning;
+                    }
                     auto unitDefinition = parseUnitDefinition(fbi, dataMaps.movementClassDatabase);
                     dataMaps.unitDefinitions.insert({toUpper(fbi.unitName), std::move(unitDefinition)});
 

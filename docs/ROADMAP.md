@@ -571,6 +571,12 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
       breaks -- and the fact that nothing has fallen over by accident is worth
       something but is not that pass. TA:Escalation and TA:Mayhem are the part
       that really is not here.
+      **One incompatibility found (#108, 2026-09-25):** Core Contingency's
+      twelve mines never went off. They have no weapon and cannot be ordered
+      to attack; what sets them off is `DefaultMissionType=Standby_Mine`,
+      which RWE did not read. Ported with its cadence, and with
+      `selfdestructcountdown`, which only the mines name
+      (`src/rwe/sim/mine.test.cpp`).
 - [x] Invalid UTF‑8 resilience (#14, 2026-09-23). `ensureUtf8` in
       `util/rwe_string.h` is the boundary: valid input comes back byte for
       byte, anything else is read as latin1. latin1 because it is the fallback

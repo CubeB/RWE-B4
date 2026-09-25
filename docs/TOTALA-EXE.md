@@ -605,11 +605,16 @@ quirks of the original that RWE reproduces although they look like defects.
   in §88.
 - **`holdtime` has no known reader** — see §11. `aimrate` is not a key the
   original recognises at all, so there is nothing there to find.
-- **`DefaultMissionType`** is decoded (§9) but not ported. RWE seeds a new
-  unit's standing orders from the definition and lets its ordinary idle
-  targeting stand in for `Standby`. The sight-range search `0x43B700` behind it
-  *is* ported now, as `findEnemyToEngage` — see §86 — so what is left here is
-  only the mission the key names.
+- **`DefaultMissionType`** is parsed and acted on for `Standby_Mine`, which
+  is how Core Contingency's mines go off, cadence included (#108,
+  `TOTALA-EXE-WEAPONS.md` §9). The other three names the data uses are what
+  RWE's idle behaviour already is for the units that name them, bar one:
+  `Standby` for an idle mobile unit, where RWE lets its ordinary idle
+  targeting stand in, so an idle tank shoots what comes into range but does
+  not walk off after what it merely sees. The sight-range search `0x43B700`
+  behind it is ported, as `findEnemyToEngage` (§86), and used by patrols,
+  idle aircraft and now the mines. Any other mission a mod names is warned
+  about at load and idles as if it named nothing.
 - **The movement mode is acted on for a break-off, and nowhere else.** A unit
   that leaves its post now carries the leash `0x43B1F0` gives it —
   `maneuverleashlength` from the spot where it saw the target — and Maneuver
