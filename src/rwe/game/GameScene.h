@@ -58,6 +58,8 @@
 
 namespace rwe
 {
+    class ScenarioDriver;
+
     struct GameSceneTimeAction
     {
         using Time = SceneTime;
@@ -234,6 +236,8 @@ namespace rwe
         static constexpr int PanelSlideTravel = GuiSizeLeft;
 
     private:
+        friend class ScenarioDriver;
+
         static const unsigned int UnitSelectChannel = 0;
 
         static const unsigned int reservedChannelsCount = 1;
@@ -634,6 +638,22 @@ namespace rwe
 
         /** What this game was started with, kept for the save-game header. */
         GameParameters gameParameters;
+
+        /**
+         * The scenario harness driving this game, when --scenario named one.
+         * Owned here so a scenario has the same access to the selection, the
+         * cursor mode and the panel that the input handlers do.
+         */
+        std::unique_ptr<ScenarioDriver> scenarioDriver;
+
+        /**
+         * Where the mouse is, in frame coordinates, while a scenario is
+         * driving. getMousePosition returns this when it is set so a
+         * synthetic click moves the point that gets picked as well as the
+         * event's own coordinates. Nothing outside ScenarioDriver ever sets
+         * it, so a real game reads the live cursor exactly as before.
+         */
+        std::optional<Point> mousePositionOverride;
 
         /**
          * Set only for a computer-versus-computer measurement run. Samples

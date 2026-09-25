@@ -466,6 +466,8 @@ set(SOURCE_FILES
     src/rwe/game/AiArenaReport.h
     src/rwe/game/SimEventLog.cpp
     src/rwe/game/SimEventLog.h
+    src/rwe/game/ScenarioDriver.cpp
+    src/rwe/game/ScenarioDriver.h
     src/rwe/game/GameParameters.h
     src/rwe/io/lostdf/io.cpp
     src/rwe/io/lostdf/io.h
@@ -1216,6 +1218,11 @@ target_link_libraries(tad_episodes librwe)
 add_executable(battle_test src/battle_test.cpp)
 target_link_libraries(battle_test librwe)
 
+# The tick-indexed scenario runner: drives the real GameScene headlessly at
+# chosen ticks and asserts on the result. See ScenarioDriver.h.
+add_executable(scenario src/scenario.cpp)
+target_link_libraries(scenario librwe)
+
 add_executable(path_bench src/path_bench.cpp)
 target_link_libraries(path_bench librwe)
 
@@ -1239,5 +1246,5 @@ target_link_libraries(crash_probe librwe)
 # symbol table, which for an executable means linking with -rdynamic. Without
 # this the crash reports on Linux are addresses and nothing else.
 if(NOT WIN32)
-    set_target_properties(rwe battle_test replay_viewer crash_probe PROPERTIES ENABLE_EXPORTS ON)
+    set_target_properties(rwe battle_test scenario replay_viewer crash_probe PROPERTIES ENABLE_EXPORTS ON)
 endif()

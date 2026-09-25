@@ -118,6 +118,15 @@ namespace rwe
 
     Point GameScene::getMousePosition() const
     {
+        // A scenario drives the scene with synthetic events, which carry
+        // their own coordinates but cannot move the live cursor. Returning
+        // the override here is what makes a synthetic click pick the thing it
+        // was aimed at. Set only by ScenarioDriver.
+        if (mousePositionOverride)
+        {
+            return *mousePositionOverride;
+        }
+
         float fx;
         float fy;
         sceneContext.sdl->getMouseState(&fx, &fy);
@@ -2057,6 +2066,23 @@ namespace rwe
         {
             p->get().addSubscription(cloak.subscribe([&p = p->get(), showFace](const auto& v) {
                 showFace(p, toggleFace(v, 2), v.value ? 1u : 0u); }));
+        }
+
+        // The BUILD/ORDERS tabs draw the section the unit's panel is showing,
+        // and that has to be re-applied here rather than kept: switching tabs
+        // rebuilds the whole panel, so any toggledOn it held died with the old
+        // one. Issue #342.
+        if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit)
+        {
+            const auto& guiInfo = getGuiInfo(*selectedUnit);
+            if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "BUILD"))
+            {
+                p->get().setToggledOn(guiInfo.section == UnitGuiInfo::Section::Build);
+            }
+            if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "ORDERS"))
+            {
+                p->get().setToggledOn(guiInfo.section == UnitGuiInfo::Section::Orders);
+            }
         }
 
         currentPanel->groupMessages().subscribe([this](const auto& msg) {

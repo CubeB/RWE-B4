@@ -237,6 +237,16 @@ namespace rwe
          */
         std::vector<std::string> battleTestUnitTypes{"ARMAH", "CORAH"};
 
+        /**
+         * The scenario to drive this game with, from the `scenario`
+         * executable. A harness-only field like battleTestUnitsPerSide: it
+         * makes GameScene own a ScenarioDriver, which feeds the scene real
+         * input at chosen ticks and asserts on what comes back. Nothing in a
+         * real game sets it, and the run is forced headless so that a tick is
+         * a frame and a step cannot fire twice for one of them.
+         */
+        std::optional<std::string> scenarioName;
+
         GameParameters(const std::string& mapName, unsigned int schemaIndex);
     };
 }
