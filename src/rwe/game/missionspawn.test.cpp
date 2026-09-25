@@ -135,4 +135,25 @@ namespace rwe
         REQUIRE(result.skipped[1].find("no player in that slot") != std::string::npos);
         REQUIRE(world.sim.getUnitState(result.spawned[0]).owner == *world.slots[0]);
     }
+
+    TEST_CASE("a mission unit whose spot is taken goes to the nearest free one", "[mission]")
+    {
+        // The original lets mission units overlap; RWE keeps one to a cell,
+        // and CC03 alone parks eleven units on top of others or on trees.
+        MissionWorld world;
+        OtaSchema schema{};
+        schema.units = {missionUnit("KBOT", 1, 300, 300), missionUnit("KBOT", 1, 300, 300), missionUnit("BLDG", 1, 300, 300)};
+
+        auto result = spawnMissionUnits(world.sim, schema, world.slots);
+        REQUIRE(result.spawned.size() == 2);
+        REQUIRE(result.skipped.size() == 1);
+        const auto& first = world.sim.getUnitState(result.spawned[0]);
+        const auto& second = world.sim.getUnitState(result.spawned[1]);
+        auto dx = second.position.x - first.position.x;
+        auto dz = second.position.z - first.position.z;
+        // Beside it, not on it, and no further than the first ring that fits
+        // a 2x2 footprint.
+        REQUIRE((dx * dx) + (dz * dz) > 0_ss);
+        REQUIRE((dx * dx) + (dz * dz) <= 48_ss * 48_ss * 2_ss);
+    }
 }

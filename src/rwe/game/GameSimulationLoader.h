@@ -151,10 +151,13 @@ namespace rwe
      * times HealthPercentage over a hundred (0x48848E) and the heading is
      * Angle in degrees (0x436EF9).
      *
-     * Two departures, both because RWE has nothing to spawn into: a name no
-     * unit definition carries is skipped, as the original skips it, and so
-     * is a unit whose slot has no player in it, where the original logs
-     * "Player number %d invalid" and makes the unit anyway.
+     * Two departures because RWE has nothing to spawn into: a name no unit
+     * definition carries is skipped, as the original skips it, and so is a
+     * unit whose slot has no player in it, where the original logs "Player
+     * number %d invalid" and makes the unit anyway. And one because RWE
+     * keeps one unit to a cell where the original lets them overlap: a
+     * mobile unit whose spot is taken goes to the nearest free one within
+     * eight cells, and a building whose spot is taken is not made.
      */
     MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers);
 }

@@ -1039,6 +1039,32 @@ namespace rwe
             auto heading = SimAngle(static_cast<uint16_t>(static_cast<int32_t>((static_cast<int64_t>(record.angle) * 65536) / 360)));
 
             auto unitId = simulation.trySpawnUnit(unitType, *slotPlayers[slot], position, heading);
+            // The original's creator 0x485F50 fails only for want of a unit
+            // slot or on the per-type limit, never on where the unit goes,
+            // so mission units that overlap -- a truck parked under an
+            // aircraft, a unit on a tree -- simply share the ground. RWE's
+            // occupancy holds one unit to a cell, so a mobile unit that
+            // cannot have its own spot takes the nearest one it can, ring by
+            // ring out to eight cells, in a fixed order. A building keeps its
+            // place or is not made: moving one would redraw the mission.
+            for (int ring = 1; !unitId && def.isMobile && ring <= 8; ++ring)
+            {
+                for (int dz = -ring; !unitId && dz <= ring; ++dz)
+                {
+                    for (int dx = -ring; !unitId && dx <= ring; ++dx)
+                    {
+                        if (std::max(std::abs(dx), std::abs(dz)) != ring)
+                        {
+                            continue;
+                        }
+                        auto nearby = position;
+                        nearby.x += SimScalar(static_cast<float>(dx)) * MapTerrain::HeightTileWidthInWorldUnits;
+                        nearby.z += SimScalar(static_cast<float>(dz)) * MapTerrain::HeightTileHeightInWorldUnits;
+                        nearby.y = simulation.terrain.getHeightAt(nearby.x, nearby.z);
+                        unitId = simulation.trySpawnUnit(unitType, *slotPlayers[slot], nearby, heading);
+                    }
+                }
+            }
             if (!unitId)
             {
                 result.skipped.push_back(describe("could not be placed"));
