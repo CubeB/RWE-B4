@@ -702,7 +702,13 @@ What did not, and now does:
   1000 metal and 1000 energy, with a stockpile that started at 1000 as well, and
   neither data set's commander declares any `MetalStorage` or `EnergyStorage` of
   its own. So in a skirmish the base is the starting stockpile, whichever field
-  the original reads it out of. See `docs/TA-DEMOS.md`.
+  the original reads it out of. See `docs/TA-DEMOS.md`. **A mission now uses
+  the flag itself** (#293, `GamePlayerInfo::hasBaseStorage`): its players
+  usually have no commander, so each gets its starting stockpile as a base
+  of its own, commander or not. A skirmish still leaves the flag clear. Moving
+  skirmish onto it too would change one thing, the storage a player keeps once
+  its commander has died, and that is a gameplay question rather than this
+  finding's.
 - **Reclaiming a unit** is instantaneous in the original, metal only, and
   RWE's is gradual and pays energy too. Changing it would be a gameplay
   decision rather than a correction, and `0x402640` is reached from one caller

@@ -117,6 +117,7 @@ namespace rwe
                 {"maxEnergy", saveEnergy(p.maxEnergy)},
                 {"startingMetal", saveMetal(p.startingMetal)},
                 {"startingEnergy", saveEnergy(p.startingEnergy)},
+                {"hasBaseStorage", p.hasBaseStorage},
                 {"metalStalled", p.metalStalled},
                 {"energyStalled", p.energyStalled},
                 {"unitsKilled", p.unitsKilled},
@@ -154,6 +155,8 @@ namespace rwe
                 loadMetal(j.at("startingMetal")),
                 loadEnergy(j.at("startingEnergy")),
                 j.contains("teamId") ? loadOptional(j.at("teamId"), [](const json& v) { return v.get<int>(); }) : std::optional<int>()};
+            // Added with missions (#293); every earlier save is a skirmish.
+            p.hasBaseStorage = j.contains("hasBaseStorage") && j.at("hasBaseStorage").get<bool>();
             p.metalStalled = j.at("metalStalled").get<bool>();
             p.energyStalled = j.at("energyStalled").get<bool>();
             p.unitsKilled = j.at("unitsKilled").get<unsigned int>();

@@ -1046,6 +1046,7 @@ set(TEST_FILES
     src/rwe/sim/waterline.test.cpp
     src/rwe/game/screenshake.test.cpp
     src/rwe/game/shatter.test.cpp
+    src/rwe/game/missionspawn.test.cpp
     src/rwe/game/wake.test.cpp
     src/rwe/game/viewcull.test.cpp
     src/rwe/game/animationclock.test.cpp

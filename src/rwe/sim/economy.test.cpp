@@ -107,6 +107,46 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a player with a base storage keeps it with no commander, and a commander does not double it", "[economy]")
+    {
+        // Issue #293. The original adds a per-player base to the storage its
+        // units hold when bit 0 of player+0x149 is set (0x401988); a mission
+        // sets it, so a mission player with no commander keeps what the
+        // schema gave it instead of losing it all at the first settle.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto player = addPlayerWithResources(sim, 1000.0f, 1000.0f, 1000.0f);
+        sim.unitDefinitions["inert"] = makeInertDef(50.0f);
+        auto commanderDef = makeInertDef(0.0f);
+        commanderDef.commander = true;
+        sim.unitDefinitions["commander"] = commanderDef;
+        addUnitOfType(sim, "inert", player, SimVector(100_ss, 0_ss, 100_ss), script);
+
+        SECTION("without the flag and without a commander, only the units' storage is left")
+        {
+            tickOneSecond(sim);
+            REQUIRE(sim.getPlayer(player).maxMetal == Metal(50.0f));
+            REQUIRE(sim.getPlayer(player).metal == Metal(50.0f));
+        }
+
+        SECTION("with it, the base is kept")
+        {
+            sim.getPlayer(player).hasBaseStorage = true;
+            tickOneSecond(sim);
+            REQUIRE(sim.getPlayer(player).maxMetal == Metal(1050.0f));
+            REQUIRE(sim.getPlayer(player).maxEnergy == Energy(1050.0f));
+            REQUIRE(sim.getPlayer(player).metal == Metal(1000.0f));
+        }
+
+        SECTION("with it and a commander, the base is counted once")
+        {
+            sim.getPlayer(player).hasBaseStorage = true;
+            addUnitOfType(sim, "commander", player, SimVector(200_ss, 0_ss, 100_ss), script);
+            tickOneSecond(sim);
+            REQUIRE(sim.getPlayer(player).maxMetal == Metal(1050.0f));
+        }
+    }
+
     TEST_CASE("a consumer is refused while it owes for earlier work", "[economy]")
     {
         auto script = makeEmptyCobScript();

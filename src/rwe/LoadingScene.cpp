@@ -266,6 +266,35 @@ namespace rwe
             stateLogStream = std::ofstream(*gameParameters.stateLogFile, std::ios::binary);
         }
 
+        // A mission brings its own units in place of the commanders. They are
+        // put into the simulation before it moves into the scene, and the
+        // camera goes to the first of the local player's.
+        std::optional<SimVector> missionCameraPos;
+        // Not when loading a save: the saved simulation already holds the
+        // mission's units, as it holds a skirmish's commanders, and spawning
+        // them here would put a second set beside the first.
+        if (gameParameters.mission && !gameParameters.loadFromSaveFile)
+        {
+            auto result = spawnMissionUnits(loaded.simulation, ota.schemas.at(schemaIndex), loaded.gamePlayers);
+            LOG_INFO << "Mission: " << result.spawned.size() << " units placed, " << result.skipped.size() << " not";
+            for (const auto& line : result.skipped)
+            {
+                LOG_WARN << "Mission unit not placed: " << line;
+            }
+            for (auto unitId : result.spawned)
+            {
+                const auto& unit = loaded.simulation.getUnitState(unitId);
+                if (!missionCameraPos || (loaded.localPlayerId && unit.owner == *loaded.localPlayerId))
+                {
+                    missionCameraPos = unit.position;
+                    if (loaded.localPlayerId && unit.owner == *loaded.localPlayerId)
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+
         auto gameScene = std::make_unique<GameScene>(
             sceneContext,
             std::move(playerCommandService),
@@ -310,11 +339,16 @@ namespace rwe
 
         std::optional<SimVector> humanStartPos;
 
+        if (missionCameraPos)
+        {
+            humanStartPos = missionCameraPos;
+        }
+
         // The battle harness wants every start position and no commanders.
         std::vector<PlayerId> battlePlayers;
         std::vector<SimVector> battleSpawns;
 
-        for (Index i = 0; i < getSize(gameParameters.players); ++i)
+        for (Index i = 0; i < getSize(gameParameters.players) && !gameParameters.mission; ++i)
         {
             const auto& player = gameParameters.players[i];
             if (!player)
