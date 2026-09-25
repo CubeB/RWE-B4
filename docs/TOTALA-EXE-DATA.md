@@ -803,9 +803,11 @@ inferred rather than followed to its consumer it says so.
 
 `0x476AE0` loads a campaign by name: `camps\<name>.tdf` (`0x476B07`,
 `0x476B11`), then `[HEADER]` (`0x476B32`) and its one key, `campaignside`
-(`0x476B57`), a string defaulting to `ALL` (`0x476BB1`). The two names the
-front end passes are `"Arm Campaign"` and `"Core Campaign"` (`0x477C0A`,
-`0x477C17`, under the `Campaign` and `Missions` menu strings); the shipped
+(`0x476B57`), a string defaulting to `ALL` (`0x476BB1`). The front end
+passes the entry picked in NEWGAME's campaign list, which holds the files
+whose `campaignside` is the player's side or `ALL`; only with two or fewer
+campaign files installed does it pass `"Arm Campaign"` or `"Core Campaign"`
+by side (`0x477C0A`, `0x477C17`; §115, corrected 2026-09-25). The shipped
 files are `ccdata.ccx/CAMPS/Arm Campaign.tdf` and `Core Campaign.tdf`, 25
 missions each. They are the original game's campaigns: the `.ccx` archives
 carry the campaign disc, and the mission maps are in `ccmiss.ccx/Maps/`.
@@ -842,8 +844,8 @@ keys come through `0x4C46C0` with the default shown, strings through
 | `maxunits` | int | 200 (`0xC8`) | the unit cap for the mission |
 | `brief` | string, 256 | | `camps\briefs\<brief>.TXT` (`0x436204`), read into a `"Briefing"`-tagged buffer (`0x436258`): the briefing text |
 | `narration` | string, 256 | | `camps\briefs\<narration>.WAV` (`0x4362A6`): the briefing voice-over |
-| `missionhint` | string, 256 | | `camps\hints\<hint>.TXT` (`0x4362DC`) |
-| `glamour` | string, 256 | | `<glamour>.PCX` (`0x43630B`): the briefing picture |
+| `missionhint` | string, 256 | | `camps\hints\<hint>.TXT` (`0x4362DC`), which nothing reads (§115) |
+| `glamour` | string, 256 | | `bitmaps\glamour\<glamour>.PCX` (`0x43630B`): the picture shown after a win, not the briefing's (§115) |
 | `glamoursound` | string, 256 | | `camps\briefs\<glamoursound>.WAV` (`0x436346`) |
 | `UseOnlyUnits` | string, 256 | | `camps\useonly\<name>.TDF` (`0x43637B`): the unit list the mission restricts building to |
 | `mapping` / `lineofsight` | int | 0 | as skirmish |
@@ -891,9 +893,9 @@ Each rule is then registered under a `VictoryCondition_<key>` or
 mission's are `Easy`, `Medium` and `Hard` (25, 25 and 26 of the shipped 26).
 `0x43689A`-`0x4368CA` lays the seven type names out in a table, and the
 switch at `0x4368DC` picks an order of preference from the difficulty
-setting at `[globals+0x37EEE]` (§24): difficulty 0 tries `Easy` then `Medium`
-then `Hard`, 1 tries `Medium` first, 2 tries `Hard` first, each falling back
-through the others (`0x4368F9`-`0x43693C`). The first schema whose `type`
+setting at `[globals+0x37EEE]` (§24): difficulty 0 tries `Easy`, `Medium`,
+`Hard`; 1 tries `Medium`, `Easy`, `Hard`; 2 tries `Hard`, `Medium`, `Easy`
+(`0x4368F9`-`0x43693C`; the fallback orders are §115's). The first schema whose `type`
 matches is the one played; none matching is the "No suitable schema type"
 error above. Inside the schema, `HumanMetal`, `HumanEnergy`,
 `ComputerMetal`, `ComputerEnergy`, `SurfaceMetal` (int, default 0),
@@ -1489,3 +1491,117 @@ Of `[units]`'s flags only `Immunity` is used: the spawner copies it into
 nothing after it (the only code that walks the record array is the reader,
 the frees, `0x487AF0` and the spawner). The shipped `AiIgnore=1` always
 comes with `Immunity=1`, which is where the behaviour is.
+
+## 115. The campaign's screens, progression and ending movies
+
+Read out of `TotalA.exe` on 2026-09-25 for the campaign port (#38). `g` is
+the globals block `[0x511DE8]`, `M` the campaign/mission object at
+`[g+0x391E9]`. Anything not read directly is **[inferred]**.
+
+### The front end's path
+
+The front end is one state machine (`0x426E80`): top state `[g+0x2BBE]`
+(jump table `0x42859C`), sub-state `[g+0x2BBF]`, and a handler asks for the
+next sub-state through `[g+0x2BC0]`. The campaign's path is four screens:
+
+1. **`SINGLE.GUI`**, button `NewCamp` (`0x4775AF`): a Campaign-CD check, then
+   **`NEWGAME.GUI`** in its "play any mission" mode (`0x42736B`,
+   `0x478240(1)`). The hidden `AnyMsn` button (revealed by typing `DRDEATH`,
+   `0x477510`) opens the same screen in the same mode, so in v3.1 it is
+   vestigial; the start-at-mission-0 mode (argument 0) is reachable only
+   from itself and is dead.
+2. **`NEWGAME.GUI`** (builder `0x478240`, handler `0x477AB0`): `Side0`/`Side1`
+   (and the text buttons `Arm`/`Core`) pick player 0's side `[g+0x37EF2]`,
+   player 1 taking the other; `Difficulty` cycles `[g+0x37EEE]` 0 Easy, 1
+   Medium, 2 Hard; the `Campaign` list is every `camps\*.tdf` whose
+   `campaignside` is the side's SIDEDATA `name` or `ALL` (`0x476A60`); the
+   `Missions` list is the chosen campaign's localised mission names
+   (`0x435760`). `Start` resets the progress string (below) to 25 `U`s
+   (`0x41DA30`), loads the campaign (`0x435110`) and the selected mission
+   (`0x435C00`), and sets **player 0's colour to 0 and player 1's to 1**
+   (`0x477C79`, `0x477C8B`). The campaign name is the list's entry, except
+   that with two or fewer campaign files installed the front end names
+   `Arm Campaign` or `Core Campaign` by side (`[0x507B6C]`, `0x477BD5`-`0x477C17`).
+3. **`MSNBRIEF.GUI`**, the briefing (builder `0x478E80`, handler `0x478CB0`):
+   background `bitmaps\mbrief<nameprefix>.pcx` (`mbriefARM`/`mbriefCOR`,
+   `0x478ED1`); the planet from the mission's `planet=` through a table of
+   display names to three GAFs, `<X>brief`, `<X>Pan` (scrolling, with "Wind
+   Speed : %d" and "Gravity : %.1f" printed over it) and `<X>Rotate`
+   (`0x4790E6`-`0x47933D`; an unknown name is `Green`, and `Lunar` on the
+   Core side is `Lunar2`); the `brief` text in `TextRegion` in the side's
+   font, paged by `MOREBAR` (`0x476D80`); and the `narration` WAV, which
+   `SHUTUP` (starting on) stops and replays. `Start` starts the game
+   (`0x478CE8`, `[g+0x2A44] |= 4`).
+4. After the game, **the glamour picture** on a win (below), then
+   **`ENDMSN.GUI`** (builder `0x41F0A0`, handler `0x41EC50`).
+
+The shipped `NEWCAMP`, `SELCAMP`, `SELCAMPX`, `ANYMSN`, `BRIEF`, `BRIEFX`,
+`MISSION`, `MISSIONX`, `SCORE`, `ENDGAME` and `SELSIDE` GUIs are named
+nowhere in the executable: leftovers.
+
+### The mission's files
+
+The mission reader resolves each header key into a path slot through
+`0x435430(slot, dir, name, ext)`, which tries `<dir>-<language>\` before
+`<dir>\` (`0x4354E3`), and reads `brief` and `narration` localised
+(`Germanbrief=`):
+
+| Key | Path | Used by |
+|---|---|---|
+| `missionfile` | `Maps\<file>.TNT` | the map |
+| `brief` | `camps\briefs[-lang]\<brief>.TXT` | the briefing, and the in-game `BRIEFING.GUI` |
+| `narration` | `camps\briefs[-lang]\<narration>.WAV` | the briefing only |
+| `missionhint` | `camps\hints\<hint>.TXT` | nothing **[inferred]**: no reader found |
+| `glamour` | `bitmaps\glamour\<glamour>.PCX` | the post-victory picture, not the briefing |
+| `glamoursound` | `camps\briefs\<glamoursound>.WAV` | played over it |
+| `UseOnlyUnits` | `camps\useonly\<name>.TDF` | the build restriction |
+| `aiprofile` | `ai\<profile>.txt`, else `ai\default.txt` | the computer player |
+
+**The schema** is chosen by difficulty through a preference list compared
+against each `[Schema N]`'s `type`, case-insensitively, first match winning
+(`0x43688B`-`0x436B88`): Easy gives Easy, Medium, Hard; Medium gives
+**Medium, Easy, Hard**; Hard gives **Hard, Medium, Easy**. The `N` and
+`SCHEMACOUNT` do not matter.
+
+### Progression
+
+- **At game end** `0x41DC20` records the result: `[g+0x391AB]` = the
+  mission's index and, in a 25-byte string `[g+0x391CF]`, `W` or `L` at that
+  index (`0x41DC81`-`0x41DC97`); untried missions are `U`.
+- **The endgame** (TOTALA-EXE-INTERFACE §104) adds for a campaign: a CD
+  check (`CDCHECK.GUI`); then, on a win with a `glamour`, the picture full
+  screen with `glamoursound` and "Click to continue." (state 6,
+  `0x41FDF8`); then ENDMSN.
+- **ENDMSN** continues when the campaign was lost or has a next mission
+  (`0x41F040`). Its `Missions` list prefixes each name with a status glyph
+  for `L`, `W` or `U` (`0x41EAA0`), and selects **the next mission after a
+  win and the same one after a loss** (`0x41F2D4`-`0x41F311`). **Any listed
+  mission can be started**: the win is not enforced. `Start` goes to that
+  mission's briefing (FE state 0xD); `Difficulty` can be changed here;
+  `LoadGame`, `SaveGame` and `MainMenu` do what they say. When it does not
+  continue, only `MainMenu` is shown.
+- **Progress is kept only in save games.** No registry key or file holds
+  it. A save's header carries `Campaign`, `Mission`, `Difficulty`, `Side` and
+  `Thumbs`, the 25-character string (`0x432869`). A save made from ENDMSN
+  is a header-only `BetweenMissions=1` save that records the **next**
+  mission (`0x432786`) and reloads to its briefing (`0x492A0A`-`0x492A96`).
+- **In-game Restart** reloads the same mission and goes straight back into
+  play, with no briefing **[inferred]** (`0x49970F`-`0x499794`).
+
+### The movies
+
+`0x426780(name)` plays `Data\<name>.zrb`, silently doing nothing when the
+file is missing:
+
+| Movie | When |
+|---|---|
+| `1.zrb` | the startup logo, every launch in full-screen mode |
+| `2.zrb` | the intro: first launch (registry `PlayMovie`) and the INTRO button |
+| `3.zrb` then `5.zrb` | **the Arm campaign completed**: the last mission (no `MISSION<n+1>`) won, `nomovie` 0, full screen, player 0 on side 0 (`0x41FC52`-`0x41FCA0`, FE state 4) |
+| `4.zrb` then `5.zrb` | **the Core campaign completed**, the same for side 1 (FE state 5) |
+| `5.zrb` | the credits: the main menu's `Credits` button, and after either ending |
+
+Nothing plays on defeat, and a completed campaign in windowed mode goes
+straight to the main menu. The shipped `nomovie=1` missions are the Core
+Contingency finales and the last Battle Tactics missions, so only the two
+original campaigns end on a film.

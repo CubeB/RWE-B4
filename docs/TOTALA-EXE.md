@@ -66,7 +66,7 @@ conversion, string reads at an address, pointer-table dumps) are in `tools/exe/`
 
 ## Index
 
-The 112 findings, numbered to 114: §83 and §84 do not exist, so the count is
+The 113 findings, numbered to 115: §83 and §84 do not exist, so the count is
 two short of the last number. The two to read before changing anything are
 **§88**, where RWE deliberately differs from the original on purpose, and
 **§91**, what is decoded but not ported; both are in this file, below.
@@ -186,6 +186,7 @@ Everything else lives in a subject file. **The numbers never move**, so a
 112. [`BUGGER_OFF` is write-only, and a blocked site only waits](TOTALA-EXE-ECONOMY.md#112-bugger_off-is-write-only-and-a-blocked-site-only-waits)
 113. [Mission rules at runtime: what each tests, how often, and how they combine](TOTALA-EXE-DATA.md#113-mission-rules-at-runtime-what-each-tests-how-often-and-how-they-combine)
 114. [A mission unit's scripted orders at runtime](TOTALA-EXE-DATA.md#114-a-mission-units-scripted-orders-at-runtime)
+115. [The campaign's screens, progression and ending movies](TOTALA-EXE-DATA.md#115-the-campaigns-screens-progression-and-ending-movies)
 
 ## 88. Where RWE deliberately differs
 
@@ -550,6 +551,10 @@ quirks of the original that RWE reproduces although they look like defects.
   InitialMission list's WAIT, WAITFORATTACK, ATTACKUTYPE, guard, transport
   start and MAKESELECTABLE, and the selectable bit that holds a scripted
   unit out of the player's hands and out of the computer AI's.
+- **The campaign's screens and progression** (§115) are decoded and not
+  ported: NEWGAME, the MSNBRIEF briefing, the glamour picture, ENDMSN's
+  mission list with its won/lost/untried marks, progress in save games only,
+  and `3.zrb`/`4.zrb` then `5.zrb` after winning a campaign's last mission.
 - TA's **Permanent** LOS mode has not been looked at.
 - **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not
   implemented; RWE always uses True.
