@@ -1617,11 +1617,12 @@ namespace rwe
             RWE_RENDERPROF("w.wake");
             wakeBatch.lines.clear();
             wakeBatch.triangles.clear();
-            for (const auto& particle : particles)
+            for (const auto& dot : wakeDots)
             {
-                drawWakeParticle(gameMediaDatabase, renderTime(), viewProjectionMatrix, particle, wakeBatch);
+                drawWakeDot(renderTime(), viewProjectionMatrix, dot, wakeBatch);
             }
             RWE_RENDERPROF_COUNT("n.particles", particles.size());
+            RWE_RENDERPROF_COUNT("n.wakedots", wakeDots.size());
             RWE_RENDERPROF_COUNT("n.waketri", wakeBatch.triangles.size());
             worldRenderService.drawBatch(wakeBatch, viewProjectionMatrix);
         }

@@ -839,6 +839,8 @@ namespace rwe
         std::unordered_set<int> playingUnitChannels;
 
         std::vector<Particle> particles;
+        /** Wake foam, apart from the particles; see WakeDot. */
+        std::vector<WakeDot> wakeDots;
 
         /** The explosion and wreck smoke still being emitted. Presentation only. */
         std::vector<SmokeEmitter> smokeEmitters;

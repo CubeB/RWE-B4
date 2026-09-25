@@ -3018,13 +3018,7 @@ namespace rwe
 
     void GameScene::spawnWake(const Vector3f& position, const Vector3f& velocity, GameTime duration, unsigned int rampPeriod, GameTime startTime, bool reverseRamp)
     {
-        Particle particle;
-        particle.position = position;
-        particle.velocity = velocity;
-        particle.renderType = ParticleRenderTypeWake{startTime + duration, rampPeriod, reverseRamp};
-        particle.startTime = startTime;
-
-        particles.push_back(particle);
+        wakeDots.push_back(spawnWakeDot(simulation.terrain, position, velocity, startTime, startTime + duration, rampPeriod, reverseRamp));
     }
 
     void GameScene::spawnNanoParticles()
