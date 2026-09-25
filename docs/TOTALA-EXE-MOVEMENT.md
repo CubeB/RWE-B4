@@ -135,8 +135,13 @@ the job rather than on the flight path.
   from the first port, and the attack run, which steers its own heading, now
   runs the brake step before that swing.
 - **Pitch.** The original also pitches aircraft via `PitchScale`
-  (`def+0x1A6`) into `unit+0x68`. RWE has no pitch for units at all and the
-  renderer applies only yaw and roll.
+  (`def+0x1A6`) into `unit+0x68`. **Ported 2026-09-24 (#24):**
+  `AirMovement::pitchAngle` is `0x43D1D5`'s arithmetic, the same lateral lean
+  the bank uses through `PitchScale`, and the renderer applies yaw, then
+  pitch about the side axis, then roll. Ground units tilt to the slope under
+  four rotated footprint corners (`computeGroundTilt`, the original's
+  `0x48A490`) unless `upright`, which is read from the FBI now. Both angles
+  are on the unit's physics state, hashed and saved.
 
   **This bullet said "from the longitudinal component of the same
   accumulator" until 2026-09-24, and that was wrong: pitch is taken from the
@@ -718,6 +723,16 @@ placement `0x48A870`. Set, the unit stays vertical and takes its height from a
 single sample under the centre; clear, `0x48A8CD` falls through to `0x48A938`
 and thence `0x48A490`, which samples four rotated footprint corners and writes
 `WORD unit+0x68` pitch and `WORD unit+0x64` roll from the slope.
+
+`0x48A490`'s arithmetic, for the record (2026-09-24, #24): each of the four
+corners is the definition's corner offset rotated to the unit's heading
+(`0x4B7173`) and sampled bilinearly within its 16-unit square
+(`0x48A5CB`-`0x48A5F5`), held up to sea level for a floater with a wave term
+folded in (`0x48A60C`-`0x48A716`); the unit's height is the mean of the four
+(`0x48A797`); `pitch = atan2(mean(corners 2, 3) - mean(corners 0, 1), |dz|)`
+(`0x48A7AE`) and `roll = atan2(corner 0 - corner 1, |dx|)` (`0x48A7D3`), the
+distances being the corner pairs' own separations. RWE's `computeGroundTilt`
+is the same shape with the footprint's half extents for the distances.
 
 `norestrict`'s four readers — `0x44C15F`, `0x44C4EA`, `0x44C73A`, `0x44CA59` —
 are all the Unit Restrictions screen, which skips definitions carrying the bit

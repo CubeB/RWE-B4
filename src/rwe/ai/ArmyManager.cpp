@@ -1074,7 +1074,8 @@ namespace rwe
                 ++gatheredAtHome;
             }
         }
-        auto reinforcementSize = std::max(2, profile.navalAttackFleetSize / 2);
+        // Capped at the sail threshold: a floor of 2 alone inverts the two thresholds at fleet size 1, so recall (2) sits above sail (1) and the state flips every pass.
+        auto reinforcementSize = std::min(profile.navalAttackFleetSize, std::max(2, profile.navalAttackFleetSize / 2));
         if (profile.navalAttackFleetSize <= 0)
         {
             bb.navalSortieActive = false;

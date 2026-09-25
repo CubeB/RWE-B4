@@ -366,6 +366,25 @@ namespace rwe
     SimScalar bombReleaseTrigger(const UnitDefinition& unitDefinition, SimScalar speed);
 
     /**
+     * The tilt of the ground under a footprint, the way the original's
+     * ground placement 0x48A490 measures it: four corners of the footprint
+     * rotated to the unit's heading, each sampled off the heightmap (and held
+     * up to sea level for a unit that floats), then
+     *
+     *   pitch = atan2(mean(front pair) - mean(back pair), length)
+     *   roll  = atan2(mean(right pair) - mean(left pair), width)
+     *
+     * in radians, pitch positive nose up, roll positive right side down.
+     * halfLength runs along the heading, halfWidth across it.
+     */
+    struct GroundTilt
+    {
+        SimScalar pitch;
+        SimScalar roll;
+    };
+    GroundTilt computeGroundTilt(const MapTerrain& terrain, const SimVector& position, SimAngle rotation, SimScalar halfLength, SimScalar halfWidth, bool holdAtSeaLevel);
+
+    /**
      * Pure state-machine step for an aircraft attack run. Given the unit's
      * current XZ position and heading, the resolved target XZ position, the
      * geometry of its attack pattern and the current run state, this advances

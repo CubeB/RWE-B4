@@ -257,6 +257,18 @@ namespace rwe
          * Rate at which the unit is travelling forwards in game units/tick.
          */
         SimScalar currentSpeed{0};
+
+        /**
+         * The tilt of the ground under the footprint, in radians: pitch
+         * positive nose up, roll positive right side down, as the original's
+         * placement writes unit+0x68 and unit+0x64 from four rotated corners
+         * (0x48A490). Zero for an `upright` unit. The previous values are
+         * for drawing between ticks.
+         */
+        SimScalar pitch{0_ss};
+        SimScalar roll{0_ss};
+        SimScalar previousPitch{0_ss};
+        SimScalar previousRoll{0_ss};
     };
 
     struct AirMovementStateFlying
@@ -493,6 +505,13 @@ namespace rwe
         SimScalar roll{0_ss};
         SimScalar previousRoll{0_ss};
         SimVector bankAccum{0_ss, 0_ss, 0_ss};
+
+        /**
+         * Pitch in radians, off the same lateral lean as the bank scaled by
+         * PitchScale instead of BankScale (0x43D1D5). Zero on shipped data.
+         */
+        SimScalar pitch{0_ss};
+        SimScalar previousPitch{0_ss};
     };
 
     using UnitPhysicsInfo = std::variant<UnitPhysicsInfoGround, UnitPhysicsInfoAir>;

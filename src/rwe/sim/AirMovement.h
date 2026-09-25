@@ -69,6 +69,12 @@ namespace rwe
          */
         static SimScalar bankAngle(const UnitState& unit, const UnitDefinition& unitDefinition, UnitPhysicsInfoAir& physics, const SimVector& deltaVelocity);
 
+        /** The original's attitude arithmetic shared by bank and pitch: atan2(-scale * lateral, g / (1 - lag)), wrapped to (-pi, pi]. */
+        static SimScalar attitudeAngle(SimScalar scale, SimScalar lateral, SimScalar gravityOverLagGain);
+
+        /** The pitch off the bank accumulator as it stands, scaled by PitchScale; call after bankAngle. */
+        static SimScalar pitchAngle(const UnitState& unit, const UnitDefinition& unitDefinition, const UnitPhysicsInfoAir& physics);
+
         /**
          * The per-tick air step: state plus intent, one tick later.
          *

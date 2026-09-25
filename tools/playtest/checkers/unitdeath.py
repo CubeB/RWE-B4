@@ -5,7 +5,9 @@ dying early and alone (D3).
 The engine's events CSV may carry three appended columns — ``deathCause``,
 ``killerType``, ``killerPlayer`` — from design §4 Phase 2. When present they
 ride along in each rule's evidence so a scan can say what actually killed the
-unit; they never change whether a rule fires.
+unit. D1 also uses them to set aside deaths that are already explained: an
+attributed killer, or a cause that is decay or a game-end wipe rather than a
+kill. The other rules ignore them.
 
 Thresholds come from ``thresholds.toml`` beside the checkers. TOML, not YAML:
 stdlib only, no PyYAML on the machines that run this.
@@ -24,6 +26,24 @@ EVENTS_NAME = "ai-arena-events.csv"
 # A file whose header lacks these is not an arena events table and is skipped
 # rather than misread.
 REQUIRED_EVENT_COLUMNS = ("category", "diedTick", "diedSeconds", "enemiesNear")
+
+# A death with one of these causes was not a kill: the unit decayed unfinished
+# at game end, was deliberately self-destructed (the game-end wipe), reclaimed,
+# or died with its transport. "Died alone" cannot be asked of them.
+EXPLAINED_DEATH_CAUSES = frozenset({
+    "unfinished", "self_destruct", "reclaimed", "carrier_died",
+})
+
+
+def _already_explained(row) -> bool:
+    # enemiesNear counts only canAttack units, so an enemy builder or
+    # nanoframe on the site is invisible to it; a killer column or a non-kill
+    # cause means the death is explained whatever that column says.
+    if (row.get("deathCause") or "").strip() in EXPLAINED_DEATH_CAUSES:
+        return True
+    return any(
+        (row.get(col) or "").strip() for col in ("killerPlayer", "killerType")
+    )
 
 
 def _thresholds(context) -> dict:
@@ -90,6 +110,7 @@ def rule_d1(events_path, rows: list, t: dict) -> list:
         if (row.get("category") or "") == "economy"
         and num(row, "diedTick") is not None
         and (num(row, "enemiesNear", 0.0) or 0.0) == 0
+        and not _already_explained(row)
     ]
     if len(dead) < base:
         return []
@@ -98,7 +119,8 @@ def rule_d1(events_path, rows: list, t: dict) -> list:
         checker="unitdeath",
         severity=severity,
         summary=(
-            f"D1: {len(dead)} economy death(s) with no armed enemy within 600 units"
+            f"D1: {len(dead)} economy death(s) with no armed enemy or "
+            f"attributed killer within 600 units"
         ),
         evidence={
             "file": str(events_path),

@@ -32,5 +32,7 @@ duration_s = 900
 seeds = [1, 2, 3, 4, 5, 6]
 players = [ { name = "A", side = "ARM", colour = 0, difficulty = "standard" },
             { name = "B", side = "CORE", colour = 1, difficulty = "standard" } ]
-# player index (as a string key) -> knob overrides, becomes --ai-tune 0:navalAggression=1.5
-tune = { "0" = { navalAggression = 1.5 } }
+# player index (as a string key) -> knob overrides, becomes --ai-tune 0:navalAttackFleetSize=1
+# How many hulls the fleet waits for before attacking (default 3, 0 = stay home); 1 is the aggressive end.
+# An invented knob name is fatal at startup and takes the whole tuned arm with it (issue #252).
+tune = { "0" = { navalAttackFleetSize = 1 } }

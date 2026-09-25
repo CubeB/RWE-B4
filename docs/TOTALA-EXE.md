@@ -506,6 +506,21 @@ quirks of the original that RWE reproduces although they look like defects.
   schedule was RWE's before and stays so, because changing it moves every
   reclaim's economy and wants its own pass with a play-test.
 
+- **A transport's capacity is read from the 1.0 key when the 3.1 one is
+  missing, and a transport that names neither still carries.** The 3.1 exe
+  reads `transportcapacity` and nothing else; `transportmaxunits`, the 1.0
+  key, is not in its string table (`TOTALA-EXE-DATA.md` §30), and a
+  transport with no `transportcapacity` parses as 0 and can never be ordered
+  to load (`TOTALA-EXE-TRANSPORTS.md` §32). On a patched install that never
+  arises, because `rev31.gp3` is searched before `totala1.hpi` and carries
+  `transportcapacity=20` for the Hulk. Without the patch data, `totala1.hpi`'s
+  `ARMTSHIP.FBI` says only `transportmaxunits=20`, and the faithful answer is
+  a sea transport that cannot load. RWE reads the old key when the new one is
+  absent, falls back to six for a ship and one for an aircraft when neither is
+  there, and writes a warning at load naming the unit either way
+  (`transportCapacityFromFbi`, `transportCapacityWarning`; #199). A file that
+  carries both keys reads the new one, as the original does.
+
 
 ## 91. Still unknown or unported
 

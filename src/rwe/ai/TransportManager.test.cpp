@@ -138,8 +138,10 @@ namespace rwe
 
         /**
          * ARMTSHIP "Hulk": 919 metal, 6x6, MinWaterDepth=12,
-         * transportsize=3, transportmaxunits=20 -- the verified shipped
-         * data, not an invented number.
+         * transportsize=3, transportcapacity=20 -- the verified shipped
+         * data from rev31.gp3, not an invented number. totala1.hpi's copy
+         * says transportmaxunits=20 instead, the 1.0 key; the loader reads
+         * that as the same 20 (transportCapacityFromFbi, issue #199).
          */
         void defineSeaTransport(GameSimulation& sim)
         {

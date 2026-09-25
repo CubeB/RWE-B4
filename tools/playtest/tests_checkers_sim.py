@@ -80,6 +80,23 @@ def write_events(path, events):
             )
 
 
+EVENTS_HEADER_EXT = EVENTS_HEADER + ["deathCause", "killerType", "killerPlayer"]
+
+
+def write_events_ext(path, events):
+    """``write_events`` for newer run roots, with the appended death-cause columns."""
+    with open(path, "w") as fh:
+        fh.write(",".join(EVENTS_HEADER_EXT) + "\n")
+        for event in events:
+            fh.write(
+                ",".join(
+                    "" if event.get(col) is None else str(event.get(col))
+                    for col in EVENTS_HEADER_EXT
+                )
+                + "\n"
+            )
+
+
 def event(player=0, unitType="ARMX", category="army", **overrides):
     row = {
         "player": player,
@@ -272,6 +289,51 @@ class UnitDeathTests(SimCheckerTestCase):
         self.copy(run_dir, "ai-arena-events.csv", "death-clean.csv")
         self.assertEqual(rules(unitdeath.check(run_dir), "D1:"), [])
 
+    def test_d1_attributed_killer_does_not_fire(self):
+        # An enemy builder or nanoframe on the extractor site cannot attack,
+        # so enemiesNear misses it, but the killer columns name the kill.
+        run_dir = self.make_dir()
+        write_events_ext(run_dir / "ai-arena-events.csv", [
+            event(0, "ARMMEX", "economy", diedTick=3000, diedSeconds=300,
+                  enemiesNear=0, killerType="CORROY", killerPlayer=3),
+        ])
+        self.assertEqual(rules(unitdeath.check(run_dir), "D1:"), [])
+
+    def test_d1_killer_type_alone_does_not_fire(self):
+        run_dir = self.make_dir()
+        write_events_ext(run_dir / "ai-arena-events.csv", [
+            event(1, "COREMEX", "economy", diedTick=3000, diedSeconds=300,
+                  enemiesNear=0, killerType="ARMPW"),
+        ])
+        self.assertEqual(rules(unitdeath.check(run_dir), "D1:"), [])
+
+    def test_d1_unfinished_decay_does_not_fire(self):
+        run_dir = self.make_dir()
+        write_events_ext(run_dir / "ai-arena-events.csv", [
+            event(0, "ARMMEX", "economy", diedTick=3000, diedSeconds=300,
+                  enemiesNear=0, deathCause="unfinished"),
+        ])
+        self.assertEqual(rules(unitdeath.check(run_dir), "D1:"), [])
+
+    def test_d1_self_destruct_does_not_fire(self):
+        run_dir = self.make_dir()
+        write_events_ext(run_dir / "ai-arena-events.csv", [
+            event(0, "ARMMEX", "economy", diedTick=3000, diedSeconds=300,
+                  enemiesNear=0, deathCause="self_destruct"),
+        ])
+        self.assertEqual(rules(unitdeath.check(run_dir), "D1:"), [])
+
+    def test_d1_alone_weapon_death_still_fires(self):
+        run_dir = self.make_dir()
+        write_events_ext(run_dir / "ai-arena-events.csv", [
+            event(0, "ARMMEX", "economy", diedTick=3000, diedSeconds=300,
+                  enemiesNear=0, deathCause="weapon"),
+        ])
+        found = rules(unitdeath.check(run_dir), "D1:")
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].severity, "suspicious")
+        self.assertEqual(found[0].evidence["count"], 1)
+
     def test_d2_five_detached_suspicious(self):
         run_dir = self.make_dir()
         self.copy(run_dir, "ai-arena-events.csv", "death-detached-army.csv")
@@ -364,6 +426,39 @@ class InvariantTests(SimCheckerTestCase):
         self.copy(run_dir, "ai-arena-events.csv", "inv-commander-dead-events.csv")
         self.write(run_dir, "game.log", result_line("decided", {0: 0, 1: 1}))
         self.assertEqual(rules(invariant.check(run_dir), "I3:"), [])
+
+    def test_commander_death_timeout_multiplayer_run_json_clean(self):
+        run_dir = self.make_dir()
+        self.copy(run_dir, "ai-arena-events.csv", "inv-commander-dead-events.csv")
+        self.write(run_dir, "game.log", result_line("timeout", {0: 0, 1: 1, 2: 1, 3: 1}))
+        self.write(run_dir, "run.json", json.dumps({
+            "schema": 1,
+            "players": [{"index": i} for i in range(4)],
+        }))
+        self.assertEqual(rules(invariant.check(run_dir), "I3:"), [])
+
+    def test_commander_death_timeout_multiplayer_events_fallback_clean(self):
+        run_dir = self.make_dir()
+        write_events(run_dir / "ai-arena-events.csv", [
+            event(0, "ARMCOM", "commander", diedTick=4000, diedSeconds=400,
+                  enemiesNear=2, nearestEnemyType="CORCOM"),
+            event(1, "COREMEX", "economy"),
+            event(2, "COREMEX", "economy"),
+        ])
+        self.write(run_dir, "game.log", result_line("timeout", {0: 0, 1: 1}))
+        self.assertEqual(rules(invariant.check(run_dir), "I3:"), [])
+
+    def test_commander_death_timeout_two_player_run_json_still_fires(self):
+        run_dir = self.make_dir()
+        self.copy(run_dir, "ai-arena-events.csv", "inv-commander-dead-events.csv")
+        self.write(run_dir, "game.log", result_line("timeout", {0: 0, 1: 1}))
+        self.write(run_dir, "run.json", json.dumps({
+            "schema": 1,
+            "players": [{"index": 0}, {"index": 1}],
+        }))
+        found = rules(invariant.check(run_dir), "I3:")
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].severity, "suspicious")
 
     def test_run_json_zero_suspicious(self):
         run_dir = self.make_dir()
