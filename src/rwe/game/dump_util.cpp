@@ -438,7 +438,10 @@ namespace rwe
             {"movementGoal", dumpJson(m.movementGoal)},
             {"pathDestination", dumpJson(m.pathDestination)},
             {"pathRequested", m.pathRequested},
-            {"reachableDestination", dumpJson(m.reachableDestination)}};
+            {"reachableDestination", dumpJson(m.reachableDestination)},
+            {"pathIsStandIn", m.pathIsStandIn},
+            {"wantsPath", m.wantsPath},
+            {"lastPathRequestTime", m.lastPathRequestTime ? nlohmann::json(m.lastPathRequestTime->value) : nlohmann::json(nullptr)}};
     }
 
     nlohmann::json dumpJson(const NavigationStateMovingToLandingSpot& m)

@@ -125,6 +125,15 @@ RWE rings outward from the goal for the nearest cell the unit could stand on and
 accepts arrival there. There is no game option for it; the `path_bench` harness
 takes `--no-relax-blocked` so the two can be measured against each other.
 
+**A repath is rate limited to once every 60 ticks, and a goal that only drifts
+keeps the route already in hand.** The rate limit is the original's (`WantsPath`,
+`0x44F260`); the original also keeps an old path whose tail already answers a new
+goal, where RWE keeps one while the new goal is within 64 world units of the one
+the route was built for — a tolerance RWE picked. A genuinely new order is never
+held back: it takes its straight-line stand-in on the tick it arrives. Without
+the limit a unit chasing a moving target re-asked every few ticks, and each ask
+threw away the search in flight.
+
 **A waypoint retires at sixteen world units rather than five.** Five is fine for
 a unit on its own and costs about a third of the arrivals in a crowd, because a
 waypoint is a cell centre and a unit two cells across cannot always get within

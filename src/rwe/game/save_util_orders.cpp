@@ -508,7 +508,10 @@ namespace rwe
                     {"pathDestination", savePathDestination(m.pathDestination)},
                     {"path", saveOptional(m.path, savePathFollowingInfo)},
                     {"pathRequested", m.pathRequested},
-                    {"reachableDestination", saveOptional(m.reachableDestination, saveSimVector)}};
+                    {"reachableDestination", saveOptional(m.reachableDestination, saveSimVector)},
+                    {"pathIsStandIn", m.pathIsStandIn},
+                    {"wantsPath", m.wantsPath},
+                    {"lastPathRequestTime", saveOptional(m.lastPathRequestTime, [](GameTime t) { return saveGameTime(t); })}};
             },
             [](const NavigationStateMovingToLandingSpot& m) {
                 return json{
@@ -531,7 +534,14 @@ namespace rwe
                 loadPathDestination(j.at("pathDestination")),
                 loadOptional(j.at("path"), loadPathFollowingInfo),
                 j.at("pathRequested").get<bool>(),
-                loadOptional(j.at("reachableDestination"), loadSimVector)};
+                loadOptional(j.at("reachableDestination"), loadSimVector),
+                // The unit field table's mayBeMissing walk does not reach into
+                // this nested object, so a save written before the repath limit
+                // carries none of these and must fall back to the old
+                // behaviour rather than throwing on j.at.
+                j.value("pathIsStandIn", false),
+                j.value("wantsPath", false),
+                j.contains("lastPathRequestTime") ? loadOptional(j.at("lastPathRequestTime"), loadGameTime) : std::optional<GameTime>{}};
         }
         if (kind == "movingToLandingSpot")
         {

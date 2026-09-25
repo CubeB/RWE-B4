@@ -1119,6 +1119,7 @@ set(TEST_FILES
     src/rwe/pathfinding/pathing.test.cpp
     src/rwe/pathfinding/BugWalk.test.cpp
     src/rwe/pathfinding/walkwhilewaiting.test.cpp
+    src/rwe/pathfinding/pathrequestlimit.test.cpp
     src/rwe/sim/economy.test.cpp
     src/rwe/sim/ResourceSettler.test.cpp
     src/rwe/sim/visibility.test.cpp

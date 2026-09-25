@@ -524,6 +524,40 @@ quirks of the original that RWE reproduces although they look like defects.
   schedule was RWE's before and stays so, because changing it moves every
   reclaim's economy and wants its own pass with a play-test.
 
+- **A repath is rate limited to once every 60 ticks, and a goal that only
+  drifts keeps the route already in hand.** The limit is the original's
+  (`WantsPath`, `0x44F260`, §87) and had not been ported: RWE re-asked on
+  every trigger, which in a fight was constant -- over one Crystal Maze game
+  the median gap between two of a unit's searches was 30 ticks and three
+  quarters were under 60. Each re-ask threw away the search in flight, and
+  `expansionsAbandoned` was 8.5% of every expansion the game spent. It is
+  ported now, at one ask per unit per 60 ticks, through a single rate-limited
+  site.
+
+  The distance is RWE's: where the original's `SetGoal` ladder keeps an old
+  path whose tail already answers the new goal, RWE keeps one while the new
+  goal is within `PathGoalRetargetTolerance`, **64 world units**, of the one
+  the route was built for. That number is chosen to sit well outside the
+  eight units an attack's stand-off point drifts by when it follows a target,
+  and to be far short of the distances a new order is given over, so a new
+  order still takes its straight-line stand-in on the tick it arrives.
+
+  Measured on Crystal Maze seeds 7 and 8, tick for tick over the window both
+  games reach -- the change ends a game at a different tick, so whole-run
+  totals are not comparable -- searches per tick fall by a third to a half,
+  expansions per tick by about a third, the first-pass walk steps by about a
+  third, and `expansionsAbandoned` by 86-95%. The saving is in the throwaway
+  searches and the stand-in walk. Since #272 counts the terrain-region
+  early-out apart from exhausted searches, the expensive A\* `exhausted` tail
+  is roughly flat, and a third to a half of the figure the issue read as that
+  tail was the cheap early-out, which spends no expansions. The `path_bench`
+  scenarios that do not repath (`spread`, `crowd`) keep identical pathfinder
+  counters, though their hashes move because the new fields are hashed;
+  `pressed-water` and `pressed-wall` do repath and show the reduced counts
+  too. Recorded here because the tolerance and the queue in place of the
+  original's round robin are RWE's, and because the change is
+  replay-breaking.
+
 - **A transport's capacity is read from the 1.0 key when the 3.1 one is
   missing, and a transport that names neither still carries.** The 3.1 exe
   reads `transportcapacity` and nothing else; `transportmaxunits`, the 1.0

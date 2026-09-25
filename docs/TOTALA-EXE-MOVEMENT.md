@@ -949,6 +949,31 @@ searches to a hundred separate points, picked up in slot order. Fairness comes
 from the rotation, so a saturated original produces worse paths rather than a
 growing backlog.
 
+**The 60-tick rate limit is ported, as of 2026-09-25.** RWE kept a queue
+instead of the round robin and re-asked on every trigger with no limit at all,
+and in a fight that was constant: over one Crystal Maze game the median gap
+between two of one unit's searches was 30 ticks and three quarters were under
+60. Each re-ask threw away the search already in flight -- `expansionsAbandoned`
+was 8.5% of every expansion the game spent -- and the first-pass walk was run
+over and over for goals re-asked about anyway. `NavigationStateMoving` carries
+the tick of the unit's last request now, and its four repath triggers all go
+through one rate-limited ask. A goal that has moved less than
+`PathGoalRetargetTolerance` (64 world units, RWE's number) from the one the
+route was built for keeps that route while it waits, which is the same idea as
+`SetGoal`'s ladder -- keep a path whose tail already answers the new goal -- at
+a distance RWE picked rather than one the original states. On Crystal Maze
+seeds 7 and 8, compared tick for tick over the window both games reach (the
+change ends a game at a different tick, so whole-run totals are not
+comparable), this cuts searches per tick by a third to a half, expansions and
+the first-pass walk per tick by about a third each, and `expansionsAbandoned`
+by 86-95%. Since #272 counts the terrain-region early-out apart from exhausted
+searches, the expensive A\* tail is roughly flat: a third to a half of what
+the issue called `exhausted` is that cheap early-out, which spends no
+expansions. The `path_bench` `spread` and `crowd` scenarios keep identical
+pathfinder counters, though their hashes move because the new fields are
+hashed; `pressed-water` and `pressed-wall` do repath and show the reduced
+counts too.
+
 Repathing has exactly three triggers (`0x44F239`): a new or changed goal, the
 path running down to fewer than two waypoints, and the mover's "blocked" bit.
 
@@ -1053,8 +1078,9 @@ make neither measurable.
 Still not ported: the adaptive heuristic weight (it would have to be hashed
 simulation state, since RWE is lockstep and the original is not), the
 restricted successor fan, the turn and straight-run costs, unexplored ground
-reading as free, the 60-tick per-unit cooldown, and the 20-waypoint clamp. RWE
-keeps an admissible octile heuristic and an eight-way fan.
+reading as free, and the 20-waypoint clamp. RWE keeps an admissible octile
+heuristic and an eight-way fan. The 60-tick per-unit cooldown used to be on
+this list; it is in now, described under Requests above.
 
 **And a warning about the benchmark, found while measuring this.**
 `path_bench`'s obstacles were an immobile unit definition with no yard map,

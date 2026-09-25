@@ -74,6 +74,44 @@ namespace rwe
          */
         const SimScalar AttackApproachDriftTolerance = 8_ss;
 
+        /**
+         * The original's per-unit repath rate limit, in ticks: a navigator is
+         * polled for "wants a path" at most once every 60 (`WantsPath`,
+         * 0x44F260; TOTALA-EXE-MOVEMENT.md S:87). RWE had no limit, and a
+         * unit chasing a moving target re-asked every few ticks -- measured on
+         * Crystal Maze at a median of 30 ticks between searches for one unit,
+         * three quarters of them under 60. Each re-ask threw away the search
+         * already in flight, and a thrown-away search is a whole component's
+         * worth of expansions that bought nothing. See groundUnitMoveTo.
+         */
+        constexpr unsigned int PathRequestCooldownTicks = 60;
+
+        /**
+         * How close two resolved destinations have to be before a changed goal
+         * is treated as the same goal drifting -- an attacker's stand-off
+         * point following its target -- rather than a new order. A unit that
+         * already has a route keeps walking it while it waits out the rate
+         * limit; a goal genuinely somewhere else gets the stand-in at once, so
+         * a new order is never ignored.
+         */
+        const SimScalar PathGoalRetargetTolerance = 64_ss;
+
+        /** Whether two resolved destinations name the same place, near enough. */
+        bool destinationsAreClose(const PathDestination& a, const PathDestination& b)
+        {
+            const auto* va = std::get_if<SimVector>(&a);
+            const auto* vb = std::get_if<SimVector>(&b);
+            if (va == nullptr || vb == nullptr)
+            {
+                // Anything that is not two points -- a footprint goal, or a
+                // mix of kinds -- is a new order and never a drift.
+                return false;
+            }
+            auto dx = va->x - vb->x;
+            auto dz = va->z - vb->z;
+            return (dx * dx) + (dz * dz) <= (PathGoalRetargetTolerance * PathGoalRetargetTolerance);
+        }
+
         SimVector airVelocity(const AirMovementState& state)
         {
             return AirMovement::airVelocity(state);
@@ -5032,53 +5070,77 @@ namespace rwe
 
         if (!movingState || movingState->movementGoal != goal)
         {
-            // Walk at it in a straight line for now, and ask for a route.
-            //
-            // The original does exactly this and it matters more than
-            // anything else about its pathfinder: 0x44F3F2 stores a two-point
-            // path -- where the unit is standing, then the goal -- sets the
-            // "I have a path" flag alongside the "I want a path" one, and the
-            // unit is moving on the tick the order was given. The real route
-            // overwrites it whenever the search gets round to that unit.
-            //
-            // Without it a unit does nothing at all until its search
-            // completes, and with four hundred a side that is seconds of an
-            // army standing still. It also makes a truncated or slow path a
-            // matter of walking an inelegant line rather than not walking.
-            auto destination = resolvePathDestination(*unitInfo.state, goal);
-            UnitPath straightLine;
-            // Two points, where the unit is standing and then the goal, which
-            // is what 0x44F3F2 writes. The first is the segment the follower
-            // steers along; it costs nothing on a straight run and is there
-            // for the tick the unit stops being on the line.
-            straightLine.waypoints.push_back(unitInfo.state->position);
-            straightLine.waypoints.push_back(match(
-                destination,
-                [&](const SimVector& v) { return v; },
-                [&](const DiscreteRect& r) {
-                    // The same centre PathFindingService aims at for a rect
-                    // destination, so the stand-in heads where the route will.
-                    auto corner = sim->terrain.heightmapIndexToWorldCorner(r.x, r.y);
-                    auto halfWidth = (SimScalar(r.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss;
-                    auto halfHeight = (SimScalar(r.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss;
-                    auto center = corner + SimVector(halfWidth, 0_ss, halfHeight);
-                    center.y = sim->terrain.getHeightAt(center.x, center.z);
-                    return center;
-                }));
+            if (movingState && movingState->pathRequested)
+            {
+                // A search for this unit is already in flight. Let it land:
+                // the goal has only just moved, and throwing the search away
+                // buys a whole component's worth of expansions and nothing
+                // else. The new goal is in desiredDestination already, so this
+                // branch is entered again on the tick the search completes.
+            }
+            else
+            {
+                auto destination = resolvePathDestination(*unitInfo.state, goal);
+                auto previousRequestTime = movingState ? movingState->lastPathRequestTime : std::nullopt;
 
-            unitInfo.state->navigationState.state = NavigationStateMoving{
-                goal,
-                destination,
-                PathFollowingInfo(std::move(straightLine), sim->gameTime),
-                true};
-            sim->requestPath(unitInfo.id);
+                if (movingState && movingState->path && !movingState->pathIsStandIn
+                    && destinationsAreClose(destination, movingState->pathDestination))
+                {
+                    // Same goal drifting: keep the route in hand and let the
+                    // rate-limited request below fetch a fresher one.
+                    movingState->movementGoal = goal;
+                    movingState->wantsPath = true;
+                }
+                else
+                {
+                    // Walk at it in a straight line for now, and ask for a route.
+                    //
+                    // The original does exactly this and it matters more than
+                    // anything else about its pathfinder: 0x44F3F2 stores a
+                    // two-point path -- where the unit is standing, then the
+                    // goal -- sets the "I have a path" flag alongside the "I
+                    // want a path" one, and the unit is moving on the tick the
+                    // order was given. The real route overwrites it whenever
+                    // the search gets round to that unit.
+                    //
+                    // Without it a unit does nothing at all until its search
+                    // completes, and with four hundred a side that is seconds
+                    // of an army standing still. It also makes a truncated or
+                    // slow path a matter of walking an inelegant line rather
+                    // than not walking.
+                    UnitPath straightLine;
+                    // Two points, where the unit is standing and then the goal,
+                    // which is what 0x44F3F2 writes. The first is the segment
+                    // the follower steers along; it costs nothing on a straight
+                    // run and is there for the tick the unit stops being on the
+                    // line.
+                    straightLine.waypoints.push_back(unitInfo.state->position);
+                    straightLine.waypoints.push_back(match(
+                        destination,
+                        [&](const SimVector& v) { return v; },
+                        [&](const DiscreteRect& r) {
+                            // The same centre PathFindingService aims at for a
+                            // rect destination, so the stand-in heads where the
+                            // route will.
+                            auto corner = sim->terrain.heightmapIndexToWorldCorner(r.x, r.y);
+                            auto halfWidth = (SimScalar(r.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss;
+                            auto halfHeight = (SimScalar(r.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss;
+                            auto center = corner + SimVector(halfWidth, 0_ss, halfHeight);
+                            center.y = sim->terrain.getHeightAt(center.x, center.z);
+                            return center;
+                        }));
 
-            // And walk it now, not next tick. Mover::Update calls
-            // Navigator::Update and then the follower (0x43DD28), so a unit
-            // whose goal was set this frame is already moving when the frame
-            // ends. Falling through rather than returning is what makes the
-            // stand-in worth having on the tick the order arrives.
-            movingState = std::get_if<NavigationStateMoving>(&unitInfo.state->navigationState.state);
+                    unitInfo.state->navigationState.state = NavigationStateMoving{
+                        goal,
+                        destination,
+                        PathFollowingInfo(std::move(straightLine), sim->gameTime),
+                        false};
+                    movingState = std::get_if<NavigationStateMoving>(&unitInfo.state->navigationState.state);
+                    movingState->pathIsStandIn = true;
+                    movingState->wantsPath = true;
+                    movingState->lastPathRequestTime = previousRequestTime;
+                }
+            }
         }
         else
         {
@@ -5090,19 +5152,43 @@ namespace rwe
                 // i.e. we don't need to throw away our previous path,
                 // we can still continue following it
                 // while we wait for a new path to be computed.
-                movingState->pathDestination = resolvedDestination;
-                sim->requestPath(unitInfo.id);
-                movingState->pathRequested = true;
+                //
+                // pathDestination only advances here when nothing is in
+                // flight: moving it under a search is what gets that search
+                // thrown away the next time it is resumed.
+                if (!movingState->pathRequested)
+                {
+                    movingState->pathDestination = resolvedDestination;
+                }
+                movingState->wantsPath = true;
             }
 
             if (unitInfo.state->inCollision && !movingState->pathRequested)
             {
                 if (!movingState->path || (sim->gameTime - movingState->path->pathCreationTime) >= GameTime(30))
                 {
-                    sim->requestPath(unitInfo.id);
-                    movingState->pathRequested = true;
+                    movingState->wantsPath = true;
                 }
             }
+        }
+
+        // The one place a path is asked for, and so the one place the rate
+        // limit has to be applied. A unit still on the stand-in has not been
+        // served yet and wants one the moment the limit lets it ask again,
+        // which is what makes the limit a delay rather than a lost request.
+        if (movingState->pathIsStandIn)
+        {
+            movingState->wantsPath = true;
+        }
+        if (movingState->wantsPath && !movingState->pathRequested
+            && (!movingState->lastPathRequestTime
+                || (sim->gameTime - *movingState->lastPathRequestTime) >= GameTime(PathRequestCooldownTicks)))
+        {
+            movingState->pathDestination = resolvePathDestination(*unitInfo.state, movingState->movementGoal);
+            sim->requestPath(unitInfo.id);
+            movingState->pathRequested = true;
+            movingState->wantsPath = false;
+            movingState->lastPathRequestTime = sim->gameTime;
         }
 
         if (movingState->path)
@@ -5117,11 +5203,11 @@ namespace rwe
                 // We finished following the path.
                 // This doesn't necessarily mean we are at the goal.
                 // The path might have been a partial path.
-                // Request a new path to get us the rest of the way there.
+                // Ask for a new path to get us the rest of the way there,
+                // through the same rate limit as everything else.
                 if (!movingState->path || (sim->gameTime - movingState->path->pathCreationTime) >= GameTime(30))
                 {
-                    sim->requestPath(unitInfo.id);
-                    movingState->pathRequested = true;
+                    movingState->wantsPath = true;
                 }
             }
         }

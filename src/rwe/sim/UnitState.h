@@ -160,6 +160,31 @@ namespace rwe
          * which then counts as the destination for arrival purposes.
          */
         std::optional<SimVector> reachableDestination{};
+
+        /**
+         * Whether `path` is the two-point straight-line stand-in the navigator
+         * installs on a new goal rather than the answer to a search. A unit on
+         * one has not been served yet, so it is the one that keeps asking --
+         * see UnitBehaviorService::groundUnitMoveTo.
+         */
+        bool pathIsStandIn{false};
+
+        /**
+         * Whether the unit wants a path it has not been able to ask for yet,
+         * because the request rate limit was still running. It has to be
+         * saved and hashed like the rest of the state: it decides on which
+         * tick the unit asks, and so where it ends up.
+         */
+        bool wantsPath{false};
+
+        /**
+         * The tick of this unit's last path request. The original polls a
+         * navigator for "wants a path" at most once every 60 ticks
+         * (`WantsPath`, 0x44F260; TOTALA-EXE-MOVEMENT.md S:87), and a unit
+         * chasing a moving target re-queued a search every few ticks without
+         * it. Empty means the unit has never asked, which is not limited.
+         */
+        std::optional<GameTime> lastPathRequestTime{};
     };
 
     struct NavigationStateMovingToLandingSpot
