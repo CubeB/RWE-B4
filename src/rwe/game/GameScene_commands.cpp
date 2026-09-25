@@ -121,9 +121,10 @@ namespace rwe
         float fx;
         float fy;
         sceneContext.sdl->getMouseState(&fx, &fy);
-        // Window pixels to frame pixels; see GlobalConfig::screenScale.
-        auto scale = static_cast<float>(std::max(1u, sceneContext.globalConfig->screenScale));
-        return Point(static_cast<int>(fx / scale), static_cast<int>(fy / scale));
+        // SDL reports the mouse in logical points; the scene is in frame
+        // pixels, frameDensity per point. See SceneManager::frameDensity.
+        auto density = sceneContext.sceneManager->frameDensity();
+        return Point(static_cast<int>(fx * density), static_cast<int>(fy * density));
     }
 
     std::optional<UnitId> GameScene::getFirstCollidingUnit(const Ray3f& ray) const

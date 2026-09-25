@@ -23,6 +23,25 @@ namespace rwe
                 return std::nullopt;
         }
     }
+    float frameDensityFor(float displayScale, unsigned int pixelSize)
+    {
+        auto clampedPixelSize = std::max(1u, pixelSize);
+        return displayScale / static_cast<float>(clampedPixelSize);
+    }
+
+    void SceneManager::refreshWindowMetrics()
+    {
+        displayScale = sdl->getWindowDisplayScale(window);
+        if (!(displayScale > 0.0f))
+        {
+            displayScale = 1.0f;
+        }
+        sdl->getWindowSize(window, &logicalWidth, &logicalHeight);
+        sdl->getWindowSizeInPixels(window, &outputWidth, &outputHeight);
+        viewport->setDimensions(outputWidth / static_cast<int>(pixelSize), outputHeight / static_cast<int>(pixelSize));
+        cursorService->setFrameDensity(frameDensity());
+    }
+
     SceneManager::SceneManager(
         SdlContext* sdl,
         SDL_Window* window,
@@ -46,14 +65,12 @@ namespace rwe
           viewport(viewport),
           requestedExit(false)
     {
-        // At a scale above 1 the scenes see a viewport of the window's size
-        // divided by the scale, draw into a buffer of that size, and the
+        // At a pixel size above 1 the scenes see a viewport of the output
+        // pixels divided by it, draw into a buffer of that size, and the
         // buffer is blown up onto the window at the end of the frame. The
         // mouse is mapped back through the same factor on the way in.
-        screenScale = std::clamp(globalConfig->screenScale, 1u, 4u);
-        sdl->getWindowSize(window, &windowWidth, &windowHeight);
-        viewport->setDimensions(windowWidth / static_cast<int>(screenScale), windowHeight / static_cast<int>(screenScale));
-        cursorService->setScreenScale(screenScale);
+        pixelSize = std::clamp(globalConfig->pixelSize, 1u, 4u);
+        refreshWindowMetrics();
     }
 
     void SceneManager::setNextScene(std::shared_ptr<Scene> scene)
@@ -61,7 +78,7 @@ namespace rwe
         nextScene = std::move(scene);
     }
 
-    void dispatchToScene(const SDL_Event& event, Scene& currentScene, float screenScale)
+    void dispatchToScene(const SDL_Event& event, Scene& currentScene, float frameDensity)
     {
         switch (event.type)
         {
@@ -84,7 +101,7 @@ namespace rwe
                     break;
                 }
 
-                MouseButtonEvent e(static_cast<int>(event.button.x / screenScale), static_cast<int>(event.button.y / screenScale), *button);
+                MouseButtonEvent e(static_cast<int>(event.button.x * frameDensity), static_cast<int>(event.button.y * frameDensity), *button);
                 currentScene.onMouseDown(e);
                 break;
             }
@@ -96,13 +113,13 @@ namespace rwe
                     break;
                 }
 
-                MouseButtonEvent e(static_cast<int>(event.button.x / screenScale), static_cast<int>(event.button.y / screenScale), *button);
+                MouseButtonEvent e(static_cast<int>(event.button.x * frameDensity), static_cast<int>(event.button.y * frameDensity), *button);
                 currentScene.onMouseUp(e);
                 break;
             }
             case SDL_EVENT_MOUSE_MOTION:
             {
-                MouseMoveEvent e(static_cast<int>(event.motion.x / screenScale), static_cast<int>(event.motion.y / screenScale));
+                MouseMoveEvent e(static_cast<int>(event.motion.x * frameDensity), static_cast<int>(event.motion.y * frameDensity));
                 currentScene.onMouseMove(e);
                 break;
             }
@@ -175,11 +192,9 @@ namespace rwe
                     return;
                 }
 
-                if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED && event.window.windowID == sdl->getWindowId(window))
+                if ((event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || event.type == SDL_EVENT_WINDOW_RESIZED) && event.window.windowID == sdl->getWindowId(window))
                 {
-                    windowWidth = event.window.data1;
-                    windowHeight = event.window.data2;
-                    viewport->setDimensions(windowWidth / static_cast<int>(screenScale), windowHeight / static_cast<int>(screenScale));
+                    refreshWindowMetrics();
                     // The GL viewport does not follow the window by itself,
                     // and only the game scene ever sets it per frame -- the
                     // menu and the movie player draw through the default one,
@@ -189,7 +204,16 @@ namespace rwe
                     continue;
                 }
 
-                dispatchToScene(event, *currentScene, static_cast<float>(screenScale));
+                // A move between monitors of different density changes the
+                // display scale without necessarily changing the pixel size,
+                // so the density and the frame have to be re-derived here.
+                if (event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED && event.window.windowID == sdl->getWindowId(window))
+                {
+                    refreshWindowMetrics();
+                    continue;
+                }
+
+                dispatchToScene(event, *currentScene, frameDensity());
             }
 
             if (!headless)
@@ -224,7 +248,7 @@ namespace rwe
             imGuiContext->render();
 
             setCrashPhase(CrashPhase::Render);
-            if (screenScale > 1)
+            if (pixelSize > 1)
             {
                 // The frame goes into a buffer of the scaled size. Scenes
                 // that bind buffers of their own unbind back to it rather
@@ -256,7 +280,7 @@ namespace rwe
                 cursorService->render(uiRenderService);
             }
 
-            if (screenScale > 1)
+            if (pixelSize > 1)
             {
                 // Nearest-neighbour, so at a whole-number scale every game
                 // pixel is a square block of screen pixels. The world's own
@@ -264,8 +288,8 @@ namespace rwe
                 // the frame, before this, as the original's own pixels
                 // would have been before a monitor stretched them.
                 graphics->setPresentationFrameBuffer(std::nullopt);
-                graphics->blitFrameBufferToWindow(presentationBuffer->frameBuffer.get(), presentationBufferWidth, presentationBufferHeight, windowWidth, windowHeight);
-                graphics->setViewport(0, 0, windowWidth, windowHeight);
+                graphics->blitFrameBufferToWindow(presentationBuffer->frameBuffer.get(), presentationBufferWidth, presentationBufferHeight, outputWidth, outputHeight);
+                graphics->setViewport(0, 0, outputWidth, outputHeight);
             }
 
             // Taken here, after the scene and the cursor and before the debug
@@ -279,7 +303,7 @@ namespace rwe
                 screenshotRequested = false;
                 if (auto dataPath = getLocalDataPath())
                 {
-                    auto written = saveScreenshot(*dataPath / "screenshots", static_cast<unsigned int>(windowWidth), static_cast<unsigned int>(windowHeight));
+                    auto written = saveScreenshot(*dataPath / "screenshots", static_cast<unsigned int>(outputWidth), static_cast<unsigned int>(outputHeight));
                     if (written)
                     {
                         LOG_INFO << "Screenshot saved to " << written->string();

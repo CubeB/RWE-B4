@@ -174,7 +174,7 @@ int main(int argc, char* argv[])
             config.musicEnabled = args.getString("music", "true") != "false";
             config.shadows = args.getString("shadows", "true") != "false";
             config.vehicleShadows = args.getString("vehicle-shadows", "true") != "false";
-            config.screenScale = std::clamp(args.getUint("screen-scale", 1), 1u, 4u);
+            config.pixelSize = std::clamp(args.getUint("pixel-size", args.getUint("screen-scale", 1)), 1u, 4u);
             config.scrollSpeed = std::clamp(args.getUint("scroll-speed", 100), 25u, 200u);
             config.cameraZoom = std::clamp(args.getUint("camera-zoom", 100), 50u, 200u);
             config.dropTimeoutSeconds = std::min(600u, args.getUint("drop-timeout", 10));

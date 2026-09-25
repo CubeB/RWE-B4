@@ -14,7 +14,7 @@ namespace rwe
 
     float GameCameraState::scaleDimension(float dimension) const
     {
-        return dimension / zoom;
+        return dimension / (zoom * density);
     }
 
     float advanceCameraZoom(float current, float target, unsigned int millisecondsElapsed)

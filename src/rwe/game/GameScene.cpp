@@ -519,6 +519,10 @@ namespace rwe
         // before the constraint so it is computed against the current extent.
         worldCameraState.zoom = advanceCameraZoom(worldCameraState.zoom, static_cast<float>(cameraZoomSetting) / 100.0f, millisecondsElapsed);
 
+        // A monitor move can change the density mid-game, so re-read it each
+        // frame and let the constraint below follow it live.
+        worldCameraState.density = sceneContext.sceneManager->frameDensity();
+
         auto cameraConstraint = computeCameraConstraint(simulation.terrain, worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()));
 
         // update camera position from keyboard arrows

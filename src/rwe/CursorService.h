@@ -64,10 +64,14 @@ namespace rwe
 
         void render(UiRenderService& renderer) const;
 
-        /** See GlobalConfig::screenScale: the mouse is in window pixels, the frame is not. */
-        void setScreenScale(unsigned int scale);
+        /**
+         * See SceneManager::frameDensity: SDL reports the mouse in logical
+         * points, and the frame the cursor is drawn into is frameDensity
+         * frame pixels per point.
+         */
+        void setFrameDensity(float density);
 
     private:
-        unsigned int screenScale{1};
+        float frameDensity{1.0f};
     };
 }

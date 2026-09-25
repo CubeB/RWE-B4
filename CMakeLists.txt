@@ -1026,6 +1026,7 @@ set(TEST_FILES
     src/rwe/io/tad/tad_writer.test.cpp
     src/rwe/io/pcx/pcx.test.cpp
     src/rwe/io/malformed_input.test.cpp
+    src/rwe/scene/SceneManager.test.cpp
     src/rwe/scene/Screenshot.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp
     src/rwe/io/fbi/transportcapacity.test.cpp

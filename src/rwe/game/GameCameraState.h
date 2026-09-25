@@ -5,7 +5,16 @@ namespace rwe
 {
     struct GameCameraState
     {
+        /** Visible extent as a reciprocal: larger zoom shows less world. */
         float zoom{1.0f};
+
+        /**
+         * Frame pixels per logical point, from SceneManager::frameDensity.
+         * Folding it into scaleDimension keeps physical parity: with zoom
+         * fixed, a sharper display spans the same world extent in logical
+         * points rather than showing more battlefield.
+         */
+        float density{1.0f};
         Vector3f position{0.0f, 0.0f, 0.0f};
 
         Vector3f getRoundedPosition() const;

@@ -13,6 +13,14 @@
 
 namespace rwe
 {
+    /**
+     * Frame pixels per logical point: the display's output pixels per point
+     * divided by the retro pixel size. pixelSize is clamped to at least 1.
+     * Mouse coordinates from SDL are in logical points, so scene/frame
+     * coordinates are the point times this.
+     */
+    float frameDensityFor(float displayScale, unsigned int pixelSize);
+
     class SceneManager
     {
     private:
@@ -45,14 +53,18 @@ namespace rwe
         bool screenshotRequested{false};
 
         /**
-         * GlobalConfig::screenScale, and what it needs: the window's own
-         * size in pixels, which the viewport the scenes read no longer
-         * holds at a scale above 1, and the buffer the frame is drawn into
-         * before it is blown up onto the window.
+         * GlobalConfig::pixelSize, the display's own output scale, and what
+         * they need: the window in logical points and in output pixels, the
+         * frame the scenes render at (output pixels / pixelSize), and the
+         * buffer that frame is drawn into before it is blown up onto the
+         * window.
          */
-        unsigned int screenScale{1};
-        int windowWidth{0};
-        int windowHeight{0};
+        unsigned int pixelSize{1};
+        float displayScale{1.0f};
+        int outputWidth{0};
+        int outputHeight{0};
+        int logicalWidth{0};
+        int logicalHeight{0};
         std::optional<FrameBufferInfo> presentationBuffer;
         int presentationBufferWidth{0};
         int presentationBufferHeight{0};
@@ -80,7 +92,17 @@ namespace rwe
          */
         void setWindowMode(const std::string& mode);
 
+        /**
+         * Frame pixels per logical point. Scenes fold this into the world
+         * projection so a sharper display shows the same battlefield rather
+         * than more of it, and use it to map mouse points into the frame.
+         */
+        float frameDensity() const { return frameDensityFor(displayScale, pixelSize); }
+
     private:
         void renderDebugWindow();
+
+        /** Re-derives the display scale, both window sizes, the frame viewport and the cursor density. */
+        void refreshWindowMetrics();
     };
 }

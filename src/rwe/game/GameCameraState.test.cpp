@@ -21,6 +21,20 @@ namespace rwe
         REQUIRE(camera.scaleDimension(100.0f) == Catch::Approx(50.0f));
     }
 
+    TEST_CASE("GameCameraState::scaleDimension folds in display density")
+    {
+        GameCameraState camera;
+        camera.zoom = 1.0f;
+        camera.density = 2.0f;
+        REQUIRE(camera.scaleDimension(100.0f) == Catch::Approx(50.0f));
+
+        // Parity: at a fixed zoom the world extent in logical points does not
+        // depend on the density, because the frame and the divisor scale
+        // together.
+        camera.zoom = 0.5f;
+        REQUIRE(camera.scaleDimension(100.0f) == Catch::Approx(100.0f));
+    }
+
     TEST_CASE("camera projection round trip")
     {
         const int width = 1280;

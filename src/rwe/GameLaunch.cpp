@@ -1,3 +1,4 @@
+#include <cmath>
 #include <filesystem>
 #include <glad/gl.h>
 #include <iostream>
@@ -153,7 +154,7 @@ namespace rwe
             throw std::runtime_error(SDL_GetError());
         }
 
-        Uint32 windowFlags = SDL_WINDOW_OPENGL;
+        Uint32 windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_HIGH_PIXEL_DENSITY;
         switch (windowMode)
         {
             case WindowMode::Bordered:
@@ -196,7 +197,18 @@ namespace rwe
                 throw std::runtime_error(SDL_GetError());
             }
 
-            if (!sdlContext->getClosestDisplayMode(displayID, desiredWindowWidth, desiredWindowHeight, 0.0f, &targetMode))
+            // The desired size is in logical points, but a display mode is
+            // in pixels, so ask for what the window would occupy on this
+            // display at its own density.
+            auto displayScale = sdlContext->getWindowDisplayScale(window.get());
+            if (!(displayScale > 0.0f))
+            {
+                displayScale = 1.0f;
+            }
+            auto desiredPixelWidth = static_cast<int>(std::lround(desiredWindowWidth * displayScale));
+            auto desiredPixelHeight = static_cast<int>(std::lround(desiredWindowHeight * displayScale));
+
+            if (!sdlContext->getClosestDisplayMode(displayID, desiredPixelWidth, desiredPixelHeight, 0.0f, &targetMode))
             {
                 throw std::runtime_error(SDL_GetError());
             }

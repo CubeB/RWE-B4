@@ -128,6 +128,17 @@ namespace rwe
             SDL_GetWindowSize(window, w, h);
         }
 
+        void getWindowSizeInPixels(SDL_Window* window, int* w, int* h)
+        {
+            SDL_GetWindowSizeInPixels(window, w, h);
+        }
+
+        /** Output pixels per logical point; 0.0f on failure. */
+        float getWindowDisplayScale(SDL_Window* window)
+        {
+            return SDL_GetWindowDisplayScale(window);
+        }
+
         SDL_DisplayID getWindowDisplayIndex(SDL_Window* window)
         {
             return SDL_GetDisplayForWindow(window);

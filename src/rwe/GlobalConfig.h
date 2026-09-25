@@ -150,7 +150,7 @@ namespace rwe
         bool vehicleShadows{true};
 
         /**
-         * How many screen pixels one game pixel is drawn as, 1 to 4. The
+         * How many output pixels one game pixel is drawn as, 1 to 4. The
          * original ran at 640x480 and, stretched across a modern display,
          * shows each of its pixels about two screen pixels wide; RWE draws
          * one to one, so its one-pixel wireframe and selection box read as
@@ -159,9 +159,15 @@ namespace rwe
          * nearest-neighbour sampling, and mouse input is mapped back
          * through the same factor. The world's own 2x supersample and the
          * building halo filter happen inside that frame, so they look the
-         * same as at 1, only larger. An rwe.cfg key, screen-scale.
+         * same as at 1, only larger.
+         *
+         * This is the retro chunky-pixels option and a cheap performance
+         * lever -- not a resolution control. It is deliberately not what
+         * makes a high-density display legible: that is a separate UI scale,
+         * and turning this up instead throws the display's sharpness away
+         * for everything on screen. An rwe.cfg key, pixel-size.
          */
-        unsigned int screenScale{1};
+        unsigned int pixelSize{1};
 
         /** Screen scroll speed percentage, 25 to 200; 100 is the old fixed rate. */
         unsigned int scrollSpeed{100};
@@ -169,7 +175,7 @@ namespace rwe
         /**
          * Camera zoom as a percentage, 50 to 200; 100 is the original view.
          * It is how much battlefield is visible -- the world projection
-         * divides by it -- and is deliberately distinct from screenScale,
+         * divides by it -- and is deliberately distinct from pixelSize,
          * which changes how chunky the pixels are rather than how much world
          * they show. Stored globally as camera-zoom.
          */
