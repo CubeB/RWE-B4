@@ -631,6 +631,9 @@ namespace rwe
                     LOG_WARN << "COB thread " << thread->name << " stopped: more than " << MaxRequestsPerTick << " requests in one tick";
                     env.killThread(thread);
                 }
+                // Only the thread that ran away pays: the rest of this unit's
+                // threads get a fresh allowance for the remainder of the tick.
+                requests = 0;
                 continue;
             }
 
