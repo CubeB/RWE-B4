@@ -254,6 +254,14 @@ namespace rwe
             bb.rallyPoint.reset();
             return;
         }
+        // An army waiting on a sea lift gathers where the hull will load it
+        // (AiTuningProfile::seaFerryMuster). TransportManager only publishes
+        // the muster while that is the case.
+        if (profile.seaFerryMuster && bb.armyNeedsFerry && bb.ferryMuster)
+        {
+            bb.rallyPoint = *bb.ferryMuster;
+            return;
+        }
         auto towards = bb.enemyBasePosition
             ? (*bb.enemyBasePosition - *bb.baseAnchor).normalizedOr(SimVector(1_ss, 0_ss, 0_ss))
             : SimVector(1_ss, 0_ss, 0_ss);

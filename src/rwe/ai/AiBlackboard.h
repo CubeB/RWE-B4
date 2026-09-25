@@ -653,6 +653,14 @@ namespace rwe
          * AiTuningProfile::armyFerryWantFromMap.
          */
         bool armyNeedsFerry{false};
+        /**
+         * Where the army gathers to be carried by sea: a dry cell on home
+         * ground beside water our navy can reach, near the shipyard. Set by
+         * TransportManager while the army needs a sea lift, and read by
+         * ArmyManager as the rally point then. See
+         * AiTuningProfile::seaFerryMuster.
+         */
+        std::optional<SimVector> ferryMuster;
         std::optional<SimVector> rallyPoint;
         std::optional<SimVector> attackTarget;
         int armySize{0};

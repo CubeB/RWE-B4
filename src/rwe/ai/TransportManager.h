@@ -65,6 +65,20 @@ namespace rwe
             SimVector destination;
             GameTime startedAt;
             bool loaded{false};
+            /**
+             * For a sea ferry that musters: the shore point the passengers
+             * walk to, and the water beside it the hull loads from. Unset for
+             * an air ferry and for one sent with seaFerryMuster off.
+             */
+            std::optional<SimVector> muster;
+            std::optional<SimVector> station;
+        };
+
+        /** A shore point to gather a sea lift at, and the water beside it. */
+        struct Muster
+        {
+            SimVector shore;
+            SimVector water;
         };
 
         const std::map<unsigned int, Ferry>& getFerries() const { return ferries; }
@@ -98,6 +112,28 @@ namespace rwe
          * AiTuningProfile::armyFerryWantFromMap.
          */
         std::optional<bool> lastArmyFerryAnswer;
+
+        /**
+         * The muster found for the last origin it was asked about. The search
+         * walks rings out from the shipyard and probes the water round each
+         * dry candidate, which is too much to repeat every pass for an answer
+         * that only changes when the yard does; the same reason
+         * navalRallyMemo exists.
+         */
+        struct MusterMemo
+        {
+            SimVector origin;
+            std::optional<Muster> muster;
+        };
+        std::optional<MusterMemo> musterMemo;
+
+        /**
+         * Where to gather a sea lift: the nearest dry cell to our shipyard (or
+         * the ground anchor, lacking one) that is on home ground and has water
+         * our navy can reach within a few steps of it. Nothing without naval
+         * labelling, or when no such cell lies within reach.
+         */
+        std::optional<Muster> seaMuster(const GameSimulation& sim, const ReachabilityMap& reachability, const AiBlackboard& bb);
 
         void tendFerries(const GameSimulation& sim, const AiTuningProfile& profile, AiBlackboard& bb, std::vector<PlayerCommand>& outCommands);
 

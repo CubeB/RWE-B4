@@ -626,6 +626,89 @@ namespace rwe
             auto unloads = ordersFor<UnloadOrder>(commands, shipId);
             REQUIRE(unloads.size() == 1);
         }
+
+        SECTION("the passengers gather at one point on the shore, and the hull loads them from the water beside it")
+        {
+            // Issue #194. Since #193 a passenger no longer wades out to its
+            // transport, so a hull sent to each one where it stands is sent
+            // at dry land it cannot reach.
+            auto kbot1 = addUnit(sim, "ARMPW", ai, SimVector(-300_ss, 60_ss, -60_ss), script);
+            auto kbot2 = addUnit(sim, "ARMPW", ai, SimVector(-300_ss, 60_ss, 60_ss), script);
+            auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+            runTicks(sim, controller, 90, commands);
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(controller.getTransportManager().getFerries().count(shipId.value) == 1);
+            const auto& ferry = controller.getTransportManager().getFerries().at(shipId.value);
+            REQUIRE(ferry.muster.has_value());
+            REQUIRE(ferry.station.has_value());
+
+            // The muster is dry home ground on the near bank, within a
+            // crane's reach of the channel (whose near edge is x -192)...
+            REQUIRE(ferry.muster->x < -192_ss);
+            REQUIRE(ferry.muster->x > -192_ss - 144_ss);
+            // ...and the station is in the channel beside it.
+            REQUIRE(ferry.station->x > -192_ss);
+            REQUIRE(ferry.station->x < 192_ss);
+            auto dx = ferry.muster->x - ferry.station->x;
+            auto dz = ferry.muster->z - ferry.station->z;
+            REQUIRE((dx * dx) + (dz * dz) <= 144_ss * 144_ss);
+
+            commands.clear();
+            runTicks(sim, controller, profile.tacticalTickInterval, commands);
+
+            // Both passengers walk to the same point...
+            for (auto kbot : {kbot1, kbot2})
+            {
+                auto moves = ordersFor<MoveOrder>(commands, kbot);
+                REQUIRE(!moves.empty());
+                REQUIRE((moves.back().destination == *ferry.muster));
+            }
+            // ...the hull sails to the water beside it, and then loads both.
+            auto shipMoves = ordersFor<MoveOrder>(commands, shipId);
+            REQUIRE(!shipMoves.empty());
+            REQUIRE((shipMoves.back().destination == *ferry.station));
+            REQUIRE(ordersFor<LoadOrder>(commands, shipId).size() == 2);
+
+            // And an army still waiting on the lift rallies there too.
+            REQUIRE(bb.ferryMuster.has_value());
+            REQUIRE((*bb.ferryMuster == *ferry.muster));
+            REQUIRE(bb.rallyPoint.has_value());
+            REQUIRE((*bb.rallyPoint == *bb.ferryMuster));
+        }
+    }
+
+    TEST_CASE("with the muster switched off, the hull goes to each passenger where it stands", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeWideChannelTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineLandUnits(sim);
+        defineSeaTransport(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(-300_ss, 60_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-320_ss, 60_ss, 40_ss), script);
+        addUnit(sim, "ARMSOLAR", human, SimVector(450_ss, 60_ss, 0_ss), script);
+        auto kbot = addUnit(sim, "ARMPW", ai, SimVector(-250_ss, 60_ss, 0_ss), script);
+        auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultBrutalProfile();
+        profile.scoutCount = 0;
+        profile.attackArmySize = 1;
+        profile.seaFerryMuster = false;
+
+        AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 90, commands);
+        const auto& ferry = controller.getTransportManager().getFerries().at(shipId.value);
+        REQUIRE_FALSE(ferry.muster.has_value());
+        REQUIRE_FALSE(controller.getBlackboard().ferryMuster.has_value());
+
+        commands.clear();
+        runTicks(sim, controller, profile.tacticalTickInterval, commands);
+        REQUIRE(ordersFor<MoveOrder>(commands, kbot).empty());
+        REQUIRE(ordersFor<MoveOrder>(commands, shipId).empty());
+        REQUIRE(ordersFor<LoadOrder>(commands, shipId).size() == 1);
     }
 
     TEST_CASE("a landing is scored against what the carrier is, not what the cargo is", "[ai]")
