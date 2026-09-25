@@ -15,6 +15,7 @@
 #include <vector>
 #include <rwe/ImGuiContext.h>
 #include <rwe/game/GameScene_util.h>
+#include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
 #include <rwe/util/match.h>
@@ -225,7 +226,7 @@ namespace rwe
                     {
                         continue;
                     }
-                    unit->get().addOrder(MoveOrder(enemy));
+                    queueBattleTestOrder(unitId, MoveOrder(enemy));
                     ++battleTestReordered;
                 }
             }
@@ -284,15 +285,15 @@ namespace rwe
                 // Completed, not a nanoframe: spawnUnit leaves a unit under
                 // construction, and an unbuilt Peewee cannot walk, so they
                 // simply piled up on the spawn.
-                auto unit = spawnCompletedUnit(unitType, battleTestPlayers[i], position);
-                if (!unit)
+                auto unitId = spawnCompletedUnit(unitType, battleTestPlayers[i], position);
+                if (!unitId)
                 {
                     ++battleTestSpawnsBlocked;
                     continue;
                 }
 
-                unit->get().fireOrders = UnitFireOrders::FireAtWill;
-                unit->get().addOrder(MoveOrder(enemy));
+                applyUnitCommandToSimulation(simulation, PlayerUnitCommand(*unitId, PlayerUnitCommand::SetFireOrders{UnitFireOrders::FireAtWill}));
+                queueBattleTestOrder(*unitId, MoveOrder(enemy));
                 ++battleTestAlive[i];
                 ++battleTestSpawned;
             }
@@ -551,11 +552,11 @@ namespace rwe
         auto owner = PlayerId(unitSpawnPlayer);
         if (unitSpawnComplete)
         {
-            if (auto unit = spawnCompletedUnit(unitSpawnType, owner, position))
+            if (auto unitId = spawnCompletedUnit(unitSpawnType, owner, position))
             {
                 // A nanoframe's hit points track its build progress, so this
                 // only means anything for a finished unit; the window says so.
-                unit->get().hitPoints = debugSpawnHitPoints(unitDefinition);
+                simulation.setHitPoints(*unitId, debugSpawnHitPoints(unitDefinition));
             }
         }
         else
@@ -674,20 +675,16 @@ namespace rwe
         ImGui::Unindent();
     }
 
-    std::optional<std::reference_wrapper<UnitState>> GameScene::spawnCompletedUnit(const std::string& unitType, PlayerId owner, const SimVector& position)
+    std::optional<UnitId> GameScene::spawnCompletedUnit(const std::string& unitType, PlayerId owner, const SimVector& position)
     {
-        auto unitId = spawnUnit(unitType, owner, position, std::nullopt);
-        if (unitId)
-        {
-            auto& unit = getUnit(*unitId);
-            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
-            // units start as unbuilt nanoframes,
-            // so convert immediately into a completed unit.
-            unit.finishBuilding(unitDefinition);
+        return simulation.trySpawnCompletedUnit(unitType, owner, position, std::nullopt);
+    }
 
-            return unit;
-        }
-
-        return std::nullopt;
+    void GameScene::queueBattleTestOrder(UnitId unitId, const UnitOrder& order)
+    {
+        // The same queued order a player's shift-click sends, applied
+        // straight away: the battle test's players have nobody at a
+        // keyboard, so there is no command buffer for it to wait out.
+        applyUnitCommandToSimulation(simulation, PlayerUnitCommand(unitId, PlayerUnitCommand::IssueOrder(order, PlayerUnitCommand::IssueOrder::IssueKind::Queued)));
     }
 }

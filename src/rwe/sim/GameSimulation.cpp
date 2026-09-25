@@ -1606,6 +1606,22 @@ namespace rwe
         return unitId;
     }
 
+    std::optional<UnitId> GameSimulation::trySpawnCompletedUnit(const std::string& unitType, PlayerId owner, const SimVector& position, std::optional<SimAngle> rotation)
+    {
+        auto unitId = trySpawnUnit(unitType, owner, position, rotation);
+        if (unitId)
+        {
+            auto& unit = getUnitState(*unitId);
+            unit.finishBuilding(unitDefinitions.at(unit.unitType));
+        }
+        return unitId;
+    }
+
+    void GameSimulation::setHitPoints(UnitId unitId, unsigned int hitPoints)
+    {
+        getUnitState(unitId).hitPoints = hitPoints;
+    }
+
     std::optional<UnitId> GameSimulation::tryAddUnit(UnitState&& unit)
     {
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);

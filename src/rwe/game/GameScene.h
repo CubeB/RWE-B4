@@ -829,6 +829,8 @@ namespace rwe
          */
         unsigned int debugSpawnHitPoints(const UnitDefinition& unitDefinition) const;
 
+        void queueBattleTestOrder(UnitId unitId, const UnitOrder& order);
+
         void renderUnitSpawnerWindow();
         void buildUnitTypeCategories();
         bool unitSpawnComplete{true};
@@ -1109,7 +1111,7 @@ namespace rwe
 
         std::optional<UnitId> spawnUnit(const std::string& unitType, PlayerId owner, const SimVector& position, std::optional<const std::reference_wrapper<SimAngle>> rotation);
 
-        std::optional<std::reference_wrapper<UnitState>> spawnCompletedUnit(const std::string& unitType, PlayerId owner, const SimVector& position);
+        std::optional<UnitId> spawnCompletedUnit(const std::string& unitType, PlayerId owner, const SimVector& position);
 
         /** Applies a saved game's state onto the freshly built simulation. */
         void applyLoadedGame(const SaveFile& save);
@@ -1623,15 +1625,9 @@ namespace rwe
 
         bool positionIsExploredByLocalPlayer(const SimVector& position) const;
 
-        UnitState& getUnit(UnitId id);
-
         const UnitState& getUnit(UnitId id) const;
 
-        std::optional<std::reference_wrapper<UnitState>> tryGetUnit(UnitId id);
-
         std::optional<std::reference_wrapper<const UnitState>> tryGetUnit(UnitId id) const;
-
-        GamePlayerInfo& getPlayer(PlayerId player);
 
         const GamePlayerInfo& getPlayer(PlayerId player) const;
 

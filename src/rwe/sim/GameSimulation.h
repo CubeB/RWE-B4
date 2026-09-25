@@ -975,6 +975,20 @@ namespace rwe
         std::optional<UnitId> trySpawnUnit(const std::string& unitType, PlayerId owner, const SimVector& position, std::optional<SimAngle> rotation);
 
         /**
+         * trySpawnUnit, finished on the spot rather than left a nanoframe:
+         * the debug spawner's, the battle test's and a replay's opening
+         * commanders.
+         */
+        std::optional<UnitId> trySpawnCompletedUnit(const std::string& unitType, PlayerId owner, const SimVector& position, std::optional<SimAngle> rotation);
+
+        /**
+         * The debug spawner's health slider. Nothing in a game sets hit
+         * points but damage, repair and building; this is here so that the
+         * one writer outside them comes through the simulation too.
+         */
+        void setHitPoints(UnitId unitId, unsigned int hitPoints);
+
+        /**
          * Returns true if the unit was really added, false otherwise.
          * A unit might not be added because it violates collision constraints.
          */
@@ -1283,10 +1297,11 @@ namespace rwe
          * Both are hashed, so each was a `nanoPoint` waiting to happen: a
          * write the hash walk knows nothing about, invisible to every test.
          *
-         * Two more remain in GameScene_debug.cpp (fireOrders and hitPoints,
-         * from the debug spawner). They cannot come through here until
-         * spawnCompletedUnit hands back a UnitId rather than a reference;
-         * issue #116 has the measurement.
+         * The debug spawner's two, fire orders and hit points, were the last
+         * (issue #116). Fire orders now go through a player's SetFireOrders
+         * command and hit points through setHitPoints, and GameScene's
+         * getUnit and tryGetUnit hand back const only, so a new write from
+         * presentation fails to compile rather than slipping past the hash.
          */
         void setMoveOrders(UnitId unitId, UnitMovementOrders orders);
 
