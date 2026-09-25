@@ -12,7 +12,13 @@ namespace rwe
 
     std::optional<ColorPalette> readPalette(std::vector<char>& vector)
     {
-        assert(vector.size() >= (4 * 256));
+        // A mod can supply a palette, and a short one was read past its end
+        // with only an assert in the way. It already returns an optional,
+        // and every caller treats nothing as an error. Issue #75.
+        if (vector.size() < (4 * 256))
+        {
+            return std::nullopt;
+        }
 
         std::vector<Color> colors(256);
 

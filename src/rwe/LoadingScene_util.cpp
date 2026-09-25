@@ -60,6 +60,13 @@ namespace rwe
         auto mapHeightInTiles = tnt.getHeader().height / 2;
         std::vector<uint16_t> mapData(mapWidthInTiles * mapHeightInTiles);
         tnt.readMapData(mapData.data());
+        // Every cell names one of the map's own tiles. The renderer indexes
+        // the tile graphics with it and checks only by assert. Issue #75.
+        auto tileCount = tnt.getHeader().numberOfTiles;
+        if (std::any_of(mapData.begin(), mapData.end(), [tileCount](auto tile) { return tile >= tileCount; }))
+        {
+            throw TntException("Map refers to a tile it does not contain");
+        }
         std::vector<std::size_t> dataCopy;
         dataCopy.reserve(mapData.size());
         std::copy(mapData.begin(), mapData.end(), std::back_inserter(dataCopy));

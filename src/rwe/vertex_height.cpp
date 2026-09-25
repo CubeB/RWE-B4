@@ -9,9 +9,10 @@ namespace rwe
     }
     _3do::Vertex findHighestVertex(const _3do::Object& obj)
     {
+        // A piece with no vertices of its own -- a mod can make one -- counts
+        // as its origin rather than dereferencing an empty range. Issue #75.
         auto it = std::max_element(obj.vertices.begin(), obj.vertices.end(), compareVertexHeights);
-        assert(it != obj.vertices.end());
-        auto highestVertex = *it;
+        auto highestVertex = it != obj.vertices.end() ? *it : _3do::Vertex(0, 0, 0);
 
         auto highestChildVertex = findHighestVertexOfList(obj.children);
 

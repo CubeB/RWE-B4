@@ -1,4 +1,5 @@
 #include "HpiFileSystem.h"
+#include <rwe/io/hpi/hpi_util.h>
 #include <rwe/util/rwe_string.h>
 
 namespace rwe
@@ -16,6 +17,10 @@ namespace rwe
             return std::nullopt;
         }
 
+        if (file->get().size > HpiArchive::MaxFileBytes)
+        {
+            throw HpiException(("Archive entry " + filename + " declares a size too large to extract").c_str());
+        }
         std::vector<char> buffer(file->get().size);
         hpi.extract(*file, buffer.data());
 

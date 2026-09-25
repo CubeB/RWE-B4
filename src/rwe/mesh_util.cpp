@@ -359,10 +359,17 @@ namespace rwe
     SelectionMesh selectionMeshFrom3do(const _3do::Object& o)
     {
         auto index = o.selectionPrimitiveIndex.value_or(0u);
-        auto p = o.primitives.at(index);
-
-        assert(p.vertices.size() == 4);
         Vector3f offset(vertexToVector(_3do::Vertex(o.x, o.y, o.z)));
+
+        // A model whose plate is missing or is not a quad -- the parser has
+        // already emptied any primitive naming a vertex the piece does not
+        // have -- gets a plate of zero size at the piece's origin. This used
+        // to read four vertices regardless. Issue #75.
+        if (index >= o.primitives.size() || o.primitives[index].vertices.size() != 4)
+        {
+            return SelectionMesh{CollisionMesh::fromQuad(offset, offset, offset, offset), {offset, offset, offset, offset}};
+        }
+        const auto& p = o.primitives[index];
 
         auto a = offset + vertexToVector(o.vertices[p.vertices[0]]);
         auto b = offset + vertexToVector(o.vertices[p.vertices[1]]);

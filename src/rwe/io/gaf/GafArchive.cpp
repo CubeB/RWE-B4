@@ -40,6 +40,13 @@ namespace rwe
             throw GafException("Invalid GAF version number");
         }
 
+        // Reserved before any entry is read, so a twelve-byte file could ask
+        // for four billion. TA's largest GAFs hold a few hundred. Issue #75.
+        constexpr uint32_t MaxEntries = 65536;
+        if (header.entries > MaxEntries)
+        {
+            throw GafException("GAF entry count out of range");
+        }
         _entries.reserve(header.entries);
 
         for (std::size_t i = 0; i < header.entries; ++i)
