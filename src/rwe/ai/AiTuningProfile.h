@@ -1228,6 +1228,18 @@ namespace rwe
          */
         int targetSeaplanePlatformCount{1};
         /**
+         * Hovercraft platforms wanted while the army needs a ferry to reach
+         * the enemy and a hovercraft could get there on its own
+         * (AiBlackboard::hoverRouteToEnemy). Hover tanks cross water under
+         * their own power, so they are the one land army a water map does
+         * not have to carry. Core Contingency only: on the base game the
+         * slot is empty and this does nothing. Issue #196.
+         *
+         * Zero switches it off, which is the default until a paired arena
+         * run says the platform is worth its 2007 metal (1793 for Core).
+         */
+        int targetHoverPlatformCount{0};
+        /**
          * Hold the factories while the first moho and the first reactor are
          * paid for. Level two was reached in play and never spent: the lab
          * went up, the factories went on taking every unit of metal as it

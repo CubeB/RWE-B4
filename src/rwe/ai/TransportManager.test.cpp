@@ -587,6 +587,34 @@ namespace rwe
             REQUIRE(bb.ferryPassengers.count(kbot2.value) == 1);
         }
 
+        SECTION("a hovercraft is never booked onto the ship: it crosses on its own")
+        {
+            // Issue #196. TANKHOVER3 names no depth at all, so nothing in
+            // the water-depth gate below refuses it; canHover is what does.
+            auto hover = makeDef(false, false, true, "LASER", 200u);
+            hover.canHover = true;
+            hover.movementCollisionInfo = UnitDefinition::AdHocMovementClass{3u, 3u, 12u, 255u, 0u, 255u};
+            sim.unitDefinitions["ARMANAC"] = hover;
+
+            auto kbot = addUnit(sim, "ARMPW", ai, SimVector(-250_ss, 60_ss, 0_ss), script);
+            auto anaconda = addUnit(sim, "ARMANAC", ai, SimVector(-250_ss, 60_ss, 40_ss), script);
+            auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+            runTicks(sim, controller, 90, commands);
+            const auto& bb = controller.getBlackboard();
+            commands.clear();
+            runTicks(sim, controller, profile.tacticalTickInterval, commands);
+
+            auto loads = ordersFor<LoadOrder>(commands, shipId);
+            REQUIRE(!loads.empty());
+            for (const auto& l : loads)
+            {
+                REQUIRE(l.target == kbot);
+            }
+            REQUIRE(bb.ferryPassengers.count(kbot.value) == 1);
+            REQUIRE(bb.ferryPassengers.count(anaconda.value) == 0);
+        }
+
         SECTION("a passenger that needs water is never booked onto the ship")
         {
             auto kbot = addUnit(sim, "ARMPW", ai, SimVector(-250_ss, 60_ss, 0_ss), script);

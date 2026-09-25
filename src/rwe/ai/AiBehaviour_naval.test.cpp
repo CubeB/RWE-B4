@@ -2186,4 +2186,116 @@ namespace rwe
         }
         (void)human;
     }
+
+    TEST_CASE("hover: where the army needs a ferry, a constructor puts up the hover platform", "[ai]")
+    {
+        // Issue #196. The two shores again: nothing the lab builds can walk
+        // to the far start position, so the army needs carrying (the map
+        // fallback in TransportManager says so with nothing in sight), and
+        // a hover tank could cross the same water on its own.
+        auto script = makeEmptyCobScript();
+        auto westStart = SimVector(-420_ss, 90_ss, 0_ss);
+        auto eastStart = SimVector(420_ss, 90_ss, 0_ss);
+
+        GameSimulation sim(makeTwoShoresTerrain(), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        for (auto* type : {"ARMCOM", "ARMCK", "ARMPW"})
+        {
+            sim.unitDefinitions.at(type).movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 20u};
+        }
+
+        // The shipped shapes: an 8x7 platform that stands on dry ground
+        // (MaxWaterDepth=0), and 3x3 hovercraft on TANKHOVER3, which names
+        // no depth and so takes the parser's 0 and 255.
+        auto platform = makeDef(false, true, false, "", 100u);
+        platform.movementCollisionInfo = UnitDefinition::AdHocMovementClass{8u, 7u, 255u, 255u, 0u, 0u};
+        platform.buildCostMetal = Metal(2007.0f);
+        sim.unitDefinitions["ARMHP"] = platform;
+        auto anaconda = makeDef(false, false, true, "LASER", 200u);
+        anaconda.canHover = true;
+        anaconda.movementCollisionInfo = UnitDefinition::AdHocMovementClass{3u, 3u, 12u, 255u, 0u, 255u};
+        sim.unitDefinitions["ARMANAC"] = anaconda;
+        auto swatter = anaconda;
+        sim.unitDefinitions["ARMAH"] = swatter;
+
+        auto commanderId = addUnit(sim, "ARMCOM", ai, westStart, script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-470_ss, 90_ss, -200_ss), script);
+        auto kbotId = addUnit(sim, "ARMCK", ai, SimVector(-440_ss, 90_ss, 200_ss), script);
+        // Income past techMinMetalIncome, and a store the platform fits in.
+        sim.unitDefinitions["ARMMEX"].metalMake = Metal(2.0f);
+        for (int i = 0; i < 8; ++i)
+        {
+            addUnit(sim, "ARMMEX", ai, SimVector(-480_ss, 90_ss, SimScalar(-400.0f + i * 40.0f)), script);
+        }
+        sim.getPlayer(ai).metal = Metal(5000.0f);
+        sim.getPlayer(ai).maxMetal = Metal(5000.0f);
+        sim.getPlayer(ai).energy = Energy(5000.0f);
+        sim.getPlayer(ai).maxEnergy = Energy(5000.0f);
+        // One builder is planned per pass, the lowest-numbered idle one, so
+        // the commander is sent walking to leave the kbot at the front.
+        sim.getUnitState(commanderId).addOrder(MoveOrder(SimVector(-420_ss, 90_ss, 400_ss)));
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        // No fleet, so the naval plan stays out of the way of the question.
+        profile.navalFleetSize = 0;
+        profile.targetHoverPlatformCount = 1;
+
+        // The kbot's page 5, by Core Contingency's download menu, and
+        // nothing else: anything the plan puts above the platform is then
+        // dropped for this builder, which leaves the platform or nothing.
+        auto tree = makeBuildTree();
+        tree.buildableBy["ARMCK"] = {"ARMHP"};
+        auto mapIntel = analyseMap(makeTwoShoresTerrain(), {westStart, eastStart});
+
+        auto platformOrders = [&](const AiTuningProfile& p) {
+            AiPlayerController controller(ai, p, 42u, mapIntel, tree);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 91, commands);
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.landRouteToEnemy.has_value());
+            REQUIRE_FALSE(*bb.landRouteToEnemy);
+            REQUIRE(bb.armyNeedsFerry);
+            int count = 0;
+            for (const auto& order : ordersFor<BuildOrder>(commands, kbotId))
+            {
+                count += order.unitType == "ARMHP" ? 1 : 0;
+            }
+            return std::make_pair(count, bb.hoverRouteToEnemy);
+        };
+
+        SECTION("the kbot puts it up, and the hover layer says a hovercraft crosses")
+        {
+            auto [count, hoverRoute] = platformOrders(profile);
+            REQUIRE(hoverRoute.has_value());
+            REQUIRE(*hoverRoute);
+            REQUIRE(count >= 1);
+        }
+
+        SECTION("not with the knob at zero")
+        {
+            profile.targetHoverPlatformCount = 0;
+            REQUIRE(platformOrders(profile).first == 0);
+        }
+
+        SECTION("not on data with no hovercraft, which is the base game")
+        {
+            sim.unitDefinitions.erase("ARMANAC");
+            auto [count, hoverRoute] = platformOrders(profile);
+            REQUIRE_FALSE(hoverRoute.has_value());
+            REQUIRE(count == 0);
+        }
+
+        SECTION("the platform builds hover tanks, and anti-air once something of theirs flies")
+        {
+            addUnit(sim, "ARMHP", ai, SimVector(-440_ss, 90_ss, -400_ss), script);
+            AiPlayerController controller(ai, profile, 42u, mapIntel, tree);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMANAC") == 1);
+            REQUIRE(countQueueCommands(commands, "ARMAH") == 0);
+        }
+    }
 }

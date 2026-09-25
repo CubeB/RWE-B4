@@ -728,6 +728,13 @@ namespace rwe
                     {
                         continue;
                     }
+                    // A hovercraft crosses under its own power, so a seat
+                    // given to one is a seat taken from something that
+                    // cannot. It goes with the army instead. Issue #196.
+                    if (def.canHover)
+                    {
+                        continue;
+                    }
                     // The size gate is the passenger's FOOTPRINT X against
                     // transportsize -- that is what
                     // GameSimulation::canLoadUnitIntoTransport tests, and it
