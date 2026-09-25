@@ -617,7 +617,7 @@ named; the class wins.
 |---|---|
 | mover object (null for buildings) | `unit+0x00` |
 | position x/y/z, 16.16 | `unit+0x6A`/`+0x6E`/`+0x72` |
-| packed current cell (x<<16 or z) | `unit+0x76` |
+| packed current cell: X cell in the low word `unit+0x76`, Z cell in the high word `unit+0x78` (`0x485B99`-`0x485BD3`; corrected 2026-09-25, §113) | `unit+0x76` |
 | footprint X (low word) / Z, copied from `def+0x14A` at spawn (`0x485AAA`) | `unit+0x7E` dword |
 | **carrier** (the transport holding this unit), 0 if none | `unit+0x86` |
 | **passenger list head** (units I am carrying) | `unit+0x8A` |
@@ -625,7 +625,7 @@ named; the class wins.
 | unit definition / player | `unit+0x92` / `+0x96` |
 | COB context | `unit+0x9A` |
 | unit id word | `unit+0xA8` |
-| build fraction, float, 1.0f when complete (`0x485B27` stores `0x3f800000`) | `unit+0x104` |
+| build fraction **remaining**, float: 1.0f for a fresh nanoframe (`0x485B27`), 0.0 when finished (`0x485B11`, and the finisher at `0x41B933`). Corrected 2026-09-25 (§113); this row used to say 1.0f meant complete | `unit+0x104` |
 | COB **busy** flag | bit 1 of the byte at `unit+0x10F` |
 | placement state, bits 0-1 of `unit+0x110`; 2 = airborne | written by the SetPosition family (`0x43DA26`, `0x48B69E`) |
 | **hidden-while-carried**, bit 17 of `unit+0x110` | set iff attached to piece -1 (`0x48AC99`) |
@@ -803,9 +803,11 @@ inferred rather than followed to its consumer it says so.
 
 `0x476AE0` loads a campaign by name: `camps\<name>.tdf` (`0x476B07`,
 `0x476B11`), then `[HEADER]` (`0x476B32`) and its one key, `campaignside`
-(`0x476B57`), a string defaulting to `ALL` (`0x476BB1`). The two names the
-front end passes are `"Arm Campaign"` and `"Core Campaign"` (`0x477C0A`,
-`0x477C17`, under the `Campaign` and `Missions` menu strings); the shipped
+(`0x476B57`), a string defaulting to `ALL` (`0x476BB1`). The front end
+passes the entry picked in NEWGAME's campaign list, which holds the files
+whose `campaignside` is the player's side or `ALL`; only with two or fewer
+campaign files installed does it pass `"Arm Campaign"` or `"Core Campaign"`
+by side (`0x477C0A`, `0x477C17`; §115, corrected 2026-09-25). The shipped
 files are `ccdata.ccx/CAMPS/Arm Campaign.tdf` and `Core Campaign.tdf`, 25
 missions each. They are the original game's campaigns: the `.ccx` archives
 carry the campaign disc, and the mission maps are in `ccmiss.ccx/Maps/`.
@@ -842,8 +844,8 @@ keys come through `0x4C46C0` with the default shown, strings through
 | `maxunits` | int | 200 (`0xC8`) | the unit cap for the mission |
 | `brief` | string, 256 | | `camps\briefs\<brief>.TXT` (`0x436204`), read into a `"Briefing"`-tagged buffer (`0x436258`): the briefing text |
 | `narration` | string, 256 | | `camps\briefs\<narration>.WAV` (`0x4362A6`): the briefing voice-over |
-| `missionhint` | string, 256 | | `camps\hints\<hint>.TXT` (`0x4362DC`) |
-| `glamour` | string, 256 | | `<glamour>.PCX` (`0x43630B`): the briefing picture |
+| `missionhint` | string, 256 | | `camps\hints\<hint>.TXT` (`0x4362DC`), which nothing reads (§115) |
+| `glamour` | string, 256 | | `bitmaps\glamour\<glamour>.PCX` (`0x43630B`): the picture shown after a win, not the briefing's (§115) |
 | `glamoursound` | string, 256 | | `camps\briefs\<glamoursound>.WAV` (`0x436346`) |
 | `UseOnlyUnits` | string, 256 | | `camps\useonly\<name>.TDF` (`0x43637B`): the unit list the mission restricts building to |
 | `mapping` / `lineofsight` | int | 0 | as skirmish |
@@ -857,16 +859,17 @@ keys come through `0x4C46C0` with the default shown, strings through
 **Win and lose conditions** are not read by the mission reader at all. The
 rule evaluator at `0x48E040`-`0x48E940` reads them straight off the header
 block when the mission starts and, for each that is set, allocates a rule
-object (`0x4B4F10`). This section first named four; there are twenty
-(corrected 2026-09-25, B4 #55). In the evaluator's order, with the reader
-each goes through and, where it is a string, the `sscanf` format it is then
-scanned with:
+object (`0x4B4F10`). This section first named four; there are eighteen,
+eleven victory and seven defeat (corrected 2026-09-25, B4 #55, and the
+count again the same day: the table below always had eighteen, in sixteen
+rows). In the evaluator's order, with the reader each goes through and,
+where it is a string, the `sscanf` format it is then scanned with:
 
 | Key | Read as | Side | Shipped missions using it (of 76, base and Core Contingency) |
 |---|---|---|---|
 | `KillEnemyCommander` (`0x48E029`) | int | victory | 4 |
 | `DestroyAllUnits` (`0x48E06B`) | int | victory | 52 |
-| `KillAllMobileUnits` (`0x48E0A9`) | int | victory | 0 |
+| `KillAllMobileUnits` (`0x48E0A9`) | int | victory | 2 (EXP1AC02, EXP1AC04) |
 | `BuildUnitType` (`0x48E105`) | unit name | victory | 5 |
 | `CaptureUnitType` (`0x48E196`) | unit name | victory | 23 |
 | `KillAllOfType` (`0x48E215`) | unit name | victory | 4 |
@@ -879,20 +882,20 @@ scanned with:
 | `AllUnitsKilledOfType` (`0x48E725`) | unit name | defeat | 27 |
 | `UnitTypeKilled` (`0x48E7BB`) | `%[a-zA-Z],%i` | defeat | 3 |
 | `DeathTimerRunsOut` (`0x48E86B`) | int | defeat | 2 |
-| `AnyUnitPassesX` / `AnyUnitPassesZ` (`0x48E8C0`, `0x48E91E`) | int | defeat | 0 |
+| `AnyUnitPassesX` / `AnyUnitPassesZ` (`0x48E8C0`, `0x48E91E`) | int | defeat | 1 (CC19, `AnyUnitPassesZ=60`) |
 
 Each rule is then registered under a `VictoryCondition_<key>` or
 `DefeatCondition_<key>` name with `Satisfied` and `Celebrated` flags
-(`0x48EAC8` onwards). What each tests, tick by tick, is not followed here;
-it is the next piece.
+(`0x48EAC8` onwards). What each tests, how often, and how they combine is
+§113.
 
 **Which schema is played.** A skirmish map's schemas are `Network n`; a
 mission's are `Easy`, `Medium` and `Hard` (25, 25 and 26 of the shipped 26).
 `0x43689A`-`0x4368CA` lays the seven type names out in a table, and the
 switch at `0x4368DC` picks an order of preference from the difficulty
-setting at `[globals+0x37EEE]` (§24): difficulty 0 tries `Easy` then `Medium`
-then `Hard`, 1 tries `Medium` first, 2 tries `Hard` first, each falling back
-through the others (`0x4368F9`-`0x43693C`). The first schema whose `type`
+setting at `[globals+0x37EEE]` (§24): difficulty 0 tries `Easy`, `Medium`,
+`Hard`; 1 tries `Medium`, `Easy`, `Hard`; 2 tries `Hard`, `Medium`, `Easy`
+(`0x4368F9`-`0x43693C`; the fallback orders are §115's). The first schema whose `type`
 matches is the one played; none matching is the "No suitable schema type"
 error above. Inside the schema, `HumanMetal`, `HumanEnergy`,
 `ComputerMetal`, `ComputerEnergy`, `SurfaceMetal` (int, default 0),
@@ -913,7 +916,7 @@ into a record tagged `"MISSIONUNIT DATA"` (`0x436DA4`):
 | `InitialMission` | string, 1024 | | | the unit's first orders, the mini-language below |
 | `XPos` / `YPos` / `ZPos` | int | 0 | `+0x0C` / `+0x10` / `+0x14` | position |
 | `Angle` | int, degrees | 0 | `+0x18` | heading; `0x436EF9`-`0x436F0A` converts degrees to the 16-bit angle |
-| `Player` | int | 0 | byte `+0x22` | owning player index |
+| `Player` | int | 0 | byte `+0x22` | owning player, **1-based**: the spawner subtracts one (`0x4883B2`-`0x4883B7`), so `Player=1` is player index 0, the human, and `Player=2` is index 1, the computer the rules count (§113). The shipped missions use only 1 and 2 |
 | `HealthPercentage` | int | 100 (`0x64`) | word `+0x1A` | starting health |
 | `BuildPriority` | int | 0 | word `+0x20` | |
 | `CreationCountdown` | int | 0 | `+0x1C` | ticks before the unit appears; the shipped data only ever says 0 |
@@ -937,18 +940,26 @@ through `0x43F0E0(id, x, z, ...)`; named ones through `0x438760(name)`.
 
 | Letter | Scans | Issues | Read as |
 |---|---|---|---|
-| `m` | ` %f %f` | mission 2 at the point | move to (x, z) |
-| `p` | ` %f %f %f` | mission 9 at the point | patrol to (x, z) |
-| `a` | ` %f %f`, else ` %[a-zA-Z0-9_.]` | mission 3 at the point, else `ATTACKUTYPE` with the name (`0x487FEC`) | attack the point, or attack every unit of that type: `a CORCOM,` |
-| `g` | ` %[a-zA-Z0-9_.]` | `0x487AF0` looks the name up, then mission 7 | guard the unit whose `Ident` this is (inferred from mission 7's use) |
-| `i` | ` %[a-zA-Z0-9_.]` | `0x487AF0` on the name (`0x48822C`) | a link to the unit whose `Ident` this is: `i CHRIS,` in the shipped data; what the link does is not followed |
-| `o` | ` %d %d` | (`0x487C9D`) | the standing orders, read as (fire, move) from the shipped `o 0 1,` (inferred; the consumer is not followed) |
-| `w` | ` %f %d`, else `a` | `WAIT` with the number (`0x48816B`); `wa` is `WAITFORATTACK` (`0x4881C7`) | wait that long, or wait to be attacked |
-| `u` | ` %f %f` | mission 5 at the point | no shipped mission uses it; by its shape, unload at the point |
-| `b` | ` %[a-zA-Z0-9_.] %d %f %f` | `MOBILEBUILD` / `BUILDINGBUILD` / `BUILDWEAPON` (`0x4880A1`, `0x4880C8`, `0x488106`) | build the named unit at the point |
-| `d` | | `SELFDESTRUCTFG` (`0x4881E0`) | self-destruct |
-| `s` | | `MAKESELECTABLE` (`0x488206`) | make the unit selectable |
-| any other letter, and the end of the string | | `MAKESELECTABLE` (`0x487E50`) | the unit is handed to the player once its orders are done |
+| `m` | ` %f %f` | order-builder command 2 at the point | move to (x, z) |
+| `p` | ` %f %f %f` | command 9 at the point | patrol to (x, z) |
+| `a` | ` %f %f`, taken only when both scan (`0x487F4F`); else ` %[a-zA-Z0-9_.]` | command 3 at the point, else `ATTACKUTYPE` with the name (`0x487FEC`) | attack the point, or every unit of that type: `a CORCOM,` |
+| `g` | ` %[a-zA-Z0-9_.]` | `0x487AF0` looks the name up, then command 7 | guard that unit (§114) |
+| `i` | ` %[a-zA-Z0-9_.]` | `0x487AF0`, then the attach `0x48AAC0` at once; nothing queued | start the mission aboard that transport: `i CHRIS,` (§114) |
+| `o` | ` %d %d` | nothing queued: `unit+0x110` bits 18-19 and 20-21 (`0x487C9D`) | the standing orders, **move then fire** (§114) |
+| `w` | ` %f %d`, else `a` | `WAIT` (`0x48816B`); `wa` is `WAITFORATTACK` (`0x4881C7`) | wait N **seconds**, or until an enemy comes within the second number; `wa`: until hit (§114) |
+| `u` | ` %f %f` | command 5 at the point | unload at the point |
+| `b` | ` %[a-zA-Z0-9_.] %d %f %f`; `bw %d` | `MOBILEBUILD` / `BUILDINGBUILD` / `BUILDWEAPON` (`0x4880A1`, `0x4880C8`, `0x488106`) | build the named unit at the point, n of it from a plant; `bw n` stockpiles n missiles |
+| `d` | | `SELFDESTRUCTFG` (`0x4881E0`) | blow up, at once |
+| `s` | | `MAKESELECTABLE` (`0x488206`) | hand the unit to the player, at that point in the list |
+| any other letter | | nothing: `0x487E50` is the loop going round | skipped |
+
+The "mission" numbers 2, 3, 5, 7 and 9 an earlier reading gave these are the
+right-click order builder's command ids (`0x43F0E0`), which it turns into the
+unit's own mission. At the end of the string the interpreter clears the
+unit's selectable bit if it queued anything, and appends a MAKESELECTABLE
+unless the list had an `s`, `p`, point `a` or `d` in it: §114, which also
+corrects three readings this table first had (`o`'s order, `w`'s units, and
+the last row, which was MAKESELECTABLE).
 
 The shipped missions use twelve shapes, the commonest being `w N,p X Z,`
 (958 units), `p X Z,` (206), `o N N,w N,` (175) and `w N,a CORCOM,` /
@@ -1178,3 +1189,419 @@ lesson for the next dead end is the one this section was written to record: the
 thing the work was blocked on was not the thing it was chasing, and an hour
 spent testing whether the blocker was real would have been worth more than the
 day spent on the checksum.
+
+## 113. Mission rules at runtime: what each tests, how often, and how they combine
+
+§105 lists the eighteen `[GlobalHeader]` win and lose keys and where the
+builder `0x48E010` reads them. This is what happens to them afterwards.
+Decoded 2026-09-25 for the campaign (B4 #38). The claims that decide how a
+port behaves were checked against the listing a second time: the
+combination rules, the order, the cadence, the countdown, DestroyAllUnits,
+KillEnemyCommander and the build fraction. The rest is one reading.
+
+### The manager
+
+`0x435DD6` allocates it (0x8C bytes, constructor `0x48DF90`) and stores it
+at `[g+0x391ED]`, where `g` is the globals block `[0x511DE8]`.
+
+| Offset | Contents |
+|---|---|
+| `+0x00`..`+0x3C` | victory rules, up to 16 |
+| `+0x40` | victory count |
+| `+0x44`..`+0x80` | defeat rules |
+| `+0x84` | defeat count |
+| `+0x88` | checks enabled, 1 at construction |
+
+If no victory key was set, the builder adds a `DestroyAllUnits` rule. If no
+defeat key was set, it adds an `AllUnitsKilled` rule (`0x48E977`-`0x48E9F1`,
+and again lazily in the checks). A rule is `+0 vtable`, `+4 Satisfied`,
+`+8 Celebrated`, then its own fields. Its six virtual slots are:
+
+| Slot | Default | Meaning | Called from |
+|---|---|---|---|
+| 0 | `0x48EA00`, return `Satisfied` | poll: is the rule true now | the victory and defeat checks, `0x490230` and `0x490360` |
+| 1 | `0x48EA10`, nothing | a unit is being killed | `0x4904C0`, from the death handler `0x4866D0` at `0x486799` |
+| 2 | `0x48EA20`, nothing | a unit is about to change owner | `0x490520`, first thing in `0x488570` |
+| 3 | `0x48EA30`, nothing | a unit was created | `0x490580`, from the creators `0x485F50` and `0x4861D0`; no rule overrides it |
+| 4 / 5 | per rule | save / load `Satisfied`, `Celebrated` and any counter, under `VictoryCondition_<key>` or `DefeatCondition_<key>` | `0x48FDF0` / `0x48FE60`, from the save writer and reader |
+
+The kill event is sent **before** the dying unit leaves its owner's array
+and before the owner's unit count drops (`0x486799` against `0x486DC7` and
+`0x486DFC`). That is why the count rules below test "at most one left".
+Every cause of death reaches it, including a nanoframe given up and the
+cause-4 death that ends an owner change. `0x4904B0` switches both checks
+off for good: the `Kill` cheat calls it, and so does a campaign mission with
+no `[units]` records (`0x488531`-`0x488547`), which can then never be won or
+lost by its rules.
+
+### How often, in what order, and how they combine
+
+The per-player pass `0x464F80` runs a player's block once every 30 ticks,
+on that player's settle tick (`player+0xF0`, `0x465077`-`0x465092`). Only
+for the local player (`0x46509D`) does it check the rules. **Victory and
+defeat are checked once a second.**
+
+In a campaign game (game type 1, `0x435100`):
+
+- **Victory needs every victory rule, polled in builder order, stopping at
+  the first that is false** (`0x490329`-`0x490332`). A rule that only looks
+  when it is polled cannot be seen true until every rule before it is true
+  in the same second.
+- **Any one defeat rule is a defeat** (`0x490481`-`0x490489`).
+- **Victory is checked first, and when it holds defeat is not checked that
+  second** (`0x4650C9`-`0x4650D5`). So victory wins a tie. Skirmish and
+  multiplayer check defeat first (`0x465167`).
+
+A result does not end the game at once. Both outcomes drive one signed word,
+`g+0x39239`, which starts at -1 (`0x498199`). The first second a result
+holds, the word is set to 4 and nothing else happens. Each later second it
+holds, the word counts down. When it goes negative the game ends:
+`g+0x3923B |= 4`, then `|= 0x10 | 0x20` for a win (`0x465881`-`0x4658D3`) or
+`&= ~0x10, |= 0x40` for a loss (`0x4650EE`-`0x465147`). Bits 5 and 6 are the
+`igvictory` and `igdefeat` banners, and the main loop leaves the battle on
+`& 0x14` (`0x499608`). Three consequences:
+
+- **It takes five more seconds** in which the result holds.
+- **The countdown is never reset.** If the result stops holding, the count
+  pauses and later carries on from where it was. DestroyAllUnits and the
+  timers do not latch, so this can happen.
+- **Every player's economy freezes while it runs.** The settle `0x401360`
+  runs only while the word is negative (`0x46554F`-`0x46555A`).
+
+`Celebrated` is set by a victory rule the first time it is seen true, and
+each time the rule plays `0x47F1A0("Victory Condition", 0)`. That is
+`ALLSOUND.TDF`'s `[Victory Condition]`, `sound=victory2`, played locally.
+**Each victory objective plays VICTORY2 once when it is met**, even while
+others remain. No defeat rule and neither timer plays anything, and there
+is no text.
+
+### The eighteen rules
+
+**P0** is player index 0, the human (`Player=1` in the file), and **P1** is
+index 1 (`Player=2`). The rules know no other players and no alliances. A
+unit's owner is the byte `unit+0xFF`. Names compare with `_stricmp`
+(`0x4F8A70`) against the FBI `UnitName`. Where a rule wants a **usable** unit
+it means the selection predicate (`0x48F283`-`0x48F2BD`): selectable
+(`unit+0x110` bit 5, which a unit with an `InitialMission` lacks until its
+`MAKESELECTABLE`), finished (`unit+0x104 == 0.0`), not under the 150-tick
+owner-transfer lock (`+0xFB`), and not carried unless by an air base.
+
+| Key | Side | Parameters | True when | How it is seen | Latches |
+|---|---|---|---|---|---|
+| `KillEnemyCommander` | victory | flag | a P1 unit dies whose name is the commander of **its owner's** side (`0x48EA40`) | kill event | yes |
+| `DestroyAllUnits` (and the default) | victory | flag | P1's unit count word `g+0x1DF2` is 0, nanoframes and carried units included (`0x48EB40`) | poll | **no** |
+| `KillAllMobileUnits` | victory | flag | a P1 unit with a mover dies and P1 then has at most one such unit, the dying one included. A mobile nanoframe has a mover and counts (`0x48EC20`) | kill event | yes |
+| `BuildUnitType` | victory | type | P0 owns a **finished** unit of the type, however it got it (`0x48EDB0`) | poll | yes |
+| `CaptureUnitType` | victory | type | a P1 unit of the type is about to change owner, to anyone (slot 2, `0x48EEB0`). It fires before the transfer can fail | owner-change event | yes |
+| `KillAllOfType` | victory | type | a P1 unit of the type dies and P1 then holds at most one, the dying one included (`0x48EFB0`) | kill event | yes |
+| `KillUnitType` | victory | `type,count` | each P1 unit of the type that dies counts the number down, while it is above 0; at 0 (`0x48F0F0`) | kill event | yes |
+| `MoveUnitToRadius` | victory | `type,x,z,radius`, or `ANYTYPE` | a usable P0 unit of the type has its centre within the radius of the ground under (x, z), flat and inclusive, each squared distance floored to whole units (`0x48F200`, `0x48F250`, `0x47E995`). (x, z) is a point of the screen plane, not the map: see below | poll | yes |
+| `UnitTypePassesX` / `Z` | victory | `type,n`, or `ANYTYPE` | a P0 unit of the type has its X (or Z) cell word within 2 of `n >> 4`. A band five cells wide, not a crossing test; any build state (`0x48F370`, `0x48F4C0`) | poll | yes |
+| `VictoryTimerRunsOut` | victory | seconds (`n * 30` ticks, `0x48E64F`) | the game tick `g+0x38A47` has reached it | poll | no |
+| `CommanderKilled` | defeat | flag | a P0 unit dies whose name is its side's commander (`0x48F6B0`) | kill event | yes |
+| `AllUnitsKilled` (and the default) | defeat | flag | P0 has **no usable unit**: nanoframes, scripted units still unselectable and passengers do not keep a player alive (`0x48F7E0`) | poll | recomputed |
+| `AllUnitsKilledOfType` | defeat | type | a unit of the type owned by **anyone** dies, and P0 and P1 together then hold at most one (`0x48F9D0`) | kill event | yes |
+| `UnitTypeKilled` | defeat | `type,count` | each unit of the type owned by **anyone** that dies counts the number down, with no floor; at 0 (`0x48F8C0`) | kill event | yes |
+| `DeathTimerRunsOut` | defeat | seconds | the game tick has reached `n * 30` (`0x48FD50`) | poll | no |
+| `AnyUnitPassesX` / `Z` | defeat | `n`, built when `n >= 0` | any P1 unit has its X (or Z) cell within 2 of `n >> 4` (`0x48FB60`, `0x48FC70`) | poll | yes |
+
+The cell words are the footprint's corner cell, `unit+0x76` for X and
+`unit+0x78` for Z, not the unit's centre.
+
+**MoveUnitToRadius's point is picked onto the ground** (corrected
+2026-09-25). The first poll passes (x, z) to `0x484B50`, which is not a plain
+clamp: it is the routine that finds the ground under a point of the screen,
+where a spot at height h shows h/2 further north than it is
+(`screenY = z - y/2`). It clamps x to `[0, width-1]` and z to
+`[0, height-1]` (`g+0x14223`, `g+0x14227`), then walks north from
+`(z & ~0xF) + 128` in 16-unit steps, at most nine of them, to the first spot
+whose `z - h/2` is at or above the point, h being the larger of the ground
+and the sea level `g+0x1427F` (`0x484BB2`-`0x484BED`). It interpolates back
+towards the spot before it, `z + ((point - shown) << 20) / (shownNext - shown)`
+in 16.16 (`0x484C5F`-`0x484C86`). The height sampler `0x485070` is a
+bilinear over the height map in sixteenths, each step truncated toward zero,
+and -1 off the map. So on ground of height h the circle is h/2 south of the
+numbers in the file.
+
+**Which scripted units are held** (added 2026-09-25). The interpreter
+`0x487BF0` clears the selectable bit only when it has queued at least one
+order: each order handler that queues something sets `edi` (`0x487D75`,
+`0x487DED`, `0x487E44`, `0x48817A`, `0x4881D6`, ...), and `0x487E5B` skips
+the clear when it is still 0. An empty string, or a bare `o` standing-orders
+line, leaves the unit selectable. AC01's own gate, `InitialMission=o 0 0,w
+3600 0,`, stands on its `MoveUnitToRadius` point and is held by its wait,
+which is why the mission is not won at the first poll.
+
+### What a port has to copy
+
+1. **All victory rules, in order, short-circuiting.** A polled rule counts
+   only at a moment when every earlier rule already holds. The shipped
+   missions depend on it. EXP1AC11 pairs `DestroyAllUnits` with
+   `UnitTypePassesZ=ARMCOM, 800`, so the commander must stand in the band
+   after the last Core unit dies. AC06, CC02, CC09, EXP1CC02 and EXP1CC04
+   pair `DestroyAllUnits` with `BuildUnitType`, so the built unit must still
+   exist then.
+2. **Timers are ANDed like anything else.** EXP1CC12 has
+   `KillEnemyCommander`, `DestroyAllUnits` and `VictoryTimerRunsOut=3600`.
+   Surviving sixty minutes is not enough by this code, although the briefing
+   mentions only the sixty minutes. Worth confirming in play.
+3. **Victory before defeat, and any defeat.** CC13 has
+   `CaptureUnitType=ARMARAD` and `UnitTypeKilled=ARMARAD, 1`. A capture kills
+   the original with cause 4, so both latch on the same event, and victory
+   wins only because it is checked first.
+4. **A capture is a kill.** The owner-change event fires, then the original
+   dies with cause 4, so every kill rule counts a capture. The capture event
+   fires even if the transfer then fails for want of a free unit slot
+   (`0x488709`).
+5. **Counts include the dying unit** (the "at most one" tests).
+6. **Once a second, then five more before it ends**, with the countdown
+   shared, never reset, and the economy frozen while it runs.
+7. **Usable-unit rules and count rules differ.** `MoveUnitToRadius` and
+   `AllUnitsKilled` want usable units. `DestroyAllUnits`,
+   `KillAllMobileUnits`, `KillAllOfType`, `AllUnitsKilledOfType` and the
+   band rules take any unit, nanoframes included. `BuildUnitType` wants a
+   finished unit and nothing more.
+8. **No owner test** in `AllUnitsKilledOfType` and `UnitTypeKilled`, and no
+   new-owner test in `CaptureUnitType`.
+9. **One VICTORY2 per victory objective.**
+10. **Parsing.** `%[a-zA-Z]` stops a type name at the first digit or
+    underscore, and a missing `%i` in `KillUnitType` leaves whatever was on
+    the stack. `ANYTYPE` works only for `MoveUnitToRadius` and the victory
+    band rules. The name is copied into a 32-byte field with no length check,
+    which a port should refuse rather than copy.
+
+**Not to port:** a copy-protection branch in the defeat check
+(`0x490373`-`0x4903C9`). If the CD check at `0x41D6A0` sets `0x511DE4`, it
+arms a random deadline five to ten minutes out and then reports a defeat.
+A legitimate copy never sets the flag.
+
+**The commander-death wipe never runs in a campaign** (settled 2026-09-25).
+The wipe at `0x48667E` is skipped when `[g+0x37EF6]` is 0
+(`0x486688`). For game type 1 the setup copies that word from `g+0x39219`
+(`0x497468`-`0x497474`), and the mission reader has just set `g+0x39219` to
+0 (`0x4363EA`, `ebx` zeroed at `0x436198`). So a campaign commander's death
+matters only through `CommanderKilled`, and killing the enemy's does not
+take its army with it.
+
+**Open:** what the network handler at `0x4576C5` uses the victory check for,
+the multiplayer victory test `0x490080`, and whether the banners are on
+screen for any frame before the battle closes.
+
+## 114. A mission unit's scripted orders at runtime
+
+Read out of `TotalA.exe` on 2026-09-25 for the campaign port (#38), after
+§105's grammar and §113's rules. `g` is the globals block `[0x511DE8]`.
+Anything not read directly is marked **[inferred]**.
+
+### The interpreter's end, and who is held
+
+`0x487BF0(unit, text, madeUnits)` runs in a second pass, after every
+`[units]` record has been made (`0x4884F1`-`0x488514`). Each handler that
+queues something sets `edi`; four also set a "sticky" flag `[esp+0x2C]`
+that is never cleared: `p` (`0x487F2A`), point `a` (`0x487FAA`), `d`
+(`0x4881FD`) and `s` (`0x488223`). At the end (`0x487E5B`-`0x487E8A`):
+
+- if `edi`, clear `unit+0x110` bit 5, the selectable bit, even when sticky;
+- if `edi` and not sticky, append `MAKESELECTABLE`.
+
+So a unit whose list queues anything is taken out of the player's hands, and
+comes back when a MAKESELECTABLE runs: an `s` in the list, or the appended
+one after the rest. A list with `p` or point `a` in it has no appended one,
+and those orders do not finish, so **such a unit is held for good**. `i`,
+`o`, `bw` and unknown letters queue nothing; `a NAME`, `b NAME` and `g NAME`
+queue only when the name resolves (`0x487FD4`, `0x487DF4`-`0x487E49`).
+
+Orders are appended in string order (`0x43ADC0` with `append = 1`). The
+coordinates of `m`, `p`, `u` and `b` are 16.16 from floats; their locals are
+never initialised, so a missing coordinate keeps what the previous order in
+the string left there, or stack garbage for the first. The shipped `m 1557`,
+`w 444,m`, the 32 bare `u` and every point-less `b` read that way.
+
+### Names: `0x487AF0`
+
+`g`, `i` and `wa` resolve a name against the `[units]` records in file
+order, comparing (`stricmp`) the record's `Ident` first and then its
+`Unitname` (`0x487B58`-`0x487B9C`), and return the first match whose record
+produced a unit. So a name is an Ident **or a unit type**, and names resolve
+only at mission start, against the units that were made.
+
+### What each order does
+
+- **`o M F`** writes the move order into bits 18-19 and the fire order into
+  bits 20-21 of `unit+0x110` (`0x487CD6`-`0x487CFC`): move 0 hold, 1
+  maneuver, 2 roam; fire 0 hold, 1 return, 2 at will. §105's table read it
+  the other way round. A single number sets the move order only.
+- **`w N R`**: `WAIT` with N x 30 ticks and R (`0x48814F`, `0x48815C`), so N
+  is **seconds**. Handler `0x401CE0`. With R = 0 it is a timer from the
+  moment WAIT first runs. With R > 0 it looks for an enemy within R world
+  units at once (`0x40AD80`, the weapon auto-acquire's gather, so only units
+  the player can see, alive, not allied, not Immune) and ends if it finds
+  one; otherwise it takes `rand(30) + 150` off the budget and looks again that
+  many ticks later, ending when the budget was already spent
+  (`0x401D66`-`0x401DB4`). A wait can overrun by one step.
+- **`wa [NAME]`**: `WAITFORATTACK` (`0x401FD0`), watching NAME, or the unit
+  itself when there is no name or it does not resolve (`0x4881B7`). It ends
+  when the watched unit takes any damage (event 0x10, posted by
+  `0x406F80` from the damage applier `0x489CE0` for any cause but heal) or
+  dies (event 8, `0x489740`). Not on sight of an enemy, and with no timer.
+- **`a NAME`**: `ATTACKUTYPE` (`0x401E00`). A unit without `canattack` flushes
+  its whole list, the appended MAKESELECTABLE with it. Otherwise it waits
+  `rand(90) + 1` ticks, then picks the enemy unit of that type anywhere on the
+  map (no sight, radar or Immunity test) with the lowest `d² - rand(d²/2)`,
+  pushes an attack on it to the front of the list, and scans again when that
+  ends. With none left it ends, and the next order runs.
+- **`g NAME`**: the guard (`FOLLOW_GROUND` `0x406300` / `VTOL_FOLLOW`), which
+  ends when the guarded unit dies.
+- **`i NAME`**: the attach `0x48AAC0(unit, carrier, -1, 0)` at once, hidden
+  in the hull; the rest of the list runs once the unit is set down
+  [inferred].
+- **`d`**: `SELFDESTRUCTFG` with `+0x36 = 1`, which skips the countdown and
+  kills the unit at once (`0x40213C`).
+- **`s`**: `MakeSelectable` (`0x401CC0`) sets bit 5 and clears bit 15,
+  **Immunity**. That is the only runtime writer of bit 5 besides the creator
+  (every new unit is selectable, `0x485B61`), the `Selectable` console
+  command (`0x416460`, every unit of every player) and a save load.
+
+### What a held unit is
+
+The selectable bit is the first test of the "usable" predicate (§113), so a
+held unit cannot be selected by any path (click, box, hotkey, squad), is
+deselected by the per-unit tick if it becomes held, and counts as unusable
+for MoveUnitToRadius and AllUnitsKilled. It does two other things:
+
+- **The computer player does not adopt it.** The AI's once-a-second walk
+  `0x408830` takes only units with bit 5 set: it resets their standing
+  orders (maneuver or roam, fire at will) and files them into an AI group
+  (`0x480250`). A held computer unit keeps the mission's `o` orders and is in
+  no group, so the scripted units are the mission's, not the AI's, until
+  their script ends.
+- **It still defends itself from where it stands.** Neither weapon
+  auto-acquire nor return fire reads bit 5, so with fire order 1 or 2 it
+  shoots what comes in range and whoever hits it. It does not leave to chase:
+  that needs an empty list or a Standby head mission.
+
+The AI's target search `0x4071F0` skips Immune units but not held ones.
+
+### The per-record flags
+
+Of `[units]`'s flags only `Immunity` is used: the spawner copies it into
+`unit+0x110` bit 15 (`0x488475`-`0x488482`), and MakeSelectable clears it.
+`CreationCountdown`, `BuildPriority`, `MissionCriticalUnit`, `AiIgnore`,
+`AiPriorityTarget` and `InitialGroup` are read by the mission reader and by
+nothing after it (the only code that walks the record array is the reader,
+the frees, `0x487AF0` and the spawner). The shipped `AiIgnore=1` always
+comes with `Immunity=1`, which is where the behaviour is.
+
+## 115. The campaign's screens, progression and ending movies
+
+Read out of `TotalA.exe` on 2026-09-25 for the campaign port (#38). `g` is
+the globals block `[0x511DE8]`, `M` the campaign/mission object at
+`[g+0x391E9]`. Anything not read directly is **[inferred]**.
+
+### The front end's path
+
+The front end is one state machine (`0x426E80`): top state `[g+0x2BBE]`
+(jump table `0x42859C`), sub-state `[g+0x2BBF]`, and a handler asks for the
+next sub-state through `[g+0x2BC0]`. The campaign's path is four screens:
+
+1. **`SINGLE.GUI`**, button `NewCamp` (`0x4775AF`): a Campaign-CD check, then
+   **`NEWGAME.GUI`** in its "play any mission" mode (`0x42736B`,
+   `0x478240(1)`). The hidden `AnyMsn` button (revealed by typing `DRDEATH`,
+   `0x477510`) opens the same screen in the same mode, so in v3.1 it is
+   vestigial; the start-at-mission-0 mode (argument 0) is reachable only
+   from itself and is dead.
+2. **`NEWGAME.GUI`** (builder `0x478240`, handler `0x477AB0`): `Side0`/`Side1`
+   (and the text buttons `Arm`/`Core`) pick player 0's side `[g+0x37EF2]`,
+   player 1 taking the other; `Difficulty` cycles `[g+0x37EEE]` 0 Easy, 1
+   Medium, 2 Hard; the `Campaign` list is every `camps\*.tdf` whose
+   `campaignside` is the side's SIDEDATA `name` or `ALL` (`0x476A60`); the
+   `Missions` list is the chosen campaign's localised mission names
+   (`0x435760`). `Start` resets the progress string (below) to 25 `U`s
+   (`0x41DA30`), loads the campaign (`0x435110`) and the selected mission
+   (`0x435C00`), and sets **player 0's colour to 0 and player 1's to 1**
+   (`0x477C79`, `0x477C8B`). The campaign name is the list's entry, except
+   that with two or fewer campaign files installed the front end names
+   `Arm Campaign` or `Core Campaign` by side (`[0x507B6C]`, `0x477BD5`-`0x477C17`).
+3. **`MSNBRIEF.GUI`**, the briefing (builder `0x478E80`, handler `0x478CB0`):
+   background `bitmaps\mbrief<nameprefix>.pcx` (`mbriefARM`/`mbriefCOR`,
+   `0x478ED1`); the planet from the mission's `planet=` through a table of
+   display names to three GAFs, `<X>brief`, `<X>Pan` (scrolling, with "Wind
+   Speed : %d" and "Gravity : %.1f" printed over it) and `<X>Rotate`
+   (`0x4790E6`-`0x47933D`; an unknown name is `Green`, and `Lunar` on the
+   Core side is `Lunar2`); the `brief` text in `TextRegion` in the side's
+   font, paged by `MOREBAR` (`0x476D80`); and the `narration` WAV, which
+   `SHUTUP` (starting on) stops and replays. `Start` starts the game
+   (`0x478CE8`, `[g+0x2A44] |= 4`).
+4. After the game, **the glamour picture** on a win (below), then
+   **`ENDMSN.GUI`** (builder `0x41F0A0`, handler `0x41EC50`).
+
+The shipped `NEWCAMP`, `SELCAMP`, `SELCAMPX`, `ANYMSN`, `BRIEF`, `BRIEFX`,
+`MISSION`, `MISSIONX`, `SCORE`, `ENDGAME` and `SELSIDE` GUIs are named
+nowhere in the executable: leftovers.
+
+### The mission's files
+
+The mission reader resolves each header key into a path slot through
+`0x435430(slot, dir, name, ext)`, which tries `<dir>-<language>\` before
+`<dir>\` (`0x4354E3`), and reads `brief` and `narration` localised
+(`Germanbrief=`):
+
+| Key | Path | Used by |
+|---|---|---|
+| `missionfile` | `Maps\<file>.TNT` | the map |
+| `brief` | `camps\briefs[-lang]\<brief>.TXT` | the briefing, and the in-game `BRIEFING.GUI` |
+| `narration` | `camps\briefs[-lang]\<narration>.WAV` | the briefing only |
+| `missionhint` | `camps\hints\<hint>.TXT` | nothing **[inferred]**: no reader found |
+| `glamour` | `bitmaps\glamour\<glamour>.PCX` | the post-victory picture, not the briefing |
+| `glamoursound` | `camps\briefs\<glamoursound>.WAV` | played over it |
+| `UseOnlyUnits` | `camps\useonly\<name>.TDF` | the build restriction |
+| `aiprofile` | `ai\<profile>.txt`, else `ai\default.txt` | the computer player |
+
+**The schema** is chosen by difficulty through a preference list compared
+against each `[Schema N]`'s `type`, case-insensitively, first match winning
+(`0x43688B`-`0x436B88`): Easy gives Easy, Medium, Hard; Medium gives
+**Medium, Easy, Hard**; Hard gives **Hard, Medium, Easy**. The `N` and
+`SCHEMACOUNT` do not matter.
+
+### Progression
+
+- **At game end** `0x41DC20` records the result: `[g+0x391AB]` = the
+  mission's index and, in a 25-byte string `[g+0x391CF]`, `W` or `L` at that
+  index (`0x41DC81`-`0x41DC97`); untried missions are `U`.
+- **The endgame** (TOTALA-EXE-INTERFACE §104) adds for a campaign: a CD
+  check (`CDCHECK.GUI`); then, on a win with a `glamour`, the picture full
+  screen with `glamoursound` and "Click to continue." (state 6,
+  `0x41FDF8`); then ENDMSN.
+- **ENDMSN** continues when the campaign was lost or has a next mission
+  (`0x41F040`). Its `Missions` list prefixes each name with a status glyph
+  for `L`, `W` or `U` (`0x41EAA0`), and selects **the next mission after a
+  win and the same one after a loss** (`0x41F2D4`-`0x41F311`). **Any listed
+  mission can be started**: the win is not enforced. `Start` goes to that
+  mission's briefing (FE state 0xD); `Difficulty` can be changed here;
+  `LoadGame`, `SaveGame` and `MainMenu` do what they say. When it does not
+  continue, only `MainMenu` is shown.
+- **Progress is kept only in save games.** No registry key or file holds
+  it. A save's header carries `Campaign`, `Mission`, `Difficulty`, `Side` and
+  `Thumbs`, the 25-character string (`0x432869`). A save made from ENDMSN
+  is a header-only `BetweenMissions=1` save that records the **next**
+  mission (`0x432786`) and reloads to its briefing (`0x492A0A`-`0x492A96`).
+- **In-game Restart** reloads the same mission and goes straight back into
+  play, with no briefing **[inferred]** (`0x49970F`-`0x499794`).
+
+### The movies
+
+`0x426780(name)` plays `Data\<name>.zrb`, silently doing nothing when the
+file is missing:
+
+| Movie | When |
+|---|---|
+| `1.zrb` | the startup logo, every launch in full-screen mode |
+| `2.zrb` | the intro: first launch (registry `PlayMovie`) and the INTRO button |
+| `3.zrb` then `5.zrb` | **the Arm campaign completed**: the last mission (no `MISSION<n+1>`) won, `nomovie` 0, full screen, player 0 on side 0 (`0x41FC52`-`0x41FCA0`, FE state 4) |
+| `4.zrb` then `5.zrb` | **the Core campaign completed**, the same for side 1 (FE state 5) |
+| `5.zrb` | the credits: the main menu's `Credits` button, and after either ending |
+
+Nothing plays on defeat, and a completed campaign in windowed mode goes
+straight to the main menu. The shipped `nomovie=1` missions are the Core
+Contingency finales and the last Battle Tactics missions, so only the two
+original campaigns end on a film.

@@ -1730,7 +1730,9 @@ in ticks of that rate.
 ### The chart
 
 The background is `bitmaps/OUTCOME0.PCX`, shown by `0x4288D0("outcome0")` at
-`0x41F1C8`; a campaign win gets `outcome1` instead. It is a 640x480 bitmap that
+`0x41F1C8` when the game does not go on; a campaign that goes on to another
+mission (lost, or with a mission after this one) gets `outcome1` instead
+(`0x41F18B`; §115 of TOTALA-EXE-DATA.md, corrected 2026-09-25). It is a 640x480 bitmap that
 paints the frame, the button surround, and all eight column headings -- **Name,
 Kills, Losses, Energy Produced, Metal Produced, Excess Energy, Excess Metal,
 Score**. Over it the original builds `guis/ENDMSN.GUI` (`0x4AA8F0` at
@@ -1826,6 +1828,11 @@ them, `gamedata/SOUND.TDF` has no entry for them, and no gui file carries a
 sound field that reaches them. `0x46C620`, which the endgame calls with 7 at
 `0x41F897`, turns out to be the statistics recorder rather than a sound call.
 RWE plays `BEEP6` twice and says so at the call site.
+
+**Found since (§113):** `VICTORY2` is reached through `ALLSOUND.TDF`'s
+`[Victory Condition]` entry, which the campaign's mission rules play with
+`0x47F1A0("Victory Condition", 0)` the first time each victory objective is
+met. It is a campaign sound, not the endgame's.
 
 ---
 

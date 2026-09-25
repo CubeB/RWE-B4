@@ -240,7 +240,7 @@ of `TotalA.exe` instead of guessed at.
 
 - `docs/TOTALA-EXE.md` — **the index to the findings**, and the two sections
   everyone is told to read first: §88, where RWE deliberately differs, and
-  §91, what is decoded but not ported. 109 findings numbered to 111 (§83 and
+  §91, what is decoded but not ported. 113 findings numbered to 115 (§83 and
   §84 do not exist). **The numbers never move**, so a §n written anywhere in
   the tree names the same finding for ever; the index says which file holds
   it. The subjects are `-MOVEMENT`, `-VISION`, `-ECONOMY`, `-WEAPONS`,
