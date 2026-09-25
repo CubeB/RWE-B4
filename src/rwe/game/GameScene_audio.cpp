@@ -149,7 +149,7 @@ namespace rwe
     }
 
 
-    void GameScene::printConsole(const std::string& text, const Color& color)
+    void GameScene::printConsole(const std::string& text, const std::optional<Color>& color)
     {
         // Five seconds a line, and never more than eight on screen.
         consoleMessages.push_back(ConsoleMessage{text, color, sceneTime + SceneTime(5u * 30u)});
@@ -167,12 +167,20 @@ namespace rwe
         }
 
         // Top-left of the world view, under the resource bar, newest line at
-        // the bottom -- where the original prints its speech text, and in the
-        // font it prints it in: COMIX, the taller of its two game fonts.
+        // the bottom -- where the original prints its speech text. Lines step
+        // by COMIX's 14-row height even though the glyphs are hattfont12's.
         float y = static_cast<float>(GuiSizeTop) + 16.0f;
         for (const auto& message : consoleMessages)
         {
-            chromeUiRenderService.drawText(static_cast<float>(GuiSizeLeft) + 8.0f, y, message.text, *speechFont, message.color);
+            auto x = static_cast<float>(GuiSizeLeft) + 8.0f;
+            if (message.color)
+            {
+                chromeUiRenderService.drawText(x, y, message.text, *speechFont, *message.color);
+            }
+            else
+            {
+                chromeUiRenderService.drawText(x, y, message.text, *speechFont);
+            }
             y += 14.0f;
         }
     }
