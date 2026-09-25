@@ -70,6 +70,16 @@ namespace rwe
             REQUIRE((std::get<PatrolOrder>(orders[1]).destination == b));
         }
 
+        SECTION("a patrol shift-queued on an idle unit loops between the point and the unit")
+        {
+            issue(sim, unit, PatrolOrder(b), Kind::Queued);
+
+            const auto& orders = sim.getUnitState(unit).orders;
+            REQUIRE(orders.size() == 2);
+            REQUIRE((std::get<PatrolOrder>(orders[0]).destination == b));
+            REQUIRE((std::get<PatrolOrder>(orders[1]).destination == SimVector(0_ss, 0_ss, 0_ss)));
+        }
+
         SECTION("a patrol with no move loops between the point and the unit")
         {
             issue(sim, unit, PatrolOrder(b), Kind::Immediate);

@@ -91,11 +91,19 @@ namespace rwe
             // An idle unit has nothing to queue behind, so this order starts
             // straight away -- which means an aircraft part-way through setting
             // down has to break off and get back in the air for it.
-            if (unit->get().orders.empty())
+            auto wasIdle = unit->get().orders.empty();
+            if (wasIdle)
             {
                 UnitBehaviorService(&simulation).interruptCurrentTask(unitId);
             }
             unit->get().addOrder(order);
+            if (wasIdle && std::holds_alternative<PatrolOrder>(order))
+            {
+                // A patrol queued on an idle unit is a fresh patrol, as in
+                // issueOrder: it loops between the point and where the unit
+                // stands, since one waypoint alone would park it.
+                unit->get().addOrder(PatrolOrder(unit->get().position));
+            }
         }
 
         void cancelBuildOrderAt(GameSimulation& simulation, UnitId unitId, const SimVector& position)
