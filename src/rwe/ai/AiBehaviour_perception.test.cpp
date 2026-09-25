@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <rwe/ai/PerceptionManager.h>
 #include <rwe/ai/ai_test_util.h>
 
 /**
@@ -296,6 +297,99 @@ namespace rwe
             runTicks(sim, controller, 2, commands);
             REQUIRE(controller.getBlackboard().knownEnemies.count(raiderId.value) == 0);
         }
+    }
+
+    TEST_CASE("a contact that dies out of sight stays on the AI's map, unless it cheats", "[ai]")
+    {
+        // refresh keeps a contact it cannot see, so a unit that dies where
+        // nothing of ours is looking does not leave the AI's map the instant
+        // it dies. The managers used to ask the live simulation whether it was
+        // dead and drop it anyway, which is knowledge a player does not have.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        // The commander sees 300; the far contact is beyond that.
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        sim.updateVisibility();
+
+        auto farAway = SimVector(450_ss, 0_ss, 0_ss);
+        auto inSight = SimVector(100_ss, 0_ss, 0_ss);
+        REQUIRE_FALSE(sim.isVisibleTo(ai, farAway));
+        REQUIRE(sim.isVisibleTo(ai, inSight));
+
+        // Unit 999 does not exist, so it is gone wherever it is.
+        KnownEnemy goneFar{UnitId(999), "ARMPW", farAway, GameTime(0), false, true, false};
+
+        SECTION("the AI keeps acting on a contact it cannot see")
+        {
+            REQUIRE(contactStillStanding(sim, ai, false, goneFar).has_value());
+        }
+
+        SECTION("an omniscient AI knows the contact is gone")
+        {
+            REQUIRE_FALSE(contactStillStanding(sim, ai, true, goneFar).has_value());
+        }
+
+        SECTION("a contact we are watching and cannot see is gone")
+        {
+            KnownEnemy goneNear{UnitId(999), "ARMPW", SimVector(100_ss, 0_ss, 0_ss), GameTime(0), false, true, false};
+            REQUIRE_FALSE(contactStillStanding(sim, ai, false, goneNear).has_value());
+        }
+
+        SECTION("a contact in sight carries the live unit, for the frame test")
+        {
+            auto live = addUnit(sim, "ARMPW", human, inSight, script);
+            sim.updateVisibility();
+            KnownEnemy seen{live, "ARMPW", inSight, GameTime(0), false, true, false};
+            auto contact = contactStillStanding(sim, ai, false, seen);
+            REQUIRE(contact.has_value());
+            REQUIRE(contact->unit != nullptr);
+            REQUIRE(contact->unit->position.x == inSight.x);
+        }
+    }
+
+    TEST_CASE("a dead contact out of sight still draws the commander, unless it cheats", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        // The only thing that can see past the commander's 300.
+        auto peeperId = addUnit(sim, "ARMPEEP", ai, SimVector(300_ss, 60_ss, 0_ss), script);
+        // Armed, beyond the commander's sight but well inside
+        // commanderDangerRadius (450), so only the scout can find it.
+        auto enemyId = addUnit(sim, "ARMPW", human, SimVector(320_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        // Run the tactical pass every tick, so a handful of ticks settles it.
+        profile.tacticalTickInterval = 1;
+        // Keep the scout where it is: nothing here is about scouting.
+        profile.scoutCount = 0;
+        profile.targetScoutPlaneCount = 0;
+
+        AiPlayerController controller(ai, profile, 42u, MapIntel{});
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 2, commands);
+        REQUIRE(controller.getBlackboard().knownEnemies.count(enemyId.value) == 1);
+
+        // The scout dies, so nothing of ours watches where the enemy was.
+        sim.getUnitState(peeperId).markAsDeadNoCorpse();
+        runTicks(sim, controller, 2, commands);
+        REQUIRE(controller.getBlackboard().knownEnemies.count(enemyId.value) == 1);
+
+        // The enemy dies out of sight. The honest AI keeps the marker and
+        // still treats it as the threat near the commander.
+        sim.getUnitState(enemyId).markAsDeadNoCorpse();
+        runTicks(sim, controller, 2, commands);
+
+        const auto& bb = controller.getBlackboard();
+        REQUIRE(bb.knownEnemies.count(enemyId.value) == 1);
+        REQUIRE(bb.commanderThreat.has_value());
+        CHECK(*bb.commanderThreat == enemyId);
     }
 
     TEST_CASE("CORE plays its own line of kbots, and a knob set by hand still wins", "[ai]")

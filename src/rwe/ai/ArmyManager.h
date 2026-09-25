@@ -154,7 +154,7 @@ namespace rwe
             std::vector<PlayerCommand>& outCommands) const;
 
         void updateRallyPoint(const AiTuningProfile& profile, AiBlackboard& bb) const;
-        std::optional<UnitId> nearestKnownEnemy(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly = false, const std::function<bool(UnitId)>& skip = nullptr) const;
+        std::optional<UnitId> nearestKnownEnemy(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly = false, const std::function<bool(UnitId)>& skip = nullptr) const;
 
         /**
          * As nearestKnownEnemy, but only an enemy MapIntel::sameWaterBody
@@ -167,7 +167,7 @@ namespace rwe
          * bb.mapIntel.valid false or sameWaterBody's own "0 means dry or
          * off the map" answer both just find nothing to shoot at.
          */
-        std::optional<UnitId> nearestNavalEnemy(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance) const;
+        std::optional<UnitId> nearestNavalEnemy(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance) const;
 
         /**
          * Ships hold the coast at the shipyard that built them and fight
@@ -191,6 +191,7 @@ namespace rwe
          */
         void updateAntiAir(
             const GameSimulation& sim,
+            PlayerId aiOwner,
             const AiTuningProfile& profile,
             AiBlackboard& bb,
             std::vector<PlayerCommand>& outCommands) const;
@@ -204,6 +205,7 @@ namespace rwe
          */
         void answerHarassmentWithCommander(
             const GameSimulation& sim,
+            PlayerId aiOwner,
             const AiTuningProfile& profile,
             const AiBlackboard& bb,
             std::vector<PlayerCommand>& outCommands) const;
@@ -212,6 +214,6 @@ namespace rwe
          * The enemy's outlying economy: a building of theirs away from their
          * base with nothing covering it. Nothing to raid returns nothing.
          */
-        std::optional<UnitId> chooseRaidTarget(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const ThreatMap& threatMap) const;
+        std::optional<UnitId> chooseRaidTarget(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, const AiBlackboard& bb, const ThreatMap& threatMap) const;
     };
 }

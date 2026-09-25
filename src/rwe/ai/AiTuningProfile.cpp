@@ -173,6 +173,9 @@ namespace rwe
             {"targetAirConstructorCount", &AiTuningProfile::targetAirConstructorCount},
             {"battlefieldReclaimEscortCount", &AiTuningProfile::battlefieldReclaimEscortCount},
             {"battlefieldReclaimBatch", &AiTuningProfile::battlefieldReclaimBatch},
+            {"ownWreckageReclaimers", &AiTuningProfile::ownWreckageReclaimers},
+            {"ownWreckageDelaySeconds", &AiTuningProfile::ownWreckageDelaySeconds},
+            {"ownWreckageBatch", &AiTuningProfile::ownWreckageBatch},
             {"waveMeetEnemyCount", &AiTuningProfile::waveMeetEnemyCount},
             {"defenceValueMaxPaybackSeconds", &AiTuningProfile::defenceValueMaxPaybackSeconds},
             {"outpostDefenceValueSecondsPerExtractor", &AiTuningProfile::outpostDefenceValueSecondsPerExtractor},
@@ -199,6 +202,7 @@ namespace rwe
             {"fortifyMissileTower", &AiTuningProfile::fortifyMissileTower},
             {"fortifyWhereAttacked", &AiTuningProfile::fortifyWhereAttacked},
             {"rebuildLostDefences", &AiTuningProfile::rebuildLostDefences},
+            {"ownWreckageOnlyWhenMetalShort", &AiTuningProfile::ownWreckageOnlyWhenMetalShort},
             {"fortifyRebuiltDefences", &AiTuningProfile::fortifyRebuiltDefences},
             {"reinforceTwiceLostDefences", &AiTuningProfile::reinforceTwiceLostDefences},
             {"energyInRows", &AiTuningProfile::energyInRows},
@@ -240,6 +244,7 @@ namespace rwe
             {"expansionNeedsExploredGround", &AiTuningProfile::expansionNeedsExploredGround},
             {"expansionStaysOnOurSide", &AiTuningProfile::expansionStaysOnOurSide},
             {"armyFerryWantFromMap", &AiTuningProfile::armyFerryWantFromMap},
+            {"navalStandOff", &AiTuningProfile::navalStandOff},
             {"ferryLandingFan", &AiTuningProfile::ferryLandingFan},
             {"ferryLandingAvoidsThreat", &AiTuningProfile::ferryLandingAvoidsThreat},
         };
@@ -357,6 +362,8 @@ namespace rwe
         p.navalFleetSize = 12;
         p.targetSubmarineCount = 4;
         p.submarineMinDestroyerCount = 2;
+        p.ownWreckageReclaimers = 2;
+        p.ownWreckageDelaySeconds = 0;
         return p;
     }
 
@@ -413,6 +420,10 @@ namespace rwe
                 // to show.
                 p.navalFleetSize = 3;
                 p.targetSubmarineCount = 0;
+                // Picks up after a raid, but late: the rubble lies for half
+                // a minute, and only while the metal is actually short.
+                p.ownWreckageDelaySeconds = 30;
+                p.ownWreckageOnlyWhenMetalShort = true;
                 return p;
             }
             case AiDifficulty::Standard:
@@ -441,6 +452,8 @@ namespace rwe
                 p.navalFleetSize = 9;
                 p.targetSubmarineCount = 3;
                 p.submarineMinDestroyerCount = 2;
+                p.ownWreckageReclaimers = 2;
+                p.ownWreckageDelaySeconds = 0;
                 return p;
             }
             case AiDifficulty::Brutal:
@@ -457,6 +470,7 @@ namespace rwe
         params.coverRadius = p.builderSafetyCoverRadius;
         params.protectionRatio = p.builderSafetyProtectionRatio;
         params.commanderCoverMetal = static_cast<float>(p.commanderFightsUpToMetal);
+        params.omniscient = p.cheatModeOmniscient;
         return params;
     }
 

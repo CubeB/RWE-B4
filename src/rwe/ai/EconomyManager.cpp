@@ -12,6 +12,28 @@
 
 namespace rwe
 {
+    namespace
+    {
+        /**
+         * Remembers where something of ours died, if it died in the base.
+         * Most recent first; EconomyManager::refresh trims the list to
+         * MaxOwnWreckSites once both diffs have run.
+         */
+        void rememberOwnWreckSite(AiBlackboard& bb, const SimVector& position)
+        {
+            if (!bb.baseAnchor)
+            {
+                return;
+            }
+            const auto reach = SimScalar(OwnWreckBaseReach);
+            if (bb.baseAnchor->distanceSquared(position) > reach * reach)
+            {
+                return;
+            }
+            bb.ownWreckSites.insert(bb.ownWreckSites.begin(), OwnWreckSite{position, bb.now});
+        }
+    }
+
     void EconomyManager::refresh(
         const GameSimulation& sim,
         PlayerId aiOwner,
@@ -362,6 +384,7 @@ namespace rwe
                     continue;
                 }
                 bb.recentLosses.insert(bb.recentLosses.begin(), LostBuilding{standing.unitType, standing.position, bb.now});
+                rememberOwnWreckSite(bb, standing.position);
             }
             if (bb.recentLosses.size() > MaxRememberedLosses)
             {
@@ -395,11 +418,16 @@ namespace rwe
                 bb.recentUnitLosses.insert(
                     bb.recentUnitLosses.begin(),
                     LostUnit{standing.unitType, standing.position, bb.now, standing.underConstruction});
+                rememberOwnWreckSite(bb, standing.position);
             }
             if (bb.recentUnitLosses.size() > MaxRememberedUnitLosses)
             {
                 bb.recentUnitLosses.resize(MaxRememberedUnitLosses);
             }
+        }
+        if (bb.ownWreckSites.size() > MaxOwnWreckSites)
+        {
+            bb.ownWreckSites.resize(MaxOwnWreckSites);
         }
         bb.standingUnits = std::move(standingUnitsNow);
         bb.recentUnitLosses.erase(

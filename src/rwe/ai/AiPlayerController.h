@@ -73,6 +73,17 @@ namespace rwe
             MapIntel mapIntel,
             AiBuildTree buildTree = AiBuildTree{});
 
+        /**
+         * Out of line, in AiPlayerController.cpp, on purpose. GameSimulation
+         * owns controllers through unique_ptr, so an implicit destructor
+         * would be generated in GameSimulation.cpp -- and with it the
+         * destructor of every container on the blackboard and in every
+         * manager, which that translation unit's section budget cannot
+         * afford (CLAUDE.md, "A translation unit can outgrow what a COFF
+         * object can describe").
+         */
+        ~AiPlayerController();
+
         void tick(const GameSimulation& sim, std::vector<PlayerCommand>& outCommands);
 
         PlayerId getPlayerId() const { return playerId; }

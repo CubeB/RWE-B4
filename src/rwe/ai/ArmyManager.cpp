@@ -266,7 +266,7 @@ namespace rwe
         return it != landTargetGivenUp.end() && now.value < it->second.value;
     }
 
-    std::optional<UnitId> ArmyManager::nearestKnownEnemy(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly, const std::function<bool(UnitId)>& skip) const
+    std::optional<UnitId> ArmyManager::nearestKnownEnemy(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, const AiBlackboard& bb, const SimVector& from, SimScalar maxDistance, bool airOnly, const std::function<bool(UnitId)>& skip) const
     {
         std::optional<UnitId> best;
         auto bestDistanceSquared = maxDistance * maxDistance;
@@ -284,12 +284,12 @@ namespace rwe
             {
                 continue;
             }
-            auto unitRef = contactStillStanding(sim, enemy);
-            if (!unitRef)
+            auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy);
+            if (!contact)
             {
                 continue;
             }
-            if (isNanoframe(sim, unitRef->get()))
+            if (contact->unit && isNanoframe(sim, *contact->unit))
             {
                 continue;
             }
@@ -305,6 +305,7 @@ namespace rwe
 
     void ArmyManager::updateAntiAir(
         const GameSimulation& sim,
+        PlayerId aiOwner,
         const AiTuningProfile& profile,
         AiBlackboard& bb,
         std::vector<PlayerCommand>& outCommands) const
@@ -326,7 +327,7 @@ namespace rwe
             // Anything airborne within reach gets shot at. The army's engage
             // radius, because it is the same question: is that close enough
             // to be worth leaving what I am doing.
-            if (auto enemy = nearestKnownEnemy(sim, profile, bb, unit.position, profile.engageRadius, true))
+            if (auto enemy = nearestKnownEnemy(sim, aiOwner, profile, bb, unit.position, profile.engageRadius, true))
             {
                 if (!isAttackingUnit(unit, *enemy))
                 {
@@ -356,6 +357,7 @@ namespace rwe
 
     std::optional<UnitId> ArmyManager::nearestNavalEnemy(
         const GameSimulation& sim,
+        PlayerId aiOwner,
         const AiTuningProfile& profile,
         const AiBlackboard& bb,
         const SimVector& from,
@@ -377,12 +379,12 @@ namespace rwe
             {
                 continue;
             }
-            auto unitRef = contactStillStanding(sim, enemy);
-            if (!unitRef)
+            auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy);
+            if (!contact)
             {
                 continue;
             }
-            if (isNanoframe(sim, unitRef->get()))
+            if (contact->unit && isNanoframe(sim, *contact->unit))
             {
                 continue;
             }
@@ -466,6 +468,101 @@ namespace rwe
             return clampInsideVisibleMap(sim.terrain, target.position + (away * standOff), 64_ss);
         }
 
+        /**
+         * The longest reach among a unit's weapons that could hit the target
+         * where it stands, asked of the simulation's own eligibility test
+         * (GameSimulation::weaponCanHitUnit, 0x49ABB0): no torpedo at
+         * something out of the water, nothing but a torpedo at a submerged
+         * hull, an anti-air weapon only at something flying. A destroyer's
+         * depth charge is not what it can hit a floating tower's gunner
+         * with, so it must not be what sets its distance.
+         */
+        SimScalar longestRangeAgainst(const GameSimulation& sim, const UnitState& shooter, const UnitState& target)
+        {
+            const auto& def = sim.unitDefinitions.at(shooter.unitType);
+            SimScalar best = 0_ss;
+            for (const auto& weaponName : {def.weapon1, def.weapon2, def.weapon3})
+            {
+                auto it = weaponName.empty() ? sim.weaponDefinitions.end() : sim.weaponDefinitions.find(weaponName);
+                if (it == sim.weaponDefinitions.end() || !sim.weaponCanHitUnit(it->second, shooter, target))
+                {
+                    continue;
+                }
+                best = rweMax(best, it->second.maxRange);
+            }
+            return best;
+        }
+
+        /**
+         * Where a hull that outranges what it is attacking should lie: near
+         * the outer edge of its own reach, straight back from the target,
+         * and never inside the target's (issue #191). Nothing when it is
+         * already that far out, when it has nothing that can hit the target
+         * -- a submarine at a shipyard's dry corner -- when the target
+         * reaches as far, or when the water there is too shallow for the
+         * hull or is some other sea.
+         *
+         * Unlike kiteBackFrom this stands off from buildings too. Backing a
+         * land unit away from a tower is walking away from the job; a hull's
+         * whole advantage over a torpedo launcher or a floating tower is that
+         * it can choose its distance.
+         */
+        std::optional<SimVector> hullStandOff(
+            const GameSimulation& sim,
+            const AiTuningProfile& profile,
+            const AiBlackboard& bb,
+            const UnitState& ship,
+            const UnitDefinition& shipDef,
+            UnitId targetId)
+        {
+            if (!profile.kiteWithLongerRange || !profile.navalStandOff)
+            {
+                return std::nullopt;
+            }
+            auto targetRef = sim.tryGetUnitState(targetId);
+            if (!targetRef)
+            {
+                return std::nullopt;
+            }
+            const auto& target = targetRef->get();
+            auto targetDefIt = sim.unitDefinitions.find(target.unitType);
+            if (targetDefIt == sim.unitDefinitions.end())
+            {
+                return std::nullopt;
+            }
+            const auto seaLevel = sim.terrain.getSeaLevel();
+
+            auto ours = longestRangeAgainst(sim, ship, target);
+            if (ours <= 0_ss)
+            {
+                return std::nullopt;
+            }
+            auto theirs = longestRangeAgainst(sim, target, ship);
+            if (ours <= theirs + profile.kiteRangeMargin)
+            {
+                return std::nullopt;
+            }
+
+            auto offset = ship.position - target.position;
+            offset.y = 0_ss;
+            auto distance = rweSqrt(offset.lengthSquared());
+            auto standOff = rweMax(theirs + profile.kiteRangeMargin, ours - profile.kiteRangeMargin);
+            if (distance >= standOff)
+            {
+                return std::nullopt;
+            }
+            auto away = offset.normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+            auto spot = clampInsideVisibleMap(sim.terrain, target.position + (away * standOff), 64_ss);
+            auto groundAtSpot = sim.terrain.tryGetHeightAt(spot.x, spot.z);
+            auto draught = SimScalar(static_cast<float>(sim.getAdHocMovementClass(shipDef.movementCollisionInfo).minWaterDepth));
+            if (!groundAtSpot || *groundAtSpot > seaLevel - draught || !sameWaterBody(bb.mapIntel, sim.terrain, ship.position, spot))
+            {
+                return std::nullopt;
+            }
+            spot.y = seaLevel;
+            return spot;
+        }
+
         std::optional<UnitId> chooseDgunTarget(
             const GameSimulation& sim,
             PlayerId aiOwner,
@@ -500,12 +597,12 @@ namespace rwe
                 {
                     continue;
                 }
-                auto enemyRef = contactStillStanding(sim, enemy);
-                if (!enemyRef || isNanoframe(sim, enemyRef->get()))
+                auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy);
+                if (!contact || (contact->unit && isNanoframe(sim, *contact->unit)))
                 {
                     continue;
                 }
-                const auto& position = enemyRef->get().position;
+                const auto& position = enemy.lastKnownPosition;
                 if (sim.terrain.getHeightAt(position.x, position.z) < sim.terrain.getSeaLevel())
                 {
                     continue;
@@ -755,8 +852,8 @@ namespace rwe
             {
                 continue;
             }
-            auto enemyRef = contactStillStanding(sim, enemy);
-            if (!enemyRef || isNanoframe(sim, enemyRef->get()))
+            auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy);
+            if (!contact || (contact->unit && isNanoframe(sim, *contact->unit)))
             {
                 continue;
             }
@@ -766,8 +863,8 @@ namespace rwe
                 continue;
             }
             ++threats;
-            threatMetal += sim.unitDefinitions.at(enemyRef->get().unitType).buildCostMetal.value;
-            const auto& enemyPosition = enemyRef->get().position;
+            threatMetal += sim.unitDefinitions.at(enemy.unitType).buildCostMetal.value;
+            const auto& enemyPosition = enemy.lastKnownPosition;
             if (sim.terrain.getHeightAt(enemyPosition.x, enemyPosition.z) >= sim.terrain.getSeaLevel()
                 && (!nearestOnLand || d < nearestOnLandDistance))
             {
@@ -1315,7 +1412,7 @@ namespace rwe
             // Anything on our own sea gets shot at, whatever else is
             // happening -- the land army's own "anything within reach"
             // rule, just asked with nearestNavalEnemy instead.
-            if (auto enemy = nearestNavalEnemy(sim, profile, bb, ship.position, profile.engageRadius))
+            if (auto enemy = nearestNavalEnemy(sim, aiOwner, profile, bb, ship.position, profile.engageRadius))
             {
                 // Is it getting hurt? If nothing we have thrown at it in
                 // navalStalledAttackSeconds has moved its hit points, the
@@ -1406,6 +1503,25 @@ namespace rwe
                     }
                 }
 
+                // Outranging it: lie off at the edge of our own reach, where
+                // it cannot answer, and fire from there next pass
+                // (navalStandOff).
+                if (auto standOff = hullStandOff(sim, profile, bb, ship, sim.unitDefinitions.at(ship.unitType), *enemy))
+                {
+                    if (!isMovingTo(ship, *standOff))
+                    {
+                        sim.eventLog.event(sim.gameTime.value, "navy_reposition")
+                            .set("player", aiOwner.value)
+                            .set("unit", shipId.value)
+                            .set("target_id", enemy->value)
+                            .set("x", static_cast<double>(standOff->x.value))
+                            .set("z", static_cast<double>(standOff->z.value))
+                            .set("why", "stand_off")
+                            .detail("ship lies off at the edge of its own reach");
+                        outCommands.push_back(moveCommand(shipId, *standOff));
+                    }
+                    continue;
+                }
                 if (!isAttackingUnit(ship, *enemy))
                 {
                     outCommands.push_back(attackCommand(shipId, *enemy));
@@ -1477,6 +1593,7 @@ namespace rwe
 
     void ArmyManager::answerHarassmentWithCommander(
         const GameSimulation& sim,
+        PlayerId aiOwner,
         const AiTuningProfile& profile,
         const AiBlackboard& bb,
         std::vector<PlayerCommand>& outCommands) const
@@ -1525,7 +1642,7 @@ namespace rwe
         // further off than that, walking to it is a base left unbuilt, and
         // on the map this is for it is as likely to be water the commander
         // cannot cross as ground it can.
-        auto enemy = nearestKnownEnemy(sim, profile, bb, commander.position, profile.engageRadius);
+        auto enemy = nearestKnownEnemy(sim, aiOwner, profile, bb, commander.position, profile.engageRadius);
         if (!enemy)
         {
             return;
@@ -1543,6 +1660,7 @@ namespace rwe
 
     std::optional<UnitId> ArmyManager::chooseRaidTarget(
         const GameSimulation& sim,
+        PlayerId aiOwner,
         const AiTuningProfile& profile,
         const AiBlackboard& bb,
         const ThreatMap& threatMap) const
@@ -1568,8 +1686,7 @@ namespace rwe
             {
                 continue;
             }
-            auto unitRef = contactStillStanding(sim, enemy);
-            if (!unitRef)
+            if (!contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy))
             {
                 continue;
             }
@@ -1652,7 +1769,7 @@ namespace rwe
         }
 
         updateCommanderSafety(sim, aiOwner, profile, bb, outCommands);
-        updateAntiAir(sim, profile, bb, outCommands);
+        updateAntiAir(sim, aiOwner, profile, bb, outCommands);
         updateNavy(sim, aiOwner, profile, bb, outCommands);
 
         // A guard for a builder placing something away from the base --
@@ -1739,7 +1856,7 @@ namespace rwe
                 auto alive = std::binary_search(bb.combatUnits.begin(), bb.combatUnits.end(), UnitId(*it), [](UnitId a, UnitId b) { return a.value < b.value; });
                 it = alive ? std::next(it) : bb.raidGroup.erase(it);
             }
-            if (auto target = chooseRaidTarget(sim, profile, bb, threatMap))
+            if (auto target = chooseRaidTarget(sim, aiOwner, profile, bb, threatMap))
             {
                 auto known = bb.knownEnemies.find(target->value);
                 if (known != bb.knownEnemies.end())
@@ -1906,7 +2023,8 @@ namespace rwe
                 // finished, and isNanoframe says why it is no target either.
                 // The builder putting it up is armed or it is not, and is
                 // judged on its own entry in this list.
-                if (auto enemyRef = sim.tryGetUnitState(enemyId); enemyRef && isNanoframe(sim, enemyRef->get()))
+                auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, known->second);
+                if (!contact || (contact->unit && isNanoframe(sim, *contact->unit)))
                 {
                     continue;
                 }
@@ -1943,8 +2061,7 @@ namespace rwe
                     }
                     if (enemy.lastKnownPosition.distanceSquared(standing.position) <= raidSquared)
                     {
-                        auto enemyRef = contactStillStanding(sim, enemy);
-                        if (enemyRef)
+                        if (contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy))
                         {
                             site = standing.position;
                             outpostRaider = enemy.unitId;
@@ -2057,8 +2174,7 @@ namespace rwe
                 {
                     continue;
                 }
-                auto enemyRef = contactStillStanding(sim, enemy);
-                if (!enemyRef)
+                if (!contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy))
                 {
                     continue;
                 }
@@ -2077,7 +2193,7 @@ namespace rwe
             }
         }
 
-        answerHarassmentWithCommander(sim, profile, bb, outCommands);
+        answerHarassmentWithCommander(sim, aiOwner, profile, bb, outCommands);
 
         // Nothing else can answer, so the commander answers itself.
         //
@@ -2236,7 +2352,7 @@ namespace rwe
             // attack would go on firing for the rest of the game. A move to
             // where it already stands is the cheapest way to say stop.
             // Anything within reach gets shot at, whatever the phase.
-            if (auto enemy = nearestKnownEnemy(sim, profile, bb, unit.position, profile.engageRadius, false, [&](UnitId candidate) { return hasGivenUpOn(unitId, candidate, bb.now); }))
+            if (auto enemy = nearestKnownEnemy(sim, aiOwner, profile, bb, unit.position, profile.engageRadius, false, [&](UnitId candidate) { return hasGivenUpOn(unitId, candidate, bb.now); }))
             {
                 // Is it getting hurt? The question is asked of the target we
                 // are about to order this unit at rather than of the order it

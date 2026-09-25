@@ -249,6 +249,41 @@ namespace rwe
         REQUIRE(exposure.threatMetal == Approx(0.0f));
     }
 
+    TEST_CASE("a remembered threat that died out of sight is still a threat, unless the AI sees everything", "[ai]")
+    {
+        // A threat dropped the moment its unit dies is knowledge the AI does
+        // not have unless it is looking there. The builder keeps retreating
+        // from the marker until something goes and looks.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(safetyMakeFlatTerrain(), 0u, 0, 0);
+        auto ai = safetyAddPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        auto enemyOwner = safetyAddPlayer(sim, "enemy", GamePlayerType::Computer, "CORE");
+        safetyDefineWorld(sim);
+
+        AiBlackboard bb;
+        bb.now = GameTime(1000);
+
+        auto enemyId = safetyAddEnemy(sim, bb, "ARMPW", enemyOwner, SimVector(250_ss, 0_ss, 0_ss), script, false, true, false, bb.now);
+        sim.getUnitState(enemyId).markAsDeadNoCorpse();
+
+        SECTION("an honest AI keeps counting it")
+        {
+            BuilderSafetyParams params;
+            auto exposure = assessExposure(sim, ai, bb, params, SimVector(0_ss, 0_ss, 0_ss));
+            REQUIRE(exposure.exposed);
+            REQUIRE(exposure.threatMetal == Approx(100.0f));
+        }
+
+        SECTION("an omniscient AI knows it is gone")
+        {
+            BuilderSafetyParams params;
+            params.omniscient = true;
+            auto exposure = assessExposure(sim, ai, bb, params, SimVector(0_ss, 0_ss, 0_ss));
+            REQUIRE_FALSE(exposure.exposed);
+            REQUIRE(exposure.threatMetal == Approx(0.0f));
+        }
+    }
+
     TEST_CASE("an airborne enemy is never a threat here", "[ai]")
     {
         auto script = makeEmptyCobScript();

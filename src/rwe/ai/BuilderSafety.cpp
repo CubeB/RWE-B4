@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <rwe/ai/AiBlackboard.h>
 #include <rwe/ai/AiMapBounds.h>
+#include <rwe/ai/PerceptionManager.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
@@ -62,13 +63,8 @@ namespace rwe
                 continue;
             }
 
-            auto unitOpt = sim.tryGetUnitState(enemy.unitId);
-            if (!unitOpt)
-            {
-                continue;
-            }
-            const UnitState& unit = unitOpt->get();
-            if (!unit.isAlive())
+            auto contact = contactStillStanding(sim, aiOwner, params.omniscient, enemy);
+            if (!contact)
             {
                 continue;
             }
@@ -81,8 +77,9 @@ namespace rwe
             const UnitDefinition& def = defIt->second;
 
             // A frame with no hit points is not a threat yet, whatever its
-            // finished self can shoot.
-            if (unit.isBeingBuilt(def))
+            // finished self can shoot. Only a live, visible unit can say
+            // whether it is still a frame; a remembered contact is a threat.
+            if (contact->unit && contact->unit->isBeingBuilt(def))
             {
                 continue;
             }

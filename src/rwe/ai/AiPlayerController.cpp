@@ -95,6 +95,8 @@ namespace rwe
         blackboard.buildTree = std::move(buildTree);
     }
 
+    AiPlayerController::~AiPlayerController() = default;
+
     void AiPlayerController::tick(const GameSimulation& sim, std::vector<PlayerCommand>& outCommands)
     {
         // An Idle opponent does nothing: no economy pass, no perception, no

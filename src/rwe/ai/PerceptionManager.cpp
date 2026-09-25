@@ -6,15 +6,35 @@
 
 namespace rwe
 {
-    std::optional<std::reference_wrapper<const UnitState>>
-        contactStillStanding(const GameSimulation& sim, const KnownEnemy& enemy)
+    std::optional<StandingContact>
+        contactStillStanding(const GameSimulation& sim, PlayerId aiOwner, bool omniscient, const KnownEnemy& enemy)
     {
         auto unitRef = sim.tryGetUnitState(enemy.unitId);
-        if (!unitRef || unitRef->get().isDead())
+        auto gone = !unitRef || unitRef->get().isDead();
+
+        if (omniscient)
         {
-            return std::nullopt;
+            if (gone)
+            {
+                return std::nullopt;
+            }
+            return StandingContact{&unitRef->get()};
         }
-        return unitRef;
+
+        if (sim.isVisibleTo(aiOwner, enemy.lastKnownPosition))
+        {
+            // Looking at the place we last saw it. It is only still there if
+            // the unit is alive and in our sight; otherwise we have seen it go.
+            if (gone || !sim.canSeeUnit(aiOwner, enemy.unitId))
+            {
+                return std::nullopt;
+            }
+            return StandingContact{&unitRef->get()};
+        }
+
+        // Not watching the place we last saw it, so we are not entitled to
+        // know whether it is still there: act on what we remember.
+        return StandingContact{};
     }
 
     void PerceptionManager::refresh(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, AiBlackboard& bb) const

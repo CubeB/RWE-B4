@@ -196,12 +196,25 @@ namespace rwe
      * once per ferry per tactical pass -- but mostly because that is what
      * ThreatMap does for the same reason, and one convention is better than
      * two.
+     *
+     * The threat a candidate is scored against is the CARRIER's own --
+     * anti-air for something that flies, anti-ground for a hull -- and not
+     * the cargo's. An air lift is killed by anti-air, a different layer
+     * (ThreatMap::antiAirCoverAt) from the anti-ground field this asked for
+     * both, so its landing was chosen by a number that has nothing to say
+     * about the guns that can actually reach it (issue #228). The cargo's own
+     * exposure after it is set down is a real and separate question, so
+     * anti-ground is kept as the second key: it can only break a tie between
+     * two landings the carrier is equally safe at. Answering both with the
+     * one field either parks the plane under what can shoot it down or drops
+     * the army in front of the guns.
      */
     template <typename Usable>
     std::optional<SimVector> searchLandingAlongRay(
         const GameSimulation& sim,
         const AiTuningProfile& profile,
         const ThreatMap& threatMap,
+        bool carrierIsAir,
         const SimVector& target,
         const SimVector& from,
         TransportManager::LandingSearchTally& tally,
@@ -241,7 +254,8 @@ namespace rwe
             {0.0f, -1.0f}};
 
         std::optional<SimVector> best;
-        float bestThreat = 0.0f;
+        float bestCarrierThreat = 0.0f;
+        float bestCargoThreat = 0.0f;
         SimScalar bestHomeward(0_ss);
 
         auto lastStep = std::max(4, profile.ferryLandingSearchSteps);
@@ -301,16 +315,38 @@ namespace rwe
                 //
                 // Comparing floats for equality is safe for the case that
                 // matters, which is nought against nought.
-                auto threat = threatMap.antiGroundInRadius(candidate, profile.ferryLandingThreatRadius);
+                //
+                // The carrier's field is the primary key. antiAirCoverAt is
+                // the right AA question and not antiGroundInRadius over a
+                // radius: the layer already spreads each anti-air unit across
+                // its whole range, so the single-cell count IS "how many
+                // things can shoot at an aircraft here", and a radius sum
+                // would count one gun once per covered cell.
+                float carrierThreat = 0.0f;
+                float cargoThreat = 0.0f;
+                if (carrierIsAir)
+                {
+                    carrierThreat = threatMap.antiAirCoverAt(candidate);
+                    cargoThreat = threatMap.antiGroundInRadius(candidate, profile.ferryLandingThreatRadius);
+                }
+                else
+                {
+                    carrierThreat = threatMap.antiGroundInRadius(candidate, profile.ferryLandingThreatRadius);
+                    cargoThreat = carrierThreat;
+                }
                 auto homeward = candidate.distanceSquared(from);
-                if (!best || threat < bestThreat || (threat == bestThreat && homeward < bestHomeward))
+                if (!best
+                    || carrierThreat < bestCarrierThreat
+                    || (carrierThreat == bestCarrierThreat && cargoThreat < bestCargoThreat)
+                    || (carrierThreat == bestCarrierThreat && cargoThreat == bestCargoThreat && homeward < bestHomeward))
                 {
                     best = candidate;
-                    bestThreat = threat;
+                    bestCarrierThreat = carrierThreat;
+                    bestCargoThreat = cargoThreat;
                     bestHomeward = homeward;
                 }
             }
-            if (best && bestThreat <= 0.0f)
+            if (best && bestCarrierThreat <= 0.0f && bestCargoThreat <= 0.0f)
             {
                 // This ring has a landing nothing can shoot at, so there is
                 // no reason to look further out. The whole ring is scored
@@ -349,7 +385,7 @@ namespace rwe
         // Walk back from the target towards home until there is ground to set
         // down on that is not in the enemy's lap -- which used to mean the
         // first dry cell it came to, and now means the quietest.
-        return searchLandingAlongRay(sim, profile, threatMap, target, from, tally, [&](const SimVector& p) {
+        return searchLandingAlongRay(sim, profile, threatMap, true, target, from, tally, [&](const SimVector& p) {
             // Walkable, and not somewhere the army could have walked to by
             // itself -- a ferry that sets its cargo down on our own side of
             // the water has carried it nowhere. The old search was bounded at
@@ -410,7 +446,7 @@ namespace rwe
             return false;
         };
 
-        return searchLandingAlongRay(sim, profile, threatMap, target, from, tally, [&](const SimVector& p) {
+        return searchLandingAlongRay(sim, profile, threatMap, false, target, from, tally, [&](const SimVector& p) {
             // See landingNear for why unreachable-on-foot is part of the test.
             return reachability.isWalkable(sim, p) && !reachability.isReachable(sim, p) && hasReachableWaterNearby(p);
         });
