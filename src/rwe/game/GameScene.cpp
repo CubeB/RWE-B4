@@ -299,9 +299,28 @@ namespace rwe
             static_cast<int>(static_cast<float>(sceneContext.viewport->height()) / scale));
     }
 
+    void GameScene::reportUiScaleFit()
+    {
+        auto width = sceneContext.viewport->width();
+        auto height = sceneContext.viewport->height();
+        auto requested = requestedUiScale(uiScaleSetting, sceneContext.sceneManager->contentScale());
+        auto fits = largestFittingUiScale(width, height);
+        if (requested <= fits)
+        {
+            return;
+        }
+
+        printConsole(
+            "UI " + std::to_string(requested) + "x needs " + std::to_string(640 * requested) + "x" + std::to_string(480 * requested)
+                + " pixels; the window has " + std::to_string(width) + "x" + std::to_string(height)
+                + ", so the UI stays at " + std::to_string(fits) + "x",
+            Color(252, 252, 0));
+    }
+
     void GameScene::init()
     {
         syncUiScale();
+        reportUiScaleFit();
         setCrashScene("GameScene");
         setCrashMap(gameParameters.mapName.c_str());
 

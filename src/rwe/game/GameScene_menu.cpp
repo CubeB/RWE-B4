@@ -1065,6 +1065,7 @@ namespace rwe
             else if (control == "UISCALE")
             {
                 uiScaleSetting = nextUiScale(uiScaleSetting);
+                reportUiScaleFit();
             }
             else if (control == "MODE")
             {

@@ -195,14 +195,21 @@ namespace rwe
         return setting == 0u ? 0u : wholeUiScale(static_cast<float>(setting) / 100.0f);
     }
 
-    float resolveUiScale(unsigned int setting, float contentScale, int frameWidth, int frameHeight)
+    unsigned int requestedUiScale(unsigned int setting, float contentScale)
     {
-        auto wanted = wholeUiScale(setting != 0u ? static_cast<float>(setting) / 100.0f : contentScale);
+        return wholeUiScale(setting != 0u ? static_cast<float>(setting) / 100.0f : contentScale);
+    }
 
+    unsigned int largestFittingUiScale(int frameWidth, int frameHeight)
+    {
         // The sidebar alone is 480 tall, so a scale that leaves less than
         // 640x480 of layout crops the HUD rather than enlarging it.
-        auto fits = static_cast<unsigned int>(std::max(1, std::min(frameWidth / 640, frameHeight / 480)));
-        return static_cast<float>(std::min(wanted, fits));
+        return static_cast<unsigned int>(std::max(1, std::min(frameWidth / 640, frameHeight / 480)));
+    }
+
+    float resolveUiScale(unsigned int setting, float contentScale, int frameWidth, int frameHeight)
+    {
+        return static_cast<float>(std::min(requestedUiScale(setting, contentScale), largestFittingUiScale(frameWidth, frameHeight)));
     }
 
     GameOptions optionsFromConfig(const GlobalConfig& config)

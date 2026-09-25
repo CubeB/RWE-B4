@@ -159,6 +159,16 @@ namespace rwe
             REQUIRE(resolveUiScale(500u, 1.0f, w, h) == 3.0f);
         }
 
+        SECTION("the request and the fit are what resolve takes the smaller of")
+        {
+            REQUIRE(requestedUiScale(300u, 1.0f) == 3u);
+            REQUIRE(requestedUiScale(0u, 2.0f) == 2u);
+            REQUIRE(largestFittingUiScale(800, 600) == 1u);
+            REQUIRE(largestFittingUiScale(1920, 1080) == 2u);
+            REQUIRE(largestFittingUiScale(1919, 1440) == 2u);
+            REQUIRE(largestFittingUiScale(320, 240) == 1u);
+        }
+
         SECTION("no scale leaves less than 640x480 of layout")
         {
             // 1080p holds 2x (960x540) but not 3x (640x360).

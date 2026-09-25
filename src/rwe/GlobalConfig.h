@@ -130,6 +130,12 @@ namespace rwe
      */
     float resolveUiScale(unsigned int setting, float contentScale, int frameWidth, int frameHeight);
 
+    /** resolveUiScale before the fit: the whole step the setting asks for, 1..3. */
+    unsigned int requestedUiScale(unsigned int setting, float contentScale);
+
+    /** The largest whole UI scale at which the 640x480 layout fits the frame, never below 1. */
+    unsigned int largestFittingUiScale(int frameWidth, int frameHeight);
+
     class GlobalConfig
     {
     public:

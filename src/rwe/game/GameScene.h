@@ -614,6 +614,9 @@ namespace rwe
         /** Applies effectiveUiScale to the chrome projection and to the screen new panels are kept inside. */
         void syncUiScale();
 
+        /** Says on the console when the window is too small for the UI scale asked for, which is otherwise silent. */
+        void reportUiScaleFit();
+
         /**
          * The scale to draw chrome at this frame: the staged setting resolved
          * against the content scale and the frame, so Auto follows a
