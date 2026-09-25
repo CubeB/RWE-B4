@@ -134,6 +134,8 @@ int main(int argc, char* argv[])
                       << "  --interface-mode <m>  left-click or right-click (default: left-click)\n"
                       << "  --data-path <path>    Game data search path (repeatable)\n"
                       << "  --map <name>          Launch directly into a game on this map\n"
+                      << "  --mission             Play --map as a mission: its [units] for the players\n"
+                      << "                        in the slots they name, and its own starting resources\n"
                       << "  --port <port>         Network port (default: 1337)\n"
                       << "  --drop-timeout <secs> Seconds a peer of a network game may go quiet\n"
                       << "                        before the rest carry on without it; 0 waits\n"

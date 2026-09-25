@@ -270,7 +270,10 @@ namespace rwe
         // put into the simulation before it moves into the scene, and the
         // camera goes to the first of the local player's.
         std::optional<SimVector> missionCameraPos;
-        if (gameParameters.mission)
+        // Not when loading a save: the saved simulation already holds the
+        // mission's units, as it holds a skirmish's commanders, and spawning
+        // them here would put a second set beside the first.
+        if (gameParameters.mission && !gameParameters.loadFromSaveFile)
         {
             auto result = spawnMissionUnits(loaded.simulation, ota.schemas.at(schemaIndex), loaded.gamePlayers);
             LOG_INFO << "Mission: " << result.spawned.size() << " units placed, " << result.skipped.size() << " not";
