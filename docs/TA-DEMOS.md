@@ -130,6 +130,61 @@ What is a recorded divergence (ADR-0001):
 Recording never reaches back into the simulation: nothing the recorder holds
 is hashed or saved, and no wall-clock or frame-rate value crosses the divide.
 
+### Read back by an independent reader (#224, 2026-09-25)
+
+Every check above goes through RWE's own reader, and a writer agreeing with
+its own reader proves less than it seems. So a written demo was also read with
+`tapacket` from [ta-forever/gpgnet4ta](https://github.com/ta-forever/gpgnet4ta)
+(MIT), the reference implementation `src/rwe/io/tad/` was ported from. It is
+a second reader with its own record walk, its own decrypt and decompress, its
+own status-message checksum test (`TADemoParser.cpp`, the
+`PlayerStatusMessage` warning) and its own table of subpacket sizes
+(`TAPacketParser::parseTaPacket`, which warns on any subpacket whose size
+disagrees).
+
+**Result: it accepts the writer's output completely.** Two `ai_arena`
+recordings on Coast To Coast, ARM against CORE, seed 3:
+
+| | 120 s | 900 s |
+|---|---|---|
+| header | version 5, 2 players, maxUnits 1000 | same |
+| records | 4 extra sectors, 2 status messages, 1 unit table | same |
+| packets | 7,200 | 54,000 |
+| subpackets | 7,286 | 55,039 |
+| codes | `0x09` 12, `0x12` 12, `0x19` 2, `0x28` 60, `0x2c` 7,200 | adds `0x0b` 153, `0x0c` 23, `0x0d` 184 |
+| `tapacket` warnings (checksums, sizes) | **0** | **0** |
+
+Both status-message checksums verified, every subpacket was the size
+`tapacket` expects for its code, and the packet, subpacket and per-code counts
+match `tad_probe` on the same files exactly. The known divergences above do
+not show up as errors, as expected: the `0x1a` table parses (its ids are not
+compared), the status body's zero bytes still checksum, and `0x10` is simply
+absent.
+
+What this does not cover: `tapacket` is a *reader*. It does not replay the
+game, so a payload whose bytes are well formed but mean the wrong thing is
+invisible to it. That is L2's job, and L3 (a TA client loading the file) is
+still roadmap.
+
+**To repeat it.** `tapacket` is a static library that needs Qt Core only for
+`qWarning`; Qt 6 works. Clone the repository outside this tree and compile
+`libs/tapacket/{DPlayPacket,TADemoParser,TAPacketParser,TPacket,UnitDataRepo,TestPackets}.cpp`
+with `libs/taflib/{HexDump,Logger,DuplicateDetection,Watchdog,nswfl_crc32}.cpp`
+(`CMAKE_AUTOMOC ON`, include paths `libs`, `libs/tapacket`, `libs/taflib`,
+link `Qt6::Core`), plus a driver that subclasses `tapacket::DemoParser`,
+counts what each `handle` overload receives, and installs a
+`qInstallMessageHandler` to count the warnings. Then:
+
+```
+ai_arena --map "Coast To Coast" --ai-arena 900 --seed 3 \
+  --player "A;Computer;ARM;0" --player "B;Computer;CORE;1" --record-demo game.tad
+tapacket_check game.tad      # the driver
+tad_probe --file game.tad    # the same counts from RWE's reader
+```
+
+It is not a CI step: it needs a clone and a Qt, and the result is a statement
+about the container that stays true until the writer's framing changes.
+
 ## The short version
 
 A `.tad` is a capture of the DirectPlay traffic seen by **one peer**, framed
