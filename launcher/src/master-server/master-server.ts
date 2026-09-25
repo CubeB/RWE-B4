@@ -86,13 +86,22 @@ masterNamespace.on("connection", socket => {
     socket.emit(protocol.GetGamesResponse, payload);
   });
 
-  socket.on(
-    protocol.CreateGameRequest,
-    (data: protocol.CreateGameRequestPayload) => {
+  // Wrapped, like every game-server handler, so that a payload it did not
+  // expect costs that request and not the process. Issue #75.
+  socket.on(protocol.CreateGameRequest, (rawData: unknown) => {
+    try {
+      const data =
+        typeof rawData === "object" && rawData !== null
+          ? (rawData as Record<string, unknown>)
+          : undefined;
       const gameInfo = gameServer.createRoom(
-        data.description,
-        data.max_players
+        data?.description,
+        data?.max_players
       );
+      if (gameInfo === undefined) {
+        return;
+      }
+      const room = gameServer.getRoomInfo(gameInfo.gameId)!;
 
       const payload: protocol.CreateGameResponsePayload = {
         game_id: gameInfo.gameId,
@@ -102,15 +111,13 @@ masterNamespace.on("connection", socket => {
 
       const eventPayload: protocol.GameCreatedEventPayload = {
         game_id: gameInfo.gameId,
-        game: {
-          description: data.description,
-          players: 0,
-          max_players: data.max_players,
-        },
+        game: roomToEntry(room),
       };
       masterNamespace.emit(protocol.GameCreatedEvent, eventPayload);
+    } catch (e) {
+      log(`Error handling create-game from ${addr}: ${e}`);
     }
-  );
+  });
 
   socket.on("disconnect", () => {
     log(`Client from ${addr} disconnected`);
