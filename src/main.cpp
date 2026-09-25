@@ -240,6 +240,12 @@ int main(int argc, char* argv[])
                 {
                     throw std::runtime_error("Could not read save file: " + savePath.string());
                 }
+                if (save->betweenMissions)
+                {
+                    // A save made between missions has no world to load; it
+                    // opens the next mission's briefing, from the main menu.
+                    throw std::runtime_error(savePath.string() + " was saved between campaign missions; open it from Load Game in the main menu");
+                }
                 gameParameters = save->parameters;
                 gameParameters->loadFromSaveFile = savePath.string();
             }

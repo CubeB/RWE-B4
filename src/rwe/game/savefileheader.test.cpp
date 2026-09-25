@@ -236,4 +236,22 @@ namespace rwe
             REQUIRE(loaded->parameters.campaign->thumbs == std::string(25, 'U'));
         }
     }
+
+    TEST_CASE("a save whose header holds a field of the wrong type reads as unreadable", "[saveload][savefile]")
+    {
+        // The file is anyone's: a hand-edited or corrupt header must fail to
+        // read, not throw out of the Load list while a game is running.
+        TempFile file;
+        writeSaveFile(file.path, makeSaveFile());
+
+        std::ifstream in(file.path, std::ios::binary);
+        auto j = nlohmann::json::parse(in);
+        in.close();
+        j.at("header")["mission"] = "yes";
+        std::ofstream out(file.path, std::ios::binary | std::ios::trunc);
+        out << j.dump();
+        out.close();
+
+        REQUIRE_FALSE(readSaveFile(file.path).has_value());
+    }
 }

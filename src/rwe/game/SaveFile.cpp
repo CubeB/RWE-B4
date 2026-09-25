@@ -254,7 +254,25 @@ namespace rwe
         out << j.dump();
     }
 
+    static std::optional<SaveFile> readSaveFileOrThrow(const fs::path& path);
+
     std::optional<SaveFile> readSaveFile(const fs::path& path)
+    {
+        // A save is a file on disk, so it can be anything: a header field of
+        // the wrong type makes nlohmann throw, and the callers (the Load list
+        // among them, while the game is running) expect an unreadable save,
+        // not an exception.
+        try
+        {
+            return readSaveFileOrThrow(path);
+        }
+        catch (const std::exception&)
+        {
+            return std::nullopt;
+        }
+    }
+
+    static std::optional<SaveFile> readSaveFileOrThrow(const fs::path& path)
     {
         std::ifstream in(path, std::ios::binary);
         if (!in)
