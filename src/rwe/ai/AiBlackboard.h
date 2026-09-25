@@ -397,6 +397,14 @@ namespace rwe
         std::optional<bool> landRouteToEnemy;
 
         /**
+         * The same question asked of the hover layer: can a hovercraft reach
+         * any other declared start position. Unset unless the side has a
+         * hover tank to label that layer for -- Core Contingency data only --
+         * and the map has water for one to cross. Issue #196.
+         */
+        std::optional<bool> hoverRouteToEnemy;
+
+        /**
          * Whether aircraft are worth spending a tier on, judged this pass
          * rather than decided once.
          *

@@ -35,6 +35,11 @@ namespace rwe
         rebuildLayer(commander, sim, mover, from);
     }
 
+    void ReachabilityMap::rebuildHover(const GameSimulation& sim, const UnitDefinition::MovementCollisionInfo& mover, const SimVector& from)
+    {
+        rebuildLayer(hover, sim, mover, from);
+    }
+
     void ReachabilityMap::rebuildLayer(Layer& layer, const GameSimulation& sim, const UnitDefinition::MovementCollisionInfo& mover, const SimVector& from) const
     {
         auto mc = sim.getAdHocMovementClass(mover);
@@ -226,6 +231,11 @@ namespace rwe
     bool ReachabilityMap::isCommanderReachable(const GameSimulation& sim, const SimVector& position) const
     {
         return isReachable(commander, sim, position);
+    }
+
+    bool ReachabilityMap::isHoverReachable(const GameSimulation& sim, const SimVector& position) const
+    {
+        return isReachable(hover, sim, position);
     }
 
     bool ReachabilityMap::isCommanderWalkable(const GameSimulation& sim, const SimVector& position) const

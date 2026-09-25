@@ -53,6 +53,16 @@ namespace rwe
         {
             return UnitDefinition::AdHocMovementClass{1u, 1u, 255u, 255u, 0u, 60u};
         }
+
+        /**
+         * A 1x1 hovercraft: dry land or any depth of water, as TANKHOVER3
+         * is. The shipped class names no depth at all, and the moveinfo
+         * parser's defaults for a missing key are 0 and 255.
+         */
+        UnitDefinition::MovementCollisionInfo hoverMover()
+        {
+            return UnitDefinition::AdHocMovementClass{1u, 1u, 255u, 255u, 0u, 255u};
+        }
     }
 
     TEST_CASE("ReachabilityMap ground and naval layers")
@@ -133,6 +143,63 @@ namespace rwe
             // Neither labelling has disturbed the other.
             REQUIRE_FALSE(reach.isReachable(sim, eastBank));
             REQUIRE_FALSE(reach.isWalkable(sim, sim.terrain.heightmapIndexToWorldCenter(5, 1)));
+        }
+
+        SECTION("a hovercraft crosses the lake from the tank's own bank, which neither other layer can say")
+        {
+            // Issue #196. The ground layer calls the far bank another world
+            // and the naval layer calls the near bank dry, so the question
+            // "does a hover tank built here reach there" had no layer that
+            // could answer it.
+            auto terrain = terrainFromRows(
+                {
+                    "LLLLwwwwLLLL",
+                    "LLLLwwwwLLLL",
+                    "LLLLwwwwLLLL",
+                },
+                100, 0, 50_ss);
+            GameSimulation sim(std::move(terrain), 0u, 0, 0);
+
+            ReachabilityMap reach;
+            auto westBank = sim.terrain.heightmapIndexToWorldCenter(1, 1);
+            auto eastBank = sim.terrain.heightmapIndexToWorldCenter(9, 1);
+            auto midLake = sim.terrain.heightmapIndexToWorldCenter(5, 1);
+
+            reach.rebuild(sim, groundMover(), westBank);
+            REQUIRE_FALSE(reach.isHoverValid());
+
+            reach.rebuildHover(sim, hoverMover(), westBank);
+            REQUIRE(reach.isHoverValid());
+            REQUIRE(reach.isHoverReachable(sim, westBank));
+            REQUIRE(reach.isHoverReachable(sim, midLake));
+            REQUIRE(reach.isHoverReachable(sim, eastBank));
+
+            // And the ground labelling it sits beside is untouched.
+            REQUIRE_FALSE(reach.isReachable(sim, eastBank));
+        }
+
+        SECTION("a cliff stops a hovercraft as it stops a tank")
+        {
+            // A hover class is not a flying one: its dry-land slope limit
+            // is a tank's (TANKHOVER3 MaxSlope=12), so a wall of rock
+            // across the map cuts the hover layer too. Heights jump from 0
+            // to 250 across one column, far past any slope limit.
+            Grid<unsigned char> heights(12, 3, static_cast<unsigned char>(100));
+            for (int y = 0; y < 3; ++y)
+            {
+                for (int x = 6; x < 12; ++x)
+                {
+                    heights.set(x, y, 250);
+                }
+            }
+            GameSimulation sim(MapTerrain(std::move(heights), 0_ss), 0u, 0, 0);
+
+            ReachabilityMap reach;
+            auto west = sim.terrain.heightmapIndexToWorldCenter(1, 1);
+            auto east = sim.terrain.heightmapIndexToWorldCenter(9, 1);
+            reach.rebuildHover(sim, UnitDefinition::AdHocMovementClass{1u, 1u, 12u, 255u, 0u, 255u}, west);
+            REQUIRE(reach.isHoverReachable(sim, west));
+            REQUIRE_FALSE(reach.isHoverReachable(sim, east));
         }
 
         SECTION("a land bridge blocks a ship from crossing it, but a tank can cross the same bridge")

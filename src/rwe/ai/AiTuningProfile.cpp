@@ -121,6 +121,7 @@ namespace rwe
             {"targetBattleshipCount", &AiTuningProfile::targetBattleshipCount},
             {"targetAntiAirShipCount", &AiTuningProfile::targetAntiAirShipCount},
             {"targetSeaplanePlatformCount", &AiTuningProfile::targetSeaplanePlatformCount},
+            {"targetHoverPlatformCount", &AiTuningProfile::targetHoverPlatformCount},
             {"maxSurplusMetalMakerCount", &AiTuningProfile::maxSurplusMetalMakerCount},
             {"tierTwoReserveMinArmySize", &AiTuningProfile::tierTwoReserveMinArmySize},
             {"tierTwoReserveCoversLabAfterSeconds", &AiTuningProfile::tierTwoReserveCoversLabAfterSeconds},
