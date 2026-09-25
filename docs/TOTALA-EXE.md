@@ -573,6 +573,20 @@ quirks of the original that RWE reproduces although they look like defects.
   (`transportCapacityFromFbi`, `transportCapacityWarning`; #199). A file that
   carries both keys reads the new one, as the original does.
 
+- **A unit script that faults loses the thread, not the game.** The original's
+  COB interpreter divides without a guard, so `div` by zero faults the whole
+  process, and it has no limit on how long a thread runs between yields
+  (`TOTALA-EXE-EXTERNAL.md`, unverified here). RWE gives a division by zero
+  the answer 0, and `INT_MIN / -1` the wrapped answer the hardware would. A
+  thread that exceeds an argument count, call depth, stack depth or run length
+  far past anything a shipped script reaches (`CobExecutionContext`'s limits)
+  is killed, as the original kills a thread that meets an opcode it does not
+  know, and so is one that faults in any other way. A synchronous query that
+  faults gives the caller's fallback, the answer a unit without the script
+  gets. None of this changes a script the original can run; it is here
+  because a mod's script is untrusted input, and in a network game a fault
+  ended every peer's game at once (#75).
+
 
 ## 91. Still unknown or unported
 

@@ -368,6 +368,13 @@ namespace rwe
         void sendSignal(unsigned int signal);
 
         /**
+         * Kills one thread as a signal would: off every queue, and kept
+         * for two sweeps before it is freed (see deadThreads). For a thread
+         * whose script faulted; see executeThreads.
+         */
+        void killThread(const CobThread* thread);
+
+        /**
          * Attempts to collect the return value from a thread.
          * The return value will be available for collection
          * if the thread finished in the previous frame.

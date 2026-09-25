@@ -98,8 +98,26 @@ namespace rwe
 
             CobExecutionContext context(&env, thread);
 
+            // A script that faults -- an opcode this VM has no case for, an
+            // index out of range, one of the limits in CobExecutionContext --
+            // loses that thread and nothing more. The original kills a thread
+            // that meets an opcode it does not know; before this, a throw
+            // here ended the game on every peer at once. Deterministic, as a
+            // fault is the same fault on every machine. Issue #75.
+            std::optional<CobEnvironment::Status> status;
+            try
+            {
+                status = context.execute();
+            }
+            catch (const std::exception& e)
+            {
+                LOG_WARN << "COB thread " << thread->name << " stopped: " << e.what();
+                env.killThread(thread);
+                continue;
+            }
+
             auto result = match(
-                context.execute(),
+                *status,
                 [&](const CobEnvironment::BlockedStatus& status) {
                     env.readyQueue.pop_front();
                     env.blockedQueue.emplace_back(status, thread);
