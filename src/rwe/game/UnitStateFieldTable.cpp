@@ -378,7 +378,7 @@ namespace rwe
             {"nanoframeWorkedOn", hashedPlain<&UnitState::nanoframeWorkedOn>()},
             {"nanoframeDecayRemainder", hashedPlain<&UnitState::nanoframeDecayRemainder>()},
             {"selfDestructTime", hashed<&UnitState::selfDestructTime>(saveOptionalGameTimeUnitStateField<&UnitState::selfDestructTime>, loadOptionalGameTimeUnitStateField<&UnitState::selfDestructTime>)},
-            {"minePollAt", hashed<&UnitState::minePollAt>(saveOptionalGameTimeUnitStateField<&UnitState::minePollAt>, loadOptionalGameTimeUnitStateField<&UnitState::minePollAt>)},
+            {"minePollAt", hashed<&UnitState::minePollAt>(saveOptionalGameTimeUnitStateField<&UnitState::minePollAt>, loadOptionalGameTimeUnitStateField<&UnitState::minePollAt>), true},
             {"paralyzedUntil", hashed<&UnitState::paralyzedUntil>(saveOptionalGameTimeUnitStateField<&UnitState::paralyzedUntil>, loadOptionalGameTimeUnitStateField<&UnitState::paralyzedUntil>)},
             {"moveRateBand", hashedPlain<&UnitState::moveRateBand>()},
             {"carriedBy", hashed<&UnitState::carriedBy>(saveOptionalUnitIdUnitStateField<&UnitState::carriedBy>, loadOptionalUnitIdUnitStateField<&UnitState::carriedBy>)},
