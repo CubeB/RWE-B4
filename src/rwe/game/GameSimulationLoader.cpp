@@ -1194,6 +1194,15 @@ namespace rwe
                     push(SK::MakeSelectable);
                 }
             }
+            else if (simulation.getPlayer(unit.owner).type == GamePlayerType::Computer)
+            {
+                // Not held, so the computer's AI has it from the first second
+                // and gives it its own standing orders (0x408830), whatever
+                // an `o` said: maneuver if it can capture, else roam, and fire
+                // at will.
+                unit.moveOrders = def.canCapture ? UnitMovementOrders::Maneuver : UnitMovementOrders::Roam;
+                unit.fireOrders = UnitFireOrders::FireAtWill;
+            }
         }
     }
 
@@ -1291,6 +1300,12 @@ namespace rwe
         // type of the first record, in file order, that produced a unit
         // (0x487AF0).
         auto resolveName = [&](const std::string& name) -> std::optional<UnitId> {
+            // A name that did not scan resolves to nothing, not to the first
+            // record that has no Ident.
+            if (name.empty())
+            {
+                return std::nullopt;
+            }
             auto wanted = toUpper(name);
             for (std::size_t n = 0; n < spawnedRecords.size(); ++n)
             {

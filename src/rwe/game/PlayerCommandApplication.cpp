@@ -156,6 +156,12 @@ namespace rwe
                 simulation.modifyStockpileQueue(unitCommand.unit, c.count);
             },
             [&](const PlayerUnitCommand::Stop&) {
+                // Stop empties the unit's list in the original, and what is
+                // left of a mission list is part of it.
+                if (simulation.missionScripts)
+                {
+                    simulation.missionScripts->scripts.erase(unitCommand.unit.value);
+                }
                 if (auto unit = simulation.tryGetUnitState(unitCommand.unit))
                 {
                     UnitBehaviorService(&simulation).interruptCurrentTask(unitCommand.unit);

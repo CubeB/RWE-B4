@@ -301,14 +301,15 @@ namespace rwe
                     unitInfo.state->buildOrderUnitId = std::nullopt;
                 }
             }
-            else if (sim->missionScripts && sim->missionScripts->isRunning(unitId))
+            else if (std::holds_alternative<UnitPhysicsInfoAir>(unitInfo.state->physics) && sim->missionScripts && sim->missionScripts->isRunning(unitId))
             {
-                // A mission unit whose list is on a wait, a hunt's pause or
-                // any other step of its own has an empty queue and is still
+                // A mission aircraft whose list is on a wait, a hunt's pause
+                // or any other step of its own has an empty queue and is still
                 // not idle: the original's head mission is the WAIT, and only
                 // an empty list or a Standby looks for a fight (0x407069). It
                 // does not go after what it sees, or off to land; its weapons
-                // still answer from where it stands.
+                // still answer from where it is. (A ground unit's idle branch
+                // only resets its state, which is right for it either way.)
             }
             else if (auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics); airPhysics != nullptr)
             {

@@ -24,7 +24,7 @@ namespace rwe
         {
             /** m: an ordinary move. */
             Move,
-            /** p: a patrol, which never ends. */
+            /** p: a patrol; a run of them is one route, which never ends. */
             Patrol,
             /** a X Z: an attack on the ground, which never ends. */
             AttackPoint,
@@ -122,6 +122,9 @@ namespace rwe
 
         /** A unit took damage: any WaitForAttack watching it is over when its turn comes. */
         void unitDamaged(UnitId unitId);
+
+        /** A unit changed hands: its list is gone, and anything watching it saw it die. */
+        void unitChangedOwner(UnitId unitId);
 
         /**
          * Whether the unit's script still has anything to do. A unit whose

@@ -95,7 +95,8 @@ namespace rwe
         std::optional<SimVector> airPlant;
         for (const auto& [unitId, unit] : sim.units)
         {
-            if (unit.owner != aiOwner || !unit.isAlive())
+            // A held mission unit is the mission's to fly, not the AI's.
+            if (unit.owner != aiOwner || !unit.isAlive() || unit.heldByMission)
             {
                 continue;
             }

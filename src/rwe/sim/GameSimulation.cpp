@@ -1069,6 +1069,13 @@ namespace rwe
         // and a reclaimed unit leaves none of those. Whether the original's
         // cause-5 damage skips armour the way its cause-10 repair does is
         // not read; it is applied bare here.
+        // Reclaiming is damage in the original, cause 5 through the same
+        // applier (0x489CE0), so it tells a watching WAITFORATTACK too.
+        if (missionScripts)
+        {
+            missionScripts->unitDamaged(targetId);
+        }
+
         auto before = unit.hitPoints;
         auto after = damage >= before ? 0u : before - damage;
         unit.hitPoints = after;
@@ -1192,6 +1199,16 @@ namespace rwe
         if (missionRules)
         {
             missionRules->unitDying(*this, targetId, previousOwner);
+        }
+
+        // The captor's copy is a new unit: selectable like every new one
+        // (0x485B61), with no list and no mission Immunity (the spawner is
+        // what sets that, 0x488475).
+        unit.heldByMission = false;
+        unit.immune = false;
+        if (missionScripts)
+        {
+            missionScripts->unitChangedOwner(targetId);
         }
 
         // The spatial index carries owners so a target search can drop its
@@ -4886,6 +4903,10 @@ namespace rwe
         if (missionScripts)
         {
             missionScripts->update(*this);
+            if (missionScripts->scripts.empty())
+            {
+                missionScripts.reset();
+            }
         }
 
         {

@@ -45,11 +45,12 @@ namespace rwe
                 std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
                 sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(pieces));
                 auto script = makeEmptyCobScript({"base"});
-                auto mobile = std::string("FootprintX=2;\nFootprintZ=2;\nBMcode=1;\nMaxDamage=200;\nBuildTime=100;\nMaxVelocity=1;\nSightDistance=300;\nCanMove=1;\nCanPatrol=1;\nCanGuard=1;");
+                auto mobile = std::string("FootprintX=2;\nFootprintZ=2;\nBMcode=1;\nMaxDamage=200;\nBuildTime=100;\nMaxVelocity=2;\nAcceleration=0.5;\nBrakeRate=0.5;\nTurnRate=2000;\nSightDistance=300;\nCanMove=1;\nCanPatrol=1;\nCanGuard=1;");
                 sim.unitDefinitions["KBOT"] = definitionFrom("KBOT", mobile + "\nCanAttack=1;");
                 sim.unitDefinitions["TRUCK"] = definitionFrom("TRUCK", mobile);
                 sim.unitDefinitions["HULL"] = definitionFrom("HULL", mobile + "\nTransportCapacity=5;\nTransportSize=3;");
                 sim.unitDefinitions["GATE"] = definitionFrom("GATE", "FootprintX=2;\nFootprintZ=2;\nBMcode=0;\nMaxDamage=300;\nBuildTime=100;\nYardMap=oooo;");
+                sim.unitDefinitions["PLANT"] = definitionFrom("PLANT", "FootprintX=2;\nFootprintZ=2;\nBMcode=0;\nMaxDamage=300;\nBuildTime=100;\nYardMap=oooo;\nBuilder=1;");
                 for (const auto& [name, def] : sim.unitDefinitions)
                 {
                     sim.unitScriptDefinitions[name] = *script;
@@ -324,5 +325,141 @@ namespace rwe
         loadSimulationFromJson(saved, loaded);
         REQUIRE(loaded.missionScripts);
         REQUIRE(*loaded.missionScripts == *world.sim.missionScripts);
+        REQUIRE(computeHashOf(loaded) == computeHashOf(world.sim));
+    }
+
+    TEST_CASE("a patrol route goes round its points and back to where it set out", "[mission][script]")
+    {
+        // A run of `p` is one route, closed by a waypoint where the unit
+        // stands when it sets out (0x43A020), and it goes round for ever.
+        ScriptWorld world;
+        world.add("KBOT", 2, 100, 100, "p 400 100,p 400 400,");
+        auto unit = world.spawn().at(0);
+        auto toWorld = [&](float x, float z) { return world.sim.terrain.topLeftCoordinateToWorld(SimVector(SimScalar(x), 0_ss, SimScalar(z))); };
+        std::vector<SimVector> points{toWorld(400, 100), toWorld(400, 400), toWorld(100, 100)};
+        std::vector<int> visits(points.size(), 0);
+        std::optional<std::size_t> last;
+        for (int i = 0; i < 6000; ++i)
+        {
+            world.sim.tick();
+            const auto& position = world.unit(unit).position;
+            for (std::size_t p = 0; p < points.size(); ++p)
+            {
+                auto dx = position.x - points[p].x;
+                auto dz = position.z - points[p].z;
+                if ((dx * dx) + (dz * dz) < 40_ss * 40_ss && last != p)
+                {
+                    ++visits[p];
+                    last = p;
+                }
+            }
+        }
+        // Round at least twice, and it is still the mission's.
+        for (auto v : visits)
+        {
+            REQUIRE(v >= 2);
+        }
+        REQUIRE(world.unit(unit).heldByMission);
+    }
+
+    TEST_CASE("a captured mission unit is the captor's, free of its list", "[mission][script]")
+    {
+        ScriptWorld world;
+        world.add("KBOT", 2, 100, 100, "p 400 100,");
+        world.add("KBOT", 1, 300, 300, "wa ENEMY,s,");
+        world.schema.units[0].ident = "enemy";
+        auto units = world.spawn();
+        world.unit(units[0]).immune = true;
+        world.runAt(1);
+
+        world.sim.captureUnit(units[0], *world.slots[0], std::nullopt);
+        REQUIRE_FALSE(world.unit(units[0]).heldByMission);
+        REQUIRE_FALSE(world.unit(units[0]).immune);
+        REQUIRE_FALSE(world.running(units[0]));
+        REQUIRE(world.unit(units[0]).isSelectableBy(world.sim.unitDefinitions.at("KBOT"), *world.slots[0]));
+        // The unit watching it saw it go, as it would have seen it die.
+        world.runAt(2);
+        REQUIRE_FALSE(world.unit(units[1]).heldByMission);
+    }
+
+    TEST_CASE("Stop ends what is left of a handed-back unit's list", "[mission][script]")
+    {
+        ScriptWorld world;
+        world.add("KBOT", 1, 100, 100, "s,w 3,m 100 600,");
+        auto unit = world.spawn().at(0);
+        world.runAt(1);
+        REQUIRE_FALSE(world.unit(unit).heldByMission);
+        REQUIRE(applyUnitCommandToSimulation(world.sim, PlayerUnitCommand(unit, PlayerUnitCommand::Stop())));
+        REQUIRE_FALSE(world.running(unit));
+        world.runAt(200);
+        REQUIRE(world.unit(unit).orders.empty());
+    }
+
+    TEST_CASE("a computer's unit counts its wait aboard its transport; a human's does not", "[mission][script]")
+    {
+        ScriptWorld world;
+        world.add("HULL", 2, 100, 100, "", "ship");
+        world.add("KBOT", 2, 300, 100, "i SHIP,w 2,s,");
+        world.add("HULL", 1, 500, 500, "", "boat");
+        world.add("KBOT", 1, 700, 500, "i BOAT,w 2,s,");
+        auto units = world.spawn();
+        REQUIRE(world.unit(units[1]).carriedBy);
+        REQUIRE(world.unit(units[3]).carriedBy);
+        for (unsigned int tick = 1; tick <= 70; ++tick)
+        {
+            world.runAt(tick);
+        }
+        REQUIRE_FALSE(world.unit(units[1]).heldByMission);
+        REQUIRE(world.unit(units[3]).heldByMission);
+    }
+
+    TEST_CASE("a plant builds its count from the queue, and a builder builds where it is told", "[mission][script]")
+    {
+        ScriptWorld world;
+        world.add("PLANT", 2, 100, 100, "b KBOT 2,");
+        world.add("TRUCK", 2, 400, 100, "b GATE 1 600 600,");
+        auto units = world.spawn();
+        world.runAt(1);
+        REQUIRE(world.unit(units[0]).buildQueue.size() == 1);
+        REQUIRE(world.unit(units[0]).buildQueue.front() == std::make_pair(std::string("KBOT"), 2));
+        auto build = front<BuildOrder>(world.unit(units[1]));
+        REQUIRE(build != nullptr);
+        REQUIRE(build->unitType == "GATE");
+
+        // The plant's list moves on once its queue has been built.
+        REQUIRE(world.unit(units[0]).heldByMission);
+        world.unit(units[0]).buildQueue.clear();
+        world.runAt(2);
+        REQUIRE_FALSE(world.unit(units[0]).heldByMission);
+    }
+
+    TEST_CASE("the small cases: a name that did not scan, a move for a building, a reclaim, a lone o", "[mission][script]")
+    {
+        ScriptWorld world;
+        world.add("TRUCK", 2, 100, 100, "");
+        world.add("KBOT", 2, 300, 100, "g,");
+        world.add("GATE", 2, 500, 100, "m 100 100,w 1,");
+        world.add("KBOT", 1, 700, 100, "wa,s,");
+        world.add("KBOT", 2, 900, 100, "o 0 0,");
+        auto units = world.spawn();
+
+        // `g` with no name guards nothing and holds nothing.
+        REQUIRE_FALSE(world.unit(units[1]).heldByMission);
+        REQUIRE_FALSE(world.running(units[1]));
+
+        // A building's move is passed over and its wait starts.
+        world.runAt(1);
+        REQUIRE(world.unit(units[2]).orders.empty());
+        REQUIRE(world.sim.missionScripts->scripts.at(units[2].value).steps.front().kind == MissionStep::Kind::Wait);
+
+        // Being reclaimed is being hit.
+        world.sim.reclaimUnitStep(units[3], *world.slots[1], 1u);
+        world.runAt(2);
+        REQUIRE_FALSE(world.unit(units[3]).heldByMission);
+
+        // A computer's unit its list does not hold is the AI's at once, and
+        // gets the AI's standing orders over the `o`.
+        REQUIRE(world.unit(units[4]).moveOrders == UnitMovementOrders::Roam);
+        REQUIRE(world.unit(units[4]).fireOrders == UnitFireOrders::FireAtWill);
     }
 }

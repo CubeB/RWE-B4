@@ -300,9 +300,14 @@ original in every case.
   one takes the previous order's, as there. An `i` (start aboard a
   transport) keeps any order written before it, which the original drops
   for a unit whose carrier is not an air base. A `g` does not check that the
-  unit it names is an ally. And a computer's unit handed back by its script
-  gets the AI's standing orders once, at that moment, where the original's
-  AI rewrites them every second. §114.
+  unit it names is an ally. A computer's unit gets the AI's standing orders
+  once, when its list hands it back (or at once if nothing holds it), where
+  the original's AI rewrites them every second. Nothing after a patrol in a
+  list ever runs, where the original rotates the patrol to the tail and
+  gets to it; no shipped list has anything there. A shift-queued order to a
+  handed-back unit runs beside what is left of its list rather than after
+  it. And the next step starts on the tick the last one ends, where the
+  original's one-handler-a-tick loop spends a tick on each. §114.
 - **A mission rule with no count or an empty name is not built.** The original
   builds KillUnitType and UnitTypeKilled with whatever its stack held, and an
   empty BuildUnitType as a rule nothing can meet. No shipped mission has either.

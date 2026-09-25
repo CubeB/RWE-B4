@@ -1,6 +1,7 @@
 #include "MissionScripts.h"
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/SimRandom.h>
@@ -18,8 +19,6 @@ namespace rwe
             {
                 case K::Move:
                     return MoveOrder(step.position);
-                case K::Patrol:
-                    return PatrolOrder(step.position);
                 case K::AttackPoint:
                     return AttackOrder(step.position);
                 case K::Guard:
@@ -34,7 +33,21 @@ namespace rwe
         bool isOrderStep(MissionStep::Kind kind)
         {
             using K = MissionStep::Kind;
-            return kind == K::Move || kind == K::Patrol || kind == K::AttackPoint || kind == K::Guard || kind == K::Unload || kind == K::Build;
+            return kind == K::Move || kind == K::AttackPoint || kind == K::Guard || kind == K::Unload || kind == K::Build;
+        }
+
+        /**
+         * The steps a computer's unit goes on running while it rides in a
+         * transport. The attach installs BeCarried and flushes the list only
+         * for a human's unit (0x48ACF3), so a computer's cargo counts its
+         * waits aboard -- AC13's Reapers wait 3545 seconds against their
+         * Valkyries' 3500 plus the flight -- while anything that needs the
+         * unit on the ground waits until it is set down.
+         */
+        bool runsAboard(MissionStep::Kind kind)
+        {
+            using K = MissionStep::Kind;
+            return kind == K::Wait || kind == K::WaitForAttack || kind == K::MakeSelectable;
         }
 
         /**
@@ -83,9 +96,11 @@ namespace rwe
                 {
                     continue;
                 }
-                auto dx = static_cast<std::int64_t>(simScalarToFloat(other.position.x - hunter.position.x));
-                auto dz = static_cast<std::int64_t>(simScalarToFloat(other.position.z - hunter.position.z));
-                auto squared = (dx * dx) + (dz * dz);
+                // Each axis squared exactly and then floored to whole
+                // units, as the 16.16 product shifted right by 32 is.
+                auto dx = simScalarToFloat(other.position.x - hunter.position.x);
+                auto dz = simScalarToFloat(other.position.z - hunter.position.z);
+                auto squared = static_cast<std::int64_t>(std::floor(dx * dx)) + static_cast<std::int64_t>(std::floor(dz * dz));
                 auto jitter = static_cast<std::int64_t>(randomBelow(sim.rng, static_cast<unsigned int>(std::min<std::int64_t>(squared / 2, 0xFFFFFFFFll))));
                 auto score = squared - jitter;
                 if (!best || score <= bestScore)
@@ -125,6 +140,24 @@ namespace rwe
         }
     }
 
+    void MissionScripts::unitChangedOwner(UnitId unitId)
+    {
+        // The original's owner change kills the unit and makes a new one for
+        // the captor: the new one has no list, and whoever was watching the
+        // old one hears it die (event 8, 0x489740).
+        scripts.erase(unitId.value);
+        for (auto& [id, script] : scripts)
+        {
+            for (auto& step : script.steps)
+            {
+                if (step.kind == MissionStep::Kind::WaitForAttack && step.target == unitId)
+                {
+                    step.hit = true;
+                }
+            }
+        }
+    }
+
     void MissionScripts::update(GameSimulation& sim)
     {
         for (auto it = scripts.begin(); it != scripts.end();)
@@ -138,14 +171,17 @@ namespace rwe
                 continue;
             }
 
-            // A unit started aboard a transport (`i`) begins once it is set
-            // down, and a stunned one does nothing.
+            // A stunned unit does nothing. One riding in a transport waits to
+            // be set down, except that a computer's goes on counting its
+            // waits (see runsAboard).
             const auto& unit = unitRef->get();
-            if (!unit.carriedBy && !unit.isParalyzed(sim.gameTime))
+            auto aboard = unit.carriedBy.has_value();
+            auto countsAboard = sim.getPlayer(unit.owner).type == GamePlayerType::Computer;
+            if (!unit.isParalyzed(sim.gameTime) && (!aboard || countsAboard))
             {
                 // A step that finishes lets the next one start on the same
                 // tick; the list only ever gets shorter, so this ends.
-                while (!script.steps.empty() && runHead(sim, unitId, script))
+                while (!script.steps.empty() && (!aboard || runsAboard(script.steps.front().kind)) && runHead(sim, unitId, script))
                 {
                     script.steps.pop_front();
                     script.started = false;
@@ -170,6 +206,41 @@ namespace rwe
         using K = MissionStep::Kind;
         auto& unit = sim.getUnitState(unitId);
         auto& step = script.steps.front();
+
+        // A move is nothing to a unit that cannot move; the original's order
+        // builder gives it a QMOVE, which RWE has no use for.
+        if (step.kind == K::Move && !sim.unitDefinitions.at(unit.unitType).isMobile)
+        {
+            return true;
+        }
+
+        if (step.kind == K::Patrol)
+        {
+            // A route is the run of patrol steps, closed by one more waypoint
+            // where the unit stands when it sets out (0x43A020), which is
+            // the shape RWE's own patrol command gives it. Its orders go
+            // round for ever, and the head step stays with them: a patrol
+            // is never finished, so nothing after it in the list runs (the
+            // original would rotate to it; no shipped list has anything
+            // there).
+            if (!script.started)
+            {
+                if (!unit.orders.empty())
+                {
+                    return false;
+                }
+                std::size_t route = 0;
+                while (route < script.steps.size() && script.steps[route].kind == K::Patrol)
+                {
+                    unit.orders.push_back(PatrolOrder(script.steps[route].position));
+                    ++route;
+                }
+                unit.orders.push_back(PatrolOrder(unit.position));
+                script.steps.erase(script.steps.begin() + 1, script.steps.begin() + static_cast<std::ptrdiff_t>(route));
+                script.started = true;
+            }
+            return false;
+        }
 
         if (isOrderStep(step.kind))
         {
