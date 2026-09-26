@@ -2,6 +2,8 @@
 #include <rapidcheck.h>
 #include <rapidcheck/catch.h>
 #include <rwe/network_util.h>
+#include <utility>
+#include <vector>
 
 namespace rwe
 {
@@ -113,5 +115,230 @@ namespace rwe
         {
             REQUIRE(longestPrefixThatFits(0, 1496, sizeOf) == 0);
         }
+    }
+
+    TEST_CASE("FrameScheduler: the drift gate")
+    {
+        const auto buffer = 1000u;
+        const int cap = 100;
+
+        SECTION("skips only past the tolerance and only on a check interval")
+        {
+            FrameScheduler scheduler(buffer, SceneTime(0), cap);
+            // Average is 0, so the tolerance band is [0, 3].
+            REQUIRE(scheduler.next(SceneTime(0)) == FrameDispatch::Attempt);
+            REQUIRE(scheduler.next(SceneTime(1)) == FrameDispatch::Attempt);
+            REQUIRE(scheduler.next(SceneTime(4)) == FrameDispatch::Attempt);
+            REQUIRE(scheduler.next(SceneTime(5)) == FrameDispatch::Skip);
+            REQUIRE(scheduler.next(SceneTime(10)) == FrameDispatch::Skip);
+        }
+
+        SECTION("an off-interval tick past the tolerance is attempted")
+        {
+            FrameScheduler scheduler(buffer, SceneTime(0), cap);
+            REQUIRE(scheduler.next(SceneTime(11)) == FrameDispatch::Attempt);
+        }
+
+        SECTION("a tick level with or behind the average is never skipped")
+        {
+            FrameScheduler scheduler(buffer, SceneTime(100), cap);
+            // Average is 100, so the tolerance band is [97, 103].
+            REQUIRE(scheduler.next(SceneTime(95)) == FrameDispatch::Attempt);
+            REQUIRE(scheduler.next(SceneTime(100)) == FrameDispatch::Attempt);
+            REQUIRE(scheduler.next(SceneTime(104)) == FrameDispatch::Attempt);
+        }
+    }
+
+    TEST_CASE("FrameScheduler: the catch-up extra tick")
+    {
+        const auto buffer = 1000u;
+
+        SECTION("runs when a tick lands on the interval while behind the average")
+        {
+            FrameScheduler scheduler(buffer, SceneTime(100), 10);
+            // The tick at 94 reaches 95: on the interval and below the low
+            // mark of 97.
+            REQUIRE(scheduler.next(SceneTime(94)) == FrameDispatch::Attempt);
+            REQUIRE(scheduler.extraTick(SceneTime(95)));
+            REQUIRE(scheduler.ticksThisFrame() == 2);
+        }
+
+        SECTION("does not run when the reached time is off the interval")
+        {
+            FrameScheduler scheduler(buffer, SceneTime(100), 10);
+            REQUIRE(scheduler.next(SceneTime(93)) == FrameDispatch::Attempt);
+            REQUIRE_FALSE(scheduler.extraTick(SceneTime(94)));
+        }
+
+        SECTION("does not run when the reached time is not behind the average")
+        {
+            FrameScheduler scheduler(buffer, SceneTime(0), 10);
+            REQUIRE(scheduler.next(SceneTime(94)) == FrameDispatch::Attempt);
+            REQUIRE_FALSE(scheduler.extraTick(SceneTime(95)));
+        }
+
+        SECTION("never takes the frame past its cap")
+        {
+            FrameScheduler scheduler(buffer, SceneTime(100), 1);
+            REQUIRE(scheduler.next(SceneTime(94)) == FrameDispatch::Attempt);
+            REQUIRE_FALSE(scheduler.extraTick(SceneTime(95)));
+            REQUIRE(scheduler.ticksThisFrame() == 1);
+        }
+
+        SECTION("the extra reaches the cap but a second one does not pass it")
+        {
+            FrameScheduler scheduler(buffer, SceneTime(100), 2);
+            REQUIRE(scheduler.next(SceneTime(94)) == FrameDispatch::Attempt);
+            REQUIRE(scheduler.extraTick(SceneTime(95)));
+            REQUIRE_FALSE(scheduler.extraTick(SceneTime(96)));
+            REQUIRE(scheduler.ticksThisFrame() == 2);
+        }
+    }
+
+    TEST_CASE("FrameScheduler: the cap drops the backlog")
+    {
+        const auto tick = static_cast<unsigned int>(SimMillisecondsPerTick);
+
+        SECTION("loses exactly the whole ticks still buffered when the cap is hit")
+        {
+            // Five ticks of buffer against a cap of two.
+            FrameScheduler scheduler(5 * tick, SceneTime(0), 2);
+            REQUIRE(scheduler.next(SceneTime(0)) == FrameDispatch::Attempt);
+            REQUIRE(scheduler.next(SceneTime(1)) == FrameDispatch::Attempt);
+            REQUIRE_FALSE(scheduler.hasWork());
+
+            auto outcome = scheduler.finish();
+            REQUIRE(outcome.ticksDispatched == 2);
+            REQUIRE(outcome.millisecondsLeft == 0);
+            REQUIRE(outcome.ticksLostToCap == 3);
+        }
+
+        SECTION("loses nothing when the frame ends on its own")
+        {
+            FrameScheduler scheduler(2 * tick, SceneTime(0), 2);
+            REQUIRE(scheduler.next(SceneTime(0)) == FrameDispatch::Attempt);
+            REQUIRE(scheduler.next(SceneTime(1)) == FrameDispatch::Attempt);
+            REQUIRE_FALSE(scheduler.hasWork());
+
+            auto outcome = scheduler.finish();
+            REQUIRE(outcome.ticksDispatched == 2);
+            REQUIRE(outcome.millisecondsLeft == 0);
+            REQUIRE(outcome.ticksLostToCap == 0);
+        }
+
+        SECTION("a partial tick left over is not a lost tick")
+        {
+            FrameScheduler scheduler(2 * tick + 20, SceneTime(0), 2);
+            REQUIRE(scheduler.next(SceneTime(0)) == FrameDispatch::Attempt);
+            REQUIRE(scheduler.next(SceneTime(1)) == FrameDispatch::Attempt);
+
+            auto outcome = scheduler.finish();
+            REQUIRE(outcome.ticksLostToCap == 0);
+            REQUIRE(outcome.millisecondsLeft == 0);
+        }
+    }
+
+    TEST_CASE("FrameScheduler: a skip spends its time but runs nothing")
+    {
+        const auto tick = static_cast<unsigned int>(SimMillisecondsPerTick);
+        FrameScheduler scheduler(3 * tick, SceneTime(0), 100);
+
+        REQUIRE(scheduler.next(SceneTime(5)) == FrameDispatch::Skip);
+
+        auto outcome = scheduler.finish();
+        REQUIRE(outcome.gateSkips == 1);
+        REQUIRE(outcome.ticksDispatched == 0);
+        REQUIRE(outcome.millisecondsLeft == 2 * tick);
+    }
+
+    TEST_CASE("planCommandSets")
+    {
+        SECTION("pads an empty buffer up to the target depth")
+        {
+            auto plan = planCommandSets(0, 5, false, false);
+            // The one set the push branch contributes, then four more.
+            REQUIRE(plan.pushLocalSet);
+            REQUIRE(plan.emptySetsToPush == 4);
+        }
+
+        SECTION("a pushed local set counts toward the target depth")
+        {
+            auto plan = planCommandSets(2, 5, false, true);
+            REQUIRE(plan.pushLocalSet);
+            REQUIRE(plan.emptySetsToPush == 2);
+        }
+
+        SECTION("pushes the local set at the target depth")
+        {
+            auto plan = planCommandSets(5, 5, false, true);
+            REQUIRE(plan.pushLocalSet);
+            REQUIRE(plan.emptySetsToPush == 0);
+        }
+
+        SECTION("defers the local set once the buffer is over the target depth")
+        {
+            auto plan = planCommandSets(6, 5, false, true);
+            REQUIRE_FALSE(plan.pushLocalSet);
+            REQUIRE(plan.emptySetsToPush == 0);
+        }
+
+        SECTION("pushes the local set while stalled even over the target depth")
+        {
+            // The drop-deadlock arm: the tick that would drain the buffer is
+            // itself waiting on the drop command sitting in it.
+            auto plan = planCommandSets(6, 5, true, true);
+            REQUIRE(plan.pushLocalSet);
+            REQUIRE(plan.emptySetsToPush == 0);
+        }
+
+        SECTION("a stalled buffer with no local set still pushes nothing")
+        {
+            auto plan = planCommandSets(6, 5, true, false);
+            REQUIRE_FALSE(plan.pushLocalSet);
+            REQUIRE(plan.emptySetsToPush == 0);
+        }
+    }
+
+    TEST_CASE("estimateAverageSceneTimeStatic")
+    {
+        auto now = getTimestamp();
+
+        SECTION("with no peers it is the local scene time alone")
+        {
+            std::vector<std::pair<SceneTime, Timestamp>> peers;
+            REQUIRE(estimateAverageSceneTimeStatic(SceneTime(12), peers, now) == 12u);
+        }
+
+        SECTION("averages the local time with each peer, truncating")
+        {
+            std::vector<std::pair<SceneTime, Timestamp>> peers{
+                {SceneTime(10), now},
+                {SceneTime(20), now}};
+            // (4 + 10 + 20) / 3, truncated.
+            REQUIRE(estimateAverageSceneTimeStatic(SceneTime(4), peers, now) == 11u);
+        }
+
+        SECTION("a peer reporting at now is not projected forward")
+        {
+            std::vector<std::pair<SceneTime, Timestamp>> peers{{SceneTime(10), now}};
+            REQUIRE(estimateAverageSceneTimeStatic(SceneTime(4), peers, now) == 7u);
+        }
+
+        SECTION("a peer's last time is carried forward before averaging")
+        {
+            auto earlier = now - std::chrono::milliseconds(100);
+            std::vector<std::pair<SceneTime, Timestamp>> peers{{SceneTime(0), earlier}};
+            auto projected = projectSceneTime(SceneTime(0), 100);
+            auto expected = (SceneTime(0).value + projected.value) / 2;
+            REQUIRE(estimateAverageSceneTimeStatic(SceneTime(0), peers, now) == expected);
+        }
+    }
+
+    TEST_CASE("projectSceneTime: a peer's time projects at the sim tick rate", "[!shouldfail]")
+    {
+        // #354: the divisor is a 16 ms frame rather than the sim's own 33 ms,
+        // so a peer 100 ms after its last report is projected six ticks
+        // forward instead of three. Drop the tag when the divisor is fixed.
+        REQUIRE(projectSceneTime(SceneTime(0), 100) == SceneTime(3));
     }
 }

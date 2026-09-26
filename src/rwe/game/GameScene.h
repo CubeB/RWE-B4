@@ -1067,6 +1067,10 @@ namespace rwe
 
         int millisecondsBuffer{0};
 
+        /** Whole ticks the per-frame cap threw away, and drift-gate skips, over the session. */
+        unsigned int ticksLostToCap{0};
+        unsigned int gateSkips{0};
+
         GameSpeed gameSpeed;
         bool paused{false};
 

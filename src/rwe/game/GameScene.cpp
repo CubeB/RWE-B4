@@ -13,6 +13,7 @@
 #include <rwe/game/ScenarioDriver.h>
 #include <rwe/io/gui/gui.h>
 #include <rwe/game/save_util.h>
+#include <rwe/network_util.h>
 #include <rwe/ui/UiTextBox.h>
 #include <rwe/util.h>
 #include <rwe/MainMenuScene.h>
@@ -896,7 +897,13 @@ namespace rwe
             // that is waiting for the drop. Queueing an extra set is safe:
             // every peer sees this peer's stream exactly as it is sent, and
             // the depth only decides how long an order waits.
-            if (bufferedCommandCount <= targetCommandBufferSize || (!waitingForPlayers.empty() && !localPlayerCommandBuffer.empty()))
+            auto setsToPush = planCommandSets(
+                bufferedCommandCount,
+                targetCommandBufferSize,
+                !waitingForPlayers.empty(),
+                !localPlayerCommandBuffer.empty());
+
+            if (setsToPush.pushLocalSet)
             {
                 // Queue up commands collected from the local player, as many
                 // as make one set a packet can carry. An order to a large
@@ -911,11 +918,10 @@ namespace rwe
                 gameNetworkService->submitCommands(sceneTime, set);
                 ++localSetsSubmitted;
                 localPlayerCommandBuffer.erase(localPlayerCommandBuffer.begin(), localPlayerCommandBuffer.begin() + static_cast<std::ptrdiff_t>(count));
-                ++bufferedCommandCount;
             }
 
             // fill up to the required threshold
-            for (; bufferedCommandCount < targetCommandBufferSize; ++bufferedCommandCount)
+            for (unsigned int i = 0; i < setsToPush.emptySetsToPush; ++i)
             {
                 playerCommandService->pushCommands(localPlayerId, std::vector<PlayerCommand>());
                 gameNetworkService->submitCommands(sceneTime, std::vector<PlayerCommand>());
@@ -955,18 +961,12 @@ namespace rwe
         // at a different game time than the recording did.
         auto averageSceneTime = replayPlayback ? sceneTime : gameNetworkService->estimateAvergeSceneTime(sceneTime);
 
-        // allow skipping sim frames every so often to get back down to average.
-        // We tolerate X frames of drift in either direction to cope with noisiness in the estimation.
-        const SceneTime frameTolerance(3);
-        const SceneTime frameCheckInterval(5);
-        auto highSceneTime = averageSceneTime + frameTolerance;
-        auto lowSceneTime = averageSceneTime <= frameTolerance ? SceneTime{0} : averageSceneTime - frameTolerance;
         // Cap the number of sim ticks we dispatch per frame to prevent
         // a runaway "spiral of death" if frame times spike at high speeds.
         //
         // Watching a recording raises it instead of raising the game speed.
         // Speed scales the accumulator, and whatever the cap then refuses to
-        // dispatch is thrown away below -- so a fast-forward driven that way
+        // dispatch is thrown away -- so a fast-forward driven that way
         // silently drops ticks and finishes the replay early, which is the
         // one thing a replay must not do. Seeking runs flat out in blocks,
         // large enough to cross ten minutes in a couple of seconds and small
@@ -974,7 +974,7 @@ namespace rwe
         const int maxTicksPerFrame = replaySeekTarget
             ? 2000
             : (replayPlayback ? 10 * std::max(replaySpeed, 1) : 10);
-        int ticksThisFrame = 0;
+        FrameScheduler scheduler(static_cast<unsigned int>(millisecondsBuffer), averageSceneTime, maxTicksPerFrame);
         // Fast playback is bounded by the clock as well as by the count. At
         // 64x a frame asks for thirty-odd ticks, and if those take longer
         // than the frame the next one asks for more, and the one after for
@@ -983,33 +983,37 @@ namespace rwe
         // plays as fast as the machine can run it and the window stays live.
         const auto frameTickingStarted = std::chrono::steady_clock::now();
         const bool clockBounded = replayPlayback && !replaySeekTarget;
-        for (; millisecondsBuffer >= SimMillisecondsPerTick && ticksThisFrame < maxTicksPerFrame; millisecondsBuffer -= SimMillisecondsPerTick)
+        while (scheduler.hasWork())
         {
-            if (clockBounded && ticksThisFrame > 0
+            if (clockBounded && scheduler.ticksThisFrame() > 0
                 && std::chrono::steady_clock::now() - frameTickingStarted > std::chrono::milliseconds(40))
             {
-                millisecondsBuffer = 0;
+                scheduler.discardBuffer();
                 break;
             }
-            if (sceneTime % frameCheckInterval != SceneTime(0) || sceneTime <= highSceneTime)
+
+            auto dispatch = scheduler.next(sceneTime);
+            if (!dispatch)
+            {
+                break;
+            }
+            if (*dispatch == FrameDispatch::Skip)
+            {
+                continue;
+            }
+
+            tryTickGame();
+
+            // simulate an extra frame to catch up every so often
+            if (scheduler.extraTick(sceneTime))
             {
                 tryTickGame();
-                ++ticksThisFrame;
-
-                // simulate an extra frame to catch up every so often
-                if (sceneTime % frameCheckInterval == SceneTime(0) && sceneTime < lowSceneTime && ticksThisFrame < maxTicksPerFrame)
-                {
-                    tryTickGame();
-                    ++ticksThisFrame;
-                }
             }
         }
-        // If we hit the cap, drain the buffer so we don't carry over
-        // unbounded backlog into the next frame.
-        if (ticksThisFrame >= maxTicksPerFrame)
-        {
-            millisecondsBuffer = 0;
-        }
+        auto frameOutcome = scheduler.finish();
+        millisecondsBuffer = static_cast<int>(frameOutcome.millisecondsLeft);
+        ticksLostToCap += frameOutcome.ticksLostToCap;
+        gateSkips += frameOutcome.gateSkips;
 
         if (replaySeekTarget && sceneTime.value >= *replaySeekTarget)
         {
