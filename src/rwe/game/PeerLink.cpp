@@ -196,7 +196,14 @@ namespace rwe
             sendTimes.emplace_back(nextSequenceNumber, now);
         }
 
+        lastSendTime = now;
+
         return bytes;
+    }
+
+    bool PeerLink::sendIsDue(Timestamp now) const
+    {
+        return !lastSendTime || now - *lastSendTime >= SubmitSendInterval;
     }
 
     void PeerLink::onPacket(const proto::GameUpdateMessage& message, Timestamp now)

@@ -79,6 +79,7 @@ namespace rwe
             {
                 e.link->submitCommands(sceneTime, commands);
             }
+            sendToAll();
         });
     }
 
@@ -90,6 +91,7 @@ namespace rwe
             {
                 e.link->submitGameHash(hash);
             }
+            sendToAll();
         });
     }
 
@@ -337,8 +339,14 @@ namespace rwe
 
     void GameNetworkService::send(GameNetworkService::PeerEndpoint& endpoint)
     {
+        auto now = getTimestamp();
+        if (!endpoint.link->sendIsDue(now))
+        {
+            return;
+        }
+
         auto sizeLimit = sendBuffer.size() - 4;
-        auto message = endpoint.link->makePacket(getTimestamp(), sizeLimit);
+        auto message = endpoint.link->makePacket(now, sizeLimit);
         if (message.empty())
         {
             return;

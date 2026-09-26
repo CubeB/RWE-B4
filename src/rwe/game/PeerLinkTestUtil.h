@@ -81,7 +81,31 @@ namespace rwe
         std::size_t packetsLost() const { return packetsLost_; }
         std::size_t packetsDelivered() const { return packetsDelivered_; }
 
+        /**
+         * Moves the clock without running either send timer or delivering
+         * anything, for a test that only wants time to pass for the submit
+         * rate limit.
+         */
+        void advance(std::chrono::milliseconds duration) { now_ += duration; }
+
         void run(std::chrono::milliseconds duration) { runUntil(now_ + duration); }
+
+        /**
+         * Submit a set the way the transport's game thread does: the link
+         * takes it, and a packet leaves at once unless one went out within the
+         * submit rate limit.
+         */
+        void submitCommands(int side, SceneTime sceneTime, const PeerLink::CommandSet& commands)
+        {
+            links_[side]->submitCommands(sceneTime, commands);
+            send(side);
+        }
+
+        void submitGameHash(int side, GameHash hash)
+        {
+            links_[side]->submitGameHash(hash);
+            send(side);
+        }
 
         /**
          * Moves the clock to `end`, in event order: each side sends on its own
@@ -153,6 +177,11 @@ namespace rwe
 
         void send(int side)
         {
+            if (!links_[side]->sendIsDue(now_))
+            {
+                return;
+            }
+
             auto bytes = links_[side]->makePacket(now_, options_.packetSizeLimit);
             if (bytes.empty())
             {
