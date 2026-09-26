@@ -1020,6 +1020,16 @@ namespace rwe
         ticksLostToCap += frameOutcome.ticksLostToCap;
         gateSkips += frameOutcome.gateSkips;
 
+        // Once a frame, so a peer's projection of this one knows the speed it
+        // is advancing at and whether it has stopped. A replay has no peers.
+        if (!replayPlayback)
+        {
+            gameNetworkService->submitRunState(
+                static_cast<unsigned int>(gameSpeed.perMille()),
+                paused,
+                lastTickAttemptBlocked);
+        }
+
         if (replaySeekTarget && sceneTime.value >= *replaySeekTarget)
         {
             LOG_INFO << "Replay: seek reached tick " << sceneTime.value;
