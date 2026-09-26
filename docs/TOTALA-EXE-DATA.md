@@ -1024,6 +1024,13 @@ The other record fields (`BuildPriority`, `CreationCountdown`, `InitialGroup`,
 > player usually has no commander, and without a base its stockpile would be
 > clamped away at the first settle. Not yet: the orders, the flags, the
 > conditions, and choosing the schema by difficulty.
+>
+> **Where units overlap (#294, #377).** The original never refuses a unit for
+> want of room. RWE keeps one unit to a cell, so a mobile unit whose spot is
+> taken goes to the nearest free cell within eight, and a building keeps its
+> spot by clearing the blocking features under it, or comes in just far
+> enough from the map's edge to fit. Only a unit or another building in the
+> way keeps a mission building out. §88.
 
 ### `[specials]` and `[features]`
 

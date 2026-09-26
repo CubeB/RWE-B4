@@ -1211,6 +1211,111 @@ namespace rwe
         }
     }
 
+    namespace
+    {
+        /**
+         * The building's position when its footprint starts at cell (x, y):
+         * the middle of the footprint, on the ground.
+         */
+        SimVector missionBuildingPositionAt(const GameSimulation& simulation, int x, int y, const DiscreteRect& footprint)
+        {
+            auto topLeft = simulation.terrain.heightmapIndexToWorldCorner(x, y);
+            SimVector position(
+                topLeft.x + ((SimScalar(footprint.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss),
+                0_ss,
+                topLeft.z + ((SimScalar(footprint.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
+            position.y = simulation.terrain.getHeightAt(position.x, position.z);
+            return position;
+        }
+
+        /**
+         * A mission building whose spot is not free, placed anyway where the
+         * original would have put it: its creator never asks what is in the
+         * way (0x485F50), so a mission's towers stand among its trees. RWE
+         * keeps a building and a feature apart, so what is cleared is the
+         * scenery -- every blocking feature under the footprint -- and a
+         * footprint hanging off the map's edge comes in just far enough to
+         * fit. Anything else in the way, a unit or another building, still
+         * keeps it out. Issue #377.
+         */
+        std::optional<UnitId> placeMissionBuildingAnyway(
+            GameSimulation& simulation,
+            const std::string& unitType,
+            const UnitDefinition& def,
+            PlayerId owner,
+            SimVector position,
+            SimAngle heading,
+            std::vector<std::string>& notes,
+            const std::string& label)
+        {
+            auto footprint = simulation.computeFootprintRegion(position, def.movementCollisionInfo);
+            auto gridWidth = simulation.occupiedGrid.getWidth();
+            auto gridHeight = simulation.occupiedGrid.getHeight();
+            auto width = static_cast<int>(footprint.width);
+            auto height = static_cast<int>(footprint.height);
+            if (width > gridWidth || height > gridHeight)
+            {
+                return std::nullopt;
+            }
+
+            // What was done to place it, reported only once it stands: one
+            // note, the move and the clearing together when both were needed.
+            std::string moved;
+            auto x = std::clamp(footprint.x, 0, gridWidth - width);
+            auto y = std::clamp(footprint.y, 0, gridHeight - height);
+            if (x != footprint.x || y != footprint.y)
+            {
+                moved = "moved onto the map by " + std::to_string(x - footprint.x) + "," + std::to_string(y - footprint.y) + " cells";
+                position = missionBuildingPositionAt(simulation, x, y, footprint);
+                footprint = simulation.computeFootprintRegion(position, def.movementCollisionInfo);
+                if (auto unitId = simulation.trySpawnUnit(unitType, owner, position, heading))
+                {
+                    notes.push_back(label + ": " + moved);
+                    return unitId;
+                }
+            }
+
+            auto region = simulation.occupiedGrid.tryToRegion(footprint);
+            if (!region)
+            {
+                return std::nullopt;
+            }
+
+            std::vector<FeatureId> scenery;
+            auto somethingElse = false;
+            region->forEach([&](const auto& coordinates) {
+                const auto& cell = simulation.occupiedGrid.get(coordinates);
+                if (cell.mobileUnitId || (cell.buildingInfo && !cell.buildingInfo->passable))
+                {
+                    somethingElse = true;
+                }
+                if (cell.featureId
+                    && simulation.getFeatureDefinition(simulation.getFeature(*cell.featureId).featureName).blocking
+                    && std::find(scenery.begin(), scenery.end(), *cell.featureId) == scenery.end())
+                {
+                    scenery.push_back(*cell.featureId);
+                }
+            });
+            if (somethingElse || scenery.empty())
+            {
+                return std::nullopt;
+            }
+
+            std::string names;
+            for (auto featureId : scenery)
+            {
+                names += (names.empty() ? "" : ", ") + simulation.getFeatureDefinition(simulation.getFeature(featureId).featureName).name;
+                simulation.deleteFeature(featureId);
+            }
+            auto unitId = simulation.trySpawnUnit(unitType, owner, position, heading);
+            if (unitId)
+            {
+                notes.push_back(label + ": " + (moved.empty() ? "" : moved + " and ") + "cleared " + names + " from under it");
+            }
+            return unitId;
+        }
+    }
+
     MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers)
     {
         MissionSpawnResult result;
@@ -1285,6 +1390,10 @@ namespace rwe
                         unitId = simulation.trySpawnUnit(unitType, *slotPlayers[slot], nearby, heading);
                     }
                 }
+            }
+            if (!unitId && !def.isMobile)
+            {
+                unitId = placeMissionBuildingAnyway(simulation, unitType, def, *slotPlayers[slot], position, heading, result.adjusted, describe("placed anyway"));
             }
             if (!unitId)
             {
