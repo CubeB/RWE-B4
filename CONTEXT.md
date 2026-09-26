@@ -98,6 +98,22 @@ at the tick before the rejoin, which is everything it missed. Carried by the
 lobby, because the lobby is what holds a reliable connection.
 _Avoid_: save, snapshot, catch-up file
 
+**Simulated locally**:
+A player whose units this machine decides: their orders, their weapons, the
+damage they take, their economy. The default for every player. The opposite
+of a player simulated elsewhere.
+_Avoid_: owned player, local player used loosely
+
+**Simulated elsewhere** (a Remote player):
+A player whose units another machine runs. This machine applies the owner's
+recorded results — positions, damage, death — and takes no decision for
+them: no orders, no weapon fire, no damage from local hits, no economy
+settle, no AI. The receiving half of TA's owner-authoritative model, which
+is why the flag is per player and not per unit. Not hashed, so it cannot
+move a sync hash. A game with one cannot be saved, because the state it is
+missing lives on the other machine.
+_Avoid_: puppet player, non-local player, demo mode
+
 **Bridge**:
 The launcher's channel to the engine, one JSON object a line over standard
 input and output. `rwe_bridge` answers questions about the data files before

@@ -3,6 +3,7 @@
 #include <rwe/sim/DemoRecorder.h>
 #include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/SimRandom.h>
+#include <rwe/sim/SimulationOwnership.h>
 #include <algorithm>
 #include <limits>
 #include <rwe/util/SimpleLogger.h>
@@ -221,6 +222,14 @@ namespace rwe
         // A unit in a transport's grip just rides along (see updateCarriedUnits).
         if (unitInfo.state->carriedBy)
         {
+            return;
+        }
+
+        // A Remote player's unit makes no decision here: its owner does, and
+        // this machine applies the results.
+        if (!simulatesLocally(*sim, unitInfo.state->owner))
+        {
+            updateRemote(unitInfo);
             return;
         }
 
@@ -628,6 +637,38 @@ namespace rwe
                             // Likewise the fighter.
                         });
                 });
+        }
+    }
+
+    void UnitBehaviorService::updateRemote(UnitInfo unitInfo)
+    {
+        // Clear the steering targets the ordinary path clears, so nothing left
+        // over from a previous tick pushes the unit; the positions that arrive
+        // from the owner replace where it is, not where it was going.
+        match(
+            unitInfo.state->physics,
+            [&](UnitPhysicsInfoGround& p) {
+                p.steeringInfo = SteeringInfo{unitInfo.state->rotation, 0_ss};
+            },
+            [&](UnitPhysicsInfoAir& p) {
+                match(
+                    p.movementState,
+                    [&](AirMovementStateFlying& s) {
+                        s.targetPosition = unitInfo.state->position;
+                    },
+                    [&](const AirMovementStateTakingOff&) {},
+                    [&](const AirMovementStateLanding&) {},
+                    [&](const AirMovementStateAttackRun&) {},
+                    [&](const AirMovementStateHoverAttack&) {},
+                    [&](const AirMovementStateDogfight&) {});
+            });
+
+        unitInfo.state->navigationState.desiredDestination = std::nullopt;
+
+        if (unitInfo.definition->isMobile)
+        {
+            applyUnitSteering(unitInfo);
+            updateUnitPosition(unitInfo);
         }
     }
 
@@ -4667,6 +4708,14 @@ namespace rwe
         }
         auto& targetUnit = targetUnitRef->get();
 
+        // Ownership is the other machine's to change; a local captor cannot
+        // take a Remote player's unit.
+        if (!simulatesLocally(*sim, targetUnit.owner))
+        {
+            changeState(*unitInfo.state, UnitBehaviorStateIdle());
+            return true;
+        }
+
         // Reach measured to the footprint, as building measures it. The FIXME
         // this used to point at is settled in reclaimTarget: the original's
         // work missions all reach by Builddistance. Measuring to the footprint
@@ -5806,6 +5855,14 @@ namespace rwe
         }
         auto& targetUnit = targetUnitRef->get();
         const auto& targetUnitDefinition = sim->unitDefinitions.at(targetUnit.unitType);
+
+        // A Remote player's unit is the owner's to mend -- its health lives on
+        // the other machine -- so a local repairer cannot touch it.
+        if (!simulatesLocally(*sim, targetUnit.owner))
+        {
+            changeState(*unitInfo.state, UnitBehaviorStateIdle());
+            return true;
+        }
 
         if (!prepareBuilderForWork(unitInfo, targetUnit.position))
         {

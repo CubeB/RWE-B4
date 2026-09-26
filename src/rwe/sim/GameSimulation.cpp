@@ -1,6 +1,7 @@
 #include "GameSimulation.h"
 #include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/SimRandom.h>
+#include <rwe/sim/SimulationOwnership.h>
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -221,6 +222,12 @@ namespace rwe
 
     void GameSimulation::addAiController(PlayerId playerId, std::unique_ptr<AiPlayerController> controller)
     {
+        // A player whose units another machine decides is never given one.
+        if (!simulatesLocally(*this, playerId))
+        {
+            return;
+        }
+
         auto [it, inserted] = aiControllers.emplace(playerId, std::move(controller));
         if (inserted)
         {
@@ -1039,6 +1046,14 @@ namespace rwe
         auto& unit = unitRef->get();
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
 
+        // A Remote player's unit is the owner's to damage; a local builder
+        // cannot take it apart. Report the step finished so the order does
+        // not spin on a target it can never consume.
+        if (!simulatesLocally(*this, unit.owner))
+        {
+            return true;
+        }
+
         // The bite comes straight off the hit points. It does not go through
         // applyDamage: that path ends in killUnit, a wreck and an explosion,
         // and a reclaimed unit leaves none of those. Whether the original's
@@ -1299,6 +1314,11 @@ namespace rwe
         std::vector<UnitId> due;
         for (const auto& [unitId, unit] : units)
         {
+            if (!simulatesLocally(*this, unit.owner))
+            {
+                continue;
+            }
+
             if (unit.isAlive() && unit.selfDestructTime && gameTime >= *unit.selfDestructTime)
             {
                 due.push_back(unitId);
@@ -1322,6 +1342,11 @@ namespace rwe
         {
             auto& unit = entry.second;
             if (unit.isDead())
+            {
+                continue;
+            }
+
+            if (!simulatesLocally(*this, unit.owner))
             {
                 continue;
             }
@@ -3360,6 +3385,14 @@ namespace rwe
 
     void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer, std::optional<PlayerId> sourceOwner)
     {
+        // Damage to a Remote player's unit is the owner's to report; a local
+        // projectile hitting it must not take hit points off. The owner's
+        // recorded damage arrives through applyRemoteDamage instead.
+        if (!simulatesLocally(*this, getUnitState(unitId).owner))
+        {
+            return;
+        }
+
         {
             // Scored by the music evaluator; carries owners so the scene
             // does not have to chase ids that may be dead by the time it
@@ -4131,8 +4164,14 @@ namespace rwe
         // run resource updates once per second
         if (gameTime % GameTime(SimTicksPerSecond) == GameTime(0))
         {
-            for (auto& player : players)
+            for (Index i = 0; i < getSize(players); ++i)
             {
+                if (!simulatesLocally(*this, PlayerId(i)))
+                {
+                    continue;
+                }
+
+                auto& player = players[i];
                 player.maxEnergy = player.hasBaseStorage ? player.startingEnergy : Energy(0);
                 player.maxMetal = player.hasBaseStorage ? player.startingMetal : Metal(0);
             }
@@ -4140,6 +4179,11 @@ namespace rwe
             for (auto& entry : units)
             {
                 auto& unit = entry.second;
+                if (!simulatesLocally(*this, unit.owner))
+                {
+                    continue;
+                }
+
                 const auto& unitDefinition = unitDefinitions.at(unit.unitType);
                 if (!unit.isBeingBuilt(unitDefinition))
                 {
@@ -4167,6 +4211,11 @@ namespace rwe
             {
                 const auto& unitId = entry.first;
                 auto& unit = entry.second;
+                if (!simulatesLocally(*this, unit.owner))
+                {
+                    continue;
+                }
+
                 const auto& unitDefinition = unitDefinitions.at(unit.unitType);
 
                 if (unit.activated)
@@ -4252,6 +4301,11 @@ namespace rwe
             // is paid before anything new.
             for (Index i = 0; i < getSize(players); ++i)
             {
+                if (!simulatesLocally(*this, PlayerId(i)))
+                {
+                    continue;
+                }
+
                 auto& player = players[i];
                 // Brutal computer players get a little extra for every unit of income.
                 auto bonus = resourceBonusFor(PlayerId(i));
@@ -4784,6 +4838,11 @@ namespace rwe
         {
             auto& unit = entry.second;
             const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+            if (!simulatesLocally(*this, unit.owner))
+            {
+                continue;
+            }
+
             if (unitDefinition.healTime == 0 || unit.isDead() || unit.isBeingBuilt(unitDefinition))
             {
                 continue;

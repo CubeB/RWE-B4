@@ -629,6 +629,8 @@ set(SOURCE_FILES
     src/rwe/sim/Metal.h
     src/rwe/sim/MovementClassCollisionService.cpp
     src/rwe/sim/SimRandom.h
+    src/rwe/sim/SimulationOwnership.cpp
+    src/rwe/sim/SimulationOwnership.h
     src/rwe/sim/MovementClassCollisionService.h
     src/rwe/sim/MovementClassDatabase.cpp
     src/rwe/sim/MovementClassDatabase.h
@@ -1119,6 +1121,7 @@ set(TEST_FILES
     src/rwe/sim/nanonozzle.test.cpp
     src/rwe/sim/builderfacing.test.cpp
     src/rwe/sim/reclaimreach.test.cpp
+    src/rwe/sim/remoteownership.test.cpp
     src/rwe/sim/fogplacement.test.cpp
     src/rwe/sim/gunship.test.cpp
     src/rwe/sim/aircraftidle.test.cpp

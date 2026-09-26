@@ -55,6 +55,13 @@ namespace rwe
          */
         bool handleOrder(UnitInfo unitInfo, UnitOrder& order);
 
+        /**
+         * The whole of a Remote player's unit's tick: stand still and apply
+         * physics. Later phases steer it from the recorded stream; nothing
+         * here makes a decision, so the owner's results never contend with one.
+         */
+        void updateRemote(UnitInfo unitInfo);
+
         /** Returns true if the order has been completed. */
         bool handleMoveOrder(UnitInfo unitInfo, const MoveOrder& moveOrder);
 
