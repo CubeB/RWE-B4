@@ -357,7 +357,8 @@ From `src/rwe/game/GameScene.cpp` `onKeyDown`/`onKeyUp` (branch `revival`):
   else deselects (no STOP-gadget press, but equivalent in effect).
 - Arrows scroll; Shift/Ctrl tracked; `+`/`=`/`-` (and keypad) speed;
   Pause pauses -- all matching.
-- F10 debug window, F1 help overlay, backquote (scancode) health bars,
+- F10 debug window, F9 network overlay (RWE-original: TA binds nothing to
+  plain F9), F1 help overlay, backquote (scancode) health bars,
   `t` track, Ctrl+C select-and-track commander.
 - Ctrl+A select all **on screen**, Ctrl+S **stop**, Ctrl+D self-destruct,
   Ctrl+Z **attack-ground mode**, Ctrl+W **guard mode**, Ctrl+F **attack

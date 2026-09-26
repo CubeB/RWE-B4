@@ -990,6 +990,8 @@ namespace rwe
 
         renderReplayWindow();
         renderDebugWindow();
+        recordNetworkHistory();
+        renderNetworkOverlay();
 
         if (scenarioDriver)
         {
