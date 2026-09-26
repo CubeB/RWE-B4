@@ -331,6 +331,14 @@ of `TotalA.exe` instead of guessed at.
   bytes in the packet stream and 192 in the header's status record — the
   reference has the second number in the table it walks the first with, which
   silently swallows nine tenths of the alliance records.
+- `docs/TA-NETWORK.md` — what a real `TotalA.exe` sends and expects over
+  DirectPlay, found by a Python host that a real TA joined and played against
+  (#386): the session handshake, the battleroom and its options byte, unit sync
+  (a host only echoes the joiner's ids, so hosting needs no unit CRC), and in
+  game the rule that settles everything else — **each unit's owner is
+  authoritative**, so its full-state record overrides the receiver, an
+  empty-slot record deletes a unit, and only the owner's `0x0c` kills one.
+  `tools/ta-net/` holds the tools that found it.
 - `docs/REVERSE-ENGINEERING-PRIORITIES.md` — what is worth reading out of the
   binary next, ranked, with the evidence that each is a real gap and a string
   or offset to pivot on. **The ranked list is empty as of 2026-09-15** -- every

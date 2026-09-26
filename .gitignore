@@ -22,3 +22,8 @@ crash.txt
 # The intent log is a session artifact; it is rendered into the PR
 # description by the intent-stack skill, never checked in.
 /.intent-log.md
+
+# Captures of TA's network traffic hold LAN addresses and player names; tools/ta-net/README.md.
+*.pcap
+fakehost.log
+fakehost-rx.jsonl
