@@ -1,6 +1,7 @@
 #include "BuildManager.h"
 #include <rwe/ai/AiMapBounds.h>
 #include <rwe/ai/BuilderSafety.h>
+#include <rwe/ai/EngagementPredictor.h>
 #include <rwe/sim/SimRandom.h>
 #include <algorithm>
 #include <cmath>
@@ -13,7 +14,6 @@
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/movement.h>
 #include <rwe/sim/WeaponDefinition.h>
-#include <rwe/util/rwe_string.h>
 #include <set>
 #include <tuple>
 #include <variant>
@@ -121,60 +121,23 @@ namespace rwe
 
     float BuildManager::unitCombatValuePerMetal(const GameSimulation& sim, const std::string& unitType)
     {
+        // Was its own copy of "the best of the unit's three weapons' damage
+        // a second, against the default armour class, not the sum" until
+        // #389 pulled that loop out as rwe::bestDps, shared now with
+        // ThreatMap::weaponRange's sibling and the engagement predictor.
+        // combatStats returns all-zero for an unknown or empty unitType,
+        // which the guard below turns into the same 0.0f this returned
+        // before -- so this stays the identical arithmetic for every caller.
         if (unitType.empty())
         {
             return 0.0f;
         }
-        auto defIt = sim.unitDefinitions.find(unitType);
-        if (defIt == sim.unitDefinitions.end())
+        auto stats = combatStats(sim, unitType);
+        if (stats.metal <= 0.0f || stats.hp <= 0.0f || stats.dps <= 0.0f)
         {
             return 0.0f;
         }
-        const auto& def = defIt->second;
-        auto metal = def.buildCostMetal.value;
-        if (metal <= 0.0f || def.maxHitPoints == 0)
-        {
-            return 0.0f;
-        }
-
-        // The best damage a second any one of its weapons manages, against
-        // the default armour class. Not the sum: a unit rarely brings two
-        // weapons to bear on the same target, and taking the best keeps a
-        // token anti-air gun from flattering a tank.
-        float bestDps = 0.0f;
-        for (const auto& weaponName : {def.weapon1, def.weapon2, def.weapon3})
-        {
-            if (weaponName.empty())
-            {
-                continue;
-            }
-            // Both the weapon table and the damage classes within it are
-            // keyed upper case by the loader, while the FBI's own spelling
-            // is whatever the unit's author typed.
-            auto weaponIt = sim.weaponDefinitions.find(toUpper(weaponName));
-            if (weaponIt == sim.weaponDefinitions.end())
-            {
-                continue;
-            }
-            const auto& weapon = weaponIt->second;
-            auto damageIt = weapon.damage.find("DEFAULT");
-            if (damageIt == weapon.damage.end())
-            {
-                continue;
-            }
-            auto reload = weapon.reloadTime.value;
-            if (reload <= 0.0f)
-            {
-                continue;
-            }
-            auto shots = static_cast<float>(std::max(1, weapon.burst));
-            bestDps = std::max(bestDps, static_cast<float>(damageIt->second) * shots / reload);
-        }
-        if (bestDps <= 0.0f)
-        {
-            return 0.0f;
-        }
-        return static_cast<float>(def.maxHitPoints) * bestDps / metal;
+        return stats.hp * stats.dps / stats.metal;
     }
 
     bool BuildManager::guardRequestDisplaces(const std::optional<AiBlackboard::BuildSiteGuardRequest>& held, float siteThreat)
