@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <rwe/config.h>
 #include <rwe/game/ControlChannel.h>
+#include <nlohmann/json.hpp>
 #include <rwe/game/GameEndedReport.h>
 #include <rwe/io/campaign/campaign.h>
 #include <rwe/io/gui/gui.h>

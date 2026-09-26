@@ -1,7 +1,7 @@
 #pragma once
 
 #include <filesystem>
-#include <nlohmann/json.hpp>
+#include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <rwe/game/SceneTime.h>
 #include <rwe/sim/PlayerId.h>

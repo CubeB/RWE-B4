@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <rwe/game/GameEndedReport.h>
 
 namespace rwe
@@ -113,6 +114,30 @@ namespace rwe
 
             std::error_code error;
             std::filesystem::remove(first, error);
+        }
+
+        SECTION("a path outside ASCII is sent as UTF-8 and survives a round trip")
+        {
+            auto path = std::filesystem::temp_directory_path() / std::filesystem::path(u8"rwe-game-ended-\u00e9t\u00e9-\u65e5.log");
+            {
+                std::ofstream out(path, std::ios::binary);
+                out << "x";
+            }
+
+            GameEndedReport report;
+            report.outcome = "abandoned";
+            report.logPath = path;
+
+            auto json = gameEndedJson(report);
+            auto u8 = path.u8string();
+            REQUIRE(json["log"] == std::string(u8.begin(), u8.end()));
+
+            // Backslashes on Windows, and the non-ASCII name everywhere, must
+            // both survive being written out and read back.
+            auto reparsed = nlohmann::json::parse(json.dump());
+            REQUIRE(reparsed["log"] == json["log"]);
+
+            std::filesystem::remove(path);
         }
     }
 }
