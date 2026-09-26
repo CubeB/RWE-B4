@@ -33,6 +33,9 @@ namespace rwe
             std::optional<UnitId> unit;
             bool placed{false};
 
+            /** The demo's global id for this slot, so the id map can be kept in step. */
+            uint16_t demoId{0};
+
             /** True while the stream has given a type but no position yet. */
             bool unplaced{false};
 
@@ -139,8 +142,84 @@ namespace rwe
             {
                 --stats.unplacedUnits;
             }
+            if (it->second.demoId != 0)
+            {
+                keyOfId.erase(it->second.demoId);
+            }
             puppets.erase(it);
         }
+
+        /**
+         * The RWE unit a puppet's demo id currently names, or nothing if the
+         * slot has been freed and possibly handed to another unit. UnitIds are
+         * recycled, so the type has to match too: a record for an id the sim
+         * has already let go names no unit of ours.
+         */
+        std::optional<UnitId> liveUnitOf(const Puppet& puppet) const
+        {
+            if (!puppet.unit)
+            {
+                return std::nullopt;
+            }
+            auto ref = sim.tryGetUnitState(*puppet.unit);
+            if (!ref || ref->get().unitType != puppet.typeName)
+            {
+                return std::nullopt;
+            }
+            return puppet.unit;
+        }
+
+        /**
+         * Takes a flying unit back out of the occupied grid.
+         *
+         * The simulation puts every mobile unit into the grid when it spawns,
+         * but a flying unit's per-tick move sets its position without touching
+         * the grid, and the death sweep skips anything airborne. So the cells
+         * it was given at spawn would stay pointed at it for ever, blocking
+         * ground units and naming a freed id to any later blast. Airborne
+         * units do not collide, so the cells are not needed.
+         */
+        void clearOccupiedCells(const UnitId& unitId, const UnitDefinition& definition)
+        {
+            auto ref = sim.tryGetUnitState(unitId);
+            if (!ref)
+            {
+                return;
+            }
+            auto region = sim.occupiedGrid.tryToRegion(sim.computeFootprintRegion(ref->get().position, definition.movementCollisionInfo));
+            if (!region)
+            {
+                return;
+            }
+            sim.occupiedGrid.forEach(*region, [&](auto& cell) {
+                if (cell.mobileUnitId == unitId)
+                {
+                    cell.mobileUnitId = std::nullopt;
+                }
+            });
+        }
+
+        /** Moves a puppet's ground footprint to a snapped position. */
+        void moveOccupiedCells(const UnitId& unitId, const SimVector& from, const SimVector& to, const UnitDefinition& definition)
+        {
+            auto oldRegion = sim.occupiedGrid.tryToRegion(sim.computeFootprintRegion(from, definition.movementCollisionInfo));
+            auto newRegion = sim.occupiedGrid.tryToRegion(sim.computeFootprintRegion(to, definition.movementCollisionInfo));
+            if (oldRegion)
+            {
+                sim.occupiedGrid.forEach(*oldRegion, [&](auto& cell) {
+                    if (cell.mobileUnitId == unitId)
+                    {
+                        cell.mobileUnitId = std::nullopt;
+                    }
+                });
+            }
+            if (newRegion)
+            {
+                sim.occupiedGrid.forEach(*newRegion, [&](auto& cell) { cell.mobileUnitId = unitId; });
+            }
+        }
+
+
 
         void advanceTo(uint32_t serial)
         {
@@ -210,8 +289,13 @@ namespace rwe
 
             puppet.unit = *unitId;
             puppet.placed = true;
+            puppet.demoId = e->unitId;
             markPlaced(puppet);
             keyOfId[e->unitId] = key;
+            if (const auto& definition = sim.unitDefinitions.at(*typeName); definition.canFly)
+            {
+                clearOccupiedCells(*unitId, definition);
+            }
             ++stats.unitsSpawned;
         }
 
@@ -230,17 +314,23 @@ namespace rwe
                 return;
             }
             auto puppetIt = puppets.find(key->second);
-            if (puppetIt == puppets.end() || !puppetIt->second.unit)
+            if (puppetIt == puppets.end())
             {
                 return;
             }
+            auto live = liveUnitOf(puppetIt->second);
+            if (!live)
+            {
+                dropPuppet(puppetIt);
+                return;
+            }
 
-            auto& unit = sim.getUnitState(*puppetIt->second.unit);
+            auto& unit = sim.getUnitState(*live);
             unit.finishBuilding(sim.unitDefinitions.at(unit.unitType));
             ++stats.unitsFinished;
         }
 
-        void applyDeath(uint8_t sender, const TadBytes& subPacket)
+        void applyDeath(const TadBytes& subPacket)
         {
             auto e = tadDecodeDeath(subPacket);
             if (!e)
@@ -262,12 +352,19 @@ namespace rwe
                 return;
             }
             auto puppetIt = puppets.find(key->second);
-            if (puppetIt == puppets.end() || !puppetIt->second.unit)
+            if (puppetIt == puppets.end())
             {
                 return;
             }
+            auto live = liveUnitOf(puppetIt->second);
+            if (!live)
+            {
+                dropPuppet(puppetIt);
+                ++stats.recordsDroppedUnknownUnit;
+                return;
+            }
 
-            auto unitId = *puppetIt->second.unit;
+            auto unitId = *live;
             sim.killUnit(unitId);
 
             // The owner's record, not the local `Killed` script, says what is
@@ -284,10 +381,9 @@ namespace rwe
 
             ++stats.unitsKilled;
             dropPuppet(puppetIt);
-            keyOfId.erase(key);
         }
 
-        void applyDamage(uint8_t sender, const TadBytes& subPacket)
+        void applyDamage(const TadBytes& subPacket)
         {
             auto e = tadDecodeDamage(subPacket);
             if (!e)
@@ -302,12 +398,18 @@ namespace rwe
                 return;
             }
             auto puppetIt = puppets.find(key->second);
-            if (puppetIt == puppets.end() || !puppetIt->second.unit)
+            if (puppetIt == puppets.end())
             {
                 return;
             }
+            auto live = liveUnitOf(puppetIt->second);
+            if (!live)
+            {
+                dropPuppet(puppetIt);
+                return;
+            }
 
-            applyRemoteDamage(sim, *puppetIt->second.unit, e->damage);
+            applyRemoteDamage(sim, *live, e->damage);
         }
 
         void applyGroundMover(UnitState& unit, const TadGroundPath& ground)
@@ -394,15 +496,16 @@ namespace rwe
                 }
 
                 auto& puppet = ensurePuppet(sender, update.index, *typeName);
-                if (!puppet.unit)
+                auto live = liveUnitOf(puppet);
+                if (!live)
                 {
-                    // No position yet, so there is nothing to steer; remember
-                    // the mover and apply it when the full-state record places
-                    // the unit.
+                    // No position yet, or the unit this slot named has left.
+                    // There is nothing to steer; remember the mover and apply
+                    // it when a full-state record places the unit.
                     puppet.pendingMover = update.mover;
                     continue;
                 }
-                applyMover(sim.getUnitState(*puppet.unit), update.mover);
+                applyMover(sim.getUnitState(*live), update.mover);
             }
 
             if (!state->sync)
@@ -420,11 +523,11 @@ namespace rwe
                 return std::nullopt;
             }
             auto it = puppets.find(key->second);
-            if (it == puppets.end() || !it->second.unit)
+            if (it == puppets.end())
             {
                 return std::nullopt;
             }
-            return it->second.unit;
+            return liveUnitOf(it->second);
         }
 
         void applySync(uint8_t sender, const TadUnitSync& sync)
@@ -441,7 +544,10 @@ namespace rwe
             {
                 // An empty slot: forget anything we had there rather than
                 // pretending the slot holds a unit the owner does not have.
-                if (auto it = puppets.find(puppetKey(sender, index)); it != puppets.end())
+                // A slot whose unit is still live is left alone, because the
+                // recorder writes the empty sync before the death record that
+                // follows it in the same packet and the death needs its id.
+                if (auto it = puppets.find(puppetKey(sender, index)); it != puppets.end() && !liveUnitOf(it->second))
                 {
                     dropPuppet(it);
                 }
@@ -458,7 +564,15 @@ namespace rwe
             auto key = puppetKey(sender, index);
             auto& puppet = ensurePuppet(sender, index, *typeName);
 
-            if (!puppet.unit)
+            auto live = liveUnitOf(puppet);
+            if (!live)
+            {
+                // The unit this slot named has left the simulation; the record
+                // is about whatever the owner has there now, so place it afresh.
+                puppet.unit = std::nullopt;
+            }
+
+            if (!live)
             {
                 // A unit that existed before the recording began: first seen
                 // in this full-state record, so spawn it complete here.
@@ -492,18 +606,23 @@ namespace rwe
                 puppet.unit = *unitId;
                 puppet.placed = !sync.carried;
                 markPlaced(puppet);
+                if (const auto& definition = sim.unitDefinitions.at(*typeName); definition.canFly)
+                {
+                    clearOccupiedCells(*unitId, definition);
+                }
                 if (puppet.pendingMover)
                 {
                     applyMover(sim.getUnitState(*unitId), *puppet.pendingMover);
                 }
                 if (auto block = blockOfSender.find(sender); block != blockOfSender.end())
                 {
-                    keyOfId[tadUnitIdOfIndex(block->second, index, maxUnits)] = key;
+                    puppet.demoId = tadUnitIdOfIndex(block->second, index, maxUnits);
+                    keyOfId[puppet.demoId] = key;
                 }
                 return;
             }
 
-            auto& unit = sim.getUnitState(*puppet.unit);
+            auto& unit = sim.getUnitState(*live);
             auto& definition = sim.unitDefinitions.at(unit.unitType);
 
             if (sync.carried)
@@ -512,7 +631,12 @@ namespace rwe
                 // unit's carrier decides where it is.
                 if (auto carrier = carrierUnit(*sync.carried))
                 {
-                    unit.position = sim.getUnitState(*carrier).position;
+                    auto carrierPosition = sim.getUnitState(*carrier).position;
+                    if (definition.isMobile && !definition.canFly)
+                    {
+                        moveOccupiedCells(*live, unit.position, carrierPosition, definition);
+                    }
+                    unit.position = carrierPosition;
                 }
                 return;
             }
@@ -526,6 +650,16 @@ namespace rwe
                 auto& drift = definition.canFly ? stats.airDrift : stats.groundDrift;
                 ++drift.samples;
                 drift.distances.push_back(distance);
+            }
+
+            // Keep the occupied grid with the snapped position, or a ground
+            // unit's cells would stay where it was and a later spawn would be
+            // refused by a footprint nobody stands on any more. A building
+            // keeps its place in the grid as a building, and its position does
+            // not move, so it is left alone.
+            if (definition.isMobile && !definition.canFly)
+            {
+                moveOccupiedCells(*live, unit.position, recorded, definition);
             }
 
             unit.previousPosition = recorded;
@@ -623,10 +757,10 @@ namespace rwe
                     impl->applyBuildFinished(packet.sender, subPacket);
                     break;
                 case TadSubPacketCode::UnitKilled:
-                    impl->applyDeath(packet.sender, subPacket);
+                    impl->applyDeath(subPacket);
                     break;
                 case TadSubPacketCode::UnitTakeDamage:
-                    impl->applyDamage(packet.sender, subPacket);
+                    impl->applyDamage(subPacket);
                     break;
                 case TadSubPacketCode::UnitStatAndMove:
                     impl->applyUnitState(packet.sender, subPacket);

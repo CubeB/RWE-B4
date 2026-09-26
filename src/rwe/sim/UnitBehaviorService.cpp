@@ -708,11 +708,16 @@ namespace rwe
             // The owner already resolved unit collisions along this path, so a
             // step is never refused here: a peer's stale footprint must not pin
             // a puppet where its owner had it move. The occupied grid is kept
-            // in step all the same, for anything local that still reads it.
+            // in step all the same, for anything local that still reads it,
+            // but a step whose footprint leaves the grid is dropped rather
+            // than made to index it.
             auto currentFootprint = sim->computeFootprintRegion(unitInfo.state->position, unitInfo.definition->movementCollisionInfo);
             auto newFootprint = sim->computeFootprintRegion(newPosition, unitInfo.definition->movementCollisionInfo);
-            sim->moveUnitOccupiedArea(currentFootprint, newFootprint, unitInfo.id);
-            unitInfo.state->position = newPosition;
+            if (sim->occupiedGrid.tryToRegion(currentFootprint) && sim->occupiedGrid.tryToRegion(newFootprint))
+            {
+                sim->moveUnitOccupiedArea(currentFootprint, newFootprint, unitInfo.id);
+                unitInfo.state->position = newPosition;
+            }
         }
 
         updateGroundTilt(unitInfo, physics);

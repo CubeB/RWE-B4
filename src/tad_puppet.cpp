@@ -86,6 +86,15 @@ namespace
         std::optional<rwe::TadHeader> header;
         std::vector<rwe::TadPlayer> players;
         std::optional<rwe::TadUnitTable> unitTable;
+
+        /**
+         * Every distinct packet sender, in first-seen order. The sender is a
+         * stable per-player key but its numbering is not: RWE numbers senders
+         * from zero and TA's own recorder from one, and the player table's
+         * `number` field matches neither reliably, so the driver is handed a
+         * seat per sender in the order they appear rather than guessing.
+         */
+        std::vector<uint8_t> senders;
     };
 
     struct MetaHandler : rwe::TadHandler
@@ -95,6 +104,14 @@ namespace
         void onHeader(const rwe::TadHeader& h) override { meta.header = h; }
         void onPlayer(const rwe::TadPlayer& p, unsigned int, unsigned int) override { meta.players.push_back(p); }
         void onUnitData(const rwe::TadBytes& d) override { meta.unitTable = rwe::tadDecodeUnitTable(d); }
+
+        void onPacket(const rwe::TadPacket& packet, const std::vector<rwe::TadBytes>&, const rwe::TadWalkStats&) override
+        {
+            if (std::find(meta.senders.begin(), meta.senders.end(), packet.sender) == meta.senders.end())
+            {
+                meta.senders.push_back(packet.sender);
+            }
+        }
     };
 
     struct PlayHandler : rwe::TadHandler
@@ -373,13 +390,13 @@ namespace
         rwe::TadPuppetDriver driver(loaded.simulation, header.maxUnits, loaded.dataMaps.unitLoadOrder);
 
         rwe::Index slot = 0;
-        for (rwe::Index i = 0; i < rwe::getSize(meta.players); ++i)
+        for (uint8_t sender : meta.senders)
         {
-            if (meta.players[i].isWatcher())
+            if (slot >= loaded.simulation.players.size())
             {
-                continue;
+                break;
             }
-            driver.addPlayer(static_cast<uint8_t>(i), rwe::PlayerId(static_cast<unsigned int>(slot)));
+            driver.addPlayer(sender, rwe::PlayerId(static_cast<unsigned int>(slot)));
             ++slot;
         }
 
