@@ -49,6 +49,7 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <thread>
 #include <rwe/ColorPalette.h>
 #include <rwe/GameLaunch.h>
 #include <rwe/PathMapping.h>
@@ -691,6 +692,14 @@ int main(int argc, char* argv[])
             }
 
             loaded.simulation.tick();
+
+            // RWE_SIM_LAG, the same as GameScene applies: cost this run wall
+            // time so a machine that cannot keep up can be reproduced on one
+            // that can. It changes when ticks run and never what they contain.
+            if (auto lag = diagnostics.simulationLagForTick(sceneTime))
+            {
+                std::this_thread::sleep_for(*lag);
+            }
 
             arenaReport.update(loaded.simulation);
             if (gameOver || loaded.simulation.gameTime.value >= arenaEndTick)
