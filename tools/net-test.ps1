@@ -57,6 +57,20 @@ $ErrorActionPreference = "Stop"
 # return.
 if ($rejoin -and $kill -lt 0) { $kill = $peers - 1 }
 
+# -lag <peer>:<ms>[@<fromTick>], checked here so a typo is a clear message
+# and not a cast exception half way through starting the peers.
+$lagPeer = -1
+$lagSpec = ""
+if ($lag) {
+    $lagParts = $lag.Split(":", 2)
+    $parsedPeer = 0
+    if ($lagParts.Count -ne 2 -or -not [int]::TryParse($lagParts[0], [ref]$parsedPeer) -or $parsedPeer -lt 0 -or $parsedPeer -ge $peers -or -not $lagParts[1]) {
+        throw "Bad -lag '$lag': expected <peer>:<ms>[@<fromTick>] with a peer from 0 to $($peers - 1), e.g. -lag 1:50"
+    }
+    $lagPeer = $parsedPeer
+    $lagSpec = $lagParts[1]
+}
+
 if (-not (Test-Path $exe)) { throw "No engine at $exe. Build the rwe target first." }
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 Remove-Item "$outDir\*.log", "$outDir\*.hashes" -ErrorAction SilentlyContinue
@@ -169,10 +183,7 @@ for ($me = 0; $me -lt $peers; $me++) {
     # One peer lagged, the rest honest: RWE_SIM_LAG makes that peer sleep after
     # every tick, which is a machine that cannot keep up reproduced on one that
     # can. The effect on the others is the thing being measured.
-    if ($lag) {
-        $lagParts = $lag.Split(":")
-        if ($lagParts.Count -eq 2 -and [int]$lagParts[0] -eq $me) { $env:RWE_SIM_LAG = $lagParts[1] }
-    }
+    if ($lagPeer -eq $me) { $env:RWE_SIM_LAG = $lagSpec }
 
     $env:RWE_HASH_LOG = $hashes[$me]
     if ($bridge -and $me -eq 0) {
@@ -282,10 +293,7 @@ if ($rejoin) {
         $a += " --log `"$($logs[$kill])`" --rejoin `"$bundle`" --rejoin-tick $atTick"
 
         $env:RWE_HASH_LOG = $hashes[$kill]
-        if ($lag) {
-            $lagParts = $lag.Split(":")
-            if ($lagParts.Count -eq 2 -and [int]$lagParts[0] -eq $kill) { $env:RWE_SIM_LAG = $lagParts[1] }
-        }
+        if ($lagPeer -eq $kill) { $env:RWE_SIM_LAG = $lagSpec }
         $procs[$kill] = Start-Process -FilePath $exe -ArgumentList $a -PassThru
         Remove-Item Env:\RWE_HASH_LOG -ErrorAction SilentlyContinue
         Remove-Item Env:\RWE_SIM_LAG -ErrorAction SilentlyContinue
