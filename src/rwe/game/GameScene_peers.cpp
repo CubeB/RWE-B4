@@ -358,9 +358,10 @@ namespace rwe
         };
 
         const auto& displaySize = ImGui::GetIO().DisplaySize;
-        // Below the top bar, which is laid out in the scene's viewport units
-        // rather than ImGui's.
-        auto belowTopBar = (static_cast<float>(GuiSizeTop) + 8.0f) * displaySize.y / static_cast<float>(sceneContext.viewport->height());
+        // Below the top bar, which is laid out in UI units -- viewport pixels
+        // divided by the UI scale -- rather than ImGui's.
+        auto topBarPixels = static_cast<float>(GuiSizeTop) * static_cast<float>(effectiveUiScale());
+        auto belowTopBar = (topBarPixels + 8.0f) * displaySize.y / static_cast<float>(sceneContext.viewport->height());
         ImGui::SetNextWindowPos(ImVec2(displaySize.x - 8.0f, belowTopBar), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
         ImGui::SetNextWindowBgAlpha(0.45f);
         const auto flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_AlwaysAutoResize
