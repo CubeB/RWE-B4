@@ -10,6 +10,7 @@
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuScene.h>
 #include <rwe/game/SaveFile.h>
+#include <rwe/game/ScenarioDriver.h>
 #include <rwe/io/gui/gui.h>
 #include <rwe/game/save_util.h>
 #include <rwe/ui/UiTextBox.h>
@@ -274,6 +275,11 @@ namespace rwe
 
         // A loaded mission has had its sounds already.
         missionCelebrationsHeard = missionCelebrations();
+
+        if (this->gameParameters.scenarioName)
+        {
+            scenarioDriver = std::make_unique<ScenarioDriver>(*this, *this->gameParameters.scenarioName);
+        }
     }
 
     GameScene::~GameScene()
@@ -374,15 +380,16 @@ namespace rwe
 
     void GameScene::updateStatsBarSlide(int millisecondsElapsed)
     {
-        // 0x4689c0. Polled on a fifteen-millisecond throttle, and each poll
-        // moves the strip a third of the way it has left to go, never less
-        // than a pixel -- so it leaves quickly and settles gently, over about
-        // an eighth of a second. The key is read live, not as a press.
+        // 0x4689c0. Each poll moves the strip a third of the way it has left
+        // to go, never less than a pixel, so it leaves quickly and settles
+        // gently. The original polls every fifteen of its timer units; the
+        // unit is not decoded, and 10ms matches it in play better than 15ms.
+        // The key is read live, not as a press.
         statsBarMillisecondsOwed += millisecondsElapsed;
         auto wanted = (spaceDown && !isGameMenuOpen()) ? StatsBarTravel : 0;
-        while (statsBarMillisecondsOwed >= 15)
+        while (statsBarMillisecondsOwed >= 10)
         {
-            statsBarMillisecondsOwed -= 15;
+            statsBarMillisecondsOwed -= 10;
             if (statsBarSlide == wanted)
             {
                 continue;
@@ -414,25 +421,32 @@ namespace rwe
             return;
         }
 
-        auto wantHidden = panelWantsHiding(
+        // Space brings the players' list out and leaves the side panel where
+        // it is, as the original does in play; F4 moves them together.
+        auto wantList = playerListWantsOut(
             panelHiddenLatch,
             spaceDown && !isGameMenuOpen(),
             isCursorOverPanel());
-        auto target = wantHidden ? static_cast<float>(PanelSlideTravel) : 0.0f;
+        auto listTarget = wantList ? static_cast<float>(PanelSlideTravel) : 0.0f;
+        auto panelTarget = panelHiddenLatch ? static_cast<float>(PanelSlideTravel) : 0.0f;
 
-        auto previous = panelSlide;
-        panelSlide = advancePanelSlide(panelSlide, target, PanelSlidePixelsPerSecond, millisecondsElapsed);
+        panelSlide = advancePanelSlide(panelSlide, panelTarget, PanelSlidePixelsPerSecond, millisecondsElapsed);
 
-        if (panelSlide != previous && panelSlide == target)
+        auto previous = playerListSlide;
+        playerListSlide = advancePanelSlide(playerListSlide, listTarget, PanelSlidePixelsPerSecond, millisecondsElapsed);
+
+        if (playerListSlide != previous && playerListSlide == listTarget)
         {
             // Both endpoints play a UI sound. 76 names them and ALLSOUND.TDF
             // has both -- PANEL is servsml6, OPTIONS is butoptn -- but which
             // sound belongs to which end is not decoded, so this pairing is
             // RWE's: the servo as the panel leaves, the button as it returns.
-            const auto& arrival = wantHidden ? sounds.panel : sounds.options;
+            const auto& arrival = wantList ? sounds.panel : sounds.options;
+            // On a free channel rather than the UI one, which drops a sound
+            // while another plays: a quick tap of Space would lose the second.
             if (arrival)
             {
-                playUiSound(*arrival);
+                sceneContext.audioService->playSound(*arrival);
             }
         }
 
@@ -452,6 +466,11 @@ namespace rwe
         auto desiredLeft = panelSlide > 0.0f ? 0 : GuiSizeLeft;
         if (desiredLeft != appliedLeftInset)
         {
+            // The wider viewport re-centres on the camera, which would drag
+            // every world pixel sideways with it. Moving the camera by half
+            // the change keeps the ground still and only adds the strip the
+            // panel has left.
+            worldCameraState.position.x -= panelSlideCameraShift(appliedLeftInset, desiredLeft, worldCameraState.zoom);
             appliedLeftInset = desiredLeft;
             worldViewport.setInset(desiredLeft, GuiSizeTop, GuiSizeRight, GuiSizeBottom);
             recreateWorldRenderTextures();
@@ -460,6 +479,16 @@ namespace rwe
 
     void GameScene::update(int millisecondsElapsed)
     {
+        // The scenario harness, if one is driving. Keyed on the tick about to
+        // run and ahead of everything else, so input delivered at tick T is
+        // in the command set flushed for T below. afterTick at the foot of
+        // this function sees the tick and any panel rebuild it caused.
+        const auto scenarioTick = sceneTime.value;
+        if (scenarioDriver)
+        {
+            scenarioDriver->beforeTick(scenarioTick);
+        }
+
         // The battle harness, if one was asked for: keep both sides at
         // strength and send every replacement at the enemy. Gated on the
         // harness being enabled rather than on the count, since a count of
@@ -794,7 +823,11 @@ namespace rwe
         // itself a computer, so its commands arrive through the drain below
         // like everybody else's. Pushing here as well would put two entries a
         // tick into one player's queue and take it out of step with the rest.
-        if (simulation.getPlayer(localPlayerId).type == GamePlayerType::Human)
+        //
+        // And in a game with no peers at all the human is fed a tick at a time
+        // in tryTickGame instead -- see localHumanCommandsAreFedPerTick -- so
+        // pushing here as well would put two entries a tick into their queue.
+        if (simulation.getPlayer(localPlayerId).type == GamePlayerType::Human && !localHumanCommandsAreFedPerTick())
         {
             // If we have too many commands buffered,
             // defer submitting commands this frame
@@ -959,6 +992,11 @@ namespace rwe
         renderDebugWindow();
         recordNetworkHistory();
         renderNetworkOverlay();
+
+        if (scenarioDriver)
+        {
+            scenarioDriver->afterTick(scenarioTick);
+        }
     }
 
     void GameScene::setCameraPosition(const Vector3f& newPosition)

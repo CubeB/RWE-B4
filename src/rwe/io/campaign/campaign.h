@@ -1,11 +1,14 @@
 #pragma once
 
+#include <optional>
 #include <rwe/io/tdf/TdfBlock.h>
 #include <string>
 #include <vector>
 
 namespace rwe
 {
+    class AbstractVirtualFileSystem;
+
     /** One [MISSIONn] of a campaign file. */
     struct CampaignMission
     {
@@ -39,4 +42,17 @@ namespace rwe
      * first is RWE's own.
      */
     std::string campaignMissionName(const CampaignMission& mission, const std::string& language);
+
+    /** `camps/<name>.tdf`, or nothing if it is missing or will not parse. */
+    std::optional<Campaign> readCampaign(AbstractVirtualFileSystem& vfs, const std::string& name);
+
+    /**
+     * A mission as the list between missions shows it (0x41EAA0): a thumb for
+     * how it went, then a space and the name. `status` is the mission's
+     * letter in the campaign's run, W won, L lost, U not yet played, and the
+     * thumbs are the last three glyphs of the list's font: 0xFE up for a win,
+     * 0xFF down for a loss, 0xFD an empty box. They are written as the code
+     * points they are, the text renderer reading UTF-8.
+     */
+    std::string campaignMissionListEntry(char status, const std::string& name);
 }

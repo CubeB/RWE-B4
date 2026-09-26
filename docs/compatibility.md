@@ -147,7 +147,7 @@ the pixels. The cursor is left out.
 **A unit parked on a factory's spawn point is told to move.** Every factory
 script sets `BUGGER_OFF`, the "get off the pad" command, and the original's
 engine ignores it: the flag has no reader but the script's own `get`, and a
-blocked build site just waits ten tries and gives the job up. A friendly hull
+factory with a blocked pad just waits until it clears. A friendly hull
 left on a shipyard's pad therefore stops the yard producing for good. RWE
 sweeps the spawn point whenever the site is found blocked and hands the unit
 standing there a move-off order, so the yard clears and carries on. This is a
@@ -327,6 +327,14 @@ original in every case.
   the window, where the original scrolls the strips across it and prints the
   wind and gravity over them. The `*` the briefings put round a heading is
   left out, its effect not decoded; the colour codes are drawn. §115.
+- **Back from a briefing reached between missions goes to the single-player
+  menu**, where the original goes back to the chart it came from: the game,
+  and its chart with it, is gone by the time the briefing is up. ENDMSN's Load
+  Game and Save Game do nothing yet. §115.
+- **A campaign's ending films play in a window too.** The original plays
+  `3.zrb` or `4.zrb` and then `5.zrb` only full-screen and goes straight to the
+  main menu otherwise; RWE plays every film in either, the intro included.
+  §115.
 - **A transport from unpatched data still loads.** Without the v3.1 patch data
   the Hulk's file gives its capacity under the old 1.0 key, which the patched
   game ignores, leaving a ship that cannot load. RWE reads the old key, and

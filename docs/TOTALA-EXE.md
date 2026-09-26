@@ -66,7 +66,7 @@ conversion, string reads at an address, pointer-table dumps) are in `tools/exe/`
 
 ## Index
 
-The 113 findings, numbered to 115: §83 and §84 do not exist, so the count is
+The 114 findings, numbered to 116: §83 and §84 do not exist, so the count is
 two short of the last number. The two to read before changing anything are
 **§88**, where RWE deliberately differs from the original on purpose, and
 **§91**, what is decoded but not ported; both are in this file, below.
@@ -187,6 +187,7 @@ Everything else lives in a subject file. **The numbers never move**, so a
 113. [Mission rules at runtime: what each tests, how often, and how they combine](TOTALA-EXE-DATA.md#113-mission-rules-at-runtime-what-each-tests-how-often-and-how-they-combine)
 114. [A mission unit's scripted orders at runtime](TOTALA-EXE-DATA.md#114-a-mission-units-scripted-orders-at-runtime)
 115. [The campaign's screens, progression and ending movies](TOTALA-EXE-DATA.md#115-the-campaigns-screens-progression-and-ending-movies)
+116. [What a round aims at on a unit, and why the water comes after it](TOTALA-EXE-WEAPONS.md#116-what-a-round-aims-at-on-a-unit-and-why-the-water-comes-after-it)
 
 ## 88. Where RWE deliberately differs
 
@@ -503,9 +504,10 @@ quirks of the original that RWE reproduces although they look like defects.
 - **A unit blocking a build site is told to move, and the site is swept again
   on every failed attempt.** The original's `BUGGER_OFF` is write-only -- the
   only reader of `unit+0x10f` bit 3 is the COB `get` (§112) -- and its site
-  check `0x47DB70` only waits: ten tries thirty ticks apart, then the queue
-  entry is given up. A friendly unit left on a spawn point therefore stalls the
-  yard for good, which is what a Coast To Coast play-test saw as "Core shipyard
+  check `0x47DB70` only waits -- a constructor ten tries thirty ticks apart
+  before giving the order up, a factory every fifteen ticks for as long as it
+  takes. A friendly unit left on a spawn point therefore stalls the yard for
+  good, which is what a Coast To Coast play-test saw as "Core shipyard
   stopped building as it got blocked by a scout ship". RWE sweeps the *site* --
   the new unit's footprint at the spawn point, not the building's own cells,
   where a hull at the pad is outside the building and would never hear about it
@@ -590,6 +592,10 @@ quirks of the original that RWE reproduces although they look like defects.
 
 ## 91. Still unknown or unported
 
+- **`unitsonly` and `groundbounce`** (§116). `unitsonly` is not parsed, so
+  no RWE round skips the ground and sea tests. RWE's `groundbounce` zeroes
+  `vy` and restores the previous height, where the original sets `vy` to
+  `-(vy >> 2)` and leaves the position alone.
 - **The campaign's win and lose rules** (§113) are decoded and not ported:
   all eighteen `[GlobalHeader]` conditions, checked once a second, all
   victory rules in order and any defeat rule, victory first, then a
@@ -599,10 +605,12 @@ quirks of the original that RWE reproduces although they look like defects.
   InitialMission list's WAIT, WAITFORATTACK, ATTACKUTYPE, guard, transport
   start and MAKESELECTABLE, and the selectable bit that holds a scripted
   unit out of the player's hands and out of the computer AI's.
-- **The campaign's screens and progression** (§115) are decoded and not
-  ported: NEWGAME, the MSNBRIEF briefing, the glamour picture, ENDMSN's
-  mission list with its won/lost/untried marks, progress in save games only,
-  and `3.zrb`/`4.zrb` then `5.zrb` after winning a campaign's last mission.
+- **Saving and loading between campaign missions** (§115) are decoded and not
+  ported: ENDMSN's Load Game and Save Game, and the header-only save with
+  `BetweenMissions=1` that opens on the next mission's briefing. The rest of
+  §115 is: NEWGAME, the briefing, the glamour picture, ENDMSN's mission list
+  with its won/lost/untried marks, `Thumbs` in the save header, and
+  `3.zrb`/`4.zrb` then `5.zrb` after a campaign's last mission is won.
 - TA's **Permanent** LOS mode has not been looked at.
 - **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not
   implemented; RWE always uses True.

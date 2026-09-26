@@ -389,9 +389,68 @@ namespace rwe
         }
         REQUIRE(produced);
 
-        for (const auto& e : eventsOf<UnitCannotComplyEvent>(sim))
+        REQUIRE(countEvents<UnitCannotComplyEvent>(sim) == 0);
+    }
+
+    TEST_CASE("a factory waits on a blocked pad silently, for as long as it takes", "[unitnotifications]")
+    {
+        // The yard's BuildingBuild (0x402640) runs the same site check as a
+        // constructor, 0x47DB70 at 0x402899, but a refusal only sets a
+        // fifteen-tick timer and returns: no caption, no count, no giving up.
+        // The constructors' ladder is MobileBuild's and VTOL_MobileBuild's.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto player = addWellStockedPlayer(sim, "CORE");
+        registerTestModel(sim);
+
+        sim.unitDefinitions["FACT"] = makeFactoryDef();
+        sim.unitScriptDefinitions["FACT"] = *script;
+        sim.unitDefinitions["TANK"] = makeMobileDef(100u);
+        sim.unitScriptDefinitions["TANK"] = *script;
+
+        // Immobile, so the sweep cannot move it: only its death clears the pad.
+        auto blockerDef = makeFactoryDef();
+        blockerDef.builder = false;
+        blockerDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
+        blockerDef.yardMap = Grid<YardMapCell>(2, 2, YardMapCell::Ground);
+        sim.unitDefinitions["BLOCKER"] = blockerDef;
+        sim.unitScriptDefinitions["BLOCKER"] = *script;
+
+        auto pad = SimVector(600_ss, 0_ss, 600_ss);
+        auto factoryId = addUnitOfType(sim, "FACT", player, pad, script);
+        sim.getUnitState(factoryId).inBuildStance = true;
+        sim.getUnitState(factoryId).buildQueue.emplace_back("TANK", 1);
+
+        sim.tick();
+        auto blockerId = sim.trySpawnUnit("BLOCKER", player, pad, std::nullopt).value();
+        sim.getUnitState(blockerId).buildTimeCompleted = blockerDef.buildTime;
+
+        auto productExists = [&]() {
+            for (const auto& entry : sim.units)
+            {
+                if (entry.second.unitType == "TANK")
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        // Well past the constructors' ten tries of thirty ticks.
+        tick(sim, 600);
+        REQUIRE_FALSE(productExists());
+        REQUIRE(countEvents<UnitCannotComplyEvent>(sim) == 0);
+        REQUIRE(sim.getUnitState(factoryId).buildQueue.size() == 1);
+
+        sim.killUnit(blockerId);
+
+        bool produced = false;
+        for (int i = 0; i < 60 && !produced; ++i)
         {
-            REQUIRE(e.message != "Target area was blocked");
+            sim.tick();
+            produced = productExists();
         }
+        REQUIRE(produced);
+        REQUIRE(countEvents<UnitCannotComplyEvent>(sim) == 0);
     }
 }

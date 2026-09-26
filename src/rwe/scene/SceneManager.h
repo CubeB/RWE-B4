@@ -74,6 +74,13 @@ namespace rwe
         void setHeadless(bool value) { headless = value; }
 
         /**
+         * Whether this run advances exactly one tick per loop iteration. The
+         * scenario driver refuses to run otherwise: a tick-keyed step is only
+         * meaningful when one frame means one tick.
+         */
+        bool isHeadless() const { return headless; }
+
+        /**
          * Switches the live window between windowed, borderless and
          * fullscreen, so the options screen's choice takes effect where the
          * player made it rather than at the next launch.

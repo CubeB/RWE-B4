@@ -167,6 +167,15 @@ namespace rwe
         std::vector<EndpointInfo> endpoints;
 
         /**
+         * Whether anybody is on the other end of this game. Fixed when the
+         * service is built: a game that began with nobody else never gains a
+         * peer, and one that began with peers keeps the lockstep buffer even
+         * if they are later dropped, because the local player's orders still
+         * have to be held for the tick they were agreed at.
+         */
+        const bool remotePeersPresent;
+
+        /**
          * The address of every peer that has been forgotten, so that one which
          * comes back can be listened to again without being told where it is.
          *
@@ -330,6 +339,15 @@ namespace rwe
         SceneTime estimateAvergeSceneTime(SceneTime localSceneTime);
 
         float getMaxAverageRttMillis();
+
+        /**
+         * Whether there is a peer to wait for at all.
+         *
+         * A game with nobody else in it has no lockstep round trip to cover,
+         * so the local player's orders do not need the buffer that pays for
+         * one. See GameScene::localHumanCommandsAreFedPerTick.
+         */
+        bool hasRemotePeers() const;
 
         /**
          * Every peer, how long it has been quiet, and how far along it said it

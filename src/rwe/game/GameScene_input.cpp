@@ -498,6 +498,22 @@ namespace rwe
         // and one on Main Menu leaves.
         if (gameOver)
         {
+            if (endGamePhase == EndGamePhase::Glamour && event.button == MouseButtonEvent::MouseButton::Left)
+            {
+                glamourClicked();
+                return;
+            }
+
+            if (endGameChartVisible() && endGameCampaignPanel && event.button == MouseButtonEvent::MouseButton::Left)
+            {
+                // ENDMSN's controls find their own gadget; a click anywhere
+                // also fills the bars, as on the plain chart.
+                auto p = endGameScreenPoint(event.x, event.y);
+                endGameCampaignPanel->mouseDown(MouseButtonEvent(p.x, p.y, event.button));
+                finishEndGameBars();
+                return;
+            }
+
             if (endGameChartVisible() && event.button == MouseButtonEvent::MouseButton::Left)
             {
                 // The button is laid out in the chart's own 640x480 space, so
@@ -723,10 +739,10 @@ namespace rwe
                             }
                             else
                             {
-                                // A fresh patrol loops between the clicked point
-                                // and wherever the unit is standing now.
+                                // A move the unit is walking becomes the route's
+                                // first waypoint, otherwise its own position
+                                // does. See issueOrder.
                                 localPlayerIssueUnitOrder(selectedUnit, PatrolOrder(*coord));
-                                localPlayerEnqueueUnitOrder(selectedUnit, PatrolOrder(getUnit(selectedUnit).position));
                             }
                         }
                         if (!isShiftDown())
@@ -935,6 +951,13 @@ namespace rwe
     {
         if (gameOver)
         {
+            if (endGameChartVisible() && endGameCampaignPanel)
+            {
+                auto p = endGameScreenPoint(event.x, event.y);
+                endGameCampaignPanel->mouseUp(MouseButtonEvent(p.x, p.y, event.button));
+                return;
+            }
+
             if (endGameChartVisible() && endGameMainMenuButton && endGameChartButtonArmed)
             {
                 endGameChartButtonArmed = false;
@@ -1122,7 +1145,12 @@ namespace rwe
     {
         if (gameOver)
         {
-            if (endGameChartVisible() && endGameMainMenuButton)
+            if (endGameChartVisible() && endGameCampaignPanel)
+            {
+                auto p = endGameScreenPoint(event.x, event.y);
+                endGameCampaignPanel->mouseMove(MouseMoveEvent(p.x, p.y));
+            }
+            else if (endGameChartVisible() && endGameMainMenuButton)
             {
                 auto p = endGameScreenPoint(event.x, event.y);
                 endGameMainMenuButton->mouseMove(MouseMoveEvent(p.x, p.y));
@@ -1158,6 +1186,12 @@ namespace rwe
 
     void GameScene::onMouseWheel(MouseWheelEvent event)
     {
+        if (endGameChartVisible() && endGameCampaignPanel)
+        {
+            endGameCampaignPanel->mouseWheel(event);
+            return;
+        }
+
         if (isGameMenuOpen())
         {
             for (auto& panel : gameMenuPanels)

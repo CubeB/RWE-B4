@@ -232,4 +232,29 @@ namespace rwe
         REQUIRE(builder.orders.size() == 1);
         REQUIRE(std::holds_alternative<PatrolOrder>(builder.orders.front()));
     }
+
+    TEST_CASE("a move followed by a patrol becomes two patrol waypoints", "[patrol]")
+    {
+        // The rule every route-composition path shares: a move immediately
+        // followed by a patrol is a route, the move's destination its first
+        // waypoint. A factory hands a whole queue to the unit it finishes,
+        // which is why replaceOrders has to apply it too.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto player = addPlayer(sim, "patroller");
+        sim.unitDefinitions["tank"] = makeTankDef();
+        registerModel(sim, "tankmodel");
+
+        auto a = SimVector(100_ss, 0_ss, 100_ss);
+        auto b = SimVector(400_ss, 0_ss, 400_ss);
+        auto tankId = addFiringUnitOfType(sim, "tank", player, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        std::deque<UnitOrder> route{MoveOrder(a), PatrolOrder(b)};
+        sim.getUnitState(tankId).replaceOrders(route);
+
+        const auto& orders = sim.getUnitState(tankId).orders;
+        REQUIRE(orders.size() == 2);
+        REQUIRE((std::get<PatrolOrder>(orders[0]).destination == a));
+        REQUIRE((std::get<PatrolOrder>(orders[1]).destination == b));
+    }
 }

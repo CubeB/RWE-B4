@@ -171,7 +171,7 @@ namespace rwe
         SECTION("is the depth a peer with no peers would use, and does not move")
         {
             REQUIRE(aiCommandBufferDepth() == commandBufferTargetForRttMillis(0.0f));
-            REQUIRE(aiCommandBufferDepth() == 14);
+            REQUIRE(aiCommandBufferDepth() == 7);
         }
 
         SECTION("is not the humans' depth, which follows the round trip time")
@@ -180,8 +180,8 @@ namespace rwe
             // network and have to be waited for; an AI's are issued by every
             // peer's own copy of the AI and are not. Tying the AI's delay to a
             // measured latency made it a different number on each peer, and
-            // the depth decides the game -- the same seed at 14 and at 18
-            // diverges within two seconds.
+            // the depth decides the game -- the same seed at two different
+            // depths diverges within two seconds.
             REQUIRE(commandBufferTargetForRttMillis(60.0f) != aiCommandBufferDepth());
         }
     }
