@@ -61,6 +61,16 @@ namespace rwe
         return name;
     }
 
+    std::string campaignResourcePath(const std::string& directory, const std::string& name, const std::string& extension)
+    {
+        auto stem = name;
+        if (auto dot = stem.rfind('.'); dot != std::string::npos)
+        {
+            stem.resize(dot);
+        }
+        return directory + "/" + stem + extension;
+    }
+
     std::optional<Campaign> readCampaign(AbstractVirtualFileSystem& vfs, const std::string& name)
     {
         auto raw = vfs.readFile("camps/" + name + ".tdf");

@@ -167,14 +167,18 @@ namespace rwe
     {
         // Only for a picture that is there: the original falls back to a
         // literal "glamour\Arm01.PCX" that has no bitmaps directory in front
-        // of it (0x41DB7E), and every shipped glamour names a file.
+        // of it (0x41DB7E). Three shipped missions name a picture that is not
+        // in the data (EXP1AC06, EXP1AC11 and EXP1CC11), and they go straight
+        // to the chart. The name loses any extension it was written with, as
+        // the original's resolver drops it (#384).
         const auto& campaign = *gameParameters.campaign;
-        if (campaign.glamour.empty() || !sceneContext.vfs->readFile("bitmaps/glamour/" + campaign.glamour + ".pcx"))
+        auto picture = campaignResourcePath("glamour", campaign.glamour, "");
+        if (campaign.glamour.empty() || !sceneContext.vfs->readFile("bitmaps/" + picture + ".pcx"))
         {
             return false;
         }
         endGameGlamour = sceneContext.textureService->getBitmapRegion(
-            "glamour/" + campaign.glamour,
+            picture,
             0,
             0,
             static_cast<int>(EndGameScreenWidth),
@@ -182,7 +186,7 @@ namespace rwe
 
         if (!campaign.glamourSound.empty())
         {
-            if (auto sound = sceneContext.audioService->loadSoundFromPath("camps/briefs/" + campaign.glamourSound + ".wav"))
+            if (auto sound = sceneContext.audioService->loadSoundFromPath(campaignResourcePath("camps/briefs", campaign.glamourSound, ".wav")))
             {
                 endGameGlamourChannel = sceneContext.audioService->playSound(*sound);
             }
