@@ -307,7 +307,7 @@ namespace rwe
 
         std::shared_ptr<SpriteSeries> guiFont;
 
-        /** COMIX.FNT, the original's world-text font; the speech console prints in it. */
+        /** hattfont12, drawn untinted: the font the original's message queue actually prints in. */
         std::shared_ptr<SpriteSeries> speechFont;
 
         PlayerId localPlayerId;
@@ -765,7 +765,8 @@ namespace rwe
         struct ConsoleMessage
         {
             std::string text;
-            Color color;
+            /** Nothing draws the glyphs in their own colours, as the original does. */
+            std::optional<Color> color;
             SceneTime expires;
         };
         std::deque<ConsoleMessage> consoleMessages;
@@ -1184,7 +1185,7 @@ namespace rwe
         /** Speaks the unit's cloak and uncloak lines as its cloak comes and goes. */
         void updateCloakNotifications();
 
-        void printConsole(const std::string& text, const Color& color = Color(255, 255, 255));
+        void printConsole(const std::string& text, const std::optional<Color>& color = std::nullopt);
 
         void updateSelfDestructNotifications();
 
