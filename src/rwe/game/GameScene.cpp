@@ -10,6 +10,7 @@
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuScene.h>
 #include <rwe/game/SaveFile.h>
+#include <rwe/game/ScenarioDriver.h>
 #include <rwe/io/gui/gui.h>
 #include <rwe/game/save_util.h>
 #include <rwe/ui/UiTextBox.h>
@@ -274,6 +275,11 @@ namespace rwe
 
         // A loaded mission has had its sounds already.
         missionCelebrationsHeard = missionCelebrations();
+
+        if (this->gameParameters.scenarioName)
+        {
+            scenarioDriver = std::make_unique<ScenarioDriver>(*this, *this->gameParameters.scenarioName);
+        }
     }
 
     GameScene::~GameScene()
@@ -473,6 +479,16 @@ namespace rwe
 
     void GameScene::update(int millisecondsElapsed)
     {
+        // The scenario harness, if one is driving. Keyed on the tick about to
+        // run and ahead of everything else, so input delivered at tick T is
+        // in the command set flushed for T below. afterTick at the foot of
+        // this function sees the tick and any panel rebuild it caused.
+        const auto scenarioTick = sceneTime.value;
+        if (scenarioDriver)
+        {
+            scenarioDriver->beforeTick(scenarioTick);
+        }
+
         // The battle harness, if one was asked for: keep both sides at
         // strength and send every replacement at the enemy. Gated on the
         // harness being enabled rather than on the count, since a count of
@@ -970,6 +986,11 @@ namespace rwe
 
         renderReplayWindow();
         renderDebugWindow();
+
+        if (scenarioDriver)
+        {
+            scenarioDriver->afterTick(scenarioTick);
+        }
     }
 
     void GameScene::setCameraPosition(const Vector3f& newPosition)
