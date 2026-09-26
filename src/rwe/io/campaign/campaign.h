@@ -50,6 +50,16 @@ namespace rwe
      */
     std::string campaignMissionMapName(const CampaignMission& mission);
 
+    /**
+     * Where a mission's named resource lives -- its brief, narration, glamour
+     * picture or glamour sound -- as the original's resolver 0x435430 makes
+     * it: `directory/name` cut at the name's last '.' (0x4BB0F0), then the
+     * extension. So `I09Brief.txt` and `I09Brief` both come to
+     * `camps/briefs/I09Brief.txt`; 105 of the shipped missions write the
+     * name with its extension.
+     */
+    std::string campaignResourcePath(const std::string& directory, const std::string& name, const std::string& extension);
+
     /** `camps/<name>.tdf`, or nothing if it is missing or will not parse. */
     std::optional<Campaign> readCampaign(AbstractVirtualFileSystem& vfs, const std::string& name);
 

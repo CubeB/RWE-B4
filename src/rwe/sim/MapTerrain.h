@@ -81,6 +81,16 @@ namespace rwe
 
         SimScalar getSeaLevel() const;
 
+        /**
+         * Whether the square under a point lies wholly under the sea: the
+         * highest of its four corners is below sea level. This, and not which
+         * surface a round struck, is what decides whether its detonation
+         * throws up spray or earth (0x499ECF, reading the high corner the map
+         * loader stores at 0x483329). Off the map is dry, and so is the last
+         * row and column of heightmap corners, which start no square.
+         */
+        bool isSquareUnderSea(SimScalar x, SimScalar z) const;
+
     private:
         bool isInHeightMapBounds(int x, int y) const;
     };

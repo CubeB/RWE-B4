@@ -2,11 +2,18 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <rwe/config.h>
+#include <rwe/game/ControlChannel.h>
+#include <nlohmann/json.hpp>
+#include <rwe/game/GameEndedReport.h>
 #include <rwe/io/campaign/campaign.h>
 #include <rwe/io/gui/gui.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/ui/UiListBox.h>
 #include <rwe/ui/UiStagedButton.h>
+#include <rwe/util.h>
+#include <rwe/util/SimpleLogger.h>
 
 namespace rwe
 {
@@ -122,6 +129,50 @@ namespace rwe
             static_cast<int>(((static_cast<float>(windowY) / scale) - layout.offsetY) / layout.scale));
     }
 
+    void GameScene::sendGameEnded(const std::string& outcome, std::optional<PlayerId> winner, std::optional<SceneTime> desyncTick)
+    {
+        if (gameEndedSent)
+        {
+            return;
+        }
+        if (!getControlChannel().enabled())
+        {
+            return;
+        }
+        gameEndedSent = true;
+
+        GameEndedReport report;
+        report.outcome = outcome;
+        report.winner = winner;
+        report.tick = sceneTime;
+        report.gameTimeSeconds = static_cast<unsigned int>(simulation.gameTime.value) / static_cast<unsigned int>(SimTicksPerSecond);
+        report.desyncTick = desyncTick;
+        report.engineBuild = ProjectNameVersion;
+
+        // The recording being written, which is the artifact a launcher wants;
+        // a replay being watched has nothing of its own to hand over.
+        if (replayWriter)
+        {
+            report.replayPath = replayWriter->path();
+        }
+
+        if (const char* hashLog = std::getenv("RWE_HASH_LOG"))
+        {
+            report.hashLogPath = std::filesystem::path(hashLog);
+        }
+
+        report.desyncDumpPaths = desyncDumpPaths;
+
+        if (const auto& loggerPath = getLogger().filePath(); !loggerPath.empty())
+        {
+            report.logPath = std::filesystem::path(loggerPath);
+        }
+
+        auto json = gameEndedJson(report);
+        LOG_INFO << "Game ended: " << json.dump();
+        getControlChannel().sendGameEnded(json);
+    }
+
     void GameScene::beginEndGameSequence()
     {
         endGamePhase = EndGamePhase::Banner;
@@ -167,14 +218,18 @@ namespace rwe
     {
         // Only for a picture that is there: the original falls back to a
         // literal "glamour\Arm01.PCX" that has no bitmaps directory in front
-        // of it (0x41DB7E), and every shipped glamour names a file.
+        // of it (0x41DB7E). Three shipped missions name a picture that is not
+        // in the data (EXP1AC06, EXP1AC11 and EXP1CC11), and they go straight
+        // to the chart. The name loses any extension it was written with, as
+        // the original's resolver drops it (#384).
         const auto& campaign = *gameParameters.campaign;
-        if (campaign.glamour.empty() || !sceneContext.vfs->readFile("bitmaps/glamour/" + campaign.glamour + ".pcx"))
+        auto picture = campaignResourcePath("glamour", campaign.glamour, "");
+        if (campaign.glamour.empty() || !sceneContext.vfs->readFile("bitmaps/" + picture + ".pcx"))
         {
             return false;
         }
         endGameGlamour = sceneContext.textureService->getBitmapRegion(
-            "glamour/" + campaign.glamour,
+            picture,
             0,
             0,
             static_cast<int>(EndGameScreenWidth),
@@ -182,7 +237,7 @@ namespace rwe
 
         if (!campaign.glamourSound.empty())
         {
-            if (auto sound = sceneContext.audioService->loadSoundFromPath("camps/briefs/" + campaign.glamourSound + ".wav"))
+            if (auto sound = sceneContext.audioService->loadSoundFromPath(campaignResourcePath("camps/briefs", campaign.glamourSound, ".wav")))
             {
                 endGameGlamourChannel = sceneContext.audioService->playSound(*sound);
             }

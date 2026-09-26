@@ -32,6 +32,22 @@ namespace rwe
             p.second.pop_front();
         }
 
+        // The sets are applied in the order they come out, so every peer has
+        // to put them in the same one, and a hash table's is its own: the
+        // standard leaves it unspecified, and it differs between standard
+        // libraries. libstdc++ iterates these buffers newest first, so the
+        // MinGW and Linux builds have always applied the highest player's
+        // commands first, while MSVC's, which iterates in insertion order,
+        // applied the lowest first. Two players' commands only disagree about
+        // order when they touch the same thing on the same tick -- one site,
+        // one capture, one draw from the simulation's generator -- which is
+        // why it went unseen (issue #349).
+        //
+        // Highest first, then, because that is what every recording made on
+        // the builds this project is developed and tested on already did, and
+        // those recordings go on playing back exactly as they were made.
+        std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return b.first < a.first; });
+
         ++poppedRounds;
         return out;
     }
