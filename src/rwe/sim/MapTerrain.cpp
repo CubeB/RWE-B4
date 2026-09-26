@@ -117,29 +117,20 @@ namespace rwe
 
     bool MapTerrain::isSquareUnderSea(SimScalar x, SimScalar z) const
     {
+        // A square is the cell between four heightmap corners, which is what
+        // isInHeightMapBounds admits, so the last row and column of corners
+        // start no square and read as off the map, as they do to
+        // tryGetHeightAt.
         auto cell = worldToHeightmapCoordinate(SimVector(x, 0_ss, z));
-        if (cell.x < 0 || cell.y < 0 || cell.x >= heights.getWidth() || cell.y >= heights.getHeight())
+        if (!isInHeightMapBounds(cell.x, cell.y))
         {
             return false;
         }
 
-        // The square's own corner and those to its right, below and
-        // diagonally below, where the map has them (0x4832D8-0x483324).
-        auto high = heights.get(cell.x, cell.y);
-        auto hasRight = cell.x + 1 < heights.getWidth();
-        auto hasBelow = cell.y + 1 < heights.getHeight();
-        if (hasRight)
-        {
-            high = std::max(high, heights.get(cell.x + 1, cell.y));
-        }
-        if (hasBelow)
-        {
-            high = std::max(high, heights.get(cell.x, cell.y + 1));
-        }
-        if (hasRight && hasBelow)
-        {
-            high = std::max(high, heights.get(cell.x + 1, cell.y + 1));
-        }
+        // The highest of the square's four corners (0x4832D8-0x483329).
+        auto high = std::max(
+            std::max(heights.get(cell.x, cell.y), heights.get(cell.x + 1, cell.y)),
+            std::max(heights.get(cell.x, cell.y + 1), heights.get(cell.x + 1, cell.y + 1)));
 
         return SimScalar(static_cast<float>(high)) < seaLevel;
     }

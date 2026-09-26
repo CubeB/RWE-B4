@@ -292,4 +292,19 @@ namespace rwe
         CHECK(wetUnderSea);
         CHECK(wetDeath == ProjectileDiedEvent::DeathType::WaterImpact);
     }
+
+    TEST_CASE("the last row and column of heightmap corners start no square", "[weapon][water]")
+    {
+        // All under twenty units of water. The squares are the cells between
+        // four corners, as they are to tryGetHeightAt, so a point past the
+        // last full cell is off the map and dry.
+        Grid<unsigned char> heights(16, 16, static_cast<unsigned char>(0));
+        MapTerrain terrain(std::move(heights), SeaLevel);
+
+        auto lastCell = terrain.heightmapIndexToWorldCorner(14, 14);
+        CHECK(terrain.isSquareUnderSea(lastCell.x + 2_ss, lastCell.z + 2_ss));
+
+        auto lastCorner = terrain.heightmapIndexToWorldCorner(15, 15);
+        CHECK_FALSE(terrain.isSquareUnderSea(lastCorner.x + 2_ss, lastCorner.z + 2_ss));
+    }
 }
