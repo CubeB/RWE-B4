@@ -560,6 +560,10 @@ namespace rwe
         receiveChatMessages();
         updateChatTest();
 
+        // Before the accumulator below, so the speed this frame runs at is
+        // the one every peer's machine can sustain (#356).
+        updateEffectiveSpeed();
+
         updateMusic();
 
         // Pause halts simulation tick dispatch by not advancing the
@@ -588,7 +592,7 @@ namespace rwe
         }
         else if (!paused)
         {
-            millisecondsBuffer += (millisecondsElapsed * gameSpeed.perMille()) / 1000;
+            millisecondsBuffer += (millisecondsElapsed * effectiveSpeedPermille) / 1000;
         }
 
         // Ease the live zoom toward the setting rather than jumping, and do it
@@ -974,7 +978,7 @@ namespace rwe
         const int maxTicksPerFrame = replaySeekTarget
             ? 2000
             : (replayPlayback ? 10 * std::max(replaySpeed, 1) : 10);
-        FrameScheduler scheduler(static_cast<unsigned int>(millisecondsBuffer), averageSceneTime, maxTicksPerFrame);
+        FrameScheduler scheduler(static_cast<unsigned int>(millisecondsBuffer), averageSceneTime, sceneTime, maxTicksPerFrame);
         // Fast playback is bounded by the clock as well as by the count. At
         // 64x a frame asks for thirty-odd ticks, and if those take longer
         // than the frame the next one asks for more, and the one after for
@@ -992,37 +996,46 @@ namespace rwe
                 break;
             }
 
-            auto dispatch = scheduler.next(sceneTime);
-            if (!dispatch)
-            {
-                break;
-            }
-            if (*dispatch == FrameDispatch::Skip)
-            {
-                continue;
-            }
-
+            scheduler.next();
+            auto tickStarted = std::chrono::steady_clock::now();
             tryTickGame();
 
-            // simulate an extra frame to catch up every so often
-            if (scheduler.extraTick(sceneTime))
+            if (!lastTickAttemptBlocked)
             {
-                tryTickGame();
+                tickCostThisFrameMillis += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tickStarted).count();
+                ++ticksTimedThisFrame;
             }
         }
         auto frameOutcome = scheduler.finish();
         millisecondsBuffer = static_cast<int>(frameOutcome.millisecondsLeft);
         ticksLostToCap += frameOutcome.ticksLostToCap;
-        gateSkips += frameOutcome.gateSkips;
+
+        // What this machine can sustain, for the peers that will cap the game
+        // speed to it and for its own governor next frame. The moving average
+        // keeps one busy frame from being read as a slow machine.
+        if (ticksTimedThisFrame > 0)
+        {
+            auto tickCostSample = static_cast<float>(tickCostThisFrameMillis / static_cast<double>(ticksTimedThisFrame));
+            averageTickCostMillis = ema(tickCostSample, averageTickCostMillis, 0.1f);
+        }
+        ownSustainableSpeedPermille = estimateSustainableSpeedPermille(
+            static_cast<unsigned int>(gameSpeed.perMille()),
+            frameOutcome.ticksDispatched,
+            frameOutcome.ticksLostToCap,
+            averageTickCostMillis);
+        tickCostThisFrameMillis = 0.0;
+        ticksTimedThisFrame = 0;
 
         // Once a frame, so a peer's projection of this one knows the speed it
-        // is advancing at and whether it has stopped. A replay has no peers.
+        // is advancing at, whether it has stopped, and what its machine can
+        // sustain. A replay has no peers.
         if (!replayPlayback)
         {
             gameNetworkService->submitRunState(
-                static_cast<unsigned int>(gameSpeed.perMille()),
+                effectiveSpeedPermille,
                 paused,
-                lastTickAttemptBlocked);
+                lastTickAttemptBlocked,
+                ownSustainableSpeedPermille);
         }
 
         if (replaySeekTarget && sceneTime.value >= *replaySeekTarget)

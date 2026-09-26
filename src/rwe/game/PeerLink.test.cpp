@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <network.pb.h>
 #include <rwe/game/PeerLinkTestUtil.h>
+#include <rwe/network_util.h>
 #include <rwe/proto/serialization.h>
 
 namespace rwe
@@ -205,12 +206,13 @@ namespace rwe
     TEST_CASE("PeerLink carries the sender's run state")
     {
         FakePeerLink link;
-        link.link(0).submitRunState(500, true, false);
+        link.link(0).submitRunState(500, true, false, 420);
         link.run(std::chrono::seconds(1));
 
         REQUIRE(link.link(1).remoteSpeedPermille() == 500);
         REQUIRE(link.link(1).remotePaused());
         REQUIRE_FALSE(link.link(1).remoteStalled());
+        REQUIRE(link.link(1).remoteSustainableSpeedPermille() == 420);
     }
 
     TEST_CASE("PeerLink treats an old peer with no run-state fields as 1x and moving")
@@ -231,5 +233,46 @@ namespace rwe
         REQUIRE(link.link(1).remoteSpeedPermille() == 1000);
         REQUIRE_FALSE(link.link(1).remotePaused());
         REQUIRE_FALSE(link.link(1).remoteStalled());
+        REQUIRE(link.link(1).remoteSustainableSpeedPermille() == 1000);
+    }
+
+    TEST_CASE("The effective speed converges to what the slowest peer can sustain")
+    {
+        FakePeerLink link;
+
+        const unsigned int chosen = 1000;
+        auto fastCapacity = estimateSustainableSpeedPermille(chosen, 1, 0, 5.0f);
+        auto slowCapacity = estimateSustainableSpeedPermille(chosen, 1, 0, 100.0f);
+        REQUIRE(fastCapacity == chosen);
+        REQUIRE(slowCapacity == 330);
+
+        SpeedGovernor fastGovernor;
+        SpeedGovernor slowGovernor;
+
+        auto update = [&](SpeedGovernor& governor, PlayerId ownId, unsigned int own, PlayerId peerId, unsigned int peer) {
+            return governor.update(
+                link.now(),
+                chosen,
+                std::vector<PeerCapacity>{{ownId, own}, {peerId, peer}});
+        };
+
+        unsigned int fastEffective = chosen;
+        unsigned int slowEffective = chosen;
+        for (int frame = 0; frame < 40; ++frame)
+        {
+            link.link(0).submitRunState(fastEffective, false, false, fastCapacity);
+            link.link(1).submitRunState(slowEffective, false, false, slowCapacity);
+            link.run(std::chrono::milliseconds(100));
+
+            fastEffective = update(fastGovernor, PlayerId(0), fastCapacity, PlayerId(1), link.link(0).remoteSustainableSpeedPermille());
+            slowEffective = update(slowGovernor, PlayerId(1), slowCapacity, PlayerId(0), link.link(1).remoteSustainableSpeedPermille());
+        }
+
+        // Both peers settled on the slow machine's capacity and stayed there,
+        // and each names the machine holding it down.
+        REQUIRE(fastEffective == slowCapacity);
+        REQUIRE(slowEffective == slowCapacity);
+        REQUIRE(fastGovernor.limitingPeers() == std::vector<PlayerId>{PlayerId(1)});
+        REQUIRE(slowGovernor.limitingPeers() == std::vector<PlayerId>{PlayerId(1)});
     }
 }

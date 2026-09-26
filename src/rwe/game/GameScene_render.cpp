@@ -631,6 +631,13 @@ namespace rwe
                 speedText += (offset > 0 ? "+" : "") + std::to_string(offset);
             }
 
+            // The speed actually being run, when a peer's machine has capped
+            // it below what the player chose (#356).
+            if (effectiveSpeedPermille < static_cast<unsigned int>(gameSpeed.perMille()))
+            {
+                speedText += " (" + std::to_string(effectiveSpeedPermille / 10) + "%)";
+            }
+
             // Three left-aligned columns, measured off a screenshot of the
             // original rather than decoded.
             auto textY = y + std::floor(barHeight / 2.0f) + 5.0f;

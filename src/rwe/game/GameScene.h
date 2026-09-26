@@ -37,6 +37,7 @@
 #include <rwe/game/SceneTime.h>
 #include <rwe/game/UnitSoundType.h>
 #include <rwe/game/WeaponMediaInfo.h>
+#include <rwe/network_util.h>
 #include <rwe/grid/DiscreteRect.h>
 #include <rwe/io/featuretdf/FeatureTdf.h>
 #include <rwe/observable/BehaviorSubject.h>
@@ -1067,12 +1068,34 @@ namespace rwe
 
         int millisecondsBuffer{0};
 
-        /** Whole ticks the per-frame cap threw away, and drift-gate skips, over the session. */
+        /** Whole ticks the per-frame cap threw away, over the session. */
         unsigned int ticksLostToCap{0};
-        unsigned int gateSkips{0};
 
         GameSpeed gameSpeed;
         bool paused{false};
+
+        /**
+         * The speed everyone is actually running at: the chosen ceiling,
+         * capped by the slowest machine among the peers, recovered slowly.
+         * It scales the wall-clock accumulator and nothing else, so it never
+         * reaches the simulation, the replay or the hash.
+         */
+        unsigned int effectiveSpeedPermille{1000};
+
+        /** The machines holding the effective speed down, for the caption. */
+        std::vector<PlayerId> limitingPeers;
+
+        /** Last frame's estimate of this machine's own capacity, in per mille. */
+        unsigned int ownSustainableSpeedPermille{1000};
+
+        /** Wall-clock cost of the ticks run this frame, and how many. */
+        double tickCostThisFrameMillis{0.0};
+        unsigned int ticksTimedThisFrame{0};
+
+        /** A moving average of a tick's cost, for the capacity estimate. */
+        float averageTickCostMillis{0.0f};
+
+        SpeedGovernor speedGovernor;
 
         /**
          * The players this tick is waiting on, and since when.
@@ -1379,6 +1402,13 @@ namespace rwe
          * drop that lets everybody else carry on.
          */
         void updatePeerLiveness();
+
+        /**
+         * Recomputes the effective game speed from the chosen ceiling and
+         * every machine's reported capacity, this one's own included. Called
+         * once a frame, before the accumulator uses it (#356).
+         */
+        void updateEffectiveSpeed();
 
         /**
          * Whether the only command buffers still empty are computer players'.

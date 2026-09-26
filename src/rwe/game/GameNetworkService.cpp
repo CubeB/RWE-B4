@@ -82,12 +82,12 @@ namespace rwe
         });
     }
 
-    void GameNetworkService::submitRunState(unsigned int speedPermille, bool paused, bool stalled)
+    void GameNetworkService::submitRunState(unsigned int speedPermille, bool paused, bool stalled, unsigned int sustainableSpeedPermille)
     {
-        asio::post(ioContext, [this, speedPermille, paused, stalled]() {
+        asio::post(ioContext, [this, speedPermille, paused, stalled, sustainableSpeedPermille]() {
             for (auto& e : endpoints)
             {
-                e.link->submitRunState(speedPermille, paused, stalled);
+                e.link->submitRunState(speedPermille, paused, stalled, sustainableSpeedPermille);
             }
         });
     }
@@ -158,6 +158,21 @@ namespace rwe
         });
 
         return SceneTime(result.get_future().get());
+    }
+
+    std::vector<PeerCapacity> GameNetworkService::peerSustainableSpeeds()
+    {
+        std::promise<std::vector<PeerCapacity>> result;
+        asio::post(ioContext, [this, &result]() {
+            std::vector<PeerCapacity> speeds;
+            for (const auto& e : endpoints)
+            {
+                speeds.push_back(PeerCapacity{e.playerId, e.link->remoteSustainableSpeedPermille()});
+            }
+            result.set_value(std::move(speeds));
+        });
+
+        return result.get_future().get();
     }
 
     std::vector<GameNetworkService::PeerStatus> GameNetworkService::getPeerStatuses()
