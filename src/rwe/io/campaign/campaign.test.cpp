@@ -81,4 +81,14 @@ namespace rwe
         REQUIRE(campaignMissionListEntry('L', "2: Destroy It") == "\xC3\xBF 2: Destroy It");
         REQUIRE(campaignMissionListEntry('U', "3: Next") == "\xC3\xBD 3: Next");
     }
+
+    TEST_CASE("a mission's resource is found whether or not its name carries the extension", "[campaign]")
+    {
+        // 0x435430 cuts `dir\name` at its last '.' (0x4BB0F0) before adding
+        // the extension; 105 shipped missions write brief=I09Brief.txt.
+        CHECK(campaignResourcePath("camps/briefs", "I09Brief.txt", ".txt") == "camps/briefs/I09Brief.txt");
+        CHECK(campaignResourcePath("camps/briefs", "ArmCampaign3", ".txt") == "camps/briefs/ArmCampaign3.txt");
+        CHECK(campaignResourcePath("glamour", "tabtarm.pcx", "") == "glamour/tabtarm");
+        CHECK(campaignResourcePath("camps/briefs", "arm01", ".wav") == "camps/briefs/arm01.wav");
+    }
 }

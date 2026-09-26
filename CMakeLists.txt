@@ -326,6 +326,8 @@ set(SOURCE_FILES
     src/rwe/game/GameMediaDatabase.h
     src/rwe/game/GameNetworkService.cpp
     src/rwe/game/GameNetworkService.h
+    src/rwe/game/PeerLink.cpp
+    src/rwe/game/PeerLink.h
     src/rwe/game/LockstepStats.cpp
     src/rwe/game/LockstepStats.h
     src/rwe/game/NetworkHistory.cpp
@@ -345,6 +347,8 @@ set(SOURCE_FILES
     src/rwe/game/panel_slide.cpp
     src/rwe/game/ControlChannel.cpp
     src/rwe/game/ControlChannel.h
+    src/rwe/game/GameEndedReport.cpp
+    src/rwe/game/GameEndedReport.h
     src/rwe/game/GameScene_rejoin.cpp
     src/rwe/game/GameScene_replay.cpp
     src/rwe/game/GameScene_util.cpp
@@ -1006,15 +1010,19 @@ set(TEST_FILES
     src/rwe/game/PlayerCommand_hotkey.test.cpp
     src/rwe/game/PlayerCommand_patrol.test.cpp
     src/rwe/game/PlayerCommand_speed.test.cpp
+    src/rwe/game/PlayerCommandService.test.cpp
     src/rwe/game/EndGameStats.test.cpp
     src/rwe/game/dump_util.test.cpp
     src/rwe/game/DesyncReport.test.cpp
+    src/rwe/game/GameEndedReport.test.cpp
     src/rwe/game/aicommandfeed.test.cpp
+    src/rwe/game/commandorder.test.cpp
     src/rwe/game/playerdrop.test.cpp
     src/rwe/game/LockstepStats.test.cpp
     src/rwe/game/SimDiagnostics.test.cpp
     src/rwe/game/playerrejoin.test.cpp
     src/rwe/game/chat_util.test.cpp
+    src/rwe/game/PeerLink.test.cpp
     src/rwe/game/SimEventLog.test.cpp
     src/rwe/geometry/BoundingBox3f.test.cpp
     src/rwe/geometry/Circle2f.test.cpp

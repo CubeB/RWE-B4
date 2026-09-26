@@ -519,6 +519,23 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
       game, replayed headlessly, reproduces its hashes exactly across the drop.
       Not run against two live launchers and a server, which wants two
       machines.
+- [x] **The game's outcome reaches the launcher when it ends (#317).** A
+      `game-ended` event goes out on the control channel exactly once per game,
+      from whichever of the three endings is reached first: a decision, a
+      desync, or a player quitting. It carries the outcome (`decided` with a
+      `winner`, `draw`, or `abandoned`), the final `tick` and `gameTime` in
+      seconds, `engineBuild`, the first divergent `desyncTick` when a desync
+      ended it, and the artifact paths a launcher might collect: `replay`,
+      `hashLog` (the `RWE_HASH_LOG` file, if set), `desyncDumps` (every
+      `rwe-desync-tick*-player*.json` written this session) and `log`. A path
+      with nothing at it is sent as `null`; a decided game carries `winner`, a
+      draw carries an empty `winners`, and an abandoned one neither. The shape
+      is built by `gameEndedJson` (`game/GameEndedReport`), a pure function
+      with a Catch2 case per outcome, and read by the launcher's `parseRweEvent`
+      without being acted on yet (#318). It is a control-channel event and a
+      pure observer: nothing in it reaches the simulation, and a plain
+      `rwe --map` run with no `--bridge` sends nothing. The event shape is
+      listed with the others on `ControlChannel`.
 
 ## Phase 4 — Compatibility & content breadth (ongoing)
 

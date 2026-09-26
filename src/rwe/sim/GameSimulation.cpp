@@ -3070,9 +3070,14 @@ namespace rwe
             return ProjectileCollisionInfoOutOfBounds();
         }
 
-        // Anything standing in the square is tested before either surface
-        // (0x49B090), so a round that dips below sea level over a wading
-        // unit's footprint hits the unit rather than the water.
+        // Anything standing in the square is tested first, then the ground,
+        // then the sea (0x49B090, the ground at 0x49B36D and the sea at
+        // 0x49B3A1). So a round that dips below sea level over a wading
+        // unit's footprint hits the unit rather than the water, and one that
+        // passes both surfaces in a tick over a wet square has struck the
+        // ground -- which a `groundbounce` round bounces off (issue #350).
+        // Which art a detonation throws up is decided by the square, not by
+        // this order; see isSquareUnderSea.
         auto heightMapPos = simulation.terrain.worldToHeightmapCoordinate(projectile.position);
         auto cellValue = simulation.occupiedGrid.tryGet(heightMapPos);
         if (cellValue && projectileCollides(simulation, projectile, cellValue->get()))
@@ -3088,6 +3093,11 @@ namespace rwe
             }
         }
 
+        if (projectile.position.y <= *terrainHeight)
+        {
+            return ProjectileCollisionInfoTerrain();
+        }
+
         auto seaLevel = simulation.terrain.getSeaLevel();
 
         auto weaponIt = simulation.weaponDefinitions.find(projectile.weaponType);
@@ -3095,11 +3105,6 @@ namespace rwe
         if (!waterWeapon && !simulation.noSeaLevelTrigger && seaLevel > *terrainHeight && projectile.position.y <= seaLevel)
         {
             return ProjectileCollisionInfoSea();
-        }
-
-        if (projectile.position.y <= *terrainHeight)
-        {
-            return ProjectileCollisionInfoTerrain();
         }
 
         return std::nullopt;
@@ -3935,6 +3940,13 @@ namespace rwe
             auto collisionInfo = checkProjectileCollision(*this, projectile);
             if (collisionInfo)
             {
+                // Spray or earth by the square the round went off in, whatever
+                // it struck (0x499ECF): a hit on a wading unit in a wet square
+                // splashes, and a round into the shallows of a square with a
+                // dry corner throws up earth.
+                auto inWater = terrain.isSquareUnderSea(projectile.position.x, projectile.position.z);
+                auto impactType = inWater ? ImpactType::Water : ImpactType::Normal;
+                auto impactDeath = inWater ? ProjectileDiedEvent::DeathType::WaterImpact : ProjectileDiedEvent::DeathType::NormalImpact;
                 match(
                     *collisionInfo,
                     [&](const ProjectileCollisionInfoOutOfBounds&) {
@@ -3942,42 +3954,48 @@ namespace rwe
                         events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, ProjectileDiedEvent::DeathType::OutOfBounds});
                     },
                     [&](const ProjectileCollisionInfoSea&) {
-                        doProjectileImpact(projectile, ImpactType::Water);
+                        doProjectileImpact(projectile, impactType);
                         if (noExplode)
                         {
-                            events.push_back(ProjectileDetonatedEvent{projectile.weaponType, projectile.position, true});
+                            events.push_back(ProjectileDetonatedEvent{projectile.weaponType, projectile.position, inWater});
                             return;
                         }
                         projectile.isDead = true;
-                        events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, ProjectileDiedEvent::DeathType::WaterImpact});
+                        events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, impactDeath});
                     },
                     [&](const ProjectileCollisionInfoTerrain&) {
                         if (projectile.groundBounce)
                         {
-                            projectile.velocity.y = 0_ss;
-                            projectile.position.y = projectile.previousPosition.y;
+                            // 0x49B37F: the fall turns into a rise a quarter
+                            // as fast, and nothing else changes -- the round
+                            // is not put back above the ground, so it can
+                            // stay under it a tick or more, bouncing, and
+                            // nothing goes off. The original's `vy >> 2` on
+                            // 16.16 floors where a quarter here does not;
+                            // they differ below 1/65536 of a unit.
+                            projectile.velocity.y = -(projectile.velocity.y / 4_ss);
                         }
                         else
                         {
-                            doProjectileImpact(projectile, ImpactType::Normal);
+                            doProjectileImpact(projectile, impactType);
                             if (noExplode)
                             {
-                                events.push_back(ProjectileDetonatedEvent{projectile.weaponType, projectile.position, false});
+                                events.push_back(ProjectileDetonatedEvent{projectile.weaponType, projectile.position, inWater});
                                 return;
                             }
                             projectile.isDead = true;
-                            events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, ProjectileDiedEvent::DeathType::NormalImpact});
+                            events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, impactDeath});
                         }
                     },
                     [&](const ProjectileCollisionInfoUnitOrFeatureOrBuilding&) {
-                        doProjectileImpact(projectile, ImpactType::Normal);
+                        doProjectileImpact(projectile, impactType);
                         if (noExplode)
                         {
-                            events.push_back(ProjectileDetonatedEvent{projectile.weaponType, projectile.position, false});
+                            events.push_back(ProjectileDetonatedEvent{projectile.weaponType, projectile.position, inWater});
                             return;
                         }
                         projectile.isDead = true;
-                        events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, ProjectileDiedEvent::DeathType::NormalImpact});
+                        events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, impactDeath});
                     });
             }
         }

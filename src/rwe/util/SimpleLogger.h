@@ -60,6 +60,8 @@ namespace rwe
         std::ofstream file;
         std::mutex mutex;
 
+        std::string path;
+
         static const char* levelString(LogLevel lvl)
         {
             switch (lvl)
@@ -95,7 +97,7 @@ namespace rwe
 
     public:
         SimpleLogger(const std::string& filePath, bool truncate)
-            : file(filePath, truncate ? std::ios::trunc : std::ios::app)
+            : file(filePath, truncate ? std::ios::trunc : std::ios::app), path(filePath)
         {
             if (!file.is_open())
             {
@@ -106,6 +108,9 @@ namespace rwe
         // A logger that discards everything, for headless use (tests, tools)
         // where no log file has been set up.
         SimpleLogger() = default;
+
+        /** The file this logger writes to, or empty when it discards. */
+        const std::string& filePath() const { return path; }
 
         void write(LogLevel msgLevel, const std::string& msg)
         {

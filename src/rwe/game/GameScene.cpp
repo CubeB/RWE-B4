@@ -289,6 +289,11 @@ namespace rwe
 
     GameScene::~GameScene()
     {
+        // Closing the window returns straight out of the scene loop without
+        // passing through leaveFor, and neither does an arena run's time limit.
+        // A game already reported is not reported twice.
+        sendGameEnded("abandoned", std::nullopt);
+
         // The one summary that catches every way a game can end, including a
         // window closed with no result and an arena run stopped by its clock.
         logLockstepSummary();
@@ -870,7 +875,7 @@ namespace rwe
         // buffer the same frame.
         finishRejoinIfCaughtUp();
 
-        auto targetCommandBufferSize = commandBufferTargetForRttMillis(gameNetworkService->getMaxAverageRttMillis());
+        auto targetCommandBufferSize = commandBufferTargetForRttMillis(gameNetworkService->getMaxAverageRttMillis(), gameNetworkService->getMaxRoundTripDeviationMillis());
 
         auto bufferedCommandCount = playerCommandService->bufferedCommandCount(localPlayerId);
 

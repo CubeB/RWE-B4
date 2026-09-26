@@ -1,4 +1,5 @@
 #include "MapTerrain.h"
+#include <algorithm>
 #include <cmath>
 #include <rwe/geometry/Plane3f.h>
 #include <rwe/geometry/Triangle3f.h>
@@ -112,6 +113,26 @@ namespace rwe
             pos.x - (getWidthInWorldUnits() / 2_ss),
             pos.y,
             pos.z - (getHeightInWorldUnits() / 2_ss));
+    }
+
+    bool MapTerrain::isSquareUnderSea(SimScalar x, SimScalar z) const
+    {
+        // A square is the cell between four heightmap corners, which is what
+        // isInHeightMapBounds admits, so the last row and column of corners
+        // start no square and read as off the map, as they do to
+        // tryGetHeightAt.
+        auto cell = worldToHeightmapCoordinate(SimVector(x, 0_ss, z));
+        if (!isInHeightMapBounds(cell.x, cell.y))
+        {
+            return false;
+        }
+
+        // The highest of the square's four corners (0x4832D8-0x483329).
+        auto high = std::max(
+            std::max(heights.get(cell.x, cell.y), heights.get(cell.x + 1, cell.y)),
+            std::max(heights.get(cell.x, cell.y + 1), heights.get(cell.x + 1, cell.y + 1)));
+
+        return SimScalar(static_cast<float>(high)) < seaLevel;
     }
 
     SimScalar MapTerrain::getHeightAt(SimScalar x, SimScalar z) const

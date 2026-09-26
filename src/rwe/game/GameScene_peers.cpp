@@ -408,12 +408,14 @@ namespace rwe
         if (!replayPlayback)
         {
             auto worstAverage = 0.0f;
+            auto worstDeviation = 0.0f;
             for (const auto& peer : latestPeerStatuses)
             {
                 worstAverage = std::max(worstAverage, peer.averageRoundTripMillis);
+                worstDeviation = std::max(worstDeviation, peer.roundTripDeviationMillis);
             }
-            auto target = commandBufferTargetForRttMillis(worstAverage);
-            ImGui::Text("order delay %u ticks (%d ms)", target, static_cast<int>(target) * SimMillisecondsPerTick);
+            auto target = commandBufferTargetForRttMillis(worstAverage, worstDeviation);
+            ImGui::Text("order delay %u ticks (%d ms), rtt %.0f jitter %.0f", target, static_cast<int>(target) * SimMillisecondsPerTick, worstAverage, worstDeviation);
         }
 
         const auto& stalled = networkHistory.stalled();
