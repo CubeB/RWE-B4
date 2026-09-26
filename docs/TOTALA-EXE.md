@@ -592,10 +592,9 @@ quirks of the original that RWE reproduces although they look like defects.
 
 ## 91. Still unknown or unported
 
-- **`unitsonly` and `groundbounce`** (§116). `unitsonly` is not parsed, so
-  no RWE round skips the ground and sea tests. RWE's `groundbounce` zeroes
-  `vy` and restores the previous height, where the original sets `vy` to
-  `-(vy >> 2)` and leaves the position alone.
+- **`unitsonly`** (§116) is not parsed, so no RWE round skips the ground and
+  sea tests. The shipped data sets it on the burning-feature damage in
+  FIRES.TDF and on MINDGUN.
 - **The campaign's win and lose rules** (§113) are decoded and not ported:
   all eighteen `[GlobalHeader]` conditions, checked once a second, all
   victory rules in order and any defeat rule, victory first, then a
