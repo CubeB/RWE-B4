@@ -78,6 +78,8 @@ namespace rwe
          * announcing "Waiting for target area to clear" on the way and
          * "Target area was blocked" at the end of it. See TOTALA-EXE.md's
          * table of the `cant` captions, at 403cdf/414020 and 403d10/414055.
+         * A factory keeps no count: it waits silently for as long as the pad
+         * stays blocked (0x402899).
          */
         unsigned int attempts{0};
 

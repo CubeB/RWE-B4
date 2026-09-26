@@ -504,9 +504,10 @@ quirks of the original that RWE reproduces although they look like defects.
 - **A unit blocking a build site is told to move, and the site is swept again
   on every failed attempt.** The original's `BUGGER_OFF` is write-only -- the
   only reader of `unit+0x10f` bit 3 is the COB `get` (§112) -- and its site
-  check `0x47DB70` only waits: ten tries thirty ticks apart, then the queue
-  entry is given up. A friendly unit left on a spawn point therefore stalls the
-  yard for good, which is what a Coast To Coast play-test saw as "Core shipyard
+  check `0x47DB70` only waits -- a constructor ten tries thirty ticks apart
+  before giving the order up, a factory every fifteen ticks for as long as it
+  takes. A friendly unit left on a spawn point therefore stalls the yard for
+  good, which is what a Coast To Coast play-test saw as "Core shipyard
   stopped building as it got blocked by a scout ship". RWE sweeps the *site* --
   the new unit's footprint at the spawn point, not the building's own cells,
   where a hull at the pad is outside the building and would never hear about it

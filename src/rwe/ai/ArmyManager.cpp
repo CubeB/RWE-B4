@@ -1570,11 +1570,11 @@ namespace rwe
             // hull at the doors was already where it was supposed to be and
             // was never told to move again. Two hulls waiting on a third
             // therefore parked across the mouth of the yard building it, and
-            // a spawn point a friendly hull is standing on is ten failed
-            // tries and a lost queue entry (GameSimulation::retryBlockedSite)
-            // for as long as it stands there. Reported from play: "boats were
-            // blocking the factory after being made", and "core shipyard
-            // stopped building as it got blocked by a scout ship".
+            // a spawn point a friendly hull is standing on stalls the yard
+            // for as long as it stands there (GameSimulation::spawnNewUnits).
+            // Reported from play: "boats were blocking the factory after
+            // being made", and "core shipyard stopped building as it got
+            // blocked by a scout ship".
             //
             // Distances are still measured from the yard. The station is
             // navalRallyDistance from it and gatherRadius is twice
