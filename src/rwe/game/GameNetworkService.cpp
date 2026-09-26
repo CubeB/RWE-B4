@@ -1,22 +1,16 @@
 #include "GameNetworkService.h"
-#include <rwe/game/chat_util.h>
 #include <algorithm>
 #include <rwe/network_util.h>
 #include <rwe/proto/serialization.h>
-#include <rwe/sim/GameHash.h>
-#include <rwe/sim/SimTicksPerSecond.h>
-#include <rwe/util/Index.h>
-#include <rwe/util/OpaqueId_io.h>
-#include <rwe/util/range_util.h>
 #include <rwe/util/SimpleLogger.h>
-#include <thread>
+#include <rwe/util/range_util.h>
 
 namespace rwe
 {
     GameNetworkService::GameNetworkService(
         PlayerId localPlayerId,
         int port,
-        const std::vector<GameNetworkService::EndpointInfo>& endpoints,
+        const std::vector<GameNetworkService::EndpointInfo>& endpointSeeds,
         PlayerCommandService* playerCommandService,
         SequenceNumber resumeFromSequence)
         : localPlayerId(localPlayerId),
@@ -24,12 +18,28 @@ namespace rwe
           resolver(ioContext),
           socket(ioContext),
           sendTimer(ioContext),
-          endpoints(endpoints),
-          remotePeersPresent(!endpoints.empty()),
-          nextSendSequence(resumeFromSequence),
-          nextHashSequence(resumeFromSequence),
+          localStream(resumeFromSequence),
+          remotePeersPresent(!endpointSeeds.empty()),
           playerCommandService(playerCommandService)
     {
+        for (const auto& seed : endpointSeeds)
+        {
+            PeerLink::ResumeState resume;
+            resume.nextCommandToSend = seed.nextCommandToSend;
+            resume.nextCommandToReceive = seed.nextCommandToReceive;
+            resume.nextHashToSend = seed.nextHashToSend;
+            resume.nextHashToReceive = seed.nextHashToReceive;
+
+            endpoints.push_back(PeerEndpoint{
+                seed.playerId,
+                seed.endpoint,
+                std::make_unique<PeerLink>(
+                    localPlayerId,
+                    seed.playerId,
+                    playerCommandService,
+                    [this]() { return nextPacketId(); },
+                    resume)});
+        }
     }
 
     GameNetworkService::~GameNetworkService()
@@ -46,41 +56,40 @@ namespace rwe
         networkThread = std::thread(&GameNetworkService::run, this);
     }
 
-    std::size_t GameNetworkService::commandsFittingOneSet(const std::vector<PlayerCommand>& commands)
+    int GameNetworkService::nextPacketId()
     {
-        return rwe::commandsFittingOneSet(commands, MaxCommandSetBytes);
+        return nextPacketIdCounter++;
     }
 
-    void GameNetworkService::submitCommands(SceneTime currentSceneTime, const GameNetworkService::CommandSet& commands)
+    std::size_t GameNetworkService::commandsFittingOneSet(const std::vector<PlayerCommand>& commands)
     {
-        asio::post(ioContext,[this, currentSceneTime, commands]() {
-            this->currentSceneTime = currentSceneTime;
-            for (auto& e : endpoints)
-            {
-                e.sendBuffer.push_back(commands);
-            }
+        return PeerLink::commandsFittingOneSet(commands);
+    }
+
+    void GameNetworkService::submitCommands(SceneTime sceneTime, const GameNetworkService::CommandSet& commands)
+    {
+        asio::post(ioContext, [this, sceneTime, commands]() {
+            currentSceneTime = sceneTime;
 
             // Kept whether anyone has been dropped or not, because by the time
             // one has it is too late to start: a returning peer wants the sets
             // from before it went quiet.
-            sendHistory.emplace_back(nextSendSequence, commands);
-            nextSendSequence = SequenceNumber(nextSendSequence.value + 1);
-            while (sendHistory.size() > RejoinHistoryLength)
+            localStream.recordCommandSet(commands);
+            for (auto& e : endpoints)
             {
-                sendHistory.pop_front();
+                e.link->submitCommands(sceneTime, commands);
             }
         });
     }
 
     void GameNetworkService::submitGameHash(GameHash hash)
     {
-        asio::post(ioContext,[this, hash]() {
+        asio::post(ioContext, [this, hash]() {
+            localStream.recordHash();
             for (auto& e : endpoints)
             {
-                e.hashSendBuffer.push_back(hash);
+                e.link->submitGameHash(hash);
             }
-
-            nextHashSequence = SequenceNumber(nextHashSequence.value + 1);
         });
     }
 
@@ -93,7 +102,7 @@ namespace rwe
         asio::post(ioContext, [this, text, &result]() {
             for (const auto& e : endpoints)
             {
-                if (e.chatSendBuffer.size() >= MaxPendingChatMessages)
+                if (e.link->chatBacklogFull())
                 {
                     result.set_value(false);
                     return;
@@ -102,7 +111,7 @@ namespace rwe
 
             for (auto& e : endpoints)
             {
-                e.chatSendBuffer.push_back(text);
+                e.link->submitChatMessage(text);
             }
 
             result.set_value(true);
@@ -120,9 +129,9 @@ namespace rwe
     SceneTime GameNetworkService::estimateAvergeSceneTime(SceneTime localSceneTime)
     {
         std::promise<unsigned int> result;
-        asio::post(ioContext,[this, localSceneTime, &result]() {
+        asio::post(ioContext, [this, localSceneTime, &result]() {
             auto time = getTimestamp();
-            auto otherTimes = choose(endpoints, [](const auto& e) { return e.lastKnownSceneTime; });
+            auto otherTimes = choose(endpoints, [](const auto& e) { return e.link->lastKnownSceneTime(); });
 
             auto finalValue = estimateAverageSceneTimeStatic(localSceneTime, otherTimes, time);
             result.set_value(finalValue);
@@ -139,49 +148,7 @@ namespace rwe
             std::vector<PeerStatus> statuses;
             for (const auto& e : endpoints)
             {
-                // A peer never heard from is measured from when this service
-                // started, so that one which never turns up times out like one
-                // which turned up and left. Before the thread has started there
-                // is no clock to measure from and nobody has had a chance to
-                // speak, so the silence is nothing.
-                auto since = e.lastPacketTime ? e.lastPacketTime : startTime;
-                auto silence = since
-                    ? std::chrono::duration_cast<std::chrono::milliseconds>(now - *since)
-                    : std::chrono::milliseconds(0);
-
-                // Each send time is keyed by the sequence number just past the
-                // last set that packet carried, so the first packet to carry
-                // the oldest unacked set is the first key beyond it.
-                auto oldestUnackedAge = std::chrono::milliseconds(0);
-                auto firstSend = std::find_if(e.sendTimes.begin(), e.sendTimes.end(), [&](const auto& t) { return t.first > e.nextCommandToSend; });
-                if (firstSend != e.sendTimes.end())
-                {
-                    oldestUnackedAge = std::chrono::duration_cast<std::chrono::milliseconds>(now - firstSend->second);
-                }
-
-                // Carried forward across the ordinary gap between packets and
-                // no further: a peer that has gone quiet may have stopped, and
-                // assuming it kept running would hide exactly that. At 1x speed
-                // only; a packet does not say its sender's speed yet (#354).
-                std::optional<float> estimatedNow;
-                if (e.lastKnownSceneTime)
-                {
-                    auto sinceReport = std::min(now - e.lastKnownSceneTime->second, std::chrono::duration_cast<Timestamp::duration>(2 * SendInterval));
-                    auto ticks = std::chrono::duration<float, std::milli>(sinceReport).count() / static_cast<float>(SimMillisecondsPerTick);
-                    estimatedNow = static_cast<float>(e.lastKnownSceneTime->first.value) + ticks;
-                }
-
-                statuses.push_back(PeerStatus{
-                    e.playerId,
-                    silence,
-                    e.lastKnownSceneTime ? std::optional<SceneTime>(e.lastKnownSceneTime->first) : std::nullopt,
-                    estimatedNow,
-                    e.averageRoundTripTime,
-                    e.recentRoundTripTimes.latest(),
-                    e.recentRoundTripTimes.min(),
-                    e.recentRoundTripTimes.max(),
-                    e.sendBuffer.size(),
-                    oldestUnackedAge});
+                statuses.push_back(e.link->status(now, startTime));
             }
 
             result.set_value(std::move(statuses));
@@ -221,37 +188,39 @@ namespace rwe
                 return;
             }
 
-            auto haveFrom = sendHistory.empty() ? nextSendSequence : sendHistory.front().first;
-            auto haveTo = nextSendSequence;
-            if (fromSequence < haveFrom || fromSequence > haveTo)
+            if (!localStream.holdsFrom(fromSequence))
             {
                 LOG_ERROR << "Cannot resume the stream to player " << playerId.value << " at " << fromSequence.value
-                          << ": this peer holds " << haveFrom.value << " to " << haveTo.value;
+                          << ": this peer holds " << localStream.firstHeldSequence().value << " to " << localStream.nextSendSequence().value;
                 result.set_value(false);
                 return;
             }
 
-            EndpointInfo endpoint(playerId, known->second);
-            endpoint.nextCommandToSend = fromSequence;
-            endpoint.nextCommandToReceive = theirNextSequence;
-            for (const auto& [sequence, commands] : sendHistory)
-            {
-                if (sequence >= fromSequence)
-                {
-                    endpoint.sendBuffer.push_back(commands);
-                }
-            }
+            auto endpoint = known->second;
 
+            PeerLink::ResumeState resume;
+            resume.nextCommandToSend = fromSequence;
+            resume.nextCommandToReceive = theirNextSequence;
             // The hash stream is numbered the same way and needs no history.
             // This peer has not yet run the tick the returning one is waiting
             // for, so there is nothing held back to hand over; saying where
             // this stream has reached is enough, because the receiver skips
             // whatever falls below the position it asked to resume at.
-            endpoint.nextHashToSend = GameTime(nextHashSequence.value);
-            endpoint.nextHashToReceive = GameTime(theirNextSequence.value);
+            resume.nextHashToSend = GameTime(localStream.nextHashSequence().value);
+            resume.nextHashToReceive = GameTime(theirNextSequence.value);
+            resume.currentSceneTime = currentSceneTime;
+
+            auto link = std::make_unique<PeerLink>(
+                localPlayerId,
+                playerId,
+                playerCommandService,
+                [this]() { return nextPacketId(); },
+                resume);
+            link->setAcceptingCommands(acceptingCommands);
+            link->restoreUnackedCommands(localStream.historyFrom(fromSequence));
 
             forgottenEndpoints.erase(known);
-            endpoints.push_back(std::move(endpoint));
+            endpoints.push_back(PeerEndpoint{playerId, endpoint, std::move(link)});
 
             LOG_INFO << "Listening to player " << playerId.value << " again, sending from " << fromSequence.value
                      << " and expecting their set " << theirNextSequence.value;
@@ -265,19 +234,23 @@ namespace rwe
     {
         asio::post(ioContext, [this, value]() {
             acceptingCommands = value;
+            for (auto& e : endpoints)
+            {
+                e.link->setAcceptingCommands(value);
+            }
         });
     }
 
     float GameNetworkService::getMaxAverageRttMillis()
     {
         std::promise<float> result;
-        asio::post(ioContext,[this, &result]() {
+        asio::post(ioContext, [this, &result]() {
             auto maxRtt = 0.0f;
             for (const auto& e : endpoints)
             {
-                if (e.averageRoundTripTime > maxRtt)
+                if (e.link->averageRoundTripTime() > maxRtt)
                 {
-                    maxRtt = e.averageRoundTripTime;
+                    maxRtt = e.link->averageRoundTripTime();
                 }
             }
 
@@ -339,61 +312,6 @@ namespace rwe
             });
     }
 
-    /**
-     * The packet sent to one peer: where we are in each of the three streams
-     * that flow to it, and everything in them it has not yet acked.
-     *
-     * setCount, hashCount and chatCount are how much of the front of each
-     * stream to include. What is left out is still unacked and goes in a
-     * later packet; see send, which chooses them so that the packet fits.
-     */
-    proto::NetworkMessage createProtoMessage(
-        int packetId,
-        PlayerId playerId,
-        SceneTime currentSceneTime,
-        std::chrono::milliseconds ackDelay,
-        const GameNetworkService::EndpointInfo& endpoint,
-        std::size_t setCount,
-        std::size_t hashCount,
-        std::size_t chatCount)
-    {
-        proto::NetworkMessage outerMessage;
-        auto& m = *outerMessage.mutable_game_update();
-        m.set_packet_id(packetId);
-        m.set_player_id(playerId.value);
-        m.set_current_scene_time(currentSceneTime.value);
-        m.set_next_command_set_to_send(endpoint.nextCommandToSend.value);
-        m.set_next_command_set_to_receive(endpoint.nextCommandToReceive.value);
-        m.set_next_game_hash_to_send(endpoint.nextHashToSend.value);
-        m.set_next_game_hash_to_receive(endpoint.nextHashToReceive.value);
-        m.set_next_chat_to_send(endpoint.nextChatToSend.value);
-        m.set_next_chat_to_receive(endpoint.nextChatToReceive.value);
-        m.set_ack_delay(ackDelay.count());
-
-        for (std::size_t i = 0; i < setCount; ++i)
-        {
-            auto& setMessage = *m.add_command_set();
-
-            for (const auto& cmd : endpoint.sendBuffer[i])
-            {
-                auto& cmdMessage = *setMessage.add_command();
-                serializePlayerCommand(cmd, cmdMessage);
-            }
-        }
-
-        for (std::size_t i = 0; i < hashCount; ++i)
-        {
-            m.add_game_hashes(endpoint.hashSendBuffer[i].value);
-        }
-
-        for (std::size_t i = 0; i < chatCount; ++i)
-        {
-            m.add_chat()->set_text(endpoint.chatSendBuffer[i]);
-        }
-
-        return outerMessage;
-    }
-
     void GameNetworkService::sendLoop()
     {
         sendToAll();
@@ -417,61 +335,25 @@ namespace rwe
         }
     }
 
-    void GameNetworkService::send(GameNetworkService::EndpointInfo& endpoint)
+    void GameNetworkService::send(GameNetworkService::PeerEndpoint& endpoint)
     {
-        auto packetId = uniform_dist(gen);
-        LOG_DEBUG << "Sending packet ID " << packetId << " to endpoint: " << endpoint.endpoint.address().to_string() << ":" << endpoint.endpoint.port();
-        std::chrono::milliseconds delay(0);
-        auto sendTime = getTimestamp();
-        if (endpoint.lastReceiveTime)
+        auto sizeLimit = sendBuffer.size() - 4;
+        auto message = endpoint.link->makePacket(getTimestamp(), sizeLimit);
+        if (message.empty())
         {
-            delay = std::chrono::duration_cast<std::chrono::milliseconds>(sendTime - *endpoint.lastReceiveTime);
-        }
-
-        // As much of each stream as fits, commands first because the game
-        // cannot move without them, then hashes, then chat. The rest is
-        // unacked and goes next time. Taking all of it, as this used to,
-        // threw once it came to more than a datagram -- a peer that stopped
-        // acking could arrange that, and so could an honest backlog -- and
-        // the throw ended the network thread. Issue #75.
-        auto sizeLimit = static_cast<unsigned long long>(getSize(sendBuffer) - 4);
-        auto sizeOf = [&](std::size_t sets, std::size_t hashes, std::size_t chats) {
-            return createProtoMessage(packetId, localPlayerId, currentSceneTime, delay, endpoint, sets, hashes, chats).ByteSizeLong();
-        };
-        auto setCount = longestPrefixThatFits(endpoint.sendBuffer.size(), sizeLimit, [&](std::size_t n) { return sizeOf(n, 0, 0); });
-        if (setCount == 0 && !endpoint.sendBuffer.empty())
-        {
-            // A single set bigger than a datagram. GameScene splits a tick's
-            // commands so that this cannot happen; if it does, the set can
-            // never be sent and this peer will be dropped for silence, which
-            // is the right outcome and better than a hung game.
-            LOG_ERROR << "A command set is too large for a packet and cannot be sent";
-        }
-        auto hashCount = longestPrefixThatFits(endpoint.hashSendBuffer.size(), sizeLimit, [&](std::size_t n) { return sizeOf(setCount, n, 0); });
-        auto chatCount = chooseChatCountForPacket(endpoint.chatSendBuffer.size(), sizeLimit, [&](std::size_t n) { return sizeOf(setCount, hashCount, n); });
-
-        auto message = createProtoMessage(packetId, localPlayerId, currentSceneTime, delay, endpoint, setCount, hashCount, chatCount);
-        auto messageSize = message.ByteSizeLong();
-        if (messageSize > sizeLimit)
-        {
-            LOG_ERROR << "A packet of " << messageSize << " bytes is too large to send; skipping it";
             return;
         }
-        if (!message.SerializeToArray(sendBuffer.data(), sendBuffer.size()))
+        if (message.size() > sizeLimit)
         {
-            throw std::runtime_error("Failed to serialize message to buffer");
+            LOG_ERROR << "A packet of " << message.size() << " bytes is too large to send; skipping it";
+            return;
         }
 
-        // throw in a CRC to verify the message
-        writeInt(&sendBuffer[messageSize], computeCrc(sendBuffer.data(), messageSize));
+        std::copy(message.begin(), message.end(), sendBuffer.begin());
+        writeInt(&sendBuffer[message.size()], computeCrc(sendBuffer.data(), static_cast<unsigned int>(message.size())));
 
-        socket.send_to(asio::buffer(sendBuffer.data(), messageSize + 4), endpoint.endpoint);
-
-        auto nextSequenceNumber = SequenceNumber(endpoint.nextCommandToSend.value + setCount);
-        if (endpoint.sendTimes.empty() || endpoint.sendTimes.back().first < nextSequenceNumber)
-        {
-            endpoint.sendTimes.emplace_back(nextSequenceNumber, sendTime);
-        }
+        LOG_DEBUG << "Sending " << message.size() + 4 << " bytes to endpoint: " << endpoint.endpoint.address().to_string() << ":" << endpoint.endpoint.port();
+        socket.send_to(asio::buffer(sendBuffer.data(), message.size() + 4), endpoint.endpoint);
     }
 
     void GameNetworkService::receive(const asio::error_code& error, std::size_t receivedBytes)
@@ -505,7 +387,7 @@ namespace rwe
         }
 
         auto receivedCrc = readInt(&receiveBuffer[receivedBytes - 4]);
-        auto computedCrc = computeCrc(receiveBuffer.data(), receivedBytes - 4);
+        auto computedCrc = computeCrc(receiveBuffer.data(), static_cast<unsigned int>(receivedBytes - 4));
         if (receivedCrc != computedCrc)
         {
             LOG_ERROR << "Message CRC incorrect, ignoring";
@@ -513,7 +395,7 @@ namespace rwe
         }
 
         proto::NetworkMessage outerMessage;
-        outerMessage.ParseFromArray(receiveBuffer.data(), receivedBytes - 4);
+        outerMessage.ParseFromArray(receiveBuffer.data(), static_cast<int>(receivedBytes - 4));
         if (!outerMessage.has_game_update())
         {
             // message wasn't a game update, ignore it
@@ -521,191 +403,16 @@ namespace rwe
             return;
         }
 
-        EndpointInfo& endpoint = *endpointIt;
+        endpointIt->link->onPacket(outerMessage.game_update(), receiveTime);
 
-        if (!acceptingCommands)
+        auto messages = endpointIt->link->takeReceivedChat();
+        if (!messages.empty())
         {
-            // Winding forward into a game in progress. Nothing is taken and so
-            // nothing is acked, and the sender keeps every set until it is --
-            // but the packet still counts as having been heard, which is what
-            // stops this peer being declared lost while it catches up.
-            endpoint.lastPacketTime = getTimestamp();
-            return;
-        }
-
-        const auto& message = outerMessage.game_update();
-
-        LOG_DEBUG << "Packet received with ID " << message.packet_id();
-        if (message.player_id() != endpoint.playerId.value)
-        {
-            LOG_ERROR << "Player " << endpoint.playerId.value << " endpoint sent wrong player ID: " << message.player_id();
-            return;
-        }
-
-        // Anything well formed from this peer counts as a sign of life,
-        // whether or not it carries anything new. lastReceiveTime below
-        // moves only for a packet with new commands in it, and so stands
-        // still for a peer that is present and has nothing to say.
-        endpoint.lastPacketTime = receiveTime;
-
-        LOG_DEBUG << "Received ack to " << message.next_command_set_to_receive() << " and " << message.command_set_size() << " commands starting at " << message.next_command_set_to_send();
-
-        SequenceNumber newNextCommandToSend(message.next_command_set_to_receive());
-        if (newNextCommandToSend.value > endpoint.nextCommandToSend.value + endpoint.sendBuffer.size())
-        {
-            LOG_ERROR << "Remote acked up to " << newNextCommandToSend.value << ", but we are at " << endpoint.nextCommandToSend.value << " and command buffer contains " << endpoint.sendBuffer.size() << " elements";
-        }
-        while (newNextCommandToSend > endpoint.nextCommandToSend && !endpoint.sendBuffer.empty())
-        {
-            endpoint.sendBuffer.pop_front();
-            endpoint.nextCommandToSend = SequenceNumber(endpoint.nextCommandToSend.value + 1);
-        }
-
-        while (!endpoint.sendTimes.empty() && endpoint.nextCommandToSend > endpoint.sendTimes.front().first)
-        {
-            // skip older send time measurements
-            endpoint.sendTimes.pop_front();
-        }
-        if (!endpoint.sendTimes.empty() && endpoint.nextCommandToSend == endpoint.sendTimes.front().first)
-        {
-            auto roundTripTime = receiveTime - endpoint.sendTimes.front().second;
-            auto ackDelay = std::chrono::milliseconds(message.ack_delay());
-            roundTripTime = roundTripTime > ackDelay ? roundTripTime - ackDelay : std::chrono::milliseconds(0);
-            auto rttMillis = std::chrono::duration_cast<std::chrono::milliseconds>(roundTripTime).count();
-            endpoint.averageRoundTripTime = ema(rttMillis, endpoint.averageRoundTripTime, 0.1f);
-            endpoint.recentRoundTripTimes.add(static_cast<float>(rttMillis));
-            LOG_DEBUG << "Average RTT: " << endpoint.averageRoundTripTime << "ms";
-        }
-
-        auto extraFrames = static_cast<unsigned int>((endpoint.averageRoundTripTime / 2.0f) * SimTicksPerSecond / 1000.0f);
-        endpoint.lastKnownSceneTime = std::make_pair(SceneTime(message.current_scene_time() + extraFrames), receiveTime);
-        LOG_DEBUG << "Estimated peer scene time: " << endpoint.lastKnownSceneTime->first.value;
-
-        SequenceNumber firstCommandNumber(message.next_command_set_to_send());
-        if (firstCommandNumber > endpoint.nextCommandToReceive)
-        {
-            // message starts with commands too far in the future, ignore it.
-            // FIXME: this should probably be an error as it shouldn't ever happen
-            LOG_ERROR << "First command number in message was too high! Expecting no more than " << endpoint.nextCommandToReceive.value << ", received " << firstCommandNumber.value;
-            return;
-        }
-
-        auto firstRelevantCommandIndex = (endpoint.nextCommandToReceive - firstCommandNumber).value;
-
-        // if the packet is relevant (contains new information), process it
-        if (firstRelevantCommandIndex < static_cast<unsigned int>(message.command_set_size()))
-        {
-            // Read every new set before taking any of them, so that a packet
-            // with one set that cannot be read is refused whole. Nothing of it
-            // is acked, and a peer that keeps sending such a thing falls
-            // silent as far as the game is concerned and is dropped.
-            std::vector<CommandSet> commandSets;
-            try
-            {
-                for (auto i = static_cast<int>(firstRelevantCommandIndex); i < message.command_set_size(); ++i)
-                {
-                    commandSets.push_back(deserializeCommandSet(message.command_set(i)));
-                }
-            }
-            catch (const std::exception& e)
-            {
-                LOG_ERROR << "Player " << endpoint.playerId.value << " sent a command set that could not be read (" << e.what() << "); ignoring the packet";
-                return;
-            }
-
-            endpoint.lastReceiveTime = receiveTime;
-
-            for (const auto& commandSet : commandSets)
-            {
-                // No further ahead than a peer could honestly be. A set costs
-                // memory until its tick runs, and a peer that sends a stream
-                // far into the future would otherwise have that memory for
-                // the asking. What is not taken is not acked, and is sent
-                // again once the game has caught up.
-                if (playerCommandService->bufferedCommandCount(endpoint.playerId) >= MaxSetsAheadOfTheGame)
-                {
-                    break;
-                }
-                playerCommandService->pushCommands(endpoint.playerId, commandSet);
-                endpoint.nextCommandToReceive = SequenceNumber(endpoint.nextCommandToReceive.value + 1);
-            }
-        }
-
-        GameTime newNextHashToSend(message.next_game_hash_to_receive());
-        if (newNextHashToSend > endpoint.nextHashToSend + GameTime(endpoint.hashSendBuffer.size()))
-        {
-            LOG_ERROR << "Remote acked up to " << newNextHashToSend.value << ", but we are at " << endpoint.nextHashToSend.value << " and hash buffer contains " << endpoint.hashSendBuffer.size() << " elements";
-        }
-        while (newNextHashToSend > endpoint.nextHashToSend && !endpoint.hashSendBuffer.empty())
-        {
-            endpoint.hashSendBuffer.pop_front();
-            endpoint.nextHashToSend += GameTime(1);
-        }
-
-        GameTime firstGameHashTime(message.next_game_hash_to_send());
-        if (firstGameHashTime > endpoint.nextHashToReceive)
-        {
-            // message starts with hashes too far in the future, ignore it.
-            // FIXME: this should probably be an error as it shouldn't ever happen
-            LOG_ERROR << "First game hash time in message was too high! Expecting no more than " << endpoint.nextHashToReceive.value << ", received " << firstGameHashTime.value;
-            return;
-        }
-
-        // Compared unsigned against the count before either becomes an int
-        // index: the difference can be anything a peer's numbering makes it,
-        // and past INT_MAX a signed index would be negative.
-        auto firstRelevantGameHashIndex = (endpoint.nextHashToReceive - firstGameHashTime).value;
-        if (firstRelevantGameHashIndex < static_cast<unsigned int>(message.game_hashes_size()))
-        {
-            for (auto i = static_cast<int>(firstRelevantGameHashIndex); i < message.game_hashes_size(); ++i)
-            {
-                if (playerCommandService->bufferedHashCount(endpoint.playerId) >= MaxSetsAheadOfTheGame)
-                {
-                    break;
-                }
-                playerCommandService->pushHash(endpoint.playerId, GameHash(message.game_hashes(i)));
-                endpoint.nextHashToReceive += GameTime(1);
-            }
-        }
-
-        SequenceNumber newNextChatToSend(message.next_chat_to_receive());
-        if (newNextChatToSend > endpoint.nextChatToSend + SequenceNumber(endpoint.chatSendBuffer.size()))
-        {
-            LOG_ERROR << "Remote acked chat up to " << newNextChatToSend.value << ", but we are at " << endpoint.nextChatToSend.value << " and the chat buffer contains " << endpoint.chatSendBuffer.size() << " elements";
-        }
-        while (newNextChatToSend > endpoint.nextChatToSend && !endpoint.chatSendBuffer.empty())
-        {
-            endpoint.chatSendBuffer.pop_front();
-            endpoint.nextChatToSend = SequenceNumber(endpoint.nextChatToSend.value + 1);
-        }
-
-        SequenceNumber firstChatNumber(message.next_chat_to_send());
-        if (firstChatNumber > endpoint.nextChatToReceive)
-        {
-            LOG_ERROR << "First chat number in message was too high! Expecting no more than " << endpoint.nextChatToReceive.value << ", received " << firstChatNumber.value;
-            return;
-        }
-
-        auto firstRelevantChatIndex = (endpoint.nextChatToReceive - firstChatNumber).value;
-        if (firstRelevantChatIndex >= static_cast<unsigned int>(message.chat_size()))
-        {
-            return;
-        }
-        for (auto i = static_cast<int>(firstRelevantChatIndex); i < message.chat_size(); ++i)
-        {
-            // Sanitised here rather than at the far end, so that nothing a peer
-            // sends reaches the scene, the font or the log unexamined. What
-            // survives is printable, one line, and bounded.
-            auto text = sanitizeChatText(message.chat(i).text());
-            endpoint.nextChatToReceive = SequenceNumber(endpoint.nextChatToReceive.value + 1);
-
-            if (text.empty())
-            {
-                continue;
-            }
-
             std::scoped_lock<std::mutex> lock(chatInboxMutex);
-            chatInbox.push_back(ReceivedChatMessage{endpoint.playerId, text});
+            for (auto& message : messages)
+            {
+                chatInbox.push_back(std::move(message));
+            }
         }
     }
 }

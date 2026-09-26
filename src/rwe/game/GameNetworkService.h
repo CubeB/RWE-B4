@@ -1,79 +1,53 @@
 #pragma once
 
+#include <array>
 #include <asio.hpp>
 #include <chrono>
 #include <deque>
 #include <future>
+#include <memory>
 #include <mutex>
 #include <network.pb.h>
-#include <random>
+#include <rwe/game/PeerLink.h>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/game/PlayerCommandService.h>
-#include <rwe/game/RoundTripWindow.h>
 #include <rwe/rwe_time.h>
 #include <rwe/sim/GameHash.h>
 #include <rwe/sim/GameTime.h>
 #include <rwe/sim/PlayerId.h>
-#include <rwe/util/OpaqueId.h>
-#include <rwe/util/OpaqueUnit.h>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace rwe
 {
-    struct SequenceNumberTag;
-    using SequenceNumber = OpaqueUnit<unsigned int, SequenceNumberTag>;
-
+    /**
+     * The transport half of the lockstep: a UDP socket, a send timer and the
+     * thread they run on. It moves bytes and nothing else -- what a packet
+     * means and what goes in one lives in PeerLink, one per remote peer. This
+     * is also the lock discipline: the game thread posts work to the io
+     * context and, where it needs an answer, waits for it, so no PeerLink is
+     * reached from two threads.
+     */
     class GameNetworkService
     {
     public:
-        using CommandSet = std::vector<PlayerCommand>;
-        /** A line of chat that arrived from a peer. */
-        struct ReceivedChatMessage
-        {
-            PlayerId sender;
-            std::string text;
-        };
+        using CommandSet = PeerLink::CommandSet;
+        using ReceivedChatMessage = PeerLink::ReceivedChatMessage;
+        using PeerStatus = PeerLink::PeerStatus;
 
-        /**
-         * How many unacked lines a peer may be owed before further ones are
-         * refused. A line is resent until it is acked, so without a ceiling a
-         * peer that has stopped answering is a growing packet.
-         */
-        static constexpr std::size_t MaxPendingChatMessages = 32;
+        static constexpr std::size_t MaxPendingChatMessages = PeerLink::MaxPendingChatMessages;
+        static constexpr unsigned int MaxSetsAheadOfTheGame = PeerLink::MaxSetsAheadOfTheGame;
+        static constexpr std::size_t MaxCommandSetBytes = PeerLink::MaxCommandSetBytes;
+        static constexpr std::chrono::milliseconds SendInterval = PeerLink::SendInterval;
 
-        /**
-         * How many command sets, and how many hashes, a peer may have waiting
-         * in this peer's buffers before more are refused: thirty seconds'
-         * worth. An honest peer is a command buffer's depth ahead, a few
-         * ticks; without a ceiling a peer could send a stream far into the
-         * future and have this machine hold all of it. Issue #75.
-         */
-        static constexpr unsigned int MaxSetsAheadOfTheGame = 900;
-
-        /**
-         * The most one command set may come to on the wire. A set is a tick's
-         * commands and cannot be split across packets, and a packet is 1500
-         * bytes with a header and every unacked set in it; this leaves room
-         * for both. A move order costs about 30 bytes a unit, so this is some
-         * thirty units a tick. See GameScene, which holds the rest of a
-         * larger order for the next tick. Issue #75.
-         */
-        static constexpr std::size_t MaxCommandSetBytes = 1000;
-
-        /**
-         * How often every peer is sent a packet, whether there is anything new
-         * or not. It is also the longest a peer holds an ack before sending it.
-         */
-        static constexpr std::chrono::milliseconds SendInterval{100};
-
-        /**
-         * How many commands from the front of `commands` make one set no
-         * bigger than MaxCommandSetBytes; at least one while there are any.
-         * Here rather than in the scene so that the scene does not have to
-         * include the protobuf headers to ask.
-         */
         static std::size_t commandsFittingOneSet(const std::vector<PlayerCommand>& commands);
 
+        /**
+         * A remote peer's address, plus where its streams begin. The seed a
+         * game is built from; the protocol state that grows from it is a
+         * PeerLink, held by the transport.
+         */
         struct EndpointInfo
         {
             PlayerId playerId;
@@ -85,217 +59,10 @@ namespace rwe
             GameTime nextHashToSend{0};
             GameTime nextHashToReceive{0};
 
-            /**
-             * The time at which the last relevant update packet
-             * was received from the remote peer.
-             * An update packet is relevant
-             * if it contains new commands that we haven't seen before.
-             */
-            std::optional<Timestamp> lastReceiveTime;
-
-            /**
-             * The time anything at all was last heard from this peer, relevant
-             * or not, and the only thing that says whether it is still there.
-             *
-             * Kept apart from lastReceiveTime, which moves only for a packet
-             * carrying new commands and so stands still for a peer that is
-             * connected and simply has nothing to say -- which is most of a
-             * game. A peer sends every 100 ms whether it has anything or not,
-             * so silence here means silence.
-             *
-             * Unset until the first packet, which is why the timeout is
-             * measured from when the service started in that case: a peer that
-             * never arrives has to be droppable too.
-             */
-            std::optional<Timestamp> lastPacketTime;
-
-            /**
-             * The last reported scene time from this peer,
-             * adjusted for RTT.
-             */
-            std::optional<std::pair<SceneTime, Timestamp>> lastKnownSceneTime;
-
-            std::deque<CommandSet> sendBuffer;
-
-            std::deque<GameHash> hashSendBuffer;
-
-            /**
-             * Chat waiting to go to this peer, and where in that stream we
-             * are. The same scheme as the commands and the hashes: the
-             * buffer holds everything not yet acked, every packet carries
-             * all of it, and an ack pops the front.
-             */
-            SequenceNumber nextChatToSend{0};
-            SequenceNumber nextChatToReceive{0};
-            std::deque<std::string> chatSendBuffer;
-
-            /**
-             * Records the time at which we first sent a packet
-             * finishing at the given sequence number.
-             * This is used for measuring RTT when we receive acks.
-             */
-            std::deque<std::pair<SequenceNumber, Timestamp>> sendTimes;
-
-            /**
-             * Exponential moving average of round trip time
-             * for communication between us and the remote peer.
-             */
-            float averageRoundTripTime{0};
-
-            RoundTripWindow recentRoundTripTimes;
-
             EndpointInfo(const PlayerId& playerId, const asio::ip::udp::endpoint& endpoint)
                 : playerId(playerId), endpoint(endpoint)
             {
             }
-        };
-
-    private:
-        std::random_device rd;
-        std::default_random_engine gen{rd()};
-        std::uniform_int_distribution<int> uniform_dist{};
-        PlayerId localPlayerId;
-        int port;
-
-        std::thread networkThread;
-
-        asio::io_context ioContext;
-        asio::ip::udp::resolver resolver;
-        asio::ip::udp::socket socket;
-        asio::steady_timer sendTimer;
-
-        std::vector<EndpointInfo> endpoints;
-
-        /**
-         * Whether anybody is on the other end of this game. Fixed when the
-         * service is built: a game that began with nobody else never gains a
-         * peer, and one that began with peers keeps the lockstep buffer even
-         * if they are later dropped, because the local player's orders still
-         * have to be held for the tick they were agreed at.
-         */
-        const bool remotePeersPresent;
-
-        /**
-         * The address of every peer that has been forgotten, so that one which
-         * comes back can be listened to again without being told where it is.
-         *
-         * A returning peer reaches the game through the lobby, which knows
-         * where it is now and could say; keeping the old address means the
-         * ordinary case -- the same machine, the same port, a process that was
-         * restarted -- needs nobody to say anything.
-         */
-        std::vector<std::pair<PlayerId, asio::ip::udp::endpoint>> forgottenEndpoints;
-
-        /**
-         * This peer's own submitted command sets, by sequence number, for as
-         * far back as RejoinHistoryLength.
-         *
-         * A sequence number is an absolute position in a peer's stream -- set N
-         * is the one the simulation runs on tick N+1 -- because submitCommands
-         * and PlayerCommandService::pushCommands are called together, once per
-         * tick, and neither ever skips. That is what lets a returning peer be
-         * handed the middle of a stream rather than the start of one.
-         *
-         * A per-endpoint send buffer cannot serve: it holds what that peer has
-         * not acked, and a peer that was dropped has no buffer at all. This is
-         * the other half of what the issue calls the command log since the
-         * save, and the only half that has to live in the engine.
-         */
-        std::deque<std::pair<SequenceNumber, CommandSet>> sendHistory;
-
-        /** How many of this peer's own sets are kept for a returning peer. */
-        static constexpr std::size_t RejoinHistoryLength = 3600;
-
-        /**
-         * How far along this peer's own two streams are: the next sequence
-         * number a submitted set or hash will carry.
-         *
-         * Both are ordinary indices -- set N runs on tick N+1, hash N is the
-         * state at the end of tick N+1 -- and a returning peer is given a
-         * position in each rather than the whole of either.
-         */
-        SequenceNumber nextSendSequence{0};
-        SequenceNumber nextHashSequence{0};
-
-        /**
-         * Whether what arrives is handed to the simulation yet.
-         *
-         * False on a peer that is winding itself forward into a game in
-         * progress. Its command buffers are being filled from the recording,
-         * and a set arriving live would be appended to those same buffers
-         * mid-wind -- landing at whichever tick the catch-up had reached
-         * rather than at the one it belongs to.
-         *
-         * Not answered rather than not listened to: the service still runs,
-         * because the scene asks it for the round trip time every frame and
-         * waits for the answer. A set that is not taken is simply not acked,
-         * and the peer that sent it keeps sending it until it is.
-         */
-        bool acceptingCommands{true};
-
-        std::array<char, 1500> sendBuffer;
-        std::array<char, 1500> receiveBuffer;
-        asio::ip::udp::endpoint currentRemoteEndpoint;
-
-        PlayerCommandService* const playerCommandService;
-
-        /**
-         * Chat that has arrived and not yet been collected by the scene.
-         *
-         * The one piece of state here touched by both threads without going
-         * through the io context, because it travels the other way: every
-         * other call posts work to the network thread and waits, and a
-         * message arriving has nobody to wait for it.
-         */
-        std::mutex chatInboxMutex;
-        std::vector<ReceivedChatMessage> chatInbox;
-
-        SceneTime currentSceneTime{0};
-
-        /**
-         * When the network thread started listening, which is where a
-         * peer's silence is measured from until it has ever been heard.
-         */
-        std::optional<Timestamp> startTime;
-
-    public:
-        /**
-         * What a peer looks like from here, for deciding whether it is still
-         * there and, if it is not, from which tick to carry on without it.
-         */
-        struct PeerStatus
-        {
-            PlayerId playerId;
-
-            /** How long since anything at all arrived from this peer. */
-            std::chrono::milliseconds silence;
-
-            /** The scene time it last reported, adjusted for the round trip. */
-            std::optional<SceneTime> lastKnownSceneTime;
-
-            /**
-             * The same, carried forward by the ticks it will have run since
-             * that report arrived, for comparing with our own tick now. Kept
-             * apart because a drop is cut at what the peer actually said.
-             */
-            std::optional<float> estimatedSceneTimeNow;
-
-            float averageRoundTripMillis;
-            float latestRoundTripMillis;
-
-            /** Over the last few seconds; zero until a sample has been taken. */
-            float minRoundTripMillis;
-            float maxRoundTripMillis;
-
-            /** Command sets sent and not yet acknowledged. A count that keeps growing is packets being lost. */
-            std::size_t unackedCommandSets;
-
-            /**
-             * How long the oldest unacknowledged set has been out; zero when
-             * nothing is. A round trip is only measured when an ack arrives,
-             * so while a peer is not acking this is the only figure that moves.
-             */
-            std::chrono::milliseconds oldestUnackedAge;
         };
 
         /**
@@ -305,21 +72,12 @@ namespace rwe
          * for the ticks it missed, and the peers that stayed are expecting its
          * stream to pick up exactly there.
          */
-        GameNetworkService(PlayerId localPlayerId, int port, const std::vector<EndpointInfo>& endpoints, PlayerCommandService* playerCommandService, SequenceNumber resumeFromSequence = SequenceNumber(0));
+        GameNetworkService(PlayerId localPlayerId, int port, const std::vector<EndpointInfo>& endpointSeeds, PlayerCommandService* playerCommandService, SequenceNumber resumeFromSequence = SequenceNumber(0));
 
         virtual ~GameNetworkService();
 
         void start();
 
-        /**
-         * Submit new information to be sent on the network.
-         * @param currentSceneTime The scene time we are currently simulating.
-         *                         This is used to inform peers/synchronise simulation speed.
-         * @param commands The latest set of player commands.
-         *                 These are not related to the current scene time.
-         *                 They will be queued up to be sent over the network
-         *                 after all the previously submitted commands.
-         */
         void submitCommands(SceneTime currentSceneTime, const CommandSet& commands);
 
         void submitGameHash(GameHash hash);
@@ -380,7 +138,7 @@ namespace rwe
          * discarded rather than pushed after the ticks it missed.
          *
          * Returns false when this peer no longer holds its own stream back to
-         * `fromSequence`. The bundle is then older than RejoinHistoryLength and
+         * `fromSequence`. The bundle is then older than the rejoin history and
          * the gap cannot be closed from here; whoever asked has to build a
          * newer one.
          */
@@ -389,11 +147,98 @@ namespace rwe
         /**
          * Stops handing arriving commands and hashes to the simulation, or
          * starts again. A peer winding itself forward into a game in progress
-         * starts with this off; see acceptingCommands.
+         * starts with this off.
          */
         void setAcceptingCommands(bool value);
 
     private:
+        /**
+         * A remote peer's address and its protocol state. Built on the game
+         * thread before start(); owned and used by the network thread after.
+         */
+        struct PeerEndpoint
+        {
+            PlayerId playerId;
+            asio::ip::udp::endpoint endpoint;
+            std::unique_ptr<PeerLink> link;
+        };
+
+        /**
+         * The id stamped on the next packet to any peer. Only ever logged, so
+         * a counter will do and the wire stays free of a hidden entropy source.
+         */
+        int nextPacketIdCounter{0};
+
+        PlayerId localPlayerId;
+        int port;
+
+        std::thread networkThread;
+
+        asio::io_context ioContext;
+        asio::ip::udp::resolver resolver;
+        asio::ip::udp::socket socket;
+        asio::steady_timer sendTimer;
+
+        std::vector<PeerEndpoint> endpoints;
+
+        /** This peer's own command and hash streams, shared by every peer. */
+        LocalStream localStream;
+
+        /**
+         * Whether anybody is on the other end of this game. Fixed when the
+         * service is built: a game that began with nobody else never gains a
+         * peer, and one that began with peers keeps the lockstep buffer even
+         * if they are later dropped, because the local player's orders still
+         * have to be held for the tick they were agreed at.
+         */
+        const bool remotePeersPresent;
+
+        /**
+         * The address of every peer that has been forgotten, so that one which
+         * comes back can be listened to again without being told where it is.
+         */
+        std::vector<std::pair<PlayerId, asio::ip::udp::endpoint>> forgottenEndpoints;
+
+        /**
+         * Whether what arrives is handed to the simulation yet, mirrored to
+         * every PeerLink, which is where the refusal happens. Kept here as well
+         * so that a peer remembered into a catch-up is born with the right
+         * setting; see setAcceptingCommands.
+         */
+        bool acceptingCommands{true};
+
+        /**
+         * The scene time last submitted, so that a peer remembered into a game
+         * in progress reports where the game is rather than zero. Mirrored into
+         * each PeerLink by submitCommands.
+         */
+        SceneTime currentSceneTime{0};
+
+        std::array<char, 1500> sendBuffer;
+        std::array<char, 1500> receiveBuffer;
+        asio::ip::udp::endpoint currentRemoteEndpoint;
+
+        PlayerCommandService* const playerCommandService;
+
+        /**
+         * Chat that has arrived and not yet been collected by the scene.
+         *
+         * The one piece of state here touched by both threads without going
+         * through the io context, because it travels the other way: every
+         * other call posts work to the network thread and waits, and a
+         * message arriving has nobody to wait for it.
+         */
+        std::mutex chatInboxMutex;
+        std::vector<ReceivedChatMessage> chatInbox;
+
+        /**
+         * When the network thread started listening, which is where a
+         * peer's silence is measured from until it has ever been heard.
+         */
+        std::optional<Timestamp> startTime;
+
+        int nextPacketId();
+
         void run();
 
         void listenForNextMessage();
@@ -402,7 +247,7 @@ namespace rwe
 
         void sendToAll();
 
-        void send(EndpointInfo& endpoint);
+        void send(PeerEndpoint& endpoint);
 
         void receive(const asio::error_code& error, std::size_t receivedBytes);
     };
