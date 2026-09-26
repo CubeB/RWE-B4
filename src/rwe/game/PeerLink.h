@@ -175,6 +175,13 @@ namespace rwe
         static constexpr std::chrono::milliseconds SendInterval{100};
 
         /**
+         * The shortest gap between packets to a peer when a set is submitted.
+         * A frame can dispatch several ticks and each submits, so without it a
+         * frame would send several near-identical packets.
+         */
+        static constexpr std::chrono::milliseconds SubmitSendInterval{10};
+
+        /**
          * How many commands from the front of `commands` make one set no
          * bigger than MaxCommandSetBytes; at least one while there are any.
          */
@@ -207,6 +214,14 @@ namespace rwe
          * later packet.
          */
         std::vector<char> makePacket(Timestamp now, std::size_t sizeLimit);
+
+        /**
+         * Whether a packet may leave at `now`: at most one per
+         * SubmitSendInterval. A set submitted after the gap sends at once; a
+         * frame that submits several ticks sends them in one. The timer asks
+         * the same question so a keepalive cannot race a submit.
+         */
+        bool sendIsDue(Timestamp now) const;
 
         /**
          * Read a packet from the remote peer. Anything well formed counts as a
@@ -279,6 +294,9 @@ namespace rwe
         std::optional<Timestamp> lastPacketTime;
 
         std::optional<std::pair<SceneTime, Timestamp>> lastKnownSceneTime_;
+
+        /** When a packet last left, for the submit rate limit. */
+        std::optional<Timestamp> lastSendTime;
 
         float averageRoundTripTime_{0};
         RoundTripWindow recentRoundTripTimes;

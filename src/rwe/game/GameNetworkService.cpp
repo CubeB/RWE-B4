@@ -18,6 +18,7 @@ namespace rwe
           resolver(ioContext),
           socket(ioContext),
           sendTimer(ioContext),
+          flushTimer(ioContext),
           localStream(resumeFromSequence),
           remotePeersPresent(!endpointSeeds.empty()),
           playerCommandService(playerCommandService)
@@ -79,6 +80,7 @@ namespace rwe
             {
                 e.link->submitCommands(sceneTime, commands);
             }
+            sendToAll();
         });
     }
 
@@ -90,6 +92,7 @@ namespace rwe
             {
                 e.link->submitGameHash(hash);
             }
+            sendToAll();
         });
     }
 
@@ -335,10 +338,35 @@ namespace rwe
         }
     }
 
+    void GameNetworkService::armFlush()
+    {
+        if (flushArmed)
+        {
+            return;
+        }
+        flushArmed = true;
+        flushTimer.expires_after(PeerLink::SubmitSendInterval);
+        flushTimer.async_wait([this](const asio::error_code& error) {
+            flushArmed = false;
+            if (error)
+            {
+                return;
+            }
+            sendToAll();
+        });
+    }
+
     void GameNetworkService::send(GameNetworkService::PeerEndpoint& endpoint)
     {
+        auto now = getTimestamp();
+        if (!endpoint.link->sendIsDue(now))
+        {
+            armFlush();
+            return;
+        }
+
         auto sizeLimit = sendBuffer.size() - 4;
-        auto message = endpoint.link->makePacket(getTimestamp(), sizeLimit);
+        auto message = endpoint.link->makePacket(now, sizeLimit);
         if (message.empty())
         {
             return;

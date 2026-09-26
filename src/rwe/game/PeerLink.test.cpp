@@ -201,4 +201,95 @@ namespace rwe
         REQUIRE(messages.front().sender == PlayerId(0));
         REQUIRE(messages.front().text == "hello there");
     }
+
+    TEST_CASE("A submit sends at once and other submits within the rate limit ride in one packet")
+    {
+        FakePeerLink link;
+
+        link.submitCommands(0, SceneTime(0), speedCommand(0));
+        link.submitCommands(0, SceneTime(1), speedCommand(1));
+        link.submitCommands(0, SceneTime(2), speedCommand(2));
+
+        REQUIRE(link.packetsSent() == 1);
+
+        link.run(std::chrono::seconds(1));
+
+        std::vector<int> arrived;
+        while (auto popped = link.service(1).tryPopCommands())
+        {
+            for (const auto& [player, commands] : *popped)
+            {
+                REQUIRE(player == PlayerId(0));
+                arrived.push_back(std::get<PlayerSetGameSpeedCommand>(commands.front()).speedIndex);
+            }
+        }
+        REQUIRE(arrived == std::vector<int>{0, 1, 2});
+    }
+
+    TEST_CASE("A submit after the rate limit sends at once")
+    {
+        FakePeerLink link;
+
+        link.submitCommands(0, SceneTime(0), speedCommand(0));
+        REQUIRE(link.packetsSent() == 1);
+
+        link.advance(PeerLink::SubmitSendInterval + std::chrono::milliseconds(1));
+        link.submitCommands(0, SceneTime(1), speedCommand(1));
+
+        REQUIRE(link.packetsSent() == 2);
+    }
+
+    TEST_CASE("A set submitted between timer ticks leaves without waiting for the send timer")
+    {
+        FakePeerLink::Options options;
+        options.oneWayDelay = std::chrono::milliseconds(5);
+        FakePeerLink link(options);
+
+        link.run(std::chrono::milliseconds(30));
+        link.submitCommands(0, SceneTime(0), speedCommand(0));
+        link.run(std::chrono::milliseconds(10));
+
+        REQUIRE(link.service(1).bufferedCommandCount(PlayerId(0)) == 1);
+    }
+
+    TEST_CASE("A mid-period submit's round trip is measured from when it was sent")
+    {
+        FakePeerLink::Options options;
+        options.oneWayDelay = std::chrono::milliseconds(40);
+        FakePeerLink link(options);
+
+        link.advance(std::chrono::milliseconds(30));
+        link.submitCommands(0, SceneTime(0), speedCommand(0));
+        link.run(std::chrono::seconds(6));
+
+        auto status = link.link(0).status(link.now(), std::nullopt);
+        REQUIRE(status.averageRoundTripMillis == Catch::Approx(80.0f).margin(1.0f));
+    }
+
+    TEST_CASE("A hash submit sends at once too")
+    {
+        FakePeerLink link;
+
+        link.submitGameHash(0, GameHash(42));
+        REQUIRE(link.packetsSent() == 1);
+
+        link.run(std::chrono::seconds(1));
+
+        REQUIRE(link.service(1).bufferedHashCount(PlayerId(0)) == 1);
+    }
+
+    TEST_CASE("The send timer still resends sets that have not been acknowledged")
+    {
+        FakePeerLink::Options options;
+        options.oneWayDelay = std::chrono::milliseconds(500);
+        FakePeerLink link(options);
+
+        link.submitCommands(0, SceneTime(0), speedCommand(0));
+        REQUIRE(link.packetsSent() == 1);
+
+        link.run(std::chrono::milliseconds(250));
+
+        REQUIRE(link.packetsSent() >= 3);
+        REQUIRE(link.link(0).status(link.now(), std::nullopt).unackedCommandSets == 1);
+    }
 }
