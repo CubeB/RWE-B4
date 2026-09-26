@@ -345,6 +345,8 @@ set(SOURCE_FILES
     src/rwe/game/panel_slide.cpp
     src/rwe/game/ControlChannel.cpp
     src/rwe/game/ControlChannel.h
+    src/rwe/game/GameEndedReport.cpp
+    src/rwe/game/GameEndedReport.h
     src/rwe/game/GameScene_rejoin.cpp
     src/rwe/game/GameScene_replay.cpp
     src/rwe/game/GameScene_util.cpp
@@ -1009,6 +1011,7 @@ set(TEST_FILES
     src/rwe/game/EndGameStats.test.cpp
     src/rwe/game/dump_util.test.cpp
     src/rwe/game/DesyncReport.test.cpp
+    src/rwe/game/GameEndedReport.test.cpp
     src/rwe/game/aicommandfeed.test.cpp
     src/rwe/game/playerdrop.test.cpp
     src/rwe/game/LockstepStats.test.cpp

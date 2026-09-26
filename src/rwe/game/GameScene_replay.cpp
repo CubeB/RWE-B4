@@ -515,8 +515,13 @@ namespace rwe
         if (auto desync = playerCommandService->checkHashes(); desync)
         {
             auto dumpPath = writeDesyncDump(*desync, localPlayerId, sceneTime, simulation);
+            if (dumpPath)
+            {
+                desyncDumpPaths.push_back(*dumpPath);
+            }
             auto description = describeDesync(*desync, localPlayerId, sceneTime, dumpPath);
             LOG_ERROR << description;
+            sendGameEnded("abandoned", std::nullopt, desync->tick);
             throw std::runtime_error(description);
         }
 
@@ -750,6 +755,7 @@ namespace rwe
                 gameOver = WinStatus(WinStatusWon{winner});
                 gameOverTime = simulation.gameTime;
                 beginEndGameSequence();
+                sendGameEnded("decided", winner);
                 LOG_INFO << "Debug: forcing the end-game sequence, winner player " << winner.value;
             }
         }
@@ -798,12 +804,14 @@ namespace rwe
                     gameOver = winStatus;
                     gameOverTime = simulation.gameTime;
                     beginEndGameSequence();
+                    sendGameEnded("decided", w.winner);
                     LOG_INFO << "Game over: player " << w.winner.value << " won at tick " << simulation.gameTime.value;
                 },
                 [&](const WinStatusDraw&) {
                     gameOver = winStatus;
                     gameOverTime = simulation.gameTime;
                     beginEndGameSequence();
+                    sendGameEnded("draw", std::nullopt);
                     LOG_INFO << "Game over: draw at tick " << simulation.gameTime.value;
                 },
                 [&](const WinStatusUndecided&) {
