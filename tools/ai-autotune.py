@@ -83,6 +83,19 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import arena_common  # noqa: E402
 
+# Windows redirects stdout to the console codepage (cp1252) rather than UTF-8
+# the moment it isn't a TTY, and this script otherwise runs for long enough
+# (screening, then confirmation) that discovering a stray non-ASCII character
+# only at the very end -- after every game has already been played -- is a
+# needless way to lose a run's output. Belt and suspenders: prints stay ASCII
+# by convention, and this reconfigures the streams anyway.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+
 try:
     import tomllib  # Python 3.11+, stdlib
 except ImportError:  # pragma: no cover - this machine's python is 3.14
@@ -657,13 +670,13 @@ def build_real_play_fn(exe: str, data_path: str, specs_by_name: Dict[str, KnobSp
 def print_leaderboard(scores: Sequence[CandidateScore], title: str) -> None:
     print(f"\n=== {title} ===")
     ranked = sorted(scores, key=lambda s: (-s.fitness, -s.wilson_lo))
-    print(f"{'candidate':10} {'n':>3} {'win':>3} {'same':>4} {'loss':>4} {'meanΔ':>8} "
-          f"{'wilson95':>14} {'decided Δ':>10} {'fitness':>9}")
+    print(f"{'candidate':10} {'n':>3} {'win':>3} {'same':>4} {'loss':>4} {'meanDelta':>9} "
+          f"{'wilson95':>14} {'decidedDelta':>13} {'fitness':>9}")
     for s in ranked:
         decided_delta = s.decided_rate_tuned - s.decided_rate_control
         wilson = f"[{s.wilson_lo:.2f},{s.wilson_hi:.2f}]"
         print(f"{s.candidate_id:10} {s.n:>3} {s.wins:>3} {s.ties:>4} {s.losses:>4} "
-              f"{s.mean_margin_delta:>8.1f} {wilson:>14} {decided_delta:>+10.2f} {s.fitness:>9.2f}")
+              f"{s.mean_margin_delta:>9.1f} {wilson:>14} {decided_delta:>+13.2f} {s.fitness:>9.2f}")
 
 
 def print_candidate_detail(score: CandidateScore, specs: Sequence[KnobSpec]) -> None:
