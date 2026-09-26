@@ -1,3 +1,4 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/game/LockstepStats.h>
 #include <rwe/game/NetworkHistory.h>
@@ -86,6 +87,62 @@ namespace rwe
             s.tickRan(t0 + 100ms);
             s.tickBlocked(t0 + 200ms, {PlayerId(1)});
             REQUIRE(s.stalledSoFar(t0 + 250ms) == 150ms);
+        }
+    }
+
+    TEST_CASE("LockstepSummary")
+    {
+        SECTION("averages ticks over the run's wall clock")
+        {
+            LockstepSummary s;
+            s.ticks = 300;
+            s.elapsed = 10000ms;
+            REQUIRE(s.effectiveTicksPerSecond() == Catch::Approx(30.0));
+        }
+
+        SECTION("a run with no elapsed time reads zero rather than dividing by zero")
+        {
+            LockstepSummary s;
+            s.ticks = 5;
+            s.elapsed = 0ms;
+            REQUIRE(s.effectiveTicksPerSecond() == 0.0);
+        }
+
+        SECTION("folds in the cap drops and gate skips it was handed, with the stall in progress")
+        {
+            LockstepStats stats;
+            Timestamp t0{};
+            stats.tickRan(t0);
+            stats.tickBlocked(t0 + 100ms, {PlayerId(1)});
+            stats.tickRan(t0 + 400ms);
+            stats.tickRan(t0 + 500ms);
+            stats.tickBlocked(t0 + 600ms, {PlayerId(1)});
+
+            auto summary = stats.summary(t0 + 700ms, 3, 7);
+            REQUIRE(summary.ticks == 3);
+            REQUIRE(summary.elapsed == 700ms);
+            REQUIRE(summary.stalls == 1);
+            REQUIRE(summary.totalStalled == 400ms);
+            REQUIRE(summary.longestStall == 300ms);
+            REQUIRE(summary.ticksLostToCap == 3);
+            REQUIRE(summary.gateSkips == 7);
+        }
+
+        SECTION("describes the figures it carries")
+        {
+            LockstepSummary s;
+            s.ticks = 300;
+            s.elapsed = 10000ms;
+            s.stalls = 2;
+            s.totalStalled = 150ms;
+            s.longestStall = 120ms;
+            s.ticksLostToCap = 4;
+            s.gateSkips = 5;
+            auto text = s.describe();
+            REQUIRE(text.find("Lockstep summary: 300 ticks") != std::string::npos);
+            REQUIRE(text.find("30.0 tps") != std::string::npos);
+            REQUIRE(text.find("cap-dropped 4") != std::string::npos);
+            REQUIRE(text.find("gate-skips 5") != std::string::npos);
         }
     }
 
