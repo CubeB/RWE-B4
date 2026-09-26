@@ -222,6 +222,14 @@ The estimate made before the spike, revised by what it found:
 The order of work in #386 stands: puppet playback of demos (#387) is the receiving half, and
 spectating a live game comes before playing in one.
 
+## TA Forever
+
+TA Forever's `gpgnet4ta` relays DirectPlay traffic between players and rewrites only the addresses
+inside it, so a peer that speaks the protocol above would pass through it in principle. That was
+deliberately not tested. Joining TA Forever's games as though RWE were TA would be passing one
+program off as another in a community's rated play; if RWE is ever to take part there, it should
+be with that project's agreement and identifying itself as RWE.
+
 ## Open
 
 - **Joining a TA host**: needs real unit CRCs, computed (D7) or harvested from demos.
@@ -230,5 +238,4 @@ spectating a live game comes before playing in one.
   does not follow a speed change was not tried.
 - **Resource statistics**: the host sent no `0x28` after the replay and nothing complained, but
   what the joiner then showed for the host's economy was not looked at.
-- **TA Forever**: whether gpgnet4ta tunnels a peer that is not TA unchanged (#386, question 6).
 - **`0x40` in the options byte**, and why `+los` did nothing with cheats allowed.
