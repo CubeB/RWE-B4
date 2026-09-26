@@ -86,6 +86,50 @@ export interface RweEvent {
   tick?: number;
   file?: string;
   reason?: string;
+
+  /**
+   * A game-ended event's payload, all absent from the other events. The
+   * engine sends one when a game ends; nothing acts on it yet (see #318).
+   * A `null` artifact is one that does not exist on this machine.
+   */
+  outcome?: "decided" | "draw" | "abandoned";
+  winner?: number | null;
+  winners?: number[];
+  gameTime?: number;
+  desyncTick?: number;
+  engineBuild?: string;
+  replay?: string | null;
+  hashLog?: string | null;
+  desyncDumps?: string[];
+  log?: string | null;
+}
+
+/**
+ * One line of the game's output as an event, or undefined for anything else.
+ *
+ * The game's own log goes to a file and is not on this stream, but a library
+ * it links may print, so a line that is not a JSON object carrying an `event`
+ * string is quietly not an event rather than an error.
+ */
+export function parseRweEvent(line: string): RweEvent | undefined {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("{")) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    return undefined;
+  }
+  const event = parsed as Record<string, unknown>;
+  if (typeof event.event !== "string") {
+    return undefined;
+  }
+  return event as unknown as RweEvent;
 }
 
 /** A game that is running, for as long as it is. */
@@ -239,17 +283,11 @@ export function execRwe(args?: RweArgs): RunningRwe {
     // goes to a file, but nothing says a library it links will stay quiet.
     const lines = readline.createInterface({ input: proc.stdout });
     lines.on("line", line => {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("{")) {
-        return;
-      }
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (typeof parsed.event === "string") {
-          events.next(parsed as RweEvent);
-        }
-      } catch {
-        console.log("Ignoring a line from RWE that is not JSON: " + trimmed);
+      const event = parseRweEvent(line);
+      if (event) {
+        events.next(event);
+      } else if (line.trim().startsWith("{")) {
+        console.log("Ignoring a line from RWE that is not JSON: " + line.trim());
       }
     });
   }

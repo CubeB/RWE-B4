@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitWeapon.h>
@@ -148,10 +149,11 @@ namespace rwe
     {
         // Eight units up and eight out, the missile's first step takes it past
         // the edge and below the surface at once. The original tests the
-        // square's units before the water (0x49B090), so the Storm takes it.
+        // square's units before the water (0x49B090), so the Storm takes it --
+        // and throws up spray, the square being under the sea (0x499ECF).
         auto shot = fireAtStorm(8_ss, 8_ss, false);
-        CHECK(shot.deathType == ProjectileDiedEvent::DeathType::NormalImpact);
         CHECK(shot.stormDamaged);
+        CHECK(shot.deathType == ProjectileDiedEvent::DeathType::WaterImpact);
     }
 
     TEST_CASE("a missile that reaches sea level short of a wading unit hits the water", "[weapon][water]")
@@ -165,8 +167,144 @@ namespace rwe
 
     TEST_CASE("on a map with nosealeveltrigger a missile goes through the water to its target", "[weapon][water]")
     {
+        // Still spray when it gets there: the art is the square's, and
+        // nosealeveltrigger switches off the sea test and nothing else.
         auto shot = fireAtStorm(80_ss, 10_ss, true);
-        CHECK(shot.deathType == ProjectileDiedEvent::DeathType::NormalImpact);
         CHECK(shot.stormDamaged);
+        CHECK(shot.deathType == ProjectileDiedEvent::DeathType::WaterImpact);
+    }
+
+    namespace
+    {
+        /** A plain shell, with `groundbounce` or without. */
+        void defineShell(GameSimulation& sim, bool groundBounce)
+        {
+            WeaponDefinition w{};
+            w.maxRange = 300_ss;
+            w.reloadTime = 1_ss;
+            w.burst = 1;
+            w.burstInterval = 0_ss;
+            w.velocity = 8_ss;
+            w.damageRadius = 8_ss;
+            w.damage["DEFAULT"] = 10;
+            w.physicsType = ProjectilePhysicsTypeBallistic();
+            w.groundBounce = groundBounce;
+            sim.weaponDefinitions["SHELL"] = w;
+        }
+
+        /**
+         * Drops a shell from `from` at eight units a tick and runs one tick:
+         * the deaths it causes, and whether the shell is still in the air.
+         */
+        std::pair<std::vector<ProjectileDiedEvent>, bool> dropShell(GameSimulation& sim, const SimVector& from)
+        {
+            auto gunner = addPlayer(sim, "gunner");
+            sim.spawnProjectile(ProjectileSpawn{
+                .owner = gunner,
+                .weaponType = "SHELL",
+                .position = from,
+                .direction = SimVector(0_ss, -1_ss, 0_ss),
+                .distanceToTarget = 100_ss});
+            REQUIRE(sim.projectiles.begin() != sim.projectiles.end());
+            sim.projectiles.begin()->second.velocity = SimVector(0_ss, -8_ss, 0_ss);
+
+            sim.events.clear();
+            sim.tick();
+            std::vector<ProjectileDiedEvent> deaths;
+            for (const auto& e : sim.events)
+            {
+                if (const auto* died = std::get_if<ProjectileDiedEvent>(&e); died != nullptr)
+                {
+                    deaths.push_back(*died);
+                }
+            }
+            auto flying = std::any_of(sim.projectiles.begin(), sim.projectiles.end(), [](const auto& p) { return !p.second.isDead; });
+            return {deaths, flying};
+        }
+    }
+
+    TEST_CASE("a bouncing round that passes the sea and the ground in one tick bounces", "[weapon][water]")
+    {
+        // Issue #350. Four units of water over a seabed at 16: a shell at 21
+        // falling eight a tick goes through the surface and into the ground
+        // in one step. The original tests the ground before the sea
+        // (0x49B36D, then 0x49B3A1), so a `groundbounce` round bounces off
+        // the seabed rather than going out in the water.
+        Grid<unsigned char> heights(16, 16, static_cast<unsigned char>(16));
+        GameSimulation sim(MapTerrain(std::move(heights), SeaLevel), 0u, 0, 0);
+        defineShell(sim, true);
+
+        auto [deaths, flying] = dropShell(sim, SimVector(0_ss, 21_ss, 0_ss));
+        CHECK(deaths.empty());
+        CHECK(flying);
+    }
+
+    TEST_CASE("a bouncing round rises at a quarter of its fall and is left where it struck", "[weapon][water]")
+    {
+        // 0x49B37F: vy becomes -(vy >> 2) and the position is not touched.
+        // Dry ground at 16 and nothing else, so only the ground is in play.
+        Grid<unsigned char> heights(16, 16, static_cast<unsigned char>(16));
+        GameSimulation sim(MapTerrain(std::move(heights), 0_ss), 0u, 0, 0);
+        defineShell(sim, true);
+
+        auto [deaths, flying] = dropShell(sim, SimVector(0_ss, 21_ss, 0_ss));
+        REQUIRE(deaths.empty());
+        REQUIRE(flying);
+        const auto& shell = sim.projectiles.begin()->second;
+        // Eight a tick down and a tick's gravity on top, then a quarter of
+        // that back up.
+        auto fall = -8_ss - (112_ss / (30_ss * 30_ss));
+        CHECK(shell.velocity.y == -(fall / 4_ss));
+        // Left under the ground: 21 less the fall, not put back at 21.
+        CHECK(shell.position.y == 21_ss + fall);
+        CHECK(shell.position.y < 16_ss);
+    }
+
+    TEST_CASE("a round's splash is the square's, not the surface it struck", "[weapon][water]")
+    {
+        // A seabed at 0 under twenty units of water, with one corner of one
+        // square standing at 30. A shell that goes into the water near that
+        // square's low corner struck the sea, but the square is not wholly
+        // under it, so it throws up earth (0x499ECF). One square over, every
+        // corner is under the sea, and the same shell splashes.
+        auto dropNear = [](SimScalar dx) {
+            Grid<unsigned char> heights(16, 16, static_cast<unsigned char>(0));
+            heights.get(8, 8) = 30;
+            GameSimulation sim(MapTerrain(std::move(heights), SeaLevel), 0u, 0, 0);
+            defineShell(sim, false);
+
+            auto corner = sim.terrain.heightmapIndexToWorldCorner(7, 7);
+            auto at = SimVector(corner.x + dx, 12_ss, corner.z + 2_ss);
+            REQUIRE(sim.terrain.getHeightAt(at.x, at.z) < 4_ss);
+            auto underSea = sim.terrain.isSquareUnderSea(at.x, at.z);
+
+            auto [deaths, flying] = dropShell(sim, at);
+            REQUIRE(deaths.size() == 1u);
+            CHECK_FALSE(flying);
+            return std::make_pair(underSea, deaths.front().deathType);
+        };
+
+        auto [shoreUnderSea, shoreDeath] = dropNear(2_ss);
+        CHECK_FALSE(shoreUnderSea);
+        CHECK(shoreDeath == ProjectileDiedEvent::DeathType::NormalImpact);
+
+        auto [wetUnderSea, wetDeath] = dropNear(-14_ss);
+        CHECK(wetUnderSea);
+        CHECK(wetDeath == ProjectileDiedEvent::DeathType::WaterImpact);
+    }
+
+    TEST_CASE("the last row and column of heightmap corners start no square", "[weapon][water]")
+    {
+        // All under twenty units of water. The squares are the cells between
+        // four corners, as they are to tryGetHeightAt, so a point past the
+        // last full cell is off the map and dry.
+        Grid<unsigned char> heights(16, 16, static_cast<unsigned char>(0));
+        MapTerrain terrain(std::move(heights), SeaLevel);
+
+        auto lastCell = terrain.heightmapIndexToWorldCorner(14, 14);
+        CHECK(terrain.isSquareUnderSea(lastCell.x + 2_ss, lastCell.z + 2_ss));
+
+        auto lastCorner = terrain.heightmapIndexToWorldCorner(15, 15);
+        CHECK_FALSE(terrain.isSquareUnderSea(lastCorner.x + 2_ss, lastCorner.z + 2_ss));
     }
 }

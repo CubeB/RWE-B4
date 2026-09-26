@@ -289,6 +289,11 @@ namespace rwe
 
     GameScene::~GameScene()
     {
+        // Closing the window returns straight out of the scene loop without
+        // passing through leaveFor, and neither does an arena run's time limit.
+        // A game already reported is not reported twice.
+        sendGameEnded("abandoned", std::nullopt);
+
         // The audio service outlives us and holds a callback into this
         // object; without handing it back, the mixer reports a finished
         // channel into freed memory the moment the NEXT game renders its
@@ -870,7 +875,7 @@ namespace rwe
         // buffer the same frame.
         finishRejoinIfCaughtUp();
 
-        auto targetCommandBufferSize = commandBufferTargetForRttMillis(gameNetworkService->getMaxAverageRttMillis());
+        auto targetCommandBufferSize = commandBufferTargetForRttMillis(gameNetworkService->getMaxAverageRttMillis(), gameNetworkService->getMaxRoundTripDeviationMillis());
 
         auto bufferedCommandCount = playerCommandService->bufferedCommandCount(localPlayerId);
 

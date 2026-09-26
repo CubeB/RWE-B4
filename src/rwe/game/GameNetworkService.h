@@ -114,6 +114,9 @@ namespace rwe
 
         float getMaxAverageRttMillis();
 
+        /** The worst round-trip deviation among the peers, alongside the average. */
+        float getMaxRoundTripDeviationMillis();
+
         /**
          * Whether there is a peer to wait for at all.
          *
@@ -195,6 +198,10 @@ namespace rwe
         asio::ip::udp::socket socket;
         asio::steady_timer sendTimer;
 
+        /** Sends what the submit rate limit held back, once the gap has passed. */
+        asio::steady_timer flushTimer;
+        bool flushArmed{false};
+
         std::vector<PeerEndpoint> endpoints;
 
         /** This peer's own command and hash streams, shared by every peer. */
@@ -262,6 +269,8 @@ namespace rwe
         void sendLoop();
 
         void sendToAll();
+
+        void armFlush();
 
         void send(PeerEndpoint& endpoint);
 

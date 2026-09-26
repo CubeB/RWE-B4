@@ -140,6 +140,16 @@ namespace rwe
         });
     }
 
+    void ControlChannel::sendGameEnded(const nlohmann::json& report)
+    {
+        if (!on)
+        {
+            return;
+        }
+
+        writeLine(report);
+    }
+
     ControlChannel& getControlChannel()
     {
         static ControlChannel* instance = new ControlChannel();
