@@ -32,6 +32,105 @@ namespace rwe
     {
         return (alpha * val) + ((1.0f - alpha) * average);
     }
+
+    CommandSetPlan planCommandSets(
+        unsigned int bufferedSets,
+        unsigned int targetDepth,
+        bool stalled,
+        bool localSetWaiting)
+    {
+        auto pushLocalSet = bufferedSets <= targetDepth || (stalled && localSetWaiting);
+        auto bufferedAfterLocalSet = pushLocalSet ? bufferedSets + 1 : bufferedSets;
+        auto emptySetsToPush = bufferedAfterLocalSet < targetDepth ? targetDepth - bufferedAfterLocalSet : 0u;
+        return {pushLocalSet, emptySetsToPush};
+    }
+
+    FrameScheduler::FrameScheduler(
+        unsigned int millisecondsBuffer,
+        SceneTime averageSceneTime,
+        int maxTicksPerFrame)
+        : millisecondsBuffer(millisecondsBuffer),
+          averageSceneTime(averageSceneTime),
+          maxTicksPerFrame(maxTicksPerFrame)
+    {
+    }
+
+    bool FrameScheduler::hasWork() const
+    {
+        return millisecondsBuffer >= static_cast<unsigned int>(SimMillisecondsPerTick)
+            && dispatched < static_cast<unsigned int>(maxTicksPerFrame);
+    }
+
+    std::optional<FrameDispatch> FrameScheduler::next(SceneTime sceneTime)
+    {
+        if (!hasWork())
+        {
+            drainBacklogForCap();
+            return std::nullopt;
+        }
+
+        millisecondsBuffer -= static_cast<unsigned int>(SimMillisecondsPerTick);
+
+        if (!gateAllowsTick(sceneTime))
+        {
+            ++skips;
+            return FrameDispatch::Skip;
+        }
+
+        ++dispatched;
+        return FrameDispatch::Attempt;
+    }
+
+    bool FrameScheduler::extraTick(SceneTime sceneTime)
+    {
+        if (dispatched < static_cast<unsigned int>(maxTicksPerFrame)
+            && sceneTime % frameCheckInterval == SceneTime(0)
+            && sceneTime < lowSceneTime())
+        {
+            ++dispatched;
+            return true;
+        }
+        return false;
+    }
+
+    void FrameScheduler::discardBuffer()
+    {
+        millisecondsBuffer = 0;
+    }
+
+    FrameOutcome FrameScheduler::finish()
+    {
+        drainBacklogForCap();
+        return {millisecondsBuffer, dispatched, skips, lostToCap};
+    }
+
+    unsigned int FrameScheduler::ticksThisFrame() const
+    {
+        return dispatched;
+    }
+
+    bool FrameScheduler::gateAllowsTick(SceneTime sceneTime) const
+    {
+        auto highSceneTime = averageSceneTime + frameTolerance;
+        return sceneTime % frameCheckInterval != SceneTime(0) || sceneTime <= highSceneTime;
+    }
+
+    SceneTime FrameScheduler::lowSceneTime() const
+    {
+        return averageSceneTime <= frameTolerance ? SceneTime(0) : averageSceneTime - frameTolerance;
+    }
+
+    void FrameScheduler::drainBacklogForCap()
+    {
+        if (capDrained || dispatched < static_cast<unsigned int>(maxTicksPerFrame))
+        {
+            return;
+        }
+        capDrained = true;
+        lostToCap = millisecondsBuffer / static_cast<unsigned int>(SimMillisecondsPerTick);
+        millisecondsBuffer = 0;
+    }
+
     std::size_t chooseChatCountForPacket(
         std::size_t available,
         unsigned long long sizeLimit,
