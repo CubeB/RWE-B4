@@ -9,6 +9,7 @@
 #include <rwe/ui/UiListBox.h>
 #include <rwe/ui/UiPanel.h>
 #include <rwe/ui/UiScrollBar.h>
+#include <rwe/ui/UiSlider.h>
 #include <rwe/ui/UiStagedButton.h>
 #include <string>
 #include <vector>
@@ -49,6 +50,13 @@ namespace rwe
     public:
         UiFactory(TextureService* textureService, AudioService* audioService, TdfBlock* soundLookup, AbstractVirtualFileSystem* vfs, const PathMapping* const pathMapping, int screenWidth, int screenHeight);
 
+        /** The screen, in the coordinates panels are laid out in, that new panels are kept inside. */
+        void setScreenSize(int width, int height)
+        {
+            screenWidth = width;
+            screenHeight = height;
+        }
+
         std::unique_ptr<UiPanel> panelFromGuiFile(const std::string& name, const std::string& background, const std::vector<GuiEntry>& entries);
 
         std::unique_ptr<UiPanel> panelFromGuiFile(const std::string& name);
@@ -82,6 +90,15 @@ namespace rwe
         std::unique_ptr<UiStagedButton> createStagedButton(int x, int y, int width, int height, const std::string& guiName, const std::string& name, const std::vector<std::string>& labels, unsigned int stages);
 
         /**
+         * A horizontal slider the gui data does not declare, drawn on the
+         * SLIDERS art from `guiName`, falling back to COMMONGUI's set the way
+         * a gui-declared slider does. The width and height are the caller's:
+         * a slider added beside one the data describes borrows that one's
+         * geometry.
+         */
+        std::unique_ptr<UiSlider> createSizedSlider(int x, int y, unsigned int width, unsigned int height, const std::string& guiName);
+
+        /**
          * Swaps a button declared in a GUI file for one with a different
          * number of stages, at exactly the geometry the data gave it.
          *
@@ -108,6 +125,28 @@ namespace rwe
          * for; see GameScene::addBuildingHaloButton.
          */
         void addStagedButtonBelow(UiPanel& panel, const std::string& guiName, const std::string& artName, const std::string& name, const std::string& anchorName, const std::string& aboveAnchorName, const std::vector<std::string>& labels, unsigned int stage);
+
+        /**
+         * Adds a staged button the GUI data does not contain between
+         * afterName and beforeName, shaped like afterName, and spaces the
+         * rows afterName, the new button, beforeName and lastName evenly
+         * between where afterName and lastName already are. For a page with
+         * no free row where the button belongs. Does nothing unless the
+         * panel has all three, and is idempotent.
+         */
+        void insertStagedButtonBetween(UiPanel& panel, const std::string& guiName, const std::string& artName, const std::string& name, const std::string& afterName, const std::string& beforeName, const std::string& lastName, const std::vector<std::string>& labels, unsigned int stage);
+
+        /**
+         * Adds a horizontal slider the GUI data does not contain, one row
+         * below anchorName, taking the row step from the gap between
+         * anchorName and aboveAnchorName. `templateName` is an existing
+         * slider on the page whose x, width and height are borrowed, since a
+         * slider that is not in the data has no geometry of its own. Does
+         * nothing unless the template and both anchors are present, and is
+         * idempotent. For settings TA never had a gadget for; the position
+         * is derived and wants a ui_probe confirmation.
+         */
+        void addSliderBelow(UiPanel& panel, const std::string& guiName, const std::string& name, const std::string& templateName, const std::string& anchorName, const std::string& aboveAnchorName, float percent);
 
         /**
          * A label the gui data does not declare, in the same font every label

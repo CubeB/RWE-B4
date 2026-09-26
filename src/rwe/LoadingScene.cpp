@@ -162,6 +162,8 @@ namespace rwe
 
         GameCameraState worldCameraState;
 
+        worldCameraState.density = sceneContext.sceneManager->contentScale();
+
         auto playerCommandService = std::make_unique<PlayerCommandService>();
 
         std::vector<GameNetworkService::EndpointInfo> endpointInfos;

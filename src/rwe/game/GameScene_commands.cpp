@@ -1,6 +1,7 @@
 #include "GameScene.h"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <functional>
@@ -45,7 +46,9 @@ namespace rwe
     {
         if (isCursorOverMinimap())
         {
-            auto mousePos = getMousePosition();
+            // The minimap is chrome, laid out in raw UI coordinates.
+            auto frame = getMousePosition();
+            auto mousePos = toUiCoordinates(frame.x, frame.y);
 
             auto worldToMinimap = worldToMinimapMatrix(simulation.terrain, minimapRect);
 
@@ -107,7 +110,8 @@ namespace rwe
 
     bool GameScene::isCursorOverMinimap() const
     {
-        auto mousePos = getMousePosition();
+        auto frame = getMousePosition();
+        auto mousePos = toUiCoordinates(frame.x, frame.y);
         return minimapRect.contains(mousePos.x, mousePos.y);
     }
 
@@ -130,9 +134,16 @@ namespace rwe
         float fx;
         float fy;
         sceneContext.sdl->getMouseState(&fx, &fy);
-        // Window pixels to frame pixels; see GlobalConfig::screenScale.
-        auto scale = static_cast<float>(std::max(1u, sceneContext.globalConfig->screenScale));
-        return Point(static_cast<int>(fx / scale), static_cast<int>(fy / scale));
+        // SDL reports the mouse in window coordinates; the scene is in frame
+        // pixels. See SceneManager::frameDensity.
+        auto density = sceneContext.sceneManager->frameDensity();
+        return Point(static_cast<int>(fx * density), static_cast<int>(fy * density));
+    }
+
+    Point GameScene::toUiCoordinates(int x, int y) const
+    {
+        auto ray = screenToWorldRayUtil(chromeUiRenderService.getInverseViewProjectionMatrix(), sceneContext.viewport->toClipSpace(x, y));
+        return Point(static_cast<int>(ray.origin.x), static_cast<int>(ray.origin.y));
     }
 
     std::optional<UnitId> GameScene::getFirstCollidingUnit(const Ray3f& ray) const
@@ -206,7 +217,8 @@ namespace rwe
         if (isCursorOverMinimap())
         {
             auto transform = minimapToWorldMatrix(simulation.terrain, minimapRect);
-            auto mousePos = getMousePosition();
+            auto frame = getMousePosition();
+            auto mousePos = toUiCoordinates(frame.x, frame.y);
             auto mouseX = static_cast<float>(mousePos.x) + 0.5f;
             auto mouseY = static_cast<float>(mousePos.y) + 0.5f;
 
@@ -1329,8 +1341,11 @@ namespace rwe
         auto rows = std::max(leftColumn.size(), rightColumn.size());
         const float boxWidth = (columnWidth * 2.0f) + 24.0f;
         const float boxHeight = (rows + 3) * lineHeight;
-        auto centerX = worldViewport.left() + (worldViewport.width() / 2.0f);
-        auto centerY = worldViewport.top() + (worldViewport.height() / 2.0f);
+        // Centred on the world view, but drawn through chrome, so the
+        // frame-space centre is turned back into raw UI coordinates.
+        auto uiScale = static_cast<float>(effectiveUiScale());
+        auto centerX = (worldViewport.left() + (worldViewport.width() / 2.0f)) / uiScale;
+        auto centerY = (worldViewport.top() + (worldViewport.height() / 2.0f)) / uiScale;
         auto boxX = centerX - (boxWidth / 2.0f);
         auto boxY = centerY - (boxHeight / 2.0f);
 
@@ -2524,10 +2539,22 @@ namespace rwe
             : std::nullopt;
     }
 
-    void GameScene::selectUnitsInBandbox(const DiscreteRect& box)
+    Vector2f GameScene::worldViewportToCameraPlane(const Point& p) const
     {
         const auto cameraPos = worldCameraState.getRoundedPosition();
-        auto cameraBox = box.translate(-cameraPos.x, -cameraPos.z);
+        return Vector2f(cameraPos.x + p.x / worldUiScale(), cameraPos.z + p.y / worldUiScale());
+    }
+
+    Point GameScene::cameraPlaneToWorldViewport(const Vector2f& p) const
+    {
+        const auto cameraPos = worldCameraState.getRoundedPosition();
+        return Point(
+            static_cast<int>(std::round((p.x - cameraPos.x) * worldUiScale())),
+            static_cast<int>(std::round((p.y - cameraPos.z) * worldUiScale())));
+    }
+
+    void GameScene::selectUnitsInBandbox(const DiscreteRect& box)
+    {
         const auto& matrix = computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
         std::unordered_set<UnitId> units;
 
@@ -2542,7 +2569,7 @@ namespace rwe
             const auto& worldPos = e.second.position;
             auto clipPos = matrix * simVectorToFloat(worldPos);
             Point viewportPos = worldViewport.toViewportSpace(clipPos.x, clipPos.y);
-            if (!cameraBox.contains(viewportPos))
+            if (!box.contains(viewportPos))
             {
                 continue;
             }
@@ -3451,7 +3478,8 @@ namespace rwe
 
     std::optional<std::string> GameScene::getUnitBuildButtonUnderCursor() const
     {
-        auto cursorPosition = getMousePosition();
+        auto frame = getMousePosition();
+        auto cursorPosition = toUiCoordinates(frame.x, frame.y);
         auto control = currentPanel->findAtPosition<UiStagedButton>(cursorPosition.x, cursorPosition.y);
         if (!control)
         {

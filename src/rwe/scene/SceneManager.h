@@ -13,6 +13,9 @@
 
 namespace rwe
 {
+    /** A per-output-pixel scale turned into a per-frame-pixel one; pixelSize is clamped to at least 1. */
+    float frameDensityFor(float scale, unsigned int pixelSize);
+
     class SceneManager
     {
     private:
@@ -45,14 +48,19 @@ namespace rwe
         bool screenshotRequested{false};
 
         /**
-         * GlobalConfig::screenScale, and what it needs: the window's own
-         * size in pixels, which the viewport the scenes read no longer
-         * holds at a scale above 1, and the buffer the frame is drawn into
-         * before it is blown up onto the window.
+         * GlobalConfig::pixelSize, the display's own output scale, and what
+         * they need: the window in logical points and in output pixels, the
+         * frame the scenes render at (output pixels / pixelSize), and the
+         * buffer that frame is drawn into before it is blown up onto the
+         * window.
          */
-        unsigned int screenScale{1};
-        int windowWidth{0};
-        int windowHeight{0};
+        unsigned int pixelSize{1};
+        float windowDisplayScale{1.0f};
+        float windowPixelDensity{1.0f};
+        int outputWidth{0};
+        int outputHeight{0};
+        int logicalWidth{0};
+        int logicalHeight{0};
         std::optional<FrameBufferInfo> presentationBuffer;
         int presentationBufferWidth{0};
         int presentationBufferHeight{0};
@@ -87,7 +95,26 @@ namespace rwe
          */
         void setWindowMode(const std::string& mode);
 
+        /**
+         * Frame pixels per window coordinate, which is what SDL reports the
+         * mouse in. For mapping input only: on Windows and X11 it is 1 at
+         * any desktop scale, so it says nothing about how big things look.
+         */
+        float frameDensity() const { return frameDensityFor(windowPixelDensity, pixelSize); }
+
+        /**
+         * How many frame pixels the desktop wants drawn for each pixel of an
+         * unscaled display. The world projection divides by it so a sharper
+         * display shows the same battlefield rather than more of it, and the
+         * UI's Auto scale follows it so the interface keeps its physical
+         * size. It is frameDensity only where the window is sized in points.
+         */
+        float contentScale() const { return frameDensityFor(windowDisplayScale, pixelSize); }
+
     private:
         void renderDebugWindow();
+
+        /** Re-derives the display scale, both window sizes, the frame viewport and the cursor density. */
+        void refreshWindowMetrics();
     };
 }

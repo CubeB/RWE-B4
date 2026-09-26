@@ -1,6 +1,7 @@
 #include "GlobalConfig.h"
 #include <cctype>
 #include <algorithm>
+#include <cmath>
 
 #include <rwe/util.h>
 
@@ -162,6 +163,68 @@ namespace rwe
         return mode == ShadingMode::BuildingsOnly || mode == ShadingMode::Both;
     }
 
+    std::vector<unsigned int> uiScaleStages()
+    {
+        return {0u, 100u, 200u, 300u};
+    }
+
+    std::vector<std::string> uiScaleLabels()
+    {
+        return {"UI Auto", "UI 1x", "UI 2x", "UI 3x"};
+    }
+
+    unsigned int nextUiScale(unsigned int setting)
+    {
+        auto stages = uiScaleStages();
+        auto index = uiScaleStageIndex(setting);
+        return stages[(index + 1) % stages.size()];
+    }
+
+    namespace
+    {
+        unsigned int wholeUiScale(float scale)
+        {
+            return std::clamp(static_cast<unsigned int>(std::lround(std::max(0.0f, scale))), 1u, 3u);
+        }
+    }
+
+    unsigned int uiScaleStageIndex(unsigned int setting)
+    {
+        // A percentage between the stages -- 150 and 250 were stages once --
+        // reads as the whole step it rounds to, which is also what it draws at.
+        return setting == 0u ? 0u : wholeUiScale(static_cast<float>(setting) / 100.0f);
+    }
+
+    unsigned int requestedUiScale(unsigned int setting, float contentScale)
+    {
+        return wholeUiScale(setting != 0u ? static_cast<float>(setting) / 100.0f : contentScale);
+    }
+
+    unsigned int largestFittingUiScale(int frameWidth, int frameHeight)
+    {
+        // The sidebar alone is 480 tall, so a scale that leaves less than
+        // 640x480 of layout crops the HUD rather than enlarging it.
+        return static_cast<unsigned int>(std::max(1, std::min(frameWidth / 640, frameHeight / 480)));
+    }
+
+    float resolveUiScale(unsigned int setting, float contentScale, int frameWidth, int frameHeight)
+    {
+        return static_cast<float>(std::min(requestedUiScale(setting, contentScale), largestFittingUiScale(frameWidth, frameHeight)));
+    }
+
+    float cameraZoomToSlider(unsigned int percent)
+    {
+        auto clamped = std::clamp(percent, MinCameraZoom, MaxCameraZoom);
+        return static_cast<float>(clamped - MinCameraZoom) / static_cast<float>(MaxCameraZoom - MinCameraZoom);
+    }
+
+    unsigned int cameraZoomFromSlider(float position)
+    {
+        auto span = static_cast<float>(MaxCameraZoom - MinCameraZoom);
+        auto offset = std::lround(std::clamp(position, 0.0f, 1.0f) * span);
+        return MinCameraZoom + static_cast<unsigned int>(offset);
+    }
+
     GameOptions optionsFromConfig(const GlobalConfig& config)
     {
         GameOptions options;
@@ -180,6 +243,8 @@ namespace rwe
         options.antiAlias = config.antiAlias;
         options.buildingHalo = config.buildingHalo;
         options.antiAliasUnits = config.antiAliasUnits;
+        options.cameraZoom = config.cameraZoom;
+        options.uiScale = config.uiScale;
         return options;
     }
 
@@ -214,6 +279,8 @@ namespace rwe
                                          {"anti-alias", options.antiAlias ? "true" : "false"},
                                          {"building-halo", options.buildingHalo ? "true" : "false"},
                                          {"anti-alias-units", options.antiAliasUnits ? "true" : "false"},
+                                         {"camera-zoom", std::to_string(options.cameraZoom)},
+                                         {"ui-scale", std::to_string(options.uiScale)},
                                      });
     }
 }

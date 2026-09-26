@@ -128,6 +128,27 @@ namespace rwe
             SDL_GetWindowSize(window, w, h);
         }
 
+        void getWindowSizeInPixels(SDL_Window* window, int* w, int* h)
+        {
+            SDL_GetWindowSizeInPixels(window, w, h);
+        }
+
+        /** Output pixels per window coordinate; 0.0f on failure. */
+        float getWindowPixelDensity(SDL_Window* window)
+        {
+            return SDL_GetWindowPixelDensity(window);
+        }
+
+        /**
+         * The pixel density times the desktop's content scale; 0.0f on
+         * failure. Where the window is sized in pixels (Windows, X11) the
+         * density is 1 and this carries the whole desktop scale.
+         */
+        float getWindowDisplayScale(SDL_Window* window)
+        {
+            return SDL_GetWindowDisplayScale(window);
+        }
+
         SDL_DisplayID getWindowDisplayIndex(SDL_Window* window)
         {
             return SDL_GetDisplayForWindow(window);

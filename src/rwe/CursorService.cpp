@@ -36,8 +36,8 @@ namespace rwe
         float fy;
 
         sdlContext->getMouseState(&fx, &fy);
-        int x = static_cast<int>(fx / static_cast<float>(screenScale));
-        int y = static_cast<int>(fy / static_cast<float>(screenScale));
+        int x = static_cast<int>(fx * frameDensity);
+        int y = static_cast<int>(fy * frameDensity);
 
         auto timeInMillis = timeService->getTicks();
         const auto& frames = currentCursor->sprites;
@@ -49,8 +49,8 @@ namespace rwe
         renderer.drawSprite(x, y, *(frames[frameIndex]));
     }
 
-    void CursorService::setScreenScale(unsigned int scale)
+    void CursorService::setFrameDensity(float density)
     {
-        screenScale = std::max(1u, scale);
+        frameDensity = std::max(0.0f, density);
     }
 }

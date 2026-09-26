@@ -145,7 +145,8 @@ namespace rwe
         // Along the bottom of the world view, above the panel -- where the
         // original puts TALK.GUI -- and in the font and the left margin the
         // console above it uses, so the two read as one column of text.
-        auto y = static_cast<float>(sceneContext.viewport->height() - GuiSizeBottom) - 14.0f;
+        auto y = static_cast<float>(sceneContext.viewport->height()) / static_cast<float>(effectiveUiScale())
+            - static_cast<float>(GuiSizeBottom) - 14.0f;
 
         // A blinking caret, on the wall clock rather than on scene time: the
         // bar is most wanted while the game is stalled, and scene time is

@@ -86,7 +86,18 @@ namespace rwe
          */
         const AbstractViewport* aspectViewport{nullptr};
 
+        /**
+         * Multiplier on every raw UI coordinate, so a fixed 640x480 layout
+         * can be drawn larger without moving a single gadget. It is folded
+         * into the view-projection as a scale term, and kept to whole
+         * numbers by its callers because that is what keeps the pixel art
+         * exact under GL_NEAREST. 1 is the identity.
+         */
+        float uiScale{1.0f};
+
         std::stack<Matrix4f> matrixStack{{Matrix4f::identity()}};
+
+        float effectiveUiScale() const;
 
     public:
         UiOrthoBounds getOrthoBounds() const;
@@ -94,6 +105,13 @@ namespace rwe
     public:
         UiRenderService(GraphicsContext* graphics, ShaderService* shaders, const AbstractViewport* viewport);
         UiRenderService(GraphicsContext* graphics, ShaderService* shaders, const AbstractViewport* viewport, const AbstractViewport* aspectViewport);
+
+        /**
+         * Sets the raw-coordinate multiplier; anything below 1 clamps to 1.
+         * A service with an aspect viewport ignores it: its content is
+         * already fitted to fill the window.
+         */
+        void setUiScale(float scale) { uiScale = std::max(1.0f, scale); }
 
         void fillScreen(const Color& color);
 

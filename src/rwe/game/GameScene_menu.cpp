@@ -10,6 +10,7 @@
 // every gadget lookup is a template instantiation and every caption a string.
 #include "GameScene.h"
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -54,6 +55,12 @@ namespace rwe
             {
                 label->get().setText(text);
             }
+        }
+
+        /** The camera zoom slider's readout, which has no gadget of its own. */
+        std::string formatZoomLabel(unsigned int percent)
+        {
+            return "Zoom " + std::to_string(percent) + "%";
         }
 
         /** Fills the GAMES listbox and mirrors clicks into the name box and the metadata labels. */
@@ -449,6 +456,7 @@ namespace rwe
                 addBuildingHaloButton(*panel);
             }
             addAntiAliasUnitsButton(*panel);
+            addCameraZoomSlider(*panel);
         }
     }
 
@@ -494,9 +502,49 @@ namespace rwe
         }
     }
 
+    void GameScene::addCameraZoomSlider(UiPanel& panel)
+    {
+        // Camera zoom is a horizontal slider built from the SLIDERS art, the
+        // same gadget the page's GAMMA and SCREEN controls use. It sits one
+        // row below AAUNITS, with the row step taken from the gap between
+        // AAUNITS and BSHADOWS above it, so it lands before RESTORE and UNDO
+        // without either page's coordinates appearing here. The position is
+        // derived rather than measured and wants a ui_probe confirmation.
+        uiFactory.addSliderBelow(panel, "VISUALRT", "CAMZOOM", "GAMMA", "AAUNITS", "BSHADOWS", cameraZoomToSlider(cameraZoomSetting));
+
+        auto slider = panel.find<UiScrollBar>("CAMZOOM");
+        if (!slider || panel.find<UiLabel>("CAMZOOMVAL"))
+        {
+            return;
+        }
+
+        // A slider carries no text, so the percentage gets a label just above
+        // it in the same font every gui label uses.
+        auto& s = slider->get();
+        auto label = uiFactory.createLabel(s.getX(), s.getY() - 14, static_cast<int>(s.getWidth()), 12, formatZoomLabel(cameraZoomSetting), UiLabel::Alignment::Left);
+        label->setName("CAMZOOMVAL");
+        panel.appendChild(std::move(label));
+    }
+
+    void GameScene::addUiScaleButton(UiPanel& panel)
+    {
+        // How big the interface is drawn, another gadget no GUI file has, on
+        // the interface page with the other legibility controls. SPEEDSRT has
+        // no free row for it: LEFTCLICK is at 219 and RESTORE at 269, with
+        // UNDO at 304 and the page ending at 352. A row below LEFTCLICK
+        // stepped from UNITCHAT (at 101) landed at 337, under both. So it
+        // goes between LEFTCLICK and RESTORE, and those four rows are spread
+        // evenly between LEFTCLICK and UNDO: 219, 247, 276, 304.
+        uiFactory.insertStagedButtonBetween(panel, "SPEEDSRT", "SHADINGMODE", "UISCALE", "LEFTCLICK", "RESTORE", "UNDO", uiScaleLabels(), uiScaleStageIndex(uiScaleSetting));
+    }
+
     void GameScene::wireInGameOptionControls()
     {
         widenShadingButton();
+        for (auto& panel : gameMenuPanels)
+        {
+            addUiScaleButton(*panel);
+        }
 
         auto state = currentInGameOptions();
 
@@ -554,6 +602,21 @@ namespace rwe
                 // The original's twenty steps of 0.5 + v/24: 0.5x to 1.333x.
                 gammaSetting = 50u + static_cast<unsigned int>(v * 83.0f);
                 applyGamma();
+            });
+            bar->addSubscription(std::move(sub));
+        }
+
+        // Camera zoom. The setting is live, eased into the camera each frame
+        // by update().
+        if (auto bar = findInGameMenu<UiScrollBar>("CAMZOOM"))
+        {
+            bar->setScrollPercent(cameraZoomToSlider(cameraZoomSetting));
+            auto sub = bar->scrollChanged().subscribe([this](float v) {
+                cameraZoomSetting = cameraZoomFromSlider(v);
+                if (auto label = findInGameMenu<UiLabel>("CAMZOOMVAL"))
+                {
+                    label->setText(formatZoomLabel(cameraZoomSetting));
+                }
             });
             bar->addSubscription(std::move(sub));
         }
@@ -673,7 +736,9 @@ namespace rwe
             antiAliasEnabled,
             buildingHaloEnabled,
             antiAliasUnitsEnabled,
-            musicTrackTypes};
+            musicTrackTypes,
+            cameraZoomSetting,
+            uiScaleSetting};
     }
 
     void GameScene::applyInGameOptions(const GameOptions& state)
@@ -689,6 +754,8 @@ namespace rwe
         unitSpeechSetting = state.unitSpeech;
         musicTrackModeSetting = state.musicTrackMode;
         musicTrackTypes = state.musicTrackTypes;
+        cameraZoomSetting = state.cameraZoom;
+        uiScaleSetting = state.uiScale;
         rebuildMusicMoods();
         audio->setSoundEnabled(state.soundMode != SoundMode::Off);
         gammaSetting = state.gamma;
@@ -1022,6 +1089,11 @@ namespace rwe
             {
                 antiAliasUnitsEnabled = !antiAliasUnitsEnabled;
             }
+            else if (control == "UISCALE")
+            {
+                uiScaleSetting = nextUiScale(uiScaleSetting);
+                reportUiScaleFit();
+            }
             else if (control == "MODE")
             {
                 // Off | Mono | 3D, cycled by the button itself.
@@ -1149,6 +1221,18 @@ namespace rwe
         if (auto toggle = findInGameMenu<UiStagedButton>("AAUNITS"))
         {
             toggle->setStage(antiAliasUnitsEnabled ? 1 : 0);
+        }
+        if (auto bar = findInGameMenu<UiScrollBar>("CAMZOOM"))
+        {
+            bar->setScrollPercent(cameraZoomToSlider(cameraZoomSetting));
+        }
+        if (auto label = findInGameMenu<UiLabel>("CAMZOOMVAL"))
+        {
+            label->setText(formatZoomLabel(cameraZoomSetting));
+        }
+        if (auto toggle = findInGameMenu<UiStagedButton>("UISCALE"))
+        {
+            toggle->setStage(uiScaleStageIndex(uiScaleSetting));
         }
         if (auto bar = findInGameMenu<UiScrollBar>("FXVOL"))
         {

@@ -62,12 +62,21 @@ namespace rwe
 
         std::shared_ptr<SpriteSeries> getCursor(CursorType type) const;
 
+        /**
+         * Not rescaled by the UI scale: the sprite hotspot is in cursor art
+         * pixels, and keeping it exact matters more than a cursor a little
+         * small on a high-density display.
+         */
         void render(UiRenderService& renderer) const;
 
-        /** See GlobalConfig::screenScale: the mouse is in window pixels, the frame is not. */
-        void setScreenScale(unsigned int scale);
+        /**
+         * See SceneManager::frameDensity: SDL reports the mouse in window
+         * coordinates, and the frame the cursor is drawn into is
+         * frameDensity frame pixels per coordinate.
+         */
+        void setFrameDensity(float density);
 
     private:
-        unsigned int screenScale{1};
+        float frameDensity{1.0f};
     };
 }

@@ -106,6 +106,45 @@ namespace rwe
     bool shadingModeCoversUnits(ShadingMode mode);
     bool shadingModeCoversBuildings(ShadingMode mode);
 
+    /** The four UI scale stages, in button order: Auto, 100, 200 and 300 percent. */
+    std::vector<unsigned int> uiScaleStages();
+
+    /** The label each UI scale stage shows; the active stage's label is the readout. */
+    std::vector<std::string> uiScaleLabels();
+
+    /** The next UI scale stage, wrapping, from the stage uiScaleStageIndex reads the setting as. */
+    unsigned int nextUiScale(unsigned int setting);
+
+    /** The stage index for a UI scale setting; a percentage between stages reads as the nearest, 1x to 3x. */
+    unsigned int uiScaleStageIndex(unsigned int setting);
+
+    /**
+     * Turns a UI scale setting into the whole-number scale to draw at. Auto
+     * (0) follows the content scale, rounded, so on a 2x display the
+     * interface is physically the same size as on a 1x one; an explicit
+     * percentage rounds to the nearest whole step. Both are clamped to 1..3,
+     * and then to the largest scale at which the 640x480 layout still fits
+     * the frame, never below 1. Whole numbers only: the art is sampled
+     * GL_NEAREST, and at 1.5x alternate art pixels come out one and two
+     * screen pixels wide.
+     */
+    float resolveUiScale(unsigned int setting, float contentScale, int frameWidth, int frameHeight);
+
+    constexpr unsigned int MinCameraZoom = 50;
+    constexpr unsigned int MaxCameraZoom = 300;
+
+    /** A camera zoom percentage as a slider position, 0 at MinCameraZoom and 1 at MaxCameraZoom. */
+    float cameraZoomToSlider(unsigned int percent);
+
+    /** A slider position as a whole camera zoom percentage, clamped to the range. */
+    unsigned int cameraZoomFromSlider(float position);
+
+    /** resolveUiScale before the fit: the whole step the setting asks for, 1..3. */
+    unsigned int requestedUiScale(unsigned int setting, float contentScale);
+
+    /** The largest whole UI scale at which the 640x480 layout fits the frame, never below 1. */
+    unsigned int largestFittingUiScale(int frameWidth, int frameHeight);
+
     class GlobalConfig
     {
     public:
@@ -138,7 +177,7 @@ namespace rwe
         bool vehicleShadows{true};
 
         /**
-         * How many screen pixels one game pixel is drawn as, 1 to 4. The
+         * How many output pixels one game pixel is drawn as, 1 to 4. The
          * original ran at 640x480 and, stretched across a modern display,
          * shows each of its pixels about two screen pixels wide; RWE draws
          * one to one, so its one-pixel wireframe and selection box read as
@@ -147,12 +186,40 @@ namespace rwe
          * nearest-neighbour sampling, and mouse input is mapped back
          * through the same factor. The world's own 2x supersample and the
          * building halo filter happen inside that frame, so they look the
-         * same as at 1, only larger. An rwe.cfg key, screen-scale.
+         * same as at 1, only larger.
+         *
+         * This is the retro chunky-pixels option and a cheap performance
+         * lever -- not a resolution control. It is deliberately not what
+         * makes a high-density display legible: that is a separate UI scale,
+         * and turning this up instead throws the display's sharpness away
+         * for everything on screen. An rwe.cfg key, pixel-size.
          */
-        unsigned int screenScale{1};
+        unsigned int pixelSize{1};
 
         /** Screen scroll speed percentage, 25 to 200; 100 is the old fixed rate. */
         unsigned int scrollSpeed{100};
+
+        /**
+         * Camera zoom as a percentage, MinCameraZoom to MaxCameraZoom (50 to
+         * 300); 100 is the original view.
+         * It is how much battlefield is visible -- the world projection
+         * divides by it -- and is deliberately distinct from pixelSize,
+         * which changes how chunky the pixels are rather than how much world
+         * they show. Stored globally as camera-zoom.
+         */
+        unsigned int cameraZoom{100};
+
+        /**
+         * How big the interface is drawn, as a percentage: 0 Auto, or 100,
+         * 200, 300. Auto follows the display density, so on a high-density
+         * display the interface is physically the same size as it was on a
+         * 1x one. It is deliberately distinct from both cameraZoom (how much
+         * battlefield is visible) and pixelSize (how chunky everything is):
+         * this is the legibility control. Whole steps only, because the art
+         * is sampled GL_NEAREST; see resolveUiScale. Stored globally as
+         * ui-scale.
+         */
+        unsigned int uiScale{0};
 
         /**
          * How long a peer of a network game may go quiet before the rest
@@ -351,8 +418,14 @@ namespace rwe
         bool buildingHalo{true};
         bool antiAliasUnits{false};
 
-        /** The per-track types, as GlobalConfig::musicTrackTypes. Last so the positional initialisers above keep working. */
+        /** The per-track types, as GlobalConfig::musicTrackTypes. */
         std::vector<unsigned int> musicTrackTypes{};
+
+        /** Camera zoom percentage; last so adding it left the positional initialisers above valid. */
+        unsigned int cameraZoom{100};
+
+        /** UI scale setting as a percentage: 0 Auto, or 100, 200, 300. Final field. */
+        unsigned int uiScale{0};
     };
 
     /** The settings as the config file last left them. */

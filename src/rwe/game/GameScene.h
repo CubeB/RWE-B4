@@ -145,9 +145,9 @@ namespace rwe
         struct SelectingState
         {
             SceneTime startTime;
-            Point startPosition;
-            explicit SelectingState(SceneTime startTime, const Point& startPosition) : startTime(startTime), startPosition(startPosition) {}
-            SelectingState(int x, int y) : startPosition(x, y) {}
+            /** On the camera plane in world units, so it stays put while the camera scrolls or zooms. */
+            Vector2f startPosition;
+            explicit SelectingState(SceneTime startTime, const Vector2f& startPosition) : startTime(startTime), startPosition(startPosition) {}
             bool operator==(const SelectingState& rhs) const
             {
                 return startTime == rhs.startTime && startPosition == rhs.startPosition;
@@ -282,6 +282,12 @@ namespace rwe
         /** palettes/PALETTE.ALP; the building halo in worldPost.frag reads it. */
         SharedTextureHandle alphaTableTexture;
 
+        /**
+         * The in-world overlays -- selection boxes, waypoint lines, unit
+         * health bars, cloak radius -- are deliberately not scaled with the
+         * UI: their positions come from the world projection, so a scale on
+         * this service would move them off the things they annotate.
+         */
         UiRenderService worldUiRenderService;
         UiRenderService chromeUiRenderService;
 
@@ -665,6 +671,30 @@ namespace rwe
         void widenShadingButton();
         void addBuildingHaloButton(UiPanel& panel);
         void addAntiAliasUnitsButton(UiPanel& panel);
+        void addCameraZoomSlider(UiPanel& panel);
+        void addUiScaleButton(UiPanel& panel);
+
+        /** Applies effectiveUiScale to the chrome projection and to the screen new panels are kept inside. */
+        void syncUiScale();
+
+        /** Says on the console when the window is too small for the UI scale asked for, which is otherwise silent. */
+        void reportUiScaleFit();
+
+        /**
+         * The scale to draw chrome at this frame: the staged setting resolved
+         * against the content scale and the frame, so Auto follows a
+         * high-density display and no setting crops the HUD. Re-read every
+         * frame because a monitor move or a resize can change either under
+         * a running game.
+         */
+        float effectiveUiScale() const
+        {
+            return resolveUiScale(
+                uiScaleSetting,
+                sceneContext.sceneManager->contentScale(),
+                sceneContext.viewport->width(),
+                sceneContext.viewport->height());
+        }
 
         /** Finds a control by name across every open menu panel. */
         template <typename T>
@@ -694,6 +724,9 @@ namespace rwe
         unsigned int buildingHaloSaturation{65};
         unsigned int buildingHaloRedShift{50};
         unsigned int scrollSpeedSetting{100};
+        unsigned int cameraZoomSetting{100};
+        /** The staged UI scale as a percentage: 0 Auto, or 100 to 300. See GlobalConfig::uiScale. */
+        unsigned int uiScaleSetting{0};
 
         /** What this game was started with, kept for the save-game header. */
         GameParameters gameParameters;
@@ -1147,6 +1180,9 @@ namespace rwe
          */
         int appliedLeftInset{GuiSizeLeft};
 
+        /** The effective UI scale the last world inset was built for. */
+        float appliedUiScale{0.0f};
+
         FrameBufferInfo worldFrameBuffer;
 
         TextureHandle dodgeMask;
@@ -1569,6 +1605,15 @@ namespace rwe
 
         Point getMousePosition() const;
 
+        /**
+         * A point in frame pixels turned into raw UI coordinates by inverting
+         * the chrome projection. This is the one conversion for everything
+         * the interface tests against: panels, the minimap and the build
+         * buttons are all laid out in raw 640x480 space and are drawn through
+         * the scaled projection. World logic keeps frame-space points.
+         */
+        Point toUiCoordinates(int x, int y) const;
+
         std::optional<UnitId> getFirstCollidingUnit(const Ray3f& ray) const;
         std::optional<FeatureId> getFirstCollidingFeature(const Ray3f& ray) const;
 
@@ -1909,6 +1954,16 @@ namespace rwe
         void drawWaypointTrail(const Matrix4f& worldToUi, const SimVector& from, const SimVector& to);
 
         void renderBuildBoxes(UnitId unitId, const UnitState& unit, const Color& outerColor, const Color& innerColor);
+
+        /**
+         * World units to UI pixels for worldUiRenderService: one world unit
+         * spans zoom * density UI pixels there, so world-space dimensions
+         * passed to it must be multiplied by this to keep their true size.
+         */
+        float worldUiScale() const { return worldCameraState.zoom * worldCameraState.density; }
+
+        Vector2f worldViewportToCameraPlane(const Point& p) const;
+        Point cameraPlaneToWorldViewport(const Vector2f& p) const;
 
         /**
          * The white ring the v3.1 patch draws around a cloaked unit while

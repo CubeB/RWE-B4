@@ -254,10 +254,14 @@ namespace rwe
           buildingHaloSaturation(sceneContext.globalConfig->buildingHaloSaturation),
           buildingHaloRedShift(sceneContext.globalConfig->buildingHaloRedShift),
           scrollSpeedSetting(sceneContext.globalConfig->scrollSpeed),
+          cameraZoomSetting(sceneContext.globalConfig->cameraZoom),
+          uiScaleSetting(sceneContext.globalConfig->uiScale),
           gameParameters(gameParameters),
           audioLookup(audioLookup),
           stateLogStream(std::move(stateLogStream))
     {
+        worldCameraState.zoom = static_cast<float>(cameraZoomSetting) / 100.0f;
+
         if (this->gameParameters.aiArenaSeconds)
         {
             // One row every ten seconds of game time: the interesting thing
@@ -292,8 +296,37 @@ namespace rwe
         audioSub->unsubscribe();
     }
 
+    void GameScene::syncUiScale()
+    {
+        auto scale = effectiveUiScale();
+        chromeUiRenderService.setUiScale(scale);
+        uiFactory.setScreenSize(
+            static_cast<int>(static_cast<float>(sceneContext.viewport->width()) / scale),
+            static_cast<int>(static_cast<float>(sceneContext.viewport->height()) / scale));
+    }
+
+    void GameScene::reportUiScaleFit()
+    {
+        auto width = sceneContext.viewport->width();
+        auto height = sceneContext.viewport->height();
+        auto requested = requestedUiScale(uiScaleSetting, sceneContext.sceneManager->contentScale());
+        auto fits = largestFittingUiScale(width, height);
+        if (requested <= fits)
+        {
+            return;
+        }
+
+        printConsole(
+            "UI " + std::to_string(requested) + "x needs " + std::to_string(640 * requested) + "x" + std::to_string(480 * requested)
+                + " pixels; the window has " + std::to_string(width) + "x" + std::to_string(height)
+                + ", so the UI stays at " + std::to_string(fits) + "x",
+            Color(252, 252, 0));
+    }
+
     void GameScene::init()
     {
+        syncUiScale();
+        reportUiScaleFit();
         setCrashScene("GameScene");
         setCrashMap(gameParameters.mapName.c_str());
 
@@ -368,8 +401,11 @@ namespace rwe
     {
         // The panel's live bounds, not its resting ones: once it has started
         // moving the cursor is no longer on it, which is what keeps a held
-        // Space from arguing with itself part way through the slide.
-        auto p = getMousePosition();
+        // Space from arguing with itself part way through the slide. The
+        // panel is laid out in raw UI coordinates; the mouse arrives in frame
+        // pixels.
+        auto frame = getMousePosition();
+        auto p = toUiCoordinates(frame.x, frame.y);
         auto x = currentPanel->getX();
         auto y = currentPanel->getY();
         return p.x >= x
@@ -463,8 +499,12 @@ namespace rwe
         // panel is home again, costs two reallocations per round trip and
         // means the panel always slides across a world that is already drawn
         // underneath it.
-        auto desiredLeft = panelSlide > 0.0f ? 0 : GuiSizeLeft;
-        if (desiredLeft != appliedLeftInset)
+        // The HUD is laid out in raw UI coordinates, which the chrome
+        // projection scales up by uiScale; the world inset is in frame
+        // pixels, so the GuiSize constants are scaled with it.
+        auto scale = effectiveUiScale();
+        auto desiredLeft = panelSlide > 0.0f ? 0 : static_cast<int>(std::lround(GuiSizeLeft * scale));
+        if (desiredLeft != appliedLeftInset || scale != appliedUiScale)
         {
             // The wider viewport re-centres on the camera, which would drag
             // every world pixel sideways with it. Moving the camera by half
@@ -472,7 +512,12 @@ namespace rwe
             // panel has left.
             worldCameraState.position.x -= panelSlideCameraShift(appliedLeftInset, desiredLeft, worldCameraState.zoom);
             appliedLeftInset = desiredLeft;
-            worldViewport.setInset(desiredLeft, GuiSizeTop, GuiSizeRight, GuiSizeBottom);
+            appliedUiScale = scale;
+            worldViewport.setInset(
+                desiredLeft,
+                static_cast<int>(std::lround(GuiSizeTop * scale)),
+                static_cast<int>(std::lround(GuiSizeRight * scale)),
+                static_cast<int>(std::lround(GuiSizeBottom * scale)));
             recreateWorldRenderTextures();
         }
     }
@@ -488,6 +533,10 @@ namespace rwe
         {
             scenarioDriver->beforeTick(scenarioTick);
         }
+
+        // The world inset follows in updatePanelSlide, once the panel's own
+        // slide has been worked out.
+        syncUiScale();
 
         // The battle harness, if one was asked for: keep both sides at
         // strength and send every replacement at the enemy. Gated on the
@@ -540,6 +589,14 @@ namespace rwe
         {
             millisecondsBuffer += (millisecondsElapsed * gameSpeed.perMille()) / 1000;
         }
+
+        // Ease the live zoom toward the setting rather than jumping, and do it
+        // before the constraint so it is computed against the current extent.
+        worldCameraState.zoom = advanceCameraZoom(worldCameraState.zoom, static_cast<float>(cameraZoomSetting) / 100.0f, millisecondsElapsed);
+
+        // A monitor move can change the density mid-game, so re-read it each
+        // frame and let the constraint below follow it live.
+        worldCameraState.density = sceneContext.sceneManager->contentScale();
 
         auto cameraConstraint = computeCameraConstraint(simulation.terrain, worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()));
 
@@ -601,7 +658,8 @@ namespace rwe
             if (std::holds_alternative<NormalCursorMode::DraggingMinimapState>(cursor->state))
             {
                 auto minimapToWorld = minimapToWorldMatrix(simulation.terrain, minimapRect);
-                auto mousePos = getMousePosition();
+                auto frame = getMousePosition();
+                auto mousePos = toUiCoordinates(frame.x, frame.y);
                 auto worldPos = minimapToWorld * Vector3f(static_cast<float>(mousePos.x) + 0.5f, static_cast<float>(mousePos.y) + 0.5, 0.0f);
 
                 relocateCamera(cameraConstraint, worldPos.x, worldPos.z);

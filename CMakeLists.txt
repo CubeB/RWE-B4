@@ -1038,6 +1038,7 @@ set(TEST_FILES
     src/rwe/io/tad/tad_writer.test.cpp
     src/rwe/io/pcx/pcx.test.cpp
     src/rwe/io/malformed_input.test.cpp
+    src/rwe/scene/SceneManager.test.cpp
     src/rwe/scene/Screenshot.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp
     src/rwe/io/fbi/transportcapacity.test.cpp
@@ -1068,6 +1069,7 @@ set(TEST_FILES
     src/rwe/game/missionscripts.test.cpp
     src/rwe/game/wake.test.cpp
     src/rwe/game/viewcull.test.cpp
+    src/rwe/game/GameCameraState.test.cpp
     src/rwe/game/animationclock.test.cpp
     src/rwe/sim/buildangle.test.cpp
     src/rwe/sim/buildtime.test.cpp

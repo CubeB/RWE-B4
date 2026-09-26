@@ -190,7 +190,9 @@ namespace rwe
         else if (keysym.key >= SDLK_F5 && keysym.key <= SDLK_F8)
         {
             // F5-F8 recall the camera bookmarks; with Ctrl held they store
-            // the current view instead, as the original does.
+            // the current view instead, as the original does. A bookmark
+            // holds the position only: recalling one deliberately leaves the
+            // current zoom alone.
             auto slot = static_cast<std::size_t>(keysym.key - SDLK_F5);
             if (isCtrlDown())
             {
@@ -555,16 +557,24 @@ namespace rwe
             return;
         }
 
+        // The UI is drawn through a scaled projection, so a panel takes its
+        // events in raw UI coordinates. The world logic below keeps the
+        // frame-space event.
         if (isGameMenuOpen())
         {
+            auto ui = toUiCoordinates(event.x, event.y);
+            MouseButtonEvent uiEvent(ui.x, ui.y, event.button);
             for (auto& panel : gameMenuPanels)
             {
-                panel->mouseDown(event);
+                panel->mouseDown(uiEvent);
             }
             return;
         }
 
-        currentPanel->mouseDown(event);
+        {
+            auto ui = toUiCoordinates(event.x, event.y);
+            currentPanel->mouseDown(MouseButtonEvent(ui.x, ui.y, event.button));
+        }
 
         // Debug placing mode: clicks drop units on the map instead of
         // selecting and ordering, so a test scenario can be set up quickly.
@@ -886,11 +896,8 @@ namespace rwe
                     }
                     else if (isCursorOverWorld())
                     {
-                        Point p(event.x, event.y);
-                        auto worldViewportPos = sceneContext.viewport->toOtherViewport(worldViewport, p);
-                        const auto cameraPosition = worldCameraState.getRoundedPosition();
-                        Point originRelativePos(cameraPosition.x + worldViewportPos.x, cameraPosition.z + worldViewportPos.y);
-                        cursorMode.next(NormalCursorMode{NormalCursorMode::SelectingState(sceneTime, originRelativePos)});
+                        auto worldViewportPos = sceneContext.viewport->toOtherViewport(worldViewport, Point(event.x, event.y));
+                        cursorMode.next(NormalCursorMode{NormalCursorMode::SelectingState(sceneTime, worldViewportToCameraPlane(worldViewportPos))});
                     }
                 });
         }
@@ -998,14 +1005,19 @@ namespace rwe
 
         if (isGameMenuOpen())
         {
+            auto ui = toUiCoordinates(event.x, event.y);
+            MouseButtonEvent uiEvent(ui.x, ui.y, event.button);
             for (auto& panel : gameMenuPanels)
             {
-                panel->mouseUp(event);
+                panel->mouseUp(uiEvent);
             }
             return;
         }
 
-        currentPanel->mouseUp(event);
+        {
+            auto ui = toUiCoordinates(event.x, event.y);
+            currentPanel->mouseUp(MouseButtonEvent(ui.x, ui.y, event.button));
+        }
 
         if (event.button == MouseButtonEvent::MouseButton::Left)
         {
@@ -1015,12 +1027,10 @@ namespace rwe
                     match(
                         normalCursor.state,
                         [&](const NormalCursorMode::SelectingState& state) {
-                            Point p(event.x, event.y);
-                            auto worldViewportPos = sceneContext.viewport->toOtherViewport(worldViewport, p);
-                            const auto cameraPosition = worldCameraState.getRoundedPosition();
-                            Point originRelativePos(cameraPosition.x + worldViewportPos.x, cameraPosition.z + worldViewportPos.y);
+                            auto worldViewportPos = sceneContext.viewport->toOtherViewport(worldViewport, Point(event.x, event.y));
+                            auto startViewportPos = cameraPlaneToWorldViewport(state.startPosition);
 
-                            if (sceneTime - state.startTime < SceneTime(30) && state.startPosition.maxSingleDimensionDistance(originRelativePos) < 32)
+                            if (sceneTime - state.startTime < SceneTime(30) && startViewportPos.maxSingleDimensionDistance(worldViewportPos) < 32)
                             {
                                 if (hoveredUnit && getUnit(*hoveredUnit).isSelectableBy(simulation.unitDefinitions.at(getUnit(*hoveredUnit).unitType), localPlayerId))
                                 {
@@ -1059,7 +1069,7 @@ namespace rwe
                             }
                             else
                             {
-                                selectUnitsInBandbox(DiscreteRect::fromPoints(state.startPosition, originRelativePos));
+                                selectUnitsInBandbox(DiscreteRect::fromPoints(startViewportPos, worldViewportPos));
                             }
 
                             cursorMode.next(NormalCursorMode{NormalCursorMode::UpState()});
@@ -1197,9 +1207,11 @@ namespace rwe
 
         if (isGameMenuOpen())
         {
+            auto ui = toUiCoordinates(event.x, event.y);
+            MouseMoveEvent uiEvent(ui.x, ui.y);
             for (auto& panel : gameMenuPanels)
             {
-                panel->mouseMove(event);
+                panel->mouseMove(uiEvent);
             }
             return;
         }
@@ -1218,11 +1230,17 @@ namespace rwe
 
             middleMousePanningState->previousCursorPosition = currentCursorPosition;
         }
-        currentPanel->mouseMove(event);
+
+        {
+            auto ui = toUiCoordinates(event.x, event.y);
+            currentPanel->mouseMove(MouseMoveEvent(ui.x, ui.y));
+        }
     }
 
     void GameScene::onMouseWheel(MouseWheelEvent event)
     {
+        // A wheel event carries scroll amounts rather than a position, so
+        // there is nothing to convert.
         if (endGameChartVisible() && endGameCampaignPanel && !isGameMenuOpen())
         {
             endGameCampaignPanel->mouseWheel(event);

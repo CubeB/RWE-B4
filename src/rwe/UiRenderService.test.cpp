@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
 #include <rwe/UiRenderService.h>
+#include <rwe/math/Vector3f.h>
 #include <rwe/render/SpriteSeries.h>
 
 namespace rwe
@@ -167,6 +168,76 @@ namespace rwe
             auto b = computeUiOrthoBounds(w, h, 1920.0f, 0.0f);
             REQUIRE(b.left == Catch::Approx(0.0f));
             REQUIRE(b.right == Catch::Approx(640.0f));
+            REQUIRE(b.top == Catch::Approx(0.0f));
+            REQUIRE(b.bottom == Catch::Approx(480.0f));
+        }
+    }
+
+    TEST_CASE("UiRenderService UI scale", "[ui]")
+    {
+        // These only ask the view-projection, which does not touch the
+        // graphics context, so null services are enough.
+        Viewport frame(0, 0, 1280, 960);
+        UiRenderService service(nullptr, nullptr, &frame);
+
+        SECTION("at 1x the bounds and projection are the viewport's own")
+        {
+            auto b = service.getOrthoBounds();
+            REQUIRE(b.left == Catch::Approx(0.0f));
+            REQUIRE(b.right == Catch::Approx(1280.0f));
+            REQUIRE(b.top == Catch::Approx(0.0f));
+            REQUIRE(b.bottom == Catch::Approx(960.0f));
+
+            auto expected = Matrix4f::orthographicProjection(0.0f, 1280.0f, 960.0f, 0.0f, 100.0f, -100.0f);
+            REQUIRE(service.getViewProjectionMatrix() == expected);
+        }
+
+        SECTION("a scale below one clamps to one")
+        {
+            service.setUiScale(0.0f);
+            REQUIRE(service.getViewProjectionMatrix() == Matrix4f::orthographicProjection(0.0f, 1280.0f, 960.0f, 0.0f, 100.0f, -100.0f));
+        }
+
+        SECTION("no aspect viewport: the raw centre maps to the physical centre at 2x")
+        {
+            service.setUiScale(2.0f);
+            // The box is unchanged; the scale lives in the matrix, so raw
+            // coordinates up to viewport/uiScale fill the frame.
+            auto b = service.getOrthoBounds();
+            REQUIRE(b.right == Catch::Approx(1280.0f));
+            REQUIRE(b.bottom == Catch::Approx(960.0f));
+
+            // Raw content up to viewport/uiScale fills the frame, so the raw
+            // centre is half of that.
+            auto clip = service.getViewProjectionMatrix() * Vector3f(320.0f, 240.0f, 0.0f);
+            REQUIRE(clip.x == Catch::Approx(0.0f));
+            REQUIRE(clip.y == Catch::Approx(0.0f));
+        }
+
+        SECTION("no aspect viewport: the inverse round trips a raw point at 3x")
+        {
+            service.setUiScale(3.0f);
+            auto forward = service.getViewProjectionMatrix();
+            auto inverse = service.getInverseViewProjectionMatrix();
+
+            Vector3f raw(123.0f, 234.0f, 0.0f);
+            auto back = inverse * (forward * raw);
+            REQUIRE(back.x == Catch::Approx(raw.x));
+            REQUIRE(back.y == Catch::Approx(raw.y));
+        }
+
+        SECTION("an aspect viewport ignores the scale")
+        {
+            Viewport content(0, 0, 640, 480);
+            Viewport window(0, 0, 1920, 1080);
+            UiRenderService aspect(nullptr, nullptr, &content, &window);
+            auto unscaled = aspect.getViewProjectionMatrix();
+            aspect.setUiScale(2.0f);
+
+            // The content already fills the window; a scale on top of the
+            // fit would draw it past the edges.
+            REQUIRE(aspect.getViewProjectionMatrix() == unscaled);
+            auto b = aspect.getOrthoBounds();
             REQUIRE(b.top == Catch::Approx(0.0f));
             REQUIRE(b.bottom == Catch::Approx(480.0f));
         }

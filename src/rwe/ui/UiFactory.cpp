@@ -1,5 +1,6 @@
 #include "UiFactory.h"
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <rwe/ui/UiSlider.h>
 #include <rwe/ui/UiTextBox.h>
@@ -413,6 +414,92 @@ namespace rwe
         button->setName(name);
         button->setStage(stage);
         panel.appendChild(std::move(button));
+    }
+
+    void UiFactory::insertStagedButtonBetween(UiPanel& panel, const std::string& guiName, const std::string& artName, const std::string& name, const std::string& afterName, const std::string& beforeName, const std::string& lastName, const std::vector<std::string>& labels, unsigned int stage)
+    {
+        auto after = panel.find<UiStagedButton>(afterName);
+        auto before = panel.find<UiStagedButton>(beforeName);
+        auto last = panel.find<UiStagedButton>(lastName);
+        if (!after || !before || !last || panel.find<UiStagedButton>(name))
+        {
+            return;
+        }
+
+        auto& afterButton = after->get();
+        auto firstY = afterButton.getY();
+        auto lastY = last->get().getY();
+
+        auto button = createStagedButton(
+            afterButton.getX(),
+            firstY,
+            static_cast<int>(afterButton.getWidth()),
+            static_cast<int>(afterButton.getHeight()),
+            guiName,
+            artName,
+            labels,
+            static_cast<unsigned int>(labels.size()));
+        button->setName(name);
+        button->setStage(stage);
+        auto& inserted = *button;
+        panel.appendChild(std::move(button));
+
+        // Four rows, three gaps: the first and last rows stay put.
+        auto step = static_cast<float>(lastY - firstY) / 3.0f;
+        inserted.setY(firstY + static_cast<int>(std::lround(step)));
+        before->get().setY(firstY + static_cast<int>(std::lround(step * 2.0f)));
+    }
+
+    void UiFactory::addSliderBelow(UiPanel& panel, const std::string& guiName, const std::string& name, const std::string& templateName, const std::string& anchorName, const std::string& aboveAnchorName, float percent)
+    {
+        // The same derived-placement and anchor guard as addStagedButtonBelow,
+        // for a slider instead of a button. The template supplies the x,
+        // width and height because the slider is not in the GUI data and so
+        // has no geometry of its own; either the page carries all three or
+        // this stays off it.
+        auto templ = panel.find<UiScrollBar>(templateName);
+        auto anchor = panel.find<UiStagedButton>(anchorName);
+        auto above = panel.find<UiStagedButton>(aboveAnchorName);
+        if (!templ || !anchor || !above)
+        {
+            return;
+        }
+
+        if (panel.find<UiScrollBar>(name))
+        {
+            return;
+        }
+
+        auto& t = templ->get();
+        auto rowStep = anchor->get().getY() - above->get().getY();
+
+        auto slider = createSizedSlider(
+            t.getX(),
+            anchor->get().getY() + rowStep,
+            t.getWidth(),
+            t.getHeight(),
+            guiName);
+        slider->setName(name);
+        slider->setScrollPercent(percent);
+        panel.appendChild(std::move(slider));
+    }
+
+    std::unique_ptr<UiSlider>
+    UiFactory::createSizedSlider(int x, int y, unsigned int width, unsigned int height, const std::string& guiName)
+    {
+        auto sprites = textureService->getGuiTexture(guiName, "SLIDERS");
+        if (!sprites)
+        {
+            // The page's own GAF carries no SLIDERS entry; the common set
+            // stands in, as it does for a gui-declared slider.
+            sprites = textureService->getGuiTexture("COMMONGUI", "SLIDERS");
+        }
+        if (!sprites)
+        {
+            throw std::runtime_error("Missing SLIDERS gaf entry");
+        }
+
+        return std::make_unique<UiSlider>(x, y, width, height, *sprites);
     }
 
     std::unique_ptr<UiStagedButton>
@@ -918,7 +1005,13 @@ namespace rwe
         }
         for (unsigned int i = stagesToCopyCount; i < stages; ++i)
         {
-            normalSprites.push_back(defaultSprite);
+            // More stages than the art carries: borrow the faces again
+            // rather than fall to the blank default. The stage faces are
+            // interchangeable (the label is what distinguishes them), so a
+            // cycle keeps every stage looking like the button it is. The UI
+            // scale's six stages need this; without it the top two were
+            // text on a blank plate.
+            normalSprites.push_back(stagesPresentCount > 0 ? sprites[i % stagesPresentCount] : defaultSprite);
         }
         assert(normalSprites.size() == stages);
 

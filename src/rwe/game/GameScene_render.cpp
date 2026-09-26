@@ -1,6 +1,7 @@
 #include "GameScene.h"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <functional>
@@ -161,6 +162,11 @@ namespace rwe
     {
         renderMinimap();
 
+        // The HUD is laid out in raw UI coordinates, which the chrome
+        // projection scales up; anything here taken from the frame-space
+        // viewport has to come back down before it is drawn.
+        const auto uiScale = static_cast<float>(effectiveUiScale());
+
         const auto& localSideData = sceneContext.sideData->at(getPlayer(hudPlayerId()).side);
 
         // render top bar
@@ -180,7 +186,7 @@ namespace rwe
             for (float x = GuiSizeLeft - panelSlide; x < GuiSizeLeft; x += filler.bounds.width())
             {
                 chromeUiRenderService.drawSpriteAbs(x, 0.0f, filler);
-                chromeUiRenderService.drawSpriteAbs(x, worldViewport.bottom(), filler);
+                chromeUiRenderService.drawSpriteAbs(x, static_cast<float>(worldViewport.bottom()) / uiScale, filler);
             }
         }
 
@@ -193,7 +199,7 @@ namespace rwe
         }
         if (bottomPanelBackground)
         {
-            while (topXBuffer < sceneContext.viewport->width())
+            while (topXBuffer < static_cast<float>(sceneContext.viewport->width()) / uiScale)
             {
                 const auto& sprite = *(*bottomPanelBackground)->sprites.at(0);
                 chromeUiRenderService.drawSpriteAbs(topXBuffer, 0.0f, sprite);
@@ -293,15 +299,18 @@ namespace rwe
         float bottomXBuffer = GuiSizeLeft;
         if (bottomPanelBackground)
         {
-            while (bottomXBuffer < sceneContext.viewport->width())
+            while (bottomXBuffer < static_cast<float>(sceneContext.viewport->width()) / uiScale)
             {
                 const auto& sprite = *(*bottomPanelBackground)->sprites.at(0);
-                chromeUiRenderService.drawSpriteAbs(bottomXBuffer, worldViewport.bottom(), sprite);
+                chromeUiRenderService.drawSpriteAbs(bottomXBuffer, static_cast<float>(worldViewport.bottom()) / uiScale, sprite);
                 bottomXBuffer += sprite.bounds.width();
             }
         }
 
-        auto extraBottom = sceneContext.viewport->height() - 480;
+        // Taken from the bar's own row: the inset under it is rounded to
+        // whole frame pixels, so the frame height alone can miss it by a
+        // fraction of a UI pixel.
+        auto extraBottom = static_cast<float>(worldViewport.bottom()) / uiScale + static_cast<float>(GuiSizeBottom) - 480.0f;
         if (hoveredUnit)
         {
             const auto& unit = getUnit(*hoveredUnit);
@@ -510,7 +519,7 @@ namespace rwe
         {
             int offset = gameSpeed.displayOffset();
             std::string speedText = (offset > 0 ? "+" : "") + std::to_string(offset);
-            float centerX = static_cast<float>(sceneContext.viewport->width()) / 2.0f;
+            float centerX = static_cast<float>(sceneContext.viewport->width()) / (2.0f * static_cast<float>(effectiveUiScale()));
             chromeUiRenderService.drawTextCenteredX(centerX, GuiSizeTop + 8, speedText, *guiFont);
         }
 
@@ -532,8 +541,8 @@ namespace rwe
 
         if (paused)
         {
-            float centerX = static_cast<float>(sceneContext.viewport->width()) / 2.0f;
-            float centerY = static_cast<float>(sceneContext.viewport->height()) / 2.0f;
+            float centerX = static_cast<float>(sceneContext.viewport->width()) / (2.0f * static_cast<float>(effectiveUiScale()));
+            float centerY = static_cast<float>(sceneContext.viewport->height()) / (2.0f * static_cast<float>(effectiveUiScale()));
             // TA's own title from anims/IGTITLES.GAF, centred on the screen.
             auto title = gameMediaDatabase.getSpriteSeries("IGTITLES", "igpaused");
             if (title && !(*title)->sprites.empty())
@@ -554,7 +563,9 @@ namespace rwe
         // the players with their kills and losses slides in at the top right,
         // and a strip with the game time, the local player's unit count and
         // the game speed rises from the bottom on a slide of its own.
-        const auto screenWidth = static_cast<float>(sceneContext.viewport->width());
+        // Both strips are chrome, so they are laid out against the raw UI
+        // viewport rather than the frame (the UI scale term).
+        const auto screenWidth = static_cast<float>(sceneContext.viewport->width()) / static_cast<float>(effectiveUiScale());
 
         // Haettenschweiler, not the console font: the strip in the small
         // cut, the list in the gui labels' one. Every offset below is from
@@ -575,7 +586,9 @@ namespace rwe
             // behind the bottom bar, clipped by the world view, and settles
             // on top of it at the world view's left edge.
             auto x = static_cast<float>(GuiSizeLeft) - std::round(panelSlide);
-            auto y = static_cast<float>(worldViewport.bottom() - statsBarSlide - 1);
+            // worldViewport is in frame pixels; the strip is drawn in raw UI
+            // coordinates, so its bottom edge is scaled back down.
+            auto y = static_cast<float>(worldViewport.bottom()) / static_cast<float>(effectiveUiScale()) - static_cast<float>(statsBarSlide) - 1.0f;
             auto clipHeight = worldViewport.bottom();
             sceneContext.graphics->enableScissor(0, sceneContext.viewport->height() - clipHeight, sceneContext.viewport->width(), clipHeight);
             if (barSprite)
@@ -966,8 +979,8 @@ namespace rwe
                 topLeftWorld.z + ((SimScalar(footprintRect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
 
             auto topLeftUi = worldToUi * simVectorToFloat(topLeftWorld);
-            auto boxWidth = footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
-            auto boxHeight = footprintRect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits);
+            auto boxWidth = footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits) * worldUiScale();
+            auto boxHeight = footprintRect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits) * worldUiScale();
 
             // Two nested one-pixel outlines with the darker line INSIDE.
             // The exact colours came out of the binary at last: the
@@ -1135,8 +1148,8 @@ namespace rwe
             topLeftWorld.z + ((SimScalar(footprintRect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
 
         auto topLeftUi = worldToUi * simVectorToFloat(topLeftWorld);
-        auto width = footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits);
-        auto height = footprintRect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits);
+        auto width = footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits) * worldUiScale();
+        auto height = footprintRect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits) * worldUiScale();
 
         auto t = static_cast<float>(std::min(age, BuildBoxSweepTicks)) / static_cast<float>(BuildBoxSweepTicks);
         auto dx = width * t;
@@ -2181,8 +2194,8 @@ namespace rwe
             worldUiRenderService.drawBoxOutline(
                 topLeftUi.x,
                 topLeftUi.y,
-                hoverBuildInfo->rect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits),
-                hoverBuildInfo->rect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits),
+                hoverBuildInfo->rect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits) * worldUiScale(),
+                hoverBuildInfo->rect.height * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits) * worldUiScale(),
                 color,
                 2.0f);
         }
@@ -2192,12 +2205,9 @@ namespace rwe
         {
             if (auto selectingState = std::get_if<NormalCursorMode::SelectingState>(&normalCursorMode->state))
             {
-                const auto& start = selectingState->startPosition;
-                const auto cameraPosition = worldCameraState.getRoundedPosition();
-                Point cameraRelativeStart(start.x - cameraPosition.x, start.y - cameraPosition.z);
-
+                auto start = cameraPlaneToWorldViewport(selectingState->startPosition);
                 auto worldViewportPos = sceneContext.viewport->toOtherViewport(worldViewport, getMousePosition());
-                auto rect = DiscreteRect::fromPoints(cameraRelativeStart, worldViewportPos);
+                auto rect = DiscreteRect::fromPoints(start, worldViewportPos);
 
                 worldUiRenderService.drawBoxOutline(rect.x, rect.y, rect.width, rect.height, Color(255, 255, 255));
                 if (rect.width > 2 && rect.height > 2)
@@ -2443,9 +2453,17 @@ namespace rwe
             if (guiVisible)
             {
                 // Coming back with the panel already slid away would otherwise
-                // put the inset back to full width underneath it.
-                appliedLeftInset = panelSlide > 0.0f ? 0 : GuiSizeLeft;
-                worldViewport.setInset(appliedLeftInset, GuiSizeTop, GuiSizeRight, GuiSizeBottom);
+                // put the inset back to full width underneath it. The GuiSize
+                // constants are raw UI units; the world inset is in frame
+                // pixels, so they scale with the UI and each side rounds.
+                auto scale = effectiveUiScale();
+                appliedUiScale = scale;
+                appliedLeftInset = panelSlide > 0.0f ? 0 : static_cast<int>(std::lround(GuiSizeLeft * scale));
+                worldViewport.setInset(
+                    appliedLeftInset,
+                    static_cast<int>(std::lround(GuiSizeTop * scale)),
+                    static_cast<int>(std::lround(GuiSizeRight * scale)),
+                    static_cast<int>(std::lround(GuiSizeBottom * scale)));
             }
             else
             {
