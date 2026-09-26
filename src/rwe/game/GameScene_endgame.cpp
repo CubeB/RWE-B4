@@ -2,11 +2,18 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <rwe/config.h>
+#include <rwe/game/ControlChannel.h>
+#include <nlohmann/json.hpp>
+#include <rwe/game/GameEndedReport.h>
 #include <rwe/io/campaign/campaign.h>
 #include <rwe/io/gui/gui.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/ui/UiListBox.h>
 #include <rwe/ui/UiStagedButton.h>
+#include <rwe/util.h>
+#include <rwe/util/SimpleLogger.h>
 
 namespace rwe
 {
@@ -120,6 +127,50 @@ namespace rwe
         return Point(
             static_cast<int>(((static_cast<float>(windowX) / scale) - layout.offsetX) / layout.scale),
             static_cast<int>(((static_cast<float>(windowY) / scale) - layout.offsetY) / layout.scale));
+    }
+
+    void GameScene::sendGameEnded(const std::string& outcome, std::optional<PlayerId> winner, std::optional<SceneTime> desyncTick)
+    {
+        if (gameEndedSent)
+        {
+            return;
+        }
+        if (!getControlChannel().enabled())
+        {
+            return;
+        }
+        gameEndedSent = true;
+
+        GameEndedReport report;
+        report.outcome = outcome;
+        report.winner = winner;
+        report.tick = sceneTime;
+        report.gameTimeSeconds = static_cast<unsigned int>(simulation.gameTime.value) / static_cast<unsigned int>(SimTicksPerSecond);
+        report.desyncTick = desyncTick;
+        report.engineBuild = ProjectNameVersion;
+
+        // The recording being written, which is the artifact a launcher wants;
+        // a replay being watched has nothing of its own to hand over.
+        if (replayWriter)
+        {
+            report.replayPath = replayWriter->path();
+        }
+
+        if (const char* hashLog = std::getenv("RWE_HASH_LOG"))
+        {
+            report.hashLogPath = std::filesystem::path(hashLog);
+        }
+
+        report.desyncDumpPaths = desyncDumpPaths;
+
+        if (const auto& loggerPath = getLogger().filePath(); !loggerPath.empty())
+        {
+            report.logPath = std::filesystem::path(loggerPath);
+        }
+
+        auto json = gameEndedJson(report);
+        LOG_INFO << "Game ended: " << json.dump();
+        getControlChannel().sendGameEnded(json);
     }
 
     void GameScene::beginEndGameSequence()

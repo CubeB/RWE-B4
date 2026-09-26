@@ -799,6 +799,10 @@ namespace rwe
 
     void GameScene::leaveFor(std::shared_ptr<Scene> scene)
     {
+        // A game left before anything decided it is abandoned. A decided one
+        // has already reported itself, and the guard inside makes that a
+        // single event either way.
+        sendGameEnded("abandoned", std::nullopt);
         sceneContext.audioService->stopMusic();
         leavingScene = true;
         sceneContext.sceneManager->setNextScene(std::move(scene));
@@ -967,6 +971,7 @@ namespace rwe
                         // the other exits do -- the loop only notices at the
                         // top of the next frame -- so the music driver is
                         // told to stand down here too.
+                        sendGameEnded("abandoned", std::nullopt);
                         leavingScene = true;
                         sceneContext.sceneManager->requestExit();
                     },

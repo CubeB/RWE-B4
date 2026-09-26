@@ -385,6 +385,15 @@ namespace rwe
         GameTime gameOverTime{0};
 
         /**
+         * Set once the game-ended event has gone out, so the three endings --
+         * a decision, a desync, and quitting -- do not each send their own.
+         */
+        bool gameEndedSent{false};
+
+        /** The desync dumps this peer wrote, for the end-of-game report. */
+        std::vector<std::filesystem::path> desyncDumpPaths;
+
+        /**
          * What the original's `endgame.cpp` does once a game is decided, cut
          * down to the three steps a skirmish actually runs. Its own state
          * machine is nine states wide (the jump table at 0x4205AC) and most of
@@ -1920,6 +1929,18 @@ namespace rwe
          * start another track for the next scene to inherit.
          */
         void leaveFor(std::shared_ptr<Scene> scene);
+
+        /**
+         * Tells the launcher the game is over, once, from whichever ending is
+         * reached first. A no-op unless a control channel is listening.
+         *
+         * `outcome` is "decided", "draw" or "abandoned"; `winner` is set only
+         * for a decided game. `desyncTick`, when given, is the first tick the
+         * peers disagreed on. The artifacts and the build identity are filled
+         * in here from what the scene already holds.
+         */
+        void sendGameEnded(const std::string& outcome, std::optional<PlayerId> winner, std::optional<SceneTime> desyncTick = std::nullopt);
+
         GameOptions currentInGameOptions() const;
         void applyInGameOptions(const GameOptions& state);
         void saveInGameOptions();
