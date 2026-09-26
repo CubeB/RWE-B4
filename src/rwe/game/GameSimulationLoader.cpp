@@ -1258,16 +1258,19 @@ namespace rwe
                 return std::nullopt;
             }
 
+            // What was done to place it, reported only once it stands: one
+            // note, the move and the clearing together when both were needed.
+            std::string moved;
             auto x = std::clamp(footprint.x, 0, gridWidth - width);
             auto y = std::clamp(footprint.y, 0, gridHeight - height);
             if (x != footprint.x || y != footprint.y)
             {
-                auto shift = std::to_string(x - footprint.x) + "," + std::to_string(y - footprint.y);
+                moved = "moved onto the map by " + std::to_string(x - footprint.x) + "," + std::to_string(y - footprint.y) + " cells";
                 position = missionBuildingPositionAt(simulation, x, y, footprint);
                 footprint = simulation.computeFootprintRegion(position, def.movementCollisionInfo);
-                notes.push_back(label + ": moved onto the map by " + shift + " cells");
                 if (auto unitId = simulation.trySpawnUnit(unitType, owner, position, heading))
                 {
+                    notes.push_back(label + ": " + moved);
                     return unitId;
                 }
             }
@@ -1304,8 +1307,12 @@ namespace rwe
                 names += (names.empty() ? "" : ", ") + simulation.getFeatureDefinition(simulation.getFeature(featureId).featureName).name;
                 simulation.deleteFeature(featureId);
             }
-            notes.push_back(label + ": cleared " + names + " from under it");
-            return simulation.trySpawnUnit(unitType, owner, position, heading);
+            auto unitId = simulation.trySpawnUnit(unitType, owner, position, heading);
+            if (unitId)
+            {
+                notes.push_back(label + ": " + (moved.empty() ? "" : moved + " and ") + "cleared " + names + " from under it");
+            }
+            return unitId;
         }
     }
 

@@ -213,6 +213,47 @@ namespace rwe
         CHECK(footprint.x + static_cast<int>(footprint.width) == gridWidth);
     }
 
+    TEST_CASE("a building brought in from the edge is placed or refused as anywhere else, with one note", "[mission]")
+    {
+        MissionWorld world;
+        auto gridWidth = world.sim.occupiedGrid.getWidth();
+        auto xPos = (gridWidth * 16) + 8;
+        // Where it lands once brought in: its last two columns, rows 5 and 6.
+        auto landing = gridWidth - 2;
+
+        SECTION("a unit where it lands still keeps it out, and nothing claims it was moved")
+        {
+            // A 2x2 kbot centred on the landing cells, earlier in the file.
+            OtaSchema schema{};
+            schema.units = {missionUnit("KBOT", 1, (landing * 16) + 16, 96), missionUnit("BLDG", 1, xPos, 100)};
+            auto result = spawnMissionUnits(world.sim, schema, world.slots);
+            CHECK(result.spawned.size() == 1u);
+            CHECK(result.skipped.size() == 1u);
+            CHECK(result.adjusted.empty());
+        }
+
+        SECTION("scenery where it lands is cleared, and the one note says both")
+        {
+            FeatureDefinition rock{};
+            rock.name = "ROCK";
+            rock.footprintX = 2;
+            rock.footprintZ = 2;
+            rock.height = 20_ss;
+            rock.blocking = true;
+            auto rockDef = world.sim.featureDefinitions.insert(rock);
+            auto rockId = world.sim.addFeature(rockDef, landing, 5).value();
+
+            OtaSchema schema{};
+            schema.units = {missionUnit("BLDG", 1, xPos, 100)};
+            auto result = spawnMissionUnits(world.sim, schema, world.slots);
+            REQUIRE(result.spawned.size() == 1u);
+            CHECK_FALSE(world.sim.tryGetFeature(rockId).has_value());
+            REQUIRE(result.adjusted.size() == 1u);
+            CHECK(result.adjusted.front().find("moved onto the map") != std::string::npos);
+            CHECK(result.adjusted.front().find("cleared ROCK") != std::string::npos);
+        }
+    }
+
     TEST_CASE("a mission unit with orders to run is not the player's yet", "[mission]")
     {
         // 0x487E69 clears the selectable bit once the interpreter has queued
