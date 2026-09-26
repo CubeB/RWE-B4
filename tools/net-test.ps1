@@ -23,6 +23,8 @@
 #   tools/net-test.ps1 -rejoin -bridge         # the same, asked for the way a
 #                                              # launcher asks: over the game's
 #                                              # own stdin and stdout
+#   tools/net-test.ps1 -lag 1:50               # peer 1 sleeps 50 ms after every
+#                                              # tick, to reproduce a slow machine
 #
 # Two things it is good for beyond drop handling: any change to the simulation
 # can be run past it to see whether two peers still agree, and RWE_DESYNC_AT
@@ -38,6 +40,7 @@ param(
     [switch]$ai,
     [int]$desyncAt = 0,
     [switch]$chat,
+    [string]$lag = "",
     [switch]$rejoin,
     [switch]$bridge,
     [int]$rejoinAfter = 8,
@@ -163,6 +166,14 @@ for ($me = 0; $me -lt $peers; $me++) {
     # peer is the whole of what chat has to do.
     if ($chat) { $env:RWE_CHAT_TEST = "$(300 + (60 * $me)):hello from $($names[$me])" }
 
+    # One peer lagged, the rest honest: RWE_SIM_LAG makes that peer sleep after
+    # every tick, which is a machine that cannot keep up reproduced on one that
+    # can. The effect on the others is the thing being measured.
+    if ($lag) {
+        $lagParts = $lag.Split(":")
+        if ($lagParts.Count -eq 2 -and [int]$lagParts[0] -eq $me) { $env:RWE_SIM_LAG = $lagParts[1] }
+    }
+
     $env:RWE_HASH_LOG = $hashes[$me]
     if ($bridge -and $me -eq 0) {
         # Redirected stdio, which Start-Process cannot give us: this is the
@@ -184,6 +195,7 @@ for ($me = 0; $me -lt $peers; $me++) {
     }
     Remove-Item Env:\RWE_DESYNC_AT -ErrorAction SilentlyContinue
     Remove-Item Env:\RWE_CHAT_TEST -ErrorAction SilentlyContinue
+    Remove-Item Env:\RWE_SIM_LAG -ErrorAction SilentlyContinue
     Remove-Item Env:\RWE_REJOIN_TEST -ErrorAction SilentlyContinue
 }
 Remove-Item Env:\RWE_HASH_LOG -ErrorAction SilentlyContinue
@@ -270,8 +282,13 @@ if ($rejoin) {
         $a += " --log `"$($logs[$kill])`" --rejoin `"$bundle`" --rejoin-tick $atTick"
 
         $env:RWE_HASH_LOG = $hashes[$kill]
+        if ($lag) {
+            $lagParts = $lag.Split(":")
+            if ($lagParts.Count -eq 2 -and [int]$lagParts[0] -eq $kill) { $env:RWE_SIM_LAG = $lagParts[1] }
+        }
         $procs[$kill] = Start-Process -FilePath $exe -ArgumentList $a -PassThru
         Remove-Item Env:\RWE_HASH_LOG -ErrorAction SilentlyContinue
+        Remove-Item Env:\RWE_SIM_LAG -ErrorAction SilentlyContinue
         Write-Output "player $kill restarted to rejoin at tick $atTick, pid $($procs[$kill].Id)"
 
         for ($i = 0; $i -lt 200; $i++) {
@@ -314,6 +331,18 @@ foreach ($s in $survivors | Select-Object -Skip 1) {
 if ($agreed -and $survivors.Count -gt 1) { Write-Output "RESULT: peers agree" }
 
 foreach ($p in $procs) { if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } }
+
+# Each peer's own account of the run, beside the hash comparison above. The
+# numbers say whether a lagged peer slowed the game smoothly or stalled it stop
+# start, which is the question -lag is asked to answer.
+foreach ($s in 0..($peers - 1)) {
+    $summaries = Get-Content $logs[$s] -ErrorAction SilentlyContinue |
+        Select-String -Pattern "Lockstep summary:"
+    if ($summaries) {
+        Write-Output "=================== player $s lockstep ==================="
+        $summaries
+    }
+}
 
 foreach ($s in 0..($peers - 1)) {
     $interesting = Get-Content $logs[$s] -ErrorAction SilentlyContinue |

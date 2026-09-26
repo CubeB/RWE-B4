@@ -1012,6 +1012,7 @@ set(TEST_FILES
     src/rwe/game/aicommandfeed.test.cpp
     src/rwe/game/playerdrop.test.cpp
     src/rwe/game/LockstepStats.test.cpp
+    src/rwe/game/SimDiagnostics.test.cpp
     src/rwe/game/playerrejoin.test.cpp
     src/rwe/game/chat_util.test.cpp
     src/rwe/game/SimEventLog.test.cpp

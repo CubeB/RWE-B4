@@ -1102,6 +1102,9 @@ namespace rwe
 
         LockstepStats lockstepStats;
 
+        /** When the last periodic lockstep summary was written, or nothing before the first tick. */
+        std::optional<Timestamp> lastLockstepSummaryAt;
+
         /** Recorded whether or not the overlay is up, so opening it after a stall still shows the stall. */
         NetworkHistory networkHistory;
 
@@ -1413,6 +1416,17 @@ namespace rwe
         void renderNetworkOverlay();
 
         void recordNetworkHistory();
+
+        /**
+         * The lockstep's whole-run figures in the log: ticks run, stalls and
+         * their total and longest, the cap's drops and the gate's skips, and
+         * the effective ticks a second. Written every ten seconds while the
+         * game runs and once when the scene ends, for tools/net-test.ps1 to
+         * read a lagged peer's numbers back. Issue #355.
+         */
+        void logLockstepSummary();
+
+        void logLockstepSummaryIfDue();
 
         /**
          * The last measured round trip, or longer if a packet has gone unacked

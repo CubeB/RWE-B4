@@ -289,6 +289,10 @@ namespace rwe
 
     GameScene::~GameScene()
     {
+        // The one summary that catches every way a game can end, including a
+        // window closed with no result and an arena run stopped by its clock.
+        logLockstepSummary();
+
         // The audio service outlives us and holds a callback into this
         // object; without handing it back, the mixer reports a finished
         // channel into freed memory the moment the NEXT game renders its
@@ -1052,6 +1056,7 @@ namespace rwe
 
         renderReplayWindow();
         renderDebugWindow();
+        logLockstepSummaryIfDue();
         recordNetworkHistory();
         renderNetworkOverlay();
 
