@@ -1095,6 +1095,13 @@ namespace rwe
         /** A moving average of a tick's cost, for the capacity estimate. */
         float averageTickCostMillis{0.0f};
 
+        /**
+         * Whether the previous frame lost ticks to the cap. One such frame is a
+         * hitch -- a dragged window, the first frame after loading -- and not a
+         * machine that cannot keep up; only a second in a row counts.
+         */
+        bool previousFrameLostToCap{false};
+
         SpeedGovernor speedGovernor;
 
         /**

@@ -1018,11 +1018,13 @@ namespace rwe
             auto tickCostSample = static_cast<float>(tickCostThisFrameMillis / static_cast<double>(ticksTimedThisFrame));
             averageTickCostMillis = ema(tickCostSample, averageTickCostMillis, 0.1f);
         }
+        auto lostToCapThisFrame = frameOutcome.ticksLostToCap > 0;
         ownSustainableSpeedPermille = estimateSustainableSpeedPermille(
             static_cast<unsigned int>(gameSpeed.perMille()),
             frameOutcome.ticksDispatched,
-            frameOutcome.ticksLostToCap,
+            previousFrameLostToCap ? frameOutcome.ticksLostToCap : 0u,
             averageTickCostMillis);
+        previousFrameLostToCap = lostToCapThisFrame;
         tickCostThisFrameMillis = 0.0;
         ticksTimedThisFrame = 0;
 
