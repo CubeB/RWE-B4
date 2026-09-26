@@ -1,5 +1,10 @@
 #include "campaign.h"
 
+#include <exception>
+#include <rwe/io/tdf/tdf.h>
+#include <rwe/util/SimpleLogger.h>
+#include <rwe/vfs/AbstractVirtualFileSystem.h>
+
 namespace rwe
 {
     Campaign parseCampaign(const TdfBlock& tdf)
@@ -43,5 +48,30 @@ namespace rwe
             return name->get();
         }
         return "Error -- Unnamed Mission";
+    }
+
+    std::optional<Campaign> readCampaign(AbstractVirtualFileSystem& vfs, const std::string& name)
+    {
+        auto raw = vfs.readFile("camps/" + name + ".tdf");
+        if (!raw)
+        {
+            return std::nullopt;
+        }
+        try
+        {
+            return parseCampaign(parseTdfFromString(std::string(raw->begin(), raw->end())));
+        }
+        catch (const std::exception& e)
+        {
+            LOG_WARN << "Campaign " << name << " could not be read: " << e.what();
+            return std::nullopt;
+        }
+    }
+
+    std::string campaignMissionListEntry(char status, const std::string& name)
+    {
+        // U+00FD, U+00FE and U+00FF in UTF-8.
+        const char* thumb = status == 'W' ? "\xC3\xBE" : (status == 'L' ? "\xC3\xBF" : "\xC3\xBD");
+        return std::string(thumb) + " " + name;
     }
 }

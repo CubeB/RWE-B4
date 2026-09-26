@@ -393,6 +393,12 @@ namespace rwe
             /** Ten steps of the fade table, one a tick (0x41FA8F). */
             Fade,
 
+            /**
+             * A campaign win's picture, `bitmaps/glamour/<glamour>.pcx`, with
+             * its sound, until the player clicks (endgame state 6, 0x41FDF8).
+             */
+            Glamour,
+
             /** The chart, over `bitmaps/OUTCOME0.PCX` (0x41FF42). */
             Chart
         };
@@ -434,6 +440,22 @@ namespace rwe
         /** Whether the press that armed the button started on it. */
         bool endGameChartButtonArmed{false};
 
+        /** The glamour picture, while it is up. */
+        std::shared_ptr<Sprite> endGameGlamour;
+
+        /** The channel the glamour's sound plays on; -1 when none does. */
+        int endGameGlamourChannel{-1};
+
+        /**
+         * ENDMSN.GUI whole, when a campaign carries on after this game: the
+         * mission list, Start, Difficulty and the rest, over OUTCOME1. Empty
+         * otherwise, and the chart has its lone Main Menu button.
+         */
+        std::unique_ptr<UiPanel> endGameCampaignPanel;
+
+        /** The difficulty ENDMSN shows, which the next mission is played at. */
+        unsigned int endGameCampaignDifficulty{0};
+
         void beginEndGameSequence();
         void updateEndGameSequence();
         void buildEndGameChart();
@@ -448,8 +470,37 @@ namespace rwe
         /** Fills every bar at once, which is what a click during the run-up does (0x420028). */
         void finishEndGameBars();
 
-        /** True once the chart has taken the screen; the world is not drawn behind it. */
+        /** True once the chart has taken the screen. */
         bool endGameChartVisible() const;
+
+        /** True once the glamour picture or the chart has the screen; the world is not drawn behind either. */
+        bool endGameCoversWorld() const;
+
+        /**
+         * Whether this is a campaign's game with a mission to play after it,
+         * which a loss always leaves: the one just lost (0x41F040).
+         */
+        bool campaignContinues() const;
+
+        /** Puts up the glamour picture and starts its sound; false if there is no picture to show. */
+        bool beginGlamour();
+
+        /** A click on the glamour picture: on to the chart, once the picture has been up a second. */
+        void glamourClicked();
+
+        /** From the fade or the glamour picture to the chart. */
+        void enterEndGameChart();
+
+        /** ENDMSN's controls for a campaign that carries on (0x41F0A0, enabled by 0x41F400). */
+        void buildCampaignEndPanel();
+
+        void campaignEndMessage(const std::string& control);
+
+        /** Leaves for a campaign mission's briefing, in the menu. */
+        void continueCampaign(const CampaignProgress& progress);
+
+        /** The campaign is won: its ending films, then the main menu (FE states 4 and 5). */
+        void playCampaignEnding();
 
         /**
          * Maps the original's 640x480 layout onto the window, keeping its

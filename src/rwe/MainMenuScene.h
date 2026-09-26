@@ -72,7 +72,13 @@ namespace rwe
         std::optional<AudioService::SoundHandle> narration;
         int narrationChannel{-1};
 
+        /** A campaign to carry on with when the menu opens: the briefing of its mission, from the screen after a game. */
+        std::optional<CampaignProgress> pendingCampaign;
+
     public:
+        /** Opens on the briefing of a campaign's mission rather than the main menu; for the screen after a campaign game. */
+        void resumeCampaign(const CampaignProgress& progress);
+
         MainMenuScene(
             const SceneContext& sceneContext,
             TdfBlock* audioLookup,
@@ -146,8 +152,8 @@ namespace rwe
         void fillCampaignMissions(unsigned int campaignIndex);
         void campaignMenuMessage(const std::string& message);
         void startCampaignMission();
+        void openCampaignMission(CampaignProgress progress);
         std::vector<std::string> campaignNamesForSide(unsigned int side);
-        std::optional<Campaign> readCampaign(const std::string& name);
 
         /** MSNBRIEF.GUI, the briefing before a mission: its planet, its text and its narration (§115). */
         void goToCampaignBriefing(const GameParameters& params, const OtaRecord& ota);

@@ -7,6 +7,8 @@
 #include <rwe/io/smk/SmkDecoder.h>
 #include <rwe/render/Sprite.h>
 #include <rwe/scene/Scene.h>
+#include <string>
+#include <vector>
 
 namespace rwe
 {
@@ -43,4 +45,11 @@ namespace rwe
         void uploadFrame();
         void finish();
     };
+
+    /**
+     * The films at `vfsPaths` one after another, passing over any that is
+     * missing as the original's player does (0x4267B3), and then the scene
+     * `then` makes.
+     */
+    std::shared_ptr<Scene> filmsThen(const SceneContext& sceneContext, std::vector<std::string> vfsPaths, std::function<std::shared_ptr<Scene>()> then);
 }
