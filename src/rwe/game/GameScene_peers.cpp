@@ -194,17 +194,44 @@ namespace rwe
         dropCountdownSeconds = soonest;
     }
 
-    void GameScene::renderWaitingForPlayers()
+    void GameScene::updateEffectiveSpeed()
     {
-        if (waitingForPlayers.empty() || !waitingSince)
+        // A lone player, or a recording, runs at the speed that was chosen:
+        // there is no other machine to slow down for.
+        if (replayPlayback || !gameNetworkService->hasRemotePeers())
         {
+            effectiveSpeedPermille = static_cast<unsigned int>(gameSpeed.perMille());
+            limitingPeers.clear();
             return;
         }
 
-        // A packet arriving a frame late empties a buffer for a frame or two in
-        // any ordinary game. Saying so would make the caption flicker through a
-        // healthy match, so it has to have lasted.
-        if (getTimestamp() - *waitingSince < WaitingCaptionDelay)
+        auto reports = gameNetworkService->peerSustainableSpeeds();
+        std::vector<PeerCapacity> capacities;
+        capacities.reserve(reports.size() + 1);
+        capacities.push_back(PeerCapacity{localPlayerId, ownSustainableSpeedPermille});
+        capacities.insert(capacities.end(), reports.begin(), reports.end());
+
+        effectiveSpeedPermille = speedGovernor.update(
+            getTimestamp(),
+            static_cast<unsigned int>(gameSpeed.perMille()),
+            capacities);
+        limitingPeers = speedGovernor.limitingPeers();
+    }
+
+    void GameScene::renderWaitingForPlayers()
+    {
+        auto waiting = !waitingForPlayers.empty()
+            && waitingSince
+            && getTimestamp() - *waitingSince >= WaitingCaptionDelay;
+
+        // Slowed while a peer's machine cannot keep up, which a player needs
+        // to tell from waiting on one that has stopped sending. There is no
+        // delay before believing it: the speed the accumulator has settled at
+        // is proof enough.
+        auto slowed = !limitingPeers.empty()
+            && effectiveSpeedPermille < static_cast<unsigned int>(gameSpeed.perMille());
+
+        if (!waiting && !slowed)
         {
             return;
         }
@@ -226,24 +253,39 @@ namespace rwe
             lineY = std::floor(centerY + (sprite.bounds.height() / 2.0f) + 12.0f);
         }
 
-        std::string names;
-        for (const auto& playerId : waitingForPlayers)
-        {
-            if (!names.empty())
+        auto joinNames = [&](const std::vector<PlayerId>& players) {
+            std::string names;
+            for (const auto& playerId : players)
             {
-                names += ", ";
+                if (!names.empty())
+                {
+                    names += ", ";
+                }
+                names += playerDisplayName(playerId);
             }
-            names += playerDisplayName(playerId);
+            return names;
+        };
+
+        if (waiting)
+        {
+            chromeUiRenderService.drawTextCenteredX(centerX, lineY, "WAITING FOR " + joinNames(waitingForPlayers), *guiFont);
+
+            if (dropCountdownSeconds)
+            {
+                chromeUiRenderService.drawTextCenteredX(
+                    centerX,
+                    lineY + 14.0f,
+                    "DROPPING IN " + std::to_string(*dropCountdownSeconds),
+                    *guiFont);
+            }
         }
 
-        chromeUiRenderService.drawTextCenteredX(centerX, lineY, "WAITING FOR " + names, *guiFont);
-
-        if (dropCountdownSeconds)
+        if (slowed)
         {
             chromeUiRenderService.drawTextCenteredX(
                 centerX,
-                lineY + 14.0f,
-                "DROPPING IN " + std::to_string(*dropCountdownSeconds),
+                waiting ? lineY + 28.0f : lineY,
+                "SLOWED FOR " + joinNames(limitingPeers),
                 *guiFont);
         }
     }

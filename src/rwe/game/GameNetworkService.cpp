@@ -84,6 +84,16 @@ namespace rwe
         });
     }
 
+    void GameNetworkService::submitRunState(unsigned int speedPermille, bool paused, bool stalled, unsigned int sustainableSpeedPermille)
+    {
+        asio::post(ioContext, [this, speedPermille, paused, stalled, sustainableSpeedPermille]() {
+            for (auto& e : endpoints)
+            {
+                e.link->submitRunState(speedPermille, paused, stalled, sustainableSpeedPermille);
+            }
+        });
+    }
+
     void GameNetworkService::submitGameHash(GameHash hash)
     {
         asio::post(ioContext, [this, hash]() {
@@ -134,13 +144,38 @@ namespace rwe
         std::promise<unsigned int> result;
         asio::post(ioContext, [this, localSceneTime, &result]() {
             auto time = getTimestamp();
-            auto otherTimes = choose(endpoints, [](const auto& e) { return e.link->lastKnownSceneTime(); });
+            auto otherTimes = choose(endpoints, [](const auto& e) -> std::optional<PeerSceneTimeReport> {
+                auto last = e.link->lastKnownSceneTime();
+                if (!last)
+                {
+                    return std::nullopt;
+                }
+                return PeerSceneTimeReport{
+                    last->first,
+                    last->second,
+                    PeerRunState{e.link->remoteSpeedPermille(), e.link->remotePaused(), e.link->remoteStalled()}};
+            });
 
             auto finalValue = estimateAverageSceneTimeStatic(localSceneTime, otherTimes, time);
             result.set_value(finalValue);
         });
 
         return SceneTime(result.get_future().get());
+    }
+
+    std::vector<PeerCapacity> GameNetworkService::peerSustainableSpeeds()
+    {
+        std::promise<std::vector<PeerCapacity>> result;
+        asio::post(ioContext, [this, &result]() {
+            std::vector<PeerCapacity> speeds;
+            for (const auto& e : endpoints)
+            {
+                speeds.push_back(PeerCapacity{e.playerId, e.link->remoteSustainableSpeedPermille()});
+            }
+            result.set_value(std::move(speeds));
+        });
+
+        return result.get_future().get();
     }
 
     std::vector<GameNetworkService::PeerStatus> GameNetworkService::getPeerStatuses()

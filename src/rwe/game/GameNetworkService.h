@@ -11,6 +11,7 @@
 #include <rwe/game/PeerLink.h>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/game/PlayerCommandService.h>
+#include <rwe/network_util.h>
 #include <rwe/rwe_time.h>
 #include <rwe/sim/GameHash.h>
 #include <rwe/sim/GameTime.h>
@@ -80,6 +81,14 @@ namespace rwe
 
         void submitCommands(SceneTime currentSceneTime, const CommandSet& commands);
 
+        /**
+         * Tell every peer how this one is running: its speed, whether it is
+         * paused, whether it is stalled waiting on commands, and the speed its
+         * machine can sustain. Carried in every packet, because a remote peer
+         * projects this one's scene time by it and caps the game speed to it.
+         */
+        void submitRunState(unsigned int speedPermille, bool paused, bool stalled, unsigned int sustainableSpeedPermille);
+
         void submitGameHash(GameHash hash);
 
         /**
@@ -95,6 +104,13 @@ namespace rwe
         std::vector<ReceivedChatMessage> takeChatMessages();
 
         SceneTime estimateAvergeSceneTime(SceneTime localSceneTime);
+
+        /**
+         * Every remote peer's id and the speed its machine reported it can
+         * sustain, for the speed governor. One call, off the network thread,
+         * as estimateAvergeSceneTime is.
+         */
+        std::vector<PeerCapacity> peerSustainableSpeeds();
 
         float getMaxAverageRttMillis();
 
