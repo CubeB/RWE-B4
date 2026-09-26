@@ -290,13 +290,7 @@ namespace rwe
         }
         const auto& mission = campaign->missions[progress.missionIndex];
 
-        // The campaign file names the map with its extension (EXP1AC01.ota);
-        // a game is started by the map's bare name.
-        auto mapName = mission.missionFile;
-        if (mapName.size() > 4 && toUpper(mapName.substr(mapName.size() - 4)) == ".OTA")
-        {
-            mapName.resize(mapName.size() - 4);
-        }
+        auto mapName = campaignMissionMapName(mission);
         auto otaRaw = sceneContext.vfs->readFile("maps/" + mapName + ".ota");
         if (!otaRaw)
         {

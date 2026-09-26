@@ -202,6 +202,8 @@ namespace rwe
 
     void GameScene::enterEndGameChart()
     {
+        // The chart has the screen and the dialogs are ENDMSN's from here.
+        closeGameMenu();
         endGamePhase = EndGamePhase::Chart;
         endGamePhaseStart = sceneTime;
         buildEndGameChart();
@@ -295,15 +297,6 @@ namespace rwe
         auto panel = uiFactory.panelFromGuiFile("ENDMSN", "OUTCOME1", *entries);
         const auto& progress = *gameParameters.campaign;
 
-        // Saving and loading between missions are still to come.
-        for (const auto* name : {"LoadGame", "SaveGame"})
-        {
-            if (auto button = panel->find<UiStagedButton>(name))
-            {
-                button->get().setEnabled(false);
-            }
-        }
-
         endGameCampaignDifficulty = progress.difficulty;
         if (auto difficulty = panel->find<UiStagedButton>("Difficulty"))
         {
@@ -365,10 +358,40 @@ namespace rwe
                 difficulty->get().setStage(endGameCampaignDifficulty);
             }
         }
+        else if (control == "SaveGame")
+        {
+            openSaveDialog();
+        }
+        else if (control == "LoadGame")
+        {
+            openLoadDialog();
+        }
         else if (control == "MainMenu")
         {
             returnToMainMenu();
         }
+    }
+
+    void GameScene::saveBetweenMissions(const std::string& name)
+    {
+        // 0x4326B0 away from a game: the header and no world (0x4329B7), at
+        // the difficulty ENDMSN shows, pointing at the mission after this one
+        // if there is one, whether this one was won or lost (0x432786,
+        // 0x435C60). The map is that mission's, for the save list.
+        SaveFile save(gameParameters);
+        auto& progress = *save.parameters.campaign;
+        progress.difficulty = endGameCampaignDifficulty;
+        if (progress.hasNextMission)
+        {
+            ++progress.missionIndex;
+        }
+        if (auto campaign = readCampaign(*sceneContext.vfs, progress.campaign); campaign && progress.missionIndex < campaign->missions.size())
+        {
+            save.parameters.mapName = campaignMissionMapName(campaign->missions[progress.missionIndex]);
+        }
+        save.betweenMissions = true;
+        writeSaveFile(savePathForName(name), save);
+        printConsole("Game saved: " + name);
     }
 
     void GameScene::updateEndGameSequence()
@@ -654,6 +677,12 @@ namespace rwe
         if (endGameMainMenuButton)
         {
             endGameMainMenuButton->render(chromeUiRenderService);
+        }
+
+        // The save and load dialogs ENDMSN opens, in the same 640x480 space.
+        for (auto& panel : gameMenuPanels)
+        {
+            panel->render(chromeUiRenderService);
         }
 
         chromeUiRenderService.popMatrix();

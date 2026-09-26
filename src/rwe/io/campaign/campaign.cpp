@@ -3,6 +3,7 @@
 #include <exception>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/util/SimpleLogger.h>
+#include <rwe/util/rwe_string.h>
 #include <rwe/vfs/AbstractVirtualFileSystem.h>
 
 namespace rwe
@@ -48,6 +49,16 @@ namespace rwe
             return name->get();
         }
         return "Error -- Unnamed Mission";
+    }
+
+    std::string campaignMissionMapName(const CampaignMission& mission)
+    {
+        auto name = mission.missionFile;
+        if (name.size() > 4 && toUpper(name.substr(name.size() - 4)) == ".OTA")
+        {
+            name.resize(name.size() - 4);
+        }
+        return name;
     }
 
     std::optional<Campaign> readCampaign(AbstractVirtualFileSystem& vfs, const std::string& name)

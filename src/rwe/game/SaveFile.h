@@ -27,6 +27,14 @@ namespace rwe
          * than failing.
          */
         std::optional<unsigned int> gameTimeSeconds;
+
+        /**
+         * A campaign saved from the screen between missions: the header
+         * alone, the campaign's progress in it pointing at the mission to
+         * brief next, and no world (BetweenMissions, 0x432942). Loading one
+         * opens that briefing rather than a game.
+         */
+        bool betweenMissions{false};
         nlohmann::json simulation;
 
         explicit SaveFile(const GameParameters& parameters) : parameters(parameters) {}
