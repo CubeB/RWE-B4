@@ -101,6 +101,11 @@ namespace rwe
             {
                 return 9;
             }
+            if (cause == "acid_water")
+            {
+                // 0x48AF32 hands cause 11 to the damage choke point.
+                return 11;
+            }
             return 1;
         }
 

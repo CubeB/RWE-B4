@@ -714,6 +714,23 @@ namespace rwe
             REQUIRE(death->corpseLevel() == 0);
         }
 
+        SECTION("acid water is cause 11")
+        {
+            // Flat ground at sea level, so both units stand in the acid; a
+            // dose that kills outright, on the tick it is given (0x48AF32).
+            sim.waterDamage = 1000;
+            sim.gameTime = GameTime(30);
+            sim.updateWaterDamage();
+            sim.demoRecorder->endOfTick(sim);
+            sim.demoRecorder->close();
+
+            auto handler = readDemo(stream.str());
+            auto death = tadDecodeDeath(*firstSubPacketOf(handler.subPackets[1], static_cast<uint8_t>(TadSubPacketCode::UnitKilled)));
+            REQUIRE(death);
+            REQUIRE(death->unitId == 5);
+            REQUIRE(death->cause() == 11);
+        }
+
         SECTION("an unfinished unit removed is cause 9 and leaves nothing")
         {
             sim.removeUnfinishedUnit(victim);
