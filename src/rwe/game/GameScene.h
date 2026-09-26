@@ -28,6 +28,8 @@
 #include <rwe/game/GameSpeed.h>
 #include <rwe/game/SaveFile.h>
 #include <rwe/game/InGameSoundsInfo.h>
+#include <rwe/game/LockstepStats.h>
+#include <rwe/game/NetworkHistory.h>
 #include <random>
 #include <rwe/game/Particle.h>
 #include <rwe/game/PlayerCommand.h>
@@ -508,6 +510,12 @@ namespace rwe
 
         /** Leaves for a campaign mission's briefing, in the menu. */
         void continueCampaign(const CampaignProgress& progress);
+
+        /** Saves the campaign from the screen between missions: the header alone, pointing at the mission to brief next. */
+        void saveBetweenMissions(const std::string& name);
+
+        /** Leaves the save or load dialog: back to the screen between missions if that is where it opened, else to the game menu. */
+        void closeSaveDialog();
 
         /** The campaign is won: its ending films, then the main menu (FE states 4 and 5). */
         void playCampaignEnding();
@@ -1086,6 +1094,16 @@ namespace rwe
         /** Whether the current stall has been logged, so it is said once and not once a frame. */
         bool stallReported{false};
 
+        bool networkOverlayVisible{false};
+
+        LockstepStats lockstepStats;
+
+        /** Recorded whether or not the overlay is up, so opening it after a stall still shows the stall. */
+        NetworkHistory networkHistory;
+
+        /** This frame's peers, for the overlay's slow-moving figures. */
+        std::vector<GameNetworkService::PeerStatus> latestPeerStatuses;
+
         /** Peers this peer has already issued a drop command for, so it asks once. */
         std::unordered_set<unsigned int> dropIssued;
 
@@ -1381,6 +1399,23 @@ namespace rwe
 
         /** The caption over the world while a tick is waiting on somebody. */
         void renderWaitingForPlayers();
+
+        /**
+         * F9: a see-through panel in the corner showing the lockstep's health
+         * while playing -- each peer's round trip, how far ahead or behind it
+         * is, how deep its commands are buffered here, and the stalls so far.
+         * It takes no input, so clicks go through it to the game.
+         */
+        void renderNetworkOverlay();
+
+        void recordNetworkHistory();
+
+        /**
+         * The last measured round trip, or longer if a packet has gone unacked
+         * for longer than that: a round trip is only measured when an ack
+         * arrives, so without this it sits still through a stall.
+         */
+        static float roundTripLowerBound(const GameNetworkService::PeerStatus& peer);
 
         /**
          * Carries on without a player who has stopped answering: cuts their

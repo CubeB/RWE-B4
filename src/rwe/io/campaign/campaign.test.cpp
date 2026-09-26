@@ -63,6 +63,17 @@ namespace rwe
         REQUIRE(campaignMissionName(campaign.missions[0], "") == "Error -- Unnamed Mission");
     }
 
+    TEST_CASE("a mission is played on its missionfile without the extension", "[campaign]")
+    {
+        CampaignMission mission;
+        mission.missionFile = "EXP1AC01.ota";
+        REQUIRE(campaignMissionMapName(mission) == "EXP1AC01");
+        mission.missionFile = "AC02.OTA";
+        REQUIRE(campaignMissionMapName(mission) == "AC02");
+        mission.missionFile = "Plain Map";
+        REQUIRE(campaignMissionMapName(mission) == "Plain Map");
+    }
+
     TEST_CASE("a mission between missions wears the thumb for how it went", "[campaign]")
     {
         // The list font's glyphs 0xFE, 0xFF and 0xFD, as UTF-8.

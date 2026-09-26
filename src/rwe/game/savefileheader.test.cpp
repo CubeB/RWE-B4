@@ -192,6 +192,36 @@ namespace rwe
             REQUIRE_FALSE(loaded->parameters.campaign.has_value());
         }
 
+        SECTION("a save between missions says so, and keeps no world")
+        {
+            TempFile file;
+            auto save = makeSaveFile();
+            save.parameters.campaign = progress;
+            save.betweenMissions = true;
+            save.simulation = nlohmann::json();
+
+            writeSaveFile(file.path, save);
+            auto loaded = readSaveFile(file.path);
+
+            REQUIRE(loaded.has_value());
+            REQUIRE(loaded->betweenMissions);
+            REQUIRE(loaded->simulation.is_null());
+            REQUIRE(loaded->parameters.campaign->missionIndex == 4u);
+        }
+
+        SECTION("a save that is not a campaign's is never between missions")
+        {
+            TempFile file;
+            auto save = makeSaveFile();
+            save.betweenMissions = true;
+
+            writeSaveFile(file.path, save);
+            auto loaded = readSaveFile(file.path);
+
+            REQUIRE(loaded.has_value());
+            REQUIRE_FALSE(loaded->betweenMissions);
+        }
+
         SECTION("a save written before the campaign keys existed loads as no campaign")
         {
             // Written with them and then taken back out, as the
@@ -232,5 +262,23 @@ namespace rwe
             REQUIRE(loaded.has_value());
             REQUIRE(loaded->parameters.campaign->thumbs == std::string(25, 'U'));
         }
+    }
+
+    TEST_CASE("a save whose header holds a field of the wrong type reads as unreadable", "[saveload][savefile]")
+    {
+        // The file is anyone's: a hand-edited or corrupt header must fail to
+        // read, not throw out of the Load list while a game is running.
+        TempFile file;
+        writeSaveFile(file.path, makeSaveFile());
+
+        std::ifstream in(file.path, std::ios::binary);
+        auto j = nlohmann::json::parse(in);
+        in.close();
+        j.at("header")["mission"] = "yes";
+        std::ofstream out(file.path, std::ios::binary | std::ios::trunc);
+        out << j.dump();
+        out.close();
+
+        REQUIRE_FALSE(readSaveFile(file.path).has_value());
     }
 }

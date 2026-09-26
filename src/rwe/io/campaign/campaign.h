@@ -43,6 +43,13 @@ namespace rwe
      */
     std::string campaignMissionName(const CampaignMission& mission, const std::string& language);
 
+    /**
+     * The map a mission is played on: its `missionfile` without the `.ota`
+     * the campaign files write (EXP1AC01.ota), a game being started by the
+     * map's bare name.
+     */
+    std::string campaignMissionMapName(const CampaignMission& mission);
+
     /** `camps/<name>.tdf`, or nothing if it is missing or will not parse. */
     std::optional<Campaign> readCampaign(AbstractVirtualFileSystem& vfs, const std::string& name);
 
