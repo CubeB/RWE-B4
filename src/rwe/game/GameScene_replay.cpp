@@ -523,6 +523,8 @@ namespace rwe
         auto playerCommands = playerCommandService->tryPopCommands();
         if (!playerCommands)
         {
+            lockstepStats.tickBlocked(getTimestamp(), playerCommandService->playersNotReady());
+
             // Said once a stall rather than once a frame. It used to be every
             // frame, which at sixty a second buried the log of a game that had
             // lost a peer under the one thing that log was needed for.
@@ -539,6 +541,7 @@ namespace rwe
             return;
         }
         stallReported = false;
+        lockstepStats.tickRan(getTimestamp());
 
         if (replayWriter)
         {
