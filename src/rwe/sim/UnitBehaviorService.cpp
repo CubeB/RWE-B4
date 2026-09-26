@@ -640,36 +640,82 @@ namespace rwe
         }
     }
 
+    bool followPath(UnitInfo unitInfo, UnitPhysicsInfoGround& physics, PathFollowingInfo& path);
+
     void UnitBehaviorService::updateRemote(UnitInfo unitInfo)
     {
-        // Clear the steering targets the ordinary path clears, so nothing left
-        // over from a previous tick pushes the unit; the positions that arrive
-        // from the owner replace where it is, not where it was going.
+        if (!unitInfo.definition->isMobile)
+        {
+            return;
+        }
+
+        // No order, no search, no target choice: the owner's replicated path
+        // or goal is the only thing steering this unit, so its results never
+        // contend with a decision made here. The steering targets are reset
+        // first, so nothing left over from a previous tick pushes it.
         match(
             unitInfo.state->physics,
             [&](UnitPhysicsInfoGround& p) {
                 p.steeringInfo = SteeringInfo{unitInfo.state->rotation, 0_ss};
+                if (auto* moving = std::get_if<NavigationStateMoving>(&unitInfo.state->navigationState.state))
+                {
+                    if (moving->path)
+                    {
+                        followPath(unitInfo, p, *moving->path);
+                    }
+                }
+                applyUnitSteering(unitInfo);
+                updateRemoteGroundPosition(unitInfo, p);
             },
             [&](UnitPhysicsInfoAir& p) {
                 match(
                     p.movementState,
                     [&](AirMovementStateFlying& s) {
-                        s.targetPosition = unitInfo.state->position;
+                        s.targetPosition = std::nullopt;
+                        if (unitInfo.state->navigationState.desiredDestination)
+                        {
+                            if (auto* target = std::get_if<SimVector>(&*unitInfo.state->navigationState.desiredDestination))
+                            {
+                                s.targetPosition = *target;
+                            }
+                        }
                     },
                     [&](const AirMovementStateTakingOff&) {},
                     [&](const AirMovementStateLanding&) {},
                     [&](const AirMovementStateAttackRun&) {},
                     [&](const AirMovementStateHoverAttack&) {},
                     [&](const AirMovementStateDogfight&) {});
+                applyUnitSteering(unitInfo);
+                updateUnitPosition(unitInfo);
             });
+    }
 
-        unitInfo.state->navigationState.desiredDestination = std::nullopt;
+    void UnitBehaviorService::updateRemoteGroundPosition(UnitInfo unitInfo, UnitPhysicsInfoGround& physics)
+    {
+        unitInfo.state->previousPosition = unitInfo.state->position;
+        unitInfo.state->inCollision = false;
 
-        if (unitInfo.definition->isMobile)
+        auto direction = UnitState::toDirection(unitInfo.state->rotation);
+        if (physics.currentSpeed > 0_ss)
         {
-            applyUnitSteering(unitInfo);
-            updateUnitPosition(unitInfo);
+            auto newPosition = unitInfo.state->position + (direction * physics.currentSpeed);
+            newPosition.y = sim->terrain.getHeightAt(newPosition.x, newPosition.z);
+            if (unitInfo.definition->floater || unitInfo.definition->canHover)
+            {
+                newPosition.y = rweMax(newPosition.y, sim->terrain.getSeaLevel());
+            }
+
+            // The owner already resolved unit collisions along this path, so a
+            // step is never refused here: a peer's stale footprint must not pin
+            // a puppet where its owner had it move. The occupied grid is kept
+            // in step all the same, for anything local that still reads it.
+            auto currentFootprint = sim->computeFootprintRegion(unitInfo.state->position, unitInfo.definition->movementCollisionInfo);
+            auto newFootprint = sim->computeFootprintRegion(newPosition, unitInfo.definition->movementCollisionInfo);
+            sim->moveUnitOccupiedArea(currentFootprint, newFootprint, unitInfo.id);
+            unitInfo.state->position = newPosition;
         }
+
+        updateGroundTilt(unitInfo, physics);
     }
 
     SimVector UnitBehaviorService::getUnitPositionWithCache(UnitState& s, UnitId unitId)

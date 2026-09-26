@@ -62,6 +62,9 @@ namespace rwe
          */
         void updateRemote(UnitInfo unitInfo);
 
+        /** Moves a Remote ground unit along its steering without a collision test. */
+        void updateRemoteGroundPosition(UnitInfo unitInfo, UnitPhysicsInfoGround& physics);
+
         /** Returns true if the order has been completed. */
         bool handleMoveOrder(UnitInfo unitInfo, const MoveOrder& moveOrder);
 
