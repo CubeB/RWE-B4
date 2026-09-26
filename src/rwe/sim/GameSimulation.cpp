@@ -3966,8 +3966,14 @@ namespace rwe
                     [&](const ProjectileCollisionInfoTerrain&) {
                         if (projectile.groundBounce)
                         {
-                            projectile.velocity.y = 0_ss;
-                            projectile.position.y = projectile.previousPosition.y;
+                            // 0x49B37F: the fall turns into a rise a quarter
+                            // as fast, and nothing else changes -- the round
+                            // is not put back above the ground, so it can
+                            // stay under it a tick or more, bouncing, and
+                            // nothing goes off. The original's `vy >> 2` on
+                            // 16.16 floors where a quarter here does not;
+                            // they differ below 1/65536 of a unit.
+                            projectile.velocity.y = -(projectile.velocity.y / 4_ss);
                         }
                         else
                         {

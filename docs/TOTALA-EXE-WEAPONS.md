@@ -2596,6 +2596,12 @@ water, the longer the range at which they get through.
   unit, the ground or the sea, splashes or throws up earth by that alone. So a
   hit on a wading unit in a wet square splashes, and a round into the shallows
   of a square with a dry corner throws up earth.
+- `groundbounce` (B4 #350) does what `0x49B37F` does: `vy` becomes minus a
+  quarter of itself and the position is left alone, so a round can sit under
+  the ground for a tick or more, bouncing, without going off. It used to zero
+  `vy` and put the round back at its previous height. The flamethrower is the
+  one shipped weapon with it, and RWE draws its terrain without writing depth,
+  so a flame under the ground is still drawn, as the original's are.
 - `nosealeveltrigger` reaches `GameSimulation::noSeaLevelTrigger` from the OTA
   and switches the sea test off. It is saved with the other map constants and
   is not hashed, as they are not.
@@ -2608,10 +2614,5 @@ water, the longer the range at which they get through.
 ### Not ported
 
 - **`unitsonly`** is not parsed. No round in RWE skips the ground and the sea.
-- **`groundbounce`** zeroes `vy` and puts the round back at its previous height.
-  The original sets `vy` to minus a quarter of itself and leaves the position
-  alone, which leaves the round under the ground for a tick or more at a time.
-  The flamethrower is the one shipped weapon with it, and how its flames look
-  doing that wants seeing in play before RWE copies it.
 
-Both are in §91.
+It is in §91.

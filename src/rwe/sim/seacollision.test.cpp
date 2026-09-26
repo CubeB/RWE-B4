@@ -239,6 +239,27 @@ namespace rwe
         CHECK(flying);
     }
 
+    TEST_CASE("a bouncing round rises at a quarter of its fall and is left where it struck", "[weapon][water]")
+    {
+        // 0x49B37F: vy becomes -(vy >> 2) and the position is not touched.
+        // Dry ground at 16 and nothing else, so only the ground is in play.
+        Grid<unsigned char> heights(16, 16, static_cast<unsigned char>(16));
+        GameSimulation sim(MapTerrain(std::move(heights), 0_ss), 0u, 0, 0);
+        defineShell(sim, true);
+
+        auto [deaths, flying] = dropShell(sim, SimVector(0_ss, 21_ss, 0_ss));
+        REQUIRE(deaths.empty());
+        REQUIRE(flying);
+        const auto& shell = sim.projectiles.begin()->second;
+        // Eight a tick down and a tick's gravity on top, then a quarter of
+        // that back up.
+        auto fall = -8_ss - (112_ss / (30_ss * 30_ss));
+        CHECK(shell.velocity.y == -(fall / 4_ss));
+        // Left under the ground: 21 less the fall, not put back at 21.
+        CHECK(shell.position.y == 21_ss + fall);
+        CHECK(shell.position.y < 16_ss);
+    }
+
     TEST_CASE("a round's splash is the square's, not the surface it struck", "[weapon][water]")
     {
         // A seabed at 0 under twenty units of water, with one corner of one
