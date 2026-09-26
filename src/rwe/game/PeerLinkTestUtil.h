@@ -82,6 +82,13 @@ namespace rwe
         std::size_t packetsDelivered() const { return packetsDelivered_; }
 
         /**
+         * The arrival time of each command set delivered to `side`, in order,
+         * one entry per set rather than per packet. A set retransmitted after
+         * loss is stamped when the retransmission arrives.
+         */
+        const std::vector<Timestamp>& setArrivals(int side) const { return setArrivals_[side]; }
+
+        /**
          * Moves the clock without running either send timer or delivering
          * anything, for a test that only wants time to pass for the submit
          * rate limit.
@@ -174,6 +181,7 @@ namespace rwe
         std::size_t packetsSent_{0};
         std::size_t packetsLost_{0};
         std::size_t packetsDelivered_{0};
+        std::array<std::vector<Timestamp>, 2> setArrivals_;
 
         void send(int side)
         {
@@ -249,7 +257,14 @@ namespace rwe
                     continue;
                 }
 
+                auto receiver = PlayerId(1 - packet.toSide);
+                auto before = services_[packet.toSide].bufferedCommandCount(receiver);
                 links_[packet.toSide]->onPacket(message.game_update(), packet.arrival);
+                auto after = services_[packet.toSide].bufferedCommandCount(receiver);
+                for (auto i = before; i < after; ++i)
+                {
+                    setArrivals_[packet.toSide].push_back(packet.arrival);
+                }
                 ++packetsDelivered_;
             }
         }

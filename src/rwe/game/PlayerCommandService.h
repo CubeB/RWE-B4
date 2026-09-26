@@ -17,17 +17,44 @@
 namespace rwe
 {
     /**
-     * How deep every player's command buffer is kept, given the worst round
-     * trip time among the peers. A command is held this many ticks before the
-     * simulation sees it, so the depth shifts when orders land; the headless
-     * arena has no peers and must use the same figure the game does or its
-     * hashes diverge from a windowed run's on the first tick an order moves.
+     * The most a submitted set can wait for the send rate limit (#359).
+     * SubmitSendInterval in PeerLink, which cannot be included from here.
      */
-    inline unsigned int commandBufferTargetForRttMillis(float maxAverageRttMillis)
+    inline constexpr float CommandSendCadenceAllowanceMillis = 10.0f;
+
+    /**
+     * The part of the drift gate's +/-3 tick tolerance the buffer pays for.
+     * Half of it: the gate skips or catches up ticks for a peer that drifts
+     * further, and paying the whole tolerance in every order would put a LAN
+     * back at four ticks.
+     */
+    inline constexpr float CommandSceneSkewAllowanceMillis = 50.0f;
+
+    /**
+     * The ceiling on the depth, so a wild estimate cannot grow it for ever.
+     * The same maximum depth the old 1.25 * rtt + 200 had at its 2000 ms cap.
+     */
+    inline constexpr float MaxCommandLatencyMillis = 2700.0f;
+
+    /**
+     * How deep every player's command buffer is kept, given the worst round
+     * trip and the worst round-trip deviation among the peers. A command is
+     * held this many ticks before the simulation sees it, so the depth shifts
+     * when orders land; the headless arena has no peers and uses
+     * aiCommandBufferDepth instead, which is a constant.
+     *
+     * What has to be covered is one-way latency, one send cadence, a margin
+     * for jitter and the scene-time skew the drift gate tolerates. About
+     * rtt/2 is the real need and the old 1.25 * rtt over-padded a steady link;
+     * the deviation is the RFC 6298 figure and four of it is the jitter
+     * margin that keeps a spiky link from stalling.
+     */
+    inline unsigned int commandBufferTargetForRttMillis(float maxAverageRttMillis, float maxRoundTripDeviationMillis)
     {
-        auto maxRtt = std::clamp(maxAverageRttMillis, 16.0f, 2000.0f);
-        auto highCommandLatencyMillis = maxRtt + (maxRtt / 4.0f) + 200.0f;
-        return static_cast<unsigned int>(highCommandLatencyMillis / static_cast<float>(SimMillisecondsPerTick)) + 1;
+        auto oneWayMillis = std::max(maxAverageRttMillis, 0.0f) / 2.0f;
+        auto jitterMarginMillis = 4.0f * std::max(maxRoundTripDeviationMillis, 0.0f);
+        auto millis = std::min(oneWayMillis + jitterMarginMillis + CommandSendCadenceAllowanceMillis + CommandSceneSkewAllowanceMillis, MaxCommandLatencyMillis);
+        return static_cast<unsigned int>(millis / static_cast<float>(SimMillisecondsPerTick)) + 1;
     }
 
     /**
@@ -38,13 +65,14 @@ namespace rwe
      * own copy of the AI over the same simulation and gets the same orders --
      * so there is no round trip to cover for, and taking the figure from one
      * would make the tick an AI order lands on a function of somebody's ping.
-     * It is the no-peer depth, which is what a single-player game and the
-     * headless arena have always used, so the delay between the AI deciding and
-     * the simulation acting is exactly what it was.
+     * It is the depth the single-player game and the headless arena have always
+     * used, and it is written as a constant rather than derived from the client
+     * formula: a low-latency client target is now smaller, and letting that
+     * reach the AI would move every arena baseline.
      */
     inline unsigned int aiCommandBufferDepth()
     {
-        return commandBufferTargetForRttMillis(0.0f);
+        return 7;
     }
 
     class PlayerCommandService

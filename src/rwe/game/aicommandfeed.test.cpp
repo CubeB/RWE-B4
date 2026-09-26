@@ -168,13 +168,13 @@ namespace rwe
 
     TEST_CASE("aiCommandBufferDepth")
     {
-        SECTION("is the depth a peer with no peers would use, and does not move")
+        SECTION("is a constant and does not move with the client formula")
         {
-            REQUIRE(aiCommandBufferDepth() == commandBufferTargetForRttMillis(0.0f));
             REQUIRE(aiCommandBufferDepth() == 7);
+            REQUIRE(aiCommandBufferDepth() == aiCommandBufferDepth());
         }
 
-        SECTION("is not the humans' depth, which follows the round trip time")
+        SECTION("is not the humans' depth, which follows the round trip and its jitter")
         {
             // The two being different is the point. A human's orders cross the
             // network and have to be waited for; an AI's are issued by every
@@ -182,7 +182,7 @@ namespace rwe
             // measured latency made it a different number on each peer, and
             // the depth decides the game -- the same seed at two different
             // depths diverges within two seconds.
-            REQUIRE(commandBufferTargetForRttMillis(60.0f) != aiCommandBufferDepth());
+            REQUIRE(commandBufferTargetForRttMillis(60.0f, 0.0f) != aiCommandBufferDepth());
         }
     }
 
