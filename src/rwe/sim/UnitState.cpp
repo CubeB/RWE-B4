@@ -461,14 +461,35 @@ namespace rwe
         clearWeaponTargets();
     }
 
+    namespace
+    {
+        /**
+         * A move immediately followed by a patrol is a patrol route: the move's
+         * destination is the route's first waypoint. Left a move it is consumed
+         * on arrival, leaving a lone patrol waypoint that parks the unit.
+         */
+        void convertMovesBeforePatrols(std::deque<UnitOrder>& orders)
+        {
+            for (std::size_t i = 0; i + 1 < orders.size(); ++i)
+            {
+                if (auto move = std::get_if<MoveOrder>(&orders[i]); move != nullptr && std::holds_alternative<PatrolOrder>(orders[i + 1]))
+                {
+                    orders[i] = PatrolOrder(move->destination);
+                }
+            }
+        }
+    }
+
     void UnitState::replaceOrders(const std::deque<UnitOrder>& newOrders)
     {
         orders = newOrders;
+        convertMovesBeforePatrols(orders);
     }
 
     void UnitState::addOrder(const UnitOrder& order)
     {
         orders.push_back(order);
+        convertMovesBeforePatrols(orders);
     }
 
     class TargetIsUnitVisitor
