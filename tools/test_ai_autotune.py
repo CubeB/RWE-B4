@@ -108,6 +108,47 @@ class KnobValidationTest(unittest.TestCase):
         self.assertIn("nope1", str(ctx.exception))
         self.assertIn("nope2", str(ctx.exception))
 
+    def test_float_spec_for_an_int_knob_fails(self):
+        # The engine rejects "57.3" for an int knob, which kills that game.
+        specs = [autotune.KnobSpec(name="attackArmySize", type="float", min=4, max=20)]
+        with self.assertRaises(ValueError) as ctx:
+            autotune.validate_knob_spec(specs, self.known)
+        self.assertIn("attackArmySize", str(ctx.exception))
+
+
+class PhaseSeedsTest(unittest.TestCase):
+    def test_phases_never_share_a_seed(self):
+        for args in [(1, 4, 12, 4), (1, 6, 16, 8), (100, 3, 3, 3)]:
+            screen, confirm, fp = autotune.phase_seeds(*args)
+            self.assertEqual(len(screen), args[1])
+            self.assertEqual(len(confirm), args[2])
+            self.assertEqual(len(fp), args[3])
+            self.assertFalse(set(screen) & set(confirm))
+            self.assertFalse(set(screen) & set(fp))
+            self.assertFalse(set(confirm) & set(fp))
+            self.assertEqual(screen[0], args[0])
+
+
+class RunConfigTest(unittest.TestCase):
+    def fingerprint(self, **over):
+        base = {"exe": {"path": "x", "size": 1, "mtime": 2}, "map": "Great Divide", "difficulty": "standard"}
+        base.update(over)
+        return base
+
+    def test_first_use_records_then_same_config_resumes(self):
+        with tempfile.TemporaryDirectory() as d:
+            autotune.check_run_config(d, self.fingerprint(), allow_change=False)
+            self.assertTrue(os.path.exists(os.path.join(d, autotune.RUN_CONFIG_NAME)))
+            autotune.check_run_config(d, self.fingerprint(), allow_change=False)  # must not raise
+
+    def test_a_changed_config_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            autotune.check_run_config(d, self.fingerprint(), allow_change=False)
+            with self.assertRaises(SystemExit) as ctx:
+                autotune.check_run_config(d, self.fingerprint(map="Acid Foursome"), allow_change=False)
+            self.assertIn("map", str(ctx.exception))
+            autotune.check_run_config(d, self.fingerprint(map="Acid Foursome"), allow_change=True)  # warns only
+
 
 class CandidateSamplingTest(unittest.TestCase):
     def setUp(self):

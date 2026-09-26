@@ -172,14 +172,15 @@ def validate_knob_spec(specs: Sequence[KnobSpec], known: Dict[str, str]) -> None
     mismatched = []
     for s in specs:
         engine_type = known[s.name]
-        # scalar and float both use plain decimal text on the command line;
-        # anything else mismatching is worth a loud warning, not a hard stop,
-        # since the engine table is the ground truth and a spec author may
-        # have reason to treat an int knob as effectively continuous.
-        if s.type in ("int", "bool") and s.type != engine_type:
+        # scalar and float both use plain decimal text on the command line, so
+        # those two may stand for each other; any other difference is an error.
+        continuous = ("float", "scalar")
+        if s.type != engine_type and not (s.type in continuous and engine_type in continuous):
             mismatched.append(f"{s.name} (spec says {s.type}, engine says {engine_type})")
     if mismatched:
-        print("warning: knob type mismatch: " + "; ".join(mismatched), file=sys.stderr)
+        # A continuous value sent to an int/bool knob is rejected by the engine
+        # (fatal for that game), and an int sent to a float knob wastes the range.
+        raise ValueError("knob type mismatch: " + "; ".join(mismatched))
 
 
 # ---------------------------------------------------------------------------
@@ -706,6 +707,60 @@ def print_candidate_detail(score: CandidateScore, specs: Sequence[KnobSpec]) -> 
             print(f"    p.{name} = {float(value):.4f}f;")
 
 
+def phase_seeds(first: int, screen: int, confirm: int, fourplayer: int) -> Tuple[List[int], List[int], List[int]]:
+    """The arena seeds each phase plays, as three disjoint runs of numbers.
+
+    Confirmation must use seeds the screening never saw: a candidate is promoted
+    because it did well on the screening seeds, so counting those seeds again in
+    confirmation is exactly the selection bias successive halving exists to
+    remove. The 1v1v1v1 check is held out from both for the same reason."""
+    screen_seeds = list(range(first, first + screen))
+    confirm_seeds = list(range(first + screen, first + screen + confirm))
+    fp_seeds = list(range(first + screen + confirm, first + screen + confirm + fourplayer))
+    return screen_seeds, confirm_seeds, fp_seeds
+
+
+RUN_CONFIG_NAME = "run_config.json"
+
+
+def run_fingerprint(args: argparse.Namespace) -> Dict[str, object]:
+    """Everything outside the result key that changes what a game means. A
+    resumed run with a different map, difficulty or engine binary would
+    otherwise blend two experiments into one candidate's fitness."""
+    try:
+        st = os.stat(args.exe)
+        exe_id = {"path": os.path.abspath(args.exe), "size": st.st_size, "mtime": int(st.st_mtime)}
+    except OSError:
+        exe_id = {"path": os.path.abspath(args.exe), "size": None, "mtime": None}
+    return {
+        "exe": exe_id,
+        "data_path": args.data_path,
+        "map": args.map,
+        "fourplayer_map": args.fourplayer_map,
+        "difficulty": args.difficulty,
+        "start_location": args.start_location,
+        "first_eval_seed": args.first_eval_seed,
+    }
+
+
+def check_run_config(out_dir: str, fingerprint: Dict[str, object], allow_change: bool) -> None:
+    """Records the fingerprint on first use; on resume, refuses a mismatch
+    unless --allow-config-change says the caller means it."""
+    path = os.path.join(out_dir, RUN_CONFIG_NAME)
+    if not os.path.exists(path):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(fingerprint, f, indent=2, sort_keys=True)
+        return
+    with open(path, encoding="utf-8") as f:
+        recorded = json.load(f)
+    if recorded != fingerprint:
+        diff = sorted(k for k in set(recorded) | set(fingerprint) if recorded.get(k) != fingerprint.get(k))
+        msg = f"{path} records a different run configuration ({', '.join(diff)}); results would mix two experiments"
+        if not allow_change:
+            raise SystemExit("error: " + msg + ". Use a new --out, or --allow-config-change if this is deliberate.")
+        print("warning: " + msg, file=sys.stderr)
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--exe", default="D:/RWE-bin/revival-31369ec6/ai_arena.exe")
@@ -731,6 +786,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--jobs", type=int, default=3)
     parser.add_argument("--watchdog", type=int, default=120, help="wall-clock seconds before a game is killed")
     parser.add_argument("--efficiency", action="store_true", help="fold arena-analyse waste figures into fitness")
+    parser.add_argument("--allow-config-change", action="store_true",
+                        help="resume into --out even though its recorded run configuration differs")
     parser.add_argument("--skip-fourplayer", action="store_true", help="skip the mandatory 1v1v1v1 confirmation (debugging only)")
     args = parser.parse_args(argv)
 
@@ -744,6 +801,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             raise ValueError(f"unknown scenario {s!r}, expected one of {list(SCENARIO_SIDES)}")
 
     os.makedirs(args.out, exist_ok=True)
+    check_run_config(args.out, run_fingerprint(args), args.allow_config_change)
+    screen_seeds, confirm_seeds, fp_seeds = phase_seeds(
+        args.first_eval_seed, args.screen_seeds, args.confirm_seeds, args.fourplayer_seeds)
     store = ResultStore(os.path.join(args.out, "results.jsonl"))
     games_dir = os.path.join(args.out, "games")
 
@@ -759,7 +819,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     for cid, k in candidates:
         print(f"  {cid}: {k}")
 
-    screen_seeds = list(range(args.first_eval_seed, args.first_eval_seed + args.screen_seeds))
     t0 = time.time()
     screen_scores = evaluate_round(
         candidates, screen_seeds, args.screen_seconds, scenarios,
@@ -774,7 +833,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     promoted_pairs = [(s.candidate_id, s.knobs) for s in promoted]
     print(f"\npromoted to confirmation: {[c for c, _ in promoted_pairs]}")
 
-    confirm_seeds = list(range(args.first_eval_seed, args.first_eval_seed + args.confirm_seeds))
     t1 = time.time()
     confirm_scores = evaluate_round(
         promoted_pairs, confirm_seeds, args.confirm_seconds, scenarios,
@@ -798,7 +856,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     fp_scenario = "fourplayer"
     fp_sides = ("ARM", "CORE", "ARM", "CORE")
-    fp_seeds = list(range(args.first_eval_seed, args.first_eval_seed + args.fourplayer_seeds))
     t2 = time.time()
     fp_scores = evaluate_fourplayer(
         winner.candidate_id, winner.knobs, fp_seeds, args.fourplayer_seconds, fp_sides,
