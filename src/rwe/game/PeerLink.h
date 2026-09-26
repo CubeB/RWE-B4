@@ -114,6 +114,14 @@ namespace rwe
             std::optional<float> estimatedSceneTimeNow;
 
             float averageRoundTripMillis;
+
+            /**
+             * The smoothed round-trip deviation, in milliseconds: how far a
+             * sample typically falls from the average. Zero until a sample
+             * has been taken.
+             */
+            float roundTripDeviationMillis;
+
             float latestRoundTripMillis;
 
             /** Over the last few seconds; zero until a sample has been taken. */
@@ -175,6 +183,13 @@ namespace rwe
         static constexpr std::chrono::milliseconds SendInterval{100};
 
         /**
+         * The shortest gap between packets to a peer when a set is submitted.
+         * A frame can dispatch several ticks and each submits, so without it a
+         * frame would send several near-identical packets.
+         */
+        static constexpr std::chrono::milliseconds SubmitSendInterval{10};
+
+        /**
          * How many commands from the front of `commands` make one set no
          * bigger than MaxCommandSetBytes; at least one while there are any.
          */
@@ -218,6 +233,14 @@ namespace rwe
         std::vector<char> makePacket(Timestamp now, std::size_t sizeLimit);
 
         /**
+         * Whether a packet may leave at `now`: at most one per
+         * SubmitSendInterval. A set submitted after the gap sends at once; a
+         * frame that submits several ticks sends them in one. The timer asks
+         * the same question so a keepalive cannot race a submit.
+         */
+        bool sendIsDue(Timestamp now) const;
+
+        /**
          * Read a packet from the remote peer. Anything well formed counts as a
          * sign of life; new sets, hashes and chat are taken, acknowledged and
          * handed to the command service and the chat inbox.
@@ -247,6 +270,9 @@ namespace rwe
         bool remoteStalled() const { return remoteStalled_; }
 
         float averageRoundTripTime() const { return averageRoundTripTime_; }
+
+        /** The smoothed round-trip deviation, estimated the same way. */
+        float roundTripDeviation() const { return roundTripDeviation_; }
 
         PeerStatus status(Timestamp now, std::optional<Timestamp> sinceWhenNeverHeard) const;
 
@@ -294,7 +320,12 @@ namespace rwe
 
         std::optional<std::pair<SceneTime, Timestamp>> lastKnownSceneTime_;
 
+        /** When a packet last left, for the submit rate limit. */
+        std::optional<Timestamp> lastSendTime;
+
         float averageRoundTripTime_{0};
+        float roundTripDeviation_{0};
+        bool roundTripMeasured_{false};
         RoundTripWindow recentRoundTripTimes;
 
         SceneTime currentSceneTime{0};

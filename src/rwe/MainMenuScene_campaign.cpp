@@ -367,7 +367,7 @@ namespace rwe
             {
                 auto region = std::make_unique<UiTextRegion>(c.xpos, c.ypos, static_cast<unsigned int>(c.width), static_cast<unsigned int>(c.height), font);
                 region->setName("TextRegion");
-                if (auto text = sceneContext.vfs->readFile("camps/briefs/" + ota.brief + ".txt"))
+                if (auto text = sceneContext.vfs->readFile(campaignResourcePath("camps/briefs", ota.brief, ".txt")))
                 {
                     region->setText(std::string(text->begin(), text->end()));
                 }
@@ -419,7 +419,7 @@ namespace rwe
         goToMenu(std::move(panel));
 
         // The narration plays as the briefing opens (0x476E56).
-        narration = sceneContext.audioService->loadSoundFromPath("camps/briefs/" + ota.narration + ".wav");
+        narration = sceneContext.audioService->loadSoundFromPath(campaignResourcePath("camps/briefs", ota.narration, ".wav"));
         startNarration();
     }
 

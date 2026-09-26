@@ -206,7 +206,14 @@ namespace rwe
             sendTimes.emplace_back(nextSequenceNumber, now);
         }
 
+        lastSendTime = now;
+
         return bytes;
+    }
+
+    bool PeerLink::sendIsDue(Timestamp now) const
+    {
+        return !lastSendTime || now - *lastSendTime >= SubmitSendInterval;
     }
 
     void PeerLink::onPacket(const proto::GameUpdateMessage& message, Timestamp now)
@@ -263,10 +270,20 @@ namespace rwe
             auto roundTripTime = now - sendTimes.front().second;
             auto ackDelay = std::chrono::milliseconds(message.ack_delay());
             roundTripTime = roundTripTime > ackDelay ? roundTripTime - ackDelay : std::chrono::milliseconds(0);
-            auto rttMillis = std::chrono::duration_cast<std::chrono::milliseconds>(roundTripTime).count();
+            auto rttMillis = static_cast<float>(std::chrono::duration_cast<std::chrono::milliseconds>(roundTripTime).count());
             averageRoundTripTime_ = ema(rttMillis, averageRoundTripTime_, 0.1f);
-            recentRoundTripTimes.add(static_cast<float>(rttMillis));
-            LOG_DEBUG << "Average RTT: " << averageRoundTripTime_ << "ms";
+            if (roundTripMeasured_)
+            {
+                roundTripDeviation_ = updateRoundTripDeviation(roundTripDeviation_, rttMillis, averageRoundTripTime_);
+            }
+            else
+            {
+                // Seeded at half the first sample, as RFC 6298 does.
+                roundTripDeviation_ = rttMillis / 2.0f;
+                roundTripMeasured_ = true;
+            }
+            recentRoundTripTimes.add(rttMillis);
+            LOG_DEBUG << "Average RTT: " << averageRoundTripTime_ << "ms, deviation: " << roundTripDeviation_ << "ms";
         }
 
         auto extraFrames = static_cast<unsigned int>((averageRoundTripTime_ / 2.0f) * SimTicksPerSecond / 1000.0f);
@@ -451,6 +468,7 @@ namespace rwe
             lastKnownSceneTime_ ? std::optional<SceneTime>(lastKnownSceneTime_->first) : std::nullopt,
             estimatedNow,
             averageRoundTripTime_,
+            roundTripDeviation_,
             recentRoundTripTimes.latest(),
             recentRoundTripTimes.min(),
             recentRoundTripTimes.max(),

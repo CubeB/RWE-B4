@@ -2,10 +2,23 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 
 namespace rwe
 {
+    /**
+     * RFC 6298's round-trip deviation, given the new sample and the average it
+     * is measured against. A spike moves it a quarter of the way at once and
+     * the next samples walk it back at three quarters a sample, which is the
+     * grow-fast, shrink-slow a latency spike needs from the command buffer
+     * depth.
+     */
+    inline float updateRoundTripDeviation(float previousDeviation, float sampleMillis, float averageMillis)
+    {
+        return 0.75f * previousDeviation + 0.25f * std::abs(sampleMillis - averageMillis);
+    }
+
     /**
      * The most recent round-trip samples to one peer.
      *

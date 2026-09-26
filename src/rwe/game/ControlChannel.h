@@ -1,5 +1,6 @@
 #pragma once
 
+#include <nlohmann/json_fwd.hpp>
 #include <string>
 #include <vector>
 
@@ -42,6 +43,18 @@ namespace rwe
      * cheap no-op; the game is ordinarily started by a person and not by a
      * program, and a program that did not ask to be spoken to should not have
      * JSON appearing in its console.
+     *
+     * The events, each an object with an `event` name:
+     *
+     *   player-dropped   {player, tick}
+     *   rejoin-bundle    {player, tick, file}
+     *   rejoin-refused   {player, reason}
+     *   game-ended       {outcome, tick, gameTime, engineBuild, replay,
+     *                     hashLog, desyncDumps, log, winner|winners,
+     *                     desyncTick?}
+     *
+     * A path with nothing at it is sent as null rather than as a name the
+     * launcher would fail to open. See GameEndedReport for the whole shape.
      */
     class ControlChannel
     {
@@ -73,6 +86,15 @@ namespace rwe
 
         /** A rejoin was asked for and will not happen, with the reason why. */
         void sendRejoinRefused(unsigned int player, const std::string& reason);
+
+        /**
+         * The game is over, and this is what became of it.
+         *
+         * Sent exactly once, from whichever of the three endings is reached
+         * first. The object is the one gameEndedJson builds -- see
+         * GameEndedReport for what is in it and who assembles it.
+         */
+        void sendGameEnded(const nlohmann::json& report);
 
     private:
         bool on{false};
