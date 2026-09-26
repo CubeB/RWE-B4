@@ -46,6 +46,13 @@ namespace rwe
         return true;
     }
 
+    bool GameScene::localHumanCommandsAreFedPerTick() const
+    {
+        return !replayPlayback
+            && !gameNetworkService->hasRemotePeers()
+            && simulation.getPlayer(localPlayerId).type == GamePlayerType::Human;
+    }
+
     unsigned int GameScene::chooseDropTick(const std::vector<GameNetworkService::PeerStatus>& peers) const
     {
         // Past the furthest tick anybody has reached, not merely past this
@@ -79,6 +86,17 @@ namespace rwe
         resumeRejoiningPeers();
 
         waitingForPlayers = playerCommandService->playersNotReady();
+
+        // A lone human is fed a tick at a time when the tick runs, so their
+        // buffer being empty between ticks is not a peer gone quiet and must
+        // not raise the waiting notice. See localHumanCommandsAreFedPerTick.
+        if (localHumanCommandsAreFedPerTick())
+        {
+            waitingForPlayers.erase(
+                std::remove(waitingForPlayers.begin(), waitingForPlayers.end(), localPlayerId),
+                waitingForPlayers.end());
+        }
+
         if (waitingForPlayers.empty())
         {
             waitingSince = std::nullopt;
