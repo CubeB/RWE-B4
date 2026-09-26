@@ -537,6 +537,11 @@ namespace rwe
         }
 
         std::sort(unitFileStems.begin(), unitFileStems.end());
+
+        // TA's file system is case-insensitive, so a mod that ships ARMCSA.FBI
+        // over base TA's ArmCSA.fbi has one unit type, not two -- the merged
+        // listing presents both spellings, and ProTA 4.8 has seven such pairs.
+        unitFileStems.erase(std::unique(unitFileStems.begin(), unitFileStems.end()), unitFileStems.end());
         return unitFileStems;
     }
 

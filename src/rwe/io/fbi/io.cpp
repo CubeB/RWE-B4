@@ -21,9 +21,7 @@ namespace rwe
         tdf.read("UnitName", u.unitName);
         tdf.read("Objectname", u.objectName);
 
-        // A pseudo-unit that exists only to put a stockpiled missile on a build
-        // menu names no sound category; the original tolerates the missing key
-        // and treats the unit as silent.
+        // ProTA's stockpile build-menu pseudo-units name none.
         tdf.readOrDefault("SoundCategory", u.soundCategory);
 
         tdf.readOrDefault("MovementClass", u.movementClass);

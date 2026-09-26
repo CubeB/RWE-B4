@@ -346,6 +346,12 @@ namespace rwe
                 == std::vector<std::string>{"ARMCK", "CORCV"});
         }
 
+        SECTION("counts a name once whatever its spellings")
+        {
+            REQUIRE(tadUnitLoadOrder({"ArmCSA", "ARMCK", "ARMCSA"})
+                == std::vector<std::string>{"ARMCK", "ARMCSA"});
+        }
+
         SECTION("orders by byte, so '_' sorts after 'Z'")
         {
             // TA: Escalation ships ALL_L2.FBI. If '_' (0x5f) were folded in
