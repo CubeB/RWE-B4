@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <network.pb.h>
@@ -11,6 +12,71 @@ namespace rwe
         std::vector<PlayerCommand> speedCommand(int index)
         {
             return {PlayerSetGameSpeedCommand{index}};
+        }
+
+        struct DepthFixtureResult
+        {
+            unsigned int stalls;
+            double averageDepth;
+        };
+
+        /** The formula this replaces: 1.25 * rtt + 200 ms. */
+        unsigned int legacyCommandBufferTarget(float averageRoundTripMillis)
+        {
+            auto maxRtt = std::clamp(averageRoundTripMillis, 16.0f, 2000.0f);
+            auto millis = maxRtt + (maxRtt / 4.0f) + 200.0f;
+            return static_cast<unsigned int>(millis / static_cast<float>(SimMillisecondsPerTick)) + 1;
+        }
+
+        /**
+         * Drives the two-peer fixture the way a lockstep scene does: each tick
+         * the local peer tops its stream up to the depth the formula gives, so
+         * sets are sent ahead of the remote's one-set-a-tick drain. A set the
+         * remote reaches before its arrival is a stall. Stalls are counted
+         * only after warm-up, while the estimators are still converging.
+         */
+        DepthFixtureResult runDepthFixture(const FakePeerLink::Options& options, int warmupTicks, int measuredTicks, bool useNewFormula)
+        {
+            FakePeerLink link(options);
+            const auto tick = std::chrono::milliseconds(SimMillisecondsPerTick);
+            const auto start = link.now();
+
+            std::vector<unsigned int> depths;
+            unsigned int submitted = 0;
+
+            for (int t = 0; t < warmupTicks + measuredTicks; ++t)
+            {
+                auto depth = useNewFormula
+                    ? commandBufferTargetForRttMillis(link.link(0).averageRoundTripTime(), link.link(0).roundTripDeviation())
+                    : legacyCommandBufferTarget(link.link(0).averageRoundTripTime());
+                depths.push_back(depth);
+
+                while (submitted < static_cast<unsigned int>(t) + depth)
+                {
+                    link.submitCommands(0, SceneTime(submitted), speedCommand(static_cast<int>(submitted)));
+                    ++submitted;
+                }
+
+                link.run(tick);
+            }
+
+            const auto& arrivals = link.setArrivals(1);
+            unsigned int stalls = 0;
+            double depthSum = 0.0;
+            unsigned int counted = 0;
+            for (int k = warmupTicks; k < warmupTicks + measuredTicks; ++k)
+            {
+                depthSum += depths[static_cast<std::size_t>(k)];
+                ++counted;
+                if (static_cast<std::size_t>(k) >= arrivals.size() || arrivals[static_cast<std::size_t>(k)] > start + tick * (k + 1))
+                {
+                    ++stalls;
+                }
+            }
+
+            return DepthFixtureResult{
+                stalls,
+                counted > 0 ? depthSum / counted : 0.0};
         }
     }
 
@@ -291,5 +357,61 @@ namespace rwe
 
         REQUIRE(link.packetsSent() >= 3);
         REQUIRE(link.link(0).status(link.now(), std::nullopt).unackedCommandSets == 1);
+    }
+
+    TEST_CASE("PeerLink tracks the round trip deviation next to the average")
+    {
+        FakePeerLink::Options options;
+        options.oneWayDelay = std::chrono::milliseconds(40);
+        options.maxJitter = std::chrono::milliseconds(60);
+        options.seed = 4242;
+        FakePeerLink link(options);
+
+        for (int i = 0; i < 120; ++i)
+        {
+            link.link(0).submitCommands(SceneTime(i), speedCommand(i));
+            link.run(std::chrono::milliseconds(SimMillisecondsPerTick));
+        }
+
+        auto status = link.link(0).status(link.now(), std::nullopt);
+        REQUIRE(status.averageRoundTripMillis > 0.0f);
+        REQUIRE(status.roundTripDeviationMillis > 0.0f);
+        REQUIRE(status.roundTripDeviationMillis < status.averageRoundTripMillis);
+        REQUIRE(status.roundTripDeviationMillis == Catch::Approx(link.link(0).roundTripDeviation()));
+    }
+
+    TEST_CASE("The jitter-aware depth is a smaller delay on a steady link and covers a lossy one")
+    {
+        SECTION("a steady link gets a smaller depth and no more stalls")
+        {
+            FakePeerLink::Options options;
+            options.oneWayDelay = std::chrono::milliseconds(40);
+            options.seed = 11;
+
+            auto tuned = runDepthFixture(options, 150, 300, true);
+            auto legacy = runDepthFixture(options, 150, 300, false);
+
+            INFO("tuned depth " << tuned.averageDepth << " stalls " << tuned.stalls
+                                << ", legacy depth " << legacy.averageDepth << " stalls " << legacy.stalls);
+            REQUIRE(tuned.averageDepth < legacy.averageDepth);
+            REQUIRE(tuned.stalls <= legacy.stalls);
+        }
+
+        SECTION("a jittery, lossy link is not stalled more, with no more than the legacy delay")
+        {
+            FakePeerLink::Options options;
+            options.oneWayDelay = std::chrono::milliseconds(30);
+            options.maxJitter = std::chrono::milliseconds(60);
+            options.loss = 0.01;
+            options.seed = 99;
+
+            auto tuned = runDepthFixture(options, 150, 300, true);
+            auto legacy = runDepthFixture(options, 150, 300, false);
+
+            INFO("tuned depth " << tuned.averageDepth << " stalls " << tuned.stalls
+                                << ", legacy depth " << legacy.averageDepth << " stalls " << legacy.stalls);
+            REQUIRE(tuned.stalls <= legacy.stalls);
+            REQUIRE(tuned.averageDepth <= legacy.averageDepth);
+        }
     }
 }

@@ -114,6 +114,14 @@ namespace rwe
             std::optional<float> estimatedSceneTimeNow;
 
             float averageRoundTripMillis;
+
+            /**
+             * The smoothed round-trip deviation, in milliseconds: how far a
+             * sample typically falls from the average. Zero until a sample
+             * has been taken.
+             */
+            float roundTripDeviationMillis;
+
             float latestRoundTripMillis;
 
             /** Over the last few seconds; zero until a sample has been taken. */
@@ -249,6 +257,9 @@ namespace rwe
 
         float averageRoundTripTime() const { return averageRoundTripTime_; }
 
+        /** The smoothed round-trip deviation, estimated the same way. */
+        float roundTripDeviation() const { return roundTripDeviation_; }
+
         PeerStatus status(Timestamp now, std::optional<Timestamp> sinceWhenNeverHeard) const;
 
         /** Everything that arrived since the last call, in the order it arrived. */
@@ -299,6 +310,8 @@ namespace rwe
         std::optional<Timestamp> lastSendTime;
 
         float averageRoundTripTime_{0};
+        float roundTripDeviation_{0};
+        bool roundTripMeasured_{false};
         RoundTripWindow recentRoundTripTimes;
 
         SceneTime currentSceneTime{0};

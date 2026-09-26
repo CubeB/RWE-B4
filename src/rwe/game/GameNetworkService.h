@@ -98,6 +98,9 @@ namespace rwe
 
         float getMaxAverageRttMillis();
 
+        /** The worst round-trip deviation among the peers, alongside the average. */
+        float getMaxRoundTripDeviationMillis();
+
         /**
          * Whether there is a peer to wait for at all.
          *

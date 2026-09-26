@@ -263,6 +263,25 @@ namespace rwe
         return result.get_future().get();
     }
 
+    float GameNetworkService::getMaxRoundTripDeviationMillis()
+    {
+        std::promise<float> result;
+        asio::post(ioContext, [this, &result]() {
+            auto maxDeviation = 0.0f;
+            for (const auto& e : endpoints)
+            {
+                if (e.link->roundTripDeviation() > maxDeviation)
+                {
+                    maxDeviation = e.link->roundTripDeviation();
+                }
+            }
+
+            result.set_value(maxDeviation);
+        });
+
+        return result.get_future().get();
+    }
+
     bool GameNetworkService::hasRemotePeers() const
     {
         return remotePeersPresent;

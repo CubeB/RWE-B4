@@ -871,7 +871,7 @@ namespace rwe
         // buffer the same frame.
         finishRejoinIfCaughtUp();
 
-        auto targetCommandBufferSize = commandBufferTargetForRttMillis(gameNetworkService->getMaxAverageRttMillis());
+        auto targetCommandBufferSize = commandBufferTargetForRttMillis(gameNetworkService->getMaxAverageRttMillis(), gameNetworkService->getMaxRoundTripDeviationMillis());
 
         auto bufferedCommandCount = playerCommandService->bufferedCommandCount(localPlayerId);
 
