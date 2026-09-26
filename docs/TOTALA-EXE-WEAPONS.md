@@ -2584,12 +2584,18 @@ water, the longer the range at which they get through.
 ### Ported
 
 - `checkProjectileCollision` tests the square's units and features, then the
-  flying units, **before** the sea and the ground. It used to test the sea
-  first, so a round that went below the surface inside a wading unit's
-  footprint splashed where the original hits the unit. RWE keeps its sea test
-  ahead of its ground test; §88 does not need an entry, because the art comes
-  from the square either way (above) and the two differ only for
-  `groundbounce`, below.
+  flying units, then the ground, then the sea, the original's order. It used
+  to test the sea first, so a round that went below the surface inside a
+  wading unit's footprint splashed where the original hits the unit. And until
+  B4 #350 it still tested the sea before the ground, so a `groundbounce` round
+  (the flamethrower's) that passed the surface and the seabed in one tick over
+  shallow water went out in the water where the original bounces it.
+- The art is the square's, as the original's is: `MapTerrain::isSquareUnderSea`
+  asks whether the highest of the square's four corners (the byte the map
+  loader stores at `0x483329`) is below sea level, and every detonation, on a
+  unit, the ground or the sea, splashes or throws up earth by that alone. So a
+  hit on a wading unit in a wet square splashes, and a round into the shallows
+  of a square with a dry corner throws up earth.
 - `nosealeveltrigger` reaches `GameSimulation::noSeaLevelTrigger` from the OTA
   and switches the sea test off. It is saved with the other map constants and
   is not hashed, as they are not.
@@ -2604,6 +2610,8 @@ water, the longer the range at which they get through.
 - **`unitsonly`** is not parsed. No round in RWE skips the ground and the sea.
 - **`groundbounce`** zeroes `vy` and puts the round back at its previous height.
   The original sets `vy` to minus a quarter of itself and leaves the position
-  alone.
+  alone, which leaves the round under the ground for a tick or more at a time.
+  The flamethrower is the one shipped weapon with it, and how its flames look
+  doing that wants seeing in play before RWE copies it.
 
 Both are in §91.

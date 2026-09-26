@@ -1,4 +1,5 @@
 #include "MapTerrain.h"
+#include <algorithm>
 #include <cmath>
 #include <rwe/geometry/Plane3f.h>
 #include <rwe/geometry/Triangle3f.h>
@@ -112,6 +113,35 @@ namespace rwe
             pos.x - (getWidthInWorldUnits() / 2_ss),
             pos.y,
             pos.z - (getHeightInWorldUnits() / 2_ss));
+    }
+
+    bool MapTerrain::isSquareUnderSea(SimScalar x, SimScalar z) const
+    {
+        auto cell = worldToHeightmapCoordinate(SimVector(x, 0_ss, z));
+        if (cell.x < 0 || cell.y < 0 || cell.x >= heights.getWidth() || cell.y >= heights.getHeight())
+        {
+            return false;
+        }
+
+        // The square's own corner and those to its right, below and
+        // diagonally below, where the map has them (0x4832D8-0x483324).
+        auto high = heights.get(cell.x, cell.y);
+        auto hasRight = cell.x + 1 < heights.getWidth();
+        auto hasBelow = cell.y + 1 < heights.getHeight();
+        if (hasRight)
+        {
+            high = std::max(high, heights.get(cell.x + 1, cell.y));
+        }
+        if (hasBelow)
+        {
+            high = std::max(high, heights.get(cell.x, cell.y + 1));
+        }
+        if (hasRight && hasBelow)
+        {
+            high = std::max(high, heights.get(cell.x + 1, cell.y + 1));
+        }
+
+        return SimScalar(static_cast<float>(high)) < seaLevel;
     }
 
     SimScalar MapTerrain::getHeightAt(SimScalar x, SimScalar z) const
