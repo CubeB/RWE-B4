@@ -154,6 +154,13 @@ namespace rwe
             return simulation.unitDefinitions.find(unitType) != simulation.unitDefinitions.end();
         }
 
+        /** Off the mission's unit list (issue #381); the original has no such unit to build. */
+        bool isExcludedByMission(const GameSimulation& simulation, const std::string& unitType)
+        {
+            auto it = simulation.unitDefinitions.find(unitType);
+            return it != simulation.unitDefinitions.end() && it->second.excludedByMission;
+        }
+
         /**
          * Why a command has to be refused before any of it reaches the
          * simulation, or nothing if it may go ahead.
@@ -183,12 +190,20 @@ namespace rwe
                 {
                     return "it names an unknown unit type";
                 }
+                if (const auto* build = std::get_if<BuildOrder>(&issue->order); build != nullptr && isExcludedByMission(simulation, build->unitType))
+                {
+                    return "the mission does not offer that unit";
+                }
             }
             if (const auto* queue = std::get_if<PlayerUnitCommand::ModifyBuildQueue>(&unitCommand.command))
             {
                 if (!isKnownUnitType(simulation, queue->unitType))
                 {
                     return "it names an unknown unit type";
+                }
+                if (queue->count > 0 && isExcludedByMission(simulation, queue->unitType))
+                {
+                    return "the mission does not offer that unit";
                 }
                 if (queue->count < -MaxQueueChange || queue->count > MaxQueueChange)
                 {

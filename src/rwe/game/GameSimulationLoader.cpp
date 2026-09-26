@@ -840,10 +840,44 @@ namespace rwe
         // player could order from that unit, and cannot know that the
         // advanced constructor is the only way to a fusion plant. See
         // docs/ai-architecture-proposal.md §15.2.
+        // A mission offers only the units its `useonlyunits` file lists
+        // (0x431740; issue #381). A list that does not open restricts
+        // nothing, as in the original: two shipped missions name one that
+        // does not exist.
+        if (gameParameters.mission && !ota.useOnlyUnits.empty())
+        {
+            auto listName = ota.useOnlyUnits;
+            if (listName.size() < 4 || toUpper(listName.substr(listName.size() - 4)) != ".TDF")
+            {
+                listName += ".tdf";
+            }
+            auto bytes = services.vfs->readFile("camps/useonly/" + listName);
+            if (!bytes)
+            {
+                LOG_WARN << "Mission unit list " << listName << " not found; every unit is available";
+            }
+            else
+            {
+                try
+                {
+                    auto allowed = missionUnitListFromTdf(parseTdfFromString(std::string(bytes->begin(), bytes->end())));
+                    auto kept = applyMissionUnitList(simulation.unitDefinitions, dataMaps.builderGuisDatabase, allowed);
+                    LOG_INFO << "Mission unit list " << listName << ": " << kept << " of " << simulation.unitDefinitions.size() << " units available";
+                }
+                catch (const std::exception& e)
+                {
+                    LOG_WARN << "Mission unit list " << listName << " could not be read: " << e.what() << "; every unit is available";
+                }
+            }
+        }
+
         std::set<std::string> knownUnitTypes;
         for (const auto& [unitType, unitDefinition] : simulation.unitDefinitions)
         {
-            knownUnitTypes.insert(unitType);
+            if (!unitDefinition.excludedByMission)
+            {
+                knownUnitTypes.insert(unitType);
+            }
         }
         auto buildTree = buildTreeFromBuilderGuis(dataMaps.builderGuisDatabase, knownUnitTypes);
         LOG_INFO << "AI build tree: " << buildTree.buildableBy.size() << " builders with a build menu";
@@ -1316,6 +1350,43 @@ namespace rwe
         }
     }
 
+    std::set<std::string> missionUnitListFromTdf(const TdfBlock& tdf)
+    {
+        std::set<std::string> names;
+        for (const auto& [name, block] : tdf.blocks)
+        {
+            names.insert(toUpper(name));
+        }
+        return names;
+    }
+
+    std::size_t applyMissionUnitList(std::unordered_map<std::string, UnitDefinition>& unitDefinitions, BuilderGuisDatabase& builderGuis, const std::set<std::string>& allowed)
+    {
+        std::size_t kept = 0;
+        for (auto& [unitType, definition] : unitDefinitions)
+        {
+            definition.excludedByMission = allowed.count(toUpper(unitType)) == 0;
+            kept += definition.excludedByMission ? 0 : 1;
+        }
+
+        // A build menu's button is named after the unit it builds; the other
+        // gadgets on a page -- the page flips, the order buttons -- name no
+        // unit and stay.
+        for (auto& [builderName, pages] : builderGuis.builderGuisMap)
+        {
+            for (auto& page : pages)
+            {
+                page.erase(
+                    std::remove_if(page.begin(), page.end(), [&](const GuiEntry& entry) {
+                        auto it = unitDefinitions.find(toUpper(entry.common.name));
+                        return it != unitDefinitions.end() && it->second.excludedByMission;
+                    }),
+                    page.end());
+            }
+        }
+        return kept;
+    }
+
     MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers)
     {
         MissionSpawnResult result;
@@ -1336,6 +1407,14 @@ namespace rwe
                 continue;
             }
             const auto& def = defIt->second;
+
+            // Off the mission's own unit list the original has no definition
+            // for it at all, so it makes nothing, as for an unknown name.
+            if (def.excludedByMission)
+            {
+                result.skipped.push_back(describe("not on the mission's unit list"));
+                continue;
+            }
 
             // Player N is slot N-1 (0x4883B2). The original logs an unseated
             // one and spawns it regardless; RWE has no player to give it to.

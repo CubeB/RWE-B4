@@ -3,6 +3,7 @@
 #include <array>
 #include <memory>
 #include <optional>
+#include <set>
 #include <rwe/AudioService.h>
 #include <rwe/ColorPalette.h>
 #include <rwe/MeshService.h>
@@ -167,6 +168,20 @@ namespace rwe
      * keeps a building out.
      */
     MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers);
+
+    /**
+     * The unit types a mission's `useonlyunits` file lists: the names of its
+     * top-level blocks, upper case (0x4317F7-0x431878 matches them against
+     * each definition's name).
+     */
+    std::set<std::string> missionUnitListFromTdf(const TdfBlock& tdf);
+
+    /**
+     * Applies a mission's unit list (issue #381): every definition not on it
+     * is marked excludedByMission, and its buttons are taken off every build
+     * menu. Answers how many definitions stay.
+     */
+    std::size_t applyMissionUnitList(std::unordered_map<std::string, UnitDefinition>& unitDefinitions, BuilderGuisDatabase& builderGuis, const std::set<std::string>& allowed);
 
     /**
      * A mission's rules as the builder at 0x48E010 makes them from the

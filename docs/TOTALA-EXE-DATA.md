@@ -847,7 +847,7 @@ keys come through `0x4C46C0` with the default shown, strings through
 | `missionhint` | string, 256 | | `camps\hints\<hint>.TXT` (`0x4362DC`), which nothing reads (§115) |
 | `glamour` | string, 256 | | `bitmaps\glamour\<glamour>.PCX` (`0x43630B`): the picture shown after a win, not the briefing's (§115) |
 | `glamoursound` | string, 256 | | `camps\briefs\<glamoursound>.WAV` (`0x436346`) |
-| `UseOnlyUnits` | string, 256 | | `camps\useonly\<name>.TDF` (`0x43637B`): the unit list the mission restricts building to |
+| `UseOnlyUnits` | string, 256 | | `camps\useonly\<name>.TDF` (`0x43637B`): the only units that exist in the mission; see "The mission's unit list" below |
 | `mapping` / `lineofsight` | int | 0 | as skirmish |
 | `memory` / `numplayers` / `Planet` | string, 128 | | display only |
 | `nomovie` | int | 0 | skips the mission's movie |
@@ -1031,6 +1031,27 @@ The other record fields (`BuildPriority`, `CreationCountdown`, `InitialGroup`,
 > spot by clearing the blocking features under it, or comes in just far
 > enough from the map's edge to fit. Only a unit or another building in the
 > way keeps a mission building out. §88.
+
+**The mission's unit list** (`useonlyunits`). The reader resolves the name into
+the map record's resource slot 6 (`0x435430`; slot `n` is at
+`record+0x104+n*0x100`, read back by `0x4356C0(n)`). The unit parser sets bit
+23 of `def+0x241` on every unit (`0x42AB02`), and at game start `0x431740`
+(called at `0x4974DE`), if slot 6 names a file that opens, clears that bit on
+every definition (`0x4317AA`-`0x4317D8`) and sets it again on each one whose
+name is a block of the file (`0x4317F7`-`0x431878`). Later in the same load
+`0x42D2E0` (from `0x4918CA`) compacts the definition array, dropping every
+definition whose bit is clear (`0x42D4B7`-`0x42D50E`); `0x42D1F0` loads a
+unit's resources only when it is set. So a mission's unlisted units do not
+exist: nobody builds them, and a `[unitN]` naming one makes nothing, as for an
+unknown name. Every shipped mission names a list, of 14 to 248 units; two name
+one that does not exist ("Emerald Seamount", "Battle of Chimo Island") and are
+unrestricted. Only EXP1CC06 places a unit off its own list, a CORSCORP.
+
+> **Ported (#381).** RWE keeps the definitions and marks the unlisted ones
+> `excludedByMission`: their buttons come off every build menu, the AI's build
+> tree leaves them out, a build or queue order naming one is refused on every
+> peer, and `spawnMissionUnits` skips a record naming one. A list that does
+> not open restricts nothing.
 
 ### `[specials]` and `[features]`
 
