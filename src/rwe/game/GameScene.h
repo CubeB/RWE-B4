@@ -58,6 +58,8 @@
 
 namespace rwe
 {
+    class ScenarioDriver;
+
     struct GameSceneTimeAction
     {
         using Time = SceneTime;
@@ -234,6 +236,8 @@ namespace rwe
         static constexpr int PanelSlideTravel = GuiSizeLeft;
 
     private:
+        friend class ScenarioDriver;
+
         static const unsigned int UnitSelectChannel = 0;
 
         static const unsigned int reservedChannelsCount = 1;
@@ -245,11 +249,11 @@ namespace rwe
         static constexpr float CameraPanSpeed = 1000.0f;
 
         /**
-         * How fast the side panel slides, in pixels per second. RWE's own
-         * number: 76 pins the endpoints and the sounds but says nothing
-         * about the rate. 850 crosses the 128 pixels in about 150ms.
+         * How fast the side panel and the players' list slide, in pixels per
+         * second. RWE's own number: 76 pins the endpoints and the sounds but
+         * says nothing about the rate. 1280 crosses the 128 pixels in 100ms.
          */
-        static constexpr float PanelSlidePixelsPerSecond = 850.0f;
+        static constexpr float PanelSlidePixelsPerSecond = 1280.0f;
 
         static const Rectangle2f minimapViewport;
 
@@ -313,7 +317,7 @@ namespace rwe
 
         std::shared_ptr<SpriteSeries> guiFont;
 
-        /** COMIX.FNT, the original's world-text font; the speech console prints in it. */
+        /** hattfont12, drawn untinted: the font the original's message queue actually prints in. */
         std::shared_ptr<SpriteSeries> speechFont;
 
         PlayerId localPlayerId;
@@ -399,6 +403,12 @@ namespace rwe
             /** Ten steps of the fade table, one a tick (0x41FA8F). */
             Fade,
 
+            /**
+             * A campaign win's picture, `bitmaps/glamour/<glamour>.pcx`, with
+             * its sound, until the player clicks (endgame state 6, 0x41FDF8).
+             */
+            Glamour,
+
             /** The chart, over `bitmaps/OUTCOME0.PCX` (0x41FF42). */
             Chart
         };
@@ -440,6 +450,22 @@ namespace rwe
         /** Whether the press that armed the button started on it. */
         bool endGameChartButtonArmed{false};
 
+        /** The glamour picture, while it is up. */
+        std::shared_ptr<Sprite> endGameGlamour;
+
+        /** The channel the glamour's sound plays on; -1 when none does. */
+        int endGameGlamourChannel{-1};
+
+        /**
+         * ENDMSN.GUI whole, when a campaign carries on after this game: the
+         * mission list, Start, Difficulty and the rest, over OUTCOME1. Empty
+         * otherwise, and the chart has its lone Main Menu button.
+         */
+        std::unique_ptr<UiPanel> endGameCampaignPanel;
+
+        /** The difficulty ENDMSN shows, which the next mission is played at. */
+        unsigned int endGameCampaignDifficulty{0};
+
         void beginEndGameSequence();
         void updateEndGameSequence();
         void buildEndGameChart();
@@ -454,8 +480,37 @@ namespace rwe
         /** Fills every bar at once, which is what a click during the run-up does (0x420028). */
         void finishEndGameBars();
 
-        /** True once the chart has taken the screen; the world is not drawn behind it. */
+        /** True once the chart has taken the screen. */
         bool endGameChartVisible() const;
+
+        /** True once the glamour picture or the chart has the screen; the world is not drawn behind either. */
+        bool endGameCoversWorld() const;
+
+        /**
+         * Whether this is a campaign's game with a mission to play after it,
+         * which a loss always leaves: the one just lost (0x41F040).
+         */
+        bool campaignContinues() const;
+
+        /** Puts up the glamour picture and starts its sound; false if there is no picture to show. */
+        bool beginGlamour();
+
+        /** A click on the glamour picture: on to the chart, once the picture has been up a second. */
+        void glamourClicked();
+
+        /** From the fade or the glamour picture to the chart. */
+        void enterEndGameChart();
+
+        /** ENDMSN's controls for a campaign that carries on (0x41F0A0, enabled by 0x41F400). */
+        void buildCampaignEndPanel();
+
+        void campaignEndMessage(const std::string& control);
+
+        /** Leaves for a campaign mission's briefing, in the menu. */
+        void continueCampaign(const CampaignProgress& progress);
+
+        /** The campaign is won: its ending films, then the main menu (FE states 4 and 5). */
+        void playCampaignEnding();
 
         /**
          * Maps the original's 640x480 layout onto the window, keeping its
@@ -669,6 +724,22 @@ namespace rwe
         GameParameters gameParameters;
 
         /**
+         * The scenario harness driving this game, when --scenario named one.
+         * Owned here so a scenario has the same access to the selection, the
+         * cursor mode and the panel that the input handlers do.
+         */
+        std::unique_ptr<ScenarioDriver> scenarioDriver;
+
+        /**
+         * Where the mouse is, in frame coordinates, while a scenario is
+         * driving. getMousePosition returns this when it is set so a
+         * synthetic click moves the point that gets picked as well as the
+         * event's own coordinates. Nothing outside ScenarioDriver ever sets
+         * it, so a real game reads the live cursor exactly as before.
+         */
+        std::optional<Point> mousePositionOverride;
+
+        /**
          * Set only for a computer-versus-computer measurement run. Samples
          * the simulation as it goes and, at the time limit, writes a CSV and
          * quits. See AiArenaReport for why this exists.
@@ -798,7 +869,8 @@ namespace rwe
         struct ConsoleMessage
         {
             std::string text;
-            Color color;
+            /** Nothing draws the glyphs in their own colours, as the original does. */
+            std::optional<Color> color;
             SceneTime expires;
         };
         std::deque<ConsoleMessage> consoleMessages;
@@ -1048,11 +1120,19 @@ namespace rwe
         float panelSlide{0.0f};
 
         /**
+         * How far the players' list has come in from the right, 0 to
+         * PanelSlideTravel. Space moves only the list; F4 moves the list and
+         * the side panel together.
+         * Presentation only, like panelSlide.
+         */
+        float playerListSlide{0.0f};
+
+        /**
          * How far the Space key's bottom strip has risen, 0 to
          * StatsBarTravel. TOTALA-EXE.md S:108: a slide of its own
          * (game+0x37e90, 0 to -31), driven by Space alone -- F4, which
          * latches the side panel out, does not touch it -- and eased a third
-         * of what is left at a time, at least a pixel, every fifteen
+         * of what is left at a time, at least a pixel, every ten
          * milliseconds.
          */
         static constexpr int StatsBarTravel = 31;
@@ -1212,7 +1292,7 @@ namespace rwe
         /** Speaks the unit's cloak and uncloak lines as its cloak comes and goes. */
         void updateCloakNotifications();
 
-        void printConsole(const std::string& text, const Color& color = Color(255, 255, 255));
+        void printConsole(const std::string& text, const std::optional<Color>& color = std::nullopt);
 
         void updateSelfDestructNotifications();
 
@@ -1279,6 +1359,19 @@ namespace rwe
          * the AI's buffer may only be topped up for a tick that happens.
          */
         bool onlyComputerPlayersAreNotReady() const;
+
+        /**
+         * Whether the local human's orders are handed over a tick at a time
+         * instead of through the round-trip command buffer.
+         *
+         * The buffer exists to hold an order until every peer has it, which in
+         * a game with nobody else in it is a wait with nothing on the other
+         * side of it: the original applies an order the tick it is given, and
+         * a lone player should feel that. A game with any remote peer keeps
+         * the buffer, as does a recording, which feeds every player from the
+         * file. See GameScene::update and tryTickGame.
+         */
+        bool localHumanCommandsAreFedPerTick() const;
 
         /**
          * The tick a drop cuts the lost peer's stream at: beyond the furthest
@@ -1705,7 +1798,7 @@ namespace rwe
 
         void processPlayerCommand(PlayerId issuingPlayer, const PlayerCommand& playerCommand);
 
-        void processUnitCommand(const PlayerUnitCommand& unitCommand);
+        void processUnitCommand(PlayerId issuingPlayer, const PlayerUnitCommand& unitCommand);
 
         template <typename T>
         void delay(SceneTime interval, T&& f)

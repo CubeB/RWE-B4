@@ -7,6 +7,8 @@
 #include <rwe/SceneContext.h>
 #include <rwe/TextureService.h>
 #include <rwe/game/GameParameters.h>
+#include <rwe/io/campaign/campaign.h>
+#include <rwe/io/ota/ota.h>
 #include <rwe/io/sidedatatdf/SideData.h>
 #include <rwe/io/tdf/TdfBlock.h>
 #include <rwe/scene/Scene.h>
@@ -61,7 +63,24 @@ namespace rwe
 
         AudioService::LoopToken bgm;
 
+        /** The campaign screen's choices: 0 Arm or 1 Core, 0 Easy to 2 Hard, and the campaigns the side can play. */
+        unsigned int campaignSide{0};
+        unsigned int campaignDifficulty{0};
+        std::vector<std::string> campaignNames;
+        std::optional<std::string> selectedCampaign;
+
+        /** The mission the briefing on screen is for, and its narration. */
+        std::optional<GameParameters> briefedGame;
+        std::optional<AudioService::SoundHandle> narration;
+        int narrationChannel{-1};
+
+        /** A campaign to carry on with when the menu opens: the briefing of its mission, from the screen after a game. */
+        std::optional<CampaignProgress> pendingCampaign;
+
     public:
+        /** Opens on the briefing of a campaign's mission rather than the main menu; for the screen after a campaign game. */
+        void resumeCampaign(const CampaignProgress& progress);
+
         MainMenuScene(
             const SceneContext& sceneContext,
             TdfBlock* audioLookup,
@@ -128,6 +147,22 @@ namespace rwe
         void goToMainMenu();
 
         void goToSingleMenu();
+
+        /** NEWGAME.GUI, the campaign screen: side, difficulty, campaign and mission (§115). */
+        void goToCampaignMenu();
+        void refreshCampaignMenu();
+        void fillCampaignMissions(unsigned int campaignIndex);
+        void campaignMenuMessage(const std::string& message);
+        void startCampaignMission();
+        void openCampaignMission(CampaignProgress progress);
+        std::vector<std::string> campaignNamesForSide(unsigned int side);
+
+        /** MSNBRIEF.GUI, the briefing before a mission: its planet, its text and its narration (§115). */
+        void goToCampaignBriefing(const GameParameters& params, const OtaRecord& ota);
+        void campaignBriefingMessage(const std::string& message);
+        void launchBriefedGame();
+        void startNarration();
+        void stopNarration();
 
         void goToSkirmishMenu();
 

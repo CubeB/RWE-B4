@@ -40,6 +40,33 @@ namespace rwe
          */
         static constexpr std::size_t MaxPendingChatMessages = 32;
 
+        /**
+         * How many command sets, and how many hashes, a peer may have waiting
+         * in this peer's buffers before more are refused: thirty seconds'
+         * worth. An honest peer is a command buffer's depth ahead, a few
+         * ticks; without a ceiling a peer could send a stream far into the
+         * future and have this machine hold all of it. Issue #75.
+         */
+        static constexpr unsigned int MaxSetsAheadOfTheGame = 900;
+
+        /**
+         * The most one command set may come to on the wire. A set is a tick's
+         * commands and cannot be split across packets, and a packet is 1500
+         * bytes with a header and every unacked set in it; this leaves room
+         * for both. A move order costs about 30 bytes a unit, so this is some
+         * thirty units a tick. See GameScene, which holds the rest of a
+         * larger order for the next tick. Issue #75.
+         */
+        static constexpr std::size_t MaxCommandSetBytes = 1000;
+
+        /**
+         * How many commands from the front of `commands` make one set no
+         * bigger than MaxCommandSetBytes; at least one while there are any.
+         * Here rather than in the scene so that the scene does not have to
+         * include the protobuf headers to ask.
+         */
+        static std::size_t commandsFittingOneSet(const std::vector<PlayerCommand>& commands);
+
         struct EndpointInfo
         {
             PlayerId playerId;
@@ -129,6 +156,15 @@ namespace rwe
         asio::steady_timer sendTimer;
 
         std::vector<EndpointInfo> endpoints;
+
+        /**
+         * Whether anybody is on the other end of this game. Fixed when the
+         * service is built: a game that began with nobody else never gains a
+         * peer, and one that began with peers keeps the lockstep buffer even
+         * if they are later dropped, because the local player's orders still
+         * have to be held for the tick they were agreed at.
+         */
+        const bool remotePeersPresent;
 
         /**
          * The address of every peer that has been forgotten, so that one which
@@ -270,6 +306,15 @@ namespace rwe
         SceneTime estimateAvergeSceneTime(SceneTime localSceneTime);
 
         float getMaxAverageRttMillis();
+
+        /**
+         * Whether there is a peer to wait for at all.
+         *
+         * A game with nobody else in it has no lockstep round trip to cover,
+         * so the local player's orders do not need the buffer that pays for
+         * one. See GameScene::localHumanCommandsAreFedPerTick.
+         */
+        bool hasRemotePeers() const;
 
         /**
          * Every peer, how long it has been quiet, and how far along it said it

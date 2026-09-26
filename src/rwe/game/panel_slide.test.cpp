@@ -3,19 +3,19 @@
 
 namespace rwe
 {
-    TEST_CASE("F4 latches the panel away and Space only peeks", "[panelslide]")
+    TEST_CASE("F4 latches the players' list out and Space only peeks", "[panelslide]")
     {
-        // 76: the F4 bit alone decides it, and while that bit is clear a held
-        // Space hides the panel -- unless the cursor is on the panel itself,
-        // which is the original's own exception.
-        REQUIRE(panelWantsHiding(false, false, false) == false);
-        REQUIRE(panelWantsHiding(false, true, false) == true);
-        REQUIRE(panelWantsHiding(false, true, true) == false);
+        // 76: while the F4 bit is clear a held Space brings the list out --
+        // unless the cursor is on the side panel, which is the original's own
+        // exception.
+        REQUIRE(playerListWantsOut(false, false, false) == false);
+        REQUIRE(playerListWantsOut(false, true, false) == true);
+        REQUIRE(playerListWantsOut(false, true, true) == false);
 
-        // The latch outranks all of it: F4 set runs to the hidden endpoint
-        // whatever Space and the cursor are doing.
-        REQUIRE(panelWantsHiding(true, false, false) == true);
-        REQUIRE(panelWantsHiding(true, true, true) == true);
+        // The latch outranks all of it: F4 set holds the list out whatever
+        // Space and the cursor are doing.
+        REQUIRE(playerListWantsOut(true, false, false) == true);
+        REQUIRE(playerListWantsOut(true, true, true) == true);
     }
 
     TEST_CASE("the slide reaches its endpoint exactly and stops there", "[panelslide]")
@@ -47,5 +47,24 @@ namespace rwe
             p = advancePanelSlide(p, 128.0f, 850.0f, 16);
         }
         REQUIRE(p == 128.0f);
+    }
+
+    TEST_CASE("the camera counter-moves the viewport's half-change", "[panelslide]")
+    {
+        // Hiding the panel (128 -> 0) widens the view to the left by 128, so
+        // the view's centre moves 64 left; the camera moves 64 world units
+        // left to hold the world still.
+        REQUIRE(panelSlideCameraShift(128, 0, 1.0f) == 64.0f);
+
+        // Bringing it back is the same shift with the opposite sign, so a
+        // round trip lands exactly where it started rather than drifting.
+        REQUIRE(panelSlideCameraShift(0, 128, 1.0f) == -64.0f);
+
+        // Zoomed in, a screen pixel is less ground, so the same 64-pixel
+        // centre change moves the camera through fewer world units.
+        REQUIRE(panelSlideCameraShift(128, 0, 2.0f) == 32.0f);
+
+        // No change, no movement.
+        REQUIRE(panelSlideCameraShift(128, 128, 1.0f) == 0.0f);
     }
 }

@@ -25,6 +25,7 @@ namespace rwe
           socket(ioContext),
           sendTimer(ioContext),
           endpoints(endpoints),
+          remotePeersPresent(!endpoints.empty()),
           nextSendSequence(resumeFromSequence),
           nextHashSequence(resumeFromSequence),
           playerCommandService(playerCommandService)
@@ -43,6 +44,11 @@ namespace rwe
     void GameNetworkService::start()
     {
         networkThread = std::thread(&GameNetworkService::run, this);
+    }
+
+    std::size_t GameNetworkService::commandsFittingOneSet(const std::vector<PlayerCommand>& commands)
+    {
+        return rwe::commandsFittingOneSet(commands, MaxCommandSetBytes);
     }
 
     void GameNetworkService::submitCommands(SceneTime currentSceneTime, const GameNetworkService::CommandSet& commands)
@@ -252,6 +258,11 @@ namespace rwe
         return result.get_future().get();
     }
 
+    bool GameNetworkService::hasRemotePeers() const
+    {
+        return remotePeersPresent;
+    }
+
     void GameNetworkService::run()
     {
         try
@@ -283,7 +294,18 @@ namespace rwe
             asio::buffer(receiveBuffer.data(), receiveBuffer.size()),
             currentRemoteEndpoint,
             [this](const auto& error, const auto& bytesTransferred) {
-                receive(error, bytesTransferred);
+                // A packet that throws costs that packet. Before this, it
+                // ended run(), and with nothing left to service the
+                // io_context the main thread waited on its next future for
+                // ever: one bad datagram froze the game. Issue #75.
+                try
+                {
+                    receive(error, bytesTransferred);
+                }
+                catch (const std::exception& e)
+                {
+                    LOG_ERROR << "Ignoring a packet that could not be handled: " << e.what();
+                }
                 listenForNextMessage();
             });
     }
@@ -292,9 +314,9 @@ namespace rwe
      * The packet sent to one peer: where we are in each of the three streams
      * that flow to it, and everything in them it has not yet acked.
      *
-     * chatCount is how much of the chat buffer to include, because chat is the
-     * one part of a packet whose size is not bounded by the tick rate -- see
-     * send, which uses it to make an outsized packet fit.
+     * setCount, hashCount and chatCount are how much of the front of each
+     * stream to include. What is left out is still unacked and goes in a
+     * later packet; see send, which chooses them so that the packet fits.
      */
     proto::NetworkMessage createProtoMessage(
         int packetId,
@@ -302,6 +324,8 @@ namespace rwe
         SceneTime currentSceneTime,
         std::chrono::milliseconds ackDelay,
         const GameNetworkService::EndpointInfo& endpoint,
+        std::size_t setCount,
+        std::size_t hashCount,
         std::size_t chatCount)
     {
         proto::NetworkMessage outerMessage;
@@ -317,20 +341,20 @@ namespace rwe
         m.set_next_chat_to_receive(endpoint.nextChatToReceive.value);
         m.set_ack_delay(ackDelay.count());
 
-        for (const auto& set : endpoint.sendBuffer)
+        for (std::size_t i = 0; i < setCount; ++i)
         {
             auto& setMessage = *m.add_command_set();
 
-            for (const auto& cmd : set)
+            for (const auto& cmd : endpoint.sendBuffer[i])
             {
                 auto& cmdMessage = *setMessage.add_command();
                 serializePlayerCommand(cmd, cmdMessage);
             }
         }
 
-        for (const auto& hash : endpoint.hashSendBuffer)
+        for (std::size_t i = 0; i < hashCount; ++i)
         {
-            m.add_game_hashes(hash.value);
+            m.add_game_hashes(endpoint.hashSendBuffer[i].value);
         }
 
         for (std::size_t i = 0; i < chatCount; ++i)
@@ -375,19 +399,34 @@ namespace rwe
             delay = std::chrono::duration_cast<std::chrono::milliseconds>(sendTime - *endpoint.lastReceiveTime);
         }
 
+        // As much of each stream as fits, commands first because the game
+        // cannot move without them, then hashes, then chat. The rest is
+        // unacked and goes next time. Taking all of it, as this used to,
+        // threw once it came to more than a datagram -- a peer that stopped
+        // acking could arrange that, and so could an honest backlog -- and
+        // the throw ended the network thread. Issue #75.
         auto sizeLimit = static_cast<unsigned long long>(getSize(sendBuffer) - 4);
-        auto chatCount = chooseChatCountForPacket(
-            endpoint.chatSendBuffer.size(),
-            sizeLimit,
-            [&](std::size_t count) {
-                return createProtoMessage(packetId, localPlayerId, currentSceneTime, delay, endpoint, count).ByteSizeLong();
-            });
+        auto sizeOf = [&](std::size_t sets, std::size_t hashes, std::size_t chats) {
+            return createProtoMessage(packetId, localPlayerId, currentSceneTime, delay, endpoint, sets, hashes, chats).ByteSizeLong();
+        };
+        auto setCount = longestPrefixThatFits(endpoint.sendBuffer.size(), sizeLimit, [&](std::size_t n) { return sizeOf(n, 0, 0); });
+        if (setCount == 0 && !endpoint.sendBuffer.empty())
+        {
+            // A single set bigger than a datagram. GameScene splits a tick's
+            // commands so that this cannot happen; if it does, the set can
+            // never be sent and this peer will be dropped for silence, which
+            // is the right outcome and better than a hung game.
+            LOG_ERROR << "A command set is too large for a packet and cannot be sent";
+        }
+        auto hashCount = longestPrefixThatFits(endpoint.hashSendBuffer.size(), sizeLimit, [&](std::size_t n) { return sizeOf(setCount, n, 0); });
+        auto chatCount = chooseChatCountForPacket(endpoint.chatSendBuffer.size(), sizeLimit, [&](std::size_t n) { return sizeOf(setCount, hashCount, n); });
 
-        auto message = createProtoMessage(packetId, localPlayerId, currentSceneTime, delay, endpoint, chatCount);
+        auto message = createProtoMessage(packetId, localPlayerId, currentSceneTime, delay, endpoint, setCount, hashCount, chatCount);
         auto messageSize = message.ByteSizeLong();
         if (messageSize > sizeLimit)
         {
-            throw std::runtime_error("Message to be sent was bigger than buffer size");
+            LOG_ERROR << "A packet of " << messageSize << " bytes is too large to send; skipping it";
+            return;
         }
         if (!message.SerializeToArray(sendBuffer.data(), sendBuffer.size()))
         {
@@ -399,7 +438,7 @@ namespace rwe
 
         socket.send_to(asio::buffer(sendBuffer.data(), messageSize + 4), endpoint.endpoint);
 
-        auto nextSequenceNumber = SequenceNumber(endpoint.nextCommandToSend.value + (endpoint.sendBuffer.size()));
+        auto nextSequenceNumber = SequenceNumber(endpoint.nextCommandToSend.value + setCount);
         if (endpoint.sendTimes.empty() || endpoint.sendTimes.back().first < nextSequenceNumber)
         {
             endpoint.sendTimes.emplace_back(nextSequenceNumber, sendTime);
@@ -526,11 +565,37 @@ namespace rwe
         // if the packet is relevant (contains new information), process it
         if (firstRelevantCommandIndex < static_cast<unsigned int>(message.command_set_size()))
         {
+            // Read every new set before taking any of them, so that a packet
+            // with one set that cannot be read is refused whole. Nothing of it
+            // is acked, and a peer that keeps sending such a thing falls
+            // silent as far as the game is concerned and is dropped.
+            std::vector<CommandSet> commandSets;
+            try
+            {
+                for (auto i = static_cast<int>(firstRelevantCommandIndex); i < message.command_set_size(); ++i)
+                {
+                    commandSets.push_back(deserializeCommandSet(message.command_set(i)));
+                }
+            }
+            catch (const std::exception& e)
+            {
+                LOG_ERROR << "Player " << endpoint.playerId.value << " sent a command set that could not be read (" << e.what() << "); ignoring the packet";
+                return;
+            }
+
             endpoint.lastReceiveTime = receiveTime;
 
-            for (int i = firstRelevantCommandIndex; i < message.command_set_size(); ++i)
+            for (const auto& commandSet : commandSets)
             {
-                auto commandSet = deserializeCommandSet(message.command_set(i));
+                // No further ahead than a peer could honestly be. A set costs
+                // memory until its tick runs, and a peer that sends a stream
+                // far into the future would otherwise have that memory for
+                // the asking. What is not taken is not acked, and is sent
+                // again once the game has caught up.
+                if (playerCommandService->bufferedCommandCount(endpoint.playerId) >= MaxSetsAheadOfTheGame)
+                {
+                    break;
+                }
                 playerCommandService->pushCommands(endpoint.playerId, commandSet);
                 endpoint.nextCommandToReceive = SequenceNumber(endpoint.nextCommandToReceive.value + 1);
             }
@@ -556,11 +621,21 @@ namespace rwe
             return;
         }
 
+        // Compared unsigned against the count before either becomes an int
+        // index: the difference can be anything a peer's numbering makes it,
+        // and past INT_MAX a signed index would be negative.
         auto firstRelevantGameHashIndex = (endpoint.nextHashToReceive - firstGameHashTime).value;
-        for (int i = firstRelevantGameHashIndex; i < message.game_hashes_size(); ++i)
+        if (firstRelevantGameHashIndex < static_cast<unsigned int>(message.game_hashes_size()))
         {
-            playerCommandService->pushHash(endpoint.playerId, GameHash(message.game_hashes(i)));
-            endpoint.nextHashToReceive += GameTime(1);
+            for (auto i = static_cast<int>(firstRelevantGameHashIndex); i < message.game_hashes_size(); ++i)
+            {
+                if (playerCommandService->bufferedHashCount(endpoint.playerId) >= MaxSetsAheadOfTheGame)
+                {
+                    break;
+                }
+                playerCommandService->pushHash(endpoint.playerId, GameHash(message.game_hashes(i)));
+                endpoint.nextHashToReceive += GameTime(1);
+            }
         }
 
         SequenceNumber newNextChatToSend(message.next_chat_to_receive());
@@ -582,7 +657,11 @@ namespace rwe
         }
 
         auto firstRelevantChatIndex = (endpoint.nextChatToReceive - firstChatNumber).value;
-        for (int i = firstRelevantChatIndex; i < message.chat_size(); ++i)
+        if (firstRelevantChatIndex >= static_cast<unsigned int>(message.chat_size()))
+        {
+            return;
+        }
+        for (auto i = static_cast<int>(firstRelevantChatIndex); i < message.chat_size(); ++i)
         {
             // Sanitised here rather than at the far end, so that nothing a peer
             // sends reaches the scene, the font or the log unexamined. What

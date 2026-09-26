@@ -41,6 +41,12 @@ namespace rwe
      * Returns false if the unit the command names no longer exists, which every
      * caller must drop the command on -- including, and especially, the
      * interface side, which would otherwise refresh a panel for a dead unit.
+     *
+     * Also false, and nothing applied, for a command the issuing player may
+     * not give: one to a unit it does not own, one naming a unit type the game
+     * has no definition for, or a queue change out of range. `issuingPlayer`
+     * is where the command came from -- the network endpoint, the computer
+     * player, the recording -- never anything the command claims. Issue #75.
      */
-    bool applyUnitCommandToSimulation(GameSimulation& simulation, const PlayerUnitCommand& unitCommand);
+    bool applyUnitCommandToSimulation(GameSimulation& simulation, PlayerId issuingPlayer, const PlayerUnitCommand& unitCommand);
 }

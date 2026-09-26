@@ -137,6 +137,9 @@ namespace rwe
 
         void setToggledOn(bool _toggledOn);
 
+        /** Whether the button is drawing its pressed face as a toggle rather than as a press. */
+        bool isToggledOn() const { return toggledOn; }
+
         void setBehaviorMode(BehaviorMode mode);
 
         void setQuickKey(int quickKey);

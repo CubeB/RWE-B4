@@ -1,6 +1,7 @@
 #include "ota.h"
 
 #include <algorithm>
+#include <rwe/util/rwe_string.h>
 #include <cstdlib>
 #include <cctype>
 #include <rwe/io/tdf/tdf.h>
@@ -484,5 +485,26 @@ namespace rwe
             }
         }
         return count;
+    }
+
+    std::optional<std::size_t> chooseCampaignSchema(const std::vector<OtaSchema>& schemas, int difficulty)
+    {
+        static const char* const preferences[3][3] = {
+            {"EASY", "MEDIUM", "HARD"},
+            {"MEDIUM", "EASY", "HARD"},
+            {"HARD", "MEDIUM", "EASY"},
+        };
+        const auto& order = preferences[std::clamp(difficulty, 0, 2)];
+        for (const auto* wanted : order)
+        {
+            for (std::size_t i = 0; i < schemas.size(); ++i)
+            {
+                if (toUpper(schemas[i].type) == wanted)
+                {
+                    return i;
+                }
+            }
+        }
+        return std::nullopt;
     }
 }

@@ -99,6 +99,7 @@ other.
 Reaching for a screenshot is usually not the fastest way to settle a question, and several of these will settle one that a screenshot could only gesture at.
 
 - **`battle_test`** — a standing battle. Spawns a fixed number of units for each of two players at opposite start positions, walks them at each other, and replaces them as they die, with a live unit-count slider in the F10 debug panel so the fight can be pushed until something gives without restarting. It goes through `GameLaunch::run`, so it is the same renderer, simulation and scene loop as `rwe.exe`, which is the only way its numbers mean anything. `battle_test --map "Coast To Coast" --units 200 --unit-type CORAK`; `--list-maps` and `--list-units` say what is available. Writes `battle_test.log` in the local data directory, flushed a line at a time, because these runs normally end under `taskkill`.
+- **`scenario`** — the tick-indexed scenario runner. Drives the *real* `GameScene` -- the same input handlers, selection, cursor modes, panels and simulation as `rwe.exe` -- at chosen ticks by calling its handlers directly, then asserts on the result. It is for the interface faults a pure-function unit test cannot reach: a fault in a sequence of real handler calls, or in a panel's lifecycle across a rebuild, so a sim question still belongs in `sim_test_util` and Catch2. Scenarios are C++ functions registered in `src/scenario.cpp` against `rwe/game/ScenarioDriver.h`; the driver parks a mouse override and refuses to run unless the scene is headless, which is what keeps one update equal to one tick. `scenario --list`; `scenario --run 342-active-tab-stays-pressed --data-path <dir>`; `--all` runs every one in a single process. It exits non-zero on a failed assertion. A scenario run twice at the same seed writes byte-identical `RWE_HASH_LOG` files -- against itself, not against another run: a scenario spawns units and sends commands, so its stream is its own. A step whose tick is never reached is a failure too, not a silent pass, and the driver gives up on a run that cannot reach its end tick (a paused game stops the clock) rather than hanging. Needs game data and a GL context, so under Xvfb on a machine without a display. The two that ship pin #342 (the active BUILD/ORDERS tab staying pressed) and the ROADMAP round 10 crash (placing a unit while paused, then selecting it); the first fails without the fix in `attachOrdersMenuEventHandlers`, which is the shape a scenario is for.
 - **`ai_arena`** — `rwe --ai-arena` with no window: no SDL, no GL context, no ImGui. It builds the simulation through the same `loadGameSimulation` the loading scene uses and runs the same tick loop, so on seed N it writes the same `AI-ARENA-RESULT`, the same `ai-arena.csv`/`ai-arena-events.csv` and the same `RWE_HASH_LOG` lines as the windowed run. This is the arena for CI and any machine without a display, and the way to hunt a desync where Xvfb is not available. `ai_arena --map "Coast To Coast" --ai-arena 900 --seed 7 --player "A;Computer;ARM;0" --player "B;Computer;ARM;1" --start-location random`; `--out <dir>` chooses where the CSVs land.
 - **`--record-demo <file>`** — `rwe --map ...` and `ai_arena` both write the game they run as a TA Demo Recorder compatible `.tad`; `rwe --replay <file> --record-demo <out>` records one offline, re-running the recording through the real simulation. A demo is state and effects where RWE's replay is a command stream, so `tad_probe` and the reference scorers read it. `docs/TA-DEMOS.md`, "Writing one", says what is written faithfully and what is a recorded divergence.
 - **`ui_probe`** — builds the real UI panels from the real game data headlessly, dumps every gadget's hitbox, and delivers clicks the way the scenes deliver them, printing which gadget takes each event and what message comes out. It diagnoses layout and dispatch faults without a window.
@@ -173,6 +174,17 @@ The fix was to split the file, and the rule it leaves behind is a size one: no t
 
 Two things that pass measurement teaches, both worth knowing before making any of these bigger. **The section count is a budget, not a free win**: the standard library's floor is paid once per translation unit, so a split adds to the total even as it takes the peak down. Taking the debug harness out of `GameScene.cpp` cost 2216 sections across the pair to take 2623 off the larger; taking the menu out of `_commands` cost 8365 to take 4740 off. And **that floor is not a constant** — `_debug` came out at 4839 against the 9500 quoted above, because its include list is what it uses rather than what it would inherit, while `_menu` at 13105 pays for `MainMenuScene.h`, `LoadingScene.h` and `SaveFile.h`, which it genuinely needs. Keeping a new file's includes tight is most of what decides where it lands.
 
+**Anything read from a file or a socket is someone else's.** Maps, mods,
+models, scripts and films come from community sites, peers send packets, and
+the lobby relays other players' strings. `docs/SECURITY-AUDIT.md` (2026-09-25)
+lists what that has cost -- a heap overflow from an archive sitting in the data
+folder, a network game frozen by an honest fifty-unit order -- and the rules
+that came out of it. The short version: every count, size, offset and index
+from outside is checked before it sizes or indexes anything, an `assert` is not
+a check because release builds drop it, every walk over a structure the input
+describes is bounded, a fault in content costs that content and never every
+peer, and a new parser gets a case in `src/rwe/io/malformed_input.test.cpp`.
+
 **A forward declaration that says `class` where the definition says `struct`
 breaks MSVC and nothing else.** MSVC mangles the class-key into the symbol
 name and keeps whichever tag the translation unit saw first, so a header that
@@ -240,7 +252,7 @@ of `TotalA.exe` instead of guessed at.
 
 - `docs/TOTALA-EXE.md` — **the index to the findings**, and the two sections
   everyone is told to read first: §88, where RWE deliberately differs, and
-  §91, what is decoded but not ported. 113 findings numbered to 115 (§83 and
+  §91, what is decoded but not ported. 114 findings numbered to 116 (§83 and
   §84 do not exist). **The numbers never move**, so a §n written anywhere in
   the tree names the same finding for ever; the index says which file holds
   it. The subjects are `-MOVEMENT`, `-VISION`, `-ECONOMY`, `-WEAPONS`,

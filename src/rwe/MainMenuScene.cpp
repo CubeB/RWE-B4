@@ -69,6 +69,18 @@ namespace rwe
 
         bgm = startBgm();
         goToMainMenu();
+
+        if (pendingCampaign)
+        {
+            // Carrying on from the screen after a campaign game: straight to
+            // the next briefing, with the single-player menu behind it.
+            campaignSide = pendingCampaign->side;
+            campaignDifficulty = pendingCampaign->difficulty;
+            goToSingleMenu();
+            auto progress = *pendingCampaign;
+            pendingCampaign.reset();
+            openCampaignMission(progress);
+        }
     }
 
     void MainMenuScene::render()
@@ -714,6 +726,12 @@ namespace rwe
 
     void MainMenuScene::messageNow(const std::string& topic, const std::string& message, const ActivateMessage& details)
     {
+        // Leaving the briefing stops its narration (0x478DF0).
+        if (topic == "MSNBRIEF" && (message == "PrevMenu" || message == "PREVMENU"))
+        {
+            stopNarration();
+        }
+
         if (message == "PrevMenu" || message == "PREVMENU")
         {
             goToPreviousMenu();
@@ -756,7 +774,11 @@ namespace rwe
         }
         else if (topic == "SINGLE")
         {
-            if (message == "Skirmish")
+            if (message == "NewCamp")
+            {
+                goToCampaignMenu();
+            }
+            else if (message == "Skirmish")
             {
                 goToSkirmishMenu();
             }
@@ -768,6 +790,14 @@ namespace rwe
             {
                 goToLoadGameMenu();
             }
+        }
+        else if (topic == "NEWGAME")
+        {
+            campaignMenuMessage(message);
+        }
+        else if (topic == "MSNBRIEF")
+        {
+            campaignBriefingMessage(message);
         }
         else if (topic == "LOADGAME")
         {

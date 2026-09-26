@@ -44,6 +44,9 @@ namespace rwe
         constexpr unsigned int BlockedSiteRetryTicks = 30;
         constexpr unsigned int BlockedSiteAttempts = 10;
 
+        /** `push 0xf` before the timer call at 0x4028A2. */
+        constexpr unsigned int FactoryPadRetryTicks = 15;
+
         /**
          * Records how a unit died for the arena report. The attacker's type
          * and owner are read while it still exists; a blow from nothing (a
@@ -1246,6 +1249,10 @@ namespace rwe
     {
         auto& unit = getUnitState(unitId);
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+        if (unit.isDead())
+        {
+            return;
+        }
 
         if (missionRules)
         {
@@ -2823,6 +2830,10 @@ namespace rwe
 
     void GameSimulation::removeUnfinishedUnit(UnitId unitId)
     {
+        if (getUnitState(unitId).isDead())
+        {
+            return;
+        }
         recordUnitDeath(*this, unitId, "unfinished", std::nullopt);
         quietlyKillUnit(unitId, false);
         if (demoRecorder)
@@ -2835,6 +2846,15 @@ namespace rwe
     void GameSimulation::quietlyKillUnit(UnitId unitId, bool countAsLoss)
     {
         auto& unit = getUnitState(unitId);
+        // A unit dies once. The original's death handler turns away one that
+        // is not alive (0x486706) before it does anything else, and this and
+        // the other ways a unit is killed do the same: a unit killed earlier
+        // in the tick is still in the map until deleteDeadUnits, and a second
+        // death would count a second loss and raise a second event.
+        if (unit.isDead())
+        {
+            return;
+        }
         if (missionRules)
         {
             missionRules->unitDying(*this, unitId, unit.owner);
@@ -3050,39 +3070,36 @@ namespace rwe
             return ProjectileCollisionInfoOutOfBounds();
         }
 
+        // Anything standing in the square is tested before either surface
+        // (0x49B090), so a round that dips below sea level over a wading
+        // unit's footprint hits the unit rather than the water.
+        auto heightMapPos = simulation.terrain.worldToHeightmapCoordinate(projectile.position);
+        auto cellValue = simulation.occupiedGrid.tryGet(heightMapPos);
+        if (cellValue && projectileCollides(simulation, projectile, cellValue->get()))
+        {
+            return ProjectileCollisionInfoUnitOrFeatureOrBuilding();
+        }
+
+        for (auto unitId : simulation.flyingUnitsSet)
+        {
+            if (projectileCollidesWithUnit(simulation, projectile, unitId))
+            {
+                return ProjectileCollisionInfoUnitOrFeatureOrBuilding();
+            }
+        }
+
         auto seaLevel = simulation.terrain.getSeaLevel();
 
-        // test collision with sea; torpedoes and the like live in the water
         auto weaponIt = simulation.weaponDefinitions.find(projectile.weaponType);
         bool waterWeapon = weaponIt != simulation.weaponDefinitions.end() && weaponIt->second.waterWeapon;
-        if (!waterWeapon && seaLevel > *terrainHeight && projectile.position.y <= seaLevel)
+        if (!waterWeapon && !simulation.noSeaLevelTrigger && seaLevel > *terrainHeight && projectile.position.y <= seaLevel)
         {
             return ProjectileCollisionInfoSea();
         }
-        else if (projectile.position.y <= *terrainHeight)
+
+        if (projectile.position.y <= *terrainHeight)
         {
             return ProjectileCollisionInfoTerrain();
-        }
-        else
-        {
-            auto heightMapPos = simulation.terrain.worldToHeightmapCoordinate(projectile.position);
-            auto cellValue = simulation.occupiedGrid.tryGet(heightMapPos);
-            if (cellValue)
-            {
-                auto collides = projectileCollides(simulation, projectile, cellValue->get());
-                if (collides)
-                {
-                    return ProjectileCollisionInfoUnitOrFeatureOrBuilding();
-                }
-            }
-
-            for (auto unitId : simulation.flyingUnitsSet)
-            {
-                if (projectileCollidesWithUnit(simulation, projectile, unitId))
-                {
-                    return ProjectileCollisionInfoUnitOrFeatureOrBuilding();
-                }
-            }
         }
 
         return std::nullopt;
@@ -3154,6 +3171,10 @@ namespace rwe
     {
         auto& unit = getUnitState(unitId);
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+        if (unit.isDead())
+        {
+            return;
+        }
 
         if (missionRules)
         {
@@ -4649,16 +4670,16 @@ namespace rwe
                 auto newUnitId = trySpawnUnit(s->unitType, s->owner, s->position, s->rotation);
                 if (!newUnitId)
                 {
-                    // A factory had it worst of all: this set Failed without
-                    // even a log line, and handleBuild dropped straight back
-                    // into Building, which re-requested the same blocked spot
-                    // on the next tick and every tick after it. It is also the
-                    // case the sweep exists for: a hull left standing on the
-                    // pad is nobody's order, so without this the yard gives up
-                    // on a queue entry every time and the blocker never moves.
+                    // The original's yard (BuildingBuild, 0x402899) has none of
+                    // the constructors' ladder: no caption, no count, no giving
+                    // up. It looks again every fifteen ticks until the pad is
+                    // clear, which is normally the unit it just built rolling
+                    // off to its move location. The sweep is RWE's
+                    // (TOTALA-EXE.md 112): a hull parked on the pad is nobody's
+                    // order, and would otherwise stall the yard for good.
                     const auto& blockedDefinition = unitDefinitions.at(s->unitType);
                     emitBuggerOff(computeFootprintRegion(s->position, blockedDefinition.movementCollisionInfo));
-                    s->status = retryBlockedSite(unitId, std::get<UnitCreationStatusPending>(s->status));
+                    s->status = UnitCreationStatusPending{0, gameTime + GameTime(FactoryPadRetryTicks)};
                     continue;
                 }
 

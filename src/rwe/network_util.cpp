@@ -37,13 +37,36 @@ namespace rwe
         unsigned long long sizeLimit,
         const std::function<unsigned long long(std::size_t)>& sizeOf)
     {
-        auto count = available;
-        while (count > 0 && sizeOf(count) > sizeLimit)
+        return longestPrefixThatFits(available, sizeLimit, sizeOf);
+    }
+
+    std::size_t longestPrefixThatFits(
+        std::size_t available,
+        unsigned long long sizeLimit,
+        const std::function<unsigned long long(std::size_t)>& sizeOf)
+    {
+        if (available == 0 || sizeOf(available) <= sizeLimit)
         {
-            --count;
+            return available;
         }
 
-        return count;
+        // Invariant: `low` items fit (0 always counts as fitting, whether or
+        // not it does -- see the chat case's last test) and `high` do not.
+        std::size_t low = 0;
+        std::size_t high = available;
+        while (high - low > 1)
+        {
+            auto mid = low + ((high - low) / 2);
+            if (sizeOf(mid) <= sizeLimit)
+            {
+                low = mid;
+            }
+            else
+            {
+                high = mid;
+            }
+        }
+        return low;
     }
 
     void writeInt(char* sendBuffer, unsigned int crcResult)

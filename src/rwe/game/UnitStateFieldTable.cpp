@@ -194,11 +194,15 @@ namespace rwe
 
         void loadOrdersUnitStateField(const json& j, UnitState& u, const LoadContext& ctx)
         {
-            u.orders.clear();
+            // Through replaceOrders, so a queue saved before a move ahead of a
+            // patrol became a patrol waypoint loads converted rather than
+            // freezing the unit when it reaches the move.
+            std::deque<UnitOrder> orders;
             for (const auto& oj : j)
             {
-                u.orders.push_back(loadUnitOrder(oj, ctx));
+                orders.push_back(loadUnitOrder(oj, ctx));
             }
+            u.replaceOrders(orders);
         }
 
         json saveBuildQueueUnitStateField(const UnitState& u, const SaveContext&)

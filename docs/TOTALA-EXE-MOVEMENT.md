@@ -949,6 +949,31 @@ searches to a hundred separate points, picked up in slot order. Fairness comes
 from the rotation, so a saturated original produces worse paths rather than a
 growing backlog.
 
+**The 60-tick rate limit is ported, as of 2026-09-25.** RWE kept a queue
+instead of the round robin and re-asked on every trigger with no limit at all,
+and in a fight that was constant: over one Crystal Maze game the median gap
+between two of one unit's searches was 30 ticks and three quarters were under
+60. Each re-ask threw away the search already in flight -- `expansionsAbandoned`
+was 8.5% of every expansion the game spent -- and the first-pass walk was run
+over and over for goals re-asked about anyway. `NavigationStateMoving` carries
+the tick of the unit's last request now, and its four repath triggers all go
+through one rate-limited ask. A goal that has moved less than
+`PathGoalRetargetTolerance` (64 world units, RWE's number) from the one the
+route was built for keeps that route while it waits, which is the same idea as
+`SetGoal`'s ladder -- keep a path whose tail already answers the new goal -- at
+a distance RWE picked rather than one the original states. On Crystal Maze
+seeds 7 and 8, compared tick for tick over the window both games reach (the
+change ends a game at a different tick, so whole-run totals are not
+comparable), this cuts searches per tick by a third to a half, expansions and
+the first-pass walk per tick by about a third each, and `expansionsAbandoned`
+by 86-95%. Since #272 counts the terrain-region early-out apart from exhausted
+searches, the expensive A\* tail is roughly flat: a third to a half of what
+the issue called `exhausted` is that cheap early-out, which spends no
+expansions. The `path_bench` `spread` and `crowd` scenarios keep identical
+pathfinder counters, though their hashes move because the new fields are
+hashed; `pressed-water` and `pressed-wall` do repath and show the reduced
+counts too.
+
 Repathing has exactly three triggers (`0x44F239`): a new or changed goal, the
 path running down to fewer than two waypoints, and the mover's "blocked" bit.
 
@@ -966,23 +991,47 @@ hashed simulation state.
 
 ### What is ported, and how faithfully
 
-The straight-line stand-in is ported exactly. The first pass and the relaxed
-goal are ported in shape rather than instruction for instruction, and the
-difference is worth stating plainly.
+The straight-line stand-in is ported exactly, and so, as of 2026-09-25, is the
+first pass.
 
-`BugWalk.cpp` is a greedy walk with wall following, as the original's is, but
-its wall trace and its leave test are written from the structure of
-`0x40E3D5`-`0x40E445` rather than transcribed: the agent that decoded it could
-not make that section byte-exact, and a reimplementation of a routine one does
-not have exactly will fail on geometries the original would have walked. Three
-consequences follow, and only the first is a real cost:
+`BugWalk.cpp` is the original's walk transcribed (`0x40E160`, the wall at
+`0x40E2AC`-`0x40E600`). It goes along x and then along z. At a wall two tracers
+set off from the hit point in opposite directions, a step each in turn: the
+first starts a quarter turn from the blocked direction and scans all eight
+directions from the wall round one way, the second is its mirror image, held
+as the reverse of the way it moves. Whichever first stands back on the greedy
+line further along -- the hit point's row out to the goal's column, then that
+column to the goal, with the axes flipped so the goal lies ahead -- takes the
+walk on from there, without that cell counting towards the closest. If the two
+meet head on, standing on one cell with one about to leave the way the other
+came, there is no way round and the walk gives up.
 
-  - **RWE relaxes its goal more often than the original would**, because the
-    walk gives up more often. A relaxed goal means a shorter search horizon
-    and another request later, so it trades path optimality for cost. Measured
-    on `path_bench` at 400 units the trade is currently favourable in both
-    directions: expansions fall from 149,199 to 32,292 over 600 ticks, and
-    over 3000 ticks 116 units reach their destination where 96 did before.
+It used to be written from the structure of `0x40E3D5`-`0x40E445` rather than
+transcribed: one tracer, on a side chosen at the wall, a leave test on the
+goal's own row or column, and giving up at any corner where neither quarter
+turn was open. That made the walk disagree with itself. From a cell one short
+of an obstacle it got a cell closer and the search was relaxed to that cell;
+from that cell it got nowhere and the search was not relaxed, so it found the
+real way round, which started by stepping back. A unit in a pocket shuttled
+between the two for as long as its order stood: B4 #309, Arm's sea transport
+beside its own shipyard on Coast To Coast. The transcribed walk backs out of
+the pocket and goes round. Over 30 seeds of that map at 900 seconds, Arm's
+army ferries that timed out with nobody aboard fell from 18 to none, and 4
+completed where none had.
+
+What that did to `path_bench` (400 units, spread, Release): over 3000 ticks 79
+units reach their destination where 69 did, from 3083 searches rather than
+6211, because a reachable goal is now reached by the walk and searched for in
+full instead of relaxed and asked again; searches relaxed fall from 3480 to
+166. The first 600 ticks queue more (264 requests left rather than 145), the
+full searches being longer. On the pressed-water scenario every unit needs one
+search rather than 109 among 85 units, and the pressed-wall and crowd
+scenarios are unchanged. Three differences from the original remain, all
+deliberate:
+
+  - **The start is not asked whether it is walkable.** The original gives up
+    at once if it is not (`0x40E1AD`); RWE's walkability counts other units,
+    and a unit pressed against another would learn nothing.
   - The walk is used **only to relax, never to refuse**. The original abandons
     a search outright when its walk gets no closer than it started
     (`0x40E979`); doing that here would turn a walk that failed spuriously
@@ -1053,8 +1102,9 @@ make neither measurable.
 Still not ported: the adaptive heuristic weight (it would have to be hashed
 simulation state, since RWE is lockstep and the original is not), the
 restricted successor fan, the turn and straight-run costs, unexplored ground
-reading as free, the 60-tick per-unit cooldown, and the 20-waypoint clamp. RWE
-keeps an admissible octile heuristic and an eight-way fan.
+reading as free, and the 20-waypoint clamp. RWE keeps an admissible octile
+heuristic and an eight-way fan. The 60-tick per-unit cooldown used to be on
+this list; it is in now, described under Requests above.
 
 **And a warning about the benchmark, found while measuring this.**
 `path_bench`'s obstacles were an immobile unit definition with no yard map,

@@ -257,11 +257,11 @@ namespace rwe
         sounds.victoryCondition = lookUpSound("Victory Condition");
 
         auto consoleFont = sceneContext.textureService->getFont("fonts/CONSOLE.FNT");
-        // The original loads exactly two in-game fonts (0x42A320): COMIX for
-        // the world text -- the speech console, the countdown -- and SMLFONT
-        // for the tiny build-button overlays. The game-screen setup at
-        // 0x497FBE selects COMIX where the message queue lives.
-        auto speechFont = sceneContext.textureService->getFont("fonts/COMIX.FNT");
+        // COMIX is selected for the message queue (0x497FBE), but the text
+        // routine 0x4A50E0 draws with the GUI context's GAF font whenever one
+        // is set, and the in-game init (0x491592) sets hattfont12. So the
+        // speech lines are Haettenschweiler in the glyphs' own khaki grey.
+        auto speechFont = sceneContext.textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
 
         std::optional<std::ofstream> stateLogStream;
         if (gameParameters.stateLogFile)

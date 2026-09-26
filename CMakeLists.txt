@@ -244,6 +244,7 @@ set(SOURCE_FILES
     src/rwe/MainMenuModel.cpp
     src/rwe/MainMenuModel.h
     src/rwe/MainMenuScene.cpp
+    src/rwe/MainMenuScene_campaign.cpp
     src/rwe/MultiplayerSetup.cpp
     src/rwe/MultiplayerSetup.h
     src/rwe/MainMenuScene.h
@@ -456,6 +457,8 @@ set(SOURCE_FILES
     src/rwe/ui/UiSlider.cpp
     src/rwe/ui/UiSlider.h
     src/rwe/ui/UiTextBox.cpp
+    src/rwe/ui/UiTextRegion.cpp
+    src/rwe/ui/UiTextRegion.h
     src/rwe/ui/UiTextBox.h
     src/rwe/game/SaveFile.cpp
     src/rwe/game/SaveFile.h
@@ -463,6 +466,8 @@ set(SOURCE_FILES
     src/rwe/game/AiArenaReport.h
     src/rwe/game/SimEventLog.cpp
     src/rwe/game/SimEventLog.h
+    src/rwe/game/ScenarioDriver.cpp
+    src/rwe/game/ScenarioDriver.h
     src/rwe/game/GameParameters.h
     src/rwe/io/lostdf/io.cpp
     src/rwe/io/lostdf/io.h
@@ -994,6 +999,7 @@ set(TEST_FILES
     src/rwe/game/infopanel.test.cpp
     src/rwe/game/orderbuttons.test.cpp
     src/rwe/game/PlayerCommand_hotkey.test.cpp
+    src/rwe/game/PlayerCommand_patrol.test.cpp
     src/rwe/game/PlayerCommand_speed.test.cpp
     src/rwe/game/EndGameStats.test.cpp
     src/rwe/game/dump_util.test.cpp
@@ -1105,6 +1111,7 @@ set(TEST_FILES
     src/rwe/sim/airbase.test.cpp
     src/rwe/game/noshadow.test.cpp
     src/rwe/sim/missile.test.cpp
+    src/rwe/sim/seacollision.test.cpp
     src/rwe/sim/aircraft.test.cpp
     src/rwe/sim/groundtilt.test.cpp
     src/rwe/sim/selfdestruct.test.cpp
@@ -1121,6 +1128,7 @@ set(TEST_FILES
     src/rwe/pathfinding/pathing.test.cpp
     src/rwe/pathfinding/BugWalk.test.cpp
     src/rwe/pathfinding/walkwhilewaiting.test.cpp
+    src/rwe/pathfinding/pathrequestlimit.test.cpp
     src/rwe/sim/economy.test.cpp
     src/rwe/sim/ResourceSettler.test.cpp
     src/rwe/sim/visibility.test.cpp
@@ -1150,6 +1158,7 @@ set(TEST_FILES
     src/rwe/util/rwe_string.test.cpp
     src/rwe/ui/UiComponent.test.cpp
     src/rwe/ui/UiTextBox.test.cpp
+    src/rwe/ui/UiTextRegion.test.cpp
     src/rwe/ui/UiPanelFocus.test.cpp
     src/rwe/UiRenderService.test.cpp
     )
@@ -1213,6 +1222,11 @@ target_link_libraries(tad_episodes librwe)
 add_executable(battle_test src/battle_test.cpp)
 target_link_libraries(battle_test librwe)
 
+# The tick-indexed scenario runner: drives the real GameScene headlessly at
+# chosen ticks and asserts on the result. See ScenarioDriver.h.
+add_executable(scenario src/scenario.cpp)
+target_link_libraries(scenario librwe)
+
 add_executable(path_bench src/path_bench.cpp)
 target_link_libraries(path_bench librwe)
 
@@ -1236,5 +1250,5 @@ target_link_libraries(crash_probe librwe)
 # symbol table, which for an executable means linking with -rdynamic. Without
 # this the crash reports on Linux are addresses and nothing else.
 if(NOT WIN32)
-    set_target_properties(rwe battle_test replay_viewer crash_probe PROPERTIES ENABLE_EXPORTS ON)
+    set_target_properties(rwe battle_test scenario replay_viewer crash_probe PROPERTIES ENABLE_EXPORTS ON)
 endif()

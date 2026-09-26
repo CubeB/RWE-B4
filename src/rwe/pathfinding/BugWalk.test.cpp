@@ -102,6 +102,71 @@ namespace rwe
             REQUIRE(result.closest == start);
         }
 
+        SECTION("a dead end is backed out of, not given up on")
+        {
+            // A pocket open to the west whose east end the walker stands
+            // against: neither quarter turn is open there, only the way back.
+            // The walk must reverse out and go round (issue #309, a sea
+            // transport tucked in beside its own shipyard).
+            auto walkable = [](const Point& p) {
+                auto inPocketWall = p.x >= 0 && p.x <= 6 && (p.y == -1 || p.y == 1);
+                auto inEndWall = p.x == 7 && p.y >= -1 && p.y <= 1;
+                return !inPocketWall && !inEndWall;
+            };
+            auto goal = Point(20, 0);
+            auto result = bugWalk(
+                Point(6, 0),
+                goal,
+                walkable,
+                [&](const Point& p) { return octile(p, goal); },
+                4000);
+
+            REQUIRE(result.reachedGoal);
+        }
+
+        SECTION("a step back from the wall gets the same answer as the wall itself")
+        {
+            // What #309 needs: from the cell touching the obstacle and from
+            // the one before it, the walk has to agree, or the search is
+            // relaxed from one and not the other and the unit shuttles
+            // between them.
+            auto walkable = [](const Point& p) {
+                auto inPocketWall = p.x >= 0 && p.x <= 6 && (p.y == -1 || p.y == 1);
+                auto inEndWall = p.x == 7 && p.y >= -1 && p.y <= 1;
+                return !inPocketWall && !inEndWall;
+            };
+            auto goal = Point(20, 0);
+            auto distance = [&](const Point& p) { return octile(p, goal); };
+            // PathFindingService's rule: relax to the walk's closest cell when
+            // the walk fell short of the goal but got nearer than it started.
+            auto relaxes = [&](const Point& start) {
+                auto result = bugWalk(start, goal, walkable, distance, 4000);
+                auto reachable = distance(result.closest);
+                return !result.reachedGoal && reachable != 0 && reachable < distance(start);
+            };
+
+            REQUIRE(relaxes(Point(6, 0)) == relaxes(Point(5, 0)));
+        }
+
+        SECTION("round the short end of a wall, whichever side that is")
+        {
+            // A wall across the way that runs a hundred cells to one side and
+            // three to the other. The tracers go both ways a step at a time,
+            // so the short side is found in a handful of steps.
+            auto goal = Point(10, 0);
+            auto distance = [&](const Point& p) { return octile(p, goal); };
+            auto longUp = [](const Point& p) { return !(p.x == 5 && p.y >= -100 && p.y <= 3); };
+            auto longDown = [](const Point& p) { return !(p.x == 5 && p.y >= -3 && p.y <= 100); };
+
+            auto up = bugWalk(Point(0, 0), goal, longUp, distance, 4000);
+            auto down = bugWalk(Point(0, 0), goal, longDown, distance, 4000);
+
+            REQUIRE(up.reachedGoal);
+            REQUIRE(down.reachedGoal);
+            REQUIRE(up.steps < 40);
+            REQUIRE(down.steps < 40);
+        }
+
         SECTION("it never spends more than its step limit")
         {
             // A spiral of walls would trap a naive walk for a very long time.

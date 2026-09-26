@@ -609,6 +609,12 @@ namespace rwe
         int killMul{50};
         int timeMul{0};
 
+        /**
+         * The map's `nosealeveltrigger`: a round that reaches sea level goes
+         * on to the seabed instead of detonating on the water (0x49B3BA).
+         */
+        bool noSeaLevelTrigger{false};
+
         GameTime nextWindSpeedChange;
 
         /**

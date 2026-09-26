@@ -115,6 +115,42 @@ namespace rwe
         GameContinues = 1,
     };
 
+    /**
+     * Where a campaign game stands (TOTALA-EXE-DATA.md §115): the campaign and
+     * mission, the difficulty and side it is played at, and a letter for each
+     * mission so far -- W won, L lost, U untried -- the 25 the original keeps
+     * at [g+0x391CF] and saves as Thumbs. The rest is what the screens after
+     * the game need to know about this mission.
+     */
+    struct CampaignProgress
+    {
+        /** The campaign file's name, camps/<campaign>.tdf. */
+        std::string campaign;
+        unsigned int missionIndex{0};
+        /** 0 Easy, 1 Medium, 2 Hard. */
+        unsigned int difficulty{0};
+        /** 0 Arm, 1 Core. */
+        unsigned int side{0};
+        std::string thumbs = std::string(25, 'U');
+
+        /** The picture shown after a win (bitmaps/glamour/<glamour>.pcx) and its sound, empty when there is none. */
+        std::string glamour;
+        std::string glamourSound;
+        /** The mission's nomovie: no ending film even if it is the last. */
+        bool noMovie{false};
+        /** Whether the campaign has a mission after this one (0x435980). */
+        bool hasNextMission{false};
+
+        /** Marks this mission won or lost (0x41DC81-0x41DC97). */
+        void recordResult(bool won)
+        {
+            if (missionIndex < thumbs.size())
+            {
+                thumbs[missionIndex] = won ? 'W' : 'L';
+            }
+        }
+    };
+
     struct GameParameters
     {
         std::string mapName;
@@ -129,6 +165,10 @@ namespace rwe
          * spawnMissionUnits and issue #293.
          */
         bool mission{false};
+
+        /** A mission played as part of a campaign, from the campaign screen. Nothing for --mission alone. */
+        std::optional<CampaignProgress> campaign;
+
         std::string localNetworkPort{"1337"};
         std::optional<std::string> stateLogFile;
         /** Tuning profile given to every computer player in this game. */
@@ -236,6 +276,16 @@ namespace rwe
          * the fight never happens.
          */
         std::vector<std::string> battleTestUnitTypes{"ARMAH", "CORAH"};
+
+        /**
+         * The scenario to drive this game with, from the `scenario`
+         * executable. A harness-only field like battleTestUnitsPerSide: it
+         * makes GameScene own a ScenarioDriver, which feeds the scene real
+         * input at chosen ticks and asserts on what comes back. Nothing in a
+         * real game sets it, and the run is forced headless so that a tick is
+         * a frame and a step cannot fire twice for one of them.
+         */
+        std::optional<std::string> scenarioName;
 
         GameParameters(const std::string& mapName, unsigned int schemaIndex);
     };

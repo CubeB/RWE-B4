@@ -66,7 +66,7 @@ conversion, string reads at an address, pointer-table dumps) are in `tools/exe/`
 
 ## Index
 
-The 113 findings, numbered to 115: §83 and §84 do not exist, so the count is
+The 114 findings, numbered to 116: §83 and §84 do not exist, so the count is
 two short of the last number. The two to read before changing anything are
 **§88**, where RWE deliberately differs from the original on purpose, and
 **§91**, what is decoded but not ported; both are in this file, below.
@@ -187,6 +187,7 @@ Everything else lives in a subject file. **The numbers never move**, so a
 113. [Mission rules at runtime: what each tests, how often, and how they combine](TOTALA-EXE-DATA.md#113-mission-rules-at-runtime-what-each-tests-how-often-and-how-they-combine)
 114. [A mission unit's scripted orders at runtime](TOTALA-EXE-DATA.md#114-a-mission-units-scripted-orders-at-runtime)
 115. [The campaign's screens, progression and ending movies](TOTALA-EXE-DATA.md#115-the-campaigns-screens-progression-and-ending-movies)
+116. [What a round aims at on a unit, and why the water comes after it](TOTALA-EXE-WEAPONS.md#116-what-a-round-aims-at-on-a-unit-and-why-the-water-comes-after-it)
 
 ## 88. Where RWE deliberately differs
 
@@ -503,9 +504,10 @@ quirks of the original that RWE reproduces although they look like defects.
 - **A unit blocking a build site is told to move, and the site is swept again
   on every failed attempt.** The original's `BUGGER_OFF` is write-only -- the
   only reader of `unit+0x10f` bit 3 is the COB `get` (§112) -- and its site
-  check `0x47DB70` only waits: ten tries thirty ticks apart, then the queue
-  entry is given up. A friendly unit left on a spawn point therefore stalls the
-  yard for good, which is what a Coast To Coast play-test saw as "Core shipyard
+  check `0x47DB70` only waits -- a constructor ten tries thirty ticks apart
+  before giving the order up, a factory every fifteen ticks for as long as it
+  takes. A friendly unit left on a spawn point therefore stalls the yard for
+  good, which is what a Coast To Coast play-test saw as "Core shipyard
   stopped building as it got blocked by a scout ship". RWE sweeps the *site* --
   the new unit's footprint at the spawn point, not the building's own cells,
   where a hull at the pad is outside the building and would never hear about it
@@ -524,6 +526,40 @@ quirks of the original that RWE reproduces although they look like defects.
   schedule was RWE's before and stays so, because changing it moves every
   reclaim's economy and wants its own pass with a play-test.
 
+- **A repath is rate limited to once every 60 ticks, and a goal that only
+  drifts keeps the route already in hand.** The limit is the original's
+  (`WantsPath`, `0x44F260`, §87) and had not been ported: RWE re-asked on
+  every trigger, which in a fight was constant -- over one Crystal Maze game
+  the median gap between two of a unit's searches was 30 ticks and three
+  quarters were under 60. Each re-ask threw away the search in flight, and
+  `expansionsAbandoned` was 8.5% of every expansion the game spent. It is
+  ported now, at one ask per unit per 60 ticks, through a single rate-limited
+  site.
+
+  The distance is RWE's: where the original's `SetGoal` ladder keeps an old
+  path whose tail already answers the new goal, RWE keeps one while the new
+  goal is within `PathGoalRetargetTolerance`, **64 world units**, of the one
+  the route was built for. That number is chosen to sit well outside the
+  eight units an attack's stand-off point drifts by when it follows a target,
+  and to be far short of the distances a new order is given over, so a new
+  order still takes its straight-line stand-in on the tick it arrives.
+
+  Measured on Crystal Maze seeds 7 and 8, tick for tick over the window both
+  games reach -- the change ends a game at a different tick, so whole-run
+  totals are not comparable -- searches per tick fall by a third to a half,
+  expansions per tick by about a third, the first-pass walk steps by about a
+  third, and `expansionsAbandoned` by 86-95%. The saving is in the throwaway
+  searches and the stand-in walk. Since #272 counts the terrain-region
+  early-out apart from exhausted searches, the expensive A\* `exhausted` tail
+  is roughly flat, and a third to a half of the figure the issue read as that
+  tail was the cheap early-out, which spends no expansions. The `path_bench`
+  scenarios that do not repath (`spread`, `crowd`) keep identical pathfinder
+  counters, though their hashes move because the new fields are hashed;
+  `pressed-water` and `pressed-wall` do repath and show the reduced counts
+  too. Recorded here because the tolerance and the queue in place of the
+  original's round robin are RWE's, and because the change is
+  replay-breaking.
+
 - **A transport's capacity is read from the 1.0 key when the 3.1 one is
   missing, and a transport that names neither still carries.** The 3.1 exe
   reads `transportcapacity` and nothing else; `transportmaxunits`, the 1.0
@@ -539,9 +575,27 @@ quirks of the original that RWE reproduces although they look like defects.
   (`transportCapacityFromFbi`, `transportCapacityWarning`; #199). A file that
   carries both keys reads the new one, as the original does.
 
+- **A unit script that faults loses the thread, not the game.** The original's
+  COB interpreter divides without a guard, so `div` by zero faults the whole
+  process, and it has no limit on how long a thread runs between yields
+  (`TOTALA-EXE-EXTERNAL.md`, unverified here). RWE gives a division by zero
+  the answer 0, and `INT_MIN / -1` the wrapped answer the hardware would. A
+  thread that exceeds an argument count, call depth, stack depth or run length
+  far past anything a shipped script reaches (`CobExecutionContext`'s limits)
+  is killed, as the original kills a thread that meets an opcode it does not
+  know, and so is one that faults in any other way. A synchronous query that
+  faults gives the caller's fallback, the answer a unit without the script
+  gets. None of this changes a script the original can run; it is here
+  because a mod's script is untrusted input, and in a network game a fault
+  ended every peer's game at once (#75).
+
 
 ## 91. Still unknown or unported
 
+- **`unitsonly` and `groundbounce`** (§116). `unitsonly` is not parsed, so
+  no RWE round skips the ground and sea tests. RWE's `groundbounce` zeroes
+  `vy` and restores the previous height, where the original sets `vy` to
+  `-(vy >> 2)` and leaves the position alone.
 - **The campaign's win and lose rules** (§113) are decoded and not ported:
   all eighteen `[GlobalHeader]` conditions, checked once a second, all
   victory rules in order and any defeat rule, victory first, then a
@@ -551,10 +605,12 @@ quirks of the original that RWE reproduces although they look like defects.
   InitialMission list's WAIT, WAITFORATTACK, ATTACKUTYPE, guard, transport
   start and MAKESELECTABLE, and the selectable bit that holds a scripted
   unit out of the player's hands and out of the computer AI's.
-- **The campaign's screens and progression** (§115) are decoded and not
-  ported: NEWGAME, the MSNBRIEF briefing, the glamour picture, ENDMSN's
-  mission list with its won/lost/untried marks, progress in save games only,
-  and `3.zrb`/`4.zrb` then `5.zrb` after winning a campaign's last mission.
+- **Saving and loading between campaign missions** (§115) are decoded and not
+  ported: ENDMSN's Load Game and Save Game, and the header-only save with
+  `BetweenMissions=1` that opens on the next mission's briefing. The rest of
+  §115 is: NEWGAME, the briefing, the glamour picture, ENDMSN's mission list
+  with its won/lost/untried marks, `Thumbs` in the save header, and
+  `3.zrb`/`4.zrb` then `5.zrb` after a campaign's last mission is won.
 - TA's **Permanent** LOS mode has not been looked at.
 - **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not
   implemented; RWE always uses True.

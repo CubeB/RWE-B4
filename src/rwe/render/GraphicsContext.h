@@ -285,6 +285,11 @@ namespace rwe
 
         void setViewport(int x, int y, int width, int height);
 
+        /** Clips drawing to the rectangle, in GL window coordinates (origin bottom left). */
+        void enableScissor(int x, int y, int width, int height);
+
+        void disableScissor();
+
         FrameBufferInfo createFrameBuffer(int width, int height);
 
         void bindFrameBufferColorBuffer(TextureIdentifier texture);

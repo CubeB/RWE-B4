@@ -125,6 +125,15 @@ RWE rings outward from the goal for the nearest cell the unit could stand on and
 accepts arrival there. There is no game option for it; the `path_bench` harness
 takes `--no-relax-blocked` so the two can be measured against each other.
 
+**A repath is rate limited to once every 60 ticks, and a goal that only drifts
+keeps the route already in hand.** The rate limit is the original's (`WantsPath`,
+`0x44F260`); the original also keeps an old path whose tail already answers a new
+goal, where RWE keeps one while the new goal is within 64 world units of the one
+the route was built for — a tolerance RWE picked. A genuinely new order is never
+held back: it takes its straight-line stand-in on the tick it arrives. Without
+the limit a unit chasing a moving target re-asked every few ticks, and each ask
+threw away the search in flight.
+
 **A waypoint retires at sixteen world units rather than five.** Five is fine for
 a unit on its own and costs about a third of the arrivals in a crowd, because a
 waypoint is a cell centre and a unit two cells across cannot always get within
@@ -138,7 +147,7 @@ the pixels. The cursor is left out.
 **A unit parked on a factory's spawn point is told to move.** Every factory
 script sets `BUGGER_OFF`, the "get off the pad" command, and the original's
 engine ignores it: the flag has no reader but the script's own `get`, and a
-blocked build site just waits ten tries and gives the job up. A friendly hull
+factory with a blocked pad just waits until it clears. A friendly hull
 left on a shipyard's pad therefore stops the yard producing for good. RWE
 sweeps the spawn point whenever the site is found blocked and hands the unit
 standing there a move-off order, so the yard clears and carries on. This is a
@@ -314,10 +323,26 @@ original in every case.
 - **MoveUnitToRadius compares in floating point**, where the original floors
   each squared distance to whole units first; they differ only within a unit of
   the edge.
+- **The campaign briefing's panorama stands still**, its first strip fitted to
+  the window, where the original scrolls the strips across it and prints the
+  wind and gravity over them. The `*` the briefings put round a heading is
+  left out, its effect not decoded; the colour codes are drawn. §115.
+- **Back from a briefing reached between missions goes to the single-player
+  menu**, where the original goes back to the chart it came from: the game,
+  and its chart with it, is gone by the time the briefing is up. ENDMSN's Load
+  Game and Save Game do nothing yet. §115.
+- **A campaign's ending films play in a window too.** The original plays
+  `3.zrb` or `4.zrb` and then `5.zrb` only full-screen and goes straight to the
+  main menu otherwise; RWE plays every film in either, the intro included.
+  §115.
 - **A transport from unpatched data still loads.** Without the v3.1 patch data
   the Hulk's file gives its capacity under the old 1.0 key, which the patched
   game ignores, leaving a ship that cannot load. RWE reads the old key, and
   says at load which units it had to.
+- **A broken unit script stops itself, not the game.** A script that divides by
+  zero gets 0, and one that runs away (endless loops, huge argument lists) or
+  otherwise faults loses that one script thread. The original crashes on the
+  first and hangs on the second.
 
 ---
 

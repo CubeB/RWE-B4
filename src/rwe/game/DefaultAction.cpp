@@ -303,7 +303,7 @@ namespace rwe
                             return DefaultAction{a->action, feedbackCursor()};
                         }
                         return DefaultAction{
-                            ordererDefinition.canMove ? DefaultActionKind(DefaultActionMove()) : DefaultActionKind(DefaultActionNothing()),
+                            ordererDefinition.canMove && ordererDefinition.isMobile ? DefaultActionKind(DefaultActionMove()) : DefaultActionKind(DefaultActionNothing()),
                             feedbackCursor()};
                     }
                     case DefaultActionScheme::MoveButton:
@@ -341,7 +341,14 @@ namespace rwe
 
             if (ordererDefinition.canMove)
             {
-                return DefaultAction{DefaultActionMove(), CursorType::Move};
+                // Both default-action ladders end at 0x44019D, which moves
+                // only a unit with a mover, so a factory's rally point comes
+                // from the MOVE button alone ("QMOVE", 0x43F854). The cursor
+                // chooser does not look for the mover (0x43F07C), so the
+                // original shows cursormove over the ground for a factory and
+                // then does nothing with the click.
+                auto moves = scheme == DefaultActionScheme::MoveButton || ordererDefinition.isMobile;
+                return DefaultAction{moves ? DefaultActionKind(DefaultActionMove()) : DefaultActionKind(DefaultActionNothing()), CursorType::Move};
             }
 
             return DefaultAction{DefaultActionNothing(), CursorType::Normal};

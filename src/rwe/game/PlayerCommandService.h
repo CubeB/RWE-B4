@@ -10,6 +10,7 @@
 #include <rwe/sim/GameHash.h>
 #include <rwe/sim/GameTime.h>
 #include <rwe/sim/PlayerId.h>
+#include <rwe/sim/SimTicksPerSecond.h>
 #include <unordered_map>
 #include <vector>
 
@@ -26,7 +27,7 @@ namespace rwe
     {
         auto maxRtt = std::clamp(maxAverageRttMillis, 16.0f, 2000.0f);
         auto highCommandLatencyMillis = maxRtt + (maxRtt / 4.0f) + 200.0f;
-        return static_cast<unsigned int>(highCommandLatencyMillis / 16.0f) + 1;
+        return static_cast<unsigned int>(highCommandLatencyMillis / static_cast<float>(SimMillisecondsPerTick)) + 1;
     }
 
     /**
@@ -132,6 +133,16 @@ namespace rwe
         void rejoinPlayerLocked(PlayerId player, unsigned int fromTick);
 
     public:
+        /**
+         * How far past the tick the game has reached a drop or a rejoin may be
+         * set: thirty seconds. Every peer chooses its tick as the furthest any
+         * peer has reached plus a margin of a few seconds, so an honest one is
+         * well inside this. The padding a drop or rejoin writes is a set per
+         * tick up to the one it names, and a tick near 2^32 from the wire used
+         * to mean four billion of them on every peer. Issue #75.
+         */
+        static constexpr unsigned int MaxDropLeadTicks = 900;
+
         std::optional<std::vector<std::pair<PlayerId, std::vector<PlayerCommand>>>> tryPopCommands();
 
         void pushCommands(PlayerId player, const std::vector<PlayerCommand>& commands);
@@ -139,6 +150,9 @@ namespace rwe
         void pushHash(PlayerId player, const GameHash& gameHash);
 
         unsigned int bufferedCommandCount(PlayerId player) const;
+
+        /** Hashes from this player waiting to be compared; 0 for one that is no hash source. */
+        unsigned int bufferedHashCount(PlayerId player) const;
 
         /** Registers a player whose commands the simulation consumes: everyone in the game. */
         void registerPlayer(PlayerId playerId);

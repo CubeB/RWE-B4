@@ -78,4 +78,40 @@ namespace rwe
             REQUIRE(chooseChatCountForPacket(0, 1500, sizeOf) == 0);
         }
     }
+
+    TEST_CASE("longestPrefixThatFits")
+    {
+        // Issue #75: what each stream contributes to a packet. The same
+        // fixed-plus-per-item shape as the chat case above.
+        auto sizeOf = [](std::size_t count) -> unsigned long long { return 100 + (30 * count); };
+
+        SECTION("takes everything when everything fits")
+        {
+            REQUIRE(longestPrefixThatFits(40, 1496, sizeOf) == 40);
+        }
+
+        SECTION("takes exactly the longest prefix that fits")
+        {
+            // 100 + 46*30 is 1480; a 47th is 1510.
+            REQUIRE(longestPrefixThatFits(900, 1496, sizeOf) == 46);
+        }
+
+        SECTION("agrees with trying every length")
+        {
+            for (unsigned long long limit = 0; limit < 1000; limit += 7)
+            {
+                std::size_t linear = 0;
+                while (linear < 25 && sizeOf(linear + 1) <= limit)
+                {
+                    ++linear;
+                }
+                REQUIRE(longestPrefixThatFits(25, limit, sizeOf) == linear);
+            }
+        }
+
+        SECTION("takes none of an empty stream")
+        {
+            REQUIRE(longestPrefixThatFits(0, 1496, sizeOf) == 0);
+        }
+    }
 }

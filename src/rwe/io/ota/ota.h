@@ -235,6 +235,16 @@ namespace rwe
     OtaRecord parseOtaGlobalHeader(const TdfBlock& tdf);
 
     OtaMissionRules parseOtaMissionRules(const TdfBlock& tdf);
+
+    /**
+     * The schema a campaign mission is played on at a difficulty (0 Easy, 1
+     * Medium, 2 Hard): the first whose `type` matches, compared without
+     * case, in the order of preference 0x43688B-0x436B88 takes -- Easy,
+     * Medium, Hard; Medium, Easy, Hard; or Hard, Medium, Easy (§115). The
+     * schema's number and SCHEMACOUNT play no part. Nothing when none of the
+     * three is there, which the original reports as "No suitable schema type".
+     */
+    std::optional<std::size_t> chooseCampaignSchema(const std::vector<OtaSchema>& schemas, int difficulty);
     OtaMissionUnit parseOtaMissionUnit(const TdfBlock& tdf);
     OtaFeature parseOtaFeature(const TdfBlock& tdf);
 

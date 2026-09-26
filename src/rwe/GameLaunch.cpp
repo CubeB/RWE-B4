@@ -445,8 +445,10 @@ namespace rwe
         LOG_INFO << "Entering main loop";
         // An arena run is headless by definition: nobody is watching, and
         // waiting for a display to refresh would make a batch of twenty games
-        // take all afternoon.
-        if (gameParameters && gameParameters->aiArenaSeconds)
+        // take all afternoon. A scenario is headless for a determinism
+        // reason: only then is there exactly one update per simulation tick,
+        // which is what lets a step be keyed to a tick.
+        if (gameParameters && (gameParameters->aiArenaSeconds || gameParameters->scenarioName))
         {
             sceneManager.setHeadless(true);
         }

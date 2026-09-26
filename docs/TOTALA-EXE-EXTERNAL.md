@@ -414,7 +414,10 @@ agent that decoded it could not make that section byte-exact." Their
 direction from the blocked direction, alternating one turn each, with the
 sentinel, meet test and rejoin leg given in full. **This is the single most
 directly actionable thing in their corpus for us**, because it closes a gap we
-already know we have.
+already know we have. *Closed 2026-09-25 (B4 #309), from our own reading of
+`0x40E2AC`-`0x40E600`, which agrees with their shape: two tracers from the
+blocked direction, turning opposite ways, alternating a step each; §87 has the
+port.*
 
 **Repair pads.** `TOTALA-EXE-MOVEMENT.md` §91 records this as the piece left:
 what the pad does once an aircraft is on it "was not followed past the mission

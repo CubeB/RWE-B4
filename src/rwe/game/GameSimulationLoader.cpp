@@ -664,6 +664,7 @@ namespace rwe
         simulation.tidalStrength = std::max(0, mapData.tidalStrength);
         simulation.killMul = mapData.killMul;
         simulation.timeMul = mapData.timeMul;
+        simulation.noSeaLevelTrigger = ota.noSeaLevelTrigger;
 
         // The skirmish options the simulation itself has to know about. They
         // go in before any player is added: Mapped hands a player its explored

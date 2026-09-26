@@ -158,7 +158,6 @@ namespace rwe
             static_cast<float>(GuiSizeLeft) + 8.0f,
             y,
             "Message: " + *chatInput + caret,
-            *speechFont,
-            Color(252, 252, 252));
+            *speechFont);
     }
 }

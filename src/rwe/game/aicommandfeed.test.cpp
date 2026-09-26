@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <limits>
 #include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/game/PlayerCommandService.h>
 #include <rwe/sim/GameSimulation.h>
@@ -170,7 +171,7 @@ namespace rwe
         SECTION("is the depth a peer with no peers would use, and does not move")
         {
             REQUIRE(aiCommandBufferDepth() == commandBufferTargetForRttMillis(0.0f));
-            REQUIRE(aiCommandBufferDepth() == 14);
+            REQUIRE(aiCommandBufferDepth() == 7);
         }
 
         SECTION("is not the humans' depth, which follows the round trip time")
@@ -179,9 +180,67 @@ namespace rwe
             // network and have to be waited for; an AI's are issued by every
             // peer's own copy of the AI and are not. Tying the AI's delay to a
             // measured latency made it a different number on each peer, and
-            // the depth decides the game -- the same seed at 14 and at 18
-            // diverges within two seconds.
+            // the depth decides the game -- the same seed at two different
+            // depths diverges within two seconds.
             REQUIRE(commandBufferTargetForRttMillis(60.0f) != aiCommandBufferDepth());
+        }
+    }
+
+    TEST_CASE("a unit command reaches the simulation only if its player may give it", "[network]")
+    {
+        // Issue #75. The issuing player is where a command came from -- a
+        // network endpoint, the computer player, the recording -- and before
+        // this, nothing compared it with the unit's owner, nor the unit types
+        // and counts it named with anything the game knew.
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto owner = addPlayer(sim, "owner");
+        auto other = addPlayer(sim, "other");
+        UnitDefinition def{};
+        def.isMobile = true;
+        def.builder = true;
+        sim.unitDefinitions["ARMPW"] = def;
+        auto script = makeEmptyCobScript();
+        auto unitId = addUnitOfType(sim, "ARMPW", owner, SimVector(100_ss, 0_ss, 100_ss), script);
+        auto destination = SimVector(200_ss, 0_ss, 200_ss);
+        using IssueKind = PlayerUnitCommand::IssueOrder::IssueKind;
+
+        SECTION("its owner's order is applied")
+        {
+            REQUIRE(applyUnitCommandToSimulation(sim, owner, PlayerUnitCommand(unitId, PlayerUnitCommand::IssueOrder(MoveOrder(destination), IssueKind::Immediate))));
+            REQUIRE(sim.getUnitState(unitId).orders.size() == 1);
+        }
+
+        SECTION("anyone else's is refused, and changes nothing")
+        {
+            REQUIRE_FALSE(applyUnitCommandToSimulation(sim, other, PlayerUnitCommand(unitId, PlayerUnitCommand::IssueOrder(MoveOrder(destination), IssueKind::Immediate))));
+            REQUIRE_FALSE(applyUnitCommandToSimulation(sim, other, PlayerUnitCommand(unitId, PlayerUnitCommand::SelfDestruct{})));
+            REQUIRE(sim.getUnitState(unitId).orders.empty());
+        }
+
+        SECTION("a unit type the game has no definition for is refused")
+        {
+            REQUIRE_FALSE(applyUnitCommandToSimulation(sim, owner, PlayerUnitCommand(unitId, PlayerUnitCommand::IssueOrder(BuildOrder("NOSUCHUNIT", destination), IssueKind::Immediate))));
+            REQUIRE_FALSE(applyUnitCommandToSimulation(sim, owner, PlayerUnitCommand(unitId, PlayerUnitCommand::ModifyBuildQueue{1, "NOSUCHUNIT"})));
+            REQUIRE(sim.getUnitState(unitId).orders.empty());
+        }
+
+        SECTION("a queue change out of range is refused")
+        {
+            REQUIRE_FALSE(applyUnitCommandToSimulation(sim, owner, PlayerUnitCommand(unitId, PlayerUnitCommand::ModifyBuildQueue{1 << 30, "ARMPW"})));
+            REQUIRE_FALSE(applyUnitCommandToSimulation(sim, owner, PlayerUnitCommand(unitId, PlayerUnitCommand::ModifyStockpile{std::numeric_limits<int>::min()})));
+            REQUIRE(applyUnitCommandToSimulation(sim, owner, PlayerUnitCommand(unitId, PlayerUnitCommand::ModifyBuildQueue{20, "ARMPW"})));
+        }
+
+        SECTION("a resurrection starts from nothing, whatever progress the command claims")
+        {
+            ResurrectOrder claimed(FeatureId(3));
+            claimed.remainingTicks = 0;
+            REQUIRE(applyUnitCommandToSimulation(sim, owner, PlayerUnitCommand(unitId, PlayerUnitCommand::IssueOrder(claimed, IssueKind::Immediate))));
+            const auto& orders = sim.getUnitState(unitId).orders;
+            REQUIRE(orders.size() == 1);
+            const auto* resurrect = std::get_if<ResurrectOrder>(&orders.front());
+            REQUIRE(resurrect != nullptr);
+            REQUIRE_FALSE(resurrect->remainingTicks.has_value());
         }
     }
 }

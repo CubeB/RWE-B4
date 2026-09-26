@@ -172,6 +172,7 @@ jobs:
           wayland-protocols
           libxkbcommon-dev
           libdecor-0-dev
+          xvfb
       - name: restore ccache
         uses: actions/cache@v5
         with:
@@ -214,6 +215,27 @@ jobs:
         env:
           RWE_TEST_ANNOUNCE: 1
         run: ./build/rwe_test --durations yes
+      # The scenarios drive the real GameScene, which needs a GL context even
+      # though it draws nothing, so they run under Xvfb. They also need Total
+      # Annihilation's game data, which is not redistributable and is not on
+      # the runner: set the RWE_SCENARIO_DATA repository variable to a data
+      # directory (a self-hosted runner, or a cache step) to switch them on.
+      # With it unset the step prints that it is skipping, so a green job never
+      # stands in for a check that did not happen.
+      - name: run scenarios
+        env:
+          SCENARIO_DATA: ${{ vars.RWE_SCENARIO_DATA }}
+          SDL_AUDIODRIVER: dummy
+          XDG_RUNTIME_DIR: /tmp/rwe-xdg
+        run: |
+          if [ -z "$SCENARIO_DATA" ]; then
+            echo "RWE_SCENARIO_DATA is not set; skipping the scenario runner."
+            exit 0
+          fi
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          timeout 600 xvfb-run -a -s "-screen 0 1280x1024x24" \
+            ./build/scenario --all --data-path "$SCENARIO_DATA"
       - name: build AppImage
         if: matrix.cc == 'gcc-14' && matrix.configuration == 'Release'
         run: |

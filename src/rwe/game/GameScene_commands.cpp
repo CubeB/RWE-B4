@@ -122,6 +122,15 @@ namespace rwe
 
     Point GameScene::getMousePosition() const
     {
+        // A scenario drives the scene with synthetic events, which carry
+        // their own coordinates but cannot move the live cursor. Returning
+        // the override here is what makes a synthetic click pick the thing it
+        // was aimed at. Set only by ScenarioDriver.
+        if (mousePositionOverride)
+        {
+            return *mousePositionOverride;
+        }
+
         float fx;
         float fy;
         sceneContext.sdl->getMouseState(&fx, &fy);
@@ -2074,6 +2083,23 @@ namespace rwe
                 showFace(p, toggleFace(v, 2), v.value ? 1u : 0u); }));
         }
 
+        // The BUILD/ORDERS tabs draw the section the unit's panel is showing,
+        // and that has to be re-applied here rather than kept: switching tabs
+        // rebuilds the whole panel, so any toggledOn it held died with the old
+        // one. Issue #342.
+        if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit)
+        {
+            const auto& guiInfo = getGuiInfo(*selectedUnit);
+            if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "BUILD"))
+            {
+                p->get().setToggledOn(guiInfo.section == UnitGuiInfo::Section::Build);
+            }
+            if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "ORDERS"))
+            {
+                p->get().setToggledOn(guiInfo.section == UnitGuiInfo::Section::Orders);
+            }
+        }
+
         currentPanel->groupMessages().subscribe([this](const auto& msg) {
             if (auto activateMessage = std::get_if<ActivateMessage>(&msg.message); activateMessage != nullptr)
             {
@@ -2680,6 +2706,16 @@ namespace rwe
 
     void GameScene::onSelectedUnitsChanged()
     {
+        // An armed order mode with nothing selected is a cursor promising an
+        // action the click can no longer perform, because the unit it was
+        // armed for has died or been captured. Return to the default mode.
+        // Gated on the mode being armed so a selection click does not discard
+        // the NormalCursorMode's own selecting state.
+        if (selectedUnits.empty() && !std::holds_alternative<NormalCursorMode>(cursorMode.getValue()))
+        {
+            cursorMode.next(NormalCursorMode());
+        }
+
         refreshToggleButtons();
 
         if (selectedUnits.empty())
@@ -2897,7 +2933,7 @@ namespace rwe
         match(
             playerCommand,
             [&](const PlayerUnitCommand& c) {
-                processUnitCommand(c);
+                processUnitCommand(issuingPlayer, c);
             },
             [&](const PlayerPauseGameCommand&) {
                 // Pause is open to any player. The local player toggles
@@ -2935,6 +2971,14 @@ namespace rwe
                     return;
                 }
 
+                // And whether it was this player's to issue. A duplicate
+                // from anyone else, of a drop that did happen, is not a
+                // second announcement. Issue #75.
+                if (playerCommandService->droppingPlayerFor(c.player) != issuingPlayer)
+                {
+                    return;
+                }
+
                 onPlayerDropped(c.player, c.fromTick);
             },
             [&](const PlayerRejoinedCommand& c) {
@@ -2946,17 +2990,27 @@ namespace rwe
                     return;
                 }
 
+                // "Not dropped" is also true of a player who never was, so
+                // the entitlement is asked again here. Without it any peer
+                // could name itself and have the rejoin grace -- three
+                // minutes in which it is never dropped for silence -- by
+                // saying so. Issue #75.
+                if (playerCommandService->droppingPlayerFor(c.player) != issuingPlayer)
+                {
+                    return;
+                }
+
                 onPlayerRejoined(c.player, c.fromTick);
             });
     }
 
-    void GameScene::processUnitCommand(const PlayerUnitCommand& unitCommand)
+    void GameScene::processUnitCommand(PlayerId issuingPlayer, const PlayerUnitCommand& unitCommand)
     {
         // The simulation half is shared with the headless arena, so the two
         // cannot drift. It drops a command naming a unit that has since died;
         // the interface bookkeeping below must be dropped with it, or it would
         // refresh a panel for a dead unit.
-        if (!applyUnitCommandToSimulation(simulation, unitCommand))
+        if (!applyUnitCommandToSimulation(simulation, issuingPlayer, unitCommand))
         {
             return;
         }
