@@ -1010,6 +1010,7 @@ set(TEST_FILES
     src/rwe/game/dump_util.test.cpp
     src/rwe/game/DesyncReport.test.cpp
     src/rwe/game/aicommandfeed.test.cpp
+    src/rwe/game/commandorder.test.cpp
     src/rwe/game/playerdrop.test.cpp
     src/rwe/game/LockstepStats.test.cpp
     src/rwe/game/playerrejoin.test.cpp

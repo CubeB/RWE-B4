@@ -143,6 +143,12 @@ namespace rwe
          */
         static constexpr unsigned int MaxDropLeadTicks = 900;
 
+        /**
+         * The next tick's commands, a set for every player, or nothing while
+         * any player still owes one. The sets come out highest player first,
+         * whatever order the players were registered in; see the body for why
+         * that order and why it has to be fixed.
+         */
         std::optional<std::vector<std::pair<PlayerId, std::vector<PlayerCommand>>>> tryPopCommands();
 
         void pushCommands(PlayerId player, const std::vector<PlayerCommand>& commands);
