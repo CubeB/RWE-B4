@@ -210,6 +210,7 @@ class Harness:
         self.count = args.peers
         self.kill = args.kill
         self.peers: list[Peer] = []
+        self.survivors: list[int] = []
         self.bridge_reader: BridgeReader | None = None
         self.use_xvfb = use_xvfb()
         self.base_env = self._child_env()
@@ -444,6 +445,7 @@ class Harness:
             survivors = list(range(self.count))
         else:
             survivors = [s for s in range(self.count) if s != self.kill]
+        self.survivors = survivors
 
         for s in survivors:
             lines = read_lines(self.peers[s].hashes)
@@ -484,7 +486,11 @@ class Harness:
         self.terminate_all()
 
         expected_divergence = self.args.desync_at > 0
-        if not compared:
+        silent = [s for s in self.survivors if not read_lines(self.peers[s].hashes)]
+        if silent:
+            say(f"RESULT: player(s) {silent} produced no hash lines; they did not start")
+            code = 1
+        elif not compared:
             say("RESULT: nothing was compared")
             code = 1
         elif self.diverged:
