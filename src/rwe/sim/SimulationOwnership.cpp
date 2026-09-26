@@ -22,19 +22,15 @@ namespace rwe
 
     void applyRemoteDamage(GameSimulation& sim, UnitId unitId, unsigned int damagePoints)
     {
-        auto& unit = sim.getUnitState(unitId);
-        if (unit.isDead())
+        auto unitRef = sim.tryGetUnitState(unitId);
+        if (!unitRef || unitRef->get().isDead())
         {
             return;
         }
 
-        if (unit.hitPoints <= damagePoints)
-        {
-            sim.killUnit(unitId);
-        }
-        else
-        {
-            unit.hitPoints -= damagePoints;
-        }
+        // Only the owner declares a death, with the cause and corpse level
+        // its record carries; until it does, the unit is alive here.
+        auto& unit = unitRef->get();
+        unit.hitPoints = unit.hitPoints > damagePoints ? unit.hitPoints - damagePoints : 1;
     }
 }

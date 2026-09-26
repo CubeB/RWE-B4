@@ -23,8 +23,7 @@ namespace rwe
      * Applies damage recorded from the owner of a Remote player's unit.
      *
      * The local damage path refuses a Remote victim, so this is how the stream
-     * takes health off one; it kills the unit when the damage exceeds what is
-     * left, matching applyDamage's own health effect.
+     * takes health off one. It never kills: that is the owner's death record.
      */
     void applyRemoteDamage(GameSimulation& sim, UnitId unitId, unsigned int damagePoints);
 }

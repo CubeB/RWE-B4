@@ -185,6 +185,12 @@ namespace rwe
 
         applyRemoteDamage(sim, id, 100);
         REQUIRE(sim.getUnitState(id).hitPoints == health - 100);
+
+        applyRemoteDamage(sim, id, health);
+        REQUIRE(sim.getUnitState(id).hitPoints == 1);
+        REQUIRE(sim.getUnitState(id).isAlive());
+
+        applyRemoteDamage(sim, UnitId(9999), 100);
     }
 
     TEST_CASE("a remote unit can still be killed by the owner's death record", "[remote]")
