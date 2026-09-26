@@ -20,7 +20,11 @@ namespace rwe
 
         tdf.read("UnitName", u.unitName);
         tdf.read("Objectname", u.objectName);
-        tdf.read("SoundCategory", u.soundCategory);
+
+        // A pseudo-unit that exists only to put a stockpiled missile on a build
+        // menu names no sound category; the original tolerates the missing key
+        // and treats the unit as silent.
+        tdf.readOrDefault("SoundCategory", u.soundCategory);
 
         tdf.readOrDefault("MovementClass", u.movementClass);
 

@@ -1,7 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
+#include <deque>
+#include <rwe/LoadingScene_util.h>
 #include <rwe/io/_3do/_3do.h>
 #include <rwe/io/cob/Cob.h>
+#include <rwe/io/fbi/io.h>
 #include <rwe/io/gaf/GafArchive.h>
 #include <rwe/io/gaf/gaf_headers.h>
 #include <rwe/io/gaf/gaf_util.h>
@@ -15,6 +18,8 @@
 #include <rwe/sim/util.h>
 #include <sstream>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 /**
@@ -320,5 +325,44 @@ namespace rwe
         append(bytes, GafHeader{GafVersionNumber, 0xFFFFFFFF, 0});
         std::istringstream in(bytes);
         REQUIRE_THROWS_AS(GafArchive(&in), GafException);
+    }
+
+    TEST_CASE("an FBI with no SoundCategory is silent, not refused", "[malformed]")
+    {
+        // ProTA's MAKENUKE/MAKEANTI pseudo-units name no category; the
+        // original reads the missing key as no sound at all.
+        auto fbi = parseUnitFbi(parseTdfFromString("[UNITINFO]\n{\nUnitName=MAKENUKEARM;\nObjectname=;\n}\n"));
+        REQUIRE(fbi.unitName == "MAKENUKEARM");
+        REQUIRE(fbi.soundCategory.empty());
+    }
+
+    TEST_CASE("a referenced feature no TDF defines is dropped, not given an id", "[malformed]")
+    {
+        std::unordered_map<std::string, FeatureDefinitionId> featureNameIndex;
+        std::unordered_set<std::string> knownFeatureNames{"TREE"};
+        std::deque<std::string> openQueue;
+        std::unordered_map<std::string, FeatureDefinitionId> openSet;
+        auto nextId = FeatureDefinitionId(7);
+
+        // A present name is queued and takes the next id.
+        auto tree = getFeatureId(nextId, featureNameIndex, knownFeatureNames, openQueue, openSet, "tree");
+        REQUIRE(tree);
+        REQUIRE(tree->value == 7);
+        REQUIRE(nextId.value == 8);
+        REQUIRE(openQueue.size() == 1);
+
+        // A missing name yields nothing and leaves the next id alone, so a
+        // reference to a corpse no TDF defines cannot point at whichever
+        // feature is loaded next.
+        REQUIRE_FALSE(getFeatureId(nextId, featureNameIndex, knownFeatureNames, openQueue, openSet, "TREEDEAD"));
+        REQUIRE(nextId.value == 8);
+        REQUIRE(openQueue.size() == 1);
+
+        // A name already loaded resolves to its id without reserving another.
+        featureNameIndex.insert({"ROCK", FeatureDefinitionId(3)});
+        auto rock = getFeatureId(nextId, featureNameIndex, knownFeatureNames, openQueue, openSet, "ROCK");
+        REQUIRE(rock);
+        REQUIRE(rock->value == 3);
+        REQUIRE(nextId.value == 8);
     }
 }

@@ -469,7 +469,13 @@ It is the index TA's FBI loader assigns each unit type and stores at
 
 `tadUnitLoadOrder` in `src/rwe/io/tad/tad_events.h` is that rule, and
 `tad_episodes --units <dir>` applies it. The mod files stay out of the
-repository: `--units` takes a path.
+repository: `--units` takes a path. RWE loads ProTA 4.8 directly: its six
+`MAKENUKE`/`MAKEANTI` pseudo-units carry no `SoundCategory`, and a corpse
+chain can name a feature no TDF in the merged directory defines, both of
+which used to stop the load; the first is now read as silent and the second
+as no wreck. The merged directory is the union of every `--data-path`, so
+with base TA and the mod both mounted the listing numbers 324 types against
+the mod's own 317.
 
 Three things had to be got right at once, which is why plain alphabetical
 "scores better than chance but is not it" was as far as the previous pass got.
