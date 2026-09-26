@@ -605,12 +605,9 @@ quirks of the original that RWE reproduces although they look like defects.
   InitialMission list's WAIT, WAITFORATTACK, ATTACKUTYPE, guard, transport
   start and MAKESELECTABLE, and the selectable bit that holds a scripted
   unit out of the player's hands and out of the computer AI's.
-- **Saving and loading between campaign missions** (§115) are decoded and not
-  ported: ENDMSN's Load Game and Save Game, and the header-only save with
-  `BetweenMissions=1` that opens on the next mission's briefing. The rest of
-  §115 is: NEWGAME, the briefing, the glamour picture, ENDMSN's mission list
-  with its won/lost/untried marks, `Thumbs` in the save header, and
-  `3.zrb`/`4.zrb` then `5.zrb` after a campaign's last mission is won.
+- **One small piece of the campaign flow** (§115) is not ported: a campaign
+  mission restarted from the game menu counting as lost, which the teardown's
+  `L` would do [inferred]. The rest of §115 is ported.
 - TA's **Permanent** LOS mode has not been looked at.
 - **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not
   implemented; RWE always uses True.

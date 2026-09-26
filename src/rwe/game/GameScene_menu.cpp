@@ -109,7 +109,7 @@ namespace rwe
                 auto isNetwork = std::any_of(save->parameters.players.begin(), save->parameters.players.end(), [](const auto& p) {
                     return p && std::holds_alternative<PlayerControllerTypeNetwork>(p->controller);
                 });
-                setSaveListLabel(panel, "GAMETYPE", isNetwork ? "Network" : "Skirmish");
+                setSaveListLabel(panel, "GAMETYPE", save->parameters.campaign ? "Campaign" : (isNetwork ? "Network" : "Skirmish"));
 
                 // No slot in GameParameters says which player is local, so
                 // (per LoadingScene's own reading of a fresh game) the first
@@ -169,6 +169,12 @@ namespace rwe
 
     void GameScene::saveCurrentGame(const std::string& name)
     {
+        if (endGameChartVisible() && gameParameters.campaign)
+        {
+            saveBetweenMissions(name);
+            return;
+        }
+
         SaveFile save(gameParameters);
         save.cameraPosition = worldCameraState.position;
         save.gameTimeSeconds = simulation.gameTime.value / static_cast<unsigned int>(SimTicksPerSecond);
@@ -190,6 +196,14 @@ namespace rwe
         // Rerun the whole loading pipeline for the saved game's map and
         // players; the loading scene applies the saved state instead of
         // spawning the starting commanders.
+        // A campaign saved between missions has no world to load: it opens
+        // on the briefing it was saved at (0x492A0A).
+        if (save->betweenMissions)
+        {
+            continueCampaign(*save->parameters.campaign);
+            return;
+        }
+
         auto parameters = save->parameters;
         parameters.loadFromSaveFile = path.string();
         auto scene = std::make_shared<LoadingScene>(
@@ -623,6 +637,18 @@ namespace rwe
         }
     }
 
+    void GameScene::closeSaveDialog()
+    {
+        if (endGameChartVisible())
+        {
+            closeGameMenu();
+        }
+        else
+        {
+            openGameMenuRoot();
+        }
+    }
+
     void GameScene::closeGameMenu()
     {
         gameMenuPanels.clear();
@@ -754,7 +780,7 @@ namespace rwe
         {
             if (control == "CANCEL")
             {
-                openGameMenuRoot();
+                closeSaveDialog();
             }
             else if (control == "DELETE")
             {
@@ -800,14 +826,14 @@ namespace rwe
                         "Overwrite the saved game?",
                         [this, name]() {
                             saveCurrentGame(name);
-                            openGameMenuRoot();
+                            closeSaveDialog();
                         },
                         [this]() { openSaveDialog(); });
                 }
                 else
                 {
                     saveCurrentGame(name);
-                    openGameMenuRoot();
+                    closeSaveDialog();
                 }
             }
         }
@@ -815,7 +841,7 @@ namespace rwe
         {
             if (control == "CANCEL")
             {
-                openGameMenuRoot();
+                closeSaveDialog();
             }
             else if (control == "DELETE")
             {

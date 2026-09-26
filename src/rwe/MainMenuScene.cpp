@@ -534,6 +534,19 @@ namespace rwe
             return;
         }
 
+        // A campaign saved between missions opens on the briefing it was
+        // saved at, with the menu the load was made from behind it
+        // (0x492A0A).
+        if (save->betweenMissions)
+        {
+            const auto& progress = *save->parameters.campaign;
+            campaignSide = progress.side;
+            campaignDifficulty = progress.difficulty;
+            goToPreviousMenu();
+            openCampaignMission(progress);
+            return;
+        }
+
         auto parameters = save->parameters;
         parameters.loadFromSaveFile = path.string();
         sceneContext.audioService->stopMusic();

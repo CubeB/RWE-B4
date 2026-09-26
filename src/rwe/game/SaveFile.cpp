@@ -243,6 +243,10 @@ namespace rwe
         {
             header["gameTimeSeconds"] = *save.gameTimeSeconds;
         }
+        if (save.betweenMissions)
+        {
+            header["betweenMissions"] = true;
+        }
         j["camera"] = {{"x", save.cameraPosition.x}, {"y", save.cameraPosition.y}, {"z", save.cameraPosition.z}};
         j["sim"] = save.simulation;
 
@@ -250,7 +254,25 @@ namespace rwe
         out << j.dump();
     }
 
+    static std::optional<SaveFile> readSaveFileOrThrow(const fs::path& path);
+
     std::optional<SaveFile> readSaveFile(const fs::path& path)
+    {
+        // A save is a file on disk, so it can be anything: a header field of
+        // the wrong type makes nlohmann throw, and the callers (the Load list
+        // among them, while the game is running) expect an unreadable save,
+        // not an exception.
+        try
+        {
+            return readSaveFileOrThrow(path);
+        }
+        catch (const std::exception&)
+        {
+            return std::nullopt;
+        }
+    }
+
+    static std::optional<SaveFile> readSaveFileOrThrow(const fs::path& path)
     {
         std::ifstream in(path, std::ios::binary);
         if (!in)
@@ -306,6 +328,8 @@ namespace rwe
         {
             save.gameTimeSeconds = header.at("gameTimeSeconds").get<unsigned int>();
         }
+        // Only a campaign's: there is nothing else to brief.
+        save.betweenMissions = header.value("betweenMissions", false) && save.parameters.campaign.has_value();
         const auto& camera = j.at("camera");
         save.cameraPosition = Vector3f(camera.at("x").get<float>(), camera.at("y").get<float>(), camera.at("z").get<float>());
         save.simulation = j.at("sim");

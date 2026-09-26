@@ -503,6 +503,12 @@ namespace rwe
         /** Leaves for a campaign mission's briefing, in the menu. */
         void continueCampaign(const CampaignProgress& progress);
 
+        /** Saves the campaign from the screen between missions: the header alone, pointing at the mission to brief next. */
+        void saveBetweenMissions(const std::string& name);
+
+        /** Leaves the save or load dialog: back to the screen between missions if that is where it opened, else to the game menu. */
+        void closeSaveDialog();
+
         /** The campaign is won: its ending films, then the main menu (FE states 4 and 5). */
         void playCampaignEnding();
 
