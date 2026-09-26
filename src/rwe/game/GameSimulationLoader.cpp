@@ -665,6 +665,7 @@ namespace rwe
         simulation.killMul = mapData.killMul;
         simulation.timeMul = mapData.timeMul;
         simulation.noSeaLevelTrigger = ota.noSeaLevelTrigger;
+        simulation.waterDamage = ota.waterDoesDamage ? std::max(0, ota.waterDamage) : 0;
 
         // The skirmish options the simulation itself has to know about. They
         // go in before any player is added: Mapped hands a player its explored
