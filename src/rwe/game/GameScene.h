@@ -1098,6 +1098,13 @@ namespace rwe
         /** Whether the current stall has been logged, so it is said once and not once a frame. */
         bool stallReported{false};
 
+        /**
+         * Whether the last tick attempt could not run because a player's
+         * commands had not arrived. Reported to peers, whose scene-time
+         * projection must not carry this player forward while it is stuck.
+         */
+        bool lastTickAttemptBlocked{false};
+
         bool networkOverlayVisible{false};
 
         LockstepStats lockstepStats;

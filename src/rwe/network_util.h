@@ -12,25 +12,63 @@ namespace rwe
     float ema(float val, float average, float alpha);
 
     /**
+     * How a peer said it was running when it last reported: the speed it was
+     * advancing at, and whether it had stopped. The defaults describe a peer
+     * whose build predates the fields -- running at 1x, unpaused, not
+     * stalled.
+     */
+    struct PeerRunState
+    {
+        unsigned int speedPermille{1000};
+        bool paused{false};
+        bool stalled{false};
+    };
+
+    /**
      * A peer's last reported scene time carried forward to now. The divisor
-     * is a 16 ms frame, not the sim's own tick -- wrong since the simulation
-     * moved to 30 Hz, and the subject of #354.
+     * is the sim's own tick, not the 16 ms frame it used to be, which ran a
+     * peer's projected time forward at twice real time since the simulation
+     * moved to 30 Hz (#354).
      */
     inline SceneTime projectSceneTime(SceneTime lastKnown, long elapsedTimeMillis)
     {
-        return lastKnown + SceneTime(static_cast<unsigned int>(elapsedTimeMillis / 16));
+        return lastKnown + SceneTime(static_cast<unsigned int>(elapsedTimeMillis / SimMillisecondsPerTick));
     }
 
+    /**
+     * The same, scaled by the speed the peer is running at. A paused or
+     * stalled peer is not advancing at all, so its time stands still however
+     * long ago it reported.
+     */
+    inline SceneTime projectSceneTime(SceneTime lastKnown, long elapsedTimeMillis, const PeerRunState& runState)
+    {
+        if (runState.paused || runState.stalled)
+        {
+            return lastKnown;
+        }
+
+        auto scaledMillis = (elapsedTimeMillis * static_cast<long>(runState.speedPermille)) / 1000;
+        return lastKnown + SceneTime(static_cast<unsigned int>(scaledMillis / SimMillisecondsPerTick));
+    }
+
+    /** A peer's last report and how it said it was running when it made it. */
+    struct PeerSceneTimeReport
+    {
+        SceneTime lastKnown;
+        Timestamp reportedAt;
+        PeerRunState runState;
+    };
+
     template <typename Range>
-    unsigned int estimateAverageSceneTimeStatic(SceneTime localSceneTime, Range sceneTimes, Timestamp time)
+    unsigned int estimateAverageSceneTimeStatic(SceneTime localSceneTime, Range reports, Timestamp time)
     {
         auto accum = localSceneTime.value;
         auto count = 1;
-        for (const auto& lastKnownSceneTime : sceneTimes)
+        for (const auto& report : reports)
         {
-            auto elapsedTimeMillis = std::chrono::duration_cast<std::chrono::milliseconds>(time - lastKnownSceneTime.second).count();
+            auto elapsedTimeMillis = std::chrono::duration_cast<std::chrono::milliseconds>(time - report.reportedAt).count();
 
-            auto peerSceneTime = projectSceneTime(lastKnownSceneTime.first, elapsedTimeMillis);
+            auto peerSceneTime = projectSceneTime(report.lastKnown, elapsedTimeMillis, report.runState);
             accum += peerSceneTime.value;
             count += 1;
         }
