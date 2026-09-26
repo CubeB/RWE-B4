@@ -171,7 +171,6 @@ namespace rwe
         SECTION("is a constant and does not move with the client formula")
         {
             REQUIRE(aiCommandBufferDepth() == 7);
-            REQUIRE(aiCommandBufferDepth() == aiCommandBufferDepth());
         }
 
         SECTION("is not the humans' depth, which follows the round trip and its jitter")
