@@ -2472,6 +2472,18 @@ then snaps position, rotation, health and build progress to it. Buildings are
 not repositioned by a record: a building does not move, and moving it would
 leave its occupied cells behind.
 
+**A puppet is placed where its owner put it.** The owner already resolved
+placement, so a factory's build pad or a peer's stale footprint must not refuse
+the unit: the driver clears the blocking occupied cells and lets the new unit
+claim them through the ordinary spawn, clearing a wreck only after a first
+attempt without one. Before this, a factory-built unit was refused by the
+factory's own blocking cells -- the factory's yard is never opened by the build
+script, because a puppet does not run one -- and 61,980 spawns on the ProTA
+corpus were refused. A unit is named by the global id its slot stands for as
+soon as its sender's block is known, which is usually at its first `0x2c`
+update, so damage and death records for a unit that has not yet had its
+full-state turn are not read as unknown.
+
 `tad_puppet` plays a file or a directory headlessly (map from the header, no
 SDL or GL) and reports the counts and the drift distribution. It refuses
 cleanly when the map or the unit table does not match the loaded data, and
@@ -2482,18 +2494,53 @@ corpora:
 
 | corpus | | n | median | p90 | max | within 32 | within 128 |
 |---|---|---|---|---|---|---|---|
-| RWE `arm-core-600` (vanilla) | ground | 564 | 0 | 1.26 | 53 | 99.6% | 100% |
-| RWE `arm-core-1800` (vanilla) | ground | 4382 | 0 | 7.20 | 2258 | 97.5% | 99.5% |
-| | air | 46 | 616 | 1735 | 2838 | 23.9% | 28.3% |
-| ProTA 4.8, 39 demos | ground | 756059 | 0 | 31.9 | 5703 | 90.0% | 98.2% |
-| | air | 87319 | 117 | 2825 | 14852 | 25.8% | 50.6% |
+| RWE `arm-core-600` (vanilla) | ground | 638 | 0 | 1.46 | 53 | 99.7% | 100% |
+| RWE `arm-core-1800` (vanilla) | ground | 4824 | 0 | 7.28 | 2258 | 97.5% | 99.5% |
+| | air | 93 | 54 | 1657 | 2838 | 48.4% | 53.8% |
+| ProTA 4.8, 39 demos | ground | 788901 | 0 | 32.8 | 5703 | 89.5% | 98.3% |
+| | air | 94157 | 39 | 298 | 14852 | 46.8% | 72.7% |
 
 Ground dead reckoning is good: the median is zero, most records are within a
 tile or two, and the ProTA tail is the price of a real game's interruptions --
 a unit carried and dropped, a path update the sender never resent because its
-navigator's dirty bit did not move again. Aircraft are coarse by construction:
-an aircraft's entry is a goal, not a position, and a moving goal's velocity is
-ignored, so an air record one cycle apart is two different flight plans.
+navigator's dirty bit did not move again. Aircraft are coarser, and for reasons
+that are not a bug left in: an aircraft's entry is a *goal*, not a position, so
+the record the drift is measured against is where the aircraft is while the
+stream only ever said where it was going; a moving goal's velocity is
+integrated now (the original's resolver at `0x44EA60` adds it every tick) but
+there are only 2,366 moving goals against 4.4M move goals over the ProTA
+corpus, and 3.0M entries carry no goal at all; and RWE's flight model -- turn
+rate, the arrival profile, the altitude discipline -- is its own, so a goal
+reached by a different curve is drift even when the destination is right. The
+RWE recordings look worse on air only because the recorder writes no goal
+position yet: its air mover is always the empty kind, so a recorded aircraft
+has nowhere to fly and the 54-unit median is the sync correction alone. Air
+drift was 124 median before aircraft were given air physics at all -- a unit's
+physics defaults to the ground variant, so every puppet aircraft was a ground
+unit that never moved -- and `makeAirborne` now performs the ground-to-air
+transition the remote path does not run.
+
+**Why `finished` exceeds `spawned`.** `spawned` counts the `0x09`s, and a
+`0x12` is counted whenever a live puppet is finished. A unit that existed
+before recording began is first seen in a full-state record and spawned
+complete, with no `0x09` behind it, so its `0x12` -- and a factory product's
+`0x12` for a frame whose `0x09` was already counted -- both land in `finished`.
+On ProTA: 33,139 `0x09` spawns against 51,380 finishes, 29,429 deaths.
+
+The counts on ProTA, before and after the placement fix:
+
+| | before | after |
+|---|---|---|
+| spawned | 11,651 | 33,139 |
+| refused spawn | 61,980 | 0 |
+| unplaced | 821 | 0 |
+| unknown unit | 86,040 | 20,360 |
+| killed | 26,707 | 29,429 |
+
+The 20,360 remaining unknown records are damage (20,331 of them) and deaths
+for a slot the stream never showed at all -- a straggler after the unit died,
+or a unit that died before its first full-state turn. They are counted and
+dropped, never indexed with.
 
 **What tier 2 leaves out**, and what the next phase takes: weapons display
 (`0x0d` rounds are decoded but not spawned), `0x10` script calls, the `0x28`
@@ -2509,6 +2556,12 @@ units half a map away and `trySpawnUnit` refused them; the recorder now adds
 the half-extents and the driver takes them off again, and the RWE demo corpus
 was re-recorded. A mod's death weapon name is also taken in the case the
 weapon map uses, because the original hashes weapon names case-insensitively.
+The reference scorers are unaffected: `tad-buildtime.py` and
+`tad-storagecapacity.py` read no positions, and `tad-weapontime.py` reads only
+differences of them, which the shift cancels. `tools/demo-selfcheck.py` on a
+fresh RWE recording reports the same build-timing and storage-capacity failures
+with the old writer as with the new -- both pre-existing model disagreements,
+not coordinate ones.
 
 ## Demos as a conformance corpus
 
