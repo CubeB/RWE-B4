@@ -1,18 +1,29 @@
 #!/usr/bin/env bash
-# Start a host, run fakejoin.py against it on loopback, stop the host by its saved pid, and exit with
-# the joiner's status. The joiner is the check: it prints a PASS or FAIL line per rule in
+# Start a host, run fakejoin.py against it on loopback, stop the host's whole process group, and exit
+# with the joiner's status. The joiner is the check: it prints a PASS or FAIL line per rule in
 # docs/TA-NETWORK.md and its exit status is the verdict.
 #
 #   tools/ta-net/host-check.sh --capture <pcap> [options] -- <host command> [args...]
+#
+# The host is started with setsid and stopped by signalling that whole process group, so a host
+# command that wraps the real host in something (xvfb-run being the usual one) does not leave it
+# running and holding its ports after the run. Nothing is ever matched by name.
 #
 # For now the host is the spike's fakehost.py, which holds the launch until its go file exists:
 #
 #   tools/ta-net/host-check.sh --capture ta-small.pcap --release /tmp/run/go -- \
 #       tools/ta-net/fakehost.py ta-small.pcap --dir /tmp/run --tcp-port 2400 --udp-port 2450 --enum-port 47625
 #
-# and once the RWE host exists it is the same command with rwe --ta-host in place of it. The default
-# ports are 34700/34750/47625 for the host and 34701/34751 for the joiner, clear of the 2300/2350 and
-# 47624 a real TA or dplaysvr holds, so a run needs nothing stopped.
+# and the RWE host is the same command with rwe --ta-host in place of it:
+
+#   tools/ta-net/host-check.sh --capture ta-baseline.pcap --play-seconds 60 \
+#       --host-tcp 12300 --host-udp 12350 --enum-port 57624 --tcp-port 12301 --udp-port 12351 \
+#       --dir /tmp/run -- xvfb-run -a -s "-screen 0 1280x1024x24" \
+#       ./build/rwe --ta-host --auto-launch --map "Canal Crossing" --port-base 10000 --port 13400
+#
+# The default ports are 34700/34750/47625 for the host and 34701/34751 for the joiner, clear of the
+# 2300/2350 and 47624 a real TA or dplaysvr holds, so a run needs nothing stopped. --enum-port has to
+# be 47624 plus whatever --port-base shifted it by.
 set -u
 
 here=$(cd -- "$(dirname -- "$0")" && pwd)
@@ -54,13 +65,31 @@ fi
 
 cleanup() {
     [ -n "$watcher" ] && kill "$watcher" 2>/dev/null
-    [ -n "$host_pid" ] && kill "$host_pid" 2>/dev/null
+    # The host's whole process group, not the pid it was started as. A host
+    # command that is a wrapper -- xvfb-run is the usual one -- execs the real
+    # host as a child, and killing only the pid this script started left that
+    # child running and holding the DirectPlay ports for the next run. The
+    # group is signalled by the saved pid, which is its leader; nothing here
+    # matches on a name, because a pattern would reach other people's processes.
+    [ -n "$host_pid" ] && kill -TERM -- "-$host_pid" 2>/dev/null
+    if [ -n "$host_pid" ] && kill -0 "$host_pid" 2>/dev/null; then
+        # Still there after TERM, so it is not a group leader and the group
+        # signal went nowhere: fall back to the pid itself.
+        kill -TERM "$host_pid" 2>/dev/null
+    fi
     [ -n "$host_pid" ] && wait "$host_pid" 2>/dev/null
     return 0
 }
 trap cleanup EXIT INT TERM
 
-"${host[@]}" >"$host_log" 2>&1 &
+# setsid puts the host in a process group of its own, so the cleanup above
+# reaches everything it starts. It is coreutils and util-linux both; where it is
+# missing the host still runs and the cleanup falls back to the single pid.
+if command -v setsid >/dev/null 2>&1; then
+    setsid "${host[@]}" >"$host_log" 2>&1 &
+else
+    "${host[@]}" >"$host_log" 2>&1 &
+fi
 host_pid=$!
 echo $host_pid > "$dir/host.pid"
 echo "host: ${host[*]} (pid $host_pid)"

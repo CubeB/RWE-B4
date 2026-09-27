@@ -39,7 +39,10 @@ namespace rwe
         constexpr unsigned int ReportEveryTicks = 150;
 
         /** How near a unit of ours has to be to one of the peer's to be ordered at it by the test aid. */
-        constexpr SimScalar TaHostAttackRange = 200_ss;
+        constexpr SimScalar TaHostAttackRange = 400_ss;
+
+        /** What RWE_TA_HOST_ATTACK puts beside the peer, a gun that reaches further than a commander. */
+        constexpr const char* TaHostAttackUnit = "ARMPW";
     }
 
     struct GameScene::TaHostLink
@@ -71,6 +74,9 @@ namespace rwe
 
         /** Hits taken from the peer, for the panel and the log. */
         unsigned int damageTaken{0};
+
+        /** Hits RWE has put on the peer, which are the 0x0b records it sends. */
+        unsigned int damageDealt{0};
         bool peerPaused{false};
 
         /**
@@ -88,6 +94,12 @@ namespace rwe
 
         /** The tick the test aid last ordered attacks on. */
         unsigned int lastAttackOrderTick{0};
+
+        /** Whether RWE_TA_HOST_ATTACK has put its one unit beside the peer yet. */
+        bool attackSpawned{false};
+
+        /** Attack orders the aid has issued, which is how many units it has in range. */
+        unsigned int attackOrders{0};
     };
 
     void GameScene::enableTaHost(PlayerId remotePlayer, const std::vector<std::string>& unitLoadOrder)
@@ -286,19 +298,60 @@ namespace rwe
 
     void GameScene::orderTaHostAttack()
     {
-        // Testing aid: RWE_TA_HOST_ATTACK=1 orders, once a second, every unit
-        // of ours that is close enough to one of the peer's to attack it,
-        // which is how RWE's own 0x0b can be seen reaching a peer without a
-        // player at the keyboard and with the two commanders a whole map
-        // apart. Pair it with RWE_DEBUG_SPAWN=<type>*<n>@0:<t>:1 to put units
-        // of ours beside the peer's. Like RWE_DEBUG_SPAWN, it is in the
-        // environment rather than on the command line, and it orders nothing
-        // but an attack.
+        // Testing aid: RWE_TA_HOST_ATTACK=1 makes RWE hit the peer's units, so
+        // that RWE's own 0x0b can be seen reaching a peer with nobody at a
+        // keyboard. Like RWE_DEBUG_SPAWN, it is in the environment rather than
+        // on the command line, and it does two things and nothing else:
+        //
+        // - once, when it first finds a peer unit, it puts one Peewee of ours
+        //   beside it. A TA host and a TA joiner are usually a whole map apart
+        //   -- Canal Crossing's two start positions are nine thousand units --
+        //   and nothing walks that in the sixty seconds a check runs for, so an
+        //   attack order alone would never reach anything and the check would
+        //   pass for the wrong reason. The spawned unit is a real unit of the
+        //   Local player, so the sender describes it and the peer sees it, and
+        //   the hits it makes are the ordinary path.
+        // - once a second after that, every unit of ours that has a peer unit
+        //   in weapon range is ordered at the nearest one.
         if (!std::getenv("RWE_TA_HOST_ATTACK") || !taHostLink)
         {
             return;
         }
         auto& link = *taHostLink;
+
+        std::optional<UnitId> peerUnit;
+        SimScalar peerDistance;
+        for (const auto& [otherUnit, other] : simulation.units)
+        {
+            if (other.isOwnedBy(link.remote) && other.isAlive())
+            {
+                peerUnit = UnitId(otherUnit);
+                peerDistance = (other.position - other.position).length();
+                break;
+            }
+        }
+        if (!peerUnit)
+        {
+            return;
+        }
+
+        if (!link.attackSpawned)
+        {
+            link.attackSpawned = true;
+            auto position = simulation.getUnitState(*peerUnit).position;
+            position.x = position.x + SimScalar(60);
+            if (auto spawned = spawnCompletedUnit(TaHostAttackUnit, localPlayerId, position))
+            {
+                LOG_INFO << "TA host: RWE_TA_HOST_ATTACK put " << TaHostAttackUnit << " " << spawned->value
+                         << " beside the peer's unit " << peerUnit->value << " to make it shoot";
+            }
+            else
+            {
+                LOG_WARN << "TA host: RWE_TA_HOST_ATTACK could not put a " << TaHostAttackUnit
+                         << " beside the peer's unit " << peerUnit->value;
+            }
+        }
+
         if (sceneTime.value < link.lastAttackOrderTick + static_cast<unsigned int>(SimTicksPerSecond))
         {
             return;
@@ -335,6 +388,7 @@ namespace rwe
             localPlayerCommandBuffer.emplace_back(PlayerUnitCommand{
                 UnitId(unit),
                 PlayerUnitCommand::IssueOrder{AttackOrder(*nearest), PlayerUnitCommand::IssueOrder::Immediate}});
+            ++link.attackOrders;
         }
     }
 
@@ -357,10 +411,12 @@ namespace rwe
             }
         }
 
+        const auto& sender = link.sender->stats();
         LOG_INFO << "TA host: tick " << sceneTime.value << " in " << receiver.packetsApplied << " packets, clock drift "
                  << receiver.clock.driftTicks << " ticks, puppets " << driver.unitsSpawned << " up and "
-                 << driver.unitsKilled << " killed, " << driver.unplacedUnits << " unplaced, damage taken "
-                 << link.damageTaken << ", our peer's units:" << puppets;
+                 << driver.unitsKilled << " killed, " << driver.unplacedUnits << " unplaced, taken "
+                 << link.damageTaken << " and dealt " << sender.damageSent << " 0x0b, " << link.attackOrders
+                 << " attacks ordered, our peer's units:" << puppets;
     }
 
     void GameScene::renderTaHostWindow()
@@ -416,9 +472,13 @@ namespace rwe
             (unsigned long long)driver.unplacedUnits,
             (unsigned long long)driver.recordsDroppedUnknownUnit);
         ImGui::Text(
-            "out %llu batches, %llu refused, taken %u, dropped %llu",
+            "out %llu batches, %llu 0x0b, %llu 0x0c, %llu refused",
             (unsigned long long)sender.batches,
-            (unsigned long long)sender.unitsRefused,
+            (unsigned long long)sender.damageSent,
+            (unsigned long long)sender.deathsSent,
+            (unsigned long long)sender.unitsRefused);
+        ImGui::Text(
+            "damage taken %u, dropped %llu",
             link.damageTaken,
             (unsigned long long)link.host->stats().inboundDropped);
 

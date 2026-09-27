@@ -42,6 +42,18 @@ namespace rwe
         /** A 0x2c the layout could not describe, so the tick's full-state record was left out. */
         uint64_t unitStateSkipped{0};
 
+        /**
+         * The 0x0b records sent: a hit this machine put on a unit the peer
+         * simulates, named in the victim's owner's block. Zero over a run in
+         * which nothing was hit is the answer a caller wants, and it is the
+         * opposite of `recordsDroppedNoId`, which is a hit that could not be
+         * named and so never reached the peer at all.
+         */
+        uint64_t damageSent{0};
+
+        /** The 0x0c records sent: a death of one of this machine's own units. */
+        uint64_t deathsSent{0};
+
         /** An outbox record naming a unit that cannot be named on the wire, and so cost that record. */
         uint64_t recordsDroppedNoId{0};
 

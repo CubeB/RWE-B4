@@ -46,6 +46,7 @@ SYNC_BATCH = 77              # the ids to a message, as the recorded joiner sent
 COMMANDER_SPEED = 78643       # 16.16 world units a tick, as the recorded commander's full state reports
 HEARTBEAT = 2.0               # a host that goes quiet in the battleroom is offered for rejection
 PING_EVERY, LOADING_EVERY = 1.0, 0.3
+REPORT_EVERY = 150            # ticks between the two runs' position lines, five seconds
 READY = 0x20                 # bit 0x20 of the state byte, as gpgnet4ta reads it
 STATE_IN_GAME = 0x32         # the state byte the recorded joiner sent over UDP
 PROGRESS = (0x00, 0x25, 0x50, 0x75, 0x64)   # the loading ladder, over TCP
@@ -308,8 +309,10 @@ class Joiner:
     def start_game(self):
         self.game_since = time.monotonic()
         self.state = "game"
+        c = self.commander
         self.log(f"in game: the host is at tick {self.seen['host_ticks']} and owns slots "
-                 f"{sorted(self.seen['host_units'])}; ours is {self.tpl.cmd_unit} in slot 0")
+                 f"{sorted(self.seen['host_units'])}; ours is {self.tpl.cmd_unit} in slot 0 at "
+                 f"{c['pos'][0] / 65536:.0f},{c['pos'][2] / 65536:.0f}")
         self.app_udp([bytes([0x15]), bytes([0x07]), bytes([0x2A, 0x64]),
                       status(self.tpl.status_game, self.player_id, name=self.a.name, state=STATE_IN_GAME),
                       team(self.player_id, self.a.team),
@@ -341,6 +344,11 @@ class Joiner:
             c["pos"][0], c["pos"][2] = self.walk
             c["speed"] = 0
             self.walk = None
+            # The walk is done, and one --walk is one walk: leaving walk_to set
+            # started the whole thing again on the next tick, which put a
+            # "walk there" and an "arrived" record on the wire every tick for
+            # the rest of the game.
+            self.walk_to = None
             self.pending.append({"slot": 0, "type": c["type"], "waypoints": []})
             self.log("its commander has arrived")
         else:
@@ -381,6 +389,15 @@ class Joiner:
             # receiver has there, so the commander's slot gets its state and every other slot an empty one.
             slot = self.ticks_sent % self.max_units
             subs.append(encode_2c(self.ticks_sent, entries, None if self.dead or slot != 0 else self.commander))
+            # Where our own model is, on our own tick, so a run's two logs can be
+            # compared: this is what the receiver's puppet is dead-reckoning
+            # towards, and the gap between the two is the drift the driver
+            # reports for itself.
+            if self.ticks_sent % REPORT_EVERY == 0:
+                c = self.commander
+                self.log(f"tick {self.ticks_sent}: our commander is at "
+                         f"{c['pos'][0] / 65536:.1f},{c['pos'][2] / 65536:.1f} heading {c['rot_yzx'][0]} "
+                         f"at {c['speed'] / 65536:.2f}")
         self.app_udp(subs)
 
     def pump(self, now):

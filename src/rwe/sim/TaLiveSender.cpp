@@ -140,6 +140,7 @@ namespace rwe
                     // Not remaining health and not identified (tad_events.h);
                     // RWE has nothing to derive it from.
                     0}));
+                ++stats.damageSent;
             }
 
             for (const auto& death : outbox.deaths)
@@ -171,6 +172,7 @@ namespace rwe
                     killerId,
                     static_cast<uint8_t>(death.severity > 255u ? 255u : death.severity),
                     death.causeAndLevel}));
+                ++stats.deathsSent;
             }
 
             outbox.clear();
