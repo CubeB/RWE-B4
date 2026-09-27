@@ -530,6 +530,13 @@ set(SOURCE_FILES
     src/rwe/net/ta/TaDirectPlay.h
     src/rwe/net/ta/TaHostSession.cpp
     src/rwe/net/ta/TaHostSession.h
+    src/rwe/net/ta/TaOutboundBatcher.cpp
+    src/rwe/net/ta/TaOutboundBatcher.h
+    src/rwe/net/ta/TaPacket.cpp
+    src/rwe/net/ta/TaPacket.h
+    src/rwe/net/ta/TaPinger.cpp
+    src/rwe/net/ta/TaPinger.h
+    src/rwe/net/ta/ta_packet_captures.h
     src/rwe/observable/BehaviorSubject.h
     src/rwe/observable/Observable.h
     src/rwe/observable/Subject.h
@@ -1072,6 +1079,9 @@ set(TEST_FILES
     src/rwe/network_util.test.cpp
     src/rwe/net/ta/TaDirectPlay.test.cpp
     src/rwe/net/ta/TaHostSession.test.cpp
+    src/rwe/net/ta/TaOutboundBatcher.test.cpp
+    src/rwe/net/ta/TaPacket.test.cpp
+    src/rwe/net/ta/TaPinger.test.cpp
     src/rwe/pathfinding/pathfinding_utils.test.cpp
     src/rwe/render/FogTiles.test.cpp
     src/rwe/render/WireframeScan.test.cpp

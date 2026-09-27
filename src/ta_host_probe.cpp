@@ -15,13 +15,20 @@
 //   --options       the host's options byte (docs/TA-NETWORK.md), default 0x4f
 
 #include <asio.hpp>
+#include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <iostream>
 #include <rwe/net/ta/TaDirectPlay.h>
 #include <rwe/net/ta/TaHostSession.h>
+#include <rwe/net/ta/TaOutboundBatcher.h>
+#include <rwe/net/ta/TaPacket.h>
+#include <rwe/net/ta/TaPinger.h>
 #include <rwe/util/OpaqueArgs.h>
+#include <algorithm>
+#include <functional>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -34,9 +41,29 @@ namespace
         return result;
     }
 
+    std::string hexU32(std::uint32_t value)
+    {
+        static const char* digits = "0123456789abcdef";
+        std::string result;
+        for (int shift = 28; shift >= 0; shift -= 4)
+        {
+            result.push_back(digits[(value >> shift) & 0xF]);
+        }
+        return result;
+    }
+
     std::string toString(rwe::TaTransport transport)
     {
         return transport == rwe::TaTransport::Tcp ? "TCP" : "UDP";
+    }
+
+    /** The clock a 0x02 carries: milliseconds, near GetTickCount. */
+    std::uint32_t nowMs()
+    {
+        return static_cast<std::uint32_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count());
     }
 }
 
@@ -87,17 +114,80 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    host.onPeerJoined([](rwe::TaHostSession::PeerId id) {
+    // A 0x02 is 20 bytes on the wire and does not compress, which is how the
+    // captures carry it; everything else the host sends is compressed.
+    rwe::TaOutboundBatcher batcher(
+        [&](rwe::TaHostSession::PeerId id, std::span<const std::uint8_t> bytes, rwe::TaTransport transport) {
+            host.send(id, bytes, transport);
+        },
+        rwe::TadPacketUncompressed);
+
+    rwe::TaPinger pinger(batcher, config.hostPlayerId, nowMs);
+    std::vector<rwe::TaHostSession::PeerId> peers;
+
+    host.onPeerJoined([&](rwe::TaHostSession::PeerId id) {
         std::cout << "peer joined: 0x" << std::hex << id << std::dec << "\n" << std::flush;
+        peers.push_back(id);
     });
-    host.onPeerLeft([](rwe::TaHostSession::PeerId id) {
+    host.onPeerLeft([&](rwe::TaHostSession::PeerId id) {
         std::cout << "peer left: 0x" << std::hex << id << std::dec << "\n" << std::flush;
+        peers.erase(std::remove(peers.begin(), peers.end(), id), peers.end());
     });
-    host.onAppData([](rwe::TaHostSession::PeerId id, const std::vector<std::uint8_t>& bytes, rwe::TaTransport transport) {
+    host.onAppData([&](rwe::TaHostSession::PeerId id, const std::vector<std::uint8_t>& bytes, rwe::TaTransport transport) {
+        auto parsed = rwe::taParsePacket(bytes);
+        if (!parsed)
+        {
+            std::cout << "app data from 0x" << std::hex << id << std::dec
+                      << " over " << toString(transport) << ": " << bytes.size()
+                      << " bytes, not a TA packet\n"
+                      << std::flush;
+            return;
+        }
+
         std::cout << "app data from 0x" << std::hex << id << std::dec
-                  << " over " << toString(transport) << ": " << bytes.size() << " bytes\n"
-                  << std::flush;
+                  << " over " << toString(transport) << ": " << bytes.size()
+                  << " bytes, marker " << hexU32(parsed->packet.marker)
+                  << (parsed->checksumValid ? "" : ", bad checksum")
+                  << (parsed->stats.total() ? ", walk incomplete" : "") << "\n";
+        for (const auto& subpacket : parsed->packet.subpackets)
+        {
+            std::cout << "  " << hexByte(subpacket[0]) << " " << subpacket.size() << " bytes\n";
+            if (subpacket[0] == static_cast<std::uint8_t>(rwe::TadSubPacketCode::Ping))
+            {
+                pinger.handle(id, subpacket, transport);
+            }
+        }
+        std::cout << std::flush;
+        batcher.flush();
     });
+
+    // A host that stops answering is offered for rejection, so the probe keeps
+    // pinging and keeps the replies coming whichever side sends them.
+    asio::steady_timer pingTimer(ioContext);
+    std::function<void()> pingInTwoSeconds = [&] {
+        pingTimer.expires_after(std::chrono::seconds(2));
+        pingTimer.async_wait([&](const asio::error_code& error) {
+            if (error)
+            {
+                return;
+            }
+            if (!peers.empty())
+            {
+                pinger.sendRequests(peers);
+                batcher.flush();
+                for (rwe::TaHostSession::PeerId id : peers)
+                {
+                    if (auto roundTrip = pinger.roundTripTicks(id))
+                    {
+                        std::cout << "  ping 0x" << std::hex << id << std::dec << ": "
+                                  << *roundTrip << " ms\n" << std::flush;
+                    }
+                }
+            }
+            pingInTwoSeconds();
+        });
+    };
+    pingInTwoSeconds();
 
     std::cout << "hosting '" << rwe::taSessionName(config.gameName, config.mapName) << "'\n"
               << "  enum TCP/UDP " << host.localPorts().enumSessions << "\n"
