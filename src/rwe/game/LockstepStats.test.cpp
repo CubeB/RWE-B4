@@ -118,14 +118,13 @@ namespace rwe
             stats.tickRan(t0 + 500ms);
             stats.tickBlocked(t0 + 600ms, {PlayerId(1)});
 
-            auto summary = stats.summary(t0 + 700ms, 3, 7);
+            auto summary = stats.summary(t0 + 700ms, 3);
             REQUIRE(summary.ticks == 3);
             REQUIRE(summary.elapsed == 700ms);
             REQUIRE(summary.stalls == 1);
             REQUIRE(summary.totalStalled == 400ms);
             REQUIRE(summary.longestStall == 300ms);
             REQUIRE(summary.ticksLostToCap == 3);
-            REQUIRE(summary.gateSkips == 7);
         }
 
         SECTION("describes the figures it carries")
@@ -137,12 +136,10 @@ namespace rwe
             s.totalStalled = 150ms;
             s.longestStall = 120ms;
             s.ticksLostToCap = 4;
-            s.gateSkips = 5;
             auto text = s.describe();
             REQUIRE(text.find("Lockstep summary: 300 ticks") != std::string::npos);
             REQUIRE(text.find("30.0 tps") != std::string::npos);
             REQUIRE(text.find("cap-dropped 4") != std::string::npos);
-            REQUIRE(text.find("gate-skips 5") != std::string::npos);
         }
     }
 

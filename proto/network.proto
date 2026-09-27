@@ -302,6 +302,12 @@ message GameUpdateMessage
     optional uint32 game_speed_permille = 14 [default = 1000];
     optional bool paused = 15 [default = false];
     optional bool stalled = 16 [default = false];
+
+    // The speed the sender believes its machine can sustain, in per mille of
+    // normal speed, from the ticks it has managed to dispatch (#356). It caps
+    // the effective speed every peer runs at. Absent means no opinion, read
+    // as normal speed.
+    optional uint32 sustainable_speed_permille = 17 [default = 1000];
 }
 
 message NetworkMessage
