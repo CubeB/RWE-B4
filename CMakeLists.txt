@@ -526,6 +526,10 @@ set(SOURCE_FILES
     src/rwe/mesh_util.h
     src/rwe/network_util.cpp
     src/rwe/network_util.h
+    src/rwe/net/ta/TaDirectPlay.cpp
+    src/rwe/net/ta/TaDirectPlay.h
+    src/rwe/net/ta/TaHostSession.cpp
+    src/rwe/net/ta/TaHostSession.h
     src/rwe/observable/BehaviorSubject.h
     src/rwe/observable/Observable.h
     src/rwe/observable/Subject.h
@@ -1066,6 +1070,8 @@ set(TEST_FILES
     src/rwe/math/rwe_math.test.cpp
     src/rwe/mesh_util.test.cpp
     src/rwe/network_util.test.cpp
+    src/rwe/net/ta/TaDirectPlay.test.cpp
+    src/rwe/net/ta/TaHostSession.test.cpp
     src/rwe/pathfinding/pathfinding_utils.test.cpp
     src/rwe/render/FogTiles.test.cpp
     src/rwe/render/WireframeScan.test.cpp
