@@ -12,33 +12,53 @@ native build of the same source is kept as a local debugging option.
 
 ## Why this shape
 
-Escalation's own patch is the evidence for where the line goes. Of its eight
-behavioural changes, one is a constant (the AI handicap, `-0.7` to `-2.0`), one
-is a new FBI flag gating an existing behaviour (repair-pad seeking), two are a
-condition flipped (the expired ballistic round, the clamp at `0x41BD90`), three
-change a decision (D-gun completion, the reclaim gate, the attacked reaction)
-and one adds an order type. None of them touches movement, pathfinding,
-collision or the economy settle. Modders want to change *decisions*, which fit
-a small interface, and seldom the machinery beneath them, which does not.
+Escalation's own patch is the evidence for where the line goes. `TA-PATCHES.md`
+and `TOTALA-EXE-WEAPONS.md` list nine behavioural changes:
+- one constant: the AI handicap, `-0.7` to `-2.0`;
+- one new FBI flag gating an existing behaviour: repair-pad seeking;
+- two flipped conditions: the expired ballistic round, and the clamp at
+  `0x41BD90`;
+- one swap between existing weapon motor functions;
+- three changed decisions: D-gun and `commandfire` completion, the reclaim
+  power-switch gate, and the reaction to being attacked;
+- one new order type, inferred from the mission-state renumbering.
+
+None of them touches movement, pathfinding, collision, the damage pipeline or
+the economy settle; all of those are confirmed unpatched byte for byte.
+Modders want to change *decisions*, which fit a small interface, and seldom
+the machinery beneath them, which does not. "The v0 surface" below maps each
+of the nine changes to what covers it.
 
 ## Decisions
 
-**D1 -- Mechanism stays native; policy becomes wasm.** Mechanism is the tick
-loop, movement integration, pathfinding, collision, the projectile physics
-step, the COB VM, the economy settle, save, hash, networking and rendering.
-Policy is every decision a hook covers: whether an aircraft seeks a pad, how a
-unit answers an attack, when a mission completes, whether a round detonates,
-the damage a hit does, what an order does each tick, and the computer player.
-Moving mechanism would force the ABI to expose nearly every engine internal,
-and then it could not stay stable while fidelity work changes those internals
-weekly.
+**D1 -- Mechanism stays native; policy becomes wasm, and a hook chooses while
+the engine acts.** Mechanism is the tick loop, movement integration,
+pathfinding, collision, the projectile physics step and its motor functions,
+the damage pipeline, the COB VM, the economy settle, save, hash, networking and
+rendering. Policy is the choice between the behaviours mechanism offers:
+- whether an aircraft seeks a pad;
+- which reaction a unit makes to an attack;
+- when a D-gun order is done;
+- whether an expired round detonates;
+- which motor a round flies on;
+- the final damage of a hit;
+- the computer player.
+
+A hook returns a choice and the engine carries it out, which is why swapping
+a motor function or picking a reaction is policy even though the motors and
+the reactions themselves are mechanism. Moving mechanism would force the ABI to
+expose nearly every engine internal, and then it could not stay stable while
+fidelity work changes those internals weekly.
 
 **D2 -- TA's policy is the `ta-base` mod, and it ships as wasm.** It is loaded
-through the same path as any other mod, as the bottom layer of every fold
-(D5). A mod such as Escalation layers on top of it; a total conversion
-replaces it. This keeps the ABI honest: a hook exists only once TA's own
-behaviour runs through it, so a gap in the ABI is found by `ta-base` before it
-is found by a mod author.
+through the same path as any other mod, always in the base slot, as the bottom
+layer of every fold (D5). A mod such as Escalation layers on top of it; a total
+conversion replaces it. **TA's arithmetic for a migrated policy lives in
+`ta-base`, not in the engine.** The fold starts with the hook's declared seed
+(listed in "The v0 surface"), a neutral value that `ta-base` ignores; the
+engine holds no second copy of TA's answer. This keeps the ABI honest: a hook
+exists only once TA's own behaviour runs through it, so a gap in the ABI is
+found by `ta-base` before it is found by a mod author.
 
 **D3 -- `ta-base` can also be built natively, for debugging.** Debuggers,
 sanitizers and profilers work poorly or not at all on wasm, so a CMake option,
@@ -63,9 +83,9 @@ anything.
 
 | Kind | Rule | Examples |
 |---|---|---|
-| Fold | `ta-base` is the bottom layer. Each mod in load order receives the layer below's result as `prev` and returns the new one. | Seek a repair pad, attacked reaction, damage amount, round detonates |
+| Fold | Starts from the hook's seed; `ta-base` is the first layer. Each mod in load order receives the layer below's result as `prev` and returns the new one. | Seek a repair pad, attacked reaction, final damage, round detonates |
 | Event | Every mod is called in load order. They observe only; no return value. | Unit created, finished, killed; tick |
-| Keyed exclusive | One owner per key. A second claim is a load error unless its manifest says `replaces`. | A named order type; the computer player, chosen per player in the lobby |
+| Keyed exclusive | One owner per key. A second claim is a load error unless its manifest says `replaces`. | The computer player, chosen per player in the lobby; mod orders (D16) |
 | Presentation | Its own instance outside the sim, with read-only imports. | Interface and overlays; not in v0 |
 
 A fold hook cannot call into the layer below and skip the rest. `prev` covers
@@ -89,44 +109,86 @@ angles are `i32` in TA's 65,536ths, vectors are written to a guest pointer, and
 strings appear only in name lookups, never on a per-tick path. The WebAssembly
 component model is not used.
 
-**D8 -- Mod state lives in the mod's linear memory, which is saved and hashed,
-and in the engine-owned store (D14).** A mod needs no save or load callbacks;
-its memory is its state. The store is how one mod reads what another has set.
-`ta-base` prefers engine-owned state, in `UnitState` and the store, over its
-own memory, because state held there appears in desync dumps and other mods
-can read it. It is a preference, not a rule: the computer player will need
-real state of its own.
+**D8 -- A mod's linear memory is saved and dumped but not hashed; the store is
+hashed.** A mod needs no save or load callbacks; its memory is its state.
+Memory is saved-but-unhashed state, as weapon aim state already is. What a mod
+decides lands in hashed state (unit state, the store, commands), so a
+divergence in its memory reaches the hash the moment it matters, and hashing
+megabytes of memory on every tick buys nothing more. Each mod has a
+linear-memory quota in pages: `memory.grow` past it returns failure, and a mod
+that traps on that failure faults under D12. `ta-base` prefers engine-owned
+state, in `UnitState` and the store, over its own memory, because state held
+there is hashed, appears in desync dumps and can be read by other mods. It is
+a preference, not a rule: the computer player will need real state of its own.
 
 **D9 -- Inside a hook, decisions are return values and side effects are
-deferred.** A write a hook makes (a command, a var) is queued and applied at a
-fixed point in the tick. No host import calls into another hook, so mods cannot
-recurse into each other and their effects never depend on who ran first.
+deferred.**
+- **Writes.** A store write is queued and applied at the end of the phase in
+  which the hook ran, in load order and then call order. A read in the same
+  phase sees the value from before.
+- **No recursion.** No host import calls into another hook, so mods cannot
+  recurse into each other, and their effects never depend on who ran first.
+- **Commands.** Only the computer player's hooks (`ai_*`) issue player
+  commands, and they take exactly the native AI's path. Its commands are
+  collected in the simulation and handed out by `takeAiCommandsForPlayer`,
+  then queued by `feedAiCommands` at the constant `aiCommandBufferDepth()`
+  and behind `onlyComputerPlayersAreNotReady`. A command therefore never
+  enters the network-derived buffer depth whose frame-dependence caused the
+  tick-44 desync.
+- **Fold results.** No other hook issues commands; a fold's result is its only
+  effect on the game.
 
-**D10 -- Each mod draws from its own random stream**, seeded from the game
-seed and the mod's hash, through `rwe_rand_below`. Drawing from
-`simulation.rng` would mean that adding a mod which only observes shifts
-every later roll in the game.
+**D10 -- Each mod draws from its own random stream, except `ta-base`, whose
+stream is `simulation.rng`.** `rwe_rand_below` reduces the stream's raw output
+by modulo, as `SimRandom.h`'s `randomBelow` does. A layered mod's stream is
+seeded from the game seed and the mod's hash. It is saved and hashed, and it is
+its own stream so that adding a mod which only observes does not shift every
+later roll in the game. `ta-base` draws from `simulation.rng` because the
+native policy it replaces does. Ten draw sites in `UnitBehaviorService.cpp`
+alone would otherwise change the sequence, and with it every replay and hash
+baseline. The payoff is that **migrating a policy is hash-neutral**: moving a
+decision from C++ into `ta-base` must leave a same-seed `RWE_HASH_LOG`
+byte-identical, and that is the check each migration passes.
 
-**D11 -- A mod can read any FBI or TDF key.** `rwe_type_key_i32`, `_f32` and
-`_str` read a key by name, with a default. This is how a mod adds a unit tag,
-as Escalation added its repair-pad flag, with no engine change. It requires
-the parser to keep each type's `TdfBlock`; `parseUnitInfoBlock` currently
-reads the keys it knows and drops the rest.
+**D11 -- A mod can read any FBI or TDF key, for units and for weapons.**
+`rwe_type_key_*` and `rwe_weapon_key_*` read a key by name, as `i32`, `f32` or
+string, with a default. This is how a mod adds a unit tag, as Escalation added
+its repair-pad flag, with no engine change. It requires the parsers to keep
+each definition's `TdfBlock`; `parseUnitInfoBlock` currently reads the keys it
+knows and drops the rest. `TdfBlock` properties are an unordered map, so any
+import that iterates keys returns them sorted.
 
-**D12 -- A mod that faults is disabled, not the game.** Every hook call runs
-under a deterministic fuel budget. A trap or exhausted fuel disables that mod
-on every peer at the same tick; its fold layers then pass `prev` through
-unchanged and it receives no more events. A fault in content costs that
-content, as `docs/SECURITY-AUDIT.md` requires. Mods import nothing that
-reaches the clock, the filesystem or the network, and NaNs are canonicalised.
+**D12 -- A mod that faults is disabled, and its disabling is sim state.**
+- **Fuel.** Every hook call runs under a fuel budget counted in executed wasm
+  instructions. That count is a property of the module and its inputs, not of
+  the runtime. The sim uses a single execution mode, and a runtime mode that
+  cannot count exactly is not used for it. Peers already run the same engine
+  build.
+- **What disables a mod.** A trap, exhausted fuel, a store or memory quota
+  exceeded, or a non-finite `f32` returned across the boundary.
+- **What disabling does.** It happens on every peer at the same tick. The
+  mod's fold layers then pass `prev` through unchanged, and it receives no
+  more events.
+- **The disabled set is hashed, saved and dumped** like any other sim state.
+- **NaNs never reach the hash.** Returned floats are checked at the
+  boundary, and a non-finite one is a fault, so no NaN reaches
+  `computeHashOf(float)`, whose cast to `uint32_t` is undefined for one. A
+  fault in content costs that content, as `docs/SECURITY-AUDIT.md` requires.
+- **`ta-base` is the exception.** No policy lies below it, so a fault in
+  `ta-base` ends the game, deterministically, on every peer.
+- **No outside world.** Mods import nothing that reaches the clock, the
+  filesystem or the network.
 
-**D13 -- In a TA-compatible network game, fold hooks run only for units this
-machine owns.** TA is owner-authoritative: each machine decides for its own
-units, and the rest are puppets driven by their owners' packets. A decision
-hook running on a puppet would fight its owner's stream. The one exception is
-damage, which the attacker computes and sends as `0x0b`. Events still fire for
-every unit. The dispatch that picks local units is the same split as phase 4
-of the TA network work (#386), and the two should be designed together.
+**D13 -- Lockstep runs every hook for every unit on every peer. In a
+TA-compatible network game, fold hooks run only for units this machine owns.**
+In lockstep each peer simulates every unit, so every peer runs every hook, and
+nothing here changes that. TA's own network model is owner-authoritative: each
+machine decides for its own units, and the rest are puppets driven by their
+owners' packets. A decision hook running on a puppet would fight its owner's
+stream. The one exception is damage, which the attacker computes and sends on
+the live wire as `0x0b` (#386, step 6). Events still fire for every unit. The
+dispatch that picks local units is the same split as phase 4 of the TA network
+work, and the two should be designed together.
 
 **D14 -- Mods share state through an engine-owned store: the owner writes,
 everyone reads.**
@@ -140,62 +202,135 @@ everyone reads.**
   that exists so desync dumps can print them. The engine does not interpret
   them; a mod publishes its own value format for others to read.
 - **Snapshot reads.** A read sees the store as it stood at the start of the
-  phase, and writes land at D9's fixed point, so no mod sees another's write
-  from the same phase. A mod's scratch data belongs in its linear memory.
+  phase, and writes land at D9's point, so no mod sees another's write from the
+  same phase. A mod's scratch data belongs in its linear memory.
 - **Ordering.** Keys are kept sorted, so every peer iterates the store alike.
 - **Quotas.** Bytes and entries per mod; exceeding one is a D12 fault.
 
-The store is saved, hashed, dumped and carried in the rejoin bundle like any
-other sim state. It joins `GameHash`'s sum with one term per entry, kept up to
-date on each write by subtracting the old term and adding the new, and the
-desync report gives one sub-hash per namespace, which names the mod whose state
-diverged. Mod state stays small enough that walking all of it on a desync is
-cheap, so nothing finer is needed.
+The store is saved, hashed and dumped like any other sim state. A rejoining
+peer rebuilds it by re-running the rejoin bundle, which is a replay, as it
+rebuilds everything else. The hash walks the store when it is computed, in key
+order, hashing each key and value with a real byte hash. `computeHashOf` on a
+string is a byte sum, under which `"ab"` and `"ba"` collide. Nothing is
+maintained incrementally, so no missed update can leave two identical stores
+hashing differently. The desync report gives one sub-hash per namespace, which
+names the mod whose state diverged. Mod state stays small enough that walking
+all of it is cheap.
+
+**D15 -- The mod set is part of every save and every replay.** A save or
+replay records each mod's fingerprint and the load order, and loading one under
+a different set is refused with a message naming the difference. Loading it
+anyway would succeed and then diverge at the first fold, which is the worst
+failure to debug. A mod is never added to or removed from a game in progress:
+calling `rwe_init` on a running world is not something every peer can agree
+to.
+
+**D16 -- Mod-defined orders are not in v0.** `UnitOrder` is a closed variant
+of fifteen native orders. Each one is saved, hashed and dumped alternative by
+alternative, and per-order state, such as capture progress, is fields on
+those structs. The shape a mod order will take:
+- **Storage.** One new `ModOrder` alternative carries the owning order kind and
+  an opaque byte payload, saved, hashed and dumped as bytes.
+- **Registration.** Kinds are registered by name, and each is keyed exclusive.
+- **Queueing.** A command queues the order.
+- **Stepping.** `order_step(unit, kind, payload)` runs once per tick while the
+  order is at the front of the queue. It returns running, done or failed, and
+  may choose among effects the engine offers (a move goal, a weapon target, a
+  build) through deferred imports.
+
+A variant alternative is the kind of growth the section budget in `CLAUDE.md`
+warns about; one `PlayerCommand` alternative cost 464 sections. So this waits
+until after v0, with the section budget measured when it lands. Escalation's
+new order type waits with it.
 
 ## The v0 surface
 
-The initial hooks are chosen so that every Escalation patch is either a data
-key or one of them. That is the acceptance test for v0.
+**Acceptance test:** every decoded Escalation behaviour is a data key or a v0
+hook. Two are named gaps: the new order type (D16), and the `0x41BD90` clamp,
+whose routine is not identified. A hook cannot be named for a computation
+nobody has decoded, so that one waits for the decode.
 
-| Export | Kind |
+| Escalation change | Covered by |
 |---|---|
-| `rwe_abi_version() -> i32`, `rwe_init() -> i32` | lifecycle |
-| `hook_seek_repair_pad(unit, prev) -> i32` | fold |
-| `hook_attacked_reaction(unit, attacker, prev) -> i32` | fold |
-| `hook_mission_complete(unit, mission, prev) -> i32` | fold |
-| `hook_reclaim_allowed(builder, target, prev) -> i32` | fold |
-| `hook_round_expired_detonates(proj, prev) -> i32` | fold |
-| `hook_weapon_motor(proj, prev) -> i32` | fold |
-| `hook_damage(weapon_type, attacker, victim, amount, prev) -> f32` | fold |
-| `on_tick(tick)`, `on_unit_created/finished(unit)`, `on_unit_killed(unit, killer, cause)` | event |
-| `order_step(unit, order_kind, arg_ptr) -> i32` | keyed exclusive |
-| `ai_init(player)`, `ai_tick(player, tick)` | keyed exclusive |
+| AI handicap `-0.7` → `-2.0` | A data key, read by the AI |
+| Repair-pad seeking gated on a new flag | `hook_seek_repair_pad`, plus the flag through `rwe_type_key_*` |
+| Expired ballistic round: `burnblow` to `noautorange`, inverted | `hook_round_expired_detonates`, plus `rwe_proj_weapon` and `rwe_weapon_key_*` |
+| Weapon motor-function swap | `hook_weapon_motor` (what the swap selects is located but not decoded) |
+| D-gun and `commandfire` completion | `hook_mission_complete` |
+| Reclaim power-switch gate | `hook_reclaim_allowed` |
+| Attacked and kamikaze reaction cluster | `hook_attacked_reaction` |
+| New order type (mission renumbering) | **Gap:** D16 |
+| Clamp at `0x41BD90` | **Gap:** routine not identified |
 
-Host imports: `rwe_tick`; `rwe_unit_exists/owner/type/health/max_health/build_progress/heading/flags`
-and `rwe_unit_position(unit, out)`; `rwe_player_allied`,
-`rwe_player_resources(p, out)`; `rwe_type_by_name`, `rwe_type_key_*`;
-`rwe_units_in_radius(out, x, z, r, cap)`, sorted by id; `rwe_rand_below`;
-`rwe_store_key`, `rwe_store_get`, `rwe_store_set`, `rwe_store_del`,
-`rwe_store_scan`; `rwe_var_register`, `rwe_unit_get_var`, `rwe_unit_set_var`;
-`rwe_order_register`; `rwe_cmd_*`, the same commands a player can issue; and
-`rwe_log`, which is outside the sim.
+Each fold hook:
 
-Constants, such as the AI handicap, are data read through D11, not hooks.
+| Hook | Seed | What the engine does with the result | How often |
+|---|---|---|---|
+| `hook_seek_repair_pad(unit, prev) -> i32` | 0 | Nonzero: break off and search for a pad, as now | Every aircraft, every tick |
+| `hook_attacked_reaction(unit, attacker, prev) -> i32` | 0, none | Carries out the chosen reaction: none, return fire (sets the weapon target), move away, or detonate if kamikaze | Per damage event |
+| `hook_mission_complete(unit, order, prev) -> i32` | 0 | Nonzero: pops the order. v0 calls it only for D-gun orders and `commandfire` attacks, whose completion is a predicate over state the order imports can read | Every tick, for units with such an order at the front |
+| `hook_reclaim_allowed(builder, target, prev) -> i32` | 1 | Zero: the reclaim does not start | Per reclaim attempt |
+| `hook_round_expired_detonates(proj, prev) -> i32` | 0 | Nonzero: detonates the round where it is | Per round expiry |
+| `hook_weapon_motor(proj, prev) -> i32` | The weapon's declared motor | Runs that native motor this tick | Every guided round, every tick |
+| `hook_damage(weapon, attacker, victim, amount, paralyzer, prev) -> f32` | `amount` after the native pipeline | Applies the result; `ta-base` returns `prev` | Per impact, per victim |
+
+`hook_damage` adjusts the output of the native damage pipeline: veterancy,
+`DamageModifier` and armour. It does not replace that pipeline, which
+Escalation left untouched and is integer arithmetic pinned to the original.
+It is in v0 because it is the hook modders want first, for shields and armour
+types.
+
+Other exports: `rwe_abi_version() -> i32` and `rwe_init() -> i32` (lifecycle);
+`on_tick(tick)`, `on_unit_created(unit)`, `on_unit_finished(unit)` and
+`on_unit_killed(unit, killer, cause)` (events); `ai_init(player)` and
+`ai_tick(player, tick)` (keyed exclusive).
+
+Host imports:
+
+- **Game and units:**
+  - `rwe_tick`;
+  - `rwe_unit_exists`, `_owner`, `_type`, `_health`, `_max_health`,
+    `_build_progress`, `_heading`, `_flags`, `_kills` and
+    `rwe_unit_position(unit, out)`;
+  - `rwe_unit_order_kind`, `rwe_unit_order_target(unit, out)` and
+    `rwe_unit_order_fired`, for the order at the front;
+  - `rwe_units_in_radius(out, x, z, r, cap)`, sorted by id.
+- **Projectiles:** `rwe_proj_weapon`, `_owner_unit`, `_age`, and
+  `rwe_proj_position(proj, out)` and `rwe_proj_velocity(proj, out)`.
+- **Players:** `rwe_player_allied`, `rwe_player_resources(p, out)`.
+- **Definitions:** `rwe_type_by_name`, `rwe_weapon_by_name`,
+  `rwe_type_key_*`, `rwe_weapon_key_*`.
+- **Randomness:** `rwe_rand_below`.
+- **Store:** `rwe_store_key`, `_get`, `_set`, `_del`, `_scan`;
+  `rwe_var_register`, `rwe_unit_get_var`, `rwe_unit_set_var`.
+- **Computer player only:** `rwe_cmd_*`.
+- **Outside the sim:** `rwe_log`.
 
 ## Migration
 
-1. The runtime, the manifest, the load order and fold dispatch, with no hooks.
-2. One policy that runs rarely, repair-pad seeking, moves into `ta-base`. Its
-   existing test passes unchanged against the wasm build.
-3. One policy that runs for every unit on every tick, damage, moves next, and
-   is measured with `battle_test --units 200` under `RWE_ENABLE_SIMPROF`.
-   **This is the go/no-go on performance.** If the cost is too high, per-tick
-   hooks get a batched form that takes an array of units, or stay native, and
-   only rare decisions move.
-4. From then on, a new hook is added together with TA's version of it in
-   `ta-base`. The computer player is the largest candidate. It already reaches
-   the sim only through commands, but it is also expensive, so it waits for
-   step 3's numbers.
+1. **Infrastructure.** The runtime, the manifest, the load order, fold
+   dispatch, and D15's refusal on a mismatched mod set, with no hooks yet.
+   `rwe_test` links the runtime and loads the CI-built `ta-base.wasm`, and the
+   `sim_test_util.h` helpers load it by default, so every existing test runs
+   the shipped policy.
+2. **A rare policy, `hook_round_expired_detonates`.** It moves into `ta-base`.
+   Its tests pass unchanged, and a same-seed `RWE_HASH_LOG` is byte-identical
+   before and after the move (D10).
+3. **The per-tick policies, `hook_seek_repair_pad` and `hook_weapon_motor`.**
+   They move next, measured with `battle_test --units 200` under
+   `RWE_ENABLE_SIMPROF`: once with an aircraft type, and once with a type that
+   fires guided rounds. **This is the go/no-go on performance.** If the cost is
+   too high, per-tick hooks get a batched form that takes an array of units,
+   or stay native, and only rare decisions move.
+4. **The rest of v0**, each with the same hash-neutral check. After v0, a new
+   hook is added together with TA's version of it in `ta-base`. The computer
+   player is the largest candidate: it already reaches the sim only through
+   commands, but it is also expensive, so it waits for step 3's numbers.
+
+The findings travel with the code. A routine's `0x` addresses and § numbers
+move into `ta-base`'s source as comments at the point of use, as they sit in
+engine source now. `TOTALA-EXE.md` §88 and §91 stay the single register; an
+entry about a migrated policy names the `ta-base` file that holds it.
 
 ## Considered options
 
@@ -217,10 +352,20 @@ Constants, such as the AI handicap, are data read through D11, not hooks.
   the fuel budget and the determinism.
 - **Native plugins (DLLs).** Unsafe to load from a community archive, and each
   compiler's floating point would be a desync risk.
+- **Hashing each mod's linear memory every tick.** Rejected by D8. The cost
+  grows with memory, not with state that matters, and a divergence in memory
+  reaches the hash through what the mod decides anyway.
+- **Maintaining the store's hash incrementally on each write.** Rejected by
+  D14. A missed subtraction, such as a per-unit entry dropped with its unit,
+  leaves identical stores hashing differently, and the store is small enough
+  to walk.
 - **A Merkle tree over the store.** It would buy incremental hashing, finding
-  the differing key between peers in O(log n), and sending only the parts
-  that differ on a rejoin. The first comes free from `GameHash` being a sum;
-  the other two answer a state too large to walk, and mod state never will be.
+  the differing key between peers in O(log n), and sending only the parts that
+  differ on a rejoin. None is needed: the store is walked, and a rejoin
+  replays.
+- **A separate random stream for `ta-base`.** Rejected by D10. It would move
+  every replay and hash baseline, and lose the hash-neutral check on
+  migration.
 
 ## Consequences
 
@@ -228,9 +373,10 @@ Constants, such as the AI handicap, are data read through D11, not hooks.
   `ta-base.wasm`.
 - The runtime is not chosen here. WAMR is plain C, builds everywhere and has
   interpreter, ahead-of-time and instruction-metering modes; wasmtime is more
-  mature on determinism and needs a Rust C-API dependency. The prototype
-  decides, and neither may appear in `GameSimulation.h`. It sits behind a
-  forward declaration, for the section budget.
-- A fidelity fix to a policy is a change to `ta-base`, not to engine C++, and
-  a conformance test covers `ta-base` and the engine together. That is what
-  ships, so it is the right thing to test.
+  mature on determinism and needs a Rust C-API dependency. D12 constrains the
+  choice: the mode the sim runs in has to count executed instructions exactly.
+  The prototype decides, and neither may appear in `GameSimulation.h`. It sits
+  behind a forward declaration, for the section budget.
+- A fidelity fix to a migrated policy is a change to `ta-base`, not to engine
+  C++, and a conformance test covers `ta-base` and the engine together. That is
+  what ships, so it is the right thing to test.
