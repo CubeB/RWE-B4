@@ -792,6 +792,21 @@ namespace rwe
          */
         float techMinArmyValueRatio{1.5f};
         /**
+         * Answers techMinArmyValueRatio's comparison with the engagement
+         * predictor instead of the plain hp*dps/metal ratio above: the
+         * advanced unit and its tier-1 counterpart are each scored against
+         * the actual enemy composition (or, before any of it is seen, the
+         * enemy faction's own raider and rocket kbot), with a mobility
+         * discount for a unit too slow to answer a raid elsewhere on the
+         * map. See EngagementPredictor.h and #389 milestone 2 -- the
+         * Crystal Maze finding is the case this targets: CORCAN scores 9.4x
+         * against CORAK/CORSTORM alone with no notion that ARMFLASH is
+         * both faster and free to raid somewhere else while the Can is
+         * elsewhere. Off by default, so the plain ratio's decision (and
+         * with it, everything the ratio feeds) is unchanged until measured.
+         */
+        bool techUsesPredictor{false};
+        /**
          * How long a builder will save for a level-two building, as against
          * saveUpSeconds for everything else.
          *

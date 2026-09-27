@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <rwe/ai/AiSideUnits.h>
 #include <rwe/ai/BuildManager.h>
+#include <rwe/ai/EngagementPredictor.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
@@ -31,6 +32,153 @@ namespace rwe
                 return;
             }
             bb.ownWreckSites.insert(bb.ownWreckSites.begin(), OwnWreckSite{position, bb.now});
+        }
+
+        /** Every side an enemy of aiOwner is playing, teammates excluded. */
+        std::set<std::string> enemySides(const GameSimulation& sim, PlayerId aiOwner)
+        {
+            std::set<std::string> sides;
+            const auto& ours = sim.getPlayer(aiOwner);
+            for (std::size_t i = 0; i < sim.players.size(); ++i)
+            {
+                PlayerId other(static_cast<unsigned int>(i));
+                if (other == aiOwner)
+                {
+                    continue;
+                }
+                const auto& theirs = sim.getPlayer(other);
+                if (theirs.status != GamePlayerStatus::Alive)
+                {
+                    continue;
+                }
+                if (ours.teamId && theirs.teamId && *ours.teamId == *theirs.teamId)
+                {
+                    continue;
+                }
+                sides.insert(theirs.side);
+            }
+            return sides;
+        }
+
+        /**
+         * The composition to score a prospective tech unit's fight against:
+         * every currently-known armed ground unit that is not a building
+         * (the same domain the outpost-raid predictor already uses), or,
+         * before any of that is known -- which is every game's first tick,
+         * when bb.advancedArmyValueRatio is first computed -- a stand-in
+         * built from each enemy side's own raider and rocket kbot
+         * (AiSideUnits), which is public knowledge (a lobby's choice of
+         * faction, not something fog of war hides) and is exactly what
+         * every side answers an early rush with. Without this fallback the
+         * predictor would have nothing to measure against until a scout
+         * found something, and "no observed threat" is not the same claim
+         * as "no threat".
+         */
+        std::vector<UnitCombatStats> observedOrDefaultEnemyComposition(const GameSimulation& sim, PlayerId aiOwner, const AiBlackboard& bb)
+        {
+            std::vector<UnitCombatStats> composition;
+            for (const auto& [_, enemy] : bb.knownEnemies)
+            {
+                if (enemy.isArmed && !enemy.isAir && !enemy.isBuilding)
+                {
+                    // combatStats is all-zero for a type this sim does not
+                    // define (should not happen for a real known enemy, but
+                    // a zero-hp/zero-range entry would only drag down the
+                    // average range/speed engagementScore measures the rest
+                    // of the list against, so it is kept out rather than
+                    // trusted).
+                    if (auto stats = combatStats(sim, enemy.unitType); stats.hp > 0.0f)
+                    {
+                        composition.push_back(stats);
+                    }
+                }
+            }
+            if (!composition.empty())
+            {
+                return composition;
+            }
+            for (const auto& side : enemySides(sim, aiOwner))
+            {
+                auto units = resolveAiSideUnits(sim, side);
+                if (!units.raider.empty())
+                {
+                    composition.push_back(combatStats(sim, units.raider));
+                }
+                if (!units.rocketKbot.empty())
+                {
+                    composition.push_back(combatStats(sim, units.rocketKbot));
+                }
+            }
+            return composition;
+        }
+
+        /**
+         * The fastest thing in the composition the tech candidate is being
+         * scored against -- the yardstick the mobility discount below
+         * measures it up against, per #389 milestone 2: a unit that cannot
+         * keep pace with whatever is actually doing the raiding cannot go
+         * and answer one once it is built, however well it would do in a
+         * stand-up fight.
+         *
+         * Deliberately the composition itself, not each enemy side's
+         * AiSideUnits::raider: the Crystal Maze game the milestone is
+         * named for was raided by ARMFLASH, which AiSideUnits classifies as
+         * ARM's tank, not its raider (ARMPW). "The enemy's fast raiders"
+         * means whatever is actually doing the raiding, observed or (via
+         * observedOrDefaultEnemyComposition's own fallback) assumed, and
+         * that is exactly what this list already is -- so this needs no
+         * fallback of its own and reads no faster than the one call that
+         * built the list already did.
+         */
+        float fastestSpeed(const std::vector<UnitCombatStats>& composition)
+        {
+            float fastest = 0.0f;
+            for (const auto& unit : composition)
+            {
+                fastest = std::max(fastest, unit.speed);
+            }
+            return fastest;
+        }
+
+        /**
+         * hp*effectiveDps per metal for one unit type against a fixed enemy
+         * composition. This is the "metal-equal group" #389 milestone 2
+         * asks for without having to materialise one: engagementScore is
+         * linear in count for a fixed opposing side (a sum of independent
+         * per-unit contributions), so a group bought for a fixed metal
+         * budget scores budget/metal times a single unit's score, and that
+         * scaling is common to both sides of the ratio this feeds (advanced
+         * tier over tier-1 counterpart) and cancels out of it -- so scoring
+         * one unit and dividing by its own metal cost already is the
+         * metal-equal comparison.
+         *
+         * applyMobility discounts the score by how much slower the unit is
+         * than the fastest thing it would have to chase down (min(1,
+         * ourSpeed / enemyRaiderSpeed), never a bonus for being faster) --
+         * the caller passes true only
+         * for the prospective tech unit. The question this whole ratio
+         * answers is whether teching costs the army its ability to answer a
+         * raid, and the tier-1 units on the other side of the ratio (raider,
+         * rocketKbot) are that answer by definition: discounting them too
+         * would be asking "is the enemy's raider faster than our raider",
+         * which is a different question with nothing to do with teching,
+         * not "can the thing we'd build instead of more of them still do
+         * their job".
+         */
+        float techUnitValuePerMetal(const GameSimulation& sim, const std::string& unitType, const std::vector<UnitCombatStats>& enemyComposition, float enemyRaiderSpeed, bool applyMobility)
+        {
+            if (unitType.empty())
+            {
+                return 0.0f;
+            }
+            auto stats = combatStats(sim, unitType);
+            if (stats.metal <= 0.0f || stats.dps <= 0.0f || stats.hp <= 0.0f)
+            {
+                return 0.0f;
+            }
+            auto mobility = (applyMobility && enemyRaiderSpeed > 0.0f) ? std::min(1.0f, stats.speed / enemyRaiderSpeed) : 1.0f;
+            std::vector<UnitCombatStats> ours{stats};
+            return (engagementScore(ours, enemyComposition) / stats.metal) * mobility;
         }
     }
 
@@ -96,6 +244,26 @@ namespace rwe
                                  && bb.buildTree.canBuild(bb.sideUnits.airConstructor, bb.sideUnits.advancedAirPlant)
                              ? "yes"
                              : "no");
+        }
+
+        // #389 milestone 2: replaces the ratio just computed above with one
+        // that measures the advanced unit and its tier-1 counterpart
+        // against the actual enemy (or, until anything is known of them,
+        // the enemy faction's own answer to an early rush) rather than
+        // against nothing at all, and discounts a unit that cannot keep up
+        // with the enemy's raiders. Off by default; recomputed every tick
+        // rather than cached once, since what it measures changes as more
+        // of the enemy is seen -- unlike the plain ratio above, which is a
+        // property of two unit types alone and never changes.
+        if (profile.techUsesPredictor)
+        {
+            auto enemyComposition = observedOrDefaultEnemyComposition(sim, aiOwner, bb);
+            auto enemyRaiderSpeed = fastestSpeed(enemyComposition);
+            auto advancedValue = techUnitValuePerMetal(sim, bb.sideUnits.advancedAssault, enemyComposition, enemyRaiderSpeed, true);
+            auto basicValue = std::max(
+                techUnitValuePerMetal(sim, bb.sideUnits.raider, enemyComposition, enemyRaiderSpeed, false),
+                techUnitValuePerMetal(sim, bb.sideUnits.rocketKbot, enemyComposition, enemyRaiderSpeed, false));
+            bb.advancedArmyValueRatio = basicValue > 0.0f ? advancedValue / basicValue : 0.0f;
         }
         bb.currentMetal = player.metal;
         bb.currentEnergy = player.energy;

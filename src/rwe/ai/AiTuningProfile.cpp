@@ -198,6 +198,7 @@ namespace rwe
             {"answerOutpostRaids", &AiTuningProfile::answerOutpostRaids},
             {"outpostResponseUsesPredictor", &AiTuningProfile::outpostResponseUsesPredictor},
             {"techLevelTwo", &AiTuningProfile::techLevelTwo},
+            {"techUsesPredictor", &AiTuningProfile::techUsesPredictor},
             {"fortifyTowers", &AiTuningProfile::fortifyTowers},
             {"fortifyAtTierTwo", &AiTuningProfile::fortifyAtTierTwo},
             {"fortifyTeethWrap", &AiTuningProfile::fortifyTeethWrap},
