@@ -121,6 +121,48 @@ SCENARIO_SIDES = {
 
 
 # ---------------------------------------------------------------------------
+# --tuned-faction: pins the tuned player to a faction rather than a seat.
+#
+# Without it, a scenario's sides and which seat gets the candidate are exactly
+# SCENARIO_SIDES plus the seed-parity seat alternation (mirror) or "apply to
+# both seats" (cross) that already existed. With it, the tuned player is
+# always e.g. ARM: a mirror scenario for the other faction has no ARM seat at
+# all and is skipped, and the cross scenario stops applying the candidate to
+# both seats (that was only ever there to avoid confounding the knob with the
+# faction when neither seat was privileged) and instead applies it to
+# whichever seat holds the tuned faction -- with seat balance coming from
+# alternating which faction sits in seat 0 by seed parity, so the tuned
+# faction is not always dealt the same seat.
+# ---------------------------------------------------------------------------
+def scenario_supports_faction(scenario: str, tuned_faction: Optional[str]) -> bool:
+    if tuned_faction is None:
+        return True
+    if scenario == "cross":
+        return True  # always has both factions, one seat each
+    return tuned_faction in SCENARIO_SIDES[scenario]
+
+
+def sides_for_seed(scenario: str, seed: int, tuned_faction: Optional[str]) -> Tuple[str, ...]:
+    if tuned_faction is not None and scenario == "cross":
+        return ("ARM", "CORE") if seed % 2 == 1 else ("CORE", "ARM")
+    return SCENARIO_SIDES[scenario]
+
+
+def tuned_seat_for_scenario(scenario: str, seed: int, sides: Tuple[str, ...],
+                             tuned_faction: Optional[str]) -> int:
+    """Which seat gets the candidate for one (scenario, seed). Mirror
+    scenarios alternate by seed parity exactly as before, tuned-faction or
+    not (both seats are the same faction, so there is nothing else to pin).
+    Cross without a tuned faction is handled by `tune_both` in the caller and
+    never reaches here for its seat choice; cross with one picks the seat
+    that actually holds that faction, which `sides_for_seed` already varied
+    by seed parity."""
+    if tuned_faction is not None and scenario == "cross":
+        return sides.index(tuned_faction)
+    return 0 if seed % 2 == 1 else 1
+
+
+# ---------------------------------------------------------------------------
 # Knob spec: parsing and validation
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
@@ -181,6 +223,67 @@ def validate_knob_spec(specs: Sequence[KnobSpec], known: Dict[str, str]) -> None
         # A continuous value sent to an int/bool knob is rejected by the engine
         # (fatal for that game), and an int sent to a float knob wastes the range.
         raise ValueError("knob type mismatch: " + "; ".join(mismatched))
+
+
+# ---------------------------------------------------------------------------
+# --evaluate: fixed candidates from a file, instead of random generation +
+# successive halving. Used to re-run a search's winner (or hand-picked
+# knob combinations) on fresh seeds without re-searching.
+# ---------------------------------------------------------------------------
+def load_evaluate_candidates(path: str) -> List[Tuple[str, Knobs]]:
+    """Reads {name, knobs} entries from a JSON or TOML file:
+
+        JSON: {"candidates": [{"name": "A", "knobs": {"attackArmySize": 15}}, ...]}
+        TOML: [[candidate]]
+              name = "A"
+              knobs = { attackArmySize = 15 }
+
+    ("candidate"/"candidates" both accepted, same as the knob spec's
+    "knob"/"knobs", since it's the same one-or-many wart either format
+    could hit)."""
+    text = Path(path).read_text(encoding="utf-8")
+    if path.endswith(".toml"):
+        if tomllib is None:
+            raise RuntimeError("tomllib not available (need Python 3.11+) and --evaluate file is TOML")
+        data = tomllib.loads(text)
+    else:
+        data = json.loads(text)
+
+    entries = data.get("candidate", data.get("candidates", []))
+    result: List[Tuple[str, Knobs]] = []
+    seen = set()
+    for e in entries:
+        name = e["name"]
+        if name in seen:
+            raise ValueError(f"--evaluate file {path!r} has duplicate candidate name {name!r}")
+        seen.add(name)
+        result.append((name, dict(e.get("knobs", {}))))
+    if not result:
+        raise ValueError(f"--evaluate file {path!r} lists no candidates")
+    return result
+
+
+def infer_value_type(value: Any) -> str:
+    """bool before int: in Python, bool is an int subclass, so the bool check
+    must come first or every 'true'/'false' knob would be misread as int."""
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    return "float"
+
+
+def validate_evaluate_knobs(candidates: Sequence[Tuple[str, Knobs]], known: Dict[str, str]) -> None:
+    """Same two checks as validate_knob_spec (unknown name, mismatched type),
+    reusing it directly rather than re-deriving the rules -- so a typo'd or
+    wrongly-typed knob in an --evaluate file fails exactly the same way one
+    in a --spec file would."""
+    specs = [
+        KnobSpec(name=name, type=infer_value_type(value))
+        for _, knobs in candidates
+        for name, value in knobs.items()
+    ]
+    validate_knob_spec(specs, known)
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +357,20 @@ def wilson_interval(successes: int, n: int, z: float = 1.96) -> Tuple[float, flo
     return (max(0.0, center - half), min(1.0, center + half))
 
 
+def sign_test_p_value(better: int, worse: int) -> float:
+    """Exact two-sided binomial sign test on better-vs-worse counts, ties
+    excluded, null hypothesis p=0.5. At p=0.5 the binomial distribution is
+    symmetric, so the standard two-sided exact test is just twice the
+    one-sided tail at the smaller of the two counts, capped at 1.0 -- no
+    scipy needed."""
+    n = better + worse
+    if n == 0:
+        return 1.0
+    k = min(better, worse)
+    tail = sum(math.comb(n, i) for i in range(0, k + 1)) / (2 ** n)
+    return min(1.0, 2.0 * tail)
+
+
 # ---------------------------------------------------------------------------
 # One game: task description, execution, result parsing
 # ---------------------------------------------------------------------------
@@ -273,8 +390,19 @@ class GameTask:
     tune_both: bool = False     # cross scenario: apply the candidate to every seat
 
 
-def result_key(scenario: str, candidate: Optional[str], seed: int, arm: str, seconds: int) -> str:
-    return "|".join([scenario, candidate or "control", str(seed), arm, str(seconds)])
+def result_key(scenario: str, candidate: Optional[str], seed: int, arm: str, seconds: int,
+               tuned_faction: Optional[str] = None) -> str:
+    """`tuned_faction` only ever changes the key when it is set (a run that
+    never uses --tuned-faction gets byte-identical keys to before, so an
+    existing --out directory resumes exactly as it always did). When set, it
+    is folded into the key too -- not just the run_config fingerprint --
+    because it changes which sides/seat a (scenario, seed) plays with (see
+    sides_for_seed), so a control game cached under the old layout must not
+    be reused under a different one."""
+    parts = [scenario, candidate or "control", str(seed), arm, str(seconds)]
+    if tuned_faction:
+        parts.append(f"tf={tuned_faction}")
+    return "|".join(parts)
 
 
 def build_command(exe: str, data_path: str, task: GameTask, specs_by_name: Dict[str, KnobSpec],
@@ -429,6 +557,7 @@ class CandidateScore:
     wilson_hi: float = 1.0
     fitness: float = 0.0
     by_scenario: Dict[str, float] = field(default_factory=dict)
+    sign_test_p: float = 1.0
 
 
 def aggregate_fitness(candidate_id_: str, knobs: Knobs, samples: Sequence[FitnessSample]) -> CandidateScore:
@@ -445,6 +574,7 @@ def aggregate_fitness(candidate_id_: str, knobs: Knobs, samples: Sequence[Fitnes
     eff = [s.efficiency_delta for s in samples if s.efficiency_delta is not None]
     score.mean_efficiency_delta = (sum(eff) / len(eff)) if eff else None
     score.wilson_lo, score.wilson_hi = wilson_interval(score.wins, score.n)
+    score.sign_test_p = sign_test_p_value(score.wins, score.losses)
 
     fitness = score.mean_margin_delta
     fitness += DECIDED_BONUS * (score.decided_rate_tuned - score.decided_rate_control)
@@ -567,21 +697,33 @@ def evaluate_round(
     make_task_out_dir: Callable[[str, str, int, str], str],
     jobs: int = 3,
     compute_efficiency: bool = False,
+    tuned_faction: Optional[str] = None,
 ) -> List[CandidateScore]:
     """Runs (or resumes) every game a round of candidates needs, then
     aggregates fitness per candidate. Control games are cached in `store` and
-    shared across every candidate at the same (scenario, seed, seconds)."""
+    shared across every candidate at the same (scenario, seed, seconds).
+
+    `tuned_faction`, if given, pins the tuned player to that faction rather
+    than a seat (see scenario_supports_faction/sides_for_seed/
+    tuned_seat_for_scenario above); a scenario whose sides never include that
+    faction is skipped with a message rather than an error, so a caller can
+    pass the same --scenarios list regardless of --tuned-faction."""
+
+    active_scenarios = []
+    for scenario in scenarios:
+        if scenario_supports_faction(scenario, tuned_faction):
+            active_scenarios.append(scenario)
+        else:
+            print(f"skipping scenario {scenario!r}: its sides {SCENARIO_SIDES[scenario]} "
+                  f"never include tuned-faction {tuned_faction}")
 
     to_run: List[Tuple[str, GameTask]] = []
 
-    def seat_for(seed: int) -> int:
-        return 0 if seed % 2 == 1 else 1
-
     # Controls: one per (scenario, seed), independent of every candidate.
-    for scenario in scenarios:
-        sides = SCENARIO_SIDES[scenario]
+    for scenario in active_scenarios:
         for seed in seeds:
-            key = result_key(scenario, None, seed, "control", seconds)
+            sides = sides_for_seed(scenario, seed, tuned_faction)
+            key = result_key(scenario, None, seed, "control", seconds, tuned_faction)
             if store.has(key):
                 continue
             task = GameTask(
@@ -594,16 +736,17 @@ def evaluate_round(
 
     # Tuned games, one per (scenario, candidate, seed).
     for cid, knobs in candidates:
-        for scenario in scenarios:
-            sides = SCENARIO_SIDES[scenario]
-            tune_both = scenario == "cross"
+        for scenario in active_scenarios:
+            tune_both = scenario == "cross" and tuned_faction is None
             for seed in seeds:
-                key = result_key(scenario, cid, seed, "tuned", seconds)
+                sides = sides_for_seed(scenario, seed, tuned_faction)
+                key = result_key(scenario, cid, seed, "tuned", seconds, tuned_faction)
                 if store.has(key):
                     continue
                 task = GameTask(
                     scenario=scenario, seed=seed, seconds=seconds, sides=sides,
-                    arm="tuned", tuned_seat=seat_for(seed), map_name=map_name, difficulty=difficulty,
+                    arm="tuned", tuned_seat=tuned_seat_for_scenario(scenario, seed, sides, tuned_faction),
+                    map_name=map_name, difficulty=difficulty,
                     start_location=start_location, candidate=knobs,
                     out_dir=make_task_out_dir(scenario, cid, seed, "tuned"),
                     tune_both=tune_both,
@@ -622,11 +765,12 @@ def evaluate_round(
     scores = []
     for cid, knobs in candidates:
         samples: List[FitnessSample] = []
-        for scenario in scenarios:
+        for scenario in active_scenarios:
             for seed in seeds:
-                seat = seat_for(seed)
-                tuned_key = result_key(scenario, cid, seed, "tuned", seconds)
-                control_key = result_key(scenario, None, seed, "control", seconds)
+                sides = sides_for_seed(scenario, seed, tuned_faction)
+                seat = tuned_seat_for_scenario(scenario, seed, sides, tuned_faction)
+                tuned_key = result_key(scenario, cid, seed, "tuned", seconds, tuned_faction)
+                control_key = result_key(scenario, None, seed, "control", seconds, tuned_faction)
                 tuned_rec = store.get(tuned_key)
                 control_rec = store.get(control_key)
                 if not tuned_rec or not control_rec:
@@ -672,12 +816,15 @@ def print_leaderboard(scores: Sequence[CandidateScore], title: str) -> None:
     print(f"\n=== {title} ===")
     ranked = sorted(scores, key=lambda s: (-s.fitness, -s.wilson_lo))
     print(f"{'candidate':10} {'n':>3} {'win':>3} {'same':>4} {'loss':>4} {'meanDelta':>9} "
-          f"{'wilson95':>14} {'decidedDelta':>13} {'fitness':>9}")
+          f"{'wilson95':>14} {'signP':>7} {'decidedDelta':>13} {'fitness':>9}")
     for s in ranked:
         decided_delta = s.decided_rate_tuned - s.decided_rate_control
         wilson = f"[{s.wilson_lo:.2f},{s.wilson_hi:.2f}]"
         print(f"{s.candidate_id:10} {s.n:>3} {s.wins:>3} {s.ties:>4} {s.losses:>4} "
-              f"{s.mean_margin_delta:>9.1f} {wilson:>14} {decided_delta:>+13.2f} {s.fitness:>9.2f}")
+              f"{s.mean_margin_delta:>9.1f} {wilson:>14} {s.sign_test_p:>7.3f} "
+              f"{decided_delta:>+13.2f} {s.fitness:>9.2f}")
+        for scenario, delta in sorted(s.by_scenario.items()):
+            print(f"           {scenario}: mean margin delta {delta:+.1f}")
 
 
 def print_candidate_detail(score: CandidateScore, specs: Sequence[KnobSpec]) -> None:
@@ -740,6 +887,7 @@ def run_fingerprint(args: argparse.Namespace) -> Dict[str, object]:
         "difficulty": args.difficulty,
         "start_location": args.start_location,
         "first_eval_seed": args.first_eval_seed,
+        "tuned_faction": args.tuned_faction,
     }
 
 
@@ -789,12 +937,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--allow-config-change", action="store_true",
                         help="resume into --out even though its recorded run configuration differs")
     parser.add_argument("--skip-fourplayer", action="store_true", help="skip the mandatory 1v1v1v1 confirmation (debugging only)")
+    parser.add_argument("--evaluate", default=None,
+                        help="JSON/TOML file of fixed {name, knobs} candidates; skips random generation "
+                             "and successive halving and evaluates exactly these on --confirm-seeds seeds "
+                             "starting at --first-eval-seed (then the usual 1v1v1v1 confirmation)")
+    parser.add_argument("--tuned-faction", choices=["ARM", "CORE"], default=None,
+                        help="pin the tuned player to this faction rather than a seat; a scenario whose "
+                             "sides never include it is skipped (see evaluate_round's docstring)")
     args = parser.parse_args(argv)
 
     known_knobs = arena_common.load_knob_tables(args.source)
-    specs = load_knob_spec(args.spec)
-    validate_knob_spec(specs, known_knobs)
-    specs_by_name = {s.name: s for s in specs}
+    if args.evaluate:
+        eval_candidates = load_evaluate_candidates(args.evaluate)
+        validate_evaluate_knobs(eval_candidates, known_knobs)
+        all_names = {name for _, knobs in eval_candidates for name in knobs}
+        specs_by_name = {name: KnobSpec(name=name, type=known_knobs[name]) for name in all_names}
+        specs = list(specs_by_name.values())
+    else:
+        specs = load_knob_spec(args.spec)
+        validate_knob_spec(specs, known_knobs)
+        specs_by_name = {s.name: s for s in specs}
     scenarios = [s.strip() for s in args.scenarios.split(",") if s.strip()]
     for s in scenarios:
         if s not in SCENARIO_SIDES:
@@ -802,8 +964,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     os.makedirs(args.out, exist_ok=True)
     check_run_config(args.out, run_fingerprint(args), args.allow_config_change)
-    screen_seeds, confirm_seeds, fp_seeds = phase_seeds(
-        args.first_eval_seed, args.screen_seeds, args.confirm_seeds, args.fourplayer_seeds)
+    if args.evaluate:
+        # No screening round: --evaluate's whole point is to skip successive
+        # halving. phase_seeds with screen=0 still gives disjoint confirm/
+        # fourplayer seed blocks starting at --first-eval-seed, which is
+        # exactly "on --confirm-seeds seeds starting at --first-eval-seed".
+        screen_seeds, confirm_seeds, fp_seeds = phase_seeds(
+            args.first_eval_seed, 0, args.confirm_seeds, args.fourplayer_seeds)
+    else:
+        screen_seeds, confirm_seeds, fp_seeds = phase_seeds(
+            args.first_eval_seed, args.screen_seeds, args.confirm_seeds, args.fourplayer_seeds)
     store = ResultStore(os.path.join(args.out, "results.jsonl"))
     games_dir = os.path.join(args.out, "games")
 
@@ -813,31 +983,37 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     play_fn = build_real_play_fn(args.exe, args.data_path, specs_by_name, args.watchdog)
 
-    candidates_raw = generate_candidates(specs, args.candidates, args.seed)
-    candidates = [(candidate_id(k), k) for k in candidates_raw]
-    print(f"generated {len(candidates)} candidates from --seed {args.seed}:")
-    for cid, k in candidates:
-        print(f"  {cid}: {k}")
+    if args.evaluate:
+        promoted_pairs = load_evaluate_candidates(args.evaluate)
+        print(f"evaluating {len(promoted_pairs)} fixed candidates from {args.evaluate}:")
+        for cid, k in promoted_pairs:
+            print(f"  {cid}: {k}")
+    else:
+        candidates_raw = generate_candidates(specs, args.candidates, args.seed)
+        candidates = [(candidate_id(k), k) for k in candidates_raw]
+        print(f"generated {len(candidates)} candidates from --seed {args.seed}:")
+        for cid, k in candidates:
+            print(f"  {cid}: {k}")
 
-    t0 = time.time()
-    screen_scores = evaluate_round(
-        candidates, screen_seeds, args.screen_seconds, scenarios,
-        args.map, args.difficulty, args.start_location, store, play_fn, make_out_dir,
-        jobs=args.jobs, compute_efficiency=args.efficiency,
-    )
-    print(f"\nscreening: {len(candidates)} candidates x {len(scenarios)} scenarios x {len(screen_seeds)} seeds "
-          f"@ {args.screen_seconds}s, wall {time.time()-t0:.0f}s")
-    print_leaderboard(screen_scores, "screening leaderboard")
+        t0 = time.time()
+        screen_scores = evaluate_round(
+            candidates, screen_seeds, args.screen_seconds, scenarios,
+            args.map, args.difficulty, args.start_location, store, play_fn, make_out_dir,
+            jobs=args.jobs, compute_efficiency=args.efficiency, tuned_faction=args.tuned_faction,
+        )
+        print(f"\nscreening: {len(candidates)} candidates x {len(scenarios)} scenarios x {len(screen_seeds)} seeds "
+              f"@ {args.screen_seconds}s, wall {time.time()-t0:.0f}s")
+        print_leaderboard(screen_scores, "screening leaderboard")
 
-    promoted = promote(screen_scores, args.promote)
-    promoted_pairs = [(s.candidate_id, s.knobs) for s in promoted]
-    print(f"\npromoted to confirmation: {[c for c, _ in promoted_pairs]}")
+        promoted = promote(screen_scores, args.promote)
+        promoted_pairs = [(s.candidate_id, s.knobs) for s in promoted]
+        print(f"\npromoted to confirmation: {[c for c, _ in promoted_pairs]}")
 
     t1 = time.time()
     confirm_scores = evaluate_round(
         promoted_pairs, confirm_seeds, args.confirm_seconds, scenarios,
         args.map, args.difficulty, args.start_location, store, play_fn, make_out_dir,
-        jobs=args.jobs, compute_efficiency=args.efficiency,
+        jobs=args.jobs, compute_efficiency=args.efficiency, tuned_faction=args.tuned_faction,
     )
     print(f"\nconfirmation: {len(promoted_pairs)} candidates x {len(scenarios)} scenarios x {len(confirm_seeds)} seeds "
           f"@ {args.confirm_seconds}s, wall {time.time()-t1:.0f}s")
@@ -860,7 +1036,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     fp_scores = evaluate_fourplayer(
         winner.candidate_id, winner.knobs, fp_seeds, args.fourplayer_seconds, fp_sides,
         args.fourplayer_map, args.difficulty, args.start_location, store, play_fn, make_out_dir,
-        jobs=args.jobs,
+        jobs=args.jobs, tuned_faction=args.tuned_faction,
     )
     print(f"\n1v1v1v1 confirmation ({args.fourplayer_map}): {len(fp_seeds)} seeds @ {args.fourplayer_seconds}s, "
           f"wall {time.time()-t2:.0f}s")
@@ -873,22 +1049,39 @@ def evaluate_fourplayer(
     cid: str, knobs: Knobs, seeds: Sequence[int], seconds: int, sides: Sequence[str],
     map_name: str, difficulty: str, start_location: str, store: ResultStore, play_fn: PlayFn,
     make_task_out_dir: Callable[[str, str, int, str], str], jobs: int = 3,
+    tuned_faction: Optional[str] = None,
 ) -> CandidateScore:
     """The mandatory 1v1v1v1 confirmation: the tune goes on one rotating seat
     of a 4-player free-for-all, control gets none, and the margin is that
     seat's units against the mean of the other three -- rwe-ai-multi-enemy-
     focus's standing rule that a 1v1-only measurement can silently miss a
-    regression that only shows up with more than one opponent."""
+    regression that only shows up with more than one opponent.
+
+    Without --tuned-faction the rotating seat is any of the four. With it,
+    the rotation is restricted to the seats that actually hold that faction
+    (e.g. seats 0 and 2 of the default ARM/CORE/ARM/CORE sides for
+    --tuned-faction ARM), since tuning ARM's knobs and then judging the
+    result from a CORE seat would not be testing the same thing."""
     scenario = "fourplayer"
 
-    def seat_for(seed: int) -> int:
-        return seed % len(sides)
+    if tuned_faction is not None:
+        eligible = [i for i, s in enumerate(sides) if s == tuned_faction]
+        if not eligible:
+            raise ValueError(
+                f"--tuned-faction {tuned_faction} has no seat in fourplayer sides {tuple(sides)}"
+            )
+
+        def seat_for(seed: int) -> int:
+            return eligible[seed % len(eligible)]
+    else:
+        def seat_for(seed: int) -> int:
+            return seed % len(sides)
 
     to_run: List[Tuple[str, GameTask]] = []
     for arm, candidate in (("control", None), ("tuned", knobs)):
         for seed in seeds:
             cid_for_key = cid if arm == "tuned" else None
-            key = result_key(scenario, cid_for_key, seed, arm, seconds)
+            key = result_key(scenario, cid_for_key, seed, arm, seconds, tuned_faction)
             if store.has(key):
                 continue
             task = GameTask(
@@ -908,8 +1101,8 @@ def evaluate_fourplayer(
     samples: List[FitnessSample] = []
     for seed in seeds:
         seat = seat_for(seed)
-        tuned_rec = store.get(result_key(scenario, cid, seed, "tuned", seconds))
-        control_rec = store.get(result_key(scenario, None, seed, "control", seconds))
+        tuned_rec = store.get(result_key(scenario, cid, seed, "tuned", seconds, tuned_faction))
+        control_rec = store.get(result_key(scenario, None, seed, "control", seconds, tuned_faction))
         if not tuned_rec or not control_rec:
             continue
         sample = make_fitness_sample(scenario, seed, seat, tuned_rec, control_rec)
