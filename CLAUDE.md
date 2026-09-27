@@ -247,6 +247,20 @@ obliges you to touch. The `SaveFile` header's `PlayerInfo` now carries `teamId`
 alongside the simulation's own player table, which is what a load actually
 restores.
 
+**Two reasons a game cannot be saved, kept as two tests.**
+`GameScene::saveCurrentGame` refuses in two cases with two different messages,
+and they are deliberately separate: a player **simulated elsewhere** has its
+state on the other machine, so there is nothing here to write down —
+`saveSimulationToJson` refuses that case for itself — and an **own-clock** game
+has a peer that owns both its units and its clock, so a save of RWE's half
+could not be resumed into the game it came from (`GameScene::canSave()`,
+`src/rwe/game/GameScene_ownclock.cpp`). Merged into one test they would still
+refuse, and the console would say only that saving is unavailable, which is the
+one message that does not say which reason applies. The dialog is not
+symmetrical, and need not be: `openSaveDialog` asks `canSave()` alone, so a
+watched demo's save dialog opens and the refusal lands on the press, while an
+own-clock game's never opens at all. ADR-0003.
+
 ## Matching Total Annihilation
 
 Much of the current work is matching the original's behaviour down to the
