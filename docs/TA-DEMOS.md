@@ -2408,7 +2408,8 @@ own sake -- reproducing the table, rather than reading a demo.
 TA is not lockstep. Each machine simulates the units it owns and broadcasts
 the results, which is why the packet list is full of consequences and empty
 of orders. The disassembly in `TOTALA-EXE.md` says this from three
-independent directions:
+independent directions, and a live game against a host that is not TA
+says it a fourth ([`TA-NETWORK.md`](TA-NETWORK.md)):
 
 - A COB script call packs a type-`0x10` record -- unit id, script, two
   arguments -- and hands it to the emitter `0x451DF0`. It "is the network and

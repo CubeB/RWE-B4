@@ -227,6 +227,22 @@ fail a test, which is why the separation is the point.
 _Avoid_: the engine's own code (that is what is tested against the oracle);
 model (reserved for round-behaviour classes — motor, shell, burst)
 
+### TA's network
+
+**Owner**:
+In a game with the original, the peer whose machine simulates a unit. Its
+word on that unit's position, health and death is final everywhere else:
+other peers steer a copy along the path it sends, show damage they cause, and
+wait for its death record. The opposite of lockstep, where no peer owns
+anything. `docs/TA-NETWORK.md`.
+_Avoid_: authority, master, server
+
+**Full-state record**:
+The tail of every `0x2c`: one owner-block slot's complete state, the slot
+chosen by tick, so each unit is described once a cycle. The receiver believes
+it over anything it had, so a record for an empty slot deletes the unit there.
+_Avoid_: snapshot, keyframe
+
 ### The instruments
 
 **Harness**:
