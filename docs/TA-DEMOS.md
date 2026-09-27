@@ -2445,6 +2445,71 @@ over loopback, which is a thing RWE structurally cannot do. Three tiers of
 3. **Re-simulate from inferred inputs.** Not achievable, and not for want of
    effort -- see below.
 
+## Tier 2: the puppet driver
+
+Tier 2 exists now, headless. `TadPuppetDriver` (`src/rwe/puppet/`) owns a
+`GameSimulation&` whose demo players are all marked simulated elsewhere, so no
+local decision, damage or economy contends with the recorded ones, and consumes
+a demo's packets in order. It keeps its own table mapping TA unit ids onto RWE
+`UnitId`s and never puts that in sim state; a sender's owner block is learned
+from that sender's own `0x09`, because the block is not the player number and
+the `0x2c`'s index is relative to it. It spawns a nanoframe on `0x09`, finishes
+it on `0x12`, applies `0x0b` damage through the remote-damage path (which never
+kills -- only the owner's `0x0c` does), and kills on `0x0c` leaving the corpse
+the recorded cause and level call for rather than the one the local `Killed`
+script would pick. A unit first seen in a `0x2c` spawns complete at the recorded
+position. Every id, index, block and type index is bounds-checked before it is
+used; a record naming none of them is dropped and counted.
+
+The clock is the `0x2c` serial, never `Packet::time`, and a record with no
+serial of its own (`0x09`, `0x0c`, ...) takes the tick of its sender's current
+serial. Between records a ground unit follows the up-to-three replicated
+waypoints with RWE's own `UnitBehaviorService::updateRemote` -- no path search,
+and a step is never refused by a stale peer footprint -- and an aircraft is
+steered toward its recorded goal. At each full-state record the driver first
+measures the horizontal distance from the puppet to the recorded position and
+then snaps position, rotation, health and build progress to it. Buildings are
+not repositioned by a record: a building does not move, and moving it would
+leave its occupied cells behind.
+
+`tad_puppet` plays a file or a directory headlessly (map from the header, no
+SDL or GL) and reports the counts and the drift distribution. It refuses
+cleanly when the map or the unit table does not match the loaded data, and
+`--dir` exits non-zero if any demo fails.
+
+The drift measured at each full-state record, in world units, on the two
+corpora:
+
+| corpus | | n | median | p90 | max | within 32 | within 128 |
+|---|---|---|---|---|---|---|---|
+| RWE `arm-core-600` (vanilla) | ground | 564 | 0 | 1.26 | 53 | 99.6% | 100% |
+| RWE `arm-core-1800` (vanilla) | ground | 4382 | 0 | 7.20 | 2258 | 97.5% | 99.5% |
+| | air | 46 | 616 | 1735 | 2838 | 23.9% | 28.3% |
+| ProTA 4.8, 39 demos | ground | 756059 | 0 | 31.9 | 5703 | 90.0% | 98.2% |
+| | air | 87319 | 117 | 2825 | 14852 | 25.8% | 50.6% |
+
+Ground dead reckoning is good: the median is zero, most records are within a
+tile or two, and the ProTA tail is the price of a real game's interruptions --
+a unit carried and dropped, a path update the sender never resent because its
+navigator's dirty bit did not move again. Aircraft are coarse by construction:
+an aircraft's entry is a goal, not a position, and a moving goal's velocity is
+ignored, so an air record one cycle apart is two different flight plans.
+
+**What tier 2 leaves out**, and what the next phase takes: weapons display
+(`0x0d` rounds are decoded but not spawned), `0x10` script calls, the `0x28`
+resource state, chat, and the spectator scene that drives this driver from
+`GameScene` with fog of war. The driver is free of SDL, GL and `GameScene` so
+that scene can use the same one. Fog of war is inherent and unsolvable from
+the stream: the recording peer only saw what was sent to it.
+
+**A coordinate correction this work found.** RWE's world is centred on the
+origin and TA's starts at the map's top left. The recorder had been writing
+RWE's centred coordinates as if they were TA's, so every real demo placed its
+units half a map away and `trySpawnUnit` refused them; the recorder now adds
+the half-extents and the driver takes them off again, and the RWE demo corpus
+was re-recorded. A mod's death weapon name is also taken in the case the
+weapon map uses, because the original hashes weapon names case-insensitively.
+
 ## Demos as a conformance corpus
 
 This is the part worth doing, and it is a different exercise from playback.

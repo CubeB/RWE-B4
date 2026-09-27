@@ -200,6 +200,24 @@ saved, dumped or read back.
 _Avoid_: replay writer (`ReplayWriter` records a seed and a command stream,
 and only RWE can play it), capture
 
+**Puppet**:
+An RWE unit standing in for one a demo's stream names, driven entirely by
+that stream rather than by any local decision: spawned where the `0x09` says,
+steered along the replicated path or toward the recorded goal, and corrected
+to the recorded position, health and build progress at each full-state
+record. Not a player and not a unit of the simulation's own — a puppet exists
+only while a demo is being played, and a demo player is simulated elsewhere.
+_Avoid_: bot, proxy unit
+
+**Puppet driver** (`TadPuppetDriver`):
+The owner of a `GameSimulation&` whose demo players are all simulated
+elsewhere, which consumes a demo's packets in order and keeps the puppet
+table that maps TA unit ids onto RWE units. Free of SDL, GL and `GameScene`,
+so the headless `tad_puppet` and a future spectator scene use the same one.
+Its clock is the `0x2c` serial, never `Packet::time`.
+_Avoid_: replay player, demo player (that is the simulation's player, not the
+driver)
+
 **Demo output**:
 A `.tad` RWE wrote rather than recorded from TA. Readable and mineable by the
 same tools as a real one, with three recorded divergences: the `0x1a` ids are
