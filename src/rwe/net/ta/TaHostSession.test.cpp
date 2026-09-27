@@ -266,6 +266,25 @@ namespace rwe
             }
             REQUIRE(done());
         }
+
+        /** Pump the io_context for a while, for the tests that wait a timeout out. */
+        void runFor(asio::io_context& ioContext, std::chrono::milliseconds duration)
+        {
+            auto deadline = std::chrono::steady_clock::now() + duration;
+            while (std::chrono::steady_clock::now() < deadline)
+            {
+                ioContext.poll_one();
+                std::this_thread::sleep_for(1ms);
+            }
+        }
+
+        /** A TCP connection to the host that says nothing, held open. */
+        std::shared_ptr<asio::ip::tcp::socket> openSilentConnection(asio::io_context& ioContext, std::uint16_t port)
+        {
+            auto socket = std::make_shared<asio::ip::tcp::socket>(ioContext);
+            socket->connect(asio::ip::tcp::endpoint(asio::ip::make_address_v4("127.0.0.1"), port));
+            return socket;
+        }
     }
 
     TEST_CASE("a joiner handshakes with the host and gets as far as CREATEPLAYER", "[ta][host]")
@@ -384,6 +403,150 @@ namespace rwe
 
         REQUIRE_FALSE(host.send(0xDEADBEEF, std::vector<std::uint8_t>{0x01}, TaTransport::Tcp));
         REQUIRE_FALSE(host.send(0xDEADBEEF, std::vector<std::uint8_t>{0x01}, TaTransport::Udp));
+
+        host.stop();
+    }
+
+    TEST_CASE("a flood of handshakes cannot grow the pending map for ever", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        config.pendingHandshakeTimeout = std::chrono::milliseconds(80);
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        TestJoiner joiner(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+
+        SECTION("the map stops growing at the cap")
+        {
+            // The handshake key is the reply port in the header, which the
+            // sender picks, so every one of these is a different key.
+            for (std::uint16_t port = 20000; port < 20000 + TaHostSession::MaxPendingHandshakes * 3; ++port)
+            {
+                joiner.sendToHost(taEncodeSystemMessage(
+                    TaDirectPlayCommand::RequestPlayerId,
+                    taMakeReplyAddress(port, {127, 0, 0, 1}),
+                    taEncodeRequestPlayerId(9)));
+            }
+
+            runUntil(ioContext, [&] { return host.load().pendingHandshakes == TaHostSession::MaxPendingHandshakes; });
+            REQUIRE(host.load().pendingHandshakes <= TaHostSession::MaxPendingHandshakes);
+        }
+
+        SECTION("a handshake that never reaches CREATEPLAYER expires")
+        {
+            for (std::uint16_t port = 21000; port < 21003; ++port)
+            {
+                joiner.sendToHost(taEncodeSystemMessage(
+                    TaDirectPlayCommand::RequestPlayerId,
+                    taMakeReplyAddress(port, {127, 0, 0, 1}),
+                    taEncodeRequestPlayerId(9)));
+            }
+
+            runUntil(ioContext, [&] { return host.load().pendingHandshakes == 3; });
+            runFor(ioContext, std::chrono::milliseconds(600));
+            REQUIRE(host.load().pendingHandshakes == 0);
+        }
+
+        host.stop();
+    }
+
+    TEST_CASE("the host refuses a joiner once the session is full", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+
+        TestJoiner joiner(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+
+        auto reply = taMakeReplyAddress(joiner.tcpPort(), {127, 0, 0, 1});
+        joiner.sendToHost(taEncodeSystemMessage(
+            TaDirectPlayCommand::RequestPlayerId, reply, taEncodeRequestPlayerId(9)));
+
+        // The session advertises ten players and the host is one of them.
+        auto roomFor = TaHostSession::MaxPlayers - 1;
+        for (std::uint32_t i = 0; i < roomFor; ++i)
+        {
+            joiner.sendToHost(taEncodeSystemMessage(
+                TaDirectPlayCommand::CreatePlayer,
+                reply,
+                createPlayerPayload(0x08D90E74u + i, "p" + std::to_string(i), joiner.tcpPort(), joiner.udpPortValue())));
+        }
+
+        runUntil(ioContext, [&] { return host.load().peers == roomFor; });
+        REQUIRE(joined.size() == roomFor);
+
+        // The next one is over the advertised maximum and is dropped.
+        joiner.sendToHost(taEncodeSystemMessage(
+            TaDirectPlayCommand::CreatePlayer,
+            reply,
+            createPlayerPayload(0x08D90EFF, "one too many", joiner.tcpPort(), joiner.udpPortValue())));
+
+        runFor(ioContext, std::chrono::milliseconds(200));
+        REQUIRE(joined.size() == roomFor);
+        REQUIRE(host.load().peers == roomFor);
+
+        host.stop();
+    }
+
+    TEST_CASE("accepted connections are capped and the silent ones are closed", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        config.incomingIdleTimeout = std::chrono::milliseconds(120);
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        // Each accepted socket holds a 64 KB read buffer, so the accept queue
+        // is a cap on memory rather than a detail.
+        std::vector<std::shared_ptr<asio::ip::tcp::socket>> silent;
+        for (std::size_t i = 0; i < TaHostSession::MaxIncomingConnections + 8; ++i)
+        {
+            silent.push_back(openSilentConnection(ioContext, host.localPorts().gameTcp));
+        }
+
+        runUntil(ioContext, [&] { return host.load().incomingConnections == TaHostSession::MaxIncomingConnections; });
+        REQUIRE(host.load().incomingConnections <= TaHostSession::MaxIncomingConnections);
+
+        // None of them ever speaks, so every one of them is closed again.
+        runFor(ioContext, std::chrono::milliseconds(600));
+        REQUIRE(host.load().incomingConnections == 0);
+
+        host.stop();
+    }
+
+    TEST_CASE("a reply goes to the packet's source, not to an address in the header", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        config.gameName = "rwe";
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        TestJoiner joiner(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+
+        // The header names a third party. Honouring it would let anyone make
+        // the host send to whoever they liked; only the port may be taken.
+        joiner.sendUdp(
+            asio::ip::udp::endpoint(asio::ip::make_address_v4("127.0.0.1"), host.localPorts().enumSessions),
+            taEncodeSystemMessage(
+                TaDirectPlayCommand::EnumSessions,
+                taMakeReplyAddress(joiner.tcpPort(), {10, 11, 12, 13}),
+                enumSessionsPayload()));
+
+        runUntil(ioContext, [&] { return joiner.hasCommand(TaDirectPlayCommand::EnumSessionsReply); });
+
+        auto* reply = joiner.findCommand(TaDirectPlayCommand::EnumSessionsReply);
+        auto decoded = taDecodeEnumSessionsReply(taDecodeDirectPlayMessage(reply->data(), reply->size()).payload);
+        REQUIRE(decoded.name == "rwe             ");
 
         host.stop();
     }

@@ -15,11 +15,6 @@ namespace rwe
             return endpoint.address().to_string() + ":" + std::to_string(endpoint.port());
         }
 
-        bool ipIsZero(const TaDpAddress& address)
-        {
-            return address.ip[0] == 0 && address.ip[1] == 0 && address.ip[2] == 0 && address.ip[3] == 0;
-        }
-
         std::vector<std::uint8_t> ipBytes(const asio::ip::address& address)
         {
             if (address.is_v4())
@@ -30,14 +25,15 @@ namespace rwe
             return {0, 0, 0, 0};
         }
 
+        /**
+         * A joiner's game address with the packet's source IP: it chooses its
+         * own port, but never a third party's address to send to.
+         */
         TaDpAddress addressWithSourceIp(const TaDpAddress& address, const asio::ip::address& sourceIp)
         {
             auto result = address;
-            if (ipIsZero(result))
-            {
-                auto ip = ipBytes(sourceIp);
-                std::copy(ip.begin(), ip.end(), result.ip.begin());
-            }
+            auto ip = ipBytes(sourceIp);
+            std::copy(ip.begin(), ip.end(), result.ip.begin());
             return result;
         }
 
@@ -80,6 +76,7 @@ namespace rwe
           gameTcpAcceptor(ioContext),
           enumUdpSocket(ioContext),
           gameUdpSocket(ioContext),
+          pruneTimer(ioContext),
           nextPlayerId(this->config.firstAssignedPlayerId),
           nextSystemPlayerId(this->config.firstAssignedSystemPlayerId)
     {
@@ -123,6 +120,7 @@ namespace rwe
         listenGameTcp();
         listenEnumUdp();
         listenGameUdp();
+        prunePending();
     }
 
     void TaHostSession::stop()
@@ -138,12 +136,20 @@ namespace rwe
         gameTcpAcceptor.close(ignored);
         enumUdpSocket.close(ignored);
         gameUdpSocket.close(ignored);
+        pruneTimer.cancel();
         for (auto& [key, link] : outbound)
         {
             (void)key;
             link->socket.close(ignored);
         }
         outbound.clear();
+        for (auto& connection : incoming)
+        {
+            connection->socket.close(ignored);
+            connection->idleTimer.cancel();
+        }
+        incoming.clear();
+        pending.clear();
     }
 
     void TaHostSession::onPeerJoined(PeerJoinedHandler handler)
@@ -172,7 +178,7 @@ namespace rwe
         enumTcpAcceptor.async_accept(connection->socket, [this, connection](const asio::error_code& error) {
             if (!error)
             {
-                readTcp(connection);
+                acceptIncoming(connection);
             }
             if (started)
             {
@@ -187,13 +193,103 @@ namespace rwe
         gameTcpAcceptor.async_accept(connection->socket, [this, connection](const asio::error_code& error) {
             if (!error)
             {
-                readTcp(connection);
+                acceptIncoming(connection);
             }
             if (started)
             {
                 listenGameTcp();
             }
         });
+    }
+
+    void TaHostSession::acceptIncoming(std::shared_ptr<IncomingTcp> connection)
+    {
+        // Each accepted socket carries a 64 KB read buffer, so an unbounded
+        // accept queue is an unbounded allocation; over the cap the connection
+        // is closed unread.
+        if (incoming.size() >= MaxIncomingConnections)
+        {
+            asio::error_code ignored;
+            connection->socket.close(ignored);
+            return;
+        }
+
+        incoming.push_back(connection);
+        armIdleTimeout(connection);
+        readTcp(connection);
+    }
+
+    void TaHostSession::armIdleTimeout(std::shared_ptr<IncomingTcp> connection)
+    {
+        connection->idleTimer.expires_after(config.incomingIdleTimeout);
+        connection->idleTimer.async_wait([this, connection](const asio::error_code& error) {
+            if (error)
+            {
+                return;
+            }
+            asio::error_code ignored;
+            connection->socket.close(ignored);
+        });
+    }
+
+    void TaHostSession::forgetIncoming(const std::shared_ptr<IncomingTcp>& connection)
+    {
+        incoming.erase(std::remove(incoming.begin(), incoming.end(), connection), incoming.end());
+    }
+
+    TaHostSession::PendingHandshake* TaHostSession::pendingFor(const std::string& key)
+    {
+        auto it = pending.find(key);
+        if (it != pending.end())
+        {
+            return &it->second;
+        }
+
+        // A handshake key is a reply address the sender picks, so a flood of
+        // REQUESTPLAYERID from fresh ports would otherwise grow this map for
+        // ever; the oldest handshake is evicted to make room.
+        if (pending.size() >= MaxPendingHandshakes)
+        {
+            pending.erase(pending.begin());
+        }
+
+        auto [inserted, ok] = pending.emplace(key, PendingHandshake{});
+        if (!ok)
+        {
+            return nullptr;
+        }
+        inserted->second.started = std::chrono::steady_clock::now();
+        return &inserted->second;
+    }
+
+    void TaHostSession::prunePending()
+    {
+        auto cutoff = std::chrono::steady_clock::now() - config.pendingHandshakeTimeout;
+        for (auto it = pending.begin(); it != pending.end();)
+        {
+            if (it->second.started < cutoff)
+            {
+                it = pending.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+
+        pruneTimer.expires_after(config.pendingHandshakeTimeout);
+        pruneTimer.async_wait([this](const asio::error_code& error) {
+            if (error || !started)
+            {
+                return;
+            }
+            prunePending();
+        });
+    }
+
+    TaHostSession::Load TaHostSession::load() const
+    {
+        return Load{peers.size(), pending.size(), incoming.size()};
     }
 
     void TaHostSession::listenEnumUdp()
@@ -239,12 +335,18 @@ namespace rwe
             [this, connection](const asio::error_code& error, std::size_t bytes) {
                 if (error)
                 {
+                    forgetIncoming(connection);
                     return;
                 }
                 handleTcpBytes(connection, connection->scratch.data(), bytes);
                 if (connection->socket.is_open())
                 {
+                    armIdleTimeout(connection);
                     readTcp(connection);
+                }
+                else
+                {
+                    forgetIncoming(connection);
                 }
             });
     }
@@ -393,7 +495,10 @@ namespace rwe
 
         if (isSystemPlayer)
         {
-            pending[endpointKey(reply)].systemPlayerId = id;
+            if (auto* handshake = pendingFor(endpointKey(reply)))
+            {
+                handshake->systemPlayerId = id;
+            }
         }
 
         auto body = taEncodeRequestPlayerReply(id);
@@ -405,24 +510,28 @@ namespace rwe
         const asio::ip::tcp::endpoint& reply)
     {
         auto request = taDecodeAddForwardRequest(payload);
-        auto& handshake = pending[endpointKey(reply)];
-        handshake.systemPlayerId = request.systemPlayerId;
+        auto* handshake = pendingFor(endpointKey(reply));
+        if (handshake == nullptr)
+        {
+            return;
+        }
+        handshake->systemPlayerId = request.systemPlayerId;
 
         auto tcpAddress = addressWithSourceIp(request.tcpAddress, reply.address());
         auto udpAddress = addressWithSourceIp(request.udpAddress, reply.address());
-        handshake.tcpEndpoint = asio::ip::tcp::endpoint(
+        handshake->tcpEndpoint = asio::ip::tcp::endpoint(
             asio::ip::address_v4(tcpAddress.ip),
             tcpAddress.port != 0 ? tcpAddress.port : ports.gameTcp);
-        handshake.udpEndpoint = asio::ip::udp::endpoint(
+        handshake->udpEndpoint = asio::ip::udp::endpoint(
             asio::ip::address_v4(udpAddress.ip),
             udpAddress.port != 0 ? udpAddress.port : ports.gameUdp);
 
         auto joiner = makeSystemPlayer(request.systemPlayerId);
         joiner.tcpAddress = request.tcpAddress;
         joiner.udpAddress = request.udpAddress;
-        joiner.tcpAddress.port = handshake.tcpEndpoint.port();
-        joiner.udpAddress.port = handshake.udpEndpoint.port();
-        auto ip = ipBytes(handshake.tcpEndpoint.address());
+        joiner.tcpAddress.port = handshake->tcpEndpoint.port();
+        joiner.udpAddress.port = handshake->udpEndpoint.port();
+        auto ip = ipBytes(handshake->tcpEndpoint.address());
         std::copy(ip.begin(), ip.end(), joiner.tcpAddress.ip.begin());
         std::copy(ip.begin(), ip.end(), joiner.udpAddress.ip.begin());
 
@@ -436,13 +545,23 @@ namespace rwe
     {
         auto created = taDecodeCreatePlayer(payload);
 
+        auto key = endpointKey(reply);
+        auto handshakeIt = pending.find(key);
+
+        // The session advertises maxPlayers, the host counts as one, and the
+        // player is either new or is replacing itself; a full session refuses
+        // the joiner rather than growing past what it advertised.
+        if (peers.find(created.playerId) == peers.end() && peers.size() + 1 >= MaxPlayers)
+        {
+            pending.erase(key);
+            return;
+        }
+
         Peer peer;
         peer.playerId = created.playerId;
         peer.shortName = created.name;
         peer.longName = created.name;
 
-        auto key = endpointKey(reply);
-        auto handshakeIt = pending.find(key);
         if (handshakeIt != pending.end())
         {
             peer.systemPlayerId = handshakeIt->second.systemPlayerId;
@@ -676,7 +795,7 @@ namespace rwe
         TaSessionDescription session;
         session.instanceGuid = config.instanceGuid;
         session.applicationGuid = TaApplicationGuid;
-        session.maxPlayers = 10;
+        session.maxPlayers = static_cast<std::uint32_t>(MaxPlayers);
         session.currentPlayers = static_cast<std::uint32_t>(1 + peers.size());
         session.hostPlayerId = config.hostPlayerId;
         session.setOptions(config.options);
@@ -726,9 +845,11 @@ namespace rwe
         const asio::ip::address& sourceIp,
         std::uint16_t fallbackPort) const
     {
-        auto resolved = addressWithSourceIp(address, sourceIp);
-        auto port = resolved.port != 0 ? resolved.port : fallbackPort;
-        return asio::ip::tcp::endpoint(asio::ip::address_v4(resolved.ip), port);
+        // Always the packet's source IP, never the one in the header: a header
+        // IP that differs from the source would otherwise turn the host into a
+        // reflector sending to a third party. Only the port is taken from it.
+        auto port = address.port != 0 ? address.port : fallbackPort;
+        return asio::ip::tcp::endpoint(sourceIp, port);
     }
 
     std::vector<std::uint8_t> TaHostSession::addressIp(const asio::ip::address& address)
