@@ -322,6 +322,21 @@ chosen by tick, so each unit is described once a cycle. The receiver believes
 it over anything it had, so a record for an empty slot deletes the unit there.
 _Avoid_: snapshot, keyframe
 
+**Live sender** (`TaLiveSender`):
+The output side of playing against the original rather than writing a demo: an
+observer with the demo recorder's shape that yields the Local player's
+subpackets one tick at a time, for the network layer to frame and send. A pure
+observer in the same sense, and it covers one player, because one machine
+describes the units it simulates locally and nothing else.
+_Avoid_: demo recorder (that writes a file), peer, client
+
+**Wire tape** (`TaWireTape`):
+The encoding a live sender and a demo recorder share: the ids, the type
+indices, the last mover put out, and the per-tick subpacket order. It exists so
+the two cannot disagree about the bytes, and it owns nothing -- it is a view of
+the simulation, asked for one tick at a time.
+_Avoid_: send buffer, outbox (that is the mixed-ownership outbox)
+
 ### The instruments
 
 **Harness**:

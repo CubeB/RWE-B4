@@ -3,6 +3,7 @@
 #include <rwe/sim/MixedOwnership.h>
 #include <rwe/sim/SimRandom.h>
 #include <rwe/sim/SimulationOwnership.h>
+#include <rwe/sim/TaLiveSender.h>
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -257,6 +258,11 @@ namespace rwe
     void GameSimulation::attachDemoRecorder(std::unique_ptr<DemoRecorder> recorder)
     {
         demoRecorder = std::move(recorder);
+    }
+
+    void GameSimulation::attachTaLiveSender(std::unique_ptr<TaLiveSender> sender)
+    {
+        taLiveSender = std::move(sender);
     }
 
     void GameSimulation::addAiController(PlayerId playerId, std::unique_ptr<AiPlayerController> controller)
@@ -1212,6 +1218,11 @@ namespace rwe
             demoRecorder->unitCaptured(*this, targetId, captor);
         }
 
+        if (taLiveSender)
+        {
+            taLiveSender->unitCaptured(*this, targetId, captor);
+        }
+
         // The original's owner change is an event and then a cause-4 death of
         // the old unit, the captor's copy already made, and the mission rules
         // hear both: CaptureUnitType the first, and every kill rule the second.
@@ -1705,6 +1716,11 @@ namespace rwe
             if (demoRecorder)
             {
                 demoRecorder->unitCreated(*this, *unitId);
+            }
+
+            if (taLiveSender)
+            {
+                taLiveSender->unitCreated(*this, *unitId);
             }
 
             UnitBehaviorService(this).onCreate(*unitId);
@@ -4691,6 +4707,11 @@ namespace rwe
                 demoRecorder->unitRemoved(it->first);
             }
 
+            if (taLiveSender)
+            {
+                taLiveSender->unitRemoved(it->first);
+            }
+
             it = units.erase(it);
         }
 
@@ -4817,6 +4838,11 @@ namespace rwe
                     demoRecorder->buildStarted(*this, unitId, *newUnitId);
                 }
 
+                if (taLiveSender)
+                {
+                    taLiveSender->buildStarted(*this, unitId, *newUnitId);
+                }
+
                 events.push_back(UnitStartedBuildingEvent{unitId});
 
                 s->status = UnitCreationStatusDone{*newUnitId};
@@ -4857,6 +4883,11 @@ namespace rwe
                 if (demoRecorder)
                 {
                     demoRecorder->buildStarted(*this, unitId, *newUnitId);
+                }
+
+                if (taLiveSender)
+                {
+                    taLiveSender->buildStarted(*this, unitId, *newUnitId);
                 }
 
                 s->status = UnitCreationStatusDone{*newUnitId};
@@ -5135,6 +5166,11 @@ namespace rwe
         if (demoRecorder)
         {
             demoRecorder->endOfTick(*this);
+        }
+
+        if (taLiveSender)
+        {
+            taLiveSender->endOfTick(*this);
         }
     }
 

@@ -21,6 +21,7 @@
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MixedOwnership.h>
 #include <rwe/sim/SimulationOwnership.h>
+#include <rwe/sim/TaLiveSender.h>
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/sim_test_util.h>
 #include <rwe/sim/util.h>
@@ -537,6 +538,80 @@ namespace rwe
             removeRemotePlayer(sim, PlayerId(7));
             REQUIRE(sim.getPlayer(remote).status == GamePlayerStatus::Alive);
             REQUIRE(sim.getUnitState(*unit).hitPoints == health);
+        }
+    }
+
+    TEST_CASE("a live sender drops what it cannot name and sends the rest of the tick", "[malformed][talive]")
+    {
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
+        definePuppetTestWorld(sim);
+        auto local = addWellStockedPlayer(sim, "ARM");
+        auto remote = addWellStockedPlayer(sim, "CORE");
+        sim.getPlayer(remote).simulation = PlayerSimulation::Remote;
+
+        auto attacker = sim.trySpawnCompletedUnit("TANK", local, SimVector(100_ss, 0_ss, 100_ss), std::nullopt);
+        REQUIRE(attacker);
+        auto victim = sim.trySpawnCompletedUnit("TANK", remote, SimVector(100_ss, 0_ss, 160_ss), std::nullopt);
+        REQUIRE(victim);
+
+        TaLiveSenderSettings settings;
+        settings.sender = local;
+        settings.maxUnits = 8;
+        settings.unitLoadOrder = {"KBOT", "SOLAR", "TANK"};
+
+        // The peer has named nothing yet, so no record can carry the id a
+        // Remote unit holds in its own block.
+        TaPeerIds peerIds;
+        sim.attachTaLiveSender(std::make_unique<TaLiveSender>(sim, settings, peerIds));
+
+        auto takesNoCode = [](const TaLiveBatch& batch, uint8_t code) {
+            for (const auto& subPacket : batch.subPackets)
+            {
+                if (!subPacket.empty() && subPacket[0] == code)
+                {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        SECTION("a hit on a unit the peer has not named is counted and dropped")
+        {
+            sim.applyDamage(*victim, 30, *attacker);
+            sim.tick();
+            auto batch = sim.taLiveSender->takeBatch();
+            REQUIRE(batch);
+            REQUIRE(takesNoCode(*batch, 0x0b));
+            REQUIRE(sim.taLiveSender->stats().recordsDroppedNoId == 1);
+
+            // The tick itself is untouched: our own units are still described.
+            auto state = tadDecodeUnitState(batch->subPackets[0], tadUnitStateLayout({false, false, false}, 8));
+            REQUIRE(state);
+        }
+
+        SECTION("a death of a unit this machine does not own is counted and dropped")
+        {
+            // Not a record the outbox writes -- it only reports our own units'
+            // deaths -- and one this sender could not name whatever it said.
+            mixedOwnershipOutboxOf(sim).deaths.push_back(OutgoingDeath{*victim, std::nullopt, 50, 0x12});
+            sim.tick();
+            auto batch = sim.taLiveSender->takeBatch();
+            REQUIRE(batch);
+            REQUIRE(takesNoCode(*batch, 0x0c));
+            REQUIRE(sim.taLiveSender->stats().recordsDroppedNoId == 1);
+        }
+
+        SECTION("a type the load order does not name leaves that unit undescribed")
+        {
+            // Every id on the wire is a load-order index, so a type with none
+            // cannot be described at all. It costs the unit's description and
+            // nothing else -- no throw out of the middle of a tick.
+            settings.unitLoadOrder = {"KBOT", "SOLAR"};
+            TaLiveSender sender(sim, settings, peerIds);
+            sender.unitCreated(sim, *attacker);
+            sim.tick();
+            REQUIRE(sender.stats().unitsRefused == 1);
+            REQUIRE(sender.stats().unitStateSkipped == 0);
         }
     }
 }

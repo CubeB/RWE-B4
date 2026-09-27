@@ -4,6 +4,7 @@
 #include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/SimRandom.h>
 #include <rwe/sim/SimulationOwnership.h>
+#include <rwe/sim/TaLiveSender.h>
 #include <algorithm>
 #include <limits>
 #include <rwe/util/SimpleLogger.h>
@@ -1547,6 +1548,16 @@ namespace rwe
                 targetUnit = *unitTarget;
             }
             sim->demoRecorder->shotFired(*sim, id, weaponIndex, targetUnit, firingPoint, fireInfo->targetPosition, direction);
+        }
+
+        if (sim->taLiveSender)
+        {
+            std::optional<UnitId> targetUnit;
+            if (auto unitTarget = std::get_if<UnitId>(&attackInfo->target))
+            {
+                targetUnit = *unitTarget;
+            }
+            sim->taLiveSender->shotFired(*sim, id, weaponIndex, targetUnit, firingPoint, fireInfo->targetPosition, direction);
         }
 
         sim->events.push_back(FireWeaponEvent{weapon->weaponType, fireInfo->burstsFired, firingPoint});

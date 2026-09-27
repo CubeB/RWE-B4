@@ -660,6 +660,11 @@ set(SOURCE_FILES
     src/rwe/sim/AirMovement.h
     src/rwe/sim/DemoRecorder.cpp
     src/rwe/sim/DemoRecorder.h
+    src/rwe/sim/TaLiveSender.cpp
+    src/rwe/sim/TaLiveSender.h
+    src/rwe/sim/TaPeerIds.h
+    src/rwe/sim/TaWireTape.cpp
+    src/rwe/sim/TaWireTape.h
     src/rwe/sim/ResourceSettler.cpp
     src/rwe/sim/ResourceSettler.h
     src/rwe/sim/SimAngle.cpp
@@ -1138,6 +1143,7 @@ set(TEST_FILES
     src/rwe/sim/reclaimreach.test.cpp
     src/rwe/sim/remoteownership.test.cpp
     src/rwe/sim/mixedownership.test.cpp
+    src/rwe/sim/talivesender.test.cpp
     src/rwe/sim/fogplacement.test.cpp
     src/rwe/sim/gunship.test.cpp
     src/rwe/sim/aircraftidle.test.cpp
