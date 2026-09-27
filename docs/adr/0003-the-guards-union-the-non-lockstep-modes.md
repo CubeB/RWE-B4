@@ -14,7 +14,8 @@ guards below the two sides stand down for different reasons.
 
 Written at the merge of #421 (puppet playback) and #432 (own-clock), where both
 branches had guarded the same lines and one of the two had to be chosen. #421
-is on `revival` and #432 is not, when this was written. #421 had already
+reached `revival` first, as `e1ac68d0`; #432's branch took the merge and the
+guards below, and followed as `bf9fc1e`. #421 had already
 reached most of these conditions through the raw `replayPlayback` member, which
 `isTadPlayback()` widened; the shared guards now read `isPlayback()`, so the two
 shapes are named rather than spelled out at each site.
