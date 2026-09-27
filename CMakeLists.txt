@@ -559,6 +559,8 @@ set(SOURCE_FILES
     src/rwe/puppet/TadPuppetDriver.h
     src/rwe/puppet/TadScenePlayback.cpp
     src/rwe/puppet/TadScenePlayback.h
+    src/rwe/puppet/TaLiveReceiver.cpp
+    src/rwe/puppet/TaLiveReceiver.h
     src/rwe/proto/serialization.cpp
     src/rwe/proto/serialization.h
     src/rwe/render/FogTiles.cpp
@@ -1061,6 +1063,7 @@ set(TEST_FILES
     src/rwe/io/malformed_input.test.cpp
     src/rwe/puppet/TadDemo.test.cpp
     src/rwe/puppet/TadPuppetDriver.test.cpp
+    src/rwe/puppet/TaLiveReceiver.test.cpp
     src/rwe/scene/SceneManager.test.cpp
     src/rwe/scene/Screenshot.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp
