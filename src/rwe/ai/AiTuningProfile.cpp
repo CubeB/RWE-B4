@@ -196,6 +196,7 @@ namespace rwe
             {"counterEnemyComposition", &AiTuningProfile::counterEnemyComposition},
             {"spendSurplusOnCapacity", &AiTuningProfile::spendSurplusOnCapacity},
             {"answerOutpostRaids", &AiTuningProfile::answerOutpostRaids},
+            {"outpostResponseUsesPredictor", &AiTuningProfile::outpostResponseUsesPredictor},
             {"techLevelTwo", &AiTuningProfile::techLevelTwo},
             {"fortifyTowers", &AiTuningProfile::fortifyTowers},
             {"fortifyAtTierTwo", &AiTuningProfile::fortifyAtTierTwo},
@@ -255,6 +256,7 @@ namespace rwe
             {"counterShareTrigger", &AiTuningProfile::counterShareTrigger},
             {"capacityIncomeRatio", &AiTuningProfile::capacityIncomeRatio},
             {"outpostResponseStrength", &AiTuningProfile::outpostResponseStrength},
+            {"outpostResponseMarginThreshold", &AiTuningProfile::outpostResponseMarginThreshold},
             {"isolatedLandArmyCapMinWaterFraction", &AiTuningProfile::isolatedLandArmyCapMinWaterFraction},
             {"techMinArmyValueRatio", &AiTuningProfile::techMinArmyValueRatio},
             {"buildSiteGuardThreat", &AiTuningProfile::buildSiteGuardThreat},
@@ -500,6 +502,21 @@ namespace rwe
             p.labRocketKbotShare = 2;
             p.labArtilleryKbotShare = 1;
             p.attackArmySize = 14;
+        }
+        else if (upper == "ARM")
+        {
+            // ARM's kbot lab builds no Peewees and no Rocketeers of its own
+            // accord: its raiding is the Flash's, from the vehicle plant, and
+            // the lab's only output is what counterShares asks for -- Rocketeers
+            // or Hammers once the enemy's army calls for them. Found by the arena
+            // auto-tuner (#390) and confirmed on seeds it never saw: seeds
+            // 101-116 at 1800s, mirror and cross, ARM with these two knobs ahead
+            // of the shared defaults in 25 games of 32 and behind in 5 (sign test
+            // p < 0.001), mean margin +74.5 units; 6 of 8 ahead in 1v1v1v1.
+            // At twenty minutes the tuned side has no Peewees and about half as
+            // many Flashes again. docs/AI-TUNING.md has the runs.
+            p.labRaiderShare = 0;
+            p.labRocketKbotShare = 0;
         }
     }
 

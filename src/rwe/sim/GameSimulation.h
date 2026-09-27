@@ -615,6 +615,13 @@ namespace rwe
          */
         bool noSeaLevelTrigger{false};
 
+        /**
+         * What the sea takes off a unit in it once a second: the map's
+         * `waterdamage` when it sets `waterdoesdamage`, the acid of the Core
+         * Contingency's acid worlds, and 0 on any other map (0x48AEDF).
+         */
+        int waterDamage{0};
+
         GameTime nextWindSpeedChange;
 
         /**
@@ -1393,7 +1400,16 @@ namespace rwe
             unsigned int damagePoints,
             std::optional<UnitId> attacker,
             bool paralyzer,
-            std::optional<PlayerId> sourceOwner = std::nullopt);
+            std::optional<PlayerId> sourceOwner = std::nullopt,
+            const char* deathCause = "weapon");
+
+        /**
+         * The acid in the sea, once a second (0x48AED3-0x48AF32): every unit
+         * that is not a hovercraft and stands at or below sea level takes the
+         * map's waterDamage, through the same armour and veterancy as a hit,
+         * with nobody to credit. Death cause 11 in the original.
+         */
+        void updateWaterDamage();
 
         void applyDamageInRadius(const SimVector& position, SimScalar radius, const Projectile& projectile);
 

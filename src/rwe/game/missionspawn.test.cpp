@@ -2,10 +2,14 @@
 #include <rwe/LoadingScene_util.h>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/game/GameSimulationLoader.h>
+#include <set>
+#include <rwe/game/BuilderGuisDatabase.h>
+#include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/io/fbi/io.h>
 #include <rwe/io/ota/ota.h>
 #include <rwe/io/tdf/tdf.h>
+#include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/MovementClassDatabase.h>
@@ -156,6 +160,159 @@ namespace rwe
         // a 2x2 footprint.
         REQUIRE((dx * dx) + (dz * dz) > 0_ss);
         REQUIRE((dx * dx) + (dz * dz) <= 48_ss * 48_ss * 2_ss);
+    }
+
+    TEST_CASE("a mission building stands where the file puts it, whatever scenery was there", "[mission]")
+    {
+        // Issue #377. The original's creator never asks what is under a
+        // unit (0x485F50), so a mission's towers stand among its trees and
+        // rocks; RWE clears the scenery from under the building instead of
+        // leaving the building out.
+        MissionWorld world;
+        FeatureDefinition rock{};
+        rock.name = "ROCK";
+        rock.footprintX = 2;
+        rock.footprintZ = 2;
+        rock.height = 20_ss;
+        rock.blocking = true;
+        auto rockDef = world.sim.featureDefinitions.insert(rock);
+        // Cells 5,5 to 6,6: exactly where a 2x2 building at (100, 100) goes.
+        auto rockId = world.sim.addFeature(rockDef, 5, 5).value();
+
+        OtaSchema schema{};
+        schema.units = {missionUnit("BLDG", 1, 100, 100)};
+        auto result = spawnMissionUnits(world.sim, schema, world.slots);
+
+        REQUIRE(result.skipped.empty());
+        REQUIRE(result.spawned.size() == 1);
+        CHECK_FALSE(world.sim.tryGetFeature(rockId).has_value());
+        REQUIRE(result.adjusted.size() == 1);
+        CHECK(result.adjusted.front().find("cleared ROCK") != std::string::npos);
+
+        // Where the file put it, not beside the rock.
+        auto expected = world.sim.terrain.topLeftCoordinateToWorld(SimVector(96_ss, 0_ss, 96_ss));
+        const auto& building = world.sim.getUnitState(result.spawned.front());
+        CHECK(building.position.x == expected.x);
+        CHECK(building.position.z == expected.z);
+    }
+
+    TEST_CASE("a mission building over the edge of the map comes in just far enough to fit", "[mission]")
+    {
+        MissionWorld world;
+        auto gridWidth = world.sim.occupiedGrid.getWidth();
+        // Its footprint's first cell is the grid's last.
+        auto xPos = (gridWidth * 16) + 8;
+
+        OtaSchema schema{};
+        schema.units = {missionUnit("BLDG", 1, xPos, 100)};
+        auto result = spawnMissionUnits(world.sim, schema, world.slots);
+
+        REQUIRE(result.skipped.empty());
+        REQUIRE(result.spawned.size() == 1);
+        REQUIRE(result.adjusted.size() == 1);
+        CHECK(result.adjusted.front().find("moved onto the map") != std::string::npos);
+        const auto& building = world.sim.getUnitState(result.spawned.front());
+        auto footprint = world.sim.computeFootprintRegion(building.position, world.sim.unitDefinitions.at("BLDG").movementCollisionInfo);
+        CHECK(footprint.x + static_cast<int>(footprint.width) == gridWidth);
+    }
+
+    TEST_CASE("a building brought in from the edge is placed or refused as anywhere else, with one note", "[mission]")
+    {
+        MissionWorld world;
+        auto gridWidth = world.sim.occupiedGrid.getWidth();
+        auto xPos = (gridWidth * 16) + 8;
+        // Where it lands once brought in: its last two columns, rows 5 and 6.
+        auto landing = gridWidth - 2;
+
+        SECTION("a unit where it lands still keeps it out, and nothing claims it was moved")
+        {
+            // A 2x2 kbot centred on the landing cells, earlier in the file.
+            OtaSchema schema{};
+            schema.units = {missionUnit("KBOT", 1, (landing * 16) + 16, 96), missionUnit("BLDG", 1, xPos, 100)};
+            auto result = spawnMissionUnits(world.sim, schema, world.slots);
+            CHECK(result.spawned.size() == 1u);
+            CHECK(result.skipped.size() == 1u);
+            CHECK(result.adjusted.empty());
+        }
+
+        SECTION("scenery where it lands is cleared, and the one note says both")
+        {
+            FeatureDefinition rock{};
+            rock.name = "ROCK";
+            rock.footprintX = 2;
+            rock.footprintZ = 2;
+            rock.height = 20_ss;
+            rock.blocking = true;
+            auto rockDef = world.sim.featureDefinitions.insert(rock);
+            auto rockId = world.sim.addFeature(rockDef, landing, 5).value();
+
+            OtaSchema schema{};
+            schema.units = {missionUnit("BLDG", 1, xPos, 100)};
+            auto result = spawnMissionUnits(world.sim, schema, world.slots);
+            REQUIRE(result.spawned.size() == 1u);
+            CHECK_FALSE(world.sim.tryGetFeature(rockId).has_value());
+            REQUIRE(result.adjusted.size() == 1u);
+            CHECK(result.adjusted.front().find("moved onto the map") != std::string::npos);
+            CHECK(result.adjusted.front().find("cleared ROCK") != std::string::npos);
+        }
+    }
+
+    TEST_CASE("a mission's unit list is the block names of its useonly file", "[mission]")
+    {
+        auto tdf = parseTdfFromString("[ARMCOM]\n{\n}\n[armpw]\n{\n}\n");
+        CHECK(missionUnitListFromTdf(tdf) == std::set<std::string>{"ARMCOM", "ARMPW"});
+    }
+
+    TEST_CASE("a unit off the mission's list cannot be built or placed", "[mission]")
+    {
+        // Issue #381. The original removes it from the game (0x431740,
+        // 0x42D2E0); RWE keeps the definition and refuses it wherever a unit
+        // is made.
+        MissionWorld world;
+        BuilderGuisDatabase guis;
+        std::vector<GuiEntry> page(3);
+        page[0].common.name = "BLDG";
+        page[1].common.name = "kbot";
+        page[2].common.name = "NEXT";
+        guis.addBuilderGui("BLDG", {page});
+
+        auto kept = applyMissionUnitList(world.sim.unitDefinitions, guis, {"BLDG"});
+        CHECK(kept == 1u);
+        CHECK(world.sim.unitDefinitions.at("KBOT").excludedByMission);
+        CHECK_FALSE(world.sim.unitDefinitions.at("BLDG").excludedByMission);
+
+        SECTION("its button leaves the build menus, and nothing else does")
+        {
+            const auto& menu = guis.tryGetBuilderGui("BLDG")->get().front();
+            REQUIRE(menu.size() == 2u);
+            CHECK(menu[0].common.name == "BLDG");
+            CHECK(menu[1].common.name == "NEXT");
+        }
+
+        SECTION("the mission does not place one")
+        {
+            OtaSchema schema{};
+            schema.units = {missionUnit("KBOT", 1, 300, 300), missionUnit("BLDG", 1, 100, 100)};
+            auto result = spawnMissionUnits(world.sim, schema, world.slots);
+            REQUIRE(result.spawned.size() == 1u);
+            REQUIRE(result.skipped.size() == 1u);
+            CHECK(result.skipped.front().find("not on the mission's unit list") != std::string::npos);
+        }
+
+        SECTION("nobody can order one built")
+        {
+            OtaSchema schema{};
+            schema.units = {missionUnit("BLDG", 1, 100, 100)};
+            auto factory = spawnMissionUnits(world.sim, schema, world.slots).spawned.front();
+            auto owner = *world.slots[0];
+            auto site = SimVector(200_ss, 0_ss, 200_ss);
+            using Issue = PlayerUnitCommand::IssueOrder;
+
+            CHECK_FALSE(applyUnitCommandToSimulation(world.sim, owner, PlayerUnitCommand(factory, Issue(BuildOrder("KBOT", site), Issue::Immediate))));
+            CHECK_FALSE(applyUnitCommandToSimulation(world.sim, owner, PlayerUnitCommand(factory, PlayerUnitCommand::ModifyBuildQueue{1, "KBOT"})));
+            // What the list does offer is still built.
+            CHECK(applyUnitCommandToSimulation(world.sim, owner, PlayerUnitCommand(factory, Issue(BuildOrder("BLDG", site), Issue::Immediate))));
+        }
     }
 
     TEST_CASE("a mission unit with orders to run is not the player's yet", "[mission]")

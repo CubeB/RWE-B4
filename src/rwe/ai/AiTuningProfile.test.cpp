@@ -73,4 +73,24 @@ namespace rwe
         REQUIRE(applyAiTuning(p, "commanderLeashRadius", "999"));
         REQUIRE(p.commanderLeashRadius == SimScalar(999.0f));
     }
+
+    // #389: the outpost-raid response's engagement-predictor knobs. Default
+    // off/zero so an un-tuned game is unchanged; both have to be settable by
+    // name like every other knob for --ai-tune and the arena scripts to
+    // reach them.
+    TEST_CASE("applyAiTuning sets outpostResponseUsesPredictor by name")
+    {
+        AiTuningProfile p;
+        REQUIRE(p.outpostResponseUsesPredictor == false);
+        REQUIRE(applyAiTuning(p, "outpostResponseUsesPredictor", "true"));
+        REQUIRE(p.outpostResponseUsesPredictor == true);
+    }
+
+    TEST_CASE("applyAiTuning sets outpostResponseMarginThreshold by name")
+    {
+        AiTuningProfile p;
+        REQUIRE(p.outpostResponseMarginThreshold == 0.0f);
+        REQUIRE(applyAiTuning(p, "outpostResponseMarginThreshold", "5000"));
+        REQUIRE(p.outpostResponseMarginThreshold == 5000.0f);
+    }
 }

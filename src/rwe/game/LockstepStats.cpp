@@ -1,9 +1,47 @@
 #include "LockstepStats.h"
 
 #include <algorithm>
+#include <iomanip>
+#include <sstream>
 
 namespace rwe
 {
+    double LockstepSummary::effectiveTicksPerSecond() const
+    {
+        auto seconds = std::chrono::duration<double>(elapsed).count();
+        if (seconds <= 0.0)
+        {
+            return 0.0;
+        }
+        return static_cast<double>(ticks) / seconds;
+    }
+
+    std::string LockstepSummary::describe() const
+    {
+        std::ostringstream out;
+        out << "Lockstep summary: " << ticks << " ticks in " << elapsed.count() << " ms ("
+            << std::fixed << std::setprecision(1) << effectiveTicksPerSecond() << " tps)"
+            << ", stalls " << stalls
+            << " totalling " << totalStalled.count() << " ms"
+            << ", longest " << longestStall.count() << " ms"
+            << ", cap-dropped " << ticksLostToCap
+            << ", gate-skips " << gateSkips;
+        return out.str();
+    }
+
+    LockstepSummary LockstepStats::summary(Timestamp now, unsigned int ticksLostToCap, unsigned int gateSkips) const
+    {
+        LockstepSummary result;
+        result.ticks = ticks;
+        result.elapsed = firstRan ? std::chrono::duration_cast<std::chrono::milliseconds>(now - *firstRan) : std::chrono::milliseconds(0);
+        result.stalls = stalls;
+        result.totalStalled = stalledSoFar(now);
+        result.longestStall = longest;
+        result.ticksLostToCap = ticksLostToCap;
+        result.gateSkips = gateSkips;
+        return result;
+    }
+
     void LockstepStats::tickBlocked(Timestamp now, const std::vector<PlayerId>& players)
     {
         if (!stallStart)
@@ -21,6 +59,12 @@ namespace rwe
 
     void LockstepStats::tickRan(Timestamp now)
     {
+        ++ticks;
+        if (!firstRan)
+        {
+            firstRan = now;
+        }
+
         if (!stallStart)
         {
             return;
