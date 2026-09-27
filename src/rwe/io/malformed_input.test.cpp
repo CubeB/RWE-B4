@@ -431,4 +431,69 @@ namespace rwe
             REQUIRE(driver.stats().recordsDroppedBadType == 1);
         }
     }
+
+    TEST_CASE("the puppet driver's newer records are bounded like the rest", "[malformed][puppet]")
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        definePuppetTestWorld(sim);
+        addWellStockedPlayer(sim, "ARM");
+        addWellStockedPlayer(sim, "CORE");
+
+        TadPuppetDriver driver(sim, 8, puppetTestLoadOrder());
+        driver.addPlayer(1, PlayerId(0));
+        driver.addPlayer(2, PlayerId(1));
+
+        auto feed = [&](uint8_t sender, const std::vector<TadBytes>& subs) {
+            driver.onPacket(TadPacket{0, sender}, subs);
+        };
+
+        SECTION("a shot whose shooter no puppet holds is dropped, not indexed with")
+        {
+            auto shoot = [&](uint16_t shooter, uint8_t slot) {
+                return tadEncodeShot(TadShot{
+                    TadPosition{0, 0, 0}, TadPosition{65536, 0, 0}, TadRotation{0, 0, 0}, 0, shooter, slot});
+            };
+
+            feed(1, {shoot(99, 0)});
+            REQUIRE(driver.stats().shotsDropped == 1);
+
+            // A puppet exists but has no weapon in slot 7, so the slot is
+            // refused before the weapon map is reached.
+            feed(1, {tadEncodeBuildStarted(TadBuildStarted{3, 1, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}})});
+            feed(1, {shoot(1, 7)});
+            REQUIRE(driver.stats().shotsDropped == 2);
+            REQUIRE(driver.stats().shotsSpawned == 0);
+        }
+
+        SECTION("a script call for no puppet, and one past its script table")
+        {
+            feed(1, {tadEncodeScriptCall(TadScriptCall{99, 0, 2, {1, 2, 3, 0}})});
+            REQUIRE(driver.stats().scriptCallsDropped == 1);
+
+            feed(1, {tadEncodeBuildStarted(TadBuildStarted{3, 1, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}})});
+            feed(1, {tadEncodeScriptCall(TadScriptCall{1, 0xffff, 9, {1, 2, 3, 4}})});
+            REQUIRE(driver.stats().scriptCallsDropped == 2);
+            REQUIRE(driver.stats().scriptCallsRun == 0);
+        }
+
+        SECTION("a chat line from a sender no player stands for is ignored")
+        {
+            TadBytes chat(65, 0);
+            chat[0] = 0x05;
+            chat[1] = 'h';
+            chat[2] = 'i';
+
+            feed(3, {chat});
+            REQUIRE(driver.stats().chatLines == 0);
+            REQUIRE(driver.takeChat().empty());
+        }
+
+        SECTION("resource statistics for an unmapped sender change nobody")
+        {
+            TadResourceStats stats{};
+            stats.metalStored = 123.0f;
+            feed(3, {tadEncodeResourceStats(stats)});
+            REQUIRE(sim.getPlayer(PlayerId(0)).metal == Metal(10000.0f));
+        }
+    }
 }

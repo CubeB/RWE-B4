@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <optional>
 #include <rwe/io/tad/TadReader.h>
+#include <rwe/io/tad/tad_encoders.h>
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/puppet/TadPuppetDriver.h>
 #include <rwe/puppet/puppet_test_util.h>
@@ -129,5 +130,43 @@ namespace rwe
         {
             REQUIRE(d <= 32.0);
         }
+    }
+
+    TEST_CASE("the external clock holds a record until the scene's tick", "[puppet]")
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        definePuppetTestWorld(sim);
+        addWellStockedPlayer(sim, "ARM");
+
+        TadPuppetDriver driver(sim, 8, puppetTestLoadOrder());
+        driver.addPlayer(1, PlayerId(0));
+        driver.setExternalClock(true);
+
+        auto layout = tadUnitStateLayout(std::vector<bool>{false, false, false}, 8);
+
+        TadUnitState place;
+        place.tick = 0;
+        place.sync = TadUnitSync{0, 3, 100, 0, 0, 0, std::nullopt, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}, std::nullopt};
+        driver.onPacket(TadPacket{0, 1}, {tadEncodeUnitState(place, layout)});
+
+        // Queued, not applied: the driver does not own the clock.
+        REQUIRE_FALSE(findUnitOfType(sim, "TANK"));
+
+        driver.applyTick(0);
+        REQUIRE(findUnitOfType(sim, "TANK"));
+        REQUIRE(driver.lastTick() == 0u);
+
+        // A record for a later tick stays queued until its tick comes round.
+        // The slot is tick % maxUnits, so the later record is at tick 8.
+        auto firstPosition = sim.getUnitState(*findUnitOfType(sim, "TANK")).position;
+        TadUnitState later;
+        later.tick = 8;
+        later.sync = TadUnitSync{0, 3, 50, 0, 0, 0, std::nullopt, TadPosition{2000000, 0, 0}, TadRotation{0, 0, 0}, std::nullopt};
+        driver.onPacket(TadPacket{0, 1}, {tadEncodeUnitState(later, layout)});
+        driver.applyTick(1);
+        REQUIRE(sim.getUnitState(*findUnitOfType(sim, "TANK")).position.x == firstPosition.x);
+        driver.applyTick(8);
+        REQUIRE(sim.getUnitState(*findUnitOfType(sim, "TANK")).hitPoints == 50);
+        REQUIRE(driver.lastTick() == 8u);
     }
 }

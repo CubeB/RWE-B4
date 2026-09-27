@@ -1,5 +1,9 @@
 #include <rwe/puppet/TadPuppetDriver.h>
+#include <algorithm>
 #include <cmath>
+#include <map>
+#include <utility>
+#include <rwe/cob/CobEnvironment.h>
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/pathfinding/UnitPath.h>
 #include <rwe/sim/GameSimulation.h>
@@ -62,6 +66,23 @@ namespace rwe
         std::unordered_map<uint8_t, uint32_t> lastSerial;
 
         std::size_t initialFeatureCount{0};
+
+        /** When set, records are queued by tick and the scene owns the clock. */
+        bool externalClock{false};
+
+        struct QueuedPacket
+        {
+            uint8_t sender;
+            std::vector<TadBytes> subPackets;
+        };
+
+        /** Records waiting for their tick, in the order the stream gave them. */
+        std::map<uint32_t, std::vector<QueuedPacket>> pending;
+
+        /** The highest tick a record has been queued for. */
+        std::optional<uint32_t> lastSeenTick;
+
+        std::vector<TadChatLine> chatLines;
 
         TadPuppetStats stats;
 
@@ -561,6 +582,195 @@ namespace rwe
             applyRemoteDamage(sim, *live, e->damage);
         }
 
+        /**
+         * Spawns the round a recorded 0x0d names, from the recorded origin
+         * toward the recorded target, for its looks only.
+         *
+         * The weapon is the shooter's own slot, so the model and flight match
+         * what the unit fired. Every demo player is Remote, and the damage path
+         * refuses a Remote victim, so this can take nothing off any unit;
+         * damage reaches the simulation only through the owner's 0x0b. A shot
+         * whose shooter or slot cannot be resolved is counted and dropped.
+         */
+        void applyShot(const TadBytes& subPacket)
+        {
+            auto e = tadDecodeShot(subPacket);
+            if (!e)
+            {
+                return;
+            }
+
+            auto key = keyOfId.find(e->shooterId);
+            if (key == keyOfId.end())
+            {
+                ++stats.shotsDropped;
+                return;
+            }
+            auto it = puppets.find(key->second);
+            if (it == puppets.end())
+            {
+                ++stats.shotsDropped;
+                return;
+            }
+            auto live = liveUnitOf(it->second);
+            if (!live)
+            {
+                ++stats.shotsDropped;
+                return;
+            }
+
+            auto& unit = sim.getUnitState(*live);
+            if (e->weaponSlot >= unit.weapons.size() || !unit.weapons[e->weaponSlot])
+            {
+                ++stats.shotsDropped;
+                return;
+            }
+            const auto& weapon = *unit.weapons[e->weaponSlot];
+            if (sim.weaponDefinitions.find(weapon.weaponType) == sim.weaponDefinitions.end())
+            {
+                ++stats.shotsDropped;
+                return;
+            }
+
+            auto origin = toSimPosition(e->origin);
+            auto target = toSimPosition(e->target);
+            auto delta = target - origin;
+            auto length = delta.length();
+            if (length <= 0_ss)
+            {
+                ++stats.shotsDropped;
+                return;
+            }
+
+            sim.spawnProjectile(ProjectileSpawn{
+                .owner = unit.owner,
+                .weapon = &weapon,
+                .position = origin,
+                .direction = delta.normalizedOr(UnitState::toDirection(unit.rotation)),
+                .distanceToTarget = length,
+                .attacker = *live,
+                .targetPosition = target,
+            });
+            ++stats.shotsSpawned;
+        }
+
+        /**
+         * Runs a recorded 0x10 on the puppet's own COB environment, so the
+         * animation, activation or build arm the owner's script asked for
+         * plays here. The index is into the unit's own script table, which is
+         * the order RWE parsed out of the same .cob, and both it and the
+         * argument count are bounded before use.
+         */
+        void applyScriptCall(const TadBytes& subPacket)
+        {
+            auto e = tadDecodeScriptCall(subPacket);
+            if (!e)
+            {
+                return;
+            }
+
+            auto key = keyOfId.find(e->unitId);
+            if (key == keyOfId.end())
+            {
+                ++stats.scriptCallsDropped;
+                return;
+            }
+            auto it = puppets.find(key->second);
+            if (it == puppets.end())
+            {
+                ++stats.scriptCallsDropped;
+                return;
+            }
+            auto live = liveUnitOf(it->second);
+            if (!live)
+            {
+                ++stats.scriptCallsDropped;
+                return;
+            }
+
+            auto& unit = sim.getUnitState(*live);
+            if (!unit.cobEnvironment)
+            {
+                ++stats.scriptCallsDropped;
+                return;
+            }
+            const auto* script = unit.cobEnvironment->script();
+            if (script == nullptr || e->scriptIndex >= script->functions.size())
+            {
+                ++stats.scriptCallsDropped;
+                return;
+            }
+
+            auto count = std::min<unsigned int>(e->argCount, 4u);
+            std::vector<int> params(e->args, e->args + count);
+            unit.cobEnvironment->createThread(e->scriptIndex, params);
+            ++stats.scriptCallsRun;
+        }
+
+        /** Writes a recorded 0x28 onto the sender's own player, which is whose state it is. */
+        void applyResourceStats(uint8_t sender, const TadBytes& subPacket)
+        {
+            auto e = tadDecodeResourceStats(subPacket);
+            if (!e)
+            {
+                return;
+            }
+            auto player = senderToPlayer.find(sender);
+            if (player == senderToPlayer.end())
+            {
+                return;
+            }
+
+            auto& p = sim.getPlayer(player->second);
+            p.metal = Metal(std::max(0.0f, e->metalStored));
+            p.energy = Energy(std::max(0.0f, e->energyStored));
+            p.maxMetal = Metal(std::max(0.0f, e->metalStorage));
+            p.maxEnergy = Energy(std::max(0.0f, e->energyStorage));
+        }
+
+        void applyChat(uint8_t sender, const TadBytes& subPacket, bool ally)
+        {
+            std::string text;
+            if (ally)
+            {
+                auto e = tadDecodeAllyChat(subPacket);
+                if (!e)
+                {
+                    return;
+                }
+                text = std::move(e->text);
+            }
+            else
+            {
+                auto e = tadDecodeChat(subPacket);
+                if (!e)
+                {
+                    return;
+                }
+                text = std::move(e->text);
+            }
+
+            if (text.empty())
+            {
+                return;
+            }
+            auto player = senderToPlayer.find(sender);
+            if (player == senderToPlayer.end())
+            {
+                return;
+            }
+
+            if (ally)
+            {
+                ++stats.allyChatLines;
+            }
+            else
+            {
+                ++stats.chatLines;
+            }
+            chatLines.push_back(TadChatLine{player->second, ally, std::move(text)});
+        }
+
         void applyGroundMover(UnitState& unit, const TadGroundPath& ground)
         {
             if (ground.waypoints.empty())
@@ -855,6 +1065,89 @@ namespace rwe
             unit.hitPoints = sync.health;
             puppet.placed = true;
         }
+
+        void applySubPackets(uint8_t sender, const std::vector<TadBytes>& subPackets)
+        {
+            for (const auto& subPacket : subPackets)
+            {
+                if (subPacket.empty())
+                {
+                    continue;
+                }
+
+                switch (static_cast<TadSubPacketCode>(subPacket[0]))
+                {
+                    case TadSubPacketCode::UnitBuildStarted:
+                        applyBuildStarted(sender, subPacket);
+                        break;
+                    case TadSubPacketCode::UnitBuildFinished:
+                        applyBuildFinished(sender, subPacket);
+                        break;
+                    case TadSubPacketCode::UnitKilled:
+                        applyDeath(subPacket);
+                        break;
+                    case TadSubPacketCode::UnitTakeDamage:
+                        applyDamage(subPacket);
+                        break;
+                    case TadSubPacketCode::WeaponFired:
+                        applyShot(subPacket);
+                        break;
+                    case TadSubPacketCode::UnitStartScript:
+                        applyScriptCall(subPacket);
+                        break;
+                    case TadSubPacketCode::PlayerResourceInfo:
+                        applyResourceStats(sender, subPacket);
+                        break;
+                    case TadSubPacketCode::Chat:
+                        applyChat(sender, subPacket, false);
+                        break;
+                    case TadSubPacketCode::AllyChat:
+                        applyChat(sender, subPacket, true);
+                        break;
+                    case TadSubPacketCode::UnitStatAndMove:
+                        applyUnitState(sender, subPacket);
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+
+        void updateWreckCount()
+        {
+            if (sim.features.slotCount() > initialFeatureCount)
+            {
+                stats.wrecksLeft = sim.features.slotCount() - initialFeatureCount;
+            }
+        }
+
+        /**
+         * The sender's current serial, from its own 0x2c or, for a record that
+         * carries no clock of its own, the last one it sent. Counts a packet
+         * that has neither.
+         */
+        std::optional<uint32_t> resolveSerial(uint8_t sender, const std::vector<TadBytes>& subPackets)
+        {
+            for (const auto& subPacket : subPackets)
+            {
+                if (subPacket.size() >= 7 && static_cast<TadSubPacketCode>(subPacket[0]) == TadSubPacketCode::UnitStatAndMove)
+                {
+                    if (auto state = tadDecodeUnitState(subPacket, layout))
+                    {
+                        return state->tick;
+                    }
+                }
+            }
+
+            auto last = lastSerial.find(sender);
+            if (last != lastSerial.end())
+            {
+                return last->second;
+            }
+
+            ++stats.packetsWithoutClock;
+            return std::nullopt;
+        }
     };
 
     TadPuppetDriver::TadPuppetDriver(
@@ -877,71 +1170,67 @@ namespace rwe
     {
         ++impl->stats.packets;
 
-        std::optional<uint32_t> serial;
-        for (const auto& subPacket : subPackets)
-        {
-            if (subPacket.size() >= 7 && static_cast<TadSubPacketCode>(subPacket[0]) == TadSubPacketCode::UnitStatAndMove)
-            {
-                if (auto state = tadDecodeUnitState(subPacket, impl->layout))
-                {
-                    serial = state->tick;
-                    break;
-                }
-            }
-        }
-
+        auto serial = impl->resolveSerial(packet.sender, subPackets);
         if (!serial)
         {
-            auto last = impl->lastSerial.find(packet.sender);
-            if (last != impl->lastSerial.end())
+            if (impl->externalClock)
             {
-                serial = last->second;
+                impl->pending[impl->lastSeenTick.value_or(0)].push_back(Impl::QueuedPacket{packet.sender, subPackets});
             }
             else
             {
-                ++impl->stats.packetsWithoutClock;
+                impl->applySubPackets(packet.sender, subPackets);
+                impl->updateWreckCount();
             }
+            return;
         }
 
-        if (serial)
+        if (!impl->baseSerial)
         {
-            impl->advanceTo(*serial);
-            impl->lastSerial[packet.sender] = *serial;
+            impl->baseSerial = *serial;
+        }
+        auto tick = *serial >= *impl->baseSerial ? *serial - *impl->baseSerial : 0u;
+        impl->lastSerial[packet.sender] = *serial;
+        impl->lastSeenTick = std::max(impl->lastSeenTick.value_or(0u), tick);
+
+        if (impl->externalClock)
+        {
+            impl->pending[tick].push_back(Impl::QueuedPacket{packet.sender, subPackets});
+            return;
         }
 
-        for (const auto& subPacket : subPackets)
+        impl->advanceTo(*serial);
+        impl->applySubPackets(packet.sender, subPackets);
+        impl->updateWreckCount();
+    }
+
+    void TadPuppetDriver::setExternalClock(bool external)
+    {
+        impl->externalClock = external;
+    }
+
+    void TadPuppetDriver::applyTick(uint32_t tick)
+    {
+        for (auto it = impl->pending.begin(); it != impl->pending.end() && it->first <= tick;)
         {
-            if (subPacket.empty())
+            for (const auto& queued : it->second)
             {
-                continue;
+                impl->applySubPackets(queued.sender, queued.subPackets);
             }
-
-            switch (static_cast<TadSubPacketCode>(subPacket[0]))
-            {
-                case TadSubPacketCode::UnitBuildStarted:
-                    impl->applyBuildStarted(packet.sender, subPacket);
-                    break;
-                case TadSubPacketCode::UnitBuildFinished:
-                    impl->applyBuildFinished(packet.sender, subPacket);
-                    break;
-                case TadSubPacketCode::UnitKilled:
-                    impl->applyDeath(subPacket);
-                    break;
-                case TadSubPacketCode::UnitTakeDamage:
-                    impl->applyDamage(subPacket);
-                    break;
-                case TadSubPacketCode::UnitStatAndMove:
-                    impl->applyUnitState(packet.sender, subPacket);
-                    break;
-                default:
-                    break;
-            }
+            it = impl->pending.erase(it);
         }
+        impl->updateWreckCount();
+        impl->advanceAirGoals();
+    }
 
-        if (impl->sim.features.slotCount() > impl->initialFeatureCount)
-        {
-            impl->stats.wrecksLeft = impl->sim.features.slotCount() - impl->initialFeatureCount;
-        }
+    std::optional<uint32_t> TadPuppetDriver::lastTick() const
+    {
+        return impl->lastSeenTick;
+    }
+
+    std::vector<TadChatLine> TadPuppetDriver::takeChat()
+    {
+        return std::exchange(impl->chatLines, {});
     }
 
     const TadPuppetStats& TadPuppetDriver::stats() const

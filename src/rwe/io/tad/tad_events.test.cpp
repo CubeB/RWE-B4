@@ -585,4 +585,98 @@ namespace rwe
             REQUIRE(!tadDecodeUnitState(lying, layout));
         }
     }
+
+    TEST_CASE("tadDecodeChat", "[tad]")
+    {
+        SECTION("a player's line, from demo 9592")
+        {
+            // clang-format off
+            TadBytes s{
+                0x05, 0x3c, 0x41, 0x6c, 0x62, 0x65, 0x72, 0x74, 0x2d, 0x74, 0x68,
+                0x65, 0x5f, 0x38, 0x74, 0x68, 0x3e, 0x20, 0x77, 0x74, 0x66, 0x20,
+                0x69, 0x73, 0x77, 0x20, 0x74, 0x68, 0x69, 0x73, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+            // clang-format on
+
+            auto e = tadDecodeChat(s);
+            REQUIRE(e);
+            REQUIRE(e->text == "<Albert-the_8th> wtf isw this");
+        }
+
+        SECTION("strips control bytes and bounds the text")
+        {
+            TadBytes s(65, 0);
+            s[0] = 0x05;
+            s[1] = 'a';
+            s[2] = 0x01;
+            s[3] = 'b';
+            s[64] = 0;
+
+            auto e = tadDecodeChat(s);
+            REQUIRE(e);
+            REQUIRE(e->text == "ab");
+            REQUIRE_FALSE(e->truncated);
+        }
+
+        SECTION("reads an overlong older-recorder message whole, then cuts it")
+        {
+            TadBytes s(80, 'x');
+            s[0] = 0x05;
+
+            auto e = tadDecodeChat(s);
+            REQUIRE(e);
+            REQUIRE(e->text.size() == 64);
+            REQUIRE(e->truncated);
+        }
+
+        SECTION("refuses anything but a chat record")
+        {
+            REQUIRE(!tadDecodeChat(TadBytes{}));
+            REQUIRE(!tadDecodeChat(TadBytes{0x06, 0x00}));
+        }
+    }
+
+    TEST_CASE("tadDecodeAllyChat", "[tad]")
+    {
+        SECTION("an empty ally line, from demo 9592")
+        {
+            // clang-format off
+            TadBytes s{
+                0xf9, 0x33, 0x2e, 0xd0, 0x52, 0x36, 0x2e, 0xd0, 0x52, 0x00, 0x2b,
+                0x41, 0x00, 0x01, 0x54, 0xbf, 0x7c, 0x63, 0x9c, 0x93, 0x4f, 0xf3,
+                0x3a, 0xe8, 0xe4, 0xed, 0x7f, 0xbc, 0xbc, 0x6c, 0x8d, 0xa6, 0xa2,
+                0x63, 0x39, 0x15, 0xe8, 0xcb, 0x16, 0xeb, 0x07, 0xe6, 0xb5, 0x1b,
+                0x7a, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+            // clang-format on
+
+            auto e = tadDecodeAllyChat(s);
+            REQUIRE(e);
+            REQUIRE(e->fromDplayId == 0x52d02e33u);
+            REQUIRE(e->toDplayId == 0x52d02e36u);
+            REQUIRE(e->text.empty());
+        }
+
+        SECTION("the message is where a 0x05's is, after the two ids")
+        {
+            TadBytes s(73, 0);
+            s[0] = 0xf9;
+            s[9] = 'h';
+            s[10] = 'i';
+            s[11] = 0;
+
+            auto e = tadDecodeAllyChat(s);
+            REQUIRE(e);
+            REQUIRE(e->text == "hi");
+        }
+
+        SECTION("refuses a record of the wrong length")
+        {
+            REQUIRE(!tadDecodeAllyChat(TadBytes{0xf9}));
+            REQUIRE(!tadDecodeAllyChat(TadBytes(72, 0xf9)));
+        }
+    }
 }

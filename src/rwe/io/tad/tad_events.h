@@ -411,6 +411,49 @@ namespace rwe
         uint16_t value;
     };
 
+    /**
+     * 0x05, a chat line. The message is a NUL-terminated C string at offset 1
+     * of a 65-byte record, which is what the reference's `createChatSubpacket`
+     * writes and what the corpus reads back (`<Albert-the_8th> wtf isw this`).
+     *
+     * A record whose byte 64 is not NUL came from an older recorder that wrote
+     * more text than it should have, as a single packet, so the rest of the
+     * buffer is the message -- see the note on `0x05` in docs/TA-DEMOS.md.
+     * Decoding here is by length, not by trusting a terminator, and the text is
+     * bounded and stripped of anything unprintable because it arrives from the
+     * network.
+     */
+    struct TadChat
+    {
+        std::string text;
+
+        /** The message ran past the 64-byte buffer and was cut. */
+        bool truncated{false};
+    };
+
+    /**
+     * 0xf9, an ally chat line. Eight bytes -- two 32-bit DirectPlay ids, the
+     * sender's and the recipient's -- then the same 64-byte NUL-terminated
+     * message body a `0x05` carries. Read off the three corpus demos that
+     * contain one (9592, 14868, 7703); the reference sizes it at 73 and decodes
+     * no further.
+     *
+     * The offset is evidence, not analogy: beside an empty ally line, whose
+     * body byte for byte matches an empty `0x05` body, are lines like
+     * `<Maj_Paradox->Allies>  and vamps` at the same offset. The two ids are
+     * left as read; nothing here uses them.
+     */
+    struct TadAllyChat
+    {
+        uint32_t fromDplayId{0};
+        uint32_t toDplayId{0};
+        std::string text;
+        bool truncated{false};
+    };
+
+    std::optional<TadChat> tadDecodeChat(const TadBytes& s);
+    std::optional<TadAllyChat> tadDecodeAllyChat(const TadBytes& s);
+
     // ---------------------------------------------------------------------
     // 0x2c, unit state. Unlike everything above, this one was read out of
     // TotalA.exe rather than off the corpus, and then checked against the

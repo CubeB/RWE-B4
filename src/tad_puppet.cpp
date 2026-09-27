@@ -199,6 +199,9 @@ namespace
                  {"unknownUnit", stats.recordsDroppedUnknownUnit},
                  {"spawnRefused", stats.spawnsRefused},
              }},
+            {"shots", {{"spawned", stats.shotsSpawned}, {"dropped", stats.shotsDropped}}},
+            {"scripts", {{"run", stats.scriptCallsRun}, {"dropped", stats.scriptCallsDropped}}},
+            {"chat", {{"lines", stats.chatLines}, {"allyLines", stats.allyChatLines}}},
             {"packetsWithoutClock", stats.packetsWithoutClock},
             {"drift", {{"ground", driftJson(ground)}, {"air", driftJson(air)}}}};
     }
@@ -228,6 +231,9 @@ namespace
                   << ", unknown unit " << stats.recordsDroppedUnknownUnit
                   << ", refused spawn " << stats.spawnsRefused
                   << ", no clock " << stats.packetsWithoutClock << "\n";
+        std::cout << "  shots " << stats.shotsSpawned << " spawned, " << stats.shotsDropped << " dropped"
+                  << "; scripts " << stats.scriptCallsRun << " run, " << stats.scriptCallsDropped << " dropped"
+                  << "; chat " << stats.chatLines << " lines, " << stats.allyChatLines << " ally\n";
         printDrift("ground", summarise(stats.groundDrift));
         printDrift("air", summarise(stats.airDrift));
     }
@@ -284,6 +290,12 @@ namespace
         addCounts(into.recordsDroppedUnknownUnit, from.recordsDroppedUnknownUnit);
         addCounts(into.spawnsRefused, from.spawnsRefused);
         addCounts(into.packetsWithoutClock, from.packetsWithoutClock);
+        addCounts(into.shotsSpawned, from.shotsSpawned);
+        addCounts(into.shotsDropped, from.shotsDropped);
+        addCounts(into.scriptCallsRun, from.scriptCallsRun);
+        addCounts(into.scriptCallsDropped, from.scriptCallsDropped);
+        addCounts(into.chatLines, from.chatLines);
+        addCounts(into.allyChatLines, from.allyChatLines);
         into.groundDrift.distances.insert(into.groundDrift.distances.end(), from.groundDrift.distances.begin(), from.groundDrift.distances.end());
         into.airDrift.distances.insert(into.airDrift.distances.end(), from.airDrift.distances.begin(), from.airDrift.distances.end());
         into.groundDrift.samples += from.groundDrift.samples;

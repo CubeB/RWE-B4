@@ -52,8 +52,27 @@ namespace rwe
         /** A packet whose sender had no serial yet, applied at the current tick. */
         uint64_t packetsWithoutClock{0};
 
+        /** A recorded 0x0d turned into a display round, and one that could not be. */
+        uint64_t shotsSpawned{0};
+        uint64_t shotsDropped{0};
+
+        /** A recorded 0x10 run on the puppet's own COB, and one that named nothing runnable. */
+        uint64_t scriptCallsRun{0};
+        uint64_t scriptCallsDropped{0};
+
+        uint64_t chatLines{0};
+        uint64_t allyChatLines{0};
+
         TadPuppetDrift groundDrift;
         TadPuppetDrift airDrift;
+    };
+
+    /** One chat line from the stream, for the scene to print and a tool to count. */
+    struct TadChatLine
+    {
+        PlayerId player;
+        bool ally{false};
+        std::string text;
     };
 
     /**
@@ -88,6 +107,28 @@ namespace rwe
 
         /** Applies one packet's subpackets, advancing the clock to its serial. */
         void onPacket(const TadPacket& packet, const std::vector<TadBytes>& subPackets);
+
+        /**
+         * Hands the clock to the caller instead of ticking the simulation from
+         * `onPacket`. A packet's records are queued for the tick its serial
+         * names, and `applyTick` applies them; the scene drives the ticks and
+         * the driver never calls `GameSimulation::tick` itself. The headless
+         * tool leaves this off, so it owns the clock.
+         */
+        void setExternalClock(bool external);
+
+        /**
+         * The external clock's tick: applies every queued record that belongs
+         * to this tick, then advances moving air goals. Call once before each
+         * simulation tick.
+         */
+        void applyTick(uint32_t tick);
+
+        /** The highest tick the stream has named, once anything has a serial. */
+        std::optional<uint32_t> lastTick() const;
+
+        /** Takes the chat lines decoded since the last call. */
+        std::vector<TadChatLine> takeChat();
 
         const TadPuppetStats& stats() const;
 
