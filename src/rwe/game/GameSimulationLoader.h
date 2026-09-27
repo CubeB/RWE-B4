@@ -142,6 +142,8 @@ namespace rwe
         std::vector<UnitId> spawned;
         /** One line for each [unitN] that was not spawned, and why. */
         std::vector<std::string> skipped;
+        /** One line for each building placed only by clearing scenery from under it or moving it onto the map. */
+        std::vector<std::string> adjusted;
     };
 
     /**
@@ -159,7 +161,10 @@ namespace rwe
      * number %d invalid" and makes the unit anyway. And one because RWE
      * keeps one unit to a cell where the original lets them overlap: a
      * mobile unit whose spot is taken goes to the nearest free one within
-     * eight cells, and a building whose spot is taken is not made.
+     * eight cells. A building keeps its spot: the blocking features under it
+     * are cleared, and one hanging off the map's edge comes in just far
+     * enough to fit (issue #377). Only a unit or another building in the way
+     * keeps a building out.
      */
     MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers);
 

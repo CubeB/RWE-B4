@@ -555,6 +555,10 @@ int main(int argc, char* argv[])
             {
                 LOG_WARN << "Mission unit not placed: " << line;
             }
+            for (const auto& line : result.adjusted)
+            {
+                LOG_INFO << "Mission building " << line;
+            }
         }
         else
         {

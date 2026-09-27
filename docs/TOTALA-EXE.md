@@ -589,6 +589,19 @@ quirks of the original that RWE reproduces although they look like defects.
   because a mod's script is untrusted input, and in a network game a fault
   ended every peer's game at once (#75).
 
+- **A mission building clears the scenery from under it.** The original's
+  creator `0x485F50` never asks what is where a unit goes, so a mission's
+  towers stand among its trees and rocks, sharing the squares. RWE keeps a
+  building and a feature apart, so `spawnMissionUnits` deletes every blocking
+  feature under a mission building's footprint rather than leaving the
+  building out, and brings a footprint hanging off the map's edge in just far
+  enough to fit (#377). Whether the original's feature survives under the
+  building was not traced. Across the 175 shipped missions that is 61 to 63
+  buildings per difficulty, in 34 missions, which RWE had been leaving out: an
+  enemy's dragon's teeth, towers, storage and Mohos, mostly. A unit or another
+  building in the way still keeps a mission building out, 4 to 6 per
+  difficulty.
+
 
 ## 91. Still unknown or unported
 

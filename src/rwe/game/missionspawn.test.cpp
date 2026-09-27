@@ -6,6 +6,7 @@
 #include <rwe/io/fbi/io.h>
 #include <rwe/io/ota/ota.h>
 #include <rwe/io/tdf/tdf.h>
+#include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/MovementClassDatabase.h>
@@ -156,6 +157,101 @@ namespace rwe
         // a 2x2 footprint.
         REQUIRE((dx * dx) + (dz * dz) > 0_ss);
         REQUIRE((dx * dx) + (dz * dz) <= 48_ss * 48_ss * 2_ss);
+    }
+
+    TEST_CASE("a mission building stands where the file puts it, whatever scenery was there", "[mission]")
+    {
+        // Issue #377. The original's creator never asks what is under a
+        // unit (0x485F50), so a mission's towers stand among its trees and
+        // rocks; RWE clears the scenery from under the building instead of
+        // leaving the building out.
+        MissionWorld world;
+        FeatureDefinition rock{};
+        rock.name = "ROCK";
+        rock.footprintX = 2;
+        rock.footprintZ = 2;
+        rock.height = 20_ss;
+        rock.blocking = true;
+        auto rockDef = world.sim.featureDefinitions.insert(rock);
+        // Cells 5,5 to 6,6: exactly where a 2x2 building at (100, 100) goes.
+        auto rockId = world.sim.addFeature(rockDef, 5, 5).value();
+
+        OtaSchema schema{};
+        schema.units = {missionUnit("BLDG", 1, 100, 100)};
+        auto result = spawnMissionUnits(world.sim, schema, world.slots);
+
+        REQUIRE(result.skipped.empty());
+        REQUIRE(result.spawned.size() == 1);
+        CHECK_FALSE(world.sim.tryGetFeature(rockId).has_value());
+        REQUIRE(result.adjusted.size() == 1);
+        CHECK(result.adjusted.front().find("cleared ROCK") != std::string::npos);
+
+        // Where the file put it, not beside the rock.
+        auto expected = world.sim.terrain.topLeftCoordinateToWorld(SimVector(96_ss, 0_ss, 96_ss));
+        const auto& building = world.sim.getUnitState(result.spawned.front());
+        CHECK(building.position.x == expected.x);
+        CHECK(building.position.z == expected.z);
+    }
+
+    TEST_CASE("a mission building over the edge of the map comes in just far enough to fit", "[mission]")
+    {
+        MissionWorld world;
+        auto gridWidth = world.sim.occupiedGrid.getWidth();
+        // Its footprint's first cell is the grid's last.
+        auto xPos = (gridWidth * 16) + 8;
+
+        OtaSchema schema{};
+        schema.units = {missionUnit("BLDG", 1, xPos, 100)};
+        auto result = spawnMissionUnits(world.sim, schema, world.slots);
+
+        REQUIRE(result.skipped.empty());
+        REQUIRE(result.spawned.size() == 1);
+        REQUIRE(result.adjusted.size() == 1);
+        CHECK(result.adjusted.front().find("moved onto the map") != std::string::npos);
+        const auto& building = world.sim.getUnitState(result.spawned.front());
+        auto footprint = world.sim.computeFootprintRegion(building.position, world.sim.unitDefinitions.at("BLDG").movementCollisionInfo);
+        CHECK(footprint.x + static_cast<int>(footprint.width) == gridWidth);
+    }
+
+    TEST_CASE("a building brought in from the edge is placed or refused as anywhere else, with one note", "[mission]")
+    {
+        MissionWorld world;
+        auto gridWidth = world.sim.occupiedGrid.getWidth();
+        auto xPos = (gridWidth * 16) + 8;
+        // Where it lands once brought in: its last two columns, rows 5 and 6.
+        auto landing = gridWidth - 2;
+
+        SECTION("a unit where it lands still keeps it out, and nothing claims it was moved")
+        {
+            // A 2x2 kbot centred on the landing cells, earlier in the file.
+            OtaSchema schema{};
+            schema.units = {missionUnit("KBOT", 1, (landing * 16) + 16, 96), missionUnit("BLDG", 1, xPos, 100)};
+            auto result = spawnMissionUnits(world.sim, schema, world.slots);
+            CHECK(result.spawned.size() == 1u);
+            CHECK(result.skipped.size() == 1u);
+            CHECK(result.adjusted.empty());
+        }
+
+        SECTION("scenery where it lands is cleared, and the one note says both")
+        {
+            FeatureDefinition rock{};
+            rock.name = "ROCK";
+            rock.footprintX = 2;
+            rock.footprintZ = 2;
+            rock.height = 20_ss;
+            rock.blocking = true;
+            auto rockDef = world.sim.featureDefinitions.insert(rock);
+            auto rockId = world.sim.addFeature(rockDef, landing, 5).value();
+
+            OtaSchema schema{};
+            schema.units = {missionUnit("BLDG", 1, xPos, 100)};
+            auto result = spawnMissionUnits(world.sim, schema, world.slots);
+            REQUIRE(result.spawned.size() == 1u);
+            CHECK_FALSE(world.sim.tryGetFeature(rockId).has_value());
+            REQUIRE(result.adjusted.size() == 1u);
+            CHECK(result.adjusted.front().find("moved onto the map") != std::string::npos);
+            CHECK(result.adjusted.front().find("cleared ROCK") != std::string::npos);
+        }
     }
 
     TEST_CASE("a mission unit with orders to run is not the player's yet", "[mission]")
