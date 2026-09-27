@@ -107,7 +107,10 @@ def decrypt(d):
 
 
 def encrypt(d):
-    d = bytearray(d); check = 0; key = 3
+    d = bytearray(d)
+    if len(d) < 4:
+        return bytes(d)             # too short to carry a checksum, and decrypt agrees
+    check = 0; key = 3
     for i in range(3, len(d) - 3):
         d[i] ^= key & 0xFF; check = (check + d[i]) & 0xFFFF; key += 1
     d[1], d[2] = check & 0xFF, check >> 8
@@ -357,12 +360,16 @@ def decode_2c(s, max_units, type_bits=TYPE_BITS):
     Entries are {slot, type, blocked, waypoints [(x, z)]}. The full-state record is for block slot
     tick % max_units; None means that slot is empty. Positions are 16.16, rotations are y, z, x in
     65536ths of a turn, speed is 16.16 per tick and present only for a unit with a mover.
-    Aircraft entries and attached units are not handled.
+    Aircraft entries and attached units are not handled. A truncated record stops where its bits run
+    out rather than reading past them, which is every 0x2c of a length the sender chose; one too
+    short to hold a tick decodes to nothing at all.
     """
+    if len(s) < 7:
+        return 0, [], None
     tick = struct.unpack_from("<I", s, 3)[0]
     b = _Bits(s)
     entries = []
-    while True:
+    while b.pos + 16 <= len(s) * 8:
         slot = b.take(16)
         if slot == 0xFFFF:
             break

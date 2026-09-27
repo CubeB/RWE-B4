@@ -22,6 +22,12 @@ does not repeat.
 - **A program that is not TA can host a game a real TA joins and plays.** The fake host
   answered the DirectPlay handshake, held a battleroom, passed unit sync, launched, and then kept
   its own commander in the game, standing and walking, from `0x2c` records it built itself.
+- **The same holds in the other direction, and that is the one RWE needs.** A scripted joiner
+  (`tools/ta-net/fakejoin.py`) discovers a host with ENUMSESSIONS, does the handshake, runs unit
+  sync, readies, follows the launch, and then owns a commander in game while checking everything the
+  host sends against the rules below. It is the acceptance test for the RWE host, on loopback and
+  in CI; a real TA on the other end of it remains the maintainer's. It takes its unit ids and CRCs
+  from a capture of a real joiner rather than computing them, so it inherits D7 below.
 - **Hosting needs no unit checksum.** Unit sync is the joiner sending its CRCs to the host; a
   host that echoes the joiner's ids back is accepted. The content-derived checksum that two passes
   failed to reproduce (TA-DEMOS D7) matters only for joining a TA host.
@@ -51,6 +57,57 @@ GOG TA under Proton on Linux, launched as a non-Steam game.
 - `win32.dll` (a sound shim), `online.dll` (the online-links buttons, byte-identical to TA
   Forever's) and `mptaext.dll` (the Mplayer lobby hook) ship beside the executable. None of them
   is a network layer: `TotalA.exe` imports `DPLAYX.dll` directly.
+
+## Playtesting against a real TA
+
+The scripted joiner stands in for TA everywhere it can, and it cannot stand in for what a player
+sees. This is the maintainer's procedure for the rest, and it is the only way to answer the
+questions at the end of it. `tools/ta-net/README.md` has the commands.
+
+**One TA at a time, and the ports to themselves.** TA refuses to run twice in one prefix, so the
+second copy is a second prefix — named objects are per wineserver, and that is all TA can see. The
+first instance keeps TCP 2300, UDP 2350 and 47624; the second takes 2301 and 2351 and leaves 47624
+with the first, which is fine because only a host needs it. `dplaysvr.exe` outlives TA and keeps
+47624 whatever TA does, so stop it before anything hosts:
+`pkill -f dplaysvr.exe; ss -lntu | grep -E ':(47624|2300|2350)\b'`. An RWE host under development
+binds 2300, 2350 and 47624, the same as TA: a host on other ports is a host no TA can find.
+
+**Proton.** TA is a non-Steam game and needs Microsoft's DirectPlay in its prefix —
+`protontricks <appid> directplay`, once. Nothing else stands in for it: `TotalA.exe` imports
+`DPLAYX.dll` itself, and the DirectPlay helper `protontricks` installs is what owns 47624.
+
+**Capture before the joiner looks.** `sudo tcpdump -i any -w game.pcap 'port 47624 or portrange
+2300-2400'`, started *before* anyone joins, because the ENUMSESSIONSREPLY is what `fakehost.py` and
+`fakejoin.py` read a template out of. Captures hold LAN addresses and player names, so they are not
+checked in.
+
+**What to look at**, in this order:
+
+- `ta-capture.py game.pcap` — flows, the DirectPlay sequence, every subpacket code. **Zero checksum
+  failures and zero unsized subpackets** is the first gate: a failure there is a framing fault, and
+  nothing after it means anything.
+- `ta-capture.py game.pcap --check` — exits non-zero unless every ground `0x2c` re-encodes byte for
+  byte. Run it on every capture.
+- `--settings` — every change to a player's options byte and team. A host that never changes
+  `0x20[157]`, and the session description's `dwUser1` high byte with it, is not implementing the
+  options byte at all, whatever the joiner shows.
+- `--units` — every `0x2c` decoded. Each host-owned slot has to be described once a cycle and
+  described *correctly*; a slot described as empty is a unit eradicated on every other machine. A
+  walk should read as smooth, with the small stutter every cycle that an owner's correction meeting
+  a receiver's steering produces, and no jumps.
+- `--timeline` — first and last time each code was sent, per side. What a host sends and what a
+  joiner sends are different sets, and a code missing from one side is usually the interesting one.
+
+**The things only a real TA can answer.** Whether the host is offered for rejection in the
+battleroom (it is a host that goes silent), whether an absurd ping appears (a replayed ping rather
+than an answered one), what the other player sees for a unit nobody has described, whether the
+host's units are visible at all, and whether a unit RWE does not own behaves as a puppet should.
+The scripted joiner checks the wire; this is the only check on the screen.
+
+**Once the RWE host exists**, `tools/ta-net/host-check.sh` is the loopback half of this: it starts
+the host, runs the joiner against it and exits with the joiner's verdict, and `fakejoin.py` against
+`fakehost.py` is the same run with no RWE in it. A real TA joining the RWE host is the other half
+and needs no script — it is `fakehost.py`'s mirror image, done by hand.
 
 ## DirectPlay
 
@@ -139,6 +196,13 @@ The `0x1a` exchange that TA-DEMOS reads as a table is a conversation:
    records of status `0x0101`: in use.
 4. The joiner sends sub-type 4 records counting what it has received, until the count reaches
    `1 + 2n` (557), and repeats that until launch.
+
+**The host sends `1 + 2n` records and the counter is how many of them have been processed.** In
+the baseline capture the joiner's sub-type 4 counts climb through 387, 510 and then hold at 557:
+the first two are how far it has got, and 557 is the whole of what the host sent — the sub-type 0
+record plus two per id, one `0x0001` and one `0x0101`. The counter is sent per record rather than
+once at the end, tens of times a second, so a host that wants to see it done is watching for 557
+and not for the last batch.
 
 **Only the joiner sends CRCs, so only the host checks them.** The fake host sends the sub-type
 0 record at CREATEPLAYER, and answers each batch of the joiner's sub-type 2 records with a
@@ -232,8 +296,15 @@ be with that project's agreement and identifying itself as RWE.
 
 ## Open
 
-- **Joining a TA host**: needs real unit CRCs, computed (D7) or harvested from demos.
-- **A status `0x20` built from fields**: the fake host replayed the recorded host's.
+- **Joining a TA host**: needs real unit CRCs, computed (D7) or harvested from demos. The scripted
+  joiner harvests them from a capture of a real joiner, which is enough to be checked against but
+  not enough to be a substitute for computing one.
+- **A status `0x20` built from fields**: the fake host replayed the recorded host's, and so does the
+  scripted joiner, patched for its own player id, name and state byte. Neither builds one, and the
+  fields a real host would fill in are not all identified.
+- **The DirectPlay player-info blob** in ADDFORWARDREQUEST and CREATEPLAYER: the ids, the two ports
+  and the name are read out of the recording, and the name field is four characters wide because
+  both captures have a four-character name. Nothing says whether DirectPlay would take a longer one.
 - **Game speed**: a player's `0x19` reached a host that ignored it; what TA does when a peer
   does not follow a speed change was not tried.
 - **Resource statistics**: the host sent no `0x28` after the replay and nothing complained, but

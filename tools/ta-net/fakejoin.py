@@ -33,7 +33,7 @@ does by replaying the ones it recorded.
     --attack ID       fire at a host unit id, every half second
     --simulate-hit N  take N damage on its own commander, to exercise the 0x0c path
 """
-import argparse, math, select, socket, struct, sys, time
+import argparse, math, os, select, socket, struct, sys, time
 
 from tanet import (CMDS, commander_build, damage, death, decode, decode_2c, dp_add_forward_request, dp_app_tcp,
                    dp_app_udp, dp_command, dp_create_player, dp_enum_sessions, dp_request_player_id, encode_2c,
@@ -56,7 +56,12 @@ class Template:
     """What the joiner takes from a capture of a real TA joining a real host."""
 
     def __init__(self, path, max_units):
-        ms = read_capture(path)
+        if not os.path.isfile(path):
+            raise SystemExit(f"no capture at {path}: it is the source of this joiner's unit ids and CRCs")
+        try:
+            ms = read_capture(path)
+        except Exception as e:
+            raise SystemExit(f"{path} could not be read as a capture: {e}")
         host_flow = next((f for t, p, f, m in ms if p == "TCP" and is_dp(m) and dp_command(m) == 0x01), None)
         if host_flow is None:
             raise SystemExit("no ENUMSESSIONSREPLY in the capture: start tcpdump before anyone looks for games")
@@ -127,6 +132,7 @@ class Joiner:
         self.commander = dict(tpl.full[0], pos=list(tpl.full[0]["pos"]), rot_yzx=list(tpl.full[0]["rot_yzx"]))
         self.health, self.dead, self.walk = self.commander["health"], False, None
         self.attack = args.attack
+        self.walk_to = args.walk_to
         self.host_unit_pos = {}
         self.host_team = 0
 
@@ -136,13 +142,14 @@ class Joiner:
         self.state = "enum"
         self.started = time.monotonic()
         self.last = dict(enum=0.0, beat=0.0, ping=0.0, sync=0.0, sync_id=0.0, attack=0.0, progress=0.0)
-        self.game_since = self.ticks_sent = self.sync_sent = 0
+        self.game_since = self.ticks_sent = 0
         self.loading_since = 0.0
         self.progress_step = 0
         self.pending = []
         self.sync_out = []
         self.marker = 0xFFFFFEAD
         self.readied = self.hit = False
+        self.shots = 0
 
         self.seen = dict(enum=False, ids=0, superenum=False, status=0, team=0, records=0, echoed=[],
                          loading=False, start=False, launch=set(), host_ticks=0, host_units={}, host_full={},
@@ -214,10 +221,6 @@ class Joiner:
             if not self.seen["superenum"]:
                 self.seen["superenum"] = True
                 self.send_tcp(dp_request_player_id(self.a.tcp_port, False), "REQUESTPLAYERID (game player)")
-        elif cmd == 0x1A:                                         # SESSIONDESCCHANGED
-            self.log("<- SESSIONDESCCHANGED")
-        elif cmd == 0x0B:                                         # DELETEPLAYER
-            self.log("<- DELETEPLAYER: the host is closing the session")
 
     # ---- the host's TA traffic
 
@@ -235,9 +238,8 @@ class Joiner:
             elif s[1] == 2:
                 self.log(f"<- the host sent a checksum for unit type {struct.unpack_from('<I', s, 6)[0]:#x}")
         if counted:
-            self.sync_sent = self.seen["records"]
-            self.app_tcp(self.player_id, [sync_progress(n) for n in range(self.sync_sent - counted + 1,
-                                                                         self.sync_sent + 1)])
+            first = self.seen["records"] - counted
+            self.app_tcp(self.player_id, [sync_progress(n) for n in range(first + 1, first + counted + 1)])
 
     def on_app(self, m, proto):
         p = ta_payload(m, proto)
@@ -262,7 +264,7 @@ class Joiner:
                         self.seen["answered"] += 1
                 elif b:
                     self.seen["replies"] += 1
-            elif code == 0x20:
+            elif code == 0x20 and len(s) >= 158:
                 self.seen["status"] += 1
                 if self.seen["status"] == 1:
                     name = s[1:33].decode("utf-16-le", "ignore").split("\0")[0]
@@ -316,8 +318,10 @@ class Joiner:
 
     def step_commander(self):
         c = self.commander
-        if self.a.walk and self.walk is None:
-            tx, tz = (float(v) for v in self.a.walk.split(","))
+        if self.dead:
+            return
+        if self.walk_to and self.walk is None:
+            tx, tz = self.walk_to
             self.walk = (int(tx * 65536), int(tz * 65536))
             # Heading is atan2(dx, dz) + half a turn, in 65536ths, fitted to the recorded commander.
             c["rot_yzx"][0] = int(math.atan2(tx - c["pos"][0] / 65536, tz - c["pos"][2] / 65536)
@@ -359,9 +363,12 @@ class Joiner:
     def fire(self):
         c = self.commander
         aim = self.host_unit_pos.get(self.attack) or [c["pos"][0] + 65536, c["pos"][1], c["pos"][2] + 65536]
+        self.shots += 1
         self.app_udp([shot(c["pos"], aim, c["rot_yzx"], self.attack, self.tpl.cmd_unit, 0),
                       damage(self.attack, self.tpl.cmd_unit, self.a.attack_damage)])
-        self.log(f"0x0d and 0x0b: {self.a.attack_damage} damage at the host's unit {self.attack}")
+        if self.shots == 1 or self.shots % 40 == 0:
+            self.log(f"0x0d and 0x0b: shot {self.shots}, {self.a.attack_damage} damage at the host's "
+                     f"unit {self.attack}")
 
     def send_ticks(self, due):
         subs = []
@@ -415,12 +422,12 @@ class Joiner:
             self.start_game()            # a host that launches without a first 0x2c still gets a game
         if self.state != "game":
             return
-        if self.a.simulate_hit and not self.hit:
-            self.hit = True
-            self.take_damage(self.tpl.cmd_unit, self.a.simulate_hit)
         due = int((now - self.game_since) * TICK_RATE)
         if due - self.ticks_sent >= TICKS_PER_PACKET:
             self.send_ticks(due)
+        if self.a.simulate_hit and not self.hit:
+            self.hit = True
+            self.take_damage(self.tpl.cmd_unit, self.a.simulate_hit)
         if self.attack is not None and now - self.last["attack"] > 0.5:
             self.last["attack"] = now
             self.fire()
@@ -533,8 +540,8 @@ class Joiner:
         wrong = sorted(s for s, t in owned.items() if s in full and full[s][1]["type"] != t)
         empty = sorted(s for s, t in owned.items() if s in full and not full[s][1]["type"])
         ok = not (missing or wrong or empty)
-        detail = (f"the host owns {len(owned)} unit slots and described {len(owned) - len(missing) - len(wrong)} "
-                  f"of them over {self.seen['host_ticks']} of its ticks")
+        detail = (f"the host's {len(owned)} unit slots, {len(owned) - len(missing) - len(wrong)} described "
+                  f"correctly, over {self.seen['host_ticks']} of its ticks")
         for label, slots in (("never described", missing), ("wrong type", wrong), ("described as empty", empty)):
             if slots:
                 detail += f"; {label}: {slots}"
@@ -562,7 +569,16 @@ def main():
     a = ap.parse_args()
     if len(a.name) > 4:
         print(f"note: the player name field is four characters wide, so '{a.name}' will be truncated")
+    a.walk_to = parse_xy(a.walk) if a.walk else None
     sys.exit(0 if Joiner(Template(a.capture, a.max_units), a).run() else 1)
+
+
+def parse_xy(text):
+    try:
+        x, z = (float(v) for v in text.split(","))
+    except ValueError:
+        raise SystemExit(f"--walk wants X,Z as two numbers, not '{text}'")
+    return x, z
 
 
 if __name__ == "__main__":
