@@ -512,7 +512,7 @@ namespace rwe
             // auto-tuner (#390) and confirmed on seeds it never saw: seeds
             // 101-116 at 1800s, mirror and cross, ARM with these two knobs ahead
             // of the shared defaults in 25 games of 32 and behind in 5 (sign test
-            // p < 0.001), mean margin +74.5; 6 of 8 in 1v1v1v1 on Acid Foursome.
+            // p < 0.001), mean margin +74.5 units; 6 of 8 ahead in 1v1v1v1.
             // At twenty minutes the tuned side has no Peewees and about half as
             // many Flashes again. docs/AI-TUNING.md has the runs.
             p.labRaiderShare = 0;
