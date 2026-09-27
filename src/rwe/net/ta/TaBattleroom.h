@@ -45,6 +45,15 @@ namespace rwe
     /** The DirectPlay id, at 0x91: a REJECT record names a player by it. */
     inline constexpr std::size_t TaPlayerStatusPlayerIdOffset = 145;
 
+    /** 0 is ARM and 1 is CORE, as TadSide numbers them. */
+    inline constexpr std::size_t TaPlayerStatusSideOffset = 150;
+
+    /**
+     * The player's colour, which arrives as 0xff and is given a value when the
+     * player joins: 0xff is "not yet assigned" and not a colour.
+     */
+    inline constexpr std::size_t TaPlayerStatusColourOffset = 151;
+
     /** The state byte; gpgnet4ta reads bit 0x20 of it as ready. */
     inline constexpr std::size_t TaPlayerStatusStateOffset = 156;
 
@@ -54,13 +63,18 @@ namespace rwe
     /** 0x2a, the progress the recorded host reached on its last step. */
     inline constexpr std::uint8_t TaLoadingComplete = 0x64;
 
-    /** The four fields a 0x20 places, at the offsets named above. */
+    /** The six fields a 0x20 places, at the offsets named above. */
     struct TaPlayerStatus
     {
         std::uint32_t playerId{0};
 
         /** Longer than the field is truncated, not a longer record. */
         std::string mapName;
+
+        /** TadSide::Watch for a byte that is neither 0 nor 1. */
+        TadSide side{TadSide::Arm};
+
+        std::uint8_t colour{0};
 
         std::uint8_t state{0};
 
@@ -70,17 +84,20 @@ namespace rwe
 
     /**
      * 0x20, built from fields over a template taken from a recorded host's
-     * status. Only bytes 1-32, 145-148, 156 and 157 are decoded (TA-DEMOS D8);
-     * the rest is the recorded host's, and what each range is:
+     * status. Six fields are placed (TA-DEMOS D8); the rest is the recorded
+     * host's, and what each range is:
      *
      * - 0: the code. 33-140: zeros in every capture. 141-144: `05 c0 03 00`.
-     * - 149-155: `01 00`, two bytes, `00`, `01 00`. 151 and 152 are the only
-     *   bytes that differ between two peers, and every capture that reached a
-     *   launch had both peers on one side, so neither is a side: they are as
-     *   likely a colour or a lobby slot.
+     * - 149: `01`. 153-155: `00 01 00`. 152: 1 in a host's record and 0 in a
+     *   joiner's, in all four captures, which is what bit 0 of the state byte
+     *   also does; it is unidentified, and the template happens to be a host's.
      * - 158-169: the game settings, the words the session description keeps in
      *   its reserved fields: 4, 10, 10, 250 and 0x0103.
      * - 170-185: `29 05 be 6e` then zeros. Unidentified.
+     *
+     * ta-sides.pcap holds 65 status records, 57 of them after two players have
+     * exchanged their settings, and across those 57 the only bytes that ever
+     * change are 150, 151 and 156 -- the side, the colour and the state.
      */
     TadBytes taBuildPlayerStatus(const TaPlayerStatus& status);
 
@@ -156,6 +173,12 @@ namespace rwe
         /** TaNoTeam until the player's own 0x24 says otherwise. */
         std::uint8_t team{TaNoTeam};
 
+        /** TadSide::Watch until the player's 0x20 says which one it is on. */
+        TadSide side{TadSide::Watch};
+
+        /** 0xff until the player's 0x20 gives it a colour. */
+        std::uint8_t colour{0xFF};
+
         /** Bit 0x20 of the player's state byte. */
         bool ready{false};
 
@@ -172,6 +195,10 @@ namespace rwe
         std::uint8_t options{0x4F};
 
         std::uint8_t hostTeam{TaNoTeam};
+
+        /** Bytes 150 and 151 of the host's own status: its side and its colour. */
+        TadSide side{TadSide::Arm};
+        std::uint8_t colour{0};
 
         /**
          * Byte 156 in each state. Every capture's host walked 0x01 in the
@@ -242,13 +269,9 @@ namespace rwe
 
             std::string name;
 
-            /**
-             * Neither, because a 0x20 does not decode a side: both peers in
-             * every capture that reached a launch sat on one, so the bytes that
-             * differ between two players cannot be told from a colour. A game
-             * fills this in from its own player table.
-             */
+            /** What the joiner's 0x20 said at bytes 150 and 151. */
             TadSide side{TadSide::Watch};
+            std::uint8_t colour{0xFF};
         };
 
         /**

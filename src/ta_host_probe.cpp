@@ -22,6 +22,8 @@
 //   --battleroom    hold a battleroom, answer unit sync and launch
 //   --auto-launch   with --battleroom, launch as soon as a joiner is ready
 //   --team          the host's team in the battleroom, 5 (the default) for none
+//   --side          the host's side, arm or core (default arm)
+//   --colour        the host's colour, 0 to 255 (default 0)
 //   --max-units     the unit limit, which sets the 0x2c full-state cycle
 //   --commander-unit  the host commander's unit id, 251 for block 1 slot 0
 
@@ -40,6 +42,7 @@
 #include <rwe/net/ta/TaPinger.h>
 #include <rwe/util/OpaqueArgs.h>
 #include <algorithm>
+#include <cctype>
 #include <functional>
 #include <optional>
 #include <string>
@@ -230,6 +233,8 @@ int main(int argc, char* argv[])
                   << "  --battleroom    hold a battleroom, echo unit sync and launch\n"
                   << "  --auto-launch   with --battleroom, launch as soon as a joiner is ready\n"
                   << "  --team          the host's team in the battleroom, 5 for none (default)\n"
+                  << "  --side          the host's side, arm or core (default arm)\n"
+                  << "  --colour        the host's colour, 0 to 255 (default 0)\n"
                   << "  --max-units     the unit limit, which sets the 0x2c cycle (default 250)\n"
                   << "  --commander-unit  the host commander's unit id (default 251)\n"
                   << "\n"
@@ -242,6 +247,32 @@ int main(int argc, char* argv[])
     config.mapName = args.getString("map");
     config.ports = rwe::TaHostPorts::atBase(static_cast<int>(args.getUint("port-base", 0)));
     config.options = static_cast<std::uint8_t>(args.getUint("options", 0x4f));
+
+    rwe::TaBattleroomConfig roomConfig;
+    roomConfig.mapName = config.mapName;
+    roomConfig.options = config.options;
+    roomConfig.hostTeam = static_cast<std::uint8_t>(args.getUint("team", rwe::TaNoTeam));
+    {
+        std::string side = args.getString("side", "arm");
+        for (auto& c : side)
+        {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        if (side == "arm")
+        {
+            roomConfig.side = rwe::TadSide::Arm;
+        }
+        else if (side == "core")
+        {
+            roomConfig.side = rwe::TadSide::Core;
+        }
+        else
+        {
+            std::cerr << "--side wants arm or core, not '" << side << "'\n";
+            return 1;
+        }
+        roomConfig.colour = static_cast<std::uint8_t>(args.getUint("colour", 0));
+    }
 
     asio::io_context ioContext;
     rwe::TaHostSession host(ioContext, config);
@@ -275,10 +306,6 @@ int main(int argc, char* argv[])
     std::vector<rwe::TaHostSession::PeerId> peers;
     std::optional<std::uint32_t> lastRoundTrip;
 
-    rwe::TaBattleroomConfig roomConfig;
-    roomConfig.mapName = config.mapName;
-    roomConfig.options = config.options;
-    roomConfig.hostTeam = static_cast<std::uint8_t>(args.getUint("team", rwe::TaNoTeam));
     std::optional<rwe::TaBattleroom> room;
     std::optional<HostInGame> inGame;
     bool const autoLaunch = args.getBool("auto-launch");
@@ -291,7 +318,9 @@ int main(int argc, char* argv[])
         room.emplace(ioContext, host, batcher, nowMs, roomConfig);
         room->onReady([&](const rwe::TaBattleroomPeer& peer) {
             std::cout << "peer 0x" << std::hex << peer.playerId << std::dec
-                      << " is ready on team " << static_cast<int>(peer.team) << "\n"
+                      << " is " << (peer.side == rwe::TadSide::Core ? "CORE" : "ARM")
+                      << " colour " << static_cast<int>(peer.colour)
+                      << ", team " << static_cast<int>(peer.team) << "\n"
                       << std::flush;
             if (autoLaunch && room->state() == rwe::TaBattleroomState::Waiting)
             {
@@ -308,6 +337,8 @@ int main(int argc, char* argv[])
         room->onLaunched([&](const rwe::TaBattleroom::JoinerInfo& info) {
             std::cout << "launched: '" << info.name << "' 0x" << std::hex << info.address.playerId << std::dec
                       << " on tcp " << info.address.tcp.port() << ", udp " << info.address.udp.port()
+                      << ", " << (info.side == rwe::TadSide::Core ? "CORE" : "ARM")
+                      << " colour " << static_cast<int>(info.colour)
                       << ", team " << static_cast<int>(info.team) << "\n"
                       << std::flush;
             inGame.emplace(

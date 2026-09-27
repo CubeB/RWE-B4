@@ -47,6 +47,12 @@ namespace rwe
             return TadBytes{static_cast<std::uint8_t>(value)};
         }
 
+        /** A side byte is 0 or 1; anything else names no side. */
+        TadSide sideOf(std::uint8_t value)
+        {
+            return value <= 1 ? static_cast<TadSide>(value) : TadSide::Watch;
+        }
+
         /**
          * A recorded host's status, from ta-baseline.pcap at 20.610: the first
          * one it sent, before anything in the lobby was changed. taBuildPlayerStatus
@@ -93,6 +99,8 @@ namespace rwe
             out[TaPlayerStatusPlayerIdOffset + i] =
                 static_cast<std::uint8_t>(status.playerId >> (8 * i));
         }
+        out[TaPlayerStatusSideOffset] = static_cast<std::uint8_t>(status.side);
+        out[TaPlayerStatusColourOffset] = status.colour;
         out[TaPlayerStatusStateOffset] = status.state;
         out[TaPlayerStatusOptionsOffset] = status.options;
         return out;
@@ -108,6 +116,8 @@ namespace rwe
 
         TaPlayerStatus status;
         status.playerId = readU32(&subpacket[TaPlayerStatusPlayerIdOffset]);
+        status.side = sideOf(subpacket[TaPlayerStatusSideOffset]);
+        status.colour = subpacket[TaPlayerStatusColourOffset];
         status.state = subpacket[TaPlayerStatusStateOffset];
         status.options = subpacket[TaPlayerStatusOptionsOffset];
 
@@ -352,6 +362,14 @@ namespace rwe
                     {
                         it->second.mapName = status->mapName;
                     }
+                    if (status->side != TadSide::Watch)
+                    {
+                        it->second.side = status->side;
+                    }
+                    if (status->colour != 0xFF)
+                    {
+                        it->second.colour = status->colour;
+                    }
                     bool ready = (status->state & 0x20) != 0;
                     bool firstTime = ready && !it->second.ready && !readyAnnounced_[from];
                     it->second.ready = ready;
@@ -437,6 +455,8 @@ namespace rwe
         TaPlayerStatus status;
         status.playerId = session.hostPlayerId();
         status.mapName = config.mapName;
+        status.side = config.side;
+        status.colour = config.colour;
         status.state = state;
         status.options = config.options;
 
@@ -660,6 +680,8 @@ namespace rwe
             {
                 info.team = joiner->team;
                 info.name = joiner->name;
+                info.side = joiner->side;
+                info.colour = joiner->colour;
             }
             launchedHandler(info);
         }

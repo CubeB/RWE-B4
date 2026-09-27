@@ -883,4 +883,28 @@ namespace rwe
         TadBytes wrongCode(14, 0x1B);
         REQUIRE_FALSE(taParseUnitSyncId(wrongCode));
     }
+
+    TEST_CASE("a 0x20 whose side and colour are nonsense reads as neither, and does not fail", "[malformed]")
+    {
+        // Bytes 150 and 151 come off a peer, so every value of them has to be
+        // readable: a side that is not 0 or 1 is no side, and a colour of 0xff
+        // is the one a player arrives with, but neither may cost the record,
+        // whose other fields are still good.
+        TaPlayerStatus built;
+        built.playerId = 0x08D90E74;
+        built.options = 0x4F;
+        for (std::uint8_t side = 0; side < 0xFF; ++side)
+        {
+            auto status = taBuildPlayerStatus(built);
+            status[TaPlayerStatusSideOffset] = side;
+            status[TaPlayerStatusColourOffset] = 0xFF;
+            auto parsed = taParsePlayerStatus(status);
+            CAPTURE(side);
+            REQUIRE(parsed);
+            REQUIRE(parsed->playerId == 0x08D90E74);
+            REQUIRE(parsed->options == 0x4F);
+            REQUIRE(parsed->colour == 0xFF);
+            REQUIRE(parsed->side == (side <= 1 ? static_cast<TadSide>(side) : TadSide::Watch));
+        }
+    }
 }

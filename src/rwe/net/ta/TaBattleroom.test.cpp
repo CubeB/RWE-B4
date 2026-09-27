@@ -39,6 +39,58 @@ namespace rwe
             0x03, 0x01, 0x29, 0x05, 0xbe, 0x6e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00,};
 
+        /**
+         * The joiner's status from ta-sides.pcap at 34.82 and the host's at
+         * 33.66, once the two have exchanged their settings: of the 65 records
+         * in that capture, those 57 are the only bytes that ever differ, and
+         * every case below is one of these with 150, 151 and 156 set. The map
+         * name in bytes 1-32 is the one thing taken out, because it is text.
+         */
+        const std::vector<std::uint8_t> SidesJoinerStatus{
+            0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0xc0, 0x03,
+            0x00, 0xe8, 0xae, 0x3a, 0x0e, 0x01, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00,
+            0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x0a, 0x00, 0xfa, 0x00,
+            0x03, 0x01, 0x29, 0x05, 0xbe, 0x6e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00,};
+
+        const std::vector<std::uint8_t> SidesHostStatus{
+            0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0xc0, 0x03,
+            0x00, 0xea, 0xae, 0x3a, 0x0e, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+            0x02, 0x48, 0x04, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x0a, 0x00, 0xfa, 0x00,
+            0x03, 0x01, 0x29, 0x05, 0xbe, 0x6e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00,};
+
+        /** One of those records with the side, the colour and the state the capture had. */
+        TadBytes at(std::vector<std::uint8_t> record, std::uint8_t side, std::uint8_t colour, std::uint8_t state)
+        {
+            record[TaPlayerStatusSideOffset] = side;
+            record[TaPlayerStatusColourOffset] = colour;
+            record[TaPlayerStatusStateOffset] = state;
+            return TadBytes(record.begin(), record.end());
+        }
+
         struct Sent
         {
             TaOutboundBatcher::PeerId peer;
@@ -166,6 +218,14 @@ namespace rwe
                 packet.subpackets.push_back(taBuildPlayerStatus(status));
                 deliver(packet, from);
             }
+
+            /** A recorded 0x20 as it came off the wire, rather than one built here. */
+            void deliverStatus(const TadBytes& status, TaHostSession::PeerId from = JoinerId)
+            {
+                TaPacket packet;
+                packet.subpackets.push_back(status);
+                deliver(packet, from);
+            }
         };
 
         std::uint8_t codeOf(const TadBytes& subpacket)
@@ -202,6 +262,100 @@ namespace rwe
         status.options = 0x4F;
 
         REQUIRE(taBuildPlayerStatus(status) == CapturedHostStatus);
+    }
+
+    TEST_CASE("a side and a colour are read from bytes 150 and 151, and written back to them", "[net][ta]")
+    {
+        // What ta-sides.pcap recorded, in the order it happened: a joining
+        // player has no colour until it is given one, and both players' sides
+        // and colours move while the lobby is open.
+        struct Case
+        {
+            std::uint8_t side;
+            TadSide expected;
+            std::uint8_t colour;
+            std::uint8_t state;
+        };
+
+        SECTION("the joiner's status, at 32.8, 34.8, 43.0 and 44.5 seconds")
+        {
+            const Case cases[]{
+                {0x00, TadSide::Arm, 0xFF, 0x00},
+                {0x00, TadSide::Arm, 0x01, 0x02},
+                {0x01, TadSide::Core, 0x01, 0x02},
+                {0x01, TadSide::Core, 0x02, 0x02},
+            };
+            for (const auto& one : cases)
+            {
+                CAPTURE(one.side, one.colour, one.state);
+                auto parsed = taParsePlayerStatus(at(SidesJoinerStatus, one.side, one.colour, one.state));
+                REQUIRE(parsed);
+                REQUIRE(parsed->side == one.expected);
+                REQUIRE(parsed->colour == one.colour);
+                REQUIRE(parsed->state == one.state);
+            }
+        }
+
+        SECTION("the host's own status, at 33.7, 54.0, 56.0 and 66.2 seconds")
+        {
+            const Case cases[]{
+                {0x00, TadSide::Arm, 0x00, 0x02},
+                {0x01, TadSide::Core, 0x00, 0x02},
+                {0x01, TadSide::Core, 0x01, 0x02},
+                {0x00, TadSide::Arm, 0x01, 0x02},
+            };
+            for (const auto& one : cases)
+            {
+                CAPTURE(one.side, one.colour);
+                auto parsed = taParsePlayerStatus(at(SidesHostStatus, one.side, one.colour, one.state));
+                REQUIRE(parsed);
+                REQUIRE(parsed->side == one.expected);
+                REQUIRE(parsed->colour == one.colour);
+                REQUIRE(parsed->options == 0x48);
+            }
+        }
+
+        SECTION("the state byte as the two players readied and launched")
+        {
+            for (std::uint8_t state : {0x02, 0x22, 0x32})
+            {
+                CAPTURE(state);
+                auto ready = taParsePlayerStatus(at(SidesHostStatus, 0x00, 0x01, state));
+                REQUIRE(ready);
+                REQUIRE(ready->side == TadSide::Arm);
+                REQUIRE(ready->colour == 0x01);
+                REQUIRE(ready->state == state);
+            }
+        }
+
+        SECTION("a side byte that is neither ARM nor CORE names no side")
+        {
+            for (std::uint8_t side : {std::uint8_t{0x02}, std::uint8_t{0x7F}, std::uint8_t{0xFF}})
+            {
+                CAPTURE(side);
+                REQUIRE(taParsePlayerStatus(at(SidesHostStatus, side, 0x00, 0x02))->side == TadSide::Watch);
+            }
+        }
+    }
+
+    TEST_CASE("the host's own status round trips, with its side and colour at the recorded offsets", "[net][ta]")
+    {
+        TaPlayerStatus status;
+        status.playerId = 0x0E3AAEEA;
+        status.side = TadSide::Core;
+        status.colour = 0x01;
+        status.state = 0x22;
+        status.options = 0x48;
+
+        REQUIRE(taBuildPlayerStatus(status) == at(SidesHostStatus, 0x01, 0x01, 0x22));
+
+        auto parsed = taParsePlayerStatus(taBuildPlayerStatus(status));
+        REQUIRE(parsed);
+        REQUIRE(parsed->playerId == status.playerId);
+        REQUIRE(parsed->side == TadSide::Core);
+        REQUIRE(parsed->colour == 0x01);
+        REQUIRE(parsed->state == 0x22);
+        REQUIRE(parsed->options == 0x48);
     }
 
     TEST_CASE("a status carries the map name in bytes 1-32, padded with NULs", "[net][ta]")
@@ -395,6 +549,68 @@ namespace rwe
                 }
             }
         }
+    }
+
+    TEST_CASE("a joiner's side and colour are read from its status and kept across beats", "[net][ta]")
+    {
+        Harness h;
+        h.room->peerJoined(JoinerId);
+
+        // A joining player has no colour until it is given one, and a side
+        // neither 0 nor 1 is no side, so neither replaces what the peer is
+        // already known to be.
+        REQUIRE(h.room->peer(JoinerId)->side == TadSide::Watch);
+        REQUIRE(h.room->peer(JoinerId)->colour == 0xFF);
+
+        h.deliverStatus(at(SidesJoinerStatus, 0x00, 0xFF, 0x00));
+        REQUIRE(h.room->peer(JoinerId)->side == TadSide::Arm);
+        REQUIRE(h.room->peer(JoinerId)->colour == 0xFF);
+
+        h.deliverStatus(at(SidesJoinerStatus, 0x00, 0x01, 0x02));
+        REQUIRE(h.room->peer(JoinerId)->side == TadSide::Arm);
+        REQUIRE(h.room->peer(JoinerId)->colour == 0x01);
+
+        h.deliverStatus(at(SidesJoinerStatus, 0x01, 0x02, 0x02));
+        REQUIRE(h.room->peer(JoinerId)->side == TadSide::Core);
+        REQUIRE(h.room->peer(JoinerId)->colour == 0x02);
+    }
+
+    TEST_CASE("a launch reports the side and colour the joiner's status last said", "[net][ta]")
+    {
+        Harness h;
+        h.room->peerJoined(JoinerId);
+        h.deliverStatus(at(SidesJoinerStatus, 0x01, 0x02, 0x20));
+
+        TaBattleroom::JoinerInfo launched;
+        h.room->onLaunched([&](const TaBattleroom::JoinerInfo& info) { launched = info; });
+        REQUIRE(h.room->launch(launchParams()));
+        for (int i = 0; i < 50 && h.room->state() != TaBattleroomState::Launched; ++i)
+        {
+            h.ioContext.run_for(std::chrono::milliseconds(5));
+        }
+
+        REQUIRE(h.room->state() == TaBattleroomState::Launched);
+        REQUIRE(launched.side == TadSide::Core);
+        REQUIRE(launched.colour == 0x02);
+    }
+
+    TEST_CASE("the host's own status carries the side and colour it was configured with", "[net][ta]")
+    {
+        Harness h;
+        h.config.side = TadSide::Core;
+        h.config.colour = 7;
+        h.room = std::make_unique<TaBattleroom>(
+            h.ioContext,
+            h.session,
+            h.traffic,
+            [&h] { return h.now; },
+            h.config);
+        h.room->peerJoined(JoinerId);
+
+        auto status = taParsePlayerStatus(h.codesTo(JoinerId, TaTransport::Tcp)[0]);
+        REQUIRE(status);
+        REQUIRE(status->side == TadSide::Core);
+        REQUIRE(status->colour == 7);
     }
 
     TEST_CASE("a joiner's status says which team it is on and whether it is ready", "[net][ta]")
