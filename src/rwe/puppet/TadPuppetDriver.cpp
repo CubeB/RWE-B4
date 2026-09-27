@@ -1,5 +1,6 @@
 #include <rwe/puppet/TadPuppetDriver.h>
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <map>
 #include <utility>
@@ -1222,6 +1223,14 @@ namespace rwe
         impl->advanceTo(*serial);
         impl->applySubPackets(packet.sender, subPackets);
         impl->updateWreckCount();
+    }
+
+    void TadPuppetDriver::onPacketAt(const TadPacket& packet, const std::vector<TadBytes>& subPackets, uint32_t tick)
+    {
+        assert(impl->externalClock);
+        ++impl->stats.packets;
+        impl->lastSeenTick = std::max(impl->lastSeenTick.value_or(0u), tick);
+        impl->pending[tick].push_back(Impl::QueuedPacket{packet.sender, subPackets});
     }
 
     void TadPuppetDriver::setExternalClock(bool external)

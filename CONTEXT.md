@@ -284,9 +284,11 @@ number (a caller's own index, which a demo has to stand in for this)
 
 **Receive buffer**:
 The depth of a live receiver's jitter buffer, in ticks, and the distance the
-local clock runs behind the sender's. A packet is available up to that many
-ticks *before* the tick it names, which is what buys the reordering tolerance;
-past it a packet is late and can only be applied where it landed.
+local clock runs behind the sender's. A packet naming tick T arrives up to that
+many ticks early and is held here until T, which is what buys the reordering
+tolerance; past it a packet is late and can only be applied where it landed. A
+packet is never handed over *before* the tick it names: the buffer reorders,
+it does not run the world forward.
 _Avoid_: jitter buffer (that is the mechanism, this is the setting), buffer
 size (that is the bound on packets held)
 

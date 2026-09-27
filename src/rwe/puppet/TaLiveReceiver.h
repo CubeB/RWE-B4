@@ -14,10 +14,11 @@ namespace rwe
     struct TaLiveReceiverOptions
     {
         /**
-         * Ticks a packet is held ahead of the tick its serial names, which is
-         * also how far out of order the stream may be and still be put right.
-         * A packet has to be in the driver's hand before that tick arrives or
-         * it can only be applied late.
+         * How far the local clock runs behind the sender's, in ticks, and so
+         * how far out of order the stream may be and still be put right. A
+         * packet naming tick T arrives up to this many ticks early and is held
+         * until T; a packet later than that cannot be applied on the tick it
+         * names and is applied late instead.
          */
         uint32_t jitterTicks{3};
 
@@ -133,11 +134,19 @@ namespace rwe
      * its own, and a `0x0c` that overtakes the `0x09` two packets behind it is
      * a death for a unit the driver has not heard of.
      *
-     * The marker says *which*; the `0x2c` serial says *when*. A packet waits
-     * until the tick its serial names, or, for one with no serial, until the
-     * packet before it in its sender's order has gone -- which is what leaves
-     * the driver resolving it against the sender's last serial, the same
-     * serial the packet before it carried.
+     * The marker says *which*; the `0x2c` serial says *when*. A packet is held
+     * until the local tick reaches the tick its serial names and goes out
+     * there, never before, so a record lands on the tick the stream recorded
+     * it on. One with no serial of its own has no tick to wait for, so it goes
+     * on the tick of the packet before it in its sender's order, which is the
+     * tick the driver's own per-sender clock would have stamped it with.
+     *
+     * The local clock lags the sender's by `jitterTicks`: a packet that names
+     * tick T arrives up to that many ticks early and waits here for T, and
+     * that lag is the whole of the reordering tolerance. Handing a packet over
+     * early instead would be a receive buffer that applies records before the
+     * tick they name, which puts a death before the full-state record it
+     * belongs behind and leaves a unit that should have died alive.
      *
      * It maps TA's serial onto RWE's tick from the first packets of the run --
      * the lowest serial seen before the first packet is applied, so a first
