@@ -196,7 +196,10 @@ namespace rwe
             // any game with a computer player in it. A computer player's
             // commands come out of this very simulation, so it has no second
             // opinion to offer and gets no buffer.
-            if (playerId == *loaded.localPlayerId || isRemote)
+            //
+            // An own-clock game exchanges no hash at all: its peer owns its
+            // own units and there is no lockstep comparison to make.
+            if (gameParameters.netMode != NetMode::OwnClock && (playerId == *loaded.localPlayerId || isRemote))
             {
                 // On a peer rejoining a game in progress, every hash stream
                 // starts at the rejoin tick: this peer has none for the ticks

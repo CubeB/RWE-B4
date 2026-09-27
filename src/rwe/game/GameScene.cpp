@@ -972,8 +972,10 @@ namespace rwe
         // The drift gate below asks the network thread what time everyone
         // else is at, and skips ticks to stay level with them. There is
         // nobody else in a replay, and letting it skip would end the playback
-        // at a different game time than the recording did.
-        auto averageSceneTime = isPlayback() ? sceneTime : gameNetworkService->estimateAvergeSceneTime(sceneTime);
+        // at a different game time than the recording did. An own-clock game
+        // owns its clock too: it waits on no peer, so there is no other time
+        // to be held to.
+        auto averageSceneTime = (isPlayback() || isOwnClock()) ? sceneTime : gameNetworkService->estimateAvergeSceneTime(sceneTime);
 
         // Cap the number of sim ticks we dispatch per frame to prevent
         // a runaway "spiral of death" if frame times spike at high speeds.

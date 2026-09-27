@@ -1356,6 +1356,23 @@ namespace rwe
          */
         bool isPlayback() const { return replayPlayback.has_value() || tadPlayback != nullptr; }
 
+        /** True when the scene owns its clock and waits on no peer; see NetMode. */
+        bool isOwnClock() const { return gameParameters.netMode == NetMode::OwnClock; }
+
+        /**
+         * Applies a TA peer's `0x19` game speed, in the original's own
+         * 1..20 numbering (normal at 10). Called by the network layer that
+         * speaks to a TA peer; a no-op in any other mode. See applyPeerGameSpeed
+         * and docs/TA-NETWORK.md.
+         */
+        void setPeerGameSpeedLevel(int peerSpeedLevel);
+
+        /** Applies a TA peer's `0x19` pause or unpause; a no-op outside own-clock mode. */
+        void setPeerPaused(bool paused);
+
+        /** Whether this game may be saved. An own-clock game may not; see GameScene_ownclock.cpp. */
+        bool canSave() const;
+
         /** Whose resources the top bar reads out; the local player unless a replay says otherwise. */
         PlayerId hudPlayerId() const { return hudPlayerOverride.value_or(localPlayerId); }
 
