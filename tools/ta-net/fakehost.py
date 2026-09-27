@@ -16,7 +16,7 @@ their first full-state record. Everything else is live:
   * after launch, the host's units: every owned slot's full state once a cycle, and the commander
     walking wherever it is told
 
-    tools/ta-net/fakehost.py <capture.pcap> [--dir DIR] [--options 0x48] [--team N]
+    tools/ta-net/fakehost.py <capture.pcap> [--dir DIR] [--options 0x48] [--team N] [--tcp-port 2301]
 
 Then join from TA, and in DIR:
     touch go                  release the launch (the replay holds just before it)
@@ -24,8 +24,9 @@ Then join from TA, and in DIR:
     echo "x z" > walk         walk it to a world position
 fakehost.log is the session log; fakehost-rx.jsonl is every TA subpacket the joiner sent.
 
-It binds TCP 2300 and 47624 and UDP 2350 and 47624, so nothing else on the machine may be
+It binds TCP 2300 and 47624 and UDP 2350 and 47624 by default, so nothing else on the machine may be
 hosting, and a DirectPlay helper left running by an earlier game has to be stopped first.
+--tcp-port, --udp-port and --enum-port move them, which is what lets fakejoin.py run beside it.
 """
 import argparse, json, math, os, select, socket, struct, time
 
@@ -132,8 +133,9 @@ class Recording:
 
 
 class FakeHost:
-    def __init__(self, rec, workdir, max_units):
+    def __init__(self, rec, workdir, max_units, ports=(HOST_TCP, HOST_UDP, ENUM_PORT)):
         self.rec, self.dir, self.max_units = rec, workdir, max_units
+        self.host_tcp, self.host_udp, self.enum_port = ports
         self.log_file = open(os.path.join(workdir, "fakehost.log"), "a", buffering=1)
         self.rx = open(os.path.join(workdir, "fakehost-rx.jsonl"), "a", buffering=1)
         self.go_file, self.walk_file = os.path.join(workdir, "go"), os.path.join(workdir, "walk")
@@ -168,14 +170,14 @@ class FakeHost:
         udp.sendto(dp_app_udp(self.rec.host_player, to, ta_packet(subs, marker)), (self.ip, self.udp_port))
 
     def app_tcp(self, to, subs):
-        self.send_tcp(dp_app_tcp(HOST_TCP, self.rec.host_player, to, ta_packet(subs)))
+        self.send_tcp(dp_app_tcp(self.host_tcp, self.rec.host_player, to, ta_packet(subs)))
 
     # ---- DirectPlay
 
     def enum_reply(self):
         name = (GAME_NAME.ljust(16) + self.rec.session_name[16:]).encode("utf-16-le") + b"\0\0"
         body = self.rec.enum_reply[28:112] + name
-        return self.rec.rewrite("TCP", dp_header(0x0001, len(body), HOST_TCP) + body)
+        return self.rec.rewrite("TCP", dp_header(0x0001, len(body), self.host_tcp) + body)
 
     def superenum(self):
         m = bytearray(self.rec.superenum)
@@ -196,7 +198,7 @@ class FakeHost:
             self.ip = self.ip or src_ip; self.tcp_port = self.tcp_port or port
             pid = self.rec.sys_id if struct.unpack_from("<I", m, 28)[0] & 1 else self.rec.player_id
             body = struct.pack("<I", pid) + b"\0" * 36
-            self.send_tcp(dp_header(0x0007, len(body), HOST_TCP) + body, f"REQUESTPLAYERREPLY {pid:#x}")
+            self.send_tcp(dp_header(0x0007, len(body), self.host_tcp) + body, f"REQUESTPLAYERREPLY {pid:#x}")
         elif cmd == 0x13:
             sp = m[48 + 0x30: 48 + 0x30 + 0x20]
             self.udp_port = struct.unpack_from(">H", sp, 18)[0]
@@ -349,12 +351,13 @@ class FakeHost:
             self.log(f"replay done at host tick {self.rec.last_tick}; the host's units {sorted(self.units)} are now ours")
 
     def serve(self):
-        tcp = socket.socket(); tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); tcp.bind(("0.0.0.0", HOST_TCP)); tcp.listen(8)
-        etcp = socket.socket(); etcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); etcp.bind(("0.0.0.0", ENUM_PORT)); etcp.listen(8)
-        eudp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); eudp.bind(("0.0.0.0", ENUM_PORT))
-        udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); udp.bind(("0.0.0.0", HOST_UDP))
+        tcp = socket.socket(); tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); tcp.bind(("0.0.0.0", self.host_tcp)); tcp.listen(8)
+        etcp = socket.socket(); etcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); etcp.bind(("0.0.0.0", self.enum_port)); etcp.listen(8)
+        eudp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); eudp.bind(("0.0.0.0", self.enum_port))
+        udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); udp.bind(("0.0.0.0", self.host_udp))
         self.log(f"fake host up: '{GAME_NAME}' on {self.rec.session_name[16:].strip()}, "
-                 f"host units {sorted(self.rec.units)}, replay to host tick {self.rec.last_tick}")
+                 f"host units {sorted(self.rec.units)}, replay to host tick {self.rec.last_tick}, "
+                 f"tcp {self.host_tcp} udp {self.host_udp} enum {self.enum_port}")
         conns = {}
         while True:
             r, _, _ = select.select([tcp, etcp, eudp, udp] + list(conns), [], [], 0.005)
@@ -396,9 +399,13 @@ def main():
     ap.add_argument("--options", type=lambda x: int(x, 0), help="host options byte, e.g. 0x48 (docs/TA-NETWORK.md)")
     ap.add_argument("--team", type=int, help="the host's team in the battleroom")
     ap.add_argument("--max-units", type=int, default=250, help="the game's unit limit, which sets the full-state cycle")
+    ap.add_argument("--tcp-port", type=int, default=HOST_TCP, help="TCP port to listen on; 2301 and 2351 for a host on a machine with a joiner")
+    ap.add_argument("--udp-port", type=int, default=HOST_UDP, help="UDP port to listen on")
+    ap.add_argument("--enum-port", type=int, default=ENUM_PORT, help="port the ENUMSESSIONS broadcast arrives on")
     a = ap.parse_args()
     os.makedirs(a.dir, exist_ok=True)
-    FakeHost(Recording(a.capture, a.max_units, a.options, a.team), a.dir, a.max_units).serve()
+    FakeHost(Recording(a.capture, a.max_units, a.options, a.team), a.dir, a.max_units,
+             (a.tcp_port, a.udp_port, a.enum_port)).serve()
 
 
 if __name__ == "__main__":
