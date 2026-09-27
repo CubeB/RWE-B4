@@ -638,7 +638,7 @@ namespace
             ScheduledPacket scheduled;
             scheduled.sender = packet.sender;
             scheduled.subPackets = subPackets;
-            for (const auto& subPacket : subPackets)
+            for ([[maybe_unused]] const auto& subPacket : subPackets)
             {
                 if (rwe::tadSerialOfUnitState(subPacket))
                 {
@@ -663,16 +663,24 @@ namespace
         rwe::readTad(stream, collected);
         auto& packets = collected.packets;
 
+        auto serialOf = [](const ScheduledPacket& packet) -> std::optional<uint32_t> {
+            for (const auto& subPacket : packet.subPackets)
+            {
+                if (auto serial = rwe::tadSerialOfUnitState(subPacket))
+                {
+                    return serial;
+                }
+            }
+            return std::nullopt;
+        };
+
         // The first serial names tick 0, exactly as the receiver anchors it.
         std::optional<uint32_t> origin;
         for (const auto& packet : packets)
         {
-            if (packet.hasSerial)
+            origin = serialOf(packet);
+            if (origin)
             {
-                if (auto serial = rwe::tadSerialOfUnitState(packet.subPackets.front()))
-                {
-                    origin = *serial;
-                }
                 break;
             }
         }
@@ -690,68 +698,61 @@ namespace
         uint32_t furthest = 0;
         for (auto& packet : packets)
         {
-            if (packet.hasSerial)
+            if (auto serial = serialOf(packet))
             {
-                for (const auto& subPacket : packet.subPackets)
-                {
-                    if (auto serial = rwe::tadSerialOfUnitState(subPacket))
-                    {
-                        furthest = std::max(furthest, *serial >= *origin ? *serial - *origin : 0u);
-                        break;
-                    }
-                }
+                furthest = std::max(furthest, *serial >= *origin ? *serial - *origin : 0u);
             }
             packet.streamTick = furthest;
         }
 
         std::optional<LiveResult> result;
         withPlayback(data, meta, true, [&](rwe::GameSimulation& sim, rwe::TadPuppetDriver& driver) {
-        rwe::TaLiveReceiver receiver(driver, rwe::TaLiveReceiverOptions{live.jitterTicks});
+            rwe::TaLiveReceiver receiver(driver, rwe::TaLiveReceiverOptions{live.jitterTicks});
 
-        // The generator is the tool's own: nothing here may touch the
-        // simulation's, or the same seed would give two different games.
-        std::minstd_rand rng(live.seed);
-        std::vector<std::vector<std::size_t>> arriving(furthest + 1);
-        for (std::size_t i = 0; i < packets.size(); ++i)
-        {
-            ++live.packetsScheduled;
-            if (live.lossPercent > 0 && rwe::randomBelow(rng, 100) < live.lossPercent)
+            // The generator is the tool's own: nothing here may touch the
+            // simulation's, or the same seed would give two different games.
+            std::minstd_rand rng(live.seed);
+            std::vector<std::vector<std::size_t>> arriving(furthest + 1);
+            for (std::size_t i = 0; i < packets.size(); ++i)
             {
-                ++live.packetsLost;
-                continue;
+                ++live.packetsScheduled;
+                if (live.lossPercent > 0 && rwe::randomBelow(rng, 100) < live.lossPercent)
+                {
+                    ++live.packetsLost;
+                    continue;
+                }
+
+                // Only a packet with a 0x2c is on the jittered clock. One
+                // without has no tick of its own: the receiver passes it
+                // straight through and the driver resolves it from the
+                // sender's last serial, so there is nothing to lead it by.
+                auto lead = 0u;
+                if (packets[i].hasSerial)
+                {
+                    lead = rwe::randomBetween(rng, 0, static_cast<int>(live.jitterTicks));
+                }
+                auto streamTick = static_cast<uint64_t>(packets[i].streamTick);
+                arriving[static_cast<std::size_t>(streamTick - std::min<uint64_t>(lead, streamTick))].push_back(i);
             }
 
-            // Only a packet with a 0x2c is on the jittered clock. One without
-            // has no tick of its own: the receiver passes it straight through
-            // and the driver resolves it from the sender's last serial, so
-            // there is nothing to lead it by.
-            auto lead = 0u;
-            if (packets[i].hasSerial)
+            for (std::size_t t = 0; t <= furthest; ++t)
             {
-                lead = rwe::randomBetween(rng, 0, static_cast<int>(live.jitterTicks));
+                for (auto index : arriving[t])
+                {
+                    auto& packet = packets[index];
+                    receiver.onPacket(rwe::TadPacket{0, packet.sender}, packet.subPackets, static_cast<uint32_t>(t));
+                }
+                receiver.onTick(static_cast<uint32_t>(t));
+                driver.applyTick(static_cast<uint32_t>(t));
+                if (t < furthest)
+                {
+                    sim.tick();
+                }
             }
-            auto streamTick = static_cast<uint64_t>(packets[i].streamTick);
-            arriving[static_cast<std::size_t>(streamTick - std::min<uint64_t>(lead, streamTick))].push_back(i);
-        }
 
-        for (std::size_t t = 0; t <= furthest; ++t)
-        {
-            for (auto index : arriving[t])
-            {
-                auto& packet = packets[index];
-                receiver.onPacket(rwe::TadPacket{0, packet.sender}, packet.subPackets, static_cast<uint32_t>(t));
-            }
-            receiver.onTick(static_cast<uint32_t>(t));
-            driver.applyTick(static_cast<uint32_t>(t));
-            if (t < furthest)
-            {
-                sim.tick();
-            }
-        }
-
-        live.receiver = receiver.stats();
-        live.localTicks = static_cast<uint32_t>(furthest);
-        result = LiveResult{driver.stats(), live};
+            live.receiver = receiver.stats();
+            live.localTicks = static_cast<uint32_t>(furthest);
+            result = LiveResult{driver.stats(), live};
         });
         return result;
     }
