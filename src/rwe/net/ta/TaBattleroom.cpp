@@ -9,11 +9,9 @@ namespace rwe
 {
     namespace
     {
-        /** 0x24 and 0x1a are six and fourteen bytes; 0x09 and 0x11 the demo reader's sizes. */
+        /** The sizes the subpacket table in rwe/io/tad gives these codes. */
         constexpr std::size_t TeamSize = 6;
         constexpr std::size_t IdentSize = 41;
-        constexpr std::size_t LoadingProgressSize = 2;
-        constexpr std::size_t StartSize = 2;
         constexpr std::size_t UnitStateWordSize = 4;
         constexpr std::size_t UnitSyncSize = 14;
 
@@ -50,11 +48,9 @@ namespace rwe
         }
 
         /**
-         * A recorded host's status, taken from ta-baseline.pcap at 20.610 -- the
-         * first one it sent, before anything was changed in the lobby. The map
-         * name in it is replaced by whatever the host is serving, and the player
-         * id, state and options are overwritten; the rest is what a TA sent and
-         * is not decoded. See taBuildPlayerStatus for what each range is.
+         * A recorded host's status, from ta-baseline.pcap at 20.610: the first
+         * one it sent, before anything in the lobby was changed. taBuildPlayerStatus
+         * says which ranges of it are decoded.
          */
         constexpr std::array<std::uint8_t, TaPlayerStatusSize> CapturedHostStatus{
             0x20, 0x43, 0x61, 0x6e, 0x61, 0x6c, 0x20, 0x43, 0x72, 0x6f, 0x73, 0x73,
@@ -85,8 +81,7 @@ namespace rwe
             static_cast<std::uint8_t>(0));
 
         // A map name longer than the field is truncated rather than allowed to
-        // write over the id: a name comes from a command line, which is still
-        // somebody else's input.
+        // write over the id.
         for (std::size_t i = 0; i < status.mapName.size() && i < TaPlayerStatusMapNameLength; ++i)
         {
             auto character = static_cast<std::uint8_t>(status.mapName[i]);
@@ -120,10 +115,8 @@ namespace rwe
         auto end = begin + static_cast<std::ptrdiff_t>(TaPlayerStatusMapNameLength);
         auto nul = std::find(begin, end, static_cast<std::uint8_t>(0));
 
-        // NUL-padded ASCII and nothing else, which is the shape the captures
-        // have. A field that is not that is somebody else's name: the scripted
-        // joiner of #430 writes its own into these bytes in UTF-16, and a host
-        // that read a map out of that would refuse a game over it.
+        // NUL-padded printable ASCII and nothing else, so a name written here in
+        // UTF-16 is not read as a map and does not refuse a game.
         bool printable = std::all_of(begin, nul, [](std::uint8_t c) { return c >= 0x20 && c < 0x7F; });
         bool padded = std::all_of(nul, end, [](std::uint8_t c) { return c == 0; });
         if (printable && padded)
@@ -311,14 +304,14 @@ namespace rwe
     void TaBattleroom::peerJoined(PeerId peer)
     {
         peers_[peer] = TaBattleroomPeer{peer};
-        peers_[peer].unitSyncStarted = true;
+        peers_[peer].name = session.peerName(peer);
         readyAnnounced_[peer] = false;
 
         queueStatus(config.lobbyState, TaTransport::Tcp);
         traffic.flush();
 
-        // The unit table's header, which the joiner's 1 + 2n records are counted
-        // against. It goes in a message of its own, as it does in the captures.
+        // The unit table's header, the first of the joiner's 1 + 2n records. It
+        // goes in a message of its own, as it does in the captures.
         traffic.queue(peer, taBuildUnitSyncHeader(), TaTransport::Tcp);
         traffic.flush();
     }
@@ -419,7 +412,7 @@ namespace rwe
 
         // A real host checks a joiner's checksums against its own; this one
         // echoes the ids back, which is all a joiner counts, so no checksum is
-        // ever computed here. See docs/TA-NETWORK.md, "Unit sync".
+        // ever computed here. Each id is answered twice, in the joiner's order.
         auto answered = std::min(ids.size(), config.maxUnitSyncIdsPerMessage);
         unitSyncRefused_ += static_cast<std::uint32_t>(ids.size() - answered);
 
@@ -459,6 +452,8 @@ namespace rwe
             {
                 return;
             }
+            // A launch has stopped the battleroom: a peer in the game is kept
+            // there by the 0x2c stream and its pings, not by a status beat.
             if (state_ == TaBattleroomState::Waiting)
             {
                 sendKeepalive();
@@ -475,9 +470,9 @@ namespace rwe
             return;
         }
 
-        // The 0x07 goes alone: in every capture the keepalive is a 0x07 on its
-        // own and then the status records, and a peer reads the pair as the
-        // beat it is being offered for rejection if it stops.
+        // The 0x07 goes alone: in every capture the keepalive is a 0x07 in a
+        // message of its own and then the status records, and a peer reads the
+        // pair as the beat whose absence offers it for rejection.
         traffic.queueForAll(ids, code(TadSubPacketCode::Unk07), TaTransport::Tcp);
         traffic.flush();
 
@@ -520,6 +515,7 @@ namespace rwe
 
         std::vector<std::uint8_t> teams{config.hostTeam};
         std::vector<std::string> maps;
+        maps.reserve(peers_.size());
         for (const auto& [id, peer] : peers_)
         {
             (void)id;
@@ -615,8 +611,8 @@ namespace rwe
         traffic.queueForAll(ids, taBuildStart(1), TaTransport::Tcp);
         traffic.flush();
 
-        // Twice, as the captures have it: the host tells the session the game is
-        // starting, and then again once it has moved to UDP.
+        // Twice, as the captures have it: once as the 0x1e goes out and once
+        // after the move to UDP.
         session.sendSessionDescChanged();
         session.sendSessionDescChanged();
 

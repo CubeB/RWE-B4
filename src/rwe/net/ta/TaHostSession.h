@@ -62,7 +62,7 @@ namespace rwe
     };
 
     /**
-     * The four things a layer above the session needs from it. TaHostSession is
+     * The five things a layer above the session needs from it. TaHostSession is
      * the only implementation in the engine; TaBattleroom takes this rather than
      * the session so its own tests need no sockets.
      */
@@ -81,6 +81,9 @@ namespace rwe
 
         /** Where a peer's game traffic goes, or nothing for a peer it has lost. */
         virtual std::optional<TaPeerAddress> peerAddress(std::uint32_t peer) const = 0;
+
+        /** The name CREATEPLAYER carried, or empty for a peer it has lost. */
+        virtual std::string peerName(std::uint32_t peer) const = 0;
     };
 
     struct TaHostConfig
@@ -186,6 +189,8 @@ namespace rwe
         std::uint32_t hostPlayerId() const override { return config.hostPlayerId; }
 
         std::optional<TaPeerAddress> peerAddress(PeerId peerId) const override;
+
+        std::string peerName(PeerId peerId) const override;
 
     private:
         struct TcpLink

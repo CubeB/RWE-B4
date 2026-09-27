@@ -5,9 +5,8 @@
 // With --battleroom it also plays the host's half of what a joining TA does
 // between arriving and playing: TaBattleroom holds the battleroom, answers unit
 // sync by echo and runs the launch, and this probe keeps the host in the game
-// afterwards with a 0x2c for its one commander. That is the acceptance test for
-// TaBattleroom, and the scripted joiner it runs against is
-// tools/ta-net/host-check.sh in the worktree of issue #430.
+// afterwards with a 0x2c for its one commander. The scripted joiner it is
+// checked against is tools/ta-net/host-check.sh in the worktree of issue #430.
 //
 // The first check that the C++ session layer works against a real client is
 // tools/ta-net/dpenum.py, which does not take a port base and so needs the real
@@ -87,12 +86,10 @@ namespace
     constexpr int TickRate = 30;
 
     /**
-     * The host's one unit, described as its owner describes it: a standing ARM
-     * commander where the recorded host's own 0x09 put it, from ta-baseline.pcap
-     * at 45.636. The type index is that data set's load-order index and the
-     * health, flags and motion are that commander's own full-state record, so
-     * the joiner is told a unit exists and is told about it again once a cycle.
-     * A game supplies its own (#438); a probe has no data set to read it from.
+     * The host's one unit, as its owner describes it: a standing ARM commander
+     * where the recorded host's own 0x09 put it (ta-baseline.pcap at 45.636),
+     * with that data set's load-order index for the type. A probe has no data
+     * set to read a commander's own figures from; a game supplies them.
      */
     rwe::TadUnitSync hostCommander()
     {
@@ -109,11 +106,11 @@ namespace
     }
 
     /**
-     * The 0x2c stream that keeps a host in the game: every tick's full-state
+     * The 0x2c stream that keeps a host in the game: each tick's full-state
      * record for the slot the tick names, so an empty slot is described as empty
-     * and the commander's own slot is described as the commander, once a cycle.
-     * The first message also declares the commander as an entry, which is how a
-     * peer learns a slot is occupied at all.
+     * and the commander's own is described once a cycle. The first message also
+     * declares the commander as an entry, which is how a peer learns the slot is
+     * occupied at all.
      */
     class HostInGame
     {
@@ -309,7 +306,7 @@ int main(int argc, char* argv[])
             std::cout << "launch refused: " << reason << "\n" << std::flush;
         });
         room->onLaunched([&](const rwe::TaBattleroom::JoinerInfo& info) {
-            std::cout << "launched: peer 0x" << std::hex << info.address.playerId << std::dec
+            std::cout << "launched: '" << info.name << "' 0x" << std::hex << info.address.playerId << std::dec
                       << " on tcp " << info.address.tcp.port() << ", udp " << info.address.udp.port()
                       << ", team " << static_cast<int>(info.team) << "\n"
                       << std::flush;
@@ -342,13 +339,12 @@ int main(int argc, char* argv[])
     host.onAppData([&](rwe::TaHostSession::PeerId id, const std::vector<std::uint8_t>& bytes, rwe::TaTransport transport) {
         if (room)
         {
-            // The battleroom reads the subpackets itself: a status, a team, a
-            // unit id and a ping are all it acts on, and it answers each.
+            // The battleroom reads and answers the subpackets itself.
             room->handleAppData(id, bytes, transport);
             if (auto roundTrip = room->roundTripTicks(id); roundTrip && lastRoundTrip != *roundTrip)
             {
-                // A latency that has not moved is not worth a line; a joiner
-                // pings once a second and the log is read after a run.
+                // A joiner pings once a second and the log is read after a run,
+                // so only a latency that has moved is worth a line.
                 lastRoundTrip = *roundTrip;
                 std::cout << "  ping 0x" << std::hex << id << std::dec << ": "
                           << *roundTrip << " ms\n" << std::flush;

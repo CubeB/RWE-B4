@@ -182,6 +182,16 @@ namespace rwe
         return TaPeerAddress{it->second.playerId, it->second.tcpEndpoint, it->second.udpEndpoint};
     }
 
+    std::string TaHostSession::peerName(PeerId peerId) const
+    {
+        auto it = peers.find(peerId);
+        if (it == peers.end())
+        {
+            return {};
+        }
+        return it->second.shortName;
+    }
+
     void TaHostSession::listenEnumTcp()
     {
         auto connection = std::make_shared<IncomingTcp>(ioContext);

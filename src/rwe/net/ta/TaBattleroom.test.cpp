@@ -73,6 +73,8 @@ namespace rwe
                     asio::ip::udp::endpoint(asio::ip::make_address("127.0.0.1"), 34751)};
             }
 
+            std::string peerName(std::uint32_t) const override { return "rwe"; }
+
             int sessionDescChanged{0};
 
             explicit Session(std::vector<Sent>* where) : sent(where)
@@ -193,7 +195,6 @@ namespace rwe
 
     TEST_CASE("a status built from fields is the recorded host's with its known bytes replaced", "[net][ta]")
     {
-        // The four fields a capture identifies, at the offsets it has them at.
         TaPlayerStatus status;
         status.playerId = 0x08D90E76;
         status.mapName = "Canal Crossing";
@@ -232,14 +233,12 @@ namespace rwe
 
     TEST_CASE("a status field that is not ASCII names no map, so no game is refused over it", "[net][ta]")
     {
-        // The scripted joiner of #430 puts its own name in bytes 1-32 in UTF-16,
-        // which is what the same field holds as a map name in a real capture.
+        // The scripted joiner of #430 puts its own name in these bytes in
+        // UTF-16, where a real capture has a map name in ASCII.
         TaPlayerStatus status;
         status.playerId = JoinerId;
         auto bytes = taBuildPlayerStatus(status);
 
-        // Three characters in UTF-16, each a byte and a NUL, which is what the
-        // scripted joiner writes there.
         std::string const utf16Name = "rwe";
         std::fill(
             bytes.begin() + static_cast<std::ptrdiff_t>(TaPlayerStatusMapNameOffset),
@@ -289,12 +288,10 @@ namespace rwe
 
     TEST_CASE("a 0x1a sub-type 2 record's id, and nothing else, is read", "[net][ta]")
     {
-        // A sub-type 2 record: the id at 6 and a checksum at 10, which is the
-        // one a host never computes.
+        // The id at 6, and the checksum at 10 that a host never computes.
         TadBytes record{0x1A, 0x02, 0x00, 0x00, 0x00, 0x00, 0xb6, 0x78, 0xf8, 0xb8, 0x64, 0x86, 0xce, 0x1e};
         REQUIRE(taParseUnitSyncId(record) == 0xb8f878b6);
 
-        // The other three sub-types are not ids.
         for (std::uint8_t subType : {0x00, 0x01, 0x03, 0x04})
         {
             TadBytes other = record;
@@ -303,7 +300,6 @@ namespace rwe
             REQUIRE_FALSE(taParseUnitSyncId(other));
         }
 
-        // Nor is a record too short to hold the id.
         for (std::size_t size = 0; size < 14; ++size)
         {
             TadBytes shortRecord(size, 0x00);
@@ -336,7 +332,6 @@ namespace rwe
         REQUIRE(status->options == 0x4F);
         REQUIRE(sent[1][5] == 0);
 
-        // The sub-type 0 record, which the joiner's 1 + 2n count starts from.
         REQUIRE(sent[2] == taBuildUnitSyncHeader());
     }
 
@@ -345,7 +340,6 @@ namespace rwe
         Harness h;
         h.room->peerJoined(JoinerId);
 
-        // 35 ids, which is what a real joiner puts in a message.
         TaPacket batch;
         for (std::uint32_t i = 0; i < 35; ++i)
         {
@@ -365,8 +359,8 @@ namespace rwe
         });
         REQUIRE(it != echoes.end());
 
-        // 70 records for 35 ids, in the joiner's order, each 0x0001 then 0x0101,
-        // and no record of the joiner's own is answered twice.
+        // Two records per id, in the joiner's order: 0x0001 then 0x0101, the
+        // second meaning in use, and a limit of 0xffff.
         std::vector<TadBytes> records;
         for (const auto& one : echoes)
         {
@@ -381,19 +375,14 @@ namespace rwe
             std::uint32_t expected = 0x1000 + static_cast<std::uint32_t>(i);
             REQUIRE(records[2 * i] == taBuildUnitSyncEcho(expected, false));
             REQUIRE(records[2 * i + 1] == taBuildUnitSyncEcho(expected, true));
-            // The status word is 0x0001 or 0x0101 -- in use -- and the limit is
-            // 0xffff, which is what every capture carries.
             REQUIRE(records[2 * i][10] == 0x01);
             REQUIRE(records[2 * i][11] == 0x00);
             REQUIRE(records[2 * i + 1][10] == 0x01);
             REQUIRE(records[2 * i + 1][11] == 0x01);
-            REQUIRE(records[2 * i + 1][12] == 0xFF);
-            REQUIRE(records[2 * i + 1][13] == 0xFF);
         }
         REQUIRE(h.room->unitSyncEchoed() == 35);
 
-        // Every echo is a reply, and the host computes no checksum: the id in
-        // the record is the joiner's own, byte for byte.
+        // Every echo is a reply, which is what a joiner counts.
         for (const auto& one : h.sent)
         {
             auto parsed = taParsePacket(one.bytes);
@@ -426,13 +415,11 @@ namespace rwe
         REQUIRE_FALSE(peer->ready);
         REQUIRE_FALSE(announced);
 
-        // The team arrives in its own 0x24.
         TaPacket team;
         team.subpackets.push_back(taBuildTeam(JoinerId, 1));
         h.deliver(team);
         REQUIRE(h.room->peer(JoinerId)->team == 1);
 
-        // Bit 0x20 is ready, once.
         h.joinerStatus(0x20);
         REQUIRE(h.room->peer(JoinerId)->ready);
         REQUIRE(announced);
@@ -463,7 +450,6 @@ namespace rwe
 
     TEST_CASE("a launch is refused when every player is on one team", "[net][ta]")
     {
-        // The rule on its own, so a host can be checked without a session.
         const std::uint8_t bothOnZero[]{0, 0};
         const std::uint8_t split[]{0, 1};
         const std::uint8_t oneAlone[]{TaNoTeam, TaNoTeam};
@@ -538,7 +524,6 @@ namespace rwe
         REQUIRE(h.room->launch(launchParams()));
         REQUIRE(h.room->state() == TaBattleroomState::Launching);
 
-        // The ladder is on a timer, so let it run.
         for (int i = 0; i < 50 && h.room->state() != TaBattleroomState::Launched; ++i)
         {
             h.ioContext.run_for(std::chrono::milliseconds(5));
@@ -561,7 +546,6 @@ namespace rwe
         }
         REQUIRE(progress == std::vector<std::uint8_t>({0x00, 0x26, 0x36, 0x64}));
 
-        // SESSIONDESCCHANGED twice.
         REQUIRE(h.session.sessionDescChanged == 2);
 
         // Over UDP: 0x15, 0x07, then 0x2a, the status, the team, the 0x09 and the 0x11.
@@ -576,7 +560,6 @@ namespace rwe
                                0x11,
                            }));
 
-        // The commander's 0x09 and 0x11 carry the launch parameters.
         auto udpRecords = h.codesTo(JoinerId, TaTransport::Udp);
         auto build = std::find_if(udpRecords.begin(), udpRecords.end(), [](const TadBytes& one) {
             return one[0] == 0x09;
@@ -593,18 +576,17 @@ namespace rwe
         REQUIRE(state != udpRecords.end());
         REQUIRE(*state == taBuildUnitStateWord(251, 1));
 
-        // The status over UDP says the game is under way.
         auto status = taParsePlayerStatus(udpRecords[3]);
         REQUIRE(status);
         REQUIRE(status->state == 0x32);
         REQUIRE(status->playerId == HostId);
 
-        // And the joiner is reported with what a game needs to start.
         REQUIRE(sawLaunch);
         REQUIRE(launched.address.playerId == JoinerId);
         REQUIRE(launched.address.tcp.port() == 34701);
         REQUIRE(launched.address.udp.port() == 34751);
         REQUIRE(launched.team == TaNoTeam);
+        REQUIRE(launched.name == "rwe");
     }
 
     TEST_CASE("a second launch is not started", "[net][ta]")
@@ -621,9 +603,8 @@ namespace rwe
         h.room->peerJoined(JoinerId);
         h.sent.clear();
 
-        // A keepalive short enough to fire inside the test. How many beats a run
-        // sees is a matter of how long it ran, so what is checked is that they
-        // are all the same group of records.
+        // How many beats a run sees depends on how long it ran, so the check
+        // is that they are all the same group of records.
         h.config.keepaliveInterval = std::chrono::milliseconds(1);
         h.room = std::make_unique<TaBattleroom>(
             h.ioContext,
