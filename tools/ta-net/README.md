@@ -20,7 +20,8 @@ that read captures. None of them needs root, but recording a capture does.
 ## Checking a host
 
 `fakejoin.py` against `fakehost.py` is the loopback acceptance test, and it needs nothing but the
-two scripts and a capture:
+two scripts and a capture. Captures are not in the tree, so the path below is wherever yours is —
+`ta-small.pcap` and `ta-baseline.pcap` are the two from the spike that were developed against:
 
 ```sh
 mkdir -p /tmp/fj
@@ -61,9 +62,10 @@ STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.local/share/Steam STEAM_COMPAT_DATA_PATH=~/.
 For `fakehost.py`, launch the game and stay in it for at least ten seconds, so that the host's
 commander has sent a full-state record. Quit the joiner before the host.
 
-`ta-small.pcap` and `ta-baseline.pcap` are what the two scripts were run against; `ta-options.pcap`
-was recorded after the join, so it holds no handshake and neither will take it as a template.
-`docs/TA-NETWORK.md`, "Playtesting against a real TA", is the runbook for a session with a real TA.
+`ta-small.pcap` and `ta-baseline.pcap` are what the two scripts were developed against;
+`ta-options.pcap` was recorded after the join, so it holds no handshake and neither will take it as a
+template. `docs/TA-NETWORK.md`, "Playtesting against a real TA", is the runbook for a session with a
+real TA.
 
 Captures are not checked in: they hold LAN addresses and player names. Before starting
 `fakehost.py`, stop anything that still holds the DirectPlay ports:

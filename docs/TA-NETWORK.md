@@ -74,7 +74,8 @@ binds 2300, 2350 and 47624, the same as TA: a host on other ports is a host no T
 
 **Proton.** TA is a non-Steam game and needs Microsoft's DirectPlay in its prefix —
 `protontricks <appid> directplay`, once. Nothing else stands in for it: `TotalA.exe` imports
-`DPLAYX.dll` itself, and the DirectPlay helper `protontricks` installs is what owns 47624.
+`DPLAYX.dll` itself, and the DirectPlay that step installs is what brings `dplaysvr` with it, which
+is what owns 47624.
 
 **Capture before the joiner looks.** `sudo tcpdump -i any -w game.pcap 'port 47624 or portrange
 2300-2400'`, started *before* anyone joins, because the ENUMSESSIONSREPLY is what `fakehost.py` and
