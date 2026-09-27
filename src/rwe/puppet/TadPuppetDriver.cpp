@@ -125,6 +125,31 @@ namespace rwe
             }
         }
 
+        /**
+         * Names a puppet by the global id its slot stands for, once its
+         * sender's block is known.
+         *
+         * A unit is often first seen in a 0x2c update, which carries its
+         * block-relative index and no global id; its damage and death records
+         * carry the global id, so without this the records for a unit that has
+         * not yet had its full-state turn read as unknown. The block is
+         * learned from the sender's own 0x09, so the arithmetic is exact.
+         */
+        void assignDemoId(uint8_t sender, uint16_t index, Puppet& puppet)
+        {
+            if (puppet.demoId != 0)
+            {
+                return;
+            }
+            auto block = blockOfSender.find(sender);
+            if (block == blockOfSender.end())
+            {
+                return;
+            }
+            puppet.demoId = tadUnitIdOfIndex(block->second, index, maxUnits);
+            keyOfId[puppet.demoId] = puppetKey(sender, index);
+        }
+
         void dropPuppet(std::unordered_map<uint32_t, Puppet>::iterator it)
         {
             if (it->second.unplaced)
@@ -357,7 +382,13 @@ namespace rwe
             auto live = liveUnitOf(puppetIt->second);
             if (!live)
             {
-                dropPuppet(puppetIt);
+                // A slot the simulation has already let go is forgotten. One
+                // that has not been placed yet is left for its full-state
+                // record, which carries the build progress that finishes it.
+                if (puppetIt->second.unit)
+                {
+                    dropPuppet(puppetIt);
+                }
                 return;
             }
 
@@ -400,8 +431,9 @@ namespace rwe
             auto live = liveUnitOf(puppetIt->second);
             if (!live)
             {
+                // The owner declares a death for a unit we have not placed yet
+                // or have already let go; either way it never stands here.
                 dropPuppet(puppetIt);
-                ++stats.recordsDroppedUnknownUnit;
                 return;
             }
 
@@ -446,7 +478,13 @@ namespace rwe
             auto live = liveUnitOf(puppetIt->second);
             if (!live)
             {
-                dropPuppet(puppetIt);
+                // Damage to a slot not placed yet is dropped: the full-state
+                // record snaps its health anyway, and `applyRemoteDamage`
+                // needs a unit that exists. A slot already let go is forgotten.
+                if (puppetIt->second.unit)
+                {
+                    dropPuppet(puppetIt);
+                }
                 return;
             }
 
@@ -538,6 +576,7 @@ namespace rwe
                 }
 
                 auto& puppet = ensurePuppet(sender, update.index, *typeName);
+                assignDemoId(sender, update.index, puppet);
                 auto live = liveUnitOf(puppet);
                 if (!live)
                 {
@@ -603,7 +642,6 @@ namespace rwe
                 return;
             }
 
-            auto key = puppetKey(sender, index);
             auto& puppet = ensurePuppet(sender, index, *typeName);
 
             auto live = liveUnitOf(puppet);
@@ -657,11 +695,7 @@ namespace rwe
                 {
                     applyMover(sim.getUnitState(*unitId), *puppet.pendingMover);
                 }
-                if (auto block = blockOfSender.find(sender); block != blockOfSender.end())
-                {
-                    puppet.demoId = tadUnitIdOfIndex(block->second, index, maxUnits);
-                    keyOfId[puppet.demoId] = key;
-                }
+                assignDemoId(sender, index, puppet);
                 return;
             }
 
