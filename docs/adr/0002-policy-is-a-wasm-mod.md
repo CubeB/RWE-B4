@@ -300,9 +300,10 @@ those structs. The shape a mod order will take:
 
 This adds two variant alternatives, `ModOrder` and its command, which is the
 kind of growth the section budget in `CLAUDE.md` warns about: one
-`PlayerCommand` alternative cost 464 sections. So this waits until after v0,
-with the section budget measured when it lands. Escalation's new order type
-waits with it.
+`PlayerCommand` alternative cost 464 sections, and `GameSimulation.cpp` had
+244 to spare when last measured. So this waits until after v0, and until #396
+has recovered room for both alternatives. Escalation's new order type waits
+with it.
 
 **D17 -- A wasm computer player is not in v0.** The native AI reads far more
 than the v0 imports offer:
@@ -347,7 +348,7 @@ Each fold hook:
 |---|---|---|---|
 | `hook_seek_repair_pad(unit, prev) -> i32` | 0 | Nonzero: break off and search for a pad, as now | Every aircraft, every tick |
 | `hook_attacked_reaction(unit, attacker, prev) -> i32` | 0, none | Carries out the chosen reaction: none, return fire (sets the weapon target), move away, or detonate if kamikaze | Per damage event |
-| `hook_mission_complete(unit, order, prev) -> i32` | 0 | Nonzero: pops the order. v0 calls it only for D-gun orders and `commandfire` attacks, whose completion is a predicate over state the order imports can read | Every tick, for units with such an order at the front |
+| `hook_mission_complete(unit, order, prev) -> i32` | 0 | Nonzero: pops the order. v0 calls it only for D-gun orders and `commandfire` attacks, whose completion is a predicate over state the order imports can read. Another order is added to the hook, with imports for its state, when a mod needs it | Every tick, for units with such an order at the front |
 | `hook_reclaim_allowed(builder, target, prev) -> i32` | 1 | Zero: the reclaim does not start | Per reclaim attempt |
 | `hook_round_expired_detonates(proj, prev) -> i32` | 0 | Nonzero: detonates the round where it is | Per round expiry |
 | `hook_weapon_motor(proj, prev) -> i32` | The weapon's declared motor | Runs that native motor this tick | Every guided round, every tick |
