@@ -114,6 +114,56 @@ def encrypt(d):
     return bytes(d)
 
 
+def compress(d, header_size=3):
+    """The inverse of `decompress`, transcribed from rwe/io/tad/tad_util.cpp's `tadCompress`.
+
+    Not byte-for-byte TA's own packer: the two agree on what a packet says and not always on how
+    it is packed, so this is for re-packing a packet whose plain form has been edited (a fixture
+    with a name taken out of it), never for reproducing a capture. `ta-capture.py --check` does
+    the other half, re-encoding `0x2c` against the capture itself.
+    """
+    if len(d) <= header_size:
+        return bytes(d)
+    out = bytearray(); count = 7; control = 0; i = 4; match = 0; n = len(d)
+    while i < n + 1:
+        if count == 7:
+            count = 0; out.append(0); control = len(out) - 1
+        else:
+            count += 1
+        if i < 6 or i > 2000:                       # the reference never looks for a match here
+            out.append(d[i - 1]); i += 1; continue
+        best = 2
+        for a in range(4, i - 1):
+            c = 0
+            while a + c < i and i + c < n and d[a + c - 1] == d[i + c - 1]:
+                c += 1
+            if c > best:
+                best = c; match = a
+                if best > 17:
+                    break
+        run = 0                                     # a run of the byte just written, which the
+        while i + run < n and d[i + run - 1] == d[i - 2]:   # search above cannot express
+            run += 1
+        if run > best:
+            best = run; match = i - 1
+        if best > 2:
+            out[control] |= 1 << count
+            length = (best - 2) & 0x0F
+            op = ((match - header_size) << 4) | length
+            out.append(op & 0xFF); out.append((op >> 8) & 0xFF)
+            i += length + 2
+        else:
+            out.append(d[i - 1]); i += 1
+    if count == 7:
+        out.append(0xFF)
+    else:
+        out[control] |= (0xFF << (count + 1)) & 0xFF
+    out.append(0); out.append(0)                    # a zero offset in the next slot ends the stream
+    if len(out) + header_size < n:
+        return bytes([0x04, d[1], d[2]]) + bytes(out)
+    return bytes([0x03]) + bytes(d[1:])
+
+
 def decompress(d, header_size=3):
     # The offset is absolute into the output, not a distance back, and a copy may overrun its own source.
     if not d or d[0] != 0x04:

@@ -24,6 +24,10 @@
 #include <rwe/sim/TaLiveBatch.h>
 #include <rwe/sim/TaLiveSender.h>
 #include <rwe/sim/TaPeerIds.h>
+#include <rwe/net/ta/TaBattleroom.h>
+#include <rwe/net/ta/TaDirectPlay.h>
+#include <rwe/net/ta/TaPacket.h>
+#include <rwe/net/ta/TaPinger.h>
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/sim_test_util.h>
 #include <rwe/sim/util.h>
@@ -616,5 +620,267 @@ namespace rwe
             REQUIRE(narrow.stats().unitsRefused == 1);
             REQUIRE(narrow.stats().unitStateSkipped == 0);
         }
+    }
+    namespace
+    {
+        /** A DirectPlay TCP message: the 20-bit size, the token, then "play" and the command. */
+        std::vector<std::uint8_t> dpMessage(std::size_t declaredSize, std::uint16_t command, std::size_t payloadSize)
+        {
+            std::vector<std::uint8_t> bytes(28 + payloadSize, 0);
+            auto word = (TaDirectPlayToken << 20) | (static_cast<std::uint32_t>(declaredSize) & 0x000FFFFFu);
+            bytes[0] = static_cast<std::uint8_t>(word & 0xFF);
+            bytes[1] = static_cast<std::uint8_t>((word >> 8) & 0xFF);
+            bytes[2] = static_cast<std::uint8_t>((word >> 16) & 0xFF);
+            bytes[3] = static_cast<std::uint8_t>((word >> 24) & 0xFF);
+            bytes[4] = 2;
+            bytes[20] = 'p';
+            bytes[21] = 'l';
+            bytes[22] = 'a';
+            bytes[23] = 'y';
+            bytes[24] = static_cast<std::uint8_t>(command & 0xFF);
+            bytes[25] = static_cast<std::uint8_t>(command >> 8);
+            bytes[26] = 0x0E;
+            return bytes;
+        }
+    }
+
+    TEST_CASE("a DirectPlay message that lies about its size is refused, never trusted", "[malformed]")
+    {
+        SECTION("a size larger than the bytes received")
+        {
+            auto bytes = dpMessage(4096, 0x0001, 32);
+            REQUIRE(taPeekDirectPlayMessageSize(bytes.data(), bytes.size()) == 4096);
+            REQUIRE_THROWS_AS(taDecodeDirectPlayMessage(bytes.data(), bytes.size()), TaDirectPlayException);
+        }
+
+        SECTION("a size smaller than the header")
+        {
+            auto bytes = dpMessage(8, 0x0001, 4);
+            REQUIRE_THROWS_AS(taDecodeDirectPlayMessage(bytes.data(), bytes.size()), TaDirectPlayException);
+        }
+
+        SECTION("too short for its own header")
+        {
+            std::vector<std::uint8_t> small(10, 0);
+            REQUIRE_FALSE(taIsDirectPlayMessage(small.data(), small.size()));
+            REQUIRE_THROWS_AS(taDecodeDirectPlayMessage(small.data(), small.size()), TaDirectPlayException);
+            REQUIRE(taPeekDirectPlayMessageSize(small.data(), small.size()) == 0);
+        }
+
+        SECTION("the wrong token")
+        {
+            auto bytes = dpMessage(32, 0x0005, 4);
+            bytes[3] = 0xFF;
+            REQUIRE(taPeekDirectPlayMessageSize(bytes.data(), bytes.size()) == 0);
+            REQUIRE_THROWS_AS(taDecodeDirectPlayMessage(bytes.data(), bytes.size()), TaDirectPlayException);
+        }
+    }
+
+    TEST_CASE("a session description too short for its fields is refused", "[malformed]")
+    {
+        // A 80-byte structure, truncated to 40.
+        std::vector<std::uint8_t> payload(40, 0);
+        REQUIRE_THROWS_AS(taDecodeSessionDescription(payload), TaDirectPlayException);
+
+        // The reply names its name at offset 92; an offset that points nowhere
+        // must be refused rather than walked off the end.
+        std::vector<std::uint8_t> reply(84, 0);
+        REQUIRE_THROWS_AS(taDecodeEnumSessionsReply(reply), TaDirectPlayException);
+    }
+
+    TEST_CASE("an enum players reply that claims more players than it holds is refused", "[malformed]")
+    {
+        // PlayerCount 0xFFFFFFFF, with a packed offset inside the body.
+        std::vector<std::uint8_t> payload(28 + 80, 0);
+        payload[0] = 0xFF;
+        payload[1] = 0xFF;
+        payload[2] = 0xFF;
+        payload[3] = 0xFF;
+        // descriptionOffset (from the envelope) 36 -> payload offset 28.
+        payload[16] = 36;
+        // nameOffset 116 -> payload offset 108, inside the 80-byte body only.
+        payload[20] = 116;
+        // packedOffset 180 -> payload offset 172.
+        payload[8] = 180;
+        REQUIRE_THROWS_AS(taDecodeSuperEnumPlayersReply(payload), TaDirectPlayException);
+    }
+
+    TEST_CASE("a packed player whose strings and lengths run past the message is refused", "[malformed]")
+    {
+        // A super enum players reply with one player whose service-provider
+        // length says there is more data than the message holds.
+        std::vector<std::uint8_t> payload(28 + 80, 0);
+        payload[24] = 1; // one player
+        payload[16] = 36; // descriptionOffset, from the envelope
+        payload[20] = 116; // nameOffset, from the envelope
+        payload[8] = 180; // packedOffset, from the envelope
+
+        // The player entry starts at payload offset 172: 20 bytes of fixed
+        // fields then a one-byte spDataLength. Set infoMask to say the
+        // service-provider data is present and claim more than remains.
+        payload.resize(28 + 80 + 21, 0);
+        payload[172 + 12] = 0x04; // infoMask: sp data present, one-byte length
+        payload[172 + 20] = 0xFF; // spDataLength 255, past the end
+        REQUIRE_THROWS_AS(taDecodeSuperEnumPlayersReply(payload), TaDirectPlayException);
+    }
+
+    TEST_CASE("a create player or add forward request too short for its addresses is refused", "[malformed]")
+    {
+        std::vector<std::uint8_t> shortPayload(60, 0);
+        REQUIRE_THROWS_AS(taDecodeCreatePlayer(shortPayload), TaDirectPlayException);
+        REQUIRE_THROWS_AS(taDecodeAddForwardRequest(shortPayload), TaDirectPlayException);
+
+        std::vector<std::uint8_t> empty;
+        REQUIRE_THROWS_AS(taDecodeRequestPlayerId(empty), TaDirectPlayException);
+        REQUIRE_THROWS_AS(taDecodeRequestPlayerReply(empty), TaDirectPlayException);
+        REQUIRE_THROWS_AS(taDecodeDeletePlayer(empty), TaDirectPlayException);
+    }
+
+    TEST_CASE("application data too short for its player ids is refused", "[malformed]")
+    {
+        std::vector<std::uint8_t> tcp(24, 0);
+        REQUIRE_THROWS_AS(taDecodeAppDataTcp(tcp.data(), tcp.size()), TaDirectPlayException);
+
+        std::vector<std::uint8_t> udp(4, 0);
+        REQUIRE_THROWS_AS(taDecodeAppDataUdp(udp.data(), udp.size()), TaDirectPlayException);
+    }
+
+    TEST_CASE("a TA packet too short for its header is dropped, not read past", "[malformed]")
+    {
+        for (std::size_t size = 0; size < TaPacketHeaderSize; ++size)
+        {
+            std::vector<std::uint8_t> bytes(size, 0x03);
+            CAPTURE(size);
+            REQUIRE_FALSE(taParsePacket(bytes));
+        }
+
+        // A 0x04 whose compressed stream stops mid-slot has no plain form to
+        // walk, so there is nothing to give back.
+        TadBytes stopped{0x04, 0x00, 0x00, 0x01, 0x00};
+        REQUIRE_FALSE(taParsePacket(stopped));
+    }
+
+    TEST_CASE("a subpacket the length table cannot size ends the walk", "[malformed]")
+    {
+        // 0x6f is not in the table. The rest of the payload is handed over whole
+        // rather than absorbed silently, so a desynchronised walk is visible.
+        TaPacket unknown;
+        unknown.subpackets.push_back({0x6F, 0x01, 0x02});
+        auto parsed = taParsePacket(unknown.build());
+        REQUIRE(parsed);
+        REQUIRE(parsed->stats.unknownCodes == 1);
+        REQUIRE(parsed->packet.subpackets.size() == 1);
+        REQUIRE(parsed->packet.subpackets[0] == TadBytes({0x6F, 0x01, 0x02}));
+    }
+
+    TEST_CASE("a TA packet with a bad checksum is walked and reported, not trusted", "[malformed]")
+    {
+        TaPacket packet;
+        packet.subpackets.push_back({0x06});
+        TadBytes bytes = packet.build();
+        REQUIRE(taParsePacket(bytes)->checksumValid);
+
+        // Flip a byte inside the encrypted body. The stored checksum no longer
+        // matches, and the packet is worth walking anyway: a bad checksum is not
+        // a reason to drop a whole session's traffic.
+        bytes[4] ^= 0x40;
+        auto parsed = taParsePacket(bytes);
+        REQUIRE(parsed);
+        REQUIRE_FALSE(parsed->checksumValid);
+        REQUIRE(parsed->packet.subpackets.size() == 1);
+
+        // The same, in the header, which is not encrypted.
+        TadBytes header = packet.build();
+        header[3] ^= 0x01;
+        auto badHeader = taParsePacket(header);
+        REQUIRE(badHeader);
+        REQUIRE_FALSE(badHeader->checksumValid);
+    }
+
+    TEST_CASE("a subpacket that declares more than the packet holds ends the walk", "[malformed]")
+    {
+        // 0x2c carries its own length: claim 0xffff of a five-byte payload.
+        TaPacket unitState;
+        unitState.subpackets.push_back({0x2C, 0xFF, 0xFF, 0x00, 0x00});
+        auto parsed = taParsePacket(unitState.build());
+        REQUIRE(parsed);
+        REQUIRE(parsed->stats.truncated == 1);
+        REQUIRE(parsed->packet.subpackets.size() == 1);
+        REQUIRE(parsed->packet.subpackets[0].size() == 5);
+
+        // 0xfb's length is a byte over a three-byte prefix.
+        TaPacket recorder;
+        recorder.subpackets.push_back({0xFB, 0x7F});
+        auto parsedFb = taParsePacket(recorder.build());
+        REQUIRE(parsedFb);
+        REQUIRE(parsedFb->stats.truncated == 1);
+        REQUIRE(parsedFb->packet.subpackets.size() == 1);
+        REQUIRE(parsedFb->packet.subpackets[0].size() == 2);
+    }
+
+    TEST_CASE("a 0x02 that is not thirteen bytes is not a ping", "[malformed]")
+    {
+        for (std::size_t size = 0; size < 20; ++size)
+        {
+            if (size == 13)
+            {
+                continue;
+            }
+            TadBytes notAPing(size, 0x02);
+            CAPTURE(size);
+            REQUIRE_FALSE(TaPinger::parsePing(notAPing));
+        }
+    }
+
+    TEST_CASE("a 0x20 too short for its fields is not a status, whatever else it says", "[malformed]")
+    {
+        // Every length under the record, including one that would hold the id,
+        // the state and the options but not the whole 186 bytes.
+        for (std::size_t size = 0; size < TaPlayerStatusSize; ++size)
+        {
+            TadBytes bytes(size, 0xA0);
+            if (size > 0)
+            {
+                bytes[0] = 0x20;
+            }
+            CAPTURE(size);
+            REQUIRE_FALSE(taParsePlayerStatus(bytes));
+        }
+
+        // A record of the right length whose code is something else.
+        TadBytes full(TaPlayerStatusSize, 0x21);
+        REQUIRE_FALSE(taParsePlayerStatus(full));
+
+        // An empty map name is a player that has named none, not a fault.
+        std::vector<std::uint8_t> status = taBuildPlayerStatus(TaPlayerStatus{});
+        auto parsed = taParsePlayerStatus(status);
+        REQUIRE(parsed);
+        REQUIRE(parsed->mapName.empty());
+    }
+
+    TEST_CASE("a 0x1a that is not a whole sub-type 2 record names no unit type", "[malformed]")
+    {
+        // The joiner sends one of these per unit type, so a truncated one has to
+        // cost that record and not be read as an id from whatever follows it.
+        for (std::size_t size = 0; size < 14; ++size)
+        {
+            TadBytes bytes(size, 0x1A);
+            if (size >= 2)
+            {
+                bytes[1] = 0x02;
+            }
+            for (std::size_t i = 2; i < size; ++i)
+            {
+                bytes[i] = 0xFF;
+            }
+            CAPTURE(size);
+            REQUIRE_FALSE(taParseUnitSyncId(bytes));
+        }
+
+        // A 0x1a of another sub-type, and a 0x1a with no sub-type at all.
+        TadBytes header = taBuildUnitSyncHeader();
+        REQUIRE_FALSE(taParseUnitSyncId(header));
+        TadBytes wrongCode(14, 0x1B);
+        REQUIRE_FALSE(taParseUnitSyncId(wrongCode));
     }
 }

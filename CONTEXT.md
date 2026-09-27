@@ -339,6 +339,42 @@ the two cannot disagree about the bytes, and it owns nothing -- it is a view of
 the simulation, asked for one tick at a time.
 _Avoid_: send buffer, outbox (that is the mixed-ownership outbox)
 
+**TA packet**:
+The envelope one DirectPlay application message carries, live or in a demo:
+encrypted, compressed under a three-byte header, then a seven-byte header of
+type, checksum and a `u32` called the **marker**, then subpackets. The demo
+reader and the live session layer share the transforms and differ in what they
+do with what comes out. `docs/TA-NETWORK.md`, "TA packets".
+_Avoid_: demo record, message, datagram
+
+**Marker**:
+The `u32` at offset 3 of a TA packet. A reply wears `0xffffffff`; everything a
+sender starts itself wears a per-sender count falling by one per packet, which
+is what the captures show and what RWE sends. Not a clock, and nothing observed
+depends on it.
+_Avoid_: timestamp, sequence, checksum (that is offset 1)
+
+**Ping**:
+The `0x02` subpacket: the requester's wall-clock tick, the responder's, and the
+player id to answer. A responder must answer live, because a replayed reply
+carries another session's clock and reads as an absurd latency, and a host that
+stops answering is offered for rejection. `TaPinger`.
+_Avoid_: heartbeat, keepalive (that is `0x07`)
+
+**Battleroom**:
+What a joining TA sits in between finishing the handshake and the game starting:
+the `0x20` and `0x24` records each player is described by, the two-second beat
+that keeps it from offering the host for rejection, and the unit sync the joiner
+counts to `1 + 2n` before it is ready. A host holds one, a joiner waits in one, and
+`TaBattleroom` is the host's half of it -- including the launch out of it.
+_Avoid_: lobby, waiting room
+
+**Unit sync by echo**:
+Hosting without a unit checksum. The joiner sends its unit type ids and content
+checksums, the host answers each id twice, and a joiner that counts the records
+accepts the result. The ids are content-derived and the host never computes one.
+_Avoid_: handshaking, table exchange
+
 ### The instruments
 
 **Harness**:
