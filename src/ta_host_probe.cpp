@@ -25,15 +25,6 @@
 
 namespace
 {
-    std::string hexByte(std::uint8_t value)
-    {
-        static const char* digits = "0123456789abcdef";
-        std::string result{"0x"};
-        result.push_back(digits[value >> 4]);
-        result.push_back(digits[value & 0xF]);
-        return result;
-    }
-
     std::string toString(rwe::TaTransport transport)
     {
         return transport == rwe::TaTransport::Tcp ? "TCP" : "UDP";

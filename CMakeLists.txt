@@ -817,6 +817,14 @@ target_include_directories(librwe PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/config")
 target_include_directories(librwe PUBLIC "libs/asio/include")
 add_definitions(-DASIO_STANDALONE)
 if(WIN32)
+    # asio asks for the Windows target version to be named, and #warning's about
+    # it otherwise -- which -Werror=cpp, and so the CI's -DRWE_WERROR=ON, turns
+    # into a build failure. It assumes 0x0601 if told nothing, but mingw-w64
+    # would otherwise be choosing the default for itself, so this names a
+    # Windows 10 target rather than pinning the engine back to Windows 7.
+    add_definitions(-D_WIN32_WINNT=0x0A00)
+endif()
+if(WIN32)
     # winsock needed for asio on windows
     target_link_libraries(librwe ws2_32)
     # ...and mswsock for the IOCP half: AcceptEx and GetAcceptExSockaddrs live
