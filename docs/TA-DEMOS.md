@@ -2581,14 +2581,14 @@ simulation ticked once per local tick. The generator is the tool's own
 `minstd_rand` and the same seed gives the same run. Five ProTA demos (10158,
 11440, 11505, 11506, 11507), 35,669 ground drift samples between them:
 
-| run | ground p90 | ground within 32 | air p90 | air within 32 |
-|---|---|---|---|---|
-| `tad_puppet`, straight from the file | 52.15 | 82.03% | 87.79 | 69.64% |
-| `--live-sim 0:0:1` | 52.15 | 82.03% | 87.79 | 69.64% |
-| `--live-sim 3:0:1` | 52.38 | 81.96% | 93.20 | 68.45% |
-| `--live-sim 10:0:1` | 52.43 | 81.87% | 136.18 | 64.88% |
-| `--live-sim 3:1:1` | 53.58 | 81.62% | 103.31 | 68.26% |
-| `--live-sim 3:5:1` | 60.35 | 80.44% | 165.52 | 61.08% |
+| run | spawned | finished | killed | wrecks | ground p90 | ground within 32 | air within 32 |
+|---|---|---|---|---|---|---|---|
+| `tad_puppet`, straight from the file | 3,591 | 5,874 | 3,476 | 1,212 | 52.15 | 82.03% | 69.64% |
+| `--live-sim 0:0:1` | 3,591 | 5,874 | 3,476 | 1,211 | 52.15 | 82.03% | 69.64% |
+| `--live-sim 3:0:1` | 3,588 | 5,859 | 3,007 | 1,628 | 52.38 | 81.96% | 68.45% |
+| `--live-sim 10:0:1` | 3,585 | 5,858 | 2,898 | 1,709 | 52.43 | 81.87% | 64.88% |
+| `--live-sim 3:1:1` | 3,542 | 5,801 | 3,429 | 1,247 | 53.58 | 81.62% | 68.26% |
+| `--live-sim 3:5:1` | 3,298 | 5,403 | 2,812 | 1,620 | 60.35 | 80.44% | 61.08% |
 
 **At zero jitter the live run reproduces the straight playback exactly** --
 every per-demo figure matches to the digit, drift distributions included. That
@@ -2606,33 +2606,45 @@ against 12 at a depth of 3 -- these demos send a packet every three ticks or
 so, so a depth of 3 has little to reorder and a depth of 10 has plenty -- and
 the ground within-32 figure is 81.87% against 81.96%. The air figures are the
 other story: a goal is not a position (see above), so a puppet aircraft given
-its recorded goal three ticks earlier than before has three more ticks of its
+its recorded goal ten ticks earlier than before has ten more ticks of its
 own arrival profile to be wrong by, and 64.88% within 32 against 68.45%.
+
+**The counts do not agree at a depth, and the reason is not the pass-through.**
+The kill column is 3,476 straight and 3,007 at a depth of 3. It was 2,924
+before a packet with no `0x2c` of its own was made to wait behind what its own
+sender had already sent, and that fix is the whole of the difference on one
+demo of the five -- the other four are unmoved by it. What is left is
+`TadPuppetDriver::applyDeath` dropping a death for a puppet whose unit is not
+live *without counting it* (`!live` there returns rather than reaching
+`recordsDroppedUnknownUnit`), so the loss is invisible in every counter, and a
+receive buffer reaches it more often: the death arrives after the full-state
+record that re-used its slot for a different type. At a depth of 1 the counts
+are the straight ones -- 3,475 kills, 3,589 spawns and 1,216 wrecks against
+3,476, 3,591 and 1,212 -- which is the tell: the shortfall is an ordering at a
+boundary rather than anything that grows with the depth, and it is in the
+driver rather than in the receiver. Deciding which of the two records the
+stream means is a question about the demo, not the receiver, so it is left
+there.
 
 **Over the whole ProTA corpus the 0%-loss run holds the figure tier 2 quotes.**
 All 39 demos at a depth of 3: 89.41% of the ground drift samples within 32
 units against 89.48% straight from the files, 1,095 out-of-order packets put
-right, 6 duplicates, 0 lost, 0 refused. The sample count falls from 788,901 to
-671,708, which is the same effect the five-demo table shows in miniature and is
-explained below.
+right, 6 duplicates, 0 lost, 0 refused. The spawn count is 33,003 against
+33,139 and the kill count 27,394 against 29,429, for the reason above.
 
 Two things the numbers do not say, and a reader should not infer otherwise. A
-**death record with no `0x2c` of its own** is applied at the sender's last
-*known* tick, and a receive buffer has already advanced that clock, so at a
-depth of 3 some deaths land up to three ticks later than they would from the
-file: over the five demos that is 3,476 deaths read straight against 2,924
-through a depth-3 buffer, with more wrecks in exchange, because a unit that
-lives three ticks longer is sometimes killed by something else first. The
-drift is unmoved by it, but the kill count is not, and it is a property of the
-format's ambiguity rather than of the buffer. Over the whole corpus it is
-29,429 deaths read straight against 27,311, so 93% of the figure survives and
-the 12% of units that die some other way first is where the 15% of drift
-samples that never get measured goes. And a **recording is in arrival
-order, not serial order**: one peer's tick 0 is often written after another's
-tick 1, so a receiver reading by serial applies those records at the tick they
-name where a straight playback applies them at the current one. That is why
-the live run's `late` counter is in the thousands even at 0% loss and 0 jitter.
-Both are counted and neither is a fault in the receiver.
+**death record with no `0x2c` of its own** has no tick of its own, and the
+receiver resolves it the way the format says it must: behind whatever its own
+sender has already sent, stamped with that packet's tick. That is earlier than
+the tick a straight playback reaches, because a straight playback reads the
+file and the file's order is a peer's, not ours. The extra wrecks the table
+shows are the units that die of something else in the ticks they are given, and
+the drift is unmoved by any of it. And a **recording is in arrival order, not
+serial order**: one peer's tick 0 is often written after another's tick 1, so a
+receiver reading by serial applies those records at the tick they name where a
+straight playback applies them at the current one. That is why the live run's
+`late` counter is in the thousands even at 0% loss and 0 jitter. Neither is a
+fault in the receiver, and both are counted.
 
 The rest of the stream is consumed too. `0x0d` spawns the shooter's own weapon
 round from the recorded origin toward the target for display only; it takes no

@@ -17,6 +17,9 @@ namespace rwe
         {
             TadPacket packet;
             std::vector<TadBytes> subPackets;
+
+            /** False for a packet with no 0x2c, which rides behind the one it arrived after. */
+            bool hasSerial{true};
         };
 
         struct SenderState
@@ -26,8 +29,12 @@ namespace rwe
              * always the next one due and a release cannot be out of serial
              * order. Keyed on the serial rather than on the tick it maps to, so
              * that moving the origin does not have to move every key with it.
+             *
+             * A multimap because a packet with no 0x2c of its own takes the key
+             * of the last packet held for that sender, and a multimap keeps it
+             * behind the packet it arrived after rather than in front of it.
              */
-            std::map<uint32_t, Held> held;
+            std::multimap<uint32_t, Held> held;
 
             std::optional<uint32_t> highestSeen;
 
@@ -119,7 +126,10 @@ namespace rwe
             originFrozen = true;
             driver.onPacket(held.packet, held.subPackets);
             ++stats.packetsApplied;
-            remember(sender, serial);
+            if (held.hasSerial)
+            {
+                remember(sender, serial);
+            }
         }
 
         /** Keeps a serial on the short list of the ones already handed over. */
@@ -204,11 +214,31 @@ namespace rwe
 
         if (!serial)
         {
-            // Nothing to key on, so the driver resolves the tick itself from
-            // the sender's last serial, exactly as a demo's playback does.
             ++i.stats.packetsWithoutSerial;
-            i.driver.onPacket(packet, subPackets);
-            ++i.stats.packetsApplied;
+
+            // A record with no clock of its own belongs to its sender's current
+            // tick, so it cannot go past what that sender has already sent: a
+            // 0x0c that overtakes the 0x09 two packets behind it is a death for
+            // a unit the driver has not heard of, and the stream's own order is
+            // the only thing that says otherwise. Anything still held for this
+            // sender goes first, and this rides behind the last of it.
+            auto& sender = i.senders[packet.sender];
+            if (sender.held.empty())
+            {
+                i.driver.onPacket(packet, subPackets);
+                ++i.stats.packetsApplied;
+                return;
+            }
+
+            if (sender.held.size() >= i.options.maxHeldPerSender || i.totalHeld >= i.options.maxHeld)
+            {
+                ++i.stats.packetsDroppedBufferFull;
+                return;
+            }
+
+            sender.held.emplace(sender.held.rbegin()->first, Impl::Held{packet, subPackets, false});
+            ++i.totalHeld;
+            i.stats.held = i.totalHeld;
             return;
         }
 
@@ -220,6 +250,9 @@ namespace rwe
         }
 
         auto& sender = i.senders[packet.sender];
+        // A key is only present while the packet that put it there is: the two
+        // are inserted together and released together, so a serial-less entry
+        // under this key means this packet is still held too.
         if (sender.held.count(*serial) != 0 || sender.hasHanded(*serial))
         {
             ++i.stats.packetsDuplicate;
@@ -263,6 +296,9 @@ namespace rwe
         auto due = static_cast<int64_t>(localTick) + i.options.jitterTicks;
         for (auto& [sender, state] : i.senders)
         {
+            // The front is the next one due, and for two entries on the same
+            // key it is the one that arrived first, so a packet with no 0x2c
+            // goes out after the packet it arrived behind.
             while (!state.held.empty() && i.tickFor(state.held.begin()->first) <= due)
             {
                 auto it = state.held.begin();

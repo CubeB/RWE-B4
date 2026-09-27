@@ -88,7 +88,10 @@ namespace rwe
          */
         uint64_t packetsOutOfOrder{0};
 
-        /** A packet with no 0x2c to key on, passed through for the driver to resolve. */
+        /**
+         * A packet with no 0x2c to key on. Queued behind its own sender's
+         * waiting packets, or passed through when it has none.
+         */
         uint64_t packetsWithoutSerial{0};
 
         /**
@@ -116,6 +119,13 @@ namespace rwe
      * sender's packets until the local tick is within `jitterTicks` of the tick
      * the serial names, so the driver has them in hand by the tick that names
      * them and applies them there.
+     *
+     * A packet with no `0x2c` has no tick of its own, and goes into its
+     * sender's queue behind whatever that sender has waiting: a `0x0c` that
+     * overtakes the `0x09` two packets behind it is a death for a unit the
+     * driver has not heard of, and one peer's own order is the only thing that
+     * says otherwise. With nothing waiting for that sender it goes straight
+     * through. Nothing crosses between senders.
      *
      * It maps TA's serial onto RWE's tick from the first packets of the run --
      * the lowest serial seen before the first packet is applied, so a first

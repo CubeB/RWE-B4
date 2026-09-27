@@ -260,11 +260,13 @@ driver)
 A jitter buffer in front of the puppet driver for a game rather than a file. It
 holds each sender's packets until the local tick is within its depth of the
 tick the `0x2c` serial names, so the driver has them in hand at that tick and
-applies them there rather than at the tick they arrived; a packet whose tick
-has passed is applied at once and counted, a serial already held or already
-handed over is dropped, and the map from serial to RWE tick settles on the
-lowest serial seen before the first packet is applied. Reports how far the two
-clocks drift apart over a run. Its counters are the overlay's.
+applies them there rather than at the tick they arrived; a packet with no
+serial of its own queues behind whatever its own sender has already sent, so
+one peer's records cannot overtake each other; a packet whose tick has passed
+is applied at once and counted, a serial already held or already handed over
+is dropped, and the map from serial to RWE tick settles on the lowest serial
+seen before the first packet is applied. Reports how far the two clocks drift
+apart over a run. Its counters are the overlay's.
 _Avoid_: network layer (that is the datagram, #424), delay, lag compensation
 
 **Receive buffer**:

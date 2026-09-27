@@ -36,6 +36,16 @@ namespace rwe
         }
 
         /**
+         * A packet carrying both a 0x09 that makes the unit and the 0x2c that
+         * clocks it, which is what makes the packet held rather than passed
+         * through. Unit 1 is block 0, index 0, the slot the 0x2c names.
+         */
+        std::vector<TadBytes> buildAndState(uint32_t serial)
+        {
+            return {tadEncodeBuildStarted(TadBuildStarted{3, 1, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}}), fullStateRecord(serial, 100)};
+        }
+
+        /**
          * The driver reads which types fly out of the simulation's table, so
          * the world has to exist before the driver is built -- hence its own
          * struct rather than a line in the fixture's constructor.
@@ -316,5 +326,27 @@ namespace rwe
         f.onTick(0);
         REQUIRE(f.driver.stats().chatLines == 1);
         REQUIRE(f.driver.takeChat().size() == 1);
+    }
+
+    TEST_CASE("a death with no clock of its own does not overtake the unit it names", "[puppet]")
+    {
+        Fixture f;
+
+        // The 0x09 and the 0x2c that clocks it, held because the 0x2c is three
+        // ticks ahead of the buffer's depth...
+        f.receiver.onPacket(TadPacket{0, 1}, buildAndState(8), 0);
+        REQUIRE(f.receiver.stats().held == 1);
+
+        // ...and a death in a packet with no 0x2c, which has no tick of its own
+        // and so must not go past what its own sender has already sent.
+        f.receiver.onPacket(TadPacket{0, 1}, {tadEncodeDeath(TadDeath{1, 0xffffffffu, 0, 100, 0})}, 0);
+
+        f.onTick(3);
+        REQUIRE(f.driver.stats().unitsSpawned == 1);
+        REQUIRE(f.driver.stats().recordsDroppedBadBlock == 0);
+        REQUIRE(f.driver.stats().recordsDroppedUnknownUnit == 0);
+        REQUIRE(f.driver.stats().unitsKilled == 1);
+        REQUIRE(f.receiver.stats().packetsWithoutSerial == 1);
+        REQUIRE(f.receiver.stats().held == 0);
     }
 }
