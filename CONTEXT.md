@@ -114,6 +114,13 @@ move a sync hash. A game with one cannot be saved, because the state it is
 missing lives on the other machine.
 _Avoid_: puppet player, non-local player, demo mode
 
+**Mixed-ownership outbox**:
+The damage this machine's Local units dealt to Remote ones, and the deaths of
+its own units, recorded for the network layer to send as `0x0b` and `0x0c`.
+Pure observer state, like SimEventLog: never hashed, saved or dumped, and never
+read back by the simulation.
+_Avoid_: damage queue, send buffer
+
 **Bridge**:
 The launcher's channel to the engine, one JSON object a line over standard
 input and output. `rwe_bridge` answers questions about the data files before

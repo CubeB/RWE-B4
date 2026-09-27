@@ -1,5 +1,6 @@
 #include "GameSimulation.h"
 #include <rwe/sim/UnitBehaviorService_util.h>
+#include <rwe/sim/MixedOwnership.h>
 #include <rwe/sim/SimRandom.h>
 #include <rwe/sim/SimulationOwnership.h>
 #include <algorithm>
@@ -107,6 +108,11 @@ namespace rwe
                 // 0x48AF32 hands cause 11 to the damage choke point.
                 return 11;
             }
+            if (cause == "quit")
+            {
+                // A peer leaving: TA's own quit death, cause 8.
+                return 8;
+            }
             return 1;
         }
 
@@ -118,6 +124,22 @@ namespace rwe
                 return dead->corpseLevel;
             }
             return 0;
+        }
+
+        /** A unit has died with this cause and corpse level; both the demo recorder and the mixed-ownership outbox want it. */
+        void notifyUnitDied(
+            GameSimulation& sim,
+            UnitId unitId,
+            std::optional<UnitId> killer,
+            unsigned int severity,
+            unsigned int cause,
+            unsigned int corpseLevel)
+        {
+            if (sim.demoRecorder)
+            {
+                sim.demoRecorder->unitDied(sim, unitId, killer, severity, cause, corpseLevel);
+            }
+            recordLocalDeath(sim, unitId, killer, severity, cause, corpseLevel);
         }
 
     }
@@ -1114,12 +1136,9 @@ namespace rwe
         }
 
         events.push_back(UnitDiedEvent{targetId, unit.unitType, unit.position, UnitDiedEvent::DeathType::Deleted});
-        if (demoRecorder)
-        {
-            // Cause 5, reclaimed: it leaves nothing, and the corpus reads
-            // severity 0 and level 0 on every cause-5 death.
-            demoRecorder->unitDied(*this, targetId, std::nullopt, 0, 5, 0);
-        }
+        // Cause 5, reclaimed: it leaves nothing, and the corpus reads
+        // severity 0 and level 0 on every cause-5 death.
+        notifyUnitDied(*this, targetId, std::nullopt, 0, 5, 0);
         return true;
     }
 
@@ -1289,13 +1308,10 @@ namespace rwe
         // see, and by the time it reads the event the unit is gone.
         recordUnitDeath(*this, unitId, "self_destruct", std::nullopt);
         events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, UnitDiedEvent::DeathType::SelfDestructed, unit.owner});
-        if (demoRecorder)
-        {
-            // Cause 3, self-destruct: RWE leaves nothing to reclaim, so the
-            // record is the level-0 shape the corpus gives the skipped-script
-            // causes rather than the wreck the original's Killed might pick.
-            demoRecorder->unitDied(*this, unitId, std::nullopt, 0, 3, 0);
-        }
+        // Cause 3, self-destruct: RWE leaves nothing to reclaim, so the
+        // record is the level-0 shape the corpus gives the skipped-script
+        // causes rather than the wreck the original's Killed might pick.
+        notifyUnitDied(*this, unitId, std::nullopt, 0, 3, 0);
 
         const auto& explosion = unitDefinition.selfDestructAs.empty() ? unitDefinition.explodeAs : unitDefinition.selfDestructAs;
         if (!explosion.empty())
@@ -2866,11 +2882,8 @@ namespace rwe
         }
         recordUnitDeath(*this, unitId, "unfinished", std::nullopt);
         quietlyKillUnit(unitId, false);
-        if (demoRecorder)
-        {
-            // Cause 9, an unfinished unit removed: no script, no corpse.
-            demoRecorder->unitDied(*this, unitId, std::nullopt, 0, 9, 0);
-        }
+        // Cause 9, an unfinished unit removed: no script, no corpse.
+        notifyUnitDied(*this, unitId, std::nullopt, 0, 9, 0);
     }
 
     void GameSimulation::quietlyKillUnit(UnitId unitId, bool countAsLoss)
@@ -3352,16 +3365,13 @@ namespace rwe
 
         // After the corpse rules have all had their say, so the level the
         // record carries is the one the spawner will use.
-        if (demoRecorder)
-        {
-            demoRecorder->unitDied(
-                *this,
-                unitId,
-                attacker,
-                static_cast<unsigned int>(severity),
-                demoDeathCause(*this, unitId),
-                demoCorpseLevel(unit));
-        }
+        notifyUnitDied(
+            *this,
+            unitId,
+            attacker,
+            static_cast<unsigned int>(severity),
+            demoDeathCause(*this, unitId),
+            demoCorpseLevel(unit));
     }
 
     void GameSimulation::updateWaterDamage()
@@ -3436,11 +3446,14 @@ namespace rwe
 
     void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer, std::optional<PlayerId> sourceOwner, const char* deathCause)
     {
-        // Damage to a Remote player's unit is the owner's to report; a local
-        // projectile hitting it must not take hit points off. The owner's
-        // recorded damage arrives through applyRemoteDamage instead.
+        // Damage to a Remote player's unit is the owner's to report. When this
+        // machine ran the hit, its attacker side shows the damage and records a
+        // 0x0b for the owner, but it never kills: only the owner's 0x0c, and
+        // the full-state record that overwrites the health, settle the unit.
+        // Damage that arrived from the stream goes through applyRemoteDamage.
         if (!simulatesLocally(*this, getUnitState(unitId).owner))
         {
+            applyLocalDamageToRemoteUnit(*this, unitId, attacker, damagePoints, paralyzer, sourceOwner);
             return;
         }
 
@@ -3557,14 +3570,11 @@ namespace rwe
                 // rule: both the veterancy counter and the player's Kills sit
                 // behind the build-progress test at 0x4869A7. See §5.
                 quietlyKillUnit(unitId);
-                if (demoRecorder)
-                {
-                    // A nanoframe runs no Killed script, so it leaves no corpse
-                    // and has no severity: cause 1 with both nibbles empty,
-                    // which is what the corpus's cause-9 and cause-5 deaths
-                    // read too.
-                    demoRecorder->unitDied(*this, unitId, attacker, 0, 1, 0);
-                }
+                // A nanoframe runs no Killed script, so it leaves no corpse
+                // and has no severity: cause 1 with both nibbles empty,
+                // which is what the corpus's cause-9 and cause-5 deaths
+                // read too.
+                notifyUnitDied(*this, unitId, attacker, 0, 1, 0);
             }
             else
             {

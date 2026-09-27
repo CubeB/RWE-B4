@@ -640,6 +640,8 @@ set(SOURCE_FILES
     src/rwe/sim/SimRandom.h
     src/rwe/sim/SimulationOwnership.cpp
     src/rwe/sim/SimulationOwnership.h
+    src/rwe/sim/MixedOwnership.cpp
+    src/rwe/sim/MixedOwnership.h
     src/rwe/sim/MovementClassCollisionService.h
     src/rwe/sim/MovementClassDatabase.cpp
     src/rwe/sim/MovementClassDatabase.h
@@ -1135,6 +1137,7 @@ set(TEST_FILES
     src/rwe/sim/builderfacing.test.cpp
     src/rwe/sim/reclaimreach.test.cpp
     src/rwe/sim/remoteownership.test.cpp
+    src/rwe/sim/mixedownership.test.cpp
     src/rwe/sim/fogplacement.test.cpp
     src/rwe/sim/gunship.test.cpp
     src/rwe/sim/aircraftidle.test.cpp

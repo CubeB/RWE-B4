@@ -48,6 +48,7 @@ namespace rwe
     class DemoRecorder;
     struct MissionRules;
     struct MissionScripts;
+    struct MixedOwnershipOutbox;
 
     constexpr int MaxUtilizableWindSpeed = 5000;
 
@@ -675,6 +676,15 @@ namespace rwe
          * it back -- see docs/adr/0001-demo-recorder-is-a-pure-observer.md.
          */
         std::unique_ptr<DemoRecorder> demoRecorder;
+
+        /**
+         * The damage and deaths this machine's own units produced for the other
+         * peers, for the network layer to send (#427). Pointed-to for the
+         * section budget, like demoRecorder, and a pure observer in the same
+         * sense: created on first use, never hashed, saved or dumped, and never
+         * read back by the simulation.
+         */
+        std::unique_ptr<MixedOwnershipOutbox> mixedOwnershipOutbox;
 
         /**
          * A campaign mission's win and lose rules (TOTALA-EXE-DATA.md §113),

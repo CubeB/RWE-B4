@@ -300,10 +300,12 @@ namespace rwe
          * The owner already resolved placement, so a factory's build pad or a
          * peer's footprint must not refuse the unit: the recorded position is
          * authoritative, the same way a remote unit's step is never refused by
-         * a stale peer. The blocking cells are cleared and the new unit claims
-         * them through the ordinary spawn; a wreck in the way is cleared only
-         * after a first attempt without one, so an overlap that is not a wreck
-         * does not orphan a feature.
+         * a stale peer. Only a Remote occupant's cells are cleared -- a Local
+         * unit is not this puppet's to erase, and a Local footprint that really
+         * stands there refuses the spawn -- and the new unit claims them
+         * through the ordinary spawn. A wreck in the way is cleared only after
+         * a first attempt without one, so an overlap that is not a wreck does
+         * not orphan a feature.
          */
         std::optional<UnitId> placeUnit(
             const std::string& typeName,
@@ -319,10 +321,32 @@ namespace rwe
                 return std::nullopt;
             }
 
-            sim.occupiedGrid.forEach(*region, [](auto& cell) {
+            // A cell held by a Remote unit -- including the factory whose pad
+            // the puppet is built on, which is also Remote -- is cleared so the
+            // puppet can stand where its owner put it. A cell a Local unit
+            // holds is left alone: this machine decides where those stand.
+            auto clearRemoteOccupant = [this](auto& cell) {
+                auto occupant = cell.mobileUnitId;
+                if (!occupant && cell.buildingInfo)
+                {
+                    occupant = cell.buildingInfo->unit;
+                }
+                if (!occupant)
+                {
+                    return;
+                }
+
+                auto state = sim.tryGetUnitState(*occupant);
+                if (state && simulatesLocally(sim, state->get().owner))
+                {
+                    return;
+                }
+
                 cell.mobileUnitId = std::nullopt;
                 cell.buildingInfo = std::nullopt;
-            });
+            };
+
+            sim.occupiedGrid.forEach(*region, clearRemoteOccupant);
 
             auto spawn = [&]() -> std::optional<UnitId> {
                 return completed
