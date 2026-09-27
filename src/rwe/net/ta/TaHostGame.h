@@ -119,8 +119,12 @@ namespace rwe
 
         bool autoLaunch{false};
 
-        /** Every port is the real one plus this; 0 hosts on the real ones. */
-        int portBase{0};
+        /**
+         * The three listening ports, which are the real ones unless a caller
+         * shifts them: `TaHostPorts::atBase` is what --port-base is, and zero
+         * in any of them is the OS choosing one, which is what a test wants.
+         */
+        TaHostPorts ports;
     };
 
     /** What a run of the host did, for the log. */

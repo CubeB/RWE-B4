@@ -1112,6 +1112,7 @@ set(TEST_FILES
     src/rwe/network_util.test.cpp
     src/rwe/net/ta/TaBattleroom.test.cpp
     src/rwe/net/ta/TaDirectPlay.test.cpp
+    src/rwe/net/ta/TaHostGame.test.cpp
     src/rwe/net/ta/TaHostSession.test.cpp
     src/rwe/net/ta/TaOutboundBatcher.test.cpp
     src/rwe/net/ta/TaPacket.test.cpp

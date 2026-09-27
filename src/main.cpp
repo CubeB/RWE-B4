@@ -352,7 +352,7 @@ int main(int argc, char* argv[])
                     hostConfig.maxUnits = static_cast<std::uint16_t>(std::min(0xffffu, args.getUint("max-units", 250)));
                     hostConfig.colour = static_cast<std::uint8_t>(args.getUint("colour", 0));
                     hostConfig.autoLaunch = args.getBool("auto-launch");
-                    hostConfig.portBase = static_cast<int>(args.getUint("port-base", 0));
+                    hostConfig.ports = rwe::TaHostPorts::atBase(static_cast<int>(args.getUint("port-base", 0)));
 
                     auto side = args.getString("side", "arm");
                     for (auto& c : side)

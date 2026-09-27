@@ -239,7 +239,7 @@ namespace rwe
         hostConfig.gameName = config.gameName;
         hostConfig.mapName = config.mapName;
         hostConfig.options = config.options;
-        hostConfig.ports = TaHostPorts::atBase(config.portBase);
+        hostConfig.ports = config.ports;
         hostPlayerId = hostConfig.hostPlayerId;
         hostSystemPlayerId = hostConfig.hostSystemPlayerId;
 

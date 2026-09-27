@@ -442,9 +442,61 @@ namespace rwe
         }
     }
 
-    TEST_CASE("the puppet driver's newer records are bounded like the rest", "[malformed][puppet]")
+    TEST_CASE("a damage record the driver cannot place is offered to the caller with its id unindexed", "[malformed][puppet]")
     {
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        definePuppetTestWorld(sim);
+        addWellStockedPlayer(sim, "ARM");
+
+        constexpr uint16_t maxUnits = 8;
+        TadPuppetDriver driver(sim, maxUnits, puppetTestLoadOrder());
+        driver.addPlayer(1, PlayerId(0));
+
+        struct Handed
+        {
+            uint16_t victimId{0};
+            std::optional<UnitId> attacker;
+            unsigned int damage{0};
+        };
+        std::vector<Handed> handed;
+        driver.setIncomingDamageHandler([&](uint16_t victimId, std::optional<UnitId> attacker, unsigned int damage) {
+            handed.push_back({victimId, attacker, damage});
+        });
+
+        // Every one of these names a unit the driver does not puppet, which is
+        // what a live host sees when the peer reports a hit on one of its own
+        // units. The id is the peer's to choose, so it arrives as it is: the
+        // caller is the one that has to decide whether it names a unit of its
+        // own, and nothing here may index with it first.
+        SECTION("no unit at all, and one past every block a sixteen-bit id can name")
+        {
+            driver.onPacket(TadPacket{0, 1}, {tadEncodeDamage(TadDamage{0, 0, 5, 0})});
+            driver.onPacket(TadPacket{0, 1}, {tadEncodeDamage(TadDamage{0xffff, 0, 5, 0})});
+
+            REQUIRE(handed.size() == 2u);
+            REQUIRE(handed[0].victimId == 0);
+            REQUIRE(handed[1].victimId == 0xffff);
+            REQUIRE(driver.stats().damageHandedOff == 2u);
+            REQUIRE(driver.stats().recordsDroppedUnknownUnit == 0u);
+        }
+
+        SECTION("an attacker the driver has never seen is nothing")
+        {
+            driver.onPacket(TadPacket{0, 1}, {tadEncodeDamage(TadDamage{maxUnits + 1, 0xffff, 60, 0})});
+            REQUIRE(handed.size() == 1u);
+            REQUIRE_FALSE(handed[0].attacker);
+        }
+
+        SECTION("a record the size table cannot size never reaches the handler")
+        {
+            driver.onPacket(TadPacket{0, 1}, {TadBytes{0x0b, 0x01}});
+            REQUIRE(handed.empty());
+            REQUIRE(driver.stats().damageHandedOff == 0u);
+        }
+    }
+
+    TEST_CASE("the puppet driver's newer records are bounded like the rest", "[malformed][puppet]")
+    {        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         definePuppetTestWorld(sim);
         addWellStockedPlayer(sim, "ARM");
         addWellStockedPlayer(sim, "CORE");
