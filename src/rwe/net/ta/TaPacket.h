@@ -17,7 +17,7 @@ namespace rwe
     /** Type, checksum u16, the marker u32. */
     inline constexpr std::size_t TaPacketHeaderSize = 7;
 
-    /** What a sender writes on its own traffic, and what a reply carries. */
+    /** What a reply wears. A sender's own traffic wears a count instead. */
     inline constexpr std::uint32_t TaReplyMarker = 0xFFFFFFFF;
 
     /**
@@ -36,7 +36,7 @@ namespace rwe
         std::uint32_t next_{0xFFFFFFFF};
     };
 
-    /** A packet's contents: what the seven-byte header says and the subpackets after it. */
+    /** A packet's contents: its framing, its marker, and its subpackets. */
     struct TaPacket
     {
         /** TadPacketUncompressed or TadPacketCompressed, as it arrived. */

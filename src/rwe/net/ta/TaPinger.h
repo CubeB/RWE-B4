@@ -48,8 +48,9 @@ namespace rwe
         using TickSource = std::function<std::uint32_t()>;
 
         /**
-         * @param batcher where a ping goes when it is queued. It must be framing
-         *        uncompressed, which is how the captures carry them.
+         * @param batcher where a ping goes when it is queued. It should be
+         *        framing uncompressed, which is how the captures carry a 0x02,
+         *        though a peer reads either.
          * @param ourPlayerId the id a request we send carries.
          */
         TaPinger(TaOutboundBatcher& batcher, std::uint32_t ourPlayerId, TickSource tick);
