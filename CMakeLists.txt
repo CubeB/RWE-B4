@@ -1241,6 +1241,11 @@ target_link_libraries(solar_probe librwe)
 add_executable(tad_probe src/tad_probe.cpp)
 target_link_libraries(tad_probe librwe)
 
+# Hosts a DirectPlay game a real Total Annihilation can find, for checking
+# tools/ta-net/dpenum.py against the C++ session layer. See src/ta_host_probe.cpp.
+add_executable(ta_host_probe src/ta_host_probe.cpp)
+target_link_libraries(ta_host_probe librwe)
+
 add_executable(tad_episodes src/tad_episodes.cpp)
 target_link_libraries(tad_episodes librwe)
 
