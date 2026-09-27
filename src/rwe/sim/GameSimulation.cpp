@@ -101,6 +101,11 @@ namespace rwe
             {
                 return 9;
             }
+            if (cause == "acid_water")
+            {
+                // 0x48AF32 hands cause 11 to the damage choke point.
+                return 11;
+            }
             return 1;
         }
 
@@ -3334,6 +3339,52 @@ namespace rwe
         }
     }
 
+    void GameSimulation::updateWaterDamage()
+    {
+        // Both map values must be set, and it is the same tick for every unit:
+        // the game's tick counter a multiple of thirty (0x48AEDF-0x48AF04).
+        if (waterDamage <= 0 || gameTime.value % static_cast<unsigned int>(SimTicksPerSecond) != 0)
+        {
+            return;
+        }
+
+        auto seaLevel = terrain.getSeaLevel();
+        std::vector<UnitId> inTheSea;
+        for (const auto& [unitId, unit] : units)
+        {
+            if (unit.isDead())
+            {
+                continue;
+            }
+
+            // A hovercraft rides over it (canhover, bit 12 of def+0x241).
+            if (unitDefinitions.at(unit.unitType).canHover)
+            {
+                continue;
+            }
+
+            // The integer part of its height, the high word of the 16.16 y,
+            // at or below sea level: ships, submarines and anything wading.
+            // An aircraft over the water is above it.
+            if (SimScalar(std::floor(unit.position.y.value)) > seaLevel)
+            {
+                continue;
+            }
+
+            inTheSea.push_back(unitId);
+        }
+
+        // 0x489BB0(no attacker, unit, waterdamage, cause 11), after the scan,
+        // so that nothing the damage sets off changes who is in the sea.
+        for (auto unitId : inTheSea)
+        {
+            if (!getUnitState(unitId).isDead())
+            {
+                applyDamage(unitId, static_cast<unsigned int>(waterDamage), std::nullopt, false, std::nullopt, "acid_water");
+            }
+        }
+    }
+
     void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints)
     {
         applyDamage(unitId, damagePoints, std::nullopt);
@@ -3358,7 +3409,7 @@ namespace rwe
         applyDamage(unitId, damagePoints, attacker, false);
     }
 
-    void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer, std::optional<PlayerId> sourceOwner)
+    void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer, std::optional<PlayerId> sourceOwner, const char* deathCause)
     {
         {
             // Scored by the music evaluator; carries owners so the scene
@@ -3459,7 +3510,7 @@ namespace rwe
 
         if (unit.hitPoints <= damagePoints)
         {
-            recordUnitDeath(*this, unitId, "weapon", attacker);
+            recordUnitDeath(*this, unitId, deathCause, attacker);
             if (unit.isBeingBuilt(unitDefinition))
             {
                 // Units that are still under construction
@@ -4930,6 +4981,8 @@ namespace rwe
             RWE_SIMPROF("selfrepair");
             updateSelfRepair();
         }
+
+        updateWaterDamage();
 
         // After the behaviour pass, which is where a builder stakes its claim
         // on the frame it is working on for this period.

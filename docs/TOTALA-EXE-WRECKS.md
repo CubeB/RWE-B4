@@ -934,7 +934,7 @@ recorded on the victim at `unit+0xF5` (§5), and ends up in the high nibble of
 | 8 | — | three packer calls at `0x4859A8`, `0x486EB2`, `0x486EF8`, each gated on a non-zero unit type index |
 | 9 | **An unfinished unit removed** | `0x41BC49` (the build tick gives up on a frame) and `0x402701` (the builder takes its own frame back, refunding into `unit+0xD4`) |
 | 10 | A repair | `0x41BDC7`; `0x489BB0` short-circuits it into adding hit points |
-| 11 | — | `0x48AF32`; the one Return Fire refuses (§5) |
+| 11 | **Acid water** | `0x48AF32`, in every unit's per-tick update: the map's `waterdamage` once a second to anything in the sea on a map that sets `waterdoesdamage` (DATA §105, B4 #378); the one Return Fire refuses (§5), there being no attacker |
 
 **The game-end wipe, `0x486F10(player)` (issue #258, 2026-09-24).** When a
 unit dies, the death routine `0x4864B0` compares its definition's name

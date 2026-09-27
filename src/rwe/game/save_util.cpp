@@ -641,6 +641,7 @@ namespace rwe
         j["killMul"] = sim.killMul;
         j["timeMul"] = sim.timeMul;
         j["noSeaLevelTrigger"] = sim.noSeaLevelTrigger;
+        j["waterDamage"] = sim.waterDamage;
         j["nextWindSpeedChange"] = saveGameTime(sim.nextWindSpeedChange);
         j["featureRegrowthCursor"] = sim.featureRegrowthCursor;
         if (sim.missionRules)
@@ -784,6 +785,10 @@ namespace rwe
         if (j.contains("noSeaLevelTrigger"))
         {
             sim.noSeaLevelTrigger = j.at("noSeaLevelTrigger").get<bool>();
+        }
+        if (j.contains("waterDamage"))
+        {
+            sim.waterDamage = j.at("waterDamage").get<int>();
         }
         sim.nextWindSpeedChange = loadGameTime(j.at("nextWindSpeedChange"));
         sim.featureRegrowthCursor = j.at("featureRegrowthCursor").get<int>();

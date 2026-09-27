@@ -854,7 +854,18 @@ keys come through `0x4C46C0` with the default shown, strings through
 | `missiondescription` | string | `"No description available"` (`0x504C58`) | |
 | `minwindspeed` / `maxwindspeed` / `gravity` | int | 0 | as skirmish |
 | `tidalstrength` / `killmul` / `timemul` | float | 0.0 | as skirmish |
-| `lavaworld` / `nosealeveltrigger` / `waterdoesdamage` / `waterdamage` | int | 0 | `waterdamage` is the per-tick damage when `waterdoesdamage` is set; the shipped missions all say `waterdoesdamage=0`, `waterdamage=100` |
+| `lavaworld` / `nosealeveltrigger` / `waterdoesdamage` / `waterdamage` | int | 0 | `waterdamage` is the acid's damage, once a second, when `waterdoesdamage` is set (below). The Arm, Core and Core Contingency missions all say `waterdoesdamage=0`, `waterdamage=100`; the Battle Tactics missions "Cleanup on Kral" (100) and "Less Refreshing Sea" (6) set it, as do eight skirmish maps (the Core Contingency's acid worlds at 10, Aqua Verdigris at 6) |
+
+**Acid water** (ported, B4 #378). The reader stores `nosealeveltrigger`,
+`waterdoesdamage` and `waterdamage` on the map record at `+0xD48`, `+0xD4C` and
+`+0xD50` (`0x43659C`-`0x4365C2`). Every unit's per-tick update then does
+(`0x48AED3`-`0x48AF32`): if both are set, on a tick that is a multiple of 30,
+for a unit whose integer height is at or below sea level and whose definition
+does not say `canhover` (bit 12 of `def+0x241`), `0x489BB0(no attacker, unit,
+waterdamage, cause 11, 0)`. Through the damage choke point, so armour and the
+victim's veterancy reduce it. Ships, submarines and anything wading are hurt;
+hovercraft and aircraft over the water are not. RWE's
+`GameSimulation::updateWaterDamage` does the same after the self-repair pass.
 
 **Win and lose conditions** are not read by the mission reader at all. The
 rule evaluator at `0x48E040`-`0x48E940` reads them straight off the header
