@@ -722,12 +722,26 @@ namespace rwe
         {
             for (auto* deathWeapon : {&definition.explodeAs, &definition.selfDestructAs})
             {
-                if (!deathWeapon->empty() && simulation.weaponDefinitions.count(*deathWeapon) == 0
-                    && simulation.weaponDefinitions.count(toUpper(*deathWeapon)) == 0)
+                if (deathWeapon->empty())
                 {
-                    LOG_WARN << "Unit " << unitType << " dies as " << *deathWeapon << ", which no weapon file defines; it will die without a blast";
-                    deathWeapon->clear();
+                    continue;
                 }
+                if (simulation.weaponDefinitions.count(*deathWeapon) != 0)
+                {
+                    continue;
+                }
+                // The original hashes weapon names case-insensitively, so a
+                // mod's `lARGE_BUILDINGEX` resolves to `LARGE_BUILDINGEX`.
+                // The keys here are upper-cased, so take the upper-cased
+                // spelling when it exists rather than clearing a name the
+                // simulation's own case-sensitive lookup would then trip on.
+                if (auto upper = toUpper(*deathWeapon); simulation.weaponDefinitions.count(upper) != 0)
+                {
+                    *deathWeapon = std::move(upper);
+                    continue;
+                }
+                LOG_WARN << "Unit " << unitType << " dies as " << *deathWeapon << ", which no weapon file defines; it will die without a blast";
+                deathWeapon->clear();
             }
         }
         simulation.movementClassDatabase = std::move(dataMaps.movementClassDatabase);

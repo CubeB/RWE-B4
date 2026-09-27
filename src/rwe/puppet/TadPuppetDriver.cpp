@@ -11,14 +11,6 @@ namespace rwe
 {
     namespace
     {
-        SimVector positionFromFixed(const TadPosition& p)
-        {
-            return SimVector(
-                simScalarFromFixed(p.x),
-                simScalarFromFixed(p.y),
-                simScalarFromFixed(p.z));
-        }
-
         uint32_t puppetKey(uint8_t sender, uint16_t index)
         {
             return (static_cast<uint32_t>(sender) << 16) | static_cast<uint32_t>(index);
@@ -96,6 +88,19 @@ namespace rwe
         {
             senderOfBlock.emplace(block, sender);
             blockOfSender.emplace(sender, block);
+        }
+
+        /**
+         * The wire carries TA's world coordinates, whose origin is the map's
+         * top left; RWE's world is centred on the origin. The half-extents
+         * come off here, the inverse of what DemoRecorder puts on.
+         */
+        SimVector toSimPosition(const TadPosition& p) const
+        {
+            return sim.terrain.topLeftCoordinateToWorld(SimVector(
+                simScalarFromFixed(p.x),
+                simScalarFromFixed(p.y),
+                simScalarFromFixed(p.z)));
         }
 
         Puppet& ensurePuppet(uint8_t sender, uint16_t index, const std::string& typeName)
@@ -263,7 +268,7 @@ namespace rwe
             auto unitId = sim.trySpawnUnit(
                 *typeName,
                 player->second,
-                positionFromFixed(e->position),
+                toSimPosition(e->position),
                 SimAngle(static_cast<uint16_t>(e->rotation.y)));
             if (!unitId)
             {
@@ -417,7 +422,8 @@ namespace rwe
             path.waypoints.push_back(unit.position);
             for (const auto& wp : ground.waypoints)
             {
-                SimVector p(SimScalar(static_cast<float>(wp.x)), 0_ss, SimScalar(static_cast<float>(wp.z)));
+                SimVector p = sim.terrain.topLeftCoordinateToWorld(
+                    SimVector(SimScalar(static_cast<float>(wp.x)), 0_ss, SimScalar(static_cast<float>(wp.z))));
                 p.y = sim.terrain.getHeightAt(p.x, p.z);
                 path.waypoints.push_back(p);
             }
@@ -442,12 +448,12 @@ namespace rwe
             {
                 if (move->position)
                 {
-                    goal = positionFromFixed(*move->position);
+                    goal = toSimPosition(*move->position);
                 }
             }
             else if (const auto* moving = std::get_if<TadMovingGoal>(&air.goal))
             {
-                goal = positionFromFixed(moving->position);
+                goal = toSimPosition(moving->position);
             }
 
             unit.navigationState.desiredDestination = goal;
@@ -579,7 +585,7 @@ namespace rwe
                 }
                 else
                 {
-                    position = positionFromFixed(sync.position);
+                    position = toSimPosition(sync.position);
                 }
 
                 auto unitId = sim.trySpawnCompletedUnit(
@@ -630,7 +636,7 @@ namespace rwe
                 return;
             }
 
-            auto recorded = positionFromFixed(sync.position);
+            auto recorded = toSimPosition(sync.position);
             if (puppet.placed)
             {
                 auto dx = static_cast<double>((unit.position.x - recorded.x).value);
@@ -644,15 +650,19 @@ namespace rwe
             // Keep the occupied grid with the snapped position, or a ground
             // unit's cells would stay where it was and a later spawn would be
             // refused by a footprint nobody stands on any more. A building
-            // keeps its place in the grid as a building, and its position does
-            // not move, so it is left alone.
-            if (definition.isMobile && !definition.canFly)
+            // keeps its place in the grid as a building, and it does not move,
+            // so its position is left where it was placed: snapping it would
+            // leave its building cells behind, and the removal at the end of
+            // its life would not clear cells it no longer stands on.
+            if (definition.isMobile)
             {
-                moveOccupiedCells(*live, unit.position, recorded, definition);
+                if (!definition.canFly)
+                {
+                    moveOccupiedCells(*live, unit.position, recorded, definition);
+                }
+                unit.previousPosition = recorded;
+                unit.position = recorded;
             }
-
-            unit.previousPosition = recorded;
-            unit.position = recorded;
             unit.previousRotation = SimAngle(static_cast<uint16_t>(sync.rotation.y));
             unit.rotation = SimAngle(static_cast<uint16_t>(sync.rotation.y));
 
