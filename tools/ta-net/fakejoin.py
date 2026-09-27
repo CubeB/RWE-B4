@@ -36,8 +36,8 @@ does by replaying the ones it recorded.
 import argparse, math, os, select, socket, struct, sys, time
 
 from tanet import (CMDS, commander_build, damage, death, decode, decode_2c, dp_add_forward_request, dp_app_tcp,
-                   dp_app_udp, dp_command, dp_create_player, dp_enum_sessions, dp_request_player_id, encode_2c,
-                   is_dp, ping, read_capture, shot, split_stream, status, subpackets_of, sync_progress,
+                   dp_app_udp, dp_command, dp_create_player, dp_delete_player, dp_enum_sessions, dp_request_player_id,
+                   encode_2c, is_dp, ping, read_capture, shot, split_stream, status, subpackets_of, sync_progress,
                    ta_packet, ta_payload, team, unit_state, unit_sync_join)
 
 ENUM_PORT, HOST_TCP, HOST_UDP = 47624, 2300, 2350
@@ -172,6 +172,7 @@ class Joiner:
             self.out.sendall(m)
         except OSError as e:
             self.log("send to the host failed:", e, "- waiting for it to open another session")
+            self.out.close()
             self.out = None
             return
         if what:
@@ -487,6 +488,7 @@ class Joiner:
                             self.learn_player(struct.unpack_from("<I", m, 20)[0])
                             self.on_app(m, "TCP")
             self.pump(now)
+        self.leave()
         return self.finish()
 
     def learn_player(self, pid):
@@ -495,6 +497,13 @@ class Joiner:
             self.log(f"the host's player id is {pid:#x}")
 
     # ---- the verdict
+
+    def leave(self):
+        """A player leaves by naming both of its ids; the host is free to offer the session again."""
+        if self.player_id:
+            for pid in (self.player_id, self.sys_id):
+                self.send_tcp(dp_delete_player(self.a.tcp_port, pid), f"DELETEPLAYER {pid:#x}")
+            self.log(f"left the game after {self.ticks_sent} ticks")
 
     def finish(self):
         tpl, seen = self.tpl, self.seen
@@ -561,7 +570,7 @@ def main():
     ap.add_argument("--team", type=int, default=5)
     ap.add_argument("--play-seconds", type=float, default=30.0, help="how long to play after the launch")
     ap.add_argument("--timeout", type=float, default=120.0, help="give up if the game has not started by then")
-    ap.add_argument("--walk", help="X,Z world position to walk its commander to")
+    ap.add_argument("--walk", help="X,Z world position for its commander to walk to")
     ap.add_argument("--attack", type=int, help="a host unit id to fire at, every half second")
     ap.add_argument("--attack-damage", type=int, default=60)
     ap.add_argument("--simulate-hit", type=int, help="take this much damage on its own commander, to send a 0x0c")
@@ -577,7 +586,7 @@ def parse_xy(text):
     try:
         x, z = (float(v) for v in text.split(","))
     except ValueError:
-        raise SystemExit(f"--walk wants X,Z as two numbers, not '{text}'")
+        raise SystemExit(f"--walk wants X,Z as two numbers, not '{text}'") from None
     return x, z
 
 

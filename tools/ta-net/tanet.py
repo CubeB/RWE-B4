@@ -249,6 +249,11 @@ def dp_create_player(where, player_id, sys_id, tcp_port, udp_port, name):
     return dp_header(0x08, len(body), where) + body
 
 
+def dp_delete_player(where, player_id):
+    """DELETEPLAYER: a player leaves by naming each of its two ids, the game one and the system one."""
+    return dp_header(0x0B, 20, where) + _u32s(0, player_id, 0, 0, 0)
+
+
 def status(template, player_id, name=None, state=None, options=None):
     """0x20, the 186-byte player info, patched from a recorded one: the id is at 145, the state
     byte at 156 (gpgnet4ta reads bit 0x20 as ready) and the host's options byte at 157."""

@@ -63,6 +63,15 @@ class DirectPlayJoinMessages(unittest.TestCase):
     def test_reply_port(self):
         self.assertEqual(tanet.reply_port(tanet.dp_request_player_id(34701, True)), 34701)
 
+    def test_delete_player(self):
+        # The recording's two DELETEPLAYERs, one per id, with the reply port moved to 34701.
+        m = tanet.dp_delete_player(34701, 0x08D90E76)
+        self.assertEqual(len(m), 48)
+        self.assertEqual(m[:4].hex(), "3000b0fa")
+        self.assertEqual(struct.unpack_from(">H", m, 6)[0], 34701)
+        self.assertEqual(struct.unpack_from("<I", m, 32)[0], 0x08D90E76)
+        self.assertEqual(m[40:], b"\0" * 8)
+
 
 class Framing(unittest.TestCase):
     def test_a_ta_packet_round_trips(self):
