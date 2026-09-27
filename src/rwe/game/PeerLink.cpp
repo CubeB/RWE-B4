@@ -82,6 +82,14 @@ namespace rwe
         sendBuffer.push_back(commands);
     }
 
+    void PeerLink::submitRunState(unsigned int speedPermille, bool paused, bool stalled, unsigned int sustainableSpeedPermille)
+    {
+        localSpeedPermille = speedPermille;
+        localPaused = paused;
+        localStalled = stalled;
+        localSustainableSpeedPermille = sustainableSpeedPermille;
+    }
+
     void PeerLink::submitGameHash(GameHash hash)
     {
         hashSendBuffer.push_back(hash);
@@ -119,6 +127,10 @@ namespace rwe
         m.set_next_chat_to_send(nextChatToSend.value);
         m.set_next_chat_to_receive(nextChatToReceive.value);
         m.set_ack_delay(ackDelay.count());
+        m.set_game_speed_permille(localSpeedPermille);
+        m.set_paused(localPaused);
+        m.set_stalled(localStalled);
+        m.set_sustainable_speed_permille(localSustainableSpeedPermille);
 
         for (std::size_t i = 0; i < setCount; ++i)
         {
@@ -230,6 +242,13 @@ namespace rwe
         // moves only for a packet with new commands in it, and so stands
         // still for a peer that is present and has nothing to say.
         lastPacketTime = now;
+
+        // Absent fields read as the proto defaults -- 1x, unpaused, not
+        // stalled -- which is exactly how a build without them was running.
+        remoteSpeedPermille_ = static_cast<unsigned int>(message.game_speed_permille());
+        remotePaused_ = message.paused();
+        remoteStalled_ = message.stalled();
+        remoteSustainableSpeedPermille_ = static_cast<unsigned int>(message.sustainable_speed_permille());
 
         LOG_DEBUG << "Received ack to " << message.next_command_set_to_receive() << " and " << message.command_set_size() << " commands starting at " << message.next_command_set_to_send();
 
@@ -432,13 +451,17 @@ namespace rwe
 
         // Carried forward across the ordinary gap between packets and no
         // further: a peer that has gone quiet may have stopped, and assuming
-        // it kept running would hide exactly that. At 1x speed only; a packet
-        // does not say its sender's speed yet (#354).
+        // it kept running would hide exactly that. Scaled by the speed the
+        // peer reported, and standing still while it is paused or stalled.
         std::optional<float> estimatedNow;
         if (lastKnownSceneTime_)
         {
             auto sinceReport = std::min(now - lastKnownSceneTime_->second, std::chrono::duration_cast<Timestamp::duration>(2 * SendInterval));
-            auto ticks = std::chrono::duration<float, std::milli>(sinceReport).count() / static_cast<float>(SimMillisecondsPerTick);
+            auto sinceReportMillis = std::chrono::duration<float, std::milli>(sinceReport).count();
+            auto rate = (remotePaused_ || remoteStalled_)
+                ? 0.0f
+                : static_cast<float>(remoteSpeedPermille_) / 1000.0f;
+            auto ticks = sinceReportMillis / static_cast<float>(SimMillisecondsPerTick) * rate;
             estimatedNow = static_cast<float>(lastKnownSceneTime_->first.value) + ticks;
         }
 

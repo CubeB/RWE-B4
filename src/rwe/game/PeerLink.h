@@ -204,6 +204,15 @@ namespace rwe
 
         void submitCommands(SceneTime currentSceneTime, const CommandSet& commands);
 
+        /**
+         * Record how this peer is running, so the next packet says it and a
+         * remote peer can project this one's scene time at the right rate.
+         * Sent every frame rather than only alongside commands, because it
+         * changes with the pause key and a stall and has nothing to do with
+         * whether a command set was due.
+         */
+        void submitRunState(unsigned int speedPermille, bool paused, bool stalled, unsigned int sustainableSpeedPermille);
+
         void submitGameHash(GameHash hash);
 
         /** Whether this peer is already owed too much chat to take a new line. */
@@ -254,6 +263,14 @@ namespace rwe
         void setAcceptingCommands(bool value);
 
         std::optional<std::pair<SceneTime, Timestamp>> lastKnownSceneTime() const { return lastKnownSceneTime_; }
+
+        /** How the remote peer last said it was running, defaulting to 1x and moving. */
+        unsigned int remoteSpeedPermille() const { return remoteSpeedPermille_; }
+        bool remotePaused() const { return remotePaused_; }
+        bool remoteStalled() const { return remoteStalled_; }
+
+        /** The speed the remote peer says its machine can sustain, in per mille. */
+        unsigned int remoteSustainableSpeedPermille() const { return remoteSustainableSpeedPermille_; }
 
         float averageRoundTripTime() const { return averageRoundTripTime_; }
 
@@ -315,6 +332,18 @@ namespace rwe
         RoundTripWindow recentRoundTripTimes;
 
         SceneTime currentSceneTime{0};
+
+        /** How this peer last said it was running, sent in every packet. */
+        unsigned int localSpeedPermille{1000};
+        bool localPaused{false};
+        bool localStalled{false};
+        unsigned int localSustainableSpeedPermille{1000};
+
+        /** How the remote peer last said it was running, from the last packet. */
+        unsigned int remoteSpeedPermille_{1000};
+        bool remotePaused_{false};
+        bool remoteStalled_{false};
+        unsigned int remoteSustainableSpeedPermille_{1000};
 
         bool acceptingCommands{true};
 

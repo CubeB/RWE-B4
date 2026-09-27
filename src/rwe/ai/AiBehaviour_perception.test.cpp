@@ -392,7 +392,7 @@ namespace rwe
         CHECK(*bb.commanderThreat == enemyId);
     }
 
-    TEST_CASE("CORE plays its own line of kbots, and a knob set by hand still wins", "[ai]")
+    TEST_CASE("each faction plays its own line of kbots, and a knob set by hand still wins", "[ai]")
     {
         auto plain = makeDefaultStandardProfile();
 
@@ -405,8 +405,8 @@ namespace rwe
 
         auto arm = makeDefaultStandardProfile();
         applyFactionDefaults(arm, "ARM");
-        REQUIRE(arm.labRaiderShare == plain.labRaiderShare);
-        REQUIRE(arm.labRocketKbotShare == plain.labRocketKbotShare);
+        REQUIRE(arm.labRaiderShare == 0);
+        REQUIRE(arm.labRocketKbotShare == 0);
         REQUIRE(arm.labArtilleryKbotShare == plain.labArtilleryKbotShare);
         REQUIRE(arm.attackArmySize == plain.attackArmySize);
 

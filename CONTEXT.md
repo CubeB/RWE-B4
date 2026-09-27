@@ -184,6 +184,44 @@ suspended path search is not (it is serialized, because when the path lands
 changes where a unit is).
 _Avoid_: cached state, computed state
 
+### Modding
+
+**Mechanism**:
+The machinery that stays native C++ and that no mod replaces: the tick loop,
+movement, pathfinding, collision, projectile physics, the COB VM, the economy
+settle, save, hash, networking and rendering (ADR-0002).
+_Avoid_: core, engine (both also mean the whole of RWE)
+
+**Policy**:
+A decision a hook covers, such as whether an aircraft seeks a pad or how much
+damage a hit does. Runs as wasm, with TA's answer in the base mod.
+_Avoid_: behaviour (too broad), rules (reserved for `MissionRule`)
+
+**Wasm mod**:
+A WebAssembly module shipped inside a mod's archives, with its own instance
+and memory, that supplies policy through hooks. A mod may contain one or none;
+its archives are what the mod fingerprint covers.
+_Avoid_: plugin, script (COB scripts are something else)
+
+**Mod store**:
+Engine-owned key-value state that wasm mods share: each mod writes only its
+own namespace and every mod reads all of them, in global, per-player or
+per-unit scope. Hashed state; a desync report gives one sub-hash per
+namespace. A **var** is its per-unit `i32` fast path.
+_Avoid_: blackboard, shared memory (mods never share linear memory)
+
+**Base mod** (`ta-base`):
+The wasm mod holding TA's own policy: the bottom layer of every fold. Ships as
+wasm, and the tests run it as wasm; the same source can be built natively as a
+local debugging option.
+_Avoid_: vanilla mod, default mod
+
+**Hook**:
+A named entry point a wasm mod exports, with one fixed composition rule:
+**fold** (each layer gets the one below's result as `prev`), **event** (all
+called, none returns), or **keyed exclusive** (one owner per key).
+_Avoid_: callback, override (a fold layer adjusts, it does not replace)
+
 ### The demo corpus
 
 **Demo**:
@@ -260,6 +298,22 @@ which shares no code with it, is then held to them. A shared bug can never
 fail a test, which is why the separation is the point.
 _Avoid_: the engine's own code (that is what is tested against the oracle);
 model (reserved for round-behaviour classes — motor, shell, burst)
+
+### TA's network
+
+**Owner**:
+In a game with the original, the peer whose machine simulates a unit. Its
+word on that unit's position, health and death is final everywhere else:
+other peers steer a copy along the path it sends, show damage they cause, and
+wait for its death record. The opposite of lockstep, where no peer owns
+anything. `docs/TA-NETWORK.md`.
+_Avoid_: authority, master, server
+
+**Full-state record**:
+The tail of every `0x2c`: one owner-block slot's complete state, the slot
+chosen by tick, so each unit is described once a cycle. The receiver believes
+it over anything it had, so a record for an empty slot deletes the unit there.
+_Avoid_: snapshot, keyframe
 
 ### The instruments
 

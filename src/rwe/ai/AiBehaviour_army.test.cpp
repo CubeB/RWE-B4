@@ -777,6 +777,151 @@ namespace rwe
                 REQUIRE(ordersFor<AttackOrder>(commands, id).empty());
             }
         }
+
+        // #389: the engagement-predictor formula (outpostResponseUsesPredictor),
+        // exercised against real shipped stats rather than the fixture's own
+        // invented ones -- CLAUDE.md's own lesson about fixtures that make up
+        // plausible numbers. Both units are overwritten here with the real
+        // FBI/weapon-TDF values (read with hpi_test.exe against
+        // D:/RWE-Data/totala1.hpi, units/ARMPW.FBI, units/ARMHAM.FBI,
+        // weapons/WEAPONS.TDF [EMG], weapons/CANNONS.TDF [ARM_HAM]), which is
+        // why they are set fresh in each of these two SECTIONs rather than
+        // trusted to defineWorld/makeDef -- neither of those claims to be
+        // real data and ARMHAM is not in defineWorld's set at all. Both cases
+        // are chosen so the metal-cost ratio (outpostResponseStrength) and
+        // the predictor's margin actively DISAGREE, which is the point of
+        // #389: a formula with no range/speed term gets both of these wrong.
+        SECTION("predictor on: a slower, longer-ranged reserve the metal ratio would refuse still answers")
+        {
+            // Real ARMPW (Peewee): MaxDamage=250, MaxVelocity=1.8,
+            // BuildCostMetal=53, Weapon1=EMG (range=180, reloadtime=.4,
+            // burst=3, [DAMAGE] default=8 -- 60 dps).
+            auto& pw = sim.unitDefinitions["ARMPW"];
+            pw.maxHitPoints = 250;
+            pw.maxVelocity = 1.8_ssf;
+            pw.buildCostMetal = Metal(53.0f);
+            pw.weapon1 = "EMG";
+            WeaponDefinition emg{};
+            emg.maxRange = 180_ss;
+            emg.reloadTime = SimScalar(0.4f);
+            emg.burst = 3;
+            emg.damage["DEFAULT"] = 8u;
+            sim.weaponDefinitions["EMG"] = emg;
+
+            // Real ARMHAM (Hammer): MaxDamage=800, MaxVelocity=1.1,
+            // BuildCostMetal=151, Weapon1=ARM_HAM (range=320,
+            // reloadtime=1.95, [DAMAGE] default=85 -- ~43.6 dps). Not in
+            // defineWorld's set, so it is introduced here rather than
+            // overwritten.
+            UnitDefinition ham = pw;
+            ham.maxHitPoints = 800;
+            ham.maxVelocity = 1.1_ssf;
+            ham.buildCostMetal = Metal(151.0f);
+            ham.weapon1 = "ARM_HAM";
+            sim.unitDefinitions["ARMHAM"] = ham;
+            WeaponDefinition armHam{};
+            armHam.maxRange = 320_ss;
+            armHam.reloadTime = SimScalar(1.95f);
+            armHam.burst = 1;
+            armHam.damage["DEFAULT"] = 85u;
+            sim.weaponDefinitions["ARM_HAM"] = armHam;
+
+            // Three Peewee raiders (159 metal) against one Hammer reserve
+            // (151 metal): 151 < 159 * outpostResponseStrength(1.2) = 190.8,
+            // so the metal-ratio formula refuses this. The predictor answers
+            // anyway: the Hammer's 140-unit range edge is worth far more
+            // than the Peewees' three-to-one numbers once the range term is
+            // in (unboosted, a single Hammer's hp*dps already exceeds three
+            // Peewees' combined, and the range bonus only widens that).
+            addUnit(sim, "ARMPW", human, SimVector(-400_ss, 0_ss, -380_ss), script);
+            addUnit(sim, "ARMPW", human, SimVector(-420_ss, 0_ss, -360_ss), script);
+            auto hamId = addUnit(sim, "ARMHAM", ai, SimVector(0_ss, 0_ss, -60_ss), script);
+            // addUnit hardcodes hitPoints=100 regardless of the definition's
+            // maxHitPoints, which at the real 800 would leave the Hammer on
+            // 12.5% health and pull it into the retreat-when-damaged rule
+            // before the outpost-response order is ever assigned. Set it
+            // whole, the way RepairBase already does in ai_test_util.h for
+            // the same reason.
+            sim.getUnitState(hamId).hitPoints = 800;
+
+            profile.outpostResponseUsesPredictor = true;
+            profile.outpostResponseMarginThreshold = 0.0f;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(controller.getBlackboard().outpostRaidAnswered.has_value());
+            auto attacks = ordersFor<AttackOrder>(commands, hamId);
+            REQUIRE_FALSE(attacks.empty());
+        }
+
+        SECTION("predictor on: a numerically-adequate but outranged reserve the metal ratio would send still stays")
+        {
+            // Same real ARMPW and ARMHAM as above.
+            auto& pw = sim.unitDefinitions["ARMPW"];
+            pw.maxHitPoints = 250;
+            pw.maxVelocity = 1.8_ssf;
+            pw.buildCostMetal = Metal(53.0f);
+            pw.weapon1 = "EMG";
+            WeaponDefinition emg{};
+            emg.maxRange = 180_ss;
+            emg.reloadTime = SimScalar(0.4f);
+            emg.burst = 3;
+            emg.damage["DEFAULT"] = 8u;
+            sim.weaponDefinitions["EMG"] = emg;
+
+            UnitDefinition ham = pw;
+            ham.maxHitPoints = 800;
+            ham.maxVelocity = 1.1_ssf;
+            ham.buildCostMetal = Metal(151.0f);
+            ham.weapon1 = "ARM_HAM";
+            sim.unitDefinitions["ARMHAM"] = ham;
+            WeaponDefinition armHam{};
+            armHam.maxRange = 320_ss;
+            armHam.reloadTime = SimScalar(1.95f);
+            armHam.burst = 1;
+            armHam.damage["DEFAULT"] = 85u;
+            sim.weaponDefinitions["ARM_HAM"] = armHam;
+
+            // The shared setup above already put one weak Peewee raider
+            // (raiderId, 53 metal) at the extractor; adding a Hammer raider
+            // (151 metal) alongside it makes 204 metal of raiders in total
+            // against four Peewee responders (212 metal): 212 >= 204 * 1.2
+            // is false, but 212 is still ahead of the raw metal, and this
+            // scene is deliberately the harder case for the metal formula --
+            // at outpostResponseStrength's default 1.2 it is a near thing,
+            // while the predictor is not close at all: the Peewees never
+            // reach the Hammer's range advantage (it is 140 units longer,
+            // and the Peewees are the ones who would have to close it), so
+            // their combined unboosted score (4 * 250 * 60 = 60000) is well
+            // under what the Hammer and the small Peewee raider together
+            // score once the Hammer's range bonus is counted (~87000) --
+            // exactly the "sent a reserve that could not actually answer
+            // the raid" failure the Crystal Maze finding named.
+            addUnit(sim, "ARMHAM", human, SimVector(-400_ss, 0_ss, -380_ss), script);
+            std::vector<UnitId> ours;
+            for (int i = 0; i < 4; ++i)
+            {
+                auto id = addUnit(sim, "ARMPW", ai, SimVector(SimScalar(40.0f * i), 0_ss, -60_ss), script);
+                // See the hitPoints note in the section above: addUnit's
+                // hardcoded 100 is 40% of the real 250, close enough to
+                // retreatLineBelowPercent's default 45 to risk the "stay"
+                // this section checks for being the retreat rule rather
+                // than the predictor's refusal.
+                sim.getUnitState(id).hitPoints = 250;
+                ours.push_back(id);
+            }
+
+            profile.outpostResponseUsesPredictor = true;
+            profile.outpostResponseMarginThreshold = 0.0f;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE_FALSE(controller.getBlackboard().outpostRaidAnswered.has_value());
+            for (auto id : ours)
+            {
+                REQUIRE(ordersFor<AttackOrder>(commands, id).empty());
+            }
+        }
     }
 
     TEST_CASE("a hurt unit leaves the fight for the base until it is mended", "[ai]")

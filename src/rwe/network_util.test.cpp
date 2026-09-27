@@ -1,3 +1,4 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <rapidcheck.h>
 #include <rapidcheck/catch.h>
@@ -117,81 +118,87 @@ namespace rwe
         }
     }
 
-    TEST_CASE("FrameScheduler: the drift gate")
+    TEST_CASE("gateAdjustment")
     {
-        const auto buffer = 1000u;
-        const int cap = 100;
-
-        SECTION("skips only past the tolerance and only on a check interval")
+        SECTION("a peer level with the average is not adjusted")
         {
-            FrameScheduler scheduler(buffer, SceneTime(0), cap);
-            // Average is 0, so the tolerance band is [0, 3].
-            REQUIRE(scheduler.next(SceneTime(0)) == FrameDispatch::Attempt);
-            REQUIRE(scheduler.next(SceneTime(1)) == FrameDispatch::Attempt);
-            REQUIRE(scheduler.next(SceneTime(4)) == FrameDispatch::Attempt);
-            REQUIRE(scheduler.next(SceneTime(5)) == FrameDispatch::Skip);
-            REQUIRE(scheduler.next(SceneTime(10)) == FrameDispatch::Skip);
+            REQUIRE(gateAdjustment(SceneTime(100), SceneTime(100)) == 1.0f);
         }
 
-        SECTION("an off-interval tick past the tolerance is attempted")
+        SECTION("a lead slows in proportion to the gain")
         {
-            FrameScheduler scheduler(buffer, SceneTime(0), cap);
-            REQUIRE(scheduler.next(SceneTime(11)) == FrameDispatch::Attempt);
+            REQUIRE(gateAdjustment(SceneTime(90), SceneTime(93)) == Catch::Approx(0.91f));
         }
 
-        SECTION("a tick level with or behind the average is never skipped")
+        SECTION("a lag speeds up in proportion to the gain")
         {
-            FrameScheduler scheduler(buffer, SceneTime(100), cap);
-            // Average is 100, so the tolerance band is [97, 103].
-            REQUIRE(scheduler.next(SceneTime(95)) == FrameDispatch::Attempt);
-            REQUIRE(scheduler.next(SceneTime(100)) == FrameDispatch::Attempt);
-            REQUIRE(scheduler.next(SceneTime(104)) == FrameDispatch::Attempt);
+            REQUIRE(gateAdjustment(SceneTime(100), SceneTime(96)) == Catch::Approx(1.12f));
+        }
+
+        SECTION("clamped to plus or minus twenty-five percent")
+        {
+            REQUIRE(gateAdjustment(SceneTime(0), SceneTime(100)) == 0.75f);
+            REQUIRE(gateAdjustment(SceneTime(100), SceneTime(0)) == 1.25f);
         }
     }
 
-    TEST_CASE("FrameScheduler: the catch-up extra tick")
+    TEST_CASE("FrameScheduler: the proportional gate")
     {
-        const auto buffer = 1000u;
+        const auto tick = static_cast<unsigned int>(SimMillisecondsPerTick);
 
-        SECTION("runs when a tick lands on the interval while behind the average")
+        SECTION("a level frame runs one tick per tick's worth of buffer")
         {
-            FrameScheduler scheduler(buffer, SceneTime(100), 10);
-            // The tick at 94 reaches 95: on the interval and below the low
-            // mark of 97.
-            REQUIRE(scheduler.next(SceneTime(94)) == FrameDispatch::Attempt);
-            REQUIRE(scheduler.extraTick(SceneTime(95)));
-            REQUIRE(scheduler.ticksThisFrame() == 2);
+            FrameScheduler scheduler(12 * tick, SceneTime(10), SceneTime(10), 100);
+            while (scheduler.hasWork())
+            {
+                scheduler.next();
+            }
+            REQUIRE(scheduler.ticksThisFrame() == 12);
         }
 
-        SECTION("does not run when the reached time is off the interval")
+        SECTION("a lead makes a tick cost more, so fewer run")
         {
-            FrameScheduler scheduler(buffer, SceneTime(100), 10);
-            REQUIRE(scheduler.next(SceneTime(93)) == FrameDispatch::Attempt);
-            REQUIRE_FALSE(scheduler.extraTick(SceneTime(94)));
+            // Three ahead: factor 0.91, so a tick costs 36 ms instead of 33.
+            FrameScheduler scheduler(12 * tick, SceneTime(10), SceneTime(13), 100);
+            while (scheduler.hasWork())
+            {
+                scheduler.next();
+            }
+            REQUIRE(scheduler.ticksThisFrame() == 11);
         }
 
-        SECTION("does not run when the reached time is not behind the average")
+        SECTION("a lag makes a tick cost less, so more run")
         {
-            FrameScheduler scheduler(buffer, SceneTime(0), 10);
-            REQUIRE(scheduler.next(SceneTime(94)) == FrameDispatch::Attempt);
-            REQUIRE_FALSE(scheduler.extraTick(SceneTime(95)));
+            // Four behind: factor 1.12, so a tick costs 29 ms instead of 33.
+            FrameScheduler scheduler(12 * tick, SceneTime(14), SceneTime(10), 100);
+            while (scheduler.hasWork())
+            {
+                scheduler.next();
+            }
+            REQUIRE(scheduler.ticksThisFrame() == 13);
         }
 
-        SECTION("never takes the frame past its cap")
+        SECTION("a lagging peer runs its backlog down faster than a level one")
         {
-            FrameScheduler scheduler(buffer, SceneTime(100), 1);
-            REQUIRE(scheduler.next(SceneTime(94)) == FrameDispatch::Attempt);
-            REQUIRE_FALSE(scheduler.extraTick(SceneTime(95)));
-            REQUIRE(scheduler.ticksThisFrame() == 1);
+            FrameScheduler lagging(6 * tick, SceneTime(20), SceneTime(10), 100);
+            FrameScheduler level(6 * tick, SceneTime(10), SceneTime(10), 100);
+            while (lagging.hasWork())
+            {
+                lagging.next();
+            }
+            while (level.hasWork())
+            {
+                level.next();
+            }
+
+            REQUIRE(lagging.ticksThisFrame() > level.ticksThisFrame());
         }
 
-        SECTION("the extra reaches the cap but a second one does not pass it")
+        SECTION("a lead holds a tick back until its higher cost is met")
         {
-            FrameScheduler scheduler(buffer, SceneTime(100), 2);
-            REQUIRE(scheduler.next(SceneTime(94)) == FrameDispatch::Attempt);
-            REQUIRE(scheduler.extraTick(SceneTime(95)));
-            REQUIRE_FALSE(scheduler.extraTick(SceneTime(96)));
-            REQUIRE(scheduler.ticksThisFrame() == 2);
+            FrameScheduler scheduler(tick, SceneTime(10), SceneTime(13), 100);
+            REQUIRE_FALSE(scheduler.hasWork());
+            REQUIRE(scheduler.ticksThisFrame() == 0);
         }
     }
 
@@ -202,10 +209,11 @@ namespace rwe
         SECTION("loses exactly the whole ticks still buffered when the cap is hit")
         {
             // Five ticks of buffer against a cap of two.
-            FrameScheduler scheduler(5 * tick, SceneTime(0), 2);
-            REQUIRE(scheduler.next(SceneTime(0)) == FrameDispatch::Attempt);
-            REQUIRE(scheduler.next(SceneTime(1)) == FrameDispatch::Attempt);
-            REQUIRE_FALSE(scheduler.hasWork());
+            FrameScheduler scheduler(5 * tick, SceneTime(0), SceneTime(0), 2);
+            while (scheduler.hasWork())
+            {
+                scheduler.next();
+            }
 
             auto outcome = scheduler.finish();
             REQUIRE(outcome.ticksDispatched == 2);
@@ -215,10 +223,11 @@ namespace rwe
 
         SECTION("loses nothing when the frame ends on its own")
         {
-            FrameScheduler scheduler(2 * tick, SceneTime(0), 2);
-            REQUIRE(scheduler.next(SceneTime(0)) == FrameDispatch::Attempt);
-            REQUIRE(scheduler.next(SceneTime(1)) == FrameDispatch::Attempt);
-            REQUIRE_FALSE(scheduler.hasWork());
+            FrameScheduler scheduler(2 * tick, SceneTime(0), SceneTime(0), 2);
+            while (scheduler.hasWork())
+            {
+                scheduler.next();
+            }
 
             auto outcome = scheduler.finish();
             REQUIRE(outcome.ticksDispatched == 2);
@@ -228,9 +237,11 @@ namespace rwe
 
         SECTION("a partial tick left over is not a lost tick")
         {
-            FrameScheduler scheduler(2 * tick + 20, SceneTime(0), 2);
-            REQUIRE(scheduler.next(SceneTime(0)) == FrameDispatch::Attempt);
-            REQUIRE(scheduler.next(SceneTime(1)) == FrameDispatch::Attempt);
+            FrameScheduler scheduler(2 * tick + 20, SceneTime(0), SceneTime(0), 2);
+            while (scheduler.hasWork())
+            {
+                scheduler.next();
+            }
 
             auto outcome = scheduler.finish();
             REQUIRE(outcome.ticksLostToCap == 0);
@@ -238,17 +249,94 @@ namespace rwe
         }
     }
 
-    TEST_CASE("FrameScheduler: a skip spends its time but runs nothing")
+    TEST_CASE("estimateSustainableSpeedPermille")
     {
-        const auto tick = static_cast<unsigned int>(SimMillisecondsPerTick);
-        FrameScheduler scheduler(3 * tick, SceneTime(0), 100);
+        SECTION("keeps the chosen speed when nothing was lost and ticks are cheap")
+        {
+            REQUIRE(estimateSustainableSpeedPermille(1000, 30, 0, 1.0f) == 1000);
+        }
 
-        REQUIRE(scheduler.next(SceneTime(5)) == FrameDispatch::Skip);
+        SECTION("scales down by the fraction of the owed ticks that ran")
+        {
+            // Fifteen of thirty owed ticks ran at a chosen 1000.
+            REQUIRE(estimateSustainableSpeedPermille(1000, 15, 15, 1.0f) == 500);
+        }
 
-        auto outcome = scheduler.finish();
-        REQUIRE(outcome.gateSkips == 1);
-        REQUIRE(outcome.ticksDispatched == 0);
-        REQUIRE(outcome.millisecondsLeft == 2 * tick);
+        SECTION("drops to what a tick's cost allows")
+        {
+            // 40 ms a tick against the 33 ms budget of normal speed.
+            REQUIRE(estimateSustainableSpeedPermille(1000, 30, 0, 40.0f) == 825);
+        }
+
+        SECTION("takes the lower of the two measures")
+        {
+            // Throughput says 500, cost alone would allow 1320.
+            REQUIRE(estimateSustainableSpeedPermille(1000, 15, 15, 25.0f) == 500);
+
+            // Cost says 660; nothing was lost to the cap.
+            REQUIRE(estimateSustainableSpeedPermille(1000, 30, 0, 50.0f) == 660);
+        }
+
+        SECTION("never reports above the chosen speed")
+        {
+            REQUIRE(estimateSustainableSpeedPermille(500, 30, 0, 1.0f) == 500);
+        }
+
+        SECTION("with no ticks to go on keeps the chosen speed")
+        {
+            REQUIRE(estimateSustainableSpeedPermille(1000, 0, 0, 0.0f) == 1000);
+        }
+
+        SECTION("floors at the slowest playable speed")
+        {
+            REQUIRE(estimateSustainableSpeedPermille(1000, 1, 999, 500.0f) == MinimumSustainableSpeedPermille);
+        }
+    }
+
+    TEST_CASE("SpeedGovernor")
+    {
+        auto t0 = getTimestamp();
+
+        SECTION("drops at once to the slowest machine")
+        {
+            SpeedGovernor governor;
+            std::vector<PeerCapacity> peers{{PlayerId(1), 600}, {PlayerId(2), 800}};
+            REQUIRE(governor.update(t0, 1000, peers) == 600);
+            REQUIRE(governor.limitingPeers() == std::vector<PlayerId>{PlayerId(1)});
+        }
+
+        SECTION("recovers at a fixed rate rather than at once")
+        {
+            SpeedGovernor governor;
+            std::vector<PeerCapacity> slow{{PlayerId(1), 400}};
+            REQUIRE(governor.update(t0, 1000, slow) == 400);
+
+            // The cap lifts, but the speed climbs no faster than 100 a second.
+            std::vector<PeerCapacity> fast{{PlayerId(1), 1000}};
+            REQUIRE(governor.update(t0 + std::chrono::milliseconds(1000), 1000, fast) == 500);
+            REQUIRE(governor.update(t0 + std::chrono::milliseconds(2000), 1000, fast) == 600);
+            REQUIRE(governor.update(t0 + std::chrono::milliseconds(3000), 1000, fast) == 700);
+        }
+
+        SECTION("a transient dip does not make it hunt")
+        {
+            SpeedGovernor governor;
+            REQUIRE(governor.update(t0, 1000, {}) == 1000);
+
+            // One bad report drops it at once...
+            std::vector<PeerCapacity> dip{{PlayerId(1), 400}};
+            REQUIRE(governor.update(t0 + std::chrono::milliseconds(100), 1000, dip) == 400);
+
+            // ...and it does not snap back when the report clears.
+            REQUIRE(governor.update(t0 + std::chrono::milliseconds(1100), 1000, {}) == 500);
+        }
+
+        SECTION("a player's speed-up takes effect at once")
+        {
+            SpeedGovernor governor;
+            REQUIRE(governor.update(t0, 1000, {}) == 1000);
+            REQUIRE(governor.update(t0 + std::chrono::milliseconds(100), 1500, {}) == 1500);
+        }
     }
 
     TEST_CASE("planCommandSets")
@@ -305,40 +393,79 @@ namespace rwe
 
         SECTION("with no peers it is the local scene time alone")
         {
-            std::vector<std::pair<SceneTime, Timestamp>> peers;
+            std::vector<PeerSceneTimeReport> peers;
             REQUIRE(estimateAverageSceneTimeStatic(SceneTime(12), peers, now) == 12u);
         }
 
         SECTION("averages the local time with each peer, truncating")
         {
-            std::vector<std::pair<SceneTime, Timestamp>> peers{
-                {SceneTime(10), now},
-                {SceneTime(20), now}};
+            std::vector<PeerSceneTimeReport> peers{
+                {SceneTime(10), now, {}},
+                {SceneTime(20), now, {}}};
             // (4 + 10 + 20) / 3, truncated.
             REQUIRE(estimateAverageSceneTimeStatic(SceneTime(4), peers, now) == 11u);
         }
 
         SECTION("a peer reporting at now is not projected forward")
         {
-            std::vector<std::pair<SceneTime, Timestamp>> peers{{SceneTime(10), now}};
+            std::vector<PeerSceneTimeReport> peers{{SceneTime(10), now, {}}};
             REQUIRE(estimateAverageSceneTimeStatic(SceneTime(4), peers, now) == 7u);
         }
 
         SECTION("a peer's last time is carried forward before averaging")
         {
             auto earlier = now - std::chrono::milliseconds(100);
-            std::vector<std::pair<SceneTime, Timestamp>> peers{{SceneTime(0), earlier}};
+            std::vector<PeerSceneTimeReport> peers{{SceneTime(0), earlier, {}}};
             auto projected = projectSceneTime(SceneTime(0), 100);
             auto expected = (SceneTime(0).value + projected.value) / 2;
             REQUIRE(estimateAverageSceneTimeStatic(SceneTime(0), peers, now) == expected);
         }
+
+        SECTION("a paused peer's time is not carried forward")
+        {
+            auto earlier = now - std::chrono::milliseconds(100);
+            std::vector<PeerSceneTimeReport> peers{{SceneTime(0), earlier, PeerRunState{1000, true, false}}};
+            REQUIRE(estimateAverageSceneTimeStatic(SceneTime(0), peers, now) == 0u);
+        }
+
+        SECTION("a stalled peer's time is not carried forward")
+        {
+            auto earlier = now - std::chrono::milliseconds(100);
+            std::vector<PeerSceneTimeReport> peers{{SceneTime(0), earlier, PeerRunState{1000, false, true}}};
+            REQUIRE(estimateAverageSceneTimeStatic(SceneTime(0), peers, now) == 0u);
+        }
     }
 
-    TEST_CASE("projectSceneTime: a peer's time projects at the sim tick rate", "[!shouldfail]")
+    TEST_CASE("projectSceneTime")
     {
-        // #354: the divisor is a 16 ms frame rather than the sim's own 33 ms,
-        // so a peer 100 ms after its last report is projected six ticks
-        // forward instead of three. Drop the tag when the divisor is fixed.
-        REQUIRE(projectSceneTime(SceneTime(0), 100) == SceneTime(3));
+        SECTION("projects at the sim tick rate, not the old 16 ms frame")
+        {
+            REQUIRE(projectSceneTime(SceneTime(0), 100) == SceneTime(3));
+        }
+
+        SECTION("half speed advances half as far")
+        {
+            REQUIRE(projectSceneTime(SceneTime(0), 100, PeerRunState{500, false, false}) == SceneTime(1));
+        }
+
+        SECTION("double speed advances twice as far")
+        {
+            REQUIRE(projectSceneTime(SceneTime(0), 100, PeerRunState{2000, false, false}) == SceneTime(6));
+        }
+
+        SECTION("a paused peer does not advance")
+        {
+            REQUIRE(projectSceneTime(SceneTime(10), 100, PeerRunState{1000, true, false}) == SceneTime(10));
+        }
+
+        SECTION("a stalled peer does not advance")
+        {
+            REQUIRE(projectSceneTime(SceneTime(10), 100, PeerRunState{1000, false, true}) == SceneTime(10));
+        }
+
+        SECTION("an old peer without the fields reads as 1x and moving")
+        {
+            REQUIRE(projectSceneTime(SceneTime(0), 100, PeerRunState{}) == SceneTime(3));
+        }
     }
 }

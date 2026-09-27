@@ -189,6 +189,8 @@ set(SOURCE_FILES
     src/rwe/ai/ArmyManager.h
     src/rwe/ai/BuildManager.cpp
     src/rwe/ai/BuildManager.h
+    src/rwe/ai/EngagementPredictor.cpp
+    src/rwe/ai/EngagementPredictor.h
     src/rwe/ai/BuilderSafety.cpp
     src/rwe/ai/BuilderSafety.h
     src/rwe/ai/AiPersonality.cpp
@@ -978,6 +980,7 @@ set(TEST_FILES
     src/rwe/ai/AiBehaviour_perception.test.cpp
     src/rwe/ai/AiBehaviour_siting.test.cpp
     src/rwe/ai/BuilderSafety.test.cpp
+    src/rwe/ai/EngagementPredictor.test.cpp
     src/rwe/ai/LineOfFire.test.cpp
     src/rwe/ai/AiPersonality.test.cpp
     src/rwe/ai/MapIntel.test.cpp
@@ -1028,6 +1031,7 @@ set(TEST_FILES
     src/rwe/game/commandorder.test.cpp
     src/rwe/game/playerdrop.test.cpp
     src/rwe/game/LockstepStats.test.cpp
+    src/rwe/game/SimDiagnostics.test.cpp
     src/rwe/game/playerrejoin.test.cpp
     src/rwe/game/chat_util.test.cpp
     src/rwe/game/PeerLink.test.cpp
@@ -1138,6 +1142,7 @@ set(TEST_FILES
     src/rwe/game/noshadow.test.cpp
     src/rwe/sim/missile.test.cpp
     src/rwe/sim/seacollision.test.cpp
+    src/rwe/sim/acidwater.test.cpp
     src/rwe/sim/aircraft.test.cpp
     src/rwe/sim/groundtilt.test.cpp
     src/rwe/sim/selfdestruct.test.cpp

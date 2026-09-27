@@ -36,6 +36,7 @@
 #include <rwe/util/match.h>
 #include <rwe/util/SimpleLogger.h>
 #include <rwe/util/rwe_string.h>
+#include <thread>
 
 // Recording a game and watching one back, split out of GameScene.cpp for the
 // reason set out at the head of GameScene_render.cpp: the single translation
@@ -449,6 +450,10 @@ namespace rwe
 
     void GameScene::tryTickGame()
     {
+        // The observers RWE_HASH_LOG, RWE_STATE_DUMP, RWE_SIM_LAG and
+        // RWE_DESYNC_AT asked for, built once on the first tick.
+        static SimDiagnostics diagnostics;
+
         // Before anything reads replayPlayback, because that is what a rejoin
         // borrows to wind itself forward and what it has to stop borrowing at
         // exactly the right tick.
@@ -546,6 +551,7 @@ namespace rwe
             playerCommands = playerCommandService->tryPopCommands();
             if (!playerCommands)
             {
+                lastTickAttemptBlocked = true;
                 lockstepStats.tickBlocked(getTimestamp(), playerCommandService->playersNotReady());
 
                 // Said once a stall rather than once a frame. It used to be every
@@ -565,6 +571,7 @@ namespace rwe
             }
         }
         stallReported = false;
+        lastTickAttemptBlocked = false;
         lockstepStats.tickRan(getTimestamp());
 
         if (replayWriter)
@@ -598,6 +605,14 @@ namespace rwe
         {
             RWE_RENDERPROF("u.simtick");
             simulation.tick();
+        }
+
+        // RWE_SIM_LAG: cost this peer wall time, so a machine that cannot keep
+        // up can be reproduced on one that can. After the tick so it changes
+        // only when ticks run; the simulation never sees it. Issue #355.
+        if (auto lag = diagnostics.simulationLagForTick(sceneTime.value))
+        {
+            std::this_thread::sleep_for(*lag);
         }
 
         if (arenaReport)
@@ -652,7 +667,6 @@ namespace rwe
         // than anything around it. Periodic keyframes are the fix for that.
         // The RWE_HASH_LOG and RWE_STATE_DUMP switches themselves live in
         // SimDiagnostics, shared with the headless arena.
-        static SimDiagnostics diagnostics;
         if (!isPlayback() || diagnostics.hashLogEnabled())
         {
             auto gameHash = diagnostics.record(simulation, sceneTime.value);

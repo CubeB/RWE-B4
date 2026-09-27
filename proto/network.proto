@@ -294,6 +294,20 @@ message GameUpdateMessage
     required int32 next_chat_to_send = 11;
     required int32 next_chat_to_receive = 12;
     repeated ChatMessage chat = 13;
+
+    // How the sender is running, so a peer's scene time can be projected at
+    // the rate it is actually advancing. Absent means 1x, unpaused and not
+    // stalled, which is what a build without these fields is. #356 adds a
+    // sustainable speed beside game_speed_permille.
+    optional uint32 game_speed_permille = 14 [default = 1000];
+    optional bool paused = 15 [default = false];
+    optional bool stalled = 16 [default = false];
+
+    // The speed the sender believes its machine can sustain, in per mille of
+    // normal speed, from the ticks it has managed to dispatch (#356). It caps
+    // the effective speed every peer runs at. Absent means no opinion, read
+    // as normal speed.
+    optional uint32 sustainable_speed_permille = 17 [default = 1000];
 }
 
 message NetworkMessage

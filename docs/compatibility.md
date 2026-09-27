@@ -308,6 +308,11 @@ original in every case.
 - **A resurrect shows the reclaim cursor**, the base game's `CURSORS.GAF` not
   containing the `cursorrevive` sequence that `rev31.gp3` adds.
 - **Aircraft have no pitch** (§1); the `BrakeRate` nose re-aim is in.
+- **A mission's trees give way to its buildings.** The original lets a
+  mission's towers stand among its trees and rocks; RWE clears the scenery
+  from under a mission building instead, since it cannot stand a building on
+  a feature. A building placed partly off the map's edge comes in just far
+  enough to fit. §88.
 - **No 150-tick lock after a unit changes hands**, which the mission rules'
   usable test also reads in the original. §113.
 - **A mission unit's first order with a coordinate missing starts from 0**,

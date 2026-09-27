@@ -236,6 +236,25 @@ jobs:
           chmod 700 "$XDG_RUNTIME_DIR"
           timeout 600 xvfb-run -a -s "-screen 0 1280x1024x24" \
             ./build/scenario --all --data-path "$SCENARIO_DATA"
+      # Two peers on loopback plus a computer player, and then a run that
+      # drops one peer part way through, both comparing their RWE_HASH_LOG
+      # tick for tick. Needs the same game data as the scenarios, so it skips
+      # with them rather than standing in for a check that did not happen.
+      # The script is Python-standard-library only, so plain python3 runs it.
+      - name: run net-test
+        env:
+          SCENARIO_DATA: ${{ vars.RWE_SCENARIO_DATA }}
+          SDL_AUDIODRIVER: dummy
+          XDG_RUNTIME_DIR: /tmp/rwe-xdg
+        run: |
+          if [ -z "$SCENARIO_DATA" ]; then
+            echo "RWE_SCENARIO_DATA is not set; skipping the net-test."
+            exit 0
+          fi
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          timeout 300 python3 tools/net-test.py --ai --seconds 30 --data-path "$SCENARIO_DATA"
+          timeout 300 python3 tools/net-test.py --peers 3 --kill 2 --seconds 30 --data-path "$SCENARIO_DATA"
       - name: build AppImage
         if: matrix.cc == 'gcc-14' && matrix.configuration == 'Release'
         run: |

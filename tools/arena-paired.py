@@ -1,7 +1,8 @@
 import re, sys, os, glob
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from arena_common import PLAYER_LINE_RE as pat  # shared with ai-autotune.py; do not re-derive this regex
 # For each seed: the tuned player's result in the tuned game against the same
 # player's result in the control game of that seed. Odd seeds tune p0, even p1.
-pat = re.compile(r'p(\d)=(\w+) (\w+) units=(\d+) buildings=(\d+) army=(\d+)')
 for folder in sys.argv[1:]:
     print('==', os.path.basename(folder))
     score = {}

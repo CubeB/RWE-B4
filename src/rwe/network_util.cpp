@@ -45,52 +45,127 @@ namespace rwe
         return {pushLocalSet, emptySetsToPush};
     }
 
+    unsigned int estimateSustainableSpeedPermille(
+        unsigned int chosenSpeedPermille,
+        unsigned int ticksDispatched,
+        unsigned int ticksLostToCap,
+        float averageTickCostMillis)
+    {
+        auto capacity = chosenSpeedPermille;
+
+        auto owed = ticksDispatched + ticksLostToCap;
+        if (owed > 0 && ticksDispatched < owed)
+        {
+            auto managed = static_cast<unsigned int>(
+                static_cast<unsigned long long>(chosenSpeedPermille) * ticksDispatched / owed);
+            capacity = std::min(capacity, managed);
+        }
+
+        if (averageTickCostMillis > 0.0f)
+        {
+            auto byCost = static_cast<unsigned int>(static_cast<float>(SimMillisecondsPerTick) * 1000.0f / averageTickCostMillis);
+            capacity = std::min(capacity, byCost);
+        }
+
+        return std::max(capacity, MinimumSustainableSpeedPermille);
+    }
+
+    float gateAdjustment(SceneTime averageSceneTime, SceneTime sceneTime)
+    {
+        auto lead = static_cast<int>(averageSceneTime.value) - static_cast<int>(sceneTime.value);
+        auto factor = 1.0f + (FrameScheduler::GateGainPerTick * static_cast<float>(lead));
+        return std::clamp(factor, FrameScheduler::MinGateFactor, FrameScheduler::MaxGateFactor);
+    }
+
+    unsigned int SpeedGovernor::update(Timestamp now, unsigned int chosenPermille, const std::vector<PeerCapacity>& peers)
+    {
+        auto target = chosenPermille;
+        for (const auto& peer : peers)
+        {
+            target = std::min(target, peer.permille);
+        }
+
+        limiting.clear();
+        if (target < chosenPermille)
+        {
+            for (const auto& peer : peers)
+            {
+                if (peer.permille == target)
+                {
+                    limiting.push_back(peer.playerId);
+                }
+            }
+        }
+
+        if (!lastUpdate)
+        {
+            // First frame: nothing has been recovered from yet, so the
+            // ceiling, capped by the reports, applies at once.
+            effective = target;
+            lastUpdate = now;
+        }
+        else if (chosenPermille > lastChosen && target > effective)
+        {
+            // The player asked for more: that is explicit, not a peer
+            // recovering, so it takes effect at once.
+            effective = target;
+            lastUpdate = now;
+        }
+        else if (target < effective)
+        {
+            // Drop at once, and start the recovery clock from here so the same
+            // drop cannot be undone the next frame.
+            effective = target;
+            lastUpdate = now;
+        }
+        else if (target > effective)
+        {
+            auto elapsedMillis = std::chrono::duration_cast<std::chrono::milliseconds>(now - *lastUpdate).count();
+            auto step = static_cast<unsigned int>(
+                static_cast<long long>(RecoveryPermillePerSecond) * elapsedMillis / 1000);
+            if (step > 0)
+            {
+                effective = std::min(target, effective + step);
+                lastUpdate = now;
+            }
+        }
+
+        lastChosen = chosenPermille;
+        return effective;
+    }
+
     FrameScheduler::FrameScheduler(
         unsigned int millisecondsBuffer,
         SceneTime averageSceneTime,
+        SceneTime sceneTime,
         int maxTicksPerFrame)
         : millisecondsBuffer(millisecondsBuffer),
-          averageSceneTime(averageSceneTime),
+          gateFactor(gateAdjustment(averageSceneTime, sceneTime)),
           maxTicksPerFrame(maxTicksPerFrame)
     {
     }
 
+    unsigned int FrameScheduler::tickCost() const
+    {
+        return static_cast<unsigned int>(static_cast<float>(SimMillisecondsPerTick) / gateFactor + 0.5f);
+    }
+
     bool FrameScheduler::hasWork() const
     {
-        return millisecondsBuffer >= static_cast<unsigned int>(SimMillisecondsPerTick)
+        return millisecondsBuffer >= tickCost()
             && dispatched < static_cast<unsigned int>(maxTicksPerFrame);
     }
 
-    std::optional<FrameDispatch> FrameScheduler::next(SceneTime sceneTime)
+    void FrameScheduler::next()
     {
         if (!hasWork())
         {
             drainBacklogForCap();
-            return std::nullopt;
+            return;
         }
 
-        millisecondsBuffer -= static_cast<unsigned int>(SimMillisecondsPerTick);
-
-        if (!gateAllowsTick(sceneTime))
-        {
-            ++skips;
-            return FrameDispatch::Skip;
-        }
-
+        millisecondsBuffer -= tickCost();
         ++dispatched;
-        return FrameDispatch::Attempt;
-    }
-
-    bool FrameScheduler::extraTick(SceneTime sceneTime)
-    {
-        if (dispatched < static_cast<unsigned int>(maxTicksPerFrame)
-            && sceneTime % frameCheckInterval == SceneTime(0)
-            && sceneTime < lowSceneTime())
-        {
-            ++dispatched;
-            return true;
-        }
-        return false;
     }
 
     void FrameScheduler::discardBuffer()
@@ -101,23 +176,12 @@ namespace rwe
     FrameOutcome FrameScheduler::finish()
     {
         drainBacklogForCap();
-        return {millisecondsBuffer, dispatched, skips, lostToCap};
+        return {millisecondsBuffer, dispatched, lostToCap};
     }
 
     unsigned int FrameScheduler::ticksThisFrame() const
     {
         return dispatched;
-    }
-
-    bool FrameScheduler::gateAllowsTick(SceneTime sceneTime) const
-    {
-        auto highSceneTime = averageSceneTime + frameTolerance;
-        return sceneTime % frameCheckInterval != SceneTime(0) || sceneTime <= highSceneTime;
-    }
-
-    SceneTime FrameScheduler::lowSceneTime() const
-    {
-        return averageSceneTime <= frameTolerance ? SceneTime(0) : averageSceneTime - frameTolerance;
     }
 
     void FrameScheduler::drainBacklogForCap()
@@ -127,7 +191,7 @@ namespace rwe
             return;
         }
         capDrained = true;
-        lostToCap = millisecondsBuffer / static_cast<unsigned int>(SimMillisecondsPerTick);
+        lostToCap = millisecondsBuffer / tickCost();
         millisecondsBuffer = 0;
     }
 
