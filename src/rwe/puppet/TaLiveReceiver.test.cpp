@@ -31,8 +31,7 @@ namespace rwe
         {
             TadUnitState state;
             state.tick = serial;
-            state.sync =
-                TadUnitSync{0, 3, health, 0, 0, 0, std::nullopt, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}, std::nullopt};
+            state.sync = TadUnitSync{0, 3, health, 0, 0, 0, std::nullopt, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}, std::nullopt};
             return tadEncodeUnitState(state, testLayout());
         }
 
