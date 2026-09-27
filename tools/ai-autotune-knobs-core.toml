@@ -1,0 +1,64 @@
+# Knob search space for a CORE-only search (--tuned-faction CORE).
+#
+# The first search's winner for ARM was the kbot lab's unit mix (the lab
+# building no raiders); this looks for CORE's equivalent across both of its
+# factories. CORE's current overrides (applyFactionDefaults) are labRaiderShare
+# 1, labRocketKbotShare 2, labArtilleryKbotShare 1, attackArmySize 14; the
+# vehicle plant shares are the shared defaults, 1/0/0.
+#
+# techMinArmyValueRatio is left out on purpose: the engagement predictor's
+# second milestone (#389) replaces the tech decision it gates.
+
+[[knob]]
+name = "labRaiderShare"
+type = "int"
+min = 0
+max = 3
+
+[[knob]]
+name = "labRocketKbotShare"
+type = "int"
+min = 0
+max = 4
+
+[[knob]]
+name = "labArtilleryKbotShare"
+type = "int"
+min = 0
+max = 3
+
+[[knob]]
+name = "vehicleTankShare"
+type = "int"
+min = 0
+max = 3
+
+[[knob]]
+name = "vehicleMissileTruckShare"
+type = "int"
+min = 0
+max = 3
+
+[[knob]]
+name = "vehicleMediumTankShare"
+type = "int"
+min = 0
+max = 3
+
+[[knob]]
+name = "attackArmySize"
+type = "int"
+min = 8
+max = 22
+
+[[knob]]
+name = "counterShareBonus"
+type = "int"
+min = 0
+max = 4
+
+[[knob]]
+name = "counterShareTrigger"
+type = "scalar"
+min = 0.1
+max = 0.6
