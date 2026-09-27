@@ -496,7 +496,8 @@ namespace rwe
     }
 
     TEST_CASE("the puppet driver's newer records are bounded like the rest", "[malformed][puppet]")
-    {        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         definePuppetTestWorld(sim);
         addWellStockedPlayer(sim, "ARM");
         addWellStockedPlayer(sim, "CORE");
