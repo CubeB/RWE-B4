@@ -263,6 +263,40 @@ Its clock is the `0x2c` serial, never `Packet::time`.
 _Avoid_: replay player, demo player (that is the simulation's player, not the
 driver)
 
+**Live receiver** (`TaLiveReceiver`):
+A jitter buffer in front of the puppet driver for a game rather than a file. Each
+sender's packets are held and handed over in the order that sender sent them,
+which the stream's marker says and arrival does not: a packet with no `0x2c` has
+no tick to place it by, and a `0x0c` that overtook the `0x09` behind it is a
+death for a unit the driver never heard of. The `0x2c` serial is the *when* -- a
+packet waits for the tick it names, or for the packet before it in its sender's
+order when it names none -- and a packet a sender sent that has not turned up is
+waited on for the buffer's depth plus a tick and then given up on. A packet
+whose tick has passed is applied at once and counted, a marker already handed
+over is dropped, the map from serial to RWE tick settles on the lowest serial
+seen before the first packet is applied, and the gap between the two clocks is
+reported over a run. Its counters are the overlay's.
+_Avoid_: network layer (that is the datagram, #424), delay, lag compensation
+
+**Marker**:
+The per-sender count every TA packet carries seven bytes into its plaintext,
+falling by one per packet that sender sends, so a higher marker is a packet sent
+earlier. `0xffffffff` on replies and on the battleroom's steady traffic, which
+count for nothing in the stream's order and go straight through.
+`docs/TA-NETWORK.md` records it as "not a clock, and nothing seen depends on
+it"; a live receiver is the thing that depends on it, and it is the only
+per-sender ordering the wire carries.
+_Avoid_: clock, serial (that is the `0x2c`'s tick, a different field), packet
+number (a caller's own index, which a demo has to stand in for this)
+
+**Receive buffer**:
+The depth of a live receiver's jitter buffer, in ticks, and the distance the
+local clock runs behind the sender's. A packet is available up to that many
+ticks *before* the tick it names, which is what buys the reordering tolerance;
+past it a packet is late and can only be applied where it landed.
+_Avoid_: jitter buffer (that is the mechanism, this is the setting), buffer
+size (that is the bound on packets held)
+
 **Demo output**:
 A `.tad` RWE wrote rather than recorded from TA. Readable and mineable by the
 same tools as a real one, with three recorded divergences: the `0x1a` ids are

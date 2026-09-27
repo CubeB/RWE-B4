@@ -544,6 +544,7 @@ namespace rwe
             auto puppetIt = puppets.find(key->second);
             if (puppetIt == puppets.end())
             {
+                ++stats.deathsDroppedNotLive;
                 return;
             }
             auto live = liveUnitOf(puppetIt->second);
@@ -551,6 +552,7 @@ namespace rwe
             {
                 // The owner declares a death for a unit we have not placed yet
                 // or have already let go; either way it never stands here.
+                ++stats.deathsDroppedNotLive;
                 dropPuppet(puppetIt);
                 return;
             }

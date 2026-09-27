@@ -689,6 +689,17 @@ namespace rwe
      */
     std::optional<TadUnitState> tadDecodeUnitState(const TadBytes& subPacket, const TadUnitStateLayout& layout);
 
+    /**
+     * The sender's tick from a 0x2c, without decoding the rest of it.
+     *
+     * A live receiver has to key on the serial before it can decide whether to
+     * hold a packet, which is before anything knows which types the data set
+     * holds -- `tadDecodeUnitState` needs a layout for that. Returns nothing
+     * unless the subpacket is a 0x2c long enough to carry the field whose
+     * declared length is its own size.
+     */
+    std::optional<uint32_t> tadSerialOfUnitState(const TadBytes& subPacket);
+
     /** A block-relative unit index as a global id, the inverse of tadOwnerBlockOfUnitId. */
     uint16_t tadUnitIdOfIndex(unsigned int block, uint16_t index, uint16_t maxUnits);
 

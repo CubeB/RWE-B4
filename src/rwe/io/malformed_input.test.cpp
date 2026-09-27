@@ -16,6 +16,7 @@
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/tnt/TntArchive.h>
+#include <rwe/puppet/TaLiveReceiver.h>
 #include <rwe/puppet/TadPuppetDriver.h>
 #include <rwe/puppet/puppet_test_util.h>
 #include <rwe/sim/GameSimulation.h>
@@ -905,6 +906,82 @@ namespace rwe
             REQUIRE(parsed->options == 0x4F);
             REQUIRE(parsed->colour == 0xFF);
             REQUIRE(parsed->side == (side <= 1 ? static_cast<TadSide>(side) : TadSide::Watch));
+
+    TEST_CASE("a live receiver refuses a serial it cannot make sense of", "[malformed][puppet]")
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        definePuppetTestWorld(sim);
+        addWellStockedPlayer(sim, "ARM");
+
+        TadPuppetDriver driver(sim, 8, puppetTestLoadOrder());
+        driver.addPlayer(1, PlayerId(0));
+        driver.setExternalClock(true);
+        TaLiveReceiver receiver(driver);
+
+        auto layout = tadUnitStateLayout(std::vector<bool>{false, false, false}, 8);
+        auto record = [&](uint32_t serial) {
+            return tadEncodeUnitState(
+                TadUnitState{
+                    serial,
+                    {},
+                    TadUnitSync{0, 3, 100, 0, 0, 0, std::nullopt, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}, std::nullopt}},
+                layout);
+        };
+        uint32_t sequence = 1000;
+        auto feed = [&](const TadBytes& subPacket) {
+            receiver.onPacket(TadPacket{0, 1}, {subPacket}, 0, sequence--);
+        };
+
+        SECTION("a 0x2c too short to carry the serial, and one that lies about its length")
+        {
+            REQUIRE_FALSE(tadSerialOfUnitState(TadBytes{0x2c, 0x03, 0x00}));
+            REQUIRE_FALSE(tadSerialOfUnitState(TadBytes{0x2c, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff}));
+            REQUIRE(tadSerialOfUnitState(record(8)) == 8u);
+        }
+
+        SECTION("a subpacket that is not a 0x2c has no serial")
+        {
+            REQUIRE_FALSE(tadSerialOfUnitState(TadBytes{}));
+            REQUIRE_FALSE(tadSerialOfUnitState(TadBytes{0x2d, 0x00, 0x00}));
+            REQUIRE_FALSE(tadSerialOfUnitState(TadBytes{0x0b, 0x08, 0x00, 0, 0, 0, 0, 0}));
+        }
+
+        SECTION("a peer that names a tick a long way off is dropped, not waited for")
+        {
+            feed(record(8));
+            auto far = record(0xffffffffu);
+            for (int i = 0; i < 1000; ++i)
+            {
+                feed(far);
+            }
+
+            REQUIRE(receiver.stats().packetsReceived == 1001);
+            REQUIRE(receiver.stats().packetsDroppedOutOfRange == 1000);
+            REQUIRE(receiver.stats().held == 1);
+            REQUIRE(driver.stats().packets == 0);
+        }
+
+        SECTION("once a packet has been applied the clock is fixed, and a serial below it is refused")
+        {
+            feed(record(8));
+            receiver.onTick(0);
+            driver.applyTick(0);
+            feed(record(0));
+
+            REQUIRE(receiver.stats().clock.originSerial.value_or(0) == 8u);
+            REQUIRE(receiver.stats().packetsDroppedOutOfRange == 1);
+        }
+
+        SECTION("a flood of in-range serials is bounded, and what it lost is counted")
+        {
+            for (uint32_t serial = 1; serial <= 2000; ++serial)
+            {
+                feed(record(serial));
+            }
+
+            REQUIRE(receiver.stats().held <= receiver.options().maxHeld);
+            REQUIRE(receiver.stats().packetsDroppedBufferFull > 0);
+            REQUIRE(receiver.stats().packetsApplied == 0);
         }
     }
 }

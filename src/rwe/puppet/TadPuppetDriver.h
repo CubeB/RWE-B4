@@ -49,6 +49,14 @@ namespace rwe
         uint64_t recordsDroppedUnknownUnit{0};
         uint64_t spawnsRefused{0};
 
+        /**
+         * A death for a unit we hold no live puppet for: one never placed, one
+         * already let go, or one whose slot now holds a different type because
+         * the owner re-used it. Counted, because a loss that increments nothing
+         * is a hole in the instrument rather than a fact about the stream.
+         */
+        uint64_t deathsDroppedNotLive{0};
+
         /** A packet whose sender had no serial yet, applied at the current tick. */
         uint64_t packetsWithoutClock{0};
 

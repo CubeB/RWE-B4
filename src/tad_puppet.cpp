@@ -19,6 +19,7 @@
  */
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -26,6 +27,7 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <random>
 #include <rwe/ColorPalette.h>
 #include <rwe/MeshService.h>
 #include <rwe/PathMapping.h>
@@ -36,7 +38,9 @@
 #include <rwe/io/tad/TadReader.h>
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/io/tnt/TntArchive.h>
+#include <rwe/puppet/TaLiveReceiver.h>
 #include <rwe/puppet/TadPuppetDriver.h>
+#include <rwe/sim/SimRandom.h>
 #include <rwe/util.h>
 #include <rwe/util/OpaqueArgs.h>
 #include <rwe/util/SpanStream.h>
@@ -126,6 +130,38 @@ namespace
         }
     };
 
+    /**
+     * The network `--live-sim` stands in for.
+     *
+     * A packet becomes available between 0 and `jitterTicks` ticks *before* the
+     * tick the stream has got to, which is the tick a straight playback applies
+     * it at. That is what a receive buffer is: the local tick runs that far
+     * behind, so a packet that crosses early is still in hand at the tick that
+     * names it. Reordering falls out of two packets taking different leads, and
+     * a packet is never held past the tick it is for, which is why a run at 0%
+     * loss has to reproduce the straight figures exactly.
+     *
+     * The receiver's lateness counter is not zero here, and should not be: a
+     * recording is in arrival order rather than serial order, so one peer's
+     * tick 0 is often written after another's tick 1, and those records name a
+     * tick already played. A straight playback applies them where they landed
+     * too, which is why they change nothing.
+     */
+    struct LiveSim
+    {
+        uint32_t jitterTicks{0};
+        uint32_t lossPercent{0};
+        uint32_t seed{0};
+
+        uint64_t packetsScheduled{0};
+        uint64_t packetsLost{0};
+        uint32_t localTicks{0};
+
+        rwe::TaLiveReceiverStats receiver;
+
+        static std::optional<LiveSim> parse(const std::string& text);
+    };
+
     struct DriftSummary
     {
         unsigned int count{0};
@@ -198,6 +234,7 @@ namespace
                  {"badBlock", stats.recordsDroppedBadBlock},
                  {"unknownUnit", stats.recordsDroppedUnknownUnit},
                  {"spawnRefused", stats.spawnsRefused},
+                 {"deathNotLive", stats.deathsDroppedNotLive},
              }},
             {"shots", {{"spawned", stats.shotsSpawned}, {"dropped", stats.shotsDropped}}},
             {"scripts", {{"run", stats.scriptCallsRun}, {"dropped", stats.scriptCallsDropped}}},
@@ -231,6 +268,7 @@ namespace
                   << ", bad block " << stats.recordsDroppedBadBlock
                   << ", unknown unit " << stats.recordsDroppedUnknownUnit
                   << ", refused spawn " << stats.spawnsRefused
+                  << ", death not live " << stats.deathsDroppedNotLive
                   << ", no clock " << stats.packetsWithoutClock << "\n";
         std::cout << "  shots " << stats.shotsSpawned << " spawned, " << stats.shotsDropped << " dropped"
                   << "; scripts " << stats.scriptCallsRun << " run, " << stats.scriptCallsDropped << " dropped"
@@ -238,6 +276,85 @@ namespace
                   << "; speed " << stats.speedChanges << "\n";
         printDrift("ground", summarise(stats.groundDrift));
         printDrift("air", summarise(stats.airDrift));
+    }
+
+    json liveJson(const LiveSim& sim)
+    {
+        auto& r = sim.receiver;
+        return json{
+            {"jitterTicks", sim.jitterTicks},
+            {"lossPercent", sim.lossPercent},
+            {"seed", sim.seed},
+            {"packetsScheduled", sim.packetsScheduled},
+            {"packetsLost", sim.packetsLost},
+            {"localTicks", sim.localTicks},
+            {"received", r.packetsReceived},
+            {"applied", r.packetsApplied},
+            {"late", r.packetsLate},
+            {"duplicate", r.packetsDuplicate},
+            {"outOfOrder", r.packetsOutOfOrder},
+            {"withoutSerial", r.packetsWithoutSerial},
+            {"unsequenced", r.packetsUnsequenced},
+            {"droppedOutOfRange", r.packetsDroppedOutOfRange},
+            {"droppedBufferFull", r.packetsDroppedBufferFull},
+            {"droppedGap", r.packetsDroppedGap},
+            {"held", r.held},
+            {"clock",
+             {{"samples", r.clock.samples},
+              {"originSerial", r.clock.originSerial},
+              {"originCorrections", r.clock.originCorrections},
+              {"minOffsetTicks", r.clock.minOffsetTicks},
+              {"maxOffsetTicks", r.clock.maxOffsetTicks},
+              {"meanOffsetTicks", r.clock.meanOffsetTicks},
+              {"firstOffsetTicks", r.clock.firstOffsetTicks},
+              {"lastOffsetTicks", r.clock.lastOffsetTicks},
+              {"driftTicks", r.clock.driftTicks},
+              {"driftPer1000Ticks", r.clock.driftPer1000Ticks}}}};
+    }
+
+    void printLive(const LiveSim& sim, uint32_t localTicks)
+    {
+        auto& r = sim.receiver;
+        std::cout << "  live: " << sim.packetsScheduled << " scheduled, " << sim.packetsLost << " lost"
+                  << " (receive buffer " << sim.jitterTicks << " ticks, " << sim.lossPercent << "% loss, seed " << sim.seed
+                  << "), " << localTicks << " local ticks\n";
+        std::cout << "  received " << r.packetsReceived << ", applied " << r.packetsApplied
+                  << ", late " << r.packetsLate
+                  << ", duplicate " << r.packetsDuplicate
+                  << ", out of order " << r.packetsOutOfOrder
+                  << ", no serial " << r.packetsWithoutSerial
+                  << ", no sequence " << r.packetsUnsequenced
+                  << ", refused " << (r.packetsDroppedOutOfRange + r.packetsDroppedBufferFull + r.packetsDroppedGap)
+                  << " (" << r.packetsDroppedOutOfRange << " range, " << r.packetsDroppedBufferFull << " buffer, " << r.packetsDroppedGap
+                  << " gap)"
+                  << ", held " << r.held << "\n";
+        std::cout << "  clock: anchor " << r.clock.originSerial.value_or(0)
+                  << " (" << r.clock.originCorrections << " corrected)"
+                  << ", offset min " << r.clock.minOffsetTicks
+                  << " mean " << r.clock.meanOffsetTicks
+                  << " max " << r.clock.maxOffsetTicks
+                  << ", drift " << r.clock.driftTicks << " ticks"
+                  << " (" << r.clock.driftPer1000Ticks << " per 1000)\n";
+    }
+
+    /**
+     * The same counters without the clock line, for the aggregate: the clock
+     * figures are one anchor and one drift over a run, and a sum of them over
+     * several demos would be two numbers wearing a total's name.
+     */
+    void printLiveTotals(const LiveSim& sim)
+    {
+        auto& r = sim.receiver;
+        std::cout << "  live: " << sim.packetsScheduled << " scheduled, " << sim.packetsLost << " lost"
+                  << " (receive buffer " << sim.jitterTicks << " ticks, " << sim.lossPercent << "% loss, seed " << sim.seed
+                  << "), " << sim.localTicks << " local ticks\n";
+        std::cout << "  received " << r.packetsReceived << ", applied " << r.packetsApplied
+                  << ", late " << r.packetsLate
+                  << ", duplicate " << r.packetsDuplicate
+                  << ", out of order " << r.packetsOutOfOrder
+                  << ", no serial " << r.packetsWithoutSerial
+                  << ", no sequence " << r.packetsUnsequenced
+                  << ", refused " << (r.packetsDroppedOutOfRange + r.packetsDroppedBufferFull + r.packetsDroppedGap) << "\n";
     }
 
     /** The loaded services, built once and reused for every demo. */
@@ -273,9 +390,29 @@ namespace
     struct Totals
     {
         rwe::TadPuppetStats stats;
+        std::optional<LiveSim> live;
         unsigned int demos{0};
         unsigned int failed{0};
     };
+
+    /** Sums a live run's own counters; the clock figures are per-demo only. */
+    void addLive(LiveSim& into, const LiveSim& from)
+    {
+        addCounts(into.packetsScheduled, from.packetsScheduled);
+        addCounts(into.packetsLost, from.packetsLost);
+        addCounts(into.localTicks, from.localTicks);
+        addCounts(into.receiver.packetsReceived, from.receiver.packetsReceived);
+        addCounts(into.receiver.packetsApplied, from.receiver.packetsApplied);
+        addCounts(into.receiver.packetsLate, from.receiver.packetsLate);
+        addCounts(into.receiver.packetsDuplicate, from.receiver.packetsDuplicate);
+        addCounts(into.receiver.packetsOutOfOrder, from.receiver.packetsOutOfOrder);
+        addCounts(into.receiver.packetsWithoutSerial, from.receiver.packetsWithoutSerial);
+        addCounts(into.receiver.packetsUnsequenced, from.receiver.packetsUnsequenced);
+        addCounts(into.receiver.packetsDroppedOutOfRange, from.receiver.packetsDroppedOutOfRange);
+        addCounts(into.receiver.packetsDroppedBufferFull, from.receiver.packetsDroppedBufferFull);
+        addCounts(into.receiver.packetsDroppedGap, from.receiver.packetsDroppedGap);
+        into.receiver.held = from.receiver.held;
+    }
 
     void addStats(rwe::TadPuppetStats& into, const rwe::TadPuppetStats& from)
     {
@@ -291,6 +428,7 @@ namespace
         addCounts(into.recordsDroppedBadBlock, from.recordsDroppedBadBlock);
         addCounts(into.recordsDroppedUnknownUnit, from.recordsDroppedUnknownUnit);
         addCounts(into.spawnsRefused, from.spawnsRefused);
+        addCounts(into.deathsDroppedNotLive, from.deathsDroppedNotLive);
         addCounts(into.packetsWithoutClock, from.packetsWithoutClock);
         addCounts(into.shotsSpawned, from.shotsSpawned);
         addCounts(into.shotsDropped, from.shotsDropped);
@@ -350,35 +488,35 @@ namespace
     }
 
     /**
-     * Builds a simulation for a demo and plays it through the driver. Returns
-     * nothing, with the reason on stderr, if the map is missing or the data
-     * set does not match the demo.
+     * Runs `body` over a simulation loaded for the demo, with a driver over it
+     * and a seat for every sender. The reason is on stderr and `body` is not
+     * run if the map is missing or the data set does not match the demo.
+     *
+     * The loaded game is a local, built straight from what the loader returns.
+     * A driver holds a reference into it, so it cannot be moved out of here and
+     * passed back: the reference would be left pointing at the old one.
      */
-    std::optional<rwe::TadPuppetStats> playDemo(
-        const fs::path& path,
-        DataSet& data,
-        const DemoMeta& meta,
-        rwe::GameDataMaps*& outUnitLoadOrderMismatch)
+    template <typename Body>
+    void withPlayback(DataSet& data, const DemoMeta& meta, bool externalClock, Body&& body)
     {
-        outUnitLoadOrderMismatch = nullptr;
         if (!meta.header)
         {
             std::cerr << "  ERROR: no header\n";
-            return std::nullopt;
+            return;
         }
         const auto& header = *meta.header;
 
         auto params = parametersFor(header, meta.players);
         if (!params)
         {
-            return std::nullopt;
+            return;
         }
 
         auto otaRaw = data.vfs.readFile("maps/" + header.mapName + ".ota");
         if (!otaRaw)
         {
             std::cerr << "  ERROR: map \"" << header.mapName << "\" is not in the data\n";
-            return std::nullopt;
+            return;
         }
         std::string otaStr(otaRaw->begin(), otaRaw->end());
         auto ota = rwe::parseOta(rwe::parseTdfFromString(otaStr));
@@ -387,27 +525,27 @@ namespace
         if (!tntBytes)
         {
             std::cerr << "  ERROR: map terrain for \"" << header.mapName << "\" is not in the data\n";
-            return std::nullopt;
+            return;
         }
         rwe::SpanStream tntStream(tntBytes->data(), tntBytes->size());
         rwe::TntArchive tnt(&tntStream);
         auto mapData = rwe::readMapData(tnt, ota, params->schemaIndex);
 
-        auto loaded = rwe::loadGameSimulation(data.services(), *params, std::move(mapData), ota);
+        rwe::LoadedGame game = rwe::loadGameSimulation(data.services(), *params, std::move(mapData), ota);
 
-        if (meta.unitTable && meta.unitTable->restricted.size() != loaded.dataMaps.unitLoadOrder.size())
+        if (meta.unitTable && meta.unitTable->restricted.size() != game.dataMaps.unitLoadOrder.size())
         {
             std::cerr << "  ERROR: the demo's unit table has " << meta.unitTable->restricted.size()
-                      << " types, the data set loads " << loaded.dataMaps.unitLoadOrder.size() << "\n";
-            return std::nullopt;
+                      << " types, the data set loads " << game.dataMaps.unitLoadOrder.size() << "\n";
+            return;
         }
 
-        rwe::TadPuppetDriver driver(loaded.simulation, header.maxUnits, loaded.dataMaps.unitLoadOrder);
+        rwe::TadPuppetDriver driver(game.simulation, header.maxUnits, game.dataMaps.unitLoadOrder);
 
         rwe::Index slot = 0;
         for (uint8_t sender : meta.senders)
         {
-            if (slot >= loaded.simulation.players.size())
+            if (slot >= game.simulation.players.size())
             {
                 break;
             }
@@ -415,6 +553,137 @@ namespace
             ++slot;
         }
 
+        driver.setExternalClock(externalClock);
+        body(game.simulation, driver);
+    }
+
+    /** Plays a demo straight from the file, the way the tool has always done. */
+    std::optional<rwe::TadPuppetStats> playDemo(const fs::path& path, DataSet& data, const DemoMeta& meta)
+    {
+        std::optional<rwe::TadPuppetStats> result;
+        withPlayback(data, meta, false, [&](rwe::GameSimulation&, rwe::TadPuppetDriver& driver) {
+            std::ifstream stream(path, std::ios::binary);
+            if (!stream)
+            {
+                std::cerr << "  ERROR: cannot open\n";
+                return;
+            }
+
+            PlayHandler handler(driver);
+            rwe::readTad(stream, handler);
+            result = driver.stats();
+        });
+        return result;
+    }
+
+    /** The figures a live run reports on top of the driver's own. */
+    struct LiveResult
+    {
+        rwe::TadPuppetStats driver;
+        LiveSim sim;
+    };
+
+    /**
+     * Plays a demo as a live stream would arrive: every packet is delivered at
+     * the tick the injected network says, through a TaLiveReceiver, with the
+     * driver on its external clock and the simulation ticked once per local
+     * tick. The local tick is the clock, as it is in a game.
+     */
+    std::optional<LiveSim> LiveSim::parse(const std::string& text)
+    {
+        std::vector<std::string> parts;
+        std::size_t at = 0;
+        while (parts.size() < 3)
+        {
+            auto colon = text.find(':', at);
+            if (colon == std::string::npos)
+            {
+                if (!parts.empty())
+                {
+                    parts.push_back(text.substr(at));
+                }
+                at = std::string::npos;
+                break;
+            }
+            parts.push_back(text.substr(at, colon - at));
+            at = colon + 1;
+        }
+        if (at != std::string::npos || parts.size() != 3)
+        {
+            return std::nullopt;
+        }
+
+        LiveSim sim;
+        try
+        {
+            sim.jitterTicks = static_cast<uint32_t>(std::stoul(parts[0]));
+            sim.lossPercent = static_cast<uint32_t>(std::stoul(parts[1]));
+            sim.seed = static_cast<uint32_t>(std::stoul(parts[2]));
+        }
+        catch (const std::exception&)
+        {
+            return std::nullopt;
+        }
+        if (sim.lossPercent > 100)
+        {
+            return std::nullopt;
+        }
+        return sim;
+    }
+
+    /** One packet of a demo, and where the stream had got to when it was sent. */
+    struct ScheduledPacket
+    {
+        uint8_t sender{0};
+        std::vector<rwe::TadBytes> subPackets;
+        uint32_t streamTick{0};
+
+        /**
+         * The marker this packet would have carried: its place in its sender's
+         * stream, counting down from `markerBase` the way a real one does. A
+         * demo has no marker to read, but a record index within its sender is
+         * the same thing, and it is stamped here -- before the jitter below
+         * reorders anything, exactly as a real sender stamps the marker before
+         * the network does.
+         */
+        uint32_t sequence{0};
+        bool hasSerial{false};
+    };
+
+    /**
+     * Where a demo's per-sender markers start. The wire's own values are
+     * whatever the session has counted to (docs/TA-NETWORK.md calls them small
+     * negative numbers), and only the order matters, so anything clear of both
+     * ends will do.
+     */
+    constexpr uint32_t markerBase = 1u << 20;
+
+    /** Reads a whole demo into memory, in file order. */
+    struct CollectHandler : rwe::TadHandler
+    {
+        std::vector<ScheduledPacket> packets;
+        std::array<uint32_t, 256> sentPerSender{};
+
+        void onPacket(const rwe::TadPacket& packet, const std::vector<rwe::TadBytes>& subPackets, const rwe::TadWalkStats&) override
+        {
+            ScheduledPacket scheduled;
+            scheduled.sender = packet.sender;
+            scheduled.subPackets = subPackets;
+            scheduled.sequence = markerBase - ++sentPerSender[packet.sender];
+            for ([[maybe_unused]] const auto& subPacket : subPackets)
+            {
+                if (rwe::tadSerialOfUnitState(subPacket))
+                {
+                    scheduled.hasSerial = true;
+                    break;
+                }
+            }
+            packets.push_back(std::move(scheduled));
+        }
+    };
+
+    std::optional<LiveResult> playDemoLive(const fs::path& path, DataSet& data, const DemoMeta& meta, LiveSim live)
+    {
         std::ifstream stream(path, std::ios::binary);
         if (!stream)
         {
@@ -422,9 +691,106 @@ namespace
             return std::nullopt;
         }
 
-        PlayHandler handler(driver);
-        rwe::readTad(stream, handler);
-        return driver.stats();
+        CollectHandler collected;
+        rwe::readTad(stream, collected);
+        auto& packets = collected.packets;
+
+        auto serialOf = [](const ScheduledPacket& packet) -> std::optional<uint32_t> {
+            for (const auto& subPacket : packet.subPackets)
+            {
+                if (auto serial = rwe::tadSerialOfUnitState(subPacket))
+                {
+                    return serial;
+                }
+            }
+            return std::nullopt;
+        };
+
+        // The first serial names tick 0, exactly as the receiver anchors it.
+        std::optional<uint32_t> origin;
+        for (const auto& packet : packets)
+        {
+            origin = serialOf(packet);
+            if (origin)
+            {
+                break;
+            }
+        }
+        if (!origin)
+        {
+            std::cerr << "  ERROR: no packet carries a 0x2c to clock the run by\n";
+            return std::nullopt;
+        }
+
+        // A packet is sent at the tick its 0x2c names, but a recording is in
+        // arrival order, and one peer's tick 0 can be written after another's
+        // tick 1. So each packet is given the tick the stream has got to, which
+        // is the tick a straight playback applies it at, and the receiver is
+        // left to work out the tick it names.
+        uint32_t furthest = 0;
+        for (auto& packet : packets)
+        {
+            if (auto serial = serialOf(packet))
+            {
+                furthest = std::max(furthest, *serial >= *origin ? *serial - *origin : 0u);
+            }
+            packet.streamTick = furthest;
+        }
+
+        std::optional<LiveResult> result;
+        withPlayback(data, meta, true, [&](rwe::GameSimulation& sim, rwe::TadPuppetDriver& driver) {
+            rwe::TaLiveReceiver receiver(driver, rwe::TaLiveReceiverOptions{live.jitterTicks});
+
+            // The generator is the tool's own: nothing here may touch the
+            // simulation's, or the same seed would give two different games.
+            std::minstd_rand rng(live.seed);
+            std::vector<std::vector<std::size_t>> arriving(furthest + 1);
+            for (std::size_t i = 0; i < packets.size(); ++i)
+            {
+                ++live.packetsScheduled;
+                if (live.lossPercent > 0 && rwe::randomBelow(rng, 100) < live.lossPercent)
+                {
+                    ++live.packetsLost;
+                    continue;
+                }
+
+                // Only a packet with a 0x2c is on the jittered clock. One
+                // without has no tick of its own: the receiver passes it
+                // straight through and the driver resolves it from the
+                // sender's last serial, so there is nothing to lead it by.
+                auto lead = 0u;
+                if (packets[i].hasSerial)
+                {
+                    lead = rwe::randomBetween(rng, 0, static_cast<int>(live.jitterTicks));
+                }
+                auto streamTick = static_cast<uint64_t>(packets[i].streamTick);
+                arriving[static_cast<std::size_t>(streamTick - std::min<uint64_t>(lead, streamTick))].push_back(i);
+            }
+
+            for (std::size_t t = 0; t <= furthest; ++t)
+            {
+                for (auto index : arriving[t])
+                {
+                    auto& packet = packets[index];
+                    receiver.onPacket(
+                        rwe::TadPacket{0, packet.sender},
+                        packet.subPackets,
+                        static_cast<uint32_t>(t),
+                        packet.sequence);
+                }
+                receiver.onTick(static_cast<uint32_t>(t));
+                driver.applyTick(static_cast<uint32_t>(t));
+                if (t < furthest)
+                {
+                    sim.tick();
+                }
+            }
+
+            live.receiver = receiver.stats();
+            live.localTicks = static_cast<uint32_t>(furthest);
+            result = LiveResult{driver.stats(), live};
+        });
+        return result;
     }
 }
 
@@ -450,9 +816,22 @@ int main(int argc, char* argv[])
                   << "  --dir        a directory of demos to play; recurses\n"
                   << "  --data-path  game data search path; may be repeated, first wins\n"
                   << "  --json       write the per-demo and aggregate report to this file\n"
+                  << "  --live-sim   <jitter-ticks>:<loss-percent>:<seed>, to arrive the packets over a\n"
+                  << "               simulated network through TaLiveReceiver rather than reading them in order\n"
                   << "\n"
                   << "Exits non-zero if any demo fails to play.\n";
         return args.isHelpRequested() ? 0 : 1;
+    }
+
+    std::optional<LiveSim> liveSim;
+    if (args.contains("live-sim"))
+    {
+        liveSim = LiveSim::parse(args.getString("live-sim"));
+        if (!liveSim)
+        {
+            std::cerr << "--live-sim wants <jitter-ticks>:<loss-percent>:<seed>, loss 0 to 100\n";
+            return 1;
+        }
     }
 
     std::vector<fs::path> paths;
@@ -561,20 +940,45 @@ int main(int argc, char* argv[])
 
         try
         {
-            rwe::GameDataMaps* mismatch = nullptr;
-            auto stats = playDemo(path, data, meta, mismatch);
-            if (!stats)
+            if (liveSim)
             {
-                ++totals.failed;
-                demoJson["error"] = "failed to play";
-                report["demos"].push_back(std::move(demoJson));
-                continue;
-            }
+                auto result = playDemoLive(path, data, meta, *liveSim);
+                if (!result)
+                {
+                    ++totals.failed;
+                    demoJson["error"] = "failed to play";
+                    report["demos"].push_back(std::move(demoJson));
+                    continue;
+                }
 
-            printStats(*stats);
-            demoJson.update(statsJson(*stats));
-            report["demos"].push_back(std::move(demoJson));
-            addStats(totals.stats, *stats);
+                printLive(result->sim, result->sim.localTicks);
+                printStats(result->driver);
+                demoJson.update(statsJson(result->driver));
+                demoJson["live"] = liveJson(result->sim);
+                report["demos"].push_back(std::move(demoJson));
+                addStats(totals.stats, result->driver);
+                if (!totals.live)
+                {
+                    totals.live = *liveSim;
+                }
+                addLive(*totals.live, result->sim);
+            }
+            else
+            {
+                auto stats = playDemo(path, data, meta);
+                if (!stats)
+                {
+                    ++totals.failed;
+                    demoJson["error"] = "failed to play";
+                    report["demos"].push_back(std::move(demoJson));
+                    continue;
+                }
+
+                printStats(*stats);
+                demoJson.update(statsJson(*stats));
+                report["demos"].push_back(std::move(demoJson));
+                addStats(totals.stats, *stats);
+            }
         }
         catch (const std::exception& e)
         {
@@ -588,11 +992,21 @@ int main(int argc, char* argv[])
     std::cout << "\n"
               << totals.demos << " demos, " << totals.failed << " failed\n";
     std::cout << "aggregate:\n";
+    if (totals.live)
+    {
+        printLiveTotals(*totals.live);
+    }
     printStats(totals.stats);
 
     report["aggregate"] = statsJson(totals.stats);
     report["aggregate"]["demos"] = totals.demos;
     report["aggregate"]["failed"] = totals.failed;
+    if (totals.live)
+    {
+        report["aggregate"]["live"] = liveJson(*totals.live);
+        // The clock figures are per run, and the aggregate holds none.
+        report["aggregate"]["live"].erase("clock");
+    }
 
     if (args.contains("json"))
     {
