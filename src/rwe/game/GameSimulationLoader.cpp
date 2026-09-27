@@ -834,10 +834,10 @@ namespace rwe
                 }
             }
         }
-        if (!localPlayerId && (gameParameters.aiArenaSeconds || gameParameters.replayFile))
+        if (!localPlayerId && (gameParameters.aiArenaSeconds || gameParameters.replayFile || gameParameters.tadDemoFile))
         {
-            // Nobody is playing: this is a measurement run, or a recording of
-            // a game between computer players being watched back. The scene
+            // Nobody is playing: this is a measurement run, a recording of a
+            // game being watched back, or a demo being spectated. The scene
             // still needs a point of view, because the camera, the fog it
             // draws and the interface all hang off a local player, so the
             // first slot stands in. It keeps its AI controller -- GameScene
@@ -849,7 +849,7 @@ namespace rwe
                 if (gamePlayers[i])
                 {
                     localPlayerId = gamePlayers[i];
-                    LOG_INFO << "AI arena: no human player, watching from slot " << i;
+                    LOG_INFO << "No human player, watching from slot " << i;
                     break;
                 }
             }

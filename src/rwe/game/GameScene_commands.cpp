@@ -537,7 +537,7 @@ namespace rwe
         const auto& vis = simulation.playerVisibility.at(localPlayerId.value);
         if (fogOfWarEnabled)
         {
-            if (!replayPlayback)
+            if (!isPlayback())
             {
                 return vis;
             }
@@ -612,7 +612,7 @@ namespace rwe
         }
 
         const auto& shared = simulation.explored.getVector();
-        if (replayPlayback)
+        if (isPlayback())
         {
             // Watching a recording with the fog on shows what both sides could
             // see, so remembered ground is every group's bit and not one
@@ -712,7 +712,7 @@ namespace rwe
             return simulation.playerVisibility.at(localPlayerId.value).contains(simulation.visionCellAt(position));
         }
 
-        if (replayPlayback)
+        if (isPlayback())
         {
             // Watching a recording with the fog on shows both sides, so
             // remembered ground is every group's bit and not one player's.

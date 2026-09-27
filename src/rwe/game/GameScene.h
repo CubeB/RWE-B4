@@ -217,6 +217,8 @@ namespace rwe
         bool isValid;
     };
 
+    class TadScenePlayback;
+
     class GameScene : public Scene
     {
     public:
@@ -773,6 +775,16 @@ namespace rwe
          * and the computer players are idled so they add nothing of their own.
          */
         std::optional<Replay> replayPlayback;
+
+        /**
+         * Set while watching a TA demo. The map is loaded as usual but no
+         * player is this machine's own: every demo player is Remote and a
+         * puppet driver feeds each tick's records to the units. It reuses the
+         * replay playback controls below (playing, speed), which is why those
+         * are named for playback rather than for replays.
+         */
+        std::shared_ptr<TadScenePlayback> tadPlayback;
+
         /** Playing or paused; separate from the game's own pause. */
         bool replayPlaying{true};
         /**
@@ -849,6 +861,12 @@ namespace rwe
 
         void pushReplayCommandsForTick(unsigned int tick);
         void renderReplayWindow();
+
+        /** Applies the demo's records for the tick about to run, and prints any chat. */
+        void applyTadTick();
+        void renderTadWindow();
+        /** How many ticks a replay or demo has, for the playback controls. */
+        unsigned int playbackLastTick() const;
         void restartReplayAt(unsigned int tick);
         void openReplay(const std::filesystem::path& path);
         void takeReplayKeyframe();
@@ -1269,6 +1287,13 @@ namespace rwe
         /** Watch a recorded game instead of playing one. */
         void enableReplayPlayback(Replay&& replay);
 
+        /**
+         * Spectate a TA demo. `unitLoadOrder` is the loaded data set's listing
+         * in TA's order, which names the types the demo's indices refer to;
+         * the demo's own unit table must agree with its length or this throws.
+         */
+        void enableTadPlayback(const std::string& path, const std::vector<std::string>& unitLoadOrder);
+
         /** Write every command issued in this game to a replay file. */
         void enableReplayRecording(const std::filesystem::path& path, const ReplayHeader& header);
 
@@ -1281,6 +1306,15 @@ namespace rwe
         void enableDemoRecording(const std::filesystem::path& path, const std::vector<std::string>& unitLoadOrder);
 
         bool isReplayPlayback() const { return replayPlayback.has_value(); }
+
+        bool isTadPlayback() const { return tadPlayback != nullptr; }
+
+        /**
+         * Watching rather than playing: a replay's command stream or a demo's
+         * records are the only input, so the local-human push, the peer
+         * liveness checks and the sync hash all stand down.
+         */
+        bool isPlayback() const { return replayPlayback.has_value() || tadPlayback != nullptr; }
 
         /** Whose resources the top bar reads out; the local player unless a replay says otherwise. */
         PlayerId hudPlayerId() const { return hudPlayerOverride.value_or(localPlayerId); }

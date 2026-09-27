@@ -14,6 +14,7 @@
 #include <rwe/game/ControlChannel.h>
 #include <rwe/game/PlayerColorIndex.h>
 #include <rwe/io/tdf/tdf.h>
+#include <rwe/puppet/TadDemo.h>
 #include <rwe/sim/Energy.h>
 #include <rwe/sim/Metal.h>
 #include <rwe/util.h>
@@ -123,6 +124,7 @@ int main(int argc, char* argv[])
                       << "  --record-replay <f>   write every command to a replay file as you play\n"
                       << "  --record-demo <f>     write a TA demo of the game to this file as you play\n"
                       << "  --replay <file>       watch a replay instead of playing\n"
+                      << "  --tad <file>          spectate a TA demo (.tad/.ted) instead of playing\n"
                       << "  --rejoin <file>       rejoin a game in progress from its recording so far\n"
                       << "  --rejoin-tick <n>     the tick that recording ends at, and this peer resumes at\n"
                       << "  --bridge              take commands from whoever launched this game on stdin\n"
@@ -250,6 +252,25 @@ int main(int argc, char* argv[])
                 }
                 gameParameters = save->parameters;
                 gameParameters->loadFromSaveFile = savePath.string();
+            }
+            else if (args.contains("tad"))
+            {
+                // A demo names the map and the players but carries neither the
+                // data nor any orders; the spectator scene loads the map and
+                // puppets the units from the stream. The header has to be read
+                // before the map is loaded, so this is a pass of its own.
+                auto tadPath = args.getString("tad");
+                auto meta = rwe::readTadDemoMeta(tadPath);
+                if (!meta || !meta->header)
+                {
+                    throw std::runtime_error("Could not read demo header: " + tadPath);
+                }
+                auto parameters = rwe::gameParametersForDemo(*meta, tadPath);
+                if (!parameters)
+                {
+                    throw std::runtime_error("Demo names more players than the engine holds: " + tadPath);
+                }
+                gameParameters = std::move(parameters);
             }
             else if (args.contains("map"))
             {

@@ -351,6 +351,7 @@ set(SOURCE_FILES
     src/rwe/game/GameEndedReport.h
     src/rwe/game/GameScene_rejoin.cpp
     src/rwe/game/GameScene_replay.cpp
+    src/rwe/game/GameScene_tad.cpp
     src/rwe/game/GameScene_util.cpp
     src/rwe/game/featureplacement.cpp
     src/rwe/game/GameScene_util.h
@@ -550,8 +551,12 @@ set(SOURCE_FILES
     src/rwe/pathfinding/UnitPerimeterPathFinder.h
     src/rwe/pathfinding/pathfinding_utils.cpp
     src/rwe/pathfinding/pathfinding_utils.h
+    src/rwe/puppet/TadDemo.cpp
+    src/rwe/puppet/TadDemo.h
     src/rwe/puppet/TadPuppetDriver.cpp
     src/rwe/puppet/TadPuppetDriver.h
+    src/rwe/puppet/TadScenePlayback.cpp
+    src/rwe/puppet/TadScenePlayback.h
     src/rwe/proto/serialization.cpp
     src/rwe/proto/serialization.h
     src/rwe/render/FogTiles.cpp
