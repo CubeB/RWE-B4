@@ -22,6 +22,10 @@ does not repeat.
 - **A program that is not TA can host a game a real TA joins and plays.** The fake host
   answered the DirectPlay handshake, held a battleroom, passed unit sync, launched, and then kept
   its own commander in the game, standing and walking, from `0x2c` records it built itself.
+- **RWE can host one from its own fields rather than a recording.** `TaBattleroom` builds the
+  battleroom, echoes unit sync and runs the launch, and `ta_host_probe --battleroom` is it in
+  front of a socket. Checked against the scripted joiner of #430, which is not TA either: all nine
+  of its checks pass over 60 seconds of play.
 - **Hosting needs no unit checksum.** Unit sync is the joiner sending its CRCs to the host; a
   host that echoes the joiner's ids back is accepted. The content-derived checksum that two passes
   failed to reproduce (TA-DEMOS D7) matters only for joining a TA host.
@@ -117,6 +121,18 @@ reads as the peer's ping. So a reply echoes the requester's tick unchanged and a
 responder's, and it is only believable if it echoes a tick the requester sent. A request is 20
 bytes and uncompressed; its reply carries `0xffffffff` where the request carried a count.
 
+**The status record's body.** Of a `0x20`'s 186 bytes four are placed by what a
+capture changes: the map name in bytes 1-32, NUL-padded ASCII; the DirectPlay id
+at `0x91`; the state byte at 156; and the options byte at 157. Bytes 158-169 are
+the game settings the session description also carries (4, 10, 10, 250 and
+`0x0103`), and 141-144, 170-185 are sixteen bytes the corpus does not decode
+(TA-DEMOS D8). Bytes 151 and 152 are the only ones that differ between two
+players, and every capture that reached a launch had both of its peers on the
+same side, so nothing there can be told apart from a colour or a lobby slot.
+`TaBattleroom` therefore builds the record over a template taken from a recorded
+host's status, writes the four fields it knows and copies the rest; its header
+lists the ranges.
+
 **The options byte**, read from a capture in which the host changed one battleroom option at a
 time:
 
@@ -139,7 +155,18 @@ answered live**: replayed ones carry another game's clock and show as an absurd 
 
 **Rules live in the host.** TA's own host will not launch a game in which every player is on one
 team, but a joining TA does not check: the fake host launched one with both players on team 0.
-An RWE host has to enforce such rules itself.
+An RWE host has to enforce such rules itself. It is also the only side that can: a
+joiner picks no map and is not asked to agree on one, so the host compares what
+each joiner's `0x20` names in bytes 1-32 against its own and refuses a launch on
+a disagreement. A field that is not NUL-padded ASCII names no map and so
+disagrees about nothing: the scripted joiner of #430 writes its own name into
+those bytes in UTF-16, and a host that read a map out of that would refuse a
+game over a field it had not understood.
+
+**The team a battleroom sends is 5** (`TaNoTeam`), and 5 is what a player that
+has chosen no team says, so the rule reads a player on 5 as on no team in
+particular: a one-player game, and a game half of whose players have not picked,
+are not the game TA's host refuses.
 
 ## Unit sync
 
@@ -167,6 +194,18 @@ The host sends `0x08` (loading started), both sides send `0x2a` loading progress
 host sends `0x1e` and the joiner `0x15` and `0x1f`, and each moves to UDP with `0x15`, `0x07`,
 `0x2a`, a status `0x20` and team `0x24`, its commander's `0x09`, and `0x11`. The replay sends the
 host's side of this on the recorded schedule, and the joiner's loading kept pace with it.
+
+The host's ladder is the four steps `0x00`, `0x26`, `0x36`, `0x64` at 200 ms each, its state byte
+goes `0x01` in the battleroom, `0x02` while loading and `0x22` in game over TCP (`0x32` over UDP),
+and SESSIONDESCCHANGED goes out twice: the captures have it once as the `0x1e` is sent and once
+after the move to UDP. `TaBattleroom::LaunchParams` takes the commander's type index, unit id,
+position and rotation, because they are the game's to decide and not the wire's; the `0x11` byte
+after the unit id is `1` in every capture and is passed through unchanged.
+
+**A host is a player in the game from the first `0x2c` it sends**, and each `0x2c` ends with the
+full state of one slot, so a host that owns one unit has to describe it once every `maxUnits`
+ticks or the joiner declares it eradicated. `ta_host_probe --battleroom` does that with a fixed
+commander record; a game will describe its own.
 
 ## In game
 
@@ -253,3 +292,7 @@ be with that project's agreement and identifying itself as RWE.
 - **Resource statistics**: the host sent no `0x28` after the replay and nothing complained, but
   what the joiner then showed for the host's economy was not looked at.
 - **`0x40` in the options byte**, and why `+los` did nothing with cheats allowed.
+- **A side and a colour in a `0x20`.** Neither is decoded, and the captures cannot
+  separate them: both peers in every recording that reached a launch sat on the same
+  side, so the only two bytes that differ between players are candidates for either. A
+  game assigns sides from its own player table.

@@ -22,6 +22,23 @@ DirectPlay game the tools here can find; `dpenum.py` then prints its
 ENUMSESSIONSREPLY. The probe answers `0x02` pings live and logs the code of
 every subpacket it decodes.
 
+With `--battleroom` the probe is the whole host: it holds the battleroom from
+RWE's own game settings rather than a recording, echoes unit sync, runs the
+launch, and then keeps itself in the game with a `0x2c` for its commander.
+`--auto-launch` launches as soon as a joiner is ready. It is checked against
+`host-check.sh` and `fakejoin.py` from the worktree of issue #430:
+
+```sh
+tools/ta-net/host-check.sh --capture ta-baseline.pcap --play-seconds 60 \
+    --host-tcp 34700 --host-udp 34750 --enum-port 14488 \
+    -- build/ta_host_probe --battleroom --auto-launch \
+         --session-name rwe --map "Canal Crossing" --port-base 32400
+```
+
+`--port-base` shifts every port, and the enum port comes off the top of the range
+(47624 + 32400 wraps to 14488), so it has to be given to the joiner too. The
+script prints a PASS or a FAIL per rule and exits non-zero on any failure.
+
 ## Recording a capture
 
 Two copies of TA on one Linux machine, both under Proton with native DirectPlay. The test bed

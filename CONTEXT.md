@@ -303,6 +303,20 @@ carries another session's clock and reads as an absurd latency, and a host that
 stops answering is offered for rejection. `TaPinger`.
 _Avoid_: heartbeat, keepalive (that is `0x07`)
 
+**Battleroom**:
+What a joining TA sits in between finishing the handshake and the game starting:
+the `0x20` and `0x24` records each player is described by, the two-second beat
+that keeps it from offering the host for rejection, and the unit sync the joiner
+counts to `1 + 2n` before it is ready. A host holds one, a joiner waits in one, and
+`TaBattleroom` is the host's half of it -- including the launch out of it.
+_Avoid_: lobby, waiting room
+
+**Unit sync by echo**:
+Hosting without a unit checksum. The joiner sends its unit type ids and content
+checksums, the host answers each id twice, and a joiner that counts the records
+accepts the result. The ids are content-derived and the host never computes one.
+_Avoid_: handshaking, table exchange
+
 ### The instruments
 
 **Harness**:
