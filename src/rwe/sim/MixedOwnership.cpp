@@ -14,13 +14,14 @@ namespace rwe
          * a result it received. A projectile names the player whose simulation
          * fired it as its owner, so a Local shooter's hit is ours and a replayed
          * Remote shot's is not -- and a hit with no source at all (acid water,
-         * decay) belongs to the unit's owner to report.
+         * decay) belongs to the unit's owner to report, as is one whose source
+         * names no player this game has.
          */
         bool damageIsThisMachines(const GameSimulation& sim, std::optional<UnitId> attacker, std::optional<PlayerId> sourceOwner)
         {
             if (sourceOwner)
             {
-                return simulatesLocally(sim, *sourceOwner);
+                return sourceOwner->value < sim.players.size() && simulatesLocally(sim, *sourceOwner);
             }
 
             if (attacker)
@@ -73,8 +74,10 @@ namespace rwe
         }
 
         // The ordinary path: the local Killed script picks the corpse, and a
-        // killing blow credits the Remote attacker.
-        sim.applyDamage(victim, damage, attacker);
+        // killing blow credits the Remote attacker. This is the call the
+        // owner's own report arrives through, so the Remote-sourced gate in
+        // applyDamage is opened for it alone.
+        sim.applyDamage(victim, damage, attacker, false, std::nullopt, "weapon", true);
     }
 
     void applyLocalDamageToRemoteUnit(

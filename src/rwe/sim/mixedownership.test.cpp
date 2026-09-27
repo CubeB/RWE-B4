@@ -93,6 +93,11 @@ namespace rwe
             commander.category = "ARM ALL";
             sim.unitDefinitions["COMMANDER"] = commander;
 
+            auto bomber = makeMixedUnitDef();
+            bomber.explodeAs = "BLAST";
+            bomber.category = "ARM ALL";
+            sim.unitDefinitions["BOMBER"] = bomber;
+
             auto builder = makeMixedUnitDef();
             builder.builder = true;
             builder.canReclamate = true;
@@ -125,13 +130,48 @@ namespace rwe
             w.energyPerShot = Energy(0.0f);
             sim.weaponDefinitions["LASER"] = w;
 
+            // A death explosion: no turret, a wide enough blast to matter.
+            WeaponDefinition blast{};
+            blast.physicsType = ProjectilePhysicsTypeLineOfSight();
+            blast.velocity = 960_ss / 30_ss;
+            blast.damageRadius = 96_ss;
+            blast.damage["DEFAULT"] = 500;
+            sim.weaponDefinitions["BLAST"] = blast;
+
+            FeatureDefinition rock{};
+            rock.name = "ROCK";
+            rock.footprintX = 2;
+            rock.footprintZ = 2;
+            rock.height = 20_ss;
+            rock.blocking = true;
+            rock.reclaimable = true;
+            rock.damage = 1000;
+            auto rockId = sim.featureDefinitions.insert(std::move(rock));
+            sim.featureNameIndex.insert_or_assign("ROCK", rockId);
+
             auto plain = *makeEmptyCobScript({"base"});
             sim.unitScriptDefinitions["WALKER"] = plain;
             sim.unitScriptDefinitions["SHOOTER"] = plain;
             sim.unitScriptDefinitions["COMMANDER"] = plain;
             sim.unitScriptDefinitions["BUILDER"] = plain;
             sim.unitScriptDefinitions["CAPTOR"] = plain;
+            sim.unitScriptDefinitions["BOMBER"] = plain;
             sim.unitScriptDefinitions["VICTIM"] = *makeKilledLevelScript(2);
+        }
+
+        /** A shell at `position`, owned by `owner`, big enough to matter. */
+        Projectile makeMixedBlast(PlayerId owner, const SimVector& position, unsigned int damage)
+        {
+            Projectile p{};
+            p.weaponType = "BLAST";
+            p.owner = owner;
+            p.position = position;
+            p.previousPosition = position;
+            p.origin = position;
+            p.damage["DEFAULT"] = damage;
+            p.damageRadius = 96_ss;
+            p.edgeEffectiveness = 0_ss;
+            return p;
         }
 
         UnitId spawnMixedUnit(GameSimulation& sim, const std::string& type, PlayerId owner, const SimVector& pos)
@@ -306,6 +346,94 @@ namespace rwe
 
         REQUIRE(fireAt(false));
         REQUIRE_FALSE(fireAt(true));
+    }
+
+    TEST_CASE("a remote unit's death explosion leaves a local unit alone", "[mixed]")
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto local = addPlayer(sim, "local");
+        auto remote = addPlayer(sim, "remote");
+        defineMixedWorld(sim);
+        markRemote(sim, remote);
+
+        auto neighbour = spawnMixedUnit(sim, "WALKER", local, SimVector(200_ss, 0_ss, 200_ss));
+        auto health = sim.unitDefinitions.at("WALKER").maxHitPoints;
+
+        // The dying unit's explodeAs is a record of what its owner's machine
+        // decided; it reaches the neighbour as that owner's 0x0b.
+        auto remoteBomber = spawnMixedUnit(sim, "BOMBER", remote, SimVector(200_ss, 0_ss, 240_ss));
+        sim.killUnit(remoteBomber);
+        REQUIRE(sim.getUnitState(neighbour).hitPoints == health);
+        REQUIRE(mixedOwnershipOutboxOf(sim).deaths.empty());
+
+        // A Local player's own explosion is its to resolve, and does.
+        tick(sim, 1);
+        auto localBomber = spawnMixedUnit(sim, "BOMBER", local, SimVector(200_ss, 0_ss, 240_ss));
+        sim.killUnit(localBomber);
+        REQUIRE(sim.getUnitState(neighbour).hitPoints < health);
+    }
+
+    TEST_CASE("a projectile owned by a remote player leaves a local unit alone", "[mixed]")
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto local = addPlayer(sim, "local");
+        auto remote = addPlayer(sim, "remote");
+        defineMixedWorld(sim);
+        markRemote(sim, remote);
+
+        auto victim = spawnMixedUnit(sim, "WALKER", local, SimVector(200_ss, 0_ss, 200_ss));
+        auto health = sim.unitDefinitions.at("WALKER").maxHitPoints;
+        auto at = sim.getUnitState(victim).position;
+
+        // What a puppet's display round does here is show an explosion; the
+        // owner's 0x0b is the only thing that costs the unit anything.
+        sim.doProjectileImpact(makeMixedBlast(remote, at, 500), ImpactType::Normal);
+        REQUIRE(sim.getUnitState(victim).hitPoints == health);
+
+        sim.doProjectileImpact(makeMixedBlast(local, at, 500), ImpactType::Normal);
+        REQUIRE(sim.getUnitState(victim).hitPoints < health);
+    }
+
+    TEST_CASE("an incoming 0x0b is what does apply a remote player's damage", "[mixed]")
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto local = addPlayer(sim, "local");
+        auto remote = addPlayer(sim, "remote");
+        defineMixedWorld(sim);
+        markRemote(sim, remote);
+
+        auto attacker = spawnMixedUnit(sim, "SHOOTER", remote, SimVector(200_ss, 0_ss, 200_ss));
+        auto victim = spawnMixedUnit(sim, "WALKER", local, SimVector(200_ss, 0_ss, 240_ss));
+        auto health = sim.unitDefinitions.at("WALKER").maxHitPoints;
+
+        sim.doProjectileImpact(makeMixedBlast(remote, sim.getUnitState(victim).position, 500), ImpactType::Normal);
+        REQUIRE(sim.getUnitState(victim).hitPoints == health);
+
+        applyIncomingDamage(sim, victim, attacker, 500);
+        REQUIRE(sim.getUnitState(victim).hitPoints == health - 500);
+    }
+
+    TEST_CASE("a remote player's round leaves a feature alone", "[mixed]")
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto local = addPlayer(sim, "local");
+        auto remote = addPlayer(sim, "remote");
+        defineMixedWorld(sim);
+        markRemote(sim, remote);
+
+        auto rockId = sim.featureNameIndex.at("ROCK");
+        auto rock = sim.addFeature(rockId, 10, 10);
+        REQUIRE(rock.has_value());
+        auto health = sim.getFeature(*rock).hitPoints;
+        auto at = sim.getFeature(*rock).position;
+
+        sim.doProjectileImpact(makeMixedBlast(remote, at, 5000), ImpactType::Normal);
+        REQUIRE(sim.tryGetFeature(*rock).has_value());
+        REQUIRE(sim.getFeature(*rock).hitPoints == health);
+
+        // A Local player's round breaks it up as it always did.
+        sim.doProjectileImpact(makeMixedBlast(local, at, 5000), ImpactType::Normal);
+        REQUIRE_FALSE(sim.tryGetFeature(*rock).has_value());
     }
 
     TEST_CASE("a local unit sees and collides with a remote unit", "[mixed]")

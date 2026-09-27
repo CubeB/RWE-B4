@@ -142,6 +142,18 @@ namespace rwe
             recordLocalDeath(sim, unitId, killer, severity, cause, corpseLevel);
         }
 
+        /**
+         * Whether a round belongs to a Remote player, and so is a record of
+         * what that machine decided rather than something to resolve here: the
+         * damage reaches a Local unit as its owner's 0x0b, and nothing it hits
+         * on this side of the world changes until the owner's records say so.
+         * A round naming no player this game has is nobody's.
+         */
+        bool isRemoteRound(const GameSimulation& sim, const Projectile& projectile)
+        {
+            return projectile.owner.value < sim.players.size() && !simulatesLocally(sim, projectile.owner);
+        }
+
     }
 
     bool GamePlayerInfo::addResourceDelta(const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal)
@@ -3444,7 +3456,7 @@ namespace rwe
         applyDamage(unitId, damagePoints, attacker, false);
     }
 
-    void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer, std::optional<PlayerId> sourceOwner, const char* deathCause)
+    void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer, std::optional<PlayerId> sourceOwner, const char* deathCause, bool reportedByOwner)
     {
         // Damage to a Remote player's unit is the owner's to report. When this
         // machine ran the hit, its attacker side shows the damage and records a
@@ -3454,6 +3466,18 @@ namespace rwe
         if (!simulatesLocally(*this, getUnitState(unitId).owner))
         {
             applyLocalDamageToRemoteUnit(*this, unitId, attacker, damagePoints, paralyzer, sourceOwner);
+            return;
+        }
+
+        // What a Remote player's things do to one of ours is that owner's to
+        // report (docs/TA-NETWORK.md, "Damage and death"), and it reaches us as
+        // a 0x0b applied through applyIncomingDamage. Resolving it here as well
+        // would count it twice, and it is what stands between a puppet's own
+        // explosions and its display rounds and our side of the world. A source
+        // that names no player is nobody's round and lands as it always did.
+        auto remoteSource = sourceOwner && sourceOwner->value < players.size() && !simulatesLocally(*this, *sourceOwner);
+        if (remoteSource && !reportedByOwner)
+        {
             return;
         }
 
@@ -3679,6 +3703,11 @@ namespace rwe
         // weapon; the shipped data sets it on nothing.
         auto damagesFeatures = weaponIt == weaponDefinitions.end() || weaponIt->second.damagesFeatures;
 
+        // A Remote player's round takes nothing off a feature either: the wreck
+        // it breaks up is one its owner's machine decided, and this copy is
+        // corrected by the records that owner sends.
+        auto remoteSource = isRemoteRound(*this, projectile);
+
         auto region = GridRegion::fromCoordinates(minCell, maxCell);
 
         region.forEach([&](const auto& coords) {
@@ -3692,7 +3721,7 @@ namespace rwe
               return;
           }
 
-          if (damagesFeatures && !paralyzer)
+          if (damagesFeatures && !paralyzer && !remoteSource)
           {
               const auto& cell = occupiedGrid.get(coords);
               if (cell.featureId && seenFeatures.find(*cell.featureId) == seenFeatures.end())
@@ -3808,11 +3837,17 @@ namespace rwe
 
     void GameSimulation::doProjectileImpact(const Projectile& projectile, ImpactType /*impactType*/, std::optional<ProjectileId> projectileId)
     {
-        applyDamageInRadius(projectile.position, projectile.damageRadius, projectile);
-
-        if (auto it = weaponDefinitions.find(projectile.weaponType); it != weaponDefinitions.end() && it->second.fireStarter > 0)
+        // A Remote player's round sets nothing off here: not our units, which
+        // its owner's 0x0b accounts for, and not a feature, which is the fire
+        // starter's to ignite.
+        if (!isRemoteRound(*this, projectile))
         {
-            tryIgniteFeaturesInRadius(projectile.position, std::max(projectile.damageRadius, 16_ss), it->second.fireStarter);
+            applyDamageInRadius(projectile.position, projectile.damageRadius, projectile);
+
+            if (auto it = weaponDefinitions.find(projectile.weaponType); it != weaponDefinitions.end() && it->second.fireStarter > 0)
+            {
+                tryIgniteFeaturesInRadius(projectile.position, std::max(projectile.damageRadius, 16_ss), it->second.fireStarter);
+            }
         }
 
         // The piece that actually kills a nuke. An interceptor's warhead is not

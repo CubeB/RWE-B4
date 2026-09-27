@@ -1404,6 +1404,10 @@ namespace rwe
          * `explodeAs`, which the peer that owns the dying unit broadcasts --
          * still has a peer that would have sent it, and the corpus shows it is
          * not the victim's.
+         *
+         * A hit a Remote player ran is the victim's owner's to report and
+         * reaches us as an incoming 0x0b, so `reportedByOwner` marks that call
+         * and is the only way such a hit is applied here.
          */
         void applyDamage(
             UnitId unitId,
@@ -1411,7 +1415,8 @@ namespace rwe
             std::optional<UnitId> attacker,
             bool paralyzer,
             std::optional<PlayerId> sourceOwner = std::nullopt,
-            const char* deathCause = "weapon");
+            const char* deathCause = "weapon",
+            bool reportedByOwner = false);
 
         /**
          * The acid in the sea, once a second (0x48AED3-0x48AF32): every unit
