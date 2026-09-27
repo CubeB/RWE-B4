@@ -11,7 +11,9 @@
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MixedOwnership.h>
 #include <rwe/sim/SimulationOwnership.h>
+#include <rwe/sim/TaLiveBatch.h>
 #include <rwe/sim/TaLiveSender.h>
+#include <rwe/sim/TaPeerIds.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/sim_test_util.h>
@@ -125,6 +127,10 @@ namespace rwe
                 peerIdsByUnit[unit] = peerIdOf(index);
             }
 
+            /**
+             * Registers a sender, which is the whole of the wiring: the
+             * simulation is told where to call, and the sender stays ours.
+             */
             void attach()
             {
                 TaLiveSenderSettings settings;
@@ -143,8 +149,16 @@ namespace rwe
                 };
                 peerIds.dplayId = [](PlayerId) -> std::optional<uint32_t> { return peerDplayId; };
 
-                sim.attachTaLiveSender(std::make_unique<TaLiveSender>(sim, settings, std::move(peerIds)));
+                sender = std::make_unique<TaLiveSender>(sim, settings, std::move(peerIds));
+                sim.setTaLiveSender(sender->hooks());
             }
+
+            void detach()
+            {
+                sim.setTaLiveSender(TaLiveSenderHooks{});
+            }
+
+            std::unique_ptr<TaLiveSender> sender;
 
             /** The DirectPlay id the peer's status message carries. */
             static constexpr uint32_t peerDplayId = 7u;
@@ -162,7 +176,7 @@ namespace rwe
                 for (int i = 0; i < ticks; ++i)
                 {
                     sim.tick();
-                    while (auto batch = sim.taLiveSender->takeBatch())
+                    while (auto batch = sender->takeBatch())
                     {
                         batches.push_back(std::move(*batch));
                     }
@@ -262,7 +276,7 @@ namespace rwe
         // building's cells is pushed aside and this is a test of the wire.
         auto solar = game.sim.trySpawnUnit("SOLAR", game.local, SimVector(40_ss, 0_ss, -120_ss), std::nullopt);
         REQUIRE(solar);
-        game.sim.taLiveSender->buildStarted(game.sim, kbot, *solar);
+        game.sender->buildStarted(game.sim, kbot, *solar);
 
         auto batches = game.runAndTake(5);
         game.sim.getUnitState(*solar).finishBuilding(game.sim.unitDefinitions.at("SOLAR"));
@@ -378,7 +392,7 @@ namespace rwe
         for (int i = 0; i < 240; ++i)
         {
             game.sim.tick();
-            while (auto batch = game.sim.taLiveSender->takeBatch())
+            while (auto batch = game.sender->takeBatch())
             {
                 for (const auto& subPacket : batch->subPackets)
                 {
@@ -529,7 +543,7 @@ namespace rwe
 
         auto batches = game.runAndTake(game.maxUnits);
         REQUIRE(subPacketsOf(batches, TadSubPacketCode::UnitTakeDamage).empty());
-        REQUIRE(game.sim.taLiveSender->stats().recordsDroppedNoId == 1);
+        REQUIRE(game.sender->stats().recordsDroppedNoId == 1);
 
         // The ticks still went out whole: the sender's own units are described
         // whatever the peer has or has not said, and a whole cycle of the block
@@ -582,6 +596,31 @@ namespace rwe
         REQUIRE(described == 3);
     }
 
+    TEST_CASE("an unregistered sender is called no more, and dropping one is the network layer's business", "[talive]")
+    {
+        LiveGame game;
+        game.attach();
+        game.spawn("TANK", game.local, SimVector(0_ss, 0_ss, 0_ss));
+
+        auto before = game.runAndTake(2);
+        REQUIRE(before.size() == 2);
+        auto sentSoFar = game.sender->stats().batches;
+        REQUIRE(sentSoFar == 2);
+
+        // The simulation holds no sender, only where to call, so the order the
+        // two are torn down in does not matter -- as long as the table is
+        // handed back first.
+        game.detach();
+        game.sender.reset();
+
+        REQUIRE_FALSE(game.sim.taLiveSender.attached());
+        for (int i = 0; i < 5; ++i)
+        {
+            game.sim.tick();
+        }
+        REQUIRE_FALSE(game.sender);
+    }
+
     TEST_CASE("a unit that changes hands to the peer is killed with a cause-4 death and stops being described", "[talive]")
     {
         LiveGame game;
@@ -590,7 +629,7 @@ namespace rwe
         game.spawn("KBOT", game.local, SimVector(60_ss, 0_ss, 0_ss));
 
         game.sim.getUnitState(taken).owner = game.remote;
-        game.sim.taLiveSender->unitCaptured(game.sim, taken, game.remote);
+        game.sender->unitCaptured(game.sim, taken, game.remote);
 
         auto batches = game.runAndTake(4);
         auto states = unitStatesOf(batches, game.layout());
@@ -612,7 +651,7 @@ namespace rwe
                 REQUIRE(state.sync->typeIndex == 0u);
             }
         }
-        REQUIRE(game.sim.taLiveSender->stats().unitsRefused == 0);
+        REQUIRE(game.sender->stats().unitsRefused == 0);
     }
 
     TEST_CASE("a unit captured from the peer is described from the next full-state record on", "[talive]")
@@ -631,7 +670,7 @@ namespace rwe
         }
 
         game.sim.getUnitState(theirs).owner = game.local;
-        game.sim.taLiveSender->unitCaptured(game.sim, theirs, game.local);
+        game.sender->unitCaptured(game.sim, theirs, game.local);
 
         // No 0x09: a capture is not a nanoframe, and no cause-4 death either --
         // the old id was never ours to kill. It takes the slot the freed one
@@ -662,7 +701,7 @@ namespace rwe
         auto kbot = game.spawn("KBOT", game.local, SimVector(-60_ss, 0_ss, 0_ss));
         auto solar = game.sim.trySpawnUnit("SOLAR", game.local, SimVector(-60_ss, 0_ss, 60_ss), std::nullopt);
         REQUIRE(solar);
-        game.sim.taLiveSender->buildStarted(game.sim, kbot, *solar);
+        game.sender->buildStarted(game.sim, kbot, *solar);
 
         auto batches = game.runAndTake(5);
         game.sim.getUnitState(*solar).finishBuilding(game.sim.unitDefinitions.at("SOLAR"));

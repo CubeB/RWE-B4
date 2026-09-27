@@ -1,6 +1,7 @@
 #include "TaLiveSender.h"
 
 #include <rwe/io/tad/tad_encoders.h>
+#include <rwe/sim/TaLiveBatch.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MixedOwnership.h>
 #include <rwe/sim/TaWireTape.h>
@@ -195,6 +196,64 @@ namespace rwe
     }
 
     TaLiveSender::~TaLiveSender() = default;
+
+    namespace
+    {
+        /**
+         * The table's entries. Each is a thunk that recovers the sender from
+         * the context and forwards, because a function pointer has nowhere to
+         * put a `this`.
+         */
+        void forwardUnitCreated(void* context, const GameSimulation& simulation, UnitId unit)
+        {
+            static_cast<TaLiveSender*>(context)->unitCreated(simulation, unit);
+        }
+
+        void forwardUnitRemoved(void* context, UnitId unit)
+        {
+            static_cast<TaLiveSender*>(context)->unitRemoved(unit);
+        }
+
+        void forwardBuildStarted(void* context, const GameSimulation& simulation, UnitId builder, UnitId unit)
+        {
+            static_cast<TaLiveSender*>(context)->buildStarted(simulation, builder, unit);
+        }
+
+        void forwardShotFired(
+            void* context,
+            const GameSimulation& simulation,
+            UnitId shooter,
+            unsigned int weaponSlot,
+            std::optional<UnitId> targetUnit,
+            const SimVector& origin,
+            const SimVector& aimPoint,
+            const SimVector& direction)
+        {
+            static_cast<TaLiveSender*>(context)->shotFired(simulation, shooter, weaponSlot, targetUnit, origin, aimPoint, direction);
+        }
+
+        void forwardUnitCaptured(void* context, const GameSimulation& simulation, UnitId unit, PlayerId newOwner)
+        {
+            static_cast<TaLiveSender*>(context)->unitCaptured(simulation, unit, newOwner);
+        }
+
+        void forwardEndOfTick(void* context, const GameSimulation& simulation)
+        {
+            static_cast<TaLiveSender*>(context)->endOfTick(simulation);
+        }
+    }
+
+    TaLiveSenderHooks TaLiveSender::hooks() const
+    {
+        return TaLiveSenderHooks{
+            const_cast<TaLiveSender*>(this),
+            &forwardUnitCreated,
+            &forwardUnitRemoved,
+            &forwardBuildStarted,
+            &forwardShotFired,
+            &forwardUnitCaptured,
+            &forwardEndOfTick};
+    }
 
     void TaLiveSender::unitCreated(const GameSimulation& simulation, UnitId unit)
     {

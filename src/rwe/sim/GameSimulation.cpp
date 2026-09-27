@@ -3,7 +3,7 @@
 #include <rwe/sim/MixedOwnership.h>
 #include <rwe/sim/SimRandom.h>
 #include <rwe/sim/SimulationOwnership.h>
-#include <rwe/sim/TaLiveSender.h>
+#include <rwe/sim/TaLiveSenderHooks.h>
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -260,9 +260,9 @@ namespace rwe
         demoRecorder = std::move(recorder);
     }
 
-    void GameSimulation::attachTaLiveSender(std::unique_ptr<TaLiveSender> sender)
+    void GameSimulation::setTaLiveSender(TaLiveSenderHooks hooks)
     {
-        taLiveSender = std::move(sender);
+        taLiveSender = hooks;
     }
 
     void GameSimulation::addAiController(PlayerId playerId, std::unique_ptr<AiPlayerController> controller)
@@ -1218,9 +1218,9 @@ namespace rwe
             demoRecorder->unitCaptured(*this, targetId, captor);
         }
 
-        if (taLiveSender)
+        if (taLiveSender.attached())
         {
-            taLiveSender->unitCaptured(*this, targetId, captor);
+            taLiveSender.unitCaptured(taLiveSender.context, *this, targetId, captor);
         }
 
         // The original's owner change is an event and then a cause-4 death of
@@ -1718,9 +1718,9 @@ namespace rwe
                 demoRecorder->unitCreated(*this, *unitId);
             }
 
-            if (taLiveSender)
+            if (taLiveSender.attached())
             {
-                taLiveSender->unitCreated(*this, *unitId);
+                taLiveSender.unitCreated(taLiveSender.context, *this, *unitId);
             }
 
             UnitBehaviorService(this).onCreate(*unitId);
@@ -4707,9 +4707,9 @@ namespace rwe
                 demoRecorder->unitRemoved(it->first);
             }
 
-            if (taLiveSender)
+            if (taLiveSender.attached())
             {
-                taLiveSender->unitRemoved(it->first);
+                taLiveSender.unitRemoved(taLiveSender.context, it->first);
             }
 
             it = units.erase(it);
@@ -4838,9 +4838,9 @@ namespace rwe
                     demoRecorder->buildStarted(*this, unitId, *newUnitId);
                 }
 
-                if (taLiveSender)
+                if (taLiveSender.attached())
                 {
-                    taLiveSender->buildStarted(*this, unitId, *newUnitId);
+                    taLiveSender.buildStarted(taLiveSender.context, *this, unitId, *newUnitId);
                 }
 
                 events.push_back(UnitStartedBuildingEvent{unitId});
@@ -4885,9 +4885,9 @@ namespace rwe
                     demoRecorder->buildStarted(*this, unitId, *newUnitId);
                 }
 
-                if (taLiveSender)
+                if (taLiveSender.attached())
                 {
-                    taLiveSender->buildStarted(*this, unitId, *newUnitId);
+                    taLiveSender.buildStarted(taLiveSender.context, *this, unitId, *newUnitId);
                 }
 
                 s->status = UnitCreationStatusDone{*newUnitId};
@@ -5168,9 +5168,9 @@ namespace rwe
             demoRecorder->endOfTick(*this);
         }
 
-        if (taLiveSender)
+        if (taLiveSender.attached())
         {
-            taLiveSender->endOfTick(*this);
+            taLiveSender.endOfTick(taLiveSender.context, *this);
         }
     }
 

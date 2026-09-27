@@ -31,6 +31,7 @@
 #include <rwe/sim/ProjectileSpawn.h>
 #include <rwe/sim/ResourceSettler.h>
 #include <rwe/sim/SimAxis.h>
+#include <rwe/sim/TaLiveSenderHooks.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitId.h>
 #include <rwe/sim/UnitInfo.h>
@@ -46,7 +47,6 @@ namespace rwe
 {
     class AiPlayerController;
     class DemoRecorder;
-    class TaLiveSender;
     struct MissionRules;
     struct MissionScripts;
     struct MixedOwnershipOutbox;
@@ -679,14 +679,13 @@ namespace rwe
         std::unique_ptr<DemoRecorder> demoRecorder;
 
         /**
-         * The live sender, when a TA peer is on the other end (#427). The same
-         * observer as the demo recorder, pointed-to for the same two reasons:
-         * the sender's header stays out of every translation unit that
-         * includes this one, and the COFF section budget with it. Nothing it
-         * holds is hashed, saved or dumped, and the simulation never reads it
-         * back, so it cannot move a tick.
+         * Where a live sink is told about events, when a TA peer is on the
+         * other end (#427). Empty in a game with no peer, and a table of
+         * function pointers rather than a pointer to the sink: see
+         * `TaLiveSenderHooks` for the measured reason, and for the two things
+         * that come of the simulation not owning a network object.
          */
-        std::unique_ptr<TaLiveSender> taLiveSender;
+        TaLiveSenderHooks taLiveSender;
 
         /**
          * The damage and deaths this machine's own units produced for the other
@@ -1562,15 +1561,18 @@ namespace rwe
         void attachDemoRecorder(std::unique_ptr<DemoRecorder> recorder);
 
         /**
-         * Attaches a live sender: from here on every unit creation, build,
-         * shot, removal and completed tick is offered to it, and each tick's
-         * subpackets wait to be taken by the network layer. Takes ownership.
+         * Registers a live sink, which is `sender.hooks()` and nothing else:
+         * from here on every unit creation, build, shot, removal and completed
+         * tick is offered to it, and each tick's subpackets wait to be taken by
+         * whoever owns it. `setTaLiveSender({})` unregisters.
          *
-         * A pure observer in the same sense as the recorder (ADR-0001), and
-         * attached the same way: after the game has loaded and before the
-         * first tick, so the whole game goes out. A unit already standing is
-         * given an id but has no 0x09, having never been built under it.
+         * A pure observer in the same sense as the recorder (ADR-0001): nothing
+         * it holds is hashed, saved or dumped, and the simulation never reads
+         * it back, so it cannot move a tick. Registered after the game has
+         * loaded and before the first tick, so the whole game goes out; a unit
+         * already standing is given an id but has no 0x09, having never been
+         * built under it.
          */
-        void attachTaLiveSender(std::unique_ptr<TaLiveSender> sender);
+        void setTaLiveSender(TaLiveSenderHooks hooks);
     };
 }

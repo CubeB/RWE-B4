@@ -660,8 +660,10 @@ set(SOURCE_FILES
     src/rwe/sim/AirMovement.h
     src/rwe/sim/DemoRecorder.cpp
     src/rwe/sim/DemoRecorder.h
+    src/rwe/sim/TaLiveBatch.h
     src/rwe/sim/TaLiveSender.cpp
     src/rwe/sim/TaLiveSender.h
+    src/rwe/sim/TaLiveSenderHooks.h
     src/rwe/sim/TaPeerIds.h
     src/rwe/sim/TaWireTape.cpp
     src/rwe/sim/TaWireTape.h

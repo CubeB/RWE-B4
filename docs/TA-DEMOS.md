@@ -157,6 +157,15 @@ against a TA unit, or a `0x0c` crediting a TA killer, must name a unit in the
 named is counted and dropped rather than written with a zero -- which the peer
 reads as no unit at all.
 
+The wiring between them is worth naming too, because it is a budget decision
+rather than a style one. The simulation does not hold the live sender: it holds
+`TaLiveSenderHooks`, a table of function pointers, and the network layer owns
+the sender and fills the table in. A `std::unique_ptr` to a type named in
+`GameSimulation.h` costs every translation unit that includes it the deleter's
+worth of COFF sections -- 55 on `GameSimulation.cpp` at `-O0 -g1` for a member
+that held nothing at all -- and that header is included by most of the engine
+(CLAUDE.md, "Other hazards"). A table costs four.
+
 ### Read back by an independent reader (#224, 2026-09-25)
 
 Every check above goes through RWE's own reader, and a writer agreeing with

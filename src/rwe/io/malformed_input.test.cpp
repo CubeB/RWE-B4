@@ -21,7 +21,9 @@
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MixedOwnership.h>
 #include <rwe/sim/SimulationOwnership.h>
+#include <rwe/sim/TaLiveBatch.h>
 #include <rwe/sim/TaLiveSender.h>
+#include <rwe/sim/TaPeerIds.h>
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/sim_test_util.h>
 #include <rwe/sim/util.h>
@@ -562,7 +564,8 @@ namespace rwe
         // The peer has named nothing yet, so no record can carry the id a
         // Remote unit holds in its own block.
         TaPeerIds peerIds;
-        sim.attachTaLiveSender(std::make_unique<TaLiveSender>(sim, settings, peerIds));
+        TaLiveSender sender(sim, settings, peerIds);
+        sim.setTaLiveSender(sender.hooks());
 
         auto takesNoCode = [](const TaLiveBatch& batch, uint8_t code) {
             for (const auto& subPacket : batch.subPackets)
@@ -579,10 +582,10 @@ namespace rwe
         {
             sim.applyDamage(*victim, 30, *attacker);
             sim.tick();
-            auto batch = sim.taLiveSender->takeBatch();
+            auto batch = sender.takeBatch();
             REQUIRE(batch);
             REQUIRE(takesNoCode(*batch, 0x0b));
-            REQUIRE(sim.taLiveSender->stats().recordsDroppedNoId == 1);
+            REQUIRE(sender.stats().recordsDroppedNoId == 1);
 
             // The tick itself is untouched: our own units are still described.
             auto state = tadDecodeUnitState(batch->subPackets[0], tadUnitStateLayout({false, false, false}, 8));
@@ -595,10 +598,10 @@ namespace rwe
             // deaths -- and one this sender could not name whatever it said.
             mixedOwnershipOutboxOf(sim).deaths.push_back(OutgoingDeath{*victim, std::nullopt, 50, 0x12});
             sim.tick();
-            auto batch = sim.taLiveSender->takeBatch();
+            auto batch = sender.takeBatch();
             REQUIRE(batch);
             REQUIRE(takesNoCode(*batch, 0x0c));
-            REQUIRE(sim.taLiveSender->stats().recordsDroppedNoId == 1);
+            REQUIRE(sender.stats().recordsDroppedNoId == 1);
         }
 
         SECTION("a type the load order does not name leaves that unit undescribed")
@@ -607,11 +610,11 @@ namespace rwe
             // cannot be described at all. It costs the unit's description and
             // nothing else -- no throw out of the middle of a tick.
             settings.unitLoadOrder = {"KBOT", "SOLAR"};
-            TaLiveSender sender(sim, settings, peerIds);
-            sender.unitCreated(sim, *attacker);
+            TaLiveSender narrow(sim, settings, peerIds);
+            narrow.unitCreated(sim, *attacker);
             sim.tick();
-            REQUIRE(sender.stats().unitsRefused == 1);
-            REQUIRE(sender.stats().unitStateSkipped == 0);
+            REQUIRE(narrow.stats().unitsRefused == 1);
+            REQUIRE(narrow.stats().unitStateSkipped == 0);
         }
     }
 }

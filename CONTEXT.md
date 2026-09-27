@@ -327,7 +327,9 @@ The output side of playing against the original rather than writing a demo: an
 observer with the demo recorder's shape that yields the Local player's
 subpackets one tick at a time, for the network layer to frame and send. A pure
 observer in the same sense, and it covers one player, because one machine
-describes the units it simulates locally and nothing else.
+describes the units it simulates locally and nothing else. The network layer
+owns it and registers where the simulation should call; the simulation owns
+nothing of it.
 _Avoid_: demo recorder (that writes a file), peer, client
 
 **Wire tape** (`TaWireTape`):
