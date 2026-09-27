@@ -109,7 +109,7 @@ seventy packets down -- so `0xffffffff` is a safe value to send anywhere.
 
 | Subpacket | What it carries |
 |---|---|
-| `0x20`, 186 bytes | A player's status. Byte 157 is the host's **options** (below). Byte 156 is the player's state; gpgnet4ta reads bit `0x20` as ready. |
+| `0x20`, 186 bytes | A player's status. Byte 157 is the host's **options** (below). Byte 156 is the player's state; gpgnet4ta reads bit `0x20` as ready. Byte 150 is the **side** and 151 the **colour**. |
 | `0x24`, 6 bytes | `u32` player id, `u8` team. An untouched battleroom sends 5, no team. |
 | `0x02`, 13 bytes | Ping: the requester's tick, the responder's tick (0 in a request), the requester's player id. Requests go to everyone, replies to the requester. |
 | `0x07`, `0x06` | Filler around the status exchange. |
@@ -121,17 +121,39 @@ reads as the peer's ping. So a reply echoes the requester's tick unchanged and a
 responder's, and it is only believable if it echoes a tick the requester sent. A request is 20
 bytes and uncompressed; its reply carries `0xffffffff` where the request carried a count.
 
-**The status record's body.** Of a `0x20`'s 186 bytes four are placed by what a
+**The status record's body.** Of a `0x20`'s 186 bytes six are placed by what a
 capture changes: the map name in bytes 1-32, NUL-padded ASCII; the DirectPlay id
-at `0x91`; the state byte at 156; and the options byte at 157. Bytes 158-169 are
-the game settings the session description also carries (4, 10, 10, 250 and
-`0x0103`), and 141-144, 170-185 are sixteen bytes the corpus does not decode
-(TA-DEMOS D8). Bytes 151 and 152 are the only ones that differ between two
-players, and every capture that reached a launch had both of its peers on the
-same side, so nothing there can be told apart from a colour or a lobby slot.
-`TaBattleroom` therefore builds the record over a template taken from a recorded
-host's status, writes the four fields it knows and copies the rest; its header
-lists the ranges.
+at `0x91`; the **side** at 150; the **colour** at 151; the state byte at 156; and
+the options byte at 157. Bytes 158-169 are the game settings the session
+description also carries (4, 10, 10, 250 and `0x0103`), and 141-144, 170-185 are
+sixteen bytes the corpus does not decode (TA-DEMOS D8). Byte 152 is 1 in a host's
+record and 0 in a joiner's. `TaBattleroom` builds the record over a template
+taken from a recorded host's status, writes the six fields it knows and copies
+the rest; its header lists the ranges.
+
+**The side and the colour**, from `ta-sides.pcap`, in which one battleroom
+setting was changed at a time and every `0x20` diffed against the one before it:
+
+| t (s) | whose | byte | what |
+|---|---|---|---|
+| 32.81 | joiner | [151] `ff`→`01` | given a colour when it joins |
+| 42.95 | joiner | [150] `00`→`01` | side ARM → CORE |
+| 44.50 | joiner | [151] `01`→`02` | colour |
+| 53.11 | host | [150] `00`→`01` | side ARM → CORE |
+| 54.89 | host | [151] `00`→`01` | colour |
+| 64.08 | host | [150] `01`→`00` | side back to ARM |
+| 76.5 / 79.0 | both | [156] `02`→`22` | ready, bit `0x20` |
+| 81.6 | both | [156] `22`→`32` | launched, bit `0x10` |
+
+A team change produced no `0x20` diff at all — in `ta-small.pcap` the host goes
+from team 0 to team 1 at 103.06 and nothing in its status moves — which is what
+puts the team in `0x24` and nowhere else. `ta-sides.pcap` holds 65 status
+records, 57 of them after the two players have exchanged their settings, and
+across those 57 **the only bytes that ever change are 150, 151 and 156** — which
+is the whole of what a lobby changes, and what a host writes.
+
+`docs/TA-DEMOS.md` D8, which records how little of this record RWE writes in a
+demo, is the same field in its 192-byte header form.
 
 **The options byte**, read from a capture in which the host changed one battleroom option at a
 time:
@@ -292,7 +314,7 @@ be with that project's agreement and identifying itself as RWE.
 - **Resource statistics**: the host sent no `0x28` after the replay and nothing complained, but
   what the joiner then showed for the host's economy was not looked at.
 - **`0x40` in the options byte**, and why `+los` did nothing with cheats allowed.
-- **A side and a colour in a `0x20`.** Neither is decoded, and the captures cannot
-  separate them: both peers in every recording that reached a launch sat on the same
-  side, so the only two bytes that differ between players are candidates for either. A
-  game assigns sides from its own player table.
+- **Byte 152.** 1 in a host's `0x20` and 0 in a joiner's, in all four captures,
+  which is what bit 0 of the state byte also does; it is unidentified, and it was
+  briefly the pair the side and the colour were thought to be in. Bytes 149 and
+  153-155 are `01` and `00 01 00` in every record of every capture.
