@@ -434,7 +434,6 @@ namespace rwe
         auto shortcutCount = readU32Le(data, 12);
         auto descriptionOffset = readU32Le(data, 16);
         auto nameOffset = readU32Le(data, 20);
-        // passwordOffset is read for completeness; nothing follows it in the messages TA sends.
 
         // The offsets are from the start of the DPSP envelope, which is 8 bytes
         // before the payload this function is handed.
@@ -454,9 +453,9 @@ namespace rwe
 
         auto packed = toPayloadOffset(packedOffset);
         requireWithin(payload.size(), packed, 0, "the packed players");
-        auto total = playerCount + groupCount + shortcutCount;
-        // A message cannot hold more players than there are bytes for, and each
-        // entry takes at least 20; cap the loop so a huge count is refused.
+        auto total = static_cast<std::uint64_t>(playerCount) + groupCount + shortcutCount;
+        // Each entry takes at least 20 bytes, so a count no message could hold
+        // is refused rather than looped over.
         if (total > (payload.size() - packed) / 20)
         {
             throw TaDirectPlayException("the super enum players reply claims more players than it can hold");
@@ -465,7 +464,8 @@ namespace rwe
         auto offset = packed;
         for (std::uint32_t i = 0; i < total; ++i)
         {
-            // Groups and shortcuts are skipped by kind below; players are kept.
+            // Groups and shortcuts are decoded so the offset stays right, but
+            // only players are reported.
             auto player = taDecodeSuperPackedPlayer(data, payload.size(), offset, "a packed player");
             if (i < playerCount)
             {
