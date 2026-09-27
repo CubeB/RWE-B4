@@ -2438,10 +2438,10 @@ over loopback, which is a thing RWE structurally cannot do. Three tiers of
    coupling. This is what the archive site does.
 2. **Puppet playback.** A spectator scene that loads the map, spawns units
    and drives them straight from the packet stream with the simulation
-   switched off. Gated on decoding `0x2c`, which nobody has published;
-   further gated on mapping demo unit ids through the `0x1a` table onto RWE
-   unit types, and inherently holed by fog of war, since the recording peer
-   only saw what was sent to it.
+   switched off. It exists now (`rwe --tad`, below): `0x2c` is decoded bit for
+   bit, demo unit ids map through the `0x1a` table onto RWE unit types, and the
+   scene is inherently holed by fog of war, since the recording peer only saw
+   what was sent to it.
 3. **Re-simulate from inferred inputs.** Not achievable, and not for want of
    effort -- see below.
 
@@ -2542,12 +2542,31 @@ for a slot the stream never showed at all -- a straggler after the unit died,
 or a unit that died before its first full-state turn. They are counted and
 dropped, never indexed with.
 
-**What tier 2 leaves out**, and what the next phase takes: weapons display
-(`0x0d` rounds are decoded but not spawned), `0x10` script calls, the `0x28`
-resource state, chat, and the spectator scene that drives this driver from
-`GameScene` with fog of war. The driver is free of SDL, GL and `GameScene` so
-that scene can use the same one. Fog of war is inherent and unsolvable from
-the stream: the recording peer only saw what was sent to it.
+**`rwe --tad <file>` watches one.** It loads the map the header names through
+the ordinary loading path with every demo player a Remote seat and nobody on
+this machine owning one, so no local decision, peer-liveness check or sync hash
+runs: the scene hands the driver the next tick's records and ticks the
+simulation as usual, and the replay viewer's play/pause and speed controls act
+on it. A Demo window reports the counts. The driver is free of SDL, GL and
+`GameScene`, so `tad_puppet` and the scene use the same one.
+
+The rest of the stream is consumed too. `0x0d` spawns the shooter's own weapon
+round from the recorded origin toward the target for display only; it takes no
+health off anything, because every demo player is Remote and damage comes only
+from `0x0b` -- checked for area damage and features as well. `0x10` runs the
+named script on the puppet's own COB environment, so animations, activation and
+build arms show. `0x28` writes the sender's stored and storage metal and energy
+onto its player for the resource bar. `0x05` and `0xf9` print as chat. `0x19`
+sets the playback speed from its high byte (256 is normal); a zero level is
+left alone, because the corpus has lone zeros in demos that plainly run on, so
+the value cannot be read as a pause.
+
+**What tier 2 still leaves out.** `0x0f` feature actions are sized but not
+decoded, so a feature the recording changed is not shown; the payload is not
+guessed at. A recorded pause has no unambiguous encoding in the corpus and is
+not applied. Fog of war is inherent and unsolvable from the stream: the
+recording peer only saw what was sent to it, and a unit the stream never placed
+is shown nowhere rather than in an invented place.
 
 **A coordinate correction this work found.** RWE's world is centred on the
 origin and TA's starts at the map's top left. The recorder had been writing

@@ -348,6 +348,11 @@ original in every case.
   zero gets 0, and one that runs away (endless loops, huge argument lists) or
   otherwise faults loses that one script thread. The original crashes on the
   first and hangs on the second.
+- **A demo is watched rather than replayed.** `rwe --tad <file>` loads the
+  map a TA demo names and drives its units from the recorded stream, since a
+  demo carries state and effects and not orders. Units move, fire, die and
+  leave wrecks, but the recorded `0x0f` feature actions and pauses are not
+  applied, and a unit the recording never showed is shown nowhere.
 
 ---
 
