@@ -220,6 +220,7 @@ namespace rwe
         maker.makesMetal = Metal(1.0f);
         maker.metalStorage = Metal(500.0f);
         maker.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
+        maker.yardMap = Grid<YardMapCell>(2, 2, YardMapCell::Ground);
         sim.unitDefinitions["MAKER"] = maker;
         sim.unitScriptDefinitions["MAKER"] = *makeEmptyCobScript({"base"});
 
