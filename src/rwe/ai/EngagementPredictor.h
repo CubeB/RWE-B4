@@ -24,10 +24,14 @@ namespace rwe
      *
      * Deliberately not modelling armour class (damage is always read from
      * the "DEFAULT" key) or air/ground weapon eligibility beyond what the
-     * two originals already did (neither filtered on toAirWeapon) -- see
-     * docs/agents scratch plan section B for why a closed-form estimate
-     * accepts that simplification rather than reaching for per-class
-     * match-ups the shipped data does not expose as a distinct field.
+     * two originals already did (neither filtered on toAirWeapon).
+     *
+     * Neither combatStats nor engagementScore/engagementMargin below know
+     * whether a unit is a ground unit or an aircraft, or filter one side's
+     * list against the other's domain -- a caller with a mixed-domain
+     * candidate list (ground and air together) has to split it itself
+     * before calling in, the way the outpost-raid response already does
+     * (both its raiders and its responders are pre-filtered to !isAir).
      */
     struct UnitCombatStats
     {

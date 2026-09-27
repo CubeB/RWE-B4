@@ -2087,11 +2087,10 @@ namespace rwe
             {
                 // What the raiders there are worth, and what of the reserve
                 // could get there. The engagement predictor's stats are
-                // gathered alongside the metal sums whether or not the
-                // knob below asks for them, so a paired arena run always
-                // has both formulas' inputs in hand from the same pass over
-                // the same units -- neither can drift from what the other
-                // saw.
+                // only gathered when outpostResponseUsesPredictor asks for
+                // them -- a paired arena run is two separate processes, one
+                // per arm, so the default (off) path pays nothing extra for
+                // a formula it never consults.
                 float raiders = 0.0f;
                 std::vector<UnitCombatStats> raiderStats;
                 for (const auto& [_, enemy] : bb.knownEnemies)
@@ -2102,7 +2101,10 @@ namespace rwe
                         if (auto defIt = sim.unitDefinitions.find(enemy.unitType); defIt != sim.unitDefinitions.end())
                         {
                             raiders += defIt->second.buildCostMetal.value;
-                            raiderStats.push_back(combatStats(sim, enemy.unitType));
+                            if (profile.outpostResponseUsesPredictor)
+                            {
+                                raiderStats.push_back(combatStats(sim, enemy.unitType));
+                            }
                         }
                     }
                 }
@@ -2123,15 +2125,19 @@ namespace rwe
                     }
                     outpostResponders.insert(id.value);
                     responders += sim.unitDefinitions.at(unit.unitType).buildCostMetal.value;
-                    responderStats.push_back(combatStats(sim, unit.unitType));
+                    if (profile.outpostResponseUsesPredictor)
+                    {
+                        responderStats.push_back(combatStats(sim, unit.unitType));
+                    }
                 }
                 // Same decision either way -- are the responders worth
                 // answering with -- by two different formulas: the shipped
                 // metal-cost ratio, or (behind outpostResponseUsesPredictor,
                 // off by default) the engagement predictor's hp/dps/range/
                 // speed margin. See EngagementPredictor.h and #389.
+                auto predictedMargin = profile.outpostResponseUsesPredictor ? engagementMargin(responderStats, raiderStats) : 0.0f;
                 auto worthAnswering = profile.outpostResponseUsesPredictor
-                    ? engagementMargin(responderStats, raiderStats) >= profile.outpostResponseMarginThreshold
+                    ? predictedMargin >= profile.outpostResponseMarginThreshold
                     : responders >= raiders * profile.outpostResponseStrength;
                 if (outpostResponders.empty() || !worthAnswering)
                 {
@@ -2150,6 +2156,7 @@ namespace rwe
                         .set("z", static_cast<double>(site->z.value))
                         .set("raiders_metal", raiders)
                         .set("responders_metal", responders)
+                        .set("predictor_margin", predictedMargin)
                         .set("why", "outpost_raid")
                         .detail("reserve answers raiders at an outpost");
                 }
