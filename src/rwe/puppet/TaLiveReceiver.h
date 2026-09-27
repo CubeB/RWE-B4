@@ -118,10 +118,13 @@ namespace rwe
      * them and applies them there.
      *
      * It maps TA's serial onto RWE's tick from the first packets of the run --
-     * the lowest serial seen before the first packet is released, so a first
+     * the lowest serial seen before the first packet is applied, so a first
      * packet that arrives out of order does not move the whole clock -- and
-     * reports how far the two clocks then drift apart. A serial already
-     * applied is never applied twice.
+     * reports how far the two clocks then drift apart. The anchor is fixed
+     * once a packet has been applied, because a moving one would leave the
+     * drift figures nothing to measure; a peer whose serials then go backwards
+     * is a fault, and it shows as `packetsDroppedOutOfRange` climbing at the
+     * packet rate. A serial already applied is never applied twice.
      *
      * The driver must be on its external clock: this hands packets over, and
      * the caller's `applyTick` on the driver is what puts them into the world.

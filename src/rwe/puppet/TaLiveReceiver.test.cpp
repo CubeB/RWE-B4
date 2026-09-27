@@ -225,7 +225,7 @@ namespace rwe
         f.feed(24, 33, 0);
         f.feed(8, 22, 0);
 
-        REQUIRE(f.receiver.stats().clock.originSerial == 8u);
+        REQUIRE(f.receiver.stats().clock.originSerial.value_or(0) == 8u);
         REQUIRE(f.receiver.stats().clock.originCorrections == 1);
 
         // Neither was refused as being before the clock started, and both are
@@ -251,7 +251,7 @@ namespace rwe
 
             auto clock = f.receiver.stats().clock;
             REQUIRE(clock.samples == 100);
-            REQUIRE(clock.originSerial == 8u);
+            REQUIRE(clock.originSerial.value_or(0) == 8u);
             REQUIRE(clock.driftTicks == 0);
             REQUIRE(clock.minOffsetTicks == 0);
             REQUIRE(clock.maxOffsetTicks == 0);
