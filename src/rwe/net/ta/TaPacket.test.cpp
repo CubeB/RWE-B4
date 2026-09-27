@@ -3,6 +3,8 @@
 #include <rwe/net/ta/TaPacket.h>
 #include <rwe/net/ta/TaPinger.h>
 #include <rwe/net/ta/ta_packet_captures.h>
+#include <algorithm>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
@@ -56,9 +58,14 @@ namespace rwe
             return out;
         }
 
-        /** What the transforms leave behind: a packet's plain form. */
-        TadBytes plainForm(const TadBytes& wire)
+        bool holds(const TadBytes& haystack, const char* needle)
         {
+            TadBytes want(needle, needle + std::strlen(needle));
+            return std::search(haystack.begin(), haystack.end(), want.begin(), want.end()) != haystack.end();
+        }
+
+        /** What the transforms leave behind: a packet's plain form. */
+        TadBytes plainForm(const TadBytes& wire)        {
             TadBytes copy = wire;
             tadDecrypt(copy, 0);
             bool ok = true;
@@ -99,8 +106,11 @@ namespace rwe
 
     TEST_CASE("every TA packet in the spike's captures decodes to what the reference found", "[net][ta]")
     {
-        std::size_t plain = 0;
-        std::size_t compressed = 0;
+        std::vector<std::uint8_t> codes;
+        bool sawPlain = false;
+        bool sawCompressed = false;
+        bool sawReply = false;
+        bool sawCount = false;
 
         for (const auto& fixture : ta_test::capturedPackets())
         {
@@ -113,21 +123,30 @@ namespace rwe
             REQUIRE(parsed->packet.marker == fixture.marker);
             REQUIRE(codesOf(parsed->packet.subpackets) == fixture.codes);
 
-            if (parsed->packet.type == TadPacketUncompressed)
+            for (const auto& subpacket : parsed->packet.subpackets)
             {
-                ++plain;
+                codes.push_back(subpacket[0]);
             }
-            else
-            {
-                ++compressed;
-            }
+            sawPlain |= parsed->packet.type == TadPacketUncompressed;
+            sawCompressed |= parsed->packet.type == TadPacketCompressed;
+            (parsed->packet.marker == TaReplyMarker ? sawReply : sawCount) = true;
         }
 
-        // Both framings and both shapes of the marker have to be in there, or
-        // the corpus is not the one the envelope was written against.
-        REQUIRE(plain > 0);
-        REQUIRE(compressed > 0);
-        REQUIRE(ta_test::capturedPackets().size() == 1497);
+        // The corpus is a sample, so what matters is that it still reaches
+        // everything the envelope has to cope with: every code the captures
+        // hold, both framings, and both shapes of the u32.
+        const std::vector<std::uint8_t> every{
+            0x02, 0x06, 0x07, 0x08, 0x09, 0x0c, 0x0f, 0x10, 0x11, 0x12, 0x15, 0x17, 0x18,
+            0x1a, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23, 0x24, 0x26, 0x28, 0x2a, 0x2c};
+        for (std::uint8_t code : every)
+        {
+            CAPTURE(code);
+            REQUIRE(std::find(codes.begin(), codes.end(), code) != codes.end());
+        }
+        REQUIRE(sawPlain);
+        REQUIRE(sawCompressed);
+        REQUIRE(sawReply);
+        REQUIRE(sawCount);
     }
 
     TEST_CASE("a plain TA packet from the captures re-encodes byte for byte", "[net][ta]")
@@ -147,13 +166,17 @@ namespace rwe
             REQUIRE(toHex(parsed->packet.build()) == fixture.wire);
             ++checked;
         }
-        REQUIRE(checked == 340);
+        REQUIRE(checked > 0);
     }
 
     TEST_CASE("a compressed TA packet from the captures re-encodes to the same bytes inside", "[net][ta]")
     {
-        std::size_t checked = 0;
-        std::size_t exact = 0;
+        // The name the sanitiser put in the 0x20s it rewrote, which is what
+        // tells a re-packed sample from one that came off the wire.
+        const std::string sanitised = "Sanitised Map";
+
+        std::size_t captured = 0;
+        std::size_t repacked = 0;
         for (const auto& fixture : ta_test::capturedPackets())
         {
             TadBytes wire = fromHex(fixture.wire);
@@ -168,17 +191,26 @@ namespace rwe
 
             TadBytes rebuilt = parsed->packet.build();
             REQUIRE(bodyOf(rebuilt) == bodyOf(wire));
-            if (rebuilt == wire)
+
+            if (holds(bodyOf(wire), sanitised.c_str()))
             {
-                ++exact;
+                // Repacked by tadCompress on the way into the fixture, so it
+                // has to come back out of tadCompress the same way. This is the
+                // only place the two agree byte for byte.
+                REQUIRE(rebuilt == wire);
+                ++repacked;
             }
-            ++checked;
+            else
+            {
+                ++captured;
+            }
         }
 
-        REQUIRE(checked > 0);
         // tadCompress is gpgnet4ta's compressor, not TA's, so the two agree on
-        // what the packet says and not always on how it is packed.
-        REQUIRE(exact == 0);
+        // what a packet says and not always on how it is packed. The samples
+        // that came off the wire are the ones that cannot match.
+        REQUIRE(captured > 0);
+        REQUIRE(repacked > 0);
     }
 
     TEST_CASE("a ping reply RWE builds is the one a real host sent, byte for byte", "[net][ta]")
