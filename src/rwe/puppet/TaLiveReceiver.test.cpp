@@ -200,6 +200,28 @@ namespace rwe
         REQUIRE(f.receiver.stats().packetsDroppedOutOfRange == 1);
     }
 
+    TEST_CASE("a live receiver keeps each peer's serials to itself", "[puppet]")
+    {
+        Fixture f;
+        addWellStockedPlayer(f.world.sim, "CORE");
+        f.driver.addPlayer(2, PlayerId(1));
+
+        auto feed = [&](uint8_t sender, uint32_t serial, uint16_t health, uint32_t localTick) {
+            f.receiver.onPacket(TadPacket{0, sender}, {fullStateRecord(serial, health)}, localTick);
+        };
+
+        // One peer on a later clock, with a serial of its own and a serial the
+        // other peer has already used: neither may be taken for a repeat.
+        feed(1, 8, 100, 0);
+        feed(2, 108, 100, 0);
+        feed(1, 8, 100, 0);
+        feed(2, 116, 100, 0);
+
+        REQUIRE(f.receiver.stats().packetsDuplicate == 1);
+        REQUIRE(f.receiver.stats().held == 3);
+        REQUIRE(f.receiver.stats().packetsDroppedOutOfRange == 0);
+    }
+
     TEST_CASE("a live receiver's buffer is bounded, and says what it refused", "[puppet]")
     {
         Fixture f;

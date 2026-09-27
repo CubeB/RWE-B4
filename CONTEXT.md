@@ -256,6 +256,25 @@ Its clock is the `0x2c` serial, never `Packet::time`.
 _Avoid_: replay player, demo player (that is the simulation's player, not the
 driver)
 
+**Live receiver** (`TaLiveReceiver`):
+A jitter buffer in front of the puppet driver for a game rather than a file. It
+holds each sender's packets until the local tick is within its depth of the
+tick the `0x2c` serial names, so the driver has them in hand at that tick and
+applies them there rather than at the tick they arrived; a packet whose tick
+has passed is applied at once and counted, a serial already held or already
+handed over is dropped, and the map from serial to RWE tick settles on the
+lowest serial seen before the first packet is applied. Reports how far the two
+clocks drift apart over a run. Its counters are the overlay's.
+_Avoid_: network layer (that is the datagram, #424), delay, lag compensation
+
+**Receive buffer**:
+The depth of a live receiver's jitter buffer, in ticks, and the distance the
+local clock runs behind the sender's. A packet is available up to that many
+ticks *before* the tick it names, which is what buys the reordering tolerance;
+past it a packet is late and can only be applied where it landed.
+_Avoid_: jitter buffer (that is the mechanism, this is the setting), buffer
+size (that is the bound on packets held)
+
 **Demo output**:
 A `.tad` RWE wrote rather than recorded from TA. Readable and mineable by the
 same tools as a real one, with three recorded divergences: the `0x1a` ids are

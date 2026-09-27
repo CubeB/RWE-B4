@@ -78,7 +78,7 @@ namespace rwe
          */
         uint64_t packetsLate{0};
 
-        /** A serial already held or already applied. Dropped, never applied twice. */
+        /** A serial already held or already handed to the driver. Dropped, never applied twice. */
         uint64_t packetsDuplicate{0};
 
         /**
@@ -124,7 +124,9 @@ namespace rwe
      * once a packet has been applied, because a moving one would leave the
      * drift figures nothing to measure; a peer whose serials then go backwards
      * is a fault, and it shows as `packetsDroppedOutOfRange` climbing at the
-     * packet rate. A serial already applied is never applied twice.
+     * packet rate. A serial already handed over is never applied twice, and a
+     * short history of them is what says so -- the buffer bound is on packets
+     * held, not on that.
      *
      * The driver must be on its external clock: this hands packets over, and
      * the caller's `applyTick` on the driver is what puts them into the world.

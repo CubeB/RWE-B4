@@ -133,14 +133,18 @@ namespace
      * The network `--live-sim` stands in for.
      *
      * A packet becomes available between 0 and `jitterTicks` ticks *before* the
-     * tick its serial names, which is what a receive buffer is: our tick runs
-     * that far behind the peer's clock, so a packet that crosses early is still
-     * in hand when the tick that names it arrives. Reordering falls out of two
-     * packets taking different leads, and nothing arrives after the tick it
-     * names -- which is why a run at 0% loss has to reproduce the plain figures
-     * exactly, and why the receiver's own lateness counter stays at zero here.
-     * The lateness path is covered by the unit tests instead, since a live
-     * clock running ahead of the peer's is the only way to reach it.
+     * tick the stream has got to, which is the tick a straight playback applies
+     * it at. That is what a receive buffer is: the local tick runs that far
+     * behind, so a packet that crosses early is still in hand at the tick that
+     * names it. Reordering falls out of two packets taking different leads, and
+     * a packet is never held past the tick it is for, which is why a run at 0%
+     * loss has to reproduce the straight figures exactly.
+     *
+     * The receiver's lateness counter is not zero here, and should not be: a
+     * recording is in arrival order rather than serial order, so one peer's
+     * tick 0 is often written after another's tick 1, and those records name a
+     * tick already played. A straight playback applies them where they landed
+     * too, which is why they change nothing.
      */
     struct LiveSim
     {
@@ -323,6 +327,25 @@ namespace
                   << " max " << r.clock.maxOffsetTicks
                   << ", drift " << r.clock.driftTicks << " ticks"
                   << " (" << r.clock.driftPer1000Ticks << " per 1000)\n";
+    }
+
+    /**
+     * The same counters without the clock line, for the aggregate: the clock
+     * figures are one anchor and one drift over a run, and a sum of them over
+     * several demos would be two numbers wearing a total's name.
+     */
+    void printLiveTotals(const LiveSim& sim)
+    {
+        auto& r = sim.receiver;
+        std::cout << "  live: " << sim.packetsScheduled << " scheduled, " << sim.packetsLost << " lost"
+                  << " (receive buffer " << sim.jitterTicks << " ticks, " << sim.lossPercent << "% loss, seed " << sim.seed
+                  << "), " << sim.localTicks << " local ticks\n";
+        std::cout << "  received " << r.packetsReceived << ", applied " << r.packetsApplied
+                  << ", late " << r.packetsLate
+                  << ", duplicate " << r.packetsDuplicate
+                  << ", out of order " << r.packetsOutOfOrder
+                  << ", no serial " << r.packetsWithoutSerial
+                  << ", refused " << (r.packetsDroppedOutOfRange + r.packetsDroppedBufferFull) << "\n";
     }
 
     /** The loaded services, built once and reused for every demo. */
@@ -934,7 +957,7 @@ int main(int argc, char* argv[])
     std::cout << "aggregate:\n";
     if (totals.live)
     {
-        printLive(*totals.live, totals.live->localTicks);
+        printLiveTotals(*totals.live);
     }
     printStats(totals.stats);
 
@@ -944,6 +967,8 @@ int main(int argc, char* argv[])
     if (totals.live)
     {
         report["aggregate"]["live"] = liveJson(*totals.live);
+        // The clock figures are per run, and the aggregate holds none.
+        report["aggregate"]["live"].erase("clock");
     }
 
     if (args.contains("json"))

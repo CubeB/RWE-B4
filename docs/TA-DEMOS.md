@@ -2551,6 +2551,69 @@ simulation as usual, and the replay viewer's play/pause and speed controls act
 on it. A Demo window reports the counts. The driver is free of SDL, GL and
 `GameScene`, so `tad_puppet` and the scene use the same one.
 
+### A live game, and what the receive buffer is for
+
+Everything above is a file arriving in order. A game delivers the same packets
+over UDP in real time, and `TaLiveReceiver` (`src/rwe/puppet/`) is what sits in
+front of the driver for that: a jitter buffer keyed on the `0x2c` serial. It
+holds each sender's packets until the local tick is within `jitterTicks` of the
+tick the serial names, so the driver has them in hand at that tick and applies
+them there rather than at the tick they arrived. That depth is the **receive
+buffer**, and it is also the distance the local clock runs behind the sender's:
+a packet is available up to that many ticks *before* the tick it names, and
+past that a packet is late and can only be applied where it landed.
+
+The mapping from serial to RWE tick is settled from the first packets -- the
+lowest serial seen before the first one is applied, so a first packet that
+arrives out of order does not put the whole clock a tick out -- and then held
+fixed, because a moving one would leave nothing to measure. The gap between the
+two clocks is reported over the run: the offset distribution, the total drift,
+and the least-squares rate. A serial already held or already handed to the
+driver is dropped and counted, a late one is applied at once and counted, and
+out-of-order arrivals are put back in serial order and counted. The buffer is
+bounded per sender, across senders, and on how far past the local tick a serial
+may name; each bound drops and counts rather than waits.
+
+**`tad_puppet --live-sim <jitter-ticks>:<loss-percent>:<seed>` measures it.**
+It delivers a demo's packets at the ticks a receive buffer of that depth would
+say, through the receiver, with the driver on its external clock and the
+simulation ticked once per local tick. The generator is the tool's own
+`minstd_rand` and the same seed gives the same run. Five ProTA demos (10158,
+11440, 11505, 11506, 11507), 35,669 ground drift samples between them:
+
+| run | ground p90 | ground within 32 | air p90 | air within 32 |
+|---|---|---|---|---|
+| `tad_puppet`, straight from the file | 52.15 | 82.03% | 87.79 | 69.64% |
+| `--live-sim 0:0:1` | 52.15 | 82.03% | 87.79 | 69.64% |
+| `--live-sim 3:0:1` | 52.38 | 81.96% | 93.20 | 68.45% |
+| `--live-sim 3:1:1` | 53.58 | 81.62% | 103.31 | 68.26% |
+| `--live-sim 3:5:1` | 60.35 | 80.44% | 165.52 | 61.08% |
+
+**At zero jitter the live run reproduces the straight playback exactly** --
+every per-demo figure matches to the digit, drift distributions included. That
+is the check the buffer is there to pass: a packet is still in hand at the tick
+that names it however late it left the sender, so nothing is applied late and
+the run is the same run. Loss is the only thing that costs anything, and it
+costs slowly: 5% of packets gone moves the ground median not at all (it is
+already zero), the p90 from 52 to 60 units, and the within-32 figure by under
+two points, because a full-state record is a *correction* and the one after a
+lost packet puts the unit back.
+
+Two things the numbers do not say, and a reader should not infer otherwise. A
+**death record with no `0x2c` of its own** is applied at the sender's last
+*known* tick, and a receive buffer has already advanced that clock, so at a
+depth of 3 some deaths land up to three ticks later than they would from the
+file: over the five demos that is 3,476 deaths read straight against 2,924
+through a depth-3 buffer, with more wrecks in exchange, because a unit that
+lives three ticks longer is sometimes killed by something else first. The
+drift is unmoved by it, but the kill count is not, and it is a property of the
+format's ambiguity rather than of the buffer. And a **recording is in arrival
+order, not serial order**: one peer's tick 0 is often written after another's
+tick 1, so a receiver reading by serial applies those records at the tick they
+name where a straight playback applies them at the current one. That is why
+the live run's `late` counter is in the thousands even at 0% loss and 0 jitter.
+Both are counted and neither is a fault in the receiver.
+
 The rest of the stream is consumed too. `0x0d` spawns the shooter's own weapon
 round from the recorded origin toward the target for display only; it takes no
 health off anything, because every demo player is Remote and damage comes only

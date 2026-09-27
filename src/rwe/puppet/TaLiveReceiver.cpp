@@ -10,6 +10,9 @@ namespace rwe
 {
     struct TaLiveReceiver::Impl
     {
+        /** How many handed-over serials per sender are remembered as repeats. */
+        static constexpr std::size_t duplicateWindow = 64;
+
         struct Held
         {
             TadPacket packet;
@@ -27,7 +30,20 @@ namespace rwe
             std::map<uint32_t, Held> held;
 
             std::optional<uint32_t> highestSeen;
-            std::optional<uint32_t> highestApplied;
+
+            /**
+             * The last few serials handed to the driver, oldest first, so a
+             * repeat of one is recognised rather than applied twice. Capped,
+             * because a receiver runs for hours and a serial that comes back
+             * further behind than the window is a late packet, not a duplicate
+             * worth remembering.
+             */
+            std::vector<uint32_t> handed;
+
+            bool hasHanded(uint32_t serial) const
+            {
+                return std::find(handed.begin(), handed.end(), serial) != handed.end();
+            }
         };
 
         TadPuppetDriver& driver;
@@ -98,11 +114,23 @@ namespace rwe
             clock.meanOffsetTicks = sumY / n;
         }
 
-        void apply(const Held& held)
+        void apply(uint8_t sender, uint32_t serial, const Held& held)
         {
             originFrozen = true;
             driver.onPacket(held.packet, held.subPackets);
             ++stats.packetsApplied;
+            remember(sender, serial);
+        }
+
+        /** Keeps a serial on the short list of the ones already handed over. */
+        void remember(uint8_t sender, uint32_t serial)
+        {
+            auto& state = senders[sender];
+            state.handed.push_back(serial);
+            if (state.handed.size() > duplicateWindow)
+            {
+                state.handed.erase(state.handed.begin());
+            }
         }
 
         /** The tick a serial names, negative for one before the clock started. */
@@ -192,7 +220,7 @@ namespace rwe
         }
 
         auto& sender = i.senders[packet.sender];
-        if (sender.held.count(*serial) != 0 || (sender.highestApplied && *serial <= *sender.highestApplied))
+        if (sender.held.count(*serial) != 0 || sender.hasHanded(*serial))
         {
             ++i.stats.packetsDuplicate;
             return;
@@ -210,7 +238,7 @@ namespace rwe
             i.originFrozen = true;
             i.driver.onPacket(packet, subPackets);
             ++i.stats.packetsApplied;
-            sender.highestApplied = *serial;
+            i.remember(packet.sender, *serial);
             return;
         }
 
@@ -238,8 +266,7 @@ namespace rwe
             while (!state.held.empty() && i.tickFor(state.held.begin()->first) <= due)
             {
                 auto it = state.held.begin();
-                state.highestApplied = it->first;
-                i.apply(it->second);
+                i.apply(sender, it->first, it->second);
                 state.held.erase(it);
                 --i.totalHeld;
             }
