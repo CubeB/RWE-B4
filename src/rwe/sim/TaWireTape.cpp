@@ -272,7 +272,8 @@ namespace rwe
             record.owner = state.owner;
             record.typeIndex = typeIt->second;
             records.emplace(unit, std::move(record));
-            // The id is the UnitId's now, not the one it was called by.
+            // UnitIds are recycled, so whatever the id was called by is not
+            // what it is called now.
             releasedIds.erase(unit);
             return TaWireRefusal::None;
         }

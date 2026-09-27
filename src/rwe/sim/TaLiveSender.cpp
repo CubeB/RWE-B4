@@ -85,8 +85,8 @@ namespace rwe
             }
             // The tape's own projectile records come first: they were queued
             // as the tick happened, where the outbox's are read at the end of
-            // it. Today the only one is the cause-4 death of a unit that
-            // changed hands.
+            // it. The only one a sender gets is the cause-4 death of a unit
+            // that changed hands.
             subPackets.insert(subPackets.end(), records.projectilePass.begin(), records.projectilePass.end());
             subPackets.insert(subPackets.end(), out.damage.begin(), out.damage.end());
             subPackets.insert(subPackets.end(), out.deaths.begin(), out.deaths.end());
