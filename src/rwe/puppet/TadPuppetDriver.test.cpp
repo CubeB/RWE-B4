@@ -169,4 +169,69 @@ namespace rwe
         REQUIRE(sim.getUnitState(*findUnitOfType(sim, "TANK")).hitPoints == 50);
         REQUIRE(driver.lastTick() == 8u);
     }
+
+    TEST_CASE("a damage record for our own unit is handed off, not dropped as unknown", "[puppet]")
+    {
+        constexpr uint16_t maxUnits = 8;
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        definePuppetTestWorld(sim);
+        auto remote = addWellStockedPlayer(sim, "ARM");
+        auto local = addWellStockedPlayer(sim, "CORE");
+
+        TadPuppetDriver driver(sim, maxUnits, puppetTestLoadOrder());
+        driver.addPlayer(1, remote);
+
+        auto layout = tadUnitStateLayout(std::vector<bool>{false, false, false}, maxUnits);
+
+        // The peer's commander, announced by a 0x09 the way a real peer
+        // announces one: that record is also what says which owner block the
+        // ids from then on are in, and this driver's id of the unit.
+        driver.onPacket(
+            TadPacket{0, 1},
+            {tadEncodeBuildStarted(TadBuildStarted{3, 1, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}})});
+        driver.applyTick(0);
+
+        auto puppet = findUnitOfType(sim, "TANK");
+        REQUIRE(puppet);
+        sim.getUnitState(*puppet).finishBuilding(sim.unitDefinitions.at("TANK"));
+        auto puppetId = driver.wireIdOf(*puppet);
+        REQUIRE(puppetId == 1u);
+        REQUIRE(sim.getUnitState(*puppet).hitPoints == 100);
+
+        // A unit of ours, in the block a host keeps clear of the peer's.
+        auto ours = sim.trySpawnCompletedUnit("SOLAR", local, SimVector(100_ss, 0_ss, 100_ss), std::nullopt);
+        REQUIRE(ours);
+        constexpr uint16_t ourCommanderId = maxUnits + 1;
+
+        struct Handed
+        {
+            uint16_t victimId{0};
+            std::optional<UnitId> attacker;
+            unsigned int damage{0};
+        };
+        std::vector<Handed> handed;
+        driver.setIncomingDamageHandler([&](uint16_t victimId, std::optional<UnitId> attacker, unsigned int damage) {
+            handed.push_back({victimId, attacker, damage});
+        });
+
+        // The peer's own unit takes the remote path: the health falls for
+        // display and no death follows until the owner's 0x0c.
+        driver.onPacket(
+            TadPacket{0, 1},
+            {tadEncodeDamage(TadDamage{*puppetId, 0, 40, 0})});
+        REQUIRE(handed.empty());
+        REQUIRE(sim.getUnitState(*puppet).hitPoints == 60);
+
+        // A hit on one of ours is the attacker's to report, and the driver
+        // does not puppet it, so it goes to the caller instead.
+        driver.onPacket(
+            TadPacket{0, 1},
+            {tadEncodeDamage(TadDamage{ourCommanderId, *puppetId, 25, 0})});
+        REQUIRE(handed.size() == 1u);
+        REQUIRE(handed.front().victimId == ourCommanderId);
+        REQUIRE(handed.front().attacker == *puppet);
+        REQUIRE(handed.front().damage == 25u);
+        REQUIRE(driver.stats().damageHandedOff == 1u);
+        REQUIRE(driver.stats().recordsDroppedUnknownUnit == 0u);
+    }
 }

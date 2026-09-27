@@ -36,6 +36,15 @@ namespace rwe
         uint16_t maxUnits = 1000;
 
         /**
+         * The first id block this tape's ids are allocated from. Zero for a
+         * demo or a recording, which describes every player from the first
+         * block; a live host passes 1, because a joining TA takes block 0 for
+         * itself and two owners in one block is every unit of one of them
+         * deleted on the other machine (docs/TA-NETWORK.md, "In game").
+         */
+        unsigned int firstBlock = 0;
+
+        /**
          * The data set's unit types in TA's load order, 0-based, so a type's
          * index on the wire is its position here plus one. The caller's to
          * supply because `simulation.unitDefinitions` carries no order.

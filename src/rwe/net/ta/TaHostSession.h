@@ -181,6 +181,13 @@ namespace rwe
         /** Drop a peer, telling the remaining peers it left. */
         void deletePeer(PeerId peerId);
 
+        /**
+         * The host leaving: DELETEPLAYER for both of its own ids, to every
+         * peer. The mirror of what a joiner sends when it goes, which is how
+         * a peer is told a player has left (docs/TA-NETWORK.md, "DirectPlay").
+         */
+        void sendHostDeleted(std::uint32_t playerId, std::uint32_t systemPlayerId);
+
         /** Change the options byte; the next SESSIONDESCCHANGED carries it. */
         void setOptions(std::uint8_t options);
 

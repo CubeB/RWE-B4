@@ -22,6 +22,14 @@ namespace rwe
         /** The id block size, agreed with the peer at launch: a slot is `tick % maxUnits`. */
         uint16_t maxUnits = 1000;
 
+        /**
+         * The first id block to allocate from. One for a host: a joining TA
+         * takes block 0, so a host that also sat in it would have its units
+         * erased on the peer and the peer's on itself. See
+         * TaWireTapeSettings::firstBlock.
+         */
+        unsigned int firstBlock = 0;
+
         /** The data set's unit types in TA's load order, as `tadUnitLoadOrder` gives them. */
         std::vector<std::string> unitLoadOrder;
     };

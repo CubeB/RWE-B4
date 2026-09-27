@@ -810,6 +810,18 @@ namespace rwe
         }
     }
 
+    void TaHostSession::sendHostDeleted(std::uint32_t playerId, std::uint32_t systemPlayerId)
+    {
+        auto playerBody = taEncodeDeletePlayer(playerId);
+        auto systemBody = taEncodeDeletePlayer(systemPlayerId);
+        for (const auto& [id, peer] : peers)
+        {
+            (void)id;
+            sendSystemTo(peer.tcpEndpoint, TaDirectPlayCommand::DeletePlayer, playerBody);
+            sendSystemTo(peer.tcpEndpoint, TaDirectPlayCommand::DeletePlayer, systemBody);
+        }
+    }
+
     TaSessionDescription TaHostSession::makeSessionDescription() const
     {
         TaSessionDescription session;

@@ -16,7 +16,7 @@ namespace rwe
             : sender(settings.sender),
               tape(
                   simulation,
-                  TaWireTapeSettings{settings.maxUnits, std::move(settings.unitLoadOrder)},
+                  TaWireTapeSettings{settings.maxUnits, settings.firstBlock, std::move(settings.unitLoadOrder)},
                   std::vector<PlayerId>{settings.sender},
                   std::move(peerIds))
         {
@@ -301,6 +301,11 @@ namespace rwe
         auto batch = std::move(impl->pending.front());
         impl->pending.erase(impl->pending.begin());
         return batch;
+    }
+
+    std::optional<uint16_t> TaLiveSender::wireIdOf(UnitId unit) const
+    {
+        return impl->tape.idOf(unit);
     }
 
     const TaLiveSenderStats& TaLiveSender::stats() const

@@ -144,6 +144,14 @@ namespace rwe
          */
         std::optional<TaLiveBatch> takeBatch();
 
+        /**
+         * The wire id a record naming this unit would carry, or nothing where
+         * the unit is not one this sender describes. A host needs it to read
+         * an incoming `0x0b`, which names its victim by the id this sender
+         * gave it.
+         */
+        std::optional<uint16_t> wireIdOf(UnitId unit) const;
+
         const TaLiveSenderStats& stats() const;
 
     private:

@@ -84,6 +84,9 @@ namespace rwe
 
         std::vector<TadChatLine> chatLines;
 
+        /** A 0x0b for a unit of this machine's, where the caller takes it. */
+        IncomingDamageHandler incomingDamage;
+
         /** The latest 0x19 value waiting to be taken. */
         std::optional<uint16_t> speedChange;
 
@@ -576,6 +579,31 @@ namespace rwe
             dropPuppet(puppetIt);
         }
 
+        /**
+         * The RWE unit a wire id names, where it is one this driver puppets.
+         * An attacker this driver has not seen is nothing, which is what a
+         * record for a unit of the other owner's block looks like.
+         */
+        std::optional<UnitId> unitOfWireId(uint16_t wireId) const
+        {
+            auto key = keyOfId.find(wireId);
+            if (key == keyOfId.end())
+            {
+                return std::nullopt;
+            }
+            auto puppetIt = puppets.find(key->second);
+            if (puppetIt == puppets.end())
+            {
+                return std::nullopt;
+            }
+            return liveUnitOf(puppetIt->second);
+        }
+
+        std::optional<UnitId> attackerUnitOf(uint16_t attackerId) const
+        {
+            return attackerId == 0 ? std::nullopt : unitOfWireId(attackerId);
+        }
+
         void applyDamage(const TadBytes& subPacket)
         {
             auto e = tadDecodeDamage(subPacket);
@@ -587,6 +615,16 @@ namespace rwe
             auto key = keyOfId.find(e->victimId);
             if (key == keyOfId.end())
             {
+                // Not a unit of the sender's, so not one this driver puppets:
+                // a hit on a unit this machine owns, which the caller applies
+                // to its own simulation. Counted as handed off rather than as
+                // an unknown unit either way, so neither number hides it.
+                if (incomingDamage)
+                {
+                    ++stats.damageHandedOff;
+                    incomingDamage(e->victimId, attackerUnitOf(e->attackerId), e->damage);
+                    return;
+                }
                 ++stats.recordsDroppedUnknownUnit;
                 return;
             }
@@ -1280,6 +1318,28 @@ namespace rwe
     std::optional<uint16_t> TadPuppetDriver::takeSpeedChange()
     {
         return std::exchange(impl->speedChange, std::nullopt);
+    }
+
+    std::optional<uint16_t> TadPuppetDriver::wireIdOf(UnitId unit) const
+    {
+        // A walk rather than a second index: this is asked once per outgoing
+        // damage record, over a few hundred puppets, and an index kept beside
+        // puppet.unit would be a second thing to forget when a puppet is
+        // dropped or re-placed.
+        for (const auto& [key, puppet] : impl->puppets)
+        {
+            (void)key;
+            if (puppet.unit == unit)
+            {
+                return puppet.demoId == 0 ? std::nullopt : std::optional<uint16_t>(puppet.demoId);
+            }
+        }
+        return std::nullopt;
+    }
+
+    void TadPuppetDriver::setIncomingDamageHandler(IncomingDamageHandler handler)
+    {
+        impl->incomingDamage = std::move(handler);
     }
 
     const TadPuppetStats& TadPuppetDriver::stats() const

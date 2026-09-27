@@ -164,7 +164,7 @@ namespace rwe
             std::vector<PlayerId> describedPlayers,
             TaPeerIds peerIds)
             : settings(std::move(settings)),
-              ids(this->settings.maxUnits),
+              ids(this->settings.maxUnits, this->settings.firstBlock),
               peerIds(std::move(peerIds)),
               described(std::move(describedPlayers)),
               layout(tadUnitStateLayout(canFlyFlags(simulation, this->settings.unitLoadOrder), this->settings.maxUnits))

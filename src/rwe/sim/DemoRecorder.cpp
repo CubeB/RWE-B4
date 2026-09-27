@@ -92,16 +92,17 @@ namespace rwe
             std::size_t used{0};
         };
 
-        explicit Impl(uint16_t maxUnits) : maxUnits(maxUnits) {}
+        explicit Impl(uint16_t maxUnits, unsigned int firstBlock) : maxUnits(maxUnits), firstBlock(firstBlock) {}
 
         uint16_t maxUnits;
+        unsigned int firstBlock;
         std::unordered_map<PlayerId, Block> blocks;
         std::unordered_map<UnitId, PlayerId> owners;
         std::unordered_map<UnitId, uint16_t> ids;
     };
 
-    DemoIdAllocator::DemoIdAllocator(uint16_t maxUnits)
-        : impl(std::make_unique<Impl>(maxUnits))
+    DemoIdAllocator::DemoIdAllocator(uint16_t maxUnits, unsigned int firstBlock)
+        : impl(std::make_unique<Impl>(maxUnits, firstBlock))
     {
     }
 
@@ -128,7 +129,7 @@ namespace rwe
         auto& block = blockIt->second;
         if (inserted)
         {
-            block.number = static_cast<unsigned int>(impl->blocks.size() - 1);
+            block.number = impl->firstBlock + static_cast<unsigned int>(impl->blocks.size() - 1);
         }
 
         // A block whose base does not fit sixteen bits cannot be represented,
@@ -252,7 +253,7 @@ namespace rwe
          */
         TaWireTapeSettings tapeSettings() const
         {
-            return TaWireTapeSettings{settings.maxUnits, settings.unitLoadOrder};
+            return TaWireTapeSettings{settings.maxUnits, 0, settings.unitLoadOrder};
         }
 
         void init(const GameSimulation& simulation)
