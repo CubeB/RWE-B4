@@ -324,6 +324,29 @@ namespace rwe
         networkHistory.observe(now, sceneTime.value, lockstepStats.stalledSoFar(now), samples);
     }
 
+    void GameScene::logLockstepSummary()
+    {
+        LOG_INFO << lockstepStats.summary(getTimestamp(), ticksLostToCap, gateSkips).describe();
+    }
+
+    void GameScene::logLockstepSummaryIfDue()
+    {
+        auto now = getTimestamp();
+        if (!lastLockstepSummaryAt)
+        {
+            lastLockstepSummaryAt = now;
+            return;
+        }
+
+        if (now - *lastLockstepSummaryAt < std::chrono::seconds(10))
+        {
+            return;
+        }
+
+        lastLockstepSummaryAt = now;
+        logLockstepSummary();
+    }
+
     void GameScene::renderNetworkOverlay()
     {
         // An arena run has no ImGui frame open; see renderReplayWindow.

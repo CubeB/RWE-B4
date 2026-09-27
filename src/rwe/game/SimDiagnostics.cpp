@@ -1,20 +1,73 @@
 #include "SimDiagnostics.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <rwe/game/save_util.h>
 #include <rwe/render/render_prof.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/util/SimpleLogger.h>
+#include <string>
 
 namespace rwe
 {
+    std::optional<SimLag> parseSimLag(const char* spec)
+    {
+        if (spec == nullptr)
+        {
+            return std::nullopt;
+        }
+
+        auto specText = std::string(spec);
+        auto at = specText.find('@');
+        auto millisecondsText = at == std::string::npos ? specText : specText.substr(0, at);
+
+        char* end = nullptr;
+        errno = 0;
+        auto milliseconds = std::strtoll(millisecondsText.c_str(), &end, 10);
+        if (end == millisecondsText.c_str() || *end != '\0' || errno == ERANGE || milliseconds < 0)
+        {
+            return std::nullopt;
+        }
+
+        unsigned int fromTick = 0;
+        if (at != std::string::npos)
+        {
+            auto tickText = specText.substr(at + 1);
+            char* tickEnd = nullptr;
+            errno = 0;
+            auto tick = std::strtoll(tickText.c_str(), &tickEnd, 10);
+            if (tickEnd == tickText.c_str() || *tickEnd != '\0' || errno == ERANGE || tick < 0
+                || tick > std::numeric_limits<unsigned int>::max())
+            {
+                return std::nullopt;
+            }
+            fromTick = static_cast<unsigned int>(tick);
+        }
+
+        return SimLag{std::chrono::milliseconds(milliseconds), fromTick};
+    }
+
     SimDiagnostics::SimDiagnostics()
     {
         if (const char* path = std::getenv("RWE_HASH_LOG"))
         {
             hashLog.emplace(path, std::ios::binary);
+        }
+
+        if (const char* spec = std::getenv("RWE_SIM_LAG"))
+        {
+            if (auto lag = parseSimLag(spec))
+            {
+                simLag = lag;
+                LOG_INFO << "RWE_SIM_LAG: sleeping " << lag->delay.count() << " ms after every tick from tick " << lag->fromTick;
+            }
+            else
+            {
+                LOG_WARN << "RWE_SIM_LAG: ignoring unreadable spec \"" << spec << "\"";
+            }
         }
 
         if (const char* at = std::getenv("RWE_DESYNC_AT"))
@@ -30,6 +83,15 @@ namespace rwe
     bool SimDiagnostics::hashLogEnabled() const
     {
         return hashLog.has_value();
+    }
+
+    std::optional<std::chrono::milliseconds> SimDiagnostics::simulationLagForTick(unsigned int tick) const
+    {
+        if (!simLag || tick < simLag->fromTick)
+        {
+            return std::nullopt;
+        }
+        return simLag->delay;
     }
 
     GameHash SimDiagnostics::record(const GameSimulation& simulation, unsigned int tick)

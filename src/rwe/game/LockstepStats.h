@@ -4,10 +4,36 @@
 #include <optional>
 #include <rwe/rwe_time.h>
 #include <rwe/sim/PlayerId.h>
+#include <string>
 #include <vector>
 
 namespace rwe
 {
+    /**
+     * The whole run's lockstep figures: how many ticks ran, against what wall
+     * clock, and how many the lockstep or the frame cap got in the way of.
+     *
+     * Wall-clock figures about this one machine, written to the log for
+     * tools/net-test.ps1 to read back. The simulation must never read any of
+     * it.
+     */
+    struct LockstepSummary
+    {
+        unsigned int ticks{0};
+        std::chrono::milliseconds elapsed{0};
+        unsigned int stalls{0};
+        std::chrono::milliseconds totalStalled{0};
+        std::chrono::milliseconds longestStall{0};
+        unsigned int ticksLostToCap{0};
+        unsigned int gateSkips{0};
+
+        /** Ticks a second averaged over the run; zero for a run with no elapsed time. */
+        double effectiveTicksPerSecond() const;
+
+        /** One log line, prefixed so a log can be grepped for it. */
+        std::string describe() const;
+    };
+
     /**
      * How often and for how long a tick that was due could not run, and who it
      * was waiting for.
@@ -43,7 +69,16 @@ namespace rwe
         /** Who the most recent stall was waiting for. */
         const std::vector<PlayerId>& lastWaitingFor() const { return waitingFor; }
 
+        /**
+         * The run so far, with the frame loop's own counters folded in: only
+         * the frame loop knows when the cap dropped a tick the scheduler
+         * handed it, or when the drift gate skipped one.
+         */
+        LockstepSummary summary(Timestamp now, unsigned int ticksLostToCap, unsigned int gateSkips) const;
+
     private:
+        std::optional<Timestamp> firstRan;
+        unsigned int ticks{0};
         std::optional<Timestamp> stallStart;
         unsigned int stalls{0};
         std::chrono::milliseconds longest{0};
