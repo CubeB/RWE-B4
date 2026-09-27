@@ -172,6 +172,16 @@ namespace rwe
         config.options = options;
     }
 
+    std::optional<TaPeerAddress> TaHostSession::peerAddress(PeerId peerId) const
+    {
+        auto it = peers.find(peerId);
+        if (it == peers.end())
+        {
+            return std::nullopt;
+        }
+        return TaPeerAddress{it->second.playerId, it->second.tcpEndpoint, it->second.udpEndpoint};
+    }
+
     void TaHostSession::listenEnumTcp()
     {
         auto connection = std::make_shared<IncomingTcp>(ioContext);

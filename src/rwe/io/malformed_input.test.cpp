@@ -11,6 +11,7 @@
 #include <rwe/io/smk/SmkDecoder.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/tnt/TntArchive.h>
+#include <rwe/net/ta/TaBattleroom.h>
 #include <rwe/net/ta/TaDirectPlay.h>
 #include <rwe/net/ta/TaPacket.h>
 #include <rwe/net/ta/TaPinger.h>
@@ -534,5 +535,57 @@ namespace rwe
             CAPTURE(size);
             REQUIRE_FALSE(TaPinger::parsePing(notAPing));
         }
+    }
+
+    TEST_CASE("a 0x20 too short for its fields is not a status, whatever else it says", "[malformed]")
+    {
+        // Every length under the record, including one that would hold the id,
+        // the state and the options but not the whole 186 bytes.
+        for (std::size_t size = 0; size < TaPlayerStatusSize; ++size)
+        {
+            TadBytes bytes(size, 0xA0);
+            if (size > 0)
+            {
+                bytes[0] = 0x20;
+            }
+            CAPTURE(size);
+            REQUIRE_FALSE(taParsePlayerStatus(bytes));
+        }
+
+        // A record of the right length whose code is something else.
+        TadBytes full(TaPlayerStatusSize, 0x21);
+        REQUIRE_FALSE(taParsePlayerStatus(full));
+
+        // An empty map name is a player that has named none, not a fault.
+        std::vector<std::uint8_t> status = taBuildPlayerStatus(TaPlayerStatus{});
+        auto parsed = taParsePlayerStatus(status);
+        REQUIRE(parsed);
+        REQUIRE(parsed->mapName.empty());
+    }
+
+    TEST_CASE("a 0x1a that is not a whole sub-type 2 record names no unit type", "[malformed]")
+    {
+        // The joiner sends one of these per unit type, so a truncated one has to
+        // cost that record and not be read as an id from whatever follows it.
+        for (std::size_t size = 0; size < 14; ++size)
+        {
+            TadBytes bytes(size, 0x1A);
+            if (size >= 2)
+            {
+                bytes[1] = 0x02;
+            }
+            for (std::size_t i = 2; i < size; ++i)
+            {
+                bytes[i] = 0xFF;
+            }
+            CAPTURE(size);
+            REQUIRE_FALSE(taParseUnitSyncId(bytes));
+        }
+
+        // A 0x1a of another sub-type, and a 0x1a with no sub-type at all.
+        TadBytes header = taBuildUnitSyncHeader();
+        REQUIRE_FALSE(taParseUnitSyncId(header));
+        TadBytes wrongCode(14, 0x1B);
+        REQUIRE_FALSE(taParseUnitSyncId(wrongCode));
     }
 }
