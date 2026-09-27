@@ -142,6 +142,12 @@ namespace rwe
 
     void GameScene::openSaveDialog()
     {
+        if (!canSave())
+        {
+            printConsole("Saving is not available in this game");
+            return;
+        }
+
         // LOADGAME.GUI is the save/load dialog both ways in the original --
         // list, name field, metadata labels, radar frame -- and only the
         // painted background differs: DSavegame2 titles it SAVE GAME.
@@ -176,6 +182,12 @@ namespace rwe
 
     void GameScene::saveCurrentGame(const std::string& name)
     {
+        if (!canSave())
+        {
+            printConsole("Saving is not available in this game");
+            return;
+        }
+
         if (endGameChartVisible() && gameParameters.campaign)
         {
             saveBetweenMissions(name);

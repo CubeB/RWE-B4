@@ -53,7 +53,7 @@ namespace rwe
     bool GameScene::localHumanCommandsAreFedPerTick() const
     {
         return !replayPlayback
-            && !gameNetworkService->hasRemotePeers()
+            && (isOwnClock() || !gameNetworkService->hasRemotePeers())
             && simulation.getPlayer(localPlayerId).type == GamePlayerType::Human;
     }
 
@@ -79,7 +79,9 @@ namespace rwe
     void GameScene::updatePeerLiveness()
     {
         // A recording has no peers; its every player is fed from the file.
-        if (replayPlayback)
+        // Nor does an own-clock game wait on anyone, so there is no liveness
+        // to track and nobody to drop; its peer is not an RWE lockstep peer.
+        if (replayPlayback || isOwnClock())
         {
             return;
         }
@@ -196,9 +198,9 @@ namespace rwe
 
     void GameScene::updateEffectiveSpeed()
     {
-        // A lone player, or a recording, runs at the speed that was chosen:
-        // there is no other machine to slow down for.
-        if (replayPlayback || !gameNetworkService->hasRemotePeers())
+        // A lone player, a recording, or an own-clock game runs at the speed
+        // that was chosen: there is no lockstep peer to slow down for.
+        if (replayPlayback || isOwnClock() || !gameNetworkService->hasRemotePeers())
         {
             effectiveSpeedPermille = static_cast<unsigned int>(gameSpeed.perMille());
             limitingPeers.clear();

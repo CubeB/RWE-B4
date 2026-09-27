@@ -24,6 +24,7 @@
 #include <rwe/GlobalConfig.h>
 #include <rwe/PathMapping.h>
 #include <rwe/game/ScenarioDriver.h>
+#include <rwe/sim/SimVector.h>
 #include <rwe/util.h>
 #include <rwe/util/CrashHandler.h>
 #include <rwe/util/OpaqueArgs.h>
@@ -78,6 +79,17 @@ namespace
         return paths;
     }
 
+    /**
+     * Whether a scenario runs in the own-clock game mode (#429). The mode is
+     * chosen before the scene exists and a step runs only once it does, so a
+     * scenario names itself here rather than switching mode from inside a
+     * step. Every scenario not named is an ordinary lockstep game.
+     */
+    bool scenarioRunsOwnClock(const std::string& name)
+    {
+        return name == "own-clock-ticks-and-orders";
+    }
+
     void registerScenarios()
     {
         // The active BUILD/ORDERS tab has to stay pressed across the panel
@@ -124,6 +136,65 @@ namespace
                 d.require(d.selectedCount() == 1, "the placed unit is still selected");
             });
         });
+
+        // The own-clock game mode (#429): a live game whose scene advances on
+        // its own clock like a skirmish, with no lockstep command gate, no
+        // hash exchange, no desync report and no save, for playing against a
+        // peer that runs its own simulation and waits for nobody. With no
+        // peer it has to behave exactly like a skirmish: the clock advances
+        // at the chosen speed and the local player's own orders run.
+        rwe::registerScenario("own-clock-ticks-and-orders", [](rwe::Scenario& s) {
+            struct State
+            {
+                std::optional<rwe::UnitId> commander;
+                rwe::SimVector start;
+            };
+            auto state = std::make_shared<State>();
+
+            s.at(1, [state](rwe::ScenarioDriver& d) {
+                state->commander = d.commander(0);
+                d.require(state->commander.has_value(), "the local player has a commander");
+                if (!state->commander)
+                {
+                    return;
+                }
+                auto position = d.unitPosition(*state->commander);
+                d.require(position.has_value(), "the commander has a position");
+                if (!position)
+                {
+                    return;
+                }
+                state->start = *position;
+                d.moveOrder(
+                    *state->commander,
+                    rwe::SimVector(state->start.x + rwe::SimScalar(300.0f), state->start.y, state->start.z));
+            });
+
+            // The headless loop hands the scene exactly one tick's worth a
+            // frame, so at the default speed this fires on about the
+            // thirty-second frame. Then the peer asks for twice the speed and
+            // the same ticks have to arrive in about half the frames.
+            s.at(31, [](rwe::ScenarioDriver& d) {
+                d.require(d.frameCount() <= 35, "at the default speed the clock advances a tick a frame");
+                d.peerGameSpeed(20);
+            });
+
+            s.at(91, [state](rwe::ScenarioDriver& d) {
+                d.require(d.frameCount() <= 75, "at twice the speed the clock advances about two ticks a frame");
+                if (!state->commander)
+                {
+                    return;
+                }
+                auto position = d.unitPosition(*state->commander);
+                d.require(position.has_value(), "the commander is still on the map");
+                if (position)
+                {
+                    auto moved = (position->x != state->start.x) || (position->z != state->start.z);
+                    d.require(moved, "the local player's move order ran");
+                }
+            });
+            s.endAt(91);
+        });
     }
 
     /** Runs one scenario and says whether it passed. */
@@ -136,6 +207,11 @@ namespace
     {
         rwe::GameParameters parameters(mapName, 0);
         parameters.localNetworkPort = "0";
+
+        if (scenarioRunsOwnClock(name))
+        {
+            parameters.netMode = rwe::NetMode::OwnClock;
+        }
 
         // One local human, so the input path is exactly a player's: the click
         // goes into localPlayerCommandBuffer and out as an ordinary command in

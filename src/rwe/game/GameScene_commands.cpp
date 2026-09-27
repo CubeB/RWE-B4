@@ -2955,8 +2955,10 @@ namespace rwe
             },
             [&](const PlayerSetGameSpeedCommand& c) {
                 // Host-authoritative: only honor speed changes from player 0.
-                // Non-host requests are silently dropped.
-                if (issuingPlayer == PlayerId(0))
+                // Non-host requests are silently dropped. An own-clock game
+                // has no host and no peer to keep in step with, so the local
+                // player changes speed as in a skirmish.
+                if (issuingPlayer == PlayerId(0) || (isOwnClock() && issuingPlayer == localPlayerId))
                 {
                     gameSpeed = GameSpeed(c.speedIndex);
                 }

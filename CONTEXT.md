@@ -281,6 +281,15 @@ chosen by tick, so each unit is described once a cycle. The receiver believes
 it over anything it had, so a record for an empty slot deletes the unit there.
 _Avoid_: snapshot, keyframe
 
+**Own-clock**:
+A live game whose scene advances on its own clock at the chosen speed like a
+skirmish, with no lockstep command gate or wait on any peer, no sync-hash
+exchange, no desync report and no save. The mode for playing against a peer
+that runs its own simulation -- a real `TotalA.exe`, which is
+owner-authoritative rather than lockstep -- selected by
+`GameParameters::netMode`. `docs/TA-NETWORK.md`.
+_Avoid_: real-time (the frame clock is real-time too), non-lockstep, async
+
 ### The instruments
 
 **Harness**:
