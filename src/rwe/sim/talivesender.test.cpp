@@ -615,6 +615,43 @@ namespace rwe
         REQUIRE(game.sim.taLiveSender->stats().unitsRefused == 0);
     }
 
+    TEST_CASE("a unit captured from the peer is described from the next full-state record on", "[talive]")
+    {
+        LiveGame game(2);
+        game.attach();
+        game.spawn("TANK", game.local, SimVector(0_ss, 0_ss, 0_ss));
+        auto theirs = game.spawn("VICTIM", game.remote, SimVector(300_ss, 0_ss, 300_ss));
+
+        auto before = game.runAndTake(2);
+        for (const auto& state : unitStatesOf(before, game.layout()))
+        {
+            REQUIRE(state.sync);
+            auto describedOurs = state.sync->typeIndex == 0u || state.sync->index == 0u;
+            REQUIRE(describedOurs);
+        }
+
+        game.sim.getUnitState(theirs).owner = game.local;
+        game.sim.taLiveSender->unitCaptured(game.sim, theirs, game.local);
+
+        // No 0x09: a capture is not a nanoframe, and no cause-4 death either --
+        // the old id was never ours to kill. It takes the slot the freed one
+        // left, and from then on the round robin describes it.
+        auto after = game.runAndTake(2);
+        REQUIRE(subPacketsOf(after, TadSubPacketCode::UnitBuildStarted).empty());
+        REQUIRE(subPacketsOf(after, TadSubPacketCode::UnitKilled).empty());
+
+        std::map<uint16_t, unsigned int> described;
+        for (const auto& state : unitStatesOf(after, game.layout()))
+        {
+            REQUIRE(state.sync);
+            if (state.sync->typeIndex != 0)
+            {
+                described[state.sync->index] += 1;
+            }
+        }
+        REQUIRE(described.size() == 2);
+    }
+
     TEST_CASE("the sender's batches drive a puppet driver in a second simulation", "[talive]")
     {
         LiveGame game;

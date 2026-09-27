@@ -380,12 +380,12 @@ namespace rwe
                 static_cast<uint8_t>(((cause & 0xfu) << 4) | (corpseLevel & 0xfu))}));
         }
 
-        TaWireRefusal unitCaptured(UnitId unit, PlayerId newOwner)
+        TaWireRefusal unitCaptured(const GameSimulation& simulation, UnitId unit, PlayerId newOwner)
         {
             auto recordIt = records.find(unit);
             if (recordIt == records.end())
             {
-                return TaWireRefusal::None;
+                return describe(simulation, unit, newOwner);
             }
 
             auto previousOwner = recordIt->second.owner;
@@ -426,6 +426,38 @@ namespace rwe
 
             recordIt->second.owner = newOwner;
             recordIt->second.moverSent = false;
+            return TaWireRefusal::None;
+        }
+
+        /** Seats a unit this tape had no record of in `owner`'s block, as a creation would. */
+        TaWireRefusal describe(const GameSimulation& simulation, UnitId unit, PlayerId owner)
+        {
+            if (!describes(owner))
+            {
+                return TaWireRefusal::None;
+            }
+
+            auto unitRef = simulation.tryGetUnitState(unit);
+            if (!unitRef)
+            {
+                return TaWireRefusal::None;
+            }
+
+            auto typeIt = typeIndexOfName.find(unitRef->get().unitType);
+            if (typeIt == typeIndexOfName.end())
+            {
+                return TaWireRefusal::UnknownType;
+            }
+
+            if (!ids.allocate(owner, unit))
+            {
+                return TaWireRefusal::BlockFull;
+            }
+
+            UnitRecord record;
+            record.owner = owner;
+            record.typeIndex = typeIt->second;
+            records.emplace(unit, std::move(record));
             return TaWireRefusal::None;
         }
 
@@ -823,9 +855,9 @@ namespace rwe
         impl->unitDied(unit, killer, severity, cause, corpseLevel);
     }
 
-    TaWireRefusal TaWireTape::unitCaptured(UnitId unit, PlayerId newOwner)
+    TaWireRefusal TaWireTape::unitCaptured(const GameSimulation& simulation, UnitId unit, PlayerId newOwner)
     {
-        return impl->unitCaptured(unit, newOwner);
+        return impl->unitCaptured(simulation, unit, newOwner);
     }
 
     TaTickRecords TaWireTape::endOfTick(const GameSimulation& simulation, PlayerId player)

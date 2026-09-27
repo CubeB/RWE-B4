@@ -51,9 +51,9 @@ namespace rwe
             tape.shotFired(shooter, weaponSlot, targetUnit, origin, aimPoint, direction);
         }
 
-        void unitCaptured(UnitId unit, PlayerId newOwner)
+        void unitCaptured(const GameSimulation& simulation, UnitId unit, PlayerId newOwner)
         {
-            if (tape.unitCaptured(unit, newOwner) != TaWireRefusal::None)
+            if (tape.unitCaptured(simulation, unit, newOwner) != TaWireRefusal::None)
             {
                 ++stats.unitsRefused;
             }
@@ -223,9 +223,9 @@ namespace rwe
         impl->shotFired(shooter, weaponSlot, targetUnit, origin, aimPoint, direction);
     }
 
-    void TaLiveSender::unitCaptured(const GameSimulation& /*simulation*/, UnitId unit, PlayerId newOwner)
+    void TaLiveSender::unitCaptured(const GameSimulation& simulation, UnitId unit, PlayerId newOwner)
     {
-        impl->unitCaptured(unit, newOwner);
+        impl->unitCaptured(simulation, unit, newOwner);
     }
 
     void TaLiveSender::endOfTick(const GameSimulation& simulation)

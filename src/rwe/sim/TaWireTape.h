@@ -167,9 +167,14 @@ namespace rwe
          * destroy-and-replace: a cause-4 death for the old id, and a fresh id
          * in the new owner's block if this tape describes that owner.
          *
+         * A unit this tape never described and now describes is a capture of
+         * somebody else's, and arrives the way a creation does -- with no
+         * 0x09, because a capture is not a nanoframe, so the next 0x2c is the
+         * only record that will carry its type.
+         *
          * Returns a refusal where the new block cannot seat the unit.
          */
-        TaWireRefusal unitCaptured(UnitId unit, PlayerId newOwner);
+        TaWireRefusal unitCaptured(const GameSimulation& simulation, UnitId unit, PlayerId newOwner);
 
         /**
          * Ends one sender's tick: the 0x12s whose frames completed, the 0x2c

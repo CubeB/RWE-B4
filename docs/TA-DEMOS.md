@@ -130,6 +130,33 @@ What is a recorded divergence (ADR-0001):
 Recording never reaches back into the simulation: nothing the recorder holds
 is hashed or saved, and no wall-clock or frame-rate value crosses the divide.
 
+### The same bytes, sent live (#427)
+
+Writing a file is one way to get this stream out of the simulation and playing
+against the original is another, so the encoding is not the recorder's: it is
+`TaWireTape`, and the recorder and the **live sender** (`TaLiveSender`) are two
+observers over one of it. Everything above about the payloads and their order
+applies to both, which is the point of sharing the code rather than having two
+that can disagree.
+
+The differences are the ones the transport imposes. A tape either watches a
+whole game -- a demo is a wire tap of every sender -- or one machine's own
+player, and the live sender is the second. A demo is written as a file with a
+header and a packet per sender per tick; a live sender yields one tick's
+subpackets at a time and leaves the framing to the network layer, which puts
+six of them in a UDP message. The `0x19` and the container are a file's
+business and are not sent. The damage and deaths of a game with a peer in it
+arrive through the mixed-ownership outbox rather than from the recorder's hooks,
+because a `0x0b` is about a unit this machine does not simulate and the
+recorder has no such unit to hear about.
+
+One record needs something the recorder never had to think about: a `0x0b`
+against a TA unit, or a `0x0c` crediting a TA killer, must name a unit in the
+**peer's** owner block, and that block's allocation is the peer's to say.
+`TaPeerIds` is how the network layer supplies it, and a record that cannot be
+named is counted and dropped rather than written with a zero -- which the peer
+reads as no unit at all.
+
 ### Read back by an independent reader (#224, 2026-09-25)
 
 Every check above goes through RWE's own reader, and a writer agreeing with

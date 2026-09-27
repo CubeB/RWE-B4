@@ -214,7 +214,7 @@ The estimate made before the spike, revised by what it found:
 | 2. TA framing | ~1 | < 0.5 | Already in `src/rwe/io/tad/`; only the DirectPlay envelope is new. |
 | 3. Battleroom and launch | 4–8 | 3–5 | Unit sync by echo removes D7 for hosting, and the options byte and team are read. Building a status `0x20` from fields rather than a recording is still to do (TA-DEMOS D8). |
 | 4. Owned and remote units in the sim | 8–12 | 8–12 | Untouched by the spike, and still the largest part. |
-| 5. Sending | 3–5 | 2–4 | The mandatory set is small and the `0x2c` codec exists; `0x10` is still needed for remote players to see animation. |
+| 5. Sending | 3–5 | 2–4 | The mandatory set is small and the `0x2c` codec exists; `0x10` is still needed for remote players to see animation. The sim-side sender is #427: it yields each tick's subpackets and leaves the framing to the network layer. |
 | 6. Receiving | 5–8 | 5–8 | Decoders exist; applying them is the work. |
 | 7. Hardening | 4–6 | 4–6 | |
 | **Total** | **28–47** | **24–39** | |

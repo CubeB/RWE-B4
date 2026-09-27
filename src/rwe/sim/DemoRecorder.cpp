@@ -337,9 +337,9 @@ namespace rwe
             tape.unitDied(unit, killer, severity, cause, corpseLevel);
         }
 
-        void unitCaptured(UnitId unit, PlayerId newOwner)
+        void unitCaptured(const GameSimulation& simulation, UnitId unit, PlayerId newOwner)
         {
-            if (auto refusal = tape.unitCaptured(unit, newOwner); refusal != TaWireRefusal::None)
+            if (auto refusal = tape.unitCaptured(simulation, unit, newOwner); refusal != TaWireRefusal::None)
             {
                 throw std::runtime_error(
                     "DemoRecorder: player " + std::to_string(newOwner.value) + "'s unit block is full (maxUnits="
@@ -457,9 +457,9 @@ namespace rwe
         impl->unitDied(unit, killer, severity, cause, corpseLevel);
     }
 
-    void DemoRecorder::unitCaptured(const GameSimulation& /*simulation*/, UnitId unit, PlayerId newOwner)
+    void DemoRecorder::unitCaptured(const GameSimulation& simulation, UnitId unit, PlayerId newOwner)
     {
-        impl->unitCaptured(unit, newOwner);
+        impl->unitCaptured(simulation, unit, newOwner);
     }
 
     void DemoRecorder::endOfTick(const GameSimulation& simulation)
