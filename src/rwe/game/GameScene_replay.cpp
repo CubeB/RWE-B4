@@ -459,7 +459,16 @@ namespace rwe
         // exactly the right tick.
         finishRejoinIfCaughtUp();
 
-        if (replayPlayback)
+        if (tadPlayback)
+        {
+            // A demo is state and effects, not commands, so there is no set to
+            // push: the driver writes this tick's records straight onto the
+            // units and the tick below runs them. The scene owns the clock, so
+            // the speed control and pause act on playback exactly as they do
+            // for a replay.
+            applyTadTick();
+        }
+        else if (replayPlayback)
         {
             // Before the tick's commands go in, so the keyframe is the state
             // after the previous tick and nothing else -- restoring it and
@@ -530,26 +539,36 @@ namespace rwe
             throw std::runtime_error(description);
         }
 
-        auto playerCommands = playerCommandService->tryPopCommands();
-        if (!playerCommands)
+        std::optional<std::vector<std::pair<PlayerId, std::vector<PlayerCommand>>>> playerCommands;
+        if (tadPlayback)
         {
-            lastTickAttemptBlocked = true;
-            lockstepStats.tickBlocked(getTimestamp(), playerCommandService->playersNotReady());
-
-            // Said once a stall rather than once a frame. It used to be every
-            // frame, which at sixty a second buried the log of a game that had
-            // lost a peer under the one thing that log was needed for.
-            if (!waitingForPlayers.empty() && !stallReported)
+            // A demo has no command stream and no peer to wait for: the driver
+            // already wrote this tick's records above, so the tick runs.
+            playerCommands.emplace();
+        }
+        else
+        {
+            playerCommands = playerCommandService->tryPopCommands();
+            if (!playerCommands)
             {
-                stallReported = true;
-                std::string names;
-                for (const auto& playerId : waitingForPlayers)
+                lastTickAttemptBlocked = true;
+                lockstepStats.tickBlocked(getTimestamp(), playerCommandService->playersNotReady());
+
+                // Said once a stall rather than once a frame. It used to be every
+                // frame, which at sixty a second buried the log of a game that had
+                // lost a peer under the one thing that log was needed for.
+                if (!waitingForPlayers.empty() && !stallReported)
                 {
-                    names += (names.empty() ? "" : ", ") + playerDisplayName(playerId);
+                    stallReported = true;
+                    std::string names;
+                    for (const auto& playerId : waitingForPlayers)
+                    {
+                        names += (names.empty() ? "" : ", ") + playerDisplayName(playerId);
+                    }
+                    LOG_WARN << "Tick " << sceneTime.value << " is waiting for " << names;
                 }
-                LOG_WARN << "Tick " << sceneTime.value << " is waiting for " << names;
+                return;
             }
-            return;
         }
         stallReported = false;
         lastTickAttemptBlocked = false;
@@ -648,10 +667,10 @@ namespace rwe
         // than anything around it. Periodic keyframes are the fix for that.
         // The RWE_HASH_LOG and RWE_STATE_DUMP switches themselves live in
         // SimDiagnostics, shared with the headless arena.
-        if (!replayPlayback || diagnostics.hashLogEnabled())
+        if (!isPlayback() || diagnostics.hashLogEnabled())
         {
             auto gameHash = diagnostics.record(simulation, sceneTime.value);
-            if (!replayPlayback)
+            if (!isPlayback())
             {
                 playerCommandService->pushHash(localPlayerId, gameHash);
                 gameNetworkService->submitGameHash(gameHash);

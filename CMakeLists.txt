@@ -353,6 +353,7 @@ set(SOURCE_FILES
     src/rwe/game/GameEndedReport.h
     src/rwe/game/GameScene_rejoin.cpp
     src/rwe/game/GameScene_replay.cpp
+    src/rwe/game/GameScene_tad.cpp
     src/rwe/game/GameScene_util.cpp
     src/rwe/game/featureplacement.cpp
     src/rwe/game/GameScene_util.h
@@ -556,6 +557,12 @@ set(SOURCE_FILES
     src/rwe/pathfinding/UnitPerimeterPathFinder.h
     src/rwe/pathfinding/pathfinding_utils.cpp
     src/rwe/pathfinding/pathfinding_utils.h
+    src/rwe/puppet/TadDemo.cpp
+    src/rwe/puppet/TadDemo.h
+    src/rwe/puppet/TadPuppetDriver.cpp
+    src/rwe/puppet/TadPuppetDriver.h
+    src/rwe/puppet/TadScenePlayback.cpp
+    src/rwe/puppet/TadScenePlayback.h
     src/rwe/proto/serialization.cpp
     src/rwe/proto/serialization.h
     src/rwe/render/FogTiles.cpp
@@ -635,6 +642,8 @@ set(SOURCE_FILES
     src/rwe/sim/Metal.h
     src/rwe/sim/MovementClassCollisionService.cpp
     src/rwe/sim/SimRandom.h
+    src/rwe/sim/SimulationOwnership.cpp
+    src/rwe/sim/SimulationOwnership.h
     src/rwe/sim/MovementClassCollisionService.h
     src/rwe/sim/MovementClassDatabase.cpp
     src/rwe/sim/MovementClassDatabase.h
@@ -1054,6 +1063,8 @@ set(TEST_FILES
     src/rwe/io/tad/tad_writer.test.cpp
     src/rwe/io/pcx/pcx.test.cpp
     src/rwe/io/malformed_input.test.cpp
+    src/rwe/puppet/TadDemo.test.cpp
+    src/rwe/puppet/TadPuppetDriver.test.cpp
     src/rwe/scene/SceneManager.test.cpp
     src/rwe/scene/Screenshot.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp
@@ -1129,6 +1140,7 @@ set(TEST_FILES
     src/rwe/sim/nanonozzle.test.cpp
     src/rwe/sim/builderfacing.test.cpp
     src/rwe/sim/reclaimreach.test.cpp
+    src/rwe/sim/remoteownership.test.cpp
     src/rwe/sim/fogplacement.test.cpp
     src/rwe/sim/gunship.test.cpp
     src/rwe/sim/aircraftidle.test.cpp
@@ -1248,6 +1260,9 @@ target_link_libraries(ta_host_probe librwe)
 
 add_executable(tad_episodes src/tad_episodes.cpp)
 target_link_libraries(tad_episodes librwe)
+
+add_executable(tad_puppet src/tad_puppet.cpp)
+target_link_libraries(tad_puppet librwe)
 
 add_executable(battle_test src/battle_test.cpp)
 target_link_libraries(battle_test librwe)

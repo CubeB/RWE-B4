@@ -213,6 +213,15 @@ namespace rwe
         std::optional<std::string> replayFile;
 
         /**
+         * Spectate this TA demo (`rwe --tad`). The demo is state and effects,
+         * not orders, so it cannot be replayed: every player becomes Remote and
+         * a puppet driver drives their units straight from the stream. This
+         * machine owns nobody, so there is no local player to decide for; the
+         * first seat is only where the loader hangs the camera and interface.
+         */
+        std::optional<std::string> tadDemoFile;
+
+        /**
          * With replayFile: keep the computer players thinking instead of
          * idling them, so their decisions reach the event log. Whoever runs
          * the replay must then take and discard their commands every tick,

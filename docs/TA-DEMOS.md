@@ -469,7 +469,15 @@ It is the index TA's FBI loader assigns each unit type and stores at
 
 `tadUnitLoadOrder` in `src/rwe/io/tad/tad_events.h` is that rule, and
 `tad_episodes --units <dir>` applies it. The mod files stay out of the
-repository: `--units` takes a path.
+repository: `--units` takes a path. RWE loads ProTA 4.8 directly: its six
+`MAKENUKE`/`MAKEANTI` pseudo-units carry no `SoundCategory`, and a corpse
+chain can name a feature no TDF in the merged directory defines, both of
+which used to stop the load; the first is now read as silent and the second
+as no wreck. Mount the mod first (`--data-path <mod> --data-path <base TA>`):
+the first path wins where both define a file. The merged listing presents seven
+of ProTA's units twice, in base TA's mixed case and ProTA's capitals, and the
+load order counts each name once, as TA's case-insensitive file system does, so
+it numbers the mod's 317.
 
 Three things had to be got right at once, which is why plain alphabetical
 "scores better than chance but is not it" was as far as the previous pass got.
@@ -2431,12 +2439,149 @@ over loopback, which is a thing RWE structurally cannot do. Three tiers of
    coupling. This is what the archive site does.
 2. **Puppet playback.** A spectator scene that loads the map, spawns units
    and drives them straight from the packet stream with the simulation
-   switched off. Gated on decoding `0x2c`, which nobody has published;
-   further gated on mapping demo unit ids through the `0x1a` table onto RWE
-   unit types, and inherently holed by fog of war, since the recording peer
-   only saw what was sent to it.
+   switched off. It exists now (`rwe --tad`, below): `0x2c` is decoded bit for
+   bit, demo unit ids map through the `0x1a` table onto RWE unit types, and the
+   scene is inherently holed by fog of war, since the recording peer only saw
+   what was sent to it.
 3. **Re-simulate from inferred inputs.** Not achievable, and not for want of
    effort -- see below.
+
+## Tier 2: the puppet driver
+
+Tier 2 exists now, headless. `TadPuppetDriver` (`src/rwe/puppet/`) owns a
+`GameSimulation&` whose demo players are all marked simulated elsewhere, so no
+local decision, damage or economy contends with the recorded ones, and consumes
+a demo's packets in order. It keeps its own table mapping TA unit ids onto RWE
+`UnitId`s and never puts that in sim state; a sender's owner block is learned
+from that sender's own `0x09`, because the block is not the player number and
+the `0x2c`'s index is relative to it. It spawns a nanoframe on `0x09`, finishes
+it on `0x12`, applies `0x0b` damage through the remote-damage path (which never
+kills -- only the owner's `0x0c` does), and kills on `0x0c` leaving the corpse
+the recorded cause and level call for rather than the one the local `Killed`
+script would pick. A unit first seen in a `0x2c` spawns complete at the recorded
+position. Every id, index, block and type index is bounds-checked before it is
+used; a record naming none of them is dropped and counted.
+
+The clock is the `0x2c` serial, never `Packet::time`, and a record with no
+serial of its own (`0x09`, `0x0c`, ...) takes the tick of its sender's current
+serial. Between records a ground unit follows the up-to-three replicated
+waypoints with RWE's own `UnitBehaviorService::updateRemote` -- no path search,
+and a step is never refused by a stale peer footprint -- and an aircraft is
+steered toward its recorded goal. At each full-state record the driver first
+measures the horizontal distance from the puppet to the recorded position and
+then snaps position, rotation, health and build progress to it. Buildings are
+not repositioned by a record: a building does not move, and moving it would
+leave its occupied cells behind.
+
+**A puppet is placed where its owner put it.** The owner already resolved
+placement, so a factory's build pad or a peer's stale footprint must not refuse
+the unit: the driver clears the blocking occupied cells and lets the new unit
+claim them through the ordinary spawn, clearing a wreck only after a first
+attempt without one. Before this, a factory-built unit was refused by the
+factory's own blocking cells -- the factory's yard is never opened by the build
+script, because a puppet does not run one -- and 61,980 spawns on the ProTA
+corpus were refused. A unit is named by the global id its slot stands for as
+soon as its sender's block is known, which is usually at its first `0x2c`
+update, so damage and death records for a unit that has not yet had its
+full-state turn are not read as unknown.
+
+`tad_puppet` plays a file or a directory headlessly (map from the header, no
+SDL or GL) and reports the counts and the drift distribution. It refuses
+cleanly when the map or the unit table does not match the loaded data, and
+`--dir` exits non-zero if any demo fails.
+
+The drift measured at each full-state record, in world units, on the two
+corpora:
+
+| corpus | | n | median | p90 | max | within 32 | within 128 |
+|---|---|---|---|---|---|---|---|
+| RWE `arm-core-600` (vanilla) | ground | 638 | 0 | 1.46 | 53 | 99.7% | 100% |
+| RWE `arm-core-1800` (vanilla) | ground | 4824 | 0 | 7.28 | 2258 | 97.5% | 99.5% |
+| | air | 93 | 54 | 1657 | 2838 | 48.4% | 53.8% |
+| ProTA 4.8, 39 demos | ground | 788901 | 0 | 32.8 | 5703 | 89.5% | 98.3% |
+| | air | 94157 | 39 | 298 | 14852 | 46.8% | 72.7% |
+
+Ground dead reckoning is good: the median is zero, most records are within a
+tile or two, and the ProTA tail is the price of a real game's interruptions --
+a unit carried and dropped, a path update the sender never resent because its
+navigator's dirty bit did not move again. Aircraft are coarser, and for reasons
+that are not a bug left in: an aircraft's entry is a *goal*, not a position, so
+the record the drift is measured against is where the aircraft is while the
+stream only ever said where it was going; a moving goal's velocity is
+integrated now (the original's resolver at `0x44EA60` adds it every tick) but
+there are only 2,366 moving goals against 4.4M move goals over the ProTA
+corpus, and 3.0M entries carry no goal at all; and RWE's flight model -- turn
+rate, the arrival profile, the altitude discipline -- is its own, so a goal
+reached by a different curve is drift even when the destination is right. The
+RWE recordings look worse on air only because the recorder writes no goal
+position yet: its air mover is always the empty kind, so a recorded aircraft
+has nowhere to fly and the 54-unit median is the sync correction alone. Air
+drift was 124 median before aircraft were given air physics at all -- a unit's
+physics defaults to the ground variant, so every puppet aircraft was a ground
+unit that never moved -- and `makeAirborne` now performs the ground-to-air
+transition the remote path does not run.
+
+**Why `finished` exceeds `spawned`.** `spawned` counts the `0x09`s, and a
+`0x12` is counted whenever a live puppet is finished. A unit that existed
+before recording began is first seen in a full-state record and spawned
+complete, with no `0x09` behind it, so its `0x12` -- and a factory product's
+`0x12` for a frame whose `0x09` was already counted -- both land in `finished`.
+On ProTA: 33,139 `0x09` spawns against 51,380 finishes, 29,429 deaths.
+
+The counts on ProTA, before and after the placement fix:
+
+| | before | after |
+|---|---|---|
+| spawned | 11,651 | 33,139 |
+| refused spawn | 61,980 | 0 |
+| unplaced | 821 | 0 |
+| unknown unit | 86,040 | 20,360 |
+| killed | 26,707 | 29,429 |
+
+The 20,360 remaining unknown records are damage (20,331 of them) and deaths
+for a slot the stream never showed at all -- a straggler after the unit died,
+or a unit that died before its first full-state turn. They are counted and
+dropped, never indexed with.
+
+**`rwe --tad <file>` watches one.** It loads the map the header names through
+the ordinary loading path with every demo player a Remote seat and nobody on
+this machine owning one, so no local decision, peer-liveness check or sync hash
+runs: the scene hands the driver the next tick's records and ticks the
+simulation as usual, and the replay viewer's play/pause and speed controls act
+on it. A Demo window reports the counts. The driver is free of SDL, GL and
+`GameScene`, so `tad_puppet` and the scene use the same one.
+
+The rest of the stream is consumed too. `0x0d` spawns the shooter's own weapon
+round from the recorded origin toward the target for display only; it takes no
+health off anything, because every demo player is Remote and damage comes only
+from `0x0b` -- checked for area damage and features as well. `0x10` runs the
+named script on the puppet's own COB environment, so animations, activation and
+build arms show. `0x28` writes the sender's stored and storage metal and energy
+onto its player for the resource bar. `0x05` and `0xf9` print as chat. `0x19`
+sets the playback speed from its high byte (256 is normal); a zero level is
+left alone, because the corpus has lone zeros in demos that plainly run on, so
+the value cannot be read as a pause.
+
+**What tier 2 still leaves out.** `0x0f` feature actions are sized but not
+decoded, so a feature the recording changed is not shown; the payload is not
+guessed at. A recorded pause has no unambiguous encoding in the corpus and is
+not applied. Fog of war is inherent and unsolvable from the stream: the
+recording peer only saw what was sent to it, and a unit the stream never placed
+is shown nowhere rather than in an invented place.
+
+**A coordinate correction this work found.** RWE's world is centred on the
+origin and TA's starts at the map's top left. The recorder had been writing
+RWE's centred coordinates as if they were TA's, so every real demo placed its
+units half a map away and `trySpawnUnit` refused them; the recorder now adds
+the half-extents and the driver takes them off again, and the RWE demo corpus
+was re-recorded. A mod's death weapon name is also taken in the case the
+weapon map uses, because the original hashes weapon names case-insensitively.
+The reference scorers are unaffected: `tad-buildtime.py` and
+`tad-storagecapacity.py` read no positions, and `tad-weapontime.py` reads only
+differences of them, which the shift cancels. `tools/demo-selfcheck.py` on a
+fresh RWE recording reports the same build-timing and storage-capacity failures
+with the old writer as with the new -- both pre-existing model disagreements,
+not coordinate ones.
 
 ## Demos as a conformance corpus
 

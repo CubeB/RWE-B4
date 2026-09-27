@@ -588,7 +588,7 @@ namespace rwe
             // manages rather than at the rate the clock ticks.
             millisecondsBuffer = static_cast<unsigned int>(SimMillisecondsPerTick) * 2001u;
         }
-        else if (replayPlayback)
+        else if (isPlayback())
         {
             // Speed is a whole multiple of real time and multiplies the
             // elapsed time rather than the game speed, so that one second of
@@ -887,8 +887,9 @@ namespace rwe
 
         // Watching a recording: every command for every player comes out of
         // the file, one set per player per tick, pushed in tryTickGame where
-        // the tick number is known. Nothing below here may push as well.
-        if (!replayPlayback)
+        // the tick number is known. Nothing below here may push as well. A
+        // demo is the same story with no commands at all.
+        if (!isPlayback())
         {
 
         // In an AI arena there is no human at all and the local player is
@@ -972,7 +973,7 @@ namespace rwe
         // else is at, and skips ticks to stay level with them. There is
         // nobody else in a replay, and letting it skip would end the playback
         // at a different game time than the recording did.
-        auto averageSceneTime = replayPlayback ? sceneTime : gameNetworkService->estimateAvergeSceneTime(sceneTime);
+        auto averageSceneTime = isPlayback() ? sceneTime : gameNetworkService->estimateAvergeSceneTime(sceneTime);
 
         // Cap the number of sim ticks we dispatch per frame to prevent
         // a runaway "spiral of death" if frame times spike at high speeds.
@@ -986,7 +987,7 @@ namespace rwe
         // enough that the window still answers between them.
         const int maxTicksPerFrame = replaySeekTarget
             ? 2000
-            : (replayPlayback ? 10 * std::max(replaySpeed, 1) : 10);
+            : (isPlayback() ? 10 * std::max(replaySpeed, 1) : 10);
         FrameScheduler scheduler(static_cast<unsigned int>(millisecondsBuffer), averageSceneTime, sceneTime, maxTicksPerFrame);
         // Fast playback is bounded by the clock as well as by the count. At
         // 64x a frame asks for thirty-odd ticks, and if those take longer
@@ -995,7 +996,7 @@ namespace rwe
         // Past the budget the rest of the backlog is dropped: the replay
         // plays as fast as the machine can run it and the window stays live.
         const auto frameTickingStarted = std::chrono::steady_clock::now();
-        const bool clockBounded = replayPlayback && !replaySeekTarget;
+        const bool clockBounded = isPlayback() && !replaySeekTarget;
         while (scheduler.hasWork())
         {
             if (clockBounded && scheduler.ticksThisFrame() > 0
@@ -1063,13 +1064,13 @@ namespace rwe
         // Not for a peer winding itself forward: its recording running out is
         // the moment it goes live, not the end of anything, and a bundle is
         // cut to end exactly there. Pausing would be a game that never starts.
-        if (replayPlayback && !replaySeekTarget && !replayReachedEnd && !rejoiningAtTick
-            && sceneTime.value >= replayPlayback->lastTick)
+        if (isPlayback() && !replaySeekTarget && !replayReachedEnd && !rejoiningAtTick
+            && sceneTime.value >= playbackLastTick())
         {
             replayReachedEnd = true;
             replayPlaying = false;
             millisecondsBuffer = 0;
-            LOG_INFO << "Replay: reached the end at tick " << sceneTime.value;
+            LOG_INFO << "Playback: reached the end at tick " << sceneTime.value;
         }
 
         // A launcher's magazine fills without anybody ordering anything, so its
@@ -1085,6 +1086,7 @@ namespace rwe
         refreshBuildGuiTotals();
 
         renderReplayWindow();
+        renderTadWindow();
         renderDebugWindow();
         logLockstepSummaryIfDue();
         recordNetworkHistory();
