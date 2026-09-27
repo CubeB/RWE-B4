@@ -423,7 +423,7 @@ namespace rwe
         // A super enum players reply with one player whose service-provider
         // length says there is more data than the message holds.
         std::vector<std::uint8_t> payload(28 + 80, 0);
-        payload[24] = 1; // one player
+        payload[0] = 1; // one player, read from offset 0
         payload[16] = 36; // descriptionOffset, from the envelope
         payload[20] = 116; // nameOffset, from the envelope
         payload[8] = 180; // packedOffset, from the envelope
@@ -431,7 +431,7 @@ namespace rwe
         // The player entry starts at payload offset 172: 20 bytes of fixed
         // fields then a one-byte spDataLength. Set infoMask to say the
         // service-provider data is present and claim more than remains.
-        payload.resize(28 + 80 + 21, 0);
+        payload.resize(172 + 21, 0);
         payload[172 + 12] = 0x04; // infoMask: sp data present, one-byte length
         payload[172 + 20] = 0xFF; // spDataLength 255, past the end
         REQUIRE_THROWS_AS(taDecodeSuperEnumPlayersReply(payload), TaDirectPlayException);

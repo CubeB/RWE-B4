@@ -819,6 +819,11 @@ add_definitions(-DASIO_STANDALONE)
 if(WIN32)
     # winsock needed for asio on windows
     target_link_libraries(librwe ws2_32)
+    # ...and mswsock for the IOCP half: AcceptEx and GetAcceptExSockaddrs live
+    # there, not in ws2_32. Nothing needed them until an asio acceptor appeared
+    # (TaHostSession), because every earlier asio use was a plain socket, and
+    # Linux links fine either way since asio uses epoll there.
+    target_link_libraries(librwe mswsock)
     # dbghelp resolves the crash handler's stack frames
     target_link_libraries(librwe dbghelp)
 endif()
