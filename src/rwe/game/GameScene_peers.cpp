@@ -368,7 +368,7 @@ namespace rwe
 
     void GameScene::logLockstepSummary()
     {
-        LOG_INFO << lockstepStats.summary(getTimestamp(), ticksLostToCap, gateSkips).describe();
+        LOG_INFO << lockstepStats.summary(getTimestamp(), ticksLostToCap).describe();
     }
 
     void GameScene::logLockstepSummaryIfDue()

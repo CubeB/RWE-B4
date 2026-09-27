@@ -25,7 +25,6 @@ namespace rwe
         std::chrono::milliseconds totalStalled{0};
         std::chrono::milliseconds longestStall{0};
         unsigned int ticksLostToCap{0};
-        unsigned int gateSkips{0};
 
         /** Ticks a second averaged over the run; zero for a run with no elapsed time. */
         double effectiveTicksPerSecond() const;
@@ -74,7 +73,7 @@ namespace rwe
          * the frame loop knows when the cap dropped a tick the scheduler
          * handed it, or when the drift gate skipped one.
          */
-        LockstepSummary summary(Timestamp now, unsigned int ticksLostToCap, unsigned int gateSkips) const;
+        LockstepSummary summary(Timestamp now, unsigned int ticksLostToCap) const;
 
     private:
         std::optional<Timestamp> firstRan;

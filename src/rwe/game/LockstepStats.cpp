@@ -24,12 +24,11 @@ namespace rwe
             << ", stalls " << stalls
             << " totalling " << totalStalled.count() << " ms"
             << ", longest " << longestStall.count() << " ms"
-            << ", cap-dropped " << ticksLostToCap
-            << ", gate-skips " << gateSkips;
+            << ", cap-dropped " << ticksLostToCap;
         return out.str();
     }
 
-    LockstepSummary LockstepStats::summary(Timestamp now, unsigned int ticksLostToCap, unsigned int gateSkips) const
+    LockstepSummary LockstepStats::summary(Timestamp now, unsigned int ticksLostToCap) const
     {
         LockstepSummary result;
         result.ticks = ticks;
@@ -38,7 +37,6 @@ namespace rwe
         result.totalStalled = stalledSoFar(now);
         result.longestStall = longest;
         result.ticksLostToCap = ticksLostToCap;
-        result.gateSkips = gateSkips;
         return result;
     }
 
