@@ -906,6 +906,8 @@ namespace rwe
             REQUIRE(parsed->options == 0x4F);
             REQUIRE(parsed->colour == 0xFF);
             REQUIRE(parsed->side == (side <= 1 ? static_cast<TadSide>(side) : TadSide::Watch));
+        }
+    }
 
     TEST_CASE("a live receiver refuses a serial it cannot make sense of", "[malformed][puppet]")
     {
