@@ -268,6 +268,37 @@ namespace rwe
         REQUIRE(messages.front().text == "hello there");
     }
 
+    TEST_CASE("PeerLink carries the sender's run state")
+    {
+        FakePeerLink link;
+        link.link(0).submitRunState(500, true, false);
+        link.run(std::chrono::seconds(1));
+
+        REQUIRE(link.link(1).remoteSpeedPermille() == 500);
+        REQUIRE(link.link(1).remotePaused());
+        REQUIRE_FALSE(link.link(1).remoteStalled());
+    }
+
+    TEST_CASE("PeerLink treats an old peer with no run-state fields as 1x and moving")
+    {
+        FakePeerLink link;
+
+        proto::GameUpdateMessage message;
+        message.set_packet_id(0);
+        message.set_player_id(0);
+        message.set_next_command_set_to_send(0);
+        message.set_next_command_set_to_receive(0);
+        message.set_next_game_hash_to_send(0);
+        message.set_next_game_hash_to_receive(0);
+        message.set_next_chat_to_send(0);
+        message.set_next_chat_to_receive(0);
+        link.link(1).onPacket(message, link.now());
+
+        REQUIRE(link.link(1).remoteSpeedPermille() == 1000);
+        REQUIRE_FALSE(link.link(1).remotePaused());
+        REQUIRE_FALSE(link.link(1).remoteStalled());
+    }
+
     TEST_CASE("A submit sends at once and other submits within the rate limit ride in one packet")
     {
         FakePeerLink link;

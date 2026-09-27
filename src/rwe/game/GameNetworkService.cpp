@@ -84,6 +84,16 @@ namespace rwe
         });
     }
 
+    void GameNetworkService::submitRunState(unsigned int speedPermille, bool paused, bool stalled)
+    {
+        asio::post(ioContext, [this, speedPermille, paused, stalled]() {
+            for (auto& e : endpoints)
+            {
+                e.link->submitRunState(speedPermille, paused, stalled);
+            }
+        });
+    }
+
     void GameNetworkService::submitGameHash(GameHash hash)
     {
         asio::post(ioContext, [this, hash]() {
@@ -134,7 +144,17 @@ namespace rwe
         std::promise<unsigned int> result;
         asio::post(ioContext, [this, localSceneTime, &result]() {
             auto time = getTimestamp();
-            auto otherTimes = choose(endpoints, [](const auto& e) { return e.link->lastKnownSceneTime(); });
+            auto otherTimes = choose(endpoints, [](const auto& e) -> std::optional<PeerSceneTimeReport> {
+                auto last = e.link->lastKnownSceneTime();
+                if (!last)
+                {
+                    return std::nullopt;
+                }
+                return PeerSceneTimeReport{
+                    last->first,
+                    last->second,
+                    PeerRunState{e.link->remoteSpeedPermille(), e.link->remotePaused(), e.link->remoteStalled()}};
+            });
 
             auto finalValue = estimateAverageSceneTimeStatic(localSceneTime, otherTimes, time);
             result.set_value(finalValue);

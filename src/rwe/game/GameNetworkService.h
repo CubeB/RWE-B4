@@ -80,6 +80,14 @@ namespace rwe
 
         void submitCommands(SceneTime currentSceneTime, const CommandSet& commands);
 
+        /**
+         * Tell every peer how this one is running: its speed, whether it is
+         * paused, and whether it is stalled waiting on commands. Carried in
+         * every packet, because a remote peer projects this one's scene time
+         * by it.
+         */
+        void submitRunState(unsigned int speedPermille, bool paused, bool stalled);
+
         void submitGameHash(GameHash hash);
 
         /**

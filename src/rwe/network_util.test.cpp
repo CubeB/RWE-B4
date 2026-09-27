@@ -305,40 +305,79 @@ namespace rwe
 
         SECTION("with no peers it is the local scene time alone")
         {
-            std::vector<std::pair<SceneTime, Timestamp>> peers;
+            std::vector<PeerSceneTimeReport> peers;
             REQUIRE(estimateAverageSceneTimeStatic(SceneTime(12), peers, now) == 12u);
         }
 
         SECTION("averages the local time with each peer, truncating")
         {
-            std::vector<std::pair<SceneTime, Timestamp>> peers{
-                {SceneTime(10), now},
-                {SceneTime(20), now}};
+            std::vector<PeerSceneTimeReport> peers{
+                {SceneTime(10), now, {}},
+                {SceneTime(20), now, {}}};
             // (4 + 10 + 20) / 3, truncated.
             REQUIRE(estimateAverageSceneTimeStatic(SceneTime(4), peers, now) == 11u);
         }
 
         SECTION("a peer reporting at now is not projected forward")
         {
-            std::vector<std::pair<SceneTime, Timestamp>> peers{{SceneTime(10), now}};
+            std::vector<PeerSceneTimeReport> peers{{SceneTime(10), now, {}}};
             REQUIRE(estimateAverageSceneTimeStatic(SceneTime(4), peers, now) == 7u);
         }
 
         SECTION("a peer's last time is carried forward before averaging")
         {
             auto earlier = now - std::chrono::milliseconds(100);
-            std::vector<std::pair<SceneTime, Timestamp>> peers{{SceneTime(0), earlier}};
+            std::vector<PeerSceneTimeReport> peers{{SceneTime(0), earlier, {}}};
             auto projected = projectSceneTime(SceneTime(0), 100);
             auto expected = (SceneTime(0).value + projected.value) / 2;
             REQUIRE(estimateAverageSceneTimeStatic(SceneTime(0), peers, now) == expected);
         }
+
+        SECTION("a paused peer's time is not carried forward")
+        {
+            auto earlier = now - std::chrono::milliseconds(100);
+            std::vector<PeerSceneTimeReport> peers{{SceneTime(0), earlier, PeerRunState{1000, true, false}}};
+            REQUIRE(estimateAverageSceneTimeStatic(SceneTime(0), peers, now) == 0u);
+        }
+
+        SECTION("a stalled peer's time is not carried forward")
+        {
+            auto earlier = now - std::chrono::milliseconds(100);
+            std::vector<PeerSceneTimeReport> peers{{SceneTime(0), earlier, PeerRunState{1000, false, true}}};
+            REQUIRE(estimateAverageSceneTimeStatic(SceneTime(0), peers, now) == 0u);
+        }
     }
 
-    TEST_CASE("projectSceneTime: a peer's time projects at the sim tick rate", "[!shouldfail]")
+    TEST_CASE("projectSceneTime")
     {
-        // #354: the divisor is a 16 ms frame rather than the sim's own 33 ms,
-        // so a peer 100 ms after its last report is projected six ticks
-        // forward instead of three. Drop the tag when the divisor is fixed.
-        REQUIRE(projectSceneTime(SceneTime(0), 100) == SceneTime(3));
+        SECTION("projects at the sim tick rate, not the old 16 ms frame")
+        {
+            REQUIRE(projectSceneTime(SceneTime(0), 100) == SceneTime(3));
+        }
+
+        SECTION("half speed advances half as far")
+        {
+            REQUIRE(projectSceneTime(SceneTime(0), 100, PeerRunState{500, false, false}) == SceneTime(1));
+        }
+
+        SECTION("double speed advances twice as far")
+        {
+            REQUIRE(projectSceneTime(SceneTime(0), 100, PeerRunState{2000, false, false}) == SceneTime(6));
+        }
+
+        SECTION("a paused peer does not advance")
+        {
+            REQUIRE(projectSceneTime(SceneTime(10), 100, PeerRunState{1000, true, false}) == SceneTime(10));
+        }
+
+        SECTION("a stalled peer does not advance")
+        {
+            REQUIRE(projectSceneTime(SceneTime(10), 100, PeerRunState{1000, false, true}) == SceneTime(10));
+        }
+
+        SECTION("an old peer without the fields reads as 1x and moving")
+        {
+            REQUIRE(projectSceneTime(SceneTime(0), 100, PeerRunState{}) == SceneTime(3));
+        }
     }
 }

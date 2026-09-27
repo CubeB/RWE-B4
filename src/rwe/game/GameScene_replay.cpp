@@ -533,6 +533,7 @@ namespace rwe
         auto playerCommands = playerCommandService->tryPopCommands();
         if (!playerCommands)
         {
+            lastTickAttemptBlocked = true;
             lockstepStats.tickBlocked(getTimestamp(), playerCommandService->playersNotReady());
 
             // Said once a stall rather than once a frame. It used to be every
@@ -551,6 +552,7 @@ namespace rwe
             return;
         }
         stallReported = false;
+        lastTickAttemptBlocked = false;
         lockstepStats.tickRan(getTimestamp());
 
         if (replayWriter)
