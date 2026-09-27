@@ -93,4 +93,13 @@ namespace rwe
         REQUIRE(applyAiTuning(p, "outpostResponseMarginThreshold", "5000"));
         REQUIRE(p.outpostResponseMarginThreshold == 5000.0f);
     }
+
+    // #389 milestone 2: the predictor-based tech-value ratio's knob.
+    TEST_CASE("applyAiTuning sets techUsesPredictor by name")
+    {
+        AiTuningProfile p;
+        REQUIRE(p.techUsesPredictor == false);
+        REQUIRE(applyAiTuning(p, "techUsesPredictor", "true"));
+        REQUIRE(p.techUsesPredictor == true);
+    }
 }
