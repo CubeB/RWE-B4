@@ -459,7 +459,16 @@ namespace rwe
         // exactly the right tick.
         finishRejoinIfCaughtUp();
 
-        if (replayPlayback)
+        if (tadPlayback)
+        {
+            // A demo is state and effects, not commands, so there is no set to
+            // push: the driver writes this tick's records straight onto the
+            // units and the tick below runs them. The scene owns the clock, so
+            // the speed control and pause act on playback exactly as they do
+            // for a replay.
+            applyTadTick();
+        }
+        else if (replayPlayback)
         {
             // Before the tick's commands go in, so the keyframe is the state
             // after the previous tick and nothing else -- restoring it and
@@ -540,7 +549,13 @@ namespace rwe
         }
 
         std::optional<std::vector<std::pair<PlayerId, std::vector<PlayerCommand>>>> playerCommands;
-        if (isOwnClock())
+        if (tadPlayback)
+        {
+            // A demo has no command stream and no peer to wait for: the driver
+            // already wrote this tick's records above, so the tick runs.
+            playerCommands.emplace();
+        }
+        else if (isOwnClock())
         {
             // Nobody is waited on. A player with nothing buffered contributes
             // an empty set and the tick runs; a set that arrives late is taken
@@ -668,12 +683,12 @@ namespace rwe
         // than anything around it. Periodic keyframes are the fix for that.
         // The RWE_HASH_LOG and RWE_STATE_DUMP switches themselves live in
         // SimDiagnostics, shared with the headless arena.
-        if (!replayPlayback || diagnostics.hashLogEnabled())
+        if (!isPlayback() || diagnostics.hashLogEnabled())
         {
             auto gameHash = diagnostics.record(simulation, sceneTime.value);
             // An own-clock game exchanges no sync hash: there is no lockstep
             // peer to compare against, only a peer that owns its own units.
-            if (!replayPlayback && !isOwnClock())
+            if (!isPlayback() && !isOwnClock())
             {
                 playerCommandService->pushHash(localPlayerId, gameHash);
                 gameNetworkService->submitGameHash(gameHash);

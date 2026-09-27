@@ -292,7 +292,7 @@ namespace rwe
             REQUIRE(armState->sync->health == 100);
             REQUIRE(armState->sync->buildProgress == 0);
             REQUIRE(armState->sync->speed);
-            REQUIRE(armState->sync->position == TadPosition{simScalarToFixed(100_ss), 0, simScalarToFixed(200_ss)});
+            REQUIRE(armState->sync->position == TadPosition{simScalarToFixed(356_ss), 0, simScalarToFixed(456_ss)});
 
             // The peeper's block is index 0 too, being its owner's first unit.
             auto coreState = tadDecodeUnitState(*firstSubPacketOf(handler.subPackets[1], static_cast<uint8_t>(TadSubPacketCode::UnitStatAndMove)), layout);
@@ -356,7 +356,7 @@ namespace rwe
                 REQUIRE(built);
                 REQUIRE(built->typeIndex == 2);
                 REQUIRE(built->unitId == 2);
-                REQUIRE(built->position == TadPosition{simScalarToFixed(140_ss), 0, simScalarToFixed(200_ss)});
+                REQUIRE(built->position == TadPosition{simScalarToFixed(396_ss), 0, simScalarToFixed(456_ss)});
 
                 // No 0x12 yet: the frame has only just been placed, and the
                 // full-state record at tick 1 is the frame itself, showing
@@ -528,8 +528,8 @@ namespace rwe
         REQUIRE(shot->shooterId == 1);
         REQUIRE(shot->weaponSlot == 0);
         REQUIRE(shot->targetId == 5);
-        REQUIRE(shot->origin == TadPosition{0, simScalarToFixed(20_ss), 0});
-        REQUIRE(shot->target == TadPosition{0, simScalarToFixed(20_ss), simScalarToFixed(152_ss)});
+        REQUIRE(shot->origin == TadPosition{simScalarToFixed(2048_ss), simScalarToFixed(20_ss), simScalarToFixed(2048_ss)});
+        REQUIRE(shot->target == TadPosition{simScalarToFixed(2048_ss), simScalarToFixed(20_ss), simScalarToFixed(2200_ss)});
 
         // The damage the same laser caused goes out after the 0x2c, from the
         // same sender, with the weapon's own damage figure on it.

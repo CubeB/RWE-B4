@@ -9,6 +9,7 @@
 #include <limits>
 #include <random>
 #include <set>
+#include <unordered_set>
 #include <rwe/LoadingScene_util.h>
 #include <rwe/sim/MissionScripts.h>
 #include <rwe/ai/AiPersonality.h>
@@ -176,12 +177,37 @@ namespace rwe
             const GameLoadServices& services,
             GameDataMaps& dataMaps,
             const std::unordered_map<std::string, FeatureTdf>& tdfs,
-            const std::string& initialFeatureName)
+            const std::unordered_set<std::string>& knownFeatureNames,
+            const std::string& initialFeatureName,
+            std::unordered_set<std::string>& missingFeatureNamesLogged)
         {
+            if (!knownFeatureNames.contains(toUpper(initialFeatureName)))
+            {
+                // A required corpse that no feature TDF defines is not fatal:
+                // TA looks the name up only when it spawns the wreck, so the
+                // unit simply leaves none.
+                if (missingFeatureNamesLogged.insert(toUpper(initialFeatureName)).second)
+                {
+                    LOG_WARN << "Feature " << initialFeatureName << " is referenced but no feature TDF defines it; ignoring it";
+                }
+                return;
+            }
+
             auto nextId = dataMaps.featureDefinitions.getNextId();
             std::unordered_map<std::string, FeatureDefinitionId> openSet{{toUpper(initialFeatureName), nextId}};
             nextId = FeatureDefinitionId(nextId.value + 1);
-            for (std::deque<std::string> featuresToLoad{{initialFeatureName}}; !featuresToLoad.empty(); featuresToLoad.pop_front())
+            std::deque<std::string> featuresToLoad{{initialFeatureName}};
+
+            auto resolveFeature = [&](const std::string& name) -> std::optional<FeatureDefinitionId> {
+                auto id = getFeatureId(nextId, dataMaps.featureNameIndex, knownFeatureNames, featuresToLoad, openSet, name);
+                if (!id && missingFeatureNamesLogged.insert(toUpper(name)).second)
+                {
+                    LOG_WARN << "Feature " << name << " is referenced but no feature TDF defines it; ignoring it";
+                }
+                return id;
+            };
+
+            for (; !featuresToLoad.empty(); featuresToLoad.pop_front())
             {
                 const auto& featureName = featuresToLoad.front();
 
@@ -199,7 +225,7 @@ namespace rwe
                 f.autoreclaimable = tdf.autoreclaimable;
                 if (!tdf.featureReclamate.empty())
                 {
-                    f.featureReclamate = getFeatureId(nextId, dataMaps.featureNameIndex, featuresToLoad, openSet, tdf.featureReclamate);
+                    f.featureReclamate = resolveFeature(tdf.featureReclamate);
                 }
                 f.metal = tdf.metal;
                 f.energy = tdf.energy;
@@ -207,7 +233,7 @@ namespace rwe
                 f.flamable = tdf.flamable;
                 if (!tdf.featureBurnt.empty())
                 {
-                    f.featureBurnt = getFeatureId(nextId, dataMaps.featureNameIndex, featuresToLoad, openSet, tdf.featureBurnt);
+                    f.featureBurnt = resolveFeature(tdf.featureBurnt);
                 }
                 f.burnMin = tdf.burnMin;
                 f.burnMax = tdf.burnMax;
@@ -231,7 +257,7 @@ namespace rwe
                 f.damage = tdf.damage;
                 if (!tdf.featureDead.empty())
                 {
-                    f.featureDead = getFeatureId(nextId, dataMaps.featureNameIndex, featuresToLoad, openSet, tdf.featureDead);
+                    f.featureDead = resolveFeature(tdf.featureDead);
                 }
 
                 auto id = dataMaps.featureDefinitions.insert(f);
@@ -522,6 +548,7 @@ namespace rwe
                 auto files = services.vfs->getFileNamesRecursive("features", ".tdf");
 
                 std::unordered_map<std::string, FeatureTdf> featureTdfs;
+                std::unordered_set<std::string> knownFeatureNames;
 
                 for (const auto& name : files)
                 {
@@ -537,14 +564,17 @@ namespace rwe
                     for (const auto& e : tdfRoot.blocks)
                     {
                         auto featureTdf = parseFeatureTdf(*e.second);
-                        featureTdfs.insert({toUpper(e.first), featureTdf});
+                        auto upperName = toUpper(e.first);
+                        featureTdfs.insert({upperName, featureTdf});
+                        knownFeatureNames.insert(upperName);
                     }
                 }
 
                 // actually parse and load assets for features that we require
+                std::unordered_set<std::string> missingFeatureNamesLogged;
                 for (const auto& featureName : requiredFeaturesSet)
                 {
-                    loadFeature(services, dataMaps, featureTdfs, featureName);
+                    loadFeature(services, dataMaps, featureTdfs, knownFeatureNames, featureName, missingFeatureNamesLogged);
                 }
             }
 
@@ -693,12 +723,26 @@ namespace rwe
         {
             for (auto* deathWeapon : {&definition.explodeAs, &definition.selfDestructAs})
             {
-                if (!deathWeapon->empty() && simulation.weaponDefinitions.count(*deathWeapon) == 0
-                    && simulation.weaponDefinitions.count(toUpper(*deathWeapon)) == 0)
+                if (deathWeapon->empty())
                 {
-                    LOG_WARN << "Unit " << unitType << " dies as " << *deathWeapon << ", which no weapon file defines; it will die without a blast";
-                    deathWeapon->clear();
+                    continue;
                 }
+                if (simulation.weaponDefinitions.count(*deathWeapon) != 0)
+                {
+                    continue;
+                }
+                // The original hashes weapon names case-insensitively, so a
+                // mod's `lARGE_BUILDINGEX` resolves to `LARGE_BUILDINGEX`.
+                // The keys here are upper-cased, so take the upper-cased
+                // spelling when it exists rather than clearing a name the
+                // simulation's own case-sensitive lookup would then trip on.
+                if (auto upper = toUpper(*deathWeapon); simulation.weaponDefinitions.count(upper) != 0)
+                {
+                    *deathWeapon = std::move(upper);
+                    continue;
+                }
+                LOG_WARN << "Unit " << unitType << " dies as " << *deathWeapon << ", which no weapon file defines; it will die without a blast";
+                deathWeapon->clear();
             }
         }
         simulation.movementClassDatabase = std::move(dataMaps.movementClassDatabase);
@@ -721,7 +765,15 @@ namespace rwe
             heightmap.getWidth() - 1,
             heightmap.getHeight() - 1,
             [&](const std::string& name) {
-                const auto& d = simulation.getFeatureDefinition(simulation.tryGetFeatureDefinitionId(name).value());
+                auto id = simulation.tryGetFeatureDefinitionId(name);
+                if (!id)
+                {
+                    // A map may draw a feature no TDF in the merged data
+                    // defines. It places nothing, which the zero footprint
+                    // below drops and the dropped count reports.
+                    return FeaturePlacementInfo{0, 0, false};
+                }
+                const auto& d = simulation.getFeatureDefinition(*id);
                 return FeaturePlacementInfo{d.footprintX, d.footprintZ, d.indestructible};
             });
         LOG_INFO << "Map features: " << placement.placed.size() << " placed, "
@@ -730,8 +782,12 @@ namespace rwe
 
         for (const auto& [pos, featureName] : placement.placed)
         {
-            auto featureId = simulation.tryGetFeatureDefinitionId(featureName).value();
-            if (!simulation.addFeature(featureId, pos.x, pos.y))
+            auto featureId = simulation.tryGetFeatureDefinitionId(featureName);
+            if (!featureId)
+            {
+                continue;
+            }
+            if (!simulation.addFeature(*featureId, pos.x, pos.y))
             {
                 LOG_WARN << "Map feature " << featureName << " at " << pos.x << "," << pos.y << " could not be placed";
             }
@@ -779,10 +835,10 @@ namespace rwe
                 }
             }
         }
-        if (!localPlayerId && (gameParameters.aiArenaSeconds || gameParameters.replayFile))
+        if (!localPlayerId && (gameParameters.aiArenaSeconds || gameParameters.replayFile || gameParameters.tadDemoFile))
         {
-            // Nobody is playing: this is a measurement run, or a recording of
-            // a game between computer players being watched back. The scene
+            // Nobody is playing: this is a measurement run, a recording of a
+            // game being watched back, or a demo being spectated. The scene
             // still needs a point of view, because the camera, the fog it
             // draws and the interface all hang off a local player, so the
             // first slot stands in. It keeps its AI controller -- GameScene
@@ -794,7 +850,7 @@ namespace rwe
                 if (gamePlayers[i])
                 {
                     localPlayerId = gamePlayers[i];
-                    LOG_INFO << "AI arena: no human player, watching from slot " << i;
+                    LOG_INFO << "No human player, watching from slot " << i;
                     break;
                 }
             }

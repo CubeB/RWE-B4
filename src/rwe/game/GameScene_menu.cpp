@@ -21,6 +21,7 @@
 #include <rwe/MovieScene.h>
 #include <rwe/game/SaveFile.h>
 #include <rwe/game/save_util.h>
+#include <rwe/sim/SimulationOwnership.h>
 #include <rwe/io/gui/gui.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/ui/UiLabel.h>
@@ -182,6 +183,16 @@ namespace rwe
 
     void GameScene::saveCurrentGame(const std::string& name)
     {
+        // The state of a player simulated on another machine is not here to
+        // save; saveSimulationToJson refuses it too, and this says why.
+        if (hasRemotePlayer(simulation))
+        {
+            printConsole("Cannot save: a player is simulated on another machine");
+            return;
+        }
+
+        // An own-clock game's peer owns its own units and its own clock, so a
+        // save of RWE's half could not be resumed into the game it came from.
         if (!canSave())
         {
             printConsole("Saving is not available in this game");
