@@ -37,6 +37,13 @@ namespace rwe
              * changes its mind.
              */
             std::optional<std::variant<TadGroundPath, TadAirMover>> pendingMover;
+
+            /**
+             * A moving goal's per-tick velocity, which the original's resolver
+             * adds to the goal position every tick. Advanced in `advanceTo` so
+             * an aircraft chasing a running target is not left behind.
+             */
+            std::optional<SimVector> airGoalVelocity;
         };
 
         GameSimulation& sim;
@@ -184,6 +191,35 @@ namespace rwe
         }
 
         /**
+         * Puts a freshly spawned aircraft into flight.
+         *
+         * A unit's physics defaults to the ground variant and its air variant
+         * starts in the takeoff state, which the remote path does not steer --
+         * it only sets a target on the flying state -- and the ground-to-air
+         * transition belongs to the local behavior this unit does not run.
+         * Left alone, a puppet aircraft is a ground unit that never moves. This
+         * is `UnitBehaviorService::transitionFromGroundToAir` with the state
+         * already flying, and a landed entry is put here too: it has no target,
+         * so it decelerates where it stands.
+         */
+        void makeAirborne(const UnitId& unitId, const UnitDefinition& definition)
+        {
+            auto ref = sim.tryGetUnitState(unitId);
+            if (!ref)
+            {
+                return;
+            }
+            auto& unit = ref->get();
+            unit.physics = UnitPhysicsInfoAir();
+            if (auto* air = std::get_if<UnitPhysicsInfoAir>(&unit.physics))
+            {
+                air->movementState = AirMovementStateFlying();
+            }
+            clearOccupiedCells(unitId, definition);
+            sim.flyingUnitsSet.insert(unitId);
+        }
+
+        /**
          * Takes a flying unit back out of the occupied grid.
          *
          * The simulation puts every mobile unit into the grid when it spawns,
@@ -281,6 +317,39 @@ namespace rwe
 
 
 
+        /**
+         * Moves every running air goal on by one tick.
+         *
+         * A moving goal is a point the original integrates itself when it is
+         * resolved (0x44EA60), x and z only, and never touches the height. The
+         * driver applies one record and then ticks the simulation, so the
+         * advance has to happen here, between the records.
+         */
+        void advanceAirGoals()
+        {
+            for (auto& [key, puppet] : puppets)
+            {
+                if (!puppet.airGoalVelocity)
+                {
+                    continue;
+                }
+                auto live = liveUnitOf(puppet);
+                if (!live)
+                {
+                    continue;
+                }
+                auto& destination = sim.getUnitState(*live).navigationState.desiredDestination;
+                if (destination)
+                {
+                    if (auto* target = std::get_if<SimVector>(&*destination))
+                    {
+                        target->x = target->x + puppet.airGoalVelocity->x;
+                        target->z = target->z + puppet.airGoalVelocity->z;
+                    }
+                }
+            }
+        }
+
         void advanceTo(uint32_t serial)
         {
             if (!baseSerial)
@@ -294,6 +363,7 @@ namespace rwe
             auto target = serial >= *baseSerial ? serial - *baseSerial : 0u;
             while (sim.gameTime.value < target)
             {
+                advanceAirGoals();
                 sim.tick();
                 ++stats.ticksPlayed;
             }
@@ -355,7 +425,7 @@ namespace rwe
             keyOfId[e->unitId] = key;
             if (const auto& definition = sim.unitDefinitions.at(*typeName); definition.canFly)
             {
-                clearOccupiedCells(*unitId, definition);
+                makeAirborne(*unitId, definition);
             }
             ++stats.unitsSpawned;
         }
@@ -526,8 +596,19 @@ namespace rwe
             unit.navigationState.desiredDestination = destination;
         }
 
-        void applyAirMover(UnitState& unit, const TadAirMover& air)
+        void applyAirMover(Puppet& puppet, UnitState& unit, const TadAirMover& air)
         {
+            puppet.airGoalVelocity = std::nullopt;
+
+            // Mode 1 is landed: a parked aircraft is not flying anywhere, so it
+            // gets no target and decelerates where it stands. Mode 2 is flying.
+            if (air.movementMode == 1)
+            {
+                unit.navigationState.desiredDestination = std::nullopt;
+                unit.navigationState.state = NavigationStateIdle();
+                return;
+            }
+
             std::optional<SimVector> goal;
             if (const auto* move = std::get_if<TadMoveGoal>(&air.goal))
             {
@@ -539,13 +620,19 @@ namespace rwe
             else if (const auto* moving = std::get_if<TadMovingGoal>(&air.goal))
             {
                 goal = toSimPosition(moving->position);
+                // The resolver advances the goal by its velocity every tick,
+                // x and z only; the height is never touched.
+                puppet.airGoalVelocity = SimVector(
+                    simScalarFromFixed(moving->velocity.x),
+                    0_ss,
+                    simScalarFromFixed(moving->velocity.z));
             }
 
             unit.navigationState.desiredDestination = goal;
             unit.navigationState.state = NavigationStateIdle();
         }
 
-        void applyMover(UnitState& unit, const std::variant<TadGroundPath, TadAirMover>& mover)
+        void applyMover(Puppet& puppet, UnitState& unit, const std::variant<TadGroundPath, TadAirMover>& mover)
         {
             if (const auto* ground = std::get_if<TadGroundPath>(&mover))
             {
@@ -553,7 +640,7 @@ namespace rwe
             }
             else if (const auto* air = std::get_if<TadAirMover>(&mover))
             {
-                applyAirMover(unit, *air);
+                applyAirMover(puppet, unit, *air);
             }
         }
 
@@ -586,7 +673,7 @@ namespace rwe
                     puppet.pendingMover = update.mover;
                     continue;
                 }
-                applyMover(sim.getUnitState(*live), update.mover);
+                applyMover(puppet, sim.getUnitState(*live), update.mover);
             }
 
             if (!state->sync)
@@ -689,11 +776,11 @@ namespace rwe
                 markPlaced(puppet);
                 if (const auto& definition = sim.unitDefinitions.at(*typeName); definition.canFly)
                 {
-                    clearOccupiedCells(*unitId, definition);
+                    makeAirborne(*unitId, definition);
                 }
                 if (puppet.pendingMover)
                 {
-                    applyMover(sim.getUnitState(*unitId), *puppet.pendingMover);
+                    applyMover(puppet, sim.getUnitState(*unitId), *puppet.pendingMover);
                 }
                 assignDemoId(sender, index, puppet);
                 return;
