@@ -12,9 +12,15 @@
 #include <rwe/io/hpi/hpi_util.h>
 #include <rwe/io/pcx/pcx.h>
 #include <rwe/io/smk/SmkDecoder.h>
+#include <rwe/io/tad/tad_encoders.h>
+#include <rwe/io/tad/tad_events.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/tnt/TntArchive.h>
+#include <rwe/puppet/TadPuppetDriver.h>
+#include <rwe/puppet/puppet_test_util.h>
+#include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitModelDefinition.h>
+#include <rwe/sim/sim_test_util.h>
 #include <rwe/sim/util.h>
 #include <sstream>
 #include <string>
@@ -364,5 +370,65 @@ namespace rwe
         REQUIRE(rock);
         REQUIRE(rock->value == 3);
         REQUIRE(nextId.value == 8);
+    }
+
+    TEST_CASE("a puppet driver drops a demo record it cannot place, and never indexes with it", "[malformed][puppet]")
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        definePuppetTestWorld(sim);
+        addWellStockedPlayer(sim, "ARM");
+        addWellStockedPlayer(sim, "CORE");
+
+        TadPuppetDriver driver(sim, 8, puppetTestLoadOrder());
+        driver.addPlayer(1, PlayerId(0));
+        driver.addPlayer(2, PlayerId(1));
+
+        auto feed = [&](uint8_t sender, const std::vector<TadBytes>& subs) {
+            driver.onPacket(TadPacket{0, sender}, subs);
+        };
+
+        SECTION("damage for an id no puppet holds")
+        {
+            feed(1, {tadEncodeDamage(TadDamage{3, 0, 5, 0})});
+            REQUIRE(driver.stats().recordsDroppedUnknownUnit == 1);
+        }
+
+        SECTION("a death whose id is zero, and one in a block no sender claimed")
+        {
+            feed(1, {tadEncodeDeath(TadDeath{0, 0xffffffffu, 0, 100, 0})});
+            REQUIRE(driver.stats().recordsDroppedBadId == 1);
+
+            // Block 5 is nobody's: sender 1 has sent no 0x09 to claim it.
+            feed(1, {tadEncodeDeath(TadDeath{41, 0xffffffffu, 0, 100, 0})});
+            REQUIRE(driver.stats().recordsDroppedBadBlock == 1);
+        }
+
+        SECTION("a build finished for an id no puppet holds")
+        {
+            feed(1, {tadEncodeBuildFinished(TadBuildFinished{3, 0})});
+            REQUIRE(driver.stats().recordsDroppedUnknownUnit == 1);
+        }
+
+        SECTION("a build started whose type index is past the load order")
+        {
+            feed(1, {tadEncodeBuildStarted(TadBuildStarted{99, 1, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}})});
+            REQUIRE(driver.stats().recordsDroppedBadType == 1);
+            REQUIRE(driver.stats().unitsSpawned == 0);
+        }
+
+        SECTION("a full-state record for an empty slot, and a truncated 0x2c")
+        {
+            std::vector<bool> canFly{false, false, false};
+            auto layout = tadUnitStateLayout(canFly, 8);
+
+            TadUnitState empty;
+            empty.tick = 1;
+            empty.sync = TadUnitSync{0, 0, 0, 0, 0, 0, std::nullopt, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}, std::nullopt};
+            feed(1, {tadEncodeUnitState(empty, layout)});
+            REQUIRE(driver.stats().unitsSpawned == 0);
+
+            feed(1, {TadBytes{0x2c, 0x00, 0x00}});
+            REQUIRE(driver.stats().recordsDroppedBadType == 1);
+        }
     }
 }
