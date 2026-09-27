@@ -92,22 +92,6 @@ namespace rwe
             return name;
         }
 
-        /** The owner block a global id falls in, checked before it indexes anything. */
-        std::optional<std::pair<uint8_t, uint16_t>> senderAndIndexFor(uint16_t id) const
-        {
-            auto block = tadOwnerBlockOfUnitId(id, maxUnits);
-            if (!block)
-            {
-                return std::nullopt;
-            }
-            auto sender = senderOfBlock.find(*block);
-            if (sender == senderOfBlock.end())
-            {
-                return std::nullopt;
-            }
-            return std::make_pair(sender->second, static_cast<uint16_t>((id - 1) % maxUnits));
-        }
-
         void learnBlock(uint8_t sender, unsigned int block)
         {
             senderOfBlock.emplace(block, sender);
@@ -338,10 +322,15 @@ namespace rwe
                 return;
             }
 
-            auto owner = senderAndIndexFor(e->unitId);
-            if (!owner)
+            auto block = tadOwnerBlockOfUnitId(e->unitId, maxUnits);
+            if (!block)
             {
-                ++stats.recordsDroppedUnknownUnit;
+                ++stats.recordsDroppedBadId;
+                return;
+            }
+            if (senderOfBlock.find(*block) == senderOfBlock.end())
+            {
+                ++stats.recordsDroppedBadBlock;
                 return;
             }
 
