@@ -353,6 +353,8 @@ set(SOURCE_FILES
     src/rwe/game/GameEndedReport.h
     src/rwe/game/GameScene_rejoin.cpp
     src/rwe/game/GameScene_replay.cpp
+    src/rwe/game/GameScene_ownclock.cpp
+    src/rwe/game/GameScene_ownclock.h
     src/rwe/game/GameScene_tad.cpp
     src/rwe/game/GameScene_util.cpp
     src/rwe/game/featureplacement.cpp
@@ -1025,6 +1027,7 @@ set(TEST_FILES
     src/rwe/collections/VectorMap.test.cpp
     src/rwe/game/DefaultAction.test.cpp
     src/rwe/game/GameScene_audio.test.cpp
+    src/rwe/game/GameScene_ownclock.test.cpp
     src/rwe/game/panel_slide.test.cpp
     src/rwe/game/GameSpeed.test.cpp
     src/rwe/game/buildghost.test.cpp

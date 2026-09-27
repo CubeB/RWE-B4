@@ -375,6 +375,15 @@ checksums, the host answers each id twice, and a joiner that counts the records
 accepts the result. The ids are content-derived and the host never computes one.
 _Avoid_: handshaking, table exchange
 
+**Own-clock**:
+A live game whose scene advances on its own clock at the chosen speed like a
+skirmish, with no lockstep command gate or wait on any peer, no sync-hash
+exchange, no desync report and no save. The mode for playing against a peer
+that runs its own simulation -- a real `TotalA.exe`, which is
+owner-authoritative rather than lockstep -- selected by
+`GameParameters::netMode`. `docs/TA-NETWORK.md`.
+_Avoid_: real-time (the frame clock is real-time too), non-lockstep, async
+
 ### The instruments
 
 **Harness**:
