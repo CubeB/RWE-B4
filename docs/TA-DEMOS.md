@@ -2609,6 +2609,13 @@ other story: a goal is not a position (see above), so a puppet aircraft given
 its recorded goal three ticks earlier than before has three more ticks of its
 own arrival profile to be wrong by, and 64.88% within 32 against 68.45%.
 
+**Over the whole ProTA corpus the 0%-loss run holds the figure tier 2 quotes.**
+All 39 demos at a depth of 3: 89.41% of the ground drift samples within 32
+units against 89.48% straight from the files, 1,095 out-of-order packets put
+right, 6 duplicates, 0 lost, 0 refused. The sample count falls from 788,901 to
+671,708, which is the same effect the five-demo table shows in miniature and is
+explained below.
+
 Two things the numbers do not say, and a reader should not infer otherwise. A
 **death record with no `0x2c` of its own** is applied at the sender's last
 *known* tick, and a receive buffer has already advanced that clock, so at a
@@ -2617,7 +2624,10 @@ file: over the five demos that is 3,476 deaths read straight against 2,924
 through a depth-3 buffer, with more wrecks in exchange, because a unit that
 lives three ticks longer is sometimes killed by something else first. The
 drift is unmoved by it, but the kill count is not, and it is a property of the
-format's ambiguity rather than of the buffer. And a **recording is in arrival
+format's ambiguity rather than of the buffer. Over the whole corpus it is
+29,429 deaths read straight against 27,311, so 93% of the figure survives and
+the 12% of units that die some other way first is where the 15% of drift
+samples that never get measured goes. And a **recording is in arrival
 order, not serial order**: one peer's tick 0 is often written after another's
 tick 1, so a receiver reading by serial applies those records at the tick they
 name where a straight playback applies them at the current one. That is why
