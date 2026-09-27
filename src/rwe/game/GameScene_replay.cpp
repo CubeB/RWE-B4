@@ -459,6 +459,16 @@ namespace rwe
         // exactly the right tick.
         finishRejoinIfCaughtUp();
 
+        if (taHostLink)
+        {
+            // The TA peer's own clock runs beside this one: what it has sent
+            // is taken, handed to the driver in the sender's order, and this
+            // tick's records go back out. Ahead of the command feed below,
+            // because a `0x0b` for a unit of ours has to land before the tick
+            // that decides its death.
+            applyTaHostTick();
+        }
+
         if (tadPlayback)
         {
             // A demo is state and effects, not commands, so there is no set to

@@ -1337,8 +1337,12 @@ namespace rwe
         return std::nullopt;
     }
 
-    void TadPuppetDriver::setIncomingDamageHandler(IncomingDamageHandler handler)
+    std::optional<UnitId> TadPuppetDriver::unitOfWireId(uint16_t wireId) const
     {
+        return impl->unitOfWireId(wireId);
+    }
+
+    void TadPuppetDriver::setIncomingDamageHandler(IncomingDamageHandler handler)    {
         impl->incomingDamage = std::move(handler);
     }
 

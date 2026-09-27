@@ -294,6 +294,11 @@ namespace rwe
         // A game already reported is not reported twice.
         sendGameEnded("abandoned", std::nullopt);
 
+        // A hosted game tells the peer it is going: its commander's cause-8
+        // quit death, then DELETEPLAYER, then the thread stops. Here because
+        // every way out of a game destroys this object.
+        endTaHost();
+
         // The one summary that catches every way a game can end, including a
         // window closed with no result and an arena run stopped by its clock.
         logLockstepSummary();
@@ -1089,6 +1094,7 @@ namespace rwe
 
         renderReplayWindow();
         renderTadWindow();
+        renderTaHostWindow();
         renderDebugWindow();
         logLockstepSummaryIfDue();
         recordNetworkHistory();

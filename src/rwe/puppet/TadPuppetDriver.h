@@ -168,6 +168,13 @@ namespace rwe
         std::optional<uint16_t> wireIdOf(UnitId unit) const;
 
         /**
+         * The RWE unit the peer's own id names, or nothing where that slot is
+         * empty, has been let go, or belongs to another owner. The inverse of
+         * `wireIdOf`.
+         */
+        std::optional<UnitId> unitOfWireId(uint16_t wireId) const;
+
+        /**
          * Where a 0x0b naming a unit this driver does not puppet is offered.
          *
          * TA's damage records are sent by the attacker, so a record naming

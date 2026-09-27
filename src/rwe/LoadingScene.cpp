@@ -11,6 +11,7 @@
 #include <rwe/io/ota/ota.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/tnt/TntArchive.h>
+#include <rwe/net/ta/TaHostGame.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
 
@@ -87,7 +88,13 @@ namespace rwe
         // nothing to ask them for. Left in, opening such a recording tried to
         // resolve a host that was long gone and threw before the first frame.
         // See the matching test in createGameScene.
-        for (Index i = 0; i < getSize(gameParameters.players) && !gameParameters.replayFile && !gameParameters.tadDemoFile; ++i)
+        //
+        // Nor for a game hosting a TA: that peer is reached over DirectPlay
+        // from a thread of its own, and the joiner's slot names no lockstep
+        // address for anything to resolve.
+        for (Index i = 0; i < getSize(gameParameters.players) && !gameParameters.replayFile && !gameParameters.tadDemoFile
+                && !gameParameters.taHostGame;
+             ++i)
         {
             const auto& p = gameParameters.players[i];
             if (!p)
@@ -184,7 +191,7 @@ namespace rwe
             // players in every other respect, which is what keeps them human
             // players no AI drives and leaves the local seat where the
             // recording had it.
-            auto isRemote = !gameParameters.replayFile && !gameParameters.tadDemoFile
+            auto isRemote = !gameParameters.replayFile && !gameParameters.tadDemoFile && !gameParameters.taHostGame
                 && std::get_if<PlayerControllerTypeNetwork>(&params->controller) != nullptr;
 
             // Only a peer running its own simulation has a sync hash to
@@ -368,6 +375,15 @@ namespace rwe
                 continue;
             }
 
+            // TA owns the joiner's units and describes them itself, so RWE
+            // seats no commander for it: the 0x09 the joiner sends places the
+            // one it has. The seat is still taken, which is what puts the two
+            // players on opposite sides of the map.
+            if (gameParameters.taHostGame && i == TaHostGame::remotePlayerSlot)
+            {
+                continue;
+            }
+
             // The lobby refuses to start a game whose slots the map cannot
             // seat, so this is the backstop for the command line and the
             // harnesses. It still ends the game, but it says which map and
@@ -451,6 +467,17 @@ namespace rwe
         else if (gameParameters.tadDemoFile)
         {
             gameScene->enableTadPlayback(*gameParameters.tadDemoFile, loaded.dataMaps.unitLoadOrder);
+        }
+        else if (gameParameters.taHostGame)
+        {
+            // The joiner as a Remote player, puppeted from its own stream, and
+            // our units sent to it. The seat has to be one the loader made.
+            auto remote = loaded.gamePlayers[TaHostGame::remotePlayerSlot];
+            if (!remote)
+            {
+                throw std::runtime_error("TA host: the game has no player in the joiner's slot");
+            }
+            gameScene->enableTaHost(*remote, loaded.dataMaps.unitLoadOrder);
         }
         else if (gameParameters.recordReplayFile)
         {

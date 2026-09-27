@@ -254,6 +254,8 @@ set(SOURCE_FILES
     src/rwe/Mesh.h
     src/rwe/MeshService.cpp
     src/rwe/MeshService.h
+    src/rwe/TaHostLobbyScene.cpp
+    src/rwe/TaHostLobbyScene.h
     src/rwe/PathMapping.cpp
     src/rwe/PathMapping.h
     src/rwe/RadiansAngle.cpp
@@ -356,6 +358,7 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_ownclock.cpp
     src/rwe/game/GameScene_ownclock.h
     src/rwe/game/GameScene_tad.cpp
+    src/rwe/game/GameScene_tahost.cpp
     src/rwe/game/GameScene_util.cpp
     src/rwe/game/featureplacement.cpp
     src/rwe/game/GameScene_util.h
@@ -535,6 +538,8 @@ set(SOURCE_FILES
     src/rwe/net/ta/TaDirectPlay.h
     src/rwe/net/ta/TaHostSession.cpp
     src/rwe/net/ta/TaHostSession.h
+    src/rwe/net/ta/TaHostGame.cpp
+    src/rwe/net/ta/TaHostGame.h
     src/rwe/net/ta/TaOutboundBatcher.cpp
     src/rwe/net/ta/TaOutboundBatcher.h
     src/rwe/net/ta/TaPacket.cpp

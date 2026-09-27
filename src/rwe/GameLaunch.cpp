@@ -12,6 +12,7 @@
 #include <rwe/PathMapping.h>
 #include <rwe/SceneContext.h>
 #include <rwe/ShaderService.h>
+#include <rwe/TaHostLobbyScene.h>
 #include <rwe/Viewport.h>
 #include <rwe/config.h>
 #include <rwe/game/PlayerColorIndex.h>
@@ -390,13 +391,32 @@ namespace rwe
 
         if (gameParameters)
         {
-            LOG_INFO << "Launching into game on map: " << gameParameters->mapName;
-            auto scene = std::make_unique<LoadingScene>(
-                sceneContext,
-                &allSoundTdf,
-                AudioService::LoopToken(),
-                *gameParameters);
-            sceneManager.setNextScene(std::shared_ptr<Scene>(std::move(scene)));
+            if (gameParameters->taHostGame)
+            {
+                // Hosting a game for a joining TA: the first scene is the
+                // waiting panel, and the host's own thread is already running
+                // behind it. The map is loaded by the panel once the launch
+                // has gone out, which is the only order the protocol allows.
+                LOG_INFO << "Launching into the TA host lobby for map: " << gameParameters->mapName;
+                auto scene = std::make_shared<TaHostLobbyScene>(
+                    sceneContext,
+                    &allSoundTdf,
+                    AudioService::LoopToken(),
+                    gameParameters->taHostGame,
+                    gameParameters->mapName,
+                    gameParameters->schemaIndex);
+                sceneManager.setNextScene(scene);
+            }
+            else
+            {
+                LOG_INFO << "Launching into game on map: " << gameParameters->mapName;
+                auto scene = std::make_unique<LoadingScene>(
+                    sceneContext,
+                    &allSoundTdf,
+                    AudioService::LoopToken(),
+                    *gameParameters);
+                sceneManager.setNextScene(std::shared_ptr<Scene>(std::move(scene)));
+            }
         }
         else
         {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <memory>
 #include <optional>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/game/PlayerColorIndex.h>
@@ -13,6 +14,8 @@
 
 namespace rwe
 {
+    struct TaHostGame;
+
     struct PlayerControllerTypeHuman
     {
     };
@@ -177,6 +180,20 @@ namespace rwe
 
         /** How this game advances its clock; see NetMode. */
         NetMode netMode{NetMode::Lockstep};
+
+        /**
+         * Host a game for a joining `TotalA.exe` (`rwe --ta-host`): the
+         * DirectPlay session, the battleroom and the peer, held here because
+         * the waiting panel and then the game both need it and neither owns
+         * the other's half. Nothing about the game is decided by this field --
+         * the parameters above it are the game, and they are filled in from
+         * what the joiner said when the launch happened.
+         *
+         * A `shared_ptr` to a type this header only names, because
+         * `GameParameters.h` reaches most of the engine and a container of
+         * anything costs every one of those translation units.
+         */
+        std::shared_ptr<TaHostGame> taHostGame;
 
         /**
          * Play the map as a mission (--mission): the schema's [units] for the
