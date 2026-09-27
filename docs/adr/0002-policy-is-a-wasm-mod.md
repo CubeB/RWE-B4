@@ -79,35 +79,65 @@ export hooks from any subsystem. Its manifest declares which, so the launcher
 can list what each mod touches, and where two conflict, without running
 anything.
 
+The manifest, `modinfo.tdf`, lives **inside one of the mod's archives**, beside
+its `.wasm`, so that the mod fingerprint covers it. A loose file in the mod
+directory, as `rwe_mod.json` is, is outside the fingerprint: two peers could
+agree on every archive and still compose their mods differently. It declares:
+- the wasm modules;
+- each exported hook with its version;
+- `requires`: a mod name with a version range, for a mod that reads another's
+  store format (D14);
+- `after` and `before` load-order constraints;
+- for each keyed-exclusive key it takes over, `replaces = <mod>:<key>`. That
+  names one key of one mod, never everything that mod claims.
+
 **D5 -- Every hook has one composition rule, fixed when the hook is defined.**
 
 | Kind | Rule | Examples |
 |---|---|---|
 | Fold | Starts from the hook's seed; `ta-base` is the first layer. Each mod in load order receives the layer below's result as `prev` and returns the new one. | Seek a repair pad, attacked reaction, final damage, round detonates |
 | Event | Every mod is called in load order. They observe only; no return value. | Unit created, finished, killed; tick |
-| Keyed exclusive | One owner per key. A second claim is a load error unless its manifest says `replaces`. | The computer player, chosen per player in the lobby; mod orders (D16) |
+| Keyed exclusive | One owner per key. A second claim is a load error unless its manifest says `replaces`. | Mod orders (D16) and the computer player, chosen per player in the lobby (D17); neither is in v0 |
 | Presentation | Its own instance outside the sim, with read-only imports. | Interface and overlays; not in v0 |
 
 A fold hook cannot call into the layer below and skip the rest. `prev` covers
 overriding, vetoing and adjusting, and a single pass in load order is simple to
 reason about.
 
-**D6 -- Load order belongs to the launcher.** It is the same on every peer and
-covered by the lobby's check that every player has the same data, exactly as
-archive order is now. Wasm modules ship inside a mod's archives, so each
-player's mod fingerprint covers them without a new mechanism. Which mods a game
+**D6 -- Load order belongs to the launcher, and it is compared, not
+implied.** The launcher works the order out from the player's mod list and the
+manifests' `requires`, `after` and `before`, and refuses a list those cannot
+satisfy. The host sends the resulting ordered list with the game. The lobby
+compares it as an ordered list of fingerprints, so two peers with the same
+mods in different orders do not start. Today's lobby compares archive bytes,
+not order, so this is new. Wasm modules and manifests ship inside a mod's
+archives, so the existing fingerprint covers their bytes. Which mods a game
 runs, including in TA-compatible network games, is also the launcher's
 decision; the engine loads what it is told.
 
 **D7 -- The ABI is plain core wasm and hides engine internals.** It uses a
-C-style calling convention with `i32`, `i64` and `f32` only, and is versioned
-by an exported `rwe_abi_version()`. Host functions are imported from the `rwe`
-namespace; hooks are exports named `hook_*`, `on_*`, `order_*` and `ai_*`.
-Every engine object is an opaque `u32` id. No struct layout crosses the
-boundary, so a change to `UnitState` never breaks a mod. `SimScalar` is `f32`,
-angles are `i32` in TA's 65,536ths, vectors are written to a guest pointer, and
-strings appear only in name lookups, never on a per-tick path. The WebAssembly
-component model is not used.
+C-style calling convention with `i32`, `i64` and `f32` only. Host functions are
+imported from the `rwe` namespace; hooks are exports named `hook_*`, `on_*`,
+`order_*` and `ai_*`. Every engine object is an opaque `u32` id. No struct
+layout crosses the boundary, so a change to `UnitState` never breaks a mod.
+`SimScalar` is `f32`, angles are `i32` in TA's 65,536ths, and vectors are
+written to a guest pointer.
+
+- **Bytes and strings out.** Any import that returns bytes or a string takes a
+  guest `(out, cap)` and returns the full length, or -1 when there is nothing
+  to return. It writes at most `cap` bytes, so a mod whose buffer was too small
+  calls again with a bigger one. The host holds no buffer between calls, so
+  there is nothing stale to read.
+- **Strings in** appear only in name lookups, never on a per-tick path.
+- **Versioning is per hook, in the export name.** A hook is exported as
+  `hook_damage_v1`, `hook_damage_v2`, and so on. The engine documents the
+  versions it accepts for each hook, calls the newest one a mod exports, and
+  refuses to load a mod that exports only versions it no longer accepts,
+  naming the hook, as D15 does. A signature change is therefore a new version
+  and a decision about how long to accept the old one, never a silent change
+  in arity. `rwe_abi_version()` versions only the imports.
+
+The WebAssembly component model is not used.
 
 **D8 -- A mod's linear memory is saved and dumped but not hashed; the store is
 hashed.** A mod needs no save or load callbacks; its memory is its state.
@@ -115,28 +145,39 @@ Memory is saved-but-unhashed state, as weapon aim state already is. What a mod
 decides lands in hashed state (unit state, the store, commands), so a
 divergence in its memory reaches the hash the moment it matters, and hashing
 megabytes of memory on every tick buys nothing more. Each mod has a
-linear-memory quota in pages: `memory.grow` past it returns failure, and a mod
-that traps on that failure faults under D12. `ta-base` prefers engine-owned
+linear-memory quota in pages. It is checked twice: against the module's
+declared initial memory when it is loaded, and on every `memory.grow`, which
+returns failure past the quota. A mod that traps on that failure faults under
+D12. `ta-base` prefers engine-owned
 state, in `UnitState` and the store, over its own memory, because state held
 there is hashed, appears in desync dumps and can be read by other mods. It is
 a preference, not a rule: the computer player will need real state of its own.
 
 **D9 -- Inside a hook, decisions are return values and side effects are
 deferred.**
-- **Writes.** A store write is queued and applied at the end of the phase in
-  which the hook ran, in load order and then call order. A read in the same
-  phase sees the value from before.
+- **Writes.** A mod reads its own namespace live, and sees its own writes at
+  once. That is deterministic, because only that mod writes there and its
+  calls come in a fixed order. It is also what a mod needs for anything that
+  accumulates: a shield taking two hits in one tick must see the first hit's
+  deduction when the second arrives. Other mods see a namespace as it stood
+  at the start of the phase, and its writes become visible to them at the end
+  of the phase. So no mod's view of another depends on call order within the
+  phase.
 - **No recursion.** No host import calls into another hook, so mods cannot
   recurse into each other, and their effects never depend on who ran first.
-- **Commands.** Only the computer player's hooks (`ai_*`) issue player
+- **Commands.** Only the computer player's hooks (`ai_*`, D17) issue player
   commands, and they take exactly the native AI's path. Its commands are
   collected in the simulation and handed out by `takeAiCommandsForPlayer`,
   then queued by `feedAiCommands` at the constant `aiCommandBufferDepth()`
   and behind `onlyComputerPlayersAreNotReady`. A command therefore never
   enters the network-derived buffer depth whose frame-dependence caused the
   tick-44 desync.
-- **Fold results.** No other hook issues commands; a fold's result is its only
-  effect on the game.
+- **Effects.** No other hook issues commands. Besides its result and its
+  store writes, a hook has one effect in v0: `rwe_unit_apply_damage(unit,
+  amount, attacker)`. It is queued and applied at the end of the phase through
+  the native damage pipeline, so a shield can charge what it absorbed to its
+  own health. Further effects, such as spawning a feature, arrive with mod
+  orders (D16).
 
 **D10 -- Each mod draws from its own random stream, except `ta-base`, whose
 stream is `simulation.rng`.** `rwe_rand_below` reduces the stream's raw output
@@ -178,6 +219,21 @@ import that iterates keys returns them sorted.
   `ta-base` ends the game, deterministically, on every peer.
 - **No outside world.** Mods import nothing that reaches the clock, the
   filesystem or the network.
+- **The boundary is untrusted input**, under `docs/SECURITY-AUDIT.md`'s rules,
+  because a mod is content from a community archive:
+  - every guest pointer and length an import receives is bounds-checked
+    against the instance's memory before the host reads or writes through it;
+  - every `cap` is clamped to what fits;
+  - no import trusts a length the guest supplies.
+- **Loading is bounded too, since fuel only covers execution.** The loader
+  caps:
+  - a module's size;
+  - its function, table and global counts;
+  - its declared memory (D8);
+  - the time validation and instantiation may take.
+
+  A module that exceeds a cap is refused at load, before the game starts.
+  Every peer loads the same bytes, so every peer refuses it alike.
 
 **D13 -- Lockstep runs every hook for every unit on every peer. In a
 TA-compatible network game, fold hooks run only for units this machine owns.**
@@ -201,9 +257,10 @@ everyone reads.**
 - **Values.** Opaque bytes, with a type tag (`i32`, `f32`, `string`, `bytes`)
   that exists so desync dumps can print them. The engine does not interpret
   them; a mod publishes its own value format for others to read.
-- **Snapshot reads.** A read sees the store as it stood at the start of the
-  phase, and writes land at D9's point, so no mod sees another's write from the
-  same phase. A mod's scratch data belongs in its linear memory.
+- **Reads.** A mod reads its own namespace live and everyone else's as of the
+  start of the phase (D9). So state that accumulates within a tick, such as a
+  shield's charge, can live in the store, where it is hashed and other mods can
+  read it. A mod's scratch data belongs in its linear memory.
 - **Ordering.** Keys are kept sorted, so every peer iterates the store alike.
 - **Quotas.** Bytes and entries per mod; exceeding one is a D12 fault.
 
@@ -232,16 +289,38 @@ those structs. The shape a mod order will take:
 - **Storage.** One new `ModOrder` alternative carries the owning order kind and
   an opaque byte payload, saved, hashed and dumped as bytes.
 - **Registration.** Kinds are registered by name, and each is keyed exclusive.
-- **Queueing.** A command queues the order.
+- **Queueing.** A new `PlayerCommand` alternative queues it. A player issues
+  it from an order button declared in data: a button naming the order kind and
+  a cursor mode. The computer player queues it as it queues any other order.
 - **Stepping.** `order_step(unit, kind, payload)` runs once per tick while the
   order is at the front of the queue. It returns running, done or failed, and
-  may choose among effects the engine offers (a move goal, a weapon target, a
-  build) through deferred imports.
+  may choose among effects the engine offers through deferred imports: a move
+  goal, a weapon target, a build, and placing a feature or unit, which a mine
+  layer needs.
 
-A variant alternative is the kind of growth the section budget in `CLAUDE.md`
-warns about; one `PlayerCommand` alternative cost 464 sections. So this waits
-until after v0, with the section budget measured when it lands. Escalation's
-new order type waits with it.
+This adds two variant alternatives, `ModOrder` and its command, which is the
+kind of growth the section budget in `CLAUDE.md` warns about: one
+`PlayerCommand` alternative cost 464 sections. So this waits until after v0,
+with the section budget measured when it lands. Escalation's new order type
+waits with it.
+
+**D17 -- A wasm computer player is not in v0.** The native AI reads far more
+than the v0 imports offer:
+- every unit, through `PerceptionManager`;
+- visibility, through `canSeeUnit` and `isVisibleTo`;
+- unit definitions and build options;
+- terrain and reachability;
+- player records.
+
+A replacement AI needs perception imports of its own:
+- units by owner, filtered by what the player can see;
+- map bounds and terrain height;
+- passability for a movement class;
+- a type's build options.
+
+Those form their own surface, designed with the first wasm AI rather than
+guessed at now. `ai_init`, `ai_tick` and `rwe_cmd_*` arrive with it, on the
+command path D9 already fixes.
 
 ## The v0 surface
 
@@ -280,10 +359,12 @@ Escalation left untouched and is integer arithmetic pinned to the original.
 It is in v0 because it is the hook modders want first, for shields and armour
 types.
 
+Every hook is exported as its `_v1` form (D7), such as `hook_damage_v1`.
+
 Other exports: `rwe_abi_version() -> i32` and `rwe_init() -> i32` (lifecycle);
 `on_tick(tick)`, `on_unit_created(unit)`, `on_unit_finished(unit)` and
-`on_unit_killed(unit, killer, cause)` (events); `ai_init(player)` and
-`ai_tick(player, tick)` (keyed exclusive).
+`on_unit_killed(unit, killer, cause)` (events). Nothing keyed exclusive is in
+v0: mod orders are D16 and the computer player is D17.
 
 Host imports:
 
@@ -303,16 +384,29 @@ Host imports:
 - **Randomness:** `rwe_rand_below`.
 - **Store:** `rwe_store_key`, `_get`, `_set`, `_del`, `_scan`;
   `rwe_var_register`, `rwe_unit_get_var`, `rwe_unit_set_var`.
-- **Computer player only:** `rwe_cmd_*`.
+- **Effects:** `rwe_unit_apply_damage(unit, amount, attacker)`, deferred (D9).
 - **Outside the sim:** `rwe_log`.
+
+Every import that returns bytes or a string, including `rwe_type_key_str`,
+`rwe_store_get` and `rwe_store_scan`, uses D7's `(out, cap) -> length`
+convention.
 
 ## Migration
 
-1. **Infrastructure.** The runtime, the manifest, the load order, fold
+0. **Choose the runtime.** A spike builds WAMR and wasmtime on the MinGW64 and
+   MSVC runners, checks that each counts executed instructions exactly in the
+   mode the sim would use (D12), and picks one.
+1. **Infrastructure.** The runtime, the manifest, the ordered load list, fold
    dispatch, and D15's refusal on a mismatched mod set, with no hooks yet.
    `rwe_test` links the runtime and loads the CI-built `ta-base.wasm`, and the
    `sim_test_util.h` helpers load it by default, so every existing test runs
-   the shipped policy.
+   the shipped policy. The mod SDK ships in the same step, because an ABI
+   nobody outside the repository can build against is not yet tested by its
+   users:
+   - a public header of the imports;
+   - a stub library for D3's native build;
+   - `rwe_test` and `ai_arena` options that load a named mod on top of
+     `ta-base`.
 2. **A rare policy, `hook_round_expired_detonates`.** It moves into `ta-base`.
    Its tests pass unchanged, and a same-seed `RWE_HASH_LOG` is byte-identical
    before and after the move (D10).
@@ -323,9 +417,10 @@ Host imports:
    too high, per-tick hooks get a batched form that takes an array of units,
    or stay native, and only rare decisions move.
 4. **The rest of v0**, each with the same hash-neutral check. After v0, a new
-   hook is added together with TA's version of it in `ta-base`. The computer
-   player is the largest candidate: it already reaches the sim only through
-   commands, but it is also expensive, so it waits for step 3's numbers.
+   hook is added together with TA's version of it in `ta-base`. Mod orders
+   (D16) and the computer player (D17) are the largest pieces. The computer
+   player already reaches the sim only through commands, but it is also
+   expensive, so it waits for step 3's numbers.
 
 The findings travel with the code. A routine's `0x` addresses and § numbers
 move into `ta-base`'s source as comments at the point of use, as they sit in
