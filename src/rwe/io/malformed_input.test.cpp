@@ -19,6 +19,8 @@
 #include <rwe/puppet/TadPuppetDriver.h>
 #include <rwe/puppet/puppet_test_util.h>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/MixedOwnership.h>
+#include <rwe/sim/SimulationOwnership.h>
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/sim_test_util.h>
 #include <rwe/sim/util.h>
@@ -508,6 +510,33 @@ namespace rwe
             REQUIRE(speed);
             REQUIRE(*speed == 256);
             REQUIRE_FALSE(driver.takeSpeedChange());
+        }
+    }
+
+    TEST_CASE("the mixed-ownership hooks refuse what a stream cannot mean", "[malformed][mixed]")
+    {
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
+        definePuppetTestWorld(sim);
+        auto local = addWellStockedPlayer(sim, "ARM");
+        auto remote = addWellStockedPlayer(sim, "CORE");
+        sim.getPlayer(remote).simulation = PlayerSimulation::Remote;
+
+        auto unit = sim.trySpawnCompletedUnit("TANK", local, SimVector(200_ss, 0_ss, 200_ss), std::nullopt);
+        REQUIRE(unit);
+        auto health = sim.getUnitState(*unit).hitPoints;
+
+        SECTION("an incoming 0x0b naming no unit costs the record and nothing else")
+        {
+            applyIncomingDamage(sim, UnitId(9999), std::nullopt, 1000);
+            REQUIRE(mixedOwnershipOutboxOf(sim).deaths.empty());
+            REQUIRE(mixedOwnershipOutboxOf(sim).damage.empty());
+        }
+
+        SECTION("a DELETEPLAYER for a player this game does not have is ignored")
+        {
+            removeRemotePlayer(sim, PlayerId(7));
+            REQUIRE(sim.getPlayer(remote).status == GamePlayerStatus::Alive);
+            REQUIRE(sim.getUnitState(*unit).hitPoints == health);
         }
     }
 }

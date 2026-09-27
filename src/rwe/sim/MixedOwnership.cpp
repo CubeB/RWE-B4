@@ -54,7 +54,8 @@ namespace rwe
     {
         // Only our own units' deaths are ours to report, and only when there is
         // a peer to report them to.
-        if (!simulatesLocally(sim, sim.getUnitState(unit).owner) || !hasRemotePlayer(sim))
+        auto unitRef = sim.tryGetUnitState(unit);
+        if (!unitRef || !simulatesLocally(sim, unitRef->get().owner) || !hasRemotePlayer(sim))
         {
             return;
         }
@@ -110,6 +111,13 @@ namespace rwe
 
     void removeRemotePlayer(GameSimulation& sim, PlayerId player)
     {
+        // A DELETEPLAYER names an id this machine has to look up, and a stream
+        // can name one that is not a player at all.
+        if (player.value >= sim.players.size())
+        {
+            return;
+        }
+
         std::vector<UnitId> owned;
         for (const auto& [unitId, unit] : sim.units)
         {
