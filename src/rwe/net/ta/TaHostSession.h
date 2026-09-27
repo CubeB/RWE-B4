@@ -15,6 +15,7 @@
 #include <asio.hpp>
 #include <rwe/net/ta/TaDirectPlay.h>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -70,6 +71,12 @@ namespace rwe
         std::array<std::uint8_t, 16> instanceGuid{
             0x88, 0xFE, 0xCB, 0xC9, 0xEF, 0xDB, 0x94, 0x43,
             0xB9, 0x5C, 0x0D, 0x53, 0xCC, 0x2C, 0x18, 0xD4};
+
+        /** How long a handshake may sit in flight before it is swept away. */
+        std::chrono::milliseconds pendingHandshakeTimeout{30000};
+
+        /** How long an accepted connection may be silent before it is closed. */
+        std::chrono::milliseconds incomingIdleTimeout{10000};
     };
 
     class TaHostSession
@@ -79,6 +86,31 @@ namespace rwe
         using PeerJoinedHandler = std::function<void(PeerId)>;
         using PeerLeftHandler = std::function<void(PeerId)>;
         using AppDataHandler = std::function<void(PeerId, const std::vector<std::uint8_t>&, TaTransport)>;
+
+        /**
+         * The session advertises maxPlayers = 10 and the host counts as one, so
+         * at most this many joiners are accepted.
+         */
+        static constexpr std::size_t MaxPlayers = 10;
+
+        /**
+         * The caps on the state a peer can grow before it has joined. A
+         * handshake key is a reply address the sender chooses, so the map of
+         * in-flight handshakes is bounded and its entries expire; the same for
+         * accepted connections, each of which holds a 64 KB read buffer.
+         */
+        static constexpr std::size_t MaxPendingHandshakes = 16;
+        static constexpr std::size_t MaxIncomingConnections = 32;
+
+        /** What the host is currently holding, against the caps above. */
+        struct Load
+        {
+            std::size_t peers{0};
+            std::size_t pendingHandshakes{0};
+            std::size_t incomingConnections{0};
+        };
+
+        Load load() const;
 
         TaHostSession(asio::io_context& ioContext, TaHostConfig config);
         ~TaHostSession();
@@ -130,10 +162,14 @@ namespace rwe
         struct IncomingTcp
         {
             asio::ip::tcp::socket socket;
+            asio::steady_timer idleTimer;
             std::array<std::uint8_t, 65536> scratch{};
             std::vector<std::uint8_t> pending;
 
-            explicit IncomingTcp(asio::io_context& io) : socket(io) {}
+            explicit IncomingTcp(asio::io_context& io)
+                : socket(io), idleTimer(io)
+            {
+            }
         };
 
         struct Peer
@@ -152,6 +188,7 @@ namespace rwe
             asio::ip::tcp::endpoint tcpEndpoint;
             asio::ip::udp::endpoint udpEndpoint;
             std::string name;
+            std::chrono::steady_clock::time_point started;
         };
 
         asio::io_context& ioContext;
@@ -166,6 +203,12 @@ namespace rwe
         std::map<PeerId, Peer> peers;
         std::map<std::string, PendingHandshake> pending;
         std::map<std::string, std::shared_ptr<TcpLink>> outbound;
+
+        /** Every accepted connection, so the count can be capped and each armed. */
+        std::vector<std::shared_ptr<IncomingTcp>> incoming;
+
+        /** Sweeps handshakes that never reached CREATEPLAYER. */
+        asio::steady_timer pruneTimer;
 
         std::array<std::uint8_t, 65536> udpBuffer{};
 
@@ -182,6 +225,20 @@ namespace rwe
         void listenGameTcp();
         void listenEnumUdp();
         void listenGameUdp();
+
+        /** Admit an accepted connection, or close it if the host is full. */
+        void acceptIncoming(std::shared_ptr<IncomingTcp> connection);
+
+        /** Arm the idle timer that closes a connection which has gone quiet. */
+        void armIdleTimeout(std::shared_ptr<IncomingTcp> connection);
+
+        void forgetIncoming(const std::shared_ptr<IncomingTcp>& connection);
+
+        /** Drop handshakes older than the configured timeout, then rearm. */
+        void prunePending();
+
+        /** The handshake for a reply address, created within the cap or nullptr. */
+        PendingHandshake* pendingFor(const std::string& key);
 
         void readTcp(std::shared_ptr<IncomingTcp> connection);
         void handleTcpBytes(std::shared_ptr<IncomingTcp> connection, const std::uint8_t* data, std::size_t len);
