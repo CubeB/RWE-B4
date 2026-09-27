@@ -592,6 +592,24 @@ namespace rwe
         SimScalar outpostResponseRadius{1500_ss};
         float outpostResponseStrength{1.2f};
         /**
+         * Answer the raid on the engagement predictor's margin
+         * (EngagementPredictor.h) instead of outpostResponseStrength's
+         * metal-cost ratio: responders vs raiders, by hp/dps/range/speed,
+         * has to come out at least outpostResponseMarginThreshold in the
+         * reserve's favour. Off by default (#389 milestone 1) so the
+         * un-tuned game is unchanged and a paired arena run can compare the
+         * two formulas against each other with everything else equal.
+         */
+        bool outpostResponseUsesPredictor{false};
+        /**
+         * The margin engagementMargin(responders, raiders) has to clear
+         * before outpostResponseUsesPredictor answers a raid. Zero means
+         * "any predicted edge, however slight"; the metal-ratio knob above
+         * defaults above 1 (an actual safety margin) for the same reason a
+         * zero threshold here is the closer analogue of "at least even".
+         */
+        float outpostResponseMarginThreshold{0.0f};
+        /**
          * A builder that is nearly done is left to finish. builderSafety
          * pulls an exposed builder out with an immediate move, and an
          * immediate order throws away what it was doing: reported from a

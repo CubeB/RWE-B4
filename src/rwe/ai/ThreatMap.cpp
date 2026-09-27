@@ -1,6 +1,7 @@
 #include "ThreatMap.h"
 #include <algorithm>
 #include <cmath>
+#include <rwe/ai/EngagementPredictor.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/PlayerVisibility.h>
 #include <rwe/sim/UnitDefinition.h>
@@ -11,7 +12,22 @@ namespace rwe
 {
     namespace
     {
-        /** Rough damage per second of a unit's primary weapon against ground targets. */
+        /**
+         * Rough damage per second of a unit's primary weapon against ground
+         * targets: the SUM over its three weapon slots, unlike
+         * rwe::bestDps (the BEST of the three), because a threat cell wants
+         * "how much of everything this unit carries could land here", not
+         * "what it would actually bring to bear on one target" -- a unit
+         * with both a main gun and a flak gun should count for more threat
+         * than one with the main gun alone, even though it would only ever
+         * fire one of them at a given target. #389 looked at consolidating
+         * this onto rwe::bestDps and found the two are not
+         * behaviour-identical for exactly that reason: replacing the sum
+         * with a max here would lower every multi-weapon unit's threat
+         * contribution and change antiGround, and with it bestAttackTarget
+         * and the raid-legality threshold in ArmyManager::chooseRaidTarget.
+         * Left as its own copy on purpose.
+         */
         float estimateDps(const GameSimulation& sim, const UnitDefinition& def)
         {
             float total = 0.0f;
@@ -47,11 +63,13 @@ namespace rwe
         /**
          * How far the unit's guns reach.
          *
-         * Keyed upper case because the loader upper-cases every weapon name
-         * while a unit's FBI is spelled however its author typed it. This is
-         * hardening for mod data and not a repair: every one of the 29 weapon
-         * references in the 64 shipped FBIs is already upper case, so the
-         * lookup matched before it was added.
+         * Was its own copy of this loop (keyed upper case because the loader
+         * upper-cases every weapon name while a unit's FBI is spelled
+         * however its author typed it) until #389 consolidated it onto
+         * rwe::bestRange, which is the identical arithmetic -- the best
+         * (highest) maxRange across the three weapon slots -- shared with
+         * the engagement predictor and BuildManager. Kept as a thin wrapper
+         * so every caller below stays unchanged.
          *
          * It was first committed as a fix, on the grounds that the damage
          * lookup above had exactly this defect and this one had the same
@@ -62,20 +80,7 @@ namespace rwe
          */
         float weaponRange(const GameSimulation& sim, const UnitDefinition& def)
         {
-            float best = 0.0f;
-            for (const auto& weaponName : {def.weapon1, def.weapon2, def.weapon3})
-            {
-                if (weaponName.empty())
-                {
-                    continue;
-                }
-                auto it = sim.weaponDefinitions.find(toUpper(weaponName));
-                if (it != sim.weaponDefinitions.end())
-                {
-                    best = std::max(best, it->second.maxRange.value);
-                }
-            }
-            return best;
+            return bestRange(sim, def);
         }
 
         /** How far the unit reaches at an aircraft, or zero if it cannot touch one. */

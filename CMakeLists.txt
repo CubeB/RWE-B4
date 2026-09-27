@@ -189,6 +189,8 @@ set(SOURCE_FILES
     src/rwe/ai/ArmyManager.h
     src/rwe/ai/BuildManager.cpp
     src/rwe/ai/BuildManager.h
+    src/rwe/ai/EngagementPredictor.cpp
+    src/rwe/ai/EngagementPredictor.h
     src/rwe/ai/BuilderSafety.cpp
     src/rwe/ai/BuilderSafety.h
     src/rwe/ai/AiPersonality.cpp
@@ -969,6 +971,7 @@ set(TEST_FILES
     src/rwe/ai/AiBehaviour_perception.test.cpp
     src/rwe/ai/AiBehaviour_siting.test.cpp
     src/rwe/ai/BuilderSafety.test.cpp
+    src/rwe/ai/EngagementPredictor.test.cpp
     src/rwe/ai/LineOfFire.test.cpp
     src/rwe/ai/AiPersonality.test.cpp
     src/rwe/ai/MapIntel.test.cpp
