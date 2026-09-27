@@ -1,0 +1,76 @@
+# Knob search space for tools/ai-autotune.py, milestone 1.
+#
+# The eight knobs here are the ones the CORE-vs-ARM deficit investigation
+# (core-ai-deficit-investigation) already implicated by hand: the lab unit
+# shares that decide CORE's composition, attackArmySize/retreatArmySize (when
+# a wave goes and when it comes home), the two retreat-percent gates, and
+# raidPartySize. All eight are IntKnob entries in AiTuningProfile.cpp, and
+# ai-autotune.py refuses to start if any name here is not one of the four
+# tables applyAiTuning reads from -- see arena_common.parse_knob_tables.
+#
+# outpostResponseStrength is deliberately left out: issue #389's engagement
+# predictor is about to replace its cost-ratio formula, and tuning a
+# coefficient that is about to be deleted wastes the run (ai-plan.md, "Do the
+# predictor's milestone 1 before the auto-tuner's... or run them in parallel
+# on disjoint knobs").
+#
+# Ranges below are centred on the shipped defaults/faction overrides
+# (AiTuningProfile.h defaults; applyFactionDefaults' CORE block), widened
+# enough for a random search to find something either side of "known good"
+# without wandering into values nobody would ship (e.g. attackArmySize=200).
+
+[[knob]]
+name = "labRaiderShare"
+type = "int"
+min = 0
+max = 4
+# default (ARM) 2; CORE override 1
+
+[[knob]]
+name = "labRocketKbotShare"
+type = "int"
+min = 0
+max = 4
+# default (ARM) 1; CORE override 2
+
+[[knob]]
+name = "labArtilleryKbotShare"
+type = "int"
+min = 0
+max = 4
+# default (ARM) 0; CORE override 1 (the Thud mix -- core-ai-deficit-investigation's best single change)
+
+[[knob]]
+name = "attackArmySize"
+type = "int"
+min = 4
+max = 20
+# default 8; CORE override 14; easy 14; hard 7
+
+[[knob]]
+name = "retreatArmySize"
+type = "int"
+min = 1
+max = 10
+# default 3; hard 2; easy 5
+
+[[knob]]
+name = "retreatRaiderBelowPercent"
+type = "int"
+min = 10
+max = 70
+# default 30
+
+[[knob]]
+name = "retreatLineBelowPercent"
+type = "int"
+min = 15
+max = 80
+# default 45
+
+[[knob]]
+name = "raidPartySize"
+type = "int"
+min = 1
+max = 6
+# default 3
