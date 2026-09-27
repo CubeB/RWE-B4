@@ -2,6 +2,9 @@
 #include <rwe/LoadingScene_util.h>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/game/GameSimulationLoader.h>
+#include <set>
+#include <rwe/game/BuilderGuisDatabase.h>
+#include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/io/fbi/io.h>
 #include <rwe/io/ota/ota.h>
@@ -251,6 +254,64 @@ namespace rwe
             REQUIRE(result.adjusted.size() == 1u);
             CHECK(result.adjusted.front().find("moved onto the map") != std::string::npos);
             CHECK(result.adjusted.front().find("cleared ROCK") != std::string::npos);
+        }
+    }
+
+    TEST_CASE("a mission's unit list is the block names of its useonly file", "[mission]")
+    {
+        auto tdf = parseTdfFromString("[ARMCOM]\n{\n}\n[armpw]\n{\n}\n");
+        CHECK(missionUnitListFromTdf(tdf) == std::set<std::string>{"ARMCOM", "ARMPW"});
+    }
+
+    TEST_CASE("a unit off the mission's list cannot be built or placed", "[mission]")
+    {
+        // Issue #381. The original removes it from the game (0x431740,
+        // 0x42D2E0); RWE keeps the definition and refuses it wherever a unit
+        // is made.
+        MissionWorld world;
+        BuilderGuisDatabase guis;
+        std::vector<GuiEntry> page(3);
+        page[0].common.name = "BLDG";
+        page[1].common.name = "kbot";
+        page[2].common.name = "NEXT";
+        guis.addBuilderGui("BLDG", {page});
+
+        auto kept = applyMissionUnitList(world.sim.unitDefinitions, guis, {"BLDG"});
+        CHECK(kept == 1u);
+        CHECK(world.sim.unitDefinitions.at("KBOT").excludedByMission);
+        CHECK_FALSE(world.sim.unitDefinitions.at("BLDG").excludedByMission);
+
+        SECTION("its button leaves the build menus, and nothing else does")
+        {
+            const auto& menu = guis.tryGetBuilderGui("BLDG")->get().front();
+            REQUIRE(menu.size() == 2u);
+            CHECK(menu[0].common.name == "BLDG");
+            CHECK(menu[1].common.name == "NEXT");
+        }
+
+        SECTION("the mission does not place one")
+        {
+            OtaSchema schema{};
+            schema.units = {missionUnit("KBOT", 1, 300, 300), missionUnit("BLDG", 1, 100, 100)};
+            auto result = spawnMissionUnits(world.sim, schema, world.slots);
+            REQUIRE(result.spawned.size() == 1u);
+            REQUIRE(result.skipped.size() == 1u);
+            CHECK(result.skipped.front().find("not on the mission's unit list") != std::string::npos);
+        }
+
+        SECTION("nobody can order one built")
+        {
+            OtaSchema schema{};
+            schema.units = {missionUnit("BLDG", 1, 100, 100)};
+            auto factory = spawnMissionUnits(world.sim, schema, world.slots).spawned.front();
+            auto owner = *world.slots[0];
+            auto site = SimVector(200_ss, 0_ss, 200_ss);
+            using Issue = PlayerUnitCommand::IssueOrder;
+
+            CHECK_FALSE(applyUnitCommandToSimulation(world.sim, owner, PlayerUnitCommand(factory, Issue(BuildOrder("KBOT", site), Issue::Immediate))));
+            CHECK_FALSE(applyUnitCommandToSimulation(world.sim, owner, PlayerUnitCommand(factory, PlayerUnitCommand::ModifyBuildQueue{1, "KBOT"})));
+            // What the list does offer is still built.
+            CHECK(applyUnitCommandToSimulation(world.sim, owner, PlayerUnitCommand(factory, Issue(BuildOrder("BLDG", site), Issue::Immediate))));
         }
     }
 

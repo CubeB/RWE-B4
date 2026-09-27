@@ -200,6 +200,15 @@ namespace rwe
         bool canHover;
 
         /**
+         * Left off the mission's unit list, its `useonlyunits` file: nobody
+         * can build one and the mission cannot place one. The original
+         * removes such a definition outright (bit 23 of def+0x241, cleared by
+         * 0x431740 and compacted away by 0x42D2E0); RWE keeps it and refuses
+         * it everywhere a unit is built. Issue #381.
+         */
+        bool excludedByMission{false};
+
+        /**
          * How far below the water surface the hull rides, in whole world
          * units. The original uses it in two places (TotalA.exe 0x43D72E and
          * 0x43DBA9); see the findings doc for why only the second of them has
