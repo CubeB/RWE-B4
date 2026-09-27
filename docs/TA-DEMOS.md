@@ -2586,6 +2586,7 @@ simulation ticked once per local tick. The generator is the tool's own
 | `tad_puppet`, straight from the file | 52.15 | 82.03% | 87.79 | 69.64% |
 | `--live-sim 0:0:1` | 52.15 | 82.03% | 87.79 | 69.64% |
 | `--live-sim 3:0:1` | 52.38 | 81.96% | 93.20 | 68.45% |
+| `--live-sim 10:0:1` | 52.43 | 81.87% | 136.18 | 64.88% |
 | `--live-sim 3:1:1` | 53.58 | 81.62% | 103.31 | 68.26% |
 | `--live-sim 3:5:1` | 60.35 | 80.44% | 165.52 | 61.08% |
 
@@ -2598,6 +2599,15 @@ costs slowly: 5% of packets gone moves the ground median not at all (it is
 already zero), the p90 from 52 to 60 units, and the within-32 figure by under
 two points, because a full-state record is a *correction* and the one after a
 lost packet puts the unit back.
+
+**A deeper buffer costs the ground figures almost nothing.** At a depth of 10
+the receiver has 2,310 out-of-order packets to put right over the five demos
+against 12 at a depth of 3 -- these demos send a packet every three ticks or
+so, so a depth of 3 has little to reorder and a depth of 10 has plenty -- and
+the ground within-32 figure is 81.87% against 81.96%. The air figures are the
+other story: a goal is not a position (see above), so a puppet aircraft given
+its recorded goal three ticks earlier than before has three more ticks of its
+own arrival profile to be wrong by, and 64.88% within 32 against 68.45%.
 
 Two things the numbers do not say, and a reader should not infer otherwise. A
 **death record with no `0x2c` of its own** is applied at the sender's last
