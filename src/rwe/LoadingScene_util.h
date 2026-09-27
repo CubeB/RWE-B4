@@ -1,6 +1,7 @@
 #pragma once
 
 #include <deque>
+#include <optional>
 #include <rwe/ColorPalette.h>
 #include <rwe/game/WeaponMediaInfo.h>
 #include <rwe/io/cob/Cob.h>
@@ -16,6 +17,7 @@
 #include <rwe/sim/WeaponDefinition.h>
 #include <rwe/vfs/AbstractVirtualFileSystem.h>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace rwe
 {
@@ -84,5 +86,13 @@ namespace rwe
 
     WeaponMediaInfo parseWeaponMediaInfo(const std::vector<Color>& palette, const std::vector<Color>& guiPalette, const WeaponTdf& tdf);
 
-    FeatureDefinitionId getFeatureId(FeatureDefinitionId& nextId, const std::unordered_map<std::string, FeatureDefinitionId>& featureNameIndex, std::deque<std::string>& openQueue, std::unordered_map<std::string, FeatureDefinitionId>& openSet, const std::string& featureName);
+    /**
+     * Reserves an id for a feature a definition references, if the game data
+     * defines that name. A name no feature TDF defines yields nothing and
+     * reserves nothing: TA looks the name up only when it spawns the corpse,
+     * so a data set whose corpse chain has a missing link still loads and
+     * leaves no wreck, while an id reserved for a never-loaded feature would
+     * make the reference point at whichever feature lands on it next.
+     */
+    std::optional<FeatureDefinitionId> getFeatureId(FeatureDefinitionId& nextId, const std::unordered_map<std::string, FeatureDefinitionId>& featureNameIndex, const std::unordered_set<std::string>& knownFeatureNames, std::deque<std::string>& openQueue, std::unordered_map<std::string, FeatureDefinitionId>& openSet, const std::string& featureName);
 }

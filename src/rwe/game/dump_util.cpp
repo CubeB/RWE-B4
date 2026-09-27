@@ -37,6 +37,7 @@ namespace rwe
             {"type", dumpJson(p.type)},
             {"color", dumpJson(p.color)},
             {"status", dumpJson(p.status)},
+            {"simulation", dumpJson(p.simulation)},
             {"side", dumpJson(p.side)},
             {"metal", dumpJson(p.metal)},
             {"maxMetal", dumpJson(p.maxMetal)},

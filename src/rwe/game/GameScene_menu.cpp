@@ -21,6 +21,7 @@
 #include <rwe/MovieScene.h>
 #include <rwe/game/SaveFile.h>
 #include <rwe/game/save_util.h>
+#include <rwe/sim/SimulationOwnership.h>
 #include <rwe/io/gui/gui.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/ui/UiLabel.h>
@@ -176,6 +177,14 @@ namespace rwe
 
     void GameScene::saveCurrentGame(const std::string& name)
     {
+        // The state of a player simulated on another machine is not here to
+        // save; saveSimulationToJson refuses it too, and this says why.
+        if (hasRemotePlayer(simulation))
+        {
+            printConsole("Cannot save: a player is simulated on another machine");
+            return;
+        }
+
         if (endGameChartVisible() && gameParameters.campaign)
         {
             saveBetweenMissions(name);

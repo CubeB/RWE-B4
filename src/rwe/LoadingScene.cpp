@@ -87,7 +87,7 @@ namespace rwe
         // nothing to ask them for. Left in, opening such a recording tried to
         // resolve a host that was long gone and threw before the first frame.
         // See the matching test in createGameScene.
-        for (Index i = 0; i < getSize(gameParameters.players) && !gameParameters.replayFile; ++i)
+        for (Index i = 0; i < getSize(gameParameters.players) && !gameParameters.replayFile && !gameParameters.tadDemoFile; ++i)
         {
             const auto& p = gameParameters.players[i];
             if (!p)
@@ -184,7 +184,7 @@ namespace rwe
             // players in every other respect, which is what keeps them human
             // players no AI drives and leaves the local seat where the
             // recording had it.
-            auto isRemote = !gameParameters.replayFile
+            auto isRemote = !gameParameters.replayFile && !gameParameters.tadDemoFile
                 && std::get_if<PlayerControllerTypeNetwork>(&params->controller) != nullptr;
 
             // Only a peer running its own simulation has a sync hash to
@@ -357,7 +357,7 @@ namespace rwe
         std::vector<PlayerId> battlePlayers;
         std::vector<SimVector> battleSpawns;
 
-        for (Index i = 0; i < getSize(gameParameters.players) && !gameParameters.mission; ++i)
+        for (Index i = 0; i < getSize(gameParameters.players) && !gameParameters.mission && !gameParameters.tadDemoFile; ++i)
         {
             const auto& player = gameParameters.players[i];
             if (!player)
@@ -410,6 +410,14 @@ namespace rwe
                 battleSpawns);
         }
 
+        if (gameParameters.tadDemoFile && !humanStartPos)
+        {
+            // A spectator has no commander to look at: open on the middle of
+            // the map, and the units arrive as the stream places them.
+            humanStartPos = SimVector(0_ss, 0_ss, 0_ss);
+            humanStartPos->y = gameScene->getTerrain().getHeightAt(humanStartPos->x, humanStartPos->z);
+        }
+
         if (!humanStartPos)
         {
             throw std::runtime_error("No human player!");
@@ -436,6 +444,10 @@ namespace rwe
                 throw std::runtime_error("Could not read replay file: " + *gameParameters.replayFile);
             }
             gameScene->enableReplayPlayback(std::move(*replay));
+        }
+        else if (gameParameters.tadDemoFile)
+        {
+            gameScene->enableTadPlayback(*gameParameters.tadDemoFile, loaded.dataMaps.unitLoadOrder);
         }
         else if (gameParameters.recordReplayFile)
         {
