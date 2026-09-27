@@ -4,6 +4,7 @@
 #include <rwe/net/ta/TaPinger.h>
 #include <rwe/net/ta/ta_packet_captures.h>
 #include <string>
+#include <utility>
 #include <vector>
 
 /**
@@ -232,6 +233,58 @@ namespace rwe
             TadBytes tooShort(size, 0x03);
             CAPTURE(size);
             REQUIRE_FALSE(taParsePacket(tooShort));
+        }
+    }
+
+    TEST_CASE("anything built comes back, at either framing and any size", "[net][ta]")
+    {
+        // Codes the length table agrees with, so the walk is the only thing
+        // that could lose a subpacket.
+        const std::vector<std::pair<std::uint8_t, std::size_t>> shapes{
+            {0x06, 1}, {0x11, 4}, {0x02, 13}, {0x1a, 14}, {0x09, 23}, {0x0d, 36}, {0x28, 58}, {0x20, 186}};
+
+        for (std::uint8_t framing : {TadPacketUncompressed, TadPacketCompressed})
+        {
+            for (std::size_t count = 1; count <= shapes.size(); ++count)
+            {
+                CAPTURE(framing, count);
+                TaPacket packet;
+                packet.type = framing;
+                packet.marker = 0xffffffc3;
+                for (std::size_t i = 0; i < count; ++i)
+                {
+                    // A body that does not compress, so the compressor's copy
+                    // branch runs as well as its literal one.
+                    packet.subpackets.push_back(TadBytes(shapes[i].second, static_cast<std::uint8_t>(i * 37 + 1)));
+                    packet.subpackets.back()[0] = shapes[i].first;
+                }
+
+                auto parsed = taParsePacket(packet.build());
+                REQUIRE(parsed);
+                REQUIRE(parsed->checksumValid);
+                REQUIRE(parsed->packet.marker == packet.marker);
+                REQUIRE(parsed->packet.subpackets.size() == count);
+                for (std::size_t i = 0; i < count; ++i)
+                {
+                    REQUIRE(parsed->packet.subpackets[i] == packet.subpackets[i]);
+                }
+            }
+        }
+
+        // A code the table cannot size takes the rest of the payload, so one
+        // subpacket of any length comes back whole.
+        for (std::size_t size = 1; size < 400; size += 7)
+        {
+            CAPTURE(size);
+            TaPacket packet;
+            packet.type = TadPacketCompressed;
+            packet.subpackets.push_back(TadBytes(size, 0xA5));
+            packet.subpackets.back()[0] = 0x77;
+            auto parsed = taParsePacket(packet.build());
+            REQUIRE(parsed);
+            REQUIRE(parsed->stats.unknownCodes == 1);
+            REQUIRE(parsed->packet.subpackets.size() == 1);
+            REQUIRE(parsed->packet.subpackets[0].size() == size);
         }
     }
 }
