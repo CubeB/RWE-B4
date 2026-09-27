@@ -208,6 +208,52 @@ namespace rwe
             }
         }
 
+        /**
+         * Spawns a puppet where its owner recorded it, whether or not the
+         * simulation's own placement would allow it.
+         *
+         * The owner already resolved placement, so a factory's build pad or a
+         * peer's footprint must not refuse the unit: the recorded position is
+         * authoritative, the same way a remote unit's step is never refused by
+         * a stale peer. The blocking cells are cleared and the new unit claims
+         * them through the ordinary spawn; a wreck in the way is cleared only
+         * after a first attempt without one, so an overlap that is not a wreck
+         * does not orphan a feature.
+         */
+        std::optional<UnitId> placeUnit(
+            const std::string& typeName,
+            PlayerId player,
+            const SimVector& position,
+            SimAngle rotation,
+            bool completed)
+        {
+            const auto& definition = sim.unitDefinitions.at(typeName);
+            auto region = sim.occupiedGrid.tryToRegion(sim.computeFootprintRegion(position, definition.movementCollisionInfo));
+            if (!region)
+            {
+                return std::nullopt;
+            }
+
+            sim.occupiedGrid.forEach(*region, [](auto& cell) {
+                cell.mobileUnitId = std::nullopt;
+                cell.buildingInfo = std::nullopt;
+            });
+
+            auto spawn = [&]() -> std::optional<UnitId> {
+                return completed
+                    ? sim.trySpawnCompletedUnit(typeName, player, position, rotation)
+                    : sim.trySpawnUnit(typeName, player, position, rotation);
+            };
+
+            if (auto id = spawn())
+            {
+                return id;
+            }
+
+            sim.occupiedGrid.forEach(*region, [](auto& cell) { cell.featureId = std::nullopt; });
+            return spawn();
+        }
+
 
 
         void advanceTo(uint32_t serial)
@@ -265,11 +311,12 @@ namespace rwe
             }
 
             auto& puppet = ensurePuppet(sender, static_cast<uint16_t>((e->unitId - 1) % maxUnits), *typeName);
-            auto unitId = sim.trySpawnUnit(
+            auto unitId = placeUnit(
                 *typeName,
                 player->second,
                 toSimPosition(e->position),
-                SimAngle(static_cast<uint16_t>(e->rotation.y)));
+                SimAngle(static_cast<uint16_t>(e->rotation.y)),
+                false);
             if (!unitId)
             {
                 ++stats.spawnsRefused;
@@ -588,11 +635,12 @@ namespace rwe
                     position = toSimPosition(sync.position);
                 }
 
-                auto unitId = sim.trySpawnCompletedUnit(
+                auto unitId = placeUnit(
                     *typeName,
                     player->second,
                     position,
-                    SimAngle(static_cast<uint16_t>(sync.rotation.y)));
+                    SimAngle(static_cast<uint16_t>(sync.rotation.y)),
+                    true);
                 if (!unitId)
                 {
                     ++stats.spawnsRefused;
