@@ -84,6 +84,9 @@ namespace rwe
 
         std::vector<TadChatLine> chatLines;
 
+        /** The latest 0x19 value waiting to be taken. */
+        std::optional<uint16_t> speedChange;
+
         TadPuppetStats stats;
 
         Impl(GameSimulation& sim, uint16_t maxUnits, std::vector<std::string> unitLoadOrder)
@@ -728,6 +731,18 @@ namespace rwe
             p.maxEnergy = Energy(std::max(0.0f, e->energyStorage));
         }
 
+        /** Reads a recorded 0x19. The value is stored, not interpreted: what a pause looks like is not settled. */
+        void applySpeed(const TadBytes& subPacket)
+        {
+            auto e = tadDecodeSpeed(subPacket);
+            if (!e)
+            {
+                return;
+            }
+            ++stats.speedChanges;
+            speedChange = e->value;
+        }
+
         void applyChat(uint8_t sender, const TadBytes& subPacket, bool ally)
         {
             std::string text;
@@ -1098,6 +1113,9 @@ namespace rwe
                     case TadSubPacketCode::PlayerResourceInfo:
                         applyResourceStats(sender, subPacket);
                         break;
+                    case TadSubPacketCode::Speed:
+                        applySpeed(subPacket);
+                        break;
                     case TadSubPacketCode::Chat:
                         applyChat(sender, subPacket, false);
                         break;
@@ -1231,6 +1249,11 @@ namespace rwe
     std::vector<TadChatLine> TadPuppetDriver::takeChat()
     {
         return std::exchange(impl->chatLines, {});
+    }
+
+    std::optional<uint16_t> TadPuppetDriver::takeSpeedChange()
+    {
+        return std::exchange(impl->speedChange, std::nullopt);
     }
 
     const TadPuppetStats& TadPuppetDriver::stats() const

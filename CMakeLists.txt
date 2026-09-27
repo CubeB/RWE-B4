@@ -1055,6 +1055,7 @@ set(TEST_FILES
     src/rwe/io/tad/tad_writer.test.cpp
     src/rwe/io/pcx/pcx.test.cpp
     src/rwe/io/malformed_input.test.cpp
+    src/rwe/puppet/TadDemo.test.cpp
     src/rwe/puppet/TadPuppetDriver.test.cpp
     src/rwe/scene/SceneManager.test.cpp
     src/rwe/scene/Screenshot.test.cpp

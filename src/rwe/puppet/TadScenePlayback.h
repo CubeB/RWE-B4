@@ -41,6 +41,9 @@ namespace rwe
 
         std::vector<TadChatLine> takeChat();
 
+        /** The latest recorded 0x19 value, or nothing; see TadPuppetDriver. */
+        std::optional<uint16_t> takeSpeedChange();
+
     private:
         struct Impl;
         std::unique_ptr<Impl> impl;

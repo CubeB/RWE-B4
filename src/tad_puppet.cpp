@@ -202,6 +202,7 @@ namespace
             {"shots", {{"spawned", stats.shotsSpawned}, {"dropped", stats.shotsDropped}}},
             {"scripts", {{"run", stats.scriptCallsRun}, {"dropped", stats.scriptCallsDropped}}},
             {"chat", {{"lines", stats.chatLines}, {"allyLines", stats.allyChatLines}}},
+            {"speedChanges", stats.speedChanges},
             {"packetsWithoutClock", stats.packetsWithoutClock},
             {"drift", {{"ground", driftJson(ground)}, {"air", driftJson(air)}}}};
     }
@@ -233,7 +234,8 @@ namespace
                   << ", no clock " << stats.packetsWithoutClock << "\n";
         std::cout << "  shots " << stats.shotsSpawned << " spawned, " << stats.shotsDropped << " dropped"
                   << "; scripts " << stats.scriptCallsRun << " run, " << stats.scriptCallsDropped << " dropped"
-                  << "; chat " << stats.chatLines << " lines, " << stats.allyChatLines << " ally\n";
+                  << "; chat " << stats.chatLines << " lines, " << stats.allyChatLines << " ally"
+                  << "; speed " << stats.speedChanges << "\n";
         printDrift("ground", summarise(stats.groundDrift));
         printDrift("air", summarise(stats.airDrift));
     }
@@ -296,6 +298,7 @@ namespace
         addCounts(into.scriptCallsDropped, from.scriptCallsDropped);
         addCounts(into.chatLines, from.chatLines);
         addCounts(into.allyChatLines, from.allyChatLines);
+        addCounts(into.speedChanges, from.speedChanges);
         into.groundDrift.distances.insert(into.groundDrift.distances.end(), from.groundDrift.distances.begin(), from.groundDrift.distances.end());
         into.airDrift.distances.insert(into.airDrift.distances.end(), from.airDrift.distances.begin(), from.airDrift.distances.end());
         into.groundDrift.samples += from.groundDrift.samples;

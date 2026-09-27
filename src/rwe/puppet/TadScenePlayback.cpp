@@ -113,4 +113,9 @@ namespace rwe
     {
         return impl->driver->takeChat();
     }
+
+    std::optional<uint16_t> TadScenePlayback::takeSpeedChange()
+    {
+        return impl->driver->takeSpeedChange();
+    }
 }

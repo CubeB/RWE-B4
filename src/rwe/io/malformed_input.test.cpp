@@ -495,5 +495,19 @@ namespace rwe
             feed(3, {tadEncodeResourceStats(stats)});
             REQUIRE(sim.getPlayer(PlayerId(0)).metal == Metal(10000.0f));
         }
+
+        SECTION("a truncated speed record changes nothing, a whole one is stored")
+        {
+            feed(1, {TadBytes{0x19, 0x00}});
+            REQUIRE(driver.stats().speedChanges == 0);
+            REQUIRE_FALSE(driver.takeSpeedChange());
+
+            feed(1, {tadEncodeSpeed(TadSpeed{256})});
+            REQUIRE(driver.stats().speedChanges == 1);
+            auto speed = driver.takeSpeedChange();
+            REQUIRE(speed);
+            REQUIRE(*speed == 256);
+            REQUIRE_FALSE(driver.takeSpeedChange());
+        }
     }
 }

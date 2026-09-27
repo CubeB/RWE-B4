@@ -39,6 +39,20 @@ namespace rwe
         }
 
         tadPlayback->applyTick(sceneTime.value);
+
+        // A recorded 0x19 carries a game-speed level in its high byte, 256
+        // being normal. A zero level is left alone: the corpus has lone zeros
+        // in demos that plainly run on, so reading one as a pause would freeze
+        // playback where the recording did not.
+        if (auto speed = tadPlayback->takeSpeedChange())
+        {
+            auto level = static_cast<int>(*speed >> 8);
+            if (level > 0)
+            {
+                replaySpeed = std::clamp(level, 1, 64);
+            }
+        }
+
         for (auto& line : tadPlayback->takeChat())
         {
             printChatLine(line.player, line.ally ? "(ally) " + line.text : line.text);
@@ -107,13 +121,14 @@ namespace rwe
         }
 
         const auto& s = tadPlayback->stats();
-        ImGui::Text("shots %llu/%llu  scripts %llu/%llu  chat %llu+%llu",
+        ImGui::Text("shots %llu/%llu  scripts %llu/%llu  chat %llu+%llu  speed %llu",
             static_cast<unsigned long long>(s.shotsSpawned),
             static_cast<unsigned long long>(s.shotsDropped),
             static_cast<unsigned long long>(s.scriptCallsRun),
             static_cast<unsigned long long>(s.scriptCallsDropped),
             static_cast<unsigned long long>(s.chatLines),
-            static_cast<unsigned long long>(s.allyChatLines));
+            static_cast<unsigned long long>(s.allyChatLines),
+            static_cast<unsigned long long>(s.speedChanges));
 
         ImGui::End();
     }

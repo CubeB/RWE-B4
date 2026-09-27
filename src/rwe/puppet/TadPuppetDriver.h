@@ -63,6 +63,9 @@ namespace rwe
         uint64_t chatLines{0};
         uint64_t allyChatLines{0};
 
+        /** A recorded 0x19 game-speed setting. */
+        uint64_t speedChanges{0};
+
         TadPuppetDrift groundDrift;
         TadPuppetDrift airDrift;
     };
@@ -129,6 +132,16 @@ namespace rwe
 
         /** Takes the chat lines decoded since the last call. */
         std::vector<TadChatLine> takeChat();
+
+        /**
+         * Takes the most recent recorded 0x19 game-speed value since the last
+         * call, or nothing. The value is TA's own: 256 is normal speed and the
+         * high byte is the speed level, but the corpus does not settle what a
+         * pause looks like, so the caller reads it rather than the driver.
+         * Asked after `applyTick`, where the value belongs to the tick about
+         * to run.
+         */
+        std::optional<uint16_t> takeSpeedChange();
 
         const TadPuppetStats& stats() const;
 
