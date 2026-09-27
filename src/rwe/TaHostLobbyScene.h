@@ -1,12 +1,12 @@
 #pragma once
 
+#include <memory>
+#include <optional>
 #include <rwe/LoadingScene.h>
 #include <rwe/SceneContext.h>
 #include <rwe/game/PlayerColorIndex.h>
 #include <rwe/net/ta/TaBattleroom.h>
 #include <rwe/scene/Scene.h>
-#include <memory>
-#include <optional>
 #include <string>
 
 namespace rwe
@@ -67,10 +67,12 @@ namespace rwe
 
         /**
          * The commander's own figures, read from the loaded data set when the
-         * launch is asked for: a 0x09 names a type by its position in the
-         * unit listing, which is a property of the data and not of the wire.
+         * panel opens: a 0x09 names a type by its position in the unit listing,
+         * which is a property of the data and not of the wire.
          */
-        std::optional<TaBattleroom::LaunchParams> launchParams() const;
+        std::optional<TaBattleroom::LaunchParams> params;
+
+        std::optional<TaBattleroom::LaunchParams> computeLaunchParams() const;
 
         void tryLaunch();
         void launch();

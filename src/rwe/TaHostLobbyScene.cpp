@@ -1,17 +1,17 @@
 #include "TaHostLobbyScene.h"
 
-#include <imgui.h>
-#include <rwe/game/PlayerColorIndex.h>
-#include <rwe/io/ota/ota.h>
-#include <rwe/io/tdf/tdf.h>
-#include <rwe/io/tad/tad_events.h>
-#include <rwe/net/ta/TaHostGame.h>
-#include <rwe/sim/Metal.h>
-#include <rwe/sim/Energy.h>
-#include <rwe/util/SimpleLogger.h>
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <imgui.h>
+#include <rwe/game/PlayerColorIndex.h>
+#include <rwe/io/ota/ota.h>
+#include <rwe/io/tad/tad_events.h>
+#include <rwe/io/tdf/tdf.h>
+#include <rwe/net/ta/TaHostGame.h>
+#include <rwe/sim/Energy.h>
+#include <rwe/sim/Metal.h>
+#include <rwe/util/SimpleLogger.h>
 #include <string>
 #include <vector>
 
@@ -95,20 +95,32 @@ namespace rwe
         {
             LOG_ERROR << "TA host: there is no host to wait for";
             sceneContext.sceneManager->requestExit();
+            return;
+        }
+        const auto& config = host->config();
+
+        // Read once: the commander's type index is its position in the data
+        // set's unit listing and its position is the map's first start
+        // position, and neither of those changes while a panel is up. A frame
+        // that re-read the listing would be a directory scan sixty times a
+        // second.
+        params = computeLaunchParams();
+        if (!params)
+        {
+            auto side = std::string(config.side == TadSide::Core ? "CORE" : "ARM");
+            LOG_ERROR << "TA host: " << mapName << " has no first start position, or the data set's unit"
+                      << "listing does not name " << side << "'s commander; nothing can be launched";
         }
     }
 
     void TaHostLobbyScene::update(int)
     {
-        if (!host || loading)
+        if (!host || loading || !params)
         {
             return;
         }
 
-        if (auto params = launchParams())
-        {
-            host->autoLaunchIfReady(*params);
-        }
+        host->autoLaunchIfReady(*params);
 
         auto lobby = host->lobbyState();
         if (lobby.launched && !launched)
@@ -117,9 +129,9 @@ namespace rwe
             launched->name = lobby.launched->name;
             launched->team = lobby.launched->team;
 
-            // A joiner that has not said which side it is on is put on the
-            // other one: the map has to seat two players and two players
-            // cannot both be on the same side.
+            // A joiner whose own status named no side is put on the other one:
+            // a player on no side cannot be seated on a map, and ours is the
+            // one side this host knows.
             auto side = lobby.launched->side;
             if (side != TadSide::Arm && side != TadSide::Core)
             {
@@ -131,7 +143,7 @@ namespace rwe
         }
     }
 
-    std::optional<TaBattleroom::LaunchParams> TaHostLobbyScene::launchParams() const
+    std::optional<TaBattleroom::LaunchParams> TaHostLobbyScene::computeLaunchParams() const
     {
         const auto& config = host->config();
         auto side = std::string(config.side == TadSide::Core ? "CORE" : "ARM");
@@ -179,14 +191,8 @@ namespace rwe
 
     void TaHostLobbyScene::tryLaunch()
     {
-        if (!host || loading)
+        if (!host || loading || !params)
         {
-            return;
-        }
-        auto params = launchParams();
-        if (!params)
-        {
-            LOG_ERROR << "TA host: the map's first start position or the data set's unit listing is not there";
             return;
         }
         host->launch(*params);
@@ -219,6 +225,10 @@ namespace rwe
         GameParameters parameters{mapName, schemaIndex};
         parameters.netMode = NetMode::OwnClock;
         parameters.taHostGame = host;
+
+        // TA has no commander-death rule: a player whose commander dies keeps
+        // playing, and the peer owns the other half of the board besides.
+        parameters.commanderDeath = CommanderDeathMode::GameContinues;
 
         auto localSide = std::string(config.side == TadSide::Core ? "CORE" : "ARM");
         auto localColor = std::min<unsigned int>(config.colour, 9u);

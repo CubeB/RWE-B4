@@ -19,16 +19,16 @@
 //
 // docs/TA-NETWORK.md, "Playtesting against a real TA" and "DirectPlay".
 
-#include <rwe/io/tad/tad_headers.h>
-#include <rwe/io/tad/tad_util.h>
-#include <rwe/net/ta/TaBattleroom.h>
-#include <rwe/net/ta/TaHostSession.h>
-#include <rwe/net/ta/TaPacket.h>
 #include <chrono>
 #include <cstdint>
 #include <deque>
 #include <memory>
 #include <optional>
+#include <rwe/io/tad/tad_headers.h>
+#include <rwe/io/tad/tad_util.h>
+#include <rwe/net/ta/TaBattleroom.h>
+#include <rwe/net/ta/TaHostSession.h>
+#include <rwe/net/ta/TaPacket.h>
 #include <string>
 #include <vector>
 

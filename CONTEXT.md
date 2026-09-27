@@ -356,6 +356,14 @@ chosen by tick, so each unit is described once a cycle. The receiver believes
 it over anything it had, so a record for an empty slot deletes the unit there.
 _Avoid_: snapshot, keyframe
 
+**Owner block**, **id block**:
+The contiguous run of unit ids one owner holds, `id = block * maxUnits + index
++ 1`, so two owners in one block would erase each other's units once per cycle
+and each unit id says whose it is. A joining TA takes block 0 and a host its
+block 1. `DemoIdAllocator` allocates them, `TaWireTapeSettings::firstBlock`
+says where a live host's start. `docs/TA-NETWORK.md`, "Hosting a game".
+_Avoid_: page, arena, slot (a slot is an index inside a block)
+
 **Live sender** (`TaLiveSender`):
 The output side of playing against the original rather than writing a demo: an
 observer with the demo recorder's shape that yields the Local player's
@@ -417,6 +425,16 @@ that runs its own simulation -- a real `TotalA.exe`, which is
 owner-authoritative rather than lockstep -- selected by
 `GameParameters::netMode`. `docs/TA-NETWORK.md`.
 _Avoid_: real-time (the frame clock is real-time too), non-lockstep, async
+
+**TA host**:
+`rwe --ta-host`: RWE hosting a game for a joining `TotalA.exe` rather than
+playing one. A panel waits in the battleroom, the launch puts the joiner in the
+game as a second player, and the game is an own-clock one in which RWE's player
+is Local and the joiner is Remote. `TaHostGame` is the host session, the
+battleroom and the peer on a thread of their own, with one queue each way
+between them and the game; `TaHostLobbyScene` is the panel; `GameScene_tahost`
+is the in-game half. `docs/TA-NETWORK.md`, "Hosting a game".
+_Avoid_: lobby (that is the battleroom), listen server, master
 
 ### The instruments
 

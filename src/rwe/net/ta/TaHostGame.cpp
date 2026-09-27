@@ -1,14 +1,14 @@
 #include "TaHostGame.h"
 
+#include <algorithm>
 #include <asio.hpp>
+#include <future>
+#include <mutex>
 #include <rwe/io/tad/tad_encoders.h>
 #include <rwe/net/ta/TaDirectPlay.h>
 #include <rwe/net/ta/TaOutboundBatcher.h>
 #include <rwe/net/ta/TaPinger.h>
 #include <rwe/util/SimpleLogger.h>
-#include <algorithm>
-#include <future>
-#include <mutex>
 #include <thread>
 #include <utility>
 

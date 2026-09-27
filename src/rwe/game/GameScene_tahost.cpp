@@ -1,20 +1,19 @@
 #include "GameScene.h"
-
+#include <algorithm>
+#include <cstdlib>
 #include <imgui.h>
+#include <optional>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/net/ta/TaHostGame.h>
 #include <rwe/net/ta/TaOutboundBatcher.h>
-#include <rwe/puppet/TadPuppetDriver.h>
 #include <rwe/puppet/TaLiveReceiver.h>
+#include <rwe/puppet/TadPuppetDriver.h>
 #include <rwe/sim/MixedOwnership.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/TaLiveBatch.h>
 #include <rwe/sim/TaLiveSender.h>
 #include <rwe/sim/TaPeerIds.h>
 #include <rwe/util/SimpleLogger.h>
-#include <algorithm>
-#include <cstdlib>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -38,6 +37,9 @@ namespace rwe
 
         /** How often the log says where the peer has got to. */
         constexpr unsigned int ReportEveryTicks = 150;
+
+        /** How near a unit of ours has to be to one of the peer's to be ordered at it by the test aid. */
+        constexpr SimScalar TaHostAttackRange = 200_ss;
     }
 
     struct GameScene::TaHostLink
@@ -84,8 +86,7 @@ namespace rwe
         std::optional<unsigned int> driverOrigin;
         unsigned int appliedPackets{0};
 
-        /** The peer unit RWE_TA_HOST_ATTACK names, once it has been read. */
-        std::optional<std::uint16_t> attackTarget;
+        /** The tick the test aid last ordered attacks on. */
         unsigned int lastAttackOrderTick{0};
     };
 
@@ -118,7 +119,10 @@ namespace rwe
 
         auto peerId = link->peer;
         TaPeerIds peerIds;
-        peerIds.unitId = [&link](UnitId unit) { return link->driver->wireIdOf(unit); };
+        // Through the scene's own member rather than the local pointer: the
+        // local one is moved into it below, and a callback that captured it
+        // would be reading a stack slot that no longer exists.
+        peerIds.unitId = [this](UnitId unit) { return taHostLink->driver->wireIdOf(unit); };
         peerIds.dplayId = [peerId](PlayerId player) -> std::optional<std::uint32_t> { return peerId; };
 
         TaLiveSenderSettings senderSettings;
@@ -130,8 +134,8 @@ namespace rwe
         simulation.setTaLiveSender(link->sender->hooks());
 
         link->traffic = std::make_unique<TaOutboundBatcher>(
-            [&link](TaHostSession::PeerId id, std::span<const std::uint8_t> bytes, TaTransport transport) {
-                link->host->queueOutbound(id, bytes, transport);
+            [this](TaHostSession::PeerId id, std::span<const std::uint8_t> bytes, TaTransport transport) {
+                taHostLink->host->queueOutbound(id, bytes, transport);
             },
             TadPacketCompressed);
 
@@ -140,20 +144,21 @@ namespace rwe
         // it is and applied through the ordinary damage path, so the local
         // Killed script picks the death and the 0x0c goes out.
         link->driver->setIncomingDamageHandler(
-            [this, &link](std::uint16_t victimId, std::optional<UnitId> attacker, unsigned int damage) {
-                auto it = link->localByWireId.find(victimId);
-                if (it == link->localByWireId.end())
+            [this](std::uint16_t victimId, std::optional<UnitId> attacker, unsigned int damage) {
+                auto& link = *taHostLink;
+                auto it = link.localByWireId.find(victimId);
+                if (it == link.localByWireId.end())
                 {
-                    link->localByWireId.clear();
+                    link.localByWireId.clear();
                     for (const auto& [unit, state] : simulation.units)
                     {
-                        if (auto id = link->sender->wireIdOf(UnitId(unit)))
+                        if (auto id = link.sender->wireIdOf(UnitId(unit)))
                         {
-                            link->localByWireId.emplace(*id, UnitId(unit));
+                            link.localByWireId.emplace(*id, UnitId(unit));
                         }
                     }
-                    it = link->localByWireId.find(victimId);
-                    if (it == link->localByWireId.end())
+                    it = link.localByWireId.find(victimId);
+                    if (it == link.localByWireId.end())
                     {
                         // Not one of ours: it is the peer's own unit, which the
                         // driver has already dealt with, or a unit that has
@@ -168,16 +173,16 @@ namespace rwe
                     return;
                 }
 
-                ++link->damageTaken;
+                ++link.damageTaken;
                 applyIncomingDamage(simulation, victim, attacker, damage);
                 LOG_INFO << "TA host: our unit " << victim.value << " took " << damage << " from the peer";
             });
 
-        taHostLink = std::move(link);
-
         LOG_INFO << "TA host: '" << config.gameName << "' on " << config.mapName << ", the joiner is player "
                  << remotePlayer.value << " on peer 0x" << std::hex << link->peer << std::dec << ", "
                  << config.maxUnits << " units a block, ours in block " << TaHostGame::hostUnitBlock;
+
+        taHostLink = std::move(link);
     }
 
     void GameScene::applyTaHostTick()
@@ -207,6 +212,9 @@ namespace rwe
 
         link.receiver->onTick(sceneTime.value);
 
+        // The driver counts from its first packet, so the scene tick it is
+        // given has to be read against the tick that packet arrived on; the
+        // receiver's applied count is what says one has.
         if (link.receiver->stats().packetsApplied != link.appliedPackets)
         {
             link.appliedPackets = static_cast<unsigned int>(link.receiver->stats().packetsApplied);
@@ -278,43 +286,55 @@ namespace rwe
 
     void GameScene::orderTaHostAttack()
     {
-        // Testing aid: RWE_TA_HOST_ATTACK=<the peer's wire unit id> orders the
-        // local player's first unit at that unit once a second, which is how
-        // RWE's own 0x0b can be seen reaching the peer without a player at the
-        // keyboard. Like RWE_DEBUG_SPAWN, it is in the environment rather than
-        // on the command line, and it orders nothing but an attack.
-        const char* attack = std::getenv("RWE_TA_HOST_ATTACK");
-        if (!attack || !taHostLink)
+        // Testing aid: RWE_TA_HOST_ATTACK=1 orders, once a second, every unit
+        // of ours that is close enough to one of the peer's to attack it,
+        // which is how RWE's own 0x0b can be seen reaching a peer without a
+        // player at the keyboard and with the two commanders a whole map
+        // apart. Pair it with RWE_DEBUG_SPAWN=<type>*<n>@0:<t>:1 to put units
+        // of ours beside the peer's. Like RWE_DEBUG_SPAWN, it is in the
+        // environment rather than on the command line, and it orders nothing
+        // but an attack.
+        if (!std::getenv("RWE_TA_HOST_ATTACK") || !taHostLink)
         {
             return;
         }
         auto& link = *taHostLink;
-
-        if (!link.attackTarget)
-        {
-            link.attackTarget = static_cast<std::uint16_t>(std::atoi(attack));
-        }
         if (sceneTime.value < link.lastAttackOrderTick + static_cast<unsigned int>(SimTicksPerSecond))
         {
             return;
         }
         link.lastAttackOrderTick = sceneTime.value;
 
-        auto target = link.driver->unitOfWireId(*link.attackTarget);
-        if (!target)
-        {
-            return;
-        }
         for (const auto& [unit, state] : simulation.units)
         {
             if (!state.isOwnedBy(localPlayerId) || !state.isAlive())
             {
                 continue;
             }
+
+            std::optional<UnitId> nearest;
+            SimScalar nearestDistance = TaHostAttackRange;
+            for (const auto& [otherUnit, other] : simulation.units)
+            {
+                if (!other.isOwnedBy(link.remote) || !other.isAlive())
+                {
+                    continue;
+                }
+                auto distance = (other.position - state.position).length();
+                if (distance < nearestDistance)
+                {
+                    nearestDistance = distance;
+                    nearest = UnitId(otherUnit);
+                }
+            }
+            if (!nearest)
+            {
+                continue;
+            }
+
             localPlayerCommandBuffer.emplace_back(PlayerUnitCommand{
                 UnitId(unit),
-                PlayerUnitCommand::IssueOrder{AttackOrder(*target), PlayerUnitCommand::IssueOrder::Immediate}});
-            break;
+                PlayerUnitCommand::IssueOrder{AttackOrder(*nearest), PlayerUnitCommand::IssueOrder::Immediate}});
         }
     }
 

@@ -24,8 +24,10 @@ does not repeat.
   its own commander in the game, standing and walking, from `0x2c` records it built itself.
 - **RWE can host one from its own fields rather than a recording.** `TaBattleroom` builds the
   battleroom, echoes unit sync and runs the launch, and `ta_host_probe --battleroom` is it in
-  front of a socket. Checked against the scripted joiner of #430, which is not TA either: all nine
-  of its checks pass over 60 seconds of play.
+  front of a socket. `rwe --ta-host` is the same thing with the game behind it, and the scripted
+  joiner of #430 checks all nine of its rules against that over 60 seconds of play. The one
+  difference from the probe is the game: the probe describes a fixed commander, and a game
+  describes the one it has.
 - **The same holds in the other direction, and that is the one RWE needs.** A scripted joiner
   (`tools/ta-net/fakejoin.py`) discovers a host with ENUMSESSIONS, does the handshake, runs unit
   sync, readies, follows the launch, and then owns a commander in game while checking everything the
@@ -362,6 +364,63 @@ The estimate made before the spike, revised by what it found:
 The order of work in #386 stands: puppet playback of demos (#387) is the receiving half, and
 spectating a live game comes before playing in one.
 
+## Hosting a game: `rwe --ta-host`
+
+`rwe --ta-host --map <name>` is the whole of the above in front of a real game. A panel opens, the
+DirectPlay ports are bound and a joining `TotalA.exe` is waited for; when it is ready the launch
+goes out, the map loads with RWE's own player **Local** and the joiner a **Remote** player in the
+next slot, and the game runs on the peer's own clock (`NetMode::OwnClock`, below). In game, RWE
+owns the units of the Local player and puppets the joiner's: its `0x2c` stream steers them, its
+`0x0b` records reach RWE's own units through `applyIncomingDamage`, and RWE's units go out as the
+joiner's own `0x2c`, `0x09`, `0x12`, `0x0d`, `0x0b` and `0x0c`.
+
+```
+rwe --ta-host --map "Canal Crossing" --data-path ~/.ta
+    [--game-name rwe] [--side arm|core] [--colour 0] [--team 5] [--options 0x4f]
+    [--max-units 250] [--auto-launch] [--port-base 0] [--port 1337]
+```
+
+- **`--side`, `--colour`, `--team`, `--options`** are the host's own half of the battleroom: bytes
+  150, 151, its `0x24` team and byte 157. The joiner's side and colour come from its own `0x20`.
+- **`--max-units`** is the id block size, and the two sides must agree on it or each describes
+  slots the other has not: it sets the `0x2c` full-state cycle. 250 is what the recorded hosts used.
+- **`--port-base`** shifts all three ports (47624, 2300, 2350) by the same amount, so a host can
+  run beside a real TA or a `dplaysvr` that already holds the real ones. The enum port is
+  `47624 + base` and so runs out of range above 17911.
+- **`--auto-launch`** launches the moment a joiner is ready; otherwise Enter or the panel's button
+  does it. A launch is refused if every player is on one team, or a joiner's status names a
+  different map.
+
+**The id blocks are not interchangeable.** A joining TA takes block 0 for its own units and the
+host's are in block 1 — ta-baseline.pcap has the recorded host's commander at 251 and the joiner's
+at 1, with `maxUnits` 250. Two owners in one block is every unit of one of them deleted on the
+other machine once per full-state cycle, because an empty record is a deletion. `TaHostGame::
+hostUnitBlock` is where RWE's own block is set, and it is also the block RWE keeps the peer's units
+out of.
+
+**The check that stands in for a real TA** is `tools/ta-net/host-check.sh`, which starts the host,
+runs `fakejoin.py` against it on loopback and exits with the joiner's verdict:
+
+```
+tools/ta-net/host-check.sh --capture ta-baseline.pcap --play-seconds 60 \
+    --host-tcp 12300 --host-udp 12350 --enum-port 57624 \
+    --tcp-port 12301 --udp-port 12351 --dir /tmp/run -- \
+    xvfb-run -a -s "-screen 0 1280x1024x24" ./build/rwe --ta-host --auto-launch \
+        --map "Canal Crossing" --port-base 10000 --port 13400 --data-path ~/.ta
+```
+
+Add `--walk X,Z` and `--attack <the host's wire unit id>` (251 with the defaults above) to see the
+peer's commander walk as a puppet and RWE's own unit take its damage, and pair
+`RWE_DEBUG_SPAWN=<type>*<n>@0:<t>:1` with `RWE_TA_HOST_ATTACK=1` to see RWE's `0x0b` reach the
+joiner. Two ports matter beyond the DirectPlay ones: the host's own lockstep port
+(`--port`), which an own-clock game never uses but still binds, has to be free.
+
+**What a real TA is still the only check on** is unchanged by all of this: whether the host is
+offered for rejection in the battleroom (it is a host that goes silent), what the other player
+sees for a unit nobody has described, whether the host's units are visible at all, and what
+`0x19` does when a peer ignores it. The scripted joiner checks the wire; this is the only check on
+the screen.
+
 ## RWE's own-clock mode
 
 A game against a real `TotalA.exe` cannot be lockstep. The peer runs its own simulation and waits
@@ -380,6 +439,15 @@ game carried on, but whether a real TA then resends, fights the peer, or drifts 
 known; the hook is one-way and affects nothing but the clock, so a later issue can try the other
 half from the wire without changing this one.
 
+**The scale of the `0x19` payload is inferred, and this is the one to check against a real TA.**
+Every sender puts 256 on the wire at game start and the corpus calls that normal speed, and the
+same code is what the Pause key broadcasts (TOTALA-EXE-INTERFACE.md §70) — so RWE reads the two
+bytes as 256ths of normal, 0 being the pause and 256 being 1x, which puts normal at level 10 and
+leaves RWE's own clock alone for the record every game opens with. The alternative reading, that
+the high byte is the level and 256 is therefore level 1, would put a game that had just started at
+the slowest step; nothing in the corpus settles it, and the level is not read out of a capture
+because no capture of the four contains a `0x19` at all.
+
 ## TA Forever
 
 TA Forever's `gpgnet4ta` relays DirectPlay traffic between players and rewrites only the addresses
@@ -394,14 +462,23 @@ be with that project's agreement and identifying itself as RWE.
   joiner harvests them from a capture of a real joiner, which is enough to be checked against but
   not enough to be a substitute for computing one.
 - **A status `0x20` built from fields**: the fake host replayed the recorded host's, and so does the
-  scripted joiner, patched for its own player id, name and state byte. Neither builds one, and the
+  scripted joiner, patched for its own player id, name and state byte. `TaBattleroom` builds one
+  from fields over that same template, writing the six fields it knows and copying the rest; the
   fields a real host would fill in are not all identified.
 - **The DirectPlay player-info blob** in ADDFORWARDREQUEST and CREATEPLAYER: the ids, the two ports
   and the name are read out of the recording, and the name field is four characters wide because
   both captures have a four-character name. Nothing says whether DirectPlay would take a longer one.
 - **Game speed**: a player's `0x19` reached a host that ignored it; what TA does when a peer
   does not follow a speed change was not tried. RWE follows it, through the own-clock mode
-  above; the other half is still open, to be tried once a peer exists.
+  above; the other half is still open, to be tried once a peer exists. The scale RWE reads the
+  payload on is inferred from the corpus's one value and the pause broadcast, and is the first
+  thing to watch for in a real game: a `0x19` that puts RWE at the wrong speed, or a pause it
+  does not follow.
+- **The `0x0f` burst of a quit**: a quitting player's commander dies with cause 8 and a burst of
+  `0x0f` records follows it. RWE sends the `0x0c` -- read out of the recorded host's own quit at
+  ta-baseline.pcap 92.91 -- and the DELETEPLAYER, and leaves out the `0x0f`, whose payload TA-DEMOS
+  does not decode. Putting words in TA's mouth about a record nothing here has read is worse than
+  a peer that sees a quieter exit.
 - **Resource statistics**: the host sent no `0x28` after the replay and nothing complained, but
   what the joiner then showed for the host's economy was not looked at.
 - **`0x40` in the options byte**, and why `+los` did nothing with cheats allowed.
