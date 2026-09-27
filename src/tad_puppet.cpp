@@ -19,6 +19,7 @@
  */
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -233,6 +234,7 @@ namespace
                  {"badBlock", stats.recordsDroppedBadBlock},
                  {"unknownUnit", stats.recordsDroppedUnknownUnit},
                  {"spawnRefused", stats.spawnsRefused},
+                 {"deathNotLive", stats.deathsDroppedNotLive},
              }},
             {"shots", {{"spawned", stats.shotsSpawned}, {"dropped", stats.shotsDropped}}},
             {"scripts", {{"run", stats.scriptCallsRun}, {"dropped", stats.scriptCallsDropped}}},
@@ -266,6 +268,7 @@ namespace
                   << ", bad block " << stats.recordsDroppedBadBlock
                   << ", unknown unit " << stats.recordsDroppedUnknownUnit
                   << ", refused spawn " << stats.spawnsRefused
+                  << ", death not live " << stats.deathsDroppedNotLive
                   << ", no clock " << stats.packetsWithoutClock << "\n";
         std::cout << "  shots " << stats.shotsSpawned << " spawned, " << stats.shotsDropped << " dropped"
                   << "; scripts " << stats.scriptCallsRun << " run, " << stats.scriptCallsDropped << " dropped"
@@ -291,8 +294,10 @@ namespace
             {"duplicate", r.packetsDuplicate},
             {"outOfOrder", r.packetsOutOfOrder},
             {"withoutSerial", r.packetsWithoutSerial},
+            {"unsequenced", r.packetsUnsequenced},
             {"droppedOutOfRange", r.packetsDroppedOutOfRange},
             {"droppedBufferFull", r.packetsDroppedBufferFull},
+            {"droppedGap", r.packetsDroppedGap},
             {"held", r.held},
             {"clock",
              {{"samples", r.clock.samples},
@@ -318,7 +323,10 @@ namespace
                   << ", duplicate " << r.packetsDuplicate
                   << ", out of order " << r.packetsOutOfOrder
                   << ", no serial " << r.packetsWithoutSerial
-                  << ", refused " << (r.packetsDroppedOutOfRange + r.packetsDroppedBufferFull)
+                  << ", no sequence " << r.packetsUnsequenced
+                  << ", refused " << (r.packetsDroppedOutOfRange + r.packetsDroppedBufferFull + r.packetsDroppedGap)
+                  << " (" << r.packetsDroppedOutOfRange << " range, " << r.packetsDroppedBufferFull << " buffer, " << r.packetsDroppedGap
+                  << " gap)"
                   << ", held " << r.held << "\n";
         std::cout << "  clock: anchor " << r.clock.originSerial.value_or(0)
                   << " (" << r.clock.originCorrections << " corrected)"
@@ -345,7 +353,8 @@ namespace
                   << ", duplicate " << r.packetsDuplicate
                   << ", out of order " << r.packetsOutOfOrder
                   << ", no serial " << r.packetsWithoutSerial
-                  << ", refused " << (r.packetsDroppedOutOfRange + r.packetsDroppedBufferFull) << "\n";
+                  << ", no sequence " << r.packetsUnsequenced
+                  << ", refused " << (r.packetsDroppedOutOfRange + r.packetsDroppedBufferFull + r.packetsDroppedGap) << "\n";
     }
 
     /** The loaded services, built once and reused for every demo. */
@@ -398,8 +407,10 @@ namespace
         addCounts(into.receiver.packetsDuplicate, from.receiver.packetsDuplicate);
         addCounts(into.receiver.packetsOutOfOrder, from.receiver.packetsOutOfOrder);
         addCounts(into.receiver.packetsWithoutSerial, from.receiver.packetsWithoutSerial);
+        addCounts(into.receiver.packetsUnsequenced, from.receiver.packetsUnsequenced);
         addCounts(into.receiver.packetsDroppedOutOfRange, from.receiver.packetsDroppedOutOfRange);
         addCounts(into.receiver.packetsDroppedBufferFull, from.receiver.packetsDroppedBufferFull);
+        addCounts(into.receiver.packetsDroppedGap, from.receiver.packetsDroppedGap);
         into.receiver.held = from.receiver.held;
     }
 
@@ -417,6 +428,7 @@ namespace
         addCounts(into.recordsDroppedBadBlock, from.recordsDroppedBadBlock);
         addCounts(into.recordsDroppedUnknownUnit, from.recordsDroppedUnknownUnit);
         addCounts(into.spawnsRefused, from.spawnsRefused);
+        addCounts(into.deathsDroppedNotLive, from.deathsDroppedNotLive);
         addCounts(into.packetsWithoutClock, from.packetsWithoutClock);
         addCounts(into.shotsSpawned, from.shotsSpawned);
         addCounts(into.shotsDropped, from.shotsDropped);
@@ -619,25 +631,45 @@ namespace
         return sim;
     }
 
-    /** One packet of a demo, and the tick of the stream by the time it was sent. */
+    /** One packet of a demo, and where the stream had got to when it was sent. */
     struct ScheduledPacket
     {
         uint8_t sender{0};
         std::vector<rwe::TadBytes> subPackets;
         uint32_t streamTick{0};
+
+        /**
+         * The marker this packet would have carried: its place in its sender's
+         * stream, counting down from `markerBase` the way a real one does. A
+         * demo has no marker to read, but a record index within its sender is
+         * the same thing, and it is stamped here -- before the jitter below
+         * reorders anything, exactly as a real sender stamps the marker before
+         * the network does.
+         */
+        uint32_t sequence{0};
         bool hasSerial{false};
     };
+
+    /**
+     * Where a demo's per-sender markers start. The wire's own values are
+     * whatever the session has counted to (docs/TA-NETWORK.md calls them small
+     * negative numbers), and only the order matters, so anything clear of both
+     * ends will do.
+     */
+    constexpr uint32_t markerBase = 1u << 20;
 
     /** Reads a whole demo into memory, in file order. */
     struct CollectHandler : rwe::TadHandler
     {
         std::vector<ScheduledPacket> packets;
+        std::array<uint32_t, 256> sentPerSender{};
 
         void onPacket(const rwe::TadPacket& packet, const std::vector<rwe::TadBytes>& subPackets, const rwe::TadWalkStats&) override
         {
             ScheduledPacket scheduled;
             scheduled.sender = packet.sender;
             scheduled.subPackets = subPackets;
+            scheduled.sequence = markerBase - ++sentPerSender[packet.sender];
             for ([[maybe_unused]] const auto& subPacket : subPackets)
             {
                 if (rwe::tadSerialOfUnitState(subPacket))
@@ -740,7 +772,11 @@ namespace
                 for (auto index : arriving[t])
                 {
                     auto& packet = packets[index];
-                    receiver.onPacket(rwe::TadPacket{0, packet.sender}, packet.subPackets, static_cast<uint32_t>(t));
+                    receiver.onPacket(
+                        rwe::TadPacket{0, packet.sender},
+                        packet.subPackets,
+                        static_cast<uint32_t>(t),
+                        packet.sequence);
                 }
                 receiver.onTick(static_cast<uint32_t>(t));
                 driver.applyTick(static_cast<uint32_t>(t));

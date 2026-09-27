@@ -1,6 +1,8 @@
 #include <rwe/puppet/TaLiveReceiver.h>
 #include <algorithm>
 #include <cstdint>
+#include <functional>
+#include <limits>
 #include <map>
 #include <optional>
 #include <rwe/io/tad/tad_events.h>
@@ -10,7 +12,7 @@ namespace rwe
 {
     struct TaLiveReceiver::Impl
     {
-        /** How many handed-over serials per sender are remembered as repeats. */
+        /** How many markers per sender are remembered as repeats. */
         static constexpr std::size_t duplicateWindow = 64;
 
         struct Held
@@ -18,38 +20,38 @@ namespace rwe
             TadPacket packet;
             std::vector<TadBytes> subPackets;
 
-            /** False for a packet with no 0x2c, which rides behind the one it arrived after. */
-            bool hasSerial{true};
+            /** The 0x2c's serial, or nothing for a packet carrying no clock. */
+            std::optional<uint32_t> serial;
         };
 
         struct SenderState
         {
             /**
-             * Held packets by the serial they name, in order, so the front is
-             * always the next one due and a release cannot be out of serial
-             * order. Keyed on the serial rather than on the tick it maps to, so
-             * that moving the origin does not have to move every key with it.
-             *
-             * A multimap because a packet with no 0x2c of its own takes the key
-             * of the last packet held for that sender, and a multimap keeps it
-             * behind the packet it arrived after rather than in front of it.
+             * Held packets by their marker, highest first, so the front is the
+             * next one this sender sent whatever order the network delivered
+             * them in.
              */
-            std::multimap<uint32_t, Held> held;
+            std::map<int32_t, Held, std::greater<int32_t>> held;
 
-            std::optional<uint32_t> highestSeen;
+            /** The marker the next packet in this sender's stream should carry. */
+            std::optional<int32_t> expectedMarker;
+
+            /** The local tick at which a gap at the front was first waited on. */
+            std::optional<uint32_t> gapSince;
+
+            std::optional<int32_t> lastArrived;
 
             /**
-             * The last few serials handed to the driver, oldest first, so a
-             * repeat of one is recognised rather than applied twice. Capped,
-             * because a receiver runs for hours and a serial that comes back
-             * further behind than the window is a late packet, not a duplicate
-             * worth remembering.
+             * The last few markers handed to the driver, so a repeat of one is
+             * recognised rather than applied twice. Capped, because a receiver
+             * runs for hours and a marker that comes back further behind than
+             * the window is a late packet, not a duplicate worth remembering.
              */
-            std::vector<uint32_t> handed;
+            std::vector<int32_t> handed;
 
-            bool hasHanded(uint32_t serial) const
+            bool hasHanded(int32_t marker) const
             {
-                return std::find(handed.begin(), handed.end(), serial) != handed.end();
+                return std::find(handed.begin(), handed.end(), marker) != handed.end();
             }
         };
 
@@ -121,22 +123,19 @@ namespace rwe
             clock.meanOffsetTicks = sumY / n;
         }
 
-        void apply(uint8_t sender, uint32_t serial, const Held& held)
+        void apply(uint8_t sender, int32_t marker, const Held& held)
         {
             originFrozen = true;
             driver.onPacket(held.packet, held.subPackets);
             ++stats.packetsApplied;
-            if (held.hasSerial)
-            {
-                remember(sender, serial);
-            }
+            remember(sender, marker);
         }
 
-        /** Keeps a serial on the short list of the ones already handed over. */
-        void remember(uint8_t sender, uint32_t serial)
+        /** Keeps a marker on the short list of the ones already handed over. */
+        void remember(uint8_t sender, int32_t marker)
         {
             auto& state = senders[sender];
-            state.handed.push_back(serial);
+            state.handed.push_back(marker);
             if (state.handed.size() > duplicateWindow)
             {
                 state.handed.erase(state.handed.begin());
@@ -188,6 +187,68 @@ namespace rwe
             }
             return tick;
         }
+
+        /**
+         * Hands one sender's due packets over, in the order that sender sent
+         * them.
+         *
+         * Two things hold a packet back: a packet this sender sent before it
+         * that has not turned up, and a tick that has not come. The first is
+         * waited on for `jitterTicks + 1` ticks and then given up on, because a
+         * packet cannot arrive later than the buffer is deep and a lost one
+         * never arrives at all.
+         */
+        void release(uint8_t sender, SenderState& state, uint32_t localTick)
+        {
+            while (!state.held.empty())
+            {
+                auto it = state.held.begin();
+                auto marker = it->first;
+
+                if (state.expectedMarker && marker < *state.expectedMarker)
+                {
+                    if (!state.gapSince)
+                    {
+                        state.gapSince = localTick;
+                    }
+                    if (static_cast<int64_t>(localTick) < static_cast<int64_t>(*state.gapSince) + options.jitterTicks + 1)
+                    {
+                        return;
+                    }
+
+                    // Given up on, and the wait ends there: the gap is closed so
+                    // the packet in hand is the sender's next one as far as
+                    // anyone here can tell.
+                    stats.packetsDroppedGap += static_cast<uint64_t>(static_cast<int64_t>(*state.expectedMarker) - marker);
+                    state.expectedMarker = marker;
+                    state.gapSince.reset();
+                }
+
+                // A packet with a 0x2c waits for the tick that one names. One
+                // without has no tick of its own, so it goes as soon as the
+                // packet before it has: the driver resolves it against the
+                // sender's last serial, which is that packet's.
+                if (it->second.serial)
+                {
+                    auto due = static_cast<int64_t>(localTick) + options.jitterTicks;
+                    if (tickFor(*it->second.serial) > due)
+                    {
+                        return;
+                    }
+                }
+
+                // A marker that has run out of range stops the check rather
+                // than asking for a packet that cannot exist.
+                if (marker != std::numeric_limits<int32_t>::min())
+                {
+                    state.expectedMarker = marker - 1;
+                }
+                state.gapSince.reset();
+                apply(sender, marker, it->second);
+                state.held.erase(it);
+                --totalHeld;
+            }
+        }
     };
 
     TaLiveReceiver::TaLiveReceiver(TadPuppetDriver& driver, TaLiveReceiverOptions options)
@@ -197,7 +258,11 @@ namespace rwe
 
     TaLiveReceiver::~TaLiveReceiver() = default;
 
-    void TaLiveReceiver::onPacket(const TadPacket& packet, const std::vector<TadBytes>& subPackets, uint32_t localTick)
+    void TaLiveReceiver::onPacket(
+        const TadPacket& packet,
+        const std::vector<TadBytes>& subPackets,
+        uint32_t localTick,
+        std::optional<uint32_t> sequence)
     {
         auto& i = *impl;
         ++i.stats.packetsReceived;
@@ -212,67 +277,50 @@ namespace rwe
             }
         }
 
-        if (!serial)
+        if (!sequence)
         {
-            ++i.stats.packetsWithoutSerial;
-
-            // A record with no clock of its own belongs to its sender's current
-            // tick, so it cannot go past what that sender has already sent: a
-            // 0x0c that overtakes the 0x09 two packets behind it is a death for
-            // a unit the driver has not heard of, and the stream's own order is
-            // the only thing that says otherwise. Anything still held for this
-            // sender goes first, and this rides behind the last of it.
-            auto& sender = i.senders[packet.sender];
-            if (sender.held.empty())
-            {
-                i.driver.onPacket(packet, subPackets);
-                ++i.stats.packetsApplied;
-                return;
-            }
-
-            if (sender.held.size() >= i.options.maxHeldPerSender || i.totalHeld >= i.options.maxHeld)
-            {
-                ++i.stats.packetsDroppedBufferFull;
-                return;
-            }
-
-            sender.held.emplace(sender.held.rbegin()->first, Impl::Held{packet, subPackets, false});
-            ++i.totalHeld;
-            i.stats.held = i.totalHeld;
+            // A reply wears 0xffffffff on the wire and counts for nothing in
+            // its sender's order, so there is nowhere to put it and nothing to
+            // put it behind.
+            ++i.stats.packetsUnsequenced;
+            i.driver.onPacket(packet, subPackets);
+            ++i.stats.packetsApplied;
             return;
         }
 
-        auto taTick = i.tickOf(*serial);
-        if (!taTick || *taTick > static_cast<int64_t>(localTick) + i.options.maxSerialLeadTicks)
-        {
-            ++i.stats.packetsDroppedOutOfRange;
-            return;
-        }
-
+        // The marker falls by one per packet, so the one a sender sent first is
+        // the highest, and reading it as signed keeps the order right when a
+        // session's count goes below zero.
+        auto marker = static_cast<int32_t>(*sequence);
         auto& sender = i.senders[packet.sender];
-        // A key is only present while the packet that put it there is: the two
-        // are inserted together and released together, so a serial-less entry
-        // under this key means this packet is still held too.
-        if (sender.held.count(*serial) != 0 || sender.hasHanded(*serial))
+        if (sender.held.count(marker) != 0 || sender.hasHanded(marker))
         {
             ++i.stats.packetsDuplicate;
             return;
         }
-        auto outOfOrder = sender.highestSeen && *serial < *sender.highestSeen;
-        if (!sender.highestSeen || *serial > *sender.highestSeen)
-        {
-            sender.highestSeen = *serial;
-        }
-        i.sampleClock(localTick, *taTick);
+        // Arriving after a packet this sender sent *later* is the reordering the
+        // buffer puts right; arriving early is what a receive buffer is for and
+        // is not a fault.
+        auto outOfOrder = sender.lastArrived && marker > *sender.lastArrived;
+        sender.lastArrived = marker;
 
-        if (*taTick < static_cast<int64_t>(localTick))
+        if (serial)
         {
-            ++i.stats.packetsLate;
-            i.originFrozen = true;
-            i.driver.onPacket(packet, subPackets);
-            ++i.stats.packetsApplied;
-            i.remember(packet.sender, *serial);
-            return;
+            auto taTick = i.tickOf(*serial);
+            if (!taTick || *taTick > static_cast<int64_t>(localTick) + i.options.maxSerialLeadTicks)
+            {
+                ++i.stats.packetsDroppedOutOfRange;
+                return;
+            }
+            i.sampleClock(localTick, *taTick);
+            if (*taTick < static_cast<int64_t>(localTick))
+            {
+                ++i.stats.packetsLate;
+            }
+        }
+        else
+        {
+            ++i.stats.packetsWithoutSerial;
         }
 
         if (sender.held.size() >= i.options.maxHeldPerSender || i.totalHeld >= i.options.maxHeld)
@@ -285,7 +333,7 @@ namespace rwe
         {
             ++i.stats.packetsOutOfOrder;
         }
-        sender.held.emplace(*serial, Impl::Held{packet, subPackets});
+        sender.held.emplace(marker, Impl::Held{packet, subPackets, serial});
         ++i.totalHeld;
         i.stats.held = i.totalHeld;
     }
@@ -293,19 +341,9 @@ namespace rwe
     void TaLiveReceiver::onTick(uint32_t localTick)
     {
         auto& i = *impl;
-        auto due = static_cast<int64_t>(localTick) + i.options.jitterTicks;
         for (auto& [sender, state] : i.senders)
         {
-            // The front is the next one due, and for two entries on the same
-            // key it is the one that arrived first, so a packet with no 0x2c
-            // goes out after the packet it arrived behind.
-            while (!state.held.empty() && i.tickFor(state.held.begin()->first) <= due)
-            {
-                auto it = state.held.begin();
-                i.apply(sender, it->first, it->second);
-                state.held.erase(it);
-                --i.totalHeld;
-            }
+            i.release(sender, state, localTick);
         }
         i.stats.held = i.totalHeld;
     }

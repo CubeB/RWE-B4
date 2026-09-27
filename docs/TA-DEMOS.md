@@ -2555,128 +2555,100 @@ on it. A Demo window reports the counts. The driver is free of SDL, GL and
 
 Everything above is a file arriving in order. A game delivers the same packets
 over UDP in real time, and `TaLiveReceiver` (`src/rwe/puppet/`) is what sits in
-front of the driver for that: a jitter buffer keyed on the `0x2c` serial. It
-holds each sender's packets until the local tick is within `jitterTicks` of the
-tick the serial names, so the driver has them in hand at that tick and applies
-them there rather than at the tick they arrived. That depth is the **receive
-buffer**, and it is also the distance the local clock runs behind the sender's:
-a packet is available up to that many ticks *before* the tick it names, and
-past that a packet is late and can only be applied where it landed.
+front of the driver for that.
+
+**The marker says which, the serial says when.** Every TA packet carries a
+per-sender count that falls by one per packet (`docs/TA-NETWORK.md`, "TA
+packets"), so a higher marker is a packet its sender sent earlier, and
+`0xffffffff` on a reply, which counts for nothing in that order. Nothing else on
+the wire says which of two packets came first, and arrival cannot: a packet with
+no `0x2c` of its own -- a `0x0c`, a `0x0b`, a `0x09` -- has no tick to place it
+by, and a `0x0c` that lands after the full-state record that re-used its unit's
+slot is a death for a unit the driver has let go of. So each sender's packets are
+held and handed over in the order that sender sent them, whatever order the
+network delivered them in, and the `0x2c` serial is only the *when*: a packet
+waits until the tick its serial names, or, for one with no serial, until the
+packet before it in its sender's order has gone -- which leaves the driver
+resolving it against the sender's last serial, the serial the packet before it
+carried.
+
+That depth is the **receive buffer**: our tick runs that far behind the sender's,
+a packet is available up to that many ticks *before* the tick it names, and past
+that it is late and can only be applied where it landed. A packet a sender sent
+that has not turned up holds the queue behind it for `jitterTicks + 1` ticks and
+is then given up on and counted, because a packet cannot arrive later than the
+buffer is deep and a lost one never arrives.
 
 The mapping from serial to RWE tick is settled from the first packets -- the
 lowest serial seen before the first one is applied, so a first packet that
-arrives out of order does not put the whole clock a tick out -- and then held
-fixed, because a moving one would leave nothing to measure. The gap between the
-two clocks is reported over the run: the offset distribution, the total drift,
-and the least-squares rate. A serial already held or already handed to the
-driver is dropped and counted, a late one is applied at once and counted, and
-out-of-order arrivals are put back in serial order and counted. The buffer is
-bounded per sender, across senders, and on how far past the local tick a serial
-may name; each bound drops and counts rather than waits.
+arrives out of order does not move the whole clock -- and then held fixed,
+because a moving one would leave nothing to measure. The gap between the two
+clocks is reported over the run: the offset distribution, the total drift, and
+the least-squares rate. A marker already handed to the driver is dropped and
+counted, a late packet is counted, and a packet that arrived after one its sender
+sent later is put back in order and counted. The buffer is bounded per sender,
+across senders, and on how far past the local tick a serial may name; each bound
+drops and counts rather than waits.
 
 **`tad_puppet --live-sim <jitter-ticks>:<loss-percent>:<seed>` measures it.**
 It delivers a demo's packets at the ticks a receive buffer of that depth would
 say, through the receiver, with the driver on its external clock and the
-simulation ticked once per local tick. The generator is the tool's own
-`minstd_rand` and the same seed gives the same run. Five ProTA demos (10158,
-11440, 11505, 11506, 11507), 35,669 ground drift samples between them:
+simulation ticked once per local tick. A demo has no marker, so each record
+takes its place in its own sender's stream as the receiver's sequence -- stamped
+before the jitter reorders anything, as a real sender stamps the marker before
+the network does. The generator is the tool's own `minstd_rand` and the same
+seed gives the same run. Five ProTA demos (10158, 11440, 11505, 11506, 11507),
+35,669 ground drift samples between them:
 
 | run | spawned | finished | killed | wrecks | ground p90 | ground within 32 | air within 32 |
 |---|---|---|---|---|---|---|---|
 | `tad_puppet`, straight from the file | 3,591 | 5,874 | 3,476 | 1,212 | 52.15 | 82.03% | 69.64% |
 | `--live-sim 0:0:1` | 3,591 | 5,874 | 3,476 | 1,211 | 52.15 | 82.03% | 69.64% |
-| `--live-sim 3:0:1` | 3,588 | 5,859 | 3,007 | 1,628 | 52.38 | 81.96% | 68.45% |
-| `--live-sim 10:0:1` | 3,585 | 5,858 | 2,898 | 1,709 | 52.43 | 81.87% | 64.88% |
-| `--live-sim 3:1:1` | 3,542 | 5,801 | 3,429 | 1,247 | 53.58 | 81.62% | 68.26% |
-| `--live-sim 3:5:1` | 3,298 | 5,403 | 2,812 | 1,620 | 60.35 | 80.44% | 61.08% |
+| `--live-sim 1:0:1` | 3,591 | 5,874 | 3,476 | 1,208 | 52.17 | 82.05% | 69.64% |
+| `--live-sim 2:0:1` | 3,591 | 5,863 | 3,104 | 1,543 | 52.17 | 82.10% | 68.86% |
+| `--live-sim 3:0:1` | 3,586 | 5,863 | 3,007 | 1,632 | 51.94 | 82.09% | 68.45% |
+| `--live-sim 3:1:1` | 3,543 | 5,805 | 3,430 | 1,247 | 53.52 | 81.69% | 68.26% |
+| `--live-sim 3:5:1` | 3,299 | 5,418 | 3,185 | 1,287 | 59.91 | 80.45% | 60.48% |
 
-**At zero jitter the live run reproduces the straight playback exactly** --
-every per-demo figure matches to the digit, drift distributions included. That
-is the check the buffer is there to pass: a packet is still in hand at the tick
-that names it however late it left the sender, so nothing is applied late and
-the run is the same run. Loss is the only thing that costs anything, and it
-costs slowly: 5% of packets gone moves the ground median not at all (it is
-already zero), the p90 from 52 to 60 units, and the within-32 figure by under
-two points, because a full-state record is a *correction* and the one after a
-lost packet puts the unit back.
+**At a depth of 0 or 1 the live run reproduces the straight playback exactly** --
+every figure, drift distributions included, and at a depth of 1 that is with 473
+packets that arrived after one their sender sent later and were put back in
+order. That is the check the buffer is there to pass: a packet is still in hand
+at the tick that names it however late it left the sender, so nothing is applied
+late and the run is the same run. Loss costs slowly, and every packet it takes
+shows up as a gap given up on: 616 of the 617 dropped at 1% and 3,352 of the
+3,353 at 5%, so the receiver is not losing a second packet to any gap it gave up
+on. 5% gone moves the ground median not at all (it is already zero), the p90 from
+52 to 60 units, and the within-32 figure by under two points, because a
+full-state record is a *correction* and the one after a lost packet puts the unit
+back.
 
-**A deeper buffer costs the ground figures almost nothing.** At a depth of 10
-the receiver has 2,310 out-of-order packets to put right over the five demos
-against 12 at a depth of 3 -- these demos send a packet every three ticks or
-so, so a depth of 3 has little to reorder and a depth of 10 has plenty -- and
-the ground within-32 figure is 81.87% against 81.96%. The air figures are the
-other story: a goal is not a position (see above), so a puppet aircraft given
-its recorded goal ten ticks earlier than before has ten more ticks of its
-own arrival profile to be wrong by, and 64.88% within 32 against 68.45%.
+**The drift is never the thing that suffers.** The ground within-32 figure is
+equal or better at every depth from 0 to 3 -- 82.09% at a depth of 3 against
+82.03% straight -- and 473, 700 and 848 packets put back in order at depths 1, 2
+and 3 cost nothing in it. The air figures are the other story, and have been
+since the puppet driver: a goal is not a position (see above), so a puppet
+aircraft given its recorded goal three ticks earlier than before has three more
+ticks of its own arrival profile to be wrong by.
 
-**The counts do not agree at a depth, and the reason is not the pass-through.**
-The kill column is 3,476 straight and 3,007 at a depth of 3. It was 2,924
-before a packet with no `0x2c` of its own was made to wait behind what its own
-sender had already sent, and that fix is the whole of the difference on one
-demo of the five -- the other four are unmoved by it. What is left is
-`TadPuppetDriver::applyDeath` dropping a death for a puppet whose unit is not
-live *without counting it* (`!live` there returns rather than reaching
-`recordsDroppedUnknownUnit`), so the loss is invisible in every counter, and a
-receive buffer reaches it more often: the death arrives after the full-state
-record that re-used its slot for a different type. At a depth of 1 the counts
-are the straight ones -- 3,475 kills, 3,589 spawns and 1,216 wrecks against
-3,476, 3,591 and 1,212 -- which is the tell: the shortfall is an ordering at a
-boundary rather than anything that grows with the depth, and it is in the
-driver rather than in the receiver. Deciding which of the two records the
-stream means is a question about the demo, not the receiver, so it is left
-there.
-
-**Over the whole ProTA corpus the 0%-loss run holds the figure tier 2 quotes.**
-All 39 demos at a depth of 3: 89.41% of the ground drift samples within 32
-units against 89.48% straight from the files, 1,095 out-of-order packets put
-right, 6 duplicates, 0 lost, 0 refused. The spawn count is 33,003 against
-33,139 and the kill count 27,394 against 29,429, for the reason above.
-
-Two things the numbers do not say, and a reader should not infer otherwise. A
-**death record with no `0x2c` of its own** has no tick of its own, and the
-receiver resolves it the way the format says it must: behind whatever its own
-sender has already sent, stamped with that packet's tick. That is earlier than
-the tick a straight playback reaches, because a straight playback reads the
-file and the file's order is a peer's, not ours. The extra wrecks the table
-shows are the units that die of something else in the ticks they are given, and
-the drift is unmoved by any of it. And a **recording is in arrival order, not
-serial order**: one peer's tick 0 is often written after another's tick 1, so a
-receiver reading by serial applies those records at the tick they name where a
-straight playback applies them at the current one. That is why the live run's
-`late` counter is in the thousands even at 0% loss and 0 jitter. Neither is a
-fault in the receiver, and both are counted.
-
-The rest of the stream is consumed too. `0x0d` spawns the shooter's own weapon
-round from the recorded origin toward the target for display only; it takes no
-health off anything, because every demo player is Remote and damage comes only
-from `0x0b` -- checked for area damage and features as well. `0x10` runs the
-named script on the puppet's own COB environment, so animations, activation and
-build arms show. `0x28` writes the sender's stored and storage metal and energy
-onto its player for the resource bar. `0x05` and `0xf9` print as chat. `0x19`
-sets the playback speed from its high byte (256 is normal); a zero level is
-left alone, because the corpus has lone zeros in demos that plainly run on, so
-the value cannot be read as a pause.
-
-**What tier 2 still leaves out.** `0x0f` feature actions are sized but not
-decoded, so a feature the recording changed is not shown; the payload is not
-guessed at. A recorded pause has no unambiguous encoding in the corpus and is
-not applied. Fog of war is inherent and unsolvable from the stream: the
-recording peer only saw what was sent to it, and a unit the stream never placed
-is shown nowhere rather than in an invented place.
-
-**A coordinate correction this work found.** RWE's world is centred on the
-origin and TA's starts at the map's top left. The recorder had been writing
-RWE's centred coordinates as if they were TA's, so every real demo placed its
-units half a map away and `trySpawnUnit` refused them; the recorder now adds
-the half-extents and the driver takes them off again, and the RWE demo corpus
-was re-recorded. A mod's death weapon name is also taken in the case the
-weapon map uses, because the original hashes weapon names case-insensitively.
-The reference scorers are unaffected: `tad-buildtime.py` and
-`tad-storagecapacity.py` read no positions, and `tad-weapontime.py` reads only
-differences of them, which the shift cancels. `tools/demo-selfcheck.py` on a
-fresh RWE recording reports the same build-timing and storage-capacity failures
-with the old writer as with the new -- both pre-existing model disagreements,
-not coordinate ones.
+**The counts stop agreeing at a depth of 2, and `deathsDroppedNotLive` says
+where they go.** The kill column is 3,476 straight and 3,007 at a depth of 3, and
+every one of them is a `0x0c` that found no live puppet: the counter is 92
+straight, 110 at a depth of 0 or 1, 471 at a depth of 2 and 568 at a depth of 3.
+What has happened is a stale death arriving after the full-state record that
+re-used its unit's slot for a different type, so the driver is looking at the
+*new* unit and the old one is orphaned -- which is also where the extra 420
+wrecks come from, an orphaned unit being run over rather than killed. The step is
+between a depth of 1 and 2, not gradual, and it is not the receiver's ordering:
+the sequence puts each sender's packets back exactly, and a lead of one tick
+costs nothing at all. What a depth of two changes is that the receiver starts
+handing packets over *two* ticks before the tick they name, and a `0x0c` with no
+serial of its own then goes out stamped with a serial that is two ticks further
+on than the tick the straight playback would have applied it at. Deciding which
+of the two records the stream means when a slot has been re-used is a question
+about the demo and not about the receiver, so it is left there -- with a counter
+on it, which is the other half of the answer: a loss that increments nothing is a
+hole in the instrument.
 
 ## Demos as a conformance corpus
 

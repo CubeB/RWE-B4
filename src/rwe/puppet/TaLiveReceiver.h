@@ -69,30 +69,33 @@ namespace rwe
     {
         uint64_t packetsReceived{0};
 
-        /** Handed to the driver, whether held first or passed through late. */
+        /** Handed to the driver, whether held first or passed straight through. */
         uint64_t packetsApplied{0};
 
         /**
-         * A packet whose serial named a tick already played, applied at once
-         * because waiting would only make it later.
+         * A packet whose serial named a tick already played, so it went out at
+         * once rather than waiting for a tick that has been.
          */
         uint64_t packetsLate{0};
 
-        /** A serial already held or already handed to the driver. Dropped, never applied twice. */
+        /** A marker already held or already handed over. Dropped, never applied twice. */
         uint64_t packetsDuplicate{0};
 
         /**
-         * An accepted packet that arrived after a higher serial from the same
-         * sender, and was applied in the order it was sent. The late ones are
-         * counted above instead, since they are not put back in order.
+         * A packet that arrived after one its sender sent later, and was
+         * applied in the order that sender sent it. Arriving early is what a
+         * receive buffer is for and is not counted here.
          */
         uint64_t packetsOutOfOrder{0};
 
-        /**
-         * A packet with no 0x2c to key on. Queued behind its own sender's
-         * waiting packets, or passed through when it has none.
-         */
+        /** A packet with no 0x2c to key on, released on the tick of the packet before it. */
         uint64_t packetsWithoutSerial{0};
+
+        /**
+         * A packet with no sequence: a reply, which wears 0xffffffff on the
+         * wire and counts for nothing in its sender's order.
+         */
+        uint64_t packetsUnsequenced{0};
 
         /**
          * A serial naming a tick before the clock started or further ahead than
@@ -102,6 +105,14 @@ namespace rwe
 
         /** A packet that found the buffer at its bound. */
         uint64_t packetsDroppedBufferFull{0};
+
+        /**
+         * Packets a sender sent, between one this receiver had already
+         * released and one that had not arrived, and that had not turned up
+         * within `jitterTicks + 1` ticks. Waited on once and given up on, so
+         * the packet behind them is not held for ever.
+         */
+        uint64_t packetsDroppedGap{0};
 
         /** Packets held right now. */
         uint32_t held{0};
@@ -115,17 +126,18 @@ namespace rwe
      * A demo arrives in order, so the driver could take a packet the moment it
      * was read. A game does not: the same packets come over UDP with jitter,
      * loss and reordering, and a packet that names tick 900 with the driver
-     * already at tick 903 can never be applied at 900. The receiver holds each
-     * sender's packets until the local tick is within `jitterTicks` of the tick
-     * the serial names, so the driver has them in hand by the tick that names
-     * them and applies them there.
+     * already at tick 903 can never be applied at 900. So each sender's packets
+     * are held and handed over in **that sender's own order**, which the
+     * stream carries as a marker falling by one per packet, and not in the
+     * order they arrived: arrival cannot place a record that has no clock of
+     * its own, and a `0x0c` that overtakes the `0x09` two packets behind it is
+     * a death for a unit the driver has not heard of.
      *
-     * A packet with no `0x2c` has no tick of its own, and goes into its
-     * sender's queue behind whatever that sender has waiting: a `0x0c` that
-     * overtakes the `0x09` two packets behind it is a death for a unit the
-     * driver has not heard of, and one peer's own order is the only thing that
-     * says otherwise. With nothing waiting for that sender it goes straight
-     * through. Nothing crosses between senders.
+     * The marker says *which*; the `0x2c` serial says *when*. A packet waits
+     * until the tick its serial names, or, for one with no serial, until the
+     * packet before it in its sender's order has gone -- which is what leaves
+     * the driver resolving it against the sender's last serial, the same
+     * serial the packet before it carried.
      *
      * It maps TA's serial onto RWE's tick from the first packets of the run --
      * the lowest serial seen before the first packet is applied, so a first
@@ -134,7 +146,7 @@ namespace rwe
      * once a packet has been applied, because a moving one would leave the
      * drift figures nothing to measure; a peer whose serials then go backwards
      * is a fault, and it shows as `packetsDroppedOutOfRange` climbing at the
-     * packet rate. A serial already handed over is never applied twice, and a
+     * packet rate. A marker already handed over is never applied twice, and a
      * short history of them is what says so -- the buffer bound is on packets
      * held, not on that.
      *
@@ -153,16 +165,27 @@ namespace rwe
         /**
          * Takes one packet's subpackets, having arrived at `localTick`.
          *
+         * `sequence` is the packet's marker as the network layer read it, where
+         * a **higher marker is a packet sent earlier** -- the count falls by one
+         * per packet, and the wire's values go below zero over a session, which
+         * is why it is ordered as a signed count. Nothing means a reply, which
+         * counts for nothing in its sender's order and goes straight through.
+         *
          * `TadPacket::time` is carried through untouched; the driver reads the
          * `0x2c` serial and never that field, and this receiver does not use
          * it either.
          */
-        void onPacket(const TadPacket& packet, const std::vector<TadBytes>& subPackets, uint32_t localTick);
+        void onPacket(
+            const TadPacket& packet,
+            const std::vector<TadBytes>& subPackets,
+            uint32_t localTick,
+            std::optional<uint32_t> sequence);
 
         /**
-         * Releases every packet whose serial is within `jitterTicks` of
-         * `localTick`, in serial order per sender. Call once a tick, before the
-         * driver's own `applyTick` for it.
+         * Releases every packet of a sender whose turn has come: the tick it
+         * names is here, and every packet that sender sent before it has gone
+         * or been given up on. Call once a tick, before the driver's own
+         * `applyTick` for it.
          */
         void onTick(uint32_t localTick);
 

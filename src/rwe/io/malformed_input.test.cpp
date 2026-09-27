@@ -532,8 +532,9 @@ namespace rwe
                     TadUnitSync{0, 3, 100, 0, 0, 0, std::nullopt, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}, std::nullopt}},
                 layout);
         };
+        uint32_t sequence = 1000;
         auto feed = [&](const TadBytes& subPacket) {
-            receiver.onPacket(TadPacket{0, 1}, {subPacket}, 0);
+            receiver.onPacket(TadPacket{0, 1}, {subPacket}, 0, sequence--);
         };
 
         SECTION("a 0x2c too short to carry the serial, and one that lies about its length")

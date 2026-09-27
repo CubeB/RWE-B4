@@ -73,9 +73,21 @@ namespace rwe
                 driver.setExternalClock(true);
             }
 
+            /** A packet under the next marker down, as a sender's would be. */
             void feed(uint32_t serial, uint16_t health, uint32_t localTick)
             {
-                receiver.onPacket(TadPacket{0, 1}, {fullStateRecord(serial, health)}, localTick);
+                feedAt(nextSequence--, {fullStateRecord(serial, health)}, localTick);
+            }
+
+            /** Delivers a packet under a chosen marker, as a network layer would. */
+            void feedAt(uint32_t sequence, const std::vector<TadBytes>& subPackets, uint32_t localTick)
+            {
+                receiver.onPacket(TadPacket{0, 1}, subPackets, localTick, sequence);
+            }
+
+            void feedTo(uint8_t sender, uint32_t sequence, const std::vector<TadBytes>& subPackets, uint32_t localTick)
+            {
+                receiver.onPacket(TadPacket{0, sender}, subPackets, localTick, sequence);
             }
 
             /** One turn of the live loop: release, apply, then run the tick. */
@@ -105,6 +117,8 @@ namespace rwe
                 }
                 return static_cast<int>(world.sim.getUnitState(*unit).hitPoints);
             }
+
+            uint32_t nextSequence{1000};
         };
     }
 
@@ -134,19 +148,24 @@ namespace rwe
         REQUIRE(f.receiver.stats().held == 0);
     }
 
-    TEST_CASE("a live receiver puts an out-of-order packet back in serial order", "[puppet]")
+    TEST_CASE("a live receiver hands packets over in the order a sender sent them", "[puppet]")
     {
         Fixture f;
-        f.feed(8, 100, 0);
-        f.feed(32, 44, 0);
-        f.feed(16, 22, 0);
-        f.feed(24, 33, 0);
 
-        REQUIRE(f.receiver.stats().packetsOutOfOrder == 2);
+        // A marker falls by one per packet, so the packet a sender sent first
+        // has the highest: 4, 3, 2, 1 for serials 8, 16, 24, 32. They arrive
+        // 4, 2, 3, 1, which is the only thing a network can change.
+        f.feedAt(4, {fullStateRecord(8, 100)}, 0);
+        f.feedAt(2, {fullStateRecord(24, 33)}, 0);
+        f.feedAt(3, {fullStateRecord(16, 22)}, 0);
+        f.feedAt(1, {fullStateRecord(32, 44)}, 0);
+
+        REQUIRE(f.receiver.stats().packetsOutOfOrder == 1);
         REQUIRE(f.receiver.stats().packetsLate == 0);
+        REQUIRE(f.receiver.stats().packetsDroppedGap == 0);
 
-        // Tick 0 places the puppet, and the three that arrived out of order
-        // are still applied in the ticks they name, so the last of them wins.
+        // Tick 0 places the puppet, and the two that arrived out of order are
+        // still applied in the ticks they name, so the last of them wins.
         f.onTick(0);
         REQUIRE(f.health() == 100);
         f.onTick(8);
@@ -155,6 +174,81 @@ namespace rwe
         REQUIRE(f.health() == 33);
         f.onTick(24);
         REQUIRE(f.health() == 44);
+    }
+
+    TEST_CASE("a live receiver reorders across a packet with no clock of its own", "[puppet]")
+    {
+        Fixture f;
+
+        // A build and the state record that clocks it, then a state record for a
+        // later tick, then damage that belongs between them. Arrival order
+        // would put the damage after the later record, which is a different
+        // health; the marker puts it back where the sender sent it.
+        f.feedAt(12, buildAndState(8), 0);
+        f.feedAt(10, {fullStateRecord(24, 50)}, 0);
+        f.feedAt(11, {tadEncodeDamage(TadDamage{1, 0, 30, 0})}, 0);
+
+        REQUIRE(f.receiver.stats().packetsWithoutSerial == 1);
+        REQUIRE(f.receiver.stats().packetsOutOfOrder == 1);
+
+        // The damage goes on the tick the build is on, and the state record for
+        // tick 16 corrects afterwards. Applied the other way round, the record
+        // would be setting 50 and the damage would take 30 off it.
+        f.onTick(0);
+        REQUIRE(f.health() == 70);
+        f.onTick(16);
+        REQUIRE(f.health() == 50);
+    }
+
+    TEST_CASE("a live receiver gives up on a packet its sender did not send", "[puppet]")
+    {
+        Fixture f;
+
+        // Markers 10 and 8 with 9 missing: 8 cannot go out before 9, and 9 is
+        // never coming.
+        f.feedAt(10, buildAndState(8), 0);
+        f.feedAt(8, {fullStateRecord(24, 50)}, 0);
+        f.onTick(0);
+        REQUIRE(f.health() == 100);
+        REQUIRE(f.receiver.stats().packetsDroppedGap == 0);
+        REQUIRE(f.receiver.stats().held == 1);
+
+        // The gap is waited on for the buffer's depth plus the one tick, and no
+        // longer: a packet cannot arrive later than the buffer is deep.
+        f.onTicks(1, 3);
+        REQUIRE(f.receiver.stats().packetsDroppedGap == 0);
+        f.onTick(4);
+        REQUIRE(f.receiver.stats().packetsDroppedGap == 1);
+        REQUIRE(f.receiver.stats().held == 1);
+
+        // And then it waits for the tick it names like anything else.
+        f.onTick(15);
+        REQUIRE(f.health() == 100);
+        f.onTick(16);
+        REQUIRE(f.health() == 50);
+        REQUIRE(f.receiver.stats().held == 0);
+    }
+
+    TEST_CASE("a live receiver passes a reply through, sequence or not", "[puppet]")
+    {
+        Fixture f;
+        f.feedAt(5, buildAndState(8), 0);
+        REQUIRE(f.receiver.stats().held == 1);
+
+        // A reply wears 0xffffffff on the wire and counts for nothing in its
+        // sender's order, so there is no place to hold it behind.
+        TadBytes chat(65, 0);
+        chat[0] = static_cast<uint8_t>(TadSubPacketCode::Chat);
+        chat[1] = 'h';
+        chat[2] = 'i';
+        f.receiver.onPacket(TadPacket{0, 1}, {chat}, 0, std::nullopt);
+
+        REQUIRE(f.receiver.stats().packetsUnsequenced == 1);
+        REQUIRE(f.receiver.stats().packetsApplied == 1);
+        REQUIRE(f.receiver.stats().held == 1);
+
+        f.onTick(0);
+        REQUIRE(f.driver.stats().chatLines == 1);
     }
 
     TEST_CASE("a packet whose tick has passed is applied at once and counted", "[puppet]")
@@ -179,19 +273,19 @@ namespace rwe
         REQUIRE(f.health() == 22);
     }
 
-    TEST_CASE("a live receiver drops a serial it has already had", "[puppet]")
+    TEST_CASE("a live receiver drops a marker it has already had", "[puppet]")
     {
         Fixture f;
-        f.feed(8, 100, 0);
-        f.feed(8, 33, 0);
+        f.feedAt(7, {fullStateRecord(8, 100)}, 0);
+        f.feedAt(7, {fullStateRecord(8, 33)}, 0);
         REQUIRE(f.receiver.stats().packetsDuplicate == 1);
         REQUIRE(f.receiver.stats().held == 1);
 
         f.onTick(0);
         REQUIRE(f.health() == 100);
 
-        // The same serial again, now that it has been applied.
-        f.feed(8, 44, 4);
+        // The same marker again, now that its packet has been handed over.
+        f.feedAt(7, {fullStateRecord(8, 44)}, 4);
         REQUIRE(f.receiver.stats().packetsDuplicate == 2);
         REQUIRE(f.health() == 100);
     }
@@ -209,22 +303,24 @@ namespace rwe
         REQUIRE(f.receiver.stats().packetsDroppedOutOfRange == 1);
     }
 
-    TEST_CASE("a live receiver keeps each peer's serials to itself", "[puppet]")
+    TEST_CASE("a live receiver keeps each peer's markers to itself", "[puppet]")
     {
         Fixture f;
         addWellStockedPlayer(f.world.sim, "CORE");
         f.driver.addPlayer(2, PlayerId(1));
 
-        auto feed = [&](uint8_t sender, uint32_t serial, uint16_t health, uint32_t localTick) {
-            f.receiver.onPacket(TadPacket{0, sender}, {fullStateRecord(serial, health)}, localTick);
+        auto feed = [&](uint8_t sender, uint32_t sequence, uint32_t serial, uint16_t health, uint32_t localTick) {
+            f.receiver.onPacket(TadPacket{0, sender}, {fullStateRecord(serial, health)}, localTick, sequence);
         };
 
-        // One peer on a later clock, with a serial of its own and a serial the
-        // other peer has already used: neither may be taken for a repeat.
-        feed(1, 8, 100, 0);
-        feed(2, 108, 100, 0);
-        feed(1, 8, 100, 0);
-        feed(2, 116, 100, 0);
+        // One peer's marker is no relation to the other's, though both count
+        // down from the same number, and a serial the other peer has already
+        // used is not a repeat of anything here. Only the third packet repeats
+        // one, and it repeats its own sender's.
+        feed(1, 3, 8, 100, 0);
+        feed(2, 3, 108, 100, 0);
+        feed(1, 3, 8, 100, 0);
+        feed(2, 2, 116, 100, 0);
 
         REQUIRE(f.receiver.stats().packetsDuplicate == 1);
         REQUIRE(f.receiver.stats().held == 3);
@@ -236,13 +332,13 @@ namespace rwe
         Fixture f;
         TaLiveReceiver bounded(f.driver, TaLiveReceiverOptions{3, 4, 6, 300});
 
-        // Eleven serials, none of them due and every one inside the lead, so
+        // Eleven packets, none of them due and every one inside the lead, so
         // nothing is ever released and the only bound that can save us is the
         // buffer's own. One sender, so the per-sender bound is the one that
         // bites first.
         for (uint32_t i = 1; i <= 11; ++i)
         {
-            bounded.onPacket(TadPacket{0, 1}, {fullStateRecord(i * maxUnits, 100)}, 0);
+            bounded.onPacket(TadPacket{0, 1}, {fullStateRecord(i * maxUnits, 100)}, 0, 12 - i);
         }
 
         REQUIRE(bounded.stats().packetsReceived == 11);
@@ -253,19 +349,24 @@ namespace rwe
     TEST_CASE("a live receiver's clock settles on the lowest serial of the run", "[puppet]")
     {
         Fixture f;
-        f.feed(24, 33, 0);
-        f.feed(8, 22, 0);
+
+        // The second packet of this sender's stream turns up first, and names a
+        // later tick. Nothing has been applied yet, so the clock moves back to
+        // the tick the first packet named rather than leaving it unplayed.
+        f.feedAt(1, {fullStateRecord(16, 33)}, 0);
+        f.feedAt(2, {fullStateRecord(8, 100)}, 0);
 
         REQUIRE(f.receiver.stats().clock.originSerial.value_or(0) == 8u);
         REQUIRE(f.receiver.stats().clock.originCorrections == 1);
 
-        // Neither was refused as being before the clock started, and both are
-        // applied in the order they were sent rather than the order they came.
+        // Neither was refused as being before the clock started, and they are
+        // applied in the order that sender sent them rather than the order they
+        // came.
         REQUIRE(f.receiver.stats().packetsDroppedOutOfRange == 0);
         REQUIRE(f.receiver.stats().packetsLate == 0);
         f.onTick(0);
         REQUIRE(f.health() == 100);
-        f.onTick(16);
+        f.onTick(8);
         REQUIRE(f.health() == 33);
     }
 
@@ -311,7 +412,7 @@ namespace rwe
         }
     }
 
-    TEST_CASE("a packet with no clock to key on is passed through", "[puppet]")
+    TEST_CASE("a packet with no clock of its own goes on its sender's tick", "[puppet]")
     {
         Fixture f;
         TadBytes chat(65, 0);
@@ -319,9 +420,9 @@ namespace rwe
         chat[1] = 'h';
         chat[2] = 'i';
 
-        f.receiver.onPacket(TadPacket{0, 1}, {chat}, 0);
+        f.feedAt(1, {chat}, 0);
         REQUIRE(f.receiver.stats().packetsWithoutSerial == 1);
-        REQUIRE(f.receiver.stats().packetsApplied == 1);
+        REQUIRE(f.receiver.stats().held == 1);
 
         f.onTick(0);
         REQUIRE(f.driver.stats().chatLines == 1);
@@ -334,17 +435,19 @@ namespace rwe
 
         // The 0x09 and the 0x2c that clocks it, held because the 0x2c is three
         // ticks ahead of the buffer's depth...
-        f.receiver.onPacket(TadPacket{0, 1}, buildAndState(8), 0);
+        f.feedAt(2, buildAndState(8), 0);
         REQUIRE(f.receiver.stats().held == 1);
 
         // ...and a death in a packet with no 0x2c, which has no tick of its own
         // and so must not go past what its own sender has already sent.
-        f.receiver.onPacket(TadPacket{0, 1}, {tadEncodeDeath(TadDeath{1, 0xffffffffu, 0, 100, 0})}, 0);
+        f.feedAt(1, {tadEncodeDeath(TadDeath{1, 0xffffffffu, 0, 100, 0})}, 0);
+        REQUIRE(f.receiver.stats().held == 2);
 
         f.onTick(3);
         REQUIRE(f.driver.stats().unitsSpawned == 1);
         REQUIRE(f.driver.stats().recordsDroppedBadBlock == 0);
         REQUIRE(f.driver.stats().recordsDroppedUnknownUnit == 0);
+        REQUIRE(f.driver.stats().deathsDroppedNotLive == 0);
         REQUIRE(f.driver.stats().unitsKilled == 1);
         REQUIRE(f.receiver.stats().packetsWithoutSerial == 1);
         REQUIRE(f.receiver.stats().held == 0);
