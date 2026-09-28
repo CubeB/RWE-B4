@@ -226,6 +226,11 @@ namespace rwe
             auto& out = *cmd->mutable_cancel_build_order();
             serializeVector(c.position, *out.mutable_position());
         }
+
+        void operator()(const PlayerUnitCommand::SetBuildQueueRepeat& c)
+        {
+            cmd->mutable_set_build_queue_repeat()->set_repeats(c.repeat);
+        }
     };
 
     class WritePlayerCommandVisitor
@@ -444,6 +449,11 @@ namespace rwe
         if (cmd.has_cancel_build_order())
         {
             return PlayerUnitCommand(UnitId(cmd.unit()), PlayerUnitCommand::CancelBuildOrder{deserializeVector(cmd.cancel_build_order().position())});
+        }
+
+        if (cmd.has_set_build_queue_repeat())
+        {
+            return PlayerUnitCommand(UnitId(cmd.unit()), PlayerUnitCommand::SetBuildQueueRepeat{cmd.set_build_queue_repeat().repeats()});
         }
 
         throw std::runtime_error("Failed to deserialize unit command");
