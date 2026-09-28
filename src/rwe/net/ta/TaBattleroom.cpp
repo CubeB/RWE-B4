@@ -395,6 +395,15 @@ namespace rwe
                     sawUnitSync = true;
                     break;
 
+                case TadSubPacketCode::Start15:
+                    // A joiner's TCP 0x15 answers our 0x1e: it is through loading.
+                    // Only then may in-game traffic reach it.
+                    if (transport == TaTransport::Tcp && state_ == TaBattleroomState::Launching)
+                    {
+                        joinerLoaded_ = true;
+                    }
+                    break;
+
                 default:
                     break;
             }
@@ -576,15 +585,22 @@ namespace rwe
 
         launchParams_ = params;
         loadingStep_ = 0;
+        joinerLoaded_ = false;
+        loadedWaits_ = 0;
         state_ = TaBattleroomState::Launching;
 
+        // The real host's launch, from ta-baseline.pcap and ta-small.pcap:
+        // SESSIONDESCCHANGED, then 08 06; a 2a/06 and a 07 every 200 ms, the
+        // last 07 with the 1e; then, once the joiner has answered with its own
+        // 0x15, the move to UDP and 50 ms later the first in-game bundle. A
+        // 0x09 sent with the 1e reached a TA still loading, and it crashed.
+        session.sendSessionDescChanged();
         auto ids = peerIds();
         traffic.queueForAll(ids, code(TadSubPacketCode::LoadingStarted), TaTransport::Tcp);
         traffic.queueForAll(ids, code(TadSubPacketCode::PadEncrypt), TaTransport::Tcp);
-        queueStatus(config.loadingState, TaTransport::Tcp);
         traffic.flush();
 
-        if (config.loadingProgress.empty())
+        if (config.loadingProgress.size() < 2)
         {
             finishLaunch();
             return true;
@@ -595,30 +611,45 @@ namespace rwe
 
     void TaBattleroom::armLoadingStep()
     {
-        loadingTimer.expires_after(config.loadingStepInterval);
-        loadingTimer.async_wait([this](const asio::error_code& error) {
-            if (error)
+        armLaunchTimer(config.loadingStepInterval, [this] { sendLoadingStep(); });
+    }
+
+    void TaBattleroom::armLaunchTimer(std::chrono::milliseconds after, std::function<void()> then)
+    {
+        loadingTimer.expires_after(after);
+        loadingTimer.async_wait([then = std::move(then)](const asio::error_code& error) {
+            if (!error)
             {
-                return;
+                then();
             }
-            sendLoadingStep();
         });
     }
 
     void TaBattleroom::sendLoadingStep()
     {
         auto ids = peerIds();
-        if (loadingStep_ < config.loadingProgress.size())
+        auto last = config.loadingProgress.size() - 1;
+        if (loadingStep_ < last)
         {
             traffic.queueForAll(ids, taBuildLoadingProgress(config.loadingProgress[loadingStep_]), TaTransport::Tcp);
+            traffic.queueForAll(ids, code(TadSubPacketCode::PadEncrypt), TaTransport::Tcp);
             traffic.flush();
             traffic.queueForAll(ids, code(TadSubPacketCode::Unk07), TaTransport::Tcp);
+            if (loadingStep_ + 1 == last)
+            {
+                traffic.queueForAll(ids, taBuildStart(1), TaTransport::Tcp);
+            }
             traffic.flush();
             ++loadingStep_;
+            armLoadingStep();
+            return;
         }
 
-        if (loadingStep_ < config.loadingProgress.size())
+        // A real joiner answers the 1e within a step; one that has not after
+        // ten is not going to, and the launch goes ahead rather than hang.
+        if (!joinerLoaded_ && loadedWaits_ < config.maxLoadedWaits)
         {
+            ++loadedWaits_;
             armLoadingStep();
             return;
         }
@@ -627,20 +658,24 @@ namespace rwe
 
     void TaBattleroom::finishLaunch()
     {
-        auto ids = peerIds();
-        traffic.queueForAll(ids, taBuildStart(1), TaTransport::Tcp);
-        traffic.flush();
-
-        // Twice, as the captures have it: once as the 0x1e goes out and once
-        // after the move to UDP.
-        session.sendSessionDescChanged();
-        session.sendSessionDescChanged();
-
-        state_ = TaBattleroomState::Launched;
         moveToUdp();
     }
 
     void TaBattleroom::moveToUdp()
+    {
+        auto ids = peerIds();
+        traffic.queueForAll(ids, code(TadSubPacketCode::Start15), TaTransport::Udp);
+        traffic.flush();
+        traffic.queueForAll(ids, code(TadSubPacketCode::Unk07), TaTransport::Udp);
+        traffic.flush();
+        traffic.queueForAll(ids, taBuildLoadingProgress(TaLoadingComplete), TaTransport::Tcp);
+        traffic.queueForAll(ids, code(TadSubPacketCode::PadEncrypt), TaTransport::Tcp);
+        traffic.flush();
+
+        armLaunchTimer(config.gameStartDelay, [this] { sendGameStart(); });
+    }
+
+    void TaBattleroom::sendGameStart()
     {
         auto ids = peerIds();
         auto builder = tadEncodeBuildStarted(TadBuildStarted{
@@ -649,19 +684,16 @@ namespace rwe
             launchParams_.commanderPosition,
             launchParams_.commanderRotation});
 
-        traffic.queueForAll(ids, code(TadSubPacketCode::Start15), TaTransport::Udp);
-        traffic.flush();
-        traffic.queueForAll(ids, code(TadSubPacketCode::Unk07), TaTransport::Udp);
-        traffic.flush();
-
         traffic.queueForAll(ids, taBuildLoadingProgress(TaLoadingComplete), TaTransport::Udp);
-        queueStatus(config.inGameUdpState, TaTransport::Udp);
         traffic.queueForAll(ids, builder, TaTransport::Udp);
         traffic.queueForAll(
             ids,
             taBuildUnitStateWord(launchParams_.commanderUnitId, launchParams_.commanderStateWord),
             TaTransport::Udp);
+        queueStatus(config.inGameUdpState, TaTransport::Udp);
         traffic.flush();
+        session.sendSessionDescChanged();
+        state_ = TaBattleroomState::Launched;
 
         for (PeerId id : ids)
         {

@@ -158,6 +158,7 @@ namespace rwe
                 config.keepaliveInterval = std::chrono::milliseconds(60000);
                 config.pingInterval = std::chrono::milliseconds(60000);
                 config.loadingStepInterval = std::chrono::milliseconds(1);
+                config.gameStartDelay = std::chrono::milliseconds(1);
                 room = std::make_unique<TaBattleroom>(
                     ioContext,
                     session,
@@ -746,11 +747,17 @@ namespace rwe
         }
         REQUIRE(h.room->state() == TaBattleroomState::Launched);
 
-        // Over TCP: 0x08, the progress ladder to 0x64, and 0x1e.
+        // Over TCP, exactly as a real host sends it (ta-baseline.pcap): 08 06,
+        // then 2a/06 and 07 a step, the last 07 with the 1e, and 2a 64/06
+        // alongside the move to UDP.
         auto tcp = codeList(h.codesTo(JoinerId, TaTransport::Tcp));
-        REQUIRE(tcp.front() == 0x08);
-        REQUIRE(tcp.back() == 0x1E);
-        REQUIRE(std::count(tcp.begin(), tcp.end(), 0x2A) == 4);
+        REQUIRE(tcp == std::vector<std::uint8_t>({
+                           0x08, 0x06,
+                           0x2A, 0x06, 0x07,
+                           0x2A, 0x06, 0x07,
+                           0x2A, 0x06, 0x07, 0x1E,
+                           0x2A, 0x06,
+                       }));
 
         std::vector<std::uint8_t> progress;
         for (const auto& subpacket : h.codesTo(JoinerId, TaTransport::Tcp))
@@ -764,16 +771,17 @@ namespace rwe
 
         REQUIRE(h.session.sessionDescChanged == 2);
 
-        // Over UDP: 0x15, 0x07, then 0x2a, the status, the team, the 0x09 and the 0x11.
+        // Over UDP: 0x15, 0x07, then the first in-game bundle in a real host's
+        // order: 0x2a, the 0x09, the 0x11, the status and the team.
         auto udp = codeList(h.codesTo(JoinerId, TaTransport::Udp));
         REQUIRE(udp == std::vector<std::uint8_t>({
                                0x15,
                                0x07,
                                0x2A,
-                               0x20,
-                               0x24,
                                0x09,
                                0x11,
+                               0x20,
+                               0x24,
                            }));
 
         auto udpRecords = h.codesTo(JoinerId, TaTransport::Udp);
@@ -792,7 +800,11 @@ namespace rwe
         REQUIRE(state != udpRecords.end());
         REQUIRE(*state == taBuildUnitStateWord(251, 1));
 
-        auto status = taParsePlayerStatus(udpRecords[3]);
+        auto statusRecord = std::find_if(udpRecords.begin(), udpRecords.end(), [](const TadBytes& one) {
+            return one[0] == 0x20;
+        });
+        REQUIRE(statusRecord != udpRecords.end());
+        auto status = taParsePlayerStatus(*statusRecord);
         REQUIRE(status);
         REQUIRE(status->state == 0x32);
         REQUIRE(status->playerId == HostId);
@@ -803,6 +815,39 @@ namespace rwe
         REQUIRE(launched.address.udp.port() == 34751);
         REQUIRE(launched.team == TaNoTeam);
         REQUIRE(launched.name == "rwe");
+    }
+
+    TEST_CASE("no in-game record reaches a joiner until it has answered the 1e", "[net][ta]")
+    {
+        // A 0x09 sent with the 1e reached a real TA still loading its map, and
+        // it crashed: the first in-game bundle waits for the joiner's own 0x15.
+        Harness h;
+        h.config.maxLoadedWaits = 1000000;
+        h.room = std::make_unique<TaBattleroom>(
+            h.ioContext,
+            h.session,
+            h.traffic,
+            [&h] { return h.now; },
+            h.config);
+        h.room->peerJoined(JoinerId);
+        h.sent.clear();
+
+        REQUIRE(h.room->launch(launchParams()));
+        h.ioContext.run_for(std::chrono::milliseconds(100));
+        REQUIRE(h.room->state() == TaBattleroomState::Launching);
+        auto early = codeList(h.codesTo(JoinerId, TaTransport::Udp));
+        REQUIRE(std::count(early.begin(), early.end(), 0x09) == 0);
+
+        TaPacket loaded;
+        loaded.subpackets.push_back(TadBytes{0x15});
+        h.deliver(loaded, JoinerId, TaTransport::Tcp);
+        for (int i = 0; i < 100 && h.room->state() != TaBattleroomState::Launched; ++i)
+        {
+            h.ioContext.run_for(std::chrono::milliseconds(5));
+        }
+        REQUIRE(h.room->state() == TaBattleroomState::Launched);
+        auto late = codeList(h.codesTo(JoinerId, TaTransport::Udp));
+        REQUIRE(std::count(late.begin(), late.end(), 0x09) == 1);
     }
 
     TEST_CASE("a second launch is not started", "[net][ta]")
