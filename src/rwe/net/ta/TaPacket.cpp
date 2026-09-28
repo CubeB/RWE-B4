@@ -60,7 +60,7 @@ namespace rwe
         result.packet.type = encrypted[0];
         result.packet.marker = readU32(&plain[3]);
         result.packet.subpackets = tadSplitSubPackets(
-            &plain[TaPacketHeaderSize],
+            plain.data() + TaPacketHeaderSize,
             plain.size() - TaPacketHeaderSize,
             result.stats);
         return result;
