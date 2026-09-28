@@ -21,6 +21,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -48,6 +49,43 @@ namespace rwe
         static TaHostPorts atBase(int base);
     };
 
+    /**
+     * Where one peer's game traffic goes, which a game needs before it can send
+     * anything: the sockets it told us it listens on during the handshake.
+     */
+    struct TaPeerAddress
+    {
+        /** TaHostSession::PeerId, which is a uint32. */
+        std::uint32_t playerId{0};
+        asio::ip::tcp::endpoint tcp;
+        asio::ip::udp::endpoint udp;
+    };
+
+    /**
+     * The five things a layer above the session needs from it. TaHostSession is
+     * the only implementation in the engine; TaBattleroom takes this rather than
+     * the session so its own tests need no sockets.
+     */
+    struct TaBattleroomHost
+    {
+        virtual ~TaBattleroomHost() = default;
+
+        /** The id every message the host sends is stamped with. */
+        virtual std::uint32_t hostPlayerId() const = 0;
+
+        /** Sends application data to one peer; false for a peer it has lost. */
+        virtual bool send(std::uint32_t peer, std::span<const std::uint8_t> bytes, TaTransport transport) = 0;
+
+        /** Tells every peer the session changed, which the host does at launch. */
+        virtual void sendSessionDescChanged() = 0;
+
+        /** Where a peer's game traffic goes, or nothing for a peer it has lost. */
+        virtual std::optional<TaPeerAddress> peerAddress(std::uint32_t peer) const = 0;
+
+        /** The name CREATEPLAYER carried, or empty for a peer it has lost. */
+        virtual std::string peerName(std::uint32_t peer) const = 0;
+    };
+
     struct TaHostConfig
     {
         TaHostPorts ports;
@@ -61,10 +99,21 @@ namespace rwe
         /** The host's options byte, in the session description's dwUser3. */
         std::uint8_t options{0x4F};
 
-        std::uint32_t hostPlayerId{0x08D80E77};
+        /**
+         * The host's named player: the "from" of its application data and the
+         * player a joiner lists. A real host's is one below its system player.
+         */
+        std::uint32_t hostPlayerId{0x08D90E76};
         std::uint32_t hostSystemPlayerId{0x08D90E77};
 
-        /** The first id handed out; player and system ids count up from here. */
+        /**
+         * The id the session description carries and a joiner's
+         * ADDFORWARDREQUEST addresses: DirectPlay's own name for the host,
+         * distinct from both of its players.
+         */
+        std::uint32_t sessionHostId{0x08D80E77};
+
+        /** The first ids handed out; each joiner after takes the pair two below. */
         std::uint32_t firstAssignedPlayerId{0x08D90E74};
         std::uint32_t firstAssignedSystemPlayerId{0x08D90E75};
 
@@ -79,7 +128,7 @@ namespace rwe
         std::chrono::milliseconds incomingIdleTimeout{10000};
     };
 
-    class TaHostSession
+    class TaHostSession : public TaBattleroomHost
     {
     public:
         using PeerId = std::uint32_t;
@@ -132,21 +181,34 @@ namespace rwe
         void onAppData(AppDataHandler handler);
 
         /** Send application data to one peer. Returns false if the peer is unknown. */
-        bool send(PeerId to, std::span<const std::uint8_t> bytes, TaTransport transport);
+        bool send(PeerId to, std::span<const std::uint8_t> bytes, TaTransport transport) override;
 
         /** Send application data to every peer that has finished the handshake. */
         void sendToAll(std::span<const std::uint8_t> bytes, TaTransport transport);
 
         /** Send SESSIONDESCCHANGED now; the host does this whenever an option changes. */
-        void sendSessionDescChanged();
+        void sendSessionDescChanged() override;
 
         /** Drop a peer, telling the remaining peers it left. */
         void deletePeer(PeerId peerId);
+
+        /**
+         * The host leaving: DELETEPLAYER for both of its own ids, to every
+         * peer. The mirror of what a joiner sends when it goes, which is how
+         * a peer is told a player has left (docs/TA-NETWORK.md, "DirectPlay").
+         */
+        void sendHostDeleted(std::uint32_t playerId, std::uint32_t systemPlayerId);
 
         /** Change the options byte; the next SESSIONDESCCHANGED carries it. */
         void setOptions(std::uint8_t options);
 
         std::uint8_t options() const { return config.options; }
+
+        std::uint32_t hostPlayerId() const override { return config.hostPlayerId; }
+
+        std::optional<TaPeerAddress> peerAddress(PeerId peerId) const override;
+
+        std::string peerName(PeerId peerId) const override;
 
     private:
         struct TcpLink

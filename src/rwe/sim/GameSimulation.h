@@ -31,6 +31,7 @@
 #include <rwe/sim/ProjectileSpawn.h>
 #include <rwe/sim/ResourceSettler.h>
 #include <rwe/sim/SimAxis.h>
+#include <rwe/sim/TaLiveSenderHooks.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitId.h>
 #include <rwe/sim/UnitInfo.h>
@@ -48,6 +49,7 @@ namespace rwe
     class DemoRecorder;
     struct MissionRules;
     struct MissionScripts;
+    struct MixedOwnershipOutbox;
 
     constexpr int MaxUtilizableWindSpeed = 5000;
 
@@ -675,6 +677,24 @@ namespace rwe
          * it back -- see docs/adr/0001-demo-recorder-is-a-pure-observer.md.
          */
         std::unique_ptr<DemoRecorder> demoRecorder;
+
+        /**
+         * Where a live sink is told about events, when a TA peer is on the
+         * other end (#427). Empty in a game with no peer, and a table of
+         * function pointers rather than a pointer to the sink: see
+         * `TaLiveSenderHooks` for the measured reason, and for the two things
+         * that come of the simulation not owning a network object.
+         */
+        TaLiveSenderHooks taLiveSender;
+
+        /**
+         * The damage and deaths this machine's own units produced for the other
+         * peers, for the network layer to send (#427). Pointed-to for the
+         * section budget, like demoRecorder, and a pure observer in the same
+         * sense: created on first use, never hashed, saved or dumped, and never
+         * read back by the simulation.
+         */
+        std::unique_ptr<MixedOwnershipOutbox> mixedOwnershipOutbox;
 
         /**
          * A campaign mission's win and lose rules (TOTALA-EXE-DATA.md §113),
@@ -1394,6 +1414,10 @@ namespace rwe
          * `explodeAs`, which the peer that owns the dying unit broadcasts --
          * still has a peer that would have sent it, and the corpus shows it is
          * not the victim's.
+         *
+         * A hit a Remote player ran is the victim's owner's to report and
+         * reaches us as an incoming 0x0b, so `reportedByOwner` marks that call
+         * and is the only way such a hit is applied here.
          */
         void applyDamage(
             UnitId unitId,
@@ -1401,7 +1425,8 @@ namespace rwe
             std::optional<UnitId> attacker,
             bool paralyzer,
             std::optional<PlayerId> sourceOwner = std::nullopt,
-            const char* deathCause = "weapon");
+            const char* deathCause = "weapon",
+            bool reportedByOwner = false);
 
         /**
          * The acid in the sea, once a second (0x48AED3-0x48AF32): every unit
@@ -1534,5 +1559,20 @@ namespace rwe
          * never been built under this recording.
          */
         void attachDemoRecorder(std::unique_ptr<DemoRecorder> recorder);
+
+        /**
+         * Registers a live sink, which is `sender.hooks()` and nothing else:
+         * from here on every unit creation, build, shot, removal and completed
+         * tick is offered to it, and each tick's subpackets wait to be taken by
+         * whoever owns it. `setTaLiveSender({})` unregisters.
+         *
+         * A pure observer in the same sense as the recorder (ADR-0001): nothing
+         * it holds is hashed, saved or dumped, and the simulation never reads
+         * it back, so it cannot move a tick. Registered after the game has
+         * loaded and before the first tick, so the whole game goes out; a unit
+         * already standing is given an id but has no 0x09, having never been
+         * built under it.
+         */
+        void setTaLiveSender(TaLiveSenderHooks hooks);
     };
 }

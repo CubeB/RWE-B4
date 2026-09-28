@@ -116,9 +116,12 @@ What is a recorded divergence (ADR-0001):
 
 - **The `0x1a` ids (D7).** The `sub` 3 block's count is the data set's unit
   count and the fixed pseudo-entry is emitted, but the ids are deterministic
-  synthetic values: the content-derived id has not been reproduced, and two
-  passes have failed at it. The tools use the table's count and not its ids,
-  and `--units` naming does not read it.
+  synthetic values. **The real id is now known** -- `taChecksum` (`0x4B6BA0`)
+  over the raw FBI bytes, `docs/TOTALA-EXE-DATA.md` §117, and
+  `tools/exe/mapcrc.py unit <fbi>` prints one -- but the writer still emits the
+  synthetic values, because wiring the real ones into the recorder is separate
+  work. The tools use the table's count and not its ids, and `--units` naming
+  does not read it.
 - **The status-message body (D8).** Only the DirectPlay id at offset `0x91` is
   decoded, so the other bytes are zero. The message encrypt+compresses to a
   matching checksum, which is what lets `tad_probe` verify it rather than
@@ -129,6 +132,42 @@ What is a recorded divergence (ADR-0001):
 
 Recording never reaches back into the simulation: nothing the recorder holds
 is hashed or saved, and no wall-clock or frame-rate value crosses the divide.
+
+### The same bytes, sent live (#427)
+
+Writing a file is one way to get this stream out of the simulation and playing
+against the original is another, so the encoding is not the recorder's: it is
+`TaWireTape`, and the recorder and the **live sender** (`TaLiveSender`) are two
+observers over one of it. Everything above about the payloads and their order
+applies to both, which is the point of sharing the code rather than having two
+that can disagree.
+
+The differences are the ones the transport imposes. A tape either watches a
+whole game -- a demo is a wire tap of every sender -- or one machine's own
+player, and the live sender is the second. A demo is written as a file with a
+header and a packet per sender per tick; a live sender yields one tick's
+subpackets at a time and leaves the framing to the network layer, which puts
+six of them in a UDP message. The `0x19` and the container are a file's
+business and are not sent. The damage and deaths of a game with a peer in it
+arrive through the mixed-ownership outbox rather than from the recorder's hooks,
+because a `0x0b` is about a unit this machine does not simulate and the
+recorder has no such unit to hear about.
+
+One record needs something the recorder never had to think about: a `0x0b`
+against a TA unit, or a `0x0c` crediting a TA killer, must name a unit in the
+**peer's** owner block, and that block's allocation is the peer's to say.
+`TaPeerIds` is how the network layer supplies it, and a record that cannot be
+named is counted and dropped rather than written with a zero -- which the peer
+reads as no unit at all.
+
+The wiring between them is worth naming too, because it is a budget decision
+rather than a style one. The simulation does not hold the live sender: it holds
+`TaLiveSenderHooks`, a table of function pointers, and the network layer owns
+the sender and fills the table in. A `std::unique_ptr` to a type named in
+`GameSimulation.h` costs every translation unit that includes it the deleter's
+worth of COFF sections -- 55 on `GameSimulation.cpp` at `-O0 -g1` for a member
+that held nothing at all -- and that header is included by most of the engine
+(CLAUDE.md, "Other hazards"). A table costs four.
 
 ### Read back by an independent reader (#224, 2026-09-25)
 
@@ -803,8 +842,17 @@ See the wrecks section below; this is the largest single finding of the pass.
 
 Two 16.16 position triples -- where the shot came from and where it was aimed,
 and the second is far enough from the first that it cannot be a velocity -- then
-a rotation triple, then `u16` target (zero if the shot was not aimed at a unit),
-`u16` shooter, and one byte that is 0, 1 or 2.
+three `u16` words that are **not** a rotation triple, then `u16` target (zero if
+the shot was not aimed at a unit), `u16` shooter, and one byte that is 0, 1 or 2.
+
+**The three words are the weapon's `ID`, the bearing and the elevation.**
+`TOTALA-EXE-WEAPONS.md`, "Receiving a `0x0d`, `0x49D270`", is the decode: the
+first word's low byte is the weapon's own TDF `ID` and its high byte a flags
+byte the emitter never writes, and the receiver indexes its weapon table by the
+low byte. The second and third are the launch bearing and elevation, in TA's
+16-bit angle units. Reading the first word as an angle -- as this document did
+until the receiver was read -- mistakes a weapon id for a pitch; `ARMCOMLASER`
+is `ID=20`, which is why a laser's first word is the constant `0x0014`.
 
 **That last byte is the weapon slot**, a 0-based index into the shooter's own
 `Weapon1`/`Weapon2`/`Weapon3` -- so `WeaponN` with `N = slot + 1`. This is what
@@ -924,9 +972,10 @@ floors positions onto sixteen-unit squares: a rounded coordinate on the wrong
 side of a boundary moved whole pairings, and `CORVAMP` read 52% in the script
 against 66% in the port. Regenerate an old dump before scoring it.
 
-**A shot also carries its rotation triple** as `rx`, `ry`, `rz`, which is what
-identified the field: see "Why 53,706 shots drew no damage". A dump written
-before that has no such keys and has to be regenerated to use them.
+**A shot also carries its three words** as `rx`, `ry`, `rz` -- the weapon's TDF
+`ID`, the bearing and the elevation, in that order, not a rotation triple; see
+"Receiving a `0x0d`, `0x49D270`" in `TOTALA-EXE-WEAPONS.md`. A dump written
+before those keys existed has to be regenerated to use them.
 
 #### A `0x0b` is sent by the attacker's owner, which is what makes this tractable
 
@@ -1801,11 +1850,19 @@ measured it on units that died.
 
 **Two things the pass found on the way that are not about misses.**
 
-*The `0x0d`'s rotation triple is the shot's own launch attitude.* `--emit-shots`
-now carries it. `ry` against `atan2(dx, dz)` over the aim line has a circular
-correlation of **0.984** with a constant offset of half a circle, so it is a
-yaw; `rx` never leaves -494..182 and tracks the aim line's elevation, so it is a
-pitch. The yaw is not the aim bearing exactly -- its departure has a median of
+*The `0x0d`'s three words are the weapon ID, the bearing and the elevation.*
+`--emit-shots` carries them as `rx`, `ry`, `rz`, but only the last two are
+angles: `rx` is the weapon's TDF `ID` in its low byte and a flags byte the
+emitter leaves clear in its high one, and it is what the receiver indexes its
+weapon table by (`TOTALA-EXE-WEAPONS.md`, "Receiving a `0x0d`, `0x49D270`").
+`ry` against `atan2(dx, dz)` over the aim line has a circular correlation of
+**0.984** with a constant offset of half a circle, so it is a yaw; `rz` tracks
+the aim line's elevation, so it is the pitch. The reading here until the
+receiver was decoded called `rx` the pitch because its signed range (-494..182)
+looks like one; that range is the weapon id with the emitter's unwritten flags
+byte above it, and `ARMCOMLASER`'s constant `0x0014` -- `ID=20` -- is what a
+per-weapon field looks like. The yaw is not the aim bearing exactly -- its
+departure has a median of
 **1.8 degrees** and a 90th percentile of 7 -- so it records a real aiming error,
 which is the first thing in the stream that does. But it does **not** decide a
 shot: bucketing isolated shots by that departure gives a no-damage rate flat at
@@ -1860,8 +1917,8 @@ merely a sign to fix.
 first imagined to be. Three things constrain it.
 
 * **It can only ever be a rate, never a per-shot prediction.** The `0x0d`
-  records where the shot was *aimed* -- and, in the rotation triple, roughly
-  where it was pointed -- but whether it connected depends on where the victim
+  records where the shot was *aimed* -- and, in its bearing and elevation,
+  roughly where it was pointed -- but whether it connected depends on where the victim
   was when it arrived, and the victim's position is in the stream once every
   `maxUnits` ticks. A cell's hit *share* is measurable; "did this shot hit" is
   not.
@@ -2364,8 +2421,11 @@ The `sub` 2 block is always a **superset**: 550 entries in demos 14727 and 14728
 and 551 in 14732 and 14734, the extra ids being `1235944411` and `410801334` in
 both cases. That difference is not explained.
 
-**The id is content-derived and has not been reproduced.** Two passes have now
-failed at it, and between them they have ruled out a lot:
+**The id is content-derived, and it is now reproduced.** It is `taChecksum`
+(`0x4B6BA0`) over the raw bytes of the FBI file, docs/TOTALA-EXE-DATA.md §117,
+and all 278 of the GOG install's unit types match; `tools/exe/mapcrc.py unit
+<fbi>` prints one. The list below is what was tried first and failed, kept so
+that the negative stays reproducible.
 
 - 88 name-hash combinations -- crc32 plain and complemented, djb2, djb2-xor,
   sdbm, FNV-1, FNV-1a, java-31, rotate-xor, byte sum and adler32, over upper and
@@ -2395,7 +2455,9 @@ absolute-address search or a grep of the resolved disassembly can see, and
 objdump's linear sweep demonstrably desynchronises on a jump table at `0x46d84c`
 in the same neighbourhood, which is the likely reason. A recursive-descent
 disassembly of `0x455000`-`0x46e000`, or a live breakpoint on the
-restrictions-dialog arrays, is the way in next time.
+restrictions-dialog arrays, is the way in next time. The id no longer needs it
+(§117); what is left here is the transient record itself, which nothing else
+needs.
 
 **But it identifies a data set today, which was the question that mattered.**
 `tad_probe` now prints the table's size and an order-independent fingerprint of
@@ -2551,37 +2613,109 @@ simulation as usual, and the replay viewer's play/pause and speed controls act
 on it. A Demo window reports the counts. The driver is free of SDL, GL and
 `GameScene`, so `tad_puppet` and the scene use the same one.
 
-The rest of the stream is consumed too. `0x0d` spawns the shooter's own weapon
-round from the recorded origin toward the target for display only; it takes no
-health off anything, because every demo player is Remote and damage comes only
-from `0x0b` -- checked for area damage and features as well. `0x10` runs the
-named script on the puppet's own COB environment, so animations, activation and
-build arms show. `0x28` writes the sender's stored and storage metal and energy
-onto its player for the resource bar. `0x05` and `0xf9` print as chat. `0x19`
-sets the playback speed from its high byte (256 is normal); a zero level is
-left alone, because the corpus has lone zeros in demos that plainly run on, so
-the value cannot be read as a pause.
+### A live game, and what the receive buffer is for
 
-**What tier 2 still leaves out.** `0x0f` feature actions are sized but not
-decoded, so a feature the recording changed is not shown; the payload is not
-guessed at. A recorded pause has no unambiguous encoding in the corpus and is
-not applied. Fog of war is inherent and unsolvable from the stream: the
-recording peer only saw what was sent to it, and a unit the stream never placed
-is shown nowhere rather than in an invented place.
+Everything above is a file arriving in order. A game delivers the same packets
+over UDP in real time, and `TaLiveReceiver` (`src/rwe/puppet/`) is what sits in
+front of the driver for that.
 
-**A coordinate correction this work found.** RWE's world is centred on the
-origin and TA's starts at the map's top left. The recorder had been writing
-RWE's centred coordinates as if they were TA's, so every real demo placed its
-units half a map away and `trySpawnUnit` refused them; the recorder now adds
-the half-extents and the driver takes them off again, and the RWE demo corpus
-was re-recorded. A mod's death weapon name is also taken in the case the
-weapon map uses, because the original hashes weapon names case-insensitively.
-The reference scorers are unaffected: `tad-buildtime.py` and
-`tad-storagecapacity.py` read no positions, and `tad-weapontime.py` reads only
-differences of them, which the shift cancels. `tools/demo-selfcheck.py` on a
-fresh RWE recording reports the same build-timing and storage-capacity failures
-with the old writer as with the new -- both pre-existing model disagreements,
-not coordinate ones.
+**The marker says which, the serial says when.** Every TA packet carries a
+per-sender count that falls by one per packet (`docs/TA-NETWORK.md`, "TA
+packets"), so a higher marker is a packet its sender sent earlier, and
+`0xffffffff` on a reply, which counts for nothing in that order. Nothing else on
+the wire says which of two packets came first, and arrival cannot: a packet with
+no `0x2c` of its own -- a `0x0c`, a `0x0b`, a `0x09` -- has no tick to place it
+by, and a `0x0c` that lands after the full-state record that re-used its unit's
+slot is a death for a unit the driver has let go of. So each sender's packets are
+held and handed over in the order that sender sent them, whatever order the
+network delivered them in, and the `0x2c` serial is only the *when*: a packet
+waits until the tick its serial names, or, for one with no serial, until the
+packet before it in its sender's order has gone -- which leaves the driver
+resolving it against the sender's last serial, the serial the packet before it
+carried.
+
+That depth is the **receive buffer**: our tick runs that far behind the sender's,
+so a packet naming tick T arrives up to that many ticks early and is held here
+until T, and past that it is late and can only be applied where it landed.
+Nothing is ever handed over *before* the tick it names -- a buffer that applied
+records early would put a death before the full-state record it belongs behind,
+and leave a unit that should have died alive. A packet a sender sent that has
+not turned up holds the queue behind it for `jitterTicks + 1` ticks and is then
+given up on and counted, because a packet cannot arrive later than the buffer is
+deep and a lost one never arrives.
+
+The mapping from serial to RWE tick is settled from the first packets -- the
+lowest serial seen before the first one is applied, so a first packet that
+arrives out of order does not move the whole clock -- and then held fixed,
+because a moving one would leave nothing to measure. The gap between the two
+clocks is reported over the run: the offset distribution, the total drift, and
+the least-squares rate. A marker already handed to the driver is dropped and
+counted, a late packet is counted, and a packet that arrived after one its sender
+sent later is put back in order and counted. The buffer is bounded per sender,
+across senders, and on how far past the local tick a serial may name; each bound
+drops and counts rather than waits.
+
+**`tad_puppet --live-sim <jitter-ticks>:<loss-percent>:<seed>` measures it.**
+It delivers a demo's packets at the ticks a receive buffer of that depth would
+say, through the receiver, with the driver on its external clock and the
+simulation ticked once per local tick. A demo has no marker, so each record
+takes its place in its own sender's stream as the receiver's sequence -- stamped
+before the jitter reorders anything, as a real sender stamps the marker before
+the network does. The generator is the tool's own `minstd_rand` and the same
+seed gives the same run. Five ProTA demos (10158, 11440, 11505, 11506, 11507),
+35,669 ground drift samples between them:
+
+| run | spawned | finished | killed | wrecks | ground p90 | ground within 32 | air within 32 |
+|---|---|---|---|---|---|---|---|
+| `tad_puppet`, straight from the file | 3,591 | 5,874 | 3,476 | 1,212 | 52.15 | 82.03% | 69.64% |
+| `--live-sim 0:0:1` | 3,591 | 5,874 | 3,476 | 1,211 | 52.15 | 82.03% | 69.64% |
+| `--live-sim 1:0:1` | 3,591 | 5,874 | 3,476 | 1,208 | 52.09 | 82.05% | 70.83% |
+| `--live-sim 2:0:1` | 3,591 | 5,863 | 3,104 | 1,543 | 51.95 | 82.10% | 69.05% |
+| `--live-sim 3:0:1` | 3,591 | 5,863 | 3,007 | 1,633 | 51.93 | 82.09% | 68.45% |
+| `--live-sim 5:0:1` | 3,591 | 5,863 | 3,007 | 1,627 | 52.08 | 82.19% | 67.26% |
+| `--live-sim 3:1:1` | 3,546 | 5,805 | 3,430 | 1,248 | 53.52 | 81.69% | 68.26% |
+| `--live-sim 3:5:1` | 3,302 | 5,418 | 3,185 | 1,289 | 59.91 | 80.45% | 60.48% |
+
+**At a depth of 0 or 1 the live run reproduces the straight playback exactly** --
+every figure, drift distributions included, and at a depth of 1 that is with 473
+packets that arrived after one their sender sent later and were put back in
+order. That is the check the buffer is there to pass: a packet is still in hand
+at the tick that names it however late it left the sender, so nothing is applied
+late and the run is the same run. Loss costs slowly, and every packet it takes
+shows up as a gap given up on: 616 of the 617 dropped at 1% and 3,352 of the
+3,353 at 5%, so the receiver is not losing a second packet to any gap it gave up
+on. 5% gone moves the ground median not at all (it is already zero), the p90 from
+52 to 60 units, and the within-32 figure by under two points, because a
+full-state record is a *correction* and the one after a lost packet puts the unit
+back.
+
+**The drift is never the thing that suffers.** The ground within-32 figure is
+equal or better at every depth from 0 to 3 -- 82.09% at a depth of 3 against
+82.03% straight -- and 473, 700 and 848 packets put back in order at depths 1, 2
+and 3 cost nothing in it. The air figures are the other story, and have been
+since the puppet driver: a goal is not a position (see above), so a puppet
+aircraft given its recorded goal three ticks earlier than before has three more
+ticks of its own arrival profile to be wrong by.
+
+**The counts stop agreeing at a depth of 2, and `deathsDroppedNotLive` says
+where they go.** The kill column is 3,476 straight and 3,007 at a depth of 3, and
+every one of them is a `0x0c` that found no live puppet: the counter is 92
+straight, 110 at a depth of 0 or 1, 471 at a depth of 2, and 568 at a depth of 3
+or 5. The step is between a depth of 1 and 2, not gradual, and a lead of one tick
+costs nothing at all: 473 packets put back in order and every count still the
+straight one.
+
+So it is neither the receiver's ordering nor a packet being applied early.
+Releasing each packet exactly on the tick it names -- which is what this section
+now describes -- brings the drift sample count up to the straight one at every
+depth, 35,669 of 35,669, and leaves the kills where they were. What is left is
+the driver's own reading of a slot that a full-state record has re-used for a
+different type, where a stale death finds the *new* unit standing in the slot and
+the old one is orphaned -- which is also where the extra 421 wrecks come from, an
+orphaned unit being run over rather than killed. Deciding which of two records
+for a re-used slot the stream means is a question about the demo and not about
+the receiver, so it is left there, with the counter on it: a loss that increments
+nothing is a hole in the instrument.
 
 ## Demos as a conformance corpus
 
@@ -3388,11 +3522,11 @@ They catch different things and should not share machinery.
       puts on every turret shot is a **range** error for a shell rather than a
       speed error, so only 2 of its 17 cells keep enough pairings to be scored,
       and the other 15 are printed with what took them. The decoding prize that
-      was hoped for there -- the `0x0d`'s **rotation triple** -- was not what
+      was hoped for there -- the `0x0d`'s **three words** -- was not what
       gave this class its launch vector, since the muzzle and the aim point
       already determine the angle through the engine's own solver. It has since
-      been identified from the other side (the shot's own launch attitude, "The
-      `0x0d`'s rotation triple" above) and `--emit-shots` carries it now, so
+      been identified from the other side (the shot's bearing and elevation,
+      the `0x0d` section above) and `--emit-shots` carries it now, so
       what remains is the use rather than the decode: it is the only way to test
       the solver's *output* rather than its inputs.
 
@@ -3467,12 +3601,12 @@ They catch different things and should not share machinery.
   something ordinary and both are `UNK_` in the reference.
 - The length of `0x13`, which the reference never had, and which nothing in the
   corpus exercises.
-- **What computes a `0x1a` id.** The layout of the record is settled and the
-  fingerprint does the filtering job, but the id itself is content-derived and
-  resists every name hash tried against it. ~~This is now the single thing
-  blocking checked-in episodes.~~ It is not: naming came from the load order
-  instead (see `0x09`), so episodes can be named and checked in without it. The
-  id stays unexplained and stays here, but nothing waits on it.
+- **What computes a `0x1a` id.** ~~The id itself is content-derived and resists
+  every name hash tried against it.~~ **Answered**: `taChecksum` (`0x4B6BA0`)
+  over the raw FBI bytes, docs/TOTALA-EXE-DATA.md §117, all 278 of the GOG
+  install's ids reproduced. Naming still comes from the load order (see `0x09`),
+  which is what checked-in episodes wait on; the recorder still writes synthetic
+  ids, which is the one piece of wiring left.
 - **The last six floats of `0x28`.** Stored and storage are identified for both
   resources; the two cumulative triples are not, so expenditure still cannot be
   recovered by difference.

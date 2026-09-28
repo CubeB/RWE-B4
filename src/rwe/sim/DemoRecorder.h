@@ -27,15 +27,20 @@ namespace rwe
      *
      * A block that cannot seat another unit is a game TA cannot represent
      * either, so the caller is told rather than a unit being quietly dropped.
-     * Blocks are assigned in first-allocation order; the numbers are stable
-     * per owner but are deliberately not the demo's player numbers (the
-     * corpus's demo 14733 has sender 1 in block 2, so nothing may assume
-     * they agree).
+     * Blocks are assigned in first-allocation order from `firstBlock`; the
+     * numbers are stable per owner but are deliberately not the demo's player
+     * numbers (the corpus's demo 14733 has sender 1 in block 2, so nothing may
+     * assume they agree).
+     *
+     * `firstBlock` is 0 for a demo or a recording, which describes every
+     * player from the first. A live host is not: a joining TA takes block 0
+     * for itself, so the host's own units start at block 1
+     * (docs/TA-NETWORK.md, "In game").
      */
     class DemoIdAllocator
     {
     public:
-        explicit DemoIdAllocator(uint16_t maxUnits = 1000);
+        explicit DemoIdAllocator(uint16_t maxUnits = 1000, unsigned int firstBlock = 0);
         ~DemoIdAllocator();
 
         DemoIdAllocator(const DemoIdAllocator&) = delete;

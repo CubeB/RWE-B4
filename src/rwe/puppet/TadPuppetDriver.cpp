@@ -1,11 +1,13 @@
 #include <rwe/puppet/TadPuppetDriver.h>
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <map>
 #include <utility>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/pathfinding/UnitPath.h>
+#include <rwe/sim/TaHeading.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/SimScalar.h>
 #include <rwe/sim/SimulationOwnership.h>
@@ -83,6 +85,9 @@ namespace rwe
         std::optional<uint32_t> lastSeenTick;
 
         std::vector<TadChatLine> chatLines;
+
+        /** A 0x0b for a unit of this machine's, where the caller takes it. */
+        IncomingDamageHandler incomingDamage;
 
         /** The latest 0x19 value waiting to be taken. */
         std::optional<uint16_t> speedChange;
@@ -300,10 +305,12 @@ namespace rwe
          * The owner already resolved placement, so a factory's build pad or a
          * peer's footprint must not refuse the unit: the recorded position is
          * authoritative, the same way a remote unit's step is never refused by
-         * a stale peer. The blocking cells are cleared and the new unit claims
-         * them through the ordinary spawn; a wreck in the way is cleared only
-         * after a first attempt without one, so an overlap that is not a wreck
-         * does not orphan a feature.
+         * a stale peer. Only a Remote occupant's cells are cleared -- a Local
+         * unit is not this puppet's to erase, and a Local footprint that really
+         * stands there refuses the spawn -- and the new unit claims them
+         * through the ordinary spawn. A wreck in the way is cleared only after
+         * a first attempt without one, so an overlap that is not a wreck does
+         * not orphan a feature.
          */
         std::optional<UnitId> placeUnit(
             const std::string& typeName,
@@ -319,10 +326,32 @@ namespace rwe
                 return std::nullopt;
             }
 
-            sim.occupiedGrid.forEach(*region, [](auto& cell) {
+            // A cell held by a Remote unit -- including the factory whose pad
+            // the puppet is built on, which is also Remote -- is cleared so the
+            // puppet can stand where its owner put it. A cell a Local unit
+            // holds is left alone: this machine decides where those stand.
+            auto clearRemoteOccupant = [this](auto& cell) {
+                auto occupant = cell.mobileUnitId;
+                if (!occupant && cell.buildingInfo)
+                {
+                    occupant = cell.buildingInfo->unit;
+                }
+                if (!occupant)
+                {
+                    return;
+                }
+
+                auto state = sim.tryGetUnitState(*occupant);
+                if (state && simulatesLocally(sim, state->get().owner))
+                {
+                    return;
+                }
+
                 cell.mobileUnitId = std::nullopt;
                 cell.buildingInfo = std::nullopt;
-            });
+            };
+
+            sim.occupiedGrid.forEach(*region, clearRemoteOccupant);
 
             auto spawn = [&]() -> std::optional<UnitId> {
                 return completed
@@ -338,8 +367,6 @@ namespace rwe
             sim.occupiedGrid.forEach(*region, [](auto& cell) { cell.featureId = std::nullopt; });
             return spawn();
         }
-
-
 
         /**
          * Moves every running air goal on by one tick.
@@ -434,7 +461,7 @@ namespace rwe
                 *typeName,
                 player->second,
                 toSimPosition(e->position),
-                SimAngle(static_cast<uint16_t>(e->rotation.y)),
+                simAngleFromTaYaw(e->rotation.y),
                 false);
             if (!unitId)
             {
@@ -520,6 +547,7 @@ namespace rwe
             auto puppetIt = puppets.find(key->second);
             if (puppetIt == puppets.end())
             {
+                ++stats.deathsDroppedNotLive;
                 return;
             }
             auto live = liveUnitOf(puppetIt->second);
@@ -527,6 +555,7 @@ namespace rwe
             {
                 // The owner declares a death for a unit we have not placed yet
                 // or have already let go; either way it never stands here.
+                ++stats.deathsDroppedNotLive;
                 dropPuppet(puppetIt);
                 return;
             }
@@ -550,6 +579,31 @@ namespace rwe
             dropPuppet(puppetIt);
         }
 
+        /**
+         * The RWE unit a wire id names, where it is one this driver puppets.
+         * An attacker this driver has not seen is nothing, which is what a
+         * record for a unit of the other owner's block looks like.
+         */
+        std::optional<UnitId> unitOfWireId(uint16_t wireId) const
+        {
+            auto key = keyOfId.find(wireId);
+            if (key == keyOfId.end())
+            {
+                return std::nullopt;
+            }
+            auto puppetIt = puppets.find(key->second);
+            if (puppetIt == puppets.end())
+            {
+                return std::nullopt;
+            }
+            return liveUnitOf(puppetIt->second);
+        }
+
+        std::optional<UnitId> attackerUnitOf(uint16_t attackerId) const
+        {
+            return attackerId == 0 ? std::nullopt : unitOfWireId(attackerId);
+        }
+
         void applyDamage(const TadBytes& subPacket)
         {
             auto e = tadDecodeDamage(subPacket);
@@ -561,6 +615,16 @@ namespace rwe
             auto key = keyOfId.find(e->victimId);
             if (key == keyOfId.end())
             {
+                // Not a unit of the sender's, so not one this driver puppets:
+                // a hit on a unit this machine owns, which the caller applies
+                // to its own simulation. Counted as handed off rather than as
+                // an unknown unit either way, so neither number hides it.
+                if (incomingDamage)
+                {
+                    ++stats.damageHandedOff;
+                    incomingDamage(e->victimId, attackerUnitOf(e->attackerId), e->damage);
+                    return;
+                }
                 ++stats.recordsDroppedUnknownUnit;
                 return;
             }
@@ -797,11 +861,16 @@ namespace rwe
 
             // The follower steers along the segment from wp[current-1] to
             // wp[current], so the front of the path is where the unit stands
-            // now and the replicated waypoints follow it.
+            // now and the replicated waypoints follow it. The entry's first
+            // corner is the one the owner's unit has just left (TOTALA-EXE.md
+            // section 102), so where there is a corner after it, steering starts
+            // there rather than turning back.
             UnitPath path;
             path.waypoints.push_back(unit.position);
-            for (const auto& wp : ground.waypoints)
+            auto first = ground.waypoints.size() >= 2 ? std::next(ground.waypoints.begin()) : ground.waypoints.begin();
+            for (auto wpIt = first; wpIt != ground.waypoints.end(); ++wpIt)
             {
+                const auto& wp = *wpIt;
                 SimVector p = sim.terrain.topLeftCoordinateToWorld(
                     SimVector(SimScalar(static_cast<float>(wp.x)), 0_ss, SimScalar(static_cast<float>(wp.z))));
                 p.y = sim.terrain.getHeightAt(p.x, p.z);
@@ -989,7 +1058,7 @@ namespace rwe
                     *typeName,
                     player->second,
                     position,
-                    SimAngle(static_cast<uint16_t>(sync.rotation.y)),
+                    simAngleFromTaYaw(sync.rotation.y),
                     true);
                 if (!unitId)
                 {
@@ -1016,12 +1085,20 @@ namespace rwe
 
             if (sync.carried)
             {
-                // No position on the wire, so nothing to measure or snap; the
-                // unit's carrier decides where it is.
+                // A transport carries mobile units. A building cannot be
+                // carried, so this record says nothing about where it stands,
+                // and moving it would leave the cells it was given behind: the
+                // death sweep clears a building's cells at the position it
+                // dies at, so the cells left at the old one would go on naming
+                // a freed id, and a projectile walking the grid would read it.
+                if (!definition.isMobile)
+                {
+                    return;
+                }
                 if (auto carrier = carrierUnit(*sync.carried))
                 {
                     auto carrierPosition = sim.getUnitState(*carrier).position;
-                    if (definition.isMobile && !definition.canFly)
+                    if (!definition.canFly)
                     {
                         moveOccupiedCells(*live, unit.position, carrierPosition, definition);
                     }
@@ -1057,8 +1134,8 @@ namespace rwe
                 unit.previousPosition = recorded;
                 unit.position = recorded;
             }
-            unit.previousRotation = SimAngle(static_cast<uint16_t>(sync.rotation.y));
-            unit.rotation = SimAngle(static_cast<uint16_t>(sync.rotation.y));
+            unit.previousRotation = simAngleFromTaYaw(sync.rotation.y);
+            unit.rotation = simAngleFromTaYaw(sync.rotation.y);
 
             if (sync.buildProgress == 0)
             {
@@ -1222,6 +1299,14 @@ namespace rwe
         impl->updateWreckCount();
     }
 
+    void TadPuppetDriver::onPacketAt(const TadPacket& packet, const std::vector<TadBytes>& subPackets, uint32_t tick)
+    {
+        assert(impl->externalClock);
+        ++impl->stats.packets;
+        impl->lastSeenTick = std::max(impl->lastSeenTick.value_or(0u), tick);
+        impl->pending[tick].push_back(Impl::QueuedPacket{packet.sender, subPackets});
+    }
+
     void TadPuppetDriver::setExternalClock(bool external)
     {
         impl->externalClock = external;
@@ -1254,6 +1339,32 @@ namespace rwe
     std::optional<uint16_t> TadPuppetDriver::takeSpeedChange()
     {
         return std::exchange(impl->speedChange, std::nullopt);
+    }
+
+    std::optional<uint16_t> TadPuppetDriver::wireIdOf(UnitId unit) const
+    {
+        // A walk rather than a second index: this is asked once per outgoing
+        // damage record, over a few hundred puppets, and an index kept beside
+        // puppet.unit would be a second thing to forget when a puppet is
+        // dropped or re-placed.
+        for (const auto& [key, puppet] : impl->puppets)
+        {
+            (void)key;
+            if (puppet.unit == unit)
+            {
+                return puppet.demoId == 0 ? std::nullopt : std::optional<uint16_t>(puppet.demoId);
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::optional<UnitId> TadPuppetDriver::unitOfWireId(uint16_t wireId) const
+    {
+        return impl->unitOfWireId(wireId);
+    }
+
+    void TadPuppetDriver::setIncomingDamageHandler(IncomingDamageHandler handler)    {
+        impl->incomingDamage = std::move(handler);
     }
 
     const TadPuppetStats& TadPuppetDriver::stats() const

@@ -794,6 +794,18 @@ namespace rwe
          */
         std::shared_ptr<TadScenePlayback> tadPlayback;
 
+        /**
+         * Set while hosting a game for a joining `TotalA.exe`: the peer, the
+         * receiver in front of the puppet driver, the sender of this machine's
+         * own units and the traffic batcher, all in one pimpl so that this
+         * header carries a pointer and nothing else. See GameScene_tahost.cpp.
+         *
+         * A shared_ptr, as `tadPlayback` is, so that a GameScene.cpp that
+         * never sees the whole type can still destroy it.
+         */
+        struct TaHostLink;
+        std::shared_ptr<TaHostLink> taHostLink;
+
         /** Playing or paused; separate from the game's own pause. */
         bool replayPlaying{true};
         /**
@@ -874,6 +886,36 @@ namespace rwe
         /** Applies the demo's records for the tick about to run, and prints any chat. */
         void applyTadTick();
         void renderTadWindow();
+        /**
+         * The TA host's half of a tick: the peer's packets into the receiver
+         * and so into the puppet driver, the peer's speed and pause onto the
+         * own clock, and this tick's subpackets out to the peer.
+         */
+        void applyTaHostTick();
+
+        /**
+         * Hands the peer's packets to the receiver. Every frame as well as every
+         * tick: a game holding its clock for the peer runs no tick, and the
+         * packet it is waiting for would otherwise never be read.
+         */
+        void pollTaHostInbound();
+
+        /** Ticks this game should run beyond its own clock to be level with a TA peer's. */
+        unsigned int taHostTicksBehind() const;
+
+        /**
+         * Whether this game has run far enough past a TA peer's latest tick to
+         * wait for it: a tick here is a whole 33 ms and TA's is a third of a
+         * millisecond longer, so left alone RWE gains a tick every hundred.
+         */
+        bool taHostTooFarAhead() const;
+        void renderTaHostWindow();
+        /** The quit sequence, and the peer unregistered from the simulation. */
+        void endTaHost();
+        /** One line every few seconds: what has come in, and where the peer is. */
+        void logTaHostStatus();
+        /** RWE_TA_HOST_ATTACK: a testing aid, ordered once a second. */
+        void orderTaHostAttack();
         /** How many ticks a replay or demo has, for the playback controls. */
         unsigned int playbackLastTick() const;
         void restartReplayAt(unsigned int tick);
@@ -1379,6 +1421,15 @@ namespace rwe
          * the demo's own unit table must agree with its length or this throws.
          */
         void enableTadPlayback(const std::string& path, const std::vector<std::string>& unitLoadOrder);
+
+        /**
+         * Host a game for a joining TA (`rwe --ta-host`): the joiner becomes
+         * a Remote player whose units a puppet driver steers from the peer's
+         * own stream, and this machine's own units go out as the peer's
+         * `0x2c`. `remotePlayer` is the joiner's player, and `unitLoadOrder`
+         * the loaded data set's listing, which both sides index types by.
+         */
+        void enableTaHost(PlayerId remotePlayer, const std::vector<std::string>& unitLoadOrder);
 
         /** Write every command issued in this game to a replay file. */
         void enableReplayRecording(const std::filesystem::path& path, const ReplayHeader& header);

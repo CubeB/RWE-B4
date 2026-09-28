@@ -294,6 +294,11 @@ namespace rwe
         // A game already reported is not reported twice.
         sendGameEnded("abandoned", std::nullopt);
 
+        // A hosted game tells the peer it is going: its commander's cause-8
+        // quit death, then DELETEPLAYER, then the thread stops. Here because
+        // every way out of a game destroys this object.
+        endTaHost();
+
         // The one summary that catches every way a game can end, including a
         // window closed with no result and an arena run stopped by its clock.
         logLockstepSummary();
@@ -591,6 +596,7 @@ namespace rwe
         // == 1000 we accumulate 1ms per real ms; at 100 we accumulate
         // 0.1ms per real ms; at 5000 we accumulate 5ms per real ms.
         // The sim tick threshold (SimMillisecondsPerTick) is unchanged.
+        pollTaHostInbound();
         if (replaySeekTarget)
         {
             // Seeking: fill the accumulator past anything the cap will
@@ -609,7 +615,7 @@ namespace rwe
                 millisecondsBuffer += millisecondsElapsed * static_cast<unsigned int>(std::max(replaySpeed, 1));
             }
         }
-        else if (!paused)
+        else if (!paused && !taHostTooFarAhead())
         {
             millisecondsBuffer += (millisecondsElapsed * effectiveSpeedPermille) / 1000;
         }
@@ -1006,9 +1012,15 @@ namespace rwe
         // one thing a replay must not do. Seeking runs flat out in blocks,
         // large enough to cross ten minutes in a couple of seconds and small
         // enough that the window still answers between them.
+        // A game on its own clock beside a TA peer runs to wherever the peer
+        // has got to: a frame the display held back, or ticks lost to the cap,
+        // would otherwise leave every one of the peer's moves that far behind.
+        constexpr unsigned int OwnClockMaxCatchUpTicks = 30;
+        auto ownClockCatchUp = std::min(taHostTicksBehind(), OwnClockMaxCatchUpTicks);
+        millisecondsBuffer += static_cast<int>(ownClockCatchUp * SimMillisecondsPerTick);
         const int maxTicksPerFrame = replaySeekTarget
             ? 2000
-            : (isPlayback() ? 10 * std::max(replaySpeed, 1) : 10);
+            : (isPlayback() ? 10 * std::max(replaySpeed, 1) : 10 + static_cast<int>(ownClockCatchUp));
         FrameScheduler scheduler(static_cast<unsigned int>(millisecondsBuffer), averageSceneTime, sceneTime, maxTicksPerFrame);
         // Fast playback is bounded by the clock as well as by the count. At
         // 64x a frame asks for thirty-odd ticks, and if those take longer
@@ -1108,6 +1120,7 @@ namespace rwe
 
         renderReplayWindow();
         renderTadWindow();
+        renderTaHostWindow();
         renderDebugWindow();
         logLockstepSummaryIfDue();
         recordNetworkHistory();

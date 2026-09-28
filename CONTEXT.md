@@ -126,6 +126,13 @@ move a sync hash. A game with one cannot be saved, because the state it is
 missing lives on the other machine.
 _Avoid_: puppet player, non-local player, demo mode
 
+**Mixed-ownership outbox**:
+The damage this machine's Local units dealt to Remote ones, and the deaths of
+its own units, recorded for the network layer to send as `0x0b` and `0x0c`.
+Pure observer state, like SimEventLog: never hashed, saved or dumped, and never
+read back by the simulation.
+_Avoid_: damage queue, send buffer
+
 **Bridge**:
 The launcher's channel to the engine, one JSON object a line over standard
 input and output. `rwe_bridge` answers questions about the data files before
@@ -276,6 +283,53 @@ Its clock is the `0x2c` serial, never `Packet::time`.
 _Avoid_: replay player, demo player (that is the simulation's player, not the
 driver)
 
+**Live receiver** (`TaLiveReceiver`):
+A jitter buffer in front of the puppet driver for a game rather than a file. Each
+sender's packets are held and handed over in the order that sender sent them,
+which the stream's marker says and arrival does not: a packet with no `0x2c` has
+no tick to place it by, and a `0x0c` that overtook the `0x09` behind it is a
+death for a unit the driver never heard of. The `0x2c` serial is the *when* -- a
+packet waits for the tick it names, or for the packet before it in its sender's
+order when it names none -- and a packet a sender sent that has not turned up is
+waited on for the buffer's depth plus a tick and then given up on. A packet
+whose tick has passed is applied at once and counted, a marker already handed
+over is dropped, the map from serial to RWE tick settles on the lowest serial
+seen before the first packet is applied, and the gap between the two clocks is
+reported over a run. Its counters are the overlay's.
+_Avoid_: network layer (that is the datagram, #424), delay, lag compensation
+
+**Marker**:
+The per-sender count every TA packet carries seven bytes into its plaintext,
+falling by one per packet that sender sends, so a higher marker is a packet sent
+earlier. `0xffffffff` on replies and on the battleroom's steady traffic, which
+count for nothing in the stream's order and go straight through.
+`docs/TA-NETWORK.md` records it as "not a clock, and nothing seen depends on
+it"; a live receiver is the thing that depends on it, and it is the only
+per-sender ordering the wire carries.
+_Avoid_: clock, serial (that is the `0x2c`'s tick, a different field), packet
+number (a caller's own index, which a demo has to stand in for this)
+
+**Receive buffer**:
+The depth of a live receiver's jitter buffer, in ticks, and the distance the
+local clock runs behind the sender's. A packet naming tick T arrives up to that
+many ticks early and is held here until T, which is what buys the reordering
+tolerance; past it a packet is late and can only be applied where it landed. A
+packet is never handed over *before* the tick it names: the buffer reorders,
+it does not run the world forward.
+_Avoid_: jitter buffer (that is the mechanism, this is the setting), buffer
+size (that is the bound on packets held)
+
+**Stub navigator** (`0x44F570`):
+The navigator TotalA.exe gives a unit whose owner is another machine
+(`0x43DC00`, player state 3). It holds the waypoints of the last `0x2c` entry
+and reports them, but its `Update` is the base no-op where a local unit's
+(`0x44F1A0`) retires a waypoint within five units of the next corner, so it can
+never advance past `wp[1]`. A remote unit therefore walks one segment per entry
+and stops at the corner until the owner's next one; total onset is the owner's
+problem, not the receiver's. `docs/TOTALA-EXE-MOVEMENT.md` §118.
+_Avoid_: puppet navigator (RWE's receiver writes its own path, it does not run
+this)
+
 **Demo output**:
 A `.tad` RWE wrote rather than recorded from TA. Readable and mineable by the
 same tools as a real one, with three recorded divergences: the `0x1a` ids are
@@ -335,6 +389,31 @@ chosen by tick, so each unit is described once a cycle. The receiver believes
 it over anything it had, so a record for an empty slot deletes the unit there.
 _Avoid_: snapshot, keyframe
 
+**Owner block**, **id block**:
+The contiguous run of unit ids one owner holds, `id = block * maxUnits + index
++ 1`, so two owners in one block would erase each other's units once per cycle
+and each unit id says whose it is. A joining TA takes block 0 and a host its
+block 1. `DemoIdAllocator` allocates them, `TaWireTapeSettings::firstBlock`
+says where a live host's start. `docs/TA-NETWORK.md`, "Hosting a game".
+_Avoid_: page, arena, slot (a slot is an index inside a block)
+
+**Live sender** (`TaLiveSender`):
+The output side of playing against the original rather than writing a demo: an
+observer with the demo recorder's shape that yields the Local player's
+subpackets one tick at a time, for the network layer to frame and send. A pure
+observer in the same sense, and it covers one player, because one machine
+describes the units it simulates locally and nothing else. The network layer
+owns it and registers where the simulation should call; the simulation owns
+nothing of it.
+_Avoid_: demo recorder (that writes a file), peer, client
+
+**Wire tape** (`TaWireTape`):
+The encoding a live sender and a demo recorder share: the ids, the type
+indices, the last mover put out, and the per-tick subpacket order. It exists so
+the two cannot disagree about the bytes, and it owns nothing -- it is a view of
+the simulation, asked for one tick at a time.
+_Avoid_: send buffer, outbox (that is the mixed-ownership outbox)
+
 **TA packet**:
 The envelope one DirectPlay application message carries, live or in a demo:
 encrypted, compressed under a three-byte header, then a seven-byte header of
@@ -357,6 +436,36 @@ carries another session's clock and reads as an absurd latency, and a host that
 stops answering is offered for rejection. `TaPinger`.
 _Avoid_: heartbeat, keepalive (that is `0x07`)
 
+**Battleroom**:
+What a joining TA sits in between finishing the handshake and the game starting:
+the `0x20` and `0x24` records each player is described by, the two-second beat
+that keeps it from offering the host for rejection, and the unit sync the joiner
+counts to `1 + 2n` before it is ready. A host holds one, a joiner waits in one, and
+`TaBattleroom` is the host's half of it -- including the launch out of it.
+_Avoid_: lobby, waiting room
+
+**Unit sync by echo**:
+Hosting without a unit checksum. The joiner sends its unit type ids and content
+checksums, the host answers each id twice, and a joiner that counts the records
+accepts the result. The ids are content-derived -- `taChecksum` over the raw FBI
+bytes, `docs/TOTALA-EXE-DATA.md` §117 -- but a host does not have to compute one
+to echo one.
+_Avoid_: handshaking, table exchange
+
+**TA checksum** (`taChecksum`):
+Total Annihilation's own checksum routine (`0x4B6BA0`), not a CRC and not any
+standard hash: four one-byte accumulators walked over the input and combined
+big-endian. It is underneath both the map checksum and a unit type's
+content-derived id. `docs/TOTALA-EXE-DATA.md` §117, `TaChecksums.h`.
+_Avoid_: crc, hash, digest
+
+**Map checksum** (`taMapChecksum`):
+The value a host writes at bytes 170-173 of its `0x20` status and a joining TA
+looks the hosted map up by: `taChecksum` over three blocks of the `.tnt` XORed
+with `taChecksum` over the `.ota`'s `[GlobalHeader]` block body. `TaChecksums.h`,
+`docs/TOTALA-EXE-DATA.md` §117.
+_Avoid_: map hash, map id, map name
+
 **Own-clock**:
 A live game whose scene advances on its own clock at the chosen speed like a
 skirmish, with no lockstep command gate or wait on any peer, no sync-hash
@@ -365,6 +474,16 @@ that runs its own simulation -- a real `TotalA.exe`, which is
 owner-authoritative rather than lockstep -- selected by
 `GameParameters::netMode`. `docs/TA-NETWORK.md`.
 _Avoid_: real-time (the frame clock is real-time too), non-lockstep, async
+
+**TA host**:
+`rwe --ta-host`: RWE hosting a game for a joining `TotalA.exe` rather than
+playing one. A panel waits in the battleroom, the launch puts the joiner in the
+game as a second player, and the game is an own-clock one in which RWE's player
+is Local and the joiner is Remote. `TaHostGame` is the host session, the
+battleroom and the peer on a thread of their own, with one queue each way
+between them and the game; `TaHostLobbyScene` is the panel; `GameScene_tahost`
+is the in-game half. `docs/TA-NETWORK.md`, "Hosting a game".
+_Avoid_: lobby (that is the battleroom), listen server, master
 
 ### The instruments
 

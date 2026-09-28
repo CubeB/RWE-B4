@@ -1,7 +1,9 @@
 #include "GameSimulation.h"
 #include <rwe/sim/UnitBehaviorService_util.h>
+#include <rwe/sim/MixedOwnership.h>
 #include <rwe/sim/SimRandom.h>
 #include <rwe/sim/SimulationOwnership.h>
+#include <rwe/sim/TaLiveSenderHooks.h>
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -107,6 +109,11 @@ namespace rwe
                 // 0x48AF32 hands cause 11 to the damage choke point.
                 return 11;
             }
+            if (cause == "quit")
+            {
+                // A peer leaving: TA's own quit death, cause 8.
+                return 8;
+            }
             return 1;
         }
 
@@ -118,6 +125,34 @@ namespace rwe
                 return dead->corpseLevel;
             }
             return 0;
+        }
+
+        /** A unit has died with this cause and corpse level; both the demo recorder and the mixed-ownership outbox want it. */
+        void notifyUnitDied(
+            GameSimulation& sim,
+            UnitId unitId,
+            std::optional<UnitId> killer,
+            unsigned int severity,
+            unsigned int cause,
+            unsigned int corpseLevel)
+        {
+            if (sim.demoRecorder)
+            {
+                sim.demoRecorder->unitDied(sim, unitId, killer, severity, cause, corpseLevel);
+            }
+            recordLocalDeath(sim, unitId, killer, severity, cause, corpseLevel);
+        }
+
+        /**
+         * Whether a round belongs to a Remote player, and so is a record of
+         * what that machine decided rather than something to resolve here: the
+         * damage reaches a Local unit as its owner's 0x0b, and nothing it hits
+         * on this side of the world changes until the owner's records say so.
+         * A round naming no player this game has is nobody's.
+         */
+        bool isRemoteRound(const GameSimulation& sim, const Projectile& projectile)
+        {
+            return projectile.owner.value < sim.players.size() && !simulatesLocally(sim, projectile.owner);
         }
 
     }
@@ -223,6 +258,11 @@ namespace rwe
     void GameSimulation::attachDemoRecorder(std::unique_ptr<DemoRecorder> recorder)
     {
         demoRecorder = std::move(recorder);
+    }
+
+    void GameSimulation::setTaLiveSender(TaLiveSenderHooks hooks)
+    {
+        taLiveSender = hooks;
     }
 
     void GameSimulation::addAiController(PlayerId playerId, std::unique_ptr<AiPlayerController> controller)
@@ -1114,12 +1154,9 @@ namespace rwe
         }
 
         events.push_back(UnitDiedEvent{targetId, unit.unitType, unit.position, UnitDiedEvent::DeathType::Deleted});
-        if (demoRecorder)
-        {
-            // Cause 5, reclaimed: it leaves nothing, and the corpus reads
-            // severity 0 and level 0 on every cause-5 death.
-            demoRecorder->unitDied(*this, targetId, std::nullopt, 0, 5, 0);
-        }
+        // Cause 5, reclaimed: it leaves nothing, and the corpus reads
+        // severity 0 and level 0 on every cause-5 death.
+        notifyUnitDied(*this, targetId, std::nullopt, 0, 5, 0);
         return true;
     }
 
@@ -1179,6 +1216,11 @@ namespace rwe
         if (demoRecorder)
         {
             demoRecorder->unitCaptured(*this, targetId, captor);
+        }
+
+        if (taLiveSender.attached())
+        {
+            taLiveSender.unitCaptured(taLiveSender.context, *this, targetId, captor);
         }
 
         // The original's owner change is an event and then a cause-4 death of
@@ -1289,13 +1331,10 @@ namespace rwe
         // see, and by the time it reads the event the unit is gone.
         recordUnitDeath(*this, unitId, "self_destruct", std::nullopt);
         events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, UnitDiedEvent::DeathType::SelfDestructed, unit.owner});
-        if (demoRecorder)
-        {
-            // Cause 3, self-destruct: RWE leaves nothing to reclaim, so the
-            // record is the level-0 shape the corpus gives the skipped-script
-            // causes rather than the wreck the original's Killed might pick.
-            demoRecorder->unitDied(*this, unitId, std::nullopt, 0, 3, 0);
-        }
+        // Cause 3, self-destruct: RWE leaves nothing to reclaim, so the
+        // record is the level-0 shape the corpus gives the skipped-script
+        // causes rather than the wreck the original's Killed might pick.
+        notifyUnitDied(*this, unitId, std::nullopt, 0, 3, 0);
 
         const auto& explosion = unitDefinition.selfDestructAs.empty() ? unitDefinition.explodeAs : unitDefinition.selfDestructAs;
         if (!explosion.empty())
@@ -1677,6 +1716,11 @@ namespace rwe
             if (demoRecorder)
             {
                 demoRecorder->unitCreated(*this, *unitId);
+            }
+
+            if (taLiveSender.attached())
+            {
+                taLiveSender.unitCreated(taLiveSender.context, *this, *unitId);
             }
 
             UnitBehaviorService(this).onCreate(*unitId);
@@ -2866,11 +2910,8 @@ namespace rwe
         }
         recordUnitDeath(*this, unitId, "unfinished", std::nullopt);
         quietlyKillUnit(unitId, false);
-        if (demoRecorder)
-        {
-            // Cause 9, an unfinished unit removed: no script, no corpse.
-            demoRecorder->unitDied(*this, unitId, std::nullopt, 0, 9, 0);
-        }
+        // Cause 9, an unfinished unit removed: no script, no corpse.
+        notifyUnitDied(*this, unitId, std::nullopt, 0, 9, 0);
     }
 
     void GameSimulation::quietlyKillUnit(UnitId unitId, bool countAsLoss)
@@ -3364,16 +3405,13 @@ namespace rwe
 
         // After the corpse rules have all had their say, so the level the
         // record carries is the one the spawner will use.
-        if (demoRecorder)
-        {
-            demoRecorder->unitDied(
-                *this,
-                unitId,
-                attacker,
-                static_cast<unsigned int>(severity),
-                demoDeathCause(*this, unitId),
-                demoCorpseLevel(unit));
-        }
+        notifyUnitDied(
+            *this,
+            unitId,
+            attacker,
+            static_cast<unsigned int>(severity),
+            demoDeathCause(*this, unitId),
+            demoCorpseLevel(unit));
     }
 
     void GameSimulation::updateWaterDamage()
@@ -3446,12 +3484,27 @@ namespace rwe
         applyDamage(unitId, damagePoints, attacker, false);
     }
 
-    void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer, std::optional<PlayerId> sourceOwner, const char* deathCause)
+    void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer, std::optional<PlayerId> sourceOwner, const char* deathCause, bool reportedByOwner)
     {
-        // Damage to a Remote player's unit is the owner's to report; a local
-        // projectile hitting it must not take hit points off. The owner's
-        // recorded damage arrives through applyRemoteDamage instead.
+        // Damage to a Remote player's unit is the owner's to report. When this
+        // machine ran the hit, its attacker side shows the damage and records a
+        // 0x0b for the owner, but it never kills: only the owner's 0x0c, and
+        // the full-state record that overwrites the health, settle the unit.
+        // Damage that arrived from the stream goes through applyRemoteDamage.
         if (!simulatesLocally(*this, getUnitState(unitId).owner))
+        {
+            applyLocalDamageToRemoteUnit(*this, unitId, attacker, damagePoints, paralyzer, sourceOwner);
+            return;
+        }
+
+        // What a Remote player's things do to one of ours is that owner's to
+        // report (docs/TA-NETWORK.md, "Damage and death"), and it reaches us as
+        // a 0x0b applied through applyIncomingDamage. Resolving it here as well
+        // would count it twice, and it is what stands between a puppet's own
+        // explosions and its display rounds and our side of the world. A source
+        // that names no player is nobody's round and lands as it always did.
+        auto remoteSource = sourceOwner && sourceOwner->value < players.size() && !simulatesLocally(*this, *sourceOwner);
+        if (remoteSource && !reportedByOwner)
         {
             return;
         }
@@ -3569,14 +3622,11 @@ namespace rwe
                 // rule: both the veterancy counter and the player's Kills sit
                 // behind the build-progress test at 0x4869A7. See §5.
                 quietlyKillUnit(unitId);
-                if (demoRecorder)
-                {
-                    // A nanoframe runs no Killed script, so it leaves no corpse
-                    // and has no severity: cause 1 with both nibbles empty,
-                    // which is what the corpus's cause-9 and cause-5 deaths
-                    // read too.
-                    demoRecorder->unitDied(*this, unitId, attacker, 0, 1, 0);
-                }
+                // A nanoframe runs no Killed script, so it leaves no corpse
+                // and has no severity: cause 1 with both nibbles empty,
+                // which is what the corpus's cause-9 and cause-5 deaths
+                // read too.
+                notifyUnitDied(*this, unitId, attacker, 0, 1, 0);
             }
             else
             {
@@ -3681,6 +3731,11 @@ namespace rwe
         // weapon; the shipped data sets it on nothing.
         auto damagesFeatures = weaponIt == weaponDefinitions.end() || weaponIt->second.damagesFeatures;
 
+        // A Remote player's round takes nothing off a feature either: the wreck
+        // it breaks up is one its owner's machine decided, and this copy is
+        // corrected by the records that owner sends.
+        auto remoteSource = isRemoteRound(*this, projectile);
+
         auto region = GridRegion::fromCoordinates(minCell, maxCell);
 
         region.forEach([&](const auto& coords) {
@@ -3694,7 +3749,7 @@ namespace rwe
               return;
           }
 
-          if (damagesFeatures && !paralyzer)
+          if (damagesFeatures && !paralyzer && !remoteSource)
           {
               const auto& cell = occupiedGrid.get(coords);
               if (cell.featureId && seenFeatures.find(*cell.featureId) == seenFeatures.end())
@@ -3810,11 +3865,17 @@ namespace rwe
 
     void GameSimulation::doProjectileImpact(const Projectile& projectile, ImpactType /*impactType*/, std::optional<ProjectileId> projectileId)
     {
-        applyDamageInRadius(projectile.position, projectile.damageRadius, projectile);
-
-        if (auto it = weaponDefinitions.find(projectile.weaponType); it != weaponDefinitions.end() && it->second.fireStarter > 0)
+        // A Remote player's round sets nothing off here: not our units, which
+        // its owner's 0x0b accounts for, and not a feature, which is the fire
+        // starter's to ignite.
+        if (!isRemoteRound(*this, projectile))
         {
-            tryIgniteFeaturesInRadius(projectile.position, std::max(projectile.damageRadius, 16_ss), it->second.fireStarter);
+            applyDamageInRadius(projectile.position, projectile.damageRadius, projectile);
+
+            if (auto it = weaponDefinitions.find(projectile.weaponType); it != weaponDefinitions.end() && it->second.fireStarter > 0)
+            {
+                tryIgniteFeaturesInRadius(projectile.position, std::max(projectile.damageRadius, 16_ss), it->second.fireStarter);
+            }
         }
 
         // The piece that actually kills a nuke. An interceptor's warhead is not
@@ -4658,6 +4719,11 @@ namespace rwe
                 demoRecorder->unitRemoved(it->first);
             }
 
+            if (taLiveSender.attached())
+            {
+                taLiveSender.unitRemoved(taLiveSender.context, it->first);
+            }
+
             it = units.erase(it);
         }
 
@@ -4784,6 +4850,11 @@ namespace rwe
                     demoRecorder->buildStarted(*this, unitId, *newUnitId);
                 }
 
+                if (taLiveSender.attached())
+                {
+                    taLiveSender.buildStarted(taLiveSender.context, *this, unitId, *newUnitId);
+                }
+
                 events.push_back(UnitStartedBuildingEvent{unitId});
 
                 s->status = UnitCreationStatusDone{*newUnitId};
@@ -4824,6 +4895,11 @@ namespace rwe
                 if (demoRecorder)
                 {
                     demoRecorder->buildStarted(*this, unitId, *newUnitId);
+                }
+
+                if (taLiveSender.attached())
+                {
+                    taLiveSender.buildStarted(taLiveSender.context, *this, unitId, *newUnitId);
                 }
 
                 s->status = UnitCreationStatusDone{*newUnitId};
@@ -5102,6 +5178,11 @@ namespace rwe
         if (demoRecorder)
         {
             demoRecorder->endOfTick(*this);
+        }
+
+        if (taLiveSender.attached())
+        {
+            taLiveSender.endOfTick(taLiveSender.context, *this);
         }
     }
 

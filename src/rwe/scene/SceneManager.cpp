@@ -218,7 +218,17 @@ namespace rwe
                     continue;
                 }
 
+                if (event.window.windowID == sdl->getWindowId(window))
+                {
+                    trackWindowVisibility(event.type);
+                }
+
                 dispatchToScene(event, *currentScene, frameDensity());
+            }
+
+            if (!headless)
+            {
+                updateSwapPacing();
             }
 
             if (!headless)
@@ -335,10 +345,61 @@ namespace rwe
 
             auto finishTime = timeService->getTicks();
             auto lastFrameDurationMs = finishTime - startTime;
+            if (swapUnpaced && lastFrameDurationMs < UnpacedFrameMilliseconds)
+            {
+                sdl->delay(static_cast<Uint32>(UnpacedFrameMilliseconds - lastFrameDurationMs));
+            }
             lastFrameStartTime = startTime;
             frameTimes[frameTimesOffset] = lastFrameDurationMs;
             frameTimesOffset = (frameTimesOffset + 1) % 500;
         }
+    }
+
+    void SceneManager::trackWindowVisibility(Uint32 type)
+    {
+        switch (type)
+        {
+            case SDL_EVENT_WINDOW_FOCUS_GAINED:
+                windowFocused = true;
+                break;
+            case SDL_EVENT_WINDOW_FOCUS_LOST:
+                windowFocused = false;
+                break;
+            case SDL_EVENT_WINDOW_OCCLUDED:
+            case SDL_EVENT_WINDOW_HIDDEN:
+            case SDL_EVENT_WINDOW_MINIMIZED:
+                windowOccluded = true;
+                break;
+            case SDL_EVENT_WINDOW_EXPOSED:
+            case SDL_EVENT_WINDOW_SHOWN:
+            case SDL_EVENT_WINDOW_RESTORED:
+                windowOccluded = false;
+                break;
+            default:
+                break;
+        }
+    }
+
+    void SceneManager::updateSwapPacing()
+    {
+        bool unpaced = !windowFocused || windowOccluded;
+        if (unpaced == swapUnpaced)
+        {
+            return;
+        }
+        if (unpaced)
+        {
+            if (auto interval = sdl->glGetSwapInterval(); interval && *interval != 0)
+            {
+                pacedSwapInterval = *interval;
+            }
+            sdl->glSetSwapInterval(0);
+        }
+        else
+        {
+            sdl->glSetSwapInterval(pacedSwapInterval);
+        }
+        swapUnpaced = unpaced;
     }
 
     void SceneManager::setWindowMode(const std::string& mode)

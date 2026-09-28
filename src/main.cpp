@@ -14,6 +14,7 @@
 #include <rwe/game/ControlChannel.h>
 #include <rwe/game/PlayerColorIndex.h>
 #include <rwe/io/tdf/tdf.h>
+#include <rwe/net/ta/TaHostGame.h>
 #include <rwe/puppet/TadDemo.h>
 #include <rwe/sim/Energy.h>
 #include <rwe/sim/Metal.h>
@@ -138,6 +139,17 @@ int main(int argc, char* argv[])
                       << "  --map <name>          Launch directly into a game on this map\n"
                       << "  --mission             Play --map as a mission: its [units] for the players\n"
                       << "                        in the slots they name, and its own starting resources\n"
+                      << "  --ta-host             Host a game for a joining Total Annihilation instead of\n"
+                      << "                        playing one: wait in a lobby, then load --map with RWE's\n"
+                      << "                        player and the joiner, on the peer's own clock\n"
+                      << "  --game-name <name>    The session's name, padded to 16 (default: rwe)\n"
+                      << "  --side <arm|core>     RWE's own side, which is the host's in the battleroom\n"
+                      << "  --colour <n>          RWE's own colour, 0 to 255 (default: 0)\n"
+                      << "  --team <n>            RWE's team in the battleroom, 5 (the default) for none\n"
+                      << "  --options <byte>      The host's options byte, 0x4f by default\n"
+                      << "  --max-units <n>       The id block size both sides agree on (default: 250)\n"
+                      << "  --auto-launch         Launch as soon as the joiner is ready\n"
+                      << "  --port-base <n>       Every DirectPlay port is the real one plus this (default: 0)\n"
                       << "  --pathfinding <m>     rwe | oa (default: rwe)\n"
                       << "  --port <port>         Network port (default: 1337)\n"
                       << "  --drop-timeout <secs> Seconds a peer of a network game may go quiet\n"
@@ -326,10 +338,65 @@ int main(int argc, char* argv[])
                     // and nothing lists demos.
                     gameParameters->recordDemoFile = args.getString("record-demo", "");
                 }
+                if (args.contains("ta-host"))
+                {
+                    // Hosting a game for a joining Total Annihilation. The host
+                    // session and the battleroom are asio objects and are built
+                    // here, on the main thread, so a port that cannot be bound
+                    // is said before a window is up; their thread is running
+                    // by the time this returns. The game itself is loaded by
+                    // the waiting panel once the launch has gone out.
+                    rwe::TaHostGameConfig hostConfig;
+                    hostConfig.mapName = mapName;
+                    hostConfig.gameName = args.getString("game-name", "rwe");
+                    {
+                        // Base-detected, since the byte is always written in hex (0x48).
+                        auto text = args.getString("options", "0x4f");
+                        std::size_t used = 0;
+                        unsigned long value = 0;
+                        try
+                        {
+                            value = std::stoul(text, &used, 0);
+                        }
+                        catch (const std::exception&)
+                        {
+                            used = 0;
+                        }
+                        if (used != text.size() || value > 0xff)
+                        {
+                            throw std::runtime_error("--options wants a byte, such as 0x48: " + text);
+                        }
+                        hostConfig.options = static_cast<std::uint8_t>(value);
+                    }
+                    hostConfig.team = static_cast<std::uint8_t>(args.getUint("team", rwe::TaNoTeam));
+                    hostConfig.maxUnits = static_cast<std::uint16_t>(std::min(0xffffu, args.getUint("max-units", 250)));
+                    hostConfig.colour = static_cast<std::uint8_t>(args.getUint("colour", 0));
+                    hostConfig.autoLaunch = args.getBool("auto-launch");
+                    hostConfig.ports = rwe::TaHostPorts::atBase(static_cast<int>(args.getUint("port-base", 0)));
+
+                    auto side = args.getString("side", "arm");
+                    for (auto& c : side)
+                    {
+                        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    }
+                    if (side == "arm")
+                    {
+                        hostConfig.side = rwe::TadSide::Arm;
+                    }
+                    else if (side == "core")
+                    {
+                        hostConfig.side = rwe::TadSide::Core;
+                    }
+                    else
+                    {
+                        throw std::runtime_error("--side wants arm or core, not '" + side + "'");
+                    }
+
+                    gameParameters->taHostGame = std::make_shared<rwe::TaHostGame>(std::move(hostConfig));
+                }
                 auto difficulty = args.getString("ai-difficulty", "standard");
                 for (auto& c : difficulty)
-                {
-                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                {                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
                 }
                 if (difficulty == "idle" || difficulty == "none" || difficulty == "off")
                 {

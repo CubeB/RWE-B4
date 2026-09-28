@@ -103,4 +103,34 @@ namespace rwe
         }
         return std::nullopt;
     }
+
+    /**
+     * Fails unless every id an occupied cell names is still a unit.
+     *
+     * The simulation trusts the grid: a projectile walking it asks for each
+     * cell's unit by id, and its own asserts are the only thing that catches
+     * an id that has been freed. A build without them, and a driver that leaves
+     * a cell behind, then reads a unit that is not there -- so the driver's own
+     * tests check the grid rather than rely on the simulation's assertions.
+     */
+    inline void requireNoStaleCells(const GameSimulation& sim)
+    {
+        for (int y = 0; y < sim.occupiedGrid.getHeight(); ++y)
+        {
+            for (int x = 0; x < sim.occupiedGrid.getWidth(); ++x)
+            {
+                const auto& cell = sim.occupiedGrid.get(x, y);
+                if (cell.mobileUnitId)
+                {
+                    INFO("cell (" << x << "," << y << ") names a freed mobile unit");
+                    REQUIRE(sim.tryGetUnitState(*cell.mobileUnitId));
+                }
+                if (cell.buildingInfo)
+                {
+                    INFO("cell (" << x << "," << y << ") names a freed building");
+                    REQUIRE(sim.tryGetUnitState(cell.buildingInfo->unit));
+                }
+            }
+        }
+    }
 }

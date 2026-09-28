@@ -4,6 +4,7 @@
 #include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/SimRandom.h>
 #include <rwe/sim/SimulationOwnership.h>
+#include <rwe/sim/TaLiveSenderHooks.h>
 #include <algorithm>
 #include <limits>
 #include <rwe/util/SimpleLogger.h>
@@ -743,6 +744,10 @@ namespace rwe
                 applyUnitSteering(unitInfo);
                 updateUnitPosition(unitInfo);
             });
+
+        // The owner sends no walk animation: each machine starts it from the
+        // unit's own movement, as TA does, so a puppet walks rather than slides.
+        updateMoveRateBand(unitInfo);
     }
 
     void UnitBehaviorService::updateRemoteGroundPosition(UnitInfo unitInfo, UnitPhysicsInfoGround& physics)
@@ -1267,6 +1272,7 @@ namespace rwe
                 if (threadId)
                 {
                     aimingState->attackInfo = UnitWeaponStateAttacking::AimInfo{*threadId, heading, pitch};
+                    notifyAimScriptStarted(id, unit, getAimScriptName(weaponIndex), toCobAngle(heading).value, toCobAngle(pitch).value);
                 }
                 else
                 {
@@ -1602,6 +1608,16 @@ namespace rwe
                 targetUnit = *unitTarget;
             }
             sim->demoRecorder->shotFired(*sim, id, weaponIndex, targetUnit, firingPoint, fireInfo->targetPosition, direction);
+        }
+
+        if (sim->taLiveSender.attached())
+        {
+            std::optional<UnitId> targetUnit;
+            if (auto unitTarget = std::get_if<UnitId>(&attackInfo->target))
+            {
+                targetUnit = *unitTarget;
+            }
+            sim->taLiveSender.shotFired(sim->taLiveSender.context, *sim, id, weaponIndex, targetUnit, firingPoint, fireInfo->targetPosition, direction);
         }
 
         sim->events.push_back(FireWeaponEvent{weapon->weaponType, fireInfo->burstsFired, firingPoint});
@@ -3413,6 +3429,27 @@ namespace rwe
         }
 
         return false;
+    }
+
+    void UnitBehaviorService::notifyAimScriptStarted(UnitId id, const UnitState& unit, const std::string& functionName, int heading, int pitch)
+    {
+        if (!sim->taLiveSender.attached() || sim->taLiveSender.aimScriptStarted == nullptr || !unit.cobEnvironment)
+        {
+            return;
+        }
+        const auto* script = unit.cobEnvironment->script();
+        if (script == nullptr)
+        {
+            return;
+        }
+        for (std::size_t i = 0; i < script->functions.size(); ++i)
+        {
+            if (script->functions[i].name == functionName)
+            {
+                sim->taLiveSender.aimScriptStarted(sim->taLiveSender.context, id, static_cast<unsigned int>(i), heading, pitch);
+                return;
+            }
+        }
     }
 
     void UnitBehaviorService::updateMoveRateBand(UnitInfo unitInfo)

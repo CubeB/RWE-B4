@@ -159,6 +159,7 @@ namespace rwe
     {
         WeaponDefinition weaponDefinition;
 
+        weaponDefinition.taWeaponId = tdf.id;
         weaponDefinition.maxRange = SimScalar(tdf.range);
 
         // Everything that hits a feature can damage it, beams included.

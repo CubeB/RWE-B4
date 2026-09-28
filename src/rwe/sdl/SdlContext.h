@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include <SDL3/SDL.h>
 #include <memory>
 #include <rwe/sdl/SdlException.h>
@@ -121,6 +123,16 @@ namespace rwe
         bool glSetSwapInterval(int interval)
         {
             return SDL_GL_SetSwapInterval(interval);
+        }
+
+        std::optional<int> glGetSwapInterval()
+        {
+            int interval = 0;
+            if (!SDL_GL_GetSwapInterval(&interval))
+            {
+                return std::nullopt;
+            }
+            return interval;
         }
 
         void getWindowSize(SDL_Window* window, int* w, int* h)

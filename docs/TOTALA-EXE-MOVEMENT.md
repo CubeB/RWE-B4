@@ -17,6 +17,7 @@ and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
 87. [Pathfinding: one scheduler, a bug-walk, and a unit that never waits](#87-pathfinding-one-scheduler-a-bug-walk-and-a-unit-that-never-waits)
 95. [What blocks a unit: the map square, the passability class, and why a hovercraft cannot cross a wreck](#95-what-blocks-a-unit-the-map-square-the-passability-class-and-why-a-hovercraft-cannot-cross-a-wreck)
 102. [The ground path follower: an aim point on the segment, and two brakes into the corner](#102-the-ground-path-follower-an-aim-point-on-the-segment-and-two-brakes-into-the-corner)
+118. [A peer's `0x2c` records, and the stub navigator that cannot retire a waypoint](#118-a-peers-0x2c-records-and-the-stub-navigator-that-cannot-retire-a-waypoint)
 
 ## 1. Aircraft flight model
 
@@ -1908,5 +1909,90 @@ stops it now.
 - **Bit 2 of `mover+0x2E`.** Read as "blocked" here and in §87, and the only writer found is `0x43D92C`, which sets it when `0x47DB70` — §95's footprint test for a unit definition — refuses the square. But that writer sits inside a branch gated on `unit+0x96` (`0x43D8E3`), so there may be a second writer on a path not walked here.
 - **The exact sign convention of the pitch index** into the slope table. The table is asymmetric, so which end is uphill matters; the code is `clamp(pitch >> 11, -5, +5)` with no negation, and the table's shape (100% at −1 and 0, falling faster on the positive side) reads as positive = uphill, but that is inference from the numbers rather than a decode.
 - **Whether ships differ.** They do not take a different follower — `0x43DD3E` branches on `canfly` alone — but `0x43DB50`, the waterline step, was not read past its first few instructions and may adjust the speed for a floater in a way the follower does not see.
+
+---
+
+## 118. A peer's `0x2c` records, and the stub navigator that cannot retire a waypoint
+
+How the original receives another machine's unit state, decoded 2026-09-28. The
+entry point is the subpacket dispatch shared with every other received code:
+`0x45485F` reads the code byte, subtracts 2 and bounds it at `0x2A`, then
+indexes the table at `0x455F84` (`docs/TOTALA-EXE-WEAPONS.md`, "Receiving a
+`0x0d`", has the table's shape). Code `0x2c` is entry offset `+0xa8` and lands
+at `0x4553EE`, which pushes the record and the sender's player context and
+calls `0x48B920`.
+
+### The receive case, `0x48B920`
+
+The player context is `[globals+0x1B63]`, stride `0x14B`; its `+0x18` receives
+the record's tick, `+0x10` is a per-sender subpacket count and `+0x1C` a
+`0x4B6340` timestamp. `0x48B920` reads the code (8 bits), the length (16) and
+the tick (32) straight off the bit reader, stores the tick at `[ctx+0x18]`, and
+returns if `[ctx+0x67]` — the sender's block of the unit array — is null. It
+then repeats, in unit order: a 16-bit block index (`0xFFFF` ends the list), the
+`W`-bit type, compared against `[unit+0xA6]` and, when it differs, handed to
+`0x4861D0` to place or retype the unit; then the mover's `vtable+0x24`, which
+reads that entry's waypoints. After the entries it walks the sender's whole
+unit range, `[ctx+0x67]` to `[ctx+0x6B]` step `0x118`, calling `0x43DD20` and
+`0x48A870` on each, and finally reads the full-state-present bit and, when set,
+computes the slot as `tick % maxUnits` (`[globals+0x37EE6]`) and calls
+`0x48B200`/`0x48B3F0` to read the full-state record into that slot.
+
+**Nothing is queued and no clock is compared.** Every record is applied the
+moment it is walked, in arrival order; the tick's only job on this path is to
+choose the full-state slot. A peer's units are *not* held until a tick
+matches. They are moved by the `Mover::Update` (`0x43DD20`) pass this case runs
+over the sender's units, so they advance as that sender's records are applied,
+a message at a time. That is a measurement, not a reading of the local tick
+loop: an RWE host sending six ticks to a message was shown to a real TA
+jumping every 0.40 s and standing still between, and smooth at one tick a
+message (`docs/TA-NETWORK.md`, "How a peer's `0x2c` is received").
+
+### The stub navigator, `0x44F570`
+
+`Mover::Update` (`0x43DD20`) calls `Navigator::Update` first, then the ground
+or air follower. Which navigator a unit gets is decided at `0x43DC00`, and it
+branches on the owner: **a unit whose player is state 3 — a remote player — is
+given `0x44F570`, the stub navigator**, with vtable `0x4FD488`; a local unit
+gets `0x44F010`, vtable `0x4FD458`. The stub mirrors the local navigator's
+`GetWaypoints` (vtable slot `+0x0C` is `0x44F650`) and `HasPath` (`+0x14` is
+`0x44F5B0`, `count >= 2`), and its reader `+0x24` is `0x44F5C0`.
+
+The one thing it does **not** override is `Update`: the stub's `vtable+0x08` is
+the base no-op `0x44EFB0`, where the local navigator's is `0x44F1A0`. `0x44F1A0`
+is the routine that retires `wp[0]` — it shifts the waypoint array down and
+decrements the count once the unit is within five world units of `wp[1]`
+(squared distance `<= 0x19`, `0x44F205`) and sets the dirty bit that the
+serialiser `0x44F4A0` reads.
+
+So **a remote unit's navigator never retires a waypoint.** It holds the last
+entry's list, and the follower `0x43CD20` (§102) steers along the segment
+`wp[0] → wp[1]` and no further. Between two entries the unit walks that one
+segment and brakes to a stop at `wp[1]`; how long it waits there is decided
+entirely by when the owner sends the next entry, which it does when its *own*
+navigator retires (`0x44F480` reads the dirty bit). A peer that sends the next
+entry only once its own unit is within its advance radius of the corner is
+therefore in step; one that sends later stalls the receiver at the corner.
+
+### What makes a peer flush early
+
+The same dispatch carries `0x02` (entry `+0x00` → `0x454B2A`), which calls the
+ping handler `0x4565A0`. A **request** (its responder tick, at `+0x05`, is
+zero) stamps its own clock into the reply and sends it with `0x451BC0`; the
+queued unit-state subpackets are flushed at the same moment, as a packet of
+their own. The queue is appended by `0x451DF0`
+(DirectPlay id, buffer, length) and flushed for every player by `0x451F2B`; the
+`0x2c` builder `0x48B710` is its one caller for unit state. The exact call from
+the request branch to the flush was not traced — the link below is measured,
+not read.
+
+It is a clean measurement over `ta-rwe-test-11.pcap`: **every ping request a
+real TA receives is followed within 0–60 ms by a `0x2c` packet shorter than the
+usual six ticks**, and TA's 6-tick packets are spread across the interval
+instead. A real `TotalA.exe`, host or joiner, sends its **last ping before the
+first in-game `0x2c`** and none for the rest of the game (`ta-baseline.pcap`,
+`ta-sides.pcap`; 46.8 s and 35.2 s of game with no `0x02`). RWE keeps pinging
+in game, from two timers, so TA flushes early throughout. Matching the original
+— no in-game pings — removes the early flushes.
 
 ---

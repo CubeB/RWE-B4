@@ -107,7 +107,10 @@ def decrypt(d):
 
 
 def encrypt(d):
-    d = bytearray(d); check = 0; key = 3
+    d = bytearray(d)
+    if len(d) < 4:
+        return bytes(d)             # too short to carry a checksum, and decrypt agrees
+    check = 0; key = 3
     for i in range(3, len(d) - 3):
         d[i] ^= key & 0xFF; check = (check + d[i]) & 0xFFFF; key += 1
     d[1], d[2] = check & 0xFF, check >> 8
@@ -237,6 +240,146 @@ def ping(a, b, requester):
 
 
 # ---------------------------------------------------------------------------------------------
+# A joining client: the DirectPlay messages it sends, and the TA records it owns.
+# The player-info blob in ADDFORWARDREQUEST and CREATEPLAYER is transcribed from the recorded TA
+# joiner in the three spike captures; the ids, the two ports and the name are the only fields that
+# differ between two joins, and the name is the same length in both, so nothing here says whether
+# DirectPlay would accept a longer one.
+
+TA_APP_GUID = bytes.fromhex("20747999f5f5cf11982700a0241496c8")   # {99797420-F5F5-11CF-9827-00A0241496C8}
+ENUM_TAIL = b"\0\0\0\0\x81\0\0\0"       # the last two words of TA's EnumSessions request
+PLAYER_NAME = 9                         # a NUL-terminated utf-16le name, four characters wide
+
+
+def reply_port(m):
+    """The port a received message says its sender wants its replies on."""
+    return struct.unpack_from(">H", m, 6)[0]
+
+
+def _sockaddr(port):
+    # family 2, a big-endian port, a zero IP: the sender's reply address, meaning this packet's source.
+    return struct.pack("<H", 2) + struct.pack(">H", port) + b"\0" * 10
+
+
+def _name(name):
+    b = name.encode("utf-16-le")[:PLAYER_NAME - 1]
+    return b + b"\0" * (PLAYER_NAME - len(b))
+
+
+def _u32(v):
+    return struct.pack("<I", v & 0xFFFFFFFF)
+
+
+def _u32s(*values):
+    return b"".join(_u32(v) for v in values)
+
+
+def dp_enum_sessions(where):
+    """The UDP broadcast a joiner sends to 47624; the header carries the port it listens on."""
+    body = TA_APP_GUID + ENUM_TAIL
+    return dp_header(0x02, len(body), where) + body
+
+
+def dp_request_player_id(where, system):
+    """Flags 9 asks the host for a system player, 8 for a game player."""
+    return dp_header(0x05, 4, where) + struct.pack("<I", 9 if system else 8)
+
+
+def dp_add_forward_request(where, sys_id, tcp_port, udp_port, service_id):
+    """ADDFORWARDREQUEST: its own player info, carrying the joiner's two listening addresses."""
+    body = (_u32s(0, sys_id, 0, 0x1C, 0x6C, 0x50, 9, sys_id, 0, 0, 0x20, 0, 0, sys_id, 0x30, 0x0E, 0)
+            + _sockaddr(tcp_port) + b"\0\0" + _sockaddr(udp_port) + b"\0" * 4 + _u32(service_id))
+    return dp_header(0x13, len(body), where) + body
+
+
+def dp_create_player(where, player_id, sys_id, tcp_port, udp_port, name):
+    """CREATEPLAYER: the same player info, named this time."""
+    body = (_u32s(0, player_id, 0, 0x1C, 0, 0x79, 8, player_id, 0x0A, 0x0A, 0x20, 0x15, 0, sys_id, 0x30, 0x0E, 0)
+            + _name(name) * 2 + _sockaddr(tcp_port) + _sockaddr(udp_port) + b"\0" * 28 + b"\x50" + b"\0" * 4)
+    return dp_header(0x08, len(body), where) + body
+
+
+def dp_delete_player(where, player_id):
+    """DELETEPLAYER: a player leaves by naming each of its two ids, the game one and the system one."""
+    return dp_header(0x0B, 20, where) + _u32s(0, player_id, 0, 0, 0)
+
+
+def status(template, player_id, name=None, state=None, options=None):
+    """0x20, the 186-byte player info, patched from a recorded one: the id is at 145, the state
+    byte at 156 (gpgnet4ta reads bit 0x20 as ready) and the host's options byte at 157."""
+    s = bytearray(template)
+    struct.pack_into("<I", s, 145, player_id)
+    if name is not None:
+        s[1:33] = (name.encode("utf-16-le")[:30] + b"\0" * 32)[:32]
+    if state is not None:
+        s[156] = state
+    if options is not None:
+        s[157] = options
+    return bytes(s)
+
+
+def team(player_id, team_id):
+    """0x24: whose team, and which. An untouched battleroom sends 5, no team."""
+    return bytes([0x24]) + struct.pack("<IB", player_id, team_id)
+
+
+def sync_types(count):
+    """0x1a sub-type 1: how many unit types this side has (278 in the GOG install)."""
+    return bytes([0x1A, 0x01]) + b"\0" * 8 + _u32(count)
+
+
+def sync_unit(uid, crc):
+    """0x1a sub-type 2: one unit type's id and its content-derived checksum. Only a joiner sends these."""
+    return bytes([0x1A, 0x02]) + b"\0" * 4 + _u32(uid) + _u32(crc)
+
+
+def sync_echo(uid, in_use):
+    """0x1a sub-type 3: one id, with status 0x0001 or 0x0101 (in use) and the limit."""
+    return bytes([0x1A, 0x03]) + b"\0" * 4 + _u32(uid) + (b"\x01\x01" if in_use else b"\x01\x00") + b"\xff\xff"
+
+
+def sync_progress(count):
+    """0x1a sub-type 4: how many of the host's 1 + 2n records have been processed."""
+    return bytes([0x1A, 0x04]) + b"\0" * 8 + _u32(count)
+
+
+def unit_sync_join(units, batch=35):
+    """The joiner's side of unit sync: the count, then an id and its CRC for each type."""
+    out = [sync_types(len(units))]
+    for i in range(0, len(units), batch):
+        out += [sync_unit(uid, crc) for uid, crc in units[i:i + batch]]
+    return out
+
+
+def commander_build(type_index, unit, pos):
+    """0x09: a unit appeared. The type is a 1-based load-order index, not an index into the 0x1a table."""
+    return (bytes([0x09]) + struct.pack("<HH", type_index, unit)
+            + b"".join(struct.pack("<i", c) for c in pos) + b"\0" * 6)
+
+
+def unit_state(unit, value):
+    """0x11: a unit's state word -- a u16 unit id and one byte whose meaning is not decoded."""
+    return bytes([0x11]) + struct.pack("<HB", unit, value)
+
+
+def shot(origin, aim, rot, target, shooter, slot):
+    """0x0d: 0x0d shot fired. slot is the 0-based index of the shooter's Weapon1/2/3."""
+    return (bytes([0x0D]) + b"".join(struct.pack("<i", c) for c in origin)
+            + b"".join(struct.pack("<i", c) for c in aim) + b"".join(struct.pack("<H", c & 0xFFFF) for c in rot)
+            + struct.pack("<HHB", target, shooter, slot))
+
+
+def damage(victim, attacker, amount):
+    """0x0b: damage. The trailing word is not remaining health and nothing reads it yet (TA-DEMOS)."""
+    return bytes([0x0B]) + struct.pack("<HHHH", victim, attacker, amount, 0)
+
+
+def death(unit, killer_player, killer, severity, cause, level):
+    """0x0c: the only record that kills a unit, and only its owner may send one."""
+    return bytes([0x0C]) + struct.pack("<HIHBB", unit, killer_player, killer, severity, cause << 4 | level)
+
+
+# ---------------------------------------------------------------------------------------------
 # 0x2c unit state: an LSB-first bit stream (TA-DEMOS.md, "0x2c, unit state")
 
 TYPE_BITS = 9                 # bit length of the data set's unit type count: 278 types in the GOG install
@@ -272,12 +415,16 @@ def decode_2c(s, max_units, type_bits=TYPE_BITS):
     Entries are {slot, type, blocked, waypoints [(x, z)]}. The full-state record is for block slot
     tick % max_units; None means that slot is empty. Positions are 16.16, rotations are y, z, x in
     65536ths of a turn, speed is 16.16 per tick and present only for a unit with a mover.
-    Aircraft entries and attached units are not handled.
+    Aircraft entries and attached units are not handled. A truncated record stops where its bits run
+    out rather than reading past them, which is every 0x2c of a length the sender chose; one too
+    short to hold a tick decodes to nothing at all.
     """
+    if len(s) < 7:
+        return 0, [], None
     tick = struct.unpack_from("<I", s, 3)[0]
     b = _Bits(s)
     entries = []
-    while True:
+    while b.pos + 16 <= len(s) * 8:
         slot = b.take(16)
         if slot == 0xFFFF:
             break

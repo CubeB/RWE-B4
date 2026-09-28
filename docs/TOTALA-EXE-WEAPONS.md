@@ -347,6 +347,65 @@ during the behaviour pass and `updateProjectiles` walks the new round in the
 same tick, applying damage inline on the collision -- and
 `src/rwe/sim/weaponfiretick.test.cpp` pins it end to end through `tick()`.
 
+### Receiving a `0x0d`, `0x49D270`
+
+A received subpacket is dispatched at `0x45485F`: the code byte is read, `2` is
+subtracted, and `0x2A` bounds it, so codes `0x02` to `0x2C` index the jump table
+at `0x455F84`. Code `0x0d` is table entry `0x0B` and lands at `0x45542D`, which
+calls `0x49D270` with the whole record. Every field is read:
+
+| Offset | The receiver sees |
+|---|---|
+| `+0x01` | origin, 3 × 16.16 |
+| `+0x0D` | aim point, 3 × 16.16 |
+| `+0x19` | **the weapon's TDF `ID`** — the index into the weapon table at `globals+0x2CF3`, stride `0x115`, whose flags are at `+0x111` |
+| `+0x1A` | a flags byte; only bit 0 is read |
+| `+0x1B` | the shot's bearing (`s16`), stored into the receiver's slot `+0x16` |
+| `+0x1D` | the shot's elevation (`s16`), stored into the receiver's slot `+0x18` |
+| `+0x1F` | the target unit id, zero if none |
+| `+0x21` | the shooter unit id |
+| `+0x23` | the shooter's weapon slot |
+
+The first word is **not an angle**, and that is what makes the fields decodable:
+`0x49D295` zero-extends the byte at `+0x19` and indexes the weapon table with
+it, then reads that entry's flags. The table is initialised at `0x42E310` (the
+entry index is written to `+0x10A`) and filled by the loader at `0x42E440`,
+whose entry pointer is the `lea ebp,[edx+ecx*4+0x2CF3]` at `0x42E489`, from each
+weapon TDF's own **`ID`** key (`0x504310`, parsed with default `-1`). That is
+the same field the emitter writes into the record at `0x49D7E5`. So the low
+byte is the
+weapon's id, and the id is what the receiver looks the weapon up by; the high
+byte is not written by the emitter at all (it reads `+0x1A` at `0x49D836`
+without having stored one) and is nothing but bit 0 to the receiver.
+
+The conditions, in the order they can refuse a shot:
+
+- **The weapon's flags choose the path.** `0x49D29C` shifts the entry's flags
+  right five and tests bit 0; a `meteor` weapon (bit 5) spawns straight from the
+  origin and aim point without looking at a shooter (`0x49D2AF`).
+- Otherwise the shooter id at `+0x21` must resolve in the unit table
+  (`globals+0x14357`, stride `0x118`) and the shooter must be alive —
+  `unit+0x110` bit 28 — or the routine returns and **nothing is drawn**
+  (`0x49D354`).
+- The bearing and elevation are written into the receiver's own copy of the
+  shooter's slot (`unit+4+28*slot`, `+0x16`/`+0x18`), and the target id is
+  resolved as a unit.
+- A set bit 0 of `+0x1A` makes the routine look for an existing projectile on
+  the same origin, aim, slot and shooter and reuse it; the original leaves the
+  byte clear.
+- The same flags then pick the spawn: `ballistic` (bit 1) → `0x49CDE0`,
+  `vlaunch` (bit 4) → `0x49CC20`, otherwise `lineofsight` (bit 0) or `selfprop`
+  (bit 20) → `0x49C9C0`, and `dropped` (bit 8) → the projectile spawn at
+  `0x49C740`. **A weapon with none of those flags is dropped** (`0x49D4A3`).
+
+The last point is the whole of the live-play fault this section records: RWE's
+encoder used to put the launch *pitch* in the first word, so the receiver
+indexed the weapon table with a pitch byte — `0xFFE7` has low byte `0xE7` — read
+a random weapon's flags, and flew the round as that weapon or dropped it
+outright. A real TA's own shots carry the weapon's `ID` there: `ARMCOMLASER`,
+the ARM commander's `Weapon1`, is `ID=20`, and the laser shots in the capture
+read `0x0014` for it.
+
 ### Guidance, `0x49B520`
 
 Steering is gated on **`guidance` (bit 12), not `tracks`** (bit 13). The

@@ -256,6 +256,8 @@ set(SOURCE_FILES
     src/rwe/Mesh.h
     src/rwe/MeshService.cpp
     src/rwe/MeshService.h
+    src/rwe/TaHostLobbyScene.cpp
+    src/rwe/TaHostLobbyScene.h
     src/rwe/PathMapping.cpp
     src/rwe/PathMapping.h
     src/rwe/RadiansAngle.cpp
@@ -359,6 +361,7 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_ownclock.cpp
     src/rwe/game/GameScene_ownclock.h
     src/rwe/game/GameScene_tad.cpp
+    src/rwe/game/GameScene_tahost.cpp
     src/rwe/game/GameScene_util.cpp
     src/rwe/game/featureplacement.cpp
     src/rwe/game/GameScene_util.h
@@ -534,10 +537,16 @@ set(SOURCE_FILES
     src/rwe/mesh_util.h
     src/rwe/network_util.cpp
     src/rwe/network_util.h
+    src/rwe/net/ta/TaBattleroom.cpp
+    src/rwe/net/ta/TaBattleroom.h
+    src/rwe/net/ta/TaChecksums.cpp
+    src/rwe/net/ta/TaChecksums.h
     src/rwe/net/ta/TaDirectPlay.cpp
     src/rwe/net/ta/TaDirectPlay.h
     src/rwe/net/ta/TaHostSession.cpp
     src/rwe/net/ta/TaHostSession.h
+    src/rwe/net/ta/TaHostGame.cpp
+    src/rwe/net/ta/TaHostGame.h
     src/rwe/net/ta/TaOutboundBatcher.cpp
     src/rwe/net/ta/TaOutboundBatcher.h
     src/rwe/net/ta/TaPacket.cpp
@@ -589,6 +598,8 @@ set(SOURCE_FILES
     src/rwe/puppet/TadPuppetDriver.h
     src/rwe/puppet/TadScenePlayback.cpp
     src/rwe/puppet/TadScenePlayback.h
+    src/rwe/puppet/TaLiveReceiver.cpp
+    src/rwe/puppet/TaLiveReceiver.h
     src/rwe/proto/serialization.cpp
     src/rwe/proto/serialization.h
     src/rwe/render/FogTiles.cpp
@@ -670,6 +681,8 @@ set(SOURCE_FILES
     src/rwe/sim/SimRandom.h
     src/rwe/sim/SimulationOwnership.cpp
     src/rwe/sim/SimulationOwnership.h
+    src/rwe/sim/MixedOwnership.cpp
+    src/rwe/sim/MixedOwnership.h
     src/rwe/sim/MovementClassCollisionService.h
     src/rwe/sim/MovementClassDatabase.cpp
     src/rwe/sim/MovementClassDatabase.h
@@ -688,6 +701,13 @@ set(SOURCE_FILES
     src/rwe/sim/AirMovement.h
     src/rwe/sim/DemoRecorder.cpp
     src/rwe/sim/DemoRecorder.h
+    src/rwe/sim/TaLiveBatch.h
+    src/rwe/sim/TaLiveSender.cpp
+    src/rwe/sim/TaLiveSender.h
+    src/rwe/sim/TaLiveSenderHooks.h
+    src/rwe/sim/TaPeerIds.h
+    src/rwe/sim/TaWireTape.cpp
+    src/rwe/sim/TaWireTape.h
     src/rwe/sim/ResourceSettler.cpp
     src/rwe/sim/ResourceSettler.h
     src/rwe/sim/SimAngle.cpp
@@ -1110,6 +1130,7 @@ set(TEST_FILES
     src/rwe/io/malformed_input.test.cpp
     src/rwe/puppet/TadDemo.test.cpp
     src/rwe/puppet/TadPuppetDriver.test.cpp
+    src/rwe/puppet/TaLiveReceiver.test.cpp
     src/rwe/scene/SceneManager.test.cpp
     src/rwe/scene/Screenshot.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp
@@ -1126,7 +1147,10 @@ set(TEST_FILES
     src/rwe/math/rwe_math.test.cpp
     src/rwe/mesh_util.test.cpp
     src/rwe/network_util.test.cpp
+    src/rwe/net/ta/TaBattleroom.test.cpp
+    src/rwe/net/ta/TaChecksums.test.cpp
     src/rwe/net/ta/TaDirectPlay.test.cpp
+    src/rwe/net/ta/TaHostGame.test.cpp
     src/rwe/net/ta/TaHostSession.test.cpp
     src/rwe/net/ta/TaOutboundBatcher.test.cpp
     src/rwe/net/ta/TaPacket.test.cpp
@@ -1190,6 +1214,8 @@ set(TEST_FILES
     src/rwe/sim/builderfacing.test.cpp
     src/rwe/sim/reclaimreach.test.cpp
     src/rwe/sim/remoteownership.test.cpp
+    src/rwe/sim/mixedownership.test.cpp
+    src/rwe/sim/talivesender.test.cpp
     src/rwe/sim/fogplacement.test.cpp
     src/rwe/sim/gunship.test.cpp
     src/rwe/sim/aircraftidle.test.cpp

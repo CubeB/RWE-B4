@@ -583,6 +583,21 @@ namespace rwe
         }
     }
 
+    std::optional<uint32_t> tadSerialOfUnitState(const TadBytes& s)
+    {
+        if (s.size() < 7 || static_cast<TadSubPacketCode>(s[0]) != TadSubPacketCode::UnitStatAndMove
+            || readU16(&s[1]) != s.size())
+        {
+            return std::nullopt;
+        }
+
+        // The serial is the 32 bits at offset 24, which TadBitReader reads
+        // least-significant bit first within each byte.
+        TadBitReader r(s);
+        r.read(24);
+        return r.read(32);
+    }
+
     uint16_t tadUnitIdOfIndex(unsigned int block, uint16_t index, uint16_t maxUnits)
     {
         return static_cast<uint16_t>(block * maxUnits + index + 1u);

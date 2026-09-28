@@ -48,6 +48,16 @@ namespace rwe
         bool screenshotRequested{false};
 
         /**
+         * A window the player cannot see does not pace the loop. A compositor
+         * holds the swap of a hidden window for up to a second, which stalls a
+         * game that another program is waiting on (a TA peer) along with it.
+         */
+        bool windowFocused{true};
+        bool windowOccluded{false};
+        bool swapUnpaced{false};
+        int pacedSwapInterval{1};
+
+        /**
          * GlobalConfig::pixelSize, the display's own output scale, and what
          * they need: the window in logical points and in output pixels, the
          * frame the scenes render at (output pixels / pixelSize), and the
@@ -116,5 +126,11 @@ namespace rwe
 
         /** Re-derives the display scale, both window sizes, the frame viewport and the cursor density. */
         void refreshWindowMetrics();
+
+        /** About 120 frames a second once the display no longer paces the loop. */
+        static constexpr Uint64 UnpacedFrameMilliseconds = 8;
+
+        void trackWindowVisibility(Uint32 type);
+        void updateSwapPacing();
     };
 }

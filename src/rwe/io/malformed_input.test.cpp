@@ -17,12 +17,20 @@
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/tnt/TntArchive.h>
 #include <rwe/io/weapontdf/WeaponTdf.h>
-#include <rwe/net/ta/TaDirectPlay.h>
-#include <rwe/net/ta/TaPacket.h>
-#include <rwe/net/ta/TaPinger.h>
+#include <rwe/puppet/TaLiveReceiver.h>
 #include <rwe/puppet/TadPuppetDriver.h>
 #include <rwe/puppet/puppet_test_util.h>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/MixedOwnership.h>
+#include <rwe/sim/SimulationOwnership.h>
+#include <rwe/sim/TaLiveBatch.h>
+#include <rwe/sim/TaLiveSender.h>
+#include <rwe/sim/TaPeerIds.h>
+#include <rwe/net/ta/TaBattleroom.h>
+#include <rwe/net/ta/TaChecksums.h>
+#include <rwe/net/ta/TaDirectPlay.h>
+#include <rwe/net/ta/TaPacket.h>
+#include <rwe/net/ta/TaPinger.h>
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/sim_test_util.h>
 #include <rwe/sim/util.h>
@@ -306,6 +314,31 @@ namespace rwe
         REQUIRE_THROWS(SmkDecoder(std::move(data)));
     }
 
+    TEST_CASE("a weapon TDF's unitsonly only takes a number", "[malformed]")
+    {
+        // `unitsonly` tells the simulation to skip the ground and the sea stop
+        // tests for this weapon's rounds, so a nonsense value must cost the
+        // weapon the key and nothing else. Reading it as anything non-numeric
+        // would leave the flag off, which is the original's default and the
+        // safe direction: the round still stops on terrain.
+        TdfBlock nonsense;
+        nonsense.insertOrAssignProperty("unitsonly", "true");
+        REQUIRE_FALSE(parseWeaponBlock(nonsense).unitsOnly);
+
+        TdfBlock empty;
+        empty.insertOrAssignProperty("unitsonly", "");
+        REQUIRE_FALSE(parseWeaponBlock(empty).unitsOnly);
+
+        // The numeric spellings the data uses, and the zero that is off.
+        TdfBlock on;
+        on.insertOrAssignProperty("unitsonly", "1");
+        REQUIRE(parseWeaponBlock(on).unitsOnly);
+
+        TdfBlock off;
+        off.insertOrAssignProperty("unitsonly", "0");
+        REQUIRE_FALSE(parseWeaponBlock(off).unitsOnly);
+    }
+
     TEST_CASE("TDF blocks nested past any real file are refused, not recursed into", "[malformed]")
     {
         std::string text;
@@ -335,6 +368,339 @@ namespace rwe
         append(bytes, GafHeader{GafVersionNumber, 0xFFFFFFFF, 0});
         std::istringstream in(bytes);
         REQUIRE_THROWS_AS(GafArchive(&in), GafException);
+    }
+
+    TEST_CASE("an FBI with no SoundCategory is silent, not refused", "[malformed]")
+    {
+        // ProTA's MAKENUKE/MAKEANTI pseudo-units name no category; the
+        // original reads the missing key as no sound at all.
+        auto fbi = parseUnitFbi(parseTdfFromString("[UNITINFO]\n{\nUnitName=MAKENUKEARM;\nObjectname=;\n}\n"));
+        REQUIRE(fbi.unitName == "MAKENUKEARM");
+        REQUIRE(fbi.soundCategory.empty());
+    }
+
+    TEST_CASE("a referenced feature no TDF defines is dropped, not given an id", "[malformed]")
+    {
+        std::unordered_map<std::string, FeatureDefinitionId> featureNameIndex;
+        std::unordered_set<std::string> knownFeatureNames{"TREE"};
+        std::deque<std::string> openQueue;
+        std::unordered_map<std::string, FeatureDefinitionId> openSet;
+        auto nextId = FeatureDefinitionId(7);
+
+        // A present name is queued and takes the next id.
+        auto tree = getFeatureId(nextId, featureNameIndex, knownFeatureNames, openQueue, openSet, "tree");
+        REQUIRE(tree);
+        REQUIRE(tree->value == 7);
+        REQUIRE(nextId.value == 8);
+        REQUIRE(openQueue.size() == 1);
+
+        // A missing name yields nothing and leaves the next id alone, so a
+        // reference to a corpse no TDF defines cannot point at whichever
+        // feature is loaded next.
+        REQUIRE_FALSE(getFeatureId(nextId, featureNameIndex, knownFeatureNames, openQueue, openSet, "TREEDEAD"));
+        REQUIRE(nextId.value == 8);
+        REQUIRE(openQueue.size() == 1);
+
+        // A name already loaded resolves to its id without reserving another.
+        featureNameIndex.insert({"ROCK", FeatureDefinitionId(3)});
+        auto rock = getFeatureId(nextId, featureNameIndex, knownFeatureNames, openQueue, openSet, "ROCK");
+        REQUIRE(rock);
+        REQUIRE(rock->value == 3);
+        REQUIRE(nextId.value == 8);
+    }
+
+    TEST_CASE("a puppet driver drops a demo record it cannot place, and never indexes with it", "[malformed][puppet]")
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        definePuppetTestWorld(sim);
+        addWellStockedPlayer(sim, "ARM");
+        addWellStockedPlayer(sim, "CORE");
+
+        TadPuppetDriver driver(sim, 8, puppetTestLoadOrder());
+        driver.addPlayer(1, PlayerId(0));
+        driver.addPlayer(2, PlayerId(1));
+
+        auto feed = [&](uint8_t sender, const std::vector<TadBytes>& subs) {
+            driver.onPacket(TadPacket{0, sender}, subs);
+        };
+
+        SECTION("damage for an id no puppet holds")
+        {
+            feed(1, {tadEncodeDamage(TadDamage{3, 0, 5, 0})});
+            REQUIRE(driver.stats().recordsDroppedUnknownUnit == 1);
+        }
+
+        SECTION("a death whose id is zero, and one in a block no sender claimed")
+        {
+            feed(1, {tadEncodeDeath(TadDeath{0, 0xffffffffu, 0, 100, 0})});
+            REQUIRE(driver.stats().recordsDroppedBadId == 1);
+
+            // Block 5 is nobody's: sender 1 has sent no 0x09 to claim it.
+            feed(1, {tadEncodeDeath(TadDeath{41, 0xffffffffu, 0, 100, 0})});
+            REQUIRE(driver.stats().recordsDroppedBadBlock == 1);
+        }
+
+        SECTION("a build finished for an id no puppet holds")
+        {
+            feed(1, {tadEncodeBuildFinished(TadBuildFinished{3, 0})});
+            REQUIRE(driver.stats().recordsDroppedUnknownUnit == 1);
+        }
+
+        SECTION("a build started whose type index is past the load order")
+        {
+            feed(1, {tadEncodeBuildStarted(TadBuildStarted{99, 1, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}})});
+            REQUIRE(driver.stats().recordsDroppedBadType == 1);
+            REQUIRE(driver.stats().unitsSpawned == 0);
+        }
+
+        SECTION("a full-state record for an empty slot, and a truncated 0x2c")
+        {
+            std::vector<bool> canFly{false, false, false};
+            auto layout = tadUnitStateLayout(canFly, 8);
+
+            TadUnitState empty;
+            empty.tick = 1;
+            empty.sync = TadUnitSync{0, 0, 0, 0, 0, 0, std::nullopt, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}, std::nullopt};
+            feed(1, {tadEncodeUnitState(empty, layout)});
+            REQUIRE(driver.stats().unitsSpawned == 0);
+
+            feed(1, {TadBytes{0x2c, 0x00, 0x00}});
+            REQUIRE(driver.stats().recordsDroppedBadType == 1);
+        }
+    }
+
+    TEST_CASE("a damage record the driver cannot place is offered to the caller with its id unindexed", "[malformed][puppet]")
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        definePuppetTestWorld(sim);
+        addWellStockedPlayer(sim, "ARM");
+
+        constexpr uint16_t maxUnits = 8;
+        TadPuppetDriver driver(sim, maxUnits, puppetTestLoadOrder());
+        driver.addPlayer(1, PlayerId(0));
+
+        struct Handed
+        {
+            uint16_t victimId{0};
+            std::optional<UnitId> attacker;
+            unsigned int damage{0};
+        };
+        std::vector<Handed> handed;
+        driver.setIncomingDamageHandler([&](uint16_t victimId, std::optional<UnitId> attacker, unsigned int damage) {
+            handed.push_back({victimId, attacker, damage});
+        });
+
+        // Every one of these names a unit the driver does not puppet, which is
+        // what a live host sees when the peer reports a hit on one of its own
+        // units. The id is the peer's to choose, so it arrives as it is: the
+        // caller is the one that has to decide whether it names a unit of its
+        // own, and nothing here may index with it first.
+        SECTION("no unit at all, and one past every block a sixteen-bit id can name")
+        {
+            driver.onPacket(TadPacket{0, 1}, {tadEncodeDamage(TadDamage{0, 0, 5, 0})});
+            driver.onPacket(TadPacket{0, 1}, {tadEncodeDamage(TadDamage{0xffff, 0, 5, 0})});
+
+            REQUIRE(handed.size() == 2u);
+            REQUIRE(handed[0].victimId == 0);
+            REQUIRE(handed[1].victimId == 0xffff);
+            REQUIRE(driver.stats().damageHandedOff == 2u);
+            REQUIRE(driver.stats().recordsDroppedUnknownUnit == 0u);
+        }
+
+        SECTION("an attacker the driver has never seen is nothing")
+        {
+            driver.onPacket(TadPacket{0, 1}, {tadEncodeDamage(TadDamage{maxUnits + 1, 0xffff, 60, 0})});
+            REQUIRE(handed.size() == 1u);
+            REQUIRE_FALSE(handed[0].attacker);
+        }
+
+        SECTION("a record the size table cannot size never reaches the handler")
+        {
+            driver.onPacket(TadPacket{0, 1}, {TadBytes{0x0b, 0x01}});
+            REQUIRE(handed.empty());
+            REQUIRE(driver.stats().damageHandedOff == 0u);
+        }
+    }
+
+    TEST_CASE("the puppet driver's newer records are bounded like the rest", "[malformed][puppet]")
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        definePuppetTestWorld(sim);
+        addWellStockedPlayer(sim, "ARM");
+        addWellStockedPlayer(sim, "CORE");
+
+        TadPuppetDriver driver(sim, 8, puppetTestLoadOrder());
+        driver.addPlayer(1, PlayerId(0));
+        driver.addPlayer(2, PlayerId(1));
+
+        auto feed = [&](uint8_t sender, const std::vector<TadBytes>& subs) {
+            driver.onPacket(TadPacket{0, sender}, subs);
+        };
+
+        SECTION("a shot whose shooter no puppet holds is dropped, not indexed with")
+        {
+            auto shoot = [&](uint16_t shooter, uint8_t slot) {
+                return tadEncodeShot(TadShot{
+                    TadPosition{0, 0, 0}, TadPosition{65536, 0, 0}, TadRotation{0, 0, 0}, 0, shooter, slot});
+            };
+
+            feed(1, {shoot(99, 0)});
+            REQUIRE(driver.stats().shotsDropped == 1);
+
+            // A puppet exists but has no weapon in slot 7, so the slot is
+            // refused before the weapon map is reached.
+            feed(1, {tadEncodeBuildStarted(TadBuildStarted{3, 1, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}})});
+            feed(1, {shoot(1, 7)});
+            REQUIRE(driver.stats().shotsDropped == 2);
+            REQUIRE(driver.stats().shotsSpawned == 0);
+        }
+
+        SECTION("a script call for no puppet, and one past its script table")
+        {
+            feed(1, {tadEncodeScriptCall(TadScriptCall{99, 0, 2, {1, 2, 3, 0}})});
+            REQUIRE(driver.stats().scriptCallsDropped == 1);
+
+            feed(1, {tadEncodeBuildStarted(TadBuildStarted{3, 1, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}})});
+            feed(1, {tadEncodeScriptCall(TadScriptCall{1, 0xffff, 9, {1, 2, 3, 4}})});
+            REQUIRE(driver.stats().scriptCallsDropped == 2);
+            REQUIRE(driver.stats().scriptCallsRun == 0);
+        }
+
+        SECTION("a chat line from a sender no player stands for is ignored")
+        {
+            TadBytes chat(65, 0);
+            chat[0] = 0x05;
+            chat[1] = 'h';
+            chat[2] = 'i';
+
+            feed(3, {chat});
+            REQUIRE(driver.stats().chatLines == 0);
+            REQUIRE(driver.takeChat().empty());
+        }
+
+        SECTION("resource statistics for an unmapped sender change nobody")
+        {
+            TadResourceStats stats{};
+            stats.metalStored = 123.0f;
+            feed(3, {tadEncodeResourceStats(stats)});
+            REQUIRE(sim.getPlayer(PlayerId(0)).metal == Metal(10000.0f));
+        }
+
+        SECTION("a truncated speed record changes nothing, a whole one is stored")
+        {
+            feed(1, {TadBytes{0x19, 0x00}});
+            REQUIRE(driver.stats().speedChanges == 0);
+            REQUIRE_FALSE(driver.takeSpeedChange());
+
+            feed(1, {tadEncodeSpeed(TadSpeed{256})});
+            REQUIRE(driver.stats().speedChanges == 1);
+            auto speed = driver.takeSpeedChange();
+            REQUIRE(speed);
+            REQUIRE(*speed == 256);
+            REQUIRE_FALSE(driver.takeSpeedChange());
+        }
+    }
+
+    TEST_CASE("the mixed-ownership hooks refuse what a stream cannot mean", "[malformed][mixed]")
+    {
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
+        definePuppetTestWorld(sim);
+        auto local = addWellStockedPlayer(sim, "ARM");
+        auto remote = addWellStockedPlayer(sim, "CORE");
+        sim.getPlayer(remote).simulation = PlayerSimulation::Remote;
+
+        auto unit = sim.trySpawnCompletedUnit("TANK", local, SimVector(200_ss, 0_ss, 200_ss), std::nullopt);
+        REQUIRE(unit);
+        auto health = sim.getUnitState(*unit).hitPoints;
+
+        SECTION("an incoming 0x0b naming no unit costs the record and nothing else")
+        {
+            applyIncomingDamage(sim, UnitId(9999), std::nullopt, 1000);
+            REQUIRE(mixedOwnershipOutboxOf(sim).deaths.empty());
+            REQUIRE(mixedOwnershipOutboxOf(sim).damage.empty());
+        }
+
+        SECTION("a DELETEPLAYER for a player this game does not have is ignored")
+        {
+            removeRemotePlayer(sim, PlayerId(7));
+            REQUIRE(sim.getPlayer(remote).status == GamePlayerStatus::Alive);
+            REQUIRE(sim.getUnitState(*unit).hitPoints == health);
+        }
+    }
+
+    TEST_CASE("a live sender drops what it cannot name and sends the rest of the tick", "[malformed][talive]")
+    {
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
+        definePuppetTestWorld(sim);
+        auto local = addWellStockedPlayer(sim, "ARM");
+        auto remote = addWellStockedPlayer(sim, "CORE");
+        sim.getPlayer(remote).simulation = PlayerSimulation::Remote;
+
+        auto attacker = sim.trySpawnCompletedUnit("TANK", local, SimVector(100_ss, 0_ss, 100_ss), std::nullopt);
+        REQUIRE(attacker);
+        auto victim = sim.trySpawnCompletedUnit("TANK", remote, SimVector(100_ss, 0_ss, 160_ss), std::nullopt);
+        REQUIRE(victim);
+
+        TaLiveSenderSettings settings;
+        settings.sender = local;
+        settings.maxUnits = 8;
+        settings.unitLoadOrder = {"KBOT", "SOLAR", "TANK"};
+
+        // The peer has named nothing yet, so no record can carry the id a
+        // Remote unit holds in its own block.
+        TaPeerIds peerIds;
+        TaLiveSender sender(sim, settings, peerIds);
+        sim.setTaLiveSender(sender.hooks());
+
+        auto takesNoCode = [](const TaLiveBatch& batch, uint8_t code) {
+            for (const auto& subPacket : batch.subPackets)
+            {
+                if (!subPacket.empty() && subPacket[0] == code)
+                {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        SECTION("a hit on a unit the peer has not named is counted and dropped")
+        {
+            sim.applyDamage(*victim, 30, *attacker);
+            sim.tick();
+            auto batch = sender.takeBatch();
+            REQUIRE(batch);
+            REQUIRE(takesNoCode(*batch, 0x0b));
+            REQUIRE(sender.stats().recordsDroppedNoId == 1);
+
+            // The tick itself is untouched: our own units are still described.
+            auto state = tadDecodeUnitState(batch->subPackets[0], tadUnitStateLayout({false, false, false}, 8));
+            REQUIRE(state);
+        }
+
+        SECTION("a death of a unit this machine does not own is counted and dropped")
+        {
+            // Not a record the outbox writes -- it only reports our own units'
+            // deaths -- and one this sender could not name whatever it said.
+            mixedOwnershipOutboxOf(sim).deaths.push_back(OutgoingDeath{*victim, std::nullopt, 50, 0x12});
+            sim.tick();
+            auto batch = sender.takeBatch();
+            REQUIRE(batch);
+            REQUIRE(takesNoCode(*batch, 0x0c));
+            REQUIRE(sender.stats().recordsDroppedNoId == 1);
+        }
+
+        SECTION("a type the load order does not name leaves that unit undescribed")
+        {
+            // Every id on the wire is a load-order index, so a type with none
+            // cannot be described at all. It costs the unit's description and
+            // nothing else -- no throw out of the middle of a tick.
+            settings.unitLoadOrder = {"KBOT", "SOLAR"};
+            TaLiveSender narrow(sim, settings, peerIds);
+            narrow.unitCreated(sim, *attacker);
+            sim.tick();
+            REQUIRE(narrow.stats().unitsRefused == 1);
+            REQUIRE(narrow.stats().unitStateSkipped == 0);
+        }
     }
 
     namespace
@@ -548,206 +914,223 @@ namespace rwe
         }
     }
 
-    TEST_CASE("an FBI with no SoundCategory is silent, not refused", "[malformed]")
+    TEST_CASE("a 0x20 too short for its fields is not a status, whatever else it says", "[malformed]")
     {
-        // ProTA's MAKENUKE/MAKEANTI pseudo-units name no category; the
-        // original reads the missing key as no sound at all.
-        auto fbi = parseUnitFbi(parseTdfFromString("[UNITINFO]\n{\nUnitName=MAKENUKEARM;\nObjectname=;\n}\n"));
-        REQUIRE(fbi.unitName == "MAKENUKEARM");
-        REQUIRE(fbi.soundCategory.empty());
+        // Every length under the record, including one that would hold the id,
+        // the state and the options but not the whole 186 bytes.
+        for (std::size_t size = 0; size < TaPlayerStatusSize; ++size)
+        {
+            TadBytes bytes(size, 0xA0);
+            if (size > 0)
+            {
+                bytes[0] = 0x20;
+            }
+            CAPTURE(size);
+            REQUIRE_FALSE(taParsePlayerStatus(bytes));
+        }
+
+        // A record of the right length whose code is something else.
+        TadBytes full(TaPlayerStatusSize, 0x21);
+        REQUIRE_FALSE(taParsePlayerStatus(full));
+
+        // An empty map name is a player that has named none, not a fault.
+        std::vector<std::uint8_t> status = taBuildPlayerStatus(TaPlayerStatus{});
+        auto parsed = taParsePlayerStatus(status);
+        REQUIRE(parsed);
+        REQUIRE(parsed->mapName.empty());
     }
 
-    TEST_CASE("a weapon TDF's unitsonly only takes a number", "[malformed]")
+    TEST_CASE("a 0x1a that is not a whole sub-type 2 record names no unit type", "[malformed]")
     {
-        // `unitsonly` tells the simulation to skip the ground and the sea stop
-        // tests for this weapon's rounds, so a nonsense value must cost the
-        // weapon the key and nothing else. Reading it as anything non-numeric
-        // would leave the flag off, which is the original's default and the
-        // safe direction: the round still stops on terrain.
-        TdfBlock nonsense;
-        nonsense.insertOrAssignProperty("unitsonly", "true");
-        REQUIRE_FALSE(parseWeaponBlock(nonsense).unitsOnly);
+        // The joiner sends one of these per unit type, so a truncated one has to
+        // cost that record and not be read as an id from whatever follows it.
+        for (std::size_t size = 0; size < 14; ++size)
+        {
+            TadBytes bytes(size, 0x1A);
+            if (size >= 2)
+            {
+                bytes[1] = 0x02;
+            }
+            for (std::size_t i = 2; i < size; ++i)
+            {
+                bytes[i] = 0xFF;
+            }
+            CAPTURE(size);
+            REQUIRE_FALSE(taParseUnitSyncId(bytes));
+        }
 
-        TdfBlock empty;
-        empty.insertOrAssignProperty("unitsonly", "");
-        REQUIRE_FALSE(parseWeaponBlock(empty).unitsOnly);
-
-        // The numeric spellings the data uses, and the zero that is off.
-        TdfBlock on;
-        on.insertOrAssignProperty("unitsonly", "1");
-        REQUIRE(parseWeaponBlock(on).unitsOnly);
-
-        TdfBlock off;
-        off.insertOrAssignProperty("unitsonly", "0");
-        REQUIRE_FALSE(parseWeaponBlock(off).unitsOnly);
+        // A 0x1a of another sub-type, and a 0x1a with no sub-type at all.
+        TadBytes header = taBuildUnitSyncHeader();
+        REQUIRE_FALSE(taParseUnitSyncId(header));
+        TadBytes wrongCode(14, 0x1B);
+        REQUIRE_FALSE(taParseUnitSyncId(wrongCode));
     }
 
-    TEST_CASE("a referenced feature no TDF defines is dropped, not given an id", "[malformed]")
+    TEST_CASE("a 0x20 whose side and colour are nonsense reads as neither, and does not fail", "[malformed]")
     {
-        std::unordered_map<std::string, FeatureDefinitionId> featureNameIndex;
-        std::unordered_set<std::string> knownFeatureNames{"TREE"};
-        std::deque<std::string> openQueue;
-        std::unordered_map<std::string, FeatureDefinitionId> openSet;
-        auto nextId = FeatureDefinitionId(7);
-
-        // A present name is queued and takes the next id.
-        auto tree = getFeatureId(nextId, featureNameIndex, knownFeatureNames, openQueue, openSet, "tree");
-        REQUIRE(tree);
-        REQUIRE(tree->value == 7);
-        REQUIRE(nextId.value == 8);
-        REQUIRE(openQueue.size() == 1);
-
-        // A missing name yields nothing and leaves the next id alone, so a
-        // reference to a corpse no TDF defines cannot point at whichever
-        // feature is loaded next.
-        REQUIRE_FALSE(getFeatureId(nextId, featureNameIndex, knownFeatureNames, openQueue, openSet, "TREEDEAD"));
-        REQUIRE(nextId.value == 8);
-        REQUIRE(openQueue.size() == 1);
-
-        // A name already loaded resolves to its id without reserving another.
-        featureNameIndex.insert({"ROCK", FeatureDefinitionId(3)});
-        auto rock = getFeatureId(nextId, featureNameIndex, knownFeatureNames, openQueue, openSet, "ROCK");
-        REQUIRE(rock);
-        REQUIRE(rock->value == 3);
-        REQUIRE(nextId.value == 8);
+        // Bytes 150 and 151 come off a peer, so every value of them has to be
+        // readable: a side that is not 0 or 1 is no side, and a colour of 0xff
+        // is the one a player arrives with, but neither may cost the record,
+        // whose other fields are still good.
+        TaPlayerStatus built;
+        built.playerId = 0x08D90E74;
+        built.options = 0x4F;
+        for (std::uint8_t side = 0; side < 0xFF; ++side)
+        {
+            auto status = taBuildPlayerStatus(built);
+            status[TaPlayerStatusSideOffset] = side;
+            status[TaPlayerStatusColourOffset] = 0xFF;
+            auto parsed = taParsePlayerStatus(status);
+            CAPTURE(side);
+            REQUIRE(parsed);
+            REQUIRE(parsed->playerId == 0x08D90E74);
+            REQUIRE(parsed->options == 0x4F);
+            REQUIRE(parsed->colour == 0xFF);
+            REQUIRE(parsed->side == (side <= 1 ? static_cast<TadSide>(side) : TadSide::Watch));
+        }
     }
 
-    TEST_CASE("a puppet driver drops a demo record it cannot place, and never indexes with it", "[malformed][puppet]")
+    TEST_CASE("a live receiver refuses a serial it cannot make sense of", "[malformed][puppet]")
     {
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         definePuppetTestWorld(sim);
         addWellStockedPlayer(sim, "ARM");
-        addWellStockedPlayer(sim, "CORE");
 
         TadPuppetDriver driver(sim, 8, puppetTestLoadOrder());
         driver.addPlayer(1, PlayerId(0));
-        driver.addPlayer(2, PlayerId(1));
+        driver.setExternalClock(true);
+        TaLiveReceiver receiver(driver);
 
-        auto feed = [&](uint8_t sender, const std::vector<TadBytes>& subs) {
-            driver.onPacket(TadPacket{0, sender}, subs);
+        auto layout = tadUnitStateLayout(std::vector<bool>{false, false, false}, 8);
+        auto record = [&](uint32_t serial) {
+            return tadEncodeUnitState(
+                TadUnitState{
+                    serial,
+                    {},
+                    TadUnitSync{0, 3, 100, 0, 0, 0, std::nullopt, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}, std::nullopt}},
+                layout);
+        };
+        uint32_t sequence = 1000;
+        auto feed = [&](const TadBytes& subPacket) {
+            receiver.onPacket(TadPacket{0, 1}, {subPacket}, 0, sequence--);
         };
 
-        SECTION("damage for an id no puppet holds")
+        SECTION("a 0x2c too short to carry the serial, and one that lies about its length")
         {
-            feed(1, {tadEncodeDamage(TadDamage{3, 0, 5, 0})});
-            REQUIRE(driver.stats().recordsDroppedUnknownUnit == 1);
+            REQUIRE_FALSE(tadSerialOfUnitState(TadBytes{0x2c, 0x03, 0x00}));
+            REQUIRE_FALSE(tadSerialOfUnitState(TadBytes{0x2c, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff}));
+            REQUIRE(tadSerialOfUnitState(record(8)) == 8u);
         }
 
-        SECTION("a death whose id is zero, and one in a block no sender claimed")
+        SECTION("a subpacket that is not a 0x2c has no serial")
         {
-            feed(1, {tadEncodeDeath(TadDeath{0, 0xffffffffu, 0, 100, 0})});
-            REQUIRE(driver.stats().recordsDroppedBadId == 1);
-
-            // Block 5 is nobody's: sender 1 has sent no 0x09 to claim it.
-            feed(1, {tadEncodeDeath(TadDeath{41, 0xffffffffu, 0, 100, 0})});
-            REQUIRE(driver.stats().recordsDroppedBadBlock == 1);
+            REQUIRE_FALSE(tadSerialOfUnitState(TadBytes{}));
+            REQUIRE_FALSE(tadSerialOfUnitState(TadBytes{0x2d, 0x00, 0x00}));
+            REQUIRE_FALSE(tadSerialOfUnitState(TadBytes{0x0b, 0x08, 0x00, 0, 0, 0, 0, 0}));
         }
 
-        SECTION("a build finished for an id no puppet holds")
+        SECTION("a peer that names a tick a long way off is dropped, not waited for")
         {
-            feed(1, {tadEncodeBuildFinished(TadBuildFinished{3, 0})});
-            REQUIRE(driver.stats().recordsDroppedUnknownUnit == 1);
+            feed(record(8));
+            auto farRecord = record(0xffffffffu);
+            for (int i = 0; i < 1000; ++i)
+            {
+                feed(farRecord);
+            }
+
+            REQUIRE(receiver.stats().packetsReceived == 1001);
+            REQUIRE(receiver.stats().packetsDroppedOutOfRange == 1000);
+            REQUIRE(receiver.stats().held == 1);
+            REQUIRE(driver.stats().packets == 0);
         }
 
-        SECTION("a build started whose type index is past the load order")
+        SECTION("once a packet has been applied the clock is fixed, and a serial below it is refused")
         {
-            feed(1, {tadEncodeBuildStarted(TadBuildStarted{99, 1, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}})});
-            REQUIRE(driver.stats().recordsDroppedBadType == 1);
-            REQUIRE(driver.stats().unitsSpawned == 0);
+            feed(record(8));
+            receiver.onTick(0);
+            driver.applyTick(0);
+            feed(record(0));
+
+            REQUIRE(receiver.stats().clock.originSerial.value_or(0) == 8u);
+            REQUIRE(receiver.stats().packetsDroppedOutOfRange == 1);
         }
 
-        SECTION("a full-state record for an empty slot, and a truncated 0x2c")
+        SECTION("a flood of in-range serials is bounded, and what it lost is counted")
         {
-            std::vector<bool> canFly{false, false, false};
-            auto layout = tadUnitStateLayout(canFly, 8);
+            for (uint32_t serial = 1; serial <= 2000; ++serial)
+            {
+                feed(record(serial));
+            }
 
-            TadUnitState empty;
-            empty.tick = 1;
-            empty.sync = TadUnitSync{0, 0, 0, 0, 0, 0, std::nullopt, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}, std::nullopt};
-            feed(1, {tadEncodeUnitState(empty, layout)});
-            REQUIRE(driver.stats().unitsSpawned == 0);
-
-            feed(1, {TadBytes{0x2c, 0x00, 0x00}});
-            REQUIRE(driver.stats().recordsDroppedBadType == 1);
+            REQUIRE(receiver.stats().held <= receiver.options().maxHeld);
+            REQUIRE(receiver.stats().packetsDroppedBufferFull > 0);
+            REQUIRE(receiver.stats().packetsApplied == 0);
         }
     }
 
-    TEST_CASE("the puppet driver's newer records are bounded like the rest", "[malformed][puppet]")
+    TEST_CASE("a map's TNT whose blocks run past its end is refused, not read", "[malformed]")
     {
-        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
-        definePuppetTestWorld(sim);
-        addWellStockedPlayer(sim, "ARM");
-        addWellStockedPlayer(sim, "CORE");
-
-        TadPuppetDriver driver(sim, 8, puppetTestLoadOrder());
-        driver.addPlayer(1, PlayerId(0));
-        driver.addPlayer(2, PlayerId(1));
-
-        auto feed = [&](uint8_t sender, const std::vector<TadBytes>& subs) {
-            driver.onPacket(TadPacket{0, sender}, subs);
+        auto asBytes = [](const std::string& bytes) {
+            return std::span<const std::uint8_t>(
+                reinterpret_cast<const std::uint8_t*>(bytes.data()),
+                bytes.size());
         };
+        auto put = [](std::string& bytes, std::size_t offset, std::uint32_t value) {
+            bytes[offset] = static_cast<char>(value);
+            bytes[offset + 1] = static_cast<char>(value >> 8);
+            bytes[offset + 2] = static_cast<char>(value >> 16);
+            bytes[offset + 3] = static_cast<char>(value >> 24);
+        };
+        // The shortest thing that is a GlobalHeader block, for the TNT cases.
+        const std::string ota = "[GlobalHeader]\r\n\t{\r\n}\r\n";
 
-        SECTION("a shot whose shooter no puppet holds is dropped, not indexed with")
+        SECTION("a header shorter than the file's own shape")
         {
-            auto shoot = [&](uint16_t shooter, uint8_t slot) {
-                return tadEncodeShot(TadShot{
-                    TadPosition{0, 0, 0}, TadPosition{65536, 0, 0}, TadRotation{0, 0, 0}, 0, shooter, slot});
-            };
-
-            feed(1, {shoot(99, 0)});
-            REQUIRE(driver.stats().shotsDropped == 1);
-
-            // A puppet exists but has no weapon in slot 7, so the slot is
-            // refused before the weapon map is reached.
-            feed(1, {tadEncodeBuildStarted(TadBuildStarted{3, 1, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}})});
-            feed(1, {shoot(1, 7)});
-            REQUIRE(driver.stats().shotsDropped == 2);
-            REQUIRE(driver.stats().shotsSpawned == 0);
+            std::string tnt(0x20, '\0');
+            REQUIRE_FALSE(taMapChecksum(asBytes(tnt), asBytes(ota)));
         }
 
-        SECTION("a script call for no puppet, and one past its script table")
+        SECTION("a tile-attributes block that runs past the end")
         {
-            feed(1, {tadEncodeScriptCall(TadScriptCall{99, 0, 2, {1, 2, 3, 0}})});
-            REQUIRE(driver.stats().scriptCallsDropped == 1);
-
-            feed(1, {tadEncodeBuildStarted(TadBuildStarted{3, 1, TadPosition{0, 0, 0}, TadRotation{0, 0, 0}})});
-            feed(1, {tadEncodeScriptCall(TadScriptCall{1, 0xffff, 9, {1, 2, 3, 4}})});
-            REQUIRE(driver.stats().scriptCallsDropped == 2);
-            REQUIRE(driver.stats().scriptCallsRun == 0);
+            std::string tnt(0x40, '\0');
+            put(tnt, 0, 0x2000);
+            put(tnt, 4, 4);       // width
+            put(tnt, 8, 4);       // height
+            put(tnt, 0x10, 0x40); // attributes at the end, 4 * 4 * 4 bytes needed
+            put(tnt, 0x1c, 0);    // features
+            put(tnt, 0x20, 0x40);
+            REQUIRE_FALSE(taMapChecksum(asBytes(tnt), asBytes(ota)));
         }
 
-        SECTION("a chat line from a sender no player stands for is ignored")
+        SECTION("a feature count that would size an unbounded read")
         {
-            TadBytes chat(65, 0);
-            chat[0] = 0x05;
-            chat[1] = 'h';
-            chat[2] = 'i';
-
-            feed(3, {chat});
-            REQUIRE(driver.stats().chatLines == 0);
-            REQUIRE(driver.takeChat().empty());
+            std::string tnt(0x40 + 4, '\0');
+            put(tnt, 0, 0x2000);
+            put(tnt, 4, 1);
+            put(tnt, 8, 1);
+            put(tnt, 0x10, 0x40);
+            put(tnt, 0x1c, 0xffffffffu);
+            put(tnt, 0x20, 0x44);
+            REQUIRE_FALSE(taMapChecksum(asBytes(tnt), asBytes(ota)));
         }
 
-        SECTION("resource statistics for an unmapped sender change nobody")
+        // A one-by-one map's attributes, which are exactly the four bytes after the header.
+        std::string smallTnt(0x40 + 4, '\0');
+        put(smallTnt, 0, 0x2000);
+        put(smallTnt, 4, 1);
+        put(smallTnt, 8, 1);
+        put(smallTnt, 0x10, 0x40);
+        put(smallTnt, 0x1c, 0);
+        put(smallTnt, 0x20, 0x44);
+
+        SECTION("an OTA with no GlobalHeader block")
         {
-            TadResourceStats stats{};
-            stats.metalStored = 123.0f;
-            feed(3, {tadEncodeResourceStats(stats)});
-            REQUIRE(sim.getPlayer(PlayerId(0)).metal == Metal(10000.0f));
+            REQUIRE_FALSE(taMapChecksum(asBytes(smallTnt), asBytes("[Schema 0]\r\n{\r\n}\r\n")));
         }
 
-        SECTION("a truncated speed record changes nothing, a whole one is stored")
+        SECTION("a GlobalHeader whose brace never closes")
         {
-            feed(1, {TadBytes{0x19, 0x00}});
-            REQUIRE(driver.stats().speedChanges == 0);
-            REQUIRE_FALSE(driver.takeSpeedChange());
-
-            feed(1, {tadEncodeSpeed(TadSpeed{256})});
-            REQUIRE(driver.stats().speedChanges == 1);
-            auto speed = driver.takeSpeedChange();
-            REQUIRE(speed);
-            REQUIRE(*speed == 256);
-            REQUIRE_FALSE(driver.takeSpeedChange());
+            REQUIRE_FALSE(taMapChecksum(asBytes(smallTnt), asBytes("[GlobalHeader]\r\n{\r\n")));
         }
     }
 }

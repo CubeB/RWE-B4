@@ -358,6 +358,9 @@ namespace rwe
          */
         void updateMoveRateBand(UnitInfo unitInfo);
 
+        /** Tells a live TA sink an aim script started, by its index in the unit's own script. */
+        void notifyAimScriptStarted(UnitId id, const UnitState& unit, const std::string& functionName, int heading, int pitch);
+
         /**
          * Gunship attack handler, for the two units in the original data with
          * HoverAttack set. Closes to weapon range, then holds a ring at two

@@ -221,6 +221,20 @@ namespace rwe
             ids.release(UnitId(1));
             REQUIRE(ids.usedBy(PlayerId(0)) == 0);
         }
+
+        SECTION("a live host's first block is one, clear of the block a joiner takes")
+        {
+            // A joining TA puts its own units in block 0, so a host that
+            // started there would have its units erased on the peer and the
+            // peer's on itself.
+            DemoIdAllocator ids(250, 1);
+            PlayerId a(0);
+            PlayerId b(1);
+
+            REQUIRE(ids.allocate(a, UnitId(1)) == 251);
+            REQUIRE(ids.allocate(b, UnitId(2)) == 501);
+            REQUIRE(ids.indexOf(UnitId(1)) == 0);
+        }
     }
 
     TEST_CASE("DemoRecorder", "[demorecorder]")

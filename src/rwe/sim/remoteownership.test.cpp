@@ -158,7 +158,7 @@ namespace rwe
         REQUIRE_FALSE(setup(true));
     }
 
-    TEST_CASE("local damage cannot touch a remote unit but recorded damage can", "[remote]")
+    TEST_CASE("a local hit shows on a remote unit without killing it, and recorded damage does too", "[remote]")
     {
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto local = addPlayer(sim, "local");
@@ -169,9 +169,14 @@ namespace rwe
         auto id = spawnOwnershipUnit(sim, "WALKER", remote, SimVector(200_ss, 0_ss, 200_ss));
         auto health = sim.unitDefinitions.at("WALKER").maxHitPoints;
 
+        // A bare applyDamage names no source, so it is taken as the owner's and
+        // leaves a remote unit alone.
         sim.applyDamage(id, 100);
         REQUIRE(sim.getUnitState(id).hitPoints == health);
 
+        // A local weapon's blast is this machine's, so it shows on the victim:
+        // worn down to its last hit point, but never killed -- only the owner's
+        // record settles it.
         Projectile blast{};
         blast.owner = local;
         blast.position = sim.getUnitState(id).position;
@@ -181,8 +186,11 @@ namespace rwe
         blast.damageRadius = 100_ss;
         blast.edgeEffectiveness = 0_ss;
         sim.applyDamageInRadius(blast.position, blast.damageRadius, blast);
-        REQUIRE(sim.getUnitState(id).hitPoints == health);
+        REQUIRE(sim.getUnitState(id).hitPoints == 1);
+        REQUIRE(sim.getUnitState(id).isAlive());
 
+        // Recorded damage from the owner does the same, and likewise never kills.
+        sim.getUnitState(id).hitPoints = health;
         applyRemoteDamage(sim, id, 100);
         REQUIRE(sim.getUnitState(id).hitPoints == health - 100);
 

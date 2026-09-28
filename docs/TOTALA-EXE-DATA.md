@@ -1172,6 +1172,12 @@ not. A knockback added for feel would be a deliberate departure and belongs in
 This one is included because it **failed**, and the shape of the failure is
 worth having written down before someone spends the same two days on it again.
 
+**Superseded in part by §117.** The checksum this section could not find is
+`0x4B6BA0` over the **raw FBI bytes** -- not a name hash and not a standard
+checksum, which is why every candidate below missed. The map half of the same
+routine is in §117 too. What follows is kept for the FBI struct map and for the
+list of things that do not work.
+
 A `.tad` demo carries a `UnitData` record listing every unit type the game
 knew, as 14-byte `0x1a` subpackets (see `docs/TA-DEMOS.md`). The stream then
 refers to unit types by an *index into that table*, so a demo's build events
@@ -1253,7 +1259,9 @@ these against a ground-truth CSV so the negative is reproducible and a new
 candidate can be checked before it is believed.
 
 Next time: a recursive-descent disassembly of `0x455000`-`0x46e000`, or a live
-breakpoint on the restrictions-dialog arrays at `0x44ca4e`.
+breakpoint on the restrictions-dialog arrays at `0x44ca4e`. The checksum is no
+longer behind either of them (§117), so what is left here is the transient
+record itself, which nothing else needs.
 
 ### What it was wanted for, and why that no longer needs it
 
@@ -1688,3 +1696,90 @@ Nothing plays on defeat, and a completed campaign in windowed mode goes
 straight to the main menu. The shipped `nomovie=1` missions are the Core
 Contingency finales and the last Battle Tactics missions, so only the two
 original campaigns end on a film.
+
+## 117. The map checksum, and the unit id that shares its routine
+
+Decoded 2026-09-28 for B4 #471. The host's `0x20` status carries a map
+checksum at bytes 170-173 that a joining TA looks the map up by, and a
+joining TA's `0x1a` unit table carries one content-derived id per unit type.
+Both come out of one routine. §109 stopped a few bytes short of it; this is
+what was on the other side.
+
+### The routine, `0x4B6BA0`
+
+`taChecksum(ptr, len)`, two arguments and `ret 8`, hashes a byte range with
+four one-byte accumulators and returns them combined big-endian as `A D B C`:
+
+```
+A ^= (index_lo + byte)      ; index_lo is the low byte of the position
+B ^= byte
+C += byte
+D += (index_lo ^ byte)
+result = (A << 24) | (D << 16) | (B << 8) | C
+```
+
+Every accumulator wraps at a byte, so the result has the 256-byte period the
+index introduces. It is not a CRC and not any standard checksum, which is why
+the crc32, adler32 and byte-sum candidates of §109 all missed. Empty input
+hashes to zero; `"A"` hashes to `0x41414141`.
+
+### The map checksum, `0x4373A0`
+
+Called with the current map object and returning a dword, it reads two cached
+halves and returns their XOR:
+
+- **`+0xC1C`**, the `.tnt` half, computed on first use and then cached. It is
+  the XOR of `taChecksum` over three blocks of `maps\<name>.tnt` (opened by
+  `0x4BB5B0` with mode `"rb"`), and the value is also inserted into the
+  name-keyed list at `0x5122C0`, so a map already asked about is answered from
+  the list:
+
+  | Block | Offset | Length |
+  |---|---|---|
+  | the file header | `0` | `0x40` |
+  | the tile attributes | `+0x10` (`mapAttributesOffset`) | `width * height * 4` |
+  | the features | `+0x20` (`featuresOffset`) | `numberOfFeatures * 132` |
+
+  A first dword other than `0x2000` is not a TNT and the routine returns zero.
+- **`+0xC20`**, the `.ota` half, is the `[GlobalHeader]` TDF block's own hash,
+  which the mission reader puts there at `0x4361EF` from the block's `+0x25`.
+  That hash is made by the TDF parser at `0x4C4183`: `taChecksum` over the
+  block's body from the byte after its opening `{` to **two bytes before its
+  matching `}`**. The two trailing bytes are always dropped, whatever they
+  are -- for a shipped OTA that is the `\n` and `\t` before the closing brace,
+  so the block's final `\r` is hashed and the two bytes after it are not.
+
+`0x4373A0` is what fills bytes 170-173: the local player's copy is written at
+`0x44A536`/`0x444E36` into `player+0xA9` (the status record minus its leading
+type byte), the evidence in a capture is read back through the same XOR, and a
+peer's copy is compared against it at `0x448F2C`, `0x4481C3`, `0x44A719` and
+`0x440D54`, which is where "does not have this map" (`0x505E04`) comes from.
+
+The two oracles, from a real host's `0x20` (bytes 170-173, little-endian):
+
+| Map | Checksum |
+|---|---|
+| Canal Crossing | `0x6EBE0529` |
+| Great Divide | `0xE4D8389A` |
+
+`tools/exe/mapcrc.py` reproduces both; `rwe_test`'s
+`TaChecksums.test.cpp` checks them through the VFS.
+
+### The unit id is the same routine over the FBI
+
+The `a` field of a `0x1A` sub-type-2 record -- the content-derived id a joining
+TA sends and a host echoes -- is `taChecksum` over the **raw bytes of the FBI
+file**, with no path, name, case-folding or canonicalisation in it. Against
+the GOG install's 278 unit types, all 278 ids match, over the files as the VFS
+serves them (CRLF and all), which is the check that settled §109. The `b`
+field of the record is the flag word §109 decodes and not a second hash.
+
+### Why §109 failed, and what it costs
+
+The two passes looked for a checksum over a *name* or a *canonical form* and
+used standard hashes; the routine is neither and the input is the raw file.
+The record `0x46D630` reads from is still unfound, but it no longer needs to
+be: its id is computable from the FBI, and the `0x09` path that motivated the
+original search does not use the table at all (§109). The map half is now
+wired into `TaBattleroom`, so `rwe --ta-host` sends the checksum of whatever
+map it hosts.
