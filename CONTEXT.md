@@ -299,6 +299,17 @@ it does not run the world forward.
 _Avoid_: jitter buffer (that is the mechanism, this is the setting), buffer
 size (that is the bound on packets held)
 
+**Stub navigator** (`0x44F570`):
+The navigator TotalA.exe gives a unit whose owner is another machine
+(`0x43DC00`, player state 3). It holds the waypoints of the last `0x2c` entry
+and reports them, but its `Update` is the base no-op where a local unit's
+(`0x44F1A0`) retires a waypoint within five units of the next corner, so it can
+never advance past `wp[1]`. A remote unit therefore walks one segment per entry
+and stops at the corner until the owner's next one; total onset is the owner's
+problem, not the receiver's. `docs/TOTALA-EXE-MOVEMENT.md` §118.
+_Avoid_: puppet navigator (RWE's receiver writes its own path, it does not run
+this)
+
 **Demo output**:
 A `.tad` RWE wrote rather than recorded from TA. Readable and mineable by the
 same tools as a real one, with three recorded divergences: the `0x1a` ids are

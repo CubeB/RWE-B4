@@ -66,7 +66,7 @@ conversion, string reads at an address, pointer-table dumps) are in `tools/exe/`
 
 ## Index
 
-The 114 findings, numbered to 116: §83 and §84 do not exist, so the count is
+The 116 findings, numbered to 118: §83 and §84 do not exist, so the count is
 two short of the last number. The two to read before changing anything are
 **§88**, where RWE deliberately differs from the original on purpose, and
 **§91**, what is decoded but not ported; both are in this file, below.
@@ -189,6 +189,7 @@ Everything else lives in a subject file. **The numbers never move**, so a
 115. [The campaign's screens, progression and ending movies](TOTALA-EXE-DATA.md#115-the-campaigns-screens-progression-and-ending-movies)
 116. [What a round aims at on a unit, and why the water comes after it](TOTALA-EXE-WEAPONS.md#116-what-a-round-aims-at-on-a-unit-and-why-the-water-comes-after-it)
 117. [The map checksum, and the unit id that shares its routine](TOTALA-EXE-DATA.md#117-the-map-checksum-and-the-unit-id-that-shares-its-routine)
+118. [A peer's `0x2c` records, and the stub navigator that cannot retire a waypoint](TOTALA-EXE-MOVEMENT.md#118-a-peers-0x2c-records-and-the-stub-navigator-that-cannot-retire-a-waypoint)
 
 ## 88. Where RWE deliberately differs
 

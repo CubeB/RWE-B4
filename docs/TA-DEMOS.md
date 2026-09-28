@@ -842,8 +842,17 @@ See the wrecks section below; this is the largest single finding of the pass.
 
 Two 16.16 position triples -- where the shot came from and where it was aimed,
 and the second is far enough from the first that it cannot be a velocity -- then
-a rotation triple, then `u16` target (zero if the shot was not aimed at a unit),
-`u16` shooter, and one byte that is 0, 1 or 2.
+three `u16` words that are **not** a rotation triple, then `u16` target (zero if
+the shot was not aimed at a unit), `u16` shooter, and one byte that is 0, 1 or 2.
+
+**The three words are the weapon's `ID`, the bearing and the elevation.**
+`TOTALA-EXE-WEAPONS.md`, "Receiving a `0x0d`, `0x49D270`", is the decode: the
+first word's low byte is the weapon's own TDF `ID` and its high byte a flags
+byte the emitter never writes, and the receiver indexes its weapon table by the
+low byte. The second and third are the launch bearing and elevation, in TA's
+16-bit angle units. Reading the first word as an angle -- as this document did
+until the receiver was read -- mistakes a weapon id for a pitch; `ARMCOMLASER`
+is `ID=20`, which is why a laser's first word is the constant `0x0014`.
 
 **That last byte is the weapon slot**, a 0-based index into the shooter's own
 `Weapon1`/`Weapon2`/`Weapon3` -- so `WeaponN` with `N = slot + 1`. This is what
@@ -963,9 +972,10 @@ floors positions onto sixteen-unit squares: a rounded coordinate on the wrong
 side of a boundary moved whole pairings, and `CORVAMP` read 52% in the script
 against 66% in the port. Regenerate an old dump before scoring it.
 
-**A shot also carries its rotation triple** as `rx`, `ry`, `rz`, which is what
-identified the field: see "Why 53,706 shots drew no damage". A dump written
-before that has no such keys and has to be regenerated to use them.
+**A shot also carries its three words** as `rx`, `ry`, `rz` -- the weapon's TDF
+`ID`, the bearing and the elevation, in that order, not a rotation triple; see
+"Receiving a `0x0d`, `0x49D270`" in `TOTALA-EXE-WEAPONS.md`. A dump written
+before those keys existed has to be regenerated to use them.
 
 #### A `0x0b` is sent by the attacker's owner, which is what makes this tractable
 
@@ -1840,11 +1850,19 @@ measured it on units that died.
 
 **Two things the pass found on the way that are not about misses.**
 
-*The `0x0d`'s rotation triple is the shot's own launch attitude.* `--emit-shots`
-now carries it. `ry` against `atan2(dx, dz)` over the aim line has a circular
-correlation of **0.984** with a constant offset of half a circle, so it is a
-yaw; `rx` never leaves -494..182 and tracks the aim line's elevation, so it is a
-pitch. The yaw is not the aim bearing exactly -- its departure has a median of
+*The `0x0d`'s three words are the weapon ID, the bearing and the elevation.*
+`--emit-shots` carries them as `rx`, `ry`, `rz`, but only the last two are
+angles: `rx` is the weapon's TDF `ID` in its low byte and a flags byte the
+emitter leaves clear in its high one, and it is what the receiver indexes its
+weapon table by (`TOTALA-EXE-WEAPONS.md`, "Receiving a `0x0d`, `0x49D270`").
+`ry` against `atan2(dx, dz)` over the aim line has a circular correlation of
+**0.984** with a constant offset of half a circle, so it is a yaw; `rz` tracks
+the aim line's elevation, so it is the pitch. The reading here until the
+receiver was decoded called `rx` the pitch because its signed range (-494..182)
+looks like one; that range is the weapon id with the emitter's unwritten flags
+byte above it, and `ARMCOMLASER`'s constant `0x0014` -- `ID=20` -- is what a
+per-weapon field looks like. The yaw is not the aim bearing exactly -- its
+departure has a median of
 **1.8 degrees** and a 90th percentile of 7 -- so it records a real aiming error,
 which is the first thing in the stream that does. But it does **not** decide a
 shot: bucketing isolated shots by that departure gives a no-damage rate flat at
@@ -1899,8 +1917,8 @@ merely a sign to fix.
 first imagined to be. Three things constrain it.
 
 * **It can only ever be a rate, never a per-shot prediction.** The `0x0d`
-  records where the shot was *aimed* -- and, in the rotation triple, roughly
-  where it was pointed -- but whether it connected depends on where the victim
+  records where the shot was *aimed* -- and, in its bearing and elevation,
+  roughly where it was pointed -- but whether it connected depends on where the victim
   was when it arrived, and the victim's position is in the stream once every
   `maxUnits` ticks. A cell's hit *share* is measurable; "did this shot hit" is
   not.
@@ -3504,11 +3522,11 @@ They catch different things and should not share machinery.
       puts on every turret shot is a **range** error for a shell rather than a
       speed error, so only 2 of its 17 cells keep enough pairings to be scored,
       and the other 15 are printed with what took them. The decoding prize that
-      was hoped for there -- the `0x0d`'s **rotation triple** -- was not what
+      was hoped for there -- the `0x0d`'s **three words** -- was not what
       gave this class its launch vector, since the muzzle and the aim point
       already determine the angle through the engine's own solver. It has since
-      been identified from the other side (the shot's own launch attitude, "The
-      `0x0d`'s rotation triple" above) and `--emit-shots` carries it now, so
+      been identified from the other side (the shot's bearing and elevation,
+      the `0x0d` section above) and `--emit-shots` carries it now, so
       what remains is the use rather than the decode: it is the only way to test
       the solver's *output* rather than its inputs.
 

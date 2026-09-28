@@ -310,9 +310,10 @@ commander record; a game will describe its own.
 
 ## In game
 
-**Staying in the game takes only the `0x2c` stream and pings.** The fake host kept the host
-player in one game for more than five minutes sending nothing else: no `0x28`, `0x10` or `0x11`.
-TA sends its `0x2c` six ticks to a UDP message, thirty ticks a second.
+**Staying in the game takes only the `0x2c` stream.** The fake host kept the host player in one
+game for more than five minutes sending nothing else: no `0x28`, `0x10` or `0x11`. TA sends its
+`0x2c` six ticks to a UDP message, thirty ticks a second. **A `0x02` in game is not part of that:**
+a real host and joiner both stop pinging at launch (below), and RWE does now too.
 
 **The full-state record is authoritative.** Each `0x2c` ends with the full state of block slot
 `tick % maxUnits` (TA-DEMOS, "The full-state record"). An idle record,
@@ -334,6 +335,48 @@ receiver's steering, which varies speed with the ground where the script's model
 
 The Python codec in `tanet.py` re-encodes all 5,153 ground `0x2c` of both captures that carry
 them, both senders, byte for byte. Its type field is 9 bits for the GOG install's 278 types.
+
+### How a peer's `0x2c` is received
+
+Decoded from `TotalA.exe` on 2026-09-28; the addresses and the receive case are in
+`TOTALA-EXE-MOVEMENT.md` §118.
+
+- **A record is applied the moment it arrives.** The `0x2c` case of the subpacket dispatch
+  (`0x4553EE` → `0x48B920`) reads the tick, walks the waypoint entries into the sender's units,
+  moves every one of the sender's units through `Mover::Update` (`0x43DD20`), and reads the
+  full-state record into slot `tick % maxUnits`. Nothing is queued and no clock is compared: a
+  record is never held for a tick to come round.
+- **A remote unit moves as its owner's records are applied, not on the receiver's clock.** This
+  is measured rather than read: RWE hosting at six ticks to a message, as a real TA sends them,
+  showed its commander to a real TA advancing in single-frame jumps every 0.40 s and standing
+  still between them (a screen recording tracked frame by frame, 2026-09-28); sent at one tick to
+  a message, the same walk was smooth. So the `Mover::Update` pass in the `0x2c` case is what
+  moves the sender's units, a message's worth at a time. Why a real TA's six-tick messages do
+  not show the same to another TA is not established. **RWE hosts at one tick a message**;
+  `RWE_TA_TICKS_PER_PACKET` sets another count for experiments.
+- **A remote unit's navigator is a stub.** A remote player's unit (player state 3, `0x43DC53`)
+  is given a **stub navigator** (`0x44F570`) whose `Update` is the base no-op (`0x44EFB0`), where
+  a local unit's navigator (`0x44F1A0`) retires a waypoint within five units of the next corner.
+- **So a remote unit walks one segment per entry.** The stub cannot retire a waypoint, so the
+  follower (`0x43CD20`) steers along `wp[0] → wp[1]` and stops at `wp[1]` until the owner's next
+  entry replaces the list. An owner that sends the next entry when its own navigator retires is
+  in step; one that sends it late leaves the receiver standing at the corner for the difference.
+
+### Why a TA flushes a packet early
+
+- **A received ping request flushes the queued `0x2c`.** The `0x02` case (`0x454B2A` → `0x4565A0`)
+  answers a request and at the same moment the queued unit-state subpackets are flushed, as a
+  packet of their own. Measured over
+  `ta-rwe-test-11.pcap`: every ping request TA receives is followed within 0–60 ms by a `0x2c`
+  packet shorter than six ticks, and TA's 6-tick packets otherwise fall across the interval.
+- **A real TA does not ping in game.** In both `ta-baseline.pcap` and `ta-sides.pcap` the last
+  `0x02` is sent just before the first in-game `0x2c`, and none follows for the rest of the game
+  (46.8 s and 35.2 s). A real host's nine packets in ten are six ticks of unit state and nothing
+  else.
+- **RWE hosted pinging in game, from two timers.** `TaHostGame` armed a 2 s ping timer at launch
+  while `TaBattleroom`'s 2 s ping timer kept running, giving the two interleaved request series
+  (~1 a second) visible in the capture. Both are stopped at launch now, so RWE no longer causes
+  the early flush.
 
 ## Damage and death
 
