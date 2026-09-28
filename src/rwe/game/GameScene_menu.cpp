@@ -143,6 +143,12 @@ namespace rwe
 
     void GameScene::openSaveDialog()
     {
+        if (!canSave())
+        {
+            printConsole("Saving is not available in this game");
+            return;
+        }
+
         // LOADGAME.GUI is the save/load dialog both ways in the original --
         // list, name field, metadata labels, radar frame -- and only the
         // painted background differs: DSavegame2 titles it SAVE GAME.
@@ -182,6 +188,14 @@ namespace rwe
         if (hasRemotePlayer(simulation))
         {
             printConsole("Cannot save: a player is simulated on another machine");
+            return;
+        }
+
+        // An own-clock game's peer owns its own units and its own clock, so a
+        // save of RWE's half could not be resumed into the game it came from.
+        if (!canSave())
+        {
+            printConsole("Saving is not available in this game");
             return;
         }
 

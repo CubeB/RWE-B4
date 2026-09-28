@@ -151,11 +151,32 @@ namespace rwe
         }
     };
 
+    /**
+     * How a live game advances its clock.
+     *
+     * Lockstep is RWE's multiplayer contract: a tick runs only once every
+     * peer's commands for it have arrived and peers compare sync hashes.
+     *
+     * OwnClock is a game against a peer that runs its own simulation and
+     * waits for nobody -- a real `TotalA.exe`, which is owner-authoritative
+     * rather than lockstep (docs/TA-NETWORK.md). The scene ticks on its own
+     * clock at the chosen speed like a skirmish, with no command gate, no
+     * hash exchange, no desync report and no save.
+     */
+    enum class NetMode
+    {
+        Lockstep,
+        OwnClock,
+    };
+
     struct GameParameters
     {
         std::string mapName;
         unsigned int schemaIndex;
         std::array<std::optional<PlayerInfo>, 10> players;
+
+        /** How this game advances its clock; see NetMode. */
+        NetMode netMode{NetMode::Lockstep};
 
         /**
          * Play the map as a mission (--mission): the schema's [units] for the

@@ -301,6 +301,25 @@ namespace rwe
                     {
                         --entry.second;
                     }
+                    else if (unitInfo.state->repeatBuildQueue)
+                    {
+                        // The opt-in factory repeat (#417). The entry that has
+                        // just been worked off goes to the back of the
+                        // factory's own queue instead of being consumed, so
+                        // one queued type loops for ever and a queue of
+                        // several keeps its order -- each finished entry
+                        // rejoins behind whatever is still waiting, so a
+                        // factory works its list round and round rather than
+                        // restarting it.
+                        //
+                        // The type is copied out first: pop_front invalidates
+                        // the reference this branch is holding, which is the
+                        // kind of use-after-free that reads as a corrupted
+                        // queue rather than as a crash.
+                        auto finishedType = entry.first;
+                        unitInfo.state->buildQueue.pop_front();
+                        unitInfo.state->buildQueue.emplace_back(finishedType, 1);
+                    }
                     else
                     {
                         unitInfo.state->buildQueue.pop_front();
