@@ -216,21 +216,17 @@ namespace rwe
 
     TadBytes taBuildUnitSyncHeader()
     {
-        TadBytes out;
-        out.reserve(UnitSyncSize);
-        out.push_back(static_cast<std::uint8_t>(TadSubPacketCode::UnitData));
-        out.push_back(UnitSyncHeaderSubType);
-        out.resize(UnitSyncSize, 0);
+        TadBytes out(UnitSyncSize, 0);
+        out[0] = static_cast<std::uint8_t>(TadSubPacketCode::UnitData);
+        out[1] = UnitSyncHeaderSubType;
         return out;
     }
 
     TadBytes taBuildUnitSyncEcho(std::uint32_t unitTypeId, bool inUse)
     {
-        TadBytes out;
-        out.reserve(UnitSyncSize);
-        out.push_back(static_cast<std::uint8_t>(TadSubPacketCode::UnitData));
-        out.push_back(UnitSyncEchoSubType);
-        out.resize(6, 0);
+        // Built from a list rather than reserve, push_back and resize: GCC's
+        // -O2 stringop-overflow check misreads that sequence and fails -Werror.
+        TadBytes out{static_cast<std::uint8_t>(TadSubPacketCode::UnitData), UnitSyncEchoSubType, 0, 0, 0, 0};
         writeU32(out, unitTypeId);
         writeU16(out, static_cast<std::uint16_t>(inUse ? 0x0101 : 0x0001));
         writeU16(out, 0xFFFF);
@@ -344,7 +340,9 @@ namespace rwe
 
     void TaBattleroom::peerJoined(PeerId peer)
     {
-        peers_[peer] = TaBattleroomPeer{peer};
+        TaBattleroomPeer joined;
+        joined.playerId = peer;
+        peers_[peer] = std::move(joined);
         peers_[peer].name = session.peerName(peer);
         readyAnnounced_[peer] = false;
         if (std::find(joinOrder_.begin(), joinOrder_.end(), peer) == joinOrder_.end())
