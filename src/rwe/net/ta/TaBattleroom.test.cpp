@@ -493,6 +493,19 @@ namespace rwe
         REQUIRE(sent[2] == taBuildUnitSyncHeader());
     }
 
+    TEST_CASE("the map checksum the lobby set is the one the status carries", "[net][ta]")
+    {
+        Harness h;
+        h.room->setMapChecksum(0xE4D8389A);
+        h.room->peerJoined(JoinerId);
+
+        auto sent = h.codesTo(JoinerId, TaTransport::Tcp);
+        auto status = taParsePlayerStatus(sent[0]);
+        REQUIRE(status);
+        REQUIRE(status->mapChecksum == 0xE4D8389A);
+        REQUIRE(sent[0][TaPlayerStatusMapChecksumOffset] == 0x9A);
+    }
+
     TEST_CASE("each batch of the joiner's ids is echoed in its order, both ways, uncompressed", "[net][ta]")
     {
         Harness h;
