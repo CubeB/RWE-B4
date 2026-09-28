@@ -8,7 +8,7 @@
 
 namespace rwe
 {
-    class GameSimulation;
+    struct GameSimulation;
 
     /**
      * The named player's own construction units that have nothing to do right

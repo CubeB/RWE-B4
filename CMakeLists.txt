@@ -343,6 +343,7 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_chat.cpp
     src/rwe/game/GameScene_commands.cpp
     src/rwe/game/GameScene_debug.cpp
+    src/rwe/game/GameScene_idle.cpp
     src/rwe/game/GameScene_endgame.cpp
     src/rwe/game/GameScene_input.cpp
     src/rwe/game/GameScene_menu.cpp
