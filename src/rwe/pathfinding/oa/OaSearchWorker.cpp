@@ -572,17 +572,19 @@ namespace rwe
             budget_ = 0;
             const auto next_width = begin.mapWidth;
             const auto next_height = begin.mapHeight;
-            const auto count = static_cast<std::size_t>(next_width) * next_height;
             if (next_width < 0 || next_height < 0)
             {
                 throw std::length_error("search map dimensions are negative");
             }
-            if (next_width != 0 && count / next_width != next_height)
+            const auto unsigned_width = static_cast<std::size_t>(next_width);
+            const auto unsigned_height = static_cast<std::size_t>(next_height);
+            const auto count = unsigned_width * unsigned_height;
+            if (unsigned_width != 0 && count / unsigned_width != unsigned_height)
             {
                 throw std::length_error("search map dimensions overflow");
             }
             const auto dirty_words = static_cast<std::size_t>((static_cast<uint64_t>(count) + 0xff) >> 8);
-            if (width_ != next_width || height_ != next_height || cells_.size() != count)
+            if (width_ != static_cast<uint32_t>(next_width) || height_ != static_cast<uint32_t>(next_height) || cells_.size() != count)
             {
                 width_ = static_cast<uint32_t>(next_width);
                 height_ = static_cast<uint32_t>(next_height);
