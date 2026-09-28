@@ -29,12 +29,13 @@ A reading tool only. RWE can read HPI and cannot write it, and nothing here is
 a step toward writing one.
 
 Checked against all thirteen archives of a TA 3.1 install -- `totala1-4.hpi`,
-`worlds.hpi`, `tactics1-8.hpi` -- by extracting every one of their 3,571 files:
-every chunk checksum verified and every file came back the length its directory
-entry declares. `totala1/2/4` are encrypted (a non-zero key) and LZ77; the rest
-are ZLib. **No shipped archive stores a file uncompressed**, so
+`worlds.hpi`, `tactics1-8.hpi` -- by extracting every one of their 3,676 files
+and diffing the result against what the engine's own reader, `build/hpi_test
+extract-all`, writes for the same archive: identical, all of them, byte for
+byte. `totala1/2/4` are encrypted (a non-zero key) and LZ77; the rest are
+ZLib. **No shipped archive stores a file uncompressed**, so
 `CompressionScheme::None` is written to match `HpiArchive::extract` and is
-exercised only by a synthesised archive.
+exercised by `tools/test_hpi.py` against an archive it builds itself.
 """
 
 import argparse
