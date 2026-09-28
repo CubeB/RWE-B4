@@ -15,6 +15,7 @@
 #include <rwe/sim/UnitId.h>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rwe
@@ -773,5 +774,73 @@ namespace rwe
          * gate and turn straight round. See AiTuningProfile::retreatDamagedUnits.
          */
         std::map<unsigned int, GameTime> mendingUnits;
+
+        /**
+         * Landing searches for an army ferry that have come back with nothing,
+         * as the coarse cell the attack target fell in and the tick until
+         * which the answer is still believed (issue #398).
+         *
+         * The ferry's landing search is asked once per tactical pass per idle
+         * transport, and its failure was logged and forgotten, so an objective
+         * the sea cannot serve was asked about again every half second for the
+         * rest of the game with the transport standing idle on it each time.
+         * Nothing remembered that a search had already been made.
+         *
+         * On the blackboard rather than inside TransportManager because
+         * ArmyManager has to be told as well: the transport pass runs before
+         * the army pass in the same tick, so a refusal written now is read
+         * when the army picks the objective for the next pass, and an enemy
+         * that cannot be landed at can be passed over for one that can. See
+         * TransportManager::update and
+         * AiTuningProfile::ferryLandingRefusalCooldownSeconds.
+         *
+         * An ordered map, but only ever looked up by cell and never walked,
+         * so there is no iteration order to get wrong and nothing here feeds
+         * a decision by being in a particular sequence. Bounded by the cell
+         * grid over one map -- a few thousand entries at the shipped cell
+         * width, each a pair of ints and a tick -- and each entry is dropped
+         * the first time it is found stale.
+         */
+        std::map<std::pair<int, int>, GameTime> ferryLandingRefusals;
     };
+
+    /**
+     * Which landing-refusal cell a world position falls in: a floor division
+     * of the whole number of world units a SimVector carries by the cell
+     * width, in each axis.
+     *
+     * Integer throughout, and floor rather than truncation, so two points a
+     * unit either side of a cell boundary land in the same cell. This decides
+     * whether a refusal is remembered at all, so every peer has to come to the
+     * same answer from it; a float divide and a floor would almost certainly
+     * do, and is one more place for it not to.
+     */
+    inline std::pair<int, int> ferryLandingRefusalCell(const SimVector& at, int cellSize)
+    {
+        if (cellSize < 1)
+        {
+            return std::make_pair(0, 0);
+        }
+        auto floorDivide = [cellSize](SimScalar world) {
+            auto whole = static_cast<int>(world.value);
+            auto cell = whole / cellSize;
+            return (whole % cellSize != 0 && whole < 0) ? cell - 1 : cell;
+        };
+        return std::make_pair(floorDivide(at.x), floorDivide(at.z));
+    }
+
+    /**
+     * Whether an army ferry's landing search has already come back empty for
+     * this objective and the answer has not gone stale yet.
+     *
+     * Pure: it does not drop the stale entry it finds, because ArmyManager
+     * asks this about candidates it may go on to use, and forgetting what the
+     * ferry learned is TransportManager's business. That is where an expired
+     * entry is erased -- on the pass that would have acted on it.
+     */
+    inline bool ferryLandingRefused(const AiBlackboard& bb, const SimVector& at, int cellSize, GameTime now)
+    {
+        auto it = bb.ferryLandingRefusals.find(ferryLandingRefusalCell(at, cellSize));
+        return it != bb.ferryLandingRefusals.end() && it->second > now;
+    }
 }
