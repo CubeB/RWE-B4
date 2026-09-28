@@ -89,10 +89,17 @@ of a player's ids, is how a player leaves.
 
 `decrypt`, then `decompress` with a three-byte header, then skip seven bytes (type, checksum, a
 `u32`), then the subpacket table: exactly `tadDecrypt`, `tadDecompress` and
-`tadSplitSubPackets`. The `u32` is `0xffffffff` on replies and the battleroom's steady traffic and
-takes small negative values that fall over a session on a sender's own requests and in-game
-packets; it is not a clock, and nothing seen depends on it. Uncompressed packets (type `0x03`)
-were accepted for unit sync and status, where TA itself sends compressed ones.
+`tadSplitSubPackets`. Uncompressed packets (type `0x03`) were accepted for unit sync and status,
+where TA itself sends compressed ones.
+
+**The `u32` is a per-sender count, and a reply is the one value it is not.** It is `0xffffffff` on
+every reply. On everything a sender starts itself it falls by one per packet: a joining TA's own
+traffic runs `0xfffffffe`, `0xfffffffd`, `0xfffffffc` and on, and in all three recordings both
+peers begin one below `0xffffffff`, so a sender's own status, its pings, the launch exchange and
+the in-game `0x2c` all carry a count, while the unit sync that answers someone else's request
+carries `0xffffffff` and does not consume one. It is not a clock and nothing seen depends on it --
+a replay writes `0xfffffead`, and a real host's first own packet in a recording can already be
+seventy packets down -- so `0xffffffff` is a safe value to send anywhere.
 
 ## The battleroom
 
@@ -102,6 +109,13 @@ were accepted for unit sync and status, where TA itself sends compressed ones.
 | `0x24`, 6 bytes | `u32` player id, `u8` team. An untouched battleroom sends 5, no team. |
 | `0x02`, 13 bytes | Ping: the requester's tick, the responder's tick (0 in a request), the requester's player id. Requests go to everyone, replies to the requester. |
 | `0x07`, `0x06` | Filler around the status exchange. |
+
+**The tick in a ping is a wall clock, near `GetTickCount`, and the reply's second tick is the
+latency.** Two peers a second apart in uptime agree on it to the millisecond, and in the captures
+the second tick in a reply is 0 to 22 above the tick the request carried, which the requester
+reads as the peer's ping. So a reply echoes the requester's tick unchanged and adds the
+responder's, and it is only believable if it echoes a tick the requester sent. A request is 20
+bytes and uncompressed; its reply carries `0xffffffff` where the request carried a count.
 
 **The options byte**, read from a capture in which the host changed one battleroom option at a
 time:

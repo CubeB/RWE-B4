@@ -18,6 +18,8 @@
 #include <rwe/io/tnt/TntArchive.h>
 #include <rwe/io/weapontdf/WeaponTdf.h>
 #include <rwe/net/ta/TaDirectPlay.h>
+#include <rwe/net/ta/TaPacket.h>
+#include <rwe/net/ta/TaPinger.h>
 #include <rwe/puppet/TadPuppetDriver.h>
 #include <rwe/puppet/puppet_test_util.h>
 #include <rwe/sim/GameSimulation.h>
@@ -457,6 +459,93 @@ namespace rwe
 
         std::vector<std::uint8_t> udp(4, 0);
         REQUIRE_THROWS_AS(taDecodeAppDataUdp(udp.data(), udp.size()), TaDirectPlayException);
+    }
+
+    TEST_CASE("a TA packet too short for its header is dropped, not read past", "[malformed]")
+    {
+        for (std::size_t size = 0; size < TaPacketHeaderSize; ++size)
+        {
+            std::vector<std::uint8_t> bytes(size, 0x03);
+            CAPTURE(size);
+            REQUIRE_FALSE(taParsePacket(bytes));
+        }
+
+        // A 0x04 whose compressed stream stops mid-slot has no plain form to
+        // walk, so there is nothing to give back.
+        TadBytes stopped{0x04, 0x00, 0x00, 0x01, 0x00};
+        REQUIRE_FALSE(taParsePacket(stopped));
+    }
+
+    TEST_CASE("a subpacket the length table cannot size ends the walk", "[malformed]")
+    {
+        // 0x6f is not in the table. The rest of the payload is handed over whole
+        // rather than absorbed silently, so a desynchronised walk is visible.
+        TaPacket unknown;
+        unknown.subpackets.push_back({0x6F, 0x01, 0x02});
+        auto parsed = taParsePacket(unknown.build());
+        REQUIRE(parsed);
+        REQUIRE(parsed->stats.unknownCodes == 1);
+        REQUIRE(parsed->packet.subpackets.size() == 1);
+        REQUIRE(parsed->packet.subpackets[0] == TadBytes({0x6F, 0x01, 0x02}));
+    }
+
+    TEST_CASE("a TA packet with a bad checksum is walked and reported, not trusted", "[malformed]")
+    {
+        TaPacket packet;
+        packet.subpackets.push_back({0x06});
+        TadBytes bytes = packet.build();
+        REQUIRE(taParsePacket(bytes)->checksumValid);
+
+        // Flip a byte inside the encrypted body. The stored checksum no longer
+        // matches, and the packet is worth walking anyway: a bad checksum is not
+        // a reason to drop a whole session's traffic.
+        bytes[4] ^= 0x40;
+        auto parsed = taParsePacket(bytes);
+        REQUIRE(parsed);
+        REQUIRE_FALSE(parsed->checksumValid);
+        REQUIRE(parsed->packet.subpackets.size() == 1);
+
+        // The same, in the header, which is not encrypted.
+        TadBytes header = packet.build();
+        header[3] ^= 0x01;
+        auto badHeader = taParsePacket(header);
+        REQUIRE(badHeader);
+        REQUIRE_FALSE(badHeader->checksumValid);
+    }
+
+    TEST_CASE("a subpacket that declares more than the packet holds ends the walk", "[malformed]")
+    {
+        // 0x2c carries its own length: claim 0xffff of a five-byte payload.
+        TaPacket unitState;
+        unitState.subpackets.push_back({0x2C, 0xFF, 0xFF, 0x00, 0x00});
+        auto parsed = taParsePacket(unitState.build());
+        REQUIRE(parsed);
+        REQUIRE(parsed->stats.truncated == 1);
+        REQUIRE(parsed->packet.subpackets.size() == 1);
+        REQUIRE(parsed->packet.subpackets[0].size() == 5);
+
+        // 0xfb's length is a byte over a three-byte prefix.
+        TaPacket recorder;
+        recorder.subpackets.push_back({0xFB, 0x7F});
+        auto parsedFb = taParsePacket(recorder.build());
+        REQUIRE(parsedFb);
+        REQUIRE(parsedFb->stats.truncated == 1);
+        REQUIRE(parsedFb->packet.subpackets.size() == 1);
+        REQUIRE(parsedFb->packet.subpackets[0].size() == 2);
+    }
+
+    TEST_CASE("a 0x02 that is not thirteen bytes is not a ping", "[malformed]")
+    {
+        for (std::size_t size = 0; size < 20; ++size)
+        {
+            if (size == 13)
+            {
+                continue;
+            }
+            TadBytes notAPing(size, 0x02);
+            CAPTURE(size);
+            REQUIRE_FALSE(TaPinger::parsePing(notAPing));
+        }
     }
 
     TEST_CASE("an FBI with no SoundCategory is silent, not refused", "[malformed]")
