@@ -43,6 +43,8 @@ namespace rwe
          * listAiKnobs sorts its own output rather than relying on it.
          */
         constexpr IntKnob intKnobs[] = {
+            {"ferryLandingRefusalCooldownSeconds", &AiTuningProfile::ferryLandingRefusalCooldownSeconds},
+            {"ferryLandingRefusalCell", &AiTuningProfile::ferryLandingRefusalCell},
             {"openingMetalExtractorCount", &AiTuningProfile::openingMetalExtractorCount},
             {"openingSolarCount", &AiTuningProfile::openingSolarCount},
             {"targetSolarCount", &AiTuningProfile::targetSolarCount},
