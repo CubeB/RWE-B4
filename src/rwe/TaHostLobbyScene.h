@@ -38,7 +38,6 @@ namespace rwe
 
         void update(int millisecondsElapsed) override;
 
-        void render() override;
 
         void onKeyDown(const SDL_KeyboardEvent& event) override;
 
@@ -74,6 +73,7 @@ namespace rwe
 
         std::optional<TaBattleroom::LaunchParams> computeLaunchParams() const;
 
+        void drawPanel();
         void tryLaunch();
         void launch();
         void startLoading();

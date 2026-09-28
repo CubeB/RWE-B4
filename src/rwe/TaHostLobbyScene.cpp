@@ -115,6 +115,10 @@ namespace rwe
 
     void TaHostLobbyScene::update(int)
     {
+        // ImGui windows go in during update: the scene manager ends the ImGui
+        // frame before it calls render(), so a window begun there never draws.
+        drawPanel();
+
         if (!host || loading || !params)
         {
             return;
@@ -274,7 +278,7 @@ namespace rwe
         sceneContext.sceneManager->setNextScene(std::shared_ptr<Scene>(std::move(scene)));
     }
 
-    void TaHostLobbyScene::render()
+    void TaHostLobbyScene::drawPanel()
     {
         if (!host)
         {
