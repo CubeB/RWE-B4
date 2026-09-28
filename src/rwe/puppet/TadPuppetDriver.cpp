@@ -7,6 +7,7 @@
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/pathfinding/UnitPath.h>
+#include <rwe/sim/TaHeading.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/SimScalar.h>
 #include <rwe/sim/SimulationOwnership.h>
@@ -460,7 +461,7 @@ namespace rwe
                 *typeName,
                 player->second,
                 toSimPosition(e->position),
-                SimAngle(static_cast<uint16_t>(e->rotation.y)),
+                simAngleFromTaYaw(e->rotation.y),
                 false);
             if (!unitId)
             {
@@ -860,11 +861,16 @@ namespace rwe
 
             // The follower steers along the segment from wp[current-1] to
             // wp[current], so the front of the path is where the unit stands
-            // now and the replicated waypoints follow it.
+            // now and the replicated waypoints follow it. The entry's first
+            // corner is the one the owner's unit has just left (TOTALA-EXE.md
+            // section 102), so where there is a corner after it, steering starts
+            // there rather than turning back.
             UnitPath path;
             path.waypoints.push_back(unit.position);
-            for (const auto& wp : ground.waypoints)
+            auto first = ground.waypoints.size() >= 2 ? std::next(ground.waypoints.begin()) : ground.waypoints.begin();
+            for (auto wpIt = first; wpIt != ground.waypoints.end(); ++wpIt)
             {
+                const auto& wp = *wpIt;
                 SimVector p = sim.terrain.topLeftCoordinateToWorld(
                     SimVector(SimScalar(static_cast<float>(wp.x)), 0_ss, SimScalar(static_cast<float>(wp.z))));
                 p.y = sim.terrain.getHeightAt(p.x, p.z);
@@ -1052,7 +1058,7 @@ namespace rwe
                     *typeName,
                     player->second,
                     position,
-                    SimAngle(static_cast<uint16_t>(sync.rotation.y)),
+                    simAngleFromTaYaw(sync.rotation.y),
                     true);
                 if (!unitId)
                 {
@@ -1128,8 +1134,8 @@ namespace rwe
                 unit.previousPosition = recorded;
                 unit.position = recorded;
             }
-            unit.previousRotation = SimAngle(static_cast<uint16_t>(sync.rotation.y));
-            unit.rotation = SimAngle(static_cast<uint16_t>(sync.rotation.y));
+            unit.previousRotation = simAngleFromTaYaw(sync.rotation.y);
+            unit.rotation = simAngleFromTaYaw(sync.rotation.y);
 
             if (sync.buildProgress == 0)
             {

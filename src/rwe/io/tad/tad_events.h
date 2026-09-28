@@ -202,6 +202,11 @@ namespace rwe
         /** Where it was aimed. Not a velocity: it is far from the origin. */
         TadPosition target;
 
+        /**
+         * Three words, but not a rotation: the weapon's TDF `ID` in `x`'s low
+         * byte with a flags byte above it, then the launch bearing in `y` and
+         * elevation in `z`. `docs/TOTALA-EXE-WEAPONS.md`, "Receiving a `0x0d`".
+         */
         TadRotation rotation;
 
         /** Zero where the shot was not aimed at a unit. */

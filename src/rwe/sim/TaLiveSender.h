@@ -131,6 +131,9 @@ namespace rwe
         void buildStarted(const GameSimulation& simulation, UnitId builder, UnitId unit);
 
         /** A weapon fired: a 0x0d, sent by the shooter's owner. */
+        /** A unit of ours started an aim script: a 0x10 carrying its heading and pitch. */
+        void aimScriptStarted(UnitId unit, unsigned int functionIndex, int heading, int pitch);
+
         void shotFired(
             const GameSimulation& simulation,
             UnitId shooter,

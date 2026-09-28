@@ -42,6 +42,7 @@ namespace rwe
         }
 
         void shotFired(
+            const GameSimulation& simulation,
             UnitId shooter,
             unsigned int weaponSlot,
             std::optional<UnitId> targetUnit,
@@ -49,7 +50,7 @@ namespace rwe
             const SimVector& aimPoint,
             const SimVector& direction)
         {
-            tape.shotFired(shooter, weaponSlot, targetUnit, origin, aimPoint, direction);
+            tape.shotFired(simulation, shooter, weaponSlot, targetUnit, origin, aimPoint, direction);
         }
 
         void unitCaptured(const GameSimulation& simulation, UnitId unit, PlayerId newOwner)
@@ -243,6 +244,11 @@ namespace rwe
         {
             static_cast<TaLiveSender*>(context)->endOfTick(simulation);
         }
+
+        void forwardAimScriptStarted(void* context, UnitId unit, unsigned int functionIndex, int heading, int pitch)
+        {
+            static_cast<TaLiveSender*>(context)->aimScriptStarted(unit, functionIndex, heading, pitch);
+        }
     }
 
     TaLiveSenderHooks TaLiveSender::hooks() const
@@ -254,7 +260,8 @@ namespace rwe
             &forwardBuildStarted,
             &forwardShotFired,
             &forwardUnitCaptured,
-            &forwardEndOfTick};
+            &forwardEndOfTick,
+            &forwardAimScriptStarted};
     }
 
     void TaLiveSender::unitCreated(const GameSimulation& simulation, UnitId unit)
@@ -273,7 +280,7 @@ namespace rwe
     }
 
     void TaLiveSender::shotFired(
-        const GameSimulation& /*simulation*/,
+        const GameSimulation& simulation,
         UnitId shooter,
         unsigned int weaponSlot,
         std::optional<UnitId> targetUnit,
@@ -281,12 +288,17 @@ namespace rwe
         const SimVector& aimPoint,
         const SimVector& direction)
     {
-        impl->shotFired(shooter, weaponSlot, targetUnit, origin, aimPoint, direction);
+        impl->shotFired(simulation, shooter, weaponSlot, targetUnit, origin, aimPoint, direction);
     }
 
     void TaLiveSender::unitCaptured(const GameSimulation& simulation, UnitId unit, PlayerId newOwner)
     {
         impl->unitCaptured(simulation, unit, newOwner);
+    }
+
+    void TaLiveSender::aimScriptStarted(UnitId unit, unsigned int functionIndex, int heading, int pitch)
+    {
+        impl->tape.aimScriptStarted(unit, functionIndex, heading, pitch);
     }
 
     void TaLiveSender::endOfTick(const GameSimulation& simulation)

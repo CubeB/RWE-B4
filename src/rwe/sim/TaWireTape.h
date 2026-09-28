@@ -142,10 +142,21 @@ namespace rwe
         bool buildStarted(const GameSimulation& simulation, UnitId builder, UnitId unit);
 
         /**
+         * An aim script started: a 0x10 naming the function in the unit's own
+         * script, with the heading and pitch it was called with, so the peer
+         * turns the turret its puppet shows. Dropped where the unit cannot be
+         * named or the index does not fit the record.
+         */
+        void aimScriptStarted(UnitId unit, unsigned int functionIndex, int heading, int pitch);
+
+        /**
          * A weapon fired: a 0x0d, sent by the shooter's owner. Dropped where
-         * the shooter cannot be named.
+         * the shooter cannot be named. The weapon's TDF `ID` is read off the
+         * shooter's slot and written into the record's first word, which is
+         * the index the receiver looks its weapon flags up by.
          */
         void shotFired(
+            const GameSimulation& simulation,
             UnitId shooter,
             unsigned int weaponSlot,
             std::optional<UnitId> targetUnit,

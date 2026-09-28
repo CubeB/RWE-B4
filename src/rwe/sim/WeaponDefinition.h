@@ -13,6 +13,14 @@ namespace rwe
 {
     struct WeaponDefinition
     {
+        /**
+         * The weapon TDF's own `ID`, which is the original's weapon table
+         * index. A `0x0d` carries it in its first word's low byte and the
+         * receiver looks its flags up by it, so a shot naming another index is
+         * flown by another weapon or dropped. `docs/TOTALA-EXE-WEAPONS.md`.
+         */
+        unsigned int taWeaponId{0};
+
         ProjectilePhysicsType physicsType;
 
         SimScalar maxRange;

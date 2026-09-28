@@ -689,6 +689,10 @@ namespace rwe
                 applyUnitSteering(unitInfo);
                 updateUnitPosition(unitInfo);
             });
+
+        // The owner sends no walk animation: each machine starts it from the
+        // unit's own movement, as TA does, so a puppet walks rather than slides.
+        updateMoveRateBand(unitInfo);
     }
 
     void UnitBehaviorService::updateRemoteGroundPosition(UnitInfo unitInfo, UnitPhysicsInfoGround& physics)
@@ -1213,6 +1217,7 @@ namespace rwe
                 if (threadId)
                 {
                     aimingState->attackInfo = UnitWeaponStateAttacking::AimInfo{*threadId, heading, pitch};
+                    notifyAimScriptStarted(id, unit, getAimScriptName(weaponIndex), toCobAngle(heading).value, toCobAngle(pitch).value);
                 }
                 else
                 {
@@ -3369,6 +3374,27 @@ namespace rwe
         }
 
         return false;
+    }
+
+    void UnitBehaviorService::notifyAimScriptStarted(UnitId id, const UnitState& unit, const std::string& functionName, int heading, int pitch)
+    {
+        if (!sim->taLiveSender.attached() || sim->taLiveSender.aimScriptStarted == nullptr || !unit.cobEnvironment)
+        {
+            return;
+        }
+        const auto* script = unit.cobEnvironment->script();
+        if (script == nullptr)
+        {
+            return;
+        }
+        for (std::size_t i = 0; i < script->functions.size(); ++i)
+        {
+            if (script->functions[i].name == functionName)
+            {
+                sim->taLiveSender.aimScriptStarted(sim->taLiveSender.context, id, static_cast<unsigned int>(i), heading, pitch);
+                return;
+            }
+        }
     }
 
     void UnitBehaviorService::updateMoveRateBand(UnitInfo unitInfo)

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <rwe/sim/TaHeading.h>
 #include <rwe/io/tad/tad_encoders.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/util/match.h>
@@ -69,26 +70,28 @@ namespace rwe
 
         /**
          * The corpus's rotation is (pitch, yaw, roll) and RWE keeps only the
-         * yaw; terrain-following pitch and roll are presentation. The encoder
-         * writes the record as y, z, x, which is why the yaw goes in y here.
+         * yaw, in TA's heading convention; terrain-following pitch and roll are
+         * presentation. The encoder writes the record as y, z, x, which is why
+         * the yaw goes in y here.
          */
         TadRotation toTadRotation(const UnitState& unit)
         {
-            return TadRotation{0, static_cast<int16_t>(unit.rotation.value), 0};
+            return TadRotation{0, taYawFromSimAngle(unit.rotation), 0};
         }
 
         /**
-         * A shot's launch attitude from the direction it actually left on:
-         * yaw and elevation, roll left zero. The corpus's 0x0d rotation triple
-         * tracks the aim line's bearing and elevation, and its departure from
-         * the aim line is a real aiming error, so it is the post-scatter
-         * direction that belongs here and not the mount's pre-scatter aim.
+         * The 0x0d's three words: the weapon's TDF `ID` in the first -- the
+         * index the receiver indexes its weapon table with, its low byte being
+         * the id and its high byte a flags byte the original leaves clear --
+         * then the shot's launch bearing and elevation. The direction is the
+         * round's post-scatter one, so the departure from the aim line is the
+         * aiming error the shot really flew with.
          */
-        TadRotation launchRotation(const SimVector& direction)
+        TadRotation launchRotation(unsigned int weaponId, const SimVector& direction)
         {
             auto yaw = atan2(direction.x, direction.z);
             auto pitch = atan2(direction.y, hypot(direction.x, direction.z));
-            return TadRotation{static_cast<int16_t>(pitch.value), static_cast<int16_t>(yaw.value), 0};
+            return TadRotation{static_cast<int16_t>(weaponId & 0xffu), taYawFromSimAngle(yaw), static_cast<int16_t>(pitch.value)};
         }
 
         SimVector airVelocity(const UnitPhysicsInfoAir& air)
@@ -290,6 +293,7 @@ namespace rwe
         }
 
         void shotFired(
+            const GameSimulation& simulation,
             UnitId shooter,
             unsigned int weaponSlot,
             std::optional<UnitId> targetUnit,
@@ -304,6 +308,25 @@ namespace rwe
                 return;
             }
 
+            // The first word is the weapon the round is flown by on the
+            // receiver, and it has to be the sender's own weapon: a shot whose
+            // index names no weapon there is dropped or flown by another, so a
+            // missing definition sends the zero the original reserves for
+            // NOWEAPON rather than a field that means something else.
+            unsigned int weaponId = 0;
+            if (auto unitRef = simulation.tryGetUnitState(shooter))
+            {
+                const auto& unit = unitRef->get();
+                if (weaponSlot < unit.weapons.size() && unit.weapons[weaponSlot])
+                {
+                    auto weaponIt = simulation.weaponDefinitions.find(unit.weapons[weaponSlot]->weaponType);
+                    if (weaponIt != simulation.weaponDefinitions.end())
+                    {
+                        weaponId = weaponIt->second.taWeaponId;
+                    }
+                }
+            }
+
             uint16_t targetId = 0;
             if (targetUnit)
             {
@@ -313,10 +336,27 @@ namespace rwe
             tickRecords[recordIt->second.owner].unitPass.push_back(tadEncodeShot(TadShot{
                 toTadPosition(origin, halfWidth, halfHeight),
                 toTadPosition(aimPoint, halfWidth, halfHeight),
-                launchRotation(direction),
+                launchRotation(weaponId, direction),
                 targetId,
                 *shooterId,
                 static_cast<uint8_t>(weaponSlot)}));
+        }
+
+        void aimScriptStarted(UnitId unit, unsigned int functionIndex, int heading, int pitch)
+        {
+            auto recordIt = records.find(unit);
+            auto unitId = idOf(unit);
+            if (recordIt == records.end() || !unitId || functionIndex > 0xFFFF)
+            {
+                return;
+            }
+            TadScriptCall call{};
+            call.unitId = *unitId;
+            call.scriptIndex = static_cast<uint16_t>(functionIndex);
+            call.argCount = 2;
+            call.args[0] = heading;
+            call.args[1] = pitch;
+            tickRecords[recordIt->second.owner].unitPass.push_back(tadEncodeScriptCall(call));
         }
 
         void damageApplied(UnitId victim, std::optional<UnitId> attacker, unsigned int damage, std::optional<PlayerId> sourceOwner)
@@ -546,13 +586,19 @@ namespace rwe
 
             // `currentWaypoint` is the corner being headed for and the one
             // behind it is where the unit came from -- the original's wp[1] and
-            // wp[0] (TOTALA-EXE.md section 102). The wire carries wp[1] onward,
-            // which is why the walk starts at the iterator itself.
+            // wp[0] (TOTALA-EXE.md section 102). The wire carries wp[0] onward:
+            // a real TA's entry leads with the corner its unit has just reached
+            // (ta-rwe-test-10.pcap), and a receiver steering for the first
+            // corner of ours would cut ahead of the unit and be snapped back.
             if (const auto* moving = std::get_if<NavigationStateMoving>(&unit.navigationState.state))
             {
                 if (moving->path)
                 {
                     auto it = moving->path->currentWaypoint;
+                    if (it != moving->path->path.waypoints.begin())
+                    {
+                        --it;
+                    }
                     auto end = moving->path->path.waypoints.end();
                     for (int i = 0; i < 3 && it != end; ++i, ++it)
                     {
@@ -835,7 +881,13 @@ namespace rwe
         return impl->buildStarted(simulation, builder, unit);
     }
 
+    void TaWireTape::aimScriptStarted(UnitId unit, unsigned int functionIndex, int heading, int pitch)
+    {
+        impl->aimScriptStarted(unit, functionIndex, heading, pitch);
+    }
+
     void TaWireTape::shotFired(
+        const GameSimulation& simulation,
         UnitId shooter,
         unsigned int weaponSlot,
         std::optional<UnitId> targetUnit,
@@ -843,7 +895,7 @@ namespace rwe
         const SimVector& aimPoint,
         const SimVector& direction)
     {
-        impl->shotFired(shooter, weaponSlot, targetUnit, origin, aimPoint, direction);
+        impl->shotFired(simulation, shooter, weaponSlot, targetUnit, origin, aimPoint, direction);
     }
 
     void TaWireTape::damageApplied(UnitId victim, std::optional<UnitId> attacker, unsigned int damage, std::optional<PlayerId> sourceOwner)

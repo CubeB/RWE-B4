@@ -55,6 +55,9 @@ namespace rwe
         void (*unitCaptured)(void* context, const GameSimulation& simulation, UnitId unit, PlayerId newOwner){nullptr};
         void (*endOfTick)(void* context, const GameSimulation& simulation){nullptr};
 
+        /** An aim script started, which TA replicates so the peer turns the same piece (a 0x10). */
+        void (*aimScriptStarted)(void* context, UnitId unit, unsigned int functionIndex, int heading, int pitch){nullptr};
+
         /** Whether a live sink is listening. */
         bool attached() const { return endOfTick != nullptr; }
     };

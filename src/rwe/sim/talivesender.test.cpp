@@ -6,6 +6,7 @@
 #include <rwe/io/tad/TadReader.h>
 #include <rwe/io/tad/tad_encoders.h>
 #include <rwe/io/tad/tad_events.h>
+#include <rwe/pathfinding/UnitPath.h>
 #include <rwe/puppet/TadPuppetDriver.h>
 #include <rwe/puppet/puppet_test_util.h>
 #include <rwe/sim/GameSimulation.h>
@@ -14,6 +15,7 @@
 #include <rwe/sim/TaLiveBatch.h>
 #include <rwe/sim/TaLiveSender.h>
 #include <rwe/sim/TaPeerIds.h>
+#include <rwe/sim/TaWireTape.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/sim_test_util.h>
@@ -62,6 +64,9 @@ namespace rwe
             laser.turret = true;
             laser.tolerance = SimAngle(1000);
             laser.pitchTolerance = SimAngle(1000);
+            // The TDF's own `ID`, which the 0x0d carries and the peer indexes
+            // its weapon table by.
+            laser.taWeaponId = 42u;
             sim.weaponDefinitions["LASER"] = laser;
         }
 
@@ -306,6 +311,10 @@ namespace rwe
         REQUIRE(shot->shooterId == localIdOf(2));
         REQUIRE(shot->targetId == game.peerIdOf(0));
         REQUIRE(shot->weaponSlot == 0u);
+        // The first word is the weapon's TDF `ID`, not an angle: the peer
+        // looks its flags up by it and a shot naming another weapon is flown
+        // by that one or dropped.
+        REQUIRE(shot->rotation.x == 42);
 
         // A waypoint entry goes out when the path changes, carries the path in
         // TA's coordinates, and its waypoints are corners of the map rather
@@ -357,6 +366,77 @@ namespace rwe
         auto walked = game.sim.getUnitState(tank).position != tankStart;
         REQUIRE(walked);
         REQUIRE(findUnitOfType(game.sim, "SOLAR"));
+    }
+
+    TEST_CASE("a 0x0d carries the weapon ID, then the bearing and elevation", "[talive]")
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        defineLiveWorld(sim);
+        auto local = addPlayer(sim, "local");
+        auto gun = sim.trySpawnCompletedUnit("GUN", local, SimVector(0_ss, 0_ss, 0_ss), std::nullopt);
+        REQUIRE(gun);
+
+        TaWireTape tape(sim, TaWireTapeSettings{8, 0, liveLoadOrder()}, std::vector<PlayerId>{local}, TaPeerIds{});
+
+        // Equal parts east and up, none north: a shot at an eighth of
+        // elevation, bearing east. The original's three words are the weapon's
+        // ID, the bearing and the elevation, in that order; the first is not an
+        // angle, and the elevation is third. East is a quarter turn in RWE's
+        // heading and minus a quarter in TA's, whose heading faces the other way.
+        tape.shotFired(sim, *gun, 0, std::nullopt, SimVector(0_ss, 0_ss, 0_ss), SimVector(1_ss, 1_ss, 0_ss), SimVector(1_ss, 1_ss, 0_ss));
+        auto records = tape.endOfTick(sim, local);
+
+        auto it = std::find_if(records.unitPass.begin(), records.unitPass.end(), [](const TadBytes& s) {
+            return !s.empty() && static_cast<TadSubPacketCode>(s[0]) == TadSubPacketCode::WeaponFired;
+        });
+        REQUIRE(it != records.unitPass.end());
+        auto shot = tadDecodeShot(*it);
+        REQUIRE(shot);
+        REQUIRE(shot->rotation.x == 42);
+        REQUIRE(shot->rotation.y == -16384);
+        REQUIRE(shot->rotation.z == 8192);
+    }
+
+    TEST_CASE("a waypoint entry leads with the corner the unit has just left", "[talive]")
+    {
+        // ta-rwe-test-10.pcap: a real TA sends a new entry as its unit reaches
+        // a corner, and the entry begins with that corner, then the one headed
+        // for and the one after (TOTALA-EXE.md section 102's wp[0], wp[1],
+        // wp[2]). Leading with the corner headed for had TA's copy of RWE's
+        // unit cut one corner ahead and be pulled back by every full state.
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        defineLiveWorld(sim);
+        auto local = addPlayer(sim, "local");
+        auto tank = sim.trySpawnCompletedUnit("TANK", local, SimVector(0_ss, 0_ss, 0_ss), std::nullopt);
+        REQUIRE(tank);
+
+        UnitPath unitPath;
+        unitPath.waypoints = {
+            SimVector(0_ss, 0_ss, 0_ss),
+            SimVector(64_ss, 0_ss, 0_ss),
+            SimVector(64_ss, 0_ss, 128_ss),
+            SimVector(-32_ss, 0_ss, 128_ss)};
+        NavigationStateMoving moving;
+        moving.movementGoal = unitPath.waypoints.back();
+        moving.path = PathFollowingInfo(std::move(unitPath), sim.gameTime);
+        auto& unit = sim.getUnitState(*tank);
+        unit.navigationState.state = std::move(moving);
+
+        TaWireTape tape(sim, TaWireTapeSettings{8, 0, liveLoadOrder()}, std::vector<PlayerId>{local}, TaPeerIds{});
+        auto records = tape.endOfTick(sim, local);
+        auto state = tadDecodeUnitState(records.unitState, tadUnitStateLayout(liveCanFly(), 8));
+        REQUIRE(state);
+        REQUIRE(state->updates.size() == 1);
+        const auto* ground = std::get_if<TadGroundPath>(&state->updates[0].mover);
+        REQUIRE(ground);
+        REQUIRE(ground->waypoints.size() == 3);
+
+        auto halfWidth = halfWidthUnits(sim);
+        auto halfHeight = halfHeightUnits(sim);
+        REQUIRE(ground->waypoints[0].x == halfWidth);
+        REQUIRE(ground->waypoints[0].z == halfHeight);
+        REQUIRE(ground->waypoints[1].x == 64 + halfWidth);
+        REQUIRE(ground->waypoints[2].z == 128 + halfHeight);
     }
 
     TEST_CASE("a unit that stops is described by an entry with no waypoints", "[talive]")
@@ -560,6 +640,32 @@ namespace rwe
             }
         }
         REQUIRE(described == batches.size() / game.maxUnits);
+    }
+
+    TEST_CASE("an aim script a Local unit starts goes out as a 0x10 with its heading and pitch", "[talive]")
+    {
+        // ta-rwe-test-7.pcap: TA sent its commander's AimPrimary, function 11
+        // of ARMCOM.cob, as 10 <unit> 0b 00 02 <heading> <pitch>, so the
+        // peer's puppet turns its torso to fire rather than shooting from
+        // whichever way its body faces.
+        LiveGame game;
+        game.attach();
+        auto gun = game.spawn("GUN", game.local, SimVector(0_ss, 0_ss, 0_ss));
+        auto victim = game.spawn("VICTIM", game.remote, SimVector(300_ss, 0_ss, 300_ss));
+
+        game.sender->aimScriptStarted(gun, 11, 1234, -56);
+        game.sender->aimScriptStarted(victim, 11, 1, 2);
+        auto batches = game.runAndTake(1);
+
+        auto calls = subPacketsOf(batches, TadSubPacketCode::UnitStartScript);
+        REQUIRE(calls.size() == 1);
+        auto call = tadDecodeScriptCall(calls[0]);
+        REQUIRE(call);
+        REQUIRE(call->unitId == localIdOf(0));
+        REQUIRE(call->scriptIndex == 11u);
+        REQUIRE(call->argCount == 2u);
+        REQUIRE(call->args[0] == 1234);
+        REQUIRE(call->args[1] == -56);
     }
 
     TEST_CASE("nothing is sent for a Remote unit", "[talive]")

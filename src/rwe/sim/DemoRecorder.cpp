@@ -318,6 +318,7 @@ namespace rwe
         }
 
         void shotFired(
+            const GameSimulation& simulation,
             UnitId shooter,
             unsigned int weaponSlot,
             std::optional<UnitId> targetUnit,
@@ -325,7 +326,7 @@ namespace rwe
             const SimVector& aimPoint,
             const SimVector& direction)
         {
-            tape.shotFired(shooter, weaponSlot, targetUnit, origin, aimPoint, direction);
+            tape.shotFired(simulation, shooter, weaponSlot, targetUnit, origin, aimPoint, direction);
         }
 
         void damageApplied(UnitId victim, std::optional<UnitId> attacker, unsigned int damage, std::optional<PlayerId> sourceOwner)
@@ -426,7 +427,7 @@ namespace rwe
     }
 
     void DemoRecorder::shotFired(
-        const GameSimulation& /*simulation*/,
+        const GameSimulation& simulation,
         UnitId shooter,
         unsigned int weaponSlot,
         std::optional<UnitId> targetUnit,
@@ -434,7 +435,7 @@ namespace rwe
         const SimVector& aimPoint,
         const SimVector& direction)
     {
-        impl->shotFired(shooter, weaponSlot, targetUnit, origin, aimPoint, direction);
+        impl->shotFired(simulation, shooter, weaponSlot, targetUnit, origin, aimPoint, direction);
     }
 
     void DemoRecorder::damageApplied(

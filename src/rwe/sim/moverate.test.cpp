@@ -3,7 +3,9 @@
 #include <rwe/cob/CobOpCode.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
+#include <rwe/pathfinding/UnitPath.h>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/SimulationOwnership.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
@@ -205,6 +207,32 @@ namespace rwe
 
             REQUIRE(sim.getUnitState(atlas).moveRateBand == 0);
             REQUIRE(hasThread(sim, atlas, "StopMoving"));
+        }
+
+        SECTION("a remote player's unit steered along its owner's path starts walking too")
+        {
+            defineMover(sim, "atlas", 7.0f, 0.0f, 0.0f);
+            sim.getPlayer(player).simulation = PlayerSimulation::Remote;
+            auto atlas = spawnMover(sim, "atlas", player, SimVector(0_ss, 0_ss, 0_ss), script);
+
+            auto& unit = sim.getUnitState(atlas);
+            UnitPath path;
+            path.waypoints.push_back(unit.position);
+            path.waypoints.push_back(SimVector(400_ss, 0_ss, 0_ss));
+            NavigationStateMoving moving;
+            moving.movementGoal = SimVector(400_ss, 0_ss, 0_ss);
+            moving.pathDestination = SimVector(400_ss, 0_ss, 0_ss);
+            moving.path = PathFollowingInfo(std::move(path), sim.gameTime);
+            unit.navigationState.state = std::move(moving);
+            unit.navigationState.desiredDestination = SimVector(400_ss, 0_ss, 0_ss);
+
+            for (int i = 0; i < 20; ++i)
+            {
+                sim.tick();
+            }
+
+            REQUIRE(sim.getUnitState(atlas).moveRateBand == 1);
+            REQUIRE(hasThread(sim, atlas, "StartMoving"));
         }
 
         SECTION("a unit standing still never enters a band at all")
