@@ -347,7 +347,25 @@ int main(int argc, char* argv[])
                     rwe::TaHostGameConfig hostConfig;
                     hostConfig.mapName = mapName;
                     hostConfig.gameName = args.getString("game-name", "rwe");
-                    hostConfig.options = static_cast<std::uint8_t>(args.getUint("options", 0x4f));
+                    {
+                        // Base-detected, since the byte is always written in hex (0x48).
+                        auto text = args.getString("options", "0x4f");
+                        std::size_t used = 0;
+                        unsigned long value = 0;
+                        try
+                        {
+                            value = std::stoul(text, &used, 0);
+                        }
+                        catch (const std::exception&)
+                        {
+                            used = 0;
+                        }
+                        if (used != text.size() || value > 0xff)
+                        {
+                            throw std::runtime_error("--options wants a byte, such as 0x48: " + text);
+                        }
+                        hostConfig.options = static_cast<std::uint8_t>(value);
+                    }
                     hostConfig.team = static_cast<std::uint8_t>(args.getUint("team", rwe::TaNoTeam));
                     hostConfig.maxUnits = static_cast<std::uint16_t>(std::min(0xffffu, args.getUint("max-units", 250)));
                     hostConfig.colour = static_cast<std::uint8_t>(args.getUint("colour", 0));

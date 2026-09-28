@@ -248,6 +248,23 @@ namespace rwe
         // playing, and the peer owns the other half of the board besides.
         parameters.commanderDeath = CommanderDeathMode::GameContinues;
 
+        // The options byte the joiner was told (docs/TA-NETWORK.md): LOS in
+        // bits 0x06 (True 0x06, Circular 0x02, Permanent 0x00), 0x01 set for
+        // unmapped. Both sides have to see the same board.
+        switch (config.options & 0x06)
+        {
+            case 0x00:
+                parameters.lineOfSight = LineOfSightMode::Permanent;
+                break;
+            case 0x02:
+                parameters.lineOfSight = LineOfSightMode::Circular;
+                break;
+            default:
+                parameters.lineOfSight = LineOfSightMode::True;
+                break;
+        }
+        parameters.mapping = (config.options & 0x01) != 0 ? MappingMode::Unmapped : MappingMode::Mapped;
+
         auto localSide = std::string(config.side == TadSide::Core ? "CORE" : "ARM");
         auto localColor = std::min<unsigned int>(config.colour, 9u);
         PlayerInfo localPlayer{
