@@ -572,8 +572,22 @@ namespace rwe
         // The makers go first: what they are switched to decides how much
         // energy the build pass below has to spend.
         timed("makers", [&] { metalMakers.update(sim, profile, blackboard, outCommands); });
-        // threatMap was rebuilt at step 3b, so the build pass reads it fresh in
-        // this same tick rather than a tick stale.
+        // Ordering, for the passes that read another pass's state. The
+        // influence map is rebuilt at step 3, above, and every pass that reads
+        // it runs after that in the same tick -- so on a tick the rebuild comes
+        // due, none of them sees a half-written map, and none of them can see a
+        // map rebuilt from an enemy list the blackboard has not caught up with
+        // yet (perception, which fills knownEnemies, is step 2). That is the
+        // whole of the contract, and it is why BuildManager can be handed the
+        // map at all: it is owned here, above every reader, and is passed down
+        // by const reference rather than shared.
+        //
+        // What this does NOT promise is freshness. The rebuild is every
+        // threatMapTickInterval ticks, not every tick, so a reader that runs on
+        // an ordinary tick is reading a map up to half a second old. The age is
+        // a function of the tick count alone -- no wall clock and no frame time
+        // anywhere near it -- so every peer computes the same one, which is what
+        // keeps a guard request reading a stale map from being a desync.
         //
         // What the build pass emitted is remembered for the commander's
         // sake: a job given to it here has not reached its order queue by

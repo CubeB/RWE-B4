@@ -1025,6 +1025,7 @@ set(TEST_FILES
     src/rwe/ai/AiBehaviour_naval.test.cpp
     src/rwe/ai/AiBehaviour_perception.test.cpp
     src/rwe/ai/AiBehaviour_siting.test.cpp
+    src/rwe/ai/BuildManager.test.cpp
     src/rwe/ai/BuilderSafety.test.cpp
     src/rwe/ai/EngagementPredictor.test.cpp
     src/rwe/ai/LineOfFire.test.cpp

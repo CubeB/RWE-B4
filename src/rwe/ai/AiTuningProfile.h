@@ -1614,10 +1614,12 @@ namespace rwe
          *
          * The mechanism is kept rather than deleted because the idea is
          * right and the trigger is what is wrong -- it is raw distance, with
-         * no notion of danger. Triggering on the influence map instead wants
-         * the ThreatMap threaded into BuildManager, which is the one manager
-         * that does not receive it. Set this to 2 or 3 to play the old
-         * behaviour against its own absence.
+         * no notion of danger. The ThreatMap is now threaded into
+         * BuildManager and the trigger reads it through
+         * buildSiteGuardThreat below, so setting this to 2 or 3 gives a guard
+         * that asks whether anything can reach the site rather than only
+         * whether it is far away. Set it to 2 or 3 with that floor at 0 to
+         * play the old distance-only behaviour against its own absence.
          */
         int buildSiteGuardSize{0};
         /**
@@ -1629,22 +1631,68 @@ namespace rwe
          */
         SimScalar buildSiteGuardMinDistance{900_ss};
         /**
-         * Enemy anti-ground damage per second that has to be able to reach a
-         * build site before the builder placing something there is offered a
-         * guard, on top of the distance test above.
+         * Enemy anti-ground damage that has to be able to reach a build site
+         * before the builder placing something there is offered a guard, on
+         * top of the distance test above. Read as
+         * ThreatMap::antiGroundInRadius, so the figure is a SUM over the
+         * cells within buildSiteGuardThreatRadius rather than the damage
+         * itself, and the units are "cell-damage-seconds per site" -- a
+         * Peewee standing on the spot reads in the thousands because its gun
+         * covers two hundred cells, and a long-range gun covering the whole
+         * radius reads higher still. It orders sites against each other; it is
+         * not a dps a player would recognise.
          *
          * Zero switches the test off and restores the distance-only trigger
          * exactly, which is both the documented kill switch and the control
-         * arm: the guard's own audit measured it COSTING games with distance
-         * alone -- 71.7 units and 27.2 army with it off against 44.6 and 15.1
-         * with it on, repeated in the other slot -- because 69 of 81 guards
-         * ended with the builder simply finished and only 6 with it lost. The
-         * mechanism was kept on the grounds that the idea is right and the
-         * trigger is wrong; this is the trigger the entry asked for.
+         * arm any measurement of the gate is played against.
          *
-         * Defaults to off, like the size knob it depends on, so nothing moves
-         * until it has been played against its own absence. To measure, set
-         * buildSiteGuardSize to 2 or 3 and run this at 0 and at a DPS floor.
+         * **Measured, and it is why the floor is the default where the guard
+         * is on.** Painted Desert and Great Divide, ARM against ARM at Hard,
+         * 1500 s, ten seeds each, seats dealt, every seed played twice and
+         * read through tools/arena-paired.py against its own control (the
+         * shipped profile, which is this floor at 0):
+         *
+         *  - What the distance-only trigger costs. Turning the guard off
+         *    entirely against it: the guardless side came out better in 7
+         *    seeds of 10 on Painted Desert and better in 6 on Great Divide
+         *    (worse in 3 and 3, with one Great Divide seed a tie). So the
+         *    trigger this knob gates is beaten by having no guard at all on
+         *    both maps, which is the ROADMAP verdict reproduced.
+         *
+         *  - What the gate does about it. Run at 1000 against the same
+         *    control: level on Painted Desert (better 2, same 3, worse 3)
+         *    and better on Great Divide (better 7, same 1, worse 2). It is
+         *    never worse than the trigger it replaces on either map, and
+         *    where it helps it helps by the largest margin in the set.
+         *
+         *  - What it is choosing between. Across 1702 guard requests in those
+         *    forty games, 1393 -- 82% -- were for a site the influence map
+         *    reads as *nothing at all* in reach: 88% of them on Painted
+         *    Desert and 74% on Great Divide. That is the original audit's
+         *    "69 of 81 ended with the builder having simply finished",
+         *    measured directly -- four guards in five are aimed at empty
+         *    ground.
+         *
+         *  - What it does to the guard's own bill. On Great Divide, six
+         *    further games with the floor on BOTH players (so every guard
+         *    line belongs to a gated side, which the one-tuned-seat games
+         *    cannot say) against twenty control games at the shipped
+         *    profile: 24.3 requests and 4.5 standing guards a side-game
+         *    become 5.1 and 2.7. The gate gives up 94% of the requests and
+         *    40% of the guards, and the ones it keeps are the ones it
+         *    judged worth sending -- 28% of them ended with a builder dying
+         *    against 24%, the right way round, but nine deaths against
+         *    forty-three is not enough to claim it.
+         *
+         * **What this does not claim.** No arm here beat having no guard at
+         * all, so this is a better trigger, not a feature that pays for
+         * itself; the guard stays off by default at Standard, which is the
+         * difficulty that takes the header value, and the numbers above are
+         * Hard. And ROADMAP's own eight-seed run of this same floor on these
+         * same two maps read Great Divide the OTHER way -- the gate losing
+         * the benefit the guard had. Two runs of ten disagreeing about the
+         * sign on one map says the effect is near this sample size, so treat
+         * 1000 as the best-evidenced floor rather than a settled one.
          */
         float buildSiteGuardThreat{0.0f};
         /**
