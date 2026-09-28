@@ -545,6 +545,9 @@ namespace rwe
             TadBytes notAPing(size, 0x02);
             CAPTURE(size);
             REQUIRE_FALSE(TaPinger::parsePing(notAPing));
+        }
+    }
+
     TEST_CASE("an FBI with no SoundCategory is silent, not refused", "[malformed]")
     {
         // ProTA's MAKENUKE/MAKEANTI pseudo-units name no category; the
