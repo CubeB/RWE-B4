@@ -115,6 +115,21 @@ namespace rwe
     /** 0x26: the two player ids, and 32 bytes every capture leaves empty. */
     TadBytes taBuildIdent(std::uint32_t playerId, std::uint32_t otherPlayerId);
 
+    /** How many colours a battleroom offers. */
+    inline constexpr std::uint8_t TaColourCount = 10;
+
+    /**
+     * The colour a host grants a joiner's 0x17: the one asked for if nobody
+     * has it, otherwise the next free one after it. 0xff when all are taken.
+     */
+    std::uint8_t taGrantColour(std::uint8_t wanted, std::span<const std::uint8_t> taken);
+
+    /** 0x18: the host's answer to a 0x17, the colour the joiner may have. */
+    TadBytes taBuildColourGrant(std::uint8_t colour);
+
+    /** 0x22: a player's id and its 1-based number in the game, the host being 1. */
+    TadBytes taBuildPlayerNumber(std::uint32_t playerId, std::uint8_t number);
+
     /** 0x2a: loading progress, a percentage. */
     TadBytes taBuildLoadingProgress(std::uint8_t percent);
 
@@ -349,6 +364,10 @@ namespace rwe
         std::map<PeerId, TaBattleroomPeer> peers_;
         std::map<PeerId, bool> readyAnnounced_;
 
+        /** Joiners in the order they joined; the host is number 1 and they follow. */
+        std::vector<PeerId> joinOrder_;
+        bool numbersSent_{false};
+
         asio::steady_timer keepaliveTimer;
         asio::steady_timer pingTimer;
         asio::steady_timer loadingTimer;
@@ -380,6 +399,8 @@ namespace rwe
         void queueStatus(std::uint8_t state, TaTransport transport);
 
         void echoUnitSync(PeerId from, const TaPacket& packet);
+
+        void grantColour(PeerId from, std::uint8_t wanted);
 
         /** The reason a launch may not go ahead, or an empty string. */
         std::string launchRefusal() const;

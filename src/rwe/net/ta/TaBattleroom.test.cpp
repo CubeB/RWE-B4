@@ -576,6 +576,45 @@ namespace rwe
         REQUIRE(h.room->peer(JoinerId)->colour == 0x02);
     }
 
+    TEST_CASE("a colour asked for is granted if free, else the next free one after it", "[net][ta]")
+    {
+        std::vector<std::uint8_t> hostOnly{0};
+        REQUIRE(taGrantColour(0, hostOnly) == 1);
+        REQUIRE(taGrantColour(2, hostOnly) == 2);
+
+        std::vector<std::uint8_t> wraps{0, 9};
+        REQUIRE(taGrantColour(9, wraps) == 1);
+
+        std::vector<std::uint8_t> all{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+        REQUIRE(taGrantColour(3, all) == 0xFF);
+    }
+
+    TEST_CASE("a joiner's 0x17 is answered with a colour, then the players are numbered once", "[net][ta]")
+    {
+        // ta-sides.pcap: 17 00 is answered 18 01, then 22 <joiner> 02 and
+        // 22 <host> 01; a later 17 02 is answered 18 02 and nothing else.
+        Harness h;
+        h.room->peerJoined(JoinerId);
+        h.sent.clear();
+
+        TaPacket ask;
+        ask.subpackets.push_back(TadBytes{0x17, 0x00});
+        h.deliver(ask);
+
+        auto tcp = h.codesTo(JoinerId, TaTransport::Tcp);
+        REQUIRE(tcp.size() == 3);
+        REQUIRE(tcp[0] == TadBytes{0x18, 0x01});
+        REQUIRE(tcp[1] == taBuildPlayerNumber(JoinerId, 2));
+        REQUIRE(tcp[2] == taBuildPlayerNumber(HostId, 1));
+        REQUIRE(h.room->peer(JoinerId)->colour == 0x01);
+
+        h.sent.clear();
+        TaPacket again;
+        again.subpackets.push_back(TadBytes{0x17, 0x02});
+        h.deliver(again);
+        REQUIRE(h.codesTo(JoinerId, TaTransport::Tcp) == std::vector<TadBytes>{TadBytes{0x18, 0x02}});
+    }
+
     TEST_CASE("a launch reports the side and colour the joiner's status last said", "[net][ta]")
     {
         Harness h;

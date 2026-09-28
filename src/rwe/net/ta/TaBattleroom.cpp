@@ -14,6 +14,8 @@ namespace rwe
         constexpr std::size_t IdentSize = 41;
         constexpr std::size_t UnitStateWordSize = 4;
         constexpr std::size_t UnitSyncSize = 14;
+        constexpr std::size_t ColourRequestSize = 2;
+        constexpr std::size_t PlayerNumberSize = 6;
 
         /** 0x1a sub-types, which are the byte after the code. */
         constexpr std::uint8_t UnitSyncHeaderSubType = 0x00;
@@ -154,6 +156,35 @@ namespace rwe
         writeU32(out, playerId);
         writeU32(out, otherPlayerId);
         out.resize(IdentSize, 0);
+        return out;
+    }
+
+    std::uint8_t taGrantColour(std::uint8_t wanted, std::span<const std::uint8_t> taken)
+    {
+        std::uint8_t start = wanted < TaColourCount ? wanted : 0;
+        for (std::uint8_t i = 0; i < TaColourCount; ++i)
+        {
+            auto colour = static_cast<std::uint8_t>((start + i) % TaColourCount);
+            if (std::find(taken.begin(), taken.end(), colour) == taken.end())
+            {
+                return colour;
+            }
+        }
+        return 0xFF;
+    }
+
+    TadBytes taBuildColourGrant(std::uint8_t colour)
+    {
+        return TadBytes{static_cast<std::uint8_t>(TadSubPacketCode::HostMigration), colour};
+    }
+
+    TadBytes taBuildPlayerNumber(std::uint32_t playerId, std::uint8_t number)
+    {
+        TadBytes out;
+        out.reserve(PlayerNumberSize);
+        out.push_back(static_cast<std::uint8_t>(TadSubPacketCode::Ident3));
+        writeU32(out, playerId);
+        out.push_back(number);
         return out;
     }
 
@@ -316,6 +347,10 @@ namespace rwe
         peers_[peer] = TaBattleroomPeer{peer};
         peers_[peer].name = session.peerName(peer);
         readyAnnounced_[peer] = false;
+        if (std::find(joinOrder_.begin(), joinOrder_.end(), peer) == joinOrder_.end())
+        {
+            joinOrder_.push_back(peer);
+        }
 
         queueStatus(config.lobbyState, TaTransport::Tcp);
         traffic.flush();
@@ -330,6 +365,7 @@ namespace rwe
     {
         peers_.erase(peer);
         readyAnnounced_.erase(peer);
+        joinOrder_.erase(std::remove(joinOrder_.begin(), joinOrder_.end(), peer), joinOrder_.end());
     }
 
     void TaBattleroom::handleAppData(PeerId from, std::span<const std::uint8_t> bytes, TaTransport transport)
@@ -395,6 +431,15 @@ namespace rwe
                     sawUnitSync = true;
                     break;
 
+                case TadSubPacketCode::Unk17:
+                    // A joiner asks for a colour and waits for the host's 0x18; a
+                    // TA that never gets one loads the game as colour 0xff and crashes.
+                    if (subpacket.size() >= ColourRequestSize && state_ == TaBattleroomState::Waiting)
+                    {
+                        grantColour(from, subpacket[1]);
+                    }
+                    break;
+
                 case TadSubPacketCode::Start15:
                     // A joiner's TCP 0x15 answers our 0x1e: it is through loading.
                     // Only then may in-game traffic reach it.
@@ -419,6 +464,45 @@ namespace rwe
 
         traffic.flush();
         pings.flush();
+    }
+
+    void TaBattleroom::grantColour(PeerId from, std::uint8_t wanted)
+    {
+        auto it = peers_.find(from);
+        if (it == peers_.end())
+        {
+            return;
+        }
+
+        std::vector<std::uint8_t> taken{config.colour};
+        for (const auto& [id, other] : peers_)
+        {
+            if (id != from && other.colour != 0xFF)
+            {
+                taken.push_back(other.colour);
+            }
+        }
+        auto colour = taGrantColour(wanted, taken);
+        if (colour == 0xFF)
+        {
+            return;
+        }
+        it->second.colour = colour;
+        traffic.queueReply(from, taBuildColourGrant(colour), TaTransport::Tcp);
+        traffic.flush();
+
+        // Every capture's host numbers the players once, right after the first
+        // grant, joiners first and itself last.
+        if (!numbersSent_)
+        {
+            numbersSent_ = true;
+            for (std::size_t i = 0; i < joinOrder_.size(); ++i)
+            {
+                traffic.queue(from, taBuildPlayerNumber(joinOrder_[i], static_cast<std::uint8_t>(i + 2)), TaTransport::Tcp);
+            }
+            traffic.queue(from, taBuildPlayerNumber(session.hostPlayerId(), 1), TaTransport::Tcp);
+            traffic.flush();
+        }
     }
 
     void TaBattleroom::echoUnitSync(PeerId from, const TaPacket& packet)
