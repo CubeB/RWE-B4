@@ -5,13 +5,16 @@
 #include <filesystem>
 #include <imgui.h>
 #include <rwe/game/PlayerColorIndex.h>
+#include <rwe/game/GameSimulationLoader.h>
 #include <rwe/io/ota/ota.h>
+#include <rwe/io/tnt/TntArchive.h>
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/net/ta/TaHostGame.h>
 #include <rwe/sim/Energy.h>
 #include <rwe/sim/Metal.h>
 #include <rwe/util/SimpleLogger.h>
+#include <rwe/util/SpanStream.h>
 #include <string>
 #include <vector>
 
@@ -182,13 +185,24 @@ namespace rwe
         TaBattleroom::LaunchParams params;
         params.commanderTypeIndex = static_cast<std::uint16_t>(index);
         params.commanderUnitId = host->commanderUnitId();
-        // The height is left at zero: a commander is a mobile ground unit, and
-        // both sides settle one onto the terrain as it is created (0x486109
-        // calling 0x48A870, and GameSimulation::trySpawnUnit), so the full
-        // state record a tick later is what puts it on the ground either way.
+        // A real host's 0x09 carries the ground's height (86 at Canal
+        // Crossing's first start), so this one does too. The OTA's start
+        // position is in TA's frame, from the map's corner; the terrain's is
+        // centred, hence the half-extents.
+        SimScalar height = 0_ss;
+        if (auto tntBytes = sceneContext.vfs->readFile(std::string("maps/").append(mapName).append(".tnt")))
+        {
+            SpanStream tntStream(tntBytes->data(), tntBytes->size());
+            TntArchive tnt(&tntStream);
+            auto mapData = readMapData(tnt, ota, schemaIndex);
+            const auto& terrain = mapData.terrain;
+            height = terrain.getHeightAt(
+                SimScalar(startPos->xPos) - terrain.getWidthInWorldUnits() / 2_ss,
+                SimScalar(startPos->zPos) - terrain.getHeightInWorldUnits() / 2_ss);
+        }
         params.commanderPosition = TadPosition{
             simScalarToFixed(SimScalar(startPos->xPos)),
-            0,
+            simScalarToFixed(height),
             simScalarToFixed(SimScalar(startPos->zPos))};
         return params;
     }
