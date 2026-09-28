@@ -246,6 +246,11 @@ namespace rwe
         return computeWalkable(p);
     }
 
+    bool AbstractUnitPathFinder::isRoughTerrainOutsideSearch(const Point& p) const
+    {
+        return computeRoughTerrain(p);
+    }
+
     bool AbstractUnitPathFinder::computeWalkable(const Point& p) const
     {
         DiscreteRect rect(p.x, p.y, footprintX, footprintZ);

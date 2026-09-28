@@ -1,12 +1,13 @@
 #pragma once
 
+#include <memory>
 #include <rwe/grid/DiscreteRect.h>
 #include <rwe/grid/Point.h>
 #include <rwe/pathfinding/AStarPathFinder.h>
 #include <rwe/pathfinding/AStarScratch.h>
 #include <rwe/pathfinding/PathCost.h>
+#include <rwe/pathfinding/PathfindingBackend.h>
 #include <rwe/pathfinding/UnitPath.h>
-#include <memory>
 #include <rwe/sim/MovementClassCollisionService.h>
 #include <rwe/sim/SimVector.h>
 #include <rwe/sim/UnitId.h>
@@ -21,6 +22,20 @@ namespace rwe
     {
     public:
         AStarPathInfo<Point, PathCost> lastPathDebugInfo;
+
+        /**
+         * Which search the service runs. Set once when the game is built from
+         * `GameParameters::pathfindingBackend`, which is itself recorded in the
+         * replay and save headers; it never changes during a game.
+         *
+         * Unlike the tuning constants below, this one is a per-game choice
+         * rather than a constant of the build, because a player may want to
+         * compare the two searches. It has the same lockstep obligation: every
+         * peer of a game must run the same value or they path differently and
+         * desync, which is why it travels in the game parameters rather than
+         * in a local preference.
+         */
+        PathfindingBackend backend{PathfindingBackend::RweAStar};
 
         /**
          * Node expansions the service will spend in one tick, over all the

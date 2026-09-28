@@ -548,6 +548,18 @@ set(SOURCE_FILES
     src/rwe/pathfinding/PathCost.h
     src/rwe/pathfinding/PathFindingService.cpp
     src/rwe/pathfinding/PathFindingService.h
+    src/rwe/pathfinding/PathfindingBackend.cpp
+    src/rwe/pathfinding/PathfindingBackend.h
+    src/rwe/pathfinding/OaUnitPathSearch.cpp
+    src/rwe/pathfinding/OaUnitPathSearch.h
+    src/rwe/pathfinding/oa/OaSearchGoal.cpp
+    src/rwe/pathfinding/oa/OaSearchGoal.h
+    src/rwe/pathfinding/oa/OaSearchHeap.cpp
+    src/rwe/pathfinding/oa/OaSearchHeap.h
+    src/rwe/pathfinding/oa/OaSearchTrace.cpp
+    src/rwe/pathfinding/oa/OaSearchTrace.h
+    src/rwe/pathfinding/oa/OaSearchWorker.cpp
+    src/rwe/pathfinding/oa/OaSearchWorker.h
     src/rwe/pathfinding/UnitPath.h
     src/rwe/pathfinding/UnitPathFinder.cpp
     src/rwe/pathfinding/UnitPathFinder.h
@@ -1160,6 +1172,12 @@ set(TEST_FILES
     src/rwe/sim/ballisticair.test.cpp
     src/rwe/sim/wind.test.cpp
     src/rwe/pathfinding/pathing.test.cpp
+    src/rwe/pathfinding/PathfindingBackend.test.cpp
+    src/rwe/pathfinding/OaUnitPathSearch.test.cpp
+    src/rwe/pathfinding/oa/OaSearchGoal.test.cpp
+    src/rwe/pathfinding/oa/OaSearchHeap.test.cpp
+    src/rwe/pathfinding/oa/OaSearchTrace.test.cpp
+    src/rwe/pathfinding/oa/OaSearchWorker.test.cpp
     src/rwe/pathfinding/BugWalk.test.cpp
     src/rwe/pathfinding/walkwhilewaiting.test.cpp
     src/rwe/pathfinding/pathrequestlimit.test.cpp

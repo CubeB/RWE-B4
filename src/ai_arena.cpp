@@ -396,6 +396,8 @@ int main(int argc, char* argv[])
                 gameParameters.startLocation = StartLocationMode::Random;
             }
 
+            gameParameters.pathfindingBackend = pathfindingBackendFromString(args.getString("pathfinding", "rwe"), PathfindingBackend::RweAStar);
+
             for (const auto& tuning : args.getMulti("ai-tune"))
             {
                 gameParameters.aiTuning.push_back(tuning);

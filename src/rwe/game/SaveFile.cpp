@@ -4,6 +4,7 @@
 #include <array>
 #include <cctype>
 #include <fstream>
+#include <rwe/pathfinding/PathfindingBackend.h>
 #include <rwe/util.h>
 #include <rwe/util/match.h>
 #include <utility>
@@ -164,6 +165,11 @@ namespace rwe
             {CommanderDeathMode::GameEnds, "gameends"},
             {CommanderDeathMode::GameContinues, "gamecontinues"},
         }};
+
+        constexpr std::array<std::pair<PathfindingBackend, const char*>, 2> PathfindingBackendNames{{
+            {PathfindingBackend::RweAStar, "rwe"},
+            {PathfindingBackend::OpenAnnihilation, "oa"},
+        }};
     }
 
     fs::path getSaveDirectory()
@@ -216,6 +222,7 @@ namespace rwe
         header["mapping"] = enumToName(save.parameters.mapping, MappingNames, "unmapped");
         header["startLocation"] = enumToName(save.parameters.startLocation, StartLocationNames, "fixed");
         header["commanderDeath"] = enumToName(save.parameters.commanderDeath, CommanderDeathNames, "gameends");
+        header["pathfinding"] = enumToName(save.parameters.pathfindingBackend, PathfindingBackendNames, "rwe");
         header["mission"] = save.parameters.mission;
         if (const auto& c = save.parameters.campaign)
         {
@@ -292,6 +299,7 @@ namespace rwe
         parameters.mapping = enumFromName(header.value("mapping", "unmapped"), MappingNames, MappingMode::Unmapped);
         parameters.startLocation = enumFromName(header.value("startLocation", "fixed"), StartLocationNames, StartLocationMode::Fixed);
         parameters.commanderDeath = enumFromName(header.value("commanderDeath", "gameends"), CommanderDeathNames, CommanderDeathMode::GameEnds);
+        parameters.pathfindingBackend = enumFromName(header.value("pathfinding", "rwe"), PathfindingBackendNames, PathfindingBackend::RweAStar);
         parameters.mission = header.value("mission", false);
         if (header.contains("campaign") && header.at("campaign").is_object())
         {

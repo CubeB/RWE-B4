@@ -184,6 +184,14 @@ suspended path search is not (it is serialized, because when the path lands
 changes where a unit is).
 _Avoid_: cached state, computed state
 
+**Pathfinding backend**:
+Which search a game runs: RWE's own `RweAStar` A\*, or `OpenAnnihilation`, the
+original's phase-two search. A game option and not a local preference, because
+the two path units differently and no sync hash catches a disagreement in a
+build constant: `rwe.cfg`'s `pathfinding` key supplies the default, and the
+value is carried in the replay and save headers.
+_Avoid_: path mode, pathfinder setting, local setting
+
 ### Modding
 
 **Mechanism**:

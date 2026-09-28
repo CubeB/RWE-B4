@@ -192,6 +192,7 @@ int main(int argc, char* argv[])
         config.buildingHaloStrength = std::min(100u, args.getUint("building-halo-strength", 100));
         config.buildingHaloSaturation = std::min(100u, args.getUint("building-halo-saturation", 65));
         config.buildingHaloRedShift = std::min(100u, args.getUint("building-halo-red-shift", 50));
+        config.pathfindingBackend = rwe::pathfindingBackendFromString(args.getString("pathfinding", "rwe"), rwe::PathfindingBackend::RweAStar);
 
         auto windowMode = rwe::WindowMode::Bordered;
         auto windowModeString = args.getString("window-mode", "");

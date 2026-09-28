@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <rwe/game/ReplayFile.h>
+#include <rwe/pathfinding/PathfindingBackend.h>
 
 /**
  * The replay container's round trip.
@@ -78,6 +79,7 @@ namespace rwe
             header.mapping = MappingMode::Mapped;
             header.startLocation = StartLocationMode::Random;
             header.commanderDeath = CommanderDeathMode::GameContinues;
+            header.pathfindingBackend = PathfindingBackend::OpenAnnihilation;
             return header;
         }
 
@@ -114,6 +116,7 @@ namespace rwe
         REQUIRE(h.mapping == MappingMode::Mapped);
         REQUIRE(h.startLocation == StartLocationMode::Random);
         REQUIRE(h.commanderDeath == CommanderDeathMode::GameContinues);
+        REQUIRE(h.pathfindingBackend == PathfindingBackend::OpenAnnihilation);
 
         // The empty slot has to stay an empty slot: a player's index is the
         // PlayerId that the recorded commands name.
@@ -139,6 +142,7 @@ namespace rwe
         GameParameters parameters("Great Divide", 2);
         parameters.randomSeed = 7;
         parameters.commanderDeath = CommanderDeathMode::GameContinues;
+        parameters.pathfindingBackend = PathfindingBackend::OpenAnnihilation;
         parameters.players[0] = makePlayer("Blue", "ARM", 0, 2);
         parameters.players[1] = makePlayer("Red", "CORE", 1, 2);
 
@@ -152,6 +156,7 @@ namespace rwe
         REQUIRE(restored.schemaIndex == 2u);
         REQUIRE(restored.randomSeed == std::optional<unsigned int>(7));
         REQUIRE(restored.commanderDeath == CommanderDeathMode::GameContinues);
+        REQUIRE(restored.pathfindingBackend == PathfindingBackend::OpenAnnihilation);
         REQUIRE(restored.players[0]->teamId == std::optional<int>(2));
         REQUIRE(restored.players[1]->teamId == std::optional<int>(2));
         REQUIRE(!restored.players[2].has_value());
