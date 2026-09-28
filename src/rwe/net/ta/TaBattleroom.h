@@ -216,6 +216,12 @@ namespace rwe
 
         std::chrono::milliseconds loadingStepInterval{200};
 
+        /** From the move to UDP to the first in-game bundle; a real host waits about 50 ms. */
+        std::chrono::milliseconds gameStartDelay{50};
+
+        /** Loading steps to wait for a joiner's 0x15 before launching anyway. */
+        unsigned int maxLoadedWaits{10};
+
         /** The ladder the progress walks, as the recorded host walked it. */
         std::vector<std::uint8_t> loadingProgress{0x00, 0x26, 0x36, TaLoadingComplete};
 
@@ -350,6 +356,8 @@ namespace rwe
         TaBattleroomState state_{TaBattleroomState::Waiting};
         LaunchParams launchParams_;
         std::size_t loadingStep_{0};
+        bool joinerLoaded_{false};
+        unsigned int loadedWaits_{0};
         std::uint32_t unitSyncEchoed_{0};
         std::uint32_t unitSyncRefused_{0};
 
@@ -365,6 +373,8 @@ namespace rwe
         void sendLoadingStep();
         void finishLaunch();
         void moveToUdp();
+        void sendGameStart();
+        void armLaunchTimer(std::chrono::milliseconds after, std::function<void()> then);
 
         /** Our status and team, as one message. */
         void queueStatus(std::uint8_t state, TaTransport transport);
