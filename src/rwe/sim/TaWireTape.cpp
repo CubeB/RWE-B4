@@ -168,9 +168,9 @@ namespace rwe
             TaPeerIds peerIds)
             : settings(std::move(settings)),
               ids(this->settings.maxUnits, this->settings.firstBlock),
+              layout(tadUnitStateLayout(canFlyFlags(simulation, this->settings.unitLoadOrder), this->settings.maxUnits)),
               peerIds(std::move(peerIds)),
-              described(std::move(describedPlayers)),
-              layout(tadUnitStateLayout(canFlyFlags(simulation, this->settings.unitLoadOrder), this->settings.maxUnits))
+              described(std::move(describedPlayers))
         {
             if (this->settings.maxUnits == 0)
             {
