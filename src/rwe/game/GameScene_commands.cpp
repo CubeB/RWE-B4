@@ -420,6 +420,24 @@ namespace rwe
             simulation, selectedUnits, [](const UnitDefinition& d) { return d.cloakable; }, [](const UnitState& u) { return u.cloakRequested; }));
     }
 
+    GatheredToggle<bool> GameScene::gatherRepeatBuildQueue() const
+    {
+        // Offered by anything that builds. There is no original capability
+        // flag here to read, because there is no original button: the
+        // factory repeat is RWE's own (#417), and what it means is "this unit
+        // has a build queue", which is exactly what UnitState::buildQueue is.
+        return gatherToggle(toggleStates<bool>(
+            simulation, selectedUnits, [](const UnitDefinition& d) { return d.builder; }, [](const UnitState& u) { return u.repeatBuildQueue; }));
+    }
+
+    void GameScene::localPlayerSetRepeatBuildQueue(UnitId unitId, bool repeat)
+    {
+        // Through the command buffer, like every other order. The flag is
+        // hashed, so writing it to the unit from here would put this machine's
+        // answer into the sync hash before any peer had heard of it.
+        localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::SetBuildQueueRepeat{repeat}));
+    }
+
     void GameScene::refreshToggleButtons()
     {
         // Each face shows the gathered state, disagreement included: the
@@ -442,6 +460,10 @@ namespace rwe
         if (auto shown = gatherCloak(); shown.offered)
         {
             cloak.next(shown);
+        }
+        if (auto shown = gatherRepeatBuildQueue(); shown.offered)
+        {
+            repeatBuildQueue.next(shown);
         }
     }
 
@@ -848,7 +870,51 @@ namespace rwe
         const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
         auto panel = uiFactory.panelFromGuiFile(sidePrefix + "GEN");
         applyOrderButtonGating(*panel);
+        addRepeatBuildButton(*panel);
         return panel;
+    }
+
+    void GameScene::addRepeatBuildButton(UiPanel& panel)
+    {
+        const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
+
+        // A button the GUI data has no gadget for: the factory repeat is
+        // RWE's own (#417) and ARMGEN.GUI is read-only game data with no
+        // override directory, so it is built here the way the halo and
+        // anti-alias toggles on VISUALRT are.
+        //
+        // It goes on the orders page rather than the build page, which is
+        // where the factory opens: a builder's guiInfo starts on Build, and
+        // the build pages carry the order strip but no toggle row to sit in.
+        // ORDERS is the same route a mobile builder takes to reach ONOFF and
+        // CLOAK, so a factory reaching its repeat there is consistent rather
+        // than a special case.
+        //
+        // Position derived, not written down: one row below CLOAK with the
+        // step taken from the gap between CLOAK and ONOFF. On this panel
+        // ui_probe measures ONOFF at y=92 and CLOAK at 116, so a 24-pixel step
+        // lands at 140, and the next row down -- RECLAIM and UNLOAD -- is at
+        // 172, clear of it. It borrows CLOAK's geometry and its artwork, which
+        // carries the three faces a two-state toggle needs: OFF, ON, and
+        // OFF/ON ORDERS for a selection that disagrees.
+        uiFactory.addStagedButtonBelow(
+            panel,
+            sidePrefix + "GEN",
+            sidePrefix + "CLOAK",
+            sidePrefix + "REPEAT",
+            sidePrefix + "CLOAK",
+            sidePrefix + "ONOFF",
+            {"Repeat Off", "Repeat On"},
+            repeatBuildQueue.getValue().value ? 1u : 0u);
+
+        // Greyed rather than hidden when nothing in the selection builds, which
+        // is what every other inapplicable order on this panel does. It is
+        // added either way so it does not appear and disappear as the selection
+        // changes -- the same reason the halo button is added unconditionally.
+        if (auto button = panel.find<UiStagedButton>(sidePrefix + "REPEAT"))
+        {
+            button->get().setEnabled(gatherRepeatBuildQueue().offered);
+        }
     }
 
     void GameScene::applyOrderButtonGating(UiPanel& panel)
@@ -2084,6 +2150,12 @@ namespace rwe
                 showFace(p, toggleFace(v, 2), v.value ? 1u : 0u); }));
         }
 
+        if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "REPEAT"))
+        {
+            p->get().addSubscription(repeatBuildQueue.subscribe([&p = p->get(), showFace](const auto& v) {
+                showFace(p, toggleFace(v, 2), v.value ? 1u : 0u); }));
+        }
+
         // The BUILD/ORDERS tabs draw the section the unit's panel is showing,
         // and that has to be re-applied here rather than kept: switching tabs
         // rebuilds the whole panel, so any toggledOn it held died with the old
@@ -2389,6 +2461,35 @@ namespace rwe
                     localPlayerSetCloak(selectedUnit, next);
                 }
                 cloak.next(GatheredToggle<bool>{true, false, next});
+            }
+        }
+        else if (matchesWithSidePrefix("REPEAT", message))
+        {
+            if (sounds.immediateOrders)
+            {
+                sceneContext.audioService->playSound(*sounds.immediateOrders);
+            }
+
+            // The factory repeat toggle (#417), which has no original handler
+            // to mirror -- there is no original button. It follows ONOFF's
+            // shape rather than CLOAK's, because there is no original
+            // asymmetry to preserve: all off, or mixed, turns it on, and all
+            // on turns it off. One value goes to every builder in the
+            // selection, so a mixed selection converges rather than each unit
+            // stepping on from wherever it was.
+            if (auto shown = gatherRepeatBuildQueue(); shown.offered)
+            {
+                auto next = onOffAfterClick(shown);
+                for (const auto& selectedUnit : selectedUnits)
+                {
+                    auto unit = tryGetUnit(selectedUnit);
+                    if (!unit || !simulation.unitDefinitions.at(unit->get().unitType).builder)
+                    {
+                        continue;
+                    }
+                    localPlayerSetRepeatBuildQueue(selectedUnit, next);
+                }
+                repeatBuildQueue.next(GatheredToggle<bool>{true, false, next});
             }
         }
         else if (matchesWithSidePrefix("NEXT", message))
@@ -2955,8 +3056,10 @@ namespace rwe
             },
             [&](const PlayerSetGameSpeedCommand& c) {
                 // Host-authoritative: only honor speed changes from player 0.
-                // Non-host requests are silently dropped.
-                if (issuingPlayer == PlayerId(0))
+                // Non-host requests are silently dropped. An own-clock game
+                // has no host and no peer to keep in step with, so the local
+                // player changes speed as in a skirmish.
+                if (issuingPlayer == PlayerId(0) || (isOwnClock() && issuingPlayer == localPlayerId))
                 {
                     gameSpeed = GameSpeed(c.speedIndex);
                 }

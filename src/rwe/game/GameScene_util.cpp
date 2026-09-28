@@ -1245,46 +1245,60 @@ namespace rwe
         pushTriangle(batch.triangles, topLeft, bottomRight, topRight, color);
     }
 
-    void drawWakeDot(GameTime currentTime, const Matrix4f& viewProjectionMatrix, const WakeDot& dot, ColoredMeshBatch& batch)
+    void buildWakeDotBatch(GameTime currentTime, const Matrix4f& viewProjectionMatrix, const std::vector<WakeDot>& dots, ColoredMeshBatch& batch)
     {
-        if (currentTime < dot.startTime || currentTime >= dot.finishTime)
-        {
-            return;
-        }
+        batch.lines.clear();
+        batch.triangles.clear();
 
         // Wake dots are the longest list the renderer walks: a wake lives
         // ninety-six ticks and every hovercraft lays two a tick, so eight
-        // hundred of them keep about 130,000 dots alive between them and the
-        // camera can see a few hundred. Six vertices each is eighteen
-        // megabytes of vertex buffer a frame if all of them go in, so the
-        // ones outside the view are dropped here rather than uploaded for the
-        // GPU to clip. The projection is orthographic, so a point transforms
-        // straight to clip space with no divide, and the dot is two world
-        // units across -- far inside the margin.
-        auto clipPosition = viewProjectionMatrix * dot.position;
-        if (clipPosition.x < -1.05f || clipPosition.x > 1.05f || clipPosition.y < -1.05f || clipPosition.y > 1.05f)
+        // hundred of them keep about a hundred thousand dots alive between
+        // them and the camera can see a few hundred. Six vertices each is
+        // four megabytes of vertex buffer a frame if all of them go in, so
+        // the ones outside the view are dropped here rather than uploaded
+        // for the GPU to clip. The projection is orthographic, so a point
+        // transforms straight to clip space with no divide, and the dot is
+        // two world units across -- far inside the margin.
+        //
+        // The whole walk is in this one function, and currentTime is a
+        // parameter rather than something asked of the scene per dot: at a
+        // hundred thousand dots a frame, a call out to the clock and a call
+        // into a per-dot draw were costing more than the arithmetic they
+        // wrapped. Nothing else in the loop can be hoisted, so this is the
+        // cheapest place for it to live.
+        for (const auto& dot : dots)
         {
-            return;
+            if (currentTime < dot.startTime || currentTime >= dot.finishTime)
+            {
+                continue;
+            }
+
+            auto clipPosition = viewProjectionMatrix * dot.position;
+            if (clipPosition.x < -1.05f || clipPosition.x > 1.05f || clipPosition.y < -1.05f || clipPosition.y > 1.05f)
+            {
+                continue;
+            }
+
+            const auto topLeft = dot.position + Vector3f(-1.0f, 0.0f, -1.0f);
+            const auto topRight = dot.position + Vector3f(1.0f, 0.0f, -1.0f);
+            const auto bottomLeft = dot.position + Vector3f(-1.0f, 0.0f, 1.0f);
+            const auto bottomRight = dot.position + Vector3f(1.0f, 0.0f, 1.0f);
+
+            // A discrete step along the seven water blues rather than a fade.
+            // The original advances the palette index by one every rampPeriod
+            // ticks and never wraps, because the life is exactly six steps
+            // long.
+            auto age = static_cast<unsigned int>((currentTime - dot.startTime).value);
+            auto colorIndex = wakeColorIndex(age, dot.rampPeriod);
+            if (dot.reverseRamp)
+            {
+                colorIndex = (WakeColors.size() - 1) - colorIndex;
+            }
+            const auto& color = WakeColors[colorIndex];
+
+            pushTriangle(batch.triangles, topLeft, bottomLeft, bottomRight, color);
+            pushTriangle(batch.triangles, topLeft, bottomRight, topRight, color);
         }
-
-        const auto topLeft = dot.position + Vector3f(-1.0f, 0.0f, -1.0f);
-        const auto topRight = dot.position + Vector3f(1.0f, 0.0f, -1.0f);
-        const auto bottomLeft = dot.position + Vector3f(-1.0f, 0.0f, 1.0f);
-        const auto bottomRight = dot.position + Vector3f(1.0f, 0.0f, 1.0f);
-
-        // A discrete step along the seven water blues rather than a fade. The
-        // original advances the palette index by one every rampPeriod ticks
-        // and never wraps, because the life is exactly six steps long.
-        auto age = static_cast<unsigned int>((currentTime - dot.startTime).value);
-        auto colorIndex = wakeColorIndex(age, dot.rampPeriod);
-        if (dot.reverseRamp)
-        {
-            colorIndex = (WakeColors.size() - 1) - colorIndex;
-        }
-        const auto& color = WakeColors[colorIndex];
-
-        pushTriangle(batch.triangles, topLeft, bottomLeft, bottomRight, color);
-        pushTriangle(batch.triangles, topLeft, bottomRight, topRight, color);
     }
 
     void drawSpriteParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, SpriteBatch& batch)

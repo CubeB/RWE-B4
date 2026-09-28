@@ -302,6 +302,25 @@ namespace rwe
                     {
                         --entry.second;
                     }
+                    else if (unitInfo.state->repeatBuildQueue)
+                    {
+                        // The opt-in factory repeat (#417). The entry that has
+                        // just been worked off goes to the back of the
+                        // factory's own queue instead of being consumed, so
+                        // one queued type loops for ever and a queue of
+                        // several keeps its order -- each finished entry
+                        // rejoins behind whatever is still waiting, so a
+                        // factory works its list round and round rather than
+                        // restarting it.
+                        //
+                        // The type is copied out first: pop_front invalidates
+                        // the reference this branch is holding, which is the
+                        // kind of use-after-free that reads as a corrupted
+                        // queue rather than as a crash.
+                        auto finishedType = entry.first;
+                        unitInfo.state->buildQueue.pop_front();
+                        unitInfo.state->buildQueue.emplace_back(finishedType, 1);
+                    }
                     else
                     {
                         unitInfo.state->buildQueue.pop_front();
@@ -617,8 +636,44 @@ namespace rwe
                                 // Never touch down on water, whatever the
                                 // navigation thinks: better to keep flying and
                                 // look for somewhere else than to sink.
+                                //
+                                // **Unless there is a pad to come down on.** A
+                                // boat carrier is a pad whose ground is under
+                                // the waterline for the whole of its life --
+                                // ARMCARRY floats on `BOATD6` with
+                                // `MinWaterDepth=30` -- so asking about the
+                                // terrain refuses every descent onto one, and
+                                // an aircraft sent to a carrier flew to within
+                                // a world unit of the hull and then hovered
+                                // over it for ever without once entering the
+                                // landing state.
+                                //
+                                // The question worth asking is the one the
+                                // original asks, and it is not about water at
+                                // all: the descent target is the pad's own
+                                // landing piece. `VTOL_Landing` calls
+                                // `QueryLandingPad` (0x501C14) at 0x411A35,
+                                // gets up to four piece ids back, picks a free
+                                // one and hands it to the navigator as a piece
+                                // goal (0x44E250 at 0x411D60). That piece is
+                                // above the waterline whether the pad stands
+                                // on land or floats -- `landpad` at 20 on
+                                // ARMASP, `landpad1` at 27.05 on ARMCARRY --
+                                // so it is what decides where the aircraft
+                                // ends up, and the terrain under the pad never
+                                // enters into it.
+                                //
+                                // `airBaseLandingPoint` answers exactly that
+                                // question, from the same piece, and it only
+                                // answers when the aircraft is already over
+                                // the pad -- which is the case here, or it
+                                // would not be landing. With no pad underneath
+                                // there is nothing to save, and the aircraft
+                                // keeps flying over open water as it did
+                                // before.
+                                auto landingPoint = airBaseLandingPoint(unitInfo);
                                 auto ground = sim->terrain.getHeightAt(unitInfo.state->position.x, unitInfo.state->position.z);
-                                if (ground < sim->terrain.getSeaLevel())
+                                if (!landingPoint && ground < sim->terrain.getSeaLevel())
                                 {
                                     unitInfo.state->navigationState.state = NavigationStateIdle();
                                     return;
@@ -6071,8 +6126,13 @@ namespace rwe
         // sank through the platform and came to rest inside the ground.
         //
         // Only the height is taken from the piece. Its x and z are the pad's
-        // own on every shipped pad, and the navigation has already brought the
-        // aircraft over the pad by the time it is descending.
+        // own on ARMASP -- `landpad` is at (0, 20, 0) -- but **not** on a
+        // carrier, whose deck pieces stand well off the hull (ARMCARRY's at
+        // z=+52.5 and z=-37.5, CORCARRY's 22.8 and 35.1 units away). That
+        // distance is not this function's problem to solve -- it is the reason
+        // the aircraft is walked onto the piece over the descent at all, and
+        // the reason `handleLandOnAirBaseOrder`'s goal needs to be the piece
+        // rather than the origin.
         if (unitInfo.state->orders.empty())
         {
             return std::nullopt;
@@ -6093,6 +6153,17 @@ namespace rwe
 
         // And only when it really is over the pad: an aircraft that gave up
         // and set down somewhere else lands on the ground like anything else.
+        //
+        // Measured to the pad's own origin, which is the right anchor for the
+        // question being asked -- *is the aircraft over the hull?* -- and is
+        // why this is not where a carrier goes wrong. The reach is 48 world
+        // units for a 6x6 and ARMCARRY's bow deck piece is 52.5 away, so an
+        // aircraft starts its descent inside the reach and then walks out of it
+        // toward the piece, losing the answer on the way. What is wrong is the
+        // goal it is walking toward, not the distance measured here: see
+        // `handleLandOnAirBaseOrder`, which navigates to `pad.position` while
+        // the landing point is the deck piece, and `descendToGroundLevel`,
+        // which is what walks it out of the reach in the first place.
         auto reach = airBaseRepairReach(*sim, sim->unitDefinitions.at(pad.unitType));
         if (distanceSquaredXZ(unitInfo.state->position, pad.position) > reach * reach)
         {

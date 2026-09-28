@@ -3141,11 +3141,11 @@ namespace rwe
             return ProjectileCollisionInfoOutOfBounds();
         }
 
-        // Anything standing in the square is tested first, then the ground,
-        // then the sea (0x49B090, the ground at 0x49B36D and the sea at
-        // 0x49B3A1). So a round that dips below sea level over a wading
-        // unit's footprint hits the unit rather than the water, and one that
-        // passes both surfaces in a tick over a wet square has struck the
+        // The original's stop tests run in a fixed order (0x49B090): the
+        // square's units, then `unitsonly`, then the ground at 0x49B36D, then
+        // the sea at 0x49B3A1. So a round that dips below sea level over a
+        // wading unit's footprint hits the unit rather than the water, and one
+        // that passes both surfaces in a tick over a wet square has struck the
         // ground -- which a `groundbounce` round bounces off (issue #350).
         // Which art a detonation throws up is decided by the square, not by
         // this order; see isSquareUnderSea.
@@ -3164,6 +3164,19 @@ namespace rwe
             }
         }
 
+        // `unitsonly` sits between the last unit test and the first surface
+        // test (0x49B294), and a round carrying it comes straight back out
+        // here. It does not go on to test the ground or the sea, so a Mind Gun
+        // round flies through a hillside and through the water and only ever
+        // detonates on something alive. Nothing else about it changes: it
+        // still explodes on a unit, still hurts one, and still dies when its
+        // time or its range runs out.
+        auto weaponIt = simulation.weaponDefinitions.find(projectile.weaponType);
+        if (weaponIt != simulation.weaponDefinitions.end() && weaponIt->second.unitsOnly)
+        {
+            return std::nullopt;
+        }
+
         if (projectile.position.y <= *terrainHeight)
         {
             return ProjectileCollisionInfoTerrain();
@@ -3171,7 +3184,6 @@ namespace rwe
 
         auto seaLevel = simulation.terrain.getSeaLevel();
 
-        auto weaponIt = simulation.weaponDefinitions.find(projectile.weaponType);
         bool waterWeapon = weaponIt != simulation.weaponDefinitions.end() && weaponIt->second.waterWeapon;
         if (!waterWeapon && !simulation.noSeaLevelTrigger && seaLevel > *terrainHeight && projectile.position.y <= seaLevel)
         {

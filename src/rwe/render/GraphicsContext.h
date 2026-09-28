@@ -222,6 +222,24 @@ namespace rwe
 
         GlMesh createColoredMesh(const std::vector<GlColoredVertex>& vertices, GLenum usage);
 
+        /**
+         * Puts `vertices` into `mesh`, making the mesh first if it has none.
+         *
+         * A batch the renderer rebuilds every frame -- the wake is the big
+         * one -- wants the vertex array and the buffer to outlive the frame
+         * rather than be made and thrown away each time, which is what
+         * createColoredMesh does and what this exists to avoid. The buffer
+         * keeps its high-water mark, so a batch that grows and shrinks a
+         * little from frame to frame reallocates when it outgrows what it
+         * has and not otherwise.
+         *
+         * The upload re-specifies the whole buffer rather than writing into
+         * it, which orphans the previous contents: a draw already queued
+         * against them goes on to read the old store instead of finding this
+         * frame's vertices under it.
+         */
+        void updateColoredMesh(GlMesh& mesh, const std::vector<GlColoredVertex>& vertices);
+
         GlMesh createTexturedNormalMesh(const std::vector<GlTexturedNormalVertex>& vertices, GLenum usage);
 
         GlMesh createColoredNormalMesh(const std::vector<GlColoredNormalVertex>& vertices, GLenum usage);
