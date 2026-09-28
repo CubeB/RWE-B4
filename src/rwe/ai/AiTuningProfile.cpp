@@ -363,6 +363,12 @@ namespace rwe
         p.defenceValueMaxPaybackSeconds = 45;
         p.outpostDefenceValueSecondsPerExtractor = 20;
         p.buildSiteGuardSize = 3;
+        // And the guard it detaches asks the influence map whether anything
+        // can reach the site, rather than only how far away it is. Brutal
+        // builds further out and fights more, so it is the difficulty where a
+        // guard has the most to be worth. See buildSiteGuardThreat for the
+        // measurement and for what it does not claim.
+        p.buildSiteGuardThreat = 1000.0f;
         p.navalFleetSize = 12;
         p.targetSubmarineCount = 4;
         p.submarineMinDestroyerCount = 2;
@@ -453,6 +459,10 @@ namespace rwe
                 p.defenceValueMaxPaybackSeconds = 60;
                 p.outpostDefenceValueSecondsPerExtractor = 30;
                 p.buildSiteGuardSize = 3;
+                // The same danger gate Brutal uses, for the reason given
+                // there: four guards in five were being aimed at sites the
+                // influence map reads as empty.
+                p.buildSiteGuardThreat = 1000.0f;
                 p.navalFleetSize = 9;
                 p.targetSubmarineCount = 3;
                 p.submarineMinDestroyerCount = 2;

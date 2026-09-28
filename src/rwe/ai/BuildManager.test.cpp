@@ -156,4 +156,29 @@ namespace rwe
         REQUIRE(guardsTheExactSite);
         REQUIRE(bb.buildSiteGuardRequest->threat == 0.0f);
     }
+
+    TEST_CASE("the two difficulties that build a guard at all gate it on danger", "[ai]")
+    {
+        // The floor and the size are one switch between them, and a floor
+        // without a size guards nothing at all. Hard and Brutal are the only
+        // profiles that ask for guards, so they are the only ones where the
+        // gate has to be on for it to mean anything -- and an earlier version
+        // of this had it the other way round, with both defaults at zero and
+        // the gate never once live in a played game.
+        for (auto difficulty : {AiDifficulty::Hard, AiDifficulty::Brutal})
+        {
+            auto profile = makeProfileForDifficulty(difficulty);
+            CAPTURE(difficulty == AiDifficulty::Brutal ? "BRUTAL" : "HARD");
+            REQUIRE(profile.buildSiteGuardSize > 0);
+            REQUIRE(profile.buildSiteGuardThreat > 0.0f);
+        }
+
+        // The header default, which is Standard, asks for no guard and so has
+        // no floor to set: the measured cost of the distance-only trigger is
+        // why the feature is off there at all, and a floor on a profile with
+        // no guard would be a number that governs nothing.
+        auto standard = makeProfileForDifficulty(AiDifficulty::Standard);
+        REQUIRE(standard.buildSiteGuardSize == 0);
+        REQUIRE(standard.buildSiteGuardThreat == 0.0f);
+    }
 }
