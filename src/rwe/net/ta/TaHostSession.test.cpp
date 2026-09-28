@@ -344,8 +344,34 @@ namespace rwe
         joiner.sendToHost(taEncodeSystemMessage(
             TaDirectPlayCommand::AddForwardRequest,
             taMakeReplyAddress(joiner.tcpPort(), {127, 0, 0, 1}),
-            addForwardRequestPayload(systemPlayerId, joiner.tcpPort(), joiner.udpPortValue(), config.hostPlayerId)));
+            addForwardRequestPayload(systemPlayerId, joiner.tcpPort(), joiner.udpPortValue(), config.sessionHostId)));
         runUntil(ioContext, [&] { return joiner.hasCommand(TaDirectPlayCommand::SuperEnumPlayersReply); });
+
+        // What a real TA joiner needs before it sends CREATEPLAYER, pinned to
+        // the real host in ta-baseline.pcap: without the name-server bit and
+        // the host player's own id and data, a real TA sat in the battleroom
+        // without ever announcing its player.
+        {
+            auto* superMessage = joiner.findCommand(TaDirectPlayCommand::SuperEnumPlayersReply);
+            auto reply = taDecodeSuperEnumPlayersReply(taDecodeDirectPlayMessage(superMessage->data(), superMessage->size()).payload);
+            REQUIRE(reply.session.hostPlayerId == 0x08D80E77u);
+            REQUIRE(reply.session.user3 == 0x4F010001u);
+
+            auto hostSystem = std::find_if(reply.players.begin(), reply.players.end(), [](const auto& p) { return p.id == 0x08D90E77u; });
+            REQUIRE(hostSystem != reply.players.end());
+            REQUIRE(hostSystem->flags == 0x0Fu);
+
+            auto hostPlayer = std::find_if(reply.players.begin(), reply.players.end(), [](const auto& p) { return p.id == 0x08D90E76u; });
+            REQUIRE(hostPlayer != reply.players.end());
+            REQUIRE(hostPlayer->flags == 0x0Cu);
+            REQUIRE(hostPlayer->versionOrSystemPlayerId == 0x08D90E77u);
+            REQUIRE(hostPlayer->playerData.size() == 21u);
+            REQUIRE(hostPlayer->playerData[19] == 0x50);
+
+            auto joinerSystem = std::find_if(reply.players.begin(), reply.players.end(), [&](const auto& p) { return p.id == systemPlayerId; });
+            REQUIRE(joinerSystem != reply.players.end());
+            REQUIRE(joinerSystem->flags == 0x05u);
+        }
 
         // REQUESTPLAYERID, flags 8: a named player.
         joiner.sendToHost(taEncodeSystemMessage(
