@@ -37,10 +37,10 @@ namespace rwe
             return result;
         }
 
-        TaSuperPackedPlayer makeSystemPlayer(std::uint32_t id)
+        TaSuperPackedPlayer makeSystemPlayer(std::uint32_t id, std::uint32_t flags = 5)
         {
             TaSuperPackedPlayer player;
-            player.flags = 5;
+            player.flags = flags;
             player.id = id;
             player.infoMask = 0x4;
             player.versionOrSystemPlayerId = TaDirectPlayDialect;
@@ -511,7 +511,10 @@ namespace rwe
     {
         auto flags = taDecodeRequestPlayerId(payload);
         auto isSystemPlayer = (flags & 0x1) != 0;
-        auto id = isSystemPlayer ? nextSystemPlayerId++ : nextPlayerId++;
+        // Down in pairs, as a real host hands them out: counting up would give
+        // a second joiner the host's own ids, which sit just above the first.
+        auto id = isSystemPlayer ? nextSystemPlayerId : nextPlayerId;
+        (isSystemPlayer ? nextSystemPlayerId : nextPlayerId) -= 2;
 
         if (isSystemPlayer)
         {
@@ -817,9 +820,11 @@ namespace rwe
         session.applicationGuid = TaApplicationGuid;
         session.maxPlayers = static_cast<std::uint32_t>(MaxPlayers);
         session.currentPlayers = static_cast<std::uint32_t>(1 + peers.size());
-        session.hostPlayerId = config.hostPlayerId;
+        session.hostPlayerId = config.sessionHostId;
+        // A real host's reads 0x4f010001: the options byte on top, a constant
+        // 1 below it, and the player count at the bottom.
+        session.user3 = 0x00010000u | (session.currentPlayers & 0xFFu);
         session.setOptions(config.options);
-        session.user3 = (session.user3 & 0x00FFFF00u) | (session.currentPlayers & 0xFFu);
         return session;
     }
 
@@ -834,12 +839,18 @@ namespace rwe
             reply.players.push_back(*extraSystemPlayer);
         }
 
-        auto hostSystem = makeSystemPlayer(config.hostSystemPlayerId);
+        // 0x0f, not a joiner's 0x05: the name-server bit is how a joiner finds
+        // the host to send its CREATEPLAYER to, and a real host sets it.
+        auto hostSystem = makeSystemPlayer(config.hostSystemPlayerId, 0x0F);
         hostSystem.tcpAddress.port = ports.gameTcp;
         hostSystem.udpAddress.port = ports.gameUdp;
         reply.players.push_back(hostSystem);
 
         auto hostPlayer = makeNamedPlayer(config.hostPlayerId, config.gameName, config.hostSystemPlayerId);
+        // A real host's player carries 21 bytes of TA's own player data; the
+        // captures only show this value, so it is sent as they show it.
+        hostPlayer.playerData.assign(21, 0);
+        hostPlayer.playerData[19] = 0x50;
         hostPlayer.tcpAddress.port = ports.gameTcp;
         hostPlayer.udpAddress.port = ports.gameUdp;
         reply.players.push_back(hostPlayer);
