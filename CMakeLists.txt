@@ -345,6 +345,7 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_chat.cpp
     src/rwe/game/GameScene_commands.cpp
     src/rwe/game/GameScene_debug.cpp
+    src/rwe/game/GameScene_idle.cpp
     src/rwe/game/GameScene_endgame.cpp
     src/rwe/game/GameScene_input.cpp
     src/rwe/game/GameScene_menu.cpp
@@ -487,6 +488,8 @@ set(SOURCE_FILES
     src/rwe/game/SimEventLog.h
     src/rwe/game/ScenarioDriver.cpp
     src/rwe/game/ScenarioDriver.h
+    src/rwe/game/idle_builders.cpp
+    src/rwe/game/idle_builders.h
     src/rwe/game/GameParameters.h
     src/rwe/io/lostdf/io.cpp
     src/rwe/io/lostdf/io.h
@@ -570,6 +573,18 @@ set(SOURCE_FILES
     src/rwe/pathfinding/PathCost.h
     src/rwe/pathfinding/PathFindingService.cpp
     src/rwe/pathfinding/PathFindingService.h
+    src/rwe/pathfinding/PathfindingBackend.cpp
+    src/rwe/pathfinding/PathfindingBackend.h
+    src/rwe/pathfinding/OaUnitPathSearch.cpp
+    src/rwe/pathfinding/OaUnitPathSearch.h
+    src/rwe/pathfinding/oa/OaSearchGoal.cpp
+    src/rwe/pathfinding/oa/OaSearchGoal.h
+    src/rwe/pathfinding/oa/OaSearchHeap.cpp
+    src/rwe/pathfinding/oa/OaSearchHeap.h
+    src/rwe/pathfinding/oa/OaSearchTrace.cpp
+    src/rwe/pathfinding/oa/OaSearchTrace.h
+    src/rwe/pathfinding/oa/OaSearchWorker.cpp
+    src/rwe/pathfinding/oa/OaSearchWorker.h
     src/rwe/pathfinding/UnitPath.h
     src/rwe/pathfinding/UnitPathFinder.cpp
     src/rwe/pathfinding/UnitPathFinder.h
@@ -736,6 +751,8 @@ set(SOURCE_FILES
     src/rwe/ui/UiComponent.h
     src/rwe/ui/UiFactory.cpp
     src/rwe/ui/UiFactory.h
+    src/rwe/ui/UiIdleBuilderSign.cpp
+    src/rwe/ui/UiIdleBuilderSign.h
     src/rwe/ui/UiLabel.cpp
     src/rwe/ui/UiLabel.h
     src/rwe/ui/UiLightBar.cpp
@@ -1067,6 +1084,7 @@ set(TEST_FILES
     src/rwe/game/replaykeyframe.test.cpp
     src/rwe/game/savefileheader.test.cpp
     src/rwe/game/hoveredfeature.test.cpp
+    src/rwe/game/idle_builders.test.cpp
     src/rwe/game/infopanel.test.cpp
     src/rwe/game/orderbuttons.test.cpp
     src/rwe/game/PlayerCommand_hotkey.test.cpp
@@ -1220,6 +1238,12 @@ set(TEST_FILES
     src/rwe/sim/ballisticair.test.cpp
     src/rwe/sim/wind.test.cpp
     src/rwe/pathfinding/pathing.test.cpp
+    src/rwe/pathfinding/PathfindingBackend.test.cpp
+    src/rwe/pathfinding/OaUnitPathSearch.test.cpp
+    src/rwe/pathfinding/oa/OaSearchGoal.test.cpp
+    src/rwe/pathfinding/oa/OaSearchHeap.test.cpp
+    src/rwe/pathfinding/oa/OaSearchTrace.test.cpp
+    src/rwe/pathfinding/oa/OaSearchWorker.test.cpp
     src/rwe/pathfinding/BugWalk.test.cpp
     src/rwe/pathfinding/walkwhilewaiting.test.cpp
     src/rwe/pathfinding/pathrequestlimit.test.cpp
@@ -1252,6 +1276,7 @@ set(TEST_FILES
     src/rwe/util/range_util.test.cpp
     src/rwe/util/rwe_string.test.cpp
     src/rwe/ui/UiComponent.test.cpp
+    src/rwe/ui/UiIdleBuilderSign.test.cpp
     src/rwe/ui/UiTextBox.test.cpp
     src/rwe/ui/UiTextRegion.test.cpp
     src/rwe/ui/UiPanelFocus.test.cpp

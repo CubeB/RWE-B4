@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <rwe/pathfinding/PathfindingBackend.h>
 #include <string>
 #include <vector>
 
@@ -391,6 +392,16 @@ namespace rwe
          */
         unsigned int buildingHaloSaturation{65};
         unsigned int buildingHaloRedShift{50};
+
+        /**
+         * Which pathfinding backend a new game starts on, read from the
+         * rwe.cfg key `pathfinding`. A game option and not a local preference:
+         * two lockstep peers that path their units differently desync, and no
+         * sync hash catches a disagreement about which search to run. This
+         * only supplies the default a fresh game starts from; a replay or a
+         * save carries the value it was recorded with.
+         */
+        PathfindingBackend pathfindingBackend{PathfindingBackend::RweAStar};
     };
 
     /**

@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <SDL3/SDL.h>
 #include <memory>
+#include <rwe/ui/UiIdleBuilderSign.h>
 #include <rwe/ui/UiPanel.h>
 #include <rwe/ui/UiStagedButton.h>
 #include <rwe/ui/UiTextBox.h>
@@ -82,6 +83,63 @@ namespace rwe
 
             REQUIRE(secondPresses == 1);
             REQUIRE(firstPresses == 0);
+        }
+    }
+
+    // Clicking a gadget is what gives it the focus, and the side panel's
+    // idle-builder sign is a gadget a player clicks -- with the pointer, not
+    // with a key. UiPanel::mouseDown sets the focus on the child under the
+    // pointer before handing it the event, and mouseUp then goes to whichever
+    // child holds it rather than to the one under the pointer, so a press that
+    // has wandered off the panel between the two halves still lands.
+    TEST_CASE("a clicked gadget takes the focus, and the release finds it there", "[ui]")
+    {
+        auto activations = 0;
+
+        UiPanel panel(0, 0, 128, 416);
+        {
+            auto sign = std::make_unique<UiIdleBuilderSign>(0, 0, 120, 14, nullptr);
+            sign->setName("IDLEBUILDERS");
+            sign->setIdleBuilderCount(2);
+            sign->addSubscription(sign->messages().subscribe([&activations](const ControlMessage& message) {
+                if (std::holds_alternative<ActivateMessage>(message))
+                {
+                    ++activations;
+                }
+            }));
+            panel.appendChild(std::move(sign));
+        }
+
+        // The sign sits at the panel's own origin, and the panel translates the
+        // event on the way in, so these are the sign's own coordinates.
+        panel.mouseDown(MouseButtonEvent(10, 5, MouseButtonEvent::MouseButton::Left));
+
+        SECTION("a release somewhere else entirely still reaches it")
+        {
+            panel.mouseUp(MouseButtonEvent(400, 300, MouseButtonEvent::MouseButton::Left));
+
+            REQUIRE(activations == 1);
+        }
+
+        SECTION("a release with no press on the panel reaches nothing")
+        {
+            // The click took the focus, so this is the one that matters: a
+            // release on its own is not a click, and the sign's armed flag is
+            // what says so.
+            panel.clearFocus();
+            panel.setFocusByName("IDLEBUILDERS");
+            panel.mouseUp(MouseButtonEvent(400, 300, MouseButtonEvent::MouseButton::Left));
+
+            REQUIRE(activations == 0);
+        }
+
+        SECTION("a press that lands on no gadget at all reaches nothing")
+        {
+            panel.clearFocus();
+            panel.mouseDown(MouseButtonEvent(400, 300, MouseButtonEvent::MouseButton::Left));
+            panel.mouseUp(MouseButtonEvent(10, 5, MouseButtonEvent::MouseButton::Left));
+
+            REQUIRE(activations == 0);
         }
     }
 

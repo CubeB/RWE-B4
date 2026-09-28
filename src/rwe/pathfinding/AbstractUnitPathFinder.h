@@ -83,6 +83,15 @@ namespace rwe
          */
         bool isWalkableOutsideSearch(const Point& p) const;
 
+        /**
+         * The same answer for the rough-terrain question, and for the same
+         * reason: the memoised version stamps the scratch.
+         *
+         * The original's search costs a step through rough ground extra, and
+         * the ported search (`oa::SearchWorker`) asks this per cell it expands.
+         */
+        bool isRoughTerrainOutsideSearch(const Point& p) const;
+
     protected:
         unsigned int getSuccessors(const Point& vertex, const std::optional<Point>& predecessor, const PathCost& costToReach, Successor* out) override;
 

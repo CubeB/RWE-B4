@@ -20,6 +20,8 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <optional>
+#include <string>
 #include <rwe/GameLaunch.h>
 #include <rwe/GlobalConfig.h>
 #include <rwe/PathMapping.h>
@@ -194,6 +196,165 @@ namespace
                 }
             });
             s.endAt(91);
+        });
+
+        // The side panel's idle-builder sign (#418): a count of the local
+        // player's construction units that have nothing to do, and a click that
+        // goes to the next one. Two things a pure-function test cannot reach.
+        // The count has to arrive on a widget that did not exist when the game
+        // started, because the panel is rebuilt every time the selection
+        // changes -- so the sign is put on each new panel and has to be found
+        // on the current one afterwards. And the click has to travel the real
+        // route, a mouseDown and a mouseUp through the scene's own handlers
+        // into the panel's group messages, and come out the far side as a
+        // selection and a camera move.
+        //
+        // One construction bot is spawned because the commander alone gives the
+        // count a single entry, and a rotation over one entry cannot be told
+        // apart from no rotation at all.
+        rwe::registerScenario("418-idle-builder-sign", [](rwe::Scenario& s) {
+            // How far apart two points are in the world plane, squared. The
+            // camera is clamped to the terrain and cannot always be put exactly
+            // on a unit, so "the view is nearer the builder the sign named than
+            // to the other one" is the true statement about what a click does,
+            // and squaring keeps it a comparison rather than a square root.
+            auto squaredFlatDistance = [](const rwe::SimVector& a, const rwe::SimVector& b) {
+                auto dx = a.x - b.x;
+                auto dz = a.z - b.z;
+                return dx * dx + dz * dz;
+            };
+
+            struct State
+            {
+                std::optional<rwe::UnitId> bot;
+                std::optional<rwe::UnitId> firstClick;
+            };
+            auto state = std::make_shared<State>();
+
+            s.at(1, [state](rwe::ScenarioDriver& d) {
+                // The commander on its own is a construction unit with an empty
+                // order queue, so the sign is showing something before anything
+                // is spawned. If it is not, the sign is not being updated at
+                // all and nothing after this can be believed.
+                auto before = d.idleBuilderCount();
+                d.require(before.has_value(), "the side panel has room for the idle-builder sign");
+                d.require(
+                    before.value_or(-1) == 1,
+                    "the commander is the only idle construction unit to begin with, not " + std::to_string(before.value_or(-1)));
+
+                // ARMCK is the level-one construction bot, the name the AI's own
+                // side-units table carries for it. One only: the spawner drops
+                // every unit on the same spot beside the camera, so a second
+                // would find the first standing there and refuse.
+                state->bot = d.spawnNearCamera("ARMCK");
+                d.require(state->bot.has_value(), "a construction bot was placed");
+            });
+
+            s.at(2, [](rwe::ScenarioDriver& d) {
+                d.require(
+                    d.idleBuilderCount() == 2,
+                    "the sign counts the commander and the construction bot, not " + std::to_string(d.idleBuilderCount().value_or(-1)));
+            });
+
+            s.at(3, [state, squaredFlatDistance](rwe::ScenarioDriver& d) {
+                auto before = d.cameraPosition();
+                d.clickGadget("IDLEBUILDERS");
+
+                state->firstClick = d.selectedUnit();
+                d.require(d.selectedCount() == 1, "the sign's click selected exactly one unit");
+                d.require(state->firstClick.has_value(), "the sign's click selected a unit the driver can name");
+
+                // And the view went with it. The camera is clamped to keep the
+                // world viewport on the terrain, so a builder standing at the
+                // edge of the map cannot be centred on exactly and "it arrived"
+                // is not a statement this can make. What it can make is the
+                // half that survives the clamp: the click left the view no
+                // further from the builder the sign named than it found it,
+                // which is what setting the camera on that builder means once
+                // the constraint has had its say.
+                auto after = d.cameraPosition();
+                auto onNamed = state->firstClick ? d.unitPosition(*state->firstClick) : std::nullopt;
+                d.require(after.has_value() && onNamed.has_value() && before.has_value(), "the camera and the builder it jumped to both have positions");
+                if (after && onNamed && before)
+                {
+                    d.require(
+                        squaredFlatDistance(*after, *onNamed) <= squaredFlatDistance(*before, *onNamed),
+                        "the click left the view no further from the builder it named than it found it");
+                }
+            });
+
+            s.at(4, [](rwe::ScenarioDriver& d) {
+                // Back to the main panel, and the sign is on this one. It is
+                // deliberately not on a build page: those are grids of buttons
+                // out of a different gui file -- ARMCOM1's runs from row 27 to
+                // 237 -- and RWE has no claim on any part of one, so the sign
+                // is left off rather than laid over shipped art. Selecting a
+                // builder therefore takes the sign off the screen, and this is
+                // the way back to it.
+                d.key(SDLK_ESCAPE);
+                d.require(d.selectedCount() == 0, "escape cleared the selection the sign made");
+            });
+
+            s.at(5, [state, squaredFlatDistance](rwe::ScenarioDriver& d) {
+                // The second click moves on rather than coming back to the same
+                // builder, which is the whole difference between a rotation and
+                // a shortcut.
+                d.require(d.idleBuilderCount() == 2, "the sign came back on the main panel with the count it had");
+                auto before = d.cameraPosition();
+                d.clickGadget("IDLEBUILDERS");
+                auto secondClick = d.selectedUnit();
+                d.require(d.selectedCount() == 1, "the second click selected exactly one unit");
+                d.require(secondClick.has_value(), "the second click selected a unit the driver can name");
+                d.require(
+                    !state->firstClick.has_value() || secondClick != state->firstClick,
+                    "the second click moved on to a different builder");
+
+                auto after = d.cameraPosition();
+                auto onSecond = secondClick ? d.unitPosition(*secondClick) : std::nullopt;
+                d.require(after.has_value() && onSecond.has_value() && before.has_value(), "the camera and the second builder both have positions");
+                if (after && onSecond && before)
+                {
+                    d.require(
+                        squaredFlatDistance(*after, *onSecond) <= squaredFlatDistance(*before, *onSecond),
+                        "the second click brought the view to the other builder");
+                }
+            });
+
+            s.at(6, [](rwe::ScenarioDriver& d) {
+                // The count is live: give the builder the second click landed on
+                // something to do, and the number on the sign has to fall by
+                // one, with nothing else having changed.
+                auto busy = d.selectedUnit();
+                d.require(busy.has_value(), "there is a selected builder to give work to");
+                if (!busy)
+                {
+                    return;
+                }
+                auto at = d.unitPosition(*busy);
+                d.require(at.has_value(), "the busy builder has a position");
+                if (at)
+                {
+                    d.moveOrder(*busy, rwe::SimVector(at->x + rwe::SimScalar(240.0f), at->y, at->z));
+                }
+            });
+
+            s.at(7, [](rwe::ScenarioDriver& d) {
+                // Back to the main panel again, so the count is read off a
+                // widget that is actually on screen.
+                d.key(SDLK_ESCAPE);
+            });
+
+            s.after(8, [](rwe::ScenarioDriver& d) {
+                // Read several ticks after the order went out, because that
+                // order is a command: it rides out with the tick's set and
+                // lands on the unit a tick or two later, and the sign only
+                // ever shows what the simulation has already decided.
+                d.require(
+                    d.idleBuilderCount() == 1,
+                    "a builder given an order has left the count, and the count reads " + std::to_string(d.idleBuilderCount().value_or(-1)));
+            });
+
+            s.endAt(8);
         });
     }
 

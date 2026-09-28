@@ -5,6 +5,7 @@
 #include <optional>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/game/PlayerColorIndex.h>
+#include <rwe/pathfinding/PathfindingBackend.h>
 #include <rwe/sim/Energy.h>
 #include <rwe/sim/Metal.h>
 #include <string>
@@ -306,6 +307,9 @@ namespace rwe
         MappingMode mapping{MappingMode::Unmapped};
         StartLocationMode startLocation{StartLocationMode::Fixed};
         CommanderDeathMode commanderDeath{CommanderDeathMode::GameEnds};
+
+        /** Which path search this game runs; a lockstep option like the four above. */
+        PathfindingBackend pathfindingBackend{PathfindingBackend::RweAStar};
 
         /**
          * The battle test: instead of a commander each, every player is kept

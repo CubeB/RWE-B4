@@ -705,6 +705,7 @@ namespace rwe
         simulation.lineOfSightMode = gameParameters.lineOfSight;
         simulation.mappingMode = gameParameters.mapping;
         simulation.commanderDeathMode = gameParameters.commanderDeath;
+        simulation.pathFindingService.backend = gameParameters.pathfindingBackend;
 
         simulation.unitDefinitions = std::move(dataMaps.unitDefinitions);
         simulation.weaponDefinitions = std::move(dataMaps.weaponDefinitions);

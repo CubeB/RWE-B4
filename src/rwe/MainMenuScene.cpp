@@ -1941,6 +1941,7 @@ namespace rwe
         params.mapping = skirmishStageToMappingMode(model.skirmishOptions.mapping.getValue());
         params.startLocation = skirmishStageToStartLocationMode(model.skirmishOptions.startLocation.getValue());
         params.commanderDeath = skirmishStageToCommanderDeathMode(model.skirmishOptions.commanderDeath.getValue());
+        params.pathfindingBackend = sceneContext.globalConfig->pathfindingBackend;
 
         for (Index i = 0; i < getSize(model.players); ++i)
         {

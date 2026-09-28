@@ -150,6 +150,7 @@ int main(int argc, char* argv[])
                       << "  --max-units <n>       The id block size both sides agree on (default: 250)\n"
                       << "  --auto-launch         Launch as soon as the joiner is ready\n"
                       << "  --port-base <n>       Every DirectPlay port is the real one plus this (default: 0)\n"
+                      << "  --pathfinding <m>     rwe | oa (default: rwe)\n"
                       << "  --port <port>         Network port (default: 1337)\n"
                       << "  --drop-timeout <secs> Seconds a peer of a network game may go quiet\n"
                       << "                        before the rest carry on without it; 0 waits\n"
@@ -212,6 +213,7 @@ int main(int argc, char* argv[])
             config.buildingHaloStrength = std::min(100u, args.getUint("building-halo-strength", 100));
             config.buildingHaloSaturation = std::min(100u, args.getUint("building-halo-saturation", 65));
             config.buildingHaloRedShift = std::min(100u, args.getUint("building-halo-red-shift", 50));
+            config.pathfindingBackend = rwe::pathfindingBackendFromString(args.getString("pathfinding", "rwe"), rwe::PathfindingBackend::RweAStar);
             std::optional<rwe::GameParameters> gameParameters;
             if (args.contains("replay"))
             {
@@ -439,6 +441,7 @@ int main(int argc, char* argv[])
                 {
                     gameParameters->startLocation = rwe::StartLocationMode::Random;
                 }
+                gameParameters->pathfindingBackend = config.pathfindingBackend;
                 for (const auto& tuning : args.getMulti("ai-tune"))
                 {
                     gameParameters->aiTuning.push_back(tuning);

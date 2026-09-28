@@ -1,13 +1,15 @@
 #include "PathFindingService.h"
-#include <rwe/pathfinding/BugWalk.h>
-#include <rwe/pathfinding/UnitPathFinder.h>
-#include <rwe/sim/GameSimulation.h>
-#include <rwe/pathfinding/UnitPerimeterPathFinder.h>
-#include <rwe/pathfinding/pathfinding_utils.h>
-#include <rwe/util/Index.h>
-#include <rwe/util/SimpleLogger.h>
 #include <algorithm>
 #include <cstdlib>
+#include <rwe/pathfinding/BugWalk.h>
+#include <rwe/pathfinding/OaUnitPathSearch.h>
+#include <rwe/pathfinding/UnitPathFinder.h>
+#include <rwe/pathfinding/UnitPerimeterPathFinder.h>
+#include <rwe/pathfinding/oa/OaSearchWorker.h>
+#include <rwe/pathfinding/pathfinding_utils.h>
+#include <rwe/sim/GameSimulation.h>
+#include <rwe/util/Index.h>
+#include <rwe/util/SimpleLogger.h>
 
 namespace rwe
 {
@@ -89,6 +91,12 @@ namespace rwe
         long long expansions{0};
         std::unique_ptr<AbstractUnitPathFinder> pathFinder;
         /**
+         * The original-search backend's search, when that is the one running.
+         * Exactly one of `pathFinder` and `oaSearch` is set, decided once by
+         * `PathFindingService::backend`.
+         */
+        std::unique_ptr<OaUnitPathSearch> oaSearch;
+        /**
          * A finished answer for a search that was proven pointless before it
          * ran: the goal is in a different terrain region, so no route can
          * exist. The A* would have run out over every cell the unit can reach
@@ -159,7 +167,15 @@ namespace rwe
 
     std::size_t PathFindingService::suspendedSearchExpansions() const
     {
-        return activeSearch ? activeSearch->pathFinder->expansionsSoFar() : 0;
+        if (!activeSearch)
+        {
+            return 0;
+        }
+        if (activeSearch->oaSearch)
+        {
+            return activeSearch->oaSearch->expansionsSoFar();
+        }
+        return activeSearch->pathFinder->expansionsSoFar();
     }
 
     void PathFindingService::restoreSuspendedSearch(const GameSimulation& simulation, const DiscreteRect& start, std::size_t expansions)
@@ -202,8 +218,16 @@ namespace rwe
         // Deterministic, so running the expansions again lands on exactly the
         // state that was suspended. It cannot finish part way: it did not
         // finish in this many expansions the first time round either.
-        activeSearch->pathFinder->stepSearch(static_cast<unsigned int>(expansions));
-        assert(!activeSearch->pathFinder->isSearchFinished());
+        if (activeSearch->oaSearch)
+        {
+            activeSearch->oaSearch->stepSearch(static_cast<unsigned int>(expansions));
+            assert(!activeSearch->oaSearch->isSearchFinished());
+        }
+        else
+        {
+            activeSearch->pathFinder->stepSearch(static_cast<unsigned int>(expansions));
+            assert(!activeSearch->pathFinder->isSearchFinished());
+        }
     }
 
     void PathFindingService::update(GameSimulation& simulation)
@@ -258,7 +282,27 @@ namespace rwe
                 ++counters.searches;
             }
 
-            if (!activeSearch->immediateResult)
+            if (activeSearch->oaSearch)
+            {
+                // The original slices its search at a hundred expansions a
+                // tick rather than spending whatever the budget has left, so
+                // the ported search takes the smaller of the two. It is
+                // charged the same way and resumes in the same place.
+                const auto slice = static_cast<unsigned int>(std::min(
+                    std::max(remainingBudget, 0),
+                    static_cast<int>(oa::search_slice_expansions)));
+                auto expansions = activeSearch->oaSearch->stepSearch(slice);
+                remainingBudget -= static_cast<int>(expansions);
+                counters.expansions += static_cast<long long>(expansions);
+                activeSearch->expansions += static_cast<long long>(expansions);
+
+                if (!activeSearch->oaSearch->isSearchFinished())
+                {
+                    ++counters.searchesSuspended;
+                    break;
+                }
+            }
+            else if (!activeSearch->immediateResult)
             {
                 auto expansions = activeSearch->pathFinder->stepSearch(static_cast<unsigned int>(remainingBudget));
                 remainingBudget -= static_cast<int>(expansions);
@@ -412,6 +456,7 @@ namespace rwe
             unitDefinition.movementCollisionInfo, [&](const UnitDefinition::NamedMovementClass& mc) { return std::make_optional(mc.movementClassId); }, [&](const auto&) { return std::optional<MovementClassId>(); });
 
         std::unique_ptr<AbstractUnitPathFinder> pathFinder;
+        std::unique_ptr<OaUnitPathSearch> oaSearch;
         std::optional<AStarPathInfo<Point, PathCost>> immediateResult;
         auto goal = Point(0, 0);
         auto goalRelaxed = false;
@@ -422,6 +467,19 @@ namespace rwe
             [&](const SimVector& position) {
                 auto goalRegion = simulation.computeFootprintRegion(position, unitDefinition.movementCollisionInfo);
                 goal = Point(goalRegion.x, goalRegion.y);
+
+                if (backend == PathfindingBackend::OpenAnnihilation)
+                {
+                    // The ported search does its own wall-follow seed and goal
+                    // marking, so none of the goal relaxation above belongs on
+                    // this path. A rect destination still uses the perimeter
+                    // finder, because the original's ring and outline goals are
+                    // not ported yet.
+                    oaSearch = std::make_unique<OaUnitPathSearch>(
+                        &simulation, unitId, movementClassId, start.width, start.height, goal, 0);
+                    oaSearch->beginSearch(startPoint);
+                    return;
+                }
 
                 auto finder = std::make_unique<UnitPathFinder>(&simulation, &simulation.movementClassCollisionService, unitId, movementClassId, start.width, start.height, goal, &scratch);
                 // Something is standing on the goal, so the goal is not a
@@ -509,12 +567,49 @@ namespace rwe
                 pathFinder = std::move(finder);
             });
 
-        activeSearch = std::unique_ptr<ActiveSearch>(new ActiveSearch{unitId, destination, start, goal, goalRelaxed, 0, std::move(pathFinder), std::move(immediateResult), immediateWalkSteps});
+        activeSearch = std::unique_ptr<ActiveSearch>(new ActiveSearch{unitId, destination, start, goal, goalRelaxed, 0, std::move(pathFinder), std::move(oaSearch), std::move(immediateResult), immediateWalkSteps});
     }
 
     UnitPath PathFindingService::finishSearch(const GameSimulation& simulation)
     {
         auto& search = *activeSearch;
+
+        if (search.oaSearch)
+        {
+            auto path = search.oaSearch->takeResult(simulation);
+            if (path.destinationUnreachable)
+            {
+                // A relaxed goal is not an exhausted search: the wall-follow
+                // seed reached the neighbourhood and the route ends there. An
+                // empty route is the exhausted case.
+                if (search.oaSearch->goalWasRelaxed())
+                {
+                    ++counters.searchesRelaxed;
+                }
+                else
+                {
+                    ++counters.searchesExhausted;
+                }
+            }
+            else if (const auto* position = std::get_if<SimVector>(&search.destination))
+            {
+                // RWE's path follower walks the segment to its last waypoint,
+                // where the original hands its own navigator the goal cell and
+                // steers there. Snapping the last corner onto the exact
+                // destination is what lets the follower's arrival test finish
+                // the order, and it is the same snap the default backend does
+                // when a search really finished on the goal cell.
+                path.waypoints.back() = *position;
+            }
+            LOG_DEBUG << "Path for unit " << search.unitId.value << " from " << search.start.x << "," << search.start.y
+                      << " to " << search.goal.x << "," << search.goal.y
+                      << ": " << (path.destinationUnreachable ? "unreachable" : "complete") << ", " << path.waypoints.size() << " waypoints";
+            // The ported search has no A* closed list to show, so the render
+            // overlay has nothing to draw for it.
+            lastPathDebugInfo = AStarPathInfo<Point, PathCost>{AStarPathType::Complete, {}, {}, false};
+            return path;
+        }
+
         // The one source of immediateResult is the terrain-region early-out in
         // beginSearch; read it before the move below empties it.
         const bool fromTerrainRegions = search.immediateResult.has_value();
