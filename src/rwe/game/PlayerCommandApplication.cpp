@@ -339,6 +339,18 @@ namespace rwe
             [&](const PlayerUnitCommand::SelfDestruct&) {
                 // Starts the countdown, or cancels it if pressed again.
                 simulation.toggleSelfDestruct(unitCommand.unit);
+            },
+            [&](const PlayerUnitCommand::SetBuildQueueRepeat& c) {
+                // Off is restored exactly, so a factory nobody has toggled
+                // behaves as it always did. The queue itself is left alone
+                // either way: the toggle only decides what happens to an
+                // entry once it has been worked off, and a player who turns
+                // it off gets the drain-the-queue behaviour back mid-queue
+                // rather than losing what is already in it.
+                if (auto unit = simulation.tryGetUnitState(unitCommand.unit))
+                {
+                    unit->get().repeatBuildQueue = c.repeat;
+                }
             });
 
         return true;

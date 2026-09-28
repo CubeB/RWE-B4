@@ -619,6 +619,14 @@ namespace rwe
          */
         BehaviorSubject<GatheredToggle<bool>> cloak{};
 
+        /**
+         * Whether the selected factory is set to put each finished item back
+         * on the end of its own build queue (#417). Off everywhere by
+         * default, and read from the unit rather than from any panel state,
+         * because the flag lives on the factory and is hashed there.
+         */
+        BehaviorSubject<GatheredToggle<bool>> repeatBuildQueue{};
+
         UiFactory uiFactory;
 
         /**
@@ -1041,10 +1049,48 @@ namespace rwe
          * capacity alone. A wake dot is six vertices and a busy water map has
          * tens of thousands of them on screen, so a vector that starts empty
          * every frame spends the frame growing back to a couple of hundred
-         * thousand entries and copying what it already had each time.
-         * Cleared, not destroyed, at the top of every frame.
+         * thousand entries and copying what it already had each time. It is
+         * only refilled when the batch it holds has stopped being the batch
+         * this frame wants; see WakeBatchKey.
          */
         ColoredMeshBatch wakeBatch;
+
+        /**
+         * What wakeBatch holds: the tick it depicts, how many dots were alive
+         * then, and the view they were culled against. All three are inputs
+         * to the batch and nothing else is, so on a frame where none of them
+         * has moved the batch is already the right one and the walk and the
+         * upload can both be skipped.
+         */
+        struct WakeBatchKey
+        {
+            GameTime tick{GameTime(0)};
+            std::size_t dotCount{0};
+            Matrix4f view{Matrix4f::identity()};
+            bool built{false};
+
+            bool matches(GameTime t, std::size_t count, const Matrix4f& v) const
+            {
+                return built && tick == t && dotCount == count && view == v;
+            }
+
+            void remember(GameTime t, std::size_t count, const Matrix4f& v)
+            {
+                tick = t;
+                dotCount = count;
+                view = v;
+                built = true;
+            }
+        };
+        WakeBatchKey wakeBatchKey;
+
+        /**
+         * The vertex array and buffer wakeBatch was last uploaded into, kept
+         * so a frame that draws the wake it drew last frame does not have to
+         * make a new pair and throw the old one away. It belongs here rather
+         * than in RenderService, which is built afresh every frame.
+         */
+        GlMesh wakeBatchMesh;
 
         /** A piece blown off a unit by its script, tumbling under gravity. Purely visual. */
         struct Debris
@@ -1881,8 +1927,25 @@ namespace rwe
         GatheredToggle<bool> gatherOnOff() const;
         GatheredToggle<bool> gatherCloak() const;
 
+        /**
+         * The same gather over the factory repeat toggle (#417), which is
+         * offered by any unit that builds rather than by a capability flag --
+         * there is no original flag for it, because there is no original
+         * button for it. A unit that cannot build is skipped, so a squad of
+         * tanks offers nothing and the button is greyed.
+         */
+        GatheredToggle<bool> gatherRepeatBuildQueue() const;
+
         /** Re-reads the four toggles' shown state from the selection. */
         void refreshToggleButtons();
+
+        /**
+         * Adds the factory repeat button to the orders panel, which the GUI
+         * data has no gadget for, and greys it when nothing in the selection
+         * builds. Derived from the CLOAK/ONOFF gap rather than written down;
+         * see the body for the ui_probe figures. (#417)
+         */
+        void addRepeatBuildButton(UiPanel& panel);
 
         /** Select every owned live unit the predicate admits; false leaves the selection alone if nothing matched. */
         bool selectAllWhere(const std::function<bool(const UnitState&, const UnitDefinition&)>& predicate);
@@ -1942,6 +2005,17 @@ namespace rwe
 
         /** Order another round for the unit's stockpiled weapon, or take one off the queue. */
         void localPlayerModifyStockpile(UnitId unitId, int count);
+
+        /**
+         * Ask a factory to put each item it finishes back on the end of its
+         * own build queue, or to go back to consuming it (#417).
+         *
+         * Routed through the command buffer like every other order, and never
+         * written to the unit directly: the flag is hashed, so a panel that
+         * set it on the spot would put the local machine's answer into the
+         * sync hash a round trip before any peer had it.
+         */
+        void localPlayerSetRepeatBuildQueue(UnitId unitId, bool repeat);
 
         void startTrack();
 

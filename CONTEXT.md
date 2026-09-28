@@ -70,8 +70,20 @@ _Avoid_: client side, visual layer
 
 **Lockstep**:
 The simulation contract: peers exchange commands, not state, and every peer
-ticks identically. The reason presentation may not touch sim state.
+ticks identically. The reason presentation may not touch sim state. One of the
+three shapes a scene takes, the other two being playback and own-clock, and the
+guards that separate them are ADR-0003.
 _Avoid_: sync mode
+
+**Playback**:
+A scene that is watching rather than playing: its only input is a recording, so
+it is in a game with nobody. Either input counts — an RWE replay's command
+stream, or a TA demo's state and effects, which reach the simulation as
+puppets rather than as orders. The local human is not seated, the peer-liveness
+checks and the sync-hash exchange stand down, and no tick is held for anybody.
+`GameScene::isPlayback()`. A shape rather than the opposite of lockstep: it and
+own-clock are separate gates, and a shared guard tests both (ADR-0003).
+_Avoid_: replay (that is one of the two inputs), spectator mode, demo mode
 
 **Sync hash** (`GameHash`):
 The per-tick digest of hashed sim state. A mismatch between peers is a

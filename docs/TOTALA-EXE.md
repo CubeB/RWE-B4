@@ -607,9 +607,6 @@ quirks of the original that RWE reproduces although they look like defects.
 
 ## 91. Still unknown or unported
 
-- **`unitsonly`** (§116) is not parsed, so no RWE round skips the ground and
-  sea tests. The shipped data sets it on the burning-feature damage in
-  FIRES.TDF and on MINDGUN.
 - **The campaign's win and lose rules** (§113) are decoded and not ported:
   all eighteen `[GlobalHeader]` conditions, checked once a second, all
   victory rules in order and any defeat rule, victory first, then a

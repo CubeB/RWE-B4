@@ -16,6 +16,7 @@
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/tnt/TntArchive.h>
+#include <rwe/io/weapontdf/WeaponTdf.h>
 #include <rwe/puppet/TaLiveReceiver.h>
 #include <rwe/puppet/TadPuppetDriver.h>
 #include <rwe/puppet/puppet_test_util.h>
@@ -311,6 +312,31 @@ namespace rwe
         std::memcpy(data.data() + 4, &side, 4);
         std::memcpy(data.data() + 8, &side, 4);
         REQUIRE_THROWS(SmkDecoder(std::move(data)));
+    }
+
+    TEST_CASE("a weapon TDF's unitsonly only takes a number", "[malformed]")
+    {
+        // `unitsonly` tells the simulation to skip the ground and the sea stop
+        // tests for this weapon's rounds, so a nonsense value must cost the
+        // weapon the key and nothing else. Reading it as anything non-numeric
+        // would leave the flag off, which is the original's default and the
+        // safe direction: the round still stops on terrain.
+        TdfBlock nonsense;
+        nonsense.insertOrAssignProperty("unitsonly", "true");
+        REQUIRE_FALSE(parseWeaponBlock(nonsense).unitsOnly);
+
+        TdfBlock empty;
+        empty.insertOrAssignProperty("unitsonly", "");
+        REQUIRE_FALSE(parseWeaponBlock(empty).unitsOnly);
+
+        // The numeric spellings the data uses, and the zero that is off.
+        TdfBlock on;
+        on.insertOrAssignProperty("unitsonly", "1");
+        REQUIRE(parseWeaponBlock(on).unitsOnly);
+
+        TdfBlock off;
+        off.insertOrAssignProperty("unitsonly", "0");
+        REQUIRE_FALSE(parseWeaponBlock(off).unitsOnly);
     }
 
     TEST_CASE("TDF blocks nested past any real file are refused, not recursed into", "[malformed]")
@@ -676,6 +702,7 @@ namespace rwe
             REQUIRE(narrow.stats().unitStateSkipped == 0);
         }
     }
+
     namespace
     {
         /** A DirectPlay TCP message: the 20-bit size, the token, then "play" and the command. */
@@ -765,7 +792,7 @@ namespace rwe
         // A super enum players reply with one player whose service-provider
         // length says there is more data than the message holds.
         std::vector<std::uint8_t> payload(28 + 80, 0);
-        payload[24] = 1; // one player
+        payload[0] = 1; // one player, read from offset 0
         payload[16] = 36; // descriptionOffset, from the envelope
         payload[20] = 116; // nameOffset, from the envelope
         payload[8] = 180; // packedOffset, from the envelope
@@ -773,7 +800,7 @@ namespace rwe
         // The player entry starts at payload offset 172: 20 bytes of fixed
         // fields then a one-byte spDataLength. Set infoMask to say the
         // service-provider data is present and claim more than remains.
-        payload.resize(28 + 80 + 21, 0);
+        payload.resize(172 + 21, 0);
         payload[172 + 12] = 0x04; // infoMask: sp data present, one-byte length
         payload[172 + 20] = 0xFF; // spDataLength 255, past the end
         REQUIRE_THROWS_AS(taDecodeSuperEnumPlayersReply(payload), TaDirectPlayException);

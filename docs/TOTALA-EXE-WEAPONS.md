@@ -2664,6 +2664,17 @@ water, the longer the range at which they get through.
 - `nosealeveltrigger` reaches `GameSimulation::noSeaLevelTrigger` from the OTA
   and switches the sea test off. It is saved with the other map constants and
   is not hashed, as they are not.
+- **`unitsonly`** (B4 #405) takes the early return at the same place: the round
+  has been through every unit test, and it goes straight back out without
+  reaching `0x49B36D` or `0x49B3A1`. It is read off the weapon definition at
+  test time, as `waterweapon` beside it already is, and not copied onto the
+  round, because that is where the original reads it from
+  (`wdef+0x111`, bit 14) and nothing in the game data changes a weapon
+  mid-flight. It skips the two surfaces and nothing else -- a `unitsonly` round
+  still detonates on a unit, and still dies when its time or its range runs
+  out. `src/rwe/sim/unitsonly.test.cpp` fires the shipped `MINDGUN` through the
+  TDF parser and drops it onto bare ground and onto twenty units of water,
+  where it passes both and keeps falling, and onto a land unit, where it stops.
 - `src/rwe/sim/seacollision.test.cpp` fires the real `ARMKBOT_MISSILE` at a
   wading `CORSTORM` (2x2, `MaxWaterDepth=21`, model top 25.94) under twenty
   units of water: it hits from just outside the footprint, splashes from 80
@@ -2672,6 +2683,5 @@ water, the longer the range at which they get through.
 
 ### Not ported
 
-- **`unitsonly`** is not parsed. No round in RWE skips the ground and the sea.
-
-It is in §91.
+Nothing from this section. `unitsonly` was the last of it (B4 #405), and §91
+is where what is still open is kept.

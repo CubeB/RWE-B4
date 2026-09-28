@@ -468,6 +468,36 @@ namespace rwe
         return GlMesh(std::move(vao), std::move(vbo), vertices.size());
     }
 
+    void GraphicsContext::updateColoredMesh(GlMesh& mesh, const std::vector<GlColoredVertex>& vertices)
+    {
+        auto count = static_cast<unsigned int>(vertices.size());
+        if (count > mesh.capacity)
+        {
+            mesh.capacity = count;
+        }
+
+        if (!mesh.vbo.get().isValid())
+        {
+            mesh = createColoredMesh(vertices, GL_STREAM_DRAW);
+            return;
+        }
+
+        bindVertexArray(mesh.vao.get());
+        bindBuffer(GL_ARRAY_BUFFER, mesh.vbo.get());
+
+        // At the high-water mark rather than the size wanted, so a batch
+        // whose length drifts a little from frame to frame keeps one
+        // allocation, and the whole buffer rather than a range of it, so a
+        // draw already queued against the old contents goes on reading the
+        // store it was queued with.
+        glBufferData(GL_ARRAY_BUFFER, mesh.capacity * sizeof(GlColoredVertex), vertices.data(), GL_STREAM_DRAW);
+
+        unbindBuffer(GL_ARRAY_BUFFER);
+        unbindVertexArray();
+
+        mesh.vertexCount = count;
+    }
+
     GlMesh GraphicsContext::createTexturedNormalMesh(const std::vector<GlTexturedNormalVertex>& vertices, GLenum usage)
     {
         auto vao = genVertexArray();
