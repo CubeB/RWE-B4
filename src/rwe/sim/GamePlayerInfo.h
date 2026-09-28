@@ -20,6 +20,22 @@ namespace rwe
         Computer
     };
 
+    /**
+     * Whether this machine decides the player's units or applies another
+     * machine's results for them.
+     *
+     * TA is owner-authoritative: each machine simulates the units its own
+     * players own and receives the rest as state. A Remote player's units run
+     * no local orders, weapons, damage or economy; the results arrive from the
+     * owner. Not hashed, so flipping it cannot move a lockstep sync hash, and
+     * never produced by a load.
+     */
+    enum class PlayerSimulation
+    {
+        Local,
+        Remote
+    };
+
     struct GamePlayerInfo
     {
         std::optional<std::string> name;
@@ -44,6 +60,9 @@ namespace rwe
          * stop at startingEnergy, keep working.
          */
         std::optional<int> teamId{};
+
+        /** Local by default; set Remote by a mode whose units another machine owns. */
+        PlayerSimulation simulation{PlayerSimulation::Local};
 
         /**
          * The player's storage has a base of its own, startingMetal and

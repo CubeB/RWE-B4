@@ -151,11 +151,32 @@ namespace rwe
         }
     };
 
+    /**
+     * How a live game advances its clock.
+     *
+     * Lockstep is RWE's multiplayer contract: a tick runs only once every
+     * peer's commands for it have arrived and peers compare sync hashes.
+     *
+     * OwnClock is a game against a peer that runs its own simulation and
+     * waits for nobody -- a real `TotalA.exe`, which is owner-authoritative
+     * rather than lockstep (docs/TA-NETWORK.md). The scene ticks on its own
+     * clock at the chosen speed like a skirmish, with no command gate, no
+     * hash exchange, no desync report and no save.
+     */
+    enum class NetMode
+    {
+        Lockstep,
+        OwnClock,
+    };
+
     struct GameParameters
     {
         std::string mapName;
         unsigned int schemaIndex;
         std::array<std::optional<PlayerInfo>, 10> players;
+
+        /** How this game advances its clock; see NetMode. */
+        NetMode netMode{NetMode::Lockstep};
 
         /**
          * Play the map as a mission (--mission): the schema's [units] for the
@@ -211,6 +232,15 @@ namespace rwe
          * commands instead of live ones.
          */
         std::optional<std::string> replayFile;
+
+        /**
+         * Spectate this TA demo (`rwe --tad`). The demo is state and effects,
+         * not orders, so it cannot be replayed: every player becomes Remote and
+         * a puppet driver drives their units straight from the stream. This
+         * machine owns nobody, so there is no local player to decide for; the
+         * first seat is only where the loader hangs the camera and interface.
+         */
+        std::optional<std::string> tadDemoFile;
 
         /**
          * With replayFile: keep the computer players thinking instead of

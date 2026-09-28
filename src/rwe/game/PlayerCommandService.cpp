@@ -7,12 +7,25 @@ namespace rwe
     std::optional<std::vector<std::pair<PlayerId, std::vector<PlayerCommand>>>> PlayerCommandService::tryPopCommands()
     {
         std::scoped_lock<std::mutex> lock(mutex);
+        return popCommandsLocked(true);
+    }
 
-        for (const auto& p : commandBuffers)
+    std::optional<std::vector<std::pair<PlayerId, std::vector<PlayerCommand>>>> PlayerCommandService::tryPopCommandsWithoutWaiting()
+    {
+        std::scoped_lock<std::mutex> lock(mutex);
+        return popCommandsLocked(false);
+    }
+
+    std::optional<std::vector<std::pair<PlayerId, std::vector<PlayerCommand>>>> PlayerCommandService::popCommandsLocked(bool wait)
+    {
+        if (wait)
         {
-            if (p.second.empty() && !isDroppedLocked(p.first))
+            for (const auto& p : commandBuffers)
             {
-                return std::nullopt;
+                if (p.second.empty() && !isDroppedLocked(p.first))
+                {
+                    return std::nullopt;
+                }
             }
         }
 

@@ -273,6 +273,7 @@ namespace rwe
 
         weaponDefinition.groundBounce = tdf.groundBounce;
         weaponDefinition.noExplode = tdf.noExplode;
+        weaponDefinition.unitsOnly = tdf.unitsOnly;
 
         weaponDefinition.fireStarter = static_cast<unsigned int>(std::clamp(tdf.fireStarter, 0.0f, 100.0f));
 
@@ -787,11 +788,16 @@ namespace rwe
         return mediaInfo;
     }
 
-    FeatureDefinitionId getFeatureId(FeatureDefinitionId& nextId, const std::unordered_map<std::string, FeatureDefinitionId>& featureNameIndex, std::deque<std::string>& openQueue, std::unordered_map<std::string, FeatureDefinitionId>& openSet, const std::string& featureName)
+    std::optional<FeatureDefinitionId> getFeatureId(FeatureDefinitionId& nextId, const std::unordered_map<std::string, FeatureDefinitionId>& featureNameIndex, const std::unordered_set<std::string>& knownFeatureNames, std::deque<std::string>& openQueue, std::unordered_map<std::string, FeatureDefinitionId>& openSet, const std::string& featureName)
     {
         if (auto existingId = featureNameIndex.find(featureName); existingId != featureNameIndex.end())
         {
             return existingId->second;
+        }
+
+        if (!knownFeatureNames.contains(toUpper(featureName)))
+        {
+            return std::nullopt;
         }
 
         if (auto it = openSet.find(toUpper(featureName)); it != openSet.end())

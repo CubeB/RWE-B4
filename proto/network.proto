@@ -200,6 +200,11 @@ message PlayerUnitCommand
         required int32 count = 1;
     }
 
+    message SetBuildQueueRepeat
+    {
+        required bool repeats = 1;
+    }
+
     required int32 unit = 1;
 
     oneof command {
@@ -213,6 +218,7 @@ message PlayerUnitCommand
         SetCloak set_cloak = 9;
         ModifyStockpile modify_stockpile = 10;
         SetMovementOrders set_movement_orders = 11;
+        SetBuildQueueRepeat set_build_queue_repeat = 12;
     }
 }
 

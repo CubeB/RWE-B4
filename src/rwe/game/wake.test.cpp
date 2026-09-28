@@ -166,6 +166,75 @@ namespace rwe
         REQUIRE(ticks > 20);
     }
 
+    TEST_CASE("the wake batch is the quads of the dots the view can see, and nothing else", "[wake]")
+    {
+        // The walk over the dot list is the expensive half of the wake pass,
+        // so it is one function now rather than a call a dot (issue #10). What
+        // it puts in the batch is what this pins down: six vertices a dot, the
+        // two-unit square the original draws, and nothing for a dot that is
+        // finished, not started yet, or off screen.
+        auto terrain = makeShoreTerrain();
+        std::vector<WakeDot> dots{
+            spawnWakeDot(terrain, Vector3f(0.0f, 0.0f, 0.0f), Vector3f(0.0f, 0.0f, 0.0f), GameTime(0), GameTime(96), Wake1Period, false),
+            spawnWakeDot(terrain, Vector3f(100.0f, 0.0f, 0.0f), Vector3f(0.0f, 0.0f, 0.0f), GameTime(0), GameTime(96), Wake1Period, false),
+            spawnWakeDot(terrain, Vector3f(0.0f, 0.0f, 0.0f), Vector3f(0.0f, 0.0f, 0.0f), GameTime(0), GameTime(4), Wake1Period, false),
+            spawnWakeDot(terrain, Vector3f(0.0f, 0.0f, 0.0f), Vector3f(0.0f, 0.0f, 0.0f), GameTime(20), GameTime(96), Wake1Period, false),
+        };
+
+        ColoredMeshBatch batch;
+        // Left over from a previous frame: the batch is emptied first, so a
+        // dot that is dropped cannot leave last frame's quad behind.
+        batch.triangles.emplace_back(Vector3f(9.0f, 9.0f, 9.0f), Vector3f(1.0f, 0.0f, 0.0f));
+
+        // An identity view is its own inverse, so a dot is on screen exactly
+        // when it is within a unit or so of the origin.
+        buildWakeDotBatch(GameTime(10), Matrix4f::identity(), dots, batch);
+
+        REQUIRE(batch.triangles.size() == 6);
+        REQUIRE(batch.triangles[0].x == -1.0f);
+        REQUIRE(batch.triangles[0].y == 0.0f);
+        REQUIRE(batch.triangles[0].z == -1.0f);
+        REQUIRE(batch.triangles[2].x == 1.0f);
+        REQUIRE(batch.triangles[2].z == 1.0f);
+        REQUIRE(batch.triangles[5].x == 1.0f);
+        REQUIRE(batch.triangles[5].z == -1.0f);
+
+        // One dot, one colour: the six vertices of a quad are the same flat
+        // patch of foam, not a gradient across it.
+        for (const auto& vertex : batch.triangles)
+        {
+            REQUIRE(vertex.r == batch.triangles[0].r);
+            REQUIRE(vertex.g == batch.triangles[0].g);
+            REQUIRE(vertex.b == batch.triangles[0].b);
+        }
+    }
+
+    TEST_CASE("a dot's age reaches the colour in the batch, so the ramp is still there", "[wake]")
+    {
+        auto terrain = makeShoreTerrain();
+        // Both on screen at tick 40 -- a dot has to be within about a unit of
+        // the origin for an identity view to keep it -- one laid at the start
+        // of its life and one twenty ticks in, so they sit at different
+        // points of the six-step ramp and the batch has to say which is which.
+        std::vector<WakeDot> dots{
+            spawnWakeDot(terrain, Vector3f(0.0f, 0.0f, 0.0f), Vector3f(0.0f, 0.0f, 0.0f), GameTime(0), GameTime(96), Wake1Period, false),
+            spawnWakeDot(terrain, Vector3f(0.5f, 0.0f, 0.0f), Vector3f(0.0f, 0.0f, 0.0f), GameTime(20), GameTime(96), Wake1Period, false),
+        };
+
+        ColoredMeshBatch batch;
+        buildWakeDotBatch(GameTime(40), Matrix4f::identity(), dots, batch);
+
+        REQUIRE(batch.triangles.size() == 12);
+        // Ages 40 and 20 on a sixteen-tick ramp are steps two and one of the
+        // seven water blues, which are palette entries 99 and 98.
+        REQUIRE(batch.triangles[0].r == 151 / 255.0f);
+        REQUIRE(batch.triangles[0].g == 179 / 255.0f);
+        REQUIRE(batch.triangles[0].b == 255 / 255.0f);
+        REQUIRE(batch.triangles[6].r == 175 / 255.0f);
+        REQUIRE(batch.triangles[6].g == 207 / 255.0f);
+        REQUIRE(batch.triangles[6].b == 255 / 255.0f);
+    }
+
     TEST_CASE("wake dots that are left keep the order they were laid in", "[wake]")
     {
         auto terrain = makeShoreTerrain();

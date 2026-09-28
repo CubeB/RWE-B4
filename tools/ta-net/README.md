@@ -44,6 +44,11 @@ tools/ta-net/host-check.sh --capture ta-small.pcap --play-seconds 60 -- \
 `--walk`, `--attack` and `--simulate-hit` go to the joiner; anything `host-check.sh` does not
 recognise is passed to it, so they need no flag of their own.
 
+The C++ port of the session layer lives in the engine: `src/rwe/net/ta/`. Build
+`ta_host_probe` and run it with `--session-name x --map <map>` to host a
+DirectPlay game the tools here can find; `dpenum.py` then prints its
+ENUMSESSIONSREPLY.
+
 ## Recording a capture
 
 Two copies of TA on one Linux machine, both under Proton with native DirectPlay. The test bed

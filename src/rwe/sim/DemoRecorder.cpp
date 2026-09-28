@@ -67,12 +67,17 @@ namespace rwe
             return airA.movementMode == airB.movementMode && airA.goal.index() == airB.goal.index();
         }
 
-        TadPosition toTadPosition(const SimVector& position)
+        /**
+         * RWE's world is centred on the origin; TA's starts at the map's top
+         * left. The wire carries TA's, so the half-extents go back on here and
+         * come off again in the puppet driver.
+         */
+        TadPosition toTadPosition(const SimVector& position, SimScalar halfWidth, SimScalar halfHeight)
         {
             return TadPosition{
-                simScalarToFixed(position.x),
+                simScalarToFixed(position.x + halfWidth),
                 simScalarToFixed(position.y),
-                simScalarToFixed(position.z)};
+                simScalarToFixed(position.z + halfHeight)};
         }
 
         /**
@@ -395,6 +400,9 @@ namespace rwe
                 playerOrder.push_back({PlayerId(static_cast<unsigned int>(i)), static_cast<uint8_t>(i)});
             }
 
+            halfWidth = simulation.terrain.getWidthInWorldUnits() / 2_ss;
+            halfHeight = simulation.terrain.getHeightInWorldUnits() / 2_ss;
+
             writer.writeHeader();
             writer.writeExtraSectors();
             writer.writePlayers();
@@ -481,8 +489,8 @@ namespace rwe
             }
 
             tickRecords[recordIt->second.owner].unitPass.push_back(tadEncodeShot(TadShot{
-                toTadPosition(origin),
-                toTadPosition(aimPoint),
+                toTadPosition(origin, halfWidth, halfHeight),
+                toTadPosition(aimPoint, halfWidth, halfHeight),
                 launchRotation(direction),
                 targetId,
                 *shooterId,
@@ -610,7 +618,7 @@ namespace rwe
             tickRecords[recordIt->second.owner].unitPass.push_back(tadEncodeBuildStarted(TadBuildStarted{
                 recordIt->second.typeIndex,
                 *unitId,
-                toTadPosition(state.position),
+                toTadPosition(state.position, halfWidth, halfHeight),
                 toTadRotation(state)}));
 
             // The 0x09 names the frame and not its builder; the 0x12 names
@@ -690,8 +698,8 @@ namespace rwe
                     for (int i = 0; i < 3 && it != end; ++i, ++it)
                     {
                         path.waypoints.push_back(TadWaypoint{
-                            static_cast<int16_t>(std::lround(simScalarToFloat(it->x))),
-                            static_cast<int16_t>(std::lround(simScalarToFloat(it->z)))});
+                            static_cast<int16_t>(std::lround(simScalarToFloat(it->x) + simScalarToFloat(halfWidth))),
+                            static_cast<int16_t>(std::lround(simScalarToFloat(it->z) + simScalarToFloat(halfHeight)))});
                     }
                 }
             }
@@ -752,7 +760,7 @@ namespace rwe
                 }
             }
 
-            sync.position = toTadPosition(unit.position);
+            sync.position = toTadPosition(unit.position, halfWidth, halfHeight);
             sync.rotation = toTadRotation(unit);
 
             sync.speed = std::nullopt;
@@ -916,6 +924,9 @@ namespace rwe
 
         DemoIdAllocator ids;
         TadUnitStateLayout layout;
+
+        SimScalar halfWidth{0_ss};
+        SimScalar halfHeight{0_ss};
 
         std::unordered_map<std::string, uint16_t> typeIndexOfName;
         std::unordered_map<UnitId, UnitRecord> records;
