@@ -416,8 +416,24 @@ _Avoid_: lobby, waiting room
 **Unit sync by echo**:
 Hosting without a unit checksum. The joiner sends its unit type ids and content
 checksums, the host answers each id twice, and a joiner that counts the records
-accepts the result. The ids are content-derived and the host never computes one.
+accepts the result. The ids are content-derived -- `taChecksum` over the raw FBI
+bytes, `docs/TOTALA-EXE-DATA.md` §117 -- but a host does not have to compute one
+to echo one.
 _Avoid_: handshaking, table exchange
+
+**TA checksum** (`taChecksum`):
+Total Annihilation's own checksum routine (`0x4B6BA0`), not a CRC and not any
+standard hash: four one-byte accumulators walked over the input and combined
+big-endian. It is underneath both the map checksum and a unit type's
+content-derived id. `docs/TOTALA-EXE-DATA.md` §117, `TaChecksums.h`.
+_Avoid_: crc, hash, digest
+
+**Map checksum** (`taMapChecksum`):
+The value a host writes at bytes 170-173 of its `0x20` status and a joining TA
+looks the hosted map up by: `taChecksum` over three blocks of the `.tnt` XORed
+with `taChecksum` over the `.ota`'s `[GlobalHeader]` block body. `TaChecksums.h`,
+`docs/TOTALA-EXE-DATA.md` §117.
+_Avoid_: map hash, map id, map name
 
 **Own-clock**:
 A live game whose scene advances on its own clock at the chosen speed like a

@@ -26,6 +26,7 @@
 #include <rwe/sim/TaLiveSender.h>
 #include <rwe/sim/TaPeerIds.h>
 #include <rwe/net/ta/TaBattleroom.h>
+#include <rwe/net/ta/TaChecksums.h>
 #include <rwe/net/ta/TaDirectPlay.h>
 #include <rwe/net/ta/TaPacket.h>
 #include <rwe/net/ta/TaPinger.h>
@@ -1037,6 +1038,72 @@ namespace rwe
             REQUIRE(receiver.stats().held <= receiver.options().maxHeld);
             REQUIRE(receiver.stats().packetsDroppedBufferFull > 0);
             REQUIRE(receiver.stats().packetsApplied == 0);
+        }
+    }
+
+    TEST_CASE("a map's TNT whose blocks run past its end is refused, not read", "[malformed]")
+    {
+        auto asBytes = [](const std::string& bytes) {
+            return std::span<const std::uint8_t>(
+                reinterpret_cast<const std::uint8_t*>(bytes.data()),
+                bytes.size());
+        };
+        auto put = [](std::string& bytes, std::size_t offset, std::uint32_t value) {
+            bytes[offset] = static_cast<char>(value);
+            bytes[offset + 1] = static_cast<char>(value >> 8);
+            bytes[offset + 2] = static_cast<char>(value >> 16);
+            bytes[offset + 3] = static_cast<char>(value >> 24);
+        };
+        // The shortest thing that is a GlobalHeader block, for the TNT cases.
+        const std::string ota = "[GlobalHeader]\r\n\t{\r\n}\r\n";
+
+        SECTION("a header shorter than the file's own shape")
+        {
+            std::string tnt(0x20, '\0');
+            REQUIRE_FALSE(taMapChecksum(asBytes(tnt), asBytes(ota)));
+        }
+
+        SECTION("a tile-attributes block that runs past the end")
+        {
+            std::string tnt(0x40, '\0');
+            put(tnt, 0, 0x2000);
+            put(tnt, 4, 4);       // width
+            put(tnt, 8, 4);       // height
+            put(tnt, 0x10, 0x40); // attributes at the end, 4 * 4 * 4 bytes needed
+            put(tnt, 0x1c, 0);    // features
+            put(tnt, 0x20, 0x40);
+            REQUIRE_FALSE(taMapChecksum(asBytes(tnt), asBytes(ota)));
+        }
+
+        SECTION("a feature count that would size an unbounded read")
+        {
+            std::string tnt(0x40 + 4, '\0');
+            put(tnt, 0, 0x2000);
+            put(tnt, 4, 1);
+            put(tnt, 8, 1);
+            put(tnt, 0x10, 0x40);
+            put(tnt, 0x1c, 0xffffffffu);
+            put(tnt, 0x20, 0x44);
+            REQUIRE_FALSE(taMapChecksum(asBytes(tnt), asBytes(ota)));
+        }
+
+        // A one-by-one map's attributes, which are exactly the four bytes after the header.
+        std::string smallTnt(0x40 + 4, '\0');
+        put(smallTnt, 0, 0x2000);
+        put(smallTnt, 4, 1);
+        put(smallTnt, 8, 1);
+        put(smallTnt, 0x10, 0x40);
+        put(smallTnt, 0x1c, 0);
+        put(smallTnt, 0x20, 0x44);
+
+        SECTION("an OTA with no GlobalHeader block")
+        {
+            REQUIRE_FALSE(taMapChecksum(asBytes(smallTnt), asBytes("[Schema 0]\r\n{\r\n}\r\n")));
+        }
+
+        SECTION("a GlobalHeader whose brace never closes")
+        {
+            REQUIRE_FALSE(taMapChecksum(asBytes(smallTnt), asBytes("[GlobalHeader]\r\n{\r\n")));
         }
     }
 }

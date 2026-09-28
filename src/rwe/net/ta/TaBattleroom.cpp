@@ -103,6 +103,11 @@ namespace rwe
         out[TaPlayerStatusColourOffset] = status.colour;
         out[TaPlayerStatusStateOffset] = status.state;
         out[TaPlayerStatusOptionsOffset] = status.options;
+        for (std::size_t i = 0; i < 4; ++i)
+        {
+            out[TaPlayerStatusMapChecksumOffset + i] =
+                static_cast<std::uint8_t>(status.mapChecksum >> (8 * i));
+        }
         return out;
     }
 
@@ -120,6 +125,7 @@ namespace rwe
         status.colour = subpacket[TaPlayerStatusColourOffset];
         status.state = subpacket[TaPlayerStatusStateOffset];
         status.options = subpacket[TaPlayerStatusOptionsOffset];
+        status.mapChecksum = readU32(&subpacket[TaPlayerStatusMapChecksumOffset]);
 
         auto begin = subpacket.begin() + static_cast<std::ptrdiff_t>(TaPlayerStatusMapNameOffset);
         auto end = begin + static_cast<std::ptrdiff_t>(TaPlayerStatusMapNameLength);
@@ -311,6 +317,11 @@ namespace rwe
         return pinger.roundTripTicks(peer);
     }
 
+    void TaBattleroom::setMapChecksum(std::uint32_t checksum)
+    {
+        config.mapChecksum = checksum;
+    }
+
     void TaBattleroom::peerJoined(PeerId peer)
     {
         peers_[peer] = TaBattleroomPeer{peer};
@@ -468,6 +479,7 @@ namespace rwe
         status.colour = config.colour;
         status.state = state;
         status.options = config.options;
+        status.mapChecksum = config.mapChecksum;
 
         traffic.queueForAll(ids, taBuildPlayerStatus(status), transport);
         traffic.queueForAll(ids, taBuildTeam(session.hostPlayerId(), config.hostTeam), transport);

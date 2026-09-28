@@ -261,6 +261,7 @@ namespace rwe
         status.mapName = "Canal Crossing";
         status.state = 0x01;
         status.options = 0x4F;
+        status.mapChecksum = 0x6ebe0529;
 
         REQUIRE(taBuildPlayerStatus(status) == CapturedHostStatus);
     }
@@ -347,6 +348,7 @@ namespace rwe
         status.colour = 0x01;
         status.state = 0x22;
         status.options = 0x48;
+        status.mapChecksum = 0x6ebe0529;
 
         REQUIRE(taBuildPlayerStatus(status) == at(SidesHostStatus, 0x01, 0x01, 0x22));
 
@@ -357,6 +359,7 @@ namespace rwe
         REQUIRE(parsed->colour == 0x01);
         REQUIRE(parsed->state == 0x22);
         REQUIRE(parsed->options == 0x48);
+        REQUIRE(parsed->mapChecksum == 0x6ebe0529);
     }
 
     TEST_CASE("a status carries the map name in bytes 1-32, padded with NULs", "[net][ta]")
