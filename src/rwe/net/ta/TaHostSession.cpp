@@ -95,25 +95,63 @@ namespace rwe
         }
         started = true;
 
-        auto bindTcp = [](asio::ip::tcp::acceptor& acceptor, std::uint16_t port) {
+        // SO_REUSEADDR only for a fixed port, and never on Windows. There it
+        // does not mean "rebind past TIME_WAIT" but "share a port someone
+        // else holds", so asking for port 0 with it set lets the stack hand
+        // back a port another process bound exclusively, and the bind fails
+        // with WSAEACCES. The Windows CI runners did exactly that, now and
+        // then, to the loopback tests in TaHostSession.test.cpp.
+        auto reuseAddress = [](std::uint16_t port) {
+#ifdef _WIN32
+            (void)port;
+            return false;
+#else
+            return port != 0;
+#endif
+        };
+
+        auto bindTcp = [&reuseAddress](asio::ip::tcp::acceptor& acceptor, std::uint16_t port) {
             acceptor.open(asio::ip::tcp::v4());
-            acceptor.set_option(asio::ip::tcp::acceptor::reuse_address(true));
+            acceptor.set_option(asio::ip::tcp::acceptor::reuse_address(reuseAddress(port)));
             acceptor.bind(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port));
             acceptor.listen(asio::socket_base::max_listen_connections);
             return acceptor.local_endpoint().port();
         };
 
-        auto bindUdp = [](asio::ip::udp::socket& socket, std::uint16_t port) {
+        auto bindUdp = [&reuseAddress](asio::ip::udp::socket& socket, std::uint16_t port) {
             socket.open(asio::ip::udp::v4());
-            socket.set_option(asio::ip::udp::socket::reuse_address(true));
+            socket.set_option(asio::ip::udp::socket::reuse_address(reuseAddress(port)));
             socket.bind(asio::ip::udp::endpoint(asio::ip::udp::v4(), port));
             return socket.local_endpoint().port();
         };
 
-        ports.enumSessions = bindTcp(enumTcpAcceptor, ports.enumSessions);
+        // The enum UDP socket shares the enum TCP port's number. When that
+        // number was the stack's choice, it was chosen free for TCP only, and
+        // on Windows it can land in a range reserved for UDP (Hyper-V and
+        // WinNAT reserve them per protocol), where the UDP bind is refused.
+        // A fixed port is the caller's to fix; an ephemeral one is tried again.
+        const auto requestedEnumPort = ports.enumSessions;
+        constexpr int ephemeralEnumAttempts = 16;
+        for (int attempt = 1;; ++attempt)
+        {
+            const auto enumPort = bindTcp(enumTcpAcceptor, requestedEnumPort);
+            asio::error_code ec;
+            enumUdpSocket.open(asio::ip::udp::v4());
+            enumUdpSocket.set_option(asio::ip::udp::socket::reuse_address(reuseAddress(requestedEnumPort)));
+            enumUdpSocket.bind(asio::ip::udp::endpoint(asio::ip::udp::v4(), enumPort), ec);
+            if (!ec)
+            {
+                ports.enumSessions = enumPort;
+                break;
+            }
+            enumUdpSocket.close();
+            enumTcpAcceptor.close();
+            if (requestedEnumPort != 0 || attempt == ephemeralEnumAttempts)
+            {
+                throw asio::system_error(ec, "bind");
+            }
+        }
         ports.gameTcp = bindTcp(gameTcpAcceptor, ports.gameTcp);
-        // The enum UDP socket shares the enum TCP port's number.
-        bindUdp(enumUdpSocket, ports.enumSessions);
         ports.gameUdp = bindUdp(gameUdpSocket, ports.gameUdp);
 
         listenEnumTcp();
