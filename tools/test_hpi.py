@@ -4,22 +4,27 @@ Run with the MinGW python on this machine (stdlib only, no pip install):
 
     /d/msys64/mingw64/bin/python.exe tools/test_hpi.py -v
 
-The reader is a port of `src/rwe/io/hpi/`, and that C++ is the source of truth,
-so every assertion here is about what the engine does -- not about what the
-Python happens to do. The refusals are the three HPI cases from
-`src/rwe/io/malformed_input.test.cpp` transcribed byte for byte, plus the
-bounds `HpiArchive.cpp` and `hpi_util.cpp` hold.
+With a data set, which also runs the last two cases:
+
+    RWE_SCENARIO_DATA=~/ta /d/msys64/mingw64/bin/python.exe tools/test_hpi.py
+
+`src/rwe/io/hpi/` is the source of truth, so every assertion here is about what
+the engine does -- not about what the Python happens to do. The refusals are
+the three HPI cases from `src/rwe/io/malformed_input.test.cpp` transcribed byte
+for byte, plus the bounds `HpiArchive.cpp` and `hpi_util.cpp` hold.
 
 Nothing here needs a copy of the game: the archives are built in memory by
-`build_archive` below, which is the only way to reach `CompressionScheme::None`
--- no shipped archive stores a file uncompressed -- and the only way to reach a
+`build_archive` below. That is the only way to reach `CompressionScheme::None`
+-- no shipped archive stores a file uncompressed -- and the only way to put a
 stored file at a file offset that is not a multiple of 256, which is where a
-seed taken from zero instead of from `file.offset` would show.
+seed taken from zero instead of from `file.offset` shows.
 
-`RealArchiveTest` runs against a real one when `RWE_SCENARIO_DATA` names a
-directory of `.hpi` files. It is skipped, loudly, when it cannot: game data is
-not in the repository, so a pass that quietly did nothing would be worse than
-one that says it did nothing.
+`RealArchiveTest` runs when `RWE_SCENARIO_DATA` names a directory of `.hpi`
+files. It is skipped, loudly, when it cannot: game data is not in the
+repository, so a pass that quietly read nothing would be worse than one that
+says it read nothing.
+
+Like `tools/test_ai_autotune.py`, this is run by hand. Neither is in CI.
 """
 import importlib.util
 import os
