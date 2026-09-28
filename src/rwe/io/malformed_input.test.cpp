@@ -705,10 +705,10 @@ namespace rwe
         SECTION("a peer that names a tick a long way off is dropped, not waited for")
         {
             feed(record(8));
-            auto far = record(0xffffffffu);
+            auto farRecord = record(0xffffffffu);
             for (int i = 0; i < 1000; ++i)
             {
-                feed(far);
+                feed(farRecord);
             }
 
             REQUIRE(receiver.stats().packetsReceived == 1001);
