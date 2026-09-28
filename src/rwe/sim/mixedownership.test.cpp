@@ -256,7 +256,7 @@ namespace rwe
     TEST_CASE("a remote player's own shot does not become an outgoing record", "[mixed]")
     {
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
-        auto local = addPlayer(sim, "local");
+        [[maybe_unused]] auto local = addPlayer(sim, "local");
         auto remote = addPlayer(sim, "remote");
         defineMixedWorld(sim);
         markRemote(sim, remote);
@@ -312,7 +312,7 @@ namespace rwe
     TEST_CASE("an incoming 0x0b is ignored for a unit this machine does not own", "[mixed]")
     {
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
-        auto local = addPlayer(sim, "local");
+        [[maybe_unused]] auto local = addPlayer(sim, "local");
         auto remote = addPlayer(sim, "remote");
         defineMixedWorld(sim);
         markRemote(sim, remote);
@@ -494,7 +494,7 @@ namespace rwe
     TEST_CASE("a remote player is out when the stream kills its last unit", "[mixed]")
     {
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
-        auto local = addPlayer(sim, "local");
+        [[maybe_unused]] auto local = addPlayer(sim, "local");
         auto remote = addPlayer(sim, "remote");
         defineMixedWorld(sim);
         markRemote(sim, remote);
@@ -515,7 +515,7 @@ namespace rwe
     TEST_CASE("DELETEPLAYER removes a departed peer's units with the commander's quit cause", "[mixed]")
     {
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
-        auto local = addPlayer(sim, "local");
+        [[maybe_unused]] auto local = addPlayer(sim, "local");
         auto remote = addPlayer(sim, "remote");
         defineMixedWorld(sim);
         markRemote(sim, remote);
