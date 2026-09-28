@@ -15,6 +15,7 @@ namespace rwe
 {
     class GameScene;
     class ScenarioDriver;
+    class UiComponent;
     class UiStagedButton;
 
     /**
@@ -164,6 +165,26 @@ namespace rwe
         /** The named gadget's toggle state on the live panel. */
         GadgetState gadget(const std::string& name);
 
+        /**
+         * The count the side panel's idle-builder sign is showing this frame, or
+         * nothing when the panel in front has no room for it.
+         *
+         * Read out of the widget rather than out of the simulation, so what it
+         * reports is what a player would be looking at.
+         */
+        std::optional<int> idleBuilderCount();
+
+        /** The one selected unit, when exactly one is selected. */
+        std::optional<UnitId> selectedUnit() const;
+
+        /**
+         * Where the camera is standing, in world units. A scenario compares
+         * two of these: the camera is clamped to the terrain, so it cannot
+         * always be put exactly on a unit, and "the view moved towards the
+         * unit the sign named" is the true statement about what a click does.
+         */
+        std::optional<SimVector> cameraPosition() const;
+
         std::size_t selectedCount() const;
 
         bool isPaused() const;
@@ -180,7 +201,14 @@ namespace rwe
         void setMouse(const Point& p);
         void updateHover();
         std::optional<Point> gadgetCentre(const std::string& name);
-        UiStagedButton* findGadget(const std::string& name);
+        UiStagedButton* findStagedButton(const std::string& name);
+
+        /**
+         * Any clickable child of the live panel, for a name that is not a
+         * staged button: RWE's own controls, which carry no side prefix and are
+         * not out of a side's gui file.
+         */
+        UiComponent* findGadget(const std::string& name);
         std::optional<Point> screenPositionOf(UnitId unitId) const;
 
         GameScene& scene;

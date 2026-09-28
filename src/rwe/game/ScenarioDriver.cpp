@@ -6,6 +6,7 @@
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/SimVector.h>
 #include <rwe/sim/UnitOrder.h>
+#include <rwe/ui/UiIdleBuilderSign.h>
 #include <rwe/ui/UiPanel.h>
 #include <rwe/ui/UiStagedButton.h>
 #include <rwe/util/SimpleLogger.h>
@@ -328,6 +329,17 @@ namespace rwe
         return scene.selectedUnits.size();
     }
 
+    std::optional<UnitId> ScenarioDriver::selectedUnit() const
+    {
+        return scene.getSingleSelectedUnit();
+    }
+
+    std::optional<SimVector> ScenarioDriver::cameraPosition() const
+    {
+        const auto& position = scene.worldCameraState.position;
+        return SimVector(floatToSimScalar(position.x), floatToSimScalar(position.y), floatToSimScalar(position.z));
+    }
+
     bool ScenarioDriver::isPaused() const
     {
         return scene.paused;
@@ -449,7 +461,7 @@ namespace rwe
         return scene.spawnCompletedUnit(unitType, scene.localPlayerId, SimVector(floatToSimScalar(x), floatToSimScalar(y), floatToSimScalar(z)));
     }
 
-    UiStagedButton* ScenarioDriver::findGadget(const std::string& name)
+    UiStagedButton* ScenarioDriver::findStagedButton(const std::string& name)
     {
         auto* panel = scene.currentPanel.get();
         if (panel == nullptr)
@@ -465,6 +477,26 @@ namespace rwe
         {
             return &exact->get();
         }
+        return nullptr;
+    }
+
+    UiComponent* ScenarioDriver::findGadget(const std::string& name)
+    {
+        if (auto* button = findStagedButton(name))
+        {
+            return button;
+        }
+
+        // RWE's own controls are not in any side's gui file and carry no side
+        // prefix, so they are matched whole.
+        if (auto* panel = scene.currentPanel.get())
+        {
+            if (auto sign = panel->find<UiIdleBuilderSign>(name))
+            {
+                return &sign->get();
+            }
+        }
+
         return nullptr;
     }
 
@@ -488,11 +520,27 @@ namespace rwe
 
     GadgetState ScenarioDriver::gadget(const std::string& name)
     {
-        auto* button = findGadget(name);
+        auto* button = findStagedButton(name);
         if (button == nullptr)
         {
             return GadgetState{};
         }
         return GadgetState{true, button->isToggledOn()};
+    }
+
+    std::optional<int> ScenarioDriver::idleBuilderCount()
+    {
+        auto* panel = scene.currentPanel.get();
+        if (panel == nullptr)
+        {
+            return std::nullopt;
+        }
+
+        auto sign = panel->find<UiIdleBuilderSign>(GameScene::IdleBuilderSignName);
+        if (!sign)
+        {
+            return std::nullopt;
+        }
+        return sign->get().getIdleBuilderCount();
     }
 }

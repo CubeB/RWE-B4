@@ -348,6 +348,16 @@ namespace rwe
         const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
         currentPanel = uiFactory.panelFromGuiFile(sidePrefix + "MAIN2");
         panelBaseX = currentPanel->getX();
+        // The panel every later one is swapped in for, and the first thing the
+        // player can click on: the idle-builder sign goes on it. Its activation
+        // is handled by the group-message subscription attachOrdersMenuEventHandlers
+        // makes, and the swap in update() is the only other place that was
+        // called from -- so without it here the first panel, the one on screen
+        // from the first frame until something is selected, would swallow a
+        // click on the sign. It carries no order buttons of its own, so all the
+        // handler finds on it is the subscription.
+        attachIdleBuilderSign(*currentPanel);
+        attachOrdersMenuEventHandlers();
 
         sceneContext.audioService->reserveChannels(reservedChannelsCount);
 
@@ -957,12 +967,21 @@ namespace rwe
             currentPanel = std::move(*nextPanel);
             nextPanel = std::nullopt;
             attachOrdersMenuEventHandlers();
+            // The panel that just arrived is a new object and the one it
+            // replaced went with its gadgets, so the sign goes on this one too.
+            attachIdleBuilderSign(*currentPanel);
             // The incoming panel carries its own x from its gui file, and the
             // slide is taken off that -- so it has to be read before the slide
             // is applied, or a panel swapped in mid-slide would have the
             // offset subtracted from an already offset position.
             panelBaseX = currentPanel->getX();
         }
+
+        // Once a frame, and after any swap so the count lands on the panel that
+        // is about to be drawn. A read of the simulation's own state, which is
+        // the whole discipline here: the HUD is told what is idle, and never
+        // tells the simulation anything.
+        updateIdleBuilderSign();
 
         // Straight after the swap, so a panel that arrived this frame is put
         // in the right place before anything draws it.

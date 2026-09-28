@@ -26,6 +26,14 @@ namespace rwe
         std::optional<AudioService::SoundHandle> panel;
         std::optional<AudioService::SoundHandle> options;
 
+        /**
+         * The click UiFactory::deduceButtonSound falls back to for a small
+         * button carrying no art of its own. RWE's own gadgets have no gui
+         * entry and so nothing to deduce from, and this is what the fallback
+         * would have given them.
+         */
+        std::optional<AudioService::SoundHandle> smallButton;
+
         /** ALLSOUND's "Victory Condition" (VICTORY2), once for each mission objective met. */
         std::optional<AudioService::SoundHandle> victoryCondition;
     };

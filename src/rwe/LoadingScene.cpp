@@ -257,6 +257,7 @@ namespace rwe
         sounds.selectMultipleUnits = lookUpSound("SelectMultipleUnits");
         sounds.panel = lookUpSound("PANEL");
         sounds.options = lookUpSound("OPTIONS");
+        sounds.smallButton = lookUpSound("SMALLBUTTON");
         sounds.victoryCondition = lookUpSound("Victory Condition");
 
         auto consoleFont = sceneContext.textureService->getFont("fonts/CONSOLE.FNT");

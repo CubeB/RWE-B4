@@ -215,6 +215,14 @@ if ($phase -eq "ring") {
   $launchArgs += @('--width','640','--height','480')
   $env:RWE_DEBUG_SPAWN = 'ARMAMD*1@0:8:0'
 }
+if ($phase -eq "idle") {
+  # 640x480, so the client's own coordinates are the UI's virtual ones and the
+  # side panel is the first 128 columns. Two construction bots round the
+  # commander, which makes the idle-builder sign's count 3 rather than the 1 the
+  # commander alone gives. The phase further down says what it is looking at.
+  $launchArgs += @('--width','640','--height','480')
+  $env:RWE_DEBUG_SPAWN = 'ARMCON*2@0:6:0'
+}
 if ($phase -eq "shade") {
   # A solar collector dropped 96 units east of the commander at six seconds,
   # so both stand still for the camera without a click sequence that would
@@ -389,6 +397,42 @@ if ($phase -eq "ship") {
     Crop $bmp ("D:\RWE\vt-unload$i.png") ($o.X + 40) ($o.Y + 180) 400 260 2
     $bmp.Dispose()
   }
+}
+
+if ($phase -eq "idle") {
+  # The side panel's idle-builder sign (#418): a count of the player's own
+  # construction units with nothing to do, and a click that goes to the next
+  # one. Nothing else on the panel says they exist, so this is the only way to
+  # see whether the sign reads as a part of the HUD or as something stuck on
+  # the side of it -- and whether the caption fits the 128-wide column, which is
+  # the part no unit test can answer.
+  #
+  # Two construction bots are dropped round the commander above, so the count
+  # is 3 rather than the 1 the commander alone would give.
+  Hover ($o.X + 700) ($o.Y + 550)
+  Start-Sleep -Seconds 12
+  $o = Origin
+  if (-not $script:minimisedRun) { [W]::SetForegroundWindow($h) | Out-Null }
+  Start-Sleep -Milliseconds 300
+  $bmp = Shot
+  Crop $bmp "$outDir\vt-idle$tag-full.png" $o.X $o.Y 640 480 1
+  # The whole side panel at 3x. The sign is the plate on row 140 -- a third of
+  # the way down -- and what it has to sit clear of is the order strip above it
+  # and the move/stop buttons below.
+  Crop $bmp "$outDir\vt-idle$tag-panel.png" $o.X $o.Y 128 480 3
+  $bmp.Dispose()
+
+  # The pointer over the sign, then a click on it. The sign sits at row 140 of
+  # the side panel, and the panel is at y 128, so in client coordinates the
+  # sign's row is 268 to 281. The click should move the camera onto the builder
+  # it names, which the second full frame shows: the world has jumped and the
+  # side panel has not.
+  Click ($o.X + 64) ($o.Y + 275)
+  Start-Sleep -Seconds 1
+  $bmp = Shot
+  Crop $bmp "$outDir\vt-idle$tag-sign.png" $o.X ($o.Y + 260) 128 30 5
+  Crop $bmp "$outDir\vt-idle$tag-clicked.png" $o.X $o.Y 640 480 1
+  $bmp.Dispose()
 }
 
 if ($phase -eq "info") {
