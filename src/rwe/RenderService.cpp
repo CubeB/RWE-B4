@@ -183,6 +183,26 @@ namespace rwe
         }
     }
 
+    void RenderService::drawBatchIfChanged(const ColoredMeshBatch& batch, GlMesh& mesh, bool changed, const Matrix4f& vpMatrix, float alpha)
+    {
+        if (batch.triangles.empty())
+        {
+            return;
+        }
+
+        const auto& shader = shaders->basicColor;
+        graphics->bindShader(shader.handle.get());
+        graphics->setUniformFloat(shader.alpha, alpha);
+        graphics->setUniformMatrix(shader.mvpMatrix, vpMatrix);
+
+        if (changed)
+        {
+            graphics->updateColoredMesh(mesh, batch.triangles);
+        }
+
+        graphics->drawTriangles(mesh);
+    }
+
     void RenderService::drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel, TextureIdentifier shadeTableTexture)
     {
         // Finished models first: a nanoframe's see-through parts still write

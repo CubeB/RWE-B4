@@ -3,13 +3,104 @@
 #include <cmath>
 #include <rwe/geometry/Plane3f.h>
 #include <rwe/geometry/Triangle3f.h>
+#include <rwe/sim/movement.h>
 
 namespace rwe
 {
+    namespace
+    {
+        /**
+         * The per-cell slope and water-depth grids, from the heightmap and
+         * the sea level alone.
+         *
+         * Neither is invalidated, and that is not a discipline anyone has to
+         * keep: the heightmap is private, is handed out as a const reference
+         * and is set once in the constructor, so there is no path by which
+         * a cell could change under a cache that had already read it. What
+         * the cache is therefore free of is any question of when to rebuild
+         * -- and being derived state that provably cannot move the
+         * simulation's future, it is neither saved nor hashed, for the same
+         * reason MapIntel is.
+         *
+         * The sea level arrives as a SimScalar off a map header and is
+         * cast to an unsigned int, so it can in principle exceed 255 even
+         * though no heightmap cell ever will. A depth that large does not
+         * fit a byte, so the depth grid is left EMPTY in that case and the
+         * queries that want one fall back to reading the heightmap. An
+         * empty grid rather than a truncated one: the movement classes
+         * compare a depth against MinWaterDepth and MaxWaterDepth, so a
+         * depth of 300 wrapped to 44 would be a different answer, not a
+         * slower one.
+         */
+        Grid<unsigned char> buildSlopeMap(const Grid<unsigned char>& heights)
+        {
+            // One cell narrower on each axis: the 2x2 block at the last row
+            // or column would read past the map, which is the same bound
+            // getSlope has always had -- MovementClassCollisionService and
+            // ReachabilityMap both size their scans off it.
+            const int width = std::max(0, heights.getWidth() - 1);
+            const int height = std::max(0, heights.getHeight() - 1);
+            Grid<unsigned char> slopes(width, height, static_cast<unsigned char>(0));
+            if (width <= 0 || height <= 0)
+            {
+                return slopes;
+            }
+
+            for (int y = 0; y < height; ++y)
+            {
+                for (int x = 0; x < width; ++x)
+                {
+                    // Written the way movement.cpp's getSlope reads it --
+                    // min and max over the same four corners -- rather than
+                    // as two separable row passes, because the point is
+                    // that this is that function's arithmetic done once
+                    // instead of per query.
+                    const auto a = static_cast<unsigned int>(heights.get(x, y));
+                    const auto b = static_cast<unsigned int>(heights.get(x + 1, y));
+                    const auto c = static_cast<unsigned int>(heights.get(x, y + 1));
+                    const auto d = static_cast<unsigned int>(heights.get(x + 1, y + 1));
+                    const auto lowest = std::min(std::min(a, b), std::min(c, d));
+                    const auto highest = std::max(std::max(a, b), std::max(c, d));
+                    slopes.set(x, y, static_cast<unsigned char>(highest - lowest));
+                }
+            }
+
+            return slopes;
+        }
+
+        Grid<unsigned char> buildWaterDepthMap(const Grid<unsigned char>& heights, unsigned int waterLevel)
+        {
+            if (waterLevel > 255u)
+            {
+                // See the note above: no depth that large can be held, so
+                // there is no cache and every query reads the heightmap.
+                return Grid<unsigned char>();
+            }
+
+            Grid<unsigned char> depths(
+                heights.getWidth(),
+                heights.getHeight(),
+                static_cast<unsigned char>(0));
+            for (int y = 0; y < heights.getHeight(); ++y)
+            {
+                for (int x = 0; x < heights.getWidth(); ++x)
+                {
+                    const auto height = static_cast<unsigned int>(heights.get(x, y));
+                    depths.set(x, y, static_cast<unsigned char>(height < waterLevel ? waterLevel - height : 0u));
+                }
+            }
+
+            return depths;
+        }
+    }
+
     MapTerrain::MapTerrain(
         Grid<unsigned char>&& heights,
         SimScalar seaLevel)
-        : heights(std::move(heights)), seaLevel(seaLevel)
+        : heights(std::move(heights)),
+          slopeCache(buildSlopeMap(this->heights)),
+          waterDepthCache(buildWaterDepthMap(this->heights, simScalarToUInt(seaLevel))),
+          seaLevel(seaLevel)
     {
     }
 
@@ -95,6 +186,30 @@ namespace rwe
     const Grid<unsigned char>& MapTerrain::getHeightMap() const
     {
         return heights;
+    }
+
+    const Grid<unsigned char>& MapTerrain::getSlopeMap() const
+    {
+        return slopeCache;
+    }
+
+    const Grid<unsigned char>& MapTerrain::getWaterDepthMap() const
+    {
+        return waterDepthCache;
+    }
+
+    unsigned int MapTerrain::getWaterDepthAt(int x, int y) const
+    {
+        if (waterDepthCache.getWidth() > 0)
+        {
+            return waterDepthCache.get(x, y);
+        }
+
+        // The sea level is above 255, so there is no cache; read the
+        // heightmap and subtract, as every caller did before there was one.
+        // movement::getWaterDepth rather than the arithmetic open-coded, so
+        // the cached grid and this cannot drift apart.
+        return getWaterDepth(heights, simScalarToUInt(seaLevel), static_cast<unsigned int>(x), static_cast<unsigned int>(y));
     }
 
     SimScalar MapTerrain::getWidthInWorldUnits() const

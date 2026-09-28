@@ -16,6 +16,8 @@
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/tnt/TntArchive.h>
+#include <rwe/io/weapontdf/WeaponTdf.h>
+#include <rwe/net/ta/TaDirectPlay.h>
 #include <rwe/puppet/TadPuppetDriver.h>
 #include <rwe/puppet/puppet_test_util.h>
 #include <rwe/sim/GameSimulation.h>
@@ -335,6 +337,130 @@ namespace rwe
         REQUIRE_THROWS_AS(GafArchive(&in), GafException);
     }
 
+    namespace
+    {
+        /** A DirectPlay TCP message: the 20-bit size, the token, then "play" and the command. */
+        std::vector<std::uint8_t> dpMessage(std::size_t declaredSize, std::uint16_t command, std::size_t payloadSize)
+        {
+            std::vector<std::uint8_t> bytes(28 + payloadSize, 0);
+            auto word = (TaDirectPlayToken << 20) | (static_cast<std::uint32_t>(declaredSize) & 0x000FFFFFu);
+            bytes[0] = static_cast<std::uint8_t>(word & 0xFF);
+            bytes[1] = static_cast<std::uint8_t>((word >> 8) & 0xFF);
+            bytes[2] = static_cast<std::uint8_t>((word >> 16) & 0xFF);
+            bytes[3] = static_cast<std::uint8_t>((word >> 24) & 0xFF);
+            bytes[4] = 2;
+            bytes[20] = 'p';
+            bytes[21] = 'l';
+            bytes[22] = 'a';
+            bytes[23] = 'y';
+            bytes[24] = static_cast<std::uint8_t>(command & 0xFF);
+            bytes[25] = static_cast<std::uint8_t>(command >> 8);
+            bytes[26] = 0x0E;
+            return bytes;
+        }
+    }
+
+    TEST_CASE("a DirectPlay message that lies about its size is refused, never trusted", "[malformed]")
+    {
+        SECTION("a size larger than the bytes received")
+        {
+            auto bytes = dpMessage(4096, 0x0001, 32);
+            REQUIRE(taPeekDirectPlayMessageSize(bytes.data(), bytes.size()) == 4096);
+            REQUIRE_THROWS_AS(taDecodeDirectPlayMessage(bytes.data(), bytes.size()), TaDirectPlayException);
+        }
+
+        SECTION("a size smaller than the header")
+        {
+            auto bytes = dpMessage(8, 0x0001, 4);
+            REQUIRE_THROWS_AS(taDecodeDirectPlayMessage(bytes.data(), bytes.size()), TaDirectPlayException);
+        }
+
+        SECTION("too short for its own header")
+        {
+            std::vector<std::uint8_t> small(10, 0);
+            REQUIRE_FALSE(taIsDirectPlayMessage(small.data(), small.size()));
+            REQUIRE_THROWS_AS(taDecodeDirectPlayMessage(small.data(), small.size()), TaDirectPlayException);
+            REQUIRE(taPeekDirectPlayMessageSize(small.data(), small.size()) == 0);
+        }
+
+        SECTION("the wrong token")
+        {
+            auto bytes = dpMessage(32, 0x0005, 4);
+            bytes[3] = 0xFF;
+            REQUIRE(taPeekDirectPlayMessageSize(bytes.data(), bytes.size()) == 0);
+            REQUIRE_THROWS_AS(taDecodeDirectPlayMessage(bytes.data(), bytes.size()), TaDirectPlayException);
+        }
+    }
+
+    TEST_CASE("a session description too short for its fields is refused", "[malformed]")
+    {
+        // A 80-byte structure, truncated to 40.
+        std::vector<std::uint8_t> payload(40, 0);
+        REQUIRE_THROWS_AS(taDecodeSessionDescription(payload), TaDirectPlayException);
+
+        // The reply names its name at offset 92; an offset that points nowhere
+        // must be refused rather than walked off the end.
+        std::vector<std::uint8_t> reply(84, 0);
+        REQUIRE_THROWS_AS(taDecodeEnumSessionsReply(reply), TaDirectPlayException);
+    }
+
+    TEST_CASE("an enum players reply that claims more players than it holds is refused", "[malformed]")
+    {
+        // PlayerCount 0xFFFFFFFF, with a packed offset inside the body.
+        std::vector<std::uint8_t> payload(28 + 80, 0);
+        payload[0] = 0xFF;
+        payload[1] = 0xFF;
+        payload[2] = 0xFF;
+        payload[3] = 0xFF;
+        // descriptionOffset (from the envelope) 36 -> payload offset 28.
+        payload[16] = 36;
+        // nameOffset 116 -> payload offset 108, inside the 80-byte body only.
+        payload[20] = 116;
+        // packedOffset 180 -> payload offset 172.
+        payload[8] = 180;
+        REQUIRE_THROWS_AS(taDecodeSuperEnumPlayersReply(payload), TaDirectPlayException);
+    }
+
+    TEST_CASE("a packed player whose strings and lengths run past the message is refused", "[malformed]")
+    {
+        // A super enum players reply with one player whose service-provider
+        // length says there is more data than the message holds.
+        std::vector<std::uint8_t> payload(28 + 80, 0);
+        payload[0] = 1; // one player, read from offset 0
+        payload[16] = 36; // descriptionOffset, from the envelope
+        payload[20] = 116; // nameOffset, from the envelope
+        payload[8] = 180; // packedOffset, from the envelope
+
+        // The player entry starts at payload offset 172: 20 bytes of fixed
+        // fields then a one-byte spDataLength. Set infoMask to say the
+        // service-provider data is present and claim more than remains.
+        payload.resize(172 + 21, 0);
+        payload[172 + 12] = 0x04; // infoMask: sp data present, one-byte length
+        payload[172 + 20] = 0xFF; // spDataLength 255, past the end
+        REQUIRE_THROWS_AS(taDecodeSuperEnumPlayersReply(payload), TaDirectPlayException);
+    }
+
+    TEST_CASE("a create player or add forward request too short for its addresses is refused", "[malformed]")
+    {
+        std::vector<std::uint8_t> shortPayload(60, 0);
+        REQUIRE_THROWS_AS(taDecodeCreatePlayer(shortPayload), TaDirectPlayException);
+        REQUIRE_THROWS_AS(taDecodeAddForwardRequest(shortPayload), TaDirectPlayException);
+
+        std::vector<std::uint8_t> empty;
+        REQUIRE_THROWS_AS(taDecodeRequestPlayerId(empty), TaDirectPlayException);
+        REQUIRE_THROWS_AS(taDecodeRequestPlayerReply(empty), TaDirectPlayException);
+        REQUIRE_THROWS_AS(taDecodeDeletePlayer(empty), TaDirectPlayException);
+    }
+
+    TEST_CASE("application data too short for its player ids is refused", "[malformed]")
+    {
+        std::vector<std::uint8_t> tcp(24, 0);
+        REQUIRE_THROWS_AS(taDecodeAppDataTcp(tcp.data(), tcp.size()), TaDirectPlayException);
+
+        std::vector<std::uint8_t> udp(4, 0);
+        REQUIRE_THROWS_AS(taDecodeAppDataUdp(udp.data(), udp.size()), TaDirectPlayException);
+    }
+
     TEST_CASE("an FBI with no SoundCategory is silent, not refused", "[malformed]")
     {
         // ProTA's MAKENUKE/MAKEANTI pseudo-units name no category; the
@@ -342,6 +468,31 @@ namespace rwe
         auto fbi = parseUnitFbi(parseTdfFromString("[UNITINFO]\n{\nUnitName=MAKENUKEARM;\nObjectname=;\n}\n"));
         REQUIRE(fbi.unitName == "MAKENUKEARM");
         REQUIRE(fbi.soundCategory.empty());
+    }
+
+    TEST_CASE("a weapon TDF's unitsonly only takes a number", "[malformed]")
+    {
+        // `unitsonly` tells the simulation to skip the ground and the sea stop
+        // tests for this weapon's rounds, so a nonsense value must cost the
+        // weapon the key and nothing else. Reading it as anything non-numeric
+        // would leave the flag off, which is the original's default and the
+        // safe direction: the round still stops on terrain.
+        TdfBlock nonsense;
+        nonsense.insertOrAssignProperty("unitsonly", "true");
+        REQUIRE_FALSE(parseWeaponBlock(nonsense).unitsOnly);
+
+        TdfBlock empty;
+        empty.insertOrAssignProperty("unitsonly", "");
+        REQUIRE_FALSE(parseWeaponBlock(empty).unitsOnly);
+
+        // The numeric spellings the data uses, and the zero that is off.
+        TdfBlock on;
+        on.insertOrAssignProperty("unitsonly", "1");
+        REQUIRE(parseWeaponBlock(on).unitsOnly);
+
+        TdfBlock off;
+        off.insertOrAssignProperty("unitsonly", "0");
+        REQUIRE_FALSE(parseWeaponBlock(off).unitsOnly);
     }
 
     TEST_CASE("a referenced feature no TDF defines is dropped, not given an id", "[malformed]")

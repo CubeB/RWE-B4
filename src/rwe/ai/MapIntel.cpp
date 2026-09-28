@@ -101,7 +101,6 @@ namespace rwe
         // second walk of the heightmap rather than anything costlier.
         auto width = static_cast<int>(heights.getWidth());
         auto height = static_cast<int>(heights.getHeight());
-        auto seaLevelUInt = simScalarToUInt(seaLevel);
 
         intel.waterRegions = Grid<int>(width, height, 0);
         auto& waterCells = intel.waterRegions.getVector();
@@ -141,6 +140,13 @@ namespace rwe
         // isGridPointWalkable, so this asks the real question -- just without
         // the collision/yard-map checks that need the live simulation state
         // MapIntel is not allowed to depend on.
+        //
+        // Asked of the terrain rather than of the raw heightmap and sea
+        // level: the same question, with the per-cell depth read out of the
+        // cache MapTerrain built at load. This is the widest caller of that
+        // function there is -- every tile of the map, then a 20x20 sea-room
+        // check for each of the hundreds of thousands of sites a water map
+        // nominates -- which is why the depth is worth caching at all.
         if (width >= static_cast<int>(NavalShipyardFootprintX) && height >= static_cast<int>(NavalShipyardFootprintZ))
         {
             int maxX = width - static_cast<int>(NavalShipyardFootprintX);
@@ -149,7 +155,7 @@ namespace rwe
             {
                 for (int x = 0; x <= maxX; ++x)
                 {
-                    if (!isWaterDepthWithinBounds(heights, seaLevelUInt, static_cast<unsigned int>(x), static_cast<unsigned int>(y), NavalShipyardFootprintX, NavalShipyardFootprintZ, NavalShipyardMinWaterDepth, 255u))
+                    if (!isWaterDepthWithinBounds(terrain, static_cast<unsigned int>(x), static_cast<unsigned int>(y), NavalShipyardFootprintX, NavalShipyardFootprintZ, NavalShipyardMinWaterDepth, 255u))
                     {
                         continue;
                     }
@@ -169,7 +175,7 @@ namespace rwe
                         auto y0 = std::max(0, y - NavalShipyardSeaRoom);
                         auto x1 = std::min(width, x + static_cast<int>(NavalShipyardFootprintX) + NavalShipyardSeaRoom);
                         auto y1 = std::min(height, y + static_cast<int>(NavalShipyardFootprintZ) + NavalShipyardSeaRoom);
-                        site.open = isWaterDepthWithinBounds(heights, seaLevelUInt, static_cast<unsigned int>(x0), static_cast<unsigned int>(y0),
+                        site.open = isWaterDepthWithinBounds(terrain, static_cast<unsigned int>(x0), static_cast<unsigned int>(y0),
                             static_cast<unsigned int>(x1 - x0), static_cast<unsigned int>(y1 - y0), NavalShipyardMinWaterDepth, 255u);
                     }
                     intel.shipyardSites.push_back(site);

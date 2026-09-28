@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <nlohmann/json.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
 #include <rwe/ai/AiPlayerController.h>
@@ -219,6 +221,73 @@ namespace rwe
             return MapTerrain(std::move(heights), 60_ss);
         }
 
+        /**
+         * One landmass ringed by ocean, a lake cut into the middle of it and
+         * a small island in the lake -- plus a second island out in the ocean
+         * (issue #398).
+         *
+         * This is the shape the ferry bug needs, and it is worth saying why
+         * each part is load-bearing, because the naval search refuses a target
+         * by failing on EVERY candidate and then on the target itself, and
+         * both of those are easy to accidentally make succeed:
+         *
+         *  - The enemy island is 96 units across and the search's innermost
+         *    ring is four 48-unit steps, so every candidate it scores is off
+         *    the island already. There is no ring on which the island itself
+         *    is a candidate, which is what stops the search walking back into
+         *    it.
+         *  - The lake is 256 units across and NAVAL-UNREACHABLE, because the
+         *    only water our navy can float in is the ocean ring and the
+         *    landmass is in between. That is what refuses the target's own
+         *    point, which navalLandingNear tries last as a fallback: an
+         *    island in water we can sail to is always landable, and the
+         *    fallback would find it and no refusal would ever be logged.
+         *  - Everything on the landmass around the lake is ground-reachable
+         *    from our base, so no candidate out there can be a landing either
+         *    -- correctly, since the army could have walked to it. The rest are
+         *    open sea or off the map.
+         *  - The ocean island is the opposite in every respect: unreachable
+         *    on foot, with water our own navy can reach right beside it, so
+         *    the very same search that refuses the lake island finds a landing
+         *    there. It is what the army is expected to retarget onto.
+         *
+         * 128 tiles a side, so 2048 world units square, which is what leaves
+         * room for a 1152-unit search fan from the middle without its outer
+         * rings falling off the map before they reach the coast.
+         */
+        MapTerrain makeLandlockedIsletTerrain()
+        {
+            Grid<unsigned char> heights(128, 128, static_cast<unsigned char>(90));
+            for (int y = 0; y < 128; ++y)
+            {
+                for (int x = 0; x < 128; ++x)
+                {
+                    // The ocean: a sixteen-tile band right around the edge, so
+                    // the landmass is one piece with a coast on all four sides
+                    // and our navy can get to any part of it.
+                    bool ocean = x < 16 || x >= 112 || y < 16 || y >= 112;
+                    // The lake, and the island standing in it.
+                    bool lake = x >= 56 && x < 73 && y >= 56 && y < 73;
+                    bool lakeIsland = x >= 61 && x < 67 && y >= 61 && y < 67;
+                    if (ocean || (lake && !lakeIsland))
+                    {
+                        heights.set(x, y, static_cast<unsigned char>(0));
+                    }
+                }
+            }
+            // The ocean island, put back as land off the north coast: world
+            // x -128..-32, z -960..-864, with ninety-six units of navigable
+            // ocean between it and the shore.
+            for (int y = 4; y < 10; ++y)
+            {
+                for (int x = 56; x < 62; ++x)
+                {
+                    heights.set(x, y, static_cast<unsigned char>(90));
+                }
+            }
+            return MapTerrain(std::move(heights), 30_ss);
+        }
+
         template <typename Order>
         std::vector<Order> ordersFor(const std::vector<PlayerCommand>& commands, UnitId unit)
         {
@@ -263,6 +332,50 @@ namespace rwe
                 sim.tick();
                 ai.tick(sim, out);
             }
+        }
+
+        /**
+         * How many of each transport event the log holds, keyed
+         * "<ev>:<why>" -- "transport_refusal:no_landing" for a refused landing
+         * search, "transport_cooldown:landing_refused" for a pass that declined
+         * to ask because of one, and so on.
+         *
+         * The log has to be flushed to a file to be read at all
+         * (SimEventLog keeps nothing until it is told to record, and hands
+         * over its buffer only at write time), so this writes to the temp
+         * directory under the given name, counts, and removes it again -- the
+         * same round trip the "ferry that delivers after the timeout" case
+         * below does by hand.
+         */
+        std::map<std::string, int> countTransportEvents(const GameSimulation& sim, const std::string& fileName)
+        {
+            auto path = std::filesystem::temp_directory_path() / fileName;
+            sim.eventLog.write(path);
+            std::ifstream in(path);
+            std::string line;
+            std::map<std::string, int> counts;
+            while (std::getline(in, line))
+            {
+                if (line.find("\"transport_") == std::string::npos)
+                {
+                    continue;
+                }
+                try
+                {
+                    auto e = nlohmann::json::parse(line);
+                    std::string key = e.value("ev", "?") + ":" + e.value("why", "-");
+                    ++counts[key];
+                }
+                catch (const nlohmann::json::exception&)
+                {
+                    // Not one of ours, or not parseable; the substrings below
+                    // would have caught a partial line and this must not.
+                    continue;
+                }
+            }
+            in.close();
+            std::filesystem::remove(path);
+            return counts;
         }
     }
 
@@ -944,6 +1057,172 @@ namespace rwe
             // Still the nearest quiet point, 258: for a surface hull the
             // carrier's field is anti-ground, and this gun cannot touch it.
             REQUIRE(unloads.front().destination.x > 240_ss);
+        }
+    }
+
+    TEST_CASE("a refused landing target is asked about once, not on every pass", "[ai]")
+    {
+        // Issue #398. The landing search is asked once per tactical pass per
+        // idle transport and its answer was logged and thrown away, so an
+        // objective with nowhere to set the cargo down was asked about again
+        // every half second for the length of the game, with the hull standing
+        // idle through each of them. On Hundred Isles the ground-anchor fix cut
+        // the "no landing near" count from 159 to 104 over ten 1800s games, and
+        // what was left came in runs of two on ADJACENT points -- ArmyManager
+        // rebuilds bb.attackTarget from the threat map every pass and the best
+        // cell drifts, so a memory keyed on the exact point would have missed
+        // most of the repeats anyway.
+        //
+        // The enemy here is on the island in the lake, which is the one place
+        // on this map with no landing: see makeLandlockedIsletTerrain for why
+        // every candidate and the fallback itself are refused.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeLandlockedIsletTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineLandUnits(sim);
+        defineSeaTransport(sim);
+
+        // Our base on the landmass, near enough the west coast that a shipyard
+        // could stand beside it and so the naval layer has an ocean to label.
+        addUnit(sim, "ARMCOM", ai, SimVector(-700_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-680_ss, 90_ss, 40_ss), script);
+        // A kbot on the home ground, so there is a passenger worth carrying and
+        // the refusal is about the landing and not about the cargo.
+        addUnit(sim, "ARMPW", ai, SimVector(-660_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMPW", ai, SimVector(-660_ss, 90_ss, 48_ss), script);
+        // The hull, out in the ocean.
+        auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(-880_ss, 0_ss, 0_ss), script);
+        // The enemy: unarmed, so its only effect is to be worth attacking once
+        // seen, and alone on its island so the army has nowhere else to point.
+        auto targetId = addUnit(sim, "ARMSOLAR", human, SimVector(0_ss, 90_ss, 0_ss), script);
+
+        auto profile = makeDefaultBrutalProfile();
+        profile.scoutCount = 0;
+        profile.attackArmySize = 1;
+        profile.attackInWaves = false;
+        profile.cheatModeOmniscient = true;
+        profile.retreatArmySize = 0;
+        // A smaller defend radius than the shipped one, which sounds backwards
+        // and is not: this is the distance at which a known enemy near the
+        // base turns the AI to Defend, and the threat test further up this file
+        // carries the same note about it. Both of these hold the phase in
+        // Attack, which is what the ferry branch is gated on, so that the
+        // retarget below is about the refusal and not about the phase.
+        profile.defendRadius = 200_ss;
+        // The shipped thirty seconds, and deliberately not shortened: the
+        // sections below run for a few hundred ticks, and a cooldown shorter
+        // than the window would expire inside it and make what is being
+        // asserted here a statement about the clock instead.
+        profile.ferryLandingRefusalCooldownSeconds = 30;
+        sim.eventLog.setRecording(true);
+
+        AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 90, commands);
+
+        const auto& bb = controller.getBlackboard();
+        REQUIRE(bb.knownEnemies.count(targetId.value) == 1);
+        REQUIRE(bb.phase == GamePhase::Attack);
+        REQUIRE(bb.groundReachabilityValid);
+        // The whole premise: the objective is ground the army cannot walk to,
+        // so a ferry is wanted at all.
+        REQUIRE(bb.enemyAcrossWater);
+        REQUIRE(std::find(bb.transports.begin(), bb.transports.end(), shipId) != bb.transports.end());
+        // The search really was made and really was refused -- otherwise the
+        // ten passes below would be proving nothing at all by not repeating
+        // it. And one cell is remembered, because one target was refused.
+        auto warmUp = countTransportEvents(sim, "rwe-ferry-refusal-warmup.jsonl");
+        INFO("warm-up transport events: " << nlohmann::json(warmUp).dump());
+        REQUIRE(warmUp["transport_refusal:no_landing"] == 1);
+        REQUIRE(bb.ferryLandingRefusals.size() == 1);
+
+        // Only what happens from here counts. The refusal itself was recorded
+        // during the warm-up and is still inside its cooldown, so the ten
+        // passes below must not ask once between them -- which is the whole
+        // claim, and is a stronger one than counting one refusal and nine
+        // repeats: nothing is asked at all.
+        const int passes = 10;
+        sim.eventLog.clear();
+        runTicks(sim, controller, passes * profile.tacticalTickInterval, commands);
+        auto counts = countTransportEvents(sim, "rwe-ferry-refusal-test-a.jsonl");
+        INFO("ten-pass transport events: " << nlohmann::json(counts).dump());
+        REQUIRE(counts["transport_refusal:no_landing"] == 0);
+        // At least one per pass, and not an exact figure: a pass logs one event
+        // per idle transport and how many of those there are is not what this
+        // is about.
+        REQUIRE(counts["transport_cooldown:landing_refused"] >= passes);
+        // Nothing is holding the hull on it, which is the symptom the issue
+        // describes: no order of any kind reaches the transport.
+        REQUIRE(ordersFor<UnloadOrder>(commands, shipId).empty());
+        REQUIRE(ordersFor<LoadOrder>(commands, shipId).empty());
+        REQUIRE(ordersFor<MoveOrder>(commands, shipId).empty());
+        REQUIRE(controller.getTransportManager().getFerries().empty());
+
+        SECTION("the refusal is a cooldown and not an exclusion: it is asked again once it has run out")
+        {
+            sim.eventLog.clear();
+            runTicks(sim, controller, (profile.ferryLandingRefusalCooldownSeconds + 2) * static_cast<int>(SimTicksPerSecond), commands);
+            auto after = countTransportEvents(sim, "rwe-ferry-refusal-test-b.jsonl");
+            INFO("post-cooldown transport events: " << nlohmann::json(after).dump());
+            // The search ran again, and then stopped being asked again. This is
+            // the whole point of a cooldown rather than a list of targets to
+            // avoid for ever: a landing site CAN become reachable -- the enemy
+            // shore is relabelled as their navy moves, the water beside it as
+            // ours does -- and this is the search that would find it and carry
+            // somebody there. Thirty-two seconds of window, thirty of cooldown,
+            // so the question is asked at the start of it and not again for the
+            // rest. The counts are compared rather than pinned, because a pass
+            // logs one event per idle transport and how many of those there
+            // are is not what this is about.
+            REQUIRE(after["transport_refusal:no_landing"] >= 1);
+            REQUIRE(after["transport_cooldown:landing_refused"] > after["transport_refusal:no_landing"]);
+            // One cell remembered, not one per pass: the entry is replaced, not
+            // added to.
+            REQUIRE(controller.getBlackboard().ferryLandingRefusals.size() == 1);
+        }
+
+        SECTION("the army is told, and marches somewhere else")
+        {
+            // The other half of the fix, and the reason the refusal lives on
+            // the blackboard rather than inside TransportManager: the army
+            // pass runs straight after the transport pass in the same tick, so
+            // it can read what the ferry has just learned and pick another
+            // objective. A second enemy out in the ocean, on ground the same
+            // search finds a landing beside in one step, gives it something
+            // worth picking.
+            auto altTarget = addUnit(sim, "ARMSOLAR", human, SimVector(-80_ss, 90_ss, -912_ss), script);
+            sim.eventLog.clear();
+            // Forty passes, and not six: a unit added mid-test is noticed by
+            // the perception pass on its own interval and only then reaches
+            // the threat map, so the army cannot be retargeted in the couple
+            // of passes the refusal itself takes to stop. The window is
+            // generous on purpose -- a test that pins the retarget must not be
+            // the thing that goes flaky.
+            runTicks(sim, controller, 40 * profile.tacticalTickInterval, commands);
+
+            const auto& after = controller.getBlackboard();
+            INFO("retarget transport events: " << nlohmann::json(countTransportEvents(sim, "rwe-ferry-refusal-retarget.jsonl")).dump());
+            INFO("phase " << gamePhaseName(after.phase) << " army " << after.armySize
+                 << " transports " << after.transports.size()
+                 << " combat " << after.combatUnits.size()
+                 << " acrossWater " << after.enemyAcrossWater
+                 << " target " << (after.attackTarget ? static_cast<int>(after.attackTarget->x.value) : -1)
+                 << "," << (after.attackTarget ? static_cast<int>(after.attackTarget->z.value) : -1));
+            REQUIRE(after.knownEnemies.count(altTarget.value) == 1);
+            REQUIRE(after.attackTarget);
+            // The objective is no longer the ground the sea cannot serve. The
+            // refusal itself is still standing, which is the point: nothing
+            // about the island has changed, it has simply stopped being what
+            // the army is marching at.
+            REQUIRE(ferryLandingRefused(after, SimVector(0_ss, 90_ss, 0_ss), profile.ferryLandingRefusalCell, sim.gameTime));
+            REQUIRE(!ferryLandingRefused(after, *after.attackTarget, profile.ferryLandingRefusalCell, sim.gameTime));
+            // And the cell the army went to is not one the ferry has refused,
+            // so it has traded one stuck objective for another. (Which cell it
+            // does go to is not pinned: the threat map's best cell is a
+            // scoring of value against guns over the whole map, and on this
+            // one it is quite entitled to name somewhere on our own side.)
+            REQUIRE(after.ferryLandingRefusals.count(ferryLandingRefusalCell(*after.attackTarget, profile.ferryLandingRefusalCell)) == 0);
         }
     }
 }

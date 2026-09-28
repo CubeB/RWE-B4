@@ -15,6 +15,11 @@ two that read captures. None of them needs root, but recording a capture does.
 | `fakehost.py <pcap>` | A DirectPlay host that is not TA, for a real TA to join and play against. It needs a capture of a real TA host that a second TA joined, recorded from before the join. It answers the session handshake, pings and unit sync itself, replays the recorded battleroom and launch, and then owns the host's units: `touch go` releases the launch, `echo joiner > walk` walks the host's commander to the joiner's. |
 | `tanet.py` | The shared module: DirectPlay framing, TA's transforms and subpacket table, and a `0x2c` encoder and decoder. |
 
+The C++ port of the session layer lives in the engine: `src/rwe/net/ta/`. Build
+`ta_host_probe` and run it with `--session-name x --map <map>` to host a
+DirectPlay game the tools here can find; `dpenum.py` then prints its
+ENUMSESSIONSREPLY.
+
 ## Recording a capture
 
 Two copies of TA on one Linux machine, both under Proton with native DirectPlay. The test bed

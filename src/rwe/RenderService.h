@@ -192,6 +192,23 @@ namespace rwe
 
         void drawBatch(const ColoredMeshBatch& batch, const Matrix4f& vpMatrix, float alpha = 1.0f);
 
+        /**
+         * drawBatch for a batch the caller does not refill every frame.
+         *
+         * The vertex array and buffer live in `mesh`, which the caller keeps
+         * between frames -- RenderService itself is built afresh each frame,
+         * so a buffer that has to outlive one belongs to the scene -- and the
+         * vertices go up only when `changed` says the batch is not the one
+         * already in there. A frame that draws the same batch as the frame
+         * before it therefore costs a draw call and nothing else, rather
+         * than making a vertex array and a buffer, filling them with
+         * several megabytes of vertices and throwing them away again.
+         *
+         * Only the triangles are drawn: a batch that wants to be drawn this
+         * way is one the caller has taken over the contents of.
+         */
+        void drawBatchIfChanged(const ColoredMeshBatch& batch, GlMesh& mesh, bool changed, const Matrix4f& vpMatrix, float alpha = 1.0f);
+
         void drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel, TextureIdentifier shadeTableTexture);
 
         void drawUnitShadowMeshBatch(const UnitShadowMeshBatch& batch);

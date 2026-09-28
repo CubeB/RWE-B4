@@ -160,6 +160,9 @@ namespace rwe
         void dropPlayerLocked(PlayerId player, unsigned int fromTick);
         void rejoinPlayerLocked(PlayerId player, unsigned int fromTick);
 
+        /** The shared body of the two pops; `wait` is tryPopCommands' command gate. */
+        std::optional<std::vector<std::pair<PlayerId, std::vector<PlayerCommand>>>> popCommandsLocked(bool wait);
+
     public:
         /**
          * How far past the tick the game has reached a drop or a rejoin may be
@@ -178,6 +181,19 @@ namespace rwe
          * that order and why it has to be fixed.
          */
         std::optional<std::vector<std::pair<PlayerId, std::vector<PlayerCommand>>>> tryPopCommands();
+
+        /**
+         * The next tick's commands, a set for every player whether or not
+         * they have one: a player with nothing buffered contributes an empty
+         * set rather than holding the tick up.
+         *
+         * This is the own-clock game's pop. There is no lockstep contract to
+         * keep -- the peer runs its own simulation and waits for nobody -- so
+         * a tick must never be delayed for a command that is not there. A set
+         * that arrives late is taken on a later tick, in order; nothing is
+         * lost and no peer is waited on.
+         */
+        std::optional<std::vector<std::pair<PlayerId, std::vector<PlayerCommand>>>> tryPopCommandsWithoutWaiting();
 
         void pushCommands(PlayerId player, const std::vector<PlayerCommand>& commands);
 

@@ -414,7 +414,14 @@ namespace rwe
 
     void drawSpriteParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, SpriteBatch& batch);
 
-    void drawWakeDot(GameTime currentTime, const Matrix4f& viewProjectionMatrix, const WakeDot& dot, ColoredMeshBatch& batch);
+    /**
+     * Fills batch with the quads for every wake dot alive at currentTime that
+     * the view can see, and clears it first. The whole walk lives in one
+     * function: at a hundred thousand dots a frame the per-dot call out to
+     * the clock for the time and the per-dot call into a draw were costing
+     * more than the work they wrapped.
+     */
+    void buildWakeDotBatch(GameTime currentTime, const Matrix4f& viewProjectionMatrix, const std::vector<WakeDot>& dots, ColoredMeshBatch& batch);
 
     /** frac is the fraction of the current tick that has elapsed, for smooth motion between ticks. */
     void drawNanoParticle(GameTime currentTime, float frac, const Particle& particle, ColoredMeshBatch& batch);
