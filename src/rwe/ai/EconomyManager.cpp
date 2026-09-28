@@ -97,6 +97,17 @@ namespace rwe
                              ? "yes"
                              : "no");
         }
+        // Everything below asks what a unit IS -- mobile, builder, armed, one
+        // of the side's own hulls -- and it used to ask the game's definition
+        // map once per unit per tick, which is a hash of the type name, a walk
+        // of the bucket chain and then a read of fields scattered over a
+        // several-hundred-byte definition, to be told the same handful of
+        // things about every tank in the army. Resolved once per unit TYPE per
+        // pass through an index that lives here and is emptied first, so
+        // nothing it says can outlive the definitions it was read from.
+        bb.unitDefIndex.beginPass();
+        const auto& sideUnits = bb.sideUnits;
+
         bb.currentMetal = player.metal;
         bb.currentEnergy = player.energy;
         bb.metalStorage = player.maxMetal;
@@ -112,6 +123,18 @@ namespace rwe
         // end of the pass. Ordered, because the losses that come out of the
         // diff go on to steer building and must do so identically on every
         // peer.
+        //
+        // WHERE THE TIME IN THIS PASS ACTUALLY GOES, since it is not where
+        // #400 expected and the next person to be sent here will guess again.
+        // Measured on 400 owned units, microseconds a pass, each piece timed
+        // on its own and the whole pass alongside them: the walk over
+        // sim.units 60, the string-keyed definition lookup this used to do
+        // per unit 90 (now an index resolve, near enough free), the two count
+        // maps 315, these two standing maps 850 -- which is 70% of the pass,
+        // and about a third of it again if they were updated in place rather
+        // than rebuilt and thrown away every tick. The 850 is a fresh red-black
+        // node and a fresh copy of a unit type name, per unit, per tick, for a
+        // record that usually says exactly what it said last tick.
         std::map<unsigned int, StandingBuilding> standingNow;
 
         // And everything that is not one: mobile units, finished or not, and
@@ -138,7 +161,8 @@ namespace rwe
             {
                 return 0.0f;
             }
-            const auto& frameDef = sim.unitDefinitions.at(frame->get().unitType);
+            const auto frameFacts = bb.unitDefIndex.resolve(frame->get().unitType, sim, sideUnits);
+            const auto& frameDef = *frameFacts.definition;
             if (!frame->get().isBeingBuilt(frameDef))
             {
                 return 0.0f;
@@ -159,7 +183,7 @@ namespace rwe
                 continue;
             }
 
-            const auto& def = sim.unitDefinitions.at(unit.unitType);
+            const auto facts = bb.unitDefIndex.resolve(unit.unitType, sim, sideUnits);
             ++bb.ownedTotalCounts[unit.unitType];
 
             // A mission unit its script still holds is the mission's, not
@@ -170,14 +194,14 @@ namespace rwe
                 continue;
             }
 
-            const bool isCompleted = !unit.isBeingBuilt(def);
-            if (!isCompleted || def.isMobile)
+            const bool isCompleted = unit.buildTimeCompleted >= facts.buildTime;
+            if (!isCompleted || facts.isMobile)
             {
                 standingUnitsNow.emplace(unitId.value, StandingUnit{unit.unitType, unit.position, !isCompleted});
             }
             if (!isCompleted)
             {
-                if (!def.isMobile)
+                if (!facts.isMobile)
                 {
                     frames.push_back(unitId);
                 }
@@ -185,7 +209,7 @@ namespace rwe
             }
             ++bb.ownedCompletedCounts[unit.unitType];
 
-            if (def.builder)
+            if (facts.builder)
             {
                 // A builder's draw is counted once even when both records
                 // name the same frame, which they do for a build in
@@ -210,7 +234,7 @@ namespace rwe
                 }
                 if (drawing)
                 {
-                    committed += drawOf(*drawing, def);
+                    committed += drawOf(*drawing, *facts.definition);
                 }
                 if (!unit.orders.empty())
                 {
@@ -250,17 +274,17 @@ namespace rwe
                 }
             }
 
-            if (!def.isMobile)
+            if (!facts.isMobile)
             {
                 standingNow.emplace(unitId.value, StandingBuilding{unit.unitType, unit.position});
             }
 
-            if (def.onOffable && def.makesMetal.value > 0.0f)
+            if (facts.onOffable && facts.makesMetal)
             {
                 bb.metalMakers.push_back(unitId);
             }
 
-            if (def.commander)
+            if (facts.commander)
             {
                 bb.commanderUnitId = unitId;
                 bb.commanderPosition = unit.position;
@@ -274,21 +298,15 @@ namespace rwe
             // Units booked onto a transport are spoken for until they are set down again.
             const bool isFerryPassenger = bb.ferryPassengers.count(unitId.value) > 0;
 
-            if (def.builder && !def.isMobile && !def.commander)
+            if (facts.builder && !facts.isMobile && !facts.commander)
             {
                 bb.factories.push_back(unitId);
             }
-            else if (def.isMobile && def.isTransport() && !def.builder)
+            else if (facts.isMobile && facts.transport && !facts.builder)
             {
                 bb.transports.push_back(unitId);
             }
-            else if (def.isMobile && !isFerryPassenger
-                && ((!bb.sideUnits.destroyer.empty() && unit.unitType == bb.sideUnits.destroyer)
-                    || (!bb.sideUnits.submarine.empty() && unit.unitType == bb.sideUnits.submarine)
-                    || (!bb.sideUnits.cruiser.empty() && unit.unitType == bb.sideUnits.cruiser)
-                    || (!bb.sideUnits.battleship.empty() && unit.unitType == bb.sideUnits.battleship)
-                    || (!bb.sideUnits.antiAirShip.empty() && unit.unitType == bb.sideUnits.antiAirShip)
-                    || (!bb.sideUnits.scoutShip.empty() && unit.unitType == bb.sideUnits.scoutShip)))
+            else if (facts.isMobile && !isFerryPassenger && facts.navalCombatUnit)
             {
                 // Hulls. See AiBlackboard::navalCombatUnits for why these are
                 // sorted here rather than falling through to the ordinary
@@ -297,11 +315,11 @@ namespace rwe
                 // otherwise land it in.
                 bb.navalCombatUnits.push_back(unitId);
             }
-            else if (def.isMobile && (isAiScoutType(bb.sideUnits, unit.unitType) || (def.canFly && !def.canAttack && !def.builder)))
+            else if (facts.isMobile && (facts.scoutType || (facts.canFly && !facts.canAttack && !facts.builder)))
             {
                 bb.scoutUnits.push_back(unitId);
             }
-            else if (def.builder)
+            else if (facts.builder)
             {
                 if (unit.orders.empty() && !isFerryPassenger)
                 {
@@ -323,14 +341,14 @@ namespace rwe
                     assistingBuilders.push_back(unitId);
                 }
             }
-            else if (def.isMobile && isAiAntiAirType(bb.sideUnits, unit.unitType) && !isFerryPassenger)
+            else if (facts.isMobile && facts.antiAirType && !isFerryPassenger)
             {
                 // Held back from the army deliberately. Anti-air that walks
                 // off with the attack is not cover, and counting it as army
                 // would make the AI attack sooner for having built defences.
                 bb.antiAirUnits.push_back(unitId);
             }
-            else if (def.isMobile && def.canAttack && !def.canFly && (!def.weapon1.empty() || !def.weapon2.empty()) && !isFerryPassenger)
+            else if (facts.isMobile && facts.canAttack && !facts.canFly && facts.armed && !isFerryPassenger)
             {
                 bb.combatUnits.push_back(unitId);
             }

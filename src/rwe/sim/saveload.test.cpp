@@ -457,6 +457,46 @@ namespace rwe
         REQUIRE(deadB->corpseLevel == 3);
     }
 
+    TEST_CASE("the factory repeat toggle round-trips through a save", "[saveload]")
+    {
+        // Hashed state, so this is a different failure from the test above: a
+        // missing serialiser here would show up as a load that silently
+        // defaults to off, and the byte-for-byte comparison would still pass
+        // because both sides would then agree. The hash catches it (a factory
+        // that was looping stops looping, and the two simulations part company
+        // on the next tick), and this says so explicitly.
+        //
+        // The flag matters more than most saved state because it changes what
+        // a factory does next rather than what it has done: a reload that
+        // dropped it would quietly turn a player's production order back into
+        // an ordinary one.
+        auto simA = makeBaseSim();
+        buildScenario(simA);
+
+        auto us = PlayerId(0);
+        auto yardId = spawnUnit(simA, "TANK", us, SimVector(300_ss, 0_ss, 300_ss));
+
+        // Off on one unit and on the next, so the round trip has to carry a
+        // value rather than a constant: a serialiser that wrote `true`
+        // unconditionally, or dropped the key, would pass with every factory
+        // set the same way.
+        auto loopingId = spawnUnit(simA, "KBOT", us, SimVector(360_ss, 0_ss, 300_ss));
+        simA.getUnitState(yardId).repeatBuildQueue = false;
+        simA.getUnitState(loopingId).repeatBuildQueue = true;
+
+        auto saved = saveSimulationToJson(simA);
+
+        auto simB = makeBaseSim();
+        loadSimulationFromJson(saved, simB);
+
+        // Named, so a failure says which unit went missing rather than
+        // pointing at a diff of the whole save.
+        REQUIRE_FALSE(simB.getUnitState(yardId).repeatBuildQueue);
+        REQUIRE(simB.getUnitState(loopingId).repeatBuildQueue);
+
+        REQUIRE(saveSimulationToJson(simB) == saved);
+    }
+
     TEST_CASE("a unit json missing a mayBeMissing key loads its default", "[saveload]")
     {
         // commandFireShotFired is the row that opts in: saves written before
@@ -480,6 +520,23 @@ namespace rwe
         auto simB = makeBaseSim();
         REQUIRE_NOTHROW(loadSimulationFromJson(saved, simB));
         REQUIRE(!simB.getUnitState(markedId).commandFireShotFired);
+
+        // The same question for the factory repeat (#417), and the more
+        // important of the two here: this key is new, so every save in the
+        // wild lacks it, and absence has to mean off -- which is what every
+        // factory did before the toggle existed.
+        auto loopingId = spawnUnit(simA, "KBOT", us, SimVector(360_ss, 0_ss, 300_ss));
+        simA.getUnitState(loopingId).repeatBuildQueue = true;
+
+        auto withoutKey = saveSimulationToJson(simA);
+        for (auto& uj : withoutKey.at("units"))
+        {
+            uj.erase("repeatBuildQueue");
+        }
+
+        auto simC = makeBaseSim();
+        REQUIRE_NOTHROW(loadSimulationFromJson(withoutKey, simC));
+        REQUIRE(!simC.getUnitState(loopingId).repeatBuildQueue);
     }
 
     TEST_CASE("a moving unit saved before the repath limit loads its defaults", "[saveload]")

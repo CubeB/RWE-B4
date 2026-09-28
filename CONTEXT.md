@@ -70,8 +70,20 @@ _Avoid_: client side, visual layer
 
 **Lockstep**:
 The simulation contract: peers exchange commands, not state, and every peer
-ticks identically. The reason presentation may not touch sim state.
+ticks identically. The reason presentation may not touch sim state. One of the
+three shapes a scene takes, the other two being playback and own-clock, and the
+guards that separate them are ADR-0003.
 _Avoid_: sync mode
+
+**Playback**:
+A scene that is watching rather than playing: its only input is a recording, so
+it is in a game with nobody. Either input counts — an RWE replay's command
+stream, or a TA demo's state and effects, which reach the simulation as
+puppets rather than as orders. The local human is not seated, the peer-liveness
+checks and the sync-hash exchange stand down, and no tick is held for anybody.
+`GameScene::isPlayback()`. A shape rather than the opposite of lockstep: it and
+own-clock are separate gates, and a shared guard tests both (ADR-0003).
+_Avoid_: replay (that is one of the two inputs), spectator mode, demo mode
 
 **Sync hash** (`GameHash`):
 The per-tick digest of hashed sim state. A mismatch between peers is a
@@ -350,6 +362,15 @@ The tail of every `0x2c`: one owner-block slot's complete state, the slot
 chosen by tick, so each unit is described once a cycle. The receiver believes
 it over anything it had, so a record for an empty slot deletes the unit there.
 _Avoid_: snapshot, keyframe
+
+**Own-clock**:
+A live game whose scene advances on its own clock at the chosen speed like a
+skirmish, with no lockstep command gate or wait on any peer, no sync-hash
+exchange, no desync report and no save. The mode for playing against a peer
+that runs its own simulation -- a real `TotalA.exe`, which is
+owner-authoritative rather than lockstep -- selected by
+`GameParameters::netMode`. `docs/TA-NETWORK.md`.
+_Avoid_: real-time (the frame clock is real-time too), non-lockstep, async
 
 ### The instruments
 

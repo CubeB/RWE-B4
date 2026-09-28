@@ -197,6 +197,8 @@ set(SOURCE_FILES
     src/rwe/ai/AiPersonality.h
     src/rwe/ai/AiBuildTree.cpp
     src/rwe/ai/AiBuildTree.h
+    src/rwe/ai/AiUnitDefIndex.cpp
+    src/rwe/ai/AiUnitDefIndex.h
     src/rwe/ai/EconomyManager.cpp
     src/rwe/ai/EconomyManager.h
     src/rwe/ai/LineOfFire.cpp
@@ -353,6 +355,8 @@ set(SOURCE_FILES
     src/rwe/game/GameEndedReport.h
     src/rwe/game/GameScene_rejoin.cpp
     src/rwe/game/GameScene_replay.cpp
+    src/rwe/game/GameScene_ownclock.cpp
+    src/rwe/game/GameScene_ownclock.h
     src/rwe/game/GameScene_tad.cpp
     src/rwe/game/GameScene_util.cpp
     src/rwe/game/featureplacement.cpp
@@ -527,6 +531,10 @@ set(SOURCE_FILES
     src/rwe/mesh_util.h
     src/rwe/network_util.cpp
     src/rwe/network_util.h
+    src/rwe/net/ta/TaDirectPlay.cpp
+    src/rwe/net/ta/TaDirectPlay.h
+    src/rwe/net/ta/TaHostSession.cpp
+    src/rwe/net/ta/TaHostSession.h
     src/rwe/observable/BehaviorSubject.h
     src/rwe/observable/Observable.h
     src/rwe/observable/Subject.h
@@ -815,8 +823,21 @@ target_include_directories(librwe PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/config")
 target_include_directories(librwe PUBLIC "libs/asio/include")
 add_definitions(-DASIO_STANDALONE)
 if(WIN32)
+    # asio asks for the Windows target version to be named, and #warning's about
+    # it otherwise -- which -Werror=cpp, and so the CI's -DRWE_WERROR=ON, turns
+    # into a build failure. It assumes 0x0601 if told nothing, but mingw-w64
+    # would otherwise be choosing the default for itself, so this names a
+    # Windows 10 target rather than pinning the engine back to Windows 7.
+    add_definitions(-D_WIN32_WINNT=0x0A00)
+endif()
+if(WIN32)
     # winsock needed for asio on windows
     target_link_libraries(librwe ws2_32)
+    # ...and mswsock for the IOCP half: AcceptEx and GetAcceptExSockaddrs live
+    # there, not in ws2_32. Nothing needed them until an asio acceptor appeared
+    # (TaHostSession), because every earlier asio use was a plain socket, and
+    # Linux links fine either way since asio uses epoll there.
+    target_link_libraries(librwe mswsock)
     # dbghelp resolves the crash handler's stack frames
     target_link_libraries(librwe dbghelp)
 endif()
@@ -975,6 +996,7 @@ set(TEST_FILES
     src/rwe/ai/AiPlayerController.test.cpp
     src/rwe/ai/AiTuningProfile.test.cpp
     src/rwe/ai/AiBehaviour.test.cpp
+    src/rwe/ai/EconomyManager.test.cpp
     src/rwe/ai/AiBehaviour_army.test.cpp
     src/rwe/ai/AiBehaviour_commander.test.cpp
     src/rwe/ai/AiBehaviour_defences.test.cpp
@@ -1005,6 +1027,7 @@ set(TEST_FILES
     src/rwe/collections/VectorMap.test.cpp
     src/rwe/game/DefaultAction.test.cpp
     src/rwe/game/GameScene_audio.test.cpp
+    src/rwe/game/GameScene_ownclock.test.cpp
     src/rwe/game/panel_slide.test.cpp
     src/rwe/game/GameSpeed.test.cpp
     src/rwe/game/buildghost.test.cpp
@@ -1080,6 +1103,8 @@ set(TEST_FILES
     src/rwe/math/rwe_math.test.cpp
     src/rwe/mesh_util.test.cpp
     src/rwe/network_util.test.cpp
+    src/rwe/net/ta/TaDirectPlay.test.cpp
+    src/rwe/net/ta/TaHostSession.test.cpp
     src/rwe/pathfinding/pathfinding_utils.test.cpp
     src/rwe/render/FogTiles.test.cpp
     src/rwe/render/WireframeScan.test.cpp
@@ -1128,6 +1153,7 @@ set(TEST_FILES
     src/rwe/sim/kamikaze.test.cpp
     src/rwe/sim/paralyzer.test.cpp
     src/rwe/sim/moverate.test.cpp
+    src/rwe/sim/movement.test.cpp
     src/rwe/sim/pathfollowing.test.cpp
     src/rwe/sim/transport.test.cpp
     src/rwe/sim/bomber.test.cpp
@@ -1145,6 +1171,7 @@ set(TEST_FILES
     src/rwe/game/noshadow.test.cpp
     src/rwe/sim/missile.test.cpp
     src/rwe/sim/seacollision.test.cpp
+    src/rwe/sim/unitsonly.test.cpp
     src/rwe/sim/acidwater.test.cpp
     src/rwe/sim/aircraft.test.cpp
     src/rwe/sim/groundtilt.test.cpp
@@ -1182,6 +1209,7 @@ set(TEST_FILES
     src/rwe/sim/SimRandom.test.cpp
     src/rwe/sim/resurrect.test.cpp
     src/rwe/sim/saveload.test.cpp
+    src/rwe/sim/factoryrepeat.test.cpp
     src/rwe/util.test.cpp
     src/rwe/util/CrashHandler.test.cpp
     src/rwe/util/OpaqueArgs.test.cpp
@@ -1249,6 +1277,11 @@ target_link_libraries(solar_probe librwe)
 
 add_executable(tad_probe src/tad_probe.cpp)
 target_link_libraries(tad_probe librwe)
+
+# Hosts a DirectPlay game a real Total Annihilation can find, for checking
+# tools/ta-net/dpenum.py against the C++ session layer. See src/ta_host_probe.cpp.
+add_executable(ta_host_probe src/ta_host_probe.cpp)
+target_link_libraries(ta_host_probe librwe)
 
 add_executable(tad_episodes src/tad_episodes.cpp)
 target_link_libraries(tad_episodes librwe)

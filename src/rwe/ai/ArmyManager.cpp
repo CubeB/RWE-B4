@@ -1756,24 +1756,69 @@ namespace rwe
         bb.attackTarget.reset();
         if (bb.phase == GamePhase::Attack)
         {
+            // An objective the sea cannot service is a bad one: a hull sent at
+            // it finds nowhere to set its cargo down and stands idle on it
+            // again on the next pass, which is the loop issue #398 is about.
+            // The transport pass runs before this one in the same tick, so a
+            // refusal it recorded within its cooldown is visible here, and the
+            // next candidate down the chain is taken instead.
+            //
+            // A fall-through and not a re-query: bestAttackTarget names the
+            // single best cell and finding the next best is a different
+            // question, so a refused objective drops out of the chain onto the
+            // enemy base and then onto any known enemy.
+            //
+            // The first candidate is kept aside for the case where there is
+            // nothing left to drop onto. An army with no objective at all is a
+            // worse answer than one marching at ground it cannot cross, and
+            // the transport's own cooldown is what stops THAT from becoming a
+            // landing search every pass -- so the two halves cover each other
+            // rather than both covering the same case.
+            std::optional<SimVector> firstCandidate;
+            auto consider = [&](const std::optional<SimVector>& candidate) {
+                if (!candidate)
+                {
+                    return false;
+                }
+                if (!firstCandidate)
+                {
+                    firstCandidate = candidate;
+                }
+                if (ferryLandingRefused(bb, *candidate, profile.ferryLandingRefusalCell, sim.gameTime))
+                {
+                    return false;
+                }
+                bb.attackTarget = candidate;
+                return true;
+            };
             if (profile.huntEnemyCommander)
             {
-                bb.attackTarget = bb.enemyCommanderPosition;
+                consider(bb.enemyCommanderPosition);
             }
             if (!bb.attackTarget)
             {
-                bb.attackTarget = threatMap.bestAttackTarget(
+                consider(threatMap.bestAttackTarget(
                     profile.threatAversion.value,
                     bb.enemyBasePosition,
-                    profile.attackBaseRadius);
+                    profile.attackBaseRadius));
             }
-            if (!bb.attackTarget && bb.enemyBasePosition)
+            if (!bb.attackTarget)
             {
-                bb.attackTarget = bb.enemyBasePosition;
+                consider(bb.enemyBasePosition);
             }
-            if (!bb.attackTarget && !bb.knownEnemies.empty())
+            if (!bb.attackTarget)
             {
-                bb.attackTarget = bb.knownEnemies.begin()->second.lastKnownPosition;
+                for (const auto& [_, enemy] : bb.knownEnemies)
+                {
+                    if (consider(enemy.lastKnownPosition))
+                    {
+                        break;
+                    }
+                }
+            }
+            if (!bb.attackTarget)
+            {
+                bb.attackTarget = firstCandidate;
             }
         }
 

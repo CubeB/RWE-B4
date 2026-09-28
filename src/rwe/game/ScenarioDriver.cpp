@@ -5,6 +5,7 @@
 #include <rwe/game/GameScene.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/SimVector.h>
+#include <rwe/sim/UnitOrder.h>
 #include <rwe/ui/UiPanel.h>
 #include <rwe/ui/UiStagedButton.h>
 #include <rwe/util/SimpleLogger.h>
@@ -386,6 +387,31 @@ namespace rwe
         scene.onMouseDown(MouseButtonEvent(x, y, MouseButtonEvent::MouseButton::Left));
         scene.onMouseUp(MouseButtonEvent(x, y, MouseButtonEvent::MouseButton::Left));
         setMouse(parkedMouse);
+    }
+
+    std::optional<SimVector> ScenarioDriver::unitPosition(UnitId unitId) const
+    {
+        auto unit = scene.tryGetUnit(unitId);
+        if (!unit)
+        {
+            return std::nullopt;
+        }
+        return unit->get().position;
+    }
+
+    void ScenarioDriver::moveOrder(UnitId unitId, const SimVector& destination)
+    {
+        scene.localPlayerIssueUnitOrder(unitId, MoveOrder(destination));
+    }
+
+    void ScenarioDriver::peerGameSpeed(int peerSpeedLevel)
+    {
+        scene.setPeerGameSpeedLevel(peerSpeedLevel);
+    }
+
+    void ScenarioDriver::peerPaused(bool paused)
+    {
+        scene.setPeerPaused(paused);
     }
 
     void ScenarioDriver::clickGadget(const std::string& name)

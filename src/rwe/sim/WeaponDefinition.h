@@ -67,6 +67,19 @@ namespace rwe
         bool groundBounce;
 
         /**
+         * TA unitsonly, bit 14 of `wdef+0x111`. The original's stop tests run in
+         * a fixed order (0x49B090) -- the square's units, then the feature, then
+         * this, then the ground, then the sea -- and a round carrying the bit
+         * comes back out at this step without ever reaching the two surfaces.
+         * It still detonates on a unit; it simply does not stop on bare ground or
+         * in water, and keeps flying until something else ends it. Read from the
+         * weapon definition at test time, as the original does, rather than
+         * copied onto the round: nothing in the game data changes a weapon
+         * mid-flight.
+         */
+        bool unitsOnly{false};
+
+        /**
          * TA noexplode, bit 22 of `wdef+0x111`, and the whole of what makes the
          * D-gun look like a beam. It does not stop the projectile detonating --
          * it stops the detonation *consuming* it. The first act of the

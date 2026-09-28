@@ -459,7 +459,7 @@ namespace
             {
                 continue;
             }
-            if (slot >= params.players.size())
+            if (slot >= static_cast<rwe::Index>(params.players.size()))
             {
                 std::cerr << "  ERROR: the demo names more players than the engine holds\n";
                 return std::nullopt;
@@ -545,7 +545,7 @@ namespace
         rwe::Index slot = 0;
         for (uint8_t sender : meta.senders)
         {
-            if (slot >= game.simulation.players.size())
+            if (slot >= static_cast<rwe::Index>(game.simulation.players.size()))
             {
                 break;
             }

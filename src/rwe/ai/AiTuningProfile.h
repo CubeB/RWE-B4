@@ -2408,6 +2408,42 @@ namespace rwe
          */
         float ferryLandingThreatRadius{300.0f};
         /**
+         * How long a landing search that found nothing is believed to still
+         * be right (issue #398).
+         *
+         * The search runs once per tactical pass per idle transport -- up to
+         * ferryLandingSearchSteps steps at nine bearings, and every naval
+         * candidate probing the terrain eight times over -- and until this its
+         * answer was written to the log and thrown away. An objective with no
+         * shore our own navy can lie beside was therefore walked at again every
+         * half second for the rest of the game, holding the hull idle on it
+         * each time. A landing that cannot be found does not stop being
+         * unfindable because thirty seconds have passed, but a landing site
+         * CAN become reachable: the enemy shore is relabelled as their navy
+         * moves, and the water our own navy has beside it is relabelled as
+         * ours does. So the answer is remembered, not cached for ever.
+         *
+         * Thirty seconds is sixty passes at the shipped tacticalTickInterval,
+         * which takes a repeated refusal from the common case to the rare one,
+         * and still finds a landing that has opened up inside half a minute.
+         */
+        int ferryLandingRefusalCooldownSeconds{30};
+        /**
+         * The width, in world units and in each axis, of the square a refused
+         * landing search is remembered against.
+         *
+         * The search's own step is 48 world units and its innermost ring is
+         * four of them, so two objectives within 192 units of one another are
+         * walked at by very nearly the same fan of candidates and fail
+         * together. That is the drift the memory has to survive, and it is
+         * measured: the refusals left on Hundred Isles after the ground-anchor
+         * fix came in runs of two on ADJACENT points, because
+         * ArmyManager rebuilds bb.attackTarget from the threat map every pass
+         * and the best cell drifts a cell or two. A memory keyed on the exact
+         * point would have missed most of them.
+         */
+        int ferryLandingRefusalCell{192};
+        /**
          * Scoring the CROSSING as well as the landing was tried and does not
          * work. Recorded here so it is not tried again without a better idea
          * behind it.
