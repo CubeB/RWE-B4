@@ -619,6 +619,14 @@ namespace rwe
          */
         BehaviorSubject<GatheredToggle<bool>> cloak{};
 
+        /**
+         * Whether the selected factory is set to put each finished item back
+         * on the end of its own build queue (#417). Off everywhere by
+         * default, and read from the unit rather than from any panel state,
+         * because the flag lives on the factory and is hashed there.
+         */
+        BehaviorSubject<GatheredToggle<bool>> repeatBuildQueue{};
+
         UiFactory uiFactory;
 
         /**
@@ -1830,8 +1838,25 @@ namespace rwe
         GatheredToggle<bool> gatherOnOff() const;
         GatheredToggle<bool> gatherCloak() const;
 
+        /**
+         * The same gather over the factory repeat toggle (#417), which is
+         * offered by any unit that builds rather than by a capability flag --
+         * there is no original flag for it, because there is no original
+         * button for it. A unit that cannot build is skipped, so a squad of
+         * tanks offers nothing and the button is greyed.
+         */
+        GatheredToggle<bool> gatherRepeatBuildQueue() const;
+
         /** Re-reads the four toggles' shown state from the selection. */
         void refreshToggleButtons();
+
+        /**
+         * Adds the factory repeat button to the orders panel, which the GUI
+         * data has no gadget for, and greys it when nothing in the selection
+         * builds. Derived from the CLOAK/ONOFF gap rather than written down;
+         * see the body for the ui_probe figures. (#417)
+         */
+        void addRepeatBuildButton(UiPanel& panel);
 
         /** Select every owned live unit the predicate admits; false leaves the selection alone if nothing matched. */
         bool selectAllWhere(const std::function<bool(const UnitState&, const UnitDefinition&)>& predicate);
@@ -1891,6 +1916,17 @@ namespace rwe
 
         /** Order another round for the unit's stockpiled weapon, or take one off the queue. */
         void localPlayerModifyStockpile(UnitId unitId, int count);
+
+        /**
+         * Ask a factory to put each item it finishes back on the end of its
+         * own build queue, or to go back to consuming it (#417).
+         *
+         * Routed through the command buffer like every other order, and never
+         * written to the unit directly: the flag is hashed, so a panel that
+         * set it on the spot would put the local machine's answer into the
+         * sync hash a round trip before any peer had it.
+         */
+        void localPlayerSetRepeatBuildQueue(UnitId unitId, bool repeat);
 
         void startTrack();
 
