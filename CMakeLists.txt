@@ -197,6 +197,8 @@ set(SOURCE_FILES
     src/rwe/ai/AiPersonality.h
     src/rwe/ai/AiBuildTree.cpp
     src/rwe/ai/AiBuildTree.h
+    src/rwe/ai/AiUnitDefIndex.cpp
+    src/rwe/ai/AiUnitDefIndex.h
     src/rwe/ai/EconomyManager.cpp
     src/rwe/ai/EconomyManager.h
     src/rwe/ai/LineOfFire.cpp
@@ -353,6 +355,8 @@ set(SOURCE_FILES
     src/rwe/game/GameEndedReport.h
     src/rwe/game/GameScene_rejoin.cpp
     src/rwe/game/GameScene_replay.cpp
+    src/rwe/game/GameScene_ownclock.cpp
+    src/rwe/game/GameScene_ownclock.h
     src/rwe/game/GameScene_tad.cpp
     src/rwe/game/GameScene_util.cpp
     src/rwe/game/featureplacement.cpp
@@ -990,6 +994,7 @@ set(TEST_FILES
     src/rwe/ai/AiPlayerController.test.cpp
     src/rwe/ai/AiTuningProfile.test.cpp
     src/rwe/ai/AiBehaviour.test.cpp
+    src/rwe/ai/EconomyManager.test.cpp
     src/rwe/ai/AiBehaviour_army.test.cpp
     src/rwe/ai/AiBehaviour_commander.test.cpp
     src/rwe/ai/AiBehaviour_defences.test.cpp
@@ -1020,6 +1025,7 @@ set(TEST_FILES
     src/rwe/collections/VectorMap.test.cpp
     src/rwe/game/DefaultAction.test.cpp
     src/rwe/game/GameScene_audio.test.cpp
+    src/rwe/game/GameScene_ownclock.test.cpp
     src/rwe/game/panel_slide.test.cpp
     src/rwe/game/GameSpeed.test.cpp
     src/rwe/game/buildghost.test.cpp
@@ -1161,6 +1167,7 @@ set(TEST_FILES
     src/rwe/game/noshadow.test.cpp
     src/rwe/sim/missile.test.cpp
     src/rwe/sim/seacollision.test.cpp
+    src/rwe/sim/unitsonly.test.cpp
     src/rwe/sim/acidwater.test.cpp
     src/rwe/sim/aircraft.test.cpp
     src/rwe/sim/groundtilt.test.cpp
@@ -1198,6 +1205,7 @@ set(TEST_FILES
     src/rwe/sim/SimRandom.test.cpp
     src/rwe/sim/resurrect.test.cpp
     src/rwe/sim/saveload.test.cpp
+    src/rwe/sim/factoryrepeat.test.cpp
     src/rwe/util.test.cpp
     src/rwe/util/CrashHandler.test.cpp
     src/rwe/util/OpaqueArgs.test.cpp

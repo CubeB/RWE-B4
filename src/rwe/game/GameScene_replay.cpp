@@ -505,7 +505,11 @@ namespace rwe
                 localPlayerCommandBuffer.erase(localPlayerCommandBuffer.begin(), localPlayerCommandBuffer.begin() + static_cast<std::ptrdiff_t>(count));
             }
 
-            if (onlyComputerPlayersAreNotReady())
+            // An own-clock game gates on no peer, so the AI's commands go in
+            // whether or not a remote player is ready -- the same as a
+            // skirmish. In a lockstep game only the computer players may be
+            // holding the tick up.
+            if (isOwnClock() || onlyComputerPlayersAreNotReady())
             {
                 // What the computer players asked for on the tick just run, a tick
                 // at a time. Here rather than in update() because the buffer is
@@ -526,17 +530,22 @@ namespace rwe
             }
         }
 
-        if (auto desync = playerCommandService->checkHashes(); desync)
+        // An own-clock game has no peer's simulation to compare against, so
+        // there is no desync to detect. A lockstep game is untouched.
+        if (!isOwnClock())
         {
-            auto dumpPath = writeDesyncDump(*desync, localPlayerId, sceneTime, simulation);
-            if (dumpPath)
+            if (auto desync = playerCommandService->checkHashes(); desync)
             {
-                desyncDumpPaths.push_back(*dumpPath);
+                auto dumpPath = writeDesyncDump(*desync, localPlayerId, sceneTime, simulation);
+                if (dumpPath)
+                {
+                    desyncDumpPaths.push_back(*dumpPath);
+                }
+                auto description = describeDesync(*desync, localPlayerId, sceneTime, dumpPath);
+                LOG_ERROR << description;
+                sendGameEnded("abandoned", std::nullopt, desync->tick);
+                throw std::runtime_error(description);
             }
-            auto description = describeDesync(*desync, localPlayerId, sceneTime, dumpPath);
-            LOG_ERROR << description;
-            sendGameEnded("abandoned", std::nullopt, desync->tick);
-            throw std::runtime_error(description);
         }
 
         std::optional<std::vector<std::pair<PlayerId, std::vector<PlayerCommand>>>> playerCommands;
@@ -545,6 +554,13 @@ namespace rwe
             // A demo has no command stream and no peer to wait for: the driver
             // already wrote this tick's records above, so the tick runs.
             playerCommands.emplace();
+        }
+        else if (isOwnClock())
+        {
+            // Nobody is waited on. A player with nothing buffered contributes
+            // an empty set and the tick runs; a set that arrives late is taken
+            // on a later tick.
+            playerCommands = playerCommandService->tryPopCommandsWithoutWaiting();
         }
         else
         {
@@ -670,7 +686,9 @@ namespace rwe
         if (!isPlayback() || diagnostics.hashLogEnabled())
         {
             auto gameHash = diagnostics.record(simulation, sceneTime.value);
-            if (!isPlayback())
+            // An own-clock game exchanges no sync hash: there is no lockstep
+            // peer to compare against, only a peer that owns its own units.
+            if (!isPlayback() && !isOwnClock())
             {
                 playerCommandService->pushHash(localPlayerId, gameHash);
                 gameNetworkService->submitGameHash(gameHash);

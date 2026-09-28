@@ -4,6 +4,7 @@
 #include <optional>
 #include <rwe/ai/AiSideUnits.h>
 #include <rwe/ai/AiBuildTree.h>
+#include <rwe/ai/AiUnitDefIndex.h>
 #include <rwe/ai/MapIntel.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/sim/Energy.h>
@@ -229,6 +230,17 @@ namespace rwe
          * See §15.7.
          */
         float advancedArmyValueRatio{0.0f};
+
+        /**
+         * What each unit type IS, worked out once per pass instead of once
+         * per unit per pass.
+         *
+         * Emptied by `EconomyManager::refresh`, the first pass of the tick, and
+         * read from there on. See AiUnitDefIndex.h for what it holds and why
+         * it does not outlive the pass: the definitions themselves never change
+         * in a game, but a test hands the AI one and then edits it.
+         */
+        AiUnitDefIndex unitDefIndex;
 
         // --- Economy ---
         Metal currentMetal{0};

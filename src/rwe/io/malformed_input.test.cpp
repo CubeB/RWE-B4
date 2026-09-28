@@ -16,6 +16,7 @@
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/tnt/TntArchive.h>
+#include <rwe/io/weapontdf/WeaponTdf.h>
 #include <rwe/net/ta/TaDirectPlay.h>
 #include <rwe/puppet/TadPuppetDriver.h>
 #include <rwe/puppet/puppet_test_util.h>
@@ -465,6 +466,31 @@ namespace rwe
         auto fbi = parseUnitFbi(parseTdfFromString("[UNITINFO]\n{\nUnitName=MAKENUKEARM;\nObjectname=;\n}\n"));
         REQUIRE(fbi.unitName == "MAKENUKEARM");
         REQUIRE(fbi.soundCategory.empty());
+    }
+
+    TEST_CASE("a weapon TDF's unitsonly only takes a number", "[malformed]")
+    {
+        // `unitsonly` tells the simulation to skip the ground and the sea stop
+        // tests for this weapon's rounds, so a nonsense value must cost the
+        // weapon the key and nothing else. Reading it as anything non-numeric
+        // would leave the flag off, which is the original's default and the
+        // safe direction: the round still stops on terrain.
+        TdfBlock nonsense;
+        nonsense.insertOrAssignProperty("unitsonly", "true");
+        REQUIRE_FALSE(parseWeaponBlock(nonsense).unitsOnly);
+
+        TdfBlock empty;
+        empty.insertOrAssignProperty("unitsonly", "");
+        REQUIRE_FALSE(parseWeaponBlock(empty).unitsOnly);
+
+        // The numeric spellings the data uses, and the zero that is off.
+        TdfBlock on;
+        on.insertOrAssignProperty("unitsonly", "1");
+        REQUIRE(parseWeaponBlock(on).unitsOnly);
+
+        TdfBlock off;
+        off.insertOrAssignProperty("unitsonly", "0");
+        REQUIRE_FALSE(parseWeaponBlock(off).unitsOnly);
     }
 
     TEST_CASE("a referenced feature no TDF defines is dropped, not given an id", "[malformed]")

@@ -426,6 +426,15 @@ namespace rwe
                                 saveFactoryBehaviorStateUnitStateField<&UnitState::factoryState>,
                                 loadFactoryBehaviorStateUnitStateField<&UnitState::factoryState>,
                                 "the factory's create/build working state, written and read by the factory's behaviour beside the build queue it works through; the sync hash does not cover it")},
+            // A new key, so a save written before it existed carries none: the
+            // row opts into mayBeMissing and the load step reads the absence
+            // as the member's own default, which is off. That is the whole of
+            // what an old save has to mean here -- off is what every factory
+            // did before the toggle existed, so the round trip changes no
+            // existing game.
+            {"repeatBuildQueue", hashed<&UnitState::repeatBuildQueue>(
+                                     savePlainUnitStateField<&UnitState::repeatBuildQueue>,
+                                     loadLegacyBoolUnitStateField<&UnitState::repeatBuildQueue>), true},
         };
 
         static_assert(

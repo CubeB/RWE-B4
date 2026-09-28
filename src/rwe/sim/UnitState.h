@@ -927,6 +927,27 @@ namespace rwe
         std::deque<std::pair<std::string, int>> buildQueue;
         FactoryBehaviorState factoryState;
 
+        /**
+         * Whether a factory puts each item it finishes back on the end of its
+         * own build queue instead of consuming it, so one queued unit type
+         * loops for ever (#417, ROADMAP Phase 7).
+         *
+         * Not in the original: a factory's queue is drained as it builds, and
+         * the loop below is RWE's own. So it is off unless a player asks for
+         * it, and off is exactly what a factory built before this field
+         * existed does.
+         *
+         * The initialiser is not decoration. This is hashed, and this class's
+         * constructor names three of its members and leaves the rest to their
+         * default member initialisers, so a member without one holds whatever
+         * was in the memory the unit was built in -- zero while the heap is
+         * young and rubbish once it is not, and the rubbish goes straight into
+         * the sync hash. See CLAUDE.md, "A member the hash reads is
+         * initialised by the time the object exists", and the test
+         * "a new unit hashes the same wherever in memory it was built".
+         */
+        bool repeatBuildQueue{false};
+
         static SimAngle toRotation(const SimVector& direction);
 
         static SimVector toDirection(SimAngle rotation);
