@@ -237,13 +237,25 @@ answered live**: replayed ones carry another game's clock and show as an absurd 
 
 **Rules live in the host.** TA's own host will not launch a game in which every player is on one
 team, but a joining TA does not check: the fake host launched one with both players on team 0.
-An RWE host has to enforce such rules itself. It is also the only side that can: a
-joiner picks no map and is not asked to agree on one, so the host compares what
-each joiner's `0x20` names in bytes 1-32 against its own and refuses a launch on
-a disagreement. A field that is not NUL-padded ASCII names no map and so
-disagrees about nothing: the scripted joiner of #430 writes its own name into
-those bytes in UTF-16, and a host that read a map out of that would refuse a
-game over a field it had not understood.
+An RWE host has to enforce such rules itself. **A joiner's map name is not one
+of them**: a joiner's `0x20` keeps naming its own last map whatever the host
+picked. In `ta-small.pcap` the host moved to Great Divide, the joiner's status
+said Canal Crossing throughout, and the game launched. What identifies the map
+is the host's checksum at bytes 170-173 (§117), which a joiner looks up in its
+own map list.
+
+**A host's state byte carries a ready bit too.** It goes `0x01` in the
+battleroom, `0x02` once it has numbered the players (`0x22`, below), and
+`0x22` when the host readies (`ta-baseline.pcap`, 28.52). A joiner shows a host
+without bit `0x20` as not ready. RWE's host has no ready button and sets it as
+soon as someone has joined.
+
+**A joiner is given its colour.** It arrives with colour `0xff` and asks with
+`17 <colour>`; the host grants with `18 <colour>`, the one asked for if free,
+otherwise the next free one, as a reply. After the first grant the host numbers
+every player once with `22 <id> <n>`, joiners from 2 and itself as 1. A TA
+never answered loads the game as colour `0xff` and crashes just after the
+loading screen.
 
 **The team a battleroom sends is 5** (`TaNoTeam`), and 5 is what a player that
 has chosen no team says, so the rule reads a player on 5 as on no team in
@@ -388,8 +400,7 @@ rwe --ta-host --map "Canal Crossing" --data-path ~/.ta
   run beside a real TA or a `dplaysvr` that already holds the real ones. The enum port is
   `47624 + base` and so runs out of range above 17911.
 - **`--auto-launch`** launches the moment a joiner is ready; otherwise Enter or the panel's button
-  does it. A launch is refused if every player is on one team, or a joiner's status names a
-  different map.
+  does it. A launch is refused if every player is on one team.
 
 **The id blocks are not interchangeable.** A joining TA takes block 0 for its own units and the
 host's are in block 1 — ta-baseline.pcap has the recorded host's commander at 251 and the joiner's

@@ -171,8 +171,6 @@ namespace rwe
      */
     bool taEveryPlayerOnOneTeam(std::span<const std::uint8_t> teams);
 
-    /** True when one of `theirs` names a map and it is not `ourMap`. */
-    bool taMapNamesDiffer(std::string_view ourMap, std::span<const std::string> theirs);
 
     /** What the host is doing, for a front end showing how far a game has got. */
     enum class TaBattleroomState
@@ -235,10 +233,11 @@ namespace rwe
 
         /**
          * Byte 156 in each state. Every capture's host walked 0x01 in the
-         * battleroom, 0x02 once loading and 0x32 in game over UDP, and only a
-         * joiner ever set bit 0x20.
+         * battleroom, 0x02 once loading and 0x32 in game over UDP; bit 0x20 is
+         * ready, which ta-baseline.pcap's host set when it readied.
          */
         std::uint8_t lobbyState{0x01};
+        std::uint8_t readyLobbyState{0x22};
         std::uint8_t loadingState{0x02};
         std::uint8_t inGameUdpState{0x32};
 
@@ -342,8 +341,8 @@ namespace rwe
          * Starts the launch: 0x08, the loading ladder to TaLoadingComplete,
          * 0x1e, SESSIONDESCCHANGED twice, and then the move to UDP.
          *
-         * False when a host rule refuses it -- every player on one team, or a
-         * joiner on another map -- which onRefused is told about too. A launch
+         * False when a host rule refuses it -- every player on one team --
+         * which onRefused is told about too. A launch
          * already under way is not started again.
          */
         bool launch(const LaunchParams& params);
@@ -392,6 +391,7 @@ namespace rwe
         /** Joiners in the order they joined; the host is number 1 and they follow. */
         std::vector<PeerId> joinOrder_;
         bool numbersSent_{false};
+        std::uint8_t lobbyState_{0x01};
 
         asio::steady_timer keepaliveTimer;
         asio::steady_timer pingTimer;

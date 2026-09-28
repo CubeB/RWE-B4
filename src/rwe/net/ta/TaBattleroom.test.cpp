@@ -410,8 +410,6 @@ namespace rwe
         auto parsed = taParsePlayerStatus(bytes);
         REQUIRE(parsed);
         REQUIRE(parsed->mapName.empty());
-        const std::vector<std::string> theirs{parsed->mapName};
-        REQUIRE_FALSE(taMapNamesDiffer("Canal Crossing", theirs));
     }
 
     TEST_CASE("a status we build reads back as the fields it was built from", "[net][ta]")
@@ -618,11 +616,16 @@ namespace rwe
         h.deliver(ask);
 
         auto tcp = h.codesTo(JoinerId, TaTransport::Tcp);
-        REQUIRE(tcp.size() == 3);
+        REQUIRE(tcp.size() >= 4);
         REQUIRE(tcp[0] == TadBytes{0x18, 0x01});
         REQUIRE(tcp[1] == taBuildPlayerNumber(JoinerId, 2));
         REQUIRE(tcp[2] == taBuildPlayerNumber(HostId, 1));
         REQUIRE(h.room->peer(JoinerId)->colour == 0x01);
+
+        // Numbered, the host has someone to play and says it is ready.
+        auto status = taParsePlayerStatus(tcp[3]);
+        REQUIRE(status);
+        REQUIRE(status->state == 0x22);
 
         h.sent.clear();
         TaPacket again;
@@ -750,24 +753,18 @@ namespace rwe
         REQUIRE(h.room->state() == TaBattleroomState::Waiting);
     }
 
-    TEST_CASE("a launch is refused when a joiner says another map", "[net][ta]")
+    TEST_CASE("a joiner naming another map does not stop the launch", "[net][ta]")
     {
-        const std::vector<std::string> same{"Canal Crossing", ""};
-        const std::vector<std::string> other{"Great Divide", ""};
-        const std::vector<std::string> none{"", ""};
-
-        REQUIRE_FALSE(taMapNamesDiffer("Canal Crossing", same));
-        REQUIRE(taMapNamesDiffer("Canal Crossing", other));
-        REQUIRE_FALSE(taMapNamesDiffer("Canal Crossing", none));
-
+        // ta-small.pcap: the host moved to Great Divide, the joiner's status
+        // said Canal Crossing throughout, and the game launched.
         Harness h;
         std::string reason;
         h.room->onRefused([&](const std::string& why) { reason = why; });
         h.room->peerJoined(JoinerId);
-        h.joinerStatus(0x00, "Great Divide");
+        h.joinerStatus(0x00, "Canal Crossing");
 
-        REQUIRE_FALSE(h.room->launch(launchParams()));
-        REQUIRE(reason == "a player is on another map");
+        REQUIRE(h.room->launch(launchParams()));
+        REQUIRE(reason.empty());
     }
 
     TEST_CASE("a launch is refused when nobody has joined", "[net][ta]")

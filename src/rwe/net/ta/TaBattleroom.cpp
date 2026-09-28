@@ -271,18 +271,6 @@ namespace rwe
         return onATeam >= 2;
     }
 
-    bool taMapNamesDiffer(std::string_view ourMap, std::span<const std::string> theirs)
-    {
-        for (const auto& theirs : theirs)
-        {
-            if (!theirs.empty() && theirs != ourMap)
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
     TaBattleroom::TaBattleroom(
         asio::io_context& ioContext,
         TaBattleroomHost& host,
@@ -302,6 +290,7 @@ namespace rwe
           pingTimer(ioContext),
           loadingTimer(ioContext)
     {
+        lobbyState_ = this->config.lobbyState;
         armKeepalive();
         armPings();
     }
@@ -363,7 +352,7 @@ namespace rwe
             joinOrder_.push_back(peer);
         }
 
-        queueStatus(config.lobbyState, TaTransport::Tcp);
+        queueStatus(lobbyState_, TaTransport::Tcp);
         traffic.flush();
 
         // The unit table's header, the first of the joiner's 1 + 2n records. It
@@ -513,6 +502,13 @@ namespace rwe
             }
             traffic.queue(from, taBuildPlayerNumber(session.hostPlayerId(), 1), TaTransport::Tcp);
             traffic.flush();
+
+            // RWE's host has no ready button, so it is ready from the moment
+            // there is someone to play; a joiner shows a host without bit 0x20
+            // as not ready.
+            lobbyState_ = config.readyLobbyState;
+            queueStatus(lobbyState_, TaTransport::Tcp);
+            traffic.flush();
         }
     }
 
@@ -609,7 +605,7 @@ namespace rwe
                 TaTransport::Tcp);
         }
         traffic.queueForAll(ids, code(TadSubPacketCode::PadEncrypt), TaTransport::Tcp);
-        queueStatus(config.lobbyState, TaTransport::Tcp);
+        queueStatus(lobbyState_, TaTransport::Tcp);
         traffic.flush();
     }
 
@@ -639,22 +635,18 @@ namespace rwe
         }
 
         std::vector<std::uint8_t> teams{config.hostTeam};
-        std::vector<std::string> maps;
-        maps.reserve(peers_.size());
         for (const auto& [id, peer] : peers_)
         {
             (void)id;
             teams.push_back(peer.team);
-            maps.push_back(peer.mapName);
         }
 
+        // No map rule: a joiner's 0x20 keeps naming its own last map whatever
+        // the host picked (ta-small.pcap, Great Divide hosted, Canal Crossing
+        // reported, launched), so it says nothing about what the joiner loads.
         if (taEveryPlayerOnOneTeam(teams))
         {
             return "every player is on one team";
-        }
-        if (taMapNamesDiffer(config.mapName, maps))
-        {
-            return "a player is on another map";
         }
         return {};
     }
