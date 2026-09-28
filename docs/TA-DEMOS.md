@@ -116,9 +116,12 @@ What is a recorded divergence (ADR-0001):
 
 - **The `0x1a` ids (D7).** The `sub` 3 block's count is the data set's unit
   count and the fixed pseudo-entry is emitted, but the ids are deterministic
-  synthetic values: the content-derived id has not been reproduced, and two
-  passes have failed at it. The tools use the table's count and not its ids,
-  and `--units` naming does not read it.
+  synthetic values. **The real id is now known** -- `taChecksum` (`0x4B6BA0`)
+  over the raw FBI bytes, `docs/TOTALA-EXE-DATA.md` §117, and
+  `tools/exe/mapcrc.py unit <fbi>` prints one -- but the writer still emits the
+  synthetic values, because wiring the real ones into the recorder is separate
+  work. The tools use the table's count and not its ids, and `--units` naming
+  does not read it.
 - **The status-message body (D8).** Only the DirectPlay id at offset `0x91` is
   decoded, so the other bytes are zero. The message encrypt+compresses to a
   matching checksum, which is what lets `tad_probe` verify it rather than
@@ -2400,8 +2403,11 @@ The `sub` 2 block is always a **superset**: 550 entries in demos 14727 and 14728
 and 551 in 14732 and 14734, the extra ids being `1235944411` and `410801334` in
 both cases. That difference is not explained.
 
-**The id is content-derived and has not been reproduced.** Two passes have now
-failed at it, and between them they have ruled out a lot:
+**The id is content-derived, and it is now reproduced.** It is `taChecksum`
+(`0x4B6BA0`) over the raw bytes of the FBI file, docs/TOTALA-EXE-DATA.md §117,
+and all 278 of the GOG install's unit types match; `tools/exe/mapcrc.py unit
+<fbi>` prints one. The list below is what was tried first and failed, kept so
+that the negative stays reproducible.
 
 - 88 name-hash combinations -- crc32 plain and complemented, djb2, djb2-xor,
   sdbm, FNV-1, FNV-1a, java-31, rotate-xor, byte sum and adler32, over upper and
@@ -2431,7 +2437,9 @@ absolute-address search or a grep of the resolved disassembly can see, and
 objdump's linear sweep demonstrably desynchronises on a jump table at `0x46d84c`
 in the same neighbourhood, which is the likely reason. A recursive-descent
 disassembly of `0x455000`-`0x46e000`, or a live breakpoint on the
-restrictions-dialog arrays, is the way in next time.
+restrictions-dialog arrays, is the way in next time. The id no longer needs it
+(§117); what is left here is the transient record itself, which nothing else
+needs.
 
 **But it identifies a data set today, which was the question that mattered.**
 `tad_probe` now prints the table's size and an order-independent fingerprint of
@@ -3575,12 +3583,12 @@ They catch different things and should not share machinery.
   something ordinary and both are `UNK_` in the reference.
 - The length of `0x13`, which the reference never had, and which nothing in the
   corpus exercises.
-- **What computes a `0x1a` id.** The layout of the record is settled and the
-  fingerprint does the filtering job, but the id itself is content-derived and
-  resists every name hash tried against it. ~~This is now the single thing
-  blocking checked-in episodes.~~ It is not: naming came from the load order
-  instead (see `0x09`), so episodes can be named and checked in without it. The
-  id stays unexplained and stays here, but nothing waits on it.
+- **What computes a `0x1a` id.** ~~The id itself is content-derived and resists
+  every name hash tried against it.~~ **Answered**: `taChecksum` (`0x4B6BA0`)
+  over the raw FBI bytes, docs/TOTALA-EXE-DATA.md §117, all 278 of the GOG
+  install's ids reproduced. Naming still comes from the load order (see `0x09`),
+  which is what checked-in episodes wait on; the recorder still writes synthetic
+  ids, which is the one piece of wiring left.
 - **The last six floats of `0x28`.** Stored and storage are identified for both
   resources; the two cumulative triples are not, so expenditure still cannot be
   recovered by difference.

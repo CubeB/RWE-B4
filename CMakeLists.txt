@@ -534,6 +534,8 @@ set(SOURCE_FILES
     src/rwe/network_util.h
     src/rwe/net/ta/TaBattleroom.cpp
     src/rwe/net/ta/TaBattleroom.h
+    src/rwe/net/ta/TaChecksums.cpp
+    src/rwe/net/ta/TaChecksums.h
     src/rwe/net/ta/TaDirectPlay.cpp
     src/rwe/net/ta/TaDirectPlay.h
     src/rwe/net/ta/TaHostSession.cpp
@@ -1111,6 +1113,7 @@ set(TEST_FILES
     src/rwe/mesh_util.test.cpp
     src/rwe/network_util.test.cpp
     src/rwe/net/ta/TaBattleroom.test.cpp
+    src/rwe/net/ta/TaChecksums.test.cpp
     src/rwe/net/ta/TaDirectPlay.test.cpp
     src/rwe/net/ta/TaHostGame.test.cpp
     src/rwe/net/ta/TaHostSession.test.cpp

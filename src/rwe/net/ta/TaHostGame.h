@@ -191,6 +191,13 @@ namespace rwe
         std::vector<TaHostInbound> takeInbound();
 
         /**
+         * The hosted map's checksum, for bytes 170-173 of the host's status.
+         * The panel computes it from the map data it has and leaves it here;
+         * the battleroom puts it in every status from then on.
+         */
+        void setMapChecksum(std::uint32_t checksum);
+
+        /**
          * Sends one message, from the game thread. Returns it to the outbound
          * queue, which the network thread empties; nothing here touches a
          * socket.

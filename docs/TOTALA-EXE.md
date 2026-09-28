@@ -188,6 +188,7 @@ Everything else lives in a subject file. **The numbers never move**, so a
 114. [A mission unit's scripted orders at runtime](TOTALA-EXE-DATA.md#114-a-mission-units-scripted-orders-at-runtime)
 115. [The campaign's screens, progression and ending movies](TOTALA-EXE-DATA.md#115-the-campaigns-screens-progression-and-ending-movies)
 116. [What a round aims at on a unit, and why the water comes after it](TOTALA-EXE-WEAPONS.md#116-what-a-round-aims-at-on-a-unit-and-why-the-water-comes-after-it)
+117. [The map checksum, and the unit id that shares its routine](TOTALA-EXE-DATA.md#117-the-map-checksum-and-the-unit-id-that-shares-its-routine)
 
 ## 88. Where RWE deliberately differs
 

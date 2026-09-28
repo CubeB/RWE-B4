@@ -60,6 +60,9 @@ namespace rwe
     /** The options byte. docs/TA-NETWORK.md, "The battleroom", for the bits. */
     inline constexpr std::size_t TaPlayerStatusOptionsOffset = 157;
 
+    /** The hosted map's checksum: docs/TOTALA-EXE-DATA.md §117. */
+    inline constexpr std::size_t TaPlayerStatusMapChecksumOffset = 170;
+
     /** 0x2a, the progress the recorded host reached on its last step. */
     inline constexpr std::uint8_t TaLoadingComplete = 0x64;
 
@@ -80,6 +83,13 @@ namespace rwe
 
         /** Which only a host sends: a joiner leaves it zero. */
         std::uint8_t options{0};
+
+        /**
+         * The hosted map's checksum. A joiner leaves it zero; a host sends
+         * what `taMapChecksum` made of its map, which is what a joining TA
+         * looks the map up by.
+         */
+        std::uint32_t mapChecksum{0};
     };
 
     /**
@@ -93,7 +103,8 @@ namespace rwe
      *   also does; it is unidentified, and the template happens to be a host's.
      * - 158-169: the game settings, the words the session description keeps in
      *   its reserved fields: 4, 10, 10, 250 and 0x0103.
-     * - 170-185: `29 05 be 6e` then zeros. Unidentified.
+     * - 170-173: the map checksum, which is placed rather than copied; 174-185
+     *   are zeros. The template's own value is Canal Crossing's.
      *
      * ta-sides.pcap holds 65 status records, 57 of them after two players have
      * exchanged their settings, and across those 57 the only bytes that ever
@@ -214,6 +225,13 @@ namespace rwe
         /** Bytes 150 and 151 of the host's own status: its side and its colour. */
         TadSide side{TadSide::Arm};
         std::uint8_t colour{0};
+
+        /**
+         * Bytes 170-173: the hosted map's checksum, from `taMapChecksum`. Zero
+         * until a caller that has the map data sets it, which the host lobby
+         * does before any peer joins.
+         */
+        std::uint32_t mapChecksum{0};
 
         /**
          * Byte 156 in each state. Every capture's host walked 0x01 in the
@@ -352,6 +370,13 @@ namespace rwe
         std::uint32_t unitSyncRefused() const { return unitSyncRefused_; }
 
         TaBattleroomState state() const { return state_; }
+
+        /**
+         * Sets bytes 170-173 of every status from here on. The lobby computes
+         * the checksum once, before a peer joins, because the battleroom has
+         * no file system of its own.
+         */
+        void setMapChecksum(std::uint32_t checksum);
 
     private:
         TaBattleroomHost& session;

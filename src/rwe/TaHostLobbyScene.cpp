@@ -10,6 +10,7 @@
 #include <rwe/io/tnt/TntArchive.h>
 #include <rwe/io/tad/tad_events.h>
 #include <rwe/io/tdf/tdf.h>
+#include <rwe/net/ta/TaChecksums.h>
 #include <rwe/net/ta/TaHostGame.h>
 #include <rwe/sim/Energy.h>
 #include <rwe/sim/Metal.h>
@@ -113,6 +114,21 @@ namespace rwe
             auto side = std::string(config.side == TadSide::Core ? "CORE" : "ARM");
             LOG_ERROR << "TA host: " << mapName << " has no first start position, or the data set's unit"
                       << "listing does not name " << side << "'s commander; nothing can be launched";
+        }
+
+        // The map checksum a joining TA looks the map up by, computed here
+        // because this is the side of the thread boundary with the file system
+        // on it. A map whose data cannot be read sends zero, which names no
+        // map rather than a wrong one.
+        if (auto checksum = taMapChecksum(*sceneContext.vfs, mapName))
+        {
+            LOG_INFO << "TA host: " << mapName << " checksum 0x" << std::hex << *checksum << std::dec;
+            host->setMapChecksum(*checksum);
+        }
+        else
+        {
+            LOG_WARN << "TA host: could not compute a checksum for " << mapName
+                     << "; a joining TA will warn that it does not have the map";
         }
     }
 

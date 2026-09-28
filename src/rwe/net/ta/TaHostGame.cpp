@@ -105,6 +105,8 @@ namespace rwe
         void armGamePings();
         void onGamePing();
 
+        void postMapChecksum(std::uint32_t checksum);
+
         /** A message the game thread queued, for the network thread to send. */
         void enqueue(std::uint32_t peer, std::span<const std::uint8_t> bytes, TaTransport transport);
         void pushInbound(TaHostInbound&& item);
@@ -458,6 +460,13 @@ namespace rwe
         launch(std::move(params));
     }
 
+    void TaHostGame::Impl::postMapChecksum(std::uint32_t checksum)
+    {
+        // The lobby's thread has the map data and the network thread owns the
+        // room, so the checksum crosses on the io thread rather than the mutex.
+        asio::post(io, [this, checksum]() { room->setMapChecksum(checksum); });
+    }
+
     std::vector<TaHostInbound> TaHostGame::takeInbound()
     {
         std::vector<TaHostInbound> taken;
@@ -472,6 +481,11 @@ namespace rwe
     void TaHostGame::queueOutbound(std::uint32_t peer, std::span<const std::uint8_t> bytes, TaTransport transport)
     {
         impl->enqueue(peer, bytes, transport);
+    }
+
+    void TaHostGame::setMapChecksum(std::uint32_t checksum)
+    {
+        impl->postMapChecksum(checksum);
     }
 
     void TaHostGame::leave()
