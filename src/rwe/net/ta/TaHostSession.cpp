@@ -125,10 +125,33 @@ namespace rwe
             return socket.local_endpoint().port();
         };
 
-        ports.enumSessions = bindTcp(enumTcpAcceptor, ports.enumSessions);
+        // The enum UDP socket shares the enum TCP port's number. When that
+        // number was the stack's choice, it was chosen free for TCP only, and
+        // on Windows it can land in a range reserved for UDP (Hyper-V and
+        // WinNAT reserve them per protocol), where the UDP bind is refused.
+        // A fixed port is the caller's to fix; an ephemeral one is tried again.
+        const auto requestedEnumPort = ports.enumSessions;
+        constexpr int ephemeralEnumAttempts = 16;
+        for (int attempt = 1;; ++attempt)
+        {
+            const auto enumPort = bindTcp(enumTcpAcceptor, requestedEnumPort);
+            asio::error_code ec;
+            enumUdpSocket.open(asio::ip::udp::v4());
+            enumUdpSocket.set_option(asio::ip::udp::socket::reuse_address(reuseAddress(requestedEnumPort)));
+            enumUdpSocket.bind(asio::ip::udp::endpoint(asio::ip::udp::v4(), enumPort), ec);
+            if (!ec)
+            {
+                ports.enumSessions = enumPort;
+                break;
+            }
+            enumUdpSocket.close();
+            enumTcpAcceptor.close();
+            if (requestedEnumPort != 0 || attempt == ephemeralEnumAttempts)
+            {
+                throw asio::system_error(ec, "bind");
+            }
+        }
         ports.gameTcp = bindTcp(gameTcpAcceptor, ports.gameTcp);
-        // The enum UDP socket shares the enum TCP port's number.
-        bindUdp(enumUdpSocket, ports.enumSessions);
         ports.gameUdp = bindUdp(gameUdpSocket, ports.gameUdp);
 
         listenEnumTcp();
