@@ -6,6 +6,7 @@
 #include <optional>
 #include <rwe/game/GameParameters.h>
 #include <rwe/game/PlayerCommand.h>
+#include <rwe/pathfinding/PathfindingBackend.h>
 #include <rwe/sim/PlayerId.h>
 #include <string>
 #include <vector>
@@ -37,6 +38,7 @@ namespace rwe
         MappingMode mapping{MappingMode::Unmapped};
         StartLocationMode startLocation{StartLocationMode::Fixed};
         CommanderDeathMode commanderDeath{CommanderDeathMode::GameEnds};
+        PathfindingBackend pathfindingBackend{PathfindingBackend::RweAStar};
 
         /**
          * Slot for slot as the lobby dealt them, empty slots included: a

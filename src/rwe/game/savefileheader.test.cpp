@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <rwe/game/SaveFile.h>
+#include <rwe/pathfinding/PathfindingBackend.h>
 
 /**
  * The save-game header's own round trip: not the whole save (that is
@@ -131,6 +132,48 @@ namespace rwe
 
             REQUIRE(loaded.has_value());
             REQUIRE(!loaded->gameTimeSeconds.has_value());
+        }
+    }
+
+    TEST_CASE("SaveFile's header round-trips the pathfinding backend", "[saveload][savefile]")
+    {
+        SECTION("a save written with a backend reads it back")
+        {
+            TempFile file;
+            auto save = makeSaveFile();
+            save.parameters.pathfindingBackend = PathfindingBackend::OpenAnnihilation;
+
+            writeSaveFile(file.path, save);
+            auto loaded = readSaveFile(file.path);
+
+            REQUIRE(loaded.has_value());
+            REQUIRE(loaded->parameters.pathfindingBackend == PathfindingBackend::OpenAnnihilation);
+        }
+
+        SECTION("a save written before the key existed loads as the default")
+        {
+            // Built by writing a real save and taking the key back out, as the
+            // gameTimeSeconds case above does, so this fails the moment the
+            // reader starts expecting a key older saves do not have. The
+            // default matters: a save resumed on a backend its author did not
+            // choose would replay the game differently.
+            TempFile file;
+            auto save = makeSaveFile();
+            save.parameters.pathfindingBackend = PathfindingBackend::OpenAnnihilation;
+            writeSaveFile(file.path, save);
+
+            std::ifstream in(file.path, std::ios::binary);
+            auto j = nlohmann::json::parse(in);
+            in.close();
+            j.at("header").erase("pathfinding");
+            std::ofstream out(file.path, std::ios::binary | std::ios::trunc);
+            out << j.dump();
+            out.close();
+
+            auto loaded = readSaveFile(file.path);
+
+            REQUIRE(loaded.has_value());
+            REQUIRE(loaded->parameters.pathfindingBackend == PathfindingBackend::RweAStar);
         }
     }
 

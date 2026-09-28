@@ -1099,12 +1099,52 @@ expansions a tick, forty times the original's hundred. Raising or lowering it
 is its own question with its own roadmap entry, and doing both at once would
 make neither measurable.
 
-Still not ported: the adaptive heuristic weight (it would have to be hashed
-simulation state, since RWE is lockstep and the original is not), the
-restricted successor fan, the turn and straight-run costs, unexplored ground
-reading as free, and the 20-waypoint clamp. RWE keeps an admissible octile
-heuristic and an eight-way fan. The 60-tick per-unit cooldown used to be on
-this list; it is in now, described under Requests above.
+Still not ported in RWE's default search: the adaptive heuristic weight (it
+would have to be hashed simulation state, since RWE is lockstep and the
+original is not), the restricted successor fan, the turn and straight-run
+costs, unexplored ground reading as free, and the 20-waypoint clamp. RWE's
+default search keeps an admissible octile heuristic and an eight-way fan; the
+fan, the costs and the weighted heuristic are ported as an alternative backend
+below. The 60-tick per-unit cooldown used to be on this list; it is in now,
+described under Requests above.
+
+### The phase-two search, as an alternative backend
+
+The phase-two search above is ported now, as a **second, selectable backend**
+rather than a replacement. `PathfindingBackend` chooses between `RweAStar`
+(the default, unchanged) and `OpenAnnihilation`, set by the `rwe.cfg` key
+`pathfinding` (`rwe` or `oa`) and carried as a game option -- recorded in the
+replay and save headers and applied by `GameSimulationLoader` -- because two
+peers whose searches differ would path differently and desync. The port is
+`OaUnitPathSearch` (`src/rwe/pathfinding/OaUnitPathSearch.*`, the search in
+`src/rwe/pathfinding/oa/`), which reproduces the original's phase-two search as
+[OpenAnnihilation](https://github.com/open-annihilation/open-annihilation)
+reimplements it in `src/sim/ground-orders/`: the restricted successor fan (four
+relative turns from the start, two after), the turn penalties
+`{0,40,60,80,100,80,60,40}`, cardinal and diagonal step costs 16 and 22, the
++75 penalty for turning within five straight cells, the +30 difficult-cell
+extra, the inadmissible `18*max + 7*min` heuristic scaled by 1.5, the
+wall-follow seed that relaxes the goal, and the corners-only route. It is
+driven the way any other search is -- `beginSearch`, a sliced `stepSearch`,
+`takeResult` -- so the tick's expansion budget is shared with it and a
+suspended search is rebuilt from its start footprint and expansion count on
+load, exactly as the default one is.
+
+Two differences from OA are deliberate. Cell classification is delegated to
+RWE's own walkability and rough-terrain tests rather than to OA's movement map,
+so a cell the default search refuses this one refuses too. And the route is
+converted on the way out, because RWE's follower consumes world-space
+waypoints: OA's map-local coordinates are shifted into RWE's centred world, and
+for a point goal the last waypoint is snapped onto the exact destination, the
+same snap the default backend makes when a search finishes on the goal cell.
+
+The follow-up is the half that makes the original a scheduler rather than a
+search: the round-robin slot scheduler with per-player credit, the adaptive
+heuristic weight (which lockstep would have to hash as simulation state), the
+per-movement-class 2-bit movement map with its 30-tick occupancy history, the
+"unexplored ground reads as free" sight rule, ring and outline goals (a rect
+destination still takes the perimeter finder under either setting), and the
+20-waypoint navigator clamp.
 
 **And a warning about the benchmark, found while measuring this.**
 `path_bench`'s obstacles were an immobile unit definition with no yard map,

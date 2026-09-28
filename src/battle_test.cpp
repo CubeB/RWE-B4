@@ -234,6 +234,7 @@ int main(int argc, char* argv[])
         config.buildingHaloStrength = std::min(100u, args.getUint("building-halo-strength", 100));
         config.buildingHaloSaturation = std::min(100u, args.getUint("building-halo-saturation", 65));
         config.buildingHaloRedShift = std::min(100u, args.getUint("building-halo-red-shift", 50));
+        config.pathfindingBackend = rwe::pathfindingBackendFromString(args.getString("pathfinding", "rwe"), rwe::PathfindingBackend::RweAStar);
 
         auto mapName = args.getString("map", "Coast To Coast");
 
@@ -283,6 +284,7 @@ int main(int argc, char* argv[])
 
         rwe::GameParameters parameters(mapName, 0);
         parameters.localNetworkPort = args.getString("port", "1337");
+        parameters.pathfindingBackend = config.pathfindingBackend;
         parameters.aiDifficulty = rwe::AiDifficulty::Standard;
 
         // One local human -- the engine allows exactly one -- and the
