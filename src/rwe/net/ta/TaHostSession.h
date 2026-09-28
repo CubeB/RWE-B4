@@ -99,10 +99,21 @@ namespace rwe
         /** The host's options byte, in the session description's dwUser3. */
         std::uint8_t options{0x4F};
 
-        std::uint32_t hostPlayerId{0x08D80E77};
+        /**
+         * The host's named player: the "from" of its application data and the
+         * player a joiner lists. A real host's is one below its system player.
+         */
+        std::uint32_t hostPlayerId{0x08D90E76};
         std::uint32_t hostSystemPlayerId{0x08D90E77};
 
-        /** The first id handed out; player and system ids count up from here. */
+        /**
+         * The id the session description carries and a joiner's
+         * ADDFORWARDREQUEST addresses: DirectPlay's own name for the host,
+         * distinct from both of its players.
+         */
+        std::uint32_t sessionHostId{0x08D80E77};
+
+        /** The first ids handed out; each joiner after takes the pair two below. */
         std::uint32_t firstAssignedPlayerId{0x08D90E74};
         std::uint32_t firstAssignedSystemPlayerId{0x08D90E75};
 
