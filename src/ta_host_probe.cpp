@@ -32,6 +32,10 @@
 
 namespace
 {
+    // Both of these are used again by the packet dump below. hexByte was dead
+    // when #433 removed it and is not dead here, so the removal does not carry
+    // across: a dead-code deletion in one branch is undone by a later branch
+    // that starts calling it.
     std::string hexByte(std::uint8_t value)
     {
         static const char* digits = "0123456789abcdef";

@@ -3,6 +3,7 @@
 #include <rwe/sim/DemoRecorder.h>
 #include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/SimRandom.h>
+#include <rwe/sim/SimulationOwnership.h>
 #include <algorithm>
 #include <limits>
 #include <rwe/util/SimpleLogger.h>
@@ -224,6 +225,14 @@ namespace rwe
             return;
         }
 
+        // A Remote player's unit makes no decision here: its owner does, and
+        // this machine applies the results.
+        if (!simulatesLocally(*sim, unitInfo.state->owner))
+        {
+            updateRemote(unitInfo);
+            return;
+        }
+
         // The slow work facing only holds while the work pattern asserts it
         // afresh each tick; any other business turns normally.
         unitInfo.state->slowFacePoint = std::nullopt;
@@ -291,6 +300,25 @@ namespace rwe
                     if (entry.second > 1)
                     {
                         --entry.second;
+                    }
+                    else if (unitInfo.state->repeatBuildQueue)
+                    {
+                        // The opt-in factory repeat (#417). The entry that has
+                        // just been worked off goes to the back of the
+                        // factory's own queue instead of being consumed, so
+                        // one queued type loops for ever and a queue of
+                        // several keeps its order -- each finished entry
+                        // rejoins behind whatever is still waiting, so a
+                        // factory works its list round and round rather than
+                        // restarting it.
+                        //
+                        // The type is copied out first: pop_front invalidates
+                        // the reference this branch is holding, which is the
+                        // kind of use-after-free that reads as a corrupted
+                        // queue rather than as a crash.
+                        auto finishedType = entry.first;
+                        unitInfo.state->buildQueue.pop_front();
+                        unitInfo.state->buildQueue.emplace_back(finishedType, 1);
                     }
                     else
                     {
@@ -629,6 +657,89 @@ namespace rwe
                         });
                 });
         }
+    }
+
+    bool followPath(UnitInfo unitInfo, UnitPhysicsInfoGround& physics, PathFollowingInfo& path);
+
+    void UnitBehaviorService::updateRemote(UnitInfo unitInfo)
+    {
+        if (!unitInfo.definition->isMobile)
+        {
+            return;
+        }
+
+        // No order, no search, no target choice: the owner's replicated path
+        // or goal is the only thing steering this unit, so its results never
+        // contend with a decision made here. The steering targets are reset
+        // first, so nothing left over from a previous tick pushes it.
+        match(
+            unitInfo.state->physics,
+            [&](UnitPhysicsInfoGround& p) {
+                p.steeringInfo = SteeringInfo{unitInfo.state->rotation, 0_ss};
+                if (auto* moving = std::get_if<NavigationStateMoving>(&unitInfo.state->navigationState.state))
+                {
+                    if (moving->path)
+                    {
+                        followPath(unitInfo, p, *moving->path);
+                    }
+                }
+                applyUnitSteering(unitInfo);
+                updateRemoteGroundPosition(unitInfo, p);
+            },
+            [&](UnitPhysicsInfoAir& p) {
+                match(
+                    p.movementState,
+                    [&](AirMovementStateFlying& s) {
+                        s.targetPosition = std::nullopt;
+                        if (unitInfo.state->navigationState.desiredDestination)
+                        {
+                            if (auto* target = std::get_if<SimVector>(&*unitInfo.state->navigationState.desiredDestination))
+                            {
+                                s.targetPosition = *target;
+                            }
+                        }
+                    },
+                    [&](const AirMovementStateTakingOff&) {},
+                    [&](const AirMovementStateLanding&) {},
+                    [&](const AirMovementStateAttackRun&) {},
+                    [&](const AirMovementStateHoverAttack&) {},
+                    [&](const AirMovementStateDogfight&) {});
+                applyUnitSteering(unitInfo);
+                updateUnitPosition(unitInfo);
+            });
+    }
+
+    void UnitBehaviorService::updateRemoteGroundPosition(UnitInfo unitInfo, UnitPhysicsInfoGround& physics)
+    {
+        unitInfo.state->previousPosition = unitInfo.state->position;
+        unitInfo.state->inCollision = false;
+
+        auto direction = UnitState::toDirection(unitInfo.state->rotation);
+        if (physics.currentSpeed > 0_ss)
+        {
+            auto newPosition = unitInfo.state->position + (direction * physics.currentSpeed);
+            newPosition.y = sim->terrain.getHeightAt(newPosition.x, newPosition.z);
+            if (unitInfo.definition->floater || unitInfo.definition->canHover)
+            {
+                newPosition.y = rweMax(newPosition.y, sim->terrain.getSeaLevel());
+            }
+
+            // The owner already resolved unit collisions along this path, so a
+            // step is never refused here: a peer's stale footprint must not pin
+            // a puppet where its owner had it move. The occupied grid is kept
+            // in step all the same, for anything local that still reads it,
+            // but a step whose footprint leaves the grid is dropped rather
+            // than made to index it.
+            auto currentFootprint = sim->computeFootprintRegion(unitInfo.state->position, unitInfo.definition->movementCollisionInfo);
+            auto newFootprint = sim->computeFootprintRegion(newPosition, unitInfo.definition->movementCollisionInfo);
+            if (sim->occupiedGrid.tryToRegion(currentFootprint) && sim->occupiedGrid.tryToRegion(newFootprint))
+            {
+                sim->moveUnitOccupiedArea(currentFootprint, newFootprint, unitInfo.id);
+                unitInfo.state->position = newPosition;
+            }
+        }
+
+        updateGroundTilt(unitInfo, physics);
     }
 
     SimVector UnitBehaviorService::getUnitPositionWithCache(UnitState& s, UnitId unitId)
@@ -4667,6 +4778,14 @@ namespace rwe
         }
         auto& targetUnit = targetUnitRef->get();
 
+        // Ownership is the other machine's to change; a local captor cannot
+        // take a Remote player's unit.
+        if (!simulatesLocally(*sim, targetUnit.owner))
+        {
+            changeState(*unitInfo.state, UnitBehaviorStateIdle());
+            return true;
+        }
+
         // Reach measured to the footprint, as building measures it. The FIXME
         // this used to point at is settled in reclaimTarget: the original's
         // work missions all reach by Builddistance. Measuring to the footprint
@@ -5806,6 +5925,14 @@ namespace rwe
         }
         auto& targetUnit = targetUnitRef->get();
         const auto& targetUnitDefinition = sim->unitDefinitions.at(targetUnit.unitType);
+
+        // A Remote player's unit is the owner's to mend -- its health lives on
+        // the other machine -- so a local repairer cannot touch it.
+        if (!simulatesLocally(*sim, targetUnit.owner))
+        {
+            changeState(*unitInfo.state, UnitBehaviorStateIdle());
+            return true;
+        }
 
         if (!prepareBuilderForWork(unitInfo, targetUnit.position))
         {

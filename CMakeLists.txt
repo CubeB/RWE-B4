@@ -197,6 +197,8 @@ set(SOURCE_FILES
     src/rwe/ai/AiPersonality.h
     src/rwe/ai/AiBuildTree.cpp
     src/rwe/ai/AiBuildTree.h
+    src/rwe/ai/AiUnitDefIndex.cpp
+    src/rwe/ai/AiUnitDefIndex.h
     src/rwe/ai/EconomyManager.cpp
     src/rwe/ai/EconomyManager.h
     src/rwe/ai/LineOfFire.cpp
@@ -353,6 +355,9 @@ set(SOURCE_FILES
     src/rwe/game/GameEndedReport.h
     src/rwe/game/GameScene_rejoin.cpp
     src/rwe/game/GameScene_replay.cpp
+    src/rwe/game/GameScene_ownclock.cpp
+    src/rwe/game/GameScene_ownclock.h
+    src/rwe/game/GameScene_tad.cpp
     src/rwe/game/GameScene_util.cpp
     src/rwe/game/featureplacement.cpp
     src/rwe/game/GameScene_util.h
@@ -563,6 +568,12 @@ set(SOURCE_FILES
     src/rwe/pathfinding/UnitPerimeterPathFinder.h
     src/rwe/pathfinding/pathfinding_utils.cpp
     src/rwe/pathfinding/pathfinding_utils.h
+    src/rwe/puppet/TadDemo.cpp
+    src/rwe/puppet/TadDemo.h
+    src/rwe/puppet/TadPuppetDriver.cpp
+    src/rwe/puppet/TadPuppetDriver.h
+    src/rwe/puppet/TadScenePlayback.cpp
+    src/rwe/puppet/TadScenePlayback.h
     src/rwe/proto/serialization.cpp
     src/rwe/proto/serialization.h
     src/rwe/render/FogTiles.cpp
@@ -642,6 +653,8 @@ set(SOURCE_FILES
     src/rwe/sim/Metal.h
     src/rwe/sim/MovementClassCollisionService.cpp
     src/rwe/sim/SimRandom.h
+    src/rwe/sim/SimulationOwnership.cpp
+    src/rwe/sim/SimulationOwnership.h
     src/rwe/sim/MovementClassCollisionService.h
     src/rwe/sim/MovementClassDatabase.cpp
     src/rwe/sim/MovementClassDatabase.h
@@ -815,8 +828,21 @@ target_include_directories(librwe PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/config")
 target_include_directories(librwe PUBLIC "libs/asio/include")
 add_definitions(-DASIO_STANDALONE)
 if(WIN32)
+    # asio asks for the Windows target version to be named, and #warning's about
+    # it otherwise -- which -Werror=cpp, and so the CI's -DRWE_WERROR=ON, turns
+    # into a build failure. It assumes 0x0601 if told nothing, but mingw-w64
+    # would otherwise be choosing the default for itself, so this names a
+    # Windows 10 target rather than pinning the engine back to Windows 7.
+    add_definitions(-D_WIN32_WINNT=0x0A00)
+endif()
+if(WIN32)
     # winsock needed for asio on windows
     target_link_libraries(librwe ws2_32)
+    # ...and mswsock for the IOCP half: AcceptEx and GetAcceptExSockaddrs live
+    # there, not in ws2_32. Nothing needed them until an asio acceptor appeared
+    # (TaHostSession), because every earlier asio use was a plain socket, and
+    # Linux links fine either way since asio uses epoll there.
+    target_link_libraries(librwe mswsock)
     # dbghelp resolves the crash handler's stack frames
     target_link_libraries(librwe dbghelp)
 endif()
@@ -975,6 +1001,7 @@ set(TEST_FILES
     src/rwe/ai/AiPlayerController.test.cpp
     src/rwe/ai/AiTuningProfile.test.cpp
     src/rwe/ai/AiBehaviour.test.cpp
+    src/rwe/ai/EconomyManager.test.cpp
     src/rwe/ai/AiBehaviour_army.test.cpp
     src/rwe/ai/AiBehaviour_commander.test.cpp
     src/rwe/ai/AiBehaviour_defences.test.cpp
@@ -1005,6 +1032,7 @@ set(TEST_FILES
     src/rwe/collections/VectorMap.test.cpp
     src/rwe/game/DefaultAction.test.cpp
     src/rwe/game/GameScene_audio.test.cpp
+    src/rwe/game/GameScene_ownclock.test.cpp
     src/rwe/game/panel_slide.test.cpp
     src/rwe/game/GameSpeed.test.cpp
     src/rwe/game/buildghost.test.cpp
@@ -1061,6 +1089,8 @@ set(TEST_FILES
     src/rwe/io/tad/tad_writer.test.cpp
     src/rwe/io/pcx/pcx.test.cpp
     src/rwe/io/malformed_input.test.cpp
+    src/rwe/puppet/TadDemo.test.cpp
+    src/rwe/puppet/TadPuppetDriver.test.cpp
     src/rwe/scene/SceneManager.test.cpp
     src/rwe/scene/Screenshot.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp
@@ -1139,6 +1169,7 @@ set(TEST_FILES
     src/rwe/sim/nanonozzle.test.cpp
     src/rwe/sim/builderfacing.test.cpp
     src/rwe/sim/reclaimreach.test.cpp
+    src/rwe/sim/remoteownership.test.cpp
     src/rwe/sim/fogplacement.test.cpp
     src/rwe/sim/gunship.test.cpp
     src/rwe/sim/aircraftidle.test.cpp
@@ -1146,6 +1177,7 @@ set(TEST_FILES
     src/rwe/game/noshadow.test.cpp
     src/rwe/sim/missile.test.cpp
     src/rwe/sim/seacollision.test.cpp
+    src/rwe/sim/unitsonly.test.cpp
     src/rwe/sim/acidwater.test.cpp
     src/rwe/sim/aircraft.test.cpp
     src/rwe/sim/groundtilt.test.cpp
@@ -1183,6 +1215,7 @@ set(TEST_FILES
     src/rwe/sim/SimRandom.test.cpp
     src/rwe/sim/resurrect.test.cpp
     src/rwe/sim/saveload.test.cpp
+    src/rwe/sim/factoryrepeat.test.cpp
     src/rwe/util.test.cpp
     src/rwe/util/CrashHandler.test.cpp
     src/rwe/util/OpaqueArgs.test.cpp
@@ -1258,6 +1291,9 @@ target_link_libraries(ta_host_probe librwe)
 
 add_executable(tad_episodes src/tad_episodes.cpp)
 target_link_libraries(tad_episodes librwe)
+
+add_executable(tad_puppet src/tad_puppet.cpp)
+target_link_libraries(tad_puppet librwe)
 
 add_executable(battle_test src/battle_test.cpp)
 target_link_libraries(battle_test librwe)

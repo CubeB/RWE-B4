@@ -12,6 +12,7 @@
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
+#include <rwe/sim/SimulationOwnership.h>
 #include <rwe/util/match.h>
 #include <sstream>
 #include <stdexcept>
@@ -592,6 +593,14 @@ namespace rwe
 
     nlohmann::json saveSimulationToJson(const GameSimulation& sim)
     {
+        // A Remote player's state lives on the machine that simulates it, so a
+        // save here could not restore it. Refuse rather than write a game that
+        // silently comes back wrong.
+        if (hasRemotePlayer(sim))
+        {
+            throw std::runtime_error("cannot save a game with a player simulated elsewhere");
+        }
+
         SaveContext ctx;
         {
             uint32_t i = 0;

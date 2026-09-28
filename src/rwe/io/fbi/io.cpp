@@ -20,7 +20,9 @@ namespace rwe
 
         tdf.read("UnitName", u.unitName);
         tdf.read("Objectname", u.objectName);
-        tdf.read("SoundCategory", u.soundCategory);
+
+        // ProTA's stockpile build-menu pseudo-units name none.
+        tdf.readOrDefault("SoundCategory", u.soundCategory);
 
         tdf.readOrDefault("MovementClass", u.movementClass);
 

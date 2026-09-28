@@ -258,11 +258,19 @@ namespace rwe
 
         void runUntil(asio::io_context& ioContext, const std::function<bool()>& done)
         {
-            auto deadline = std::chrono::steady_clock::now() + 5s;
+            // Poll without sleeping. The wait here is for handlers to run, and
+            // they run as fast as the machine will run them; sleeping between
+            // them only spends the budget. It used to sleep 1 ms a handler
+            // against a 5 s deadline, which a handshake of any length could
+            // exhaust in a debug build on a loaded machine -- five cases in
+            // this file failed there while the release build passed.
+            //
+            // The deadline is a backstop against a hang, not the test's
+            // assertion: `done()` below is what says the work finished.
+            auto deadline = std::chrono::steady_clock::now() + 60s;
             while (!done() && std::chrono::steady_clock::now() < deadline)
             {
                 ioContext.poll_one();
-                std::this_thread::sleep_for(1ms);
             }
             REQUIRE(done());
         }
@@ -495,12 +503,17 @@ namespace rwe
         host.stop();
     }
 
-    TEST_CASE("accepted connections are capped and the silent ones are closed", "[ta][host]")
+    TEST_CASE("accepted connections are capped", "[ta][host]")
     {
         asio::io_context ioContext;
         TaHostConfig config;
         config.ports = TaHostPorts{0, 0, 0};
-        config.incomingIdleTimeout = std::chrono::milliseconds(120);
+        // Long enough that nothing times out while the queue fills. The cap and
+        // the idle close are separate properties and one timeout cannot carry
+        // both: at 120 ms this raced, because the connections accepted first
+        // were closed again before the last of the cap had been accepted, and
+        // the count never reached the cap on any machine slower than the test.
+        config.incomingIdleTimeout = std::chrono::seconds(30);
         TaHostSession host(ioContext, config);
         host.start();
 
@@ -513,7 +526,23 @@ namespace rwe
         }
 
         runUntil(ioContext, [&] { return host.load().incomingConnections == TaHostSession::MaxIncomingConnections; });
-        REQUIRE(host.load().incomingConnections <= TaHostSession::MaxIncomingConnections);
+        REQUIRE(host.load().incomingConnections == TaHostSession::MaxIncomingConnections);
+
+        host.stop();
+    }
+
+    TEST_CASE("a connection that never speaks is closed again", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        config.incomingIdleTimeout = std::chrono::milliseconds(120);
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        auto silent = openSilentConnection(ioContext, host.localPorts().gameTcp);
+        runUntil(ioContext, [&] { return host.load().incomingConnections == 1; });
+        REQUIRE(host.load().incomingConnections == 1);
 
         // None of them ever speaks, so every one of them is closed again.
         runFor(ioContext, std::chrono::milliseconds(600));
