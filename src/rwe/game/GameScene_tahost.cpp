@@ -152,7 +152,7 @@ namespace rwe
         // local one is moved into it below, and a callback that captured it
         // would be reading a stack slot that no longer exists.
         peerIds.unitId = [this](UnitId unit) { return taHostLink->driver->wireIdOf(unit); };
-        peerIds.dplayId = [peerId](PlayerId player) -> std::optional<std::uint32_t> { return peerId; };
+        peerIds.dplayId = [peerId](PlayerId) -> std::optional<std::uint32_t> { return peerId; };
 
         TaLiveSenderSettings senderSettings;
         senderSettings.sender = localPlayerId;
