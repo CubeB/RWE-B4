@@ -234,4 +234,72 @@ namespace rwe
         REQUIRE(driver.stats().damageHandedOff == 1u);
         REQUIRE(driver.stats().recordsDroppedUnknownUnit == 0u);
     }
+
+    TEST_CASE("a carried record does not move a building off its own cells", "[puppet]")
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        definePuppetTestWorld(sim);
+        addWellStockedPlayer(sim, "ARM");
+
+        TadPuppetDriver driver(sim, 8, puppetTestLoadOrder());
+        driver.addPlayer(1, PlayerId(0));
+        driver.setExternalClock(true);
+
+        auto layout = tadUnitStateLayout(std::vector<bool>{false, false, false}, 8);
+
+        // The wire's origin is the map's top left and the world's is its middle,
+        // so a record's position has to be shifted by wherever that origin put
+        // it. A four-by-four building wants the middle of the map: at the corner
+        // half of it would be off the edge.
+        auto wireOrigin = sim.terrain.topLeftCoordinateToWorld(SimVector(0_ss, 0_ss, 0_ss));
+        auto wire = [&](SimScalar world) {
+            return TadPosition{
+                simScalarToFixed(world - wireOrigin.x),
+                0,
+                simScalarToFixed(world - wireOrigin.z)};
+        };
+
+        // A walker, id 1, standing in for the transport. Its 0x09 is also the
+        // only record that teaches the driver which block of ids this sender
+        // owns, and without that a carried record cannot name its carrier.
+        driver.onPacket(
+            TadPacket{0, 1},
+            {tadEncodeBuildStarted(TadBuildStarted{3, 1, wire(0_ss), TadRotation{0, 0, 0}})});
+        driver.applyTick(0);
+        auto tank = findUnitOfType(sim, "TANK");
+        REQUIRE(tank);
+
+        // A building in slot 1. A record's slot is its serial modulo the block
+        // size, so its first record is on tick 1.
+        TadUnitState building;
+        building.tick = 1;
+        building.sync = TadUnitSync{1, 2, 100, 0, 0, 0, std::nullopt, wire(40_ss), TadRotation{0, 0, 0}, std::nullopt};
+        driver.onPacket(TadPacket{0, 1}, {tadEncodeUnitState(building, layout)});
+        driver.applyTick(1);
+
+        auto solar = findUnitOfType(sim, "SOLAR");
+        REQUIRE(solar);
+        auto stoodAt = sim.getUnitState(*solar).position;
+
+        // The building's own record then says it is riding the walker. A
+        // building cannot be carried, so the record says nothing about where it
+        // stands: moving it would leave the cells it was given behind, and the
+        // death sweep clears a building's cells where it dies rather than where
+        // it was left, so the old ones would go on naming a freed id.
+        TadUnitState carried;
+        carried.tick = 9;
+        carried.sync = TadUnitSync{1, 2, 100, 0, 0, 0, TadCarried{1, 0}, wire(0_ss), TadRotation{0, 0, 0}, std::nullopt};
+        driver.onPacket(TadPacket{0, 1}, {tadEncodeUnitState(carried, layout)});
+        driver.applyTick(9);
+
+        auto stillStood = sim.getUnitState(*solar).position == stoodAt;
+        REQUIRE(stillStood);
+        requireNoStaleCells(sim);
+
+        // And when it does die, the sweep clears every cell that named it.
+        sim.killUnit(*solar);
+        sim.tick();
+        REQUIRE_FALSE(findUnitOfType(sim, "SOLAR"));
+        requireNoStaleCells(sim);
+    }
 }

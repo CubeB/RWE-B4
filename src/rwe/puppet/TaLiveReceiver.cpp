@@ -42,6 +42,13 @@ namespace rwe
             std::optional<int32_t> lastArrived;
 
             /**
+             * The tick the last packet of this sender's stream went out on,
+             * which is where a packet with no serial of its own goes: the
+             * packet before it in the sender's order carried that tick.
+             */
+            std::optional<uint32_t> lastReleasedTick;
+
+            /**
              * The last few markers handed to the driver, so a repeat of one is
              * recognised rather than applied twice. Capped, because a receiver
              * runs for hours and a marker that comes back further behind than
@@ -123,10 +130,10 @@ namespace rwe
             clock.meanOffsetTicks = sumY / n;
         }
 
-        void apply(uint8_t sender, int32_t marker, const Held& held)
+        void apply(uint8_t sender, int32_t marker, const Held& held, uint32_t tick)
         {
             originFrozen = true;
-            driver.onPacket(held.packet, held.subPackets);
+            driver.onPacketAt(held.packet, held.subPackets, tick);
             ++stats.packetsApplied;
             remember(sender, marker);
         }
@@ -190,13 +197,13 @@ namespace rwe
 
         /**
          * Hands one sender's due packets over, in the order that sender sent
-         * them.
+         * them and each on the tick it belongs to.
          *
          * Two things hold a packet back: a packet this sender sent before it
-         * that has not turned up, and a tick that has not come. The first is
-         * waited on for `jitterTicks + 1` ticks and then given up on, because a
-         * packet cannot arrive later than the buffer is deep and a lost one
-         * never arrives at all.
+         * that has not turned up, and its own tick, which has not come. The
+         * first is waited on for `jitterTicks + 1` ticks and then given up on,
+         * because a packet cannot arrive later than the buffer is deep and a
+         * lost one never arrives at all.
          */
         void release(uint8_t sender, SenderState& state, uint32_t localTick)
         {
@@ -224,17 +231,28 @@ namespace rwe
                     state.gapSince.reset();
                 }
 
-                // A packet with a 0x2c waits for the tick that one names. One
-                // without has no tick of its own, so it goes as soon as the
-                // packet before it has: the driver resolves it against the
-                // sender's last serial, which is that packet's.
+                // A packet with a 0x2c goes out on the tick that one names, and
+                // not before: the driver applies a record on the tick it names,
+                // so a record handed over early lands a death before the
+                // full-state record it belongs behind, and a unit that should
+                // have died stays alive. One with no serial has no tick of its
+                // own, so it goes on the tick of the packet before it in the
+                // sender's order, which is the tick the driver would have
+                // stamped it with and the one the sender's own records put it
+                // on. With nothing before it, it goes on the tick it is being
+                // handed over, which is the only tick there is.
+                auto tick = static_cast<int64_t>(localTick);
                 if (it->second.serial)
                 {
-                    auto due = static_cast<int64_t>(localTick) + options.jitterTicks;
-                    if (tickFor(*it->second.serial) > due)
-                    {
-                        return;
-                    }
+                    tick = tickFor(*it->second.serial);
+                }
+                else if (state.lastReleasedTick)
+                {
+                    tick = state.lastReleasedTick.value();
+                }
+                if (tick > static_cast<int64_t>(localTick))
+                {
+                    return;
                 }
 
                 // A marker that has run out of range stops the check rather
@@ -244,7 +262,8 @@ namespace rwe
                     state.expectedMarker = marker - 1;
                 }
                 state.gapSince.reset();
-                apply(sender, marker, it->second);
+                state.lastReleasedTick = static_cast<uint32_t>(std::max<int64_t>(tick, 0));
+                apply(sender, marker, it->second, state.lastReleasedTick.value());
                 state.held.erase(it);
                 --totalHeld;
             }
@@ -281,9 +300,11 @@ namespace rwe
         {
             // A reply wears 0xffffffff on the wire and counts for nothing in
             // its sender's order, so there is nowhere to put it and nothing to
-            // put it behind.
+            // put it behind. It goes on the tick it landed, which keeps the
+            // driver on this receiver's clock rather than a second one of its
+            // own; a reply carries no record of the world either way.
             ++i.stats.packetsUnsequenced;
-            i.driver.onPacket(packet, subPackets);
+            i.driver.onPacketAt(packet, subPackets, localTick);
             ++i.stats.packetsApplied;
             return;
         }

@@ -127,6 +127,21 @@ namespace rwe
         void onPacket(const TadPacket& packet, const std::vector<TadBytes>& subPackets);
 
         /**
+         * Queues one packet's subpackets for a tick the caller has already
+         * worked out, and applies them when `applyTick` reaches it. A live
+         * receiver is that caller: it holds a packet until the tick its 0x2c
+         * names, and it is the only thing that can say where a record with no
+         * serial of its own belongs, which is the tick of the packet its
+         * sender sent before it.
+         *
+         * Requires the external clock. The tick is the caller's, so this
+         * neither reads nor keeps a clock of its own -- a record handed over
+         * here lands on the tick it is given whatever serial the packet
+         * carries.
+         */
+        void onPacketAt(const TadPacket& packet, const std::vector<TadBytes>& subPackets, uint32_t tick);
+
+        /**
          * Hands the clock to the caller instead of ticking the simulation from
          * `onPacket`. A packet's records are queued for the tick its serial
          * names, and `applyTick` applies them; the scene drives the ticks and

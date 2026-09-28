@@ -200,6 +200,32 @@ namespace rwe
         REQUIRE(f.health() == 50);
     }
 
+    TEST_CASE("a packet that arrived early waits for the tick it names", "[puppet]")
+    {
+        Fixture f;
+
+        f.feedAt(2, {fullStateRecord(8, 100)}, 0);
+
+        // Three ticks early, which is the whole of the buffer's depth, so it is
+        // in hand with room to spare -- and still has not been applied. A
+        // record handed over before the tick it names lands a death before the
+        // full-state record it belongs behind, and a unit that should have died
+        // stays alive.
+        f.feedAt(1, {fullStateRecord(24, 50)}, 13);
+        f.onTick(13);
+        REQUIRE(f.health() == 100);
+        REQUIRE(f.receiver.stats().held == 1);
+        REQUIRE(f.receiver.stats().packetsLate == 0);
+
+        f.onTicks(14, 15);
+        REQUIRE(f.health() == 100);
+        REQUIRE(f.receiver.stats().held == 1);
+
+        f.onTick(16);
+        REQUIRE(f.health() == 50);
+        REQUIRE(f.receiver.stats().held == 0);
+    }
+
     TEST_CASE("a live receiver gives up on a packet its sender did not send", "[puppet]")
     {
         Fixture f;

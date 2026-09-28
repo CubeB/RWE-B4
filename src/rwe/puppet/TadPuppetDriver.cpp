@@ -1,5 +1,6 @@
 #include <rwe/puppet/TadPuppetDriver.h>
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <map>
 #include <utility>
@@ -365,8 +366,6 @@ namespace rwe
             sim.occupiedGrid.forEach(*region, [](auto& cell) { cell.featureId = std::nullopt; });
             return spawn();
         }
-
-
 
         /**
          * Moves every running air goal on by one tick.
@@ -1080,12 +1079,20 @@ namespace rwe
 
             if (sync.carried)
             {
-                // No position on the wire, so nothing to measure or snap; the
-                // unit's carrier decides where it is.
+                // A transport carries mobile units. A building cannot be
+                // carried, so this record says nothing about where it stands,
+                // and moving it would leave the cells it was given behind: the
+                // death sweep clears a building's cells at the position it
+                // dies at, so the cells left at the old one would go on naming
+                // a freed id, and a projectile walking the grid would read it.
+                if (!definition.isMobile)
+                {
+                    return;
+                }
                 if (auto carrier = carrierUnit(*sync.carried))
                 {
                     auto carrierPosition = sim.getUnitState(*carrier).position;
-                    if (definition.isMobile && !definition.canFly)
+                    if (!definition.canFly)
                     {
                         moveOccupiedCells(*live, unit.position, carrierPosition, definition);
                     }
@@ -1284,6 +1291,14 @@ namespace rwe
         impl->advanceTo(*serial);
         impl->applySubPackets(packet.sender, subPackets);
         impl->updateWreckCount();
+    }
+
+    void TadPuppetDriver::onPacketAt(const TadPacket& packet, const std::vector<TadBytes>& subPackets, uint32_t tick)
+    {
+        assert(impl->externalClock);
+        ++impl->stats.packets;
+        impl->lastSeenTick = std::max(impl->lastSeenTick.value_or(0u), tick);
+        impl->pending[tick].push_back(Impl::QueuedPacket{packet.sender, subPackets});
     }
 
     void TadPuppetDriver::setExternalClock(bool external)

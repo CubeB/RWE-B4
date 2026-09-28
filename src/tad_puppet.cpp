@@ -755,9 +755,10 @@ namespace
                 }
 
                 // Only a packet with a 0x2c is on the jittered clock. One
-                // without has no tick of its own: the receiver passes it
-                // straight through and the driver resolves it from the
-                // sender's last serial, so there is nothing to lead it by.
+                // without has no tick of its own: the receiver holds it behind
+                // the packet its sender sent before it, and the driver resolves
+                // it from the sender's last serial, so there is nothing to
+                // lead it by.
                 auto lead = 0u;
                 if (packets[i].hasSerial)
                 {

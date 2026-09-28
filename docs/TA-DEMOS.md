@@ -2609,11 +2609,14 @@ resolving it against the sender's last serial, the serial the packet before it
 carried.
 
 That depth is the **receive buffer**: our tick runs that far behind the sender's,
-a packet is available up to that many ticks *before* the tick it names, and past
-that it is late and can only be applied where it landed. A packet a sender sent
-that has not turned up holds the queue behind it for `jitterTicks + 1` ticks and
-is then given up on and counted, because a packet cannot arrive later than the
-buffer is deep and a lost one never arrives.
+so a packet naming tick T arrives up to that many ticks early and is held here
+until T, and past that it is late and can only be applied where it landed.
+Nothing is ever handed over *before* the tick it names -- a buffer that applied
+records early would put a death before the full-state record it belongs behind,
+and leave a unit that should have died alive. A packet a sender sent that has
+not turned up holds the queue behind it for `jitterTicks + 1` ticks and is then
+given up on and counted, because a packet cannot arrive later than the buffer is
+deep and a lost one never arrives.
 
 The mapping from serial to RWE tick is settled from the first packets -- the
 lowest serial seen before the first one is applied, so a first packet that
@@ -2640,11 +2643,12 @@ seed gives the same run. Five ProTA demos (10158, 11440, 11505, 11506, 11507),
 |---|---|---|---|---|---|---|---|
 | `tad_puppet`, straight from the file | 3,591 | 5,874 | 3,476 | 1,212 | 52.15 | 82.03% | 69.64% |
 | `--live-sim 0:0:1` | 3,591 | 5,874 | 3,476 | 1,211 | 52.15 | 82.03% | 69.64% |
-| `--live-sim 1:0:1` | 3,591 | 5,874 | 3,476 | 1,208 | 52.17 | 82.05% | 69.64% |
-| `--live-sim 2:0:1` | 3,591 | 5,863 | 3,104 | 1,543 | 52.17 | 82.10% | 68.86% |
-| `--live-sim 3:0:1` | 3,586 | 5,863 | 3,007 | 1,632 | 51.94 | 82.09% | 68.45% |
-| `--live-sim 3:1:1` | 3,543 | 5,805 | 3,430 | 1,247 | 53.52 | 81.69% | 68.26% |
-| `--live-sim 3:5:1` | 3,299 | 5,418 | 3,185 | 1,287 | 59.91 | 80.45% | 60.48% |
+| `--live-sim 1:0:1` | 3,591 | 5,874 | 3,476 | 1,208 | 52.09 | 82.05% | 70.83% |
+| `--live-sim 2:0:1` | 3,591 | 5,863 | 3,104 | 1,543 | 51.95 | 82.10% | 69.05% |
+| `--live-sim 3:0:1` | 3,591 | 5,863 | 3,007 | 1,633 | 51.93 | 82.09% | 68.45% |
+| `--live-sim 5:0:1` | 3,591 | 5,863 | 3,007 | 1,627 | 52.08 | 82.19% | 67.26% |
+| `--live-sim 3:1:1` | 3,546 | 5,805 | 3,430 | 1,248 | 53.52 | 81.69% | 68.26% |
+| `--live-sim 3:5:1` | 3,302 | 5,418 | 3,185 | 1,289 | 59.91 | 80.45% | 60.48% |
 
 **At a depth of 0 or 1 the live run reproduces the straight playback exactly** --
 every figure, drift distributions included, and at a depth of 1 that is with 473
@@ -2670,21 +2674,22 @@ ticks of its own arrival profile to be wrong by.
 **The counts stop agreeing at a depth of 2, and `deathsDroppedNotLive` says
 where they go.** The kill column is 3,476 straight and 3,007 at a depth of 3, and
 every one of them is a `0x0c` that found no live puppet: the counter is 92
-straight, 110 at a depth of 0 or 1, 471 at a depth of 2 and 568 at a depth of 3.
-What has happened is a stale death arriving after the full-state record that
-re-used its unit's slot for a different type, so the driver is looking at the
-*new* unit and the old one is orphaned -- which is also where the extra 420
-wrecks come from, an orphaned unit being run over rather than killed. The step is
-between a depth of 1 and 2, not gradual, and it is not the receiver's ordering:
-the sequence puts each sender's packets back exactly, and a lead of one tick
-costs nothing at all. What a depth of two changes is that the receiver starts
-handing packets over *two* ticks before the tick they name, and a `0x0c` with no
-serial of its own then goes out stamped with a serial that is two ticks further
-on than the tick the straight playback would have applied it at. Deciding which
-of the two records the stream means when a slot has been re-used is a question
-about the demo and not about the receiver, so it is left there -- with a counter
-on it, which is the other half of the answer: a loss that increments nothing is a
-hole in the instrument.
+straight, 110 at a depth of 0 or 1, 471 at a depth of 2, and 568 at a depth of 3
+or 5. The step is between a depth of 1 and 2, not gradual, and a lead of one tick
+costs nothing at all: 473 packets put back in order and every count still the
+straight one.
+
+So it is neither the receiver's ordering nor a packet being applied early.
+Releasing each packet exactly on the tick it names -- which is what this section
+now describes -- brings the drift sample count up to the straight one at every
+depth, 35,669 of 35,669, and leaves the kills where they were. What is left is
+the driver's own reading of a slot that a full-state record has re-used for a
+different type, where a stale death finds the *new* unit standing in the slot and
+the old one is orphaned -- which is also where the extra 421 wrecks come from, an
+orphaned unit being run over rather than killed. Deciding which of two records
+for a re-used slot the stream means is a question about the demo and not about
+the receiver, so it is left there, with the counter on it: a loss that increments
+nothing is a hole in the instrument.
 
 ## Demos as a conformance corpus
 
