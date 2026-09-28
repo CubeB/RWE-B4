@@ -32,8 +32,25 @@ namespace rwe
 {
     namespace
     {
-        /** Ticks to a UDP message, as a real TA sends them: six, thirty a second. */
-        constexpr unsigned int TicksPerPacket = 6;
+        /**
+         * Ticks to a UDP message: one, unless RWE_TA_TICKS_PER_PACKET says
+         * otherwise. A real TA sends six, but a TA advances a peer's units as
+         * each message's records are applied, so six at a time showed RWE's
+         * units to a real TA moving in bursts; one a message is smooth.
+         */
+        unsigned int ticksPerPacket()
+        {
+            static const unsigned int value = [] {
+                const char* text = std::getenv("RWE_TA_TICKS_PER_PACKET");
+                if (text == nullptr)
+                {
+                    return 1u;
+                }
+                auto parsed = std::strtoul(text, nullptr, 10);
+                return parsed >= 1 && parsed <= 30 ? static_cast<unsigned int>(parsed) : 1u;
+            }();
+            return value;
+        }
 
         /** How often the log says where the peer has got to. */
         constexpr unsigned int ReportEveryTicks = 150;
@@ -197,7 +214,43 @@ namespace rwe
         taHostLink = std::move(link);
     }
 
-    void GameScene::applyTaHostTick()
+    unsigned int GameScene::taHostTicksBehind() const
+    {
+        if (!taHostLink || !taHostLink->receiver)
+        {
+            return 0;
+        }
+        const auto& receiver = *taHostLink->receiver;
+        const auto& clock = receiver.stats().clock;
+        if (clock.samples == 0)
+        {
+            return 0;
+        }
+        // The peer's newest tick less the jitter the receiver holds packets
+        // for: running up to it never runs past what the peer has said.
+        auto target = clock.latestTaTick - static_cast<int64_t>(receiver.options().jitterTicks);
+        auto behind = target - static_cast<int64_t>(sceneTime.value);
+        return behind > 0 ? static_cast<unsigned int>(behind) : 0u;
+    }
+
+    bool GameScene::taHostTooFarAhead() const
+    {
+        if (!taHostLink || !taHostLink->receiver)
+        {
+            return false;
+        }
+        const auto& clock = taHostLink->receiver->stats().clock;
+        if (clock.samples == 0)
+        {
+            return false;
+        }
+        // A peer sends about every six ticks, so its newest tick trails its
+        // clock by that much between packets; past twice that, it is behind.
+        constexpr int64_t MaxLeadTicks = 12;
+        return static_cast<int64_t>(sceneTime.value) - clock.latestTaTick > MaxLeadTicks;
+    }
+
+    void GameScene::pollTaHostInbound()
     {
         if (!taHostLink)
         {
@@ -221,7 +274,17 @@ namespace rwe
             packet.sender = item.sender;
             link.receiver->onPacket(packet, item.subPackets, sceneTime.value, item.sequence);
         }
+    }
 
+    void GameScene::applyTaHostTick()
+    {
+        if (!taHostLink)
+        {
+            return;
+        }
+        auto& link = *taHostLink;
+
+        pollTaHostInbound();
         link.receiver->onTick(sceneTime.value);
 
         // The driver counts from its first packet, so the scene tick it is
@@ -268,7 +331,7 @@ namespace rwe
         }
 
         // The two machines run their own clocks, so a batch goes out as it is
-        // taken and six of them make the message a real TA sends.
+        // taken, ticksPerPacket() of them to a message.
         auto batch = link.sender->takeBatch();
         if (batch)
         {
@@ -276,7 +339,7 @@ namespace rwe
             ++link.outgoingTicks;
         }
 
-        if (!link.outgoing.empty() && (link.outgoingTicks >= TicksPerPacket || !batch))
+        if (!link.outgoing.empty() && (link.outgoingTicks >= ticksPerPacket() || !batch))
         {
             auto peer = link.peer;
             for (auto& subPacket : link.outgoing)
@@ -416,7 +479,9 @@ namespace rwe
                  << receiver.clock.driftTicks << " ticks, puppets " << driver.unitsSpawned << " up and "
                  << driver.unitsKilled << " killed, " << driver.unplacedUnits << " unplaced, taken "
                  << link.damageTaken << " and dealt " << sender.damageSent << " 0x0b, " << link.attackOrders
-                 << " attacks ordered, our peer's units:" << puppets;
+                 << " attacks ordered, scripts " << driver.scriptCallsRun << " run and " << driver.scriptCallsDropped
+                 << " dropped, " << receiver.packetsLate << " late, lead " << (static_cast<int64_t>(sceneTime.value) - receiver.clock.latestTaTick)
+                 << " ticks, our peer's units:" << puppets;
     }
 
     void GameScene::renderTaHostWindow()

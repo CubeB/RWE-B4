@@ -108,11 +108,13 @@ namespace rwe
                 clock.firstOffsetTicks = offset;
                 clock.minOffsetTicks = offset;
                 clock.maxOffsetTicks = offset;
+                clock.latestTaTick = taTick;
             }
             else
             {
                 clock.minOffsetTicks = std::min(clock.minOffsetTicks, offset);
                 clock.maxOffsetTicks = std::max(clock.maxOffsetTicks, offset);
+                clock.latestTaTick = std::max(clock.latestTaTick, taTick);
             }
             ++clock.samples;
             clock.lastOffsetTicks = offset;
@@ -328,6 +330,14 @@ namespace rwe
         if (serial)
         {
             auto taTick = i.tickOf(*serial);
+            // Noted even for a packet too far ahead to hold, so a local clock
+            // that has fallen that far behind still knows how far to catch up;
+            // not for one so far ahead it is a bad serial rather than a lead.
+            if (taTick && i.stats.clock.samples > 0
+                && *taTick <= static_cast<int64_t>(localTick) + 4 * static_cast<int64_t>(i.options.maxSerialLeadTicks))
+            {
+                i.stats.clock.latestTaTick = std::max(i.stats.clock.latestTaTick, *taTick);
+            }
             if (!taTick || *taTick > static_cast<int64_t>(localTick) + i.options.maxSerialLeadTicks)
             {
                 ++i.stats.packetsDroppedOutOfRange;

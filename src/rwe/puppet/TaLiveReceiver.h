@@ -58,6 +58,9 @@ namespace rwe
         int64_t driftTicks{0};
         double driftPer1000Ticks{0.0};
 
+        /** The latest tick any accepted packet has named: where the sender is at least up to. */
+        int64_t latestTaTick{0};
+
         /** The serial this receiver takes for tick 0, once it has one. */
         std::optional<uint32_t> originSerial;
 

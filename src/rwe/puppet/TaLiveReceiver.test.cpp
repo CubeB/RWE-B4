@@ -329,6 +329,23 @@ namespace rwe
         REQUIRE(f.receiver.stats().packetsDroppedOutOfRange == 1);
     }
 
+    TEST_CASE("a live receiver knows the sender's latest tick, even one too far ahead to hold", "[puppet]")
+    {
+        Fixture f;
+        f.feed(8, 100, 0);
+        f.feed(8 + 50, 90, 0);
+        REQUIRE(f.receiver.stats().clock.latestTaTick == 50);
+
+        // Past the hold window: refused, but still where the sender has got to.
+        f.feed(8 + 400, 80, 0);
+        REQUIRE(f.receiver.stats().packetsDroppedOutOfRange == 1);
+        REQUIRE(f.receiver.stats().clock.latestTaTick == 400);
+
+        // A serial no clock could have reached is not a lead to chase.
+        f.feed(0xffffffffu, 70, 0);
+        REQUIRE(f.receiver.stats().clock.latestTaTick == 400);
+    }
+
     TEST_CASE("a live receiver keeps each peer's markers to itself", "[puppet]")
     {
         Fixture f;

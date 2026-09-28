@@ -884,6 +884,23 @@ namespace rwe
          * own clock, and this tick's subpackets out to the peer.
          */
         void applyTaHostTick();
+
+        /**
+         * Hands the peer's packets to the receiver. Every frame as well as every
+         * tick: a game holding its clock for the peer runs no tick, and the
+         * packet it is waiting for would otherwise never be read.
+         */
+        void pollTaHostInbound();
+
+        /** Ticks this game should run beyond its own clock to be level with a TA peer's. */
+        unsigned int taHostTicksBehind() const;
+
+        /**
+         * Whether this game has run far enough past a TA peer's latest tick to
+         * wait for it: a tick here is a whole 33 ms and TA's is a third of a
+         * millisecond longer, so left alone RWE gains a tick every hundred.
+         */
+        bool taHostTooFarAhead() const;
         void renderTaHostWindow();
         /** The quit sequence, and the peer unregistered from the simulation. */
         void endTaHost();
