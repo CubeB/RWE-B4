@@ -279,6 +279,7 @@ namespace rwe
             u.metalDebt = Metal{12.5f};
             u.buildQueue.emplace_back("ARMSOLAR", 2);
             u.buildQueue.emplace_back("ARMPNQ", 1);
+            u.repeatBuildQueue = true;
 
             return u;
         }
@@ -432,6 +433,23 @@ namespace rwe
         REQUIRE(captures == 1);
     }
 
+    TEST_CASE("two factories differing only in the repeat toggle hash differently", "[hash]")
+    {
+        // The factory repeat flag (#417) decides whether a factory consumes
+        // its queue or loops it, so two peers that disagree about it build
+        // different units from the same queue and diverge from that tick on.
+        // It is hashed for the same reason the order queue is: a player-set
+        // decision about what the simulation does next, not a presentation
+        // detail.
+        auto off = makePopulatedUnitState();
+        off.repeatBuildQueue = false;
+
+        auto on = makePopulatedUnitState();
+        on.repeatBuildQueue = true;
+
+        REQUIRE(computeHashOf(off) != computeHashOf(on));
+    }
+
     TEST_CASE("a fully-populated unit keeps its pinned hash value")
     {
         // The hash, save and dump walks are derived from one field table, so
@@ -441,8 +459,9 @@ namespace rwe
         // 2026-09-24, when reclaimProgress left the table (#19: a unit is
         // reclaimed through its hit points now, and had nothing to keep here),
         // and then 469200811 until heldByMission and immune joined it (#38),
-        // adding one each.
-        REQUIRE(computeHashOf(makePopulatedUnitState()) == GameHash(469200813u));
+        // adding one each. repeatBuildQueue joined it on 2026-09-28 (#417),
+        // adding one more.
+        REQUIRE(computeHashOf(makePopulatedUnitState()) == GameHash(469200814u));
     }
 
 }

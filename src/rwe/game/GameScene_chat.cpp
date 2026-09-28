@@ -29,9 +29,9 @@ namespace rwe
 
     void GameScene::openChatBar()
     {
-        // A replay has no peers to talk to and no player to talk as. The
-        // original refuses the bar to a watcher for the same reason.
-        if (replayPlayback)
+        // A replay or a demo has no peers to talk to and no player to talk as.
+        // The original refuses the bar to a watcher for the same reason.
+        if (isPlayback())
         {
             return;
         }

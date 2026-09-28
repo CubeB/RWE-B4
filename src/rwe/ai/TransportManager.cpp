@@ -828,6 +828,50 @@ namespace rwe
                 // perfectly well for other targets. See
                 // AiBlackboard::groundAnchor.
                 const SimVector& ferryOrigin = bb.groundAnchor ? *bb.groundAnchor : *bb.baseAnchor;
+
+                // Has this objective already been asked about and found to
+                // have no landing near it? If the answer is still fresh, do not
+                // ask again (issue #398).
+                //
+                // The search is a fan of ferryLandingSearchSteps steps at nine
+                // bearings, and every naval candidate probes the terrain eight
+                // times over looking for water our own navy can reach -- so a
+                // refusal that is re-derived is a refusal that is paid for
+                // again every half second, and the transport stands idle
+                // through each of them. It used to be paid for every pass
+                // because nothing was remembered about it, and because
+                // bb.attackTarget is rebuilt from the threat map every pass
+                // and drifts, a memory keyed on the exact point would have
+                // missed most of the repeats anyway. Keyed on a coarse cell,
+                // it catches the ones that were measured: the refusals left on
+                // Hundred Isles came in runs of two on adjacent points.
+                auto cell = ferryLandingRefusalCell(*bb.attackTarget, profile.ferryLandingRefusalCell);
+                auto refused = bb.ferryLandingRefusals.find(cell);
+                if (refused != bb.ferryLandingRefusals.end())
+                {
+                    if (refused->second > sim.gameTime)
+                    {
+                        LOG_DEBUG << "AI transport " << transportId.value << ": army ferry not asking about "
+                                  << static_cast<int>(bb.attackTarget->x.value) << "," << static_cast<int>(bb.attackTarget->z.value)
+                                  << " again, the last search found no landing and is still believed";
+                        sim.eventLog.event(sim.gameTime.value, "transport_cooldown")
+                            .set("player", aiOwner.value)
+                            .set("unit", transportId.value)
+                            .set("x", static_cast<double>(bb.attackTarget->x.value))
+                            .set("z", static_cast<double>(bb.attackTarget->z.value))
+                            .set("air", transportDef.canFly)
+                            .set("retry_in", static_cast<double>(refused->second.value - sim.gameTime.value))
+                            .set("why", "landing_refused")
+                            .detail("landing search for this attack target already failed, not asked again yet");
+                        continue;
+                    }
+                    // Stale. The enemy shore is relabelled as their navy moves
+                    // and the water beside it as ours does, so a landing that
+                    // could not be found may be findable now: ask, and let
+                    // whatever comes back replace what was believed.
+                    bb.ferryLandingRefusals.erase(refused);
+                }
+
                 LandingSearchTally tally;
                 auto landing = transportDef.canFly
                     ? landingNear(sim, reachability, profile, threatMap, *bb.attackTarget, ferryOrigin, tally)
@@ -851,8 +895,22 @@ namespace rwe
                         .set("naval_layer", reachability.isNavalValid())
                         .set("why", "no_landing")
                         .detail("army ferry blocked, no landing near the attack target");
+                    // Remember the refusal, so the next pass does not pay for
+                    // the same search again. Cooldown zero switches the
+                    // memory off and restores the old ask-every-pass.
+                    if (profile.ferryLandingRefusalCooldownSeconds > 0)
+                    {
+                        bb.ferryLandingRefusals[cell] = sim.gameTime
+                            + GameTime(static_cast<unsigned int>(profile.ferryLandingRefusalCooldownSeconds) * static_cast<unsigned int>(SimTicksPerSecond));
+                    }
                     continue;
                 }
+                // A landing was found, so whatever was believed about this
+                // cell is wrong now. Dropped rather than left to expire: a
+                // target that can be landed at must not keep its old refusal
+                // alive and cost the army the objective for the rest of the
+                // cooldown.
+                bb.ferryLandingRefusals.erase(cell);
                 std::vector<UnitId> passengers;
                 // Why each candidate was turned away, counted so the blocked
                 // message below can name the gate rather than only the tally.

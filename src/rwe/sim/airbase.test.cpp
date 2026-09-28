@@ -223,6 +223,240 @@ namespace rwe
                 sim.getUnitState(fighter).hitPoints = hitPoints;
             }
         };
+
+        /**
+         * A seabed with a waterline over it: the ground a carrier has under it
+         * for every tick of its life.
+         *
+         * `makeAirBaseTerrain` and `sim_test_util.h`'s `makeFlatTerrain` both
+         * put the ground *at* the sea level, so nothing in this file had ever
+         * been able to say "the terrain under this unit is below the
+         * waterline" -- and every pad in it has been standing on dry land. It
+         * is named for what is different rather than folded into either shared
+         * helper, and `makeFlatTerrain` is right to have no defaults: one of
+         * the defaults here would be a wrong map.
+         */
+        MapTerrain makeSeabedTerrain(int width, int height)
+        {
+            Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
+            return MapTerrain(std::move(heights), 10_ss);
+        }
+
+        /**
+         * ARMCARRY, the ARM light carrier ("Colossus", 1372 metal, 3390 hit
+         * points), with only the keys that bear on a landing.
+         *
+         * Read out of `rev31.gp3`'s `units/ARMCARRY.FBI`, which is the copy the
+         * VFS finds first, and worth quoting because the natural reading before
+         * the data was opened was that a carrier is a transport ship and so not
+         * a pad at all. It is a pad:
+         *
+         *     Builder=1  IsAirBase=1  ActivateWhenBuilt=1  onoffable=1
+         *     FootprintX=6  FootprintZ=6  MovementClass=BOATD6
+         *     MinWaterDepth=30  EnergyMake=370  MaxDamage=3390
+         *
+         * `totala1.hpi`'s copy agrees on all four of the pad keys. The
+         * transport ships are a different pair of units entirely -- `ARMTSHIP`
+         * and `CORTSHIP`, the Hulk and the Envoy -- and they are `Builder=0`
+         * with no `IsAirBase` key at all, so nothing ever lands on them and
+         * the crane path is not what is wanted here.
+         *
+         * What the carrier is not is a *transport*: there is no `canload`, no
+         * `transportsize` and no `transportcapacity` in it, in any of the three
+         * archives that carry it. Nothing is loaded aboard it -- an aircraft
+         * sets down on the deck and stays there.
+         *
+         * `MovementClass=BOATD6` with `MinWaterDepth=30` is what the fault
+         * turns on: this is a boat, so the ground beneath it is under the
+         * waterline and always will be.
+         */
+        UnitDefinition makeCarrierPadDef()
+        {
+            UnitDefinition d{};
+            d.isMobile = true;
+            d.canMove = true;
+            d.floater = true;
+            d.builder = true;
+            d.isAirBase = true;
+            d.onOffable = true;
+            d.activateWhenBuilt = true;
+            // ARMASP's figure rather than ARMCARRY's 200: nothing in the
+            // landing path reads a worker time, and holding the mending side
+            // steady is part of what makes the pair of cases comparable.
+            d.workerTimePerTick = 6u;
+            d.sightDistance = 350u;
+            d.maxHitPoints = 3390;
+            d.objectName = "carriermodel";
+            d.buildTime = 25394u;
+            // AdHocMovementClass{footprintX, footprintZ, maxSlope,
+            // maxWaterSlope, minWaterDepth, maxWaterDepth}: the 6x6 of
+            // FootprintX/FootprintZ=6 and BOATD6, and ARMCARRY's own
+            // MinWaterDepth=30.
+            d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{6u, 6u, 255u, 255u, 30u, 0u};
+            d.yardMap = Grid<YardMapCell>(6, 6, YardMapCell::Ground);
+            return d;
+        }
+
+        /**
+         * Whether the carrier's forward deck piece is modelled at its shipped
+         * offset or pulled inside the pad's own reach.
+         *
+         * A fault-isolating switch, not a fixture convenience, and it is worth
+         * stating what it separates. `airBaseLandingPoint` answers only while
+         * the aircraft is within `airBaseRepairReach` of the **hull's origin**,
+         * which for a 6x6 is 48 world units. ARMCARRY's `landpad1` sits 52.5
+         * units away, so an aircraft walking out to it crosses the reach
+         * boundary mid-descent, the landing point stops existing, and the
+         * descent target falls back to the seabed. Moving the piece to 30 is
+         * the same unit with that one number changed, which is what tells the
+         * two faults apart instead of leaving them tangled.
+         */
+        bool deckInsideReach = false;
+
+        /**
+         * ARMCARRY.3DO's deck, at the offsets the model really carries.
+         *
+         * `airBaseLandingPoint` used to state that the landing piece's x and z
+         * "are the pad's own on every shipped pad". ARMASP agrees with that --
+         * its `landpad` is at (0, 20, 0) -- and a carrier emphatically does
+         * not: these two sit 52.5 and 37.5 world units fore and aft of the
+         * hull's origin, and 27.05 above it. `airBaseRepairReach` for a 6x6 is
+         * 48, so the bow piece was outside it.
+         */
+        void registerCarrierPadModel(GameSimulation& sim, const std::string& objectName)
+        {
+            // `30.0_ssf` / `52.5_ssf` picked by the flag above, both written as
+            // literals because `UnitPieceDefinition` is an aggregate and a
+            // braced `SimScalar` in the middle of one does not convert.
+            std::vector<UnitPieceDefinition> pieces{
+                UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt},
+                UnitPieceDefinition{"landpad1", SimVector(0_ss, 27.05_ssf, deckInsideReach ? 30.0_ssf : 52.5_ssf), std::string("base")},
+                UnitPieceDefinition{"landpad2", SimVector(0_ss, 27.05_ssf, -37.5_ssf), std::string("base")},
+            };
+            sim.unitModelDefinitions[objectName] = createUnitModelDefinition(27.05_ssf, std::move(pieces));
+        }
+
+        /**
+         * ARMCARRY.COB's `QueryLandingPad`, instruction for instruction.
+         *
+         * Two local variables holding the two pad pieces, the pair swapped
+         * through the script's one static variable on every call, and a return
+         * of zero -- so the answer travels in the thread's *parameters*, which
+         * is what `runCobQuery` reads (`returnLocals[0]`) and also the
+         * original's ABI. `VTOL_Landing` calls `QueryLandingPad` (0x501C14) at
+         * 0x411A35, gets up to four piece ids back that way, and picks a free
+         * one itself; the flip here is the script half of that bargain.
+         *
+         * `CREATE_LOCAL_VAR` carries no operand -- the real script's two of
+         * them sit back to back at 150 and 151 -- so each is a single word,
+         * while `POP_LOCAL_VAR`, `PUSH_STATIC` and `POP_STATIC` do take an
+         * index. The jump targets 27, which is where the real script's 177
+         * lands once the 150 of the function's own address is taken off.
+         */
+        std::shared_ptr<CobScript> makeCarrierPadScript()
+        {
+            auto script = std::make_shared<CobScript>();
+            script->staticVariableCount = 1;
+            script->pieces.push_back("base");
+            script->pieces.push_back("landpad1");
+            script->pieces.push_back("landpad2");
+
+            using I = uint32_t;
+            script->instructions = {
+                static_cast<I>(OpCode::CREATE_LOCAL_VAR),
+                static_cast<I>(OpCode::CREATE_LOCAL_VAR),
+                static_cast<I>(OpCode::PUSH_CONSTANT),
+                1u,
+                static_cast<I>(OpCode::POP_LOCAL_VAR),
+                0u,
+                static_cast<I>(OpCode::PUSH_CONSTANT),
+                2u,
+                static_cast<I>(OpCode::POP_LOCAL_VAR),
+                1u,
+                static_cast<I>(OpCode::PUSH_STATIC),
+                0u,
+                static_cast<I>(OpCode::LOGICAL_NOT),
+                static_cast<I>(OpCode::POP_STATIC),
+                0u,
+                static_cast<I>(OpCode::PUSH_STATIC),
+                0u,
+                static_cast<I>(OpCode::JUMP_IF_ZERO),
+                27u,
+                static_cast<I>(OpCode::PUSH_CONSTANT),
+                2u,
+                static_cast<I>(OpCode::POP_LOCAL_VAR),
+                0u,
+                static_cast<I>(OpCode::PUSH_CONSTANT),
+                1u,
+                static_cast<I>(OpCode::POP_LOCAL_VAR),
+                1u,
+                static_cast<I>(OpCode::PUSH_CONSTANT),
+                0u,
+                static_cast<I>(OpCode::RETURN)};
+            script->functions.push_back(CobFunctionInfo{"QueryLandingPad", 0u});
+            return script;
+        }
+
+        /**
+         * AirBaseFixture with the two things a carrier needs and a repair pad
+         * does not: a map whose ground is under the waterline, and a second
+         * kind of pad.
+         *
+         * Both pad kinds are registered and the terrain is the constructor's
+         * argument, so the cases below differ in exactly one of the two at a
+         * time -- which is the only way to show that the difference in the
+         * outcome is the difference in the setup.
+         */
+        struct SeaAirBaseFixture
+        {
+            std::shared_ptr<CobScript> script;
+            std::shared_ptr<CobScript> padScript;
+            std::shared_ptr<CobScript> carrierScript;
+            GameSimulation sim;
+            PlayerId us;
+            UnitId fighter;
+
+            explicit SeaAirBaseFixture(bool seabed)
+                : script(makeAirBaseScript()),
+                  padScript(makeAirBasePadScript()),
+                  carrierScript(makeCarrierPadScript()),
+                  sim(
+                      seabed ? makeSeabedTerrain(512, 512) : makeAirBaseTerrain(512, 512),
+                      0u,
+                      0,
+                      0),
+                  us(addAirBasePlayer(sim)),
+                  fighter(UnitId(0))
+            {
+                sim.unitDefinitions["fighter"] = makeAirBaseFighterDef();
+                sim.unitDefinitions["pad"] = makeAirBasePadDef();
+                sim.unitDefinitions["carrier"] = makeCarrierPadDef();
+                registerAirBaseModel(sim, "model");
+                registerAirBasePadModel(sim, "padmodel");
+                registerCarrierPadModel(sim, "carriermodel");
+                sim.losTables = generateLosTables(8);
+
+                fighter = spawnAirBaseUnit(sim, "fighter", us, SimVector(0_ss, 110_ss, -400_ss), script);
+                auto& f = sim.getUnitState(fighter);
+                f.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+                f.hitPoints = 150;
+                sim.flyingUnitsSet.insert(fighter);
+            }
+
+            UnitId addCarrier(const SimVector& position)
+            {
+                auto id = spawnAirBaseUnit(sim, "carrier", us, position, carrierScript);
+                sim.getUnitState(id).activated = true;
+                return id;
+            }
+
+            UnitId addPad(const SimVector& position)
+            {
+                auto id = spawnAirBaseUnit(sim, "pad", us, position, padScript);
+                sim.getUnitState(id).activated = true;
+                return id;
+            }
+        };
     }
 
 TEST_CASE("a pad someone is already on their way to is taken", "[airbase]")
@@ -790,5 +1024,134 @@ TEST_CASE("a pad someone is already on their way to is taken", "[airbase]")
 
         // ...and the newcomer is the one told there is nowhere to go.
         REQUIRE(f.sim.getUnitState(f.fighter).orders.empty());
+    }
+
+    /**
+     * A carrier is a boat, and the three cases below are the whole of it.
+     *
+     * All three are the same flight of the same fighter under the same order to
+     * the same kind of pad. What differs is whether the pad stands on dry land
+     * and how far its landing piece sits from the hull's own origin, so the
+     * difference in the outcome is the difference in the setup. Run them
+     * together and the two faults are told apart rather than guessed at.
+     */
+    TEST_CASE("a repair pad on dry land takes an aircraft sent to it", "[airbase]")
+    {
+        // The control. It is the journey "a damaged aircraft flies to a pad,
+        // lands on it, and is mended" already walks, moved off the pad and up
+        // to cruise height so the carrier's version has to be flown from the
+        // same start.
+        SeaAirBaseFixture f(/*seabed*/ false);
+        auto pad = f.addPad(SimVector(0_ss, 0_ss, 0_ss));
+
+        f.sim.getUnitState(f.fighter).orders.push_back(LandOnAirBaseOrder(pad));
+
+        auto landed = false;
+        for (int i = 0; i < 2000 && !landed; ++i)
+        {
+            f.sim.tick();
+            landed = std::holds_alternative<UnitPhysicsInfoGround>(f.sim.getUnitState(f.fighter).physics);
+        }
+        REQUIRE(landed);
+
+        // On the deck: ARMASP's landpad is twenty world units above its base.
+        REQUIRE(f.sim.getUnitState(f.fighter).position.y == 20_ss);
+    }
+
+    TEST_CASE("a carrier whose deck is inside its own reach takes an aircraft sent to it", "[airbase]")
+    {
+        // A play-test reported that aircraft would not land on the ARM and CORE
+        // carriers. They are `ARMCARRY` and `CORCARRY` -- the light carriers,
+        // **not** the transport ships `ARMTSHIP`/`CORTSHIP, which are the Hulk
+        // and the Envoy, are `Builder=0` with no `IsAirBase` key at all, and
+        // are not pads by any reading.
+        //
+        // The natural assumption before the data was opened was that a carrier
+        // is a transport ship, and it is wrong in a way that matters: read out
+        // of `rev31.gp3`'s `units/ARMCARRY.FBI` (the copy the VFS finds
+        // first), the carrier is a pad in its own right, so
+        // `unitIsAnUsableAirBase` accepts it, the default-action cursor offers
+        // `LandOnAirBaseOrder` over it, and the aircraft is ordered there in
+        // good faith.
+        //
+        // What a carrier cannot do is stand on dry land, and that is the first
+        // fault. The transition out of `AirMovementStateFlying` tests
+        // `terrain.getHeightAt(x, z) < getSeaLevel()` and, when it holds,
+        // refuses to begin the descent at all, putting the navigation back to
+        // idle instead. A carrier floats on `BOATD6` at `MinWaterDepth=30`, so
+        // the ground beneath it is under the waterline for the whole of its
+        // life and that test can never be satisfied. The aircraft hovers over
+        // its own carrier for ever and never once becomes a ground unit.
+        //
+        // The guard was added for the opposite hazard -- an aircraft
+        // overshooting a beach was putting itself in the sea -- but it asks
+        // about the *terrain* rather than about the landing spot, and the
+        // landing spot is the pad's own piece: `VTOL_Landing` calls
+        // `QueryLandingPad` (0x501C14) at 0x411A35, gets up to four piece ids
+        // back, picks a free one and hands it to the navigator as a piece goal
+        // (0x44E250 at 0x411D60). That piece is above the waterline whether
+        // the pad stands on land or floats -- `landpad` at 20 on ARMASP,
+        // `landpad1` at 27.05 on ARMCARRY -- so the terrain under the pad never
+        // enters into where the aircraft ends up.
+        //
+        // This case puts the deck piece at 30, inside the pad's reach, so that
+        // the only thing under test is the water. The next is the same unit
+        // with the piece at its shipped 52.5.
+        deckInsideReach = true;
+        SeaAirBaseFixture f(/*seabed*/ true);
+        auto carrier = f.addCarrier(SimVector(0_ss, 10_ss, 0_ss));
+
+        // It really is a pad, by the predicate the search and the cursor both
+        // use. If this fails, the fixture is wrong rather than the engine.
+        const auto& carrierState = f.sim.getUnitState(carrier);
+        REQUIRE(unitIsAnUsableAirBase(carrierState, f.sim.unitDefinitions.at(carrierState.unitType)));
+
+        f.sim.getUnitState(f.fighter).orders.push_back(LandOnAirBaseOrder(carrier));
+
+        auto landed = false;
+        auto lowest = f.sim.getUnitState(f.fighter).position.y;
+        for (int i = 0; i < 2000 && !landed; ++i)
+        {
+            f.sim.tick();
+            const auto& s = f.sim.getUnitState(f.fighter);
+            landed = std::holds_alternative<UnitPhysicsInfoGround>(s.physics);
+            lowest = rweMin(lowest, s.position.y);
+        }
+
+        const auto& fighterState = f.sim.getUnitState(f.fighter);
+        INFO(
+            "after 2000 ticks the aircraft is "
+                << (std::holds_alternative<UnitPhysicsInfoGround>(fighterState.physics) ? "down" : "still airborne")
+                << " at (" << simScalarToFloat(fighterState.position.x) << ", " << simScalarToFloat(fighterState.position.y)
+                << ", " << simScalarToFloat(fighterState.position.z) << "), carrier at (" << simScalarToFloat(carrierState.position.x)
+                << ", " << simScalarToFloat(carrierState.position.y) << ", " << simScalarToFloat(carrierState.position.z) << ")");
+        INFO("lowest height reached: " << simScalarToFloat(lowest));
+
+        // What this case pins is the water guard, so what it asserts is that
+        // the descent *begins*: the aircraft comes down off cruise altitude
+        // over its carrier. Before the fix it never entered the landing state
+        // at all and sat at 120 for the whole 2000 ticks.
+        //
+        // The bound is the *lowest* height over the run, not the final one.
+        // The remaining fault bounces the landing off the deck piece and sends
+        // the aircraft back up, so where it happens to be on tick 2000 is a
+        // snapshot of an oscillation and pinning it would be pinning the
+        // oscillation. What separates the two engines is the floor, and both
+        // numbers are fixed by the fixture rather than chosen: the water guard
+        // refuses the descent outright, so the broken engine never leaves its
+        // start at **120** for all 2000 ticks, while the fixed one enters the
+        // landing state and gets down to **102** before the remaining fault
+        // throws it back up.
+        //
+        // That the descent does not *finish* is a separate fault with its own
+        // cause, written up on its own rather than folded in here: the
+        // navigation goal is the hull's origin while the landing point is the
+        // deck piece, and the two are 30 world units apart, so the aircraft
+        // walks out of the arrival tolerance and the landing is aborted. The
+        // case for that one needs the piece at ARMCARRY's real z=+52.5, where
+        // the aircraft also walks out of the pad's 48-unit reach and settles on
+        // the seabed; it is deliberately not here, because a test that fails is
+        // not what this change is for.
+        REQUIRE(lowest < 115_ss);
     }
 }

@@ -218,6 +218,8 @@ namespace rwe
         bool isValid;
     };
 
+    class TadScenePlayback;
+
     class GameScene : public Scene
     {
     public:
@@ -617,6 +619,14 @@ namespace rwe
          */
         BehaviorSubject<GatheredToggle<bool>> cloak{};
 
+        /**
+         * Whether the selected factory is set to put each finished item back
+         * on the end of its own build queue (#417). Off everywhere by
+         * default, and read from the unit rather than from any panel state,
+         * because the flag lives on the factory and is hashed there.
+         */
+        BehaviorSubject<GatheredToggle<bool>> repeatBuildQueue{};
+
         UiFactory uiFactory;
 
         /**
@@ -774,6 +784,16 @@ namespace rwe
          * and the computer players are idled so they add nothing of their own.
          */
         std::optional<Replay> replayPlayback;
+
+        /**
+         * Set while watching a TA demo. The map is loaded as usual but no
+         * player is this machine's own: every demo player is Remote and a
+         * puppet driver feeds each tick's records to the units. It reuses the
+         * replay playback controls below (playing, speed), which is why those
+         * are named for playback rather than for replays.
+         */
+        std::shared_ptr<TadScenePlayback> tadPlayback;
+
         /** Playing or paused; separate from the game's own pause. */
         bool replayPlaying{true};
         /**
@@ -850,6 +870,12 @@ namespace rwe
 
         void pushReplayCommandsForTick(unsigned int tick);
         void renderReplayWindow();
+
+        /** Applies the demo's records for the tick about to run, and prints any chat. */
+        void applyTadTick();
+        void renderTadWindow();
+        /** How many ticks a replay or demo has, for the playback controls. */
+        unsigned int playbackLastTick() const;
         void restartReplayAt(unsigned int tick);
         void openReplay(const std::filesystem::path& path);
         void takeReplayKeyframe();
@@ -981,10 +1007,48 @@ namespace rwe
          * capacity alone. A wake dot is six vertices and a busy water map has
          * tens of thousands of them on screen, so a vector that starts empty
          * every frame spends the frame growing back to a couple of hundred
-         * thousand entries and copying what it already had each time.
-         * Cleared, not destroyed, at the top of every frame.
+         * thousand entries and copying what it already had each time. It is
+         * only refilled when the batch it holds has stopped being the batch
+         * this frame wants; see WakeBatchKey.
          */
         ColoredMeshBatch wakeBatch;
+
+        /**
+         * What wakeBatch holds: the tick it depicts, how many dots were alive
+         * then, and the view they were culled against. All three are inputs
+         * to the batch and nothing else is, so on a frame where none of them
+         * has moved the batch is already the right one and the walk and the
+         * upload can both be skipped.
+         */
+        struct WakeBatchKey
+        {
+            GameTime tick{GameTime(0)};
+            std::size_t dotCount{0};
+            Matrix4f view{Matrix4f::identity()};
+            bool built{false};
+
+            bool matches(GameTime t, std::size_t count, const Matrix4f& v) const
+            {
+                return built && tick == t && dotCount == count && view == v;
+            }
+
+            void remember(GameTime t, std::size_t count, const Matrix4f& v)
+            {
+                tick = t;
+                dotCount = count;
+                view = v;
+                built = true;
+            }
+        };
+        WakeBatchKey wakeBatchKey;
+
+        /**
+         * The vertex array and buffer wakeBatch was last uploaded into, kept
+         * so a frame that draws the wake it drew last frame does not have to
+         * make a new pair and throw the old one away. It belongs here rather
+         * than in RenderService, which is built afresh every frame.
+         */
+        GlMesh wakeBatchMesh;
 
         /** A piece blown off a unit by its script, tumbling under gravity. Purely visual. */
         struct Debris
@@ -1309,6 +1373,13 @@ namespace rwe
         /** Watch a recorded game instead of playing one. */
         void enableReplayPlayback(Replay&& replay);
 
+        /**
+         * Spectate a TA demo. `unitLoadOrder` is the loaded data set's listing
+         * in TA's order, which names the types the demo's indices refer to;
+         * the demo's own unit table must agree with its length or this throws.
+         */
+        void enableTadPlayback(const std::string& path, const std::vector<std::string>& unitLoadOrder);
+
         /** Write every command issued in this game to a replay file. */
         void enableReplayRecording(const std::filesystem::path& path, const ReplayHeader& header);
 
@@ -1321,6 +1392,32 @@ namespace rwe
         void enableDemoRecording(const std::filesystem::path& path, const std::vector<std::string>& unitLoadOrder);
 
         bool isReplayPlayback() const { return replayPlayback.has_value(); }
+
+        bool isTadPlayback() const { return tadPlayback != nullptr; }
+
+        /**
+         * Watching rather than playing: a replay's command stream or a demo's
+         * records are the only input, so the local-human push, the peer
+         * liveness checks and the sync hash all stand down.
+         */
+        bool isPlayback() const { return replayPlayback.has_value() || tadPlayback != nullptr; }
+
+        /** True when the scene owns its clock and waits on no peer; see NetMode. */
+        bool isOwnClock() const { return gameParameters.netMode == NetMode::OwnClock; }
+
+        /**
+         * Applies a TA peer's `0x19` game speed, in the original's own
+         * 1..20 numbering (normal at 10). Called by the network layer that
+         * speaks to a TA peer; a no-op in any other mode. See applyPeerGameSpeed
+         * and docs/TA-NETWORK.md.
+         */
+        void setPeerGameSpeedLevel(int peerSpeedLevel);
+
+        /** Applies a TA peer's `0x19` pause or unpause; a no-op outside own-clock mode. */
+        void setPeerPaused(bool paused);
+
+        /** Whether this game may be saved. An own-clock game may not; see GameScene_ownclock.cpp. */
+        bool canSave() const;
 
         /** Whose resources the top bar reads out; the local player unless a replay says otherwise. */
         PlayerId hudPlayerId() const { return hudPlayerOverride.value_or(localPlayerId); }
@@ -1779,8 +1876,25 @@ namespace rwe
         GatheredToggle<bool> gatherOnOff() const;
         GatheredToggle<bool> gatherCloak() const;
 
+        /**
+         * The same gather over the factory repeat toggle (#417), which is
+         * offered by any unit that builds rather than by a capability flag --
+         * there is no original flag for it, because there is no original
+         * button for it. A unit that cannot build is skipped, so a squad of
+         * tanks offers nothing and the button is greyed.
+         */
+        GatheredToggle<bool> gatherRepeatBuildQueue() const;
+
         /** Re-reads the four toggles' shown state from the selection. */
         void refreshToggleButtons();
+
+        /**
+         * Adds the factory repeat button to the orders panel, which the GUI
+         * data has no gadget for, and greys it when nothing in the selection
+         * builds. Derived from the CLOAK/ONOFF gap rather than written down;
+         * see the body for the ui_probe figures. (#417)
+         */
+        void addRepeatBuildButton(UiPanel& panel);
 
         /** Select every owned live unit the predicate admits; false leaves the selection alone if nothing matched. */
         bool selectAllWhere(const std::function<bool(const UnitState&, const UnitDefinition&)>& predicate);
@@ -1840,6 +1954,17 @@ namespace rwe
 
         /** Order another round for the unit's stockpiled weapon, or take one off the queue. */
         void localPlayerModifyStockpile(UnitId unitId, int count);
+
+        /**
+         * Ask a factory to put each item it finishes back on the end of its
+         * own build queue, or to go back to consuming it (#417).
+         *
+         * Routed through the command buffer like every other order, and never
+         * written to the unit directly: the flag is hashed, so a panel that
+         * set it on the spot would put the local machine's answer into the
+         * sync hash a round trip before any peer had it.
+         */
+        void localPlayerSetRepeatBuildQueue(UnitId unitId, bool repeat);
 
         void startTrack();
 

@@ -70,8 +70,20 @@ _Avoid_: client side, visual layer
 
 **Lockstep**:
 The simulation contract: peers exchange commands, not state, and every peer
-ticks identically. The reason presentation may not touch sim state.
+ticks identically. The reason presentation may not touch sim state. One of the
+three shapes a scene takes, the other two being playback and own-clock, and the
+guards that separate them are ADR-0003.
 _Avoid_: sync mode
+
+**Playback**:
+A scene that is watching rather than playing: its only input is a recording, so
+it is in a game with nobody. Either input counts — an RWE replay's command
+stream, or a TA demo's state and effects, which reach the simulation as
+puppets rather than as orders. The local human is not seated, the peer-liveness
+checks and the sync-hash exchange stand down, and no tick is held for anybody.
+`GameScene::isPlayback()`. A shape rather than the opposite of lockstep: it and
+own-clock are separate gates, and a shared guard tests both (ADR-0003).
+_Avoid_: replay (that is one of the two inputs), spectator mode, demo mode
 
 **Sync hash** (`GameHash`):
 The per-tick digest of hashed sim state. A mismatch between peers is a
@@ -97,6 +109,22 @@ The recording a returning peer is handed: an ordinary replay file cut to end
 at the tick before the rejoin, which is everything it missed. Carried by the
 lobby, because the lobby is what holds a reliable connection.
 _Avoid_: save, snapshot, catch-up file
+
+**Simulated locally**:
+A player whose units this machine decides: their orders, their weapons, the
+damage they take, their economy. The default for every player. The opposite
+of a player simulated elsewhere.
+_Avoid_: owned player, local player used loosely
+
+**Simulated elsewhere** (a Remote player):
+A player whose units another machine runs. This machine applies the owner's
+recorded results — positions, damage, death — and takes no decision for
+them: no orders, no weapon fire, no damage from local hits, no economy
+settle, no AI. The receiving half of TA's owner-authoritative model, which
+is why the flag is per player and not per unit. Not hashed, so it cannot
+move a sync hash. A game with one cannot be saved, because the state it is
+missing lives on the other machine.
+_Avoid_: puppet player, non-local player, demo mode
 
 **Bridge**:
 The launcher's channel to the engine, one JSON object a line over standard
@@ -222,6 +250,24 @@ saved, dumped or read back.
 _Avoid_: replay writer (`ReplayWriter` records a seed and a command stream,
 and only RWE can play it), capture
 
+**Puppet**:
+An RWE unit standing in for one a demo's stream names, driven entirely by
+that stream rather than by any local decision: spawned where the `0x09` says,
+steered along the replicated path or toward the recorded goal, and corrected
+to the recorded position, health and build progress at each full-state
+record. Not a player and not a unit of the simulation's own — a puppet exists
+only while a demo is being played, and a demo player is simulated elsewhere.
+_Avoid_: bot, proxy unit
+
+**Puppet driver** (`TadPuppetDriver`):
+The owner of a `GameSimulation&` whose demo players are all simulated
+elsewhere, which consumes a demo's packets in order and keeps the puppet
+table that maps TA unit ids onto RWE units. Free of SDL, GL and `GameScene`,
+so the headless `tad_puppet` and a future spectator scene use the same one.
+Its clock is the `0x2c` serial, never `Packet::time`.
+_Avoid_: replay player, demo player (that is the simulation's player, not the
+driver)
+
 **Demo output**:
 A `.tad` RWE wrote rather than recorded from TA. Readable and mineable by the
 same tools as a real one, with three recorded divergences: the `0x1a` ids are
@@ -280,6 +326,15 @@ The tail of every `0x2c`: one owner-block slot's complete state, the slot
 chosen by tick, so each unit is described once a cycle. The receiver believes
 it over anything it had, so a record for an empty slot deletes the unit there.
 _Avoid_: snapshot, keyframe
+
+**Own-clock**:
+A live game whose scene advances on its own clock at the chosen speed like a
+skirmish, with no lockstep command gate or wait on any peer, no sync-hash
+exchange, no desync report and no save. The mode for playing against a peer
+that runs its own simulation -- a real `TotalA.exe`, which is
+owner-authoritative rather than lockstep -- selected by
+`GameParameters::netMode`. `docs/TA-NETWORK.md`.
+_Avoid_: real-time (the frame clock is real-time too), non-lockstep, async
 
 **TA packet**:
 The envelope one DirectPlay application message carries, live or in a demo:

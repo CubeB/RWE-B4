@@ -52,8 +52,8 @@ namespace rwe
 
     bool GameScene::localHumanCommandsAreFedPerTick() const
     {
-        return !replayPlayback
-            && !gameNetworkService->hasRemotePeers()
+        return !isPlayback()
+            && (isOwnClock() || !gameNetworkService->hasRemotePeers())
             && simulation.getPlayer(localPlayerId).type == GamePlayerType::Human;
     }
 
@@ -78,8 +78,11 @@ namespace rwe
 
     void GameScene::updatePeerLiveness()
     {
-        // A recording has no peers; its every player is fed from the file.
-        if (replayPlayback)
+        // A recording has no peers; its every player is fed from the file. A
+        // demo has no peers either and no commands to wait for. Nor does an
+        // own-clock game wait on anyone, so there is no liveness to track and
+        // nobody to drop; its peer is not an RWE lockstep peer.
+        if (isPlayback() || isOwnClock())
         {
             return;
         }
@@ -196,9 +199,9 @@ namespace rwe
 
     void GameScene::updateEffectiveSpeed()
     {
-        // A lone player, or a recording, runs at the speed that was chosen:
-        // there is no other machine to slow down for.
-        if (replayPlayback || !gameNetworkService->hasRemotePeers())
+        // A lone player, a recording, or an own-clock game runs at the speed
+        // that was chosen: there is no lockstep peer to slow down for.
+        if (isPlayback() || isOwnClock() || !gameNetworkService->hasRemotePeers())
         {
             effectiveSpeedPermille = static_cast<unsigned int>(gameSpeed.perMille());
             limitingPeers.clear();
@@ -447,7 +450,7 @@ namespace rwe
         ImGui::Text("tick %u", sceneTime.value);
         plot("##ticks", tickRate, tickCaption, expected * 1.5f);
 
-        if (!replayPlayback)
+        if (!isPlayback())
         {
             auto worstAverage = 0.0f;
             auto worstDeviation = 0.0f;
@@ -473,7 +476,7 @@ namespace rwe
             ImGui::Text("last stall waited for %s", names(lockstepStats.lastWaitingFor()).c_str());
         }
 
-        if (replayPlayback)
+        if (isPlayback())
         {
             ImGui::End();
             return;

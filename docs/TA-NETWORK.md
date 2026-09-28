@@ -297,6 +297,24 @@ The estimate made before the spike, revised by what it found:
 The order of work in #386 stands: puppet playback of demos (#387) is the receiving half, and
 spectating a live game comes before playing in one.
 
+## RWE's own-clock mode
+
+A game against a real `TotalA.exe` cannot be lockstep. The peer runs its own simulation and waits
+for nobody, so RWE has to do the same. `GameParameters::netMode` selects `NetMode::OwnClock`, in
+which `GameScene` ticks on its own clock at the chosen speed like a skirmish: no command gate and
+no wait on any peer, no sync-hash exchange, no desync report and no save. The local player plays
+exactly as in a skirmish -- input, interface and build menus unchanged. `Lockstep` stays the
+default and is untouched.
+
+The `0x19` game speed and pause reach the scene through `GameScene::setPeerGameSpeedLevel` and
+`GameScene::setPeerPaused`, which the network layer calls once it can decode them. RWE follows the
+peer's speed so the two machines advance at the same rate: the level is the original's own 1..20
+numbering, normal at 10, which RWE maps onto its own steps (9 is normal). **What TA does when a
+peer ignores a speed change was never tried.** The fake host ignored the joiner's `0x19` and the
+game carried on, but whether a real TA then resends, fights the peer, or drifts out of step is not
+known; the hook is one-way and affects nothing but the clock, so a later issue can try the other
+half from the wire without changing this one.
+
 ## TA Forever
 
 TA Forever's `gpgnet4ta` relays DirectPlay traffic between players and rewrites only the addresses
@@ -310,7 +328,8 @@ be with that project's agreement and identifying itself as RWE.
 - **Joining a TA host**: needs real unit CRCs, computed (D7) or harvested from demos.
 - **A status `0x20` built from fields**: the fake host replayed the recorded host's.
 - **Game speed**: a player's `0x19` reached a host that ignored it; what TA does when a peer
-  does not follow a speed change was not tried.
+  does not follow a speed change was not tried. RWE follows it, through the own-clock mode
+  above; the other half is still open, to be tried once a peer exists.
 - **Resource statistics**: the host sent no `0x28` after the replay and nothing complained, but
   what the joiner then showed for the host's economy was not looked at.
 - **`0x40` in the options byte**, and why `+los` did nothing with cheats allowed.

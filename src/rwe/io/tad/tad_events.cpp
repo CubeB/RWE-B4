@@ -258,6 +258,70 @@ namespace rwe
     namespace
     {
         /**
+         * Reads a chat body as TA's recorder writes it: a NUL-terminated byte
+         * string, with anything unprintable dropped and the length capped at
+         * the recorder's own 64-byte message buffer. Untrusted input, so the
+         * cap is applied before a byte is stored and the terminator is the
+         * first NUL *or* the end of the slice, whichever comes first.
+         */
+        std::string readChatText(const uint8_t* p, std::size_t len, bool& truncated)
+        {
+            constexpr std::size_t maxLength = 64;
+            std::string out;
+            for (std::size_t i = 0; i < len; ++i)
+            {
+                auto c = p[i];
+                if (c == 0)
+                {
+                    break;
+                }
+                if (c < 0x20 || c == 0x7f)
+                {
+                    continue;
+                }
+                if (out.size() >= maxLength)
+                {
+                    truncated = true;
+                    break;
+                }
+                out.push_back(static_cast<char>(c));
+            }
+            return out;
+        }
+    }
+
+    std::optional<TadChat> tadDecodeChat(const TadBytes& s)
+    {
+        // The table sizes a normal record at 65; an older recorder's overlong
+        // message is emitted whole, so any length past the code byte is read
+        // rather than refused, and the reader caps it.
+        if (s.size() < 2 || static_cast<TadSubPacketCode>(s[0]) != TadSubPacketCode::Chat)
+        {
+            return std::nullopt;
+        }
+
+        TadChat result;
+        result.text = readChatText(&s[1], s.size() - 1, result.truncated);
+        return result;
+    }
+
+    std::optional<TadAllyChat> tadDecodeAllyChat(const TadBytes& s)
+    {
+        if (!is(s, TadSubPacketCode::AllyChat, 73))
+        {
+            return std::nullopt;
+        }
+
+        TadAllyChat result;
+        result.fromDplayId = readU32(&s[1]);
+        result.toDplayId = readU32(&s[5]);
+        result.text = readChatText(&s[9], s.size() - 9, result.truncated);
+        return result;
+    }
+
+    namespace
+    {
+        /**
          * Reads the way 0x415DC0 does: fields least significant bit first,
          * out of the subpacket taken as one little-endian integer.
          *
@@ -537,6 +601,11 @@ namespace rwe
         }
 
         std::sort(unitFileStems.begin(), unitFileStems.end());
+
+        // TA's file system is case-insensitive, so a mod that ships ARMCSA.FBI
+        // over base TA's ArmCSA.fbi has one unit type, not two -- the merged
+        // listing presents both spellings, and ProTA 4.8 has seven such pairs.
+        unitFileStems.erase(std::unique(unitFileStems.begin(), unitFileStems.end()), unitFileStems.end());
         return unitFileStems;
     }
 

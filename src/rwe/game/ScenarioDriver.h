@@ -5,6 +5,7 @@
 #include <map>
 #include <optional>
 #include <rwe/grid/Point.h>
+#include <rwe/sim/SimVector.h>
 #include <rwe/sim/UnitId.h>
 #include <set>
 #include <string>
@@ -128,6 +129,21 @@ namespace rwe
 
         /** A real left click at a frame coordinate. */
         void clickAt(int x, int y);
+
+        /** The unit's current simulation position, or nothing if it is gone. */
+        std::optional<SimVector> unitPosition(UnitId unitId) const;
+
+        /** The local player's own move order, through the real order path. */
+        void moveOrder(UnitId unitId, const SimVector& destination);
+
+        /** A TA peer's `0x19` game speed, in the original's 1..20 numbering. */
+        void peerGameSpeed(int peerSpeedLevel);
+
+        /** A TA peer's `0x19` pause or unpause. */
+        void peerPaused(bool paused);
+
+        /** Frames (headless updates) the run has seen; one tick per update at 1x. */
+        unsigned int frameCount() const { return framesSeen; }
 
         /** A real left click at the centre of the named gadget on the live panel. */
         void clickGadget(const std::string& name);

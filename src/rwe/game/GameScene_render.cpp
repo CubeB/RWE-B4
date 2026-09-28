@@ -1630,16 +1630,37 @@ namespace rwe
 
         {
             RWE_RENDERPROF("w.wake");
-            wakeBatch.lines.clear();
-            wakeBatch.triangles.clear();
-            for (const auto& dot : wakeDots)
-            {
-                drawWakeDot(renderTime(), viewProjectionMatrix, dot, wakeBatch);
-            }
             RWE_RENDERPROF_COUNT("n.particles", particles.size());
             RWE_RENDERPROF_COUNT("n.wakedots", wakeDots.size());
+
+            // The batch is a pure function of three things: the tick it
+            // depicts, the dots alive at that tick, and the view they are
+            // culled against. The first two move once a tick -- a dot is laid
+            // and stepped by the tick, and its colour and position both come
+            // out of the tick -- and the third only when the camera does. A
+            // frame where none of them has moved is drawing the batch it
+            // already has, and at sixty frames a second over a thirty-Hz
+            // world that is at least half of them. So the walk and the
+            // upload are both skipped and the draw stands alone.
+            auto const now = renderTime();
+            auto const rebuilt = !wakeBatchKey.matches(now, wakeDots.size(), viewProjectionMatrix);
+            if (rebuilt)
+            {
+                RWE_RENDERPROF("w.wake.build");
+                buildWakeDotBatch(now, viewProjectionMatrix, wakeDots, wakeBatch);
+                wakeBatchKey.remember(now, wakeDots.size(), viewProjectionMatrix);
+            }
+            // n.waketri counts vertices, six to a dot, and is the figure
+            // PROFILING.md names for telling two runs apart; n.wakevisible is
+            // the same number as dots, which is what says how much of the
+            // walk the view actually wanted.
             RWE_RENDERPROF_COUNT("n.waketri", wakeBatch.triangles.size());
-            worldRenderService.drawBatch(wakeBatch, viewProjectionMatrix);
+            RWE_RENDERPROF_COUNT("n.wakevisible", wakeBatch.triangles.size() / 6);
+
+            {
+                RWE_RENDERPROF("w.wake.draw");
+                worldRenderService.drawBatchIfChanged(wakeBatch, wakeBatchMesh, rebuilt, viewProjectionMatrix);
+            }
         }
 
         ColoredMeshBatch terrainOverlayBatch;

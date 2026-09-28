@@ -1,6 +1,7 @@
 #include "GameSimulation.h"
 #include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/SimRandom.h>
+#include <rwe/sim/SimulationOwnership.h>
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -226,6 +227,12 @@ namespace rwe
 
     void GameSimulation::addAiController(PlayerId playerId, std::unique_ptr<AiPlayerController> controller)
     {
+        // A player whose units another machine decides is never given one.
+        if (!simulatesLocally(*this, playerId))
+        {
+            return;
+        }
+
         auto [it, inserted] = aiControllers.emplace(playerId, std::move(controller));
         if (inserted)
         {
@@ -1044,6 +1051,14 @@ namespace rwe
         auto& unit = unitRef->get();
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
 
+        // A Remote player's unit is the owner's to damage; a local builder
+        // cannot take it apart. Report the step finished so the order does
+        // not spin on a target it can never consume.
+        if (!simulatesLocally(*this, unit.owner))
+        {
+            return true;
+        }
+
         // The bite comes straight off the hit points. It does not go through
         // applyDamage: that path ends in killUnit, a wreck and an explosion,
         // and a reclaimed unit leaves none of those. Whether the original's
@@ -1304,6 +1319,11 @@ namespace rwe
         std::vector<UnitId> due;
         for (const auto& [unitId, unit] : units)
         {
+            if (!simulatesLocally(*this, unit.owner))
+            {
+                continue;
+            }
+
             if (unit.isAlive() && unit.selfDestructTime && gameTime >= *unit.selfDestructTime)
             {
                 due.push_back(unitId);
@@ -1327,6 +1347,11 @@ namespace rwe
         {
             auto& unit = entry.second;
             if (unit.isDead())
+            {
+                continue;
+            }
+
+            if (!simulatesLocally(*this, unit.owner))
             {
                 continue;
             }
@@ -3075,11 +3100,11 @@ namespace rwe
             return ProjectileCollisionInfoOutOfBounds();
         }
 
-        // Anything standing in the square is tested first, then the ground,
-        // then the sea (0x49B090, the ground at 0x49B36D and the sea at
-        // 0x49B3A1). So a round that dips below sea level over a wading
-        // unit's footprint hits the unit rather than the water, and one that
-        // passes both surfaces in a tick over a wet square has struck the
+        // The original's stop tests run in a fixed order (0x49B090): the
+        // square's units, then `unitsonly`, then the ground at 0x49B36D, then
+        // the sea at 0x49B3A1. So a round that dips below sea level over a
+        // wading unit's footprint hits the unit rather than the water, and one
+        // that passes both surfaces in a tick over a wet square has struck the
         // ground -- which a `groundbounce` round bounces off (issue #350).
         // Which art a detonation throws up is decided by the square, not by
         // this order; see isSquareUnderSea.
@@ -3098,6 +3123,19 @@ namespace rwe
             }
         }
 
+        // `unitsonly` sits between the last unit test and the first surface
+        // test (0x49B294), and a round carrying it comes straight back out
+        // here. It does not go on to test the ground or the sea, so a Mind Gun
+        // round flies through a hillside and through the water and only ever
+        // detonates on something alive. Nothing else about it changes: it
+        // still explodes on a unit, still hurts one, and still dies when its
+        // time or its range runs out.
+        auto weaponIt = simulation.weaponDefinitions.find(projectile.weaponType);
+        if (weaponIt != simulation.weaponDefinitions.end() && weaponIt->second.unitsOnly)
+        {
+            return std::nullopt;
+        }
+
         if (projectile.position.y <= *terrainHeight)
         {
             return ProjectileCollisionInfoTerrain();
@@ -3105,7 +3143,6 @@ namespace rwe
 
         auto seaLevel = simulation.terrain.getSeaLevel();
 
-        auto weaponIt = simulation.weaponDefinitions.find(projectile.weaponType);
         bool waterWeapon = weaponIt != simulation.weaponDefinitions.end() && weaponIt->second.waterWeapon;
         if (!waterWeapon && !simulation.noSeaLevelTrigger && seaLevel > *terrainHeight && projectile.position.y <= seaLevel)
         {
@@ -3411,6 +3448,14 @@ namespace rwe
 
     void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer, std::optional<PlayerId> sourceOwner, const char* deathCause)
     {
+        // Damage to a Remote player's unit is the owner's to report; a local
+        // projectile hitting it must not take hit points off. The owner's
+        // recorded damage arrives through applyRemoteDamage instead.
+        if (!simulatesLocally(*this, getUnitState(unitId).owner))
+        {
+            return;
+        }
+
         {
             // Scored by the music evaluator; carries owners so the scene
             // does not have to chase ids that may be dead by the time it
@@ -4182,8 +4227,14 @@ namespace rwe
         // run resource updates once per second
         if (gameTime % GameTime(SimTicksPerSecond) == GameTime(0))
         {
-            for (auto& player : players)
+            for (Index i = 0; i < getSize(players); ++i)
             {
+                if (!simulatesLocally(*this, PlayerId(i)))
+                {
+                    continue;
+                }
+
+                auto& player = players[i];
                 player.maxEnergy = player.hasBaseStorage ? player.startingEnergy : Energy(0);
                 player.maxMetal = player.hasBaseStorage ? player.startingMetal : Metal(0);
             }
@@ -4191,6 +4242,11 @@ namespace rwe
             for (auto& entry : units)
             {
                 auto& unit = entry.second;
+                if (!simulatesLocally(*this, unit.owner))
+                {
+                    continue;
+                }
+
                 const auto& unitDefinition = unitDefinitions.at(unit.unitType);
                 if (!unit.isBeingBuilt(unitDefinition))
                 {
@@ -4218,6 +4274,11 @@ namespace rwe
             {
                 const auto& unitId = entry.first;
                 auto& unit = entry.second;
+                if (!simulatesLocally(*this, unit.owner))
+                {
+                    continue;
+                }
+
                 const auto& unitDefinition = unitDefinitions.at(unit.unitType);
 
                 if (unit.activated)
@@ -4303,6 +4364,11 @@ namespace rwe
             // is paid before anything new.
             for (Index i = 0; i < getSize(players); ++i)
             {
+                if (!simulatesLocally(*this, PlayerId(i)))
+                {
+                    continue;
+                }
+
                 auto& player = players[i];
                 // Brutal computer players get a little extra for every unit of income.
                 auto bonus = resourceBonusFor(PlayerId(i));
@@ -4835,6 +4901,11 @@ namespace rwe
         {
             auto& unit = entry.second;
             const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+            if (!simulatesLocally(*this, unit.owner))
+            {
+                continue;
+            }
+
             if (unitDefinition.healTime == 0 || unit.isDead() || unit.isBeingBuilt(unitDefinition))
             {
                 continue;

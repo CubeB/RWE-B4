@@ -83,7 +83,27 @@ namespace rwe
             SimVector position;
         };
 
-        using Command = std::variant<IssueOrder, ModifyBuildQueue, ModifyStockpile, Stop, SetFireOrders, SetMovementOrders, SetOnOff, SetCloak, SelfDestruct, CancelBuildOrder>;
+        /**
+         * Put each item a factory finishes back on the end of its own build
+         * queue instead of consuming it, so one queued unit type loops.
+         *
+         * A command rather than a field the panel writes, because a toggle a
+         * player clicks is state two machines have to agree about: a factory
+         * that loops and one that does not build different units from the
+         * same queue. It rides the ordinary per-tick command stream like every
+         * other order, so it is applied on the same tick on every peer (#417).
+         *
+         * The setting is per unit rather than a game-wide option, so it needs
+         * no replay-header change: the command that sets it is in the command
+         * stream, and the flag it lands on is hashed and saved like the rest
+         * of the unit.
+         */
+        struct SetBuildQueueRepeat
+        {
+            bool repeat;
+        };
+
+        using Command = std::variant<IssueOrder, ModifyBuildQueue, ModifyStockpile, Stop, SetFireOrders, SetMovementOrders, SetOnOff, SetCloak, SelfDestruct, CancelBuildOrder, SetBuildQueueRepeat>;
 
         UnitId unit;
         Command command;
