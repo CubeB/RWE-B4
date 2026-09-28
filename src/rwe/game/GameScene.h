@@ -1902,6 +1902,45 @@ namespace rwe
         /** Ctrl+letter category selection, matched against the FBI Category tokens (CTRL_V and friends). */
         void selectAllByCategoryToken(const std::string& token);
 
+        /**
+         * The control name the side panel's idle-builder sign carries.
+         *
+         * RWE's own gadget, so unlike every other control on the panel it is
+         * not out of a side's gui file and carries no side prefix: the name is
+         * matched whole, and there is one spelling of it whatever side is
+         * playing.
+         */
+        static constexpr const char* IdleBuilderSignName = "IDLEBUILDERS";
+
+        /**
+         * Puts the idle-builder sign on a freshly built panel, if it fits.
+         *
+         * Every panel the scene puts up is a new object and the old one is
+         * destroyed with whatever the selection was showing, so this runs again
+         * for each of them rather than once at start-up. It lays the sign out
+         * against the panel's own box and declines to add it where that would
+         * cover a gadget the gui file put there.
+         */
+        void attachIdleBuilderSign(UiPanel& panel);
+
+        /**
+         * Hands the sign this frame's count, read from the simulation.
+         *
+         * Once a frame, and a read: see game/idle_builders.h for why the count
+         * is a thing the simulation already knows rather than something the
+         * interface keeps.
+         */
+        void updateIdleBuilderSign();
+
+        /**
+         * Selects the local player's next idle construction unit and centres
+         * the camera on it -- what a click on the sign does.
+         *
+         * Selection and camera are both the scene's own, so this sends no
+         * command and changes nothing any other peer could see.
+         */
+        void selectNextIdleBuilder();
+
         /** F5-F8 camera bookmarks; Ctrl+Fn stores, Fn recalls. */
         std::array<std::optional<Vector3f>, 4> cameraBookmarks;
 
@@ -1910,6 +1949,19 @@ namespace rwe
 
         /** The cursor for the 'n' key's walk through the player's own units. */
         std::optional<UnitId> nextUnitCursor;
+
+        /**
+         * The idle builder the sign last jumped to, so the next click moves on
+         * to another one rather than back to the same.
+         *
+         * Presentation state, like nextUnitCursor above: it is where the
+         * rotation through a list the simulation owns has got to, and it is
+         * never hashed, saved or sent. Nothing about it reaches a unit.
+         */
+        std::optional<UnitId> lastIdleBuilderShown;
+
+        /** Set once the sign has been found on a panel, so the log says so once rather than every frame. */
+        bool reportedIdleBuilderSignCount{false};
 
         /**
          * The battle test. Empty unless the harness asked for it: each

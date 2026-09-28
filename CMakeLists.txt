@@ -343,6 +343,7 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_chat.cpp
     src/rwe/game/GameScene_commands.cpp
     src/rwe/game/GameScene_debug.cpp
+    src/rwe/game/GameScene_idle.cpp
     src/rwe/game/GameScene_endgame.cpp
     src/rwe/game/GameScene_input.cpp
     src/rwe/game/GameScene_menu.cpp
@@ -484,6 +485,8 @@ set(SOURCE_FILES
     src/rwe/game/SimEventLog.h
     src/rwe/game/ScenarioDriver.cpp
     src/rwe/game/ScenarioDriver.h
+    src/rwe/game/idle_builders.cpp
+    src/rwe/game/idle_builders.h
     src/rwe/game/GameParameters.h
     src/rwe/io/lostdf/io.cpp
     src/rwe/io/lostdf/io.h
@@ -709,6 +712,8 @@ set(SOURCE_FILES
     src/rwe/ui/UiComponent.h
     src/rwe/ui/UiFactory.cpp
     src/rwe/ui/UiFactory.h
+    src/rwe/ui/UiIdleBuilderSign.cpp
+    src/rwe/ui/UiIdleBuilderSign.h
     src/rwe/ui/UiLabel.cpp
     src/rwe/ui/UiLabel.h
     src/rwe/ui/UiLightBar.cpp
@@ -1040,6 +1045,7 @@ set(TEST_FILES
     src/rwe/game/replaykeyframe.test.cpp
     src/rwe/game/savefileheader.test.cpp
     src/rwe/game/hoveredfeature.test.cpp
+    src/rwe/game/idle_builders.test.cpp
     src/rwe/game/infopanel.test.cpp
     src/rwe/game/orderbuttons.test.cpp
     src/rwe/game/PlayerCommand_hotkey.test.cpp
@@ -1216,6 +1222,7 @@ set(TEST_FILES
     src/rwe/util/range_util.test.cpp
     src/rwe/util/rwe_string.test.cpp
     src/rwe/ui/UiComponent.test.cpp
+    src/rwe/ui/UiIdleBuilderSign.test.cpp
     src/rwe/ui/UiTextBox.test.cpp
     src/rwe/ui/UiTextRegion.test.cpp
     src/rwe/ui/UiPanelFocus.test.cpp

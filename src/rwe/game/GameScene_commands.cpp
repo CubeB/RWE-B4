@@ -2578,6 +2578,24 @@ namespace rwe
                 setNextPanel(createOrdersPanel());
             }
         }
+        else if (message == IdleBuilderSignName)
+        {
+            // Ahead of the unit-type test below, which would otherwise be the
+            // last thing to have an opinion about a name it does not
+            // recognise. RWE's own control rather than one out of a gui file,
+            // so no side prefix and no ctrl key: it jumps to the player's next
+            // idle construction unit and centres the camera there.
+            //
+            // SMALLBUTTON is the click the ui factory already falls back to for
+            // a small button with no art of its own to deduce one from, and the
+            // sign is exactly that.
+            if (sounds.smallButton)
+            {
+                sceneContext.audioService->playSound(*sounds.smallButton);
+            }
+
+            selectNextIdleBuilder();
+        }
         else if (isStockpileButtonName(message))
         {
             // A launcher's build page has one live button and it orders a round
