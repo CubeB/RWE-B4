@@ -197,6 +197,8 @@ set(SOURCE_FILES
     src/rwe/ai/AiPersonality.h
     src/rwe/ai/AiBuildTree.cpp
     src/rwe/ai/AiBuildTree.h
+    src/rwe/ai/AiUnitDefIndex.cpp
+    src/rwe/ai/AiUnitDefIndex.h
     src/rwe/ai/EconomyManager.cpp
     src/rwe/ai/EconomyManager.h
     src/rwe/ai/LineOfFire.cpp
@@ -975,6 +977,7 @@ set(TEST_FILES
     src/rwe/ai/AiPlayerController.test.cpp
     src/rwe/ai/AiTuningProfile.test.cpp
     src/rwe/ai/AiBehaviour.test.cpp
+    src/rwe/ai/EconomyManager.test.cpp
     src/rwe/ai/AiBehaviour_army.test.cpp
     src/rwe/ai/AiBehaviour_commander.test.cpp
     src/rwe/ai/AiBehaviour_defences.test.cpp
