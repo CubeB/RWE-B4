@@ -258,11 +258,19 @@ namespace rwe
 
         void runUntil(asio::io_context& ioContext, const std::function<bool()>& done)
         {
-            auto deadline = std::chrono::steady_clock::now() + 5s;
+            // Poll without sleeping. The wait here is for handlers to run, and
+            // they run as fast as the machine will run them; sleeping between
+            // them only spends the budget. It used to sleep 1 ms a handler
+            // against a 5 s deadline, which a handshake of any length could
+            // exhaust in a debug build on a loaded machine -- five cases in
+            // this file failed there while the release build passed.
+            //
+            // The deadline is a backstop against a hang, not the test's
+            // assertion: `done()` below is what says the work finished.
+            auto deadline = std::chrono::steady_clock::now() + 60s;
             while (!done() && std::chrono::steady_clock::now() < deadline)
             {
                 ioContext.poll_one();
-                std::this_thread::sleep_for(1ms);
             }
             REQUIRE(done());
         }
