@@ -5,6 +5,8 @@
 #include <rwe/sim/movement.h>
 #include <rwe/sim/sim_test_util.h>
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <vector>
 
 /**
@@ -29,32 +31,65 @@ namespace rwe
     namespace
     {
         /**
-         * A map whose heights cover the whole byte range in a fixed pattern,
-         * so that steep ground, gentle ground, deep water and dry land are
-         * all present rather than whichever one a constant happened to be.
+         * A map with enough SHAPE that every movement class in the test below
+         * has somewhere to stand, and enough relief that a movement class is
+         * refused somewhere too.
          *
-         * Not makeFlatTerrain, which is the all-zero control and the wrong
-         * shape for this: on it, a cache that returned nothing at all would
-         * agree with the heightmap everywhere.
+         * The first version of this was an independent pseudorandom byte per
+         * cell, and it was a fixture that could not do its job: with a byte
+         * drawn afresh at each cell, the height range over a 2x2 block
+         * measured a minimum of 11 and a mean of 155 -- so EVERY footprint
+         * was steeper than every shipped MaxSlope (10 to 32) and no cell was
+         * walkable for any class, on any platform. The per-cell comparison
+         * still passed throughout: the cache agreed with the rule perfectly,
+         * on a map where the rule's answer was "nowhere" everywhere. Only the
+         * "some tile is walkable" assertion noticed. Found by the gcc-14 CI
+         * job, not here -- the assertion had never run locally, because
+         * CMake had not been re-run after this file was added to the target
+         * and the binary being tested did not contain it.
          *
-         * The pattern comes from its own generator rather than a random one
-         * because a failure has to be reproducible -- a test that fails on
-         * some runs and not others is worse than no test.
+         * So the terrain is built from smooth fields rather than noise:
+         *
+         *  - a ramp across the map, which puts heights across the whole byte
+         *    range and makes the left of the map high, gentle ground and the
+         *    right of it below sea level, so there is a coastline to test
+         *    the wet and dry slope limits against;
+         *  - two sine terms, so the ground is locally smooth -- which is the
+         *    property a slope limit is about, and the thing noise cannot
+         *    produce -- while still varying enough to refuse a tight limit;
+         *  - a plateau in the middle, a genuinely flat region whose slope is
+         *    zero, so a class with a tight limit has somewhere to succeed
+         *    even as well as somewhere to fail.
+         *
+         * Nothing here is random, so a failure is reproducible. It is also the
+         * same map on every platform: the only cell whose value lands exactly
+         * on an integer is x=0, whose 14.0 is 14*cos(0) and cos(0.0) is
+         * exactly 1.0 in IEEE-754 rather than by libm's accuracy, and the
+         * next nearest cell is 0.4998 away from a rounding boundary. Measured
+         * with a checksum of the whole grid at -O0 and -O2.
          */
         MapTerrain makeVariedTerrain(int width, int height, SimScalar seaLevel)
         {
             Grid<unsigned char> heights(width, height, static_cast<unsigned char>(0));
-            unsigned int state = 12345u;
             for (int y = 0; y < height; ++y)
             {
                 for (int x = 0; x < width; ++x)
                 {
-                    // A pseudorandom byte plus two ramps, so most cells
-                    // differ from their neighbour by a little and some by a
-                    // lot, and the map's extremes are 0 and 255.
-                    state = (state * 1103515245u) + 12345u;
-                    const auto n = (state >> 16u) & 0xFFu;
-                    heights.set(x, y, static_cast<unsigned char>((n + (x * 7u) + (y * 13u)) & 0xFFu));
+                    // The ramp alone would do for the coastline; the waves
+                    // are what put slope in the terrain without putting
+                    // noise there. Doubled x and y so the relief is a couple
+                    // of cycles across the map rather than a single slope.
+                    const auto fx = static_cast<double>(x) / static_cast<double>(width);
+                    const auto fy = static_cast<double>(y) / static_cast<double>(height);
+                    const double ramp = 250.0 * fx;
+                    const double waves = 18.0 * std::sin(fx * 12.0) + 14.0 * std::cos(fy * 9.0);
+
+                    // Flatten the middle third, so there is open ground.
+                    const bool onPlateau = x > width / 3 && x < (2 * width) / 3 && y > height / 3 && y < (2 * height) / 3;
+                    const double value = onPlateau ? 150.0 : (ramp + waves);
+
+                    const auto clamped = std::max(0.0, std::min(255.0, value));
+                    heights.set(x, y, static_cast<unsigned char>(clamped));
                 }
             }
             return MapTerrain(std::move(heights), seaLevel);
@@ -231,46 +266,72 @@ namespace rwe
         }
     }
 
+
+    /**
+     * A movement class, and what this terrain is expected to let it stand on.
+     *
+     * Three expectations, because "some tile is walkable" is too weak to
+     * catch a fixture that has quietly stopped being a map at all. That is
+     * exactly how the first version of this file failed: with an independent
+     * pseudorandom byte per cell every 2x2 block had a height range of about
+     * 85, so every footprint was far steeper than any shipped MaxSlope, no
+     * class had a single tile, and the per-cell comparison still passed
+     * throughout -- the cache agreed with the rule perfectly, on a map where
+     * the rule's answer was "nowhere" everywhere. Caught by the gcc-14 CI job;
+     * the assertion had never run locally.
+     */
+    enum class Expectation
+    {
+        /** Walkable somewhere and refused somewhere. */
+        SomeButNotAll,
+        /** Walkable on every tile of the scan. */
+        Everywhere,
+        /** Walkable on no tile of the scan. */
+        Nowhere
+    };
+
+    struct ClassCase
+    {
+        MovementClassDefinition definition;
+        Expectation expectation;
+    };
+
     TEST_CASE("isGridPointWalkable decides the same cells with the cache as without")
     {
         // The end of the chain: what the AI's site searches, the reachability
         // labelling and the collision grids all call, over every top-left tile
         // of a map with real shape in it. Held against the rule written out
-        // from the heightmap in walkableByHand.
+        // from the heightmap in walkableByHand, which never touches the cache.
         auto terrain = makeVariedTerrain(48, 40, 60_ss);
         const auto& heights = terrain.getHeightMap();
         const auto waterLevel = simScalarToUInt(terrain.getSeaLevel());
 
-        /**
-         * A movement class, and what this map should do with it: whether some
-         * tile is walkable for it, or whether it is one of the two degenerate
-         * classes that stand everywhere or nowhere.
-         */
-        struct ClassCase
-        {
-            MovementClassDefinition definition;
-            /** 0 = some tiles walkable, 1 = every tile, 2 = no tile. */
-            int expectation;
-        };
-
+        // The five real classes, spanning the shipped set: ground, a
+        // constructor, a commander that wades, a hull, and a hovercraft. The
+        // last two of the seven are degenerate on purpose.
         const ClassCase cases[] = {
-            // Ground: dry only, and gentle about it.
-            {{"TANKSH2", 3u, 3u, 0u, 0u, 12u, 15u}, 0},
-            // A constructor: a bigger footprint and a tighter dry slope.
-            {{"CORCRAP", 4u, 4u, 0u, 0u, 10u, 20u}, 0},
-            // A commander: wades to depth 100 and climbs to 32.
-            {{"TANKDS2", 2u, 2u, 0u, 100u, 32u, 32u}, 0},
-            // A hull: must float on at least 30 of depth, and cannot climb.
-            {{"some-ship", 4u, 4u, 30u, 255u, 0u, 10u}, 0},
-            // A hovercraft: dry or wet, indifferent to either.
-            {{"TANKHOVER3", 3u, 3u, 0u, 255u, 12u, 12u}, 0},
-            // Not shipped classes, and the two degenerate answers. One wants
-            // a depth nothing on a sea-level-60 map can have, so nowhere; one
-            // wants nothing at all, so everywhere. Both are worth having: a
-            // cached grid read one cell out of bounds shows up on exactly
-            // these, and nothing else.
-            {{"too-deep", 1u, 1u, 200u, 255u, 255u, 255u}, 2},
-            {{"anything-goes", 1u, 1u, 0u, 255u, 255u, 255u}, 1}};
+            // Ground: dry only, gentle. The plateau, and little else.
+            {{"TANKSH2", 3u, 3u, 0u, 0u, 12u, 15u}, Expectation::SomeButNotAll},
+            // A constructor: a bigger footprint and a tighter dry slope, so
+            // fewer tiles than the tank and never more.
+            {{"CORCRAP", 4u, 4u, 0u, 0u, 10u, 20u}, Expectation::SomeButNotAll},
+            // A commander: wades to depth 100 and climbs to 32, so it reaches
+            // wherever the tank does plus the shallows beside it.
+            {{"TANKDS2", 2u, 2u, 0u, 100u, 32u, 32u}, Expectation::SomeButNotAll},
+            // A hull: must float on at least 30 of depth and cannot climb, so
+            // it is confined to the open water on the seaward side.
+            {{"some-ship", 4u, 4u, 30u, 255u, 0u, 10u}, Expectation::SomeButNotAll},
+            // A hovercraft: dry or wet, indifferent to either, so the most
+            // tiles of any real class here.
+            {{"TANKHOVER3", 3u, 3u, 0u, 255u, 12u, 12u}, Expectation::SomeButNotAll},
+            // Not shipped classes, and the two degenerate answers. One wants a
+            // depth nothing on a sea-level-60 map can have, so nowhere; one
+            // wants nothing at all, so everywhere. They are the only cases
+            // that can catch either cached grid being read out of range,
+            // since a class that never refuses has to have been answered for
+            // every tile including the last.
+            {{"too-deep", 1u, 1u, 200u, 255u, 255u, 255u}, Expectation::Nowhere},
+            {{"anything-goes", 1u, 1u, 0u, 255u, 255u, 255u}, Expectation::Everywhere}};
 
         for (const auto& testCase : cases)
         {
@@ -278,9 +339,13 @@ namespace rwe
 
             // isMaxSlopeGreaterThan reads one cell past the footprint on each
             // axis, through isAreaUnderWater, so the scan stops a tile short
-            // of the edge for the same reason ReachabilityMap's does.
+            // of the edge for the same reason ReachabilityMap's does. A class
+            // with no room at all would have nothing to compare, which is its
+            // own way of not testing anything.
             const int maxX = heights.getWidth() - static_cast<int>(mc.footprintX) - 1;
             const int maxY = heights.getHeight() - static_cast<int>(mc.footprintZ) - 1;
+            const int tiles = (maxX + 1) * (maxY + 1);
+            REQUIRE(tiles > 0);
 
             int walkable = 0;
             for (int y = 0; y <= maxY; ++y)
@@ -290,6 +355,8 @@ namespace rwe
                     const auto ux = static_cast<unsigned int>(x);
                     const auto uy = static_cast<unsigned int>(y);
 
+                    // The load-bearing assertion: the cached answer equals the
+                    // rule, on every tile, for every class.
                     const auto expected = walkableByHand(heights, waterLevel, mc, ux, uy);
                     REQUIRE(isGridPointWalkable(terrain, mc, ux, uy) == expected);
                     if (expected)
@@ -299,21 +366,31 @@ namespace rwe
                 }
             }
 
-            // So the loop above cannot have been satisfied by a function
-            // that always refuses, nor by one that always agrees.
-            const int tiles = (maxX + 1) * (maxY + 1);
-            if (testCase.expectation == 0)
+            // And then what the counts have to be, so that the comparison
+            // above cannot be satisfied by a function that always refuses, or
+            // by a fixture that refuses everything.
+            //
+            // The count goes to the log as well as to INFO, because INFO is
+            // only printed on failure and this is the figure that says a
+            // fixture has stopped being a map -- the first version of this
+            // file passed every per-cell comparison on a map where all seven
+            // classes had zero walkable tiles, and the count is the only
+            // thing in the test that noticed.
+            std::printf("movement.test: %-14s %5d of %5d tiles walkable\n", mc.name.c_str(), walkable, tiles);
+            INFO("class " << mc.name << ": " << walkable << " of " << tiles << " tiles walkable");
+
+            switch (testCase.expectation)
             {
+            case Expectation::SomeButNotAll:
                 REQUIRE(walkable > 0);
                 REQUIRE(walkable < tiles);
-            }
-            else if (testCase.expectation == 1)
-            {
+                break;
+            case Expectation::Everywhere:
                 REQUIRE(walkable == tiles);
-            }
-            else
-            {
+                break;
+            case Expectation::Nowhere:
                 REQUIRE(walkable == 0);
+                break;
             }
         }
     }
