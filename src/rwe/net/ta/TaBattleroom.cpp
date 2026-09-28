@@ -617,11 +617,17 @@ namespace rwe
             {
                 return;
             }
-            auto ids = peerIds();
-            if (!ids.empty())
+            // A launched game is kept alive by the 0x2c stream alone: every
+            // capture's pings stop before the first in-game 0x2c, and a ping
+            // received in game makes the peer flush its unit-state queue early.
+            if (state_ == TaBattleroomState::Waiting)
             {
-                pinger.sendRequests(ids);
-                pings.flush();
+                auto ids = peerIds();
+                if (!ids.empty())
+                {
+                    pinger.sendRequests(ids);
+                    pings.flush();
+                }
             }
             armPings();
         });

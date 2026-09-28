@@ -92,7 +92,6 @@ namespace rwe
         std::unique_ptr<TaOutboundBatcher> traffic;
         std::unique_ptr<TaOutboundBatcher> pingTraffic;
         std::unique_ptr<TaPinger> pings;
-        asio::steady_timer gamePingTimer{io};
         std::thread thread;
 
         std::uint32_t hostPlayerId{0};
@@ -102,8 +101,6 @@ namespace rwe
         void stop();
         void run();
         void drainOutbound();
-        void armGamePings();
-        void onGamePing();
 
         void postMapChecksum(std::uint32_t checksum);
 
@@ -157,37 +154,6 @@ namespace rwe
         {
             session->send(message.peer, message.bytes, message.transport);
         }
-    }
-
-    void TaHostGame::Impl::armGamePings()
-    {
-        gamePingTimer.expires_after(std::chrono::seconds(2));
-        gamePingTimer.async_wait([this](const asio::error_code& error) {
-            if (error)
-            {
-                return;
-            }
-            onGamePing();
-            armGamePings();
-        });
-    }
-
-    void TaHostGame::Impl::onGamePing()
-    {
-        // A peer whose pings go unanswered is offered for rejection, and a
-        // reply has to be built now: a replayed one carries another session's
-        // clock and reads as an absurd latency.
-        if (!room)
-        {
-            return;
-        }
-        auto ids = room->peerIds();
-        if (ids.empty())
-        {
-            return;
-        }
-        pings->sendRequests(ids);
-        pingTraffic->flush();
     }
 
     void TaHostGame::Impl::refreshLobby()
@@ -370,7 +336,6 @@ namespace rwe
 
         room->onLaunched([this](const TaBattleroom::JoinerInfo&) {
             refreshLobby();
-            armGamePings();
         });
 
         thread = std::thread([this]() { run(); });

@@ -151,12 +151,12 @@ namespace rwe
 
             std::unique_ptr<TaBattleroom> room;
 
-            Harness() : session(&sent)
+            Harness(std::chrono::milliseconds pingInterval = std::chrono::milliseconds(60000)) : session(&sent)
             {
                 config.mapName = "Canal Crossing";
                 config.hostTeam = 0;
                 config.keepaliveInterval = std::chrono::milliseconds(60000);
-                config.pingInterval = std::chrono::milliseconds(60000);
+                config.pingInterval = pingInterval;
                 config.loadingStepInterval = std::chrono::milliseconds(1);
                 config.gameStartDelay = std::chrono::milliseconds(1);
                 room = std::make_unique<TaBattleroom>(
@@ -721,6 +721,48 @@ namespace rwe
         REQUIRE(ping->requesterTick == 99999);
         REQUIRE(ping->responderTick == 123456);
         REQUIRE(ping->requesterPlayerId == JoinerId);
+    }
+
+    TEST_CASE("the battleroom stops pinging once the game launches", "[net][ta]")
+    {
+        Harness h{std::chrono::milliseconds(5)};
+        h.room->peerJoined(JoinerId);
+        h.deliverStatus(at(SidesJoinerStatus, 0x01, 0x02, 0x20));
+
+        auto pingRequests = [&]() {
+            int count = 0;
+            for (const auto& subpacket : h.codesTo(JoinerId, TaTransport::Udp))
+            {
+                auto ping = TaPinger::parsePing(subpacket);
+                if (ping && ping->responderTick == 0)
+                {
+                    ++count;
+                }
+            }
+            return count;
+        };
+
+        for (int i = 0; i < 5; ++i)
+        {
+            h.ioContext.run_for(std::chrono::milliseconds(5));
+        }
+        REQUIRE(pingRequests() > 0);
+
+        REQUIRE(h.room->launch(launchParams()));
+        for (int i = 0; i < 50 && h.room->state() != TaBattleroomState::Launched; ++i)
+        {
+            h.ioContext.run_for(std::chrono::milliseconds(5));
+        }
+        REQUIRE(h.room->state() == TaBattleroomState::Launched);
+
+        // A launched game is kept alive by the 0x2c stream alone; a request
+        // here would make the peer flush its unit-state queue early.
+        const int sentByLaunch = pingRequests();
+        for (int i = 0; i < 20; ++i)
+        {
+            h.ioContext.run_for(std::chrono::milliseconds(5));
+        }
+        REQUIRE(pingRequests() == sentByLaunch);
     }
 
     TEST_CASE("a launch is refused when every player is on one team", "[net][ta]")
