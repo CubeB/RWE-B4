@@ -8,7 +8,8 @@ namespace rwe
         unsigned int vertexCount)
         : vao(std::move(vao)),
           vbo(std::move(vbo)),
-          vertexCount(vertexCount)
+          vertexCount(vertexCount),
+          capacity(vertexCount)
     {
     }
 }

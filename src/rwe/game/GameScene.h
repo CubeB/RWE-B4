@@ -999,10 +999,48 @@ namespace rwe
          * capacity alone. A wake dot is six vertices and a busy water map has
          * tens of thousands of them on screen, so a vector that starts empty
          * every frame spends the frame growing back to a couple of hundred
-         * thousand entries and copying what it already had each time.
-         * Cleared, not destroyed, at the top of every frame.
+         * thousand entries and copying what it already had each time. It is
+         * only refilled when the batch it holds has stopped being the batch
+         * this frame wants; see WakeBatchKey.
          */
         ColoredMeshBatch wakeBatch;
+
+        /**
+         * What wakeBatch holds: the tick it depicts, how many dots were alive
+         * then, and the view they were culled against. All three are inputs
+         * to the batch and nothing else is, so on a frame where none of them
+         * has moved the batch is already the right one and the walk and the
+         * upload can both be skipped.
+         */
+        struct WakeBatchKey
+        {
+            GameTime tick{GameTime(0)};
+            std::size_t dotCount{0};
+            Matrix4f view{Matrix4f::identity()};
+            bool built{false};
+
+            bool matches(GameTime t, std::size_t count, const Matrix4f& v) const
+            {
+                return built && tick == t && dotCount == count && view == v;
+            }
+
+            void remember(GameTime t, std::size_t count, const Matrix4f& v)
+            {
+                tick = t;
+                dotCount = count;
+                view = v;
+                built = true;
+            }
+        };
+        WakeBatchKey wakeBatchKey;
+
+        /**
+         * The vertex array and buffer wakeBatch was last uploaded into, kept
+         * so a frame that draws the wake it drew last frame does not have to
+         * make a new pair and throw the old one away. It belongs here rather
+         * than in RenderService, which is built afresh every frame.
+         */
+        GlMesh wakeBatchMesh;
 
         /** A piece blown off a unit by its script, tumbling under gravity. Purely visual. */
         struct Debris
