@@ -56,6 +56,16 @@ _Avoid_: doc, notes
 Decoded but not yet built into RWE. Lives in §91 until ported.
 _Avoid_: TODO, missing
 
+**Spec room**:
+Work that may read byte-tactics, the matching decompilation of the original.
+It produces findings in a register and nothing else. ADR-0004.
+_Avoid_: dirty room, RE side
+
+**Implementation room**:
+Work that writes RWE's code and tests from the registers, Nanolathe's spec and
+black-box observation, and never opens the decompilation. ADR-0004.
+_Avoid_: clean room (the whole arrangement is the clean room)
+
 ### Determinism
 
 **Sim**:
