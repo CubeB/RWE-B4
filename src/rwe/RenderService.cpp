@@ -235,6 +235,7 @@ namespace rwe
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
                 graphics->setUniformFloat(textureShader.shadeStrength, m.shadeStrength);
                 graphics->setUniformFloat(textureShader.maskValue, m.maskValue);
+                graphics->setUniformFloat(textureShader.fogged, m.fogged);
                 graphics->setActiveTextureSlot1();
                 graphics->bindTexture(m.paletteIndexTexture);
                 graphics->setActiveTextureSlot0();
@@ -288,6 +289,9 @@ namespace rwe
             const auto& textureShader = shaders->unitTexture;
             graphics->bindShader(textureShader.handle.get());
             graphics->setUniformFloat(textureShader.seaLevel, seaLevel);
+            // The program keeps the last mesh's value, and a cloaked unit is
+            // never fogged: it is only drawn where it can be seen.
+            graphics->setUniformFloat(textureShader.fogged, 0.0f);
             graphics->setUniformInt(textureShader.paletteIndexSampler, 1);
             graphics->setUniformInt(textureShader.shadeTableSampler, 2);
             graphics->setActiveTextureSlot2();
@@ -378,6 +382,7 @@ namespace rwe
             // their own units, so none of them sits on the colour atlas.
             graphics->setUniformFloat(outlineShader.shadeStrength, 0.0f);
             graphics->setUniformFloat(outlineShader.maskValue, 0.0f);
+            graphics->setUniformFloat(outlineShader.fogged, 0.0f);
             graphics->setUniformInt(outlineShader.paletteIndexSampler, 1);
             graphics->setUniformInt(outlineShader.shadeTableSampler, 2);
             for (const auto& m : meshes)

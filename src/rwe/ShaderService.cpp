@@ -103,6 +103,7 @@ namespace rwe
         s.unitTexture.paletteIndexSampler = graphics.getUniformLocation(s.unitTexture.handle.get(), "paletteIndexSampler");
         s.unitTexture.shadeTableSampler = graphics.getUniformLocation(s.unitTexture.handle.get(), "shadeTableSampler");
         s.unitTexture.maskValue = graphics.getUniformLocation(s.unitTexture.handle.get(), "maskValue");
+        s.unitTexture.fogged = graphics.getUniformLocation(s.unitTexture.handle.get(), "fogged");
 
         s.unitShadow.handle = loadShader(graphics, "shaders/unitShadow.vert", "shaders/unitShadow.frag", texturedVertexAttribs);
         s.unitShadow.vpMatrix = graphics.getUniformLocation(s.unitShadow.handle.get(), "vpMatrix");
