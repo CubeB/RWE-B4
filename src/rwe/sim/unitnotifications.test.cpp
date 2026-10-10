@@ -453,4 +453,57 @@ namespace rwe
         REQUIRE(produced);
         REQUIRE(countEvents<UnitCannotComplyEvent>(sim) == 0);
     }
+
+    TEST_CASE("a submarine's frame sits on the sea bed, not at the yard's pad", "[unitnotifications]")
+    {
+        // trySpawnUnit settles a unit with a mover onto the terrain, but the
+        // yard then re-places the frame at its build piece every tick, and
+        // took the piece's own height -- so a sub was built floating at the
+        // surface with its shadow, projected from the ground, far beneath it
+        // (play-test 2026-10-10). The original settles every unit with a
+        // mover to the terrain each tick (0x48A870).
+        auto script = makeEmptyCobScript({"base"});
+        Grid<unsigned char> heights(128, 128, 0);
+        GameSimulation sim(MapTerrain(std::move(heights), 60_ss), 0u, 0, 0);
+        auto player = addWellStockedPlayer(sim, "CORE");
+        registerTestModel(sim);
+
+        sim.unitDefinitions["FACT"] = makeFactoryDef();
+        sim.unitScriptDefinitions["FACT"] = *script;
+        // A submarine's own movement class: it needs water, and a good deal
+        // of it. Without that the frame cannot be placed on this terrain at
+        // all and the yard's per-tick placement is refused, which hides the
+        // height it would have been given.
+        auto subDef = makeMobileDef(100u);
+        subDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 10u, 255u};
+        sim.unitDefinitions["SUB"] = subDef;
+        sim.unitScriptDefinitions["SUB"] = *script;
+
+        // The yard's pad is at the water's surface.
+        auto pad = SimVector(600_ss, 60_ss, 600_ss);
+        auto factoryId = addUnitOfType(sim, "FACT", player, pad, script);
+        sim.getUnitState(factoryId).inBuildStance = true;
+        sim.getUnitState(factoryId).buildQueue.emplace_back("SUB", 1);
+
+        std::optional<UnitId> frameId;
+        for (int i = 0; i < 100 && !frameId; ++i)
+        {
+            sim.tick();
+            for (const auto& entry : sim.units)
+            {
+                if (entry.second.unitType == "SUB")
+                {
+                    frameId = entry.first;
+                }
+            }
+        }
+        REQUIRE(frameId.has_value());
+
+        // Through the rest of the build the frame stays on the bottom.
+        for (int i = 0; i < 20; ++i)
+        {
+            sim.tick();
+            REQUIRE(sim.getUnitState(*frameId).position.y == 0_ss);
+        }
+    }
 }

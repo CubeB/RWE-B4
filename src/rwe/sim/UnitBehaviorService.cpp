@@ -4596,8 +4596,17 @@ namespace rwe
     {
         if (!unitInfo.definition->isMobile)
         {
-            // Static units cannot patrol; drop the order.
-            return true;
+            // A static unit with no mover is given QPATROL, not a patrol
+            // (0x43F3B9 tests the mover before it picks the mission), and
+            // QPATROL never completes: it sleeps and rotates to the tail of
+            // the list, like QMOVE. That is what makes a patrol set on a
+            // factory work -- the waypoints stay in its queue, and when a
+            // unit is finished GetBuilt (0x402DA0) walks that queue and
+            // issues each waypoint to the product through the ordinary order
+            // builder (command 9 for a patrol). handleMoveOrder keeps its
+            // order for the same reason. Anything that cannot patrol has no
+            // way to have been given one, so the drop is only a backstop.
+            return !unitInfo.definition->canPatrol;
         }
 
         // A unit that can repair is not on this mission at all in the
@@ -5084,6 +5093,17 @@ namespace rwe
                 if (targetUnitDefinition.floater || targetUnitDefinition.canHover)
                 {
                     buildPieceInfo.position.y = rweMax(buildPieceInfo.position.y, sim->terrain.getSeaLevel());
+                }
+                else if (targetUnitDefinition.isMobile && !targetUnitDefinition.canFly)
+                {
+                    // The same rule trySpawnUnit applies at creation, and for
+                    // the same reason: a ground or sea unit with a mover is
+                    // settled onto the terrain every tick (0x48A870), so a
+                    // submarine's frame sits on the sea bed under the yard.
+                    // Taking the build piece's own height here instead put it
+                    // at the pad, floating, with its shadow -- which the
+                    // original projects from the ground -- far beneath it.
+                    buildPieceInfo.position.y = sim->terrain.getHeightAt(buildPieceInfo.position.x, buildPieceInfo.position.z);
                 }
 
                 tryApplyMovementToPosition(sim->getUnitInfo(state.targetUnit->first), buildPieceInfo.position);
@@ -5607,8 +5627,20 @@ namespace rwe
             // relaxation lands on the feature itself when nothing blocks it
             // and alongside when something does, and both are well inside
             // Builddistance.
-            navigateTo(unitInfo, rect);
-            return false;
+            auto arrived = navigateTo(unitInfo, rect);
+
+            // For a feature, arriving is the original's whole test (see
+            // above), and navigateTo also says "arrived" when the pathfinder
+            // could get no closer -- a wreck on the sea floor, with the
+            // builder on the shore. Waiting for Builddistance there stalled
+            // for ever with no beam and no complaint, which is what a
+            // play-test saw as "reclaiming under water from land does not
+            // work". A unit target keeps the strict reach: ReclaimUnit
+            // (0x404730) does test Builddistance.
+            if (!arrived || !std::holds_alternative<FeatureId>(target))
+            {
+                return false;
+            }
         }
 
         return deployReclaimArm(unitInfo, target);

@@ -158,4 +158,50 @@ namespace rwe
         REQUIRE_FALSE(isReclaiming(sim, builderId));
         REQUIRE(sim.tryGetFeature(wreckId).has_value());
     }
+
+    TEST_CASE("a land builder reclaims a wreck on the sea floor from the shore", "[reclaimreach]")
+    {
+        // The pathfinder cannot give a walker a way onto deep water, so it
+        // settles for the closest it can get, and navigateTo calls that
+        // arrival. A feature has no reach test in the original -- arriving is
+        // the whole of it -- so the beam goes out from there. RWE used to
+        // wait for Builddistance to the footprint, which a wreck out over the
+        // deep never satisfied: no beam, no complaint, the order never
+        // finished (play-test 2026-10-10).
+        auto script = makeEmptyCobScript({"base"});
+        Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(100));
+        for (int y = 0; y < 64; ++y)
+        {
+            for (int x = 32; x < 64; ++x)
+            {
+                heights.set(x, y, static_cast<unsigned char>(0));
+            }
+        }
+        GameSimulation sim(MapTerrain(std::move(heights), 50_ss), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        registerReachModel(sim);
+
+        auto walkerDef = makeShortArmedReclaimerDef();
+        walkerDef.canMove = true;
+        walkerDef.maxVelocity = 2_ss;
+        walkerDef.acceleration = 1_ss;
+        walkerDef.brakeRate = 1_ss;
+        walkerDef.turnRate = 1000_ss;
+        sim.unitDefinitions["builder"] = walkerDef;
+
+        auto wreckDef = sim.featureDefinitions.insert(makeWreckDef());
+        auto wreckId = sim.addFeature(wreckDef, 50, 32).value();
+
+        auto builderId = addUnitOfType(sim, "builder", player, SimVector(400_ss, 100_ss, 520_ss), script);
+        sim.getUnitState(builderId).inBuildStance = true;
+        sim.getUnitState(builderId).orders.push_back(ReclaimOrder(wreckId));
+
+        bool reclaimed = false;
+        for (int i = 0; i < 900 && !reclaimed; ++i)
+        {
+            sim.tick();
+            reclaimed = isReclaiming(sim, builderId) || !sim.tryGetFeature(wreckId).has_value();
+        }
+        REQUIRE(reclaimed);
+    }
 }
