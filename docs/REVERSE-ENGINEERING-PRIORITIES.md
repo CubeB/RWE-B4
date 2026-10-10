@@ -787,10 +787,12 @@ meet §106 of `TOTALA-EXE.md` first.
       and no pitch at all, so the flag chooses between two routines neither of
       which exists here. Whoever takes on terrain conforming inherits it.
     - **`healtime`** (`WORD def+0x200`, 2 units) — **done.** Single reader
-      `0x48AF3D`: every 8th tick, if not at full health, heal
-      `(healtime * 8) / 30` HP, integer-truncated. The Commanders' 27 works
-      out at 26.25 HP/s. Implemented free, where the original charges it to
-      the owner's stores, because nothing else RWE repairs costs anything.
+      `0x48AF3D`: every 8th tick, if not at full health, hand
+      `(healtime * 8) / 30` to the repair tick `0x41BD10` as its `work`. **Read
+      wrongly at first** as that many hit points (26.25 HP/s for a
+      Commander); the repair tick clamps the heal to one point, so it is
+      one point per eight ticks, 3.75 HP/s, and one energy. Corrected
+      2026-10-10, see TOTALA-EXE-ECONOMY.md.
     - **`isairbase`** (bit 9, 4 units) — **done, and it was the one with real
       behaviour behind it.** Cached onto the instance as `unit+0x110` bit 30 at
       `0x485AE7`. The list a player keeps of its own pads takes

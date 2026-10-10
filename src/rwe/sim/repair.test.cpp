@@ -278,11 +278,13 @@ namespace rwe
         REQUIRE(sim.getUnitState(factoryId).orders.empty());
     }
 
-    TEST_CASE("a unit with a healtime mends itself in eight-tick steps", "[repair]")
+    TEST_CASE("a unit with a healtime mends itself one point every eight ticks", "[repair]")
     {
-        // 0x48AF3D runs only on ticks that are a multiple of eight and then
-        // adds healtime * 8 / 30, truncated. The commanders' shipped 27 gives
-        // 7 points a step, 26.25 a second.
+        // 0x48AF3D runs only on ticks that are a multiple of eight, and hands
+        // healtime * 8 / 30 to the shared repair tick 0x41BD10 as its `work`
+        // argument -- not as a number of hit points. That routine clamps the
+        // hit points to one (0x41BD87), so the commanders' shipped 27 mends
+        // one point per step, 3.75 a second, not the 26.25 it once did.
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
         auto player = addWellStockedPlayer(sim, "ARM");
@@ -290,29 +292,56 @@ namespace rwe
         auto commanderDef = makeSolarDef();
         commanderDef.healTime = 27u;
         commanderDef.maxHitPoints = 100u;
+        // The once-a-second settle rebuilds the storage cap from the units'
+        // own storage, so a unit that has none leaves the player nothing to
+        // pay the mending with -- which is also what it costs in the game.
+        commanderDef.energyStorage = Energy(10000.0f);
         sim.unitDefinitions["commander"] = commanderDef;
         auto commanderId = addUndamagedUnitOfType(sim, "commander", player, SimVector(200_ss, 0_ss, 200_ss), script);
         sim.getUnitState(commanderId).hitPoints = 10u;
 
-        // Eight ticks buys exactly one step of seven.
+        // Eight ticks buys exactly one step of one.
         for (int i = 0; i < 8; ++i)
         {
             sim.tick();
         }
-        REQUIRE(sim.getUnitState(commanderId).hitPoints == 17u);
+        REQUIRE(sim.getUnitState(commanderId).hitPoints == 11u);
 
         for (int i = 0; i < 8; ++i)
         {
             sim.tick();
         }
-        REQUIRE(sim.getUnitState(commanderId).hitPoints == 24u);
+        REQUIRE(sim.getUnitState(commanderId).hitPoints == 12u);
 
-        // It stops at full health rather than running over.
-        for (int i = 0; i < 400; ++i)
+        // It stops at full health rather than running over: the 88 points
+        // still missing take 704 more ticks.
+        for (int i = 0; i < 800; ++i)
         {
             sim.tick();
         }
         REQUIRE(sim.getUnitState(commanderId).hitPoints == 100u);
+    }
+
+    TEST_CASE("a healtime too small to give any work mends nothing", "[repair]")
+    {
+        // healtime * 8 / 30 truncates to nothing below four, and the
+        // original's expression then comes out at zero hit points.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
+        auto player = addWellStockedPlayer(sim, "ARM");
+
+        auto def = makeSolarDef();
+        def.healTime = 3u;
+        def.maxHitPoints = 100u;
+        sim.unitDefinitions["slowhealer"] = def;
+        auto id = addUndamagedUnitOfType(sim, "slowhealer", player, SimVector(200_ss, 0_ss, 200_ss), script);
+        sim.getUnitState(id).hitPoints = 10u;
+
+        for (int i = 0; i < 80; ++i)
+        {
+            sim.tick();
+        }
+        REQUIRE(sim.getUnitState(id).hitPoints == 10u);
     }
 
     TEST_CASE("a unit without a healtime never mends itself", "[repair]")
