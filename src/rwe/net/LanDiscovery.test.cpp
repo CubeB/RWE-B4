@@ -249,8 +249,12 @@ namespace rwe
             for (int i = 0; i < 80 && !gone; ++i)
             {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                // Bound first, then search. games() returns by value, so
+                // .begin() and .end() from two separate calls are iterators
+                // into two different vectors -- a range that is not a range.
+                const auto remaining = listener.games();
                 gone = std::none_of(
-                    listener.games().begin(), listener.games().end(), [&](const auto& h) {
+                    remaining.begin(), remaining.end(), [&](const auto& h) {
                         return h.session == game.session;
                     });
             }
