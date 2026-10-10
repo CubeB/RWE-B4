@@ -1,5 +1,6 @@
 #include "GameNetworkService.h"
 #include <algorithm>
+#include <rwe/net/EndpointFamily.h>
 #include <rwe/network_util.h>
 #include <rwe/proto/serialization.h>
 #include <rwe/util/SimpleLogger.h>
@@ -328,6 +329,7 @@ namespace rwe
         {
             auto endpoint = asio::ip::udp::endpoint(asio::ip::udp::v6(), port);
             socket.open(endpoint.protocol());
+            setDualStack(socket);
             socket.bind(endpoint);
 
             // Where a peer's silence is measured from until it has been
