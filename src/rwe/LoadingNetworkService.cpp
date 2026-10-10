@@ -1,5 +1,6 @@
 #include "LoadingNetworkService.h"
 #include <algorithm>
+#include <rwe/net/EndpointFamily.h>
 #include <rwe/network_util.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
@@ -26,7 +27,7 @@ namespace rwe
 
         // asio guarantees that resolve returns non-empty
         auto results = resolver.resolve(host, port);
-        remoteEndpoints.emplace_back(playerIndex, results.begin()->endpoint(), Status::Loading);
+        remoteEndpoints.emplace_back(playerIndex, toDualStackEndpoint(results.begin()->endpoint()), Status::Loading);
     }
 
     void LoadingNetworkService::setDoneLoading()
@@ -62,6 +63,7 @@ namespace rwe
             LOG_DEBUG << "Opening listen socket on port " << port;
             auto endpoint = asio::ip::udp::endpoint(asio::ip::udp::v6(), std::stoi(port));
             socket.open(endpoint.protocol());
+            setDualStack(socket);
             socket.bind(endpoint);
 
             startListening();
