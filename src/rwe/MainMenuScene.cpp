@@ -1209,7 +1209,8 @@ namespace rwe
         goToMenu(std::move(panel));
     }
 
-    void MainMenuScene::goToSkirmishMenu()    {
+    void MainMenuScene::goToSkirmishMenu()
+    {
         goToPlayerSetupMenu(false);
     }
 
@@ -2245,7 +2246,7 @@ namespace rwe
         openDialog(std::move(panel));
     }
 
-    void MainMenuScene::attachDiscoveryComponents(UiPanel& panel, const std::shared_ptr<SpriteSeries>& font)
+    void MainMenuScene::attachDiscoveryComponents(UiPanel& panel, const std::shared_ptr<SpriteSeries>& /*font*/)
     {
         // Nothing but a button on the setup screen itself. The TA screen's
         // only free horizontal band is the 52 pixels between the bottom of
