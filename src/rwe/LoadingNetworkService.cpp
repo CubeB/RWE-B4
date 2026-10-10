@@ -3,6 +3,7 @@
 #include <rwe/network_util.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
+#include <stdexcept>
 
 namespace rwe
 {
@@ -41,13 +42,44 @@ namespace rwe
         return std::all_of(remoteEndpoints.begin(), remoteEndpoints.end(), [](const auto& p) { return p.status == Status::Ready; });
     }
 
+    std::vector<std::string> LoadingNetworkService::peersNotReady()
+    {
+        std::scoped_lock<std::mutex> lock(mutex);
+        std::vector<std::string> missing;
+        for (const auto& p : remoteEndpoints)
+        {
+            if (p.status != Status::Ready)
+            {
+                missing.push_back(
+                    "player " + std::to_string(p.playerIndex + 1) + " at "
+                    + p.endpoint.address().to_string() + ":" + std::to_string(p.endpoint.port()));
+            }
+        }
+        return missing;
+    }
+
     void LoadingNetworkService::waitForAllToBeReady()
     {
-        // crude, but it works
-        do
+        // Crude, but it works -- and unlike a do/while with no bound it
+        // ends. See the header for what an unbounded wait costs.
+        auto deadline = getTimestamp() + loadingTimeout;
+        while (!areAllClientsReady())
         {
+            if (getTimestamp() >= deadline)
+            {
+                auto missing = peersNotReady();
+                std::string message = "Timed out waiting for other players to finish loading (";
+                for (std::size_t i = 0; i < missing.size(); ++i)
+                {
+                    message += (i == 0 ? "" : ", ") + missing[i];
+                }
+                message += "). They may have lost the connection, or the address may be wrong.";
+
+                LOG_ERROR << message;
+                throw std::runtime_error(message);
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        } while (!areAllClientsReady());
+        }
     }
 
     void LoadingNetworkService::start(const std::string& port)

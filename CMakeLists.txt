@@ -1141,6 +1141,7 @@ set(TEST_FILES
     src/rwe/io/tdf/TdfBlock.test.cpp
     src/rwe/MultiplayerSetup.test.cpp
     src/rwe/ip_util.test.cpp
+    src/rwe/LoadingNetworkService.test.cpp
     src/rwe/math/Matrix4f.test.cpp
     src/rwe/math/Vector2f.test.cpp
     src/rwe/math/Vector3f.test.cpp
