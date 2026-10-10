@@ -524,6 +524,8 @@ set(SOURCE_FILES
     src/rwe/io/weapontdf/WeaponTdf.h
     src/rwe/ip_util.cpp
     src/rwe/ip_util.h
+    src/rwe/net/LanDiscovery.cpp
+    src/rwe/net/LanDiscovery.h
     src/rwe/math/Matrix4f.h
     src/rwe/math/Matrix4x.h
     src/rwe/math/Vector2f.h
@@ -1143,6 +1145,7 @@ set(TEST_FILES
     src/rwe/MultiplayerSetup.test.cpp
     src/rwe/ip_util.test.cpp
     src/rwe/LoadingNetworkService.test.cpp
+    src/rwe/net/LanDiscovery.test.cpp
     src/rwe/math/Matrix4f.test.cpp
     src/rwe/math/Vector2f.test.cpp
     src/rwe/math/Vector3f.test.cpp

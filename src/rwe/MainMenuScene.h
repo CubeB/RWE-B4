@@ -1,6 +1,8 @@
 #pragma once
 
 #include <memory>
+#include <optional>
+#include <vector>
 #include <rwe/AudioService.h>
 #include <rwe/CursorService.h>
 #include <rwe/RenderService.h>
@@ -14,6 +16,8 @@
 #include <rwe/scene/Scene.h>
 #include <rwe/ui/UiFactory.h>
 #include <rwe/ui/UiPanel.h>
+#include <rwe/render/SpriteSeries.h>
+#include <rwe/net/LanDiscovery.h>
 
 namespace rwe
 {
@@ -234,6 +238,70 @@ namespace rwe
          * of it.
          */
         bool multiplayerSetup{false};
+
+    private:
+        /**
+         * Finds other machines' lobbies on this LAN, and says what this
+         * machine is offering while it sits on the multiplayer screen. Only
+         * the multiplayer screen runs it: a skirmish has nobody to find, and
+         * holding a socket open through the campaign and the menus would
+         * make this machine visible for no reason.
+         */
+        LanDiscovery lanDiscovery;
+
+        /** Whether lanDiscovery has been started for the current menu. */
+        bool discoveryRunning{false};
+
+        /** What the list box is showing, so a selection can be mapped back to a game. */
+        std::vector<DiscoveredGame> discoveredGames;
+
+        /**
+         * Starts advertising and listening, if this is the multiplayer
+         * screen and it is not already running.
+         */
+        void startDiscoveryIfMultiplayer();
+
+        /** Stops it, if running. Safe to call on any screen. */
+        void stopDiscoveryIfRunning();
+
+        /** Re-reads lobbies from lanDiscovery into the list box on the top panel. */
+        void refreshDiscoveredGames();
+
+        /** Joins whichever lobby the list box has selected. */
+        void joinSelectedLanGame();
+
+        /** Opens the LAN games dialog over the setup screen. */
+        void openLanGameBrowser();
+
+        /**
+         * Adds the LAN games list box and its Join button to the multiplayer
+         * setup screen, in the band below the player table.
+         */
+        void attachDiscoveryComponents(UiPanel& panel, const std::shared_ptr<SpriteSeries>& font);
+
+        /**
+         * startGame, with discovery already stopped. Split out because Start
+         * is not the only way off the setup screen, and every way off it has
+         * to stop discovery.
+         */
+        void startGameBody();
+
+        /**
+         * The seat this machine should take in a game somebody else is
+         * advertising: the first seat the announcer is not playing itself,
+         * which is to say the first one left Open. A two-player lobby
+         * advertises one seat as human -- the host's -- and leaves the other
+         * open, so that is the seat handed out.
+         */
+        static std::optional<int> seatOfferedByOthers(const DiscoveredGame& game);
+
+        /** Fills the model from a lobby somebody else is advertising. */
+        void joinDiscoveredGame(const DiscoveredGame& game);
+
+        /**
+         * What this machine is currently offering on the LAN.
+         */
+        DiscoveredGame advertisedLobby() const;
 
     private:
         AudioService::LoopToken startBgm();
