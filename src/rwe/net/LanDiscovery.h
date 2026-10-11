@@ -193,6 +193,18 @@ namespace rwe
         void stopAdvertising();
 
         /**
+         * Machines each announcement is sent to by address, as well as being
+         * broadcast: the other half of probe(). A broadcast stays on this
+         * subnet, so a guest that found its host by typing an address
+         * (another subnet, a VPN) would never be heard by it, and a game
+         * needs the host to hear the guest. Each entry is written as probe()
+         * takes it -- `a.b.c.d[:port]`, `[v6][:port]` -- and one that does
+         * not parse is skipped. The list replaces the last one; an empty
+         * list is the default of broadcasting only.
+         */
+        void setAnnounceTargets(const std::vector<std::string>& hostsAndPorts);
+
+        /**
          * Sessions currently advertising, newest announcement last. This
          * includes this machine's own lobby, which is delivered to loopback
          * like any other; use the overload below to leave it out.
@@ -230,6 +242,16 @@ namespace rwe
          * answering side rate limits itself.
          */
         bool probe(const std::string& hostAndPort);
+
+        /**
+         * Whether probe() would take this text as an address: the same
+         * parser, with no socket. The TCP screen asks before it leaves, so
+         * that "Invalid TCP/IP Address" is said at the dialog and not
+         * discovered a second later as a list that never fills. A blank
+         * string is not an address -- the screen treats blank as "scan" and
+         * never asks.
+         */
+        static bool isProbeAddress(const std::string& hostAndPort);
 
         /**
          * The password gate's hash: FNV-1a, 64 bit, over
@@ -308,6 +330,9 @@ namespace rwe
 
         /** What to advertise, if anything. Read by the announce thread. */
         std::optional<DiscoveredGame> advertised;
+
+        /** Where else to send it; see setAnnounceTargets. */
+        std::vector<asio::ip::udp::endpoint> announceTargets;
         std::chrono::milliseconds interval{announceInterval};
 
         /** Session id -> what was heard. Ordered by first sight. */

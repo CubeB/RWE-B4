@@ -916,6 +916,11 @@ namespace rwe
         }
     }
 
+    bool LanDiscovery::isProbeAddress(const std::string& hostAndPort)
+    {
+        return parseProbeTarget(hostAndPort).has_value();
+    }
+
     bool LanDiscovery::probe(const std::string& hostAndPort)
     {
         auto target = parseProbeTarget(hostAndPort);
@@ -955,9 +960,11 @@ namespace rwe
         prune();
 
         std::optional<DiscoveredGame> toAnnounce;
+        std::vector<asio::ip::udp::endpoint> targets;
         {
             std::scoped_lock<std::mutex> lock(mutex);
             toAnnounce = advertised;
+            targets = announceTargets;
         }
 
         if (toAnnounce)
@@ -979,6 +986,29 @@ namespace rwe
                         if (ec)
                         {
                             LOG_DEBUG << "LAN discovery could not broadcast to " << a << ": " << ec.message();
+                        }
+                    }
+
+                    // The same datagram to each machine named by address.
+                    // A v4-mapped address goes out of the IPv4 socket as the
+                    // plain address, for the reason probe() gives.
+                    for (auto destination : targets)
+                    {
+                        auto address = destination.address();
+                        if (address.is_v6() && address.to_v6().is_v4_mapped())
+                        {
+                            destination = asio::ip::udp::endpoint(
+                                asio::ip::make_address_v4(asio::ip::v4_mapped, address.to_v6()),
+                                destination.port());
+                        }
+                        auto& s = destination.address().is_v6() ? socket6 : socket;
+                        if (!s) continue;
+
+                        asio::error_code ec;
+                        s->send_to(asio::buffer(*text), destination, 0, ec);
+                        if (ec)
+                        {
+                            LOG_DEBUG << "LAN discovery could not announce to " << describeEndpoint(destination) << ": " << ec.message();
                         }
                     }
                 }
@@ -1028,6 +1058,21 @@ namespace rwe
     {
         std::scoped_lock<std::mutex> lock(mutex);
         advertised.reset();
+    }
+
+    void LanDiscovery::setAnnounceTargets(const std::vector<std::string>& hostsAndPorts)
+    {
+        std::vector<asio::ip::udp::endpoint> parsed;
+        for (const auto& text : hostsAndPorts)
+        {
+            if (auto target = parseProbeTarget(text))
+            {
+                parsed.push_back(*target);
+            }
+        }
+
+        std::scoped_lock<std::mutex> lock(mutex);
+        announceTargets = std::move(parsed);
     }
 
     std::vector<DiscoveredGame> LanDiscovery::games() const

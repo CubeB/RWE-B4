@@ -1080,4 +1080,72 @@ namespace rwe
             a.stop();
         }
     }
+
+    TEST_CASE("LanDiscovery::isProbeAddress says what the TCP screen may accept")
+    {
+        // The same parser probe() uses, asked without a socket: the screen
+        // refuses "Invalid TCP/IP Address" at the dialog, not a second later
+        // as a list that never fills.
+        SECTION("addresses, with and without a port")
+        {
+            CHECK(LanDiscovery::isProbeAddress("192.168.2.120"));
+            CHECK(LanDiscovery::isProbeAddress("192.168.2.120:1350"));
+            CHECK(LanDiscovery::isProbeAddress("  10.0.0.7  "));
+            CHECK(LanDiscovery::isProbeAddress("::1"));
+            CHECK(LanDiscovery::isProbeAddress("[::1]:1338"));
+            CHECK(LanDiscovery::isProbeAddress("[fe80::1]"));
+        }
+
+        SECTION("what is not an address")
+        {
+            CHECK_FALSE(LanDiscovery::isProbeAddress(""));
+            CHECK_FALSE(LanDiscovery::isProbeAddress("   "));
+            // A name would have to be resolved, which blocks the caller.
+            CHECK_FALSE(LanDiscovery::isProbeAddress("example.com"));
+            CHECK_FALSE(LanDiscovery::isProbeAddress("localhost:1338"));
+            CHECK_FALSE(LanDiscovery::isProbeAddress("192.168.2.120:0"));
+            CHECK_FALSE(LanDiscovery::isProbeAddress("192.168.2.120:70000"));
+            CHECK_FALSE(LanDiscovery::isProbeAddress("192.168.2.300"));
+        }
+    }
+
+    TEST_CASE("LanDiscovery announces to a named machine")
+    {
+        // A broadcast stays on its subnet, so a guest that found its host by
+        // typing an address has to be able to say so to that address. The
+        // default port is not bound by either instance here, so a lobby in
+        // B's list can only have come from the named target.
+        constexpr unsigned short portA = 1352;
+        constexpr unsigned short portB = 1353;
+
+        auto game = extendedGame();
+        game.session = "unicast-session";
+
+        SECTION("an announcement reaches the target and only the target")
+        {
+            LanDiscovery a;
+            a.start(portA);
+            REQUIRE(a.isRunning());
+            a.advertise(game);
+
+            LanDiscovery b;
+            b.start(portB);
+            REQUIRE(b.isRunning());
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            CHECK(b.games().empty());
+
+            a.setAnnounceTargets({"127.0.0.1:" + std::to_string(portB), "not an address"});
+            REQUIRE(waitUntilHeard(b, game.session, std::chrono::milliseconds(2500)));
+            CHECK(b.games()[0].map == game.map);
+
+            // Cleared, it goes quiet again: the entry ages out of B's list.
+            a.setAnnounceTargets({});
+            std::this_thread::sleep_for(LanDiscovery::expiry + std::chrono::milliseconds(1500));
+            CHECK(b.games().empty());
+
+            b.stop();
+            a.stop();
+        }
+    }
 }
