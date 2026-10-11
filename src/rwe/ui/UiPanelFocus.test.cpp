@@ -264,4 +264,37 @@ namespace rwe
             REQUIRE(okPresses == 0);
         }
     }
+
+    // The battleroom's rows come and go with the seats. A gadget that is not
+    // visible is not there: it takes no click and answers to no quick key,
+    // so a button hidden under another is not pressed by a click on it.
+    TEST_CASE("a gadget that is not visible takes no click and no quick key", "[ui]")
+    {
+        auto presses = 0;
+
+        UiPanel panel(0, 0, 640, 480);
+        {
+            auto button = makeButton("HIDDEN");
+            button->addSubscription(button->onClick().subscribe([&presses](const ButtonClickEvent&) { ++presses; }));
+            button->setQuickKey(static_cast<int>(SDLK_X));
+            panel.appendChild(std::move(button));
+        }
+
+        SECTION("visible, a click and its quick key press it")
+        {
+            panel.mouseDown(MouseButtonEvent(5, 5, MouseButtonEvent::MouseButton::Left));
+            panel.mouseUp(MouseButtonEvent(5, 5, MouseButtonEvent::MouseButton::Left));
+            panel.keyDown(key(SDLK_X));
+            REQUIRE(presses == 2);
+        }
+
+        SECTION("hidden, neither does anything")
+        {
+            panel.find<UiStagedButton>("HIDDEN")->get().setVisible(false);
+            panel.mouseDown(MouseButtonEvent(5, 5, MouseButtonEvent::MouseButton::Left));
+            panel.mouseUp(MouseButtonEvent(5, 5, MouseButtonEvent::MouseButton::Left));
+            panel.keyDown(key(SDLK_X));
+            REQUIRE(presses == 0);
+        }
+    }
 }

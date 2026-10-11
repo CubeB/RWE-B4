@@ -84,6 +84,9 @@ namespace rwe
 
         void clearSelectedItem();
 
+        /** Scrolls so that the last row is the last one in view; a transcript's newest line is the one to see. */
+        void scrollToEnd();
+
         void render(UiRenderService& context) const override;
 
         void mouseDown(MouseButtonEvent event) override;

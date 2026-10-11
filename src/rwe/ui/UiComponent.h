@@ -24,6 +24,14 @@ namespace rwe
         std::string name;
         unsigned int group{0};
 
+        /**
+         * A component that is not visible is not drawn and takes no mouse or
+         * key input from its panel. For a screen whose rows come and go with
+         * the state of the game -- the battleroom's seats -- where removing
+         * and rebuilding the gadgets would mean rebuilding their wiring too.
+         */
+        bool visible{true};
+
         Subject<const ControlMessage&> messagesSubject;
 
     private:
@@ -144,6 +152,9 @@ namespace rwe
 
         unsigned int getGroup() const;
         void setGroup(unsigned int newGroup);
+
+        bool isVisible() const { return visible; }
+        void setVisible(bool newVisible) { visible = newVisible; }
 
         Observable<const ControlMessage&>& messages();
         const Observable<const ControlMessage&>& messages() const;

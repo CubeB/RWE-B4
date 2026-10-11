@@ -111,7 +111,10 @@ namespace rwe
 
         for (const auto& i : children)
         {
-            i->render(graphics);
+            if (i->isVisible())
+            {
+                i->render(graphics);
+            }
         }
 
         graphics.popMatrix();
@@ -126,7 +129,7 @@ namespace rwe
         for (std::size_t i = 0; i < size; ++i)
         {
             auto& c = children[i];
-            if (c->contains(event.x, event.y))
+            if (c->isVisible() && c->contains(event.x, event.y))
             {
                 setFocus(i);
                 c->mouseDown(event);
@@ -190,7 +193,7 @@ namespace rwe
 
         for (auto& e : children)
         {
-            if (e->matchesQuickKey(event.keyCode))
+            if (e->isVisible() && e->matchesQuickKey(event.keyCode))
             {
                 e->keyDown(event);
                 return;
@@ -233,7 +236,13 @@ namespace rwe
 
         for (auto& e : children)
         {
-            e->mouseMove(event);
+            // A hidden gadget is not under the pointer, whatever its
+            // geometry says: it would otherwise raise hover events nobody
+            // can see the cause of.
+            if (e->isVisible())
+            {
+                e->mouseMove(event);
+            }
         }
     }
 

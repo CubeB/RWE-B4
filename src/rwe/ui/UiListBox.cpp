@@ -148,6 +148,11 @@ namespace rwe
         selectedIndexSubject.next(std::nullopt);
     }
 
+    void UiListBox::scrollToEnd()
+    {
+        setScrollPosition(maxScrollPosition());
+    }
+
     Observable<std::optional<unsigned int>>& UiListBox::selectedIndex()
     {
         return selectedIndexSubject;

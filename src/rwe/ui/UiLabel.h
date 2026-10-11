@@ -25,6 +25,8 @@ namespace rwe
 
         void setText(const std::string& newText);
 
+        const std::string& getText() const { return text; }
+
         void setAlignment(Alignment newAlignment);
     };
 }
