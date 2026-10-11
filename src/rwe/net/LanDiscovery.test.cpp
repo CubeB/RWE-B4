@@ -1735,9 +1735,13 @@ namespace rwe
             }
 
             auto got = peer.receiveFor(std::chrono::milliseconds(500));
-            // The first went at once; the other four wait for the window
-            // to end and go as one, carrying the last.
-            REQUIRE(got.size() >= 2);
+            // The first goes at once and the rest wait for the window to
+            // end and go as one, carrying the last. How many datagrams that
+            // is depends on whether the network thread woke before the
+            // sixth call returned -- in a Release build it does not, and
+            // all six are one send -- so what is asserted is the bound and
+            // the last lobby, not the count of the first.
+            REQUIRE(got.size() >= 1);
             CHECK(got.size() <= 3);
             auto last = LanDiscovery::decode(got.back());
             REQUIRE(last);
