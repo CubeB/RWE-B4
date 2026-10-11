@@ -51,13 +51,18 @@ namespace rwe
             }
         }
 
-        std::string percentEncode(const std::string& s)
+        /**
+         * `escapePipe` is for a field that sits between `|` separators: `|` is
+         * a legal unreserved character everywhere else, and in a chat line
+         * a name that contained one would otherwise shift every field after it.
+         */
+        std::string percentEncode(const std::string& s, bool escapePipe = false)
         {
             std::string out;
             out.reserve(s.size());
             for (char c : s)
             {
-                if (isUnreserved(c))
+                if (isUnreserved(c) && !(escapePipe && c == '|'))
                 {
                     out.push_back(c);
                 }
@@ -259,6 +264,101 @@ namespace rwe
             return extras;
         }
 
+        /** A control character is anything below a space, or DEL. */
+        bool hasControlCharacter(const std::string& s)
+        {
+            return std::any_of(s.begin(), s.end(), [](char c) {
+                auto u = static_cast<unsigned char>(c);
+                return u < 0x20 || u == 0x7f;
+            });
+        }
+
+        /**
+         * What a chat line has to be to go on the wire and to be believed
+         * coming off it. The same test on both sides, so that the encoder
+         * never writes a line the decoder would drop.
+         */
+        bool isValidChatLine(const DiscoveredChatLine& line)
+        {
+            if (line.sequence < 1 || line.sequence > 2147483647u) return false;
+            if (line.text.empty() || line.text.size() > LanDiscovery::maxChatTextLength) return false;
+            if (line.name.size() > LanDiscovery::maxHostNameLength) return false;
+            return !hasControlCharacter(line.name) && !hasControlCharacter(line.text);
+        }
+
+        /**
+         * `sequence|name|text`, both strings percent-encoded. A line this
+         * cannot read is an entry to drop and not a reason to refuse the
+         * announcement: somebody's chat is not worth a lobby.
+         */
+        std::optional<DiscoveredChatLine> decodeChatLine(const std::string& value)
+        {
+            auto f = split(value, '|');
+            if (f.size() != 3) return std::nullopt;
+
+            unsigned long sequence = 0;
+            if (!parseUnsigned(f[0], sequence)) return std::nullopt;
+
+            DiscoveredChatLine line;
+            if (sequence < 1 || sequence > 2147483647ul) return std::nullopt;
+            line.sequence = static_cast<unsigned int>(sequence);
+
+            if (!percentDecode(f[1], line.name)) return std::nullopt;
+            if (!percentDecode(f[2], line.text)) return std::nullopt;
+            if (!isValidChatLine(line)) return std::nullopt;
+            return line;
+        }
+
+        /** `index:0` or `index:1`; anything else is no flag at all. */
+        std::optional<std::pair<int, bool>> decodeReadyFlag(const std::string& value)
+        {
+            auto colon = value.find(':');
+            if (colon == std::string::npos) return std::nullopt;
+
+            int index = 0;
+            if (!parseInt(value.substr(0, colon), index)) return std::nullopt;
+            if (index < 0 || index >= static_cast<int>(maxSlots)) return std::nullopt;
+
+            auto flag = value.substr(colon + 1);
+            if (flag == "1") return std::make_pair(index, true);
+            if (flag == "0") return std::make_pair(index, false);
+            return std::nullopt;
+        }
+
+        /**
+         * A host name as it is written, not as it resolves. Dot separated
+         * labels of 1..63 characters from [A-Za-z0-9-], none beginning or
+         * ending with a hyphen, 253 characters at most, and a letter
+         * somewhere: without that, `999.1.1.1` would be a perfectly good
+         * name for a machine that does not exist, and the one thing the TCP
+         * screen has to tell a person is that they mistyped an address.
+         */
+        bool isValidHostName(const std::string& s)
+        {
+            if (s.empty() || s.size() > 253) return false;
+
+            bool hasLetter = false;
+            std::size_t labelStart = 0;
+            for (std::size_t i = 0; i <= s.size(); ++i)
+            {
+                if (i == s.size() || s[i] == '.')
+                {
+                    auto length = i - labelStart;
+                    if (length < 1 || length > 63) return false;
+                    if (s[labelStart] == '-' || s[i - 1] == '-') return false;
+                    labelStart = i + 1;
+                    continue;
+                }
+
+                char c = s[i];
+                bool letter = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+                bool digit = c >= '0' && c <= '9';
+                if (!letter && !digit && c != '-') return false;
+                hasLetter = hasLetter || letter;
+            }
+            return hasLetter;
+        }
+
         std::string describeEndpoint(const asio::ip::udp::endpoint& endpoint)
         {
             auto address = endpoint.address().to_string();
@@ -302,28 +402,45 @@ namespace rwe
             return true;
         }
 
+        /** Who a probe or an announcement is to go to; see parseProbeTarget. */
+        struct ProbeTarget
+        {
+            /** A name, to be resolved; otherwise `address` is what to send to. */
+            bool isName{false};
+            asio::ip::address address;
+            /** Lower case, so that "My-PC" and "my-pc" are one lookup. */
+            std::string name;
+            unsigned short port{LanDiscovery::defaultPort};
+        };
+
         /**
          * Who a probe is to go to: `a.b.c.d`, `a.b.c.d:port`, `v6`,
-         * `[v6]`, `[v6]:port` or a v4-mapped `::ffff:a.b.c.d[:port]`. Addresses
-         * only: a name would have to be resolved, and resolving blocks on
-         * the network for as long as a DNS server cares to take.
+         * `[v6]`, `[v6]:port`, a v4-mapped `::ffff:a.b.c.d[:port]`, or a host
+         * name with or without a port. This only reads the text: a name is
+         * reported as one and never looked up here, because resolving
+         * blocks on the network for as long as a DNS server cares to take.
          *
          * This is not getHostAndPort, which splits at the last colon and so
          * reads the last group of an unbracketed IPv6 address as a port.
          */
-        std::optional<asio::ip::udp::endpoint> parseProbeTarget(const std::string& input)
+        std::optional<ProbeTarget> parseProbeTarget(const std::string& input)
         {
             auto first = input.find_first_not_of(" \t");
             if (first == std::string::npos) return std::nullopt;
             auto last = input.find_last_not_of(" \t");
             auto text = input.substr(first, last - first + 1);
-            if (text.size() > 64) return std::nullopt;
+            // A name is up to 253 characters and a port is six more with its
+            // colon. An address is a good deal shorter, and says so below.
+            if (text.size() > 259) return std::nullopt;
 
             unsigned short port = LanDiscovery::defaultPort;
             std::string host = text;
+            // Only text with no brackets and at most one colon can be a name.
+            bool mayBeName = true;
 
             if (text.front() == '[')
             {
+                mayBeName = false;
                 auto close = text.find(']');
                 if (close == std::string::npos) return std::nullopt;
                 host = text.substr(1, close - 1);
@@ -344,6 +461,7 @@ namespace rwe
                 }
                 else if (colons >= 2)
                 {
+                    mayBeName = false;
                     // A v6 address, which is all colons, or a v4-mapped one
                     // with a port after it: "::ffff:1.2.3.4:80". The second
                     // is the one with a dot before the last colon and none
@@ -358,9 +476,26 @@ namespace rwe
                 }
             }
 
-            auto address = parseBareAddress(host);
-            if (!address) return std::nullopt;
-            return asio::ip::udp::endpoint(*address, port);
+            ProbeTarget target;
+            target.port = port;
+
+            if (auto address = parseBareAddress(host))
+            {
+                target.address = *address;
+                return target;
+            }
+
+            if (mayBeName && isValidHostName(host))
+            {
+                target.isName = true;
+                target.name = host;
+                std::transform(target.name.begin(), target.name.end(), target.name.begin(), [](char c) {
+                    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+                });
+                return target;
+            }
+
+            return std::nullopt;
         }
 
         std::optional<DiscoveredSlot> decodeSlot(const std::string& line)
@@ -496,14 +631,26 @@ namespace rwe
             out += "," + percentEncode(slot.personality);
         }
 
-        // Options come last, because they are what gives way. Everything
-        // above is needed to join the lobby at all; an option is something
-        // a guest is told in addition. If the datagram would be too big the
-        // trailing options are left off, one at a time, and only a lobby
-        // that does not fit even with none is refused. Which options made it
-        // is therefore the host's list from the front.
+        // A seat that is ready says so, and a seat that is not says nothing,
+        // so a lobby where nobody has pressed the button costs no bytes.
+        // Only `1` is ever written; the decoder reads `0` as well because a
+        // peer is allowed to be more explicit than this.
+        for (const auto& slot : game.slots)
+        {
+            if (!slot.ready) continue;
+            out += "\nslotr=" + std::to_string(slot.index) + ":1";
+        }
+
+        // Everything above is needed to join the lobby at all, and so it
+        // cannot give way: a lobby that does not fit with only that is
+        // refused. What is below gives way, in this order. Chat goes first,
+        // a whole line at a time and the oldest first, since a guest who
+        // misses a line has missed a line and no more. Options go next,
+        // trailing ones first, one at a time, so which options made it is
+        // the host's list from the front.
         if (out.size() > maxMessageSize) return std::nullopt;
 
+        std::vector<std::string> optionLines;
         std::vector<std::string> seenNames;
         for (const auto& [name, value] : game.options)
         {
@@ -514,9 +661,48 @@ namespace rwe
             if (std::find(seenNames.begin(), seenNames.end(), name) != seenNames.end()) continue;
             seenNames.push_back(name);
 
-            auto line = "\n" + std::string(optionKeyPrefix) + name + "=" + percentEncode(value);
-            if (out.size() + line.size() > maxMessageSize) break;
-            out += line;
+            optionLines.push_back("\n" + std::string(optionKeyPrefix) + name + "=" + percentEncode(value));
+        }
+
+        // A line the decoder would drop is dropped here, and the newest
+        // maxChatLines of what is left are the tail. Dropping, and not
+        // refusing, because the chat is the one part of a lobby that is
+        // typed by a person into a box and a stray control character is
+        // never a reason for the lobby to stop being advertised.
+        std::vector<std::string> chatLines;
+        for (const auto& line : game.chat)
+        {
+            if (!isValidChatLine(line)) continue;
+            chatLines.push_back(
+                "\nchat=" + std::to_string(line.sequence) + "|" + percentEncode(line.name, true) + "|" + percentEncode(line.text, true));
+        }
+        if (chatLines.size() > maxChatLines)
+        {
+            chatLines.erase(chatLines.begin(), chatLines.end() - static_cast<std::ptrdiff_t>(maxChatLines));
+        }
+
+        std::size_t total = out.size();
+        for (const auto& line : optionLines) total += line.size();
+        for (const auto& line : chatLines) total += line.size();
+
+        std::size_t firstChat = 0;
+        while (total > maxMessageSize && firstChat < chatLines.size())
+        {
+            total -= chatLines[firstChat++].size();
+        }
+        auto optionCount = optionLines.size();
+        while (total > maxMessageSize && optionCount > 0)
+        {
+            total -= optionLines[--optionCount].size();
+        }
+
+        for (std::size_t i = firstChat; i < chatLines.size(); ++i)
+        {
+            out += chatLines[i];
+        }
+        for (std::size_t i = 0; i < optionCount; ++i)
+        {
+            out += optionLines[i];
         }
 
         return out;
@@ -533,6 +719,7 @@ namespace rwe
         bool havePort = false;
         std::vector<int> seenSlots;
         std::vector<SlotExtras> extras;
+        std::vector<std::pair<int, bool>> readyFlags;
 
         for (std::size_t i = 1; i < lines.size(); ++i)
         {
@@ -617,6 +804,30 @@ namespace rwe
                 }
                 extras.push_back(*x);
             }
+            else if (key == "slotr")
+            {
+                // A flag that is not one is dropped and the lobby is read
+                // without it: a seat is not ready until it is believably
+                // said to be, which is the safe way for it to be wrong.
+                // The first word on a seat is the one that counts.
+                auto flag = decodeReadyFlag(value);
+                if (!flag) continue;
+                if (std::any_of(readyFlags.begin(), readyFlags.end(), [&](const auto& r) { return r.first == flag->first; }))
+                {
+                    continue;
+                }
+                readyFlags.push_back(*flag);
+            }
+            else if (key == "chat")
+            {
+                // Dropped line by line, like the flags, and beyond the eighth
+                // not read at all: the tail has a size and a longer one is
+                // somebody not following it.
+                if (game.chat.size() >= maxChatLines) continue;
+                auto line = decodeChatLine(value);
+                if (!line) continue;
+                game.chat.push_back(std::move(*line));
+            }
             else if (key.compare(0, optionKeyPrefixLength, optionKeyPrefix) == 0)
             {
                 auto name = key.substr(optionKeyPrefixLength);
@@ -658,6 +869,15 @@ namespace rwe
             it->personality = x.personality;
         }
 
+        for (const auto& [index, ready] : readyFlags)
+        {
+            auto it = std::find_if(game.slots.begin(), game.slots.end(), [&](const auto& s) {
+                return s.index == index;
+            });
+            if (it == game.slots.end()) continue;
+            it->ready = ready;
+        }
+
         if (game.session.empty() || game.map.empty() || !havePort) return std::nullopt;
         return game;
     }
@@ -692,6 +912,12 @@ namespace rwe
         {
             std::scoped_lock<std::mutex> lock(mutex);
             advertised.reset();
+            advertisedText.reset();
+            unsentChange = false;
+            changeAnnouncementArmed = false;
+            // Whatever was armed for this run is still in the io_context's
+            // queue when it is restarted below. This is what tells it so.
+            ++generation;
         }
         ioContext.stop();
         if (networkThread.joinable())
@@ -704,6 +930,14 @@ namespace rwe
         socket6.reset();
         heard.clear();
         recentProbeReplies.clear();
+        nameLookups.clear();
+    }
+
+    void LanDiscovery::setAnnounceInterval(std::chrono::milliseconds newInterval)
+    {
+        if (newInterval.count() <= 0) return;
+        std::scoped_lock<std::mutex> lock(mutex);
+        interval = newInterval;
     }
 
     bool LanDiscovery::isRunning() const
@@ -921,109 +1155,375 @@ namespace rwe
         return parseProbeTarget(hostAndPort).has_value();
     }
 
-    bool LanDiscovery::probe(const std::string& hostAndPort)
+    bool LanDiscovery::sendDatagram(const std::string& data, asio::ip::udp::endpoint destination)
     {
-        auto target = parseProbeTarget(hostAndPort);
-        if (!target) return false;
-
-        auto address = target->address();
-        auto port = target->port();
-
         // A v4-mapped address names an IPv4 machine, and the v6-only socket
         // cannot reach one. Hand it to the IPv4 socket as the plain address.
+        auto address = destination.address();
         if (address.is_v6() && address.to_v6().is_v4_mapped())
         {
-            address = asio::ip::make_address_v4(asio::ip::v4_mapped, address.to_v6());
+            destination = asio::ip::udp::endpoint(
+                asio::ip::make_address_v4(asio::ip::v4_mapped, address.to_v6()),
+                destination.port());
         }
-        asio::ip::udp::endpoint destination(address, port);
 
-        std::scoped_lock<std::mutex> lock(mutex);
+        // Sent from the same socket that listens, so that a reply lands on
+        // the one the receive loop is already serving. The socket and the
+        // destination are the same family, which is what keeps this clear of
+        // the Winsock fault EndpointFamily.h describes.
         auto& s = destination.address().is_v6() ? socket6 : socket;
         if (!s) return false;
 
-        // Sent from the same socket that listens, so that the reply lands
-        // on the one the receive loop is already serving. The socket and
-        // the destination are the same family, which is what keeps this
-        // clear of the Winsock fault EndpointFamily.h describes.
         asio::error_code ec;
-        s->send_to(asio::buffer(probeMessage()), destination, 0, ec);
+        s->send_to(asio::buffer(data), destination, 0, ec);
         if (ec)
         {
-            LOG_DEBUG << "LAN discovery could not probe " << describeEndpoint(destination) << ": " << ec.message();
+            LOG_DEBUG << "LAN discovery could not send to " << describeEndpoint(destination) << ": " << ec.message();
             return false;
         }
         return true;
     }
 
-    void LanDiscovery::announceLoop()
+    bool LanDiscovery::probe(const std::string& hostAndPort)
     {
-        prune();
+        auto target = parseProbeTarget(hostAndPort);
+        if (!target) return false;
 
-        std::optional<DiscoveredGame> toAnnounce;
-        std::vector<asio::ip::udp::endpoint> targets;
+        std::scoped_lock<std::mutex> lock(mutex);
+
+        if (!target->isName)
         {
-            std::scoped_lock<std::mutex> lock(mutex);
-            toAnnounce = advertised;
-            targets = announceTargets;
+            return sendDatagram(probeMessage(), asio::ip::udp::endpoint(target->address, target->port));
         }
 
-        if (toAnnounce)
+        // A name is another matter. It is not looked up here, on the
+        // caller's thread, and neither is the answer waited for: it is
+        // handed to the resolver and the probe goes out when that lands.
+        if (!socket) return false;
+
+        auto answer = lookUpName(target->name, target->port);
+        if (!answer.accepted) return false;
+        if (answer.address)
         {
-            if (auto text = encode(*toAnnounce))
+            return sendDatagram(probeMessage(), asio::ip::udp::endpoint(*answer.address, target->port));
+        }
+        return true;
+    }
+
+    std::size_t LanDiscovery::pendingLookups() const
+    {
+        return static_cast<std::size_t>(std::count_if(nameLookups.begin(), nameLookups.end(), [](const auto& l) {
+            return l.pending;
+        }));
+    }
+
+    LanDiscovery::NameAnswer LanDiscovery::lookUpName(const std::string& name, unsigned short probePort)
+    {
+        // How many names are remembered at all, settled ones included. The
+        // settled ones are what get pushed out when a person has typed more
+        // names than that inside a minute.
+        constexpr std::size_t maxRemembered = 16;
+        // A believed address is looked up again a little before it expires,
+        // so that an announcement to a name never has a gap while a lookup
+        // that the minute's end called for is still on its way.
+        constexpr std::chrono::milliseconds refreshAfter{50000};
+        constexpr std::size_t maxProbePorts = 4;
+
+        auto now = getTimestamp();
+        auto believed = [&](const NameLookup& l) {
+            return l.hasAddress && now - l.addressAt < nameCacheTime;
+        };
+        auto failureRemembered = [&](const NameLookup& l) {
+            return l.failed && now - l.failedAt < nameRetryInterval;
+        };
+
+        // Forget what is neither believed nor worth remembering.
+        nameLookups.erase(
+            std::remove_if(nameLookups.begin(), nameLookups.end(), [&](const NameLookup& l) {
+                return !l.pending && !believed(l) && !failureRemembered(l);
+            }),
+            nameLookups.end());
+
+        auto it = std::find_if(nameLookups.begin(), nameLookups.end(), [&](const NameLookup& l) {
+            return l.name == name;
+        });
+
+        if (it == nameLookups.end())
+        {
+            if (pendingLookups() >= maxPendingNameLookups) return {std::nullopt, false};
+
+            while (nameLookups.size() >= maxRemembered)
             {
-                auto addresses = broadcastAddresses();
-                std::scoped_lock<std::mutex> lock(mutex);
-                if (socket)
+                auto oldest = nameLookups.end();
+                for (auto candidate = nameLookups.begin(); candidate != nameLookups.end(); ++candidate)
                 {
-                    for (const auto& a : addresses)
+                    if (candidate->pending) continue;
+                    auto stamp = [](const NameLookup& l) { return std::max(l.addressAt, l.failedAt); };
+                    if (oldest == nameLookups.end() || stamp(*candidate) < stamp(*oldest))
                     {
-                        asio::error_code ec;
-                        socket->send_to(
-                            asio::buffer(*text),
-                            asio::ip::udp::endpoint(asio::ip::make_address(a), LanDiscovery::defaultPort),
-                            0,
-                            ec);
-                        if (ec)
-                        {
-                            LOG_DEBUG << "LAN discovery could not broadcast to " << a << ": " << ec.message();
-                        }
+                        oldest = candidate;
                     }
+                }
+                // Only possible if more than maxRemembered were pending,
+                // which the check above rules out; refuse rather than loop.
+                if (oldest == nameLookups.end()) return {std::nullopt, false};
+                nameLookups.erase(oldest);
+            }
 
-                    // The same datagram to each machine named by address.
-                    // A v4-mapped address goes out of the IPv4 socket as the
-                    // plain address, for the reason probe() gives.
-                    for (auto destination : targets)
+            NameLookup fresh;
+            fresh.name = name;
+            nameLookups.push_back(std::move(fresh));
+            it = nameLookups.end() - 1;
+        }
+
+        auto& entry = *it;
+        bool usable = believed(entry);
+        bool due = !entry.pending && !failureRemembered(entry)
+            && (!usable || now - entry.addressAt >= refreshAfter);
+        if (due)
+        {
+            if (pendingLookups() < maxPendingNameLookups)
+            {
+                startLookup(entry);
+            }
+            else if (!usable)
+            {
+                // Nothing known, nothing under way, and no room to start.
+                return {std::nullopt, false};
+            }
+        }
+
+        if (usable)
+        {
+            return {entry.address, true};
+        }
+
+        if (probePort != 0 && entry.pending
+            && entry.probePorts.size() < maxProbePorts
+            && std::find(entry.probePorts.begin(), entry.probePorts.end(), probePort) == entry.probePorts.end())
+        {
+            entry.probePorts.push_back(probePort);
+        }
+        return {std::nullopt, true};
+    }
+
+    void LanDiscovery::startLookup(NameLookup& entry)
+    {
+        entry.pending = true;
+        try
+        {
+            // asio runs the blocking lookup on a helper thread of its own
+            // and posts the answer back to the io_context, so this call
+            // returns at once and the handler runs on the network thread.
+            // The resolver is kept alive by the handler that needs it.
+            auto resolver = std::make_shared<asio::ip::udp::resolver>(ioContext);
+            auto name = entry.name;
+            auto run = generation;
+            resolver->async_resolve(
+                name,
+                "",
+                [this, resolver, name, run](const asio::error_code& error, asio::ip::udp::resolver::results_type results) {
+                    onNameResolved(name, run, error, results);
+                });
+        }
+        catch (const std::exception& e)
+        {
+            LOG_DEBUG << "LAN discovery could not start a lookup of " << entry.name << ": " << e.what();
+            entry.pending = false;
+            entry.failed = true;
+            entry.failedAt = getTimestamp();
+        }
+    }
+
+    void LanDiscovery::onNameResolved(
+        const std::string& name,
+        unsigned long long run,
+        const asio::error_code& error,
+        const asio::ip::udp::resolver::results_type& results)
+    {
+        bool announceNowAfter = false;
+        {
+            std::scoped_lock<std::mutex> lock(mutex);
+
+            // An answer to a question asked before the last stop() is an
+            // answer about a run that is over.
+            if (run != generation) return;
+
+            auto it = std::find_if(nameLookups.begin(), nameLookups.end(), [&](const NameLookup& l) {
+                return l.name == name;
+            });
+            if (it == nameLookups.end() || !it->pending) return;
+
+            // IPv4 where there is a choice. Both of this class's sockets
+            // exist for a reason (see socket6) but the v4 one is the one
+            // that is always there, and a name that has both is a machine
+            // that answers on both.
+            std::optional<asio::ip::address> chosen;
+            if (!error)
+            {
+                for (const auto& result : results)
+                {
+                    auto address = result.endpoint().address();
+                    if (address.is_v6() && address.to_v6().is_v4_mapped())
                     {
-                        auto address = destination.address();
-                        if (address.is_v6() && address.to_v6().is_v4_mapped())
-                        {
-                            destination = asio::ip::udp::endpoint(
-                                asio::ip::make_address_v4(asio::ip::v4_mapped, address.to_v6()),
-                                destination.port());
-                        }
-                        auto& s = destination.address().is_v6() ? socket6 : socket;
-                        if (!s) continue;
-
-                        asio::error_code ec;
-                        s->send_to(asio::buffer(*text), destination, 0, ec);
-                        if (ec)
-                        {
-                            LOG_DEBUG << "LAN discovery could not announce to " << describeEndpoint(destination) << ": " << ec.message();
-                        }
+                        address = asio::ip::make_address_v4(asio::ip::v4_mapped, address.to_v6());
+                    }
+                    if (address.is_v4())
+                    {
+                        chosen = address;
+                        break;
+                    }
+                    if (!chosen)
+                    {
+                        chosen = address;
                     }
                 }
             }
-            else
+
+            it->pending = false;
+            auto ports = std::move(it->probePorts);
+            it->probePorts.clear();
+
+            if (!chosen)
+            {
+                LOG_DEBUG << "LAN discovery could not resolve " << name << ": "
+                          << (error ? error.message() : std::string("no address"));
+                it->failed = true;
+                it->failedAt = getTimestamp();
+                return;
+            }
+
+            it->failed = false;
+            it->hasAddress = true;
+            it->address = *chosen;
+            it->addressAt = getTimestamp();
+
+            for (auto port : ports)
+            {
+                sendDatagram(probeMessage(), asio::ip::udp::endpoint(*chosen, port));
+            }
+
+            // A lobby that is being advertised to this name has been
+            // waiting for it. It need not wait out the rest of the interval.
+            announceNowAfter = advertised.has_value()
+                && std::any_of(announceTargets.begin(), announceTargets.end(), [&](const AnnounceTarget& t) {
+                       return t.isName && t.name == name;
+                   });
+        }
+
+        if (announceNowAfter)
+        {
+            announceNow();
+        }
+    }
+
+    std::vector<asio::ip::udp::endpoint> LanDiscovery::reachableAnnounceTargets()
+    {
+        std::vector<asio::ip::udp::endpoint> reachable;
+        for (const auto& target : announceTargets)
+        {
+            if (!target.isName)
+            {
+                reachable.push_back(target.endpoint);
+                continue;
+            }
+
+            auto answer = lookUpName(target.name, 0);
+            if (answer.address)
+            {
+                reachable.emplace_back(*answer.address, target.port);
+            }
+        }
+        return reachable;
+    }
+
+    void LanDiscovery::announceLoop()
+    {
+        prune();
+        announceNow();
+
+        std::scoped_lock<std::mutex> lock(mutex);
+        auto timer = std::make_shared<asio::steady_timer>(ioContext);
+        timer->expires_after(interval);
+        auto run = generation;
+        timer->async_wait([this, timer, run](const asio::error_code& error) {
+            if (error) return;
+            {
+                // A timer from before the last stop() would otherwise start
+                // a loop of its own beside the one start() began.
+                std::scoped_lock<std::mutex> inner(mutex);
+                if (run != generation) return;
+            }
+            announceLoop();
+        });
+    }
+
+    void LanDiscovery::announceNow()
+    {
+        std::optional<std::string> text;
+        {
+            std::scoped_lock<std::mutex> lock(mutex);
+            unsentChange = false;
+            text = advertisedText;
+            if (advertised && !text)
             {
                 LOG_DEBUG << "LAN discovery could not encode its lobby; not advertising";
             }
         }
+        if (!text) return;
+
+        auto addresses = broadcastAddresses();
+        std::scoped_lock<std::mutex> lock(mutex);
+        if (!socket) return;
+
+        for (const auto& a : addresses)
+        {
+            asio::error_code ec;
+            socket->send_to(
+                asio::buffer(*text),
+                asio::ip::udp::endpoint(asio::ip::make_address(a), LanDiscovery::defaultPort),
+                0,
+                ec);
+            if (ec)
+            {
+                LOG_DEBUG << "LAN discovery could not broadcast to " << a << ": " << ec.message();
+            }
+        }
+
+        // The same datagram to each machine named by address, or by a name
+        // that has resolved by now.
+        for (const auto& destination : reachableAnnounceTargets())
+        {
+            sendDatagram(*text, destination);
+        }
+    }
+
+    void LanDiscovery::scheduleChangeAnnouncement()
+    {
+        unsentChange = true;
+        // Without a socket there is nobody to tell, and the first regular
+        // announcement after start() carries the lobby as it then is.
+        if (!socket || changeAnnouncementArmed) return;
+        changeAnnouncementArmed = true;
+
+        auto due = std::max(
+            std::chrono::steady_clock::now(),
+            lastChangeAnnouncement + changeAnnounceGap);
 
         auto timer = std::make_shared<asio::steady_timer>(ioContext);
-        timer->expires_after(interval);
-        timer->async_wait([this, timer](const asio::error_code& error) {
-            if (error) return;
-            announceLoop();
+        timer->expires_at(due);
+        auto run = generation;
+        timer->async_wait([this, timer, run](const asio::error_code& error) {
+            {
+                std::scoped_lock<std::mutex> lock(mutex);
+                if (run != generation) return;
+                changeAnnouncementArmed = false;
+                // Cancelled, or a regular announcement carried the change
+                // while this was waiting: there is nothing left to say.
+                if (error || !unsentChange) return;
+                lastChangeAnnouncement = std::chrono::steady_clock::now();
+            }
+            announceNow();
         });
     }
 
@@ -1050,29 +1550,67 @@ namespace rwe
 
     void LanDiscovery::advertise(const DiscoveredGame& game)
     {
+        // Encoded before the lock is taken: this is the comparison that
+        // says whether anything changed, and it is also the only part of
+        // this call that is not a handful of assignments.
+        auto text = encode(game);
+
         std::scoped_lock<std::mutex> lock(mutex);
         advertised = game;
+
+        bool changed = text.has_value() && text != advertisedText;
+        advertisedText = std::move(text);
+        if (changed)
+        {
+            scheduleChangeAnnouncement();
+        }
     }
 
     void LanDiscovery::stopAdvertising()
     {
         std::scoped_lock<std::mutex> lock(mutex);
         advertised.reset();
+        advertisedText.reset();
+        unsentChange = false;
     }
 
     void LanDiscovery::setAnnounceTargets(const std::vector<std::string>& hostsAndPorts)
     {
-        std::vector<asio::ip::udp::endpoint> parsed;
+        std::vector<AnnounceTarget> parsed;
         for (const auto& text : hostsAndPorts)
         {
-            if (auto target = parseProbeTarget(text))
+            auto target = parseProbeTarget(text);
+            if (!target) continue;
+
+            AnnounceTarget entry;
+            entry.isName = target->isName;
+            entry.port = target->port;
+            if (target->isName)
             {
-                parsed.push_back(*target);
+                entry.name = target->name;
             }
+            else
+            {
+                entry.endpoint = asio::ip::udp::endpoint(target->address, target->port);
+            }
+            parsed.push_back(std::move(entry));
         }
 
         std::scoped_lock<std::mutex> lock(mutex);
         announceTargets = std::move(parsed);
+
+        // Start the lookups now rather than at the next announcement, so
+        // that the name is ready by the time there is something to say.
+        if (socket)
+        {
+            for (const auto& target : announceTargets)
+            {
+                if (target.isName)
+                {
+                    lookUpName(target.name, 0);
+                }
+            }
+        }
     }
 
     std::vector<DiscoveredGame> LanDiscovery::games() const
