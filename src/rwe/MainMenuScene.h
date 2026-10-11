@@ -1,6 +1,8 @@
 #pragma once
 
 #include <memory>
+#include <optional>
+#include <vector>
 #include <rwe/AudioService.h>
 #include <rwe/CursorService.h>
 #include <rwe/RenderService.h>
@@ -14,11 +16,22 @@
 #include <rwe/scene/Scene.h>
 #include <rwe/ui/UiFactory.h>
 #include <rwe/ui/UiPanel.h>
+#include <rwe/render/SpriteSeries.h>
 
 namespace rwe
 {
+    struct MultiplayerFlow;
+    struct MenuProbe;
+
     class MainMenuScene : public Scene
     {
+        /**
+         * ui_probe reads the real panels, the real model and the flow of a
+         * running menu to say what a person would see; it is the one reader
+         * of them that is not the scene.
+         */
+        friend struct MenuProbe;
+
     private:
         SceneContext sceneContext;
         TdfBlock* soundLookup;
@@ -86,6 +99,9 @@ namespace rwe
             TdfBlock* audioLookup,
             float width,
             float height);
+
+        /** Out of line: the multiplayer flow is a type only the .cpp that defines it knows. */
+        ~MainMenuScene() override;
 
         MainMenuScene(const MainMenuScene&) = delete;
         MainMenuScene& operator=(const MainMenuScene&) = delete;
@@ -166,14 +182,32 @@ namespace rwe
 
         void goToSkirmishMenu();
 
-        /**
-         * The same screen as the skirmish one, for a game played against other
-         * machines rather than against the computer. What it adds is a slot
-         * type -- Network, with an address -- and the port this machine
-         * listens on; what it has no way to add is agreement, there being no
-         * lobby here to agree anything in. See MultiplayerSetup.h.
-         */
+        /** The way into a game against other machines; the same as goToSelectConnectionMenu. */
         void goToMultiplayerMenu();
+
+        /**
+         * The original's route to a network game, which is where MULTI goes:
+         * SELPROV.GUI (the connection), TCP.GUI (an address), SELGAME.GUI
+         * (the games, with New and Join), NEWMULTI.GUI (name the game), and
+         * then the battleroom, LOUNGE2.GUI.
+         */
+        void goToSelectConnectionMenu();
+
+        /**
+         * Handles a popped panel that belongs to the multiplayer flow
+         * (leaving the list goes back to the address dialog, and so on).
+         * True if it did, in which case the panel stack has been dealt with.
+         */
+        bool multiplayerGoBack();
+
+        /**
+         * A message from one of the multiplayer screens, the battleroom
+         * included. True if it was dealt with.
+         */
+        bool multiplayerMessage(const std::string& topic, const std::string& message, const ActivateMessage& details);
+
+        /** Once a frame: the list refreshes, the host announces, the guest follows. */
+        void updateMultiplayer();
 
         /** The screen shared by both, given which one it is being built for. */
         void goToPlayerSetupMenu(bool multiplayer);
@@ -231,9 +265,78 @@ namespace rwe
          * Whether this screen is setting up a game against other machines. It
          * decides three things: whether a slot can be Network at all, whether
          * the address and port boxes are drawn, and whether Start checks any
-         * of it.
+         * of it. The battleroom sets it too, although it draws no address or
+         * port box: the seats' addresses are on the model and Start's checks
+         * are the same.
          */
         bool multiplayerSetup{false};
+
+    private:
+        /**
+         * The multiplayer screens' state: discovery, the game list, the
+         * host's session or the guest's claim. Present from MULTI until the
+         * main menu is back or a game starts; defined in
+         * MainMenuScene_multiplayer.cpp, where the logic is too.
+         */
+        std::unique_ptr<MultiplayerFlow> multiplayerFlow;
+
+        /** The name last given on the list or the new-game screen, offered again next time. */
+        std::string rememberedNickname;
+
+        bool isMultiplayerGuest() const;
+        bool isMultiplayerHost() const;
+
+        /** The address dialog over the connection screen. */
+        void openTcpAddressDialog();
+        void confirmTcpAddress();
+
+        /** SELGAME.GUI, with discovery listening. */
+        void openGameList();
+        void updateGameList();
+        void joinSelectedGame();
+
+        /** NEWMULTI.GUI, and the host's side of its Next button. */
+        void openNewGameScreen();
+        void confirmNewGame();
+
+        /**
+         * Host: advertises the lobby as it now is, seats guests as they ask,
+         * and runs the second or two in which the guests are told to start.
+         */
+        void updateHostedLobby();
+
+        /** Guest: mirrors the host's announcement, and follows it into the game. */
+        void updateJoinedLobby();
+
+        /** LOUNGE2.GUI, the battleroom, for the role the flow is in. */
+        void goToBattleroom();
+
+        /** The battleroom's gadgets, set from the model and the room: every update. */
+        void refreshBattleroom();
+
+        /** A press on the battleroom. True if it was its own; Previous Menu is not. */
+        bool battleroomMessage(const std::string& message, const ActivateMessage& details);
+
+        /** The line typed in the battleroom's message box, said to the room. */
+        void sendChatLine();
+
+        /** Pops back to the game list from the battleroom, saying why if it was not by choice. */
+        void returnToGameList(const std::string& message);
+
+        /** Ends the multiplayer visit: discovery stopped, the setup screen's state put back. */
+        void endMultiplayer();
+
+        /** Host pressed Start: checked now, then the guests are told for a couple of seconds, then it starts. */
+        void beginHostedLaunch();
+
+        /** What the name button of a seat says: the person's name, or the kind of seat. */
+        std::string captionForSeat(int playerIndex) const;
+
+        /**
+         * Everything startGame checks and builds, short of starting: nothing
+         * if there is a problem, in which case the screen has said so.
+         */
+        std::optional<GameParameters> prepareGameParameters();
 
     private:
         AudioService::LoopToken startBgm();

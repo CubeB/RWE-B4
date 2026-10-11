@@ -4960,14 +4960,18 @@ namespace rwe
 
     void GameSimulation::updateSelfRepair()
     {
-        // `healtime` is hit points a second, but the original does not heal
-        // every tick: 0x48AF3D runs the whole thing only when the game tick
-        // is a multiple of eight (`test BYTE PTR [..],0x7`) and then adds
-        // `healtime * 8 / 30` points, truncated. That works out at roughly
-        // `healtime` a second while arriving in visible steps -- a commander
-        // with the shipped 27 gets 7 points every eight ticks, 26.25 a
-        // second -- and reproducing the granularity matters more than the
-        // average, because it is what the health bar does.
+        // 0x48AF3D runs only when the game tick is a multiple of eight
+        // (`test BYTE PTR [..],0x7`), and then it does not add hit points: it
+        // works out `work = healtime * 8 / 30` (truncated, then converted to a
+        // float) and hands it to the shared repair tick 0x41BD10 with the unit
+        // as both repairer and patient. That routine is the one every
+        // repairer goes through, and it throws the number away -- hit points
+        // and energy are each clamped to at most one (0x41BD87, 0x41BD97) --
+        // so a unit with any healtime at all mends ONE point every eight
+        // ticks, 3.75 a second, and pays one energy for it. A commander's
+        // shipped 27 makes `work` 7 and changes nothing about that. RWE
+        // used to add `work` itself, 26.25 a second, seven times too fast
+        // (play-test 2026-10-10: "commander health regen too fast?").
         if (gameTime.value % 8u != 0u)
         {
             return;
@@ -4992,11 +4996,24 @@ namespace rwe
                 continue;
             }
 
-            // Free, as all repair is in RWE. The original charges the mending
-            // against the owner's stores; nothing else here does, and making
-            // this the one exception would be more surprising than useful.
-            auto amount = (unitDefinition.healTime * 8u) / 30u;
-            unit.hitPoints = std::min(unitDefinition.maxHitPoints, unit.hitPoints + amount);
+            // work == 0 (a healtime under four) gives hp == 0 in the
+            // original's expression, and anything from one up reaches the
+            // clamp of one.
+            auto work = (unitDefinition.healTime * 8u) / 30u;
+            if (work == 0u)
+            {
+                continue;
+            }
+
+            // 0x41BDB7 asks the unit's own economy block for the energy and
+            // 0x41BDBC mends nothing if it is turned down.
+            auto energy = Energy(unitDefinition.buildCostEnergy.value * static_cast<float>(work) >= 1.0f ? 1.0f : 0.0f);
+            if (!addEnergyRequest(entry.first, energy))
+            {
+                continue;
+            }
+
+            unit.hitPoints = std::min(unitDefinition.maxHitPoints, unit.hitPoints + 1u);
         }
     }
 

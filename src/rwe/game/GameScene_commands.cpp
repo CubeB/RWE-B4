@@ -187,10 +187,54 @@ namespace rwe
             return std::nullopt;
         }
 
+        // What is not drawn cannot be picked: a feature on unexplored ground
+        // is not rendered, and hovering it must not read out its name and
+        // value or offer a reclaim cursor either. Units get the same
+        // treatment through unitIsVisibleToLocalPlayer.
+        auto pickable = [&](const FeatureId& id) {
+            auto feature = simulation.tryGetFeature(id);
+            return feature && positionIsExploredByLocalPlayer(feature->get().position);
+        };
+
+        // The terrain is hit *behind* anything with height, so a click on the
+        // upper part of a tree or a tall wreck lands a few cells away from the
+        // cell the feature stands in. Walk the last stretch of the ray down
+        // from the camera side and take the first feature whose own height
+        // the ray is still below as it passes over that feature's cell.
+        constexpr float tallestFeature = 160.0f;
+        constexpr int samples = 96;
+        auto hit = simVectorToFloat(*intersect);
+        auto dirY = ray.direction.y;
+        if (dirY < -0.0001f)
+        {
+            auto tHit = (hit.y - ray.origin.y) / dirY;
+            auto tStart = std::max(0.0f, (hit.y + tallestFeature - ray.origin.y) / dirY);
+            if (tStart < tHit)
+            {
+                for (int i = 0; i < samples; ++i)
+                {
+                    auto t = tStart + ((tHit - tStart) * static_cast<float>(i) / static_cast<float>(samples));
+                    auto p = ray.pointAt(t);
+                    auto cell = simulation.occupiedGrid.tryGet(simulation.terrain.worldToHeightmapCoordinate(floatToSimVector(p)));
+                    if (!cell || !cell->get().featureId || !pickable(*cell->get().featureId))
+                    {
+                        continue;
+                    }
+
+                    const auto& feature = simulation.getFeature(*cell->get().featureId);
+                    const auto& definition = simulation.getFeatureDefinition(feature.featureName);
+                    if (p.y <= simScalarToFloat(feature.position.y + definition.height))
+                    {
+                        return cell->get().featureId;
+                    }
+                }
+            }
+        }
+
         auto heightmapPosition = simulation.terrain.worldToHeightmapCoordinate(*intersect);
 
         auto cellContents = simulation.occupiedGrid.tryGet(heightmapPosition);
-        if (!cellContents)
+        if (!cellContents || !cellContents->get().featureId || !pickable(*cellContents->get().featureId))
         {
             return std::nullopt;
         }

@@ -1,4 +1,5 @@
 #include "MainMenuScene.h"
+#include "MainMenuScene_multiplayer.h"
 #include <rwe/game/GameScene_util.h>
 #include <rwe/ui/UiLabel.h>
 #include <rwe/MovieScene.h>
@@ -25,6 +26,7 @@
 #include <rwe/ui/UiSurface.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/rwe_string.h>
+#include <rwe/ui/UiListBox.h>
 
 namespace rwe
 {
@@ -520,8 +522,11 @@ namespace rwe
         auto panel = uiFactory.panelFromGuiFile("MSGBOX");
 
         auto font = sceneContext.textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+        // A centred label is centred on its own x, not within its width, so
+        // the x is the middle of the box. Written as 0 it was centred on the
+        // box's left edge and every message was half off it.
         auto label = std::make_unique<UiLabel>(
-            0,
+            static_cast<int>(panel->getWidth()) / 2,
             (static_cast<int>(panel->getHeight()) / 2) - 40,
             panel->getWidth(),
             20,
@@ -618,6 +623,13 @@ namespace rwe
 
         if (panelStack.size() > 1)
         {
+            // The multiplayer screens know where Previous Menu goes: the list
+            // back to the address dialog, the setup screen back to the list.
+            if (multiplayerGoBack())
+            {
+                return;
+            }
+
             panelStack.pop_back();
             return;
         }
@@ -663,6 +675,10 @@ namespace rwe
         {
             action();
         }
+
+        // The list, the host's announcement and the guest's mirror. All of it
+        // is cheap and none of it waits on the network thread.
+        updateMultiplayer();
 
         topPanel().update(static_cast<float>(millisecondsElapsed) / 1000.0f);
     }
@@ -739,6 +755,14 @@ namespace rwe
 
     void MainMenuScene::messageNow(const std::string& topic, const std::string& message, const ActivateMessage& details)
     {
+        // The multiplayer screens first: they are the original's own flow and
+        // own their buttons, and while the setup screen is a joined lobby it
+        // is theirs too.
+        if (multiplayerMessage(topic, message, details))
+        {
+            return;
+        }
+
         // Leaving the briefing stops its narration (0x478DF0).
         if (topic == "MSNBRIEF" && (message == "PrevMenu" || message == "PREVMENU"))
         {
@@ -761,13 +785,11 @@ namespace rwe
             }
             else if (message == "MULTI")
             {
-                // Straight to the setup screen. The original's multiplayer
-                // button leads to a protocol chooser first -- NEWMULTI.GUI,
-                // MODEM.GUI and SERIAL.GUI are all still in the data -- but
-                // those choose between a games service, a modem and a null
-                // cable, and RWE speaks none of them. What it does speak is
-                // UDP to an address you give it, which needs no choosing.
-                goToMultiplayerMenu();
+                // The original's own route: the connection chooser, then an
+                // address, then the list of games (SELPROV, TCP, SELGAME).
+                // The chooser has one entry here because RWE speaks one
+                // thing -- UDP to an address -- and no modem or null cable.
+                goToSelectConnectionMenu();
             }
             else if (message == "INTRO")
             {
@@ -1175,11 +1197,6 @@ namespace rwe
         goToPlayerSetupMenu(false);
     }
 
-    void MainMenuScene::goToMultiplayerMenu()
-    {
-        goToPlayerSetupMenu(true);
-    }
-
     void MainMenuScene::goToPlayerSetupMenu(bool multiplayer)
     {
         multiplayerSetup = multiplayer;
@@ -1239,16 +1256,21 @@ namespace rwe
             portBox->setName("LOCALPORT");
             panel->appendChild(std::move(portBox));
 
-            // Said on the screen because it is the one thing about a
-            // direct-connect game that surprises people: there is no host
-            // here, so nothing propagates. Every machine types this screen.
-            auto note = uiFactory.createLabel(
-                45,
-                312,
-                430,
-                12,
-                "Everyone sets this screen the same way, with their own seat as Player.",
-                UiLabel::Alignment::Left);
+            // Said on the screen because the two roles read the same table
+            // and mean different things by it. The host's is the editable
+            // screen; a guest's is a mirror of the host's, which changes
+            // only when the host changes it.
+            std::string noteText = "Everyone sets this screen the same way, with their own seat as Player.";
+            // One line each, because the help line sits right under it.
+            if (isMultiplayerGuest())
+            {
+                noteText = "In another player's game. The host sets this screen.";
+            }
+            else if (isMultiplayerHost())
+            {
+                noteText = "Players on this network can join from the game list.";
+            }
+            auto note = uiFactory.createLabel(45, 312, 430, 12, noteText, UiLabel::Alignment::Left);
             panel->appendChild(std::move(note));
         }
 
@@ -1907,9 +1929,35 @@ namespace rwe
 
     void MainMenuScene::startGame()
     {
-        if (!model.selectedMap.getValue())
+        readNetworkAddressesFromPanel();
+
+        auto params = prepareGameParameters();
+        if (!params)
         {
             return;
+        }
+
+        // Leaving the multiplayer screens for the game, so this machine
+        // stops being discoverable and stops listening. A game in progress
+        // must not keep a discovery socket open for the rest of the match.
+        // Done only now, after the checks: a problem keeps the player on
+        // the screen with discovery still working.
+        multiplayerFlow.reset();
+
+        auto scene = std::make_unique<LoadingScene>(
+            sceneContext,
+            soundLookup,
+            std::move(bgm),
+            *params);
+
+        sceneContext.sceneManager->setNextScene(std::shared_ptr<Scene>(std::move(scene)));
+    }
+
+    std::optional<GameParameters> MainMenuScene::prepareGameParameters()
+    {
+        if (!model.selectedMap.getValue())
+        {
+            return std::nullopt;
         }
 
         if (multiplayerSetup)
@@ -1930,7 +1978,7 @@ namespace rwe
             if (auto problem = multiplayerSetupProblem(slots, model.localNetworkPort.getValue()))
             {
                 openMessageBox(*problem);
-                return;
+                return std::nullopt;
             }
         }
 
@@ -1961,6 +2009,15 @@ namespace rwe
             {
                 playerInfo.aiPersonality = playerSlot.personality.getValue();
             }
+            else if (!playerSlot.name.getValue().empty())
+            {
+                // The name a person goes by, from the multiplayer screens. It
+                // is part of what the game's random generator is seeded from,
+                // so every machine must hold the same name for every seat --
+                // which is why only a seat a person plays has one, and why
+                // the setup screen's mirror takes it from the announcement.
+                playerInfo.name = playerSlot.name.getValue();
+            }
             params.players[i] = std::move(playerInfo);
         }
 
@@ -1973,16 +2030,10 @@ namespace rwe
         if (auto problem = startPositionProblem(params))
         {
             openMessageBox(*problem);
-            return;
+            return std::nullopt;
         }
 
-        auto scene = std::make_unique<LoadingScene>(
-            sceneContext,
-            soundLookup,
-            std::move(bgm),
-            params);
-
-        sceneContext.sceneManager->setNextScene(std::shared_ptr<Scene>(std::move(scene)));
+        return params;
     }
 
     std::optional<std::string> MainMenuScene::startPositionProblem(const GameParameters& params)
@@ -2054,31 +2105,30 @@ namespace rwe
                 b->setName("PLAYER" + std::to_string(i));
                 b->setTextAlign(UiStagedButton::TextAlign::Center);
 
+                // The caption is the person's name where there is one -- the
+                // multiplayer screens give seats names -- and the kind of
+                // seat where there is not.
                 auto sub = model.players[i].type.subscribe([b = b.get(), &panel, this, guiName, i](MainMenuModel::PlayerSettings::Type type) {
+                    b->setLabel(captionForSeat(i));
                     switch (type)
                     {
                         case MainMenuModel::PlayerSettings::Type::Open:
                             panel.removeChildrenWithPrefix("PLAYER" + std::to_string(i) + "_");
-                            b->setLabel("Open");
                             break;
                         case MainMenuModel::PlayerSettings::Type::Human:
-                            b->setLabel("Player");
-                            panel.removeChildrenWithPrefix("PLAYER" + std::to_string(i) + "_");
-                            attachDetailedPlayerSelectionComponents(guiName, panel, i);
-                            break;
                         case MainMenuModel::PlayerSettings::Type::Computer:
-                            b->setLabel("Computer");
-                            panel.removeChildrenWithPrefix("PLAYER" + std::to_string(i) + "_");
-                            attachDetailedPlayerSelectionComponents(guiName, panel, i);
-                            break;
                         case MainMenuModel::PlayerSettings::Type::Network:
-                            b->setLabel("Network");
                             panel.removeChildrenWithPrefix("PLAYER" + std::to_string(i) + "_");
                             attachDetailedPlayerSelectionComponents(guiName, panel, i);
                             break;
                     }
                 });
                 b->addSubscription(std::move(sub));
+
+                auto nameSub = model.players[i].name.subscribe([b = b.get(), this, i](const std::string&) {
+                    b->setLabel(captionForSeat(i));
+                });
+                b->addSubscription(std::move(nameSub));
 
                 panel.appendChild(std::move(b));
             }

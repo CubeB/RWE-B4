@@ -56,6 +56,8 @@ namespace rwe
         UniformLocation shadeTableSampler;
         /** 1 for a cached piece of a finished building, 0.5 otherwise. */
         UniformLocation maskValue;
+        /** 1 draws the mesh in the grey of remembered ground, 0 normally. */
+        UniformLocation fogged;
     };
 
     struct UnitShadowShader

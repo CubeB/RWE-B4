@@ -1323,6 +1323,23 @@ button. Read top to bottom; the first arm that fires wins:
 `CanRepair` is `0x4899B0`; `CanLoadUnit` is `0x489A90` and is again called with
 `ecx = orderer` (`0x43F97E`: `mov ecx,ebp`).
 
+**Command 9, PATROL, on a unit with no mover** (`0x43F3B9`) is the same device
+as MOVE's `QMOVE`: after `canpatrol` it tests the mover (`cmp [orderer+0], 0`)
+and gives `"QPATROL"` (string `0x5053A4`). QMOVE and QPATROL are real missions
+(the ground table's `0x4FC6A1`/`0x4FC6BA`, shared handler `0x403160`) that never
+complete -- the handler sleeps sixty ticks and rotates to the tail, which the
+interface shows as "Ready with orders". That is what lets a factory hold a
+route. The product's `GetBuilt` mission (`0x402DA0`, the finished branch at
+`0x402DC2`-`0x402EFF`) walks the factory's list and, for each QMOVE, calls the
+ordinary order builder `0x43F0E0` with command 2 for the new unit and, for each
+QPATROL, command 9, appending the result with `0x43ADC0`. Because it is the
+ordinary builder an aircraft is given VTOL_PATROL and a constructor
+REPAIRPATROL; the fire-order and move-order bits (`unit+0x110 & 0xC0000` and
+`& 0x300000`) are copied across too, and a unit that inherited nothing is
+given `"PARK"` (`0x501358`). RWE dropped a patrol from a unit with no mover on
+the tick it arrived, so only Move ever reached a product; fixed 2026-10-10 by
+keeping the order in the factory's queue as `handleMoveOrder` does.
+
 **Trace a Peewee down that list against a friendly Hulk.** Not an enemy, so the
 capture and reclaim arms are skipped. `CanRepair` fails — a Peewee is not a
 builder. Not `canfly`. `CanLoadUnit(peewee, hulk)` fails at its second test,

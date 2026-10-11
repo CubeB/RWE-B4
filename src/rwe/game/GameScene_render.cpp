@@ -1867,7 +1867,20 @@ namespace rwe
                 {
                     continue;
                 }
+                auto firstMesh = unitMeshBatch.meshes.size();
                 drawMeshFeature(simulation.unitModelDefinitions, gameMediaDatabase, viewProjectionMatrix, feature, shadeStrengthFor(true), unitAtlases, unitMeshBatch);
+
+                // A wreck is a 3-D model, so it does not go through the
+                // sprite path that greys a tree in remembered ground. Without
+                // this it stood in full colour on grey terrain, which read as
+                // "wrecks visible in fog" (play-test 2026-10-10).
+                if (!positionIsVisibleToLocalPlayer(feature.position))
+                {
+                    for (auto i = firstMesh; i < unitMeshBatch.meshes.size(); ++i)
+                    {
+                        unitMeshBatch.meshes[i].fogged = 1.0f;
+                    }
+                }
             }
             for (const auto& d : debris)
             {

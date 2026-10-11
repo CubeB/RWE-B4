@@ -95,7 +95,25 @@ namespace rwe
             panel->setFocusByName(focusName);
         }
 
+        panel->setDefaultButtons(panelEntry.crDefault.value_or(""), panelEntry.escdefault.value_or(""));
+
         return panel;
+    }
+
+    std::unique_ptr<UiPanel> UiFactory::panelFromGuiFile(const std::string& name, const std::string& background)
+    {
+        auto entries = vfs->readGuiOrThrow(pathMapping->guis + "/" + name + ".GUI");
+        return panelFromGuiFile(name, background, entries);
+    }
+
+    std::vector<GuiEntry> UiFactory::readGui(const std::string& name)
+    {
+        return vfs->readGuiOrThrow(pathMapping->guis + "/" + name + ".GUI");
+    }
+
+    bool UiFactory::bitmapExists(const std::string& bitmapName)
+    {
+        return vfs->readFile(pathMapping->bitmaps + "/" + bitmapName + ".pcx").has_value();
     }
 
     std::unique_ptr<UiPanel> UiFactory::panelFromGuiFile(const std::string& name)
@@ -136,6 +154,8 @@ namespace rwe
             const auto& focusName = *panelEntry.defaultFocus;
             panel->setFocusByName(focusName);
         }
+
+        panel->setDefaultButtons(panelEntry.crDefault.value_or(""), panelEntry.escdefault.value_or(""));
 
         return panel;
     }
@@ -563,13 +583,25 @@ namespace rwe
             case GuiElementType::TextBox:
             {
                 auto font = textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
-                return std::make_unique<UiTextBox>(
+                auto box = std::make_unique<UiTextBox>(
                     entry.common.xpos,
                     entry.common.ypos,
                     entry.common.width,
                     entry.common.height,
                     std::string(),
                     font);
+
+                // `maxchars=`: ten for a nickname, sixty-three for a game
+                // name or an address. The `text=` beside it is the layout
+                // tool's sample ("Test String") and not a default, so the
+                // box starts empty. A file that says nothing keeps the old
+                // limit, and the largest is capped at what a line of this
+                // font holds.
+                if (entry.maxChars && *entry.maxChars > 0)
+                {
+                    box->setMaxLength(std::min<unsigned int>(static_cast<unsigned int>(*entry.maxChars), UiTextBox::largestMaxLength));
+                }
+                return box;
             }
             case GuiElementType::Label:
                 return labelFromGuiEntry(guiName, entry);
@@ -687,6 +719,15 @@ namespace rwe
         const GuiEntry& entry)
     {
         auto labels = entry.text ? utf8Split(*entry.text, '|') : std::vector<std::string>();
+
+        // A gadget may name fewer captions than it has stages -- none at all
+        // is how a picture button is written: LOUNGE2.GUI's SIDEx has three
+        // stages and an empty text. The stages without a caption are blank.
+        if (entry.stages && labels.size() < static_cast<std::size_t>(*entry.stages))
+        {
+            labels.resize(static_cast<std::size_t>(*entry.stages));
+        }
+
         auto button = createStagedButton(
             entry.common.xpos,
             entry.common.ypos,

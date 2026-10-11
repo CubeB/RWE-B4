@@ -37,6 +37,11 @@ uniform float shadeStrength;
 // everything except a cloaked unit, which the original averages with whatever
 // is behind it. See RenderService::drawUnitMeshBatch.
 uniform float alpha;
+// 1 draws the model in the grey of remembered-but-unseen ground, as the terrain
+// and the sprite features are; 0 draws it normally. Set per mesh, and only
+// ever 1 for a 3-D feature (a wreck) standing where the local player cannot
+// see now.
+uniform float fogged;
 
 const vec3 waterTint = vec3(0.5, 0.5, 1.0);
 const vec3 normalTint = vec3(1.0, 1.0, 1.0);
@@ -119,6 +124,8 @@ void main(void)
     }
 
     vec3 lit = shadeTexel(vec3(baseColor)) * (height > seaLevel ? normalTint : waterTint);
+    float grey = dot(min(lit, vec3(1.0)), vec3(0.299, 0.587, 0.114)) * 0.7;
+    lit = mix(lit, vec3(grey), fogged);
     outColor = vec4(min(lit, vec3(1.0)), alpha);
     outMask = vec4(texture(paletteIndexSampler, fragTexCoord).r, 0.0, 0.0, maskValue);
 }

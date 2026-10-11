@@ -334,13 +334,25 @@ only when the game tick is a multiple of eight (`test BYTE PTR [..],0x7` at
 `0x48AF5E`) and then adds `healtime * 8 / 30`, truncated -- a `shl eax,0x3`
 followed by a divide-by-thirty done with the reciprocal `0x88888889`.
 
-So the key is hit points a **second**, delivered in eight-tick steps. Only
-the two commanders set it, at 27, which is seven points every eight ticks or
-26.25 a second. Implemented, with the granularity kept because it is what the
-health bar visibly does; the original also charges the mending against the
-owner's stores through `0x41BD10`, and RWE does not, because no other repair
-in RWE costs anything and making this the one exception would be stranger
-than leaving it free.
+**Corrected 2026-10-10: this block does not add hit points.** The quantity
+`healtime * 8 / 30` is converted to a float (`fild`/`fstp` at `0x48AF89`) and
+passed as the `work` argument of `0x41BD10`, the shared repair tick, with the
+unit as both repairer and patient (`push esi; push esi`, `0x48AF90`). That
+routine -- the same one every repairer goes through, decoded under
+"repair" above -- computes `hp = trunc((maxdamage * work - 1) / buildtime + 1)`
+and then clamps it to **at most one** (`cmp esi,1; jl; mov esi,1`,
+`0x41BD87`), and the energy likewise (`0x41BD97`). So a unit with any
+`healtime` that gives `work >= 1` mends exactly **one hit point every eight
+ticks** -- 3.75 a second -- and pays one energy for it (`0x41BDB7` asks the
+unit's own economy block and `0x41BDBC` mends nothing if refused). A
+`healtime` under four gives `work == 0` and mends nothing. The commanders'
+shipped 27 makes `work` 7, which changes nothing.
+
+The earlier reading here -- seven points a step, 26.25 a second -- took the
+`work` argument for a number of hit points and recorded the call to
+`0x41BD10` only as "charges the stores". It was seven times too fast, and a
+play-test said so: "commander health regen too fast?". RWE now heals one
+point per step and charges one energy, as the original does.
 
 Immediately above it in the same block sits the drowning rule, recorded here
 because it is easy to miss: once a second, a unit whose `WORD unit+0x70` is

@@ -37,6 +37,12 @@ namespace rwe
          * unitTexture.frag and TOTALA-EXE.md S:101.
          */
         float maskValue;
+        /**
+         * 1 for a 3-D feature standing on ground that is remembered but not
+         * in sight, which is drawn in the same grey as the terrain and the
+         * sprite features around it; 0 for everything else.
+         */
+        float fogged{0.0f};
     };
 
     /**

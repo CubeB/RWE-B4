@@ -53,6 +53,11 @@ namespace rwe
         BehaviorSubject<std::optional<unsigned int>> selectedIndexSubject;
         BehaviorSubject<unsigned int> scrollPositionSubject{0};
 
+        /** The row a second quick click on is a double click, and the seconds since it was clicked. */
+        Subject<unsigned int> itemActivatedSubject;
+        std::optional<unsigned int> lastClickedRow;
+        float secondsSinceClick{0.0f};
+
     public:
         UiListBox(int posX, int posY, unsigned int sizeX, unsigned int sizeY, std::shared_ptr<SpriteSeries> font);
 
@@ -69,13 +74,26 @@ namespace rwe
 
         void setSelectedItem(const std::string& item);
 
+        /**
+         * Selects a row by position, or clears the selection. For callers that
+         * hold several boxes side by side and keep their selections together:
+         * a no-op when the row is already selected, which is what stops two
+         * boxes setting each other for ever.
+         */
+        void setSelectedIndex(const std::optional<unsigned int>& index);
+
         void clearSelectedItem();
+
+        /** Scrolls so that the last row is the last one in view; a transcript's newest line is the one to see. */
+        void scrollToEnd();
 
         void render(UiRenderService& context) const override;
 
         void mouseDown(MouseButtonEvent event) override;
 
         void mouseWheel(MouseWheelEvent event) override;
+
+        void update(float dt) override;
 
         void keyDown(KeyEvent event) override;
 
@@ -84,6 +102,13 @@ namespace rwe
         Observable<std::optional<unsigned int>>& selectedIndex();
 
         const Observable<std::optional<unsigned int>>& selectedIndex() const;
+
+        /**
+         * A row clicked twice in quick succession -- the original's
+         * double-click on a list entry (the connection list and the game list
+         * both use it). Carries the row.
+         */
+        Observable<unsigned int>& itemActivated();
 
         Observable<bool>& itemsChanged();
 

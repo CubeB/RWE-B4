@@ -122,6 +122,11 @@ namespace rwe
 
         void setStage(unsigned int newStage);
 
+        unsigned int getStage() const { return currentStage; }
+
+        /** The caption of stage `index`, or an empty one past the last. */
+        const std::string& getStageLabel(unsigned int index) const;
+
         /** How many faces the button has, pressed and greyed not counted. */
         unsigned int getStageCount() const { return static_cast<unsigned int>(stages.size()); }
 

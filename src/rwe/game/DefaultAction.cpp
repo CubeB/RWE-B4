@@ -316,15 +316,18 @@ namespace rwe
                     }
                 }
             }
-            else if (hoveredFeature && scheme != DefaultActionScheme::MoveButton)
+
+            // Reached with no hovered unit, or with one whose ladder had
+            // nothing to offer: the original probes the map cell only after
+            // its unit arms have failed (0x43F873), which is why this is not
+            // an `else`. A hovered unit that gives no action -- someone
+            // else's, standing over a wreck -- used to hide the feature
+            // under it, so the wreck could not be reclaimed.
+            if (hoveredFeature && scheme != DefaultActionScheme::MoveButton)
             {
                 // A MOVE aimed at anything but a unit is a plain move
                 // (0x43F873), so the feature arms belong to the default
-                // action alone. RWE resolves a hovered unit and a hovered
-                // feature separately and lets the unit win, where the
-                // original probes the map cell only after its unit arms have
-                // failed; the difference shows only for a unit standing on a
-                // corpse.
+                // action alone.
                 if (ordererDefinition.canResurrect && featureIsResurrectable(sim, *hoveredFeature))
                 {
                     // CURSORS.GAF ships cursorrevive only in rev31.gp3 and

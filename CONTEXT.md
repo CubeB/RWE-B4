@@ -495,6 +495,37 @@ between them and the game; `TaHostLobbyScene` is the panel; `GameScene_tahost`
 is the in-game half. `docs/TA-NETWORK.md`, "Hosting a game".
 _Avoid_: lobby (that is the battleroom), listen server, master
 
+**Game list** (`SELGAME.GUI`):
+RWE's multiplayer front end follows TotalA.exe's own screens -- MULTI,
+`SELPROV.GUI` (the connection), `TCP.GUI` (an address, or blank to scan),
+`SELGAME.GUI` (the games, with New and Join), `NEWMULTI.GUI` (name the game)
+-- and then the battleroom, `LOUNGE2.GUI`: a row a seat, with the host's
+choices and each guest's own, a lamp that says who is ready, the room's chat,
+and a Start button only the host has. A host's battleroom advertises a lobby;
+a guest's is a **mirror**, re-applied from the host's announcement every
+update so that it cannot hold a stale copy of a lobby (which would be a
+desync) -- except for the two seconds after the guest has changed its own
+side, colour or team, which it shows as asked until the host has said the same
+or refused. The 3.1 patch ships a different layout of that file with its own
+bitmap, and the file's contents decide which art goes with it. The logic with
+no window in it is `MainMenuScene_multiplayer.{h,cpp}`; `ui_probe
+--multiplayer` and `--multiplayer-flow` check the screens and the host/guest
+flow, and the second exits non-zero if a check fails.
+_Avoid_: lobby (the announcement is a lobby on the wire; the screen is the
+list), server browser
+
+**Seat claim**:
+How a guest asks a host for a seat: a one-seat announcement whose session is
+the host's, `-g`, and a token of the guest's own. The host seats the claim
+on the seat it names if that seat is open and says so by listing it `network`
+with the token in the seat's `personality`; the guest recognises its seat by
+that token, because it cannot know the address the host saw it from. A seat
+nobody claims, or a claim that goes quiet, is open again. The claim is also
+how a guest speaks to the room: its side, colour, team and ready flag, and its
+last few chat lines, ride it, and the host acts on a choice only when it
+changes (and refuses a colour another seat holds).
+_Avoid_: join request, handshake (that is the TA session's)
+
 ### The instruments
 
 **Harness**:

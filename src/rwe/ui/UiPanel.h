@@ -18,6 +18,18 @@ namespace rwe
         bool drawSolidPlate{false};
 
         /**
+         * The gui file's `crdefault=` and `escdefault=`: the buttons Enter
+         * and Escape press (the header gadget's fields, which the original
+         * reads into its panel at load). Held always, honoured only after
+         * setDefaultKeysEnabled -- the in-game panels declare them too and
+         * have always ignored them, and switching that on for all of them at
+         * once would change what a key does under the battlefield.
+         */
+        std::string crDefault;
+        std::string escDefault;
+        bool defaultKeysEnabled{false};
+
+        /**
          * The 64x64 tile the plate is filled with, when there is one.
          *
          * A dialog whose gui says panel=NULL and ships no bitmap of its own
@@ -75,6 +87,19 @@ namespace rwe
         void setDrawSolidPlate(bool draw) { drawSolidPlate = draw; }
 
         void setPlateTile(std::shared_ptr<Sprite> tile) { plateTile = std::move(tile); }
+
+        /** Names the buttons Enter and Escape press; empty for none. */
+        void setDefaultButtons(const std::string& cr, const std::string& esc)
+        {
+            crDefault = cr;
+            escDefault = esc;
+        }
+
+        const std::string& getCrDefault() const { return crDefault; }
+        const std::string& getEscDefault() const { return escDefault; }
+
+        /** Whether Enter and Escape press the default buttons. Off until a scene asks for it. */
+        void setDefaultKeysEnabled(bool enabled) { defaultKeysEnabled = enabled; }
 
         void removeChildrenWithPrefix(const std::string& prefix);
 

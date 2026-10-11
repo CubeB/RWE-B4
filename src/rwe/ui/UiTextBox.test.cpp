@@ -92,4 +92,58 @@ namespace rwe
             REQUIRE(box.wantsTextInput());
         }
     }
+
+    TEST_CASE("a text box can be limited, masked and made read-only", "[ui]")
+    {
+        // The multiplayer screens are NEWMULTI.GUI and SELGAME.GUI, whose
+        // gadgets say how long a name may be (ten, in NEWMULTI) and whose
+        // password is never shown.
+        SECTION("a length set from the gui file caps typing")
+        {
+            auto box = makeBox();
+            box.setMaxLength(10);
+            box.textInput("abcdefghijklmnop");
+            REQUIRE(box.getText() == "abcdefghij");
+        }
+
+        SECTION("a longer limit than the default is honoured")
+        {
+            auto box = makeBox();
+            box.setMaxLength(63);
+            box.textInput(std::string(70, 'x'));
+            REQUIRE(box.getText().size() == 63);
+        }
+
+        SECTION("lowering the limit trims what is already there")
+        {
+            auto box = makeBox();
+            box.textInput("hello world");
+            box.setMaxLength(5);
+            REQUIRE(box.getText() == "hello");
+        }
+
+        SECTION("a masked box keeps what was typed")
+        {
+            auto box = makeBox();
+            box.setMasked(true);
+            box.textInput("secret");
+            REQUIRE(box.isMasked());
+            REQUIRE(box.getText() == "secret");
+        }
+
+        SECTION("a read-only box takes neither text nor backspace")
+        {
+            auto box = makeBox();
+            box.setText("192.168.0.5:1337");
+            box.setEditable(false);
+            box.textInput("x");
+            box.keyDown(KeyEvent(SDLK_BACKSPACE));
+            REQUIRE(box.getText() == "192.168.0.5:1337");
+
+            // ...but the scene can still write it, which is how a joined
+            // game's addresses follow the host's announcement.
+            box.setText("10.0.0.2:1337");
+            REQUIRE(box.getText() == "10.0.0.2:1337");
+        }
+    }
 }

@@ -180,7 +180,7 @@ namespace rwe
         REQUIRE((std::get<PatrolOrder>(tank.orders.back()).destination == a));
     }
 
-    TEST_CASE("a static unit drops a patrol order", "[patrol]")
+    TEST_CASE("a static unit that cannot patrol drops a patrol order", "[patrol]")
     {
         auto script = makeEmptyCobScript({"base"});
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
@@ -194,6 +194,81 @@ namespace rwe
         sim.tick();
 
         REQUIRE(sim.getUnitState(towerId).orders.empty());
+    }
+
+    TEST_CASE("a patrol set on a factory is handed to what it builds", "[patrol]")
+    {
+        // The original gives a unit with no mover QPATROL (0x43F3B9), a
+        // mission that never completes, so the waypoints sit in the factory's
+        // list; GetBuilt (0x402DA0) then walks that list and issues each one
+        // to the finished unit. RWE dropped the order from a static unit
+        // within a tick, so the factory had nothing to hand over and the
+        // product just got a BuggerOff (play-test 2026-10-10, an air plant).
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto player = addWellStockedPlayer(sim, "ARM");
+        registerModel(sim, "model");
+
+        UnitDefinition factoryDef{};
+        factoryDef.objectName = "model";
+        factoryDef.isMobile = false;
+        factoryDef.canMove = true;
+        factoryDef.canPatrol = true;
+        factoryDef.builder = true;
+        factoryDef.workerTimePerTick = 10;
+        factoryDef.maxHitPoints = 1000;
+        factoryDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{6u, 6u, 255u, 255u, 0u, 0u};
+        factoryDef.yardMap = Grid<YardMapCell>(6, 6, YardMapCell::GroundPassable);
+        sim.unitDefinitions["FACT"] = factoryDef;
+        sim.unitScriptDefinitions["FACT"] = *script;
+
+        auto productDef = makeTankDef();
+        productDef.objectName = "model";
+        productDef.buildTime = 100u;
+        productDef.buildCostMetal = Metal(1.0f);
+        productDef.buildCostEnergy = Energy(1.0f);
+        sim.unitDefinitions["TANK"] = productDef;
+        sim.unitScriptDefinitions["TANK"] = *script;
+
+        auto a = SimVector(900_ss, 0_ss, 600_ss);
+        auto b = SimVector(900_ss, 0_ss, 900_ss);
+
+        auto factoryId = addUnitOfType(sim, "FACT", player, SimVector(600_ss, 0_ss, 600_ss), script);
+        auto& factory = sim.getUnitState(factoryId);
+        factory.inBuildStance = true;
+        factory.buildQueue.emplace_back("TANK", 1);
+        factory.orders.push_back(PatrolOrder(a));
+        factory.orders.push_back(PatrolOrder(b));
+
+        std::optional<UnitId> productId;
+        for (int i = 0; i < 600 && !productId; ++i)
+        {
+            sim.tick();
+            for (const auto& entry : sim.units)
+            {
+                if (entry.second.unitType == "TANK" && !entry.second.isBeingBuilt(sim.unitDefinitions.at("TANK")))
+                {
+                    productId = entry.first;
+                }
+            }
+        }
+        REQUIRE(productId.has_value());
+
+        // The factory hands its orders over on the tick after the frame
+        // completes, when it notices.
+        tick(sim, 3);
+
+        // The factory kept its waypoints through the whole build...
+        REQUIRE(factory.orders.size() == 2);
+        REQUIRE(std::holds_alternative<PatrolOrder>(factory.orders.front()));
+
+        // ...and the unit it finished is on the route.
+        const auto& orders = sim.getUnitState(*productId).orders;
+        REQUIRE(orders.size() >= 2);
+        for (const auto& order : orders)
+        {
+            REQUIRE(std::holds_alternative<PatrolOrder>(order));
+        }
     }
 
     TEST_CASE("a builder on patrol does not go looking for a fight", "[patrol]")

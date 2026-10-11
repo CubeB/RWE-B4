@@ -249,6 +249,8 @@ set(SOURCE_FILES
     src/rwe/MainMenuModel.h
     src/rwe/MainMenuScene.cpp
     src/rwe/MainMenuScene_campaign.cpp
+    src/rwe/MainMenuScene_multiplayer.cpp
+    src/rwe/MainMenuScene_multiplayer.h
     src/rwe/MultiplayerSetup.cpp
     src/rwe/MultiplayerSetup.h
     src/rwe/MainMenuScene.h
@@ -524,6 +526,8 @@ set(SOURCE_FILES
     src/rwe/io/weapontdf/WeaponTdf.h
     src/rwe/ip_util.cpp
     src/rwe/ip_util.h
+    src/rwe/net/LanDiscovery.cpp
+    src/rwe/net/LanDiscovery.h
     src/rwe/math/Matrix4f.h
     src/rwe/math/Matrix4x.h
     src/rwe/math/Vector2f.h
@@ -1141,8 +1145,10 @@ set(TEST_FILES
     src/rwe/io/tdf/SimpleTdfAdapter.test.cpp
     src/rwe/io/tdf/TdfBlock.test.cpp
     src/rwe/MultiplayerSetup.test.cpp
+    src/rwe/MainMenuScene_multiplayer.test.cpp
     src/rwe/ip_util.test.cpp
     src/rwe/LoadingNetworkService.test.cpp
+    src/rwe/net/LanDiscovery.test.cpp
     src/rwe/math/Matrix4f.test.cpp
     src/rwe/math/Vector2f.test.cpp
     src/rwe/math/Vector3f.test.cpp

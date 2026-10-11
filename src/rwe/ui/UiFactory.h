@@ -61,7 +61,24 @@ namespace rwe
 
         std::unique_ptr<UiPanel> panelFromGuiFile(const std::string& name);
 
+        /**
+         * A gui file's panel over a full-screen bitmap, by name -- the
+         * multiplayer screens, whose buttons and fields are painted into
+         * `bitmaps/<background>.pcx` and whose gadgets are only the text.
+         */
+        std::unique_ptr<UiPanel> panelFromGuiFile(const std::string& name, const std::string& background);
+
         std::unique_ptr<UiPanel> panelFromGuiFile(const std::string& name, const std::vector<GuiEntry>& entries);
+
+        /**
+         * A gui file's gadgets, as the data set has it. For a screen that
+         * has to look at what the file says before it knows which art goes
+         * with it: LOUNGE2.GUI is a different layout in the 3.1 patch.
+         */
+        std::vector<GuiEntry> readGui(const std::string& name);
+
+        /** Whether `bitmaps/<name>.pcx` is in the data set. */
+        bool bitmapExists(const std::string& bitmapName);
 
         /** See plateTileName. GameScene asks for the in-game one. */
         void setPlateTileName(std::string name) { plateTileName = std::move(name); }

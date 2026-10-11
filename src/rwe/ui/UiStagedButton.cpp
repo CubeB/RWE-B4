@@ -286,6 +286,12 @@ namespace rwe
         currentStage = newStage;
     }
 
+    const std::string& UiStagedButton::getStageLabel(unsigned int index) const
+    {
+        static const std::string none;
+        return index < stages.size() ? stages[index].label : none;
+    }
+
     void UiStagedButton::setTextAlign(UiStagedButton::TextAlign align)
     {
         textAlign = align;

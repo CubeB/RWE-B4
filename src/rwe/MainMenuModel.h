@@ -72,6 +72,16 @@ namespace rwe
              * rebuilds that box and what was typed should survive it.
              */
             BehaviorSubject<std::string> networkAddress{std::string()};
+
+            /**
+             * The name the person in this seat goes by, from the multiplayer
+             * screens' name boxes: the local player's own, and for a seat on
+             * another machine the one that machine announced. Empty for a
+             * seat nobody named -- a computer player, or a skirmish -- and the
+             * game then falls back to "Player n". Display only: nothing in the
+             * simulation reads it, so it cannot be a source of desync.
+             */
+            BehaviorSubject<std::string> name{std::string()};
         };
 
     public:

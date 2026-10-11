@@ -1,6 +1,8 @@
 #include "UiPanel.h"
 #include <algorithm>
 #include <cmath>
+#include <SDL3/SDL.h>
+#include <rwe/ui/UiStagedButton.h>
 #include <rwe/util/rwe_string.h>
 
 namespace rwe
@@ -109,7 +111,10 @@ namespace rwe
 
         for (const auto& i : children)
         {
-            i->render(graphics);
+            if (i->isVisible())
+            {
+                i->render(graphics);
+            }
         }
 
         graphics.popMatrix();
@@ -124,7 +129,7 @@ namespace rwe
         for (std::size_t i = 0; i < size; ++i)
         {
             auto& c = children[i];
-            if (c->contains(event.x, event.y))
+            if (c->isVisible() && c->contains(event.x, event.y))
             {
                 setFocus(i);
                 c->mouseDown(event);
@@ -148,6 +153,29 @@ namespace rwe
 
     void UiPanel::keyDown(KeyEvent event)
     {
+        // Enter and Escape press the buttons the gui file names for them, ahead
+        // of the focused control: a text box has the focus on most of the
+        // multiplayer screens, and it is exactly there that Enter has to
+        // mean "OK". A named button that is greyed out swallows the key
+        // rather than passing it on, which is what pressing a dead button
+        // does.
+        if (defaultKeysEnabled)
+        {
+            const auto isEnter = event.keyCode == SDLK_RETURN || event.keyCode == SDLK_KP_ENTER;
+            const auto& target = isEnter ? crDefault : (event.keyCode == SDLK_ESCAPE ? escDefault : std::string());
+            if (!target.empty())
+            {
+                auto it = std::find_if(children.begin(), children.end(), [&target](const auto& c) {
+                    return c->getName() == target && dynamic_cast<UiStagedButton*>(c.get()) != nullptr;
+                });
+                if (it != children.end())
+                {
+                    (*it)->keyDown(KeyEvent(static_cast<int>(SDLK_SPACE)));
+                    return;
+                }
+            }
+        }
+
         // A key goes to the control that has the focus, not to every child.
         // The original keeps a focused-gadget index at `panel+0x64`, and it
         // is what the caret is drawn from (S:99). RWE used to hand each key
@@ -165,7 +193,7 @@ namespace rwe
 
         for (auto& e : children)
         {
-            if (e->matchesQuickKey(event.keyCode))
+            if (e->isVisible() && e->matchesQuickKey(event.keyCode))
             {
                 e->keyDown(event);
                 return;
@@ -208,7 +236,13 @@ namespace rwe
 
         for (auto& e : children)
         {
-            e->mouseMove(event);
+            // A hidden gadget is not under the pointer, whatever its
+            // geometry says: it would otherwise raise hover events nobody
+            // can see the cause of.
+            if (e->isVisible())
+            {
+                e->mouseMove(event);
+            }
         }
     }
 
