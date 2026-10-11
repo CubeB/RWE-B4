@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <rwe/MainMenuModel.h>
@@ -15,17 +16,22 @@
  *
  * TotalA.exe reaches a network game by MULTI -> SELPROV.GUI (the connection)
  * -> TCP.GUI (an address, or blank to search) -> SELGAME.GUI (the list, with
- * New and Join) -> NEWMULTI.GUI (name, game name, password) -> the battleroom.
- * RWE has no battleroom of its own, so its stand-in is the skirmish screen
- * run as a read-only mirror for a guest and as the editable screen for the
- * host. What is here is everything about that which does not need a window:
- * the translation between the setup screen's model and a LAN announcement,
- * who may sit where, what a row of the game list says, and the four panels
- * as the GUI files lay them out. `ui_probe` builds the same four panels with
+ * New and Join) -> NEWMULTI.GUI (name, game name, password) -> the battleroom,
+ * LOUNGE2.GUI over battleroom.pcx (the 3.1 patch's layout) or battleroom2.pcx
+ * (the original's). What is here is everything about that
+ * which does not need a window: the translation between the setup screen's
+ * model and a LAN announcement, who may sit where, who may touch which control
+ * of a seat, the room's chat, what a row of the game list says, and the
+ * panels as the GUI files lay them out. `ui_probe` builds the same panels with
  * the same functions, which is how they are checked without a game running.
+ *
+ * The model is still the one source of truth for a seat -- type, side, colour,
+ * team, resources -- and the announcement still carries it; the battleroom is
+ * a view of that, plus what only a room has: who is ready and what was said.
  */
 namespace rwe
 {
+    class TextureService;
     class UiFactory;
     class UiPanel;
 
@@ -63,6 +69,16 @@ namespace rwe
         std::string passwordHash;
         unsigned int port{1337};
         bool launching{false};
+
+        /**
+         * Per seat, whether the person on another machine in it has said they
+         * are ready. Read only for a Network seat: the host's own seat and a
+         * computer's are always announced ready, and an open one never is.
+         */
+        std::vector<bool> ready{};
+
+        /** The room's transcript, as announced: the newest lines, oldest first. */
+        std::vector<DiscoveredChatLine> chat{};
     };
 
     /**
@@ -135,6 +151,19 @@ namespace rwe
         int seat{-1};
         std::string name;
         std::string address;
+
+        /**
+         * What the guest has chosen for its own seat, as it announced it:
+         * "ARM" or "CORE", a colour, a team (-1 for none) and whether it is
+         * ready. The host decides what to do with them (see applyClaimChoice).
+         */
+        std::string side{"ARM"};
+        unsigned int colour{0};
+        int team{-1};
+        bool ready{false};
+
+        /** The guest's most recent lines, by its own sequence numbers. */
+        std::vector<DiscoveredChatLine> chat;
     };
 
     constexpr std::size_t claimTokenLength = 8;
@@ -151,13 +180,34 @@ namespace rwe
      */
     std::vector<SeatClaim> claimsOn(const std::vector<DiscoveredGame>& heard, const std::string& hostSession);
 
-    /** The announcement that makes a claim. */
+    /**
+     * What a guest wants for its own seat: the three things a person in a
+     * seat chooses, and whether they are ready.
+     */
+    struct GuestChoice
+    {
+        MainMenuModel::PlayerSettings::Side side{MainMenuModel::PlayerSettings::Side::Arm};
+        PlayerColorIndex colour{0};
+        std::optional<int> team;
+        bool ready{false};
+
+        bool operator==(const GuestChoice& rhs) const = default;
+    };
+
+    /**
+     * The announcement that makes a claim. Without a `choice` the seat's
+     * side, colour and team are the host's own for it, which is what a guest
+     * that has not touched anything wants; with one they are the guest's,
+     * and `chat` is the lines it wants said.
+     */
     DiscoveredGame claimAnnouncement(
         const DiscoveredGame& host,
         int seat,
         const std::string& token,
         const std::string& name,
-        unsigned int gamePort);
+        unsigned int gamePort,
+        const std::optional<GuestChoice>& choice = std::nullopt,
+        const std::vector<DiscoveredChatLine>& chat = {});
 
     enum class ClaimState
     {
@@ -170,6 +220,174 @@ namespace rwe
     };
 
     ClaimState claimState(const DiscoveredGame& host, int seat, const std::string& token);
+
+    // ---- the battleroom: what each person may touch ----
+
+    enum class RoomRole
+    {
+        /** Not in a room. */
+        None,
+        Host,
+        Guest
+    };
+
+    /** Which of a seat's controls somebody in a given role may use. */
+    struct SeatControls
+    {
+        /** The name button: the host opens a seat, or makes it a computer, or removes a guest. */
+        bool name{false};
+        bool side{false};
+        bool colour{false};
+        bool team{false};
+        bool ready{false};
+        /** A computer player's personality, which only the host chooses. */
+        bool personality{false};
+    };
+
+    /**
+     * What `role` may do to the seat of type `type`; `ownSeat` is whether the
+     * seat is the one this machine plays. The host chooses for itself and for
+     * the computers, and may open a seat or remove a guest from it; a guest
+     * chooses for itself and nothing else, and says for itself that it is
+     * ready. Nobody chooses a side, colour or team for another person.
+     */
+    SeatControls seatControls(RoomRole role, MainMenuModel::PlayerSettings::Type type, bool ownSeat);
+
+    /**
+     * Why the host cannot start, in the sentence the help line says; nothing
+     * when it can. `ready` is per seat, as in LobbyIdentity. A game with no
+     * map has nothing to start, a seat held by a person who has not said
+     * they are ready is a player the others would be left waiting for, and a
+     * room with nobody else in it is not a network game.
+     */
+    std::optional<std::string> startBlocker(const MainMenuModel& model, const std::vector<bool>& ready, bool mapChosen);
+
+    /**
+     * Applies what a guest chose for its seat to the host's model. Side and
+     * team are taken as they are; a colour is taken only if no other seat that
+     * is in the game holds it, and is otherwise refused -- the seat keeps the
+     * colour it had, and the announcement that follows tells the guest so.
+     * Returns whether anything of the seat changed.
+     */
+    bool applyClaimChoice(MainMenuModel& model, std::size_t seat, const SeatClaim& claim);
+
+    /** Whether any seat other than `seat` that is in the game has this colour. */
+    bool colourHeldByAnotherSeat(const MainMenuModel& model, std::size_t seat, const PlayerColorIndex& colour);
+
+    /**
+     * Gives a seat a colour no other seat in the game holds, if the one it has
+     * is held. For a seat that has just come into the game -- an open one a
+     * computer takes, or a claim that is seated.
+     */
+    void ensureFreeColour(MainMenuModel& model, std::size_t seat);
+
+    /**
+     * A message from a seat's control, `PLAYER3` or `PLAYER3_side`, as its seat
+     * and the rest of the name (empty for the name button). Nothing for a name
+     * that is not one, or a seat past the table.
+     */
+    struct SeatMessage
+    {
+        std::size_t seat;
+        std::string control;
+    };
+    std::optional<SeatMessage> parseSeatMessage(const std::string& name, std::size_t seatCount);
+
+    // ---- the battleroom: the game-wide options ----
+
+    /**
+     * The battleroom's option buttons read in the stage order LOUNGE2.GUI gives
+     * them, which is not the order the setup screen's buttons have: the
+     * commander button there is `Continues|Game ends` and here the model's
+     * stage 0 is "game ends". So a stage is turned into the model's by its
+     * label, here, and nowhere by its position.
+     *
+     * `optionName` is the name optionsFromModel uses (commander, startloc,
+     * mapping, los). `labels` are the button's own captions, left to right.
+     * A label this build has no meaning for -- the battleroom's `Deathmatch`
+     * -- maps to nothing, and the screen builds the button without it.
+     */
+    std::optional<unsigned int> optionStageForLabel(const std::string& optionName, const std::string& label);
+    std::optional<unsigned int> optionStageOfButtonStage(const std::string& optionName, const std::vector<std::string>& labels, unsigned int buttonStage);
+    std::optional<unsigned int> buttonStageOfOptionStage(const std::string& optionName, const std::vector<std::string>& labels, unsigned int optionStage);
+
+    /** The labels that mean something, in the button's order. */
+    std::vector<std::string> usableOptionLabels(const std::string& optionName, const std::vector<std::string>& labels);
+
+    /** What a click on the button does: the option's next stage, in the button's own order. */
+    std::optional<unsigned int> nextOptionStage(const std::string& optionName, const std::vector<std::string>& labels, unsigned int currentOptionStage);
+
+    /** The four buttons of the right-hand column that are options, by gadget name. */
+    struct BattleroomOption
+    {
+        const char* button;
+        const char* option;
+    };
+    const std::vector<BattleroomOption>& battleroomOptions();
+
+    /**
+     * The slider's stops for starting metal and energy, the same ladder the
+     * setup screen's plus and minus walk: 200, 500, then steps of 500 to
+     * 10000. The index of the stop nearest a value, a stop's value, and the
+     * knob position of a stop.
+     */
+    constexpr unsigned int resourceStopCount = 21;
+    unsigned int resourceStopValue(unsigned int stop);
+    unsigned int resourceStopNearest(float value);
+    float resourceStopPercent(unsigned int stop);
+    unsigned int resourceStopAtPercent(float percent);
+
+    // ---- the battleroom: chat ----
+
+    /**
+     * What can be said: control characters dropped, outer spaces trimmed, and
+     * at most what a line of chat carries on the wire. Nothing for a line that
+     * has nothing in it, which is not sent.
+     */
+    std::string sanitisedChatText(const std::string& text);
+
+    /**
+     * The room's transcript, kept the same way on every machine. The host
+     * assigns each line the next sequence number and every other machine
+     * appends the lines of the host's announcements that are newer than the
+     * newest it has, so a guest's own line shows once the host has taken it
+     * and in the same place for everyone.
+     */
+    struct ChatTranscript
+    {
+        static constexpr std::size_t maxKept = 200;
+
+        std::vector<DiscoveredChatLine> lines;
+        unsigned int lastSequence{0};
+
+        /** Host: a line from `name` ("" for the room itself). False if there was nothing to say. */
+        bool say(const std::string& name, const std::string& text);
+
+        /** The newest lines an announcement can carry. */
+        std::vector<DiscoveredChatLine> tail() const;
+
+        /** Appends the lines of an announced tail that are newer than the transcript; how many. */
+        std::size_t merge(const std::vector<DiscoveredChatLine>& announced);
+    };
+
+    /**
+     * Host: says the lines of a guest's claim that have not been taken yet,
+     * as `speaker`, in the guest's order. `lastTaken` is the newest sequence
+     * of that guest already said, and moves up. A line is told from one
+     * already taken by its sequence alone, so a claim repeated in every
+     * announcement is said once.
+     */
+    std::size_t takeClaimChat(ChatTranscript& room, unsigned int& lastTaken, const std::string& speaker, const std::vector<DiscoveredChatLine>& claimed);
+
+    /** `name: text`, or just the text of a line from the room. */
+    std::string chatLineText(const DiscoveredChatLine& line);
+
+    /**
+     * A line broken to rows no wider than `maxWidth` by `width`, at spaces
+     * where there is one, and a word longer than a row broken where it must.
+     * Rows after the first are indented two spaces, so they read as one line.
+     */
+    std::vector<std::string> wrapChatLine(const std::string& text, float maxWidth, const std::function<float(const std::string&)>& width);
 
     // ---- addresses ----
 
@@ -255,6 +473,30 @@ namespace rwe
     /** NEWMULTI.GUI over `createnew`. */
     std::unique_ptr<UiPanel> makeNewGamePanel(UiFactory& factory);
 
+    /**
+     * The art the battleroom's rows draw from, held by the flow so that the
+     * scene can set a seat's colour and team each update without asking the
+     * texture service for them again.
+     */
+    struct BattleroomArt
+    {
+        /** The ten team colours' logos at the 16 pixels a row has room for. */
+        std::vector<std::shared_ptr<Sprite>> logos;
+        /** `ally icons`: a pair of faces per team, then two blanks. */
+        std::vector<std::shared_ptr<Sprite>> allyIcons;
+    };
+
+    /** The step between seat rows, in LOUNGE2.GUI's pixels. */
+    constexpr int battleroomRowPitch = 20;
+
+    /**
+     * LOUNGE2.GUI over the bitmap that goes with the layout the data set has,
+     * built for `role`: ten seat rows cloned from the file's per-seat
+     * templates, the options this engine has a meaning for, and nothing of
+     * the rest. A guest's panel has no Start button.
+     */
+    std::unique_ptr<UiPanel> makeBattleroomPanel(UiFactory& factory, TextureService& textures, RoomRole role, BattleroomArt& art);
+
     /** The gadget names of SELGAME.GUI's columns, left to right. */
     const std::vector<std::string>& gameListColumnNames();
 
@@ -314,6 +556,19 @@ namespace rwe
         bool launching{false};
         Timestamp launchBeganAt{};
 
+        /** What the host has heard of each guest, by claim token, so that only a change is acted on. */
+        struct ClaimMemory
+        {
+            std::string side;
+            unsigned int colour{0};
+            int team{-1};
+            unsigned int lastChat{0};
+        };
+        std::map<std::string, ClaimMemory> claimMemory;
+
+        /** Guests the host has removed. Their claims go on until they notice, and must not seat them again. */
+        std::vector<std::string> removedTokens;
+
         // -- joined --
         std::string hostSession;
         std::string claimToken;
@@ -322,5 +577,28 @@ namespace rwe
         bool startRequested{false};
         Timestamp claimedAt{};
         Timestamp hostSeenAt{};
+
+        /**
+         * What this guest has asked for, kept until the host's announcement
+         * says the same or two seconds go by, so that a click does not
+         * flicker back to the old value for the round trip it takes to be
+         * heard. `ready` is the guest's own and never pending.
+         */
+        GuestChoice wanted;
+        bool choicePending{false};
+        Timestamp choiceAt{};
+        bool myReady{false};
+
+        /** The guest's own lines, newest last, by its own sequence numbers. */
+        std::vector<DiscoveredChatLine> sentChat;
+        unsigned int nextChatSequence{1};
+
+        // -- the room, either role --
+        /** Host: what each claim said about being ready. Guest: what the host announced. */
+        std::vector<bool> seatReady = std::vector<bool>(10);
+        ChatTranscript chat;
+        /** The newest line the OUTPUT box is showing, so that it is refilled only when something is new. */
+        unsigned int shownChatSequence{0};
+        BattleroomArt art;
     };
 }

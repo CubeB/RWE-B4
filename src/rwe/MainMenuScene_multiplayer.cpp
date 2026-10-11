@@ -3,11 +3,15 @@
 #include "MainMenuScene.h"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <random>
 #include <rwe/MultiplayerSetup.h>
+#include <rwe/TextureService.h>
 #include <rwe/rwe_time.h>
+#include <rwe/ui/UiFactory.h>
 #include <rwe/ui/UiLabel.h>
 #include <rwe/ui/UiListBox.h>
+#include <rwe/ui/UiScrollBar.h>
 #include <rwe/ui/UiStagedButton.h>
 #include <rwe/ui/UiTextBox.h>
 #include <rwe/util/SimpleLogger.h>
@@ -147,6 +151,11 @@ namespace rwe
         game.launching = identity.launching;
         game.options = optionsFromModel(model);
 
+        // The newest lines only, which is all an announcement has room for.
+        const auto& said = identity.chat;
+        const auto firstSaid = said.size() > LanDiscovery::maxChatLines ? said.size() - LanDiscovery::maxChatLines : 0;
+        game.chat.assign(said.begin() + static_cast<std::ptrdiff_t>(firstSaid), said.end());
+
         for (std::size_t i = 0; i < model.players.size(); ++i)
         {
             const auto& p = model.players[i];
@@ -165,12 +174,16 @@ namespace rwe
                     seat.controller = "open";
                     break;
                 case PlayerType::Human:
+                    // The host's own seat. The host is never anyone the room
+                    // is waiting for.
                     seat.controller = "human";
                     seat.name = p.name.getValue().substr(0, maxPlayerNameLength);
+                    seat.ready = true;
                     break;
                 case PlayerType::Computer:
                     seat.controller = "computer";
                     seat.personality = p.personality.getValue().substr(0, LanDiscovery::maxPersonalityLength);
+                    seat.ready = true;
                     break;
                 case PlayerType::Network:
                     seat.controller = "network";
@@ -180,6 +193,7 @@ namespace rwe
                     {
                         seat.personality = seatTokens[i];
                     }
+                    seat.ready = i < identity.ready.size() && identity.ready[i];
                     break;
             }
 
@@ -344,6 +358,11 @@ namespace rwe
             claim.name = g.slots.front().name.empty() ? g.hostName : g.slots.front().name;
             claim.name = claim.name.substr(0, maxPlayerNameLength);
             claim.address = gameAddress(g.sourceAddress, g.port);
+            claim.side = g.slots.front().side;
+            claim.colour = g.slots.front().colour;
+            claim.team = g.slots.front().team;
+            claim.ready = g.slots.front().ready;
+            claim.chat = g.chat;
             claims.push_back(std::move(claim));
         }
         return claims;
@@ -354,7 +373,9 @@ namespace rwe
         int seat,
         const std::string& token,
         const std::string& name,
-        unsigned int gamePort)
+        unsigned int gamePort,
+        const std::optional<GuestChoice>& choice,
+        const std::vector<DiscoveredChatLine>& chat)
     {
         DiscoveredGame claim;
         claim.session = claimSession(host.session, token);
@@ -372,7 +393,17 @@ namespace rwe
             slot.colour = hostSlot->colour;
             slot.team = hostSlot->team;
         }
+        if (choice)
+        {
+            slot.side = choice->side == PlayerSide::Core ? "CORE" : "ARM";
+            slot.colour = choice->colour.value;
+            slot.team = choice->team.value_or(-1);
+            slot.ready = choice->ready;
+        }
         claim.slots.push_back(std::move(slot));
+
+        const auto firstLine = chat.size() > LanDiscovery::maxChatLines ? chat.size() - LanDiscovery::maxChatLines : 0;
+        claim.chat.assign(chat.begin() + static_cast<std::ptrdiff_t>(firstLine), chat.end());
         return claim;
     }
 
@@ -392,6 +423,530 @@ namespace rwe
             return ClaimState::Waiting;
         }
         return ClaimState::Lost;
+    }
+
+    // ------------------------------------------------------------------
+    // The battleroom: who may touch what
+    // ------------------------------------------------------------------
+
+    SeatControls seatControls(RoomRole role, PlayerType type, bool ownSeat)
+    {
+        SeatControls controls;
+
+        switch (role)
+        {
+            case RoomRole::None:
+                break;
+
+            case RoomRole::Host:
+                switch (type)
+                {
+                    case PlayerType::Open:
+                    case PlayerType::Network:
+                        // Open it to a computer or back, or put a guest out.
+                        controls.name = true;
+                        break;
+                    case PlayerType::Computer:
+                        controls.name = true;
+                        controls.side = true;
+                        controls.colour = true;
+                        controls.team = true;
+                        controls.personality = true;
+                        break;
+                    case PlayerType::Human:
+                        // The host's own row: its choices, and nothing to
+                        // click on the name.
+                        if (ownSeat)
+                        {
+                            controls.side = true;
+                            controls.colour = true;
+                            controls.team = true;
+                        }
+                        break;
+                }
+                break;
+
+            case RoomRole::Guest:
+                if (ownSeat)
+                {
+                    controls.side = true;
+                    controls.colour = true;
+                    controls.team = true;
+                    controls.ready = true;
+                }
+                break;
+        }
+
+        return controls;
+    }
+
+    std::optional<std::string> startBlocker(const MainMenuModel& model, const std::vector<bool>& ready, bool mapChosen)
+    {
+        if (!mapChosen)
+        {
+            return std::string("Select a map");
+        }
+
+        bool anyone = false;
+        for (std::size_t i = 0; i < model.players.size(); ++i)
+        {
+            const auto& p = model.players[i];
+            if (p.type.getValue() != PlayerType::Network)
+            {
+                continue;
+            }
+            anyone = true;
+            if (i < ready.size() && ready[i])
+            {
+                continue;
+            }
+            const auto& name = p.name.getValue();
+            return "Waiting for " + (name.empty() ? "player " + std::to_string(i + 1) : name) + " to be ready";
+        }
+
+        // A game of one person and computers is the skirmish screen's, and
+        // starting it from here would only be refused (see
+        // multiplayerSetupProblem) after the button had looked pressable.
+        if (!anyone)
+        {
+            return std::string("Waiting for another player to join");
+        }
+
+        return std::nullopt;
+    }
+
+    bool colourHeldByAnotherSeat(const MainMenuModel& model, std::size_t seat, const PlayerColorIndex& colour)
+    {
+        for (std::size_t i = 0; i < model.players.size(); ++i)
+        {
+            if (i == seat)
+            {
+                continue;
+            }
+            const auto& p = model.players[i];
+            if (p.type.getValue() != PlayerType::Open && p.colorIndex.getValue() == colour)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void ensureFreeColour(MainMenuModel& model, std::size_t seat)
+    {
+        auto& p = model.players[seat];
+        if (!colourHeldByAnotherSeat(model, seat, p.colorIndex.getValue()))
+        {
+            return;
+        }
+        for (unsigned int c = 0; c < 10; ++c)
+        {
+            if (!colourHeldByAnotherSeat(model, seat, PlayerColorIndex(c)))
+            {
+                p.colorIndex.next(PlayerColorIndex(c));
+                return;
+            }
+        }
+    }
+
+    bool applyClaimChoice(MainMenuModel& model, std::size_t seat, const SeatClaim& claim)
+    {
+        if (seat >= model.players.size())
+        {
+            return false;
+        }
+        auto& p = model.players[seat];
+        bool changed = false;
+
+        const auto side = claim.side == "CORE" ? PlayerSide::Core : PlayerSide::Arm;
+        if (p.side.getValue() != side)
+        {
+            p.side.next(side);
+            changed = true;
+        }
+
+        // A number off the wire: anything outside the five teams is no team.
+        std::optional<int> team;
+        if (claim.team >= 0 && claim.team <= 4)
+        {
+            team = claim.team;
+        }
+        if (p.teamIndex.getValue() != team)
+        {
+            p.teamIndex.next(team);
+            changed = true;
+        }
+
+        // A colour is taken if it is a colour and nobody in the game has it.
+        // Refusing it here is the whole of the rule: the next announcement
+        // says what the seat has, and the guest's screen follows that.
+        if (claim.colour < 10)
+        {
+            const PlayerColorIndex wanted(claim.colour);
+            if (p.colorIndex.getValue() != wanted && !colourHeldByAnotherSeat(model, seat, wanted))
+            {
+                p.colorIndex.next(wanted);
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    std::optional<SeatMessage> parseSeatMessage(const std::string& name, std::size_t seatCount)
+    {
+        const std::string prefix = "PLAYER";
+        if (name.size() <= prefix.size() || name.compare(0, prefix.size(), prefix) != 0)
+        {
+            return std::nullopt;
+        }
+
+        std::size_t i = prefix.size();
+        std::size_t seat = 0;
+        std::size_t digits = 0;
+        while (i < name.size() && name[i] >= '0' && name[i] <= '9' && digits < 3)
+        {
+            seat = (seat * 10) + static_cast<std::size_t>(name[i] - '0');
+            ++i;
+            ++digits;
+        }
+        if (digits == 0 || seat >= seatCount)
+        {
+            return std::nullopt;
+        }
+
+        if (i == name.size())
+        {
+            return SeatMessage{seat, std::string()};
+        }
+        if (name[i] != '_' || i + 1 >= name.size())
+        {
+            return std::nullopt;
+        }
+        return SeatMessage{seat, name.substr(i + 1)};
+    }
+
+    // ------------------------------------------------------------------
+    // The battleroom: the options
+    // ------------------------------------------------------------------
+
+    namespace
+    {
+        /**
+         * What each option's stage numbers mean, in the model's order (the
+         * order optionsFromModel writes and the setup screen's buttons have).
+         */
+        const std::vector<std::string>* modelStageLabels(const std::string& optionName)
+        {
+            static const std::vector<std::pair<std::string, std::vector<std::string>>> table{
+                {"commander", {"GAME ENDS", "CONTINUES"}},
+                {"startloc", {"FIXED", "RANDOM"}},
+                {"mapping", {"UNMAPPED", "MAPPED"}},
+                {"los", {"PERMANENT", "TRUE", "CIRCULAR"}},
+            };
+            for (const auto& [name, labels] : table)
+            {
+                if (name == optionName)
+                {
+                    return &labels;
+                }
+            }
+            return nullptr;
+        }
+    }
+
+    std::optional<unsigned int> optionStageForLabel(const std::string& optionName, const std::string& label)
+    {
+        const auto* labels = modelStageLabels(optionName);
+        if (labels == nullptr)
+        {
+            return std::nullopt;
+        }
+        const auto wanted = toUpper(trimmed(label));
+        for (std::size_t i = 0; i < labels->size(); ++i)
+        {
+            if ((*labels)[i] == wanted)
+            {
+                return static_cast<unsigned int>(i);
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::optional<unsigned int> optionStageOfButtonStage(const std::string& optionName, const std::vector<std::string>& labels, unsigned int buttonStage)
+    {
+        if (buttonStage >= labels.size())
+        {
+            return std::nullopt;
+        }
+        return optionStageForLabel(optionName, labels[buttonStage]);
+    }
+
+    std::optional<unsigned int> buttonStageOfOptionStage(const std::string& optionName, const std::vector<std::string>& labels, unsigned int optionStage)
+    {
+        for (std::size_t i = 0; i < labels.size(); ++i)
+        {
+            if (optionStageForLabel(optionName, labels[i]) == optionStage)
+            {
+                return static_cast<unsigned int>(i);
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::vector<std::string> usableOptionLabels(const std::string& optionName, const std::vector<std::string>& labels)
+    {
+        std::vector<std::string> usable;
+        for (const auto& label : labels)
+        {
+            if (optionStageForLabel(optionName, label))
+            {
+                usable.push_back(label);
+            }
+        }
+        return usable;
+    }
+
+    std::optional<unsigned int> nextOptionStage(const std::string& optionName, const std::vector<std::string>& labels, unsigned int currentOptionStage)
+    {
+        if (labels.empty())
+        {
+            return std::nullopt;
+        }
+        const auto here = buttonStageOfOptionStage(optionName, labels, currentOptionStage).value_or(0u);
+        for (std::size_t step = 1; step <= labels.size(); ++step)
+        {
+            const auto candidate = static_cast<unsigned int>((here + step) % labels.size());
+            if (auto stage = optionStageOfButtonStage(optionName, labels, candidate))
+            {
+                return stage;
+            }
+        }
+        return std::nullopt;
+    }
+
+    const std::vector<BattleroomOption>& battleroomOptions()
+    {
+        static const std::vector<BattleroomOption> options{
+            {"COMMANDER", "commander"},
+            {"FIXEDLOC", "startloc"},
+            {"MAPPING", "mapping"},
+            {"LOSTYPE", "los"},
+        };
+        return options;
+    }
+
+    unsigned int resourceStopValue(unsigned int stop)
+    {
+        if (stop == 0)
+        {
+            return 200;
+        }
+        return 500 * std::min(stop, resourceStopCount - 1);
+    }
+
+    unsigned int resourceStopNearest(float value)
+    {
+        unsigned int best = 0;
+        float bestDistance = std::abs(value - static_cast<float>(resourceStopValue(0)));
+        for (unsigned int stop = 1; stop < resourceStopCount; ++stop)
+        {
+            const auto distance = std::abs(value - static_cast<float>(resourceStopValue(stop)));
+            if (distance < bestDistance)
+            {
+                best = stop;
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
+    float resourceStopPercent(unsigned int stop)
+    {
+        return static_cast<float>(std::min(stop, resourceStopCount - 1)) / static_cast<float>(resourceStopCount - 1);
+    }
+
+    unsigned int resourceStopAtPercent(float percent)
+    {
+        const auto clamped = std::clamp(percent, 0.0f, 1.0f);
+        return static_cast<unsigned int>(std::lround(clamped * static_cast<float>(resourceStopCount - 1)));
+    }
+
+    // ------------------------------------------------------------------
+    // The battleroom: chat
+    // ------------------------------------------------------------------
+
+    namespace
+    {
+        /** Bytes of printable text only: nothing below a space, and not DEL. */
+        std::string withoutControlCharacters(const std::string& text)
+        {
+            std::string out;
+            out.reserve(text.size());
+            for (char c : text)
+            {
+                const auto byte = static_cast<unsigned char>(c);
+                if (byte >= 0x20 && byte != 0x7F)
+                {
+                    out.push_back(c);
+                }
+            }
+            return out;
+        }
+
+        /** Cuts at `limit` bytes without leaving half of a multi-byte character. */
+        std::string cutAtCharacter(const std::string& text, std::size_t limit)
+        {
+            if (text.size() <= limit)
+            {
+                return text;
+            }
+            std::size_t end = limit;
+            while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80)
+            {
+                --end;
+            }
+            return text.substr(0, end);
+        }
+    }
+
+    std::string sanitisedChatText(const std::string& text)
+    {
+        return trimmed(cutAtCharacter(trimmed(withoutControlCharacters(text)), LanDiscovery::maxChatTextLength));
+    }
+
+    bool ChatTranscript::say(const std::string& name, const std::string& text)
+    {
+        auto said = sanitisedChatText(text);
+        if (said.empty() || lastSequence >= 2147483647u)
+        {
+            return false;
+        }
+
+        DiscoveredChatLine line;
+        line.sequence = ++lastSequence;
+        line.name = cutAtCharacter(withoutControlCharacters(name), maxPlayerNameLength);
+        line.text = std::move(said);
+        lines.push_back(std::move(line));
+
+        if (lines.size() > maxKept)
+        {
+            lines.erase(lines.begin(), lines.begin() + static_cast<std::ptrdiff_t>(lines.size() - maxKept));
+        }
+        return true;
+    }
+
+    std::vector<DiscoveredChatLine> ChatTranscript::tail() const
+    {
+        const auto first = lines.size() > LanDiscovery::maxChatLines ? lines.size() - LanDiscovery::maxChatLines : 0;
+        return std::vector<DiscoveredChatLine>(lines.begin() + static_cast<std::ptrdiff_t>(first), lines.end());
+    }
+
+    std::size_t ChatTranscript::merge(const std::vector<DiscoveredChatLine>& announced)
+    {
+        std::size_t added = 0;
+        for (const auto& line : announced)
+        {
+            // Only forwards: a line at or before the newest one held is one
+            // already shown, and a sequence that goes back is somebody's
+            // garbage.
+            if (line.sequence <= lastSequence)
+            {
+                continue;
+            }
+            lastSequence = line.sequence;
+            lines.push_back(line);
+            ++added;
+        }
+        if (lines.size() > maxKept)
+        {
+            lines.erase(lines.begin(), lines.begin() + static_cast<std::ptrdiff_t>(lines.size() - maxKept));
+        }
+        return added;
+    }
+
+    std::size_t takeClaimChat(ChatTranscript& room, unsigned int& lastTaken, const std::string& speaker, const std::vector<DiscoveredChatLine>& claimed)
+    {
+        auto ordered = claimed;
+        std::stable_sort(ordered.begin(), ordered.end(), [](const auto& a, const auto& b) { return a.sequence < b.sequence; });
+
+        std::size_t said = 0;
+        for (const auto& line : ordered)
+        {
+            if (line.sequence == 0 || line.sequence <= lastTaken)
+            {
+                continue;
+            }
+            // Taken even when it says nothing once cleaned: the same line
+            // will be in the next announcement and must not be tried again.
+            lastTaken = line.sequence;
+            // The speaker is the seat's, whatever name the claim put on the
+            // line, so that nobody speaks for somebody else.
+            if (room.say(speaker, line.text))
+            {
+                ++said;
+            }
+        }
+        return said;
+    }
+
+    std::string chatLineText(const DiscoveredChatLine& line)
+    {
+        return line.name.empty() ? line.text : line.name + ": " + line.text;
+    }
+
+    std::vector<std::string> wrapChatLine(const std::string& text, float maxWidth, const std::function<float(const std::string&)>& width)
+    {
+        static const std::string indent = "  ";
+
+        std::vector<std::string> rows;
+        std::string current;
+
+        auto breakLongRow = [&]() {
+            // A row that is still too wide holds a word wider than the box:
+            // cut it where it must be, keeping at least one character a row.
+            while (current.size() > indent.size() + 1 && width(current) > maxWidth)
+            {
+                std::size_t fit = indent.size() + 1;
+                while (fit < current.size() && width(current.substr(0, fit + 1)) <= maxWidth)
+                {
+                    ++fit;
+                }
+                rows.push_back(current.substr(0, fit));
+                current = indent + current.substr(fit);
+            }
+        };
+
+        std::size_t pos = 0;
+        while (pos < text.size())
+        {
+            auto space = text.find(' ', pos);
+            const auto end = space == std::string::npos ? text.size() : space;
+            const auto word = text.substr(pos, end - pos);
+            pos = end + 1;
+            if (word.empty())
+            {
+                continue;
+            }
+
+            const auto candidate = current.empty() ? word : current + " " + word;
+            if (current.empty() || width(candidate) <= maxWidth)
+            {
+                current = candidate;
+            }
+            else
+            {
+                rows.push_back(current);
+                current = indent + word;
+            }
+            breakLongRow();
+        }
+
+        if (!current.empty())
+        {
+            rows.push_back(current);
+        }
+        return rows;
     }
 
     // ------------------------------------------------------------------
@@ -796,6 +1351,271 @@ namespace rwe
         return panel;
     }
 
+    std::unique_ptr<UiPanel> makeBattleroomPanel(UiFactory& factory, TextureService& textures, RoomRole role, BattleroomArt& art)
+    {
+        // Two layouts of one file. The original LOUNGE2.GUI has an Ally
+        // column over battleroom2.pcx; the 3.1 patch moves everything over,
+        // gives the team shapes a column of their own (the TEAMICONSx
+        // gadget, with its own GAF entry) and brings battleroom.pcx to match.
+        // Either picture under the other's gadgets puts every control a
+        // finger-width from where it is drawn, so the file's own content
+        // decides which.
+        const auto entries = factory.readGui("LOUNGE2");
+        const bool patched = std::any_of(entries.begin(), entries.end(), [](const GuiEntry& g) { return g.common.name == "TEAMICONSx"; });
+        const std::string background = patched && factory.bitmapExists("battleroom") ? "battleroom" : "battleroom2";
+        auto panel = factory.panelFromGuiFile("LOUNGE2", background, entries);
+        const std::string teamTemplate = patched ? "TEAMICONSx" : "ALLYx";
+
+        // What the file draws that this engine has no meaning for. Each of
+        // these is a setting of TotalA's that RWE does not have -- a gadget
+        // that did nothing is worse than none, and one that changed a value
+        // only this end held would be a desync on the first tick.
+        //
+        //   CHEATING, WATCHING, GAMEOPEN   cheat codes, spectators and a
+        //                                  game that closes to joiners: RWE
+        //                                  has no cheat codes, no spectator
+        //                                  join, and a started game is
+        //                                  already closed.
+        //   MAXUNITS, MAXUNITSTEXT         a unit cap, which the simulation
+        //                                  does not take as a setting.
+        //   RESTRICTIONS                   the build-restriction editor.
+        //   RESx, MEMx, CDx                a seat's screen resolution, its
+        //                                  memory and its CD: nothing is
+        //                                  known about another machine's.
+        //   SYNCHING, battlestart          the "Synching" overlay, which
+        //                                  covers the Start button while the
+        //                                  units are checked against each
+        //                                  other's -- RWE has no such step.
+        //
+        // and the captions of the ones above that have one.
+        const auto resolution = panel->find<UiComponent>("RESx");
+        const int resolutionX = resolution ? resolution->get().getX() : 260;
+        const unsigned int resolutionWidth = resolution ? resolution->get().getWidth() : 96;
+        const int resolutionY = resolution ? resolution->get().getY() : 69;
+
+        const auto template_of = [&](const char* name) {
+            struct Geometry
+            {
+                int x{0};
+                int y{0};
+                unsigned int width{0};
+                unsigned int height{0};
+            } g;
+            if (auto c = panel->find<UiComponent>(name))
+            {
+                g = {c->get().getX(), c->get().getY(), c->get().getWidth(), c->get().getHeight()};
+            }
+            return g;
+        };
+        const auto nameBox = template_of("PLAYERx");
+        const auto sideBox = template_of("SIDEx");
+        const auto logoBox = template_of("LOGOx");
+        const auto teamBox = template_of(teamTemplate.c_str());
+        const auto readyBox = template_of("READYx");
+        const auto pingBox = template_of("PINGx");
+
+        for (const char* name : {"CHEATING", "WATCHING", "GAMEOPEN", "MAXUNITS", "MAXUNITSTEXT", "RESTRICTIONS", "RESx", "MEMx", "CDx", "SYNCHING", "battlestart"})
+        {
+            panel->removeChildrenNamed(name);
+        }
+
+        // The templates are cloned once per seat and not themselves seats.
+        //
+        // The patched file's ALLYx is the original's alliances column, which
+        // RWE has no counterpart of: alliances here are the teams, and those
+        // are the TEAMICONSx column.
+        for (const char* name : {"PLAYERx", "SIDEx", "LOGOx", "ALLYx", "TEAMICONSx", "READYx", "PINGx"})
+        {
+            panel->removeChildrenNamed(name);
+        }
+
+        // Every caption of the right-hand column is a label named TEXT, so
+        // they are told apart by what they say.
+        {
+            auto& children = panel->getChildren();
+            children.erase(
+                std::remove_if(children.begin(), children.end(), [](const auto& c) {
+                    auto* label = dynamic_cast<UiLabel*>(c.get());
+                    if (label == nullptr || label->getName() != "TEXT")
+                    {
+                        return false;
+                    }
+                    const auto& text = label->getText();
+                    return text == "Cheat Codes" || text == "Watching" || text == "Game Status" || text == "Max Units";
+                }),
+                children.end());
+        }
+
+        // -- the art the rows draw from --
+        art.logos.clear();
+        if (auto logos = textures.tryGetGafEntry("anims/LOGOS.GAF", "32xlogos"))
+        {
+            // The sheet's logos are 32 pixels square and a row has sixteen.
+            for (const auto& sprite : (*logos)->sprites)
+            {
+                const auto bounds = Rectangle2f::fromTopLeft(0.0f, 0.0f, 16.0f, 16.0f);
+                art.logos.push_back(std::make_shared<Sprite>(bounds, sprite->texture, sprite->mesh));
+            }
+        }
+        art.allyIcons.clear();
+        {
+            // The patched LOUNGE2.GAF carries the shapes under the gadget's
+            // own name; before the patch the skirmish screen's are the same
+            // twelve faces.
+            auto icons = textures.getGuiTexture("LOUNGE2", "TEAMICONSx");
+            if (!icons)
+            {
+                icons = textures.getGuiTexture("SKIRMISH", "TEAMICONSx");
+            }
+            if (!icons)
+            {
+                icons = textures.getGuiTexture("SKIRMISH", "ally icons");
+            }
+            if (icons)
+            {
+                art.allyIcons = (*icons)->sprites;
+            }
+        }
+
+        auto lampFaces = textures.getGuiTexture("LOUNGE2", "CHECKBOX");
+        auto lampFont = textures.getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+
+        // -- the seat rows --
+        for (int i = 0; i < 10; ++i)
+        {
+            const auto seatName = "PLAYER" + std::to_string(i);
+            const int rowY = nameBox.y + (i * battleroomRowPitch);
+            // The other templates sit a little off the name's own top, which
+            // is the file's way of centring a 16 pixel gadget on a 20 pixel row.
+            const auto rowOffset = [&](int templateY) { return rowY + (templateY - nameBox.y); };
+
+            // The gadgets of a row are drawn as pictures and say what is
+            // not allowed by not answering, not by greying out: a greyed
+            // frame would hide the one thing the other players' rows are
+            // there to show.
+            {
+                auto button = factory.createButton(
+                    nameBox.x, rowY, static_cast<int>(nameBox.width), static_cast<int>(nameBox.height), "LOUNGE2", "PLAYERx", "Open");
+                button->setName(seatName);
+                button->setTextAlign(UiStagedButton::TextAlign::Center);
+                button->setDisabledSprite(nullptr);
+                panel->appendChild(std::move(button));
+            }
+            {
+                auto button = factory.createStagedButton(
+                    sideBox.x, rowOffset(sideBox.y), static_cast<int>(sideBox.width), static_cast<int>(sideBox.height),
+                    "LOUNGE2", "SIDEx", std::vector<std::string>(2), 2);
+                button->setName(seatName + "_side");
+                button->setDisabledSprite(nullptr);
+                panel->appendChild(std::move(button));
+            }
+            {
+                auto button = factory.createButton(
+                    logoBox.x, rowOffset(logoBox.y), static_cast<int>(logoBox.width), static_cast<int>(logoBox.height),
+                    "LOUNGE2", "LOGOx", "");
+                button->setName(seatName + "_color");
+                button->setDisabledSprite(nullptr);
+                panel->appendChild(std::move(button));
+            }
+            {
+                // "team" is a name no face is filed under, so the button
+                // starts blank and takes its picture from the ally icons.
+                auto button = factory.createButton(
+                    teamBox.x, rowOffset(teamBox.y), static_cast<int>(teamBox.width), static_cast<int>(teamBox.height),
+                    "LOUNGE2", "team", "");
+                button->setName(seatName + "_team");
+                button->setDisabledSprite(nullptr);
+                panel->appendChild(std::move(button));
+            }
+            {
+                // READYx is a 16 pixel gadget the file gives no picture:
+                // the lamp is commongui's CHECKBOX -- dark, lit -- which is
+                // what a status box of that size is for.
+                const auto defaultSprite = textures.getDefaultSprite();
+                const auto off = lampFaces && (*lampFaces)->sprites.size() > 0 ? (*lampFaces)->sprites[0] : defaultSprite;
+                const auto on = lampFaces && (*lampFaces)->sprites.size() > 1 ? (*lampFaces)->sprites[1] : defaultSprite;
+                const auto pressed = lampFaces && (*lampFaces)->sprites.size() > 2 ? (*lampFaces)->sprites[2] : defaultSprite;
+                std::vector<UiStagedButton::StageInfo> stages;
+                stages.emplace_back(off, "");
+                stages.emplace_back(on, "");
+                auto button = std::make_unique<UiStagedButton>(
+                    readyBox.x, rowOffset(readyBox.y), readyBox.width, readyBox.height, std::move(stages), pressed, lampFont);
+                button->setName(seatName + "_ready");
+                panel->appendChild(std::move(button));
+            }
+            {
+                // The column the file labels Resolution has nothing to show
+                // here; a computer player's personality is the one thing RWE
+                // has that a seat there can say, and the setup screen has it
+                // beside the same row.
+                auto button = factory.createSizedButton(resolutionX, rowOffset(resolutionY), static_cast<int>(resolutionWidth), 20, "LOUNGE2", "");
+                button->setName(seatName + "_personality");
+                button->setTextAlign(UiStagedButton::TextAlign::Center);
+                button->setDisabledSprite(nullptr);
+                panel->appendChild(std::move(button));
+            }
+            {
+                auto label = factory.createLabel(
+                    pingBox.x, rowOffset(pingBox.y), static_cast<int>(pingBox.width), static_cast<int>(pingBox.height), "-", UiLabel::Alignment::Left);
+                label->setName(seatName + "_ping");
+                panel->appendChild(std::move(label));
+            }
+        }
+
+        // -- the options --
+        // A button may carry stages this build means nothing by (the
+        // commander's third, Deathmatch). It is built again without them, at
+        // the place the file gave it, so that a click can never land on one.
+        for (const auto& option : battleroomOptions())
+        {
+            auto button = panel->find<UiStagedButton>(option.button);
+            if (!button)
+            {
+                continue;
+            }
+            std::vector<std::string> labels;
+            for (unsigned int stage = 0; stage < button->get().getStageCount(); ++stage)
+            {
+                labels.push_back(button->get().getStageLabel(stage));
+            }
+            auto usable = usableOptionLabels(option.option, labels);
+            if (!usable.empty() && usable.size() != labels.size())
+            {
+                factory.replaceStagedButton(*panel, "LOUNGE2", option.button, option.button, usable, 0);
+            }
+        }
+
+        // -- who sees a Start button --
+        if (role != RoomRole::Host)
+        {
+            // Only the host starts a game. A guest's button would be one it
+            // could press and that would do nothing, or worse.
+            panel->removeChildrenNamed("START");
+        }
+
+        // -- typing --
+        if (auto message = panel->find<UiTextBox>("MESSAGE"))
+        {
+            // The bitmap has the line's plate painted into it.
+            message->get().setDrawPlate(false);
+            message->get().setMaxLength(UiTextBox::largestMaxLength);
+        }
+
+        // Enter sends the line. The file names no default button, and the
+        // panel only knows how to press a button; this one is off the screen
+        // and exists to be pressed.
+        {
+            auto send = factory.createSizedButton(-100, -100, 1, 1, "LOUNGE2", "");
+            send->setName("SEND");
+            panel->appendChild(std::move(send));
+        }
+        panel->setDefaultButtons("SEND", std::string());
+        panel->setDefaultKeysEnabled(true);
+        panel->setFocusByName("MESSAGE");
+
+        return panel;
+    }
+
     // ------------------------------------------------------------------
     // The scene's half
     // ------------------------------------------------------------------
@@ -845,6 +1665,68 @@ namespace rwe
         {
             auto label = panel.find<UiLabel>("HELPTEXT");
             return label ? &label->get() : nullptr;
+        }
+    }
+
+    namespace
+    {
+        RoomRole roomRoleOf(MultiplayerFlow::Role role)
+        {
+            switch (role)
+            {
+                case MultiplayerFlow::Role::Host:
+                    return RoomRole::Host;
+                case MultiplayerFlow::Role::Guest:
+                    return RoomRole::Guest;
+                case MultiplayerFlow::Role::Browsing:
+                    break;
+            }
+            return RoomRole::None;
+        }
+
+        /** Whether seat `i` is the one this machine plays. */
+        bool isOwnSeat(const MultiplayerFlow& flow, std::size_t i, PlayerType type)
+        {
+            if (flow.role == MultiplayerFlow::Role::Host)
+            {
+                // The host's own seat is the only one that is a Human.
+                return type == PlayerType::Human;
+            }
+            return static_cast<int>(i) == flow.mySeat;
+        }
+
+        /** What the room has that the model has not, forgotten: for a new visit to a room. */
+        void resetRoom(MultiplayerFlow& flow, std::size_t seats)
+        {
+            flow.chat = ChatTranscript{};
+            flow.shownChatSequence = 0;
+            flow.seatReady.assign(seats, false);
+            flow.claimMemory.clear();
+            flow.removedTokens.clear();
+            flow.wanted = GuestChoice{};
+            flow.choicePending = false;
+            flow.myReady = false;
+            flow.sentChat.clear();
+            flow.nextChatSequence = 1;
+        }
+
+        /** The width of text in a font, as the renderer will lay it out. */
+        float textWidthIn(const SpriteSeries& font, const std::string& text)
+        {
+            const auto valid = ensureUtf8(text);
+            float width = 0.0f;
+            auto it = utf8Begin(valid);
+            const auto end = utf8End(valid);
+            for (; it != end; ++it)
+            {
+                auto ch = *it;
+                if (ch >= font.sprites.size())
+                {
+                    ch = 0;
+                }
+                width += font.sprites[ch]->bounds.right();
+            }
+            return width;
         }
     }
 
@@ -1170,6 +2052,7 @@ namespace rwe
         flow.startRequested = false;
         flow.claimedAt = getTimestamp();
         flow.hostSeenAt = getTimestamp();
+        resetRoom(flow, model.players.size());
 
         // A broadcast stays on this subnet. The claim is also sent to the
         // address the host's announcement came from, which is what makes a
@@ -1188,8 +2071,14 @@ namespace rwe
         }
         applyLobbyToModel(model, game, *seat, gameAddress(game.sourceAddress, game.port), nickname);
 
-        goToPlayerSetupMenu(true);
-        lockMirroredControls();
+        // The choices a guest starts from are the ones the seat is shown
+        // with, and it is not waiting for anything to be echoed.
+        {
+            const auto& mine = model.players[static_cast<std::size_t>(*seat)];
+            flow.wanted = GuestChoice{mine.side.getValue(), mine.colorIndex.getValue(), mine.teamIndex.getValue(), false};
+        }
+
+        goToBattleroom();
     }
 
     void MainMenuScene::openNewGameScreen()
@@ -1263,6 +2152,7 @@ namespace rwe
         flow.session = randomHex(16);
         flow.seatTokens.assign(model.players.size(), std::string());
         flow.launching = false;
+        resetRoom(flow, model.players.size());
 
         // This machine plays seat one and every other seat is on offer: a
         // joiner takes the first open one. A computer player is something the
@@ -1276,7 +2166,7 @@ namespace rwe
         }
         model.players[0].name.next(nickname);
 
-        goToPlayerSetupMenu(true);
+        goToBattleroom();
     }
 
     bool MainMenuScene::multiplayerGoBack()
@@ -1288,8 +2178,9 @@ namespace rwe
 
         const auto name = panelStack.back()->getName();
 
-        if (name == "SKIRMISH" && multiplayerSetup)
+        if (name == "LOUNGE2")
         {
+            // The battleroom's Previous Menu, for the host and a guest alike.
             returnToGameList(std::string());
             return true;
         }
@@ -1337,6 +2228,7 @@ namespace rwe
         flow.discovery.setAnnounceTargets({});
         flow.launching = false;
         flow.seatTokens.assign(model.players.size(), std::string());
+        resetRoom(flow, model.players.size());
         flow.games.clear();
         flow.rows.clear();
         flow.listOpenedAt = getTimestamp();
@@ -1361,6 +2253,489 @@ namespace rwe
         multiplayerFlow.reset();
     }
 
+    void MainMenuScene::goToBattleroom()
+    {
+        auto& flow = *multiplayerFlow;
+        multiplayerSetup = true;
+
+        // A host that has not chosen a map plays the default one, as the
+        // setup screen does; a guest has already been given the host's.
+        selectDefaultMap();
+
+        const auto role = roomRoleOf(flow.role);
+        auto panel = makeBattleroomPanel(uiFactory, *sceneContext.textureService, role, flow.art);
+
+        if (role == RoomRole::Host)
+        {
+            // Starting metal and energy are one setting for the room, as
+            // they are in the original: a slider that sets every seat's.
+            for (const char* name : {"METAL", "ENERGY"})
+            {
+                auto bar = panel->find<UiScrollBar>(name);
+                if (!bar)
+                {
+                    continue;
+                }
+                const bool isMetal = std::string(name) == "METAL";
+                auto sub = bar->get().scrollChanged().subscribe([this, isMetal](float percent) {
+                    if (!multiplayerFlow || multiplayerFlow->role != MultiplayerFlow::Role::Host)
+                    {
+                        return;
+                    }
+                    const auto amount = static_cast<float>(resourceStopValue(resourceStopAtPercent(percent)));
+                    for (auto& p : model.players)
+                    {
+                        if (isMetal)
+                        {
+                            p.metal.next(Metal(amount));
+                        }
+                        else
+                        {
+                            p.energy.next(Energy(amount));
+                        }
+                    }
+                });
+                bar->get().addSubscription(std::move(sub));
+            }
+        }
+
+        goToMenu(std::move(panel));
+        refreshBattleroom();
+    }
+
+    void MainMenuScene::refreshBattleroom()
+    {
+        if (!multiplayerFlow || panelStack.empty() || panelStack.back()->getName() != "LOUNGE2")
+        {
+            return;
+        }
+        auto& flow = *multiplayerFlow;
+        if (flow.role == MultiplayerFlow::Role::Browsing)
+        {
+            return;
+        }
+        auto& panel = *panelStack.back();
+        const auto role = roomRoleOf(flow.role);
+
+        // -- the seats --
+        for (std::size_t i = 0; i < model.players.size(); ++i)
+        {
+            const auto seatName = "PLAYER" + std::to_string(i);
+            const auto& p = model.players[i];
+            const auto type = p.type.getValue();
+            const bool occupied = type != PlayerType::Open;
+            const auto controls = seatControls(role, type, isOwnSeat(flow, i, type));
+
+            if (auto b = panel.find<UiStagedButton>(seatName))
+            {
+                b->get().setLabel(seatCaption(type, p.name.getValue()));
+                b->get().setEnabled(controls.name);
+            }
+            if (auto b = panel.find<UiStagedButton>(seatName + "_side"))
+            {
+                b->get().setVisible(occupied);
+                b->get().setEnabled(controls.side);
+                b->get().setStage(p.side.getValue() == PlayerSide::Core ? 1u : 0u);
+            }
+            if (auto b = panel.find<UiStagedButton>(seatName + "_color"))
+            {
+                b->get().setVisible(occupied);
+                b->get().setEnabled(controls.colour);
+                const auto colour = p.colorIndex.getValue().value;
+                if (colour < flow.art.logos.size())
+                {
+                    b->get().setNormalSprite(flow.art.logos[colour]);
+                    b->get().setPressedSprite(flow.art.logos[colour]);
+                }
+            }
+            if (auto b = panel.find<UiStagedButton>(seatName + "_team"))
+            {
+                b->get().setVisible(occupied);
+                b->get().setEnabled(controls.team);
+
+                // A pair of faces a team -- the plain one when the team is
+                // shared, the other when it is on its own -- and a blank for
+                // no team: the same reading the setup screen has of it.
+                const auto& team = p.teamIndex.getValue();
+                std::size_t face = 10;
+                if (team)
+                {
+                    face = static_cast<std::size_t>(*team) * 2 + (model.isTeamShared(*team) ? 0 : 1);
+                }
+                if (face < flow.art.allyIcons.size())
+                {
+                    b->get().setNormalSprite(flow.art.allyIcons[face]);
+                    b->get().setPressedSprite(flow.art.allyIcons[face]);
+                }
+            }
+            if (auto b = panel.find<UiStagedButton>(seatName + "_ready"))
+            {
+                bool ready = false;
+                switch (type)
+                {
+                    case PlayerType::Open:
+                        break;
+                    case PlayerType::Computer:
+                        ready = true;
+                        break;
+                    case PlayerType::Human:
+                        // The host's own seat, or a guest's own: the host is
+                        // never waited for, and a guest's is what it set.
+                        ready = role == RoomRole::Host || flow.myReady;
+                        break;
+                    case PlayerType::Network:
+                        ready = i < flow.seatReady.size() && flow.seatReady[i];
+                        break;
+                }
+                b->get().setVisible(occupied);
+                b->get().setEnabled(controls.ready);
+                b->get().setStage(ready ? 1u : 0u);
+            }
+            if (auto l = panel.find<UiLabel>(seatName + "_ping"))
+            {
+                // No measurement exists on this transport. A dash says so,
+                // and says it only where a machine is on the other end.
+                l->get().setVisible(type == PlayerType::Human || type == PlayerType::Network);
+            }
+            if (auto b = panel.find<UiStagedButton>(seatName + "_personality"))
+            {
+                b->get().setVisible(type == PlayerType::Computer);
+                b->get().setEnabled(controls.personality);
+                b->get().setLabel(p.personality.getValue());
+            }
+        }
+
+        // -- the options --
+        const auto options = optionsFromModel(model);
+        for (const auto& option : battleroomOptions())
+        {
+            auto b = panel.find<UiStagedButton>(option.button);
+            if (!b)
+            {
+                continue;
+            }
+            std::vector<std::string> labels;
+            for (unsigned int stage = 0; stage < b->get().getStageCount(); ++stage)
+            {
+                labels.push_back(b->get().getStageLabel(stage));
+            }
+            if (const auto* value = findOption(options, option.option))
+            {
+                if (auto optionStage = parseStage(*value, 8))
+                {
+                    if (auto stage = buttonStageOfOptionStage(option.option, labels, *optionStage))
+                    {
+                        b->get().setStage(*stage);
+                    }
+                }
+            }
+            b->get().setEnabled(role == RoomRole::Host);
+        }
+
+        // -- the map --
+        if (auto b = panel.find<UiStagedButton>("MAP"))
+        {
+            b->get().setEnabled(role == RoomRole::Host);
+        }
+        const auto& map = model.selectedMap.getValue();
+        if (auto l = panel.find<UiLabel>("MAPNAME"))
+        {
+            l->get().setText(map ? map->name : std::string());
+        }
+
+        // -- starting resources, as the first seat has them --
+        if (auto bar = panel.find<UiScrollBar>("METAL"))
+        {
+            bar->get().setScrollPercent(resourceStopPercent(resourceStopNearest(model.players[0].metal.getValue().value)));
+        }
+        if (auto bar = panel.find<UiScrollBar>("ENERGY"))
+        {
+            bar->get().setScrollPercent(resourceStopPercent(resourceStopNearest(model.players[0].energy.getValue().value)));
+        }
+        if (auto l = panel.find<UiLabel>("METALTEXT"))
+        {
+            l->get().setText(std::to_string(static_cast<int>(model.players[0].metal.getValue().value)));
+        }
+        if (auto l = panel.find<UiLabel>("ENERGYTEXT"))
+        {
+            l->get().setText(std::to_string(static_cast<int>(model.players[0].energy.getValue().value)));
+        }
+
+        // -- Start, and the line that says why not --
+        const auto blocker = startBlocker(model, flow.seatReady, map.has_value());
+        if (auto b = panel.find<UiStagedButton>("START"))
+        {
+            b->get().setEnabled(role == RoomRole::Host && !blocker && !flow.launching);
+        }
+        if (auto l = panel.find<UiLabel>("HELPTEXT"))
+        {
+            std::string text;
+            if (role == RoomRole::Host)
+            {
+                text = flow.launching ? "Starting game..." : blocker.value_or("Everyone is ready. Press Start Game.");
+            }
+            else if (!flow.accepted)
+            {
+                text = "Asking the host for a seat...";
+            }
+            else
+            {
+                text = flow.myReady
+                    ? "You are ready. Waiting for the host to start."
+                    : "Click the box beside your name when you are ready.";
+            }
+            l->get().setText(text);
+        }
+
+        // -- the transcript --
+        if (flow.chat.lastSequence != flow.shownChatSequence)
+        {
+            if (auto output = panel.find<UiListBox>("OUTPUT"))
+            {
+                const auto font = sceneContext.textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+                const auto widthOf = [&font](const std::string& text) { return textWidthIn(*font, text); };
+                const auto rowWidth = static_cast<float>(output->get().getWidth()) - 4.0f;
+
+                output->get().clearItems();
+                for (const auto& line : flow.chat.lines)
+                {
+                    for (const auto& row : wrapChatLine(chatLineText(line), rowWidth, widthOf))
+                    {
+                        output->get().appendItem(row);
+                    }
+                }
+                output->get().scrollToEnd();
+            }
+            flow.shownChatSequence = flow.chat.lastSequence;
+        }
+    }
+
+    void MainMenuScene::sendChatLine()
+    {
+        if (!multiplayerFlow || panelStack.empty() || panelStack.back()->getName() != "LOUNGE2")
+        {
+            return;
+        }
+        auto& flow = *multiplayerFlow;
+        auto box = panelStack.back()->find<UiTextBox>("MESSAGE");
+        if (!box)
+        {
+            return;
+        }
+
+        const auto text = sanitisedChatText(box->get().getText());
+        box->get().setText(std::string());
+        if (text.empty())
+        {
+            // A line with nothing in it is not a line.
+            return;
+        }
+
+        if (flow.role == MultiplayerFlow::Role::Host)
+        {
+            flow.chat.say(flow.nickname, text);
+        }
+        else if (flow.role == MultiplayerFlow::Role::Guest)
+        {
+            // Put on the claim, and shown when the host has taken it.
+            DiscoveredChatLine line;
+            line.sequence = flow.nextChatSequence++;
+            line.name = flow.nickname.substr(0, maxPlayerNameLength);
+            line.text = text;
+            flow.sentChat.push_back(std::move(line));
+            // The claim is a datagram: the last few are repeated, so that
+            // one that is lost is not a line that is lost.
+            const std::size_t repeated = 4;
+            if (flow.sentChat.size() > repeated)
+            {
+                flow.sentChat.erase(flow.sentChat.begin(), flow.sentChat.end() - repeated);
+            }
+        }
+    }
+
+    bool MainMenuScene::battleroomMessage(const std::string& message, const ActivateMessage& details)
+    {
+        if (!multiplayerFlow || multiplayerFlow->role == MultiplayerFlow::Role::Browsing)
+        {
+            return false;
+        }
+        auto& flow = *multiplayerFlow;
+        const bool host = flow.role == MultiplayerFlow::Role::Host;
+
+        if (message == "PrevMenu" || message == "PREVMENU")
+        {
+            return false;
+        }
+
+        // Typing goes to the line box again after anything on the screen has
+        // been pressed: pressing a button moves the focus onto it, and a
+        // room is where a person types. Not when the press opened a dialog.
+        const auto keepTyping = [this]() {
+            if (dialogStack.empty() && !panelStack.empty() && panelStack.back()->getName() == "LOUNGE2")
+            {
+                panelStack.back()->setFocusByName("MESSAGE");
+            }
+        };
+
+        if (message == "SEND")
+        {
+            sendChatLine();
+        }
+        else if (message == "MAP")
+        {
+            if (host && dialogStack.empty())
+            {
+                resetCandidateSelectedMap();
+                openMapSelectionDialog();
+                return true;
+            }
+        }
+        else if (message == "START")
+        {
+            if (host && !flow.launching && !startBlocker(model, flow.seatReady, model.selectedMap.getValue().has_value()))
+            {
+                beginHostedLaunch();
+                return true;
+            }
+        }
+        else if (const auto option = std::find_if(battleroomOptions().begin(), battleroomOptions().end(), [&](const auto& o) { return message == o.button; });
+                 option != battleroomOptions().end())
+        {
+            auto button = host ? panelStack.back()->find<UiStagedButton>(option->button) : std::nullopt;
+            if (button)
+            {
+                std::vector<std::string> labels;
+                for (unsigned int stage = 0; stage < button->get().getStageCount(); ++stage)
+                {
+                    labels.push_back(button->get().getStageLabel(stage));
+                }
+                // The model's own stage for the button's current face, then
+                // the next face that means something -- by label.
+                const auto current = optionsFromModel(model);
+                const auto* value = findOption(current, option->option);
+                const auto currentStage = value ? parseStage(*value, 8) : std::nullopt;
+                if (currentStage)
+                {
+                    if (auto next = nextOptionStage(option->option, labels, *currentStage))
+                    {
+                        applyOptionsToModel(model, {{option->option, std::to_string(*next)}});
+                    }
+                }
+            }
+        }
+        else if (const auto seatMessage = parseSeatMessage(message, model.players.size()))
+        {
+            const auto i = seatMessage->seat;
+            auto& p = model.players[i];
+            const auto type = p.type.getValue();
+            const auto controls = seatControls(roomRoleOf(flow.role), type, isOwnSeat(flow, i, type));
+            const auto& control = seatMessage->control;
+            const auto index = static_cast<int>(i);
+
+            // A guest's click on its own seat is a request: the model shows
+            // it at once and the claim carries it, and the host's
+            // announcement has the last word.
+            const auto noteWanted = [&]() {
+                if (!host)
+                {
+                    flow.wanted = GuestChoice{p.side.getValue(), p.colorIndex.getValue(), p.teamIndex.getValue(), flow.myReady};
+                    flow.choicePending = true;
+                    flow.choiceAt = getTimestamp();
+                }
+            };
+
+            if (control.empty())
+            {
+                if (controls.name && host)
+                {
+                    switch (type)
+                    {
+                        case PlayerType::Open:
+                            // A colour the seat comes in with that another
+                            // seat has is changed for the first that is free.
+                            p.type.next(PlayerType::Computer);
+                            ensureFreeColour(model, i);
+                            break;
+                        case PlayerType::Computer:
+                            p.type.next(PlayerType::Open);
+                            break;
+                        case PlayerType::Network:
+                        {
+                            // Out of the room. The guest's claim goes on
+                            // being heard until it notices, and must not
+                            // seat it again, so the token is remembered.
+                            const auto name = p.name.getValue();
+                            const auto token = flow.seatTokens[i];
+                            if (!token.empty())
+                            {
+                                flow.removedTokens.push_back(token);
+                                flow.claimMemory.erase(token);
+                            }
+                            flow.seatTokens[i].clear();
+                            flow.seatReady[i] = false;
+                            p.name.next(std::string());
+                            p.networkAddress.next(std::string());
+                            p.type.next(PlayerType::Open);
+                            flow.chat.say(std::string(), (name.empty() ? "A player" : name) + " was removed");
+                            break;
+                        }
+                        case PlayerType::Human:
+                            break;
+                    }
+                }
+            }
+            else if (control == "side")
+            {
+                if (controls.side)
+                {
+                    togglePlayerSide(index);
+                    noteWanted();
+                }
+            }
+            else if (control == "color")
+            {
+                if (controls.colour)
+                {
+                    if (details.type == ActivateMessage::Type::Secondary)
+                    {
+                        reverseCyclePlayerColor(index);
+                    }
+                    else
+                    {
+                        cyclePlayerColor(index);
+                    }
+                    noteWanted();
+                }
+            }
+            else if (control == "team")
+            {
+                if (controls.team)
+                {
+                    cyclePlayerTeam(index);
+                    noteWanted();
+                }
+            }
+            else if (control == "ready")
+            {
+                if (controls.ready && !host)
+                {
+                    flow.myReady = !flow.myReady;
+                }
+            }
+            else if (control == "personality")
+            {
+                if (controls.personality)
+                {
+                    cyclePlayerPersonality(index, details.type == ActivateMessage::Type::Secondary ? -1 : 1);
+                }
+            }
+        }
+
+        refreshBattleroom();
+        keepTyping();
+        return true;
+    }
+
     void MainMenuScene::beginHostedLaunch()
     {
         if (!multiplayerFlow || multiplayerFlow->role != MultiplayerFlow::Role::Host || multiplayerFlow->launching)
@@ -1382,68 +2757,6 @@ namespace rwe
         openMessageBox("Starting game...");
     }
 
-    void MainMenuScene::lockMirroredControls()
-    {
-        if (panelStack.empty() || panelStack.back()->getName() != "SKIRMISH")
-        {
-            return;
-        }
-        auto& panel = *panelStack.back();
-
-        for (auto& child : panel.getChildren())
-        {
-            const auto& name = child->getName();
-
-            if (auto* button = dynamic_cast<UiStagedButton*>(child.get()))
-            {
-                // Previous Menu is how a guest leaves. Everything else on
-                // this screen is state the host owns -- but a side, colour
-                // or team button is its own picture, and its greyed frame
-                // would hide the one thing a guest looks here for. Those
-                // stay as they are and their clicks are ignored (see
-                // multiplayerMessage).
-                const bool isPicture = endsWith(name, "_side") || endsWith(name, "_color") || endsWith(name, "_team");
-                if (name != "PrevMenu" && name != "PREVMENU" && !isPicture)
-                {
-                    button->setEnabled(false);
-                }
-            }
-            else if (auto* box = dynamic_cast<UiTextBox*>(child.get()))
-            {
-                // The port is this machine's own, and stays editable.
-                if (name != "LOCALPORT")
-                {
-                    box->setEditable(false);
-                }
-            }
-        }
-
-        if (auto* help = helpLabel(panel))
-        {
-            help->setText("Waiting for the host to start");
-        }
-    }
-
-    void MainMenuScene::showAddressesInBoxes()
-    {
-        if (panelStack.empty())
-        {
-            return;
-        }
-        auto& panel = *panelStack.back();
-        for (std::size_t i = 0; i < model.players.size(); ++i)
-        {
-            if (auto box = panel.find<UiTextBox>("PLAYER" + std::to_string(i) + "_address"))
-            {
-                const auto& wanted = model.players[i].networkAddress.getValue();
-                if (box->get().getText() != wanted)
-                {
-                    box->get().setText(wanted);
-                }
-            }
-        }
-    }
-
     void MainMenuScene::updateHostedLobby()
     {
         auto& flow = *multiplayerFlow;
@@ -1452,12 +2765,16 @@ namespace rwe
             return;
         }
 
-        // What is typed in the address and port boxes is read before
-        // anything announces it.
-        readNetworkAddressesFromPanel();
-
         // -- who has asked for a seat --
         const auto claims = claimsOn(flow.discovery.games(flow.session), flow.session);
+
+        // A guest that was put out stays in `removedTokens` for as long as
+        // its claim is still being heard, and not a moment longer.
+        flow.removedTokens.erase(
+            std::remove_if(flow.removedTokens.begin(), flow.removedTokens.end(), [&](const auto& token) {
+                return std::none_of(claims.begin(), claims.end(), [&](const auto& c) { return c.token == token; });
+            }),
+            flow.removedTokens.end());
 
         // A claim that has gone quiet frees its seat, unless the host has
         // already changed the seat itself.
@@ -1474,12 +2791,15 @@ namespace rwe
                 auto& p = model.players[seat];
                 if (p.type.getValue() == PlayerType::Network)
                 {
+                    const auto name = p.name.getValue();
+                    flow.chat.say(std::string(), (name.empty() ? std::string("A player") : name) + " has left");
                     p.name.next(std::string());
                     p.networkAddress.next(std::string());
                     p.type.next(PlayerType::Open);
                 }
+                flow.claimMemory.erase(token);
+                flow.seatReady[seat] = false;
                 token.clear();
-                showAddressesInBoxes();
             }
         }
 
@@ -1489,18 +2809,37 @@ namespace rwe
             {
                 continue;
             }
+            if (std::find(flow.removedTokens.begin(), flow.removedTokens.end(), claim.token) != flow.removedTokens.end())
+            {
+                continue;
+            }
 
             auto held = std::find(flow.seatTokens.begin(), flow.seatTokens.end(), claim.token);
             if (held != flow.seatTokens.end())
             {
                 // Already seated: its address can move (a different port
                 // typed on the guest), and that follows.
-                auto& p = model.players[static_cast<std::size_t>(held - flow.seatTokens.begin())];
+                const auto seat = static_cast<std::size_t>(held - flow.seatTokens.begin());
+                auto& p = model.players[seat];
                 if (p.type.getValue() == PlayerType::Network && p.networkAddress.getValue() != claim.address)
                 {
                     p.networkAddress.next(claim.address);
-                    showAddressesInBoxes();
                 }
+
+                // What the guest chose, acted on when it is a change from
+                // what was last heard, so that a choice the host refused is
+                // not tried again every time it is repeated.
+                auto& memory = flow.claimMemory[claim.token];
+                if (memory.side != claim.side || memory.colour != claim.colour || memory.team != claim.team)
+                {
+                    applyClaimChoice(model, seat, claim);
+                    memory.side = claim.side;
+                    memory.colour = claim.colour;
+                    memory.team = claim.team;
+                }
+
+                flow.seatReady[seat] = claim.ready;
+                takeClaimChat(flow.chat, memory.lastChat, p.name.getValue(), claim.chat);
                 continue;
             }
 
@@ -1518,7 +2857,21 @@ namespace rwe
             p.networkAddress.next(claim.address);
             p.type.next(PlayerType::Network);
             flow.seatTokens[seat] = claim.token;
-            showAddressesInBoxes();
+
+            // The seat comes in with a colour no other seat has; then what
+            // the guest asked for on the way in, which may be refused.
+            ensureFreeColour(model, seat);
+            applyClaimChoice(model, seat, claim);
+
+            auto& memory = flow.claimMemory[claim.token];
+            memory.side = claim.side;
+            memory.colour = claim.colour;
+            memory.team = claim.team;
+            memory.lastChat = 0;
+
+            flow.seatReady[seat] = claim.ready;
+            flow.chat.say(std::string(), (claim.name.empty() ? std::string("A player") : claim.name) + " has joined");
+            takeClaimChat(flow.chat, memory.lastChat, claim.name, claim.chat);
         }
 
         // -- what is announced --
@@ -1541,6 +2894,8 @@ namespace rwe
             identity.port = 1337;
         }
         identity.launching = flow.launching;
+        identity.ready = flow.seatReady;
+        identity.chat = flow.chat.tail();
 
         if (const auto& map = model.selectedMap.getValue())
         {
@@ -1650,8 +3005,39 @@ namespace rwe
 
         // -- mirror the host, whole --
         applyLobbyToModel(model, *host, flow.mySeat, gameAddress(host->sourceAddress, host->port), flow.nickname);
-        showAddressesInBoxes();
-        lockMirroredControls();
+
+        // -- the room: what was said, and who is ready --
+        flow.chat.merge(host->chat);
+        for (const auto& slot : host->slots)
+        {
+            if (slot.index >= 0 && static_cast<std::size_t>(slot.index) < flow.seatReady.size())
+            {
+                flow.seatReady[static_cast<std::size_t>(slot.index)] = slot.ready;
+            }
+        }
+
+        // -- what this guest asked for, until the host says the same --
+        if (flow.choicePending && flow.mySeat >= 0 && static_cast<std::size_t>(flow.mySeat) < model.players.size())
+        {
+            auto& mine = model.players[static_cast<std::size_t>(flow.mySeat)];
+            const auto* slot = findSlot(*host, flow.mySeat);
+            const bool echoed = slot != nullptr
+                && mine.side.getValue() == flow.wanted.side
+                && mine.colorIndex.getValue() == flow.wanted.colour
+                && mine.teamIndex.getValue() == flow.wanted.team;
+            if (echoed || secondsSince(flow.choiceAt) > 2.0f)
+            {
+                // Said back to it, or refused: either way the host's word
+                // is what is shown from here.
+                flow.choicePending = false;
+            }
+            else
+            {
+                mine.side.next(flow.wanted.side);
+                mine.colorIndex.next(flow.wanted.colour);
+                mine.teamIndex.next(flow.wanted.team);
+            }
+        }
 
         // -- say where this machine is --
         readNetworkAddressesFromPanel();
@@ -1666,7 +3052,13 @@ namespace rwe
             {
             }
         }
-        flow.discovery.advertise(claimAnnouncement(*host, flow.mySeat, flow.claimToken, flow.nickname, port));
+        std::optional<GuestChoice> choice;
+        if (flow.mySeat >= 0 && static_cast<std::size_t>(flow.mySeat) < model.players.size())
+        {
+            const auto& mine = model.players[static_cast<std::size_t>(flow.mySeat)];
+            choice = GuestChoice{mine.side.getValue(), mine.colorIndex.getValue(), mine.teamIndex.getValue(), flow.myReady};
+        }
+        flow.discovery.advertise(claimAnnouncement(*host, flow.mySeat, flow.claimToken, flow.nickname, port, choice, flow.sentChat));
 
         // -- the host has pressed Start --
         if (host->launching && flow.accepted)
@@ -1706,9 +3098,15 @@ namespace rwe
                 updateJoinedLobby();
                 break;
         }
+
+        // After the update, so that what is on screen is what the lobby
+        // became this frame and not last frame's. A guest that was just put
+        // back on the list has no room to refresh, and refreshBattleroom
+        // says so by returning.
+        refreshBattleroom();
     }
 
-    bool MainMenuScene::multiplayerMessage(const std::string& topic, const std::string& message, const ActivateMessage& /*details*/)
+    bool MainMenuScene::multiplayerMessage(const std::string& topic, const std::string& message, const ActivateMessage& details)
     {
         if (!multiplayerFlow)
         {
@@ -1782,23 +3180,9 @@ namespace rwe
             return false;
         }
 
-        if (topic == "SKIRMISH" && multiplayerSetup)
+        if (topic == "LOUNGE2" && role != MultiplayerFlow::Role::Browsing)
         {
-            if (message == "PrevMenu" || message == "PREVMENU")
-            {
-                return false;
-            }
-            if (role == MultiplayerFlow::Role::Guest)
-            {
-                // A read-only mirror: nothing on this screen changes shared
-                // state, whichever way the click got through.
-                return true;
-            }
-            if (role == MultiplayerFlow::Role::Host && message == "Start")
-            {
-                beginHostedLaunch();
-                return true;
-            }
+            return battleroomMessage(message, details);
         }
 
         return false;

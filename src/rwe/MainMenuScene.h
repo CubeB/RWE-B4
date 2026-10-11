@@ -21,9 +21,17 @@
 namespace rwe
 {
     struct MultiplayerFlow;
+    struct MenuProbe;
 
     class MainMenuScene : public Scene
     {
+        /**
+         * ui_probe reads the real panels, the real model and the flow of a
+         * running menu to say what a person would see; it is the one reader
+         * of them that is not the scene.
+         */
+        friend struct MenuProbe;
+
     private:
         SceneContext sceneContext;
         TdfBlock* soundLookup;
@@ -174,20 +182,14 @@ namespace rwe
 
         void goToSkirmishMenu();
 
-        /**
-         * The same screen as the skirmish one, for a game played against other
-         * machines rather than against the computer. What it adds is a slot
-         * type -- Network, with an address -- and the port this machine
-         * listens on; what it has no way to add is agreement, there being no
-         * lobby here to agree anything in. See MultiplayerSetup.h.
-         */
+        /** The way into a game against other machines; the same as goToSelectConnectionMenu. */
         void goToMultiplayerMenu();
 
         /**
          * The original's route to a network game, which is where MULTI goes:
          * SELPROV.GUI (the connection), TCP.GUI (an address), SELGAME.GUI
          * (the games, with New and Join), NEWMULTI.GUI (name the game), and
-         * then the setup screen as the battleroom's stand-in.
+         * then the battleroom, LOUNGE2.GUI.
          */
         void goToSelectConnectionMenu();
 
@@ -199,8 +201,8 @@ namespace rwe
         bool multiplayerGoBack();
 
         /**
-         * A message from one of the multiplayer screens, or from the setup
-         * screen while it is a lobby. True if it was dealt with.
+         * A message from one of the multiplayer screens, the battleroom
+         * included. True if it was dealt with.
          */
         bool multiplayerMessage(const std::string& topic, const std::string& message, const ActivateMessage& details);
 
@@ -263,7 +265,9 @@ namespace rwe
          * Whether this screen is setting up a game against other machines. It
          * decides three things: whether a slot can be Network at all, whether
          * the address and port boxes are drawn, and whether Start checks any
-         * of it.
+         * of it. The battleroom sets it too, although it draws no address or
+         * port box: the seats' addresses are on the model and Start's checks
+         * are the same.
          */
         bool multiplayerSetup{false};
 
@@ -304,7 +308,19 @@ namespace rwe
         /** Guest: mirrors the host's announcement, and follows it into the game. */
         void updateJoinedLobby();
 
-        /** Pops back to the game list from the setup screen, saying why if it was not by choice. */
+        /** LOUNGE2.GUI, the battleroom, for the role the flow is in. */
+        void goToBattleroom();
+
+        /** The battleroom's gadgets, set from the model and the room: every update. */
+        void refreshBattleroom();
+
+        /** A press on the battleroom. True if it was its own; Previous Menu is not. */
+        bool battleroomMessage(const std::string& message, const ActivateMessage& details);
+
+        /** The line typed in the battleroom's message box, said to the room. */
+        void sendChatLine();
+
+        /** Pops back to the game list from the battleroom, saying why if it was not by choice. */
         void returnToGameList(const std::string& message);
 
         /** Ends the multiplayer visit: discovery stopped, the setup screen's state put back. */
@@ -312,12 +328,6 @@ namespace rwe
 
         /** Host pressed Start: checked now, then the guests are told for a couple of seconds, then it starts. */
         void beginHostedLaunch();
-
-        /** Greys out and locks what a guest may not change on the setup screen. */
-        void lockMirroredControls();
-
-        /** Writes the model's network addresses into the setup screen's address boxes. */
-        void showAddressesInBoxes();
 
         /** What the name button of a seat says: the person's name, or the kind of seat. */
         std::string captionForSeat(int playerIndex) const;

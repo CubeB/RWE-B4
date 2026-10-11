@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
 #include <rwe/MainMenuScene_multiplayer.h>
+#include <set>
 
 namespace rwe
 {
@@ -476,6 +478,711 @@ namespace rwe
         {
             CHECK(p.name.getValue().empty());
             CHECK(p.networkAddress.getValue().empty());
+        }
+    }
+}
+
+namespace rwe
+{
+    namespace
+    {
+        /** LOUNGE2.GUI's own captions for the four option buttons, in the file's order. */
+        std::vector<std::string> battleroomLabels(const std::string& option)
+        {
+            if (option == "commander")
+            {
+                return {"Continues", "Game ends", "Deathmatch"};
+            }
+            if (option == "startloc")
+            {
+                return {"Random", "Fixed"};
+            }
+            if (option == "mapping")
+            {
+                return {"Unmapped", "Mapped"};
+            }
+            return {"True", "Circular", "Permanent"};
+        }
+
+        unsigned int stagesOf(const std::string& option)
+        {
+            return option == "los" ? 3u : 2u;
+        }
+
+        MainMenuModel roomModel()
+        {
+            MainMenuModel model;
+            for (std::size_t i = 0; i < model.players.size(); ++i)
+            {
+                model.players[i].type.next(i == 0 ? Type::Human : Type::Open);
+                model.players[i].colorIndex.next(PlayerColorIndex(static_cast<unsigned int>(i)));
+            }
+            model.players[0].name.next("Hector");
+            return model;
+        }
+
+        SeatClaim claimFor(const std::string& side, unsigned int colour, int team, bool ready = false)
+        {
+            SeatClaim claim;
+            claim.token = "deadbeef";
+            claim.seat = 1;
+            claim.name = "Guest";
+            claim.side = side;
+            claim.colour = colour;
+            claim.team = team;
+            claim.ready = ready;
+            return claim;
+        }
+    }
+
+    TEST_CASE("every stage of every battleroom option round-trips through its button and the model, by label", "[multiplayer][battleroom]")
+    {
+        for (const auto& option : battleroomOptions())
+        {
+            const std::string name = option.option;
+            const auto labels = battleroomLabels(name);
+
+            SECTION(name)
+            {
+                for (unsigned int modelStage = 0; modelStage < stagesOf(name); ++modelStage)
+                {
+                    // The model's stage becomes a button face and comes back
+                    // as itself...
+                    auto face = buttonStageOfOptionStage(name, labels, modelStage);
+                    REQUIRE(face.has_value());
+                    CHECK(optionStageOfButtonStage(name, labels, *face) == modelStage);
+
+                    // ...and through a model, written as a lobby announces it.
+                    MainMenuModel host;
+                    applyOptionsToModel(host, {{name, std::to_string(modelStage)}});
+                    MainMenuModel guest;
+                    applyOptionsToModel(guest, optionsFromModel(host));
+                    CHECK(optionsFromModel(guest) == optionsFromModel(host));
+                }
+
+                // Clicking walks every stage once and returns to the start.
+                const auto usable = usableOptionLabels(name, labels);
+                REQUIRE(usable.size() == stagesOf(name));
+                unsigned int stage = 0;
+                std::set<unsigned int> seen;
+                for (std::size_t click = 0; click < usable.size(); ++click)
+                {
+                    seen.insert(stage);
+                    auto next = nextOptionStage(name, usable, stage);
+                    REQUIRE(next.has_value());
+                    stage = *next;
+                }
+                CHECK(seen.size() == usable.size());
+                CHECK(stage == 0u);
+            }
+        }
+    }
+
+    TEST_CASE("the battleroom's stage order is not the setup screen's, and the labels are what decide", "[multiplayer][battleroom]")
+    {
+        // The model's stage 0 of the commander option is "game ends"; the
+        // battleroom button lists Continues first. Position would get this
+        // exactly backwards.
+        const auto commander = battleroomLabels("commander");
+        CHECK(optionStageOfButtonStage("commander", commander, 0) == 1u); // Continues
+        CHECK(optionStageOfButtonStage("commander", commander, 1) == 0u); // Game ends
+        CHECK(buttonStageOfOptionStage("commander", commander, 0) == 1u);
+
+        // Location: the button lists Random first, the model has fixed at 0.
+        const auto location = battleroomLabels("startloc");
+        CHECK(optionStageOfButtonStage("startloc", location, 0) == 1u);
+        CHECK(optionStageOfButtonStage("startloc", location, 1) == 0u);
+
+        // Line of sight: True|Circular|Permanent against permanent|true|circular.
+        const auto los = battleroomLabels("los");
+        CHECK(optionStageOfButtonStage("los", los, 0) == 1u);
+        CHECK(optionStageOfButtonStage("los", los, 1) == 2u);
+        CHECK(optionStageOfButtonStage("los", los, 2) == 0u);
+
+        // Mapping happens to agree.
+        const auto mapping = battleroomLabels("mapping");
+        CHECK(optionStageOfButtonStage("mapping", mapping, 0) == 0u);
+        CHECK(optionStageOfButtonStage("mapping", mapping, 1) == 1u);
+
+        SECTION("a label with no meaning here maps to nothing, and is not offered")
+        {
+            CHECK_FALSE(optionStageOfButtonStage("commander", commander, 2).has_value());
+            CHECK_FALSE(optionStageForLabel("commander", "Deathmatch").has_value());
+            CHECK(usableOptionLabels("commander", commander) == std::vector<std::string>{"Continues", "Game ends"});
+            // An option the model does not have, and a stage past the buttons.
+            CHECK_FALSE(optionStageForLabel("cheating", "Allowed").has_value());
+            CHECK_FALSE(optionStageOfButtonStage("mapping", mapping, 9).has_value());
+        }
+
+        SECTION("a click on the usable labels flips the commander the right way")
+        {
+            const auto usable = usableOptionLabels("commander", commander);
+            // Game ends (0) -> Continues (1) -> Game ends (0).
+            CHECK(nextOptionStage("commander", usable, 0) == 1u);
+            CHECK(nextOptionStage("commander", usable, 1) == 0u);
+        }
+
+        SECTION("a click with the full list skips the label with no meaning")
+        {
+            // Continues (model 1) is the first label, so the next is Game
+            // ends; from Game ends the next is Deathmatch, which is skipped.
+            CHECK(nextOptionStage("commander", commander, 1) == 0u);
+            CHECK(nextOptionStage("commander", commander, 0) == 1u);
+        }
+    }
+
+    TEST_CASE("the starting resources' slider walks the setup screen's ladder", "[multiplayer][battleroom]")
+    {
+        CHECK(resourceStopValue(0) == 200u);
+        CHECK(resourceStopValue(1) == 500u);
+        CHECK(resourceStopValue(2) == 1000u);
+        CHECK(resourceStopValue(resourceStopCount - 1) == 10000u);
+
+        for (unsigned int stop = 0; stop < resourceStopCount; ++stop)
+        {
+            CHECK(resourceStopNearest(static_cast<float>(resourceStopValue(stop))) == stop);
+            CHECK(resourceStopAtPercent(resourceStopPercent(stop)) == stop);
+        }
+
+        CHECK(resourceStopNearest(0.0f) == 0u);
+        CHECK(resourceStopNearest(1e9f) == resourceStopCount - 1);
+        CHECK(resourceStopAtPercent(-3.0f) == 0u);
+        CHECK(resourceStopAtPercent(7.0f) == resourceStopCount - 1);
+    }
+
+    TEST_CASE("which controls of a seat each role may touch", "[multiplayer][battleroom]")
+    {
+        SECTION("the host chooses for itself and the computers, and opens and removes")
+        {
+            auto own = seatControls(RoomRole::Host, Type::Human, true);
+            CHECK_FALSE(own.name);
+            CHECK(own.side);
+            CHECK(own.colour);
+            CHECK(own.team);
+            CHECK_FALSE(own.ready);
+
+            auto computer = seatControls(RoomRole::Host, Type::Computer, false);
+            CHECK(computer.name);
+            CHECK(computer.side);
+            CHECK(computer.colour);
+            CHECK(computer.team);
+            CHECK(computer.personality);
+            CHECK_FALSE(computer.ready);
+
+            auto open = seatControls(RoomRole::Host, Type::Open, false);
+            CHECK(open.name);
+            CHECK_FALSE(open.side);
+            CHECK_FALSE(open.colour);
+            CHECK_FALSE(open.team);
+        }
+
+        SECTION("the host does not choose a guest's side, colour, team or readiness")
+        {
+            auto guest = seatControls(RoomRole::Host, Type::Network, false);
+            CHECK(guest.name); // which removes them
+            CHECK_FALSE(guest.side);
+            CHECK_FALSE(guest.colour);
+            CHECK_FALSE(guest.team);
+            CHECK_FALSE(guest.ready);
+            CHECK_FALSE(guest.personality);
+        }
+
+        SECTION("a guest chooses for itself, says it is ready, and touches nothing else")
+        {
+            auto own = seatControls(RoomRole::Guest, Type::Human, true);
+            CHECK_FALSE(own.name);
+            CHECK(own.side);
+            CHECK(own.colour);
+            CHECK(own.team);
+            CHECK(own.ready);
+
+            for (auto type : {Type::Open, Type::Computer, Type::Network})
+            {
+                auto other = seatControls(RoomRole::Guest, type, false);
+                CHECK_FALSE(other.name);
+                CHECK_FALSE(other.side);
+                CHECK_FALSE(other.colour);
+                CHECK_FALSE(other.team);
+                CHECK_FALSE(other.ready);
+                CHECK_FALSE(other.personality);
+            }
+        }
+
+        SECTION("nobody outside a room may touch anything")
+        {
+            for (auto type : {Type::Open, Type::Human, Type::Computer, Type::Network})
+            {
+                auto c = seatControls(RoomRole::None, type, true);
+                CHECK_FALSE(c.name);
+                CHECK_FALSE(c.side);
+                CHECK_FALSE(c.ready);
+            }
+        }
+    }
+
+    TEST_CASE("the host cannot start while a person in the room is not ready", "[multiplayer][battleroom]")
+    {
+        auto model = roomModel();
+        std::vector<bool> ready(10, false);
+
+        SECTION("alone, or with computers, there is no network game to start")
+        {
+            REQUIRE(startBlocker(model, ready, true).has_value());
+            CHECK(*startBlocker(model, ready, true) == "Waiting for another player to join");
+            model.players[1].type.next(Type::Computer);
+            CHECK(*startBlocker(model, ready, true) == "Waiting for another player to join");
+        }
+
+        SECTION("computers beside a ready guest are no reason to wait")
+        {
+            model.players[1].type.next(Type::Network);
+            model.players[1].name.next("Ada");
+            model.players[2].type.next(Type::Computer);
+            ready[1] = true;
+            CHECK_FALSE(startBlocker(model, ready, true).has_value());
+        }
+
+        SECTION("no map is a game with nothing to start")
+        {
+            auto blocker = startBlocker(model, ready, false);
+            REQUIRE(blocker.has_value());
+            CHECK(*blocker == "Select a map");
+        }
+
+        SECTION("a person who is not ready is waited for, by name")
+        {
+            model.players[2].type.next(Type::Network);
+            model.players[2].name.next("Ada");
+
+            auto blocker = startBlocker(model, ready, true);
+            REQUIRE(blocker.has_value());
+            CHECK(*blocker == "Waiting for Ada to be ready");
+
+            ready[2] = true;
+            CHECK_FALSE(startBlocker(model, ready, true).has_value());
+
+            // And unreadying closes it again.
+            ready[2] = false;
+            CHECK(startBlocker(model, ready, true).has_value());
+        }
+
+        SECTION("the first person not ready is the one named, and every one must be")
+        {
+            model.players[1].type.next(Type::Network);
+            model.players[1].name.next("Ada");
+            model.players[3].type.next(Type::Network);
+            model.players[3].name.next("Bo");
+            ready[1] = true;
+
+            CHECK(*startBlocker(model, ready, true) == "Waiting for Bo to be ready");
+            ready[3] = true;
+            CHECK_FALSE(startBlocker(model, ready, true).has_value());
+        }
+
+        SECTION("a seat with no name is called by its place")
+        {
+            model.players[4].type.next(Type::Network);
+            CHECK(*startBlocker(model, ready, true) == "Waiting for player 5 to be ready");
+        }
+
+        SECTION("a ready flag on an open seat waits for nobody, and a short list is nobody ready")
+        {
+            model.players[6].type.next(Type::Network);
+            model.players[6].name.next("Cy");
+            ready[6] = true;
+            ready[5] = true;
+            CHECK_FALSE(startBlocker(model, ready, true).has_value());
+            CHECK(*startBlocker(model, std::vector<bool>{}, true) == "Waiting for Cy to be ready");
+        }
+    }
+
+    TEST_CASE("a guest's choices are applied by the host, and a colour another seat holds is refused", "[multiplayer][battleroom]")
+    {
+        auto model = roomModel();
+        model.players[1].type.next(Type::Network);
+        model.players[1].side.next(Side::Arm);
+        model.players[1].colorIndex.next(PlayerColorIndex(1));
+        model.players[2].type.next(Type::Computer);
+        model.players[2].colorIndex.next(PlayerColorIndex(2));
+
+        SECTION("side and team are taken")
+        {
+            REQUIRE(applyClaimChoice(model, 1, claimFor("CORE", 1, 3)));
+            CHECK(model.players[1].side.getValue() == Side::Core);
+            CHECK(model.players[1].teamIndex.getValue() == std::optional<int>(3));
+        }
+
+        SECTION("a free colour is taken")
+        {
+            REQUIRE(applyClaimChoice(model, 1, claimFor("ARM", 7, -1)));
+            CHECK(model.players[1].colorIndex.getValue().value == 7u);
+        }
+
+        SECTION("the host's colour is refused, and so is a computer's")
+        {
+            CHECK_FALSE(applyClaimChoice(model, 1, claimFor("ARM", 0, -1)));
+            CHECK(model.players[1].colorIndex.getValue().value == 1u);
+            CHECK_FALSE(applyClaimChoice(model, 1, claimFor("ARM", 2, -1)));
+            CHECK(model.players[1].colorIndex.getValue().value == 1u);
+        }
+
+        SECTION("a colour an open seat has is free: nobody is in that seat")
+        {
+            REQUIRE(applyClaimChoice(model, 1, claimFor("ARM", 5, -1)));
+            CHECK(model.players[1].colorIndex.getValue().value == 5u);
+        }
+
+        SECTION("a refused colour does not stop the rest of the choice")
+        {
+            REQUIRE(applyClaimChoice(model, 1, claimFor("CORE", 0, 2)));
+            CHECK(model.players[1].colorIndex.getValue().value == 1u);
+            CHECK(model.players[1].side.getValue() == Side::Core);
+            CHECK(model.players[1].teamIndex.getValue() == std::optional<int>(2));
+        }
+
+        SECTION("a colour or team out of range is not taken")
+        {
+            applyClaimChoice(model, 1, claimFor("ARM", 400, 9));
+            CHECK(model.players[1].colorIndex.getValue().value == 1u);
+            CHECK_FALSE(model.players[1].teamIndex.getValue().has_value());
+        }
+
+        SECTION("the same choice again changes nothing")
+        {
+            REQUIRE(applyClaimChoice(model, 1, claimFor("CORE", 7, 1)));
+            CHECK_FALSE(applyClaimChoice(model, 1, claimFor("CORE", 7, 1)));
+        }
+
+        SECTION("a seat coming into the game takes a colour nobody has")
+        {
+            model.players[3].colorIndex.next(PlayerColorIndex(0)); // the host's, held
+            model.players[3].type.next(Type::Computer);
+            ensureFreeColour(model, 3);
+            CHECK(model.players[3].colorIndex.getValue().value != 0u);
+            CHECK_FALSE(colourHeldByAnotherSeat(model, 3, model.players[3].colorIndex.getValue()));
+
+            // One that is free is left alone.
+            model.players[4].colorIndex.next(PlayerColorIndex(8));
+            model.players[4].type.next(Type::Computer);
+            ensureFreeColour(model, 4);
+            CHECK(model.players[4].colorIndex.getValue().value == 8u);
+        }
+    }
+
+    TEST_CASE("a seat's control is named PLAYER, its number and the control", "[multiplayer][battleroom]")
+    {
+        auto name = parseSeatMessage("PLAYER3", 10);
+        REQUIRE(name.has_value());
+        CHECK(name->seat == 3u);
+        CHECK(name->control.empty());
+
+        auto side = parseSeatMessage("PLAYER7_side", 10);
+        REQUIRE(side.has_value());
+        CHECK(side->seat == 7u);
+        CHECK(side->control == "side");
+
+        CHECK_FALSE(parseSeatMessage("PLAYER10_side", 10).has_value());
+        CHECK_FALSE(parseSeatMessage("PLAYER", 10).has_value());
+        CHECK_FALSE(parseSeatMessage("PLAYERx", 10).has_value());
+        CHECK_FALSE(parseSeatMessage("PLAYER3_", 10).has_value());
+        CHECK_FALSE(parseSeatMessage("PLAYER3x", 10).has_value());
+        CHECK_FALSE(parseSeatMessage("START", 10).has_value());
+        CHECK_FALSE(parseSeatMessage("PLAYER99999", 10).has_value());
+    }
+
+    TEST_CASE("the room's ready flags and chat travel in the announcement", "[multiplayer][battleroom]")
+    {
+        auto model = roomModel();
+        model.players[1].type.next(Type::Network);
+        model.players[1].name.next("Ada");
+        model.players[2].type.next(Type::Network);
+        model.players[2].name.next("Bo");
+        model.players[3].type.next(Type::Computer);
+
+        LobbyIdentity id = identityFor("0123456789abcdef");
+        id.ready = std::vector<bool>(10, false);
+        id.ready[2] = true;
+        for (unsigned int n = 1; n <= 12; ++n)
+        {
+            id.chat.push_back(DiscoveredChatLine{n, "Ada", "line " + std::to_string(n)});
+        }
+
+        auto tokens = noTokens();
+        const auto lobby = lobbyFromModel(model, id, "Coast To Coast", tokens);
+
+        CHECK(lobby.slots[0].ready); // the host
+        CHECK_FALSE(lobby.slots[1].ready);
+        CHECK(lobby.slots[2].ready);
+        CHECK(lobby.slots[3].ready); // a computer
+        CHECK_FALSE(lobby.slots[4].ready); // open
+
+        // Only the newest lines an announcement can carry.
+        REQUIRE(lobby.chat.size() == LanDiscovery::maxChatLines);
+        CHECK(lobby.chat.front().sequence == 5u);
+        CHECK(lobby.chat.back().sequence == 12u);
+
+        auto text = LanDiscovery::encode(lobby);
+        REQUIRE(text.has_value());
+        auto back = LanDiscovery::decode(*text);
+        REQUIRE(back.has_value());
+        CHECK(back->slots[2].ready);
+        CHECK_FALSE(back->slots[1].ready);
+        CHECK(back->chat.size() == lobby.chat.size());
+    }
+
+    TEST_CASE("a guest's choices and lines ride its claim", "[multiplayer][battleroom]")
+    {
+        auto host = roomModel();
+        auto lobby = lobbyFromModel(host, identityFor("0123456789abcdef"), "Coast To Coast", noTokens());
+
+        GuestChoice choice{Side::Core, PlayerColorIndex(6), std::optional<int>(2), true};
+        std::vector<DiscoveredChatLine> said{{1, "Guest", "hello"}, {2, "Guest", "anyone there"}};
+        auto claim = claimAnnouncement(lobby, 1, "deadbeef", "Guest", 1400, choice, said);
+        claim.sourceAddress = "192.168.0.9:1338";
+
+        // Over the wire and back, as the host hears it.
+        auto text = LanDiscovery::encode(claim);
+        REQUIRE(text.has_value());
+        auto heard = LanDiscovery::decode(*text);
+        REQUIRE(heard.has_value());
+        heard->sourceAddress = claim.sourceAddress;
+
+        auto claims = claimsOn({lobby, *heard}, lobby.session);
+        REQUIRE(claims.size() == 1);
+        CHECK(claims[0].side == "CORE");
+        CHECK(claims[0].colour == 6u);
+        CHECK(claims[0].team == 2);
+        CHECK(claims[0].ready);
+        REQUIRE(claims[0].chat.size() == 2);
+        CHECK(claims[0].chat[1].text == "anyone there");
+
+        SECTION("a claim with no choice says what the host's seat has")
+        {
+            auto plain = claimAnnouncement(lobby, 1, "deadbeef", "Guest", 1400);
+            REQUIRE(plain.slots.size() == 1);
+            CHECK(plain.slots[0].side == lobby.slots[1].side);
+            CHECK(plain.slots[0].colour == lobby.slots[1].colour);
+            CHECK_FALSE(plain.slots[0].ready);
+            CHECK(plain.chat.empty());
+        }
+    }
+
+    TEST_CASE("chat: what can be said, and how the transcript is kept", "[multiplayer][battleroom]")
+    {
+        SECTION("control characters are dropped and a line of nothing is not a line")
+        {
+            CHECK(sanitisedChatText("  hello\tthere\x01 \n") == "hellothere");
+            CHECK(sanitisedChatText(std::string("a\x7f") + "b") == "ab");
+            CHECK(sanitisedChatText("   ").empty());
+            CHECK(sanitisedChatText("\x01\x02").empty());
+            CHECK(sanitisedChatText("").empty());
+        }
+
+        SECTION("a line is bounded to what the wire carries")
+        {
+            const auto cut = sanitisedChatText(std::string(500, 'x'));
+            CHECK(cut.size() == LanDiscovery::maxChatTextLength);
+            // Not cut through a multi-byte character.
+            const auto accented = sanitisedChatText(std::string(LanDiscovery::maxChatTextLength - 1, 'x') + "\xC3\xA9");
+            CHECK(accented.size() == LanDiscovery::maxChatTextLength - 1);
+        }
+
+        SECTION("the host numbers lines in order, and an announcement carries the newest")
+        {
+            ChatTranscript room;
+            for (unsigned int n = 1; n <= 12; ++n)
+            {
+                REQUIRE(room.say("Hector", "line " + std::to_string(n)));
+            }
+            CHECK_FALSE(room.say("Hector", "   "));
+            CHECK(room.lastSequence == 12u);
+            CHECK(room.lines.front().sequence == 1u);
+
+            auto tail = room.tail();
+            REQUIRE(tail.size() == LanDiscovery::maxChatLines);
+            CHECK(tail.front().sequence == 5u);
+            CHECK(tail.back().text == "line 12");
+        }
+
+        SECTION("a listener merges what is new, once, in order")
+        {
+            ChatTranscript room;
+            for (unsigned int n = 1; n <= 3; ++n)
+            {
+                room.say("Hector", "line " + std::to_string(n));
+            }
+
+            ChatTranscript guest;
+            CHECK(guest.merge(room.tail()) == 3u);
+            // The same announcement again is nothing new.
+            CHECK(guest.merge(room.tail()) == 0u);
+            CHECK(guest.lines.size() == 3u);
+
+            room.say("Ada", "line 4");
+            CHECK(guest.merge(room.tail()) == 1u);
+            REQUIRE(guest.lines.size() == 4u);
+            CHECK(guest.lines.back().name == "Ada");
+
+            // Same lines, same order, as the host's.
+            for (std::size_t i = 0; i < 4; ++i)
+            {
+                CHECK(guest.lines[i].sequence == room.lines[i].sequence);
+                CHECK(guest.lines[i].text == room.lines[i].text);
+            }
+        }
+
+        SECTION("a sequence that goes back, or repeats, is ignored")
+        {
+            ChatTranscript guest;
+            guest.merge({{5, "A", "five"}, {3, "A", "three"}, {5, "A", "five again"}, {6, "A", "six"}});
+            REQUIRE(guest.lines.size() == 2u);
+            CHECK(guest.lines[0].text == "five");
+            CHECK(guest.lines[1].text == "six");
+        }
+
+        SECTION("the transcript is bounded")
+        {
+            ChatTranscript room;
+            for (std::size_t n = 0; n < ChatTranscript::maxKept + 50; ++n)
+            {
+                room.say("Hector", "line " + std::to_string(n));
+            }
+            CHECK(room.lines.size() == ChatTranscript::maxKept);
+            CHECK(room.lines.back().sequence == room.lastSequence);
+
+            ChatTranscript guest;
+            for (unsigned int n = 1; n <= ChatTranscript::maxKept + 50; ++n)
+            {
+                guest.merge({{n, "Hector", "x"}});
+            }
+            CHECK(guest.lines.size() == ChatTranscript::maxKept);
+        }
+
+        SECTION("a line is shown with its speaker, and a line from the room without")
+        {
+            CHECK(chatLineText({1, "Ada", "hi"}) == "Ada: hi");
+            CHECK(chatLineText({2, "", "Ada has joined"}) == "Ada has joined");
+        }
+    }
+
+    TEST_CASE("the host takes each of a guest's lines once, as that guest", "[multiplayer][battleroom]")
+    {
+        ChatTranscript room;
+        unsigned int taken = 0;
+
+        // The claim carries the last few lines and repeats them every second.
+        std::vector<DiscoveredChatLine> claimed{{1, "Mallory", "one"}, {2, "Mallory", "two"}};
+
+        CHECK(takeClaimChat(room, taken, "Ada", claimed) == 2u);
+        REQUIRE(room.lines.size() == 2u);
+        // The speaker is the seat's, not whatever the claim put on the line.
+        CHECK(room.lines[0].name == "Ada");
+        CHECK(taken == 2u);
+
+        // The same claim heard again says nothing new.
+        CHECK(takeClaimChat(room, taken, "Ada", claimed) == 0u);
+        CHECK(room.lines.size() == 2u);
+
+        // A new line is taken, and the old ones in the claim are not.
+        claimed.push_back({3, "Ada", "three"});
+        CHECK(takeClaimChat(room, taken, "Ada", claimed) == 1u);
+        CHECK(room.lines.back().text == "three");
+
+        SECTION("out of order in the claim, said in order")
+        {
+            ChatTranscript other;
+            unsigned int t = 0;
+            takeClaimChat(other, t, "Bo", {{2, "Bo", "second"}, {1, "Bo", "first"}});
+            REQUIRE(other.lines.size() == 2u);
+            CHECK(other.lines[0].text == "first");
+            CHECK(other.lines[1].text == "second");
+        }
+
+        SECTION("a line that is nothing once cleaned is not said, and is not tried again")
+        {
+            ChatTranscript other;
+            unsigned int t = 0;
+            CHECK(takeClaimChat(other, t, "Bo", {{1, "Bo", "\x01\x02"}}) == 0u);
+            CHECK(t == 1u);
+            CHECK(other.lines.empty());
+        }
+
+        SECTION("sequence zero is nobody's line")
+        {
+            ChatTranscript other;
+            unsigned int t = 0;
+            CHECK(takeClaimChat(other, t, "Bo", {{0, "Bo", "zero"}}) == 0u);
+        }
+
+        SECTION("two guests' sequences are their own")
+        {
+            ChatTranscript other;
+            unsigned int adaTaken = 0;
+            unsigned int boTaken = 0;
+            takeClaimChat(other, adaTaken, "Ada", {{1, "Ada", "from ada"}});
+            takeClaimChat(other, boTaken, "Bo", {{1, "Bo", "from bo"}});
+            CHECK(other.lines.size() == 2u);
+        }
+    }
+
+    TEST_CASE("a chat line is wrapped to the width of the box", "[multiplayer][battleroom]")
+    {
+        // Ten units a character: easy to count and independent of any font.
+        const auto width = [](const std::string& text) { return static_cast<float>(text.size()) * 10.0f; };
+
+        SECTION("a short line is one row")
+        {
+            auto rows = wrapChatLine("Ada: hi", 200.0f, width);
+            REQUIRE(rows.size() == 1u);
+            CHECK(rows[0] == "Ada: hi");
+        }
+
+        SECTION("a long line breaks at spaces, and the continuation is indented")
+        {
+            auto rows = wrapChatLine("Ada: one two three four five", 100.0f, width);
+            REQUIRE(rows.size() > 1u);
+            for (const auto& row : rows)
+            {
+                CHECK(width(row) <= 100.0f);
+            }
+            CHECK(rows[0].substr(0, 2) != "  ");
+            CHECK(rows[1].substr(0, 2) == "  ");
+            // Nothing lost.
+            std::string joined;
+            for (const auto& row : rows)
+            {
+                joined += row + " ";
+            }
+            for (const char* word : {"Ada:", "one", "two", "three", "four", "five"})
+            {
+                CHECK(joined.find(word) != std::string::npos);
+            }
+        }
+
+        SECTION("a word wider than the box is broken, and nothing is lost")
+        {
+            auto rows = wrapChatLine(std::string(45, 'w'), 100.0f, width);
+            std::size_t letters = 0;
+            for (const auto& row : rows)
+            {
+                CHECK(width(row) <= 100.0f);
+                letters += static_cast<std::size_t>(std::count(row.begin(), row.end(), 'w'));
+            }
+            CHECK(letters == 45u);
+        }
+
+        SECTION("an empty line has no rows, and a box too narrow for anything still ends")
+        {
+            CHECK(wrapChatLine("", 100.0f, width).empty());
+            auto rows = wrapChatLine("abcdef", 5.0f, width);
+            CHECK_FALSE(rows.empty());
+        }
+
+        SECTION("the longest line that can be typed fits in a few rows")
+        {
+            const std::string longest = std::string(20, 'N') + ": " + std::string(LanDiscovery::maxChatTextLength, 'x');
+            auto rows = wrapChatLine(longest, 400.0f, width);
+            CHECK(rows.size() <= 4u);
         }
     }
 }

@@ -9,12 +9,14 @@
 #include <rwe/AudioService.h>
 #include <rwe/ColorPalette.h>
 #include <rwe/CursorService.h>
+#include <algorithm>
 #include <chrono>
 #include <rwe/GlobalConfig.h>
 #include <rwe/MainMenuScene.h>
 #include <rwe/MainMenuScene_multiplayer.h>
 #include <rwe/SceneContext.h>
 #include <rwe/scene/SceneManager.h>
+#include <set>
 #include <thread>
 #include <rwe/PathMapping.h>
 #include <rwe/ShaderService.h>
@@ -38,6 +40,32 @@
 #include <rwe/vfs/CompositeVirtualFileSystem.h>
 
 using namespace rwe;
+
+namespace rwe
+{
+    /**
+     * What the flow check reads off a menu scene: the panel a person is
+     * looking at, the dialog over it, and the model behind it. MainMenuScene
+     * names this as its friend and nothing else may see what is in it.
+     */
+    struct MenuProbe
+    {
+        static UiPanel* panel(MainMenuScene& scene)
+        {
+            return scene.panelStack.empty() ? nullptr : scene.panelStack.back().get();
+        }
+
+        static UiPanel* dialog(MainMenuScene& scene)
+        {
+            return scene.dialogStack.empty() ? nullptr : scene.dialogStack.back().get();
+        }
+
+        static MainMenuModel& model(MainMenuScene& scene)
+        {
+            return scene.model;
+        }
+    };
+}
 
 namespace
 {
@@ -245,8 +273,10 @@ int main(int argc, char* argv[])
                           << "  With one or more, dumps and clicks just those guis and stops.\n"
                           << "  --multiplayer builds the four multiplayer screens (SELPROV, TCP, SELGAME,\n"
                           << "  NEWMULTI) the way the main menu does, drives them, and writes probe_mp_*.ppm.\n"
-                          << "  --multiplayer-flow runs two real MainMenuScenes (a host and a guest) through\n"
-                          << "  the whole flow over LAN discovery on this machine, and writes probe_flow_*.ppm.\n";
+                          << "  --multiplayer-flow runs three real MainMenuScenes (a host and two guests)\n"
+                          << "  through the whole flow, the battleroom included, over LAN discovery on this\n"
+                          << "  machine; it checks what each sees, writes probe_flow_*.ppm, and exits non-zero\n"
+                          << "  if a check fails.\n";
                 return 0;
             }
             addToVfs(vfs, arg);
@@ -322,7 +352,7 @@ int main(int argc, char* argv[])
                         {
                             continue;
                         }
-                        std::cout << " " << s.index << "=" << s.controller;
+                        std::cout << " " << s.index << "=" << s.controller << (s.ready ? "+ready" : "");
                         if (!s.name.empty())
                         {
                             std::cout << "('" << s.name << "'";
@@ -343,6 +373,10 @@ int main(int argc, char* argv[])
                         std::cout << " " << n << "=" << v;
                     }
                     std::cout << "\n";
+                    for (const auto& line : g.chat)
+                    {
+                        std::cout << "      chat " << line.sequence << " <" << line.name << "> " << line.text << "\n";
+                    }
                 }
             };
 
@@ -452,26 +486,441 @@ int main(int argc, char* argv[])
             snap(guest2, "probe_flow_07c_third_player.ppm");
             describe("two guests joined");
 
-            std::cout << "---- guest tries to change a shared setting (must be ignored); host changes the map options\n";
-            press(guest, "guest", "SKIRMISH", "CommanderDeath");
-            press(guest, "guest", "SKIRMISH", "PLAYER2");
-            press(host, "host", "SKIRMISH", "LineOfSight");
-            press(host, "host", "SKIRMISH", "PLAYER2");
-            run(2.5);
-            snap(guest, "probe_flow_09_guest_follows.ppm");
-            snap(host, "probe_flow_10_host_changed.ppm");
-            describe("after the host changed options and seat 3");
+            // ---- the battleroom, as each person sees it ----
+            //
+            // What is asserted is read off the real panels and the real model
+            // of each scene (MenuProbe), and off the wire where the question
+            // is what another machine would hear. A check that fails is
+            // counted, printed, and makes the probe exit non-zero.
+            int failures = 0;
+            auto check = [&](bool ok, const std::string& what) {
+                std::cout << (ok ? "  PASS  " : "  FAIL  ") << what << "\n";
+                if (!ok)
+                {
+                    ++failures;
+                }
+            };
 
-            std::cout << "---- host presses Start\n";
-            press(host, "host", "SKIRMISH", "Start");
+            auto panelName = [](MainMenuScene& s) -> std::string {
+                auto* p = MenuProbe::panel(s);
+                return p ? p->getName() : std::string("-");
+            };
+            auto dialogText = [](MainMenuScene& s) -> std::string {
+                std::string out;
+                if (auto* d = MenuProbe::dialog(s))
+                {
+                    d->forAll<UiLabel>([&out](UiLabel& l) {
+                        if (out.empty() && !l.getText().empty())
+                        {
+                            out = l.getText();
+                        }
+                    });
+                }
+                return out;
+            };
+            auto transcript = [](MainMenuScene& s) -> std::vector<std::string> {
+                if (auto* p = MenuProbe::panel(s))
+                {
+                    if (auto box = p->find<UiListBox>("OUTPUT"))
+                    {
+                        return box->get().getItems();
+                    }
+                }
+                return {};
+            };
+            auto helpLine = [](MainMenuScene& s) -> std::string {
+                if (auto* p = MenuProbe::panel(s))
+                {
+                    if (auto l = p->find<UiLabel>("HELPTEXT"))
+                    {
+                        return l->get().getText();
+                    }
+                }
+                return {};
+            };
+            auto hasButton = [](MainMenuScene& s, const std::string& name) {
+                auto* p = MenuProbe::panel(s);
+                return p != nullptr && p->find<UiStagedButton>(name).has_value();
+            };
+            auto buttonEnabled = [](MainMenuScene& s, const std::string& name) {
+                auto* p = MenuProbe::panel(s);
+                auto b = p ? p->find<UiStagedButton>(name) : std::nullopt;
+                return b && b->get().isEnabled();
+            };
+            auto buttonVisible = [](MainMenuScene& s, const std::string& name) {
+                auto* p = MenuProbe::panel(s);
+                auto b = p ? p->find<UiStagedButton>(name) : std::nullopt;
+                return b && b->get().isVisible();
+            };
+            auto buttonLabel = [](MainMenuScene& s, const std::string& name) -> std::string {
+                auto* p = MenuProbe::panel(s);
+                auto b = p ? p->find<UiStagedButton>(name) : std::nullopt;
+                return b ? b->get().getStageLabel(b->get().getStage()) : std::string("<no such button>");
+            };
+            auto contains = [](const std::vector<std::string>& lines, const std::string& text) {
+                return std::find(lines.begin(), lines.end(), text) != lines.end();
+            };
+            auto indexOf = [](const std::vector<std::string>& lines, const std::string& text) -> int {
+                auto it = std::find(lines.begin(), lines.end(), text);
+                return it == lines.end() ? -1 : static_cast<int>(it - lines.begin());
+            };
+            auto hostLobby = [&]() -> std::optional<DiscoveredGame> {
+                for (const auto& g : observer.games())
+                {
+                    if (!isClaimSession(g.session) && g.label == "Bring snacks")
+                    {
+                        return g;
+                    }
+                }
+                return std::nullopt;
+            };
+
+            // A gadget is pressed where the panel has it, by name: the
+            // battleroom's layout is the data set's, and which of two it is
+            // depends on whether the 3.1 patch is loaded.
+            auto clickGadget = [&](MainMenuScene& s, const std::string& name) {
+                int cx = -1;
+                int cy = -1;
+                if (auto* p = MenuProbe::panel(s))
+                {
+                    p->forAll<UiComponent>([&](UiComponent& c) {
+                        if (cx < 0 && c.getName() == name && c.isVisible())
+                        {
+                            cx = p->getX() + c.getX() + static_cast<int>(c.getWidth()) / 2;
+                            cy = p->getY() + c.getY() + static_cast<int>(c.getHeight()) / 2;
+                        }
+                    });
+                }
+                if (cx < 0)
+                {
+                    std::cout << "  (no visible gadget " << name << " to press)\n";
+                    return;
+                }
+                click(s, cx, cy);
+            };
+            auto clickReady = [&](MainMenuScene& s, int seat) {
+                clickGadget(s, "PLAYER" + std::to_string(seat) + "_ready");
+                run(1.5);
+            };
+            auto say = [&](MainMenuScene& s, const std::string& text) {
+                clickGadget(s, "MESSAGE");
+                s.onTextInput(text);
+                key(s, SDLK_RETURN);
+            };
+            auto seatOf = [&](MainMenuScene& s, const std::string& caption) -> int {
+                for (int i = 0; i < 10; ++i)
+                {
+                    if (buttonLabel(s, "PLAYER" + std::to_string(i)) == caption)
+                    {
+                        return i;
+                    }
+                }
+                return -1;
+            };
+            auto optionLabel = [](const std::string& option, const std::string& value) -> std::string {
+                if (option == "commander")
+                {
+                    return value == "0" ? "Game ends" : "Continues";
+                }
+                if (option == "startloc")
+                {
+                    return value == "0" ? "Fixed" : "Random";
+                }
+                if (option == "mapping")
+                {
+                    return value == "0" ? "Unmapped" : "Mapped";
+                }
+                return value == "0" ? "Permanent" : (value == "1" ? "True" : "Circular");
+            };
+
+            std::cout << "---- the battleroom\n";
+            check(panelName(host) == "LOUNGE2", "the host is in the battleroom");
+            check(panelName(guest) == "LOUNGE2", "a guest is in the battleroom");
+            check(panelName(guest2) == "LOUNGE2", "the other guest is in the battleroom");
+            check(hasButton(host, "START"), "the host has a Start button");
+            check(!hasButton(guest, "START"), "a guest has no Start button");
+            check(!hasButton(guest2, "START"), "the other guest has no Start button");
+            check(!buttonEnabled(host, "START"), "Start is disabled while the guests are not ready");
+            check(helpLine(host) == "Waiting for Guest to be ready", "the help line says who is waited for: '" + helpLine(host) + "'");
+            check(buttonLabel(host, "PLAYER0") == "Hector", "seat 1 reads Hector on the host");
+            check(buttonLabel(guest, "PLAYER1") == "Guest", "seat 2 reads Guest on a guest");
+            check(buttonLabel(host, "PLAYER2") == "Third", "seat 3 reads Third on the host");
+            check(buttonLabel(host, "PLAYER3") == "Open", "seat 4 reads Open");
+            check(!buttonVisible(host, "PLAYER3_side"), "an open seat shows no side");
+            check(buttonVisible(host, "PLAYER1_side"), "a taken seat shows its side");
+            check(!buttonEnabled(host, "PLAYER0"), "the host's own name is not clickable");
+            check(buttonEnabled(host, "PLAYER1"), "a guest's seat can be clicked by the host");
+            check(!buttonEnabled(guest, "PLAYER1"), "a guest's own name is not clickable");
+            check(!buttonEnabled(guest, "PLAYER2"), "a guest cannot click another's seat");
+            check(buttonEnabled(guest, "PLAYER1_side") && !buttonEnabled(guest, "PLAYER2_side") && !buttonEnabled(guest, "PLAYER0_side"),
+                "a guest changes its own side and nobody else's");
+            check(!buttonEnabled(host, "PLAYER1_side") && buttonEnabled(host, "PLAYER0_side"),
+                "the host changes its own side and not a guest's");
+            check(!buttonEnabled(guest, "COMMANDER") && buttonEnabled(host, "COMMANDER"), "only the host changes the game's options");
+            check(!buttonEnabled(guest, "MAP") && buttonEnabled(host, "MAP"), "only the host selects the map");
+            {
+                auto joined = transcript(host);
+                check(contains(joined, "Guest has joined") && contains(joined, "Third has joined"), "the room says who joined");
+                check(transcript(guest) == joined && transcript(guest2) == joined, "the guests have the same room as the host");
+            }
+
+            std::cout << "---- chat, every way\n";
+            say(guest, "hello from Guest");
+            run(1.5);
+            say(guest2, "hi Guest, this is Third");
+            run(1.5);
+            say(host, "welcome both");
+            run(1.5);
+            {
+                const auto t = transcript(host);
+                const auto a = indexOf(t, "Guest: hello from Guest");
+                const auto b = indexOf(t, "Third: hi Guest, this is Third");
+                const auto c = indexOf(t, "Hector: welcome both");
+                check(a >= 0 && b >= 0 && c >= 0, "all three lines are in the host's transcript");
+                check(a < b && b < c, "in the order they were said");
+                check(transcript(guest) == t, "a guest sees the same transcript, in the same order");
+                check(transcript(guest2) == t, "the other guest sees the same transcript, in the same order");
+            }
+            {
+                const auto before = transcript(host).size();
+                say(guest, "     ");
+                run(1.5);
+                check(transcript(host).size() == before, "a line of spaces is not sent");
+
+                // Seventy characters typed, sixty-three kept.
+                clickGadget(guest, "MESSAGE");
+                guest.onTextInput(std::string(70, 'x'));
+                auto* gp = MenuProbe::panel(guest);
+                auto box = gp ? gp->find<UiTextBox>("MESSAGE") : std::nullopt;
+                check(box && box->get().getText().size() == 63, "no more than 63 characters can be typed");
+                key(guest, SDLK_RETURN);
+                run(1.5);
+                check(box && box->get().getText().empty(), "the box is empty once a line is sent");
+            }
+
+            std::cout << "---- ready gates Start\n";
+            clickReady(guest, 1);
+            {
+                auto lobby = hostLobby();
+                check(lobby && lobby->slots.size() > 1 && lobby->slots[1].ready, "the host announces that Guest is ready");
+                check(lobby && lobby->slots.size() > 2 && !lobby->slots[2].ready, "and that Third is not");
+            }
+            check(!buttonEnabled(host, "START"), "Start is still disabled with one guest not ready");
+            check(helpLine(host) == "Waiting for Third to be ready", "the help line now names the other: '" + helpLine(host) + "'");
+            check(buttonEnabled(guest, "PLAYER1_ready"), "a guest's own ready box can be pressed");
+            check(!buttonEnabled(guest, "PLAYER2_ready"), "and another's cannot");
+            clickReady(guest2, 2);
+            check(buttonEnabled(host, "START"), "Start is enabled when every guest is ready");
+            clickReady(guest, 1);
+            check(!buttonEnabled(host, "START"), "Start is disabled again when a guest unreadies");
+            clickReady(guest, 1);
+            check(buttonEnabled(host, "START"), "and enabled when it readies again");
+            clickReady(guest2, 2);
+            check(!buttonEnabled(host, "START"), "the other guest unreadying closes it too");
+
+            std::cout << "---- a guest guesses at Start, and at the host's controls\n";
+            press(guest, "guest", "LOUNGE2", "START");
             run(1.0);
+            {
+                auto lobby = hostLobby();
+                check(lobby && !lobby->launching, "a Start from a guest does nothing");
+            }
+
+            std::cout << "---- side, colour and team: a guest's own, and the host's\n";
+            auto& hm = MenuProbe::model(host);
+            auto& g2m = MenuProbe::model(guest2);
+            {
+                const auto before = hm.players[1].side.getValue();
+                clickGadget(guest, "PLAYER" + std::to_string(1) + "_side");
+                run(1.5);
+                check(hm.players[1].side.getValue() != before, "the guest's side change arrives on the host");
+                check(g2m.players[1].side.getValue() == hm.players[1].side.getValue(), "and on the other guest");
+                auto lobby = hostLobby();
+                check(lobby && lobby->slots[1].side == (hm.players[1].side.getValue() == MainMenuModel::PlayerSettings::Side::Core ? "CORE" : "ARM"),
+                    "and in the host's announcement");
+            }
+            {
+                const auto before = hm.players[1].colorIndex.getValue();
+                clickGadget(guest, "PLAYER" + std::to_string(1) + "_color");
+                run(1.5);
+                check(hm.players[1].colorIndex.getValue() != before, "the guest's colour change arrives on the host");
+                check(g2m.players[1].colorIndex.getValue() == hm.players[1].colorIndex.getValue(), "and on the other guest");
+                std::set<unsigned int> used;
+                bool distinct = true;
+                for (const auto& p : hm.players)
+                {
+                    if (p.type.getValue() != MainMenuModel::PlayerSettings::Type::Open)
+                    {
+                        distinct = used.insert(p.colorIndex.getValue().value).second && distinct;
+                    }
+                }
+                check(distinct, "no two seats in the game share a colour");
+            }
+            {
+                clickGadget(guest, "PLAYER" + std::to_string(1) + "_team");
+                run(1.5);
+                check(hm.players[1].teamIndex.getValue() == std::optional<int>(0), "the guest's team change arrives on the host");
+                check(g2m.players[1].teamIndex.getValue() == std::optional<int>(0), "and on the other guest");
+            }
+            {
+                // The host takes a colour in the very instant a guest asks
+                // for it. The host's word stands, and the guest's screen
+                // goes back to what it had.
+                const auto old = hm.players[2].colorIndex.getValue();
+                clickGadget(guest2, "PLAYER" + std::to_string(2) + "_color");
+                guest2.update(16);
+                const auto wanted = g2m.players[2].colorIndex.getValue();
+                check(wanted != old, "the guest asked for another colour (shown at once)");
+                hm.players[0].colorIndex.next(wanted);
+                run(3.5);
+                check(hm.players[2].colorIndex.getValue() == old, "the host refuses a colour another seat holds");
+                check(hm.players[0].colorIndex.getValue() == wanted, "and keeps its own");
+                check(g2m.players[2].colorIndex.getValue() == old, "the guest's screen goes back to the colour it has");
+            }
+
+            std::cout << "---- who may touch what\n";
+            {
+                const auto hostSide = hm.players[0].side.getValue();
+                clickGadget(guest, "PLAYER" + std::to_string(0) + "_side");
+                clickGadget(guest, "PLAYER" + std::to_string(0) + "_color");
+                clickGadget(guest, "PLAYER" + std::to_string(5));
+                clickGadget(guest, "PLAYER" + std::to_string(2) + "_side");
+                run(1.5);
+                check(hm.players[0].side.getValue() == hostSide, "a guest cannot change the host's side");
+                check(hm.players[5].type.getValue() == MainMenuModel::PlayerSettings::Type::Open, "a guest cannot add a computer");
+
+                clickGadget(host, "PLAYER" + std::to_string(1) + "_side");
+                run(0.5);
+                check(hm.players[1].side.getValue() == g2m.players[1].side.getValue(), "the host cannot change a guest's side");
+
+                clickGadget(host, "PLAYER" + std::to_string(5));
+                run(1.5);
+                check(hm.players[5].type.getValue() == MainMenuModel::PlayerSettings::Type::Computer, "the host adds a computer to an open seat");
+                check(MenuProbe::model(guest).players[5].type.getValue() == MainMenuModel::PlayerSettings::Type::Computer, "and the guest sees it");
+                check(buttonLabel(host, "PLAYER5") == "Computer", "the seat reads Computer");
+                check(buttonVisible(host, "PLAYER5_ready") && buttonVisible(host, "PLAYER5_side"), "a computer shows its choices");
+                check(buttonVisible(host, "PLAYER5_personality") && buttonEnabled(host, "PLAYER5_personality") && !buttonEnabled(guest, "PLAYER5_personality"),
+                    "its personality is the host's to choose");
+                {
+                    const auto personality = hm.players[5].personality.getValue();
+                    clickGadget(host, "PLAYER" + std::to_string(5) + "_personality");
+                    run(0.5);
+                    std::cout << "  (personality " << personality << " -> " << hm.players[5].personality.getValue() << ")\n";
+                }
+                clickGadget(host, "PLAYER" + std::to_string(5));
+                run(1.0);
+                check(hm.players[5].type.getValue() == MainMenuModel::PlayerSettings::Type::Open, "and takes it away again");
+                clickGadget(host, "PLAYER" + std::to_string(5));
+                run(1.0);
+            }
+
+            std::cout << "---- the game's options: the button's face says what the model holds\n";
+            {
+                struct Row
+                {
+                    const char* button;
+                    const char* option;
+                };
+                const Row rows[] = {{"COMMANDER", "commander"}, {"FIXEDLOC", "startloc"}, {"MAPPING", "mapping"}, {"LOSTYPE", "los"}};
+                auto value = [&](const char* option) {
+                    for (const auto& [n, v] : optionsFromModel(hm))
+                    {
+                        if (n == option)
+                        {
+                            return v;
+                        }
+                    }
+                    return std::string("?");
+                };
+                for (const auto& r : rows)
+                {
+                    const auto first = value(r.option);
+                    check(buttonLabel(host, r.button) == optionLabel(r.option, first),
+                        std::string(r.button) + " shows '" + buttonLabel(host, r.button) + "' for " + r.option + "=" + first);
+                    clickGadget(host, r.button);
+                    run(1.2);
+                    const auto second = value(r.option);
+                    check(second != first, std::string("a click changes ") + r.option + " from " + first + " to " + second);
+                    check(buttonLabel(host, r.button) == optionLabel(r.option, second),
+                        std::string(r.button) + " now shows '" + buttonLabel(host, r.button) + "'");
+                    check(buttonLabel(guest, r.button) == optionLabel(r.option, second), std::string("the guest's ") + r.button + " follows");
+                    check(buttonLabel(guest2, r.button) == buttonLabel(guest, r.button), std::string("and so does the other guest's"));
+                }
+                // A guest's click changes nothing.
+                const auto commander = value("commander");
+                clickGadget(guest, "COMMANDER");
+                run(1.0);
+                check(value("commander") == commander, "a guest cannot change the commander option");
+            }
+
+            snap(host, "probe_flow_11_battleroom_host.ppm");
+            snap(guest, "probe_flow_12_battleroom_guest.ppm");
+            snap(guest2, "probe_flow_13_battleroom_guest2.ppm");
+            describe("the battleroom, rendered");
+
+            std::cout << "---- the host removes a guest\n";
+            {
+                const auto before = hm.players[2].type.getValue();
+                check(before == MainMenuModel::PlayerSettings::Type::Network, "Third is in seat 3");
+                clickGadget(host, "PLAYER" + std::to_string(2));
+                run(3.0);
+                check(hm.players[2].type.getValue() == MainMenuModel::PlayerSettings::Type::Open, "the seat is open");
+                check(panelName(guest2) == "SELGAME", "the removed guest is back on the game list");
+                check(dialogText(guest2) == "You were removed from the game", "and is told so: '" + dialogText(guest2) + "'");
+                check(contains(transcript(host), "Third was removed"), "the room says who was removed");
+                check(panelName(guest) == "LOUNGE2", "the other guest is still in the room");
+                check(contains(transcript(guest), "Third was removed"), "and heard it");
+                run(2.5);
+                check(hm.players[2].type.getValue() == MainMenuModel::PlayerSettings::Type::Open, "the removed guest is not seated again by its own claim");
+                press(guest2, "guest2", "MSGBOX", "OK");
+                run(0.2);
+            }
+
+            std::cout << "---- the host picks a map the guest does not have\n";
+            {
+                const auto original = hm.selectedMap.getValue();
+                hm.selectedMap.next(MainMenuModel::SelectedMapInfo("No Such Map Anywhere", "", "", nullptr));
+                run(2.5);
+                check(panelName(guest) == "SELGAME", "the guest is back on the game list");
+                check(dialogText(guest) == "You do not have the map No Such Map Anywhere", "and is told which map: '" + dialogText(guest) + "'");
+                hm.selectedMap.next(original);
+                press(guest, "guest", "MSGBOX", "OK");
+                run(0.5);
+            }
+
+            std::cout << "---- both guests come back, ready, and the host starts\n";
+            for (auto* scene : {&guest, &guest2})
+            {
+                click(*scene, 40, 128);
+                run(0.2);
+                press(*scene, "guest", "SELGAME", "JOINGAME");
+                run(2.5);
+            }
+            check(panelName(guest) == "LOUNGE2" && panelName(guest2) == "LOUNGE2", "both are back in the battleroom");
+            {
+                const auto gs = seatOf(guest, "Guest");
+                const auto ts = seatOf(host, "Third");
+                check(gs >= 1 && ts >= 1, "each has a seat again");
+                if (gs >= 1 && ts >= 1)
+                {
+                    clickReady(guest, gs);
+                    clickReady(guest2, ts);
+                }
+                check(buttonEnabled(host, "START"), "Start is enabled");
+            }
+            press(host, "host", "LOUNGE2", "START");
+            run(1.0);
+            {
+                auto lobby = hostLobby();
+                check(lobby && lobby->launching, "the host's announcement says it is launching");
+            }
             describe("host launching");
             run(3.0);
             describe("after both started");
 
             observer.stop();
-            std::cout << "flow done\n";
-            return 0;
+            std::cout << "flow done: " << failures << " check(s) failed\n";
+            return failures == 0 ? 0 : 1;
         }
 
         // ---- the multiplayer screens, built by the same functions the scene uses ----
