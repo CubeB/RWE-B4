@@ -9,6 +9,11 @@ namespace rwe
     {
     }
 
+    std::string UiTextBox::displayText() const
+    {
+        return masked ? std::string(text.size(), '*') : text;
+    }
+
     void UiTextBox::render(UiRenderService& context) const
     {
         // A visible field to type into -- sunken plate and outline -- then
@@ -21,16 +26,32 @@ namespace rwe
         // behind the only focus test in the whole gadget renderer --
         // 0x4A4F14 compares the gadget's index with the panel's focused
         // index -- so an unfocused box shows the text and nothing else.
-        context.fillColor(posX, posY, sizeX, sizeY, Color(8, 10, 8, 170));
-        context.drawBoxOutline(posX, posY, sizeX, sizeY, Color(150, 162, 150, 255), 1.0f);
+        if (drawPlate)
+        {
+            context.fillColor(posX, posY, sizeX, sizeY, Color(8, 10, 8, 170));
+            context.drawBoxOutline(posX, posY, sizeX, sizeY, Color(150, 162, 150, 255), 1.0f);
+        }
 
         float textX = posX + 4.0f;
         float baseline = posY + 12.0f;
-        context.drawText(textX, baseline, text, *font);
 
-        if (focused)
+        // A line longer than the field shows its end, which is where the
+        // typing is. Leading characters are dropped until what is left fits,
+        // leaving room for the caret.
+        auto shown = displayText();
+        const auto room = static_cast<float>(sizeX) - 8.0f;
+        std::size_t skip = 0;
+        while (skip < shown.size() && context.getTextWidth(shown.substr(skip), *font) > room)
         {
-            auto caretX = textX + context.getTextWidth(text, *font);
+            ++skip;
+        }
+        shown.erase(0, skip);
+
+        context.drawText(textX, baseline, shown, *font);
+
+        if (focused && editable)
+        {
+            auto caretX = textX + context.getTextWidth(shown, *font);
             context.fillColor(caretX, baseline - 10.0f, 1.0f, 12.0f, Color(84, 84, 252));
         }
     }
@@ -51,6 +72,11 @@ namespace rwe
         // which is what makes a box on a French or German layout type what
         // its keys say: this used to be a hand-written US table, and on any
         // other layout it wrote the wrong letters.
+        if (!editable)
+        {
+            return;
+        }
+
         if (event.keyCode == SDLK_BACKSPACE && !text.empty())
         {
             text.pop_back();
@@ -59,6 +85,11 @@ namespace rwe
 
     void UiTextBox::textInput(const std::string& newText)
     {
+        if (!editable)
+        {
+            return;
+        }
+
         // SDL hands this over as UTF-8. A save name is a filename, and the
         // font has one glyph to a byte, so anything outside printable ASCII
         // is dropped rather than stored as bytes nothing can draw.
@@ -80,5 +111,14 @@ namespace rwe
     void UiTextBox::setText(const std::string& newText)
     {
         text = newText;
+    }
+
+    void UiTextBox::setMaxLength(unsigned int newMaxLength)
+    {
+        maxLength = newMaxLength;
+        if (text.size() > maxLength)
+        {
+            text.resize(maxLength);
+        }
     }
 }

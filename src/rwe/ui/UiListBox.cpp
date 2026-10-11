@@ -26,9 +26,22 @@ namespace rwe
             float y = 12.0f + (i * 12.0f);
             auto itemIndex = scrollPositionSubject.getValue() + i;
 
-            const auto& e = items[itemIndex];
+            // A row wider than the box is cut at its edge. The multiplayer
+            // game list sets nine of these side by side with no gap between,
+            // and a long game name would otherwise run over its neighbour.
+            std::string cut;
+            const std::string* shown = &items[itemIndex];
+            if (context.getTextWidth(*shown, *font) > static_cast<float>(sizeX))
+            {
+                cut = *shown;
+                while (!cut.empty() && context.getTextWidth(cut, *font) > static_cast<float>(sizeX))
+                {
+                    cut.pop_back();
+                }
+                shown = &cut;
+            }
 
-            context.drawText(posX, posY + y, e, *font);
+            context.drawText(posX, posY + y, *shown, *font);
 
             // The selected row is brightened, and the pass runs after the
             // text so the text is brightened with it (0x4A1FAE-0x4A1FC9,
@@ -61,6 +74,7 @@ namespace rwe
     void UiListBox::clearItems()
     {
         items.clear();
+        lastClickedRow.reset();
         selectedIndexSubject.next(std::nullopt);
         scrollPositionSubject.next(0);
         itemsChangedSubject.next(true);
@@ -83,7 +97,39 @@ namespace rwe
         if (index < items.size())
         {
             selectedIndexSubject.next(index);
+
+            // A second click on the same row within half a second.
+            if (lastClickedRow && *lastClickedRow == index && secondsSinceClick < 0.5f)
+            {
+                lastClickedRow.reset();
+                itemActivatedSubject.next(index);
+            }
+            else
+            {
+                lastClickedRow = index;
+                secondsSinceClick = 0.0f;
+            }
         }
+    }
+
+    void UiListBox::update(float dt)
+    {
+        secondsSinceClick += dt;
+    }
+
+    void UiListBox::setSelectedIndex(const std::optional<unsigned int>& index)
+    {
+        if (index && *index >= items.size())
+        {
+            selectedIndexSubject.next(std::nullopt);
+            return;
+        }
+        selectedIndexSubject.next(index);
+    }
+
+    Observable<unsigned int>& UiListBox::itemActivated()
+    {
+        return itemActivatedSubject;
     }
 
     void UiListBox::setSelectedItem(const std::string& item)

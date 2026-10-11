@@ -193,4 +193,75 @@ namespace rwe
             REQUIRE_FALSE(panel.wantsTextInput());
         }
     }
+
+    // A gui file names the buttons Enter and Escape press (`crdefault=` and
+    // `escdefault=` on the header gadget). The multiplayer screens need
+    // them: a text box has the focus there, and Enter in it has to mean OK.
+    TEST_CASE("a panel presses its default buttons for Enter and Escape", "[ui]")
+    {
+        auto okPresses = 0;
+        auto cancelPresses = 0;
+
+        UiPanel panel(0, 0, 640, 480);
+        {
+            auto ok = makeButton("OK");
+            auto cancel = makeButton("PREV");
+            ok->addSubscription(ok->onClick().subscribe([&okPresses](const ButtonClickEvent&) { ++okPresses; }));
+            cancel->addSubscription(cancel->onClick().subscribe([&cancelPresses](const ButtonClickEvent&) { ++cancelPresses; }));
+            panel.appendChild(std::move(ok));
+            panel.appendChild(std::move(cancel));
+            panel.appendChild(makeBox("ADDRESS"));
+        }
+        panel.setDefaultButtons("OK", "PREV");
+        panel.setFocusByName("ADDRESS");
+
+        SECTION("they do nothing until a scene asks")
+        {
+            panel.keyDown(key(SDLK_RETURN));
+            panel.keyDown(key(SDLK_ESCAPE));
+            REQUIRE(okPresses == 0);
+            REQUIRE(cancelPresses == 0);
+        }
+
+        SECTION("Enter presses the crdefault button even with a text box focused")
+        {
+            panel.setDefaultKeysEnabled(true);
+            panel.keyDown(key(SDLK_RETURN));
+            REQUIRE(okPresses == 1);
+            REQUIRE(cancelPresses == 0);
+        }
+
+        SECTION("so does the keypad's Enter")
+        {
+            panel.setDefaultKeysEnabled(true);
+            panel.keyDown(key(SDLK_KP_ENTER));
+            REQUIRE(okPresses == 1);
+        }
+
+        SECTION("Escape presses the escdefault button")
+        {
+            panel.setDefaultKeysEnabled(true);
+            panel.keyDown(key(SDLK_ESCAPE));
+            REQUIRE(cancelPresses == 1);
+            REQUIRE(okPresses == 0);
+        }
+
+        SECTION("a name that is no button of the panel presses nothing, and the box still types")
+        {
+            panel.setDefaultButtons("HOST", "");
+            panel.setDefaultKeysEnabled(true);
+            panel.keyDown(key(SDLK_RETURN));
+            panel.textInput("abc");
+            REQUIRE(okPresses == 0);
+            REQUIRE(panel.find<UiTextBox>("ADDRESS")->get().getText() == "abc");
+        }
+
+        SECTION("a greyed-out default button swallows the key")
+        {
+            panel.find<UiStagedButton>("OK")->get().setEnabled(false);
+            panel.setDefaultKeysEnabled(true);
+            panel.keyDown(key(SDLK_RETURN));
+            REQUIRE(okPresses == 0);
+        }
+    }
 }

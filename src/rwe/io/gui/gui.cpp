@@ -119,6 +119,7 @@ namespace rwe
         g.quickKey = e.extractInt("quickkey");
         g.grayedOut = e.extractBool("grayedout");
         g.stages = e.extractInt("stages");
+        g.maxChars = e.extractInt("maxchars");
 
         return g;
     }
@@ -159,7 +160,8 @@ namespace rwe
             && text == rhs.text
             && quickKey == rhs.quickKey
             && grayedOut == rhs.grayedOut
-            && stages == rhs.stages;
+            && stages == rhs.stages
+            && maxChars == rhs.maxChars;
     }
 
     bool GuiEntry::operator!=(const GuiEntry& rhs) const

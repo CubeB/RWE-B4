@@ -133,6 +133,13 @@ namespace rwe
         std::optional<bool> grayedOut;
         std::optional<int> stages;
 
+        /**
+         * `maxchars=`, on a text box (gadget type 3): how many characters the
+         * original lets be typed into it. NEWMULTI.GUI asks ten of a nickname
+         * and sixty-three of a game name; nothing else in the file says so.
+         */
+        std::optional<int> maxChars;
+
         bool operator==(const GuiEntry& rhs) const;
 
         bool operator!=(const GuiEntry& rhs) const;

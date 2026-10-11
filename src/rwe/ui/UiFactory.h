@@ -61,6 +61,13 @@ namespace rwe
 
         std::unique_ptr<UiPanel> panelFromGuiFile(const std::string& name);
 
+        /**
+         * A gui file's panel over a full-screen bitmap, by name -- the
+         * multiplayer screens, whose buttons and fields are painted into
+         * `bitmaps/<background>.pcx` and whose gadgets are only the text.
+         */
+        std::unique_ptr<UiPanel> panelFromGuiFile(const std::string& name, const std::string& background);
+
         std::unique_ptr<UiPanel> panelFromGuiFile(const std::string& name, const std::vector<GuiEntry>& entries);
 
         /** See plateTileName. GameScene asks for the in-game one. */

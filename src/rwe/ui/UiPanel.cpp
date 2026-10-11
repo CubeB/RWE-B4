@@ -1,6 +1,8 @@
 #include "UiPanel.h"
 #include <algorithm>
 #include <cmath>
+#include <SDL3/SDL.h>
+#include <rwe/ui/UiStagedButton.h>
 #include <rwe/util/rwe_string.h>
 
 namespace rwe
@@ -148,6 +150,29 @@ namespace rwe
 
     void UiPanel::keyDown(KeyEvent event)
     {
+        // Enter and Escape press the buttons the gui file names for them, ahead
+        // of the focused control: a text box has the focus on most of the
+        // multiplayer screens, and it is exactly there that Enter has to
+        // mean "OK". A named button that is greyed out swallows the key
+        // rather than passing it on, which is what pressing a dead button
+        // does.
+        if (defaultKeysEnabled)
+        {
+            const auto isEnter = event.keyCode == SDLK_RETURN || event.keyCode == SDLK_KP_ENTER;
+            const auto& target = isEnter ? crDefault : (event.keyCode == SDLK_ESCAPE ? escDefault : std::string());
+            if (!target.empty())
+            {
+                auto it = std::find_if(children.begin(), children.end(), [&target](const auto& c) {
+                    return c->getName() == target && dynamic_cast<UiStagedButton*>(c.get()) != nullptr;
+                });
+                if (it != children.end())
+                {
+                    (*it)->keyDown(KeyEvent(static_cast<int>(SDLK_SPACE)));
+                    return;
+                }
+            }
+        }
+
         // A key goes to the control that has the focus, not to every child.
         // The original keeps a focused-gadget index at `panel+0x64`, and it
         // is what the caret is drawn from (S:99). RWE used to hand each key
