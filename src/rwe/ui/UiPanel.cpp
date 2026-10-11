@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <SDL3/SDL.h>
+#include <rwe/ui/NinePatch.h>
 #include <rwe/ui/UiStagedButton.h>
 #include <rwe/util/rwe_string.h>
 
@@ -30,7 +31,8 @@ namespace rwe
           children(std::move(panel.children)),
           focusedChild(std::move(panel.focusedChild)),
           drawSolidPlate(panel.drawSolidPlate),
-          plateTile(std::move(panel.plateTile))
+          plateTile(std::move(panel.plateTile)),
+          plateFrames(std::move(panel.plateFrames))
     {
     }
 
@@ -45,6 +47,7 @@ namespace rwe
         focusedChild = std::move(panel.focusedChild);
         drawSolidPlate = panel.drawSolidPlate;
         plateTile = panel.plateTile;
+        plateFrames = panel.plateFrames;
 
         return *this;
     }
@@ -54,6 +57,28 @@ namespace rwe
         if (background)
         {
             graphics.drawSpriteAbs(posX, posY, **background);
+        }
+        else if (drawSolidPlate && plateFrames)
+        {
+            // A frame sequence of more than one frame is a 3x3 patch, laid out
+            // the way the original lays out BackTile; see layoutNinePatch.
+            const auto& frames = *plateFrames;
+            const auto stepX = std::max(1, static_cast<int>(frames[0]->bounds.width()));
+            const auto stepY = std::max(1, static_cast<int>(frames[0]->bounds.height()));
+            const auto width = static_cast<int>(sizeX);
+            const auto height = static_cast<int>(sizeY);
+            for (const auto& tile : layoutNinePatch(width, height, stepX, stepY))
+            {
+                // A dialog narrower or shorter than one frame squeezes it
+                // rather than spilling over what is beside it.
+                graphics.drawSpriteAbs(
+                    Rectangle2f::fromTopLeft(
+                        static_cast<float>(posX + tile.x),
+                        static_cast<float>(posY + tile.y),
+                        static_cast<float>(std::min(stepX, width)),
+                        static_cast<float>(std::min(stepY, height))),
+                    *frames[static_cast<std::size_t>(tile.frame)]);
+            }
         }
         else if (drawSolidPlate)
         {

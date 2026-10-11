@@ -20,7 +20,6 @@
 #include <rwe/io/ota/ota.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/resource_io.h>
-#include <rwe/ai/AiPersonality.h>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/ui/UiStagedButton.h>
 #include <rwe/ui/UiSurface.h>
@@ -1035,20 +1034,6 @@ namespace rwe
             {
                 cyclePlayerTeam(*num);
             }
-            else if (auto num = matchesPlayer("PLAYER{0}_personality", message))
-            {
-                switch (details.type)
-                {
-                    case ActivateMessage::Type::Primary:
-                        cyclePlayerPersonality(*num, 1);
-                        break;
-                    case ActivateMessage::Type::Secondary:
-                        cyclePlayerPersonality(*num, -1);
-                        break;
-                    default:
-                        throw std::logic_error("Invalid activation type");
-                }
-            }
             else if (auto num = matchesPlayer("PLAYER{0}_metal", message))
             {
                 switch (details.type)
@@ -1200,12 +1185,6 @@ namespace rwe
     void MainMenuScene::goToPlayerSetupMenu(bool multiplayer)
     {
         multiplayerSetup = multiplayer;
-
-        aiPersonalities.clear();
-        for (const auto& personality : loadAiPersonalities(aiPersonalityDirectory()))
-        {
-            aiPersonalities.emplace_back(personality.name, personality.description);
-        }
 
         auto mainMenuGuiRaw = sceneContext.vfs->readFile(sceneContext.pathMapping->guis + "/SKIRMISH.GUI");
         if (!mainMenuGuiRaw)
@@ -1761,32 +1740,6 @@ namespace rwe
         }
     }
 
-    void MainMenuScene::cyclePlayerPersonality(int playerIndex, int step)
-    {
-        if (aiPersonalities.empty())
-        {
-            return;
-        }
-        auto& personality = model.players[playerIndex].personality;
-        const auto count = static_cast<int>(aiPersonalities.size());
-        auto it = std::find_if(aiPersonalities.begin(), aiPersonalities.end(), [&](const auto& p) { return p.first == personality.getValue(); });
-        // A name no longer on the list -- its file was taken away -- steps
-        // onto the first one either way.
-        auto index = it == aiPersonalities.end() ? (step > 0 ? -1 : 0) : static_cast<int>(it - aiPersonalities.begin());
-        index = (((index + step) % count) + count) % count;
-        personality.next(aiPersonalities[index].first);
-    }
-
-    std::string MainMenuScene::describeAiPersonality(const std::string& name) const
-    {
-        auto it = std::find_if(aiPersonalities.begin(), aiPersonalities.end(), [&](const auto& p) { return p.first == name; });
-        if (it == aiPersonalities.end() || it->second.empty())
-        {
-            return name;
-        }
-        return name + ": " + it->second;
-    }
-
     void MainMenuScene::cyclePlayerTeam(int playerIndex)
     {
         auto& player = model.players[playerIndex];
@@ -2294,65 +2247,6 @@ namespace rwe
                 b->setLabel(formatResource(newEnergy));
             });
             b->addSubscription(std::move(sub));
-
-            panel.appendChild(std::move(b));
-        }
-
-        if (model.players[i].type.getValue() == MainMenuModel::PlayerSettings::Type::Computer)
-        {
-            // The AI personality. TA has no such thing, so SKIRMISH.GUI has
-            // no gadget for it: it sits in the gap between the energy column,
-            // which ends at 383, and the options, which start at 476. Left
-            // click steps forward, right click back, as the colour and the
-            // resources do, and hovering it puts the personality's
-            // description on the help line the options use.
-            //
-            // It draws on one of BUTTONS0's own faces rather than borrowing
-            // the name button's "skirmname" graphic. A named graphic is drawn
-            // at the sprite's size whatever width the gadget asks for, and
-            // skirmname is the 112-wide face the name column uses, so it
-            // reached x=501 and covered the first 25 pixels of the options
-            // column beside it. The gap is 93 wide and BUTTONS0's nearest
-            // face is 80, which leaves a margin either side.
-            unsigned int width = 80;
-            unsigned int height = 20;
-
-            auto b = uiFactory.createSizedButton(389, rowStart, width, height, guiName, "");
-            b->setName("PLAYER" + std::to_string(i) + "_personality");
-            b->setTextAlign(UiStagedButton::TextAlign::Center);
-
-            auto helpText = panel.find<UiLabel>("HELPTEXT");
-            auto* helpLabel = helpText ? &helpText->get() : nullptr;
-            const auto name = "PLAYER" + std::to_string(i) + "_personality";
-
-            auto sub = model.players[i].personality.subscribe([this, b = b.get(), helpLabel, name](const std::string& personality) {
-                b->setLabel(personality);
-                if (helpLabel != nullptr && hoveredSkirmishOption == name)
-                {
-                    helpLabel->setText(describeAiPersonality(personality));
-                }
-            });
-            b->addSubscription(std::move(sub));
-
-            auto hoverSub = b->onHover().subscribe([this, helpLabel, name, i](bool entered) {
-                if (helpLabel == nullptr)
-                {
-                    return;
-                }
-                if (entered)
-                {
-                    hoveredSkirmishOption = name;
-                    helpLabel->setText(describeAiPersonality(model.players[i].personality.getValue()));
-                }
-                else if (hoveredSkirmishOption == name)
-                {
-                    hoveredSkirmishOption.clear();
-                    helpLabel->setText(std::string());
-                }
-            });
-            // The button's own subject, which dies with it: see the same
-            // line in attachSkirmishOptionComponents.
-            hoverSub.reset();
 
             panel.appendChild(std::move(b));
         }

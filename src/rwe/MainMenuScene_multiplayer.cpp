@@ -451,7 +451,6 @@ namespace rwe
                         controls.side = true;
                         controls.colour = true;
                         controls.team = true;
-                        controls.personality = true;
                         break;
                     case PlayerType::Human:
                         // The host's own row: its choices, and nothing to
@@ -1382,17 +1381,16 @@ namespace rwe
         //   RESx, MEMx, CDx                a seat's screen resolution, its
         //                                  memory and its CD: nothing is
         //                                  known about another machine's.
+        //                                  The Resolution column is left
+        //                                  empty rather than given to an AI
+        //                                  personality picker: RWE has none
+        //                                  on any screen.
         //   SYNCHING, battlestart          the "Synching" overlay, which
         //                                  covers the Start button while the
         //                                  units are checked against each
         //                                  other's -- RWE has no such step.
         //
         // and the captions of the ones above that have one.
-        const auto resolution = panel->find<UiComponent>("RESx");
-        const int resolutionX = resolution ? resolution->get().getX() : 260;
-        const unsigned int resolutionWidth = resolution ? resolution->get().getWidth() : 96;
-        const int resolutionY = resolution ? resolution->get().getY() : 69;
-
         const auto template_of = [&](const char* name) {
             struct Geometry
             {
@@ -1541,17 +1539,6 @@ namespace rwe
                 auto button = std::make_unique<UiStagedButton>(
                     readyBox.x, rowOffset(readyBox.y), readyBox.width, readyBox.height, std::move(stages), pressed, lampFont);
                 button->setName(seatName + "_ready");
-                panel->appendChild(std::move(button));
-            }
-            {
-                // The column the file labels Resolution has nothing to show
-                // here; a computer player's personality is the one thing RWE
-                // has that a seat there can say, and the setup screen has it
-                // beside the same row.
-                auto button = factory.createSizedButton(resolutionX, rowOffset(resolutionY), static_cast<int>(resolutionWidth), 20, "LOUNGE2", "");
-                button->setName(seatName + "_personality");
-                button->setTextAlign(UiStagedButton::TextAlign::Center);
-                button->setDisabledSprite(nullptr);
                 panel->appendChild(std::move(button));
             }
             {
@@ -2397,12 +2384,6 @@ namespace rwe
                 // and says it only where a machine is on the other end.
                 l->get().setVisible(type == PlayerType::Human || type == PlayerType::Network);
             }
-            if (auto b = panel.find<UiStagedButton>(seatName + "_personality"))
-            {
-                b->get().setVisible(type == PlayerType::Computer);
-                b->get().setEnabled(controls.personality);
-                b->get().setLabel(p.personality.getValue());
-            }
         }
 
         // -- the options --
@@ -2720,13 +2701,6 @@ namespace rwe
                 if (controls.ready && !host)
                 {
                     flow.myReady = !flow.myReady;
-                }
-            }
-            else if (control == "personality")
-            {
-                if (controls.personality)
-                {
-                    cyclePlayerPersonality(index, details.type == ActivateMessage::Type::Secondary ? -1 : 1);
                 }
             }
         }

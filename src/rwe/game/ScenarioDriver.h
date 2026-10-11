@@ -165,15 +165,6 @@ namespace rwe
         /** The named gadget's toggle state on the live panel. */
         GadgetState gadget(const std::string& name);
 
-        /**
-         * The count the side panel's idle-builder sign is showing this frame, or
-         * nothing when the panel in front has no room for it.
-         *
-         * Read out of the widget rather than out of the simulation, so what it
-         * reports is what a player would be looking at.
-         */
-        std::optional<int> idleBuilderCount();
-
         /** The one selected unit, when exactly one is selected. */
         std::optional<UnitId> selectedUnit() const;
 

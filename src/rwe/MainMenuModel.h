@@ -61,7 +61,12 @@ namespace rwe
             BehaviorSubject<std::optional<int>> teamIndex;
             BehaviorSubject<Metal> metal;
             BehaviorSubject<Energy> energy;
-            /** The AI personality a computer player plays, by name (see AiPersonality.h). */
+            /**
+             * The AI personality a computer player plays, by name (see AiPersonality.h).
+             * No screen picks it any more -- the setup screen's picker was taken out --
+             * so a menu game plays Balanced; it is still carried through a LAN lobby and
+             * into GameParameters, which is where `--player` and the arena set it.
+             */
             BehaviorSubject<std::string> personality{std::string("Balanced")};
 
             /**

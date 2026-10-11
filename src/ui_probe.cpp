@@ -248,6 +248,7 @@ int main(int argc, char* argv[])
         std::vector<std::string> requestedPanels;
         bool multiplayerScreens = false;
         bool multiplayerFlow = false;
+        bool renderRequested = false;
         for (int i = 1; i < argc; ++i)
         {
             std::string arg(argv[i]);
@@ -259,6 +260,11 @@ int main(int argc, char* argv[])
             if (arg == "--multiplayer-flow")
             {
                 multiplayerFlow = true;
+                continue;
+            }
+            if (arg == "--render")
+            {
+                renderRequested = true;
                 continue;
             }
             if (arg == "--panel" && i + 1 < argc)
@@ -273,6 +279,7 @@ int main(int argc, char* argv[])
                           << "  With one or more, dumps and clicks just those guis and stops.\n"
                           << "  --multiplayer builds the four multiplayer screens (SELPROV, TCP, SELGAME,\n"
                           << "  NEWMULTI) the way the main menu does, drives them, and writes probe_mp_*.ppm.\n"
+                          << "  --render, with --panel, also draws each panel and writes probe_panel_<NAME>.ppm.\n"
                           << "  --multiplayer-flow runs three real MainMenuScenes (a host and two guests)\n"
                           << "  through the whole flow, the battleroom included, over LAN discovery on this\n"
                           << "  machine; it checks what each sees, writes probe_flow_*.ppm, and exits non-zero\n"
@@ -799,14 +806,7 @@ int main(int argc, char* argv[])
                 check(MenuProbe::model(guest).players[5].type.getValue() == MainMenuModel::PlayerSettings::Type::Computer, "and the guest sees it");
                 check(buttonLabel(host, "PLAYER5") == "Computer", "the seat reads Computer");
                 check(buttonVisible(host, "PLAYER5_ready") && buttonVisible(host, "PLAYER5_side"), "a computer shows its choices");
-                check(buttonVisible(host, "PLAYER5_personality") && buttonEnabled(host, "PLAYER5_personality") && !buttonEnabled(guest, "PLAYER5_personality"),
-                    "its personality is the host's to choose");
-                {
-                    const auto personality = hm.players[5].personality.getValue();
-                    clickGadget(host, "PLAYER" + std::to_string(5) + "_personality");
-                    run(0.5);
-                    std::cout << "  (personality " << personality << " -> " << hm.players[5].personality.getValue() << ")\n";
-                }
+                check(!buttonVisible(host, "PLAYER5_personality"), "there is no AI personality picker on a computer's row");
                 clickGadget(host, "PLAYER" + std::to_string(5));
                 run(1.0);
                 check(hm.players[5].type.getValue() == MainMenuModel::PlayerSettings::Type::Open, "and takes it away again");
@@ -1146,9 +1146,25 @@ int main(int argc, char* argv[])
         // ---- any gui the caller named, and nothing else ----
         if (!requestedPanels.empty())
         {
+            ShaderService shaders = ShaderService::createShaderService(graphics);
+            Viewport uiViewport(0, 0, 640, 480);
+            UiRenderService ui(&graphics, &shaders, &uiViewport);
+            graphics.setViewport(0, 0, 640, 480);
+            graphics.disableDepthBuffer();
+            graphics.enableBlending();
+
             for (const auto& panelName : requestedPanels)
             {
                 auto p = factory.panelFromGuiFile(panelName);
+                if (renderRequested)
+                {
+                    graphics.clearColor();
+                    p->render(ui);
+                    glFinish();
+                    const auto file = "probe_panel_" + panelName + ".ppm";
+                    screenshot(file.c_str());
+                    std::cout << "  wrote " << file << "\n";
+                }
                 p->groupMessages().subscribe([](const auto& msg) {
                     if (std::get_if<ActivateMessage>(&msg.message) != nullptr)
                     {
