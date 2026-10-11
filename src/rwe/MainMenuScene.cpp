@@ -1,4 +1,5 @@
 #include "MainMenuScene.h"
+#include "MainMenuScene_multiplayer.h"
 #include <rwe/game/GameScene_util.h>
 #include <rwe/ui/UiLabel.h>
 #include <rwe/MovieScene.h>
@@ -25,7 +26,6 @@
 #include <rwe/ui/UiSurface.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/rwe_string.h>
-#include <rwe/net/LanDiscovery.h>
 #include <rwe/ui/UiListBox.h>
 
 namespace rwe
@@ -522,8 +522,11 @@ namespace rwe
         auto panel = uiFactory.panelFromGuiFile("MSGBOX");
 
         auto font = sceneContext.textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+        // A centred label is centred on its own x, not within its width, so
+        // the x is the middle of the box. Written as 0 it was centred on the
+        // box's left edge and every message was half off it.
         auto label = std::make_unique<UiLabel>(
-            0,
+            static_cast<int>(panel->getWidth()) / 2,
             (static_cast<int>(panel->getHeight()) / 2) - 40,
             panel->getWidth(),
             20,
@@ -620,11 +623,13 @@ namespace rwe
 
         if (panelStack.size() > 1)
         {
-            // Back off the setup screen, or into a map dialog from it. Either
-            // way this machine is no longer sitting on the screen that
-            // advertises a game.
-            stopDiscoveryIfRunning();
-            startDiscoveryIfMultiplayer();
+            // The multiplayer screens know where Previous Menu goes: the list
+            // back to the address dialog, the setup screen back to the list.
+            if (multiplayerGoBack())
+            {
+                return;
+            }
+
             panelStack.pop_back();
             return;
         }
@@ -641,12 +646,6 @@ namespace rwe
                 message(msg.topic, msg.controlName, *activate);
             }
         });
-
-        // Whichever panel this is, the one it replaced might have been the
-        // multiplayer screen. Leaving it has to stop advertising, or this
-        // machine stays on the LAN's list of games after it has gone.
-        stopDiscoveryIfRunning();
-        startDiscoveryIfMultiplayer();
     }
 
     void MainMenuScene::openDialog(std::unique_ptr<UiPanel>&& panel)
@@ -677,23 +676,9 @@ namespace rwe
             action();
         }
 
-        if (discoveryRunning)
-        {
-            // Advertise what this machine is offering, and pick up what
-            // others are. Both are cheap and both are on the network thread;
-            // nothing here can stall the frame.
-            refreshDiscoveredGames();
-
-            const auto lobby = advertisedLobby();
-            if (!lobby.map.empty())
-            {
-                lanDiscovery.advertise(lobby);
-            }
-            else
-            {
-                lanDiscovery.stopAdvertising();
-            }
-        }
+        // The list, the host's announcement and the guest's mirror. All of it
+        // is cheap and none of it waits on the network thread.
+        updateMultiplayer();
 
         topPanel().update(static_cast<float>(millisecondsElapsed) / 1000.0f);
     }
@@ -770,6 +755,14 @@ namespace rwe
 
     void MainMenuScene::messageNow(const std::string& topic, const std::string& message, const ActivateMessage& details)
     {
+        // The multiplayer screens first: they are the original's own flow and
+        // own their buttons, and while the setup screen is a joined lobby it
+        // is theirs too.
+        if (multiplayerMessage(topic, message, details))
+        {
+            return;
+        }
+
         // Leaving the briefing stops its narration (0x478DF0).
         if (topic == "MSNBRIEF" && (message == "PrevMenu" || message == "PREVMENU"))
         {
@@ -792,21 +785,11 @@ namespace rwe
             }
             else if (message == "MULTI")
             {
-                // Straight to the setup screen. The original's multiplayer
-                // button leads to a protocol chooser first -- NEWMULTI.GUI,
-                // MODEM.GUI and SERIAL.GUI are all still in the data -- but
-                // those choose between a games service, a modem and a null
-                // cable, and RWE speaks none of them. What it does speak is
-                // UDP to an address you give it, which needs no choosing.
-                goToMultiplayerMenu();
-            }
-            else if (message == "JOIN_LAN_GAME")
-            {
-                openLanGameBrowser();
-            }
-            else if (message == "JOIN_SELECTED_LAN_GAME")
-            {
-                joinSelectedLanGame();
+                // The original's own route: the connection chooser, then an
+                // address, then the list of games (SELPROV, TCP, SELGAME).
+                // The chooser has one entry here because RWE speaks one
+                // thing -- UDP to an address -- and no modem or null cable.
+                goToSelectConnectionMenu();
             }
             else if (message == "INTRO")
             {
@@ -1214,11 +1197,6 @@ namespace rwe
         goToPlayerSetupMenu(false);
     }
 
-    void MainMenuScene::goToMultiplayerMenu()
-    {
-        goToPlayerSetupMenu(true);
-    }
-
     void MainMenuScene::goToPlayerSetupMenu(bool multiplayer)
     {
         multiplayerSetup = multiplayer;
@@ -1278,18 +1256,21 @@ namespace rwe
             portBox->setName("LOCALPORT");
             panel->appendChild(std::move(portBox));
 
-            attachDiscoveryComponents(*panel, font);
-
-            // Said on the screen because it is the one thing about a
-            // direct-connect game that surprises people: there is no host
-            // here, so nothing propagates. Every machine types this screen.
-            auto note = uiFactory.createLabel(
-                45,
-                312,
-                430,
-                12,
-                "Everyone sets this screen the same way, with their own seat as Player.",
-                UiLabel::Alignment::Left);
+            // Said on the screen because the two roles read the same table
+            // and mean different things by it. The host's is the editable
+            // screen; a guest's is a mirror of the host's, which changes
+            // only when the host changes it.
+            std::string noteText = "Everyone sets this screen the same way, with their own seat as Player.";
+            // One line each, because the help line sits right under it.
+            if (isMultiplayerGuest())
+            {
+                noteText = "In another player's game. The host sets this screen.";
+            }
+            else if (isMultiplayerHost())
+            {
+                noteText = "Players on this network can join from the game list.";
+            }
+            auto note = uiFactory.createLabel(45, 312, 430, 12, noteText, UiLabel::Alignment::Left);
             panel->appendChild(std::move(note));
         }
 
@@ -1946,324 +1927,37 @@ namespace rwe
         }
     }
 
-    void MainMenuScene::startDiscoveryIfMultiplayer()
-    {
-        if (!multiplayerSetup)
-        {
-            // A skirmish has nobody to find, and being findable through the
-            // campaign and the menus would advertise a game nobody is
-            // hosting.
-            return;
-        }
-
-        if (discoveryRunning)
-        {
-            return;
-        }
-
-        lanDiscovery.start(LanDiscovery::defaultPort);
-        discoveryRunning = lanDiscovery.isRunning();
-        if (!discoveryRunning)
-        {
-            // Nothing fatal: the setup screen still works, it just has
-            // nothing to list. One more machine holding port 1338 is enough.
-            LOG_INFO << "LAN discovery did not start; the multiplayer screen shows no LAN games";
-        }
-    }
-
-    void MainMenuScene::stopDiscoveryIfRunning()
-    {
-        if (!discoveryRunning)
-        {
-            return;
-        }
-        lanDiscovery.stop();
-        discoveryRunning = false;
-    }
-
-    void MainMenuScene::refreshDiscoveredGames()
-    {
-        discoveredGames = lanDiscovery.games();
-
-        auto& panel = topPanel();
-        auto listBox = panel.find<UiListBox>("LAN_GAMES");
-        if (!listBox)
-        {
-            return;
-        }
-
-        // Rebuilt only when the contents have actually changed. The list box
-        // clears its selection when items is emptied, so a rebuild every
-        // frame would wipe the row the player has just picked -- and the
-        // announcements arrive once a second anyway.
-        std::vector<std::string> labels;
-        for (const auto& game : discoveredGames)
-        {
-            std::string label = game.map;
-            if (!game.label.empty())
-            {
-                label += "  (" + game.label + ")";
-            }
-            label += "  " + std::to_string(game.slots.size()) + " seats";
-            label += "  @" + game.sourceAddress;
-            labels.push_back(label);
-        }
-
-        if (listBox->get().getItems() == labels)
-        {
-            return;
-        }
-
-        listBox->get().clearItems();
-        for (const auto& label : labels)
-        {
-            listBox->get().appendItem(label);
-        }
-    }
-
-    std::optional<int> MainMenuScene::seatOfferedByOthers(const DiscoveredGame& game)
-    {
-        // The announcer plays the seat it marked human. Everything else is
-        // open, and the first open seat is the one being offered. This is the
-        // same rule the original's battleroom uses, so a lobby filled by
-        // discovery reads the way one filled by hand would.
-        int best = -1;
-        for (const auto& slot : game.slots)
-        {
-            if (slot.controller == "human")
-            {
-                continue;
-            }
-            if (slot.controller == "open")
-            {
-                best = slot.index;
-                break;
-            }
-            if (slot.controller == "network")
-            {
-                // A seat somebody else is already playing. Keep looking for
-                // an actually free one, but remember it in case there is not.
-                if (best < 0)
-                {
-                    best = slot.index;
-                }
-            }
-        }
-        if (best < 0)
-        {
-            return std::nullopt;
-        }
-        return best;
-    }
-
-    void MainMenuScene::joinDiscoveredGame(const DiscoveredGame& game)
-    {
-        auto seat = seatOfferedByOthers(game);
-        if (!seat)
-        {
-            openMessageBox("The game \"" + game.map + "\" has no seat free. It is being played by "
-                           + std::to_string(game.slots.size()) + " players already.");
-            return;
-        }
-
-        // The map, then every seat as the announcer described it -- sides,
-        // colours, teams and addresses alike -- so the two machines agree
-        // without anybody typing an address. The one seat that differs is
-        // this machine's own, which is Player from here on.
-        readNetworkAddressesFromPanel();
-
-        setCandidateSelectedMap(game.map);
-        commitSelectedMap();
-
-        for (const auto& slot : game.slots)
-        {
-            auto& player = model.players[slot.index];
-
-            if (slot.index == *seat)
-            {
-                player.type.next(MainMenuModel::PlayerSettings::Type::Human);
-            }
-            else if (slot.controller == "computer")
-            {
-                player.type.next(MainMenuModel::PlayerSettings::Type::Computer);
-            }
-            else if (slot.controller == "network")
-            {
-                player.type.next(MainMenuModel::PlayerSettings::Type::Network);
-                if (slot.address.empty())
-                {
-                    player.networkAddress.next("");
-                }
-                else
-                {
-                    player.networkAddress.next(slot.address);
-                }
-            }
-            else
-            {
-                player.type.next(MainMenuModel::PlayerSettings::Type::Open);
-            }
-
-            player.side.next(slot.side == "CORE" ? MainMenuModel::PlayerSettings::Side::Core
-                                                 : MainMenuModel::PlayerSettings::Side::Arm);
-            player.colorIndex.next(PlayerColorIndex(slot.colour));
-            player.teamIndex.next(std::optional<int>(slot.team));
-
-            if (!slot.name.empty() && player.type.getValue() != MainMenuModel::PlayerSettings::Type::Open)
-            {
-                // A seat's name is carried by its address box only for a
-                // network player, and a human or computer player has no name
-                // field on this screen at all. The announcement keeps the
-                // name for the list box and for anyone reading a capture --
-                // it is not something the engine needs.
-            }
-        }
-
-        // The port is this machine's, and the announcer's own seat is where
-        // it is listening. Setting it means Start now connects to the right
-        // place without a letter of typing.
-        readNetworkAddressesFromPanel();
-
-        openMessageBox("Joined \"" + game.map + "\" as seat " + std::to_string(*seat + 1)
-                       + ". Press Start.");
-    }
-
-    DiscoveredGame MainMenuScene::advertisedLobby() const
-    {
-        DiscoveredGame game;
-        game.port = 1337;
-        game.lastSeen = getTimestamp();
-
-        if (const auto& map = model.selectedMap.getValue())
-        {
-            game.map = map->name;
-        }
-
-        for (Index i = 0; i < getSize(model.players); ++i)
-        {
-            const auto& slot = model.players[i];
-            const auto type = slot.type.getValue();
-
-            DiscoveredSlot seat;
-            seat.index = static_cast<int>(i);
-
-            switch (type)
-            {
-                case MainMenuModel::PlayerSettings::Type::Open:
-                    seat.controller = "open";
-                    break;
-                case MainMenuModel::PlayerSettings::Type::Human:
-                    seat.controller = "human";
-                    break;
-                case MainMenuModel::PlayerSettings::Type::Computer:
-                    seat.controller = "computer";
-                    break;
-                case MainMenuModel::PlayerSettings::Type::Network:
-                    seat.controller = "network";
-                    seat.address = slot.networkAddress.getValue();
-                    break;
-            }
-
-            seat.side = slot.side.getValue() == MainMenuModel::PlayerSettings::Side::Core
-                ? "CORE"
-                : "ARM";
-            seat.colour = slot.colorIndex.getValue().value;
-            seat.team = slot.teamIndex.getValue().value_or(-1);
-
-            game.slots.push_back(seat);
-        }
-
-        return game;
-    }
-
     void MainMenuScene::startGame()
     {
         readNetworkAddressesFromPanel();
 
-        // Leaving the setup screen, so this machine stops being discoverable
-        // and stops listening. A game in progress must not keep a discovery
-        // socket open for the rest of the match.
-        stopDiscoveryIfRunning();
-
-        startGameBody();
-    }
-
-    void MainMenuScene::joinSelectedLanGame()
-    {
-        auto& panel = topPanel();
-        auto listBox = panel.find<UiListBox>("LAN_GAMES");
-        if (!listBox || !listBox->get().getSelectedIndex())
+        auto params = prepareGameParameters();
+        if (!params)
         {
-            openMessageBox("Pick a game from the list first.");
             return;
         }
 
-        auto index = *listBox->get().getSelectedIndex();
-        if (index >= discoveredGames.size())
-        {
-            openMessageBox("That game has gone away.");
-            return;
-        }
+        // Leaving the multiplayer screens for the game, so this machine
+        // stops being discoverable and stops listening. A game in progress
+        // must not keep a discovery socket open for the rest of the match.
+        // Done only now, after the checks: a problem keeps the player on
+        // the screen with discovery still working.
+        multiplayerFlow.reset();
 
-        joinDiscoveredGame(discoveredGames[index]);
+        auto scene = std::make_unique<LoadingScene>(
+            sceneContext,
+            soundLookup,
+            std::move(bgm),
+            *params);
+
+        sceneContext.sceneManager->setNextScene(std::shared_ptr<Scene>(std::move(scene)));
     }
 
-    void MainMenuScene::openLanGameBrowser()
-    {
-        refreshDiscoveredGames();
-
-        auto panel = uiFactory.panelFromGuiFile("MSGBOX");
-
-        const auto width = static_cast<int>(panel->getWidth());
-        const auto height = static_cast<int>(panel->getHeight());
-
-        auto label = uiFactory.createLabel(0, 8, width, 16, "LAN games found:", UiLabel::Alignment::Center);
-        panel->appendChild(std::move(label));
-
-        auto font = sceneContext.textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
-        auto list = std::make_unique<UiListBox>(20, 28, width - 40, height - 96, font);
-        list->setName("LAN_GAMES");
-        for (const auto& game : discoveredGames)
-        {
-            std::string entry = game.map;
-            if (!game.label.empty())
-            {
-                entry += "  (" + game.label + ")";
-            }
-            entry += "  " + std::to_string(game.slots.size()) + " seats  @" + game.sourceAddress;
-            list->appendItem(entry);
-        }
-        panel->appendChild(std::move(list));
-
-        auto join = uiFactory.createButton(
-            (width / 2) - 100, height - 48, 90, 20, "MSGBOX", "JOIN_SELECTED_LAN_GAME", "Join");
-        panel->appendChild(std::move(join));
-
-        auto close = uiFactory.createButton(
-            (width / 2) + 10, height - 48, 90, 20, "MSGBOX", "PrevMenu", "Close");
-        panel->appendChild(std::move(close));
-
-        openDialog(std::move(panel));
-    }
-
-    void MainMenuScene::attachDiscoveryComponents(UiPanel& panel, const std::shared_ptr<SpriteSeries>& /*font*/)
-    {
-        // Nothing but a button on the setup screen itself. The TA screen's
-        // only free horizontal band is the 52 pixels between the bottom of
-        // the player table and HELPTEXT at y=330, and the port row already
-        // occupies the middle of it -- so a list of games wedged in beside
-        // that row would have two rows visible and nothing to show. The list
-        // belongs in a dialog, which is what the original's own too-big-for-
-        // the-screen thing looks like here.
-        auto button = uiFactory.createButton(45, 276, 150, 20, "SKIRMISH", "JOIN_LAN_GAME", "Find LAN games");
-        panel.appendChild(std::move(button));
-    }
-
-    void MainMenuScene::startGameBody()
+    std::optional<GameParameters> MainMenuScene::prepareGameParameters()
     {
         if (!model.selectedMap.getValue())
         {
-            return;
+            return std::nullopt;
         }
 
         if (multiplayerSetup)
@@ -2284,7 +1978,7 @@ namespace rwe
             if (auto problem = multiplayerSetupProblem(slots, model.localNetworkPort.getValue()))
             {
                 openMessageBox(*problem);
-                return;
+                return std::nullopt;
             }
         }
 
@@ -2315,6 +2009,15 @@ namespace rwe
             {
                 playerInfo.aiPersonality = playerSlot.personality.getValue();
             }
+            else if (!playerSlot.name.getValue().empty())
+            {
+                // The name a person goes by, from the multiplayer screens. It
+                // is part of what the game's random generator is seeded from,
+                // so every machine must hold the same name for every seat --
+                // which is why only a seat a person plays has one, and why
+                // the setup screen's mirror takes it from the announcement.
+                playerInfo.name = playerSlot.name.getValue();
+            }
             params.players[i] = std::move(playerInfo);
         }
 
@@ -2327,16 +2030,10 @@ namespace rwe
         if (auto problem = startPositionProblem(params))
         {
             openMessageBox(*problem);
-            return;
+            return std::nullopt;
         }
 
-        auto scene = std::make_unique<LoadingScene>(
-            sceneContext,
-            soundLookup,
-            std::move(bgm),
-            params);
-
-        sceneContext.sceneManager->setNextScene(std::shared_ptr<Scene>(std::move(scene)));
+        return params;
     }
 
     std::optional<std::string> MainMenuScene::startPositionProblem(const GameParameters& params)
@@ -2408,31 +2105,30 @@ namespace rwe
                 b->setName("PLAYER" + std::to_string(i));
                 b->setTextAlign(UiStagedButton::TextAlign::Center);
 
+                // The caption is the person's name where there is one -- the
+                // multiplayer screens give seats names -- and the kind of
+                // seat where there is not.
                 auto sub = model.players[i].type.subscribe([b = b.get(), &panel, this, guiName, i](MainMenuModel::PlayerSettings::Type type) {
+                    b->setLabel(captionForSeat(i));
                     switch (type)
                     {
                         case MainMenuModel::PlayerSettings::Type::Open:
                             panel.removeChildrenWithPrefix("PLAYER" + std::to_string(i) + "_");
-                            b->setLabel("Open");
                             break;
                         case MainMenuModel::PlayerSettings::Type::Human:
-                            b->setLabel("Player");
-                            panel.removeChildrenWithPrefix("PLAYER" + std::to_string(i) + "_");
-                            attachDetailedPlayerSelectionComponents(guiName, panel, i);
-                            break;
                         case MainMenuModel::PlayerSettings::Type::Computer:
-                            b->setLabel("Computer");
-                            panel.removeChildrenWithPrefix("PLAYER" + std::to_string(i) + "_");
-                            attachDetailedPlayerSelectionComponents(guiName, panel, i);
-                            break;
                         case MainMenuModel::PlayerSettings::Type::Network:
-                            b->setLabel("Network");
                             panel.removeChildrenWithPrefix("PLAYER" + std::to_string(i) + "_");
                             attachDetailedPlayerSelectionComponents(guiName, panel, i);
                             break;
                     }
                 });
                 b->addSubscription(std::move(sub));
+
+                auto nameSub = model.players[i].name.subscribe([b = b.get(), this, i](const std::string&) {
+                    b->setLabel(captionForSeat(i));
+                });
+                b->addSubscription(std::move(nameSub));
 
                 panel.appendChild(std::move(b));
             }

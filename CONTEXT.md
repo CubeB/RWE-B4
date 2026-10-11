@@ -485,6 +485,29 @@ between them and the game; `TaHostLobbyScene` is the panel; `GameScene_tahost`
 is the in-game half. `docs/TA-NETWORK.md`, "Hosting a game".
 _Avoid_: lobby (that is the battleroom), listen server, master
 
+**Game list** (`SELGAME.GUI`):
+RWE's multiplayer front end follows TotalA.exe's own screens -- MULTI,
+`SELPROV.GUI` (the connection), `TCP.GUI` (an address, or blank to scan),
+`SELGAME.GUI` (the games, with New and Join), `NEWMULTI.GUI` (name the game)
+-- and then the skirmish screen standing in for the battleroom, which RWE does
+not have. A host is the editable screen advertising a lobby; a guest is the
+same screen as a read-only **mirror**, re-applied from the host's
+announcement every update so that it cannot hold a stale copy of a lobby
+(which would be a desync). The logic with no window in it is
+`MainMenuScene_multiplayer.{h,cpp}`; `ui_probe --multiplayer` and
+`--multiplayer-flow` check the screens and the host/guest flow.
+_Avoid_: lobby (the announcement is a lobby on the wire; the screen is the
+list), server browser
+
+**Seat claim**:
+How a guest asks a host for a seat: a one-seat announcement whose session is
+the host's, `-g`, and a token of the guest's own. The host seats the claim
+on the seat it names if that seat is open and says so by listing it `network`
+with the token in the seat's `personality`; the guest recognises its seat by
+that token, because it cannot know the address the host saw it from. A seat
+nobody claims, or a claim that goes quiet, is open again.
+_Avoid_: join request, handshake (that is the TA session's)
+
 ### The instruments
 
 **Harness**:

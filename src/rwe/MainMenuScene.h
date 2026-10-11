@@ -17,10 +17,11 @@
 #include <rwe/ui/UiFactory.h>
 #include <rwe/ui/UiPanel.h>
 #include <rwe/render/SpriteSeries.h>
-#include <rwe/net/LanDiscovery.h>
 
 namespace rwe
 {
+    struct MultiplayerFlow;
+
     class MainMenuScene : public Scene
     {
     private:
@@ -90,6 +91,9 @@ namespace rwe
             TdfBlock* audioLookup,
             float width,
             float height);
+
+        /** Out of line: the multiplayer flow is a type only the .cpp that defines it knows. */
+        ~MainMenuScene() override;
 
         MainMenuScene(const MainMenuScene&) = delete;
         MainMenuScene& operator=(const MainMenuScene&) = delete;
@@ -179,6 +183,30 @@ namespace rwe
          */
         void goToMultiplayerMenu();
 
+        /**
+         * The original's route to a network game, which is where MULTI goes:
+         * SELPROV.GUI (the connection), TCP.GUI (an address), SELGAME.GUI
+         * (the games, with New and Join), NEWMULTI.GUI (name the game), and
+         * then the setup screen as the battleroom's stand-in.
+         */
+        void goToSelectConnectionMenu();
+
+        /**
+         * Handles a popped panel that belongs to the multiplayer flow
+         * (leaving the list goes back to the address dialog, and so on).
+         * True if it did, in which case the panel stack has been dealt with.
+         */
+        bool multiplayerGoBack();
+
+        /**
+         * A message from one of the multiplayer screens, or from the setup
+         * screen while it is a lobby. True if it was dealt with.
+         */
+        bool multiplayerMessage(const std::string& topic, const std::string& message, const ActivateMessage& details);
+
+        /** Once a frame: the list refreshes, the host announces, the guest follows. */
+        void updateMultiplayer();
+
         /** The screen shared by both, given which one it is being built for. */
         void goToPlayerSetupMenu(bool multiplayer);
 
@@ -241,67 +269,64 @@ namespace rwe
 
     private:
         /**
-         * Finds other machines' lobbies on this LAN, and says what this
-         * machine is offering while it sits on the multiplayer screen. Only
-         * the multiplayer screen runs it: a skirmish has nobody to find, and
-         * holding a socket open through the campaign and the menus would
-         * make this machine visible for no reason.
+         * The multiplayer screens' state: discovery, the game list, the
+         * host's session or the guest's claim. Present from MULTI until the
+         * main menu is back or a game starts; defined in
+         * MainMenuScene_multiplayer.cpp, where the logic is too.
          */
-        LanDiscovery lanDiscovery;
+        std::unique_ptr<MultiplayerFlow> multiplayerFlow;
 
-        /** Whether lanDiscovery has been started for the current menu. */
-        bool discoveryRunning{false};
+        /** The name last given on the list or the new-game screen, offered again next time. */
+        std::string rememberedNickname;
 
-        /** What the list box is showing, so a selection can be mapped back to a game. */
-        std::vector<DiscoveredGame> discoveredGames;
+        bool isMultiplayerGuest() const;
+        bool isMultiplayerHost() const;
+
+        /** The address dialog over the connection screen. */
+        void openTcpAddressDialog();
+        void confirmTcpAddress();
+
+        /** SELGAME.GUI, with discovery listening. */
+        void openGameList();
+        void updateGameList();
+        void joinSelectedGame();
+
+        /** NEWMULTI.GUI, and the host's side of its Next button. */
+        void openNewGameScreen();
+        void confirmNewGame();
 
         /**
-         * Starts advertising and listening, if this is the multiplayer
-         * screen and it is not already running.
+         * Host: advertises the lobby as it now is, seats guests as they ask,
+         * and runs the second or two in which the guests are told to start.
          */
-        void startDiscoveryIfMultiplayer();
+        void updateHostedLobby();
 
-        /** Stops it, if running. Safe to call on any screen. */
-        void stopDiscoveryIfRunning();
+        /** Guest: mirrors the host's announcement, and follows it into the game. */
+        void updateJoinedLobby();
 
-        /** Re-reads lobbies from lanDiscovery into the list box on the top panel. */
-        void refreshDiscoveredGames();
+        /** Pops back to the game list from the setup screen, saying why if it was not by choice. */
+        void returnToGameList(const std::string& message);
 
-        /** Joins whichever lobby the list box has selected. */
-        void joinSelectedLanGame();
+        /** Ends the multiplayer visit: discovery stopped, the setup screen's state put back. */
+        void endMultiplayer();
 
-        /** Opens the LAN games dialog over the setup screen. */
-        void openLanGameBrowser();
+        /** Host pressed Start: checked now, then the guests are told for a couple of seconds, then it starts. */
+        void beginHostedLaunch();
+
+        /** Greys out and locks what a guest may not change on the setup screen. */
+        void lockMirroredControls();
+
+        /** Writes the model's network addresses into the setup screen's address boxes. */
+        void showAddressesInBoxes();
+
+        /** What the name button of a seat says: the person's name, or the kind of seat. */
+        std::string captionForSeat(int playerIndex) const;
 
         /**
-         * Adds the LAN games list box and its Join button to the multiplayer
-         * setup screen, in the band below the player table.
+         * Everything startGame checks and builds, short of starting: nothing
+         * if there is a problem, in which case the screen has said so.
          */
-        void attachDiscoveryComponents(UiPanel& panel, const std::shared_ptr<SpriteSeries>& font);
-
-        /**
-         * startGame, with discovery already stopped. Split out because Start
-         * is not the only way off the setup screen, and every way off it has
-         * to stop discovery.
-         */
-        void startGameBody();
-
-        /**
-         * The seat this machine should take in a game somebody else is
-         * advertising: the first seat the announcer is not playing itself,
-         * which is to say the first one left Open. A two-player lobby
-         * advertises one seat as human -- the host's -- and leaves the other
-         * open, so that is the seat handed out.
-         */
-        static std::optional<int> seatOfferedByOthers(const DiscoveredGame& game);
-
-        /** Fills the model from a lobby somebody else is advertising. */
-        void joinDiscoveredGame(const DiscoveredGame& game);
-
-        /**
-         * What this machine is currently offering on the LAN.
-         */
-        DiscoveredGame advertisedLobby() const;
+        std::optional<GameParameters> prepareGameParameters();
 
     private:
         AudioService::LoopToken startBgm();
