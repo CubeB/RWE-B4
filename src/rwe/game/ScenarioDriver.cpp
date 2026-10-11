@@ -6,7 +6,6 @@
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/SimVector.h>
 #include <rwe/sim/UnitOrder.h>
-#include <rwe/ui/UiIdleBuilderSign.h>
 #include <rwe/ui/UiPanel.h>
 #include <rwe/ui/UiStagedButton.h>
 #include <rwe/util/SimpleLogger.h>
@@ -482,22 +481,7 @@ namespace rwe
 
     UiComponent* ScenarioDriver::findGadget(const std::string& name)
     {
-        if (auto* button = findStagedButton(name))
-        {
-            return button;
-        }
-
-        // RWE's own controls are not in any side's gui file and carry no side
-        // prefix, so they are matched whole.
-        if (auto* panel = scene.currentPanel.get())
-        {
-            if (auto sign = panel->find<UiIdleBuilderSign>(name))
-            {
-                return &sign->get();
-            }
-        }
-
-        return nullptr;
+        return findStagedButton(name);
     }
 
     std::optional<Point> ScenarioDriver::gadgetCentre(const std::string& name)
@@ -526,21 +510,5 @@ namespace rwe
             return GadgetState{};
         }
         return GadgetState{true, button->isToggledOn()};
-    }
-
-    std::optional<int> ScenarioDriver::idleBuilderCount()
-    {
-        auto* panel = scene.currentPanel.get();
-        if (panel == nullptr)
-        {
-            return std::nullopt;
-        }
-
-        auto sign = panel->find<UiIdleBuilderSign>(GameScene::IdleBuilderSignName);
-        if (!sign)
-        {
-            return std::nullopt;
-        }
-        return sign->get().getIdleBuilderCount();
     }
 }

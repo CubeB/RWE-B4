@@ -666,7 +666,6 @@ namespace rwe
             CHECK(computer.side);
             CHECK(computer.colour);
             CHECK(computer.team);
-            CHECK(computer.personality);
             CHECK_FALSE(computer.ready);
 
             auto open = seatControls(RoomRole::Host, Type::Open, false);
@@ -684,7 +683,6 @@ namespace rwe
             CHECK_FALSE(guest.colour);
             CHECK_FALSE(guest.team);
             CHECK_FALSE(guest.ready);
-            CHECK_FALSE(guest.personality);
         }
 
         SECTION("a guest chooses for itself, says it is ready, and touches nothing else")
@@ -704,7 +702,6 @@ namespace rwe
                 CHECK_FALSE(other.colour);
                 CHECK_FALSE(other.team);
                 CHECK_FALSE(other.ready);
-                CHECK_FALSE(other.personality);
             }
         }
 

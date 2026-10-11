@@ -240,8 +240,6 @@ namespace rwe
         bool colour{false};
         bool team{false};
         bool ready{false};
-        /** A computer player's personality, which only the host chooses. */
-        bool personality{false};
     };
 
     /**
