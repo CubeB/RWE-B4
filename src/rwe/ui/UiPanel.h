@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <algorithm>
+#include <array>
 #include <rwe/observable/Subject.h>
 #include <rwe/ui/UiComponent.h>
 
@@ -39,6 +40,16 @@ namespace rwe
          * the texture in those boxes comes from.
          */
         std::optional<std::shared_ptr<Sprite>> plateTile;
+
+        /**
+         * The nine frames of a multi-frame frame sequence -- `BackTile` is one
+         * -- laid out as a 3x3 patch: corners, edges and the middle, in rows
+         * of three (frames 0 1 2 / 3 4 5 / 6 7 8). Where it is set it is used
+         * in place of plateTile and the flat fill and outline are not drawn:
+         * the frames carry their own bevel, which is why tiling frame 0 alone
+         * gave a dialog a grid of bevelled squares.
+         */
+        std::optional<std::array<std::shared_ptr<Sprite>, 9>> plateFrames;
 
     public:
         UiPanel(int posX, int posY, unsigned int sizeX, unsigned int sizeY);
@@ -87,6 +98,9 @@ namespace rwe
         void setDrawSolidPlate(bool draw) { drawSolidPlate = draw; }
 
         void setPlateTile(std::shared_ptr<Sprite> tile) { plateTile = std::move(tile); }
+
+        /** Draws the plate as a 3x3 patch of these nine frames; see plateFrames. */
+        void setPlateFrames(std::array<std::shared_ptr<Sprite>, 9> frames) { plateFrames = std::move(frames); }
 
         /** Names the buttons Enter and Escape press; empty for none. */
         void setDefaultButtons(const std::string& cr, const std::string& esc)

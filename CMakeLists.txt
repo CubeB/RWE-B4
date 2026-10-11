@@ -749,6 +749,8 @@ src/rwe/net/EndpointFamily.h
     src/rwe/sim/util.cpp
     src/rwe/sim/sim_prof.h
     src/rwe/sim/util.h
+    src/rwe/ui/NinePatch.cpp
+    src/rwe/ui/NinePatch.h
     src/rwe/ui/UiComponent.cpp
     src/rwe/ui/UiComponent.h
     src/rwe/ui/UiFactory.cpp
@@ -1279,6 +1281,7 @@ set(TEST_FILES
     src/rwe/util/SpanStream.test.cpp
     src/rwe/util/range_util.test.cpp
     src/rwe/util/rwe_string.test.cpp
+    src/rwe/ui/NinePatch.test.cpp
     src/rwe/ui/UiComponent.test.cpp
     src/rwe/ui/UiTextBox.test.cpp
     src/rwe/ui/UiTextRegion.test.cpp

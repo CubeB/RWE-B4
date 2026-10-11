@@ -1,4 +1,5 @@
 #include "UiFactory.h"
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -35,6 +36,33 @@ namespace rwe
     UiFactory::UiFactory(TextureService* textureService, AudioService* audioService, TdfBlock* soundLookup, AbstractVirtualFileSystem* vfs, const PathMapping* const pathMapping, int screenWidth, int screenHeight)
         : textureService(textureService), audioService(audioService), soundLookup(soundLookup), vfs(vfs), pathMapping(pathMapping), screenWidth(screenWidth), screenHeight(screenHeight)
     {
+    }
+
+    namespace
+    {
+        /**
+         * A dialog is composed on a surface of its own width and height, and
+         * a gadget that lies wholly outside that surface is simply never
+         * seen -- ARMOPT.GUI has its "GAME OPTIONS" caption at x=161 on a
+         * dialog 128 wide, which the original never shows. Drawn here it
+         * floated out over the battlefield. Hidden, it takes no click either,
+         * which is what not being on the surface means.
+         */
+        void hideIfOutsideDialog(UiComponent& element, const GuiEntry& entry, const GuiEntry& dialog)
+        {
+            const int width = static_cast<int>(entry.common.width);
+            const int height = static_cast<int>(entry.common.height);
+            if (width <= 0 || height <= 0)
+            {
+                return;
+            }
+            const int x = entry.common.xpos;
+            const int y = entry.common.ypos;
+            if (x >= static_cast<int>(dialog.common.width) || y >= static_cast<int>(dialog.common.height) || x + width <= 0 || y + height <= 0)
+            {
+                element.setVisible(false);
+            }
+        }
     }
 
     std::unique_ptr<UiPanel> UiFactory::panelFromGuiFile(const std::string& name, const std::string& background, const std::vector<GuiEntry>& entries)
@@ -84,6 +112,7 @@ namespace rwe
 
             elem->setName(entry.common.name);
             elem->setGroup(entry.common.assoc);
+            hideIfOutsideDialog(*elem, entry, panelEntry);
 
             panel->appendChild(std::move(elem));
         }
@@ -144,6 +173,7 @@ namespace rwe
 
             elem->setName(entry.common.name);
             elem->setGroup(entry.common.assoc);
+            hideIfOutsideDialog(*elem, entry, panelEntry);
 
             panel->appendChild(std::move(elem));
         }
@@ -267,7 +297,19 @@ namespace rwe
             // rather than nothing.
             if (auto tile = textureService->getGuiTexture(name, plateTileName))
             {
-                panel->setPlateTile((*tile)->sprites.at(0));
+                const auto& sprites = (*tile)->sprites;
+                if (sprites.size() >= 9)
+                {
+                    // BackTile is nine frames, not one: a 3x3 patch with the
+                    // bevel painted on its edge and corner frames.
+                    std::array<std::shared_ptr<Sprite>, 9> frames;
+                    std::copy_n(sprites.begin(), 9, frames.begin());
+                    panel->setPlateFrames(std::move(frames));
+                }
+                else
+                {
+                    panel->setPlateTile(sprites.at(0));
+                }
             }
         }
 
