@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <rwe/math/det_math.h>
 
 namespace rwe
 {
@@ -27,21 +28,21 @@ namespace rwe
 
     SimScalar rweAtan2(SimScalar a, SimScalar b)
     {
-        return SimScalar(std::atan2(a.value, b.value));
+        return SimScalar(detAtan2(a.value, b.value));
     }
 
     SimScalar rweCos(SimScalar v)
     {
-        return SimScalar(std::cos(v.value));
+        return SimScalar(detCos(v.value));
     }
 
     SimScalar rweSin(SimScalar v)
     {
-        return SimScalar(std::sin(v.value));
+        return SimScalar(detSin(v.value));
     }
 
     SimScalar rweAcos(SimScalar v)
     {
-        return SimScalar(std::acos(v.value));
+        return SimScalar(detAcos(v.value));
     }
 }

@@ -2,6 +2,7 @@
 #include <cmath>
 #include <rwe/cob/CobPosition.h>
 #include <rwe/fixed_point.h>
+#include <rwe/math/det_math.h>
 #include <rwe/math/rwe_math.h>
 
 namespace rwe
@@ -24,13 +25,13 @@ namespace rwe
 
     int cobAtan(int a, int b)
     {
-        auto result = RadiansAngle::fromUnwrappedAngle(std::atan2(fromFixedPoint(a), fromFixedPoint(b)));
+        auto result = RadiansAngle::fromUnwrappedAngle(detAtan2(fromFixedPoint(a), fromFixedPoint(b)));
         return static_cast<int>(toCobAngle(result).value);
     }
 
     CobPosition cobHypot(CobPosition a, CobPosition b)
     {
-        return CobPosition::fromFloat(std::hypot(a.toFloat(), b.toFloat()));
+        return CobPosition::fromFloat(detHypot(a.toFloat(), b.toFloat()));
     }
 
     RadiansAngle toRadians(CobAngle angle)

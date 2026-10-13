@@ -1,5 +1,6 @@
 #include "SimAngle.h"
 #include <cmath>
+#include <rwe/math/det_math.h>
 #include <rwe/math/rwe_math.h>
 
 namespace rwe
@@ -14,23 +15,23 @@ namespace rwe
     }
     SimAngle atan(SimScalar v)
     {
-        return fromRadians(RadiansAngle::fromUnwrappedAngle(std::atan(v.value)));
+        return fromRadians(RadiansAngle::fromUnwrappedAngle(detAtan(v.value)));
     }
     SimAngle atan2(SimScalar a, SimScalar b)
     {
-        return fromRadians(RadiansAngle::fromUnwrappedAngle(std::atan2(a.value, b.value)));
+        return fromRadians(RadiansAngle::fromUnwrappedAngle(detAtan2(a.value, b.value)));
     }
     SimScalar hypot(SimScalar a, SimScalar b)
     {
-        return SimScalar(std::hypot(a.value, b.value));
+        return SimScalar(detHypot(a.value, b.value));
     }
     SimScalar cos(SimAngle a)
     {
-        return SimScalar(std::cos(toRadians(a).value));
+        return SimScalar(detCos(toRadians(a).value));
     }
     SimScalar sin(SimAngle a)
     {
-        return SimScalar(std::sin(toRadians(a).value));
+        return SimScalar(detSin(toRadians(a).value));
     }
     SimAngle angleBetween(SimAngle a, SimAngle b)
     {

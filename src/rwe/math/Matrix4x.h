@@ -295,7 +295,7 @@ namespace rwe
         /** Anti-clockwise rotation about the X axis. */
         static Matrix4x rotationX(Val angle)
         {
-            return rotationX(std::sin(angle), std::cos(angle));
+            return rotationX(rweSin(angle), rweCos(angle));
         }
 
         static Matrix4x rotationX(Val sinAngle, Val cosAngle)
@@ -330,7 +330,7 @@ namespace rwe
         /** Anti-clockwise rotation about the Y axis. */
         static Matrix4x rotationY(Val angle)
         {
-            return rotationY(std::sin(angle), std::cos(angle));
+            return rotationY(rweSin(angle), rweCos(angle));
         }
 
         /** Anti-clockwise rotation about the Y axis. */
@@ -366,7 +366,7 @@ namespace rwe
         /** Anti-clockwise rotation about the Z axis. */
         static Matrix4x rotationZ(Val angle)
         {
-            return rotationZ(std::sin(angle), std::cos(angle));
+            return rotationZ(rweSin(angle), rweCos(angle));
         }
 
         static Matrix4x rotationZ(Val sinAngle, Val cosAngle)

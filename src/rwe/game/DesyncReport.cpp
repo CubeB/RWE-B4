@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <iomanip>
+#include <rwe/BuildIdentity.h>
 #include <rwe/config.h>
 #include <rwe/game/dump_util.h>
 #include <rwe/sim/GameSimulation.h>
@@ -98,6 +99,13 @@ namespace rwe
                     {"hashes", hashes},
                     {"build", ProjectNameVersion},
                     {"commit", GitHash},
+                    // "build" and "commit" are what CMake saw when the tree was
+                    // last configured, and read as an older commit for as long
+                    // as nobody re-ran it -- a report from 2026-10-13 named
+                    // 950e38c7 for an executable that held 81db7443's code.
+                    // This is what the lobby compares: regenerated at every
+                    // build, so it is the commit the executable was made from.
+                    {"buildIdentity", buildIdentity()},
                 }},
             {"state", dumpJson(simulation)},
         };

@@ -4,6 +4,7 @@
 #include <iostream>
 #include <memory>
 #include <rwe/AudioService.h>
+#include <rwe/BuildIdentity.h>
 #include <rwe/ColorPalette.h>
 #include <rwe/GlobalConfig.h>
 #include <rwe/LoadingScene.h>
@@ -141,6 +142,7 @@ namespace rwe
     {
         LOG_INFO << ProjectNameVersion;
         LOG_INFO << "Commit: " << GitHash;
+        LOG_INFO << "Build identity: " << buildIdentity();
         LOG_INFO << "Current directory: " << fs::current_path().string();
 
         TimeService timeService(getTimestamp());

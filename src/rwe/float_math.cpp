@@ -1,6 +1,7 @@
 #include "float_math.h"
 
 #include <cmath>
+#include <rwe/math/det_math.h>
 
 namespace rwe
 {
@@ -16,21 +17,21 @@ namespace rwe
 
     float rweCos(float v)
     {
-        return std::cos(v);
+        return detCos(v);
     }
 
     float rweSin(float v)
     {
-        return std::sin(v);
+        return detSin(v);
     }
 
     float rweAcos(float v)
     {
-        return std::acos(v);
+        return detAcos(v);
     }
 
     float rweAtan2(float a, float b)
     {
-        return std::atan2(a, b);
+        return detAtan2(a, b);
     }
 }

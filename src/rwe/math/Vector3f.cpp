@@ -1,6 +1,7 @@
 #include "Vector3f.h"
 #include <algorithm>
 
+#include <rwe/math/det_math.h>
 #include <rwe/math/rwe_math.h>
 
 namespace rwe
@@ -17,7 +18,7 @@ namespace rwe
         // acos is only defined between -1 and 1
         // but float rounding error can nudge us over.
         // clamp to prevent this from causing problems.
-        auto angle = std::acos(std::clamp(cosAngle, -1.0f, 1.0f));
+        auto angle = detAcos(std::clamp(cosAngle, -1.0f, 1.0f));
         auto det = determinant(lhs, rhs, normal);
         return angle * (det > 0.0f ? 1.0f : -1.0f);
     }

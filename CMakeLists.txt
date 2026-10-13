@@ -541,6 +541,8 @@ set(SOURCE_FILES
     src/rwe/math/Vector3f.cpp
     src/rwe/math/Vector3f.h
     src/rwe/math/Vector3x.h
+    src/rwe/math/det_math.cpp
+    src/rwe/math/det_math.h
     src/rwe/math/rwe_math.cpp
     src/rwe/math/rwe_math.h
     src/rwe/mesh_util.cpp
@@ -823,7 +825,11 @@ set_target_properties(librwe PROPERTIES PREFIX "")
 if(MSVC)
     target_compile_options(librwe PUBLIC "/std:c++20" "/EHsc")
 else()
-    target_compile_options(librwe PUBLIC "-Wall" "-Wextra")
+    # Contraction off, so that a multiply and an add are never fused into
+    # one rounding on a machine that has the instruction and left as two on
+    # one that has not: math/det_math.h is bit-identical across toolchains
+    # only if nothing downstream of it is allowed to differ either.
+    target_compile_options(librwe PUBLIC "-Wall" "-Wextra" "-ffp-contract=off")
 endif()
 
 # Warnings are errors only where the tree has been shown to be clean. It
@@ -1216,6 +1222,7 @@ set(TEST_FILES
     src/rwe/sim/aircraftbuild.test.cpp
     src/rwe/sim/brakerate.test.cpp
     src/rwe/sim/cob.test.cpp
+    src/rwe/math/det_math.test.cpp
     src/rwe/sim/SimAngle.test.cpp
     src/rwe/sim/SimVector.test.cpp
     src/rwe/sim/UnitBehaviorService_air.test.cpp
