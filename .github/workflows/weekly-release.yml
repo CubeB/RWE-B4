@@ -1,0 +1,109 @@
+name: Weekly Release
+
+# A dated pre-release of `revival` every week, so there is a week-by-week
+# archive of playable builds between the version tags. The `nightly` job in
+# build.yml is the same build with a shorter memory -- one rolling release
+# whose assets are replaced on every push -- and this is the one that keeps
+# its history.
+#
+# Nothing is built here. The three assets are the ones `build.yml` already
+# produces, called the same way `release.yml` calls it, and the tag-push and
+# push-to-revival jobs inside it are both skipped under `schedule`, so a call
+# from here builds, uploads and stops. This workflow owns the release.
+on:
+  schedule:
+    # Monday 06:00 UTC, early in the working week and clear of the weekend's
+    # commits still landing.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # `contents: write` because `build.yml` declares it on the two jobs a tag
+    # push or a `revival` push would run; a called workflow may use no more
+    # than the caller grants, and release.yml grants the same for the same
+    # reason.
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: write
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Full history and tags: the notes are the commits since the last
+          # weekly, and that tag is read back from the ref list.
+          fetch-depth: 0
+      - name: download MSVC Release zip
+        uses: actions/download-artifact@v7
+        with:
+          name: RWE Zip Windows MSVC Release
+          path: dist
+      - name: download MSVC Release installer
+        uses: actions/download-artifact@v7
+        with:
+          name: RWE Installer Windows MSVC Release
+          path: dist
+      - name: download AppImage
+        uses: actions/download-artifact@v7
+        with:
+          name: RWE AppImage
+          path: dist
+      - name: write release notes
+        id: notes
+        shell: bash
+        run: |
+          sha=$(git rev-parse HEAD)
+          short=$(git rev-parse --short HEAD)
+          date=$(date -u +%Y-%m-%d)
+          tag="weekly-$date"
+          echo "date=$date" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "short=$short" >> "$GITHUB_OUTPUT"
+          # `weekly-YYYY-MM-DD` sorts chronologically as text, so the newest
+          # existing tag is the last one. These are the only tags of their
+          # shape, so nothing else is caught by the glob.
+          prev=$(git tag -l 'weekly-*' | sort | tail -n1)
+          if [ -n "$prev" ] && [ "$(git rev-list -n1 "$prev")" = "$sha" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "revival has not moved since $prev; nothing to publish."
+            exit 0
+          fi
+          {
+            echo "Weekly snapshot of \`revival\`."
+            echo
+            echo "**Commit:** [\`$sha\`](https://github.com/${{ github.repository }}/commit/$sha)"
+            echo
+            echo "Built $(date -u '+%Y-%m-%d %H:%M UTC')."
+            echo
+            if [ -z "$prev" ]; then
+              echo "_First weekly build._"
+            else
+              echo "### Changes since $prev"
+              echo
+              git log --no-merges --pretty='- %s (%h)' "$prev..HEAD"
+            fi
+          } > "$RUNNER_TEMP/weekly-notes.md"
+      - name: publish weekly pre-release
+        if: steps.notes.outputs.skip != 'true'
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          # A dated tag of its own per week, deliberately not `v*`: release.yml
+          # fires on `v*` and would build every one of these a second time.
+          tag_name: ${{ steps.notes.outputs.tag }}
+          name: Weekly ${{ steps.notes.outputs.date }}
+          target_commitish: ${{ github.sha }}
+          # Published, and a pre-release so it never takes the "Latest" badge
+          # from a version tag.
+          prerelease: true
+          make_latest: "false"
+          body_path: ${{ runner.temp }}/weekly-notes.md
+          files: dist/*
+          fail_on_unmatched_files: true
