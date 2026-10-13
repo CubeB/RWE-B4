@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <random>
+#include <rwe/BuildIdentity.h>
 #include <rwe/MultiplayerSetup.h>
 #include <rwe/TextureService.h>
 #include <rwe/net/InviteCode.h>
@@ -356,6 +357,7 @@ namespace rwe
 
             SeatClaim claim;
             claim.token = g.session.substr(prefix.size());
+            claim.build = g.build;
             claim.seat = g.slots.front().index;
             claim.name = g.slots.front().name.empty() ? g.hostName : g.slots.front().name;
             claim.name = claim.name.substr(0, maxPlayerNameLength);
@@ -2010,7 +2012,11 @@ namespace rwe
             {
                 const auto& g = flow.games[*row];
                 text = g.hostName.empty() ? std::string("Hosted at ") + g.sourceAddress : "Hosted by " + g.hostName;
-                if (!g.passwordHash.empty())
+                if (!buildsCompatible(flow.discovery.buildIdentity(), g.build))
+                {
+                    text += ". Version " + shortBuildIdentity(g.build) + ", not " + shortBuildIdentity(flow.discovery.buildIdentity()) + ": cannot join.";
+                }
+                else if (!g.passwordHash.empty())
                 {
                     text += ". Enter its password to join.";
                 }
@@ -2095,6 +2101,14 @@ namespace rwe
         if (game.launching)
         {
             openMessageBox("That game has already started");
+            return;
+        }
+
+        // Another build is another simulation. Better said here than as a
+        // desync at tick one, which reads as the engine's fault.
+        if (!buildsCompatible(flow.discovery.buildIdentity(), game.build))
+        {
+            openMessageBox("That game is version " + shortBuildIdentity(game.build) + " and this is " + shortBuildIdentity(flow.discovery.buildIdentity()));
             return;
         }
 
@@ -2887,6 +2901,27 @@ namespace rwe
             }
             if (std::find(flow.removedTokens.begin(), flow.removedTokens.end(), claim.token) != flow.removedTokens.end())
             {
+                continue;
+            }
+
+            // A guest on another build would start a game that desyncs at
+            // its first tick, and be reported as a fault in the engine. It
+            // is not seated, and the room is told why, once.
+            const auto hostBuild = flow.discovery.buildIdentity();
+            if (!buildsCompatible(hostBuild, claim.build))
+            {
+                if (std::find(flow.refusedTokens.begin(), flow.refusedTokens.end(), claim.token) == flow.refusedTokens.end())
+                {
+                    if (flow.refusedTokens.size() >= 32)
+                    {
+                        flow.refusedTokens.erase(flow.refusedTokens.begin());
+                    }
+                    flow.refusedTokens.push_back(claim.token);
+                    const auto who = claim.name.empty() ? std::string("A player") : claim.name;
+                    flow.chat.say(std::string(), who + " cannot join: it is version " + shortBuildIdentity(claim.build));
+                    flow.chat.say(std::string(), "This is version " + shortBuildIdentity(hostBuild));
+                    LOG_INFO << "Refused " << who << ": build " << shortBuildIdentity(claim.build) << ", this is " << shortBuildIdentity(hostBuild);
+                }
                 continue;
             }
 

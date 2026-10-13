@@ -1,4 +1,5 @@
 #include "LanDiscovery.h"
+#include <rwe/BuildIdentity.h>
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -594,6 +595,11 @@ namespace rwe
         {
             out += "\npw=" + game.passwordHash;
         }
+        if (!game.build.empty())
+        {
+            if (!isPlausibleBuildIdentity(game.build)) return std::nullopt;
+            out += "\nbuild=" + game.build;
+        }
         if (!game.gameAddress.empty())
         {
             if (game.gameAddress.size() > maxGameAddressLength) return std::nullopt;
@@ -764,6 +770,13 @@ namespace rwe
                 // hash that needs an escape is not one.
                 if (!isValidPasswordHash(value)) return std::nullopt;
                 game.passwordHash = value;
+            }
+            else if (key == "build")
+            {
+                // Hex or it is not one; a value that is neither is a lobby
+                // that is not read, like any other bad field.
+                if (!isPlausibleBuildIdentity(value)) return std::nullopt;
+                game.build = value;
             }
             else if (key == "gaddr")
             {
@@ -1602,8 +1615,28 @@ namespace rwe
         return {"255.255.255.255", "127.0.0.1"};
     }
 
-    void LanDiscovery::advertise(const DiscoveredGame& game)
+    void LanDiscovery::setBuildIdentity(std::string identity)
     {
+        std::scoped_lock<std::mutex> lock(mutex);
+        announcedBuild = std::move(identity);
+    }
+
+    std::string LanDiscovery::buildIdentity() const
+    {
+        std::scoped_lock<std::mutex> lock(mutex);
+        return announcedBuild.empty() ? ::rwe::buildIdentity() : announcedBuild;
+    }
+
+    void LanDiscovery::advertise(const DiscoveredGame& advertisedGame)
+    {
+        // Everything this machine says is stamped with which build said it,
+        // so that no caller can forget to.
+        DiscoveredGame game = advertisedGame;
+        if (game.build.empty())
+        {
+            game.build = buildIdentity();
+        }
+
         // Encoded before the lock is taken: this is the comparison that
         // says whether anything changed, and it is also the only part of
         // this call that is not a handful of assignments.

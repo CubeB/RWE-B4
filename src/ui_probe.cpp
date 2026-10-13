@@ -1124,6 +1124,77 @@ int main(int argc, char* argv[])
                     check(hostFlow != nullptr && !hostFlow->nat.heardFrom().empty(), "the host's game port has heard the guest's");
                     check(guestFlow != nullptr && !guestFlow->nat.heardFrom().empty(), "the guest's game port has heard the host's");
                 }
+
+            // ---- another build ----
+            //
+            // The host from the section above is still in its battleroom. A
+            // guest that is a different build is told so, on the list and
+            // when it presses Join, and is not seated; and a claim from a
+            // build that did not check, which is what an older one is, is
+            // refused by the host and said to the room.
+            std::cout << "---- a guest on another build\n";
+            {
+                MainMenuScene staleGuest(context, &emptySoundLookup, 640, 480);
+                staleGuest.init();
+                MenuProbe::useLocalNetwork(staleGuest, 1363, "1373", "127.0.0.1:1");
+
+                auto runBoth = [&](double seconds) {
+                    auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(static_cast<int>(seconds * 1000));
+                    while (std::chrono::steady_clock::now() < end)
+                    {
+                        invHost.update(16);
+                        staleGuest.update(16);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                    }
+                };
+
+                staleGuest.messageNow("MAINMENU", "MULTI", ActivateMessage{});
+                staleGuest.messageNow("SELPROV", "SELECT", ActivateMessage{});
+                staleGuest.onTextInput("127.0.0.1:1361");
+                staleGuest.messageNow("TCP", "OK", ActivateMessage{});
+                runBoth(2.0);
+
+                MenuProbe::flow(staleGuest)->discovery.setBuildIdentity("abcdef0123456789abcdef0123456789abcdef01");
+
+                click(staleGuest, 250, 355);
+                staleGuest.onTextInput("Stale");
+                click(staleGuest, 40, 128);
+                runBoth(0.3);
+                std::cout << "  help line: '" << helpLine(staleGuest) << "'\n";
+                check(helpLine(staleGuest).find("cannot join") != std::string::npos, "the list says the game is another version");
+
+                press(staleGuest, "stale guest", "SELGAME", "JOINGAME");
+                runBoth(0.3);
+                std::cout << "  dialog: '" << dialogText(staleGuest) << "'\n";
+                check(dialogText(staleGuest).find("version") != std::string::npos, "pressing Join says the version is not the host's");
+                check(panelName(staleGuest) == "SELGAME", "the guest has not left the list");
+                press(staleGuest, "stale guest", "MSGBOX", "OK");
+                runBoth(1.0);
+                check(!contains(transcript(invHost), "Stale has joined"), "the host has not seated it");
+
+                // What an older build does: claims without having looked. A
+                // claim naming another build, made by hand.
+                LanDiscovery older;
+                older.start(1364);
+                older.setAnnounceTargets({"127.0.0.1:1361"});
+                older.probe("127.0.0.1:1361");
+                runBoth(1.0);
+                const auto heardGames = older.games();
+                const auto hostGame = std::find_if(heardGames.begin(), heardGames.end(), [](const auto& g) { return !isClaimSession(g.session) && g.label == "Across the sea"; });
+                check(hostGame != heardGames.end(), "the hand-made guest can see the host's game");
+                if (hostGame != heardGames.end())
+                {
+                    auto claim = claimAnnouncement(*hostGame, 4, std::string(claimTokenLength, 'a'), "Antique", 1374);
+                    claim.build = "0123456789abcdef0123456789abcdef01234567";
+                    older.advertise(claim);
+                    runBoth(2.0);
+                    const auto lines = transcript(invHost);
+                    check(std::any_of(lines.begin(), lines.end(), [](const std::string& l) { return l.find("Antique cannot join") != std::string::npos; }),
+                        "the host says the other build was turned away");
+                    check(!contains(lines, "Antique has joined"), "and did not seat it");
+                }
+                older.stop();
+            }
             }
 
             observer.stop();

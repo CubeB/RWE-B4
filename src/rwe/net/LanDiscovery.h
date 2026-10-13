@@ -97,6 +97,16 @@ namespace rwe
         std::string hostName{};
 
         /**
+         * Which build of the game announced this: the commit it was made
+         * from (BuildIdentity.h), at most 42 characters of hex and `-d`, or
+         * empty from a build that predates the field. A machine stamps its
+         * own on everything it advertises, so a reader can refuse a lobby
+         * -- or a guest -- that would desync at the first tick. Wire key
+         * `build`.
+         */
+        std::string build{};
+
+        /**
          * Where the announcing machine's game port is as the internet sees
          * it, `a.b.c.d:port`. Empty unless that machine has gone to the
          * trouble of finding out, which it does only to be reached from
@@ -267,6 +277,14 @@ namespace rwe
          * arrived because of a change and not because a timer went off.
          */
         void setAnnounceInterval(std::chrono::milliseconds newInterval);
+
+        /**
+         * The build this machine announces itself as: buildIdentity() unless
+         * set. Only a test or a probe that wants two builds in one process
+         * has any reason to set it.
+         */
+        void setBuildIdentity(std::string identity);
+        std::string buildIdentity() const;
 
         /**
          * Advertises a lobby until stop(). Safe to call before start(); it
@@ -582,6 +600,8 @@ namespace rwe
         std::vector<AnnounceTarget> announceTargets;
 
         ForeignDatagramHandler foreignHandler;
+
+        std::string announcedBuild;
 
         /** See sendersHeard(). */
         std::vector<asio::ip::udp::endpoint> senders;

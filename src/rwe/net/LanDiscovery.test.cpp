@@ -51,6 +51,29 @@ namespace rwe
             }
         }
 
+        SECTION("the build that announced a lobby survives, and a value that is not one is refused")
+        {
+            auto game = sampleGame();
+            game.build = "927583c7f41d1c64a91c8d75d2a3a4f5b8a0e111-d";
+            auto text = LanDiscovery::encode(game);
+            REQUIRE(text);
+            auto back = LanDiscovery::decode(*text);
+            REQUIRE(back);
+            CHECK(back->build == game.build);
+
+            // Nothing is what a build from before the field says.
+            auto older = LanDiscovery::decode(*LanDiscovery::encode(sampleGame()));
+            REQUIRE(older);
+            CHECK(older->build.empty());
+
+            game.build = "not a build";
+            CHECK_FALSE(LanDiscovery::encode(game));
+
+            auto forged = *LanDiscovery::encode(sampleGame());
+            forged += "\nbuild=<script>";
+            CHECK_FALSE(LanDiscovery::decode(forged));
+        }
+
         SECTION("the game address behind a router survives, and is nothing when absent")
         {
             auto game = sampleGame();

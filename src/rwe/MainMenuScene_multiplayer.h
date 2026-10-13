@@ -159,6 +159,8 @@ namespace rwe
         int seat{-1};
         std::string name;
         std::string address;
+        /** The build the guest runs, as it announced it; empty from one that predates the field. */
+        std::string build;
 
         /**
          * What the guest has chosen for its own seat, as it announced it:
@@ -590,6 +592,8 @@ namespace rwe
         std::vector<std::string> punchReported;
         /** Host: the guests' addresses that have been heard from on the discovery socket. */
         std::vector<std::string> heardReported;
+        /** Host: claims turned away for being another build, said to the room once each. */
+        std::vector<std::string> refusedTokens;
 
         /** The name this machine plays under, once one has been given. */
         std::string nickname;
