@@ -390,6 +390,76 @@ namespace rwe
         REQUIRE(entry["hitPoints"] == 55);
     }
 
+    TEST_CASE("a feature hashes by its definition's name, not by its place in the table")
+    {
+        // Two peers on the same map with different extra content number the
+        // same wreck differently, and the hash used to read the number. It
+        // desynced at tick 1 with every other field equal.
+        const auto build = [](bool otherFirst) {
+            auto sim = std::make_unique<GameSimulation>(makeFlatTerrain(32, 32), 0u, 0, 0);
+
+            FeatureDefinition other{};
+            other.name = "something_this_machine_also_has";
+            other.footprintX = 1;
+            other.footprintZ = 1;
+            other.height = 1_ss;
+
+            FeatureDefinition rock{};
+            rock.name = "rock";
+            rock.footprintX = 1;
+            rock.footprintZ = 1;
+            rock.height = 1_ss;
+            rock.damage = 55u;
+
+            FeatureDefinitionId rockId;
+            if (otherFirst)
+            {
+                sim->featureDefinitions.insert(other);
+                rockId = sim->featureDefinitions.insert(rock);
+            }
+            else
+            {
+                rockId = sim->featureDefinitions.insert(rock);
+                sim->featureDefinitions.insert(other);
+            }
+            REQUIRE(sim->addFeature(rockId, 4, 4).has_value());
+            return sim;
+        };
+
+        auto a = build(false);
+        auto b = build(true);
+        REQUIRE(a->features.begin()->second.featureName != b->features.begin()->second.featureName);
+        REQUIRE(computeHashOf(*a) == computeHashOf(*b));
+
+        // And the name is read: a different feature in the same place is a different game.
+        auto c = build(false);
+        FeatureDefinition tree{};
+        tree.name = "tree";
+        tree.footprintX = 1;
+        tree.footprintZ = 1;
+        tree.height = 1_ss;
+        tree.damage = 55u;
+        auto treeId = c->featureDefinitions.insert(tree);
+        c->features.begin()->second.featureName = treeId;
+        REQUIRE(computeHashOf(*a) != computeHashOf(*c));
+    }
+
+    TEST_CASE("the simulation dump names the definitions its feature numbers stand for")
+    {
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
+        FeatureDefinition def{};
+        def.name = "rock";
+        def.footprintX = 1;
+        def.footprintZ = 1;
+        def.height = 1_ss;
+        sim.featureDefinitions.insert(def);
+
+        auto dumped = dumpJson(sim);
+        REQUIRE(dumped.contains("featureDefinitions"));
+        REQUIRE(dumped["featureDefinitions"].size() == 1);
+        REQUIRE(dumped["featureDefinitions"][0]["name"] == "rock");
+    }
+
     TEST_CASE("every field a projectile's hash reads is one the dump writes")
     {
         // The same fault as the features one, a field at a time rather than a

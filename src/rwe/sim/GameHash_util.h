@@ -113,7 +113,19 @@ namespace rwe
 
     GameHash computeHashOf(const DiscreteRect& r);
 
-    GameHash computeHashOf(const MapFeature& f);
+    /**
+     * A feature, by what it is called and not by where it sits in a table.
+     *
+     * `MapFeature::featureName` is an index into the loader's table of
+     * definitions, numbered in the order the loader met them, and that order
+     * is a property of one machine's data: how many other units a machine has,
+     * and how its unordered containers happened to fall. Two peers playing
+     * the same map with different extra content hold the same wreck under
+     * different numbers, and a hash that read the number desynced at tick 1
+     * with every other field equal (2026-10-13, two real machines). The
+     * definition's name is what both agree on.
+     */
+    GameHash computeHashOf(const MapFeature& f, const std::string& definitionName);
     GameHash computeHashOf(const UnitState::AirWorkOrbitState& s);
     GameHash computeHashOf(const UnitState::AirLoiterState& s);
 

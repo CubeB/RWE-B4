@@ -352,10 +352,10 @@ namespace rwe
             s.bearing);
     }
 
-    GameHash computeHashOf(const MapFeature& f)
+    GameHash computeHashOf(const MapFeature& f, const std::string& definitionName)
     {
         return combineHashes(
-            f.featureName,
+            definitionName,
             f.position,
             f.rotation,
             f.velocity,
@@ -427,12 +427,22 @@ namespace rwe
 
     GameHash computeHashOf(const GameSimulation& simulation)
     {
+        // Folded the way the container helper folds a VectorMap -- the id
+        // and the value of each entry, summed -- except that a feature is
+        // read through its definition's name. See computeHashOf(MapFeature).
+        GameHash featuresHash(0);
+        for (const auto& entry : simulation.features)
+        {
+            featuresHash += computeHashOf(entry.first)
+                + computeHashOf(entry.second, simulation.getFeatureDefinition(entry.second.featureName).name);
+        }
+
         return combineHashes(
             simulation.gameTime,
             simulation.players,
             simulation.units,
             simulation.projectiles,
-            simulation.features,
+            featuresHash,
             simulation.currentWindVector,
             simulation.featureRegrowthCursor,
             // The explored grid is per line-of-sight group and feeds canSeeUnit

@@ -75,5 +75,15 @@ namespace rwe
         {
             return Id(vec.size());
         }
+
+        const_iterator begin() const
+        {
+            return vec.begin();
+        }
+
+        const_iterator end() const
+        {
+            return vec.end();
+        }
     };
 }

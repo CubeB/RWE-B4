@@ -330,10 +330,12 @@ namespace rwe
     }
     nlohmann::json dumpJson(const MapFeature& f)
     {
-        // Mirrors computeHashOf(const MapFeature&) field for field and in its
-        // order. If one of them grows a field the other must, which is the
-        // whole point of the pairing; GameHash_util.test.cpp holds them
-        // together.
+        // Mirrors computeHashOf(const MapFeature&, name) field for field and
+        // in its order. If one of them grows a field the other must, which is
+        // the whole point of the pairing; GameHash_util.test.cpp holds them
+        // together. featureName is the table index; what the hash reads is the
+        // name it stands for, which dumpJson(const GameSimulation&) writes
+        // alongside, as "featureDefinitions".
         return nlohmann::json{
             {"featureName", dumpJson(f.featureName)},
             {"position", dumpJson(f.position)},
@@ -538,6 +540,23 @@ namespace rwe
             {"featureRegrowthCursor", simulation.featureRegrowthCursor},
             {"explored", dumpJson(simulation.explored)},
         };
+
+        // What each "featureName" above stands for. The number is a table
+        // index and means nothing on another machine; the name is what the
+        // hash reads, and a count or a name that differs between two peers'
+        // reports says their game data is not the same.
+        {
+            auto definitions = nlohmann::json::array();
+            unsigned int index = 0;
+            for (const auto& definition : simulation.featureDefinitions)
+            {
+                definitions.push_back(nlohmann::json{
+                    {"id", index++},
+                    {"name", definition.name},
+                });
+            }
+            j["featureDefinitions"] = std::move(definitions);
+        }
         // Only in a mission, so a skirmish's dump is what it was.
         if (simulation.missionRules)
         {
