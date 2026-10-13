@@ -1084,6 +1084,15 @@ namespace rwe
         const auto& sender = v6 ? currentSender6 : currentSender;
         auto text = std::string(buffer.data(), bytes);
 
+        {
+            std::scoped_lock<std::mutex> lock(mutex);
+            constexpr std::size_t maxSenders = 32;
+            if (std::find(senders.begin(), senders.end(), sender) == senders.end() && senders.size() < maxSenders)
+            {
+                senders.push_back(sender);
+            }
+        }
+
         // A probe is exactly its fixed text, with or without the newline.
         // Anything else is not one, and falls through to being read as an
         // announcement, which it will not be.
@@ -1209,6 +1218,12 @@ namespace rwe
             return false;
         }
         return true;
+    }
+
+    std::vector<asio::ip::udp::endpoint> LanDiscovery::sendersHeard() const
+    {
+        std::scoped_lock<std::mutex> lock(mutex);
+        return senders;
     }
 
     void LanDiscovery::setForeignDatagramHandler(ForeignDatagramHandler handler)

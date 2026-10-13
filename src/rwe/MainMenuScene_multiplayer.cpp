@@ -3268,7 +3268,20 @@ namespace rwe
             // The lobby is sent to it from now on, which is what opens this
             // side's router to a machine that has been sending to it.
             flow.discovery.setAnnounceTargets(flow.invitedGuests);
-            flow.chat.say(std::string(), "Reply code accepted. Waiting for that player...");
+
+            // The same outside address as this computer's own is a machine
+            // behind the same router, which is reached on the LAN and which
+            // most routers will not send a packet back across.
+            const auto mine = flow.nat.status().discoveryAddress;
+            if (mine && mine->address() == reply->address())
+            {
+                flow.chat.say(std::string(), "That code is on this router. It joins from the LAN list.");
+            }
+            else
+            {
+                flow.chat.say(std::string(), "Reply code accepted (" + address + "). Waiting for that player...");
+            }
+            LOG_INFO << "Invite: reply code names " << address << ", announcing to it";
             return true;
         }
 
@@ -3292,6 +3305,7 @@ namespace rwe
                 flow.inviteRequested = false;
                 if (const auto code = InviteCode::encode(*status.discoveryAddress))
                 {
+                    flow.inviteAddress = InviteCode::toAddressString(*status.discoveryAddress);
                     copyToClipboard(*code);
                     flow.chat.say(std::string(), "Invite code: " + *code + " (copied)");
                     flow.chat.say(std::string(), "Send it, then paste the reply code you get back here.");
@@ -3304,13 +3318,59 @@ namespace rwe
             }
         }
 
-        // Guest: the code to send back.
-        if (flow.invited && flow.replyCode.empty() && status.phase == NatTraversal::Phase::Ready && status.discoveryAddress)
+        // Host: the router moved this computer's discovery socket, which
+        // makes the code that was given out name a port that is nobody's.
+        if (flow.role == MultiplayerFlow::Role::Host && !flow.inviteRequested && !flow.inviteAddress.empty()
+            && status.phase == NatTraversal::Phase::Ready && status.discoveryAddress
+            && InviteCode::toAddressString(*status.discoveryAddress) != flow.inviteAddress)
         {
+            flow.inviteAddress = InviteCode::toAddressString(*status.discoveryAddress);
             if (const auto code = InviteCode::encode(*status.discoveryAddress))
             {
-                flow.replyCode = *code;
                 copyToClipboard(*code);
+                flow.chat.say(std::string(), "Your address changed. New invite code: " + *code);
+            }
+        }
+
+        // Guest: the code to send back, and a new one if the address moved.
+        if (flow.invited && status.phase == NatTraversal::Phase::Ready && status.discoveryAddress)
+        {
+            const auto address = InviteCode::toAddressString(*status.discoveryAddress);
+            if (flow.replyCode.empty() || address != flow.replyAddress)
+            {
+                if (const auto code = InviteCode::encode(*status.discoveryAddress))
+                {
+                    flow.replyCode = *code;
+                    flow.replyAddress = address;
+                    copyToClipboard(*code);
+                }
+            }
+        }
+
+        // Host: say when anything has arrived from a machine whose reply
+        // code was taken. That is the first moment anybody can tell that the
+        // route is open, and what separates a router that is dropping the
+        // guest's packets from a lobby that is not letting it in.
+        if (flow.role == MultiplayerFlow::Role::Host && !flow.invitedGuests.empty())
+        {
+            for (const auto& sender : flow.discovery.sendersHeard())
+            {
+                const auto ip = sender.address().to_string();
+                const auto text = InviteCode::toAddressString(sender);
+                if (std::find(flow.heardReported.begin(), flow.heardReported.end(), ip) != flow.heardReported.end())
+                {
+                    continue;
+                }
+                for (const auto& invited : flow.invitedGuests)
+                {
+                    if (hostPartOf(invited) == ip)
+                    {
+                        flow.heardReported.push_back(ip);
+                        flow.chat.say(std::string(), "Hearing from " + text);
+                        LOG_INFO << "Invite: first datagram from " << text << " on the discovery socket";
+                        break;
+                    }
+                }
             }
         }
 

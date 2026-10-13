@@ -578,12 +578,18 @@ namespace rwe
         std::string replyCode;
         /** Host: the invite was asked for and is waiting on the lookup. */
         bool inviteRequested{false};
+        /** Host: the address the code last given out names, so a move of it is noticed. */
+        std::string inviteAddress;
+        /** Guest: the address the reply code names. */
+        std::string replyAddress;
         /** Host: the discovery address of each guest whose reply code was pasted. */
         std::vector<std::string> invitedGuests;
         /** The punch targets last handed to `nat`, so only a change is sent. */
         std::vector<std::string> punchTargetsGiven;
         /** Host: the addresses whose first datagram has been said to the room. */
         std::vector<std::string> punchReported;
+        /** Host: the guests' addresses that have been heard from on the discovery socket. */
+        std::vector<std::string> heardReported;
 
         /** The name this machine plays under, once one has been given. */
         std::string nickname;

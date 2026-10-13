@@ -323,6 +323,16 @@ namespace rwe
         void setForeignDatagramHandler(ForeignDatagramHandler handler);
 
         /**
+         * The addresses datagrams have been received from, of any kind --
+         * announcements, probes, STUN answers -- oldest first, without
+         * repeats and bounded. It exists so that a person pasting a code can
+         * be told that something has arrived from the machine it named
+         * before there is a lobby to show for it: the difference between "the
+         * route is shut" and "the route is open and the rest is wrong".
+         */
+        std::vector<asio::ip::udp::endpoint> sendersHeard() const;
+
+        /**
          * Sends one datagram of the caller's own from the discovery socket,
          * so that it leaves with the same source port discovery uses. True
          * if it was handed to the socket. Callable from any thread once
@@ -572,6 +582,9 @@ namespace rwe
         std::vector<AnnounceTarget> announceTargets;
 
         ForeignDatagramHandler foreignHandler;
+
+        /** See sendersHeard(). */
+        std::vector<asio::ip::udp::endpoint> senders;
         std::chrono::milliseconds interval{announceInterval};
 
         /** Session id -> what was heard. Ordered by first sight. */

@@ -1063,8 +1063,10 @@ int main(int argc, char* argv[])
                 runInternet(1.0);
                 {
                     const auto lines = transcript(invHost);
-                    check(std::any_of(lines.begin(), lines.end(), [](const std::string& l) { return l.find("Reply code accepted") != std::string::npos; }),
-                        "the host is told the reply code was taken");
+                    // Both ends are 127.0.0.1 here, which is exactly "the same
+                    // router", so that is the sentence the host is given.
+                    check(std::any_of(lines.begin(), lines.end(), [](const std::string& l) { return l.find("That code is on this router") != std::string::npos; }),
+                        "the host is told when the reply is from its own router");
                     check(!contains(lines, replyCode), "the reply code is not said to the room as chat");
                 }
 

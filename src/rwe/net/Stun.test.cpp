@@ -317,6 +317,47 @@ namespace rwe
             CHECK(sent[0].first == serverB);
         }
 
+        SECTION("a refresh keeps the old address until the new answers land, then follows the router")
+        {
+            probe.begin({serverA, serverB}, t0);
+            REQUIRE(probe.onDatagram(response(idOf(0), ep("203.0.113.5", 40001)).data(), 32, serverA, t0));
+            REQUIRE(probe.onDatagram(response(idOf(1), ep("203.0.113.5", 40001)).data(), 32, serverB, t0));
+            REQUIRE(probe.state() == stun::ReflexiveProbe::State::Done);
+
+            sent.clear();
+            probe.refresh(t0 + std::chrono::seconds(4));
+            REQUIRE(sent.size() == 2);
+            CHECK(sent[0].first == serverA);
+            CHECK(sent[1].first == serverB);
+            // New ids, so that an old answer arriving late is not mistaken.
+            CHECK(idOf(0) != stun::TransactionId{});
+
+            // Nothing has come back: the address stands, and so does the verdict.
+            REQUIRE(probe.mapped());
+            CHECK(*probe.mapped() == ep("203.0.113.5", 40001));
+            CHECK(probe.state() == stun::ReflexiveProbe::State::Done);
+
+            // The router has moved the socket: the answers carry the new port.
+            const auto first = response(idOf(0), ep("203.0.113.5", 52222));
+            const auto second = response(idOf(1), ep("203.0.113.5", 52222));
+            REQUIRE(probe.onDatagram(first.data(), first.size(), serverA, t0 + std::chrono::seconds(4)));
+            // One server has said the new port and one the old, which is not
+            // a router that gives each destination its own.
+            CHECK(probe.mapping() != stun::ReflexiveProbe::Mapping::EndpointDependent);
+            REQUIRE(probe.onDatagram(second.data(), second.size(), serverB, t0 + std::chrono::seconds(4)));
+            REQUIRE(probe.mapped());
+            CHECK(*probe.mapped() == ep("203.0.113.5", 52222));
+            CHECK(probe.mapping() == stun::ReflexiveProbe::Mapping::EndpointIndependent);
+        }
+
+        SECTION("a refresh before the first answers does nothing")
+        {
+            probe.begin({serverA}, t0);
+            sent.clear();
+            probe.refresh(t0 + std::chrono::seconds(1));
+            CHECK(sent.empty());
+        }
+
         SECTION("no servers is a failure at once")
         {
             probe.begin({}, t0);

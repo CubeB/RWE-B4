@@ -1,3 +1,4 @@
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/net/NatTraversal.h>
 #include <rwe/net/stun_test_util.h>
@@ -58,6 +59,48 @@ namespace rwe
             CHECK(*status.gameAddress == loopback(gamePort));
             CHECK(status.problem.empty());
 
+            nat.stop();
+        }
+
+        SECTION("an address the router has moved is followed, and the sockets are kept alive")
+        {
+            // A router drops a mapping that has carried nothing and makes
+            // another, at another port, when the socket next sends. A code
+            // that was made a minute ago then names nobody. The servers are
+            // asked again every keepaliveInterval, which both holds the
+            // mapping and notices that it moved.
+            std::atomic<int> shift{0};
+            FakeStunServer a([&shift](const udp::endpoint& from) {
+                return udp::endpoint(from.address(), static_cast<unsigned short>(from.port() + shift));
+            });
+            FakeStunServer b([&shift](const udp::endpoint& from) {
+                return udp::endpoint(from.address(), static_cast<unsigned short>(from.port() + shift));
+            });
+
+            LanDiscovery discovery;
+            discovery.start(discoveryPort + 7);
+            NatTraversal nat(discovery);
+            nat.keepaliveInterval = std::chrono::milliseconds(100);
+            nat.start(gamePort + 7, std::vector<udp::endpoint>{a.endpoint(), b.endpoint()});
+
+            REQUIRE(waitUntil([&]() { return nat.status().phase == NatTraversal::Phase::Ready; }));
+            REQUIRE(nat.status().discoveryAddress);
+            CHECK(*nat.status().discoveryAddress == loopback(discoveryPort + 7));
+
+            // Asked again and again, from both sockets, with nobody changing anything.
+            const auto before = a.requests();
+            REQUIRE(waitUntil([&]() { return a.requests() >= before + 6; }));
+            CHECK(nat.status().phase == NatTraversal::Phase::Ready);
+
+            shift = 11;
+            REQUIRE(waitUntil([&]() {
+                const auto s = nat.status();
+                return s.discoveryAddress && s.gameAddress
+                    && s.discoveryAddress->port() == discoveryPort + 7 + 11
+                    && s.gameAddress->port() == gamePort + 7 + 11;
+            }));
+            // Both servers moved together, so it is still a router that can be punched.
+            CHECK(nat.status().phase == NatTraversal::Phase::Ready);
             nat.stop();
         }
 

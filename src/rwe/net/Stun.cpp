@@ -299,11 +299,18 @@ namespace rwe::stun
         // sixty-odd bits nobody off the path has seen, and the address check
         // is what stops one server's answer being counted for another.
         auto query = std::find_if(queries.begin(), queries.end(), [&](const Query& q) {
-            return q.id == response->id && sameEndpoint(q.server, from);
+            return (q.id == response->id || (q.refreshId && *q.refreshId == response->id)) && sameEndpoint(q.server, from);
         });
         if (query == queries.end())
         {
             return false;
+        }
+
+        if (query->refreshId && *query->refreshId == response->id)
+        {
+            query->answer = response->mapped;
+            query->refreshId.reset();
+            return true;
         }
 
         if (!query->answer)
@@ -344,6 +351,24 @@ namespace rwe::stun
         }
     }
 
+    void ReflexiveProbe::refresh(Timestamp now)
+    {
+        (void)now;
+        if (currentState != State::Done || !send)
+        {
+            return;
+        }
+        for (auto& q : queries)
+        {
+            if (!q.answer)
+            {
+                continue;
+            }
+            q.refreshId = randomTransactionId();
+            send(q.server, makeBindingRequest(*q.refreshId));
+        }
+    }
+
     void ReflexiveProbe::settleIfDue(Timestamp now)
     {
         if (currentState != State::Pending)
@@ -370,11 +395,18 @@ namespace rwe::stun
     std::optional<asio::ip::udp::endpoint> ReflexiveProbe::mapped() const
     {
         // The address the most servers agreed on; ties go to the one heard
-        // first in the list, which is the one asked first.
+        // first in the list, which is the one asked first. A server whose
+        // refresh is still in the air is left out while any other has
+        // answered, so that a router that has just moved this socket is
+        // not read as half of each.
+        const auto usable = [&](const Query& q) { return q.answer && !q.refreshId; };
+        const bool anySettled = std::any_of(queries.begin(), queries.end(), usable);
+        const auto counts = [&](const Query& q) { return anySettled ? usable(q) : q.answer.has_value(); };
+
         std::map<asio::ip::udp::endpoint, int> votes;
         for (const auto& q : queries)
         {
-            if (q.answer)
+            if (counts(q))
             {
                 ++votes[*q.answer];
             }
@@ -388,7 +420,7 @@ namespace rwe::stun
         int bestVotes = 0;
         for (const auto& q : queries)
         {
-            if (q.answer && votes[*q.answer] > bestVotes)
+            if (counts(q) && votes[*q.answer] > bestVotes)
             {
                 best = q.answer;
                 bestVotes = votes[*q.answer];
@@ -403,7 +435,8 @@ namespace rwe::stun
         std::size_t answers = 0;
         for (const auto& q : queries)
         {
-            if (!q.answer)
+            // Not one whose refresh is in the air: see mapped().
+            if (!q.answer || q.refreshId)
             {
                 continue;
             }

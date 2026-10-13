@@ -62,6 +62,26 @@ A LAN game never starts any of this: `NatTraversal` is idle until `/invite` or a
 code is entered, and `gaddr` is only believed by a machine that is itself
 traversing, so a LAN guest keeps using the source address.
 
+## Keeping the address true
+
+A router drops a mapping that has carried nothing, and makes another -- at another
+port -- the next time the socket sends. On a carrier's NAT that can be ten seconds.
+A code is read out a minute after it was made, so the first version of this, which
+asked STUN once, handed out ports that were nobody's by the time they were used
+(found on the first real test, 2026-10-13: the host said "Waiting for that player..."
+for ever). `NatTraversal` now asks the servers again every `keepaliveInterval` (4 s)
+from both sockets. That keeps both mappings alive, and `ReflexiveProbe::refresh`
+follows the answers: if the router moved the socket the status changes, and the
+lobby says `Your address changed. New invite code: ...` on the host, and shows a new
+reply code on the guest.
+
+The host's room also says what it can tell: `Reply code accepted (a.b.c.d:port)`,
+then `Hearing from a.b.c.d:port` when anything has arrived on the discovery socket
+from that address (the route is open), then `X is reachable directly` when the game
+port's datagram has. Stuck before the second line means the guest's packets are not
+getting through; stuck after it means the route is fine and something above it is not.
+A reply from the host's own outside address is said to be on the same router.
+
 ## Peer address learning
 
 The lobby's address for a peer is the outside port STUN reported, and it can

@@ -72,6 +72,16 @@ namespace rwe
         /** How often a punch target is sent to. */
         static constexpr std::chrono::milliseconds punchInterval{400};
 
+        /**
+         * How often the STUN servers are asked again once the addresses are
+         * known. A mapping that carries nothing is dropped by the router --
+         * on a carrier's in as little as ten seconds -- and a code that was
+         * read out a minute after it was made would otherwise name a port
+         * the router has since given to nobody. Settable before start() so
+         * that a test can see a change without waiting.
+         */
+        std::chrono::milliseconds keepaliveInterval{4000};
+
         /** Hooks `discovery`, which must outlive this and be started before start(). */
         explicit NatTraversal(LanDiscovery& discovery);
         ~NatTraversal();

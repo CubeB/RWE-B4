@@ -134,8 +134,15 @@ namespace rwe
         const auto discoveryState = discoveryProbe->state();
         const auto gameState = gameProbe->state();
 
-        current.discoveryAddress = discoveryProbe->mapped();
-        current.gameAddress = gameProbe->mapped();
+        const auto discoveryNow = discoveryProbe->mapped();
+        const auto gameNow = gameProbe->mapped();
+        if (discoveryNow != current.discoveryAddress || gameNow != current.gameAddress)
+        {
+            const auto text = [](const std::optional<asio::ip::udp::endpoint>& e) { return e ? describe(*e) : std::string("unknown"); };
+            LOG_INFO << "NAT traversal: discovery socket is " << text(discoveryNow) << ", game port is " << text(gameNow);
+        }
+        current.discoveryAddress = discoveryNow;
+        current.gameAddress = gameNow;
 
         if (discoveryState == stun::ReflexiveProbe::State::Pending || gameState == stun::ReflexiveProbe::State::Pending)
         {
@@ -282,6 +289,7 @@ namespace rwe
 
             std::array<char, 2048> buffer{};
             auto lastPunch = getTimestamp() - punchInterval;
+            auto lastKeepalive = getTimestamp();
 
             while (!stopRequested)
             {
@@ -340,6 +348,19 @@ namespace rwe
                     {
                         targets = punchTargets;
                         lastPunch = now;
+                    }
+
+                    if (now - lastKeepalive >= keepaliveInterval)
+                    {
+                        lastKeepalive = now;
+                        if (discoveryProbe)
+                        {
+                            discoveryProbe->refresh(now);
+                        }
+                        if (gameProbe)
+                        {
+                            gameProbe->refresh(now);
+                        }
                     }
                 }
 

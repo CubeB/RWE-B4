@@ -140,6 +140,19 @@ namespace rwe::stun
         /** Repeats what is unanswered and settles or fails the probe. */
         void tick(Timestamp now);
 
+        /**
+         * Asks every server that has answered once more, from the same
+         * socket, and keeps the last answers until the new ones land.
+         *
+         * A router forgets a mapping that has carried nothing for a while --
+         * ten seconds on some carriers' -- and makes a new one, at another
+         * port, the next time the socket sends. An address found once and
+         * written on a card is then somebody else's. Sending one of these a
+         * few seconds apart is both what keeps the mapping alive and what
+         * notices that it moved: mapped() follows the answers.
+         */
+        void refresh(Timestamp now);
+
         State state() const { return currentState; }
         Mapping mapping() const;
 
@@ -154,6 +167,8 @@ namespace rwe::stun
             asio::ip::udp::endpoint server;
             TransactionId id{};
             std::optional<asio::ip::udp::endpoint> answer;
+            /** Set while a refresh of this query is in the air. */
+            std::optional<TransactionId> refreshId;
         };
 
         void sendUnanswered();
