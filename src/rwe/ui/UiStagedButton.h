@@ -124,6 +124,12 @@ namespace rwe
 
         unsigned int getStage() const { return currentStage; }
 
+        /** The face a stage is drawn with, or null past the last stage. */
+        std::shared_ptr<Sprite> getStageSprite(unsigned int index) const
+        {
+            return index < stages.size() ? stages[index].sprite : nullptr;
+        }
+
         /** The caption of stage `index`, or an empty one past the last. */
         const std::string& getStageLabel(unsigned int index) const;
 

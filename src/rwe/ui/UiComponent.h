@@ -87,6 +87,13 @@ namespace rwe
         void setX(int x) { posX = x; }
         void setY(int y) { posY = y; }
 
+        /**
+         * Sets the width of the component. For a gadget the data gives a
+         * width that is too narrow for what RWE puts in it -- a status line
+         * whose longest message wrapped off the bottom of the screen.
+         */
+        void setWidth(unsigned int width) { sizeX = width; }
+
         virtual void mouseDown(MouseButtonEvent /*event*/) {}
 
         virtual void mouseUp(MouseButtonEvent /*event*/) {}

@@ -10,12 +10,45 @@ namespace rwe
         switch (alignment)
         {
             case Alignment::Left:
-                context.drawTextWrapped(Rectangle2f::fromTopLeft(posX, posY + 12.0f, sizeX, sizeY), text, *font);
+                if (singleLine)
+                {
+                    context.drawText(static_cast<float>(posX), posY + 12.0f, fittedToWidth(context), *font);
+                }
+                else
+                {
+                    context.drawTextWrapped(Rectangle2f::fromTopLeft(posX, posY + 12.0f, sizeX, sizeY), text, *font);
+                }
                 break;
             case Alignment::Center:
                 context.drawTextCentered(posX, posY, text, *font);
                 break;
         }
+    }
+
+    std::string UiLabel::fittedToWidth(UiRenderService& context) const
+    {
+        const auto limit = static_cast<float>(sizeX);
+        if (context.getTextWidth(text, *font) <= limit)
+        {
+            return text;
+        }
+
+        // Drop whole characters from the end until the rest and an ellipsis
+        // fit; a UTF-8 continuation byte is never left standing alone.
+        std::string shown = text;
+        while (!shown.empty())
+        {
+            do
+            {
+                shown.pop_back();
+            } while (!shown.empty() && (static_cast<unsigned char>(shown.back()) & 0xC0) == 0x80);
+
+            if (context.getTextWidth(shown + "...", *font) <= limit)
+            {
+                break;
+            }
+        }
+        return shown + "...";
     }
 
     UiLabel::UiLabel(int posX, int posY, unsigned int sizeX, unsigned int sizeY, const std::string& text, const std::shared_ptr<SpriteSeries>& font) : UiComponent(posX, posY, sizeX, sizeY), text(ensureUtf8(text)), font(font)
@@ -33,5 +66,10 @@ namespace rwe
     void UiLabel::setAlignment(Alignment newAlignment)
     {
         alignment = newAlignment;
+    }
+
+    void UiLabel::setSingleLine(bool value)
+    {
+        singleLine = value;
     }
 }

@@ -928,16 +928,26 @@ namespace rwe
             // with no face on it is.
             if (it == (*sprites)->sprites.end())
             {
-                const int tolerance = 8;
-                int bestDistance = tolerance + 1;
+                // The height may be off by a pixel or two as well as the
+                // width: NEWMULTI.GUI's Next and Previous are 119x21 and
+                // 119x19, one pixel either side of the 120x20 face the art
+                // has, and asking for the same height left both with no
+                // face at all. A height miss costs more than a width one so
+                // an exact height still wins.
+                const int widthTolerance = 8;
+                const int heightTolerance = 2;
+                const int heightWeight = 4;
+                int bestDistance = widthTolerance + (heightTolerance * heightWeight) + 1;
                 for (auto candidate = (*sprites)->sprites.begin(); candidate != (*sprites)->sprites.end(); ++candidate)
                 {
-                    if (static_cast<int>((*candidate)->bounds.height()) != height)
+                    const auto heightMiss = std::abs(static_cast<int>((*candidate)->bounds.height()) - height);
+                    const auto widthMiss = std::abs(static_cast<int>((*candidate)->bounds.width()) - width);
+                    if (heightMiss > heightTolerance || widthMiss > widthTolerance)
                     {
                         continue;
                     }
 
-                    auto distance = std::abs(static_cast<int>((*candidate)->bounds.width()) - width);
+                    const auto distance = widthMiss + (heightMiss * heightWeight);
                     if (distance < bestDistance)
                     {
                         bestDistance = distance;

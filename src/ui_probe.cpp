@@ -198,6 +198,32 @@ namespace
         }
     }
 
+    /**
+     * Every real button of a panel -- the 16-pixel lamps are not -- has a
+     * face of its own and not the blank default sprite. NEWMULTI's Next and
+     * Previous were 119x21 and 119x19 and had none, which the baked plate
+     * under them hid until the button was pressed. Returns how many are blank.
+     */
+    int expectButtonFaces(UiPanel& panel, TextureService& textures, const std::string& panelName)
+    {
+        const auto blank = textures.getDefaultSprite();
+        int blanks = 0;
+        panel.forAll<UiStagedButton>([&](UiStagedButton& b) {
+            if (b.getWidth() < 32 || b.getHeight() < 12 || b.getStageCount() == 0)
+            {
+                return;
+            }
+            const auto face = b.getStageSprite(0);
+            if (!face || face == blank)
+            {
+                std::cout << "  face " << panelName << "/" << b.getName() << " (" << b.getWidth() << "x" << b.getHeight() << "): BLANK\n";
+                ++blanks;
+            }
+        });
+        std::cout << "  faces " << panelName << ": " << (blanks == 0 ? "all buttons have art" : std::to_string(blanks) + " blank") << "\n";
+        return blanks;
+    }
+
     void printSelections(UiPanel& panel)
     {
         std::cout << "  selection by column:";
@@ -933,12 +959,15 @@ int main(int argc, char* argv[])
             graphics.disableDepthBuffer();
             graphics.enableBlending();
 
+            int blankFaces = 0;
+
             // ---- SELPROV ----
             {
                 auto panel = makeSelectConnectionPanel(factory);
                 printActivations(*panel);
                 dumpPanel(*panel, "SELPROV");
                 expectGadgets(*panel, {"DPLAY", "SLIDER", "SELECT", "PREVMENU"}, {"SETTINGS", "SERVICEX"});
+                blankFaces += expectButtonFaces(*panel, textureService, "SELPROV");
                 auto list = panel->find<UiListBox>("DPLAY");
                 std::cout << "  DPLAY rows=" << (list ? list->get().getItems().size() : 0)
                           << " first='" << (list && !list->get().getItems().empty() ? list->get().getItems()[0] : "") << "'"
@@ -969,6 +998,7 @@ int main(int argc, char* argv[])
                 printActivations(*tcp);
                 dumpPanel(*tcp, "TCP");
                 expectGadgets(*tcp, {"TEXT", "ADDRESS", "OK", "PREV"}, {});
+                blankFaces += expectButtonFaces(*tcp, textureService, "TCP");
                 auto address = tcp->find<UiTextBox>("ADDRESS");
                 if (address)
                 {
@@ -1001,6 +1031,16 @@ int main(int argc, char* argv[])
                 printActivations(*panel);
                 dumpPanel(*panel, "SELGAME");
                 expectGadgets(*panel, {"GAMENAME", "MAPNAME", "COMMANDER", "PING", "LOS", "FULLMAP", "METAL", "ENERGY", "PLAYERS", "STATUS", "SLIDER", "NICKNAME", "PASSWORD", "STARTNEW", "UPDATE", "JOINGAME", "PREVMENU", "HELPTEXT"}, {"WATCH"});
+                blankFaces += expectButtonFaces(*panel, textureService, "SELGAME");
+                if (auto help = panel->find<UiLabel>("HELPTEXT"))
+                {
+                    std::cout << "  HELPTEXT is " << help->get().getWidth() << " wide, to x=" << (help->get().getX() + static_cast<int>(help->get().getWidth())) << " of 640\n";
+                    if (help->get().getX() + static_cast<int>(help->get().getWidth()) < 600)
+                    {
+                        std::cout << "  FAIL  the status line does not reach the right of the screen\n";
+                        ++blankFaces;
+                    }
+                }
 
                 for (const char* name : {"NICKNAME", "PASSWORD"})
                 {
@@ -1102,6 +1142,7 @@ int main(int argc, char* argv[])
                 printActivations(*panel);
                 dumpPanel(*panel, "NEWMULTI");
                 expectGadgets(*panel, {"GAMENAME", "NICKNAME", "PASSWORD", "OK", "CANCEL"}, {});
+                blankFaces += expectButtonFaces(*panel, textureService, "NEWMULTI");
 
                 for (const char* name : {"GAMENAME", "NICKNAME", "PASSWORD"})
                 {
@@ -1140,6 +1181,11 @@ int main(int argc, char* argv[])
             }
 
             std::cout << "probe done\n";
+            if (blankFaces != 0)
+            {
+                std::cout << blankFaces << " problem(s) with button faces or the status line\n";
+                return 1;
+            }
             return 0;
         }
 

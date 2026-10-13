@@ -1302,6 +1302,19 @@ namespace rwe
         return panel;
     }
 
+    namespace
+    {
+        /** Makes a panel's HELPTEXT line one row, `width` pixels wide, clipped rather than wrapped. */
+        void widenStatusLine(UiPanel& panel, unsigned int width)
+        {
+            if (auto label = panel.find<UiLabel>("HELPTEXT"))
+            {
+                label->get().setWidth(width);
+                label->get().setSingleLine(true);
+            }
+        }
+    }
+
     std::unique_ptr<UiPanel> makeSelectGamePanel(UiFactory& factory)
     {
         auto panel = factory.panelFromGuiFile("SELGAME", "selectgame2x");
@@ -1323,6 +1336,13 @@ namespace rwe
         }
         useBakedPlate(*panel, "NICKNAME");
         useBakedPlate(*panel, "PASSWORD");
+
+        // The status line under the game list is the whole width of the
+        // screen. The file gives it 346 pixels, which the longest of its
+        // messages ("No games found on this network. Press New to host
+        // one.") does not fit, and it wrapped onto a second line below the
+        // bottom of the screen where nobody could read it.
+        widenStatusLine(*panel, 640 - 9 - 9);
 
         linkSelections(gameListBoxes(*panel));
 
@@ -1579,6 +1599,10 @@ namespace rwe
             // could press and that would do nothing, or worse.
             panel->removeChildrenNamed("START");
         }
+
+        // The status line along the bottom: as wide as the screen allows,
+        // which for the host stops short of the Start button.
+        widenStatusLine(*panel, role == RoomRole::Host ? 508 - 9 - 4 : 640 - 9 - 9);
 
         // -- typing --
         if (auto message = panel->find<UiTextBox>("MESSAGE"))
