@@ -242,6 +242,13 @@ namespace rwe
                 {
                     problem = "UDP port " + std::to_string(gamePort) + " is in use; is another game running?";
                     LOG_WARN << "NAT traversal: UDP port " << gamePort << " could not be opened: " << ec.message();
+
+                    // Closed, not left open: a socket that failed to bind is
+                    // still open and still blocking, and the receive below
+                    // returns at once on Windows and waits for ever on Linux
+                    // -- with stop() joining a thread that cannot hear it.
+                    asio::error_code ignored;
+                    socket.close(ignored);
                 }
             }
 
