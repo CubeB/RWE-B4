@@ -689,6 +689,21 @@ namespace rwe
 
     void MainMenuScene::onKeyDown(const SDL_KeyboardEvent& keysym)
     {
+        // Ctrl+V. An invite code is thirteen characters nobody is going to
+        // type correctly twice, and it arrives by chat or message.
+        if (keysym.key == SDLK_V && (keysym.mod & SDL_KMOD_CTRL) != 0)
+        {
+            if (char* clipboard = SDL_GetClipboardText())
+            {
+                std::string pasted(clipboard);
+                SDL_free(clipboard);
+                // The boxes are one line.
+                pasted.erase(std::remove_if(pasted.begin(), pasted.end(), [](char c) { return c == '\r' || c == '\n'; }), pasted.end());
+                topPanel().textInput(pasted);
+            }
+            return;
+        }
+
         topPanel().keyDown(KeyEvent(keysym.key));
     }
 

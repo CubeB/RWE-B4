@@ -109,6 +109,19 @@ namespace rwe
 
             networkService.addEndpoint(i, address->first, address->second);
         }
+
+        // Which seat this machine is, so a peer that was told the wrong port
+        // for it -- every peer behind a NAT was -- can tell whose packet has
+        // just arrived from somewhere unexpected and follow it there.
+        for (Index i = 0; i < getSize(gameParameters.players); ++i)
+        {
+            const auto& p = gameParameters.players[i];
+            if (p && std::visit(IsHumanVisitor(), p->controller))
+            {
+                networkService.setLocalSlot(static_cast<int>(i));
+                break;
+            }
+        }
         networkService.start(gameParameters.localNetworkPort);
 
         sceneContext.sceneManager->setNextScene(std::shared_ptr<Scene>(createGameScene(gameParameters.mapName, gameParameters.schemaIndex)));

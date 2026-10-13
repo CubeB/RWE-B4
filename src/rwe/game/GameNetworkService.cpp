@@ -463,28 +463,58 @@ namespace rwe
         }
 
         auto endpointIt = std::find_if(endpoints.begin(), endpoints.end(), [this](const auto& e) { return currentRemoteEndpoint == e.endpoint; });
-        if (endpointIt == endpoints.end())
-        {
-            // message was from some unknown address, ignore it
-            LOG_DEBUG << "Unknown address, ignoring";
-            return;
-        }
+        const bool knownAddress = endpointIt != endpoints.end();
 
         auto receivedCrc = readInt(&receiveBuffer[receivedBytes - 4]);
         auto computedCrc = computeCrc(receiveBuffer.data(), static_cast<unsigned int>(receivedBytes - 4));
         if (receivedCrc != computedCrc)
         {
-            LOG_ERROR << "Message CRC incorrect, ignoring";
+            if (knownAddress)
+            {
+                LOG_ERROR << "Message CRC incorrect, ignoring";
+            }
             return;
         }
 
         proto::NetworkMessage outerMessage;
-        outerMessage.ParseFromArray(receiveBuffer.data(), static_cast<int>(receivedBytes - 4));
+        if (!outerMessage.ParseFromArray(receiveBuffer.data(), static_cast<int>(receivedBytes - 4)))
+        {
+            LOG_DEBUG << "Message did not parse, ignoring";
+            return;
+        }
         if (!outerMessage.has_game_update())
         {
             // message wasn't a game update, ignore it
             LOG_DEBUG << "Not game update, ignoring";
             return;
+        }
+
+        if (!knownAddress)
+        {
+            // Not from where anybody was told to expect a peer. Behind a NAT
+            // that is the ordinary case and not an attack: the address the
+            // lobby gave was a guess at the port, and the mapping the router
+            // made for the peer's socket is wherever it put it. So a whole
+            // game update that names a peer, from the address that peer is
+            // already known at, moves that peer's endpoint here.
+            //
+            // The address has to match; only the port may differ. This is
+            // not authentication -- the CRC is not a MAC -- but spoofing the
+            // address was already all it took to inject packets, and another
+            // port of the same address gives an attacker nothing it lacked.
+            const PlayerId sender(outerMessage.game_update().player_id());
+            endpointIt = std::find_if(endpoints.begin(), endpoints.end(), [&](const auto& e) {
+                return e.playerId == sender && e.endpoint.address() == currentRemoteEndpoint.address();
+            });
+            if (endpointIt == endpoints.end())
+            {
+                LOG_DEBUG << "Unknown address, ignoring";
+                return;
+            }
+
+            LOG_INFO << "Player " << sender.value << " is sending from " << currentRemoteEndpoint.address().to_string() << ":" << currentRemoteEndpoint.port()
+                     << ", not " << endpointIt->endpoint.address().to_string() << ":" << endpointIt->endpoint.port() << "; following it";
+            endpointIt->endpoint = currentRemoteEndpoint;
         }
 
         endpointIt->link->onPacket(outerMessage.game_update(), receiveTime);

@@ -11,6 +11,13 @@ message LoadingStatusMessage
     }
 
     required Status status = 1;
+
+    // The sender's seat in the game's player list. A peer behind a NAT is
+    // reached at an address the lobby could only guess at, and the first
+    // packet that arrives from somewhere unexpected is how the receiver finds
+    // out where it really is -- but only if the packet says who sent it.
+    // Absent from a build that predates this, which is then never relearned.
+    optional uint32 sender_slot = 2;
 }
 
 message SimVector

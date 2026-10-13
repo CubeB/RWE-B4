@@ -97,6 +97,18 @@ namespace rwe
         std::string hostName{};
 
         /**
+         * Where the announcing machine's game port is as the internet sees
+         * it, `a.b.c.d:port`. Empty unless that machine has gone to the
+         * trouble of finding out, which it does only to be reached from
+         * behind another router: on a LAN the announcement's source address
+         * and `port` are the whole answer, and a reflexive address would be
+         * a worse one (a router rarely sends a packet back to itself).
+         * Wire key `gaddr`, at most 64 characters. The reader checks that
+         * its address is the announcement's own before believing it.
+         */
+        std::string gameAddress{};
+
+        /**
          * The password gate: empty for none, otherwise exactly 16 lower-case
          * hex characters as LanDiscovery::hashPassword produces them. Wire
          * key `pw`. See hashPassword for what this is, and is not, worth.
@@ -296,6 +308,27 @@ namespace rwe
          * was waiting for it goes out as soon as the lookup lands.
          */
         void setAnnounceTargets(const std::vector<std::string>& hostsAndPorts);
+
+        /**
+         * Receives what arrives on this socket that is not discovery
+         * traffic -- a STUN answer, which is why this exists: the address a
+         * router gave this socket is a fact about *this socket*, and the
+         * only way to ask is to send from it.
+         *
+         * Called on the network thread with no lock held, for every
+         * datagram that is neither a probe nor an announcement; return true
+         * if it was taken. It must not block, and it may call sendRaw().
+         */
+        using ForeignDatagramHandler = std::function<bool(const char* data, std::size_t size, const asio::ip::udp::endpoint& from)>;
+        void setForeignDatagramHandler(ForeignDatagramHandler handler);
+
+        /**
+         * Sends one datagram of the caller's own from the discovery socket,
+         * so that it leaves with the same source port discovery uses. True
+         * if it was handed to the socket. Callable from any thread once
+         * start() has returned.
+         */
+        bool sendRaw(const asio::ip::udp::endpoint& destination, const std::string& data);
 
         /**
          * Sessions currently advertising, newest announcement last. This
@@ -537,6 +570,8 @@ namespace rwe
 
         /** Where else to send it; see setAnnounceTargets. */
         std::vector<AnnounceTarget> announceTargets;
+
+        ForeignDatagramHandler foreignHandler;
         std::chrono::milliseconds interval{announceInterval};
 
         /** Session id -> what was heard. Ordered by first sight. */

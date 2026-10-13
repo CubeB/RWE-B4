@@ -360,6 +360,18 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
 
 ## Phase 3 — Multiplayer polish & launcher (≈ 2 months)
 
+- [x] **Friends across routers, with no server of ours** (2026-10-13, `docs/NAT-PUNCH.md`).
+      UPnP was built first and removed the same day: both of the maintainer's
+      connections are carrier-grade NAT (a 4G router and Starlink), where there is
+      no port to map and nobody to ask. What replaced it is STUN for an address
+      lookup, invite and reply codes (`RWE-XXXX-XXXX-XXXXX`) passed by the people, a
+      punch from the game port, and both transports following a peer that arrives
+      from another port of the same address. `/invite` in the battleroom; paste a
+      code in the TCP address dialog; Ctrl+V works in any box. Verified on loopback
+      by unit tests and `ui_probe --multiplayer-flow`; **not yet on two real
+      connections**, which is the one thing that is still owed. A router that gives
+      each destination its own port cannot be punched and is named as such.
+
 - [x] **Launcher dependency refresh** (2026-09-23, #11). Electron 22 to 44, React 16
       to 18, Material-UI v4 to MUI v7, Redux Toolkit, socket.io 2 to 4, ESLint 9 flat
       config, TypeScript 5.9, Jest 30, Storybook 6 to 10; `react-hot-loader` replaced

@@ -7,6 +7,7 @@
 #include <random>
 #include <rwe/MultiplayerSetup.h>
 #include <rwe/TextureService.h>
+#include <rwe/net/InviteCode.h>
 #include <rwe/rwe_time.h>
 #include <rwe/ui/UiFactory.h>
 #include <rwe/ui/UiLabel.h>
@@ -149,6 +150,7 @@ namespace rwe
         game.hostName = identity.hostName.substr(0, maxPlayerNameLength);
         game.passwordHash = identity.passwordHash;
         game.launching = identity.launching;
+        game.gameAddress = identity.gameAddress;
         game.options = optionsFromModel(model);
 
         // The newest lines only, which is all an announcement has room for.
@@ -357,7 +359,11 @@ namespace rwe
             claim.seat = g.slots.front().index;
             claim.name = g.slots.front().name.empty() ? g.hostName : g.slots.front().name;
             claim.name = claim.name.substr(0, maxPlayerNameLength);
-            claim.address = gameAddress(g.sourceAddress, g.port);
+            // A guest that has found its own outside address says so, and the
+            // host is the one reading it: a guest on another network is
+            // never at its source address and port 1337 -- the router put
+            // it wherever it liked.
+            claim.address = announcedGameAddress(g, true);
             claim.side = g.slots.front().side;
             claim.colour = g.slots.front().colour;
             claim.team = g.slots.front().team;
@@ -375,12 +381,14 @@ namespace rwe
         const std::string& name,
         unsigned int gamePort,
         const std::optional<GuestChoice>& choice,
-        const std::vector<DiscoveredChatLine>& chat)
+        const std::vector<DiscoveredChatLine>& chat,
+        const std::string& reachableAt)
     {
         DiscoveredGame claim;
         claim.session = claimSession(host.session, token);
         claim.map = host.map;
         claim.port = gamePort;
+        claim.gameAddress = reachableAt;
         claim.hostName = name.substr(0, maxPlayerNameLength);
 
         DiscoveredSlot slot;
@@ -978,6 +986,27 @@ namespace rwe
         return hostPartOf(sourceAddress) + ":" + std::to_string(port);
     }
 
+    std::string announcedGameAddress(const DiscoveredGame& announcement, bool believeAnnounced)
+    {
+        if (believeAnnounced && !announcement.gameAddress.empty()
+            && hostPartOf(announcement.gameAddress) == hostPartOf(announcement.sourceAddress))
+        {
+            // The port has to be one too: it is what a game is started with.
+            const auto& text = announcement.gameAddress;
+            const auto colon = text.rfind(':');
+            if (colon != std::string::npos && colon + 1 < text.size())
+            {
+                const auto port = text.substr(colon + 1);
+                const bool digits = std::all_of(port.begin(), port.end(), [](char c) { return c >= '0' && c <= '9'; });
+                if (digits && port.size() <= 5 && std::stoul(port) > 0 && std::stoul(port) <= 65535)
+                {
+                    return text;
+                }
+            }
+        }
+        return gameAddress(announcement.sourceAddress, announcement.port);
+    }
+
     bool hasOpenSeat(const DiscoveredGame& game)
     {
         return std::any_of(game.slots.begin(), game.slots.end(), [](const auto& s) { return s.controller == "open"; });
@@ -1296,7 +1325,7 @@ namespace rwe
             92,
             285,
             30,
-            "An address without a port uses the discovery port, 1338.",
+            "An address without a port uses the discovery port, 1338. Or paste an invite code.",
             UiLabel::Alignment::Left);
         panel->appendChild(std::move(hint));
         return panel;
@@ -1816,17 +1845,37 @@ namespace rwe
             text = trimmed(box->get().getText());
         }
 
+        // An invite code stands for the address of a host on another
+        // network. It is asked about like any typed address -- the host is
+        // probed at it -- and what is different is that this machine goes
+        // and finds its own outside address, so that there is a reply to
+        // send back.
+        const auto invite = InviteCode::decode(text);
+
         // The original's own sentence. Said here, with the dialog still up,
         // rather than a second later as a list that never fills.
-        if (!text.empty() && !LanDiscovery::isProbeAddress(text))
+        if (!invite && !text.empty() && !LanDiscovery::isProbeAddress(text))
         {
             openMessageBox("Invalid TCP/IP Address");
             return;
         }
 
-        multiplayerFlow->address = text;
+        auto& flow = *multiplayerFlow;
+        flow.address = invite ? InviteCode::toAddressString(*invite) : text;
+        flow.invited = invite.has_value();
+        flow.replyCode.clear();
+        if (!flow.invited)
+        {
+            flow.nat.stop();
+            flow.punchTargetsGiven.clear();
+        }
         dialogStack.pop_back();
         openGameList();
+
+        if (flow.invited)
+        {
+            startNatTraversal();
+        }
     }
 
     void MainMenuScene::openGameList()
@@ -1840,7 +1889,7 @@ namespace rwe
 
         if (!flow.discoveryRunning)
         {
-            flow.discovery.start(LanDiscovery::defaultPort);
+            flow.discovery.start(discoveryPortOverride != 0 ? discoveryPortOverride : LanDiscovery::defaultPort);
             flow.discoveryRunning = flow.discovery.isRunning();
             if (!flow.discoveryRunning)
             {
@@ -1976,6 +2025,22 @@ namespace rwe
                 {
                     text = "Connecting (ESC to abort)";
                 }
+                else if (flow.invited)
+                {
+                    const auto status = flow.nat.status();
+                    if (status.phase == NatTraversal::Phase::Failed)
+                    {
+                        text = status.problem;
+                    }
+                    else if (!flow.replyCode.empty())
+                    {
+                        text = "Reply code " + flow.replyCode + " is copied. Send it to the host and wait here.";
+                    }
+                    else
+                    {
+                        text = "Finding this computer's internet address...";
+                    }
+                }
                 else if (flow.address.empty())
                 {
                     text = "No games found on this network. Press New to host one.";
@@ -1984,6 +2049,12 @@ namespace rwe
                 {
                     text = "No game found at " + flow.address + ". Press New to host one.";
                 }
+            }
+            else if (flow.invited && !flow.replyCode.empty())
+            {
+                // The host's game is on the list, which on some routers it
+                // is before the host has the reply. Still owed.
+                text = "Reply code " + flow.replyCode + " is copied. Send it to the host, then Join.";
             }
             else
             {
@@ -2080,7 +2151,7 @@ namespace rwe
             flow.discovery.setAnnounceTargets({});
             return;
         }
-        applyLobbyToModel(model, game, *seat, gameAddress(game.sourceAddress, game.port), nickname);
+        applyLobbyToModel(model, game, *seat, announcedGameAddress(game, flow.invited), nickname);
 
         // The choices a guest starts from are the ones the seat is shown
         // with, and it is not waiting for anything to be echoed.
@@ -2536,6 +2607,13 @@ namespace rwe
             return;
         }
 
+        // The host's `/invite`, and the reply code a guest sent back: both
+        // are said to the program and not to the room.
+        if (takeInviteInput(text))
+        {
+            return;
+        }
+
         if (flow.role == MultiplayerFlow::Role::Host)
         {
             flow.chat.say(flow.nickname, text);
@@ -2894,6 +2972,13 @@ namespace rwe
         identity.launching = flow.launching;
         identity.ready = flow.seatReady;
         identity.chat = flow.chat.tail();
+        {
+            const auto status = flow.nat.status();
+            if (status.phase == NatTraversal::Phase::Ready && status.gameAddress)
+            {
+                identity.gameAddress = InviteCode::toAddressString(*status.gameAddress);
+            }
+        }
 
         if (const auto& map = model.selectedMap.getValue())
         {
@@ -2973,7 +3058,12 @@ namespace rwe
                 }
                 if (secondsSince(flow.claimedAt) > 8.0f)
                 {
-                    returnToGameList("The host did not answer");
+                    // Across routers the likeliest reason is that the host
+                    // has not been given this machine's reply code, so the
+                    // router in front of it is still dropping what arrives.
+                    returnToGameList(flow.invited && !flow.replyCode.empty()
+                            ? "The host did not answer. Has it been sent your reply code, " + flow.replyCode + "?"
+                            : std::string("The host did not answer"));
                     return;
                 }
                 break;
@@ -3002,7 +3092,7 @@ namespace rwe
         }
 
         // -- mirror the host, whole --
-        applyLobbyToModel(model, *host, flow.mySeat, gameAddress(host->sourceAddress, host->port), flow.nickname);
+        applyLobbyToModel(model, *host, flow.mySeat, announcedGameAddress(*host, flow.invited), flow.nickname);
 
         // -- the room: what was said, and who is ready --
         flow.chat.merge(host->chat);
@@ -3056,7 +3146,18 @@ namespace rwe
             const auto& mine = model.players[static_cast<std::size_t>(flow.mySeat)];
             choice = GuestChoice{mine.side.getValue(), mine.colorIndex.getValue(), mine.teamIndex.getValue(), flow.myReady};
         }
-        flow.discovery.advertise(claimAnnouncement(*host, flow.mySeat, flow.claimToken, flow.nickname, port, choice, flow.sentChat));
+        // Where the game port is from outside, if this machine found out.
+        // Left empty on a LAN, where the source address is the answer.
+        std::string reachableAt;
+        if (flow.invited)
+        {
+            const auto status = flow.nat.status();
+            if (status.phase == NatTraversal::Phase::Ready && status.gameAddress)
+            {
+                reachableAt = InviteCode::toAddressString(*status.gameAddress);
+            }
+        }
+        flow.discovery.advertise(claimAnnouncement(*host, flow.mySeat, flow.claimToken, flow.nickname, port, choice, flow.sentChat, reachableAt));
 
         // -- the host has pressed Start --
         if (host->launching && flow.accepted)
@@ -3074,12 +3175,219 @@ namespace rwe
         }
     }
 
+    namespace
+    {
+        /** The game port the setup screen names, 1337 if it names nothing usable. */
+        unsigned short localGamePort(const MainMenuModel& model)
+        {
+            const auto& text = model.localNetworkPort.getValue();
+            if (isUsablePort(text))
+            {
+                try
+                {
+                    return static_cast<unsigned short>(std::stoul(text));
+                }
+                catch (const std::exception&)
+                {
+                }
+            }
+            return 1337;
+        }
+
+        void copyToClipboard(const std::string& text)
+        {
+            // Best effort: it fails without a window, and the code is on
+            // screen either way.
+            SDL_SetClipboardText(text.c_str());
+        }
+    }
+
+    void MainMenuScene::startNatTraversal()
+    {
+        auto& flow = *multiplayerFlow;
+        if (!flow.discoveryRunning)
+        {
+            return;
+        }
+
+        const auto phase = flow.nat.status().phase;
+        if (phase == NatTraversal::Phase::Working || phase == NatTraversal::Phase::Ready)
+        {
+            return;
+        }
+
+        if (stunServerOverride.empty())
+        {
+            flow.nat.start(localGamePort(model));
+            return;
+        }
+
+        std::vector<stun::Server> servers;
+        for (const auto& text : stunServerOverride)
+        {
+            const auto colon = text.rfind(':');
+            if (colon == std::string::npos)
+            {
+                continue;
+            }
+            servers.push_back(stun::Server{text.substr(0, colon), static_cast<unsigned short>(std::stoul(text.substr(colon + 1)))});
+        }
+        flow.nat.start(localGamePort(model), servers);
+    }
+
+    bool MainMenuScene::takeInviteInput(const std::string& text)
+    {
+        auto& flow = *multiplayerFlow;
+        if (flow.role != MultiplayerFlow::Role::Host)
+        {
+            return false;
+        }
+
+        std::string lowered = text;
+        std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (lowered == "/invite")
+        {
+            if (!flow.discoveryRunning)
+            {
+                flow.chat.say(std::string(), "Cannot invite: this computer could not listen on the network.");
+                return true;
+            }
+            flow.inviteRequested = true;
+            startNatTraversal();
+            flow.chat.say(std::string(), "Finding this computer's internet address...");
+            return true;
+        }
+
+        if (const auto reply = InviteCode::decode(text))
+        {
+            const auto address = InviteCode::toAddressString(*reply);
+            if (std::find(flow.invitedGuests.begin(), flow.invitedGuests.end(), address) == flow.invitedGuests.end())
+            {
+                flow.invitedGuests.push_back(address);
+            }
+            // The lobby is sent to it from now on, which is what opens this
+            // side's router to a machine that has been sending to it.
+            flow.discovery.setAnnounceTargets(flow.invitedGuests);
+            flow.chat.say(std::string(), "Reply code accepted. Waiting for that player...");
+            return true;
+        }
+
+        return false;
+    }
+
+    void MainMenuScene::updateNatTraversal()
+    {
+        auto& flow = *multiplayerFlow;
+        const auto status = flow.nat.status();
+        if (status.phase == NatTraversal::Phase::Idle)
+        {
+            return;
+        }
+
+        // Host: the invite that was asked for.
+        if (flow.role == MultiplayerFlow::Role::Host && flow.inviteRequested)
+        {
+            if (status.phase == NatTraversal::Phase::Ready && status.discoveryAddress)
+            {
+                flow.inviteRequested = false;
+                if (const auto code = InviteCode::encode(*status.discoveryAddress))
+                {
+                    copyToClipboard(*code);
+                    flow.chat.say(std::string(), "Invite code: " + *code + " (copied)");
+                    flow.chat.say(std::string(), "Send it, then paste the reply code you get back here.");
+                }
+            }
+            else if (status.phase == NatTraversal::Phase::Failed)
+            {
+                flow.inviteRequested = false;
+                flow.chat.say(std::string(), status.problem);
+            }
+        }
+
+        // Guest: the code to send back.
+        if (flow.invited && flow.replyCode.empty() && status.phase == NatTraversal::Phase::Ready && status.discoveryAddress)
+        {
+            if (const auto code = InviteCode::encode(*status.discoveryAddress))
+            {
+                flow.replyCode = *code;
+                copyToClipboard(*code);
+            }
+        }
+
+        // Host: say when a guest's datagram has got through, which is the
+        // first moment anybody can tell that the route works at all.
+        if (flow.role == MultiplayerFlow::Role::Host)
+        {
+            for (const auto& heard : flow.nat.heardFrom())
+            {
+                const auto ip = heard.address().to_string();
+                if (std::find(flow.punchReported.begin(), flow.punchReported.end(), ip) != flow.punchReported.end())
+                {
+                    continue;
+                }
+                for (const auto& p : model.players)
+                {
+                    if (p.type.getValue() == PlayerType::Network && hostPartOf(p.networkAddress.getValue()) == ip)
+                    {
+                        flow.punchReported.push_back(ip);
+                        flow.chat.say(std::string(), p.name.getValue() + " is reachable directly");
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Keep a way open to everybody the model says is across the network.
+        // Only a change is handed over: the thread sends them all the time.
+        std::vector<std::string> keys;
+        std::vector<asio::ip::udp::endpoint> targets;
+        for (const auto& p : model.players)
+        {
+            if (p.type.getValue() != PlayerType::Network)
+            {
+                continue;
+            }
+            const auto& text = p.networkAddress.getValue();
+            const auto colon = text.rfind(':');
+            if (colon == std::string::npos)
+            {
+                continue;
+            }
+            asio::error_code ec;
+            const auto address = asio::ip::make_address_v4(text.substr(0, colon), ec);
+            if (ec)
+            {
+                continue;
+            }
+            try
+            {
+                const auto port = std::stoul(text.substr(colon + 1));
+                if (port == 0 || port > 65535)
+                {
+                    continue;
+                }
+                targets.emplace_back(address, static_cast<unsigned short>(port));
+                keys.push_back(text);
+            }
+            catch (const std::exception&)
+            {
+            }
+        }
+        if (keys != flow.punchTargetsGiven)
+        {
+            flow.nat.setPunchTargets(std::move(targets));
+            flow.punchTargetsGiven = std::move(keys);
+        }
+    }
+
     void MainMenuScene::updateMultiplayer()
     {
         if (!multiplayerFlow)
         {
             return;
         }
+
+        updateNatTraversal();
 
         switch (multiplayerFlow->role)
         {

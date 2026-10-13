@@ -280,6 +280,16 @@ namespace rwe
         /** The name last given on the list or the new-game screen, offered again next time. */
         std::string rememberedNickname;
 
+        /**
+         * Where a probe that runs several scenes in one process points this
+         * one's network at something of its own: a discovery port that is
+         * not the shared 1338, and STUN servers ("host:port") on loopback
+         * rather than the internet's. Zero and empty are what a game uses.
+         * Set only through MenuProbe.
+         */
+        unsigned short discoveryPortOverride{0};
+        std::vector<std::string> stunServerOverride;
+
         bool isMultiplayerGuest() const;
         bool isMultiplayerHost() const;
 
@@ -304,6 +314,23 @@ namespace rwe
 
         /** Guest: mirrors the host's announcement, and follows it into the game. */
         void updateJoinedLobby();
+
+        /**
+         * The internet side of a lobby, every update and for any role: the
+         * invite code a host asked for and the reply code a guest owes, and
+         * the addresses the game port keeps a way open to.
+         */
+        void updateNatTraversal();
+
+        /** Starts finding this machine's outside addresses, if that is not under way or done. */
+        void startNatTraversal();
+
+        /**
+         * A line typed in the battleroom, before it is chat. True if it was
+         * the host's `/invite` or a guest's reply code and has been dealt
+         * with, so that it is not said to the room.
+         */
+        bool takeInviteInput(const std::string& text);
 
         /** LOUNGE2.GUI, the battleroom, for the role the flow is in. */
         void goToBattleroom();

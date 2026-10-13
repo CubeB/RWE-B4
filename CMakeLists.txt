@@ -523,8 +523,15 @@ set(SOURCE_FILES
     src/rwe/io/weapontdf/WeaponTdf.h
     src/rwe/ip_util.cpp
     src/rwe/ip_util.h
+    src/rwe/net/InviteCode.cpp
+    src/rwe/net/InviteCode.h
     src/rwe/net/LanDiscovery.cpp
     src/rwe/net/LanDiscovery.h
+    src/rwe/net/NatTraversal.cpp
+    src/rwe/net/NatTraversal.h
+    src/rwe/net/Stun.cpp
+    src/rwe/net/Stun.h
+    src/rwe/net/stun_test_util.h
     src/rwe/math/Matrix4f.h
     src/rwe/math/Matrix4x.h
     src/rwe/math/Vector2f.h
@@ -1096,6 +1103,7 @@ set(TEST_FILES
     src/rwe/game/EndGameStats.test.cpp
     src/rwe/game/dump_util.test.cpp
     src/rwe/game/DesyncReport.test.cpp
+    src/rwe/game/GameNetworkService.test.cpp
     src/rwe/game/GameEndedReport.test.cpp
     src/rwe/game/aicommandfeed.test.cpp
     src/rwe/game/commandorder.test.cpp
@@ -1144,7 +1152,10 @@ set(TEST_FILES
     src/rwe/MainMenuScene_multiplayer.test.cpp
     src/rwe/ip_util.test.cpp
     src/rwe/LoadingNetworkService.test.cpp
+    src/rwe/net/InviteCode.test.cpp
     src/rwe/net/LanDiscovery.test.cpp
+    src/rwe/net/NatTraversal.test.cpp
+    src/rwe/net/Stun.test.cpp
     src/rwe/math/Matrix4f.test.cpp
     src/rwe/math/Vector2f.test.cpp
     src/rwe/math/Vector3f.test.cpp

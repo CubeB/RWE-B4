@@ -51,6 +51,36 @@ namespace rwe
             }
         }
 
+        SECTION("the game address behind a router survives, and is nothing when absent")
+        {
+            auto game = sampleGame();
+            auto plain = LanDiscovery::decode(*LanDiscovery::encode(game));
+            REQUIRE(plain);
+            CHECK(plain->gameAddress.empty());
+
+            game.gameAddress = "100.109.106.220:33780";
+            auto text = LanDiscovery::encode(game);
+            REQUIRE(text);
+            auto back = LanDiscovery::decode(*text);
+            REQUIRE(back);
+            CHECK(back->gameAddress == "100.109.106.220:33780");
+
+            // It is a field of its own: an older reader that has never heard
+            // of the key ignores it and still reads the lobby.
+            CHECK(text->find("gaddr=") != std::string::npos);
+        }
+
+        SECTION("a game address that is too long is refused rather than truncated")
+        {
+            auto game = sampleGame();
+            game.gameAddress = std::string(65, '1');
+            CHECK_FALSE(LanDiscovery::encode(game));
+
+            auto text = *LanDiscovery::encode(sampleGame());
+            text += "\ngaddr=" + std::string(65, '1');
+            CHECK_FALSE(LanDiscovery::decode(text));
+        }
+
         SECTION("a map name with spaces and punctuation survives")
         {
             // Map names come from the data and are chosen by a person, so

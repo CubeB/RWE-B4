@@ -31,6 +31,12 @@ namespace rwe
         remoteEndpoints.emplace_back(playerIndex, toDualStackEndpoint(results.begin()->endpoint()), Status::Loading);
     }
 
+    void LoadingNetworkService::setLocalSlot(int slot)
+    {
+        std::scoped_lock<std::mutex> lock(mutex);
+        localSlot = slot;
+    }
+
     void LoadingNetworkService::setDoneLoading()
     {
         std::scoped_lock<std::mutex> lock(mutex);
@@ -120,19 +126,10 @@ namespace rwe
 
         std::scoped_lock<std::mutex> lock(mutex);
         LOG_DEBUG << "Received network message from " << currentRemoteEndpoint.address().to_string() << " " << currentRemoteEndpoint.port() << ", size " << bytesTransferred;
-        auto it = std::find_if(remoteEndpoints.begin(), remoteEndpoints.end(), [this](const auto& p) { return p.endpoint == currentRemoteEndpoint; });
-        if (it == remoteEndpoints.end())
-        {
-            // message from some unknown address, ignore
-            LOG_DEBUG << "Sender was unknown, aborting";
-            return;
-        }
-
-        LOG_DEBUG << "Sender was recognised";
 
         if (bytesTransferred < 4)
         {
-            LOG_ERROR << "Received message is too short, ignoring";
+            LOG_DEBUG << "Received message is too short, ignoring";
             return;
         }
 
@@ -140,12 +137,53 @@ namespace rwe
         auto computedCrc = computeCrc(receiveBuffer.data(), bytesTransferred - 4);
         if (receivedCrc != computedCrc)
         {
-            LOG_ERROR << "Message CRC incorrect, ignoring";
+            LOG_DEBUG << "Message CRC incorrect, ignoring";
             return;
         }
 
         proto::NetworkMessage message;
-        message.ParseFromArray(receiveBuffer.data(), bytesTransferred - 4);
+        if (!message.ParseFromArray(receiveBuffer.data(), bytesTransferred - 4))
+        {
+            LOG_DEBUG << "Message did not parse, ignoring";
+            return;
+        }
+
+        auto it = std::find_if(remoteEndpoints.begin(), remoteEndpoints.end(), [this](const auto& p) { return p.endpoint == currentRemoteEndpoint; });
+        if (it == remoteEndpoints.end())
+        {
+            // Not from where anybody was told to expect a peer. Behind a
+            // NAT that is the ordinary case, not an attack: the address the
+            // lobby gave was a guess at the port, and the mapping the
+            // router made for this machine's socket is wherever it put it.
+            // So a whole, well-formed message that names a seat, from the
+            // address that seat is already known at, moves that seat's
+            // endpoint here. The address has to match and only the port is
+            // allowed to differ: this is not authentication -- the CRC is
+            // not a MAC -- but spoofing the address was already enough to
+            // inject packets, and a different port of the same address buys
+            // an attacker nothing it did not have.
+            if (!message.has_loading_status() || !message.loading_status().has_sender_slot())
+            {
+                LOG_DEBUG << "Sender was unknown, aborting";
+                return;
+            }
+
+            const auto slot = static_cast<int>(message.loading_status().sender_slot());
+            it = std::find_if(remoteEndpoints.begin(), remoteEndpoints.end(), [&](const auto& p) {
+                return p.playerIndex == slot && p.endpoint.address() == currentRemoteEndpoint.address();
+            });
+            if (it == remoteEndpoints.end())
+            {
+                LOG_DEBUG << "Sender was unknown, aborting";
+                return;
+            }
+
+            LOG_INFO << "Player " << (slot + 1) << " is sending from " << currentRemoteEndpoint.address().to_string() << ":" << currentRemoteEndpoint.port()
+                     << ", not " << it->endpoint.address().to_string() << ":" << it->endpoint.port() << "; following it";
+            it->endpoint = currentRemoteEndpoint;
+        }
+
+        LOG_DEBUG << "Sender was recognised";
 
         if (!message.has_loading_status())
         {
@@ -178,6 +216,10 @@ namespace rwe
 
         {
             auto& innerMessage = *outerMessage.mutable_loading_status();
+            if (localSlot)
+            {
+                innerMessage.set_sender_slot(static_cast<unsigned int>(*localSlot));
+            }
             switch (loadingStatus)
             {
                 case Status::Loading:
@@ -239,6 +281,7 @@ namespace rwe
     }
     asio::ip::udp::endpoint LoadingNetworkService::getEndpoint(int playerIndex)
     {
+        std::scoped_lock<std::mutex> lock(mutex);
         auto it = std::find_if(remoteEndpoints.begin(), remoteEndpoints.end(), [&](const auto& e) { return e.playerIndex == playerIndex; });
         if (it == remoteEndpoints.end())
         {

@@ -6,6 +6,7 @@
 #include <optional>
 #include <rwe/MainMenuModel.h>
 #include <rwe/net/LanDiscovery.h>
+#include <rwe/net/NatTraversal.h>
 #include <rwe/rwe_time.h>
 #include <string>
 #include <utility>
@@ -69,6 +70,13 @@ namespace rwe
         std::string passwordHash;
         unsigned int port{1337};
         bool launching{false};
+
+        /**
+         * Where this machine's game port is as the internet sees it, once
+         * it has found out (NatTraversal), or empty. See
+         * DiscoveredGame::gameAddress for why a LAN lobby leaves it empty.
+         */
+        std::string gameAddress{};
 
         /**
          * Per seat, whether the person on another machine in it has said they
@@ -207,7 +215,8 @@ namespace rwe
         const std::string& name,
         unsigned int gamePort,
         const std::optional<GuestChoice>& choice = std::nullopt,
-        const std::vector<DiscoveredChatLine>& chat = {});
+        const std::vector<DiscoveredChatLine>& chat = {},
+        const std::string& reachableAt = {});
 
     enum class ClaimState
     {
@@ -398,6 +407,23 @@ namespace rwe
     /** `hostPartOf(source)` and a game port, written the way a --player address is. */
     std::string gameAddress(const std::string& sourceAddress, unsigned int port);
 
+    /**
+     * Where the machine that sent `announcement` plays: the game address it
+     * announced if `believeAnnounced` and that address is the announcement's
+     * own machine's, otherwise the announcement's source address and port.
+     *
+     * Only the machines that have gone to the trouble of finding out their
+     * outside address announce one, and a reader that is itself reaching the
+     * other across routers is the only one that should use it: on a LAN the
+     * source address is the better answer, and a router that will not send a
+     * machine's own packets back to it makes the outside one a worse one.
+     * The host half has to be the same machine's -- an announcement that
+     * points a game's packets at somebody else's address is somebody using
+     * a lobby to aim traffic -- so a reflexive address with another host
+     * part is not believed.
+     */
+    std::string announcedGameAddress(const DiscoveredGame& announcement, bool believeAnnounced);
+
     // ---- the game list ----
 
     /** One game as SELGAME.GUI's ten columns show it. */
@@ -536,6 +562,28 @@ namespace rwe
 
         /** The TCP dialog's address; empty is "scan this network". */
         std::string address;
+
+        // -- reaching a machine on another network --
+        /**
+         * Finds this machine's outside addresses and keeps a way open to the
+         * peers. Declared after `discovery`, which it uses and which has to
+         * outlive it. Idle until somebody asks for an invite or joins by one:
+         * a LAN game never starts it.
+         */
+        NatTraversal nat{discovery};
+
+        /** Guest: the address came from an invite code, so the host is across a router. */
+        bool invited{false};
+        /** Guest: this machine's own code, to be sent back to the host once it is known. */
+        std::string replyCode;
+        /** Host: the invite was asked for and is waiting on the lookup. */
+        bool inviteRequested{false};
+        /** Host: the discovery address of each guest whose reply code was pasted. */
+        std::vector<std::string> invitedGuests;
+        /** The punch targets last handed to `nat`, so only a change is sent. */
+        std::vector<std::string> punchTargetsGiven;
+        /** Host: the addresses whose first datagram has been said to the room. */
+        std::vector<std::string> punchReported;
 
         /** The name this machine plays under, once one has been given. */
         std::string nickname;

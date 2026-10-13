@@ -14,6 +14,8 @@
 #include <rwe/GlobalConfig.h>
 #include <rwe/MainMenuScene.h>
 #include <rwe/MainMenuScene_multiplayer.h>
+#include <rwe/net/InviteCode.h>
+#include <rwe/net/stun_test_util.h>
 #include <rwe/SceneContext.h>
 #include <rwe/scene/SceneManager.h>
 #include <set>
@@ -63,6 +65,24 @@ namespace rwe
         static MainMenuModel& model(MainMenuScene& scene)
         {
             return scene.model;
+        }
+
+        /**
+         * Points one scene's network at things of its own, so that two of
+         * them in one process can be a host and a guest across "the
+         * internet": a discovery port that is not the shared one, a game
+         * port that is not the other's, and a STUN server on loopback.
+         */
+        static void useLocalNetwork(MainMenuScene& scene, unsigned short discoveryPort, const std::string& gamePort, const std::string& stunServer)
+        {
+            scene.discoveryPortOverride = discoveryPort;
+            scene.model.localNetworkPort.next(gamePort);
+            scene.stunServerOverride = {stunServer};
+        }
+
+        static MultiplayerFlow* flow(MainMenuScene& scene)
+        {
+            return scene.multiplayerFlow.get();
         }
     };
 }
@@ -943,6 +963,166 @@ int main(int argc, char* argv[])
             describe("host launching");
             run(3.0);
             describe("after both started");
+
+            // ---- the internet path: invite code, reply code, punch ----
+            //
+            // A host and a guest that are not on each other's LAN: each has
+            // a discovery port and a game port of its own and a STUN server
+            // that is on this machine, there is no broadcast between them,
+            // and the only way they find each other is the codes. Nothing
+            // here is a router -- loopback has no NAT in it -- so what this
+            // settles is the lobby's half of the work: the code is the
+            // host's discovery address, the reply is the guest's, the game
+            // addresses that go into the seats are the STUN ones, and the
+            // game ports are opened toward each other. The punching itself
+            // is settled by NatTraversal's tests and the two transports'.
+            std::cout << "---- the internet path\n";
+            {
+                FakeStunServer stunServer;
+
+                MainMenuScene invHost(context, &emptySoundLookup, 640, 480);
+                MainMenuScene invGuest(context, &emptySoundLookup, 640, 480);
+                invHost.init();
+                invGuest.init();
+                MenuProbe::useLocalNetwork(invHost, 1361, "1371", stunServer.address());
+                MenuProbe::useLocalNetwork(invGuest, 1362, "1372", stunServer.address());
+
+                auto runInternet = [&](double seconds) {
+                    auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(static_cast<int>(seconds * 1000));
+                    while (std::chrono::steady_clock::now() < end)
+                    {
+                        invHost.update(16);
+                        invGuest.update(16);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                    }
+                };
+
+                // The first "RWE-XXXX-XXXX-XXXXX" in a piece of text that is a code.
+                auto codeIn = [](const std::string& text) -> std::string {
+                    for (std::size_t at = text.find("RWE-"); at != std::string::npos; at = text.find("RWE-", at + 1))
+                    {
+                        const auto candidate = text.substr(at, 19);
+                        if (InviteCode::isInviteCode(candidate))
+                        {
+                            return candidate;
+                        }
+                    }
+                    return {};
+                };
+
+                for (auto* scene : {&invHost, &invGuest})
+                {
+                    scene->messageNow("MAINMENU", "MULTI", ActivateMessage{});
+                    scene->messageNow("SELPROV", "SELECT", ActivateMessage{});
+                    scene->messageNow("TCP", "OK", ActivateMessage{});
+                }
+                runInternet(0.5);
+
+                press(invHost, "host", "SELGAME", "STARTNEW");
+                click(invHost, 260, 140);
+                invHost.onTextInput("Across the sea");
+                click(invHost, 260, 200);
+                invHost.onTextInput("Hector");
+                press(invHost, "host", "NEWMULTI", "OK");
+                runInternet(1.5);
+                check(panelName(invHost) == "LOUNGE2", "the internet host is in the battleroom");
+
+                // -- the host asks for an invite --
+                say(invHost, "/invite");
+                runInternet(2.0);
+                std::string inviteCode;
+                for (const auto& line : transcript(invHost))
+                {
+                    if (auto c = codeIn(line); !c.empty())
+                    {
+                        inviteCode = c;
+                    }
+                }
+                check(!inviteCode.empty(), "the host is given an invite code: '" + inviteCode + "'");
+                check(!contains(transcript(invHost), "/invite"), "the command is not said to the room as chat");
+                if (auto endpoint = InviteCode::decode(inviteCode))
+                {
+                    check(*endpoint == asio::ip::udp::endpoint(asio::ip::make_address_v4("127.0.0.1"), 1361),
+                        "the code is the host's discovery socket as the STUN server saw it: " + InviteCode::toAddressString(*endpoint));
+                }
+
+                // -- the guest joins by it --
+                invGuest.messageNow("SELPROV", "SELECT", ActivateMessage{});
+                invGuest.onTextInput(inviteCode);
+                std::cout << "  guest enters the invite code\n";
+                invGuest.messageNow("TCP", "OK", ActivateMessage{});
+                runInternet(2.0);
+                check(panelName(invGuest) == "SELGAME", "the guest is on the game list");
+                const auto replyCode = MenuProbe::flow(invGuest) != nullptr ? MenuProbe::flow(invGuest)->replyCode : std::string();
+                check(!replyCode.empty(), "the guest has a reply code: '" + replyCode + "'");
+                check(codeIn(helpLine(invGuest)) == replyCode, "the guest is shown its reply code: '" + helpLine(invGuest) + "'");
+                check(replyCode != inviteCode, "the reply is the guest's own address, not the invite again");
+
+                // -- the host takes the reply --
+                say(invHost, replyCode);
+                runInternet(1.0);
+                {
+                    const auto lines = transcript(invHost);
+                    check(std::any_of(lines.begin(), lines.end(), [](const std::string& l) { return l.find("Reply code accepted") != std::string::npos; }),
+                        "the host is told the reply code was taken");
+                    check(!contains(lines, replyCode), "the reply code is not said to the room as chat");
+                }
+
+                // The host's lobby reaches the guest, which lists it.
+                runInternet(3.0);
+                snap(invGuest, "probe_flow_internet_list.ppm");
+                std::cout << "  guest help line: '" << helpLine(invGuest) << "'\n";
+                check(helpLine(invGuest).find("Join") != std::string::npos,
+                    "the guest's list shows the host's game");
+
+                click(invGuest, 250, 355);
+                invGuest.onTextInput("Net");
+                click(invGuest, 40, 128);
+                runInternet(0.2);
+                press(invGuest, "guest", "SELGAME", "JOINGAME");
+                runInternet(3.5);
+                snap(invHost, "probe_flow_internet_host.ppm");
+                snap(invGuest, "probe_flow_internet_guest.ppm");
+
+                check(panelName(invGuest) == "LOUNGE2", "the guest is in the host's battleroom");
+                check(contains(transcript(invHost), "Net has joined"), "the host sees the guest join");
+                runInternet(1.0);
+                check(contains(transcript(invHost), "Net is reachable directly"), "the host is told the guest's datagram got through");
+
+                // The addresses the game would be started with.
+                {
+                    auto& hostModel = MenuProbe::model(invHost);
+                    auto& guestModel = MenuProbe::model(invGuest);
+                    std::string seenByHost;
+                    for (const auto& p : hostModel.players)
+                    {
+                        if (p.type.getValue() == rwe::MainMenuModel::PlayerSettings::Type::Network)
+                        {
+                            seenByHost = p.networkAddress.getValue();
+                        }
+                    }
+                    std::string seenByGuest;
+                    for (const auto& p : guestModel.players)
+                    {
+                        if (p.type.getValue() == rwe::MainMenuModel::PlayerSettings::Type::Network)
+                        {
+                            seenByGuest = p.networkAddress.getValue();
+                        }
+                    }
+                    std::cout << "  the host will send to " << seenByHost << ", the guest to " << seenByGuest << "\n";
+                    check(seenByHost == "127.0.0.1:1372", "the host's seat for the guest is the guest's game port as STUN saw it");
+                    check(seenByGuest == "127.0.0.1:1371", "the guest's seat for the host is the host's game port as STUN saw it");
+                }
+
+                // Each side's game port has been sent to the other's, and heard.
+                runInternet(1.5);
+                {
+                    auto* hostFlow = MenuProbe::flow(invHost);
+                    auto* guestFlow = MenuProbe::flow(invGuest);
+                    check(hostFlow != nullptr && !hostFlow->nat.heardFrom().empty(), "the host's game port has heard the guest's");
+                    check(guestFlow != nullptr && !guestFlow->nat.heardFrom().empty(), "the guest's game port has heard the host's");
+                }
+            }
 
             observer.stop();
             std::cout << "flow done: " << failures << " check(s) failed\n";

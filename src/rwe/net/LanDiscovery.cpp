@@ -20,6 +20,8 @@ namespace rwe
         /** The setup screen offers ten seats, so ten is all a lobby can have. */
         constexpr std::size_t maxSlots = 10;
         constexpr std::size_t maxFieldLength = 128;
+        /** `255.255.255.255:65535` is 21; the rest is room for an IPv6 address someday. */
+        constexpr std::size_t maxGameAddressLength = 64;
 
         bool isHex(char c)
         {
@@ -592,6 +594,11 @@ namespace rwe
         {
             out += "\npw=" + game.passwordHash;
         }
+        if (!game.gameAddress.empty())
+        {
+            if (game.gameAddress.size() > maxGameAddressLength) return std::nullopt;
+            out += "\ngaddr=" + percentEncode(game.gameAddress);
+        }
         if (game.launching)
         {
             out += "\nlaunch=1";
@@ -757,6 +764,11 @@ namespace rwe
                 // hash that needs an escape is not one.
                 if (!isValidPasswordHash(value)) return std::nullopt;
                 game.passwordHash = value;
+            }
+            else if (key == "gaddr")
+            {
+                if (!percentDecode(value, game.gameAddress)) return std::nullopt;
+                if (game.gameAddress.size() > maxGameAddressLength) return std::nullopt;
             }
             else if (key == "launch")
             {
@@ -1082,7 +1094,22 @@ namespace rwe
         }
 
         auto game = decode(text);
-        if (!game) return;
+        if (!game)
+        {
+            // Not ours. It may be somebody else's on this socket: a STUN
+            // answer to a request this socket sent. Offered with the lock
+            // released, because the handler is allowed to call back in.
+            ForeignDatagramHandler handler;
+            {
+                std::scoped_lock<std::mutex> inner(mutex);
+                handler = foreignHandler;
+            }
+            if (handler)
+            {
+                handler(buffer.data(), bytes, sender);
+            }
+            return;
+        }
 
         std::scoped_lock<std::mutex> inner(mutex);
         game->sourceAddress = describeEndpoint(sender);
@@ -1182,6 +1209,18 @@ namespace rwe
             return false;
         }
         return true;
+    }
+
+    void LanDiscovery::setForeignDatagramHandler(ForeignDatagramHandler handler)
+    {
+        std::scoped_lock<std::mutex> lock(mutex);
+        foreignHandler = std::move(handler);
+    }
+
+    bool LanDiscovery::sendRaw(const asio::ip::udp::endpoint& destination, const std::string& data)
+    {
+        std::scoped_lock<std::mutex> lock(mutex);
+        return sendDatagram(data, destination);
     }
 
     bool LanDiscovery::probe(const std::string& hostAndPort)

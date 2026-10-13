@@ -7,6 +7,7 @@
 #include <functional>
 #include <mutex>
 #include <network.pb.h>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -37,6 +38,7 @@ namespace rwe
         std::mutex mutex;
         Status loadingStatus{Status::Loading};
         std::vector<PlayerInfo> remoteEndpoints;
+        std::optional<int> localSlot;
 
         // state owned by the worker thread
         asio::io_context ioContext;
@@ -54,7 +56,21 @@ namespace rwe
 
         void addEndpoint(int playerIndex, const std::string& host, const std::string& port);
 
+        /**
+         * The endpoint a peer is reached at now: the one it was given, or --
+         * if a packet from that peer arrived from another port of the same
+         * address -- the one it was last heard from. See the note on
+         * onReceive.
+         */
         asio::ip::udp::endpoint getEndpoint(int playerIndex);
+
+        /**
+         * Which seat this machine is, so that its status messages say who is
+         * sending them. Without it a peer cannot tell this machine's packets
+         * from anybody else's when they come from an address it was not
+         * told. Callable before start() and at any time after.
+         */
+        void setLocalSlot(int slot);
 
         void setDoneLoading();
 
