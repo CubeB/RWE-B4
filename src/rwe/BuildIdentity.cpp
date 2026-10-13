@@ -3,19 +3,29 @@
 
 namespace rwe
 {
-    // Defined in the file CMake regenerates at every build.
-    extern const char* const generatedBuildId;
+    // Defined in the file CMake regenerates at every build. A function and
+    // not a variable: a function has no initialisation order to be wrong
+    // about and no linkage rule a compiler can read differently.
+    const char* generatedBuildIdentity();
 
     namespace
     {
         constexpr const char* unknownIdentity = "unknown";
+
+        std::string readGeneratedIdentity()
+        {
+            const char* generated = generatedBuildIdentity();
+            if (generated == nullptr || generated[0] == '\0')
+            {
+                return std::string(unknownIdentity);
+            }
+            return std::string(generated);
+        }
     }
 
     const std::string& buildIdentity()
     {
-        static const std::string identity = generatedBuildId != nullptr && generatedBuildId[0] != '\0'
-            ? std::string(generatedBuildId)
-            : std::string(unknownIdentity);
+        static const std::string identity = readGeneratedIdentity();
         return identity;
     }
 

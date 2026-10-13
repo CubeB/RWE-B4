@@ -10,6 +10,8 @@ namespace rwe
 
         SECTION("this build has an identity")
         {
+            // Said when it fails: "it is empty" is no help at 2 a.m.
+            INFO("buildIdentity() is '" << buildIdentity() << "', " << buildIdentity().size() << " characters");
             CHECK_FALSE(buildIdentity().empty());
             CHECK(isPlausibleBuildIdentity(buildIdentity()));
         }
