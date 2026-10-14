@@ -199,6 +199,15 @@ set(SOURCE_FILES
     src/rwe/ai/AiController.h
     src/rwe/ai/classic/ClassicAiController.cpp
     src/rwe/ai/classic/ClassicAiController.h
+    src/rwe/ai/classic/ClassicAiGroups.cpp
+    src/rwe/ai/classic/ClassicAiGroups.h
+    src/rwe/ai/classic/ClassicAiPlacement.cpp
+    src/rwe/ai/classic/ClassicAiPlacement.h
+    src/rwe/ai/classic/ClassicAiScoring.cpp
+    src/rwe/ai/classic/ClassicAiScoring.h
+    src/rwe/ai/classic/ClassicAiScript.cpp
+    src/rwe/ai/classic/ClassicAiScript.h
+    src/rwe/ai/classic/ClassicRandom.h
     src/rwe/ai/AiBuildTree.cpp
     src/rwe/ai/AiBuildTree.h
     src/rwe/ai/AiUnitDefIndex.cpp
@@ -1091,6 +1100,8 @@ set(TEST_FILES
     src/rwe/ai/EngagementPredictor.test.cpp
     src/rwe/ai/LineOfFire.test.cpp
     src/rwe/ai/AiPersonality.test.cpp
+    src/rwe/ai/classic/ClassicAiParts.test.cpp
+    src/rwe/ai/classic/ClassicAiController.test.cpp
     src/rwe/ai/MapIntel.test.cpp
     src/rwe/ai/ReachabilityMap.test.cpp
     src/rwe/ai/TransportManager.test.cpp
