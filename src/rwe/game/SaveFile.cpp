@@ -39,6 +39,10 @@ namespace rwe
             {
                 j["aiPersonality"] = *p.aiPersonality;
             }
+            if (p.aiEngine)
+            {
+                j["aiEngine"] = aiEngineName(*p.aiEngine);
+            }
             return j;
         }
 
@@ -67,6 +71,23 @@ namespace rwe
             if (j.contains("aiPersonality"))
             {
                 p.aiPersonality = j.at("aiPersonality").get<std::string>();
+            }
+            if (controller == "computer")
+            {
+                // A save that does not say which engine played this seat was
+                // written before there was a choice, so by RWE's own
+                // computer player. It loads as that, not as the new default,
+                // or a game in progress would change opponent on load
+                // (ADR-0005). A name this build does not know is the same
+                // case: better the engine that wrote the older saves than
+                // refusing the file.
+                AiEngine engine = AiEngine::Rwe;
+                if (j.contains("aiEngine") && j.at("aiEngine").is_string())
+                {
+                    const auto name = j.at("aiEngine").get<std::string>();
+                    aiEngineFromName(name.c_str(), engine);
+                }
+                p.aiEngine = engine;
             }
             return p;
         }

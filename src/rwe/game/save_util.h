@@ -18,6 +18,20 @@ namespace rwe
      * types and nothing else.
      */
     struct GameSimulation;
+    struct GameParameters;
+
+    /**
+     * Writes into `parameters` the engine each computer player is actually
+     * being played by, taken from the simulation's live controllers, so that a
+     * save's header can say which engine to rebuild (ADR-0005). The simulation
+     * saves no controller state -- they restart from what they observe -- so
+     * which engine a seat plays is the one thing about them a save has to
+     * carry.
+     *
+     * Slot n of the parameters is player index n among the filled slots, as
+     * the loader numbers them. A slot with no controller keeps whatever it had.
+     */
+    void recordAiEngines(GameParameters& parameters, const GameSimulation& sim);
 
     /**
      * Per-type save and load helpers for UnitState's members.
@@ -90,7 +104,10 @@ namespace rwe
      * - events: scene-facing, drained by GameScene, never hashed.
      * - aiControllers, aiPlayerOrder, aiPendingCommands: AI blackboard state
      *   intentionally restarts. The caller re-registers its AI controllers
-     *   after loading; they rebuild their plans from what they observe.
+     *   after loading; they rebuild their plans from what they observe. Which
+     *   engine plays each seat is not in here: it lives in the save file's
+     *   header (PlayerInfo::aiEngine, written by recordAiEngines), because the
+     *   caller needs it before the simulation exists to be loaded into.
      * - A weapon aim thread that had already been killed by a COB signal is
      *   restored as a null thread reference, which fails to reap exactly the
      *   way the dangling pointer it replaces did.

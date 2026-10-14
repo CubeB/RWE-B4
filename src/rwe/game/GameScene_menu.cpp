@@ -206,6 +206,9 @@ namespace rwe
         }
 
         SaveFile save(gameParameters);
+        // Which engine plays each computer seat is not part of the simulation's
+        // state; the header carries it (ADR-0005).
+        recordAiEngines(save.parameters, simulation);
         save.cameraPosition = worldCameraState.position;
         save.gameTimeSeconds = simulation.gameTime.value / static_cast<unsigned int>(SimTicksPerSecond);
         save.simulation = saveSimulationToJson(simulation);

@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <rwe/ai/AiController.h>
+#include <rwe/game/GameParameters.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
@@ -1051,5 +1053,25 @@ namespace rwe
         sim.unitCreationRequests.clear();
         sim.events.clear();
         sim.aiPendingCommands.clear();
+    }
+
+    void recordAiEngines(GameParameters& parameters, const GameSimulation& sim)
+    {
+        // The simulation numbers its players densely in slot order, so the
+        // controller of the nth filled slot is PlayerId n: the same count the
+        // loader makes when it deals the ids out.
+        unsigned int playerIndex = 0;
+        for (auto& slot : parameters.players)
+        {
+            if (!slot)
+            {
+                continue;
+            }
+            const auto it = sim.aiControllers.find(PlayerId(playerIndex++));
+            if (it != sim.aiControllers.end() && it->second)
+            {
+                slot->aiEngine = it->second->engine();
+            }
+        }
     }
 }

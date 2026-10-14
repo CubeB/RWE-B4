@@ -1128,6 +1128,7 @@ set(TEST_FILES
     src/rwe/game/ReplayFile.test.cpp
     src/rwe/game/replaykeyframe.test.cpp
     src/rwe/game/savefileheader.test.cpp
+    src/rwe/game/saveaiengine.test.cpp
     src/rwe/game/hoveredfeature.test.cpp
     src/rwe/game/infopanel.test.cpp
     src/rwe/game/orderbuttons.test.cpp
