@@ -879,8 +879,17 @@ the reroll either: the 75% gate (section 130) is in the swing branch only
 the counter on an in-range arrival, and on the second miss attaches a fresh
 random-bearing station at range `R` and flies it.
 
-**RWE differs** twice: it resets the counter where the original does not, and
-it flies to the reroll point where the original does not.
+**RWE differed** twice: it reset the counter where the original does not, and
+it flew to the reroll point where the original does not.
+
+**Ported, 2026-10-14.** `nextHoverAttackStation` no longer resets the counter
+on an in-range arrival; on the miss that takes it to 2 it zeroes it, draws one
+`rand(0x10000)` from the simulation's generator and discards it, and returns the
+aircraft's own position as the station, so the next tick's arrival test passes
+at once and the ordinary swing installs the +/-45 degree station (counter 0 to
+1, side toggled, no second draw). The health test stays in the swing.
+`gunship.test.cpp` pins the draw count, the cumulative counter and the tick
+after the reroll.
 
 ### The change
 

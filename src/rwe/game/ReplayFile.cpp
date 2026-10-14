@@ -22,7 +22,9 @@ namespace rwe
 
         constexpr char Magic[] = {'R', 'W', 'E', 'R', 'E', 'P', 'L', 'A', 'Y'};
         constexpr std::size_t MagicSize = sizeof(Magic);
-        constexpr char Version = 1;
+        // Simulation semantics changed in TOTALA-EXE sections 125-137. Old command
+        // recordings cannot reproduce their games under these rules.
+        constexpr char Version = 2;
 
         constexpr const char* ReplayExtension = ".rwereplay";
 

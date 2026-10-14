@@ -296,6 +296,15 @@ namespace rwe
         return bearing - stepBase - SimAngle(draw % (LoiterStepJitter.value + 1u));
     }
 
+    SimVector AirMovement::idleHopWaypoint(const SimVector& anchor, unsigned int bearingDraw, unsigned int radiusDraw)
+    {
+        auto bearing = SimAngle(bearingDraw % 0x10000u);
+        auto radius = SimScalar(static_cast<float>((radiusDraw % IdleHopRadiusSpan) + IdleHopRadiusMin));
+        auto point = anchor + (UnitState::toDirection(bearing) * radius);
+        point.y = anchor.y;
+        return point;
+    }
+
     bool AirMovement::canDivertForRepair(bool canFly, bool isAirborne, bool inDogfight, bool frontOrderBreaksOff, bool hurtEnough)
     {
         return canFly && isAirborne && !inDogfight && frontOrderBreaksOff && hurtEnough;

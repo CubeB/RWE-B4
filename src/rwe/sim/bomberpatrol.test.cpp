@@ -1,4 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
+#include <cstdlib>
+#include <iostream>
+#include <memory>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
@@ -7,9 +10,6 @@
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/WeaponDefinition.h>
 #include <rwe/sim/sim_test_util.h>
-#include <cstdlib>
-#include <iostream>
-#include <memory>
 #include <vector>
 
 namespace rwe
@@ -157,12 +157,18 @@ namespace rwe
                 std::string state = "ground";
                 if (auto air = std::get_if<UnitPhysicsInfoAir>(&b.physics))
                 {
-                    if (std::holds_alternative<AirMovementStateFlying>(air->movementState)) state = "flying";
-                    else if (auto r = std::get_if<AirMovementStateAttackRun>(&air->movementState)) state = "run" + std::to_string(static_cast<int>(r->phase));
-                    else state = "other";
+                    if (std::holds_alternative<AirMovementStateFlying>(air->movementState))
+                        state = "flying";
+                    else if (auto r = std::get_if<AirMovementStateAttackRun>(&air->movementState))
+                        state = "run" + std::to_string(static_cast<int>(r->phase));
+                    else
+                        state = "other";
                 }
                 int projectileCount = 0;
-                for ([[maybe_unused]] const auto& pr : sim.projectiles) { ++projectileCount; }
+                for ([[maybe_unused]] const auto& pr : sim.projectiles)
+                {
+                    ++projectileCount;
+                }
                 bool aiming = b.weapons[0] && !std::holds_alternative<UnitWeaponStateIdle>(b.weapons[0]->state);
                 std::cout << "t=" << tick
                           << " pos=" << simScalarToFloat(b.position.x) << "," << simScalarToFloat(b.position.z)
@@ -253,9 +259,12 @@ namespace rwe
                 std::string state = "ground";
                 if (auto air = std::get_if<UnitPhysicsInfoAir>(&b.physics))
                 {
-                    if (std::holds_alternative<AirMovementStateFlying>(air->movementState)) state = "flying";
-                    else if (auto r = std::get_if<AirMovementStateAttackRun>(&air->movementState)) state = "run" + std::to_string(static_cast<int>(r->phase));
-                    else state = "other";
+                    if (std::holds_alternative<AirMovementStateFlying>(air->movementState))
+                        state = "flying";
+                    else if (auto r = std::get_if<AirMovementStateAttackRun>(&air->movementState))
+                        state = "run" + std::to_string(static_cast<int>(r->phase));
+                    else
+                        state = "other";
                 }
                 std::string front = "none";
                 if (!b.orders.empty())
@@ -338,6 +347,107 @@ namespace rwe
         const auto& bomber = sim.getUnitState(bomberId);
         REQUIRE_FALSE(bomber.orders.empty());
         REQUIRE(std::holds_alternative<PatrolOrder>(bomber.orders.front()));
+    }
+
+    TEST_CASE("an aircraft on patrol flies each leg at a goal 320 past the waypoint", "[patrol][bomber]")
+    {
+        // TOTALA-EXE-MOVEMENT.md S:125, VTOL_Patrol state 2 (0x410E70). The
+        // goal is the waypoint plus 320 along the line from the aircraft,
+        // and the leg is done when the aircraft is strictly inside 336 of
+        // it: 16 short of the waypoint for an aircraft on the line. RWE used
+        // to steer at the waypoint and arrive inside max(8, 4 * maxVelocity).
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto us = addPlayer(sim, "us");
+        sim.unitDefinitions["bomber"] = makeBomberDef();
+        registerModel(sim);
+        defineBomb(sim);
+
+        auto west = SimVector(-800_ss, 0_ss, 0_ss);
+        auto east = SimVector(800_ss, 0_ss, 0_ss);
+        auto bomberId = launchBomber(sim, us, SimVector(west.x, 200_ss, west.z), script);
+        {
+            auto& bomber = sim.getUnitState(bomberId);
+            bomber.orders.push_back(PatrolOrder(east));
+            bomber.orders.push_back(PatrolOrder(west));
+        }
+
+        // The goal exists, and is 320 beyond the waypoint on the far side.
+        sim.tick();
+        {
+            const auto& b = sim.getUnitState(bomberId);
+            REQUIRE(b.airLoiter.has_value());
+            REQUIRE(b.airLoiter->reason == UnitState::AirLoiterState::Reason::Patrol);
+            REQUIRE((b.airLoiter->anchor == east));
+            // Flying east along the line, so the goal is at x = 800 + 320.
+            REQUIRE(b.airLoiter->waypoint.x > 1115_ss);
+            REQUIRE(b.airLoiter->waypoint.x < 1125_ss);
+            REQUIRE(b.airLoiter->dueAt == sim.gameTime + GameTime(30u));
+        }
+
+        // Fly it to the end of the first leg and see where the order retires.
+        auto retiredAt = std::optional<SimVector>();
+        for (int tick = 0; tick < 1000 && !retiredAt; ++tick)
+        {
+            sim.tick();
+            const auto& b = sim.getUnitState(bomberId);
+            if (std::get<PatrolOrder>(b.orders.front()).destination == west)
+            {
+                retiredAt = b.position;
+            }
+        }
+        REQUIRE(retiredAt.has_value());
+
+        // Inside 336 of the goal, i.e. about 16 short of the waypoint -- not
+        // the 36 (4 * maxVelocity) the old waypoint test allowed. A tick of
+        // travel is at most 9 units, so allow for the step that crossed the line.
+        auto shortOfEast = east.x - retiredAt->x;
+        CAPTURE(simScalarToFloat(shortOfEast));
+        REQUIRE(shortOfEast > 0_ss);
+        REQUIRE(shortOfEast < 26_ss);
+    }
+
+    TEST_CASE("an aircraft on patrol re-aims its goal from where it is every 30 ticks", "[patrol][bomber]")
+    {
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto us = addPlayer(sim, "us");
+        sim.unitDefinitions["bomber"] = makeBomberDef();
+        registerModel(sim);
+        defineBomb(sim);
+
+        // Start well off the line to the waypoint, so that the bearing the
+        // goal is laid along changes as the aircraft closes in.
+        auto east = SimVector(800_ss, 0_ss, 0_ss);
+        auto bomberId = launchBomber(sim, us, SimVector(-400_ss, 200_ss, 700_ss), script);
+        sim.getUnitState(bomberId).orders.push_back(PatrolOrder(east));
+        sim.getUnitState(bomberId).orders.push_back(PatrolOrder(SimVector(-800_ss, 0_ss, 0_ss)));
+
+        sim.tick();
+        auto first = *sim.getUnitState(bomberId).airLoiter;
+        // Beyond the waypoint as seen from the start: x > 800, z < 0.
+        REQUIRE(first.waypoint.x > east.x);
+        REQUIRE(first.waypoint.z < 0_ss);
+        // 320 from the waypoint exactly, in whole terms of the bearing's resolution.
+        auto d = rweSqrt(((first.waypoint.x - east.x) * (first.waypoint.x - east.x)) + (first.waypoint.z * first.waypoint.z));
+        REQUIRE(d > 319_ss);
+        REQUIRE(d < 321_ss);
+
+        // Not re-aimed before the timer...
+        for (int tick = 0; tick < 20; ++tick)
+        {
+            sim.tick();
+        }
+        REQUIRE((sim.getUnitState(bomberId).airLoiter->waypoint == first.waypoint));
+
+        // ...and re-aimed after it, from a different position.
+        for (int tick = 0; tick < 20; ++tick)
+        {
+            sim.tick();
+        }
+        const auto& later = *sim.getUnitState(bomberId).airLoiter;
+        REQUIRE((later.waypoint != first.waypoint));
+        REQUIRE(later.dueAt > first.dueAt);
     }
 
     TEST_CASE("an idle aircraft on Hold Position does not go after what it sees", "[patrol][bomber]")

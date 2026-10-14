@@ -7,30 +7,30 @@
 #include <rwe/CroppedViewport.h>
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuScene.h>
-#include <rwe/game/SaveFile.h>
-#include <rwe/io/gui/gui.h>
-#include <rwe/game/save_util.h>
-#include <rwe/ui/UiTextBox.h>
-#include <rwe/util.h>
-#include <rwe/MainMenuScene.h>
-#include <rwe/ai/AiPlayerController.h>
 #include <rwe/Mesh.h>
+#include <rwe/ai/AiPlayerController.h>
 #include <rwe/camera_util.h>
 #include <rwe/game/GameScene_util.h>
-#include <rwe/game/chat_util.h>
 #include <rwe/game/OrderButtons.h>
+#include <rwe/game/OrderDispatch.h>
+#include <rwe/game/SaveFile.h>
+#include <rwe/game/chat_util.h>
 #include <rwe/game/dump_util.h>
 #include <rwe/game/matrix_util.h>
+#include <rwe/game/save_util.h>
+#include <rwe/io/gui/gui.h>
 #include <rwe/render/render_prof.h>
-#include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/resource_io.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitBehaviorService.h>
+#include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/ui/UiStagedButton.h>
+#include <rwe/ui/UiTextBox.h>
+#include <rwe/util.h>
 #include <rwe/util/CrashHandler.h>
 #include <rwe/util/Index.h>
-#include <rwe/util/match.h>
 #include <rwe/util/SimpleLogger.h>
+#include <rwe/util/match.h>
 #include <rwe/util/rwe_string.h>
 
 // The input half of GameScene: the keyboard and mouse handlers, split out of
@@ -764,14 +764,14 @@ namespace rwe
                         {
                             if (isShiftDown())
                             {
-                                localPlayerEnqueueUnitOrder(selectedUnit, PatrolOrder(*coord));
+                                localPlayerEnqueueUnitOrder(selectedUnit, mouseFormationOrder(selectedUnit, PatrolOrder(*coord)));
                             }
                             else
                             {
                                 // A move the unit is walking becomes the route's
                                 // first waypoint, otherwise its own position
                                 // does. See issueOrder.
-                                localPlayerIssueUnitOrder(selectedUnit, PatrolOrder(*coord));
+                                localPlayerIssueUnitOrder(selectedUnit, mouseFormationOrder(selectedUnit, PatrolOrder(*coord)));
                             }
                         }
                         if (!isShiftDown())
@@ -1107,6 +1107,33 @@ namespace rwe
         }
     }
 
+    UnitOrder GameScene::mouseFormationOrder(UnitId receiver, const UnitOrder& order) const
+    {
+        const auto& unit = simulation.getUnitState(receiver);
+        if (!simulation.unitDefinitions.at(unit.unitType).isMobile
+            || (!std::holds_alternative<MoveOrder>(order) && !std::holds_alternative<PatrolOrder>(order)))
+        {
+            return order;
+        }
+        std::vector<SimVector> positions;
+        for (auto id : selectedUnits)
+        {
+            if (hoveredUnit && id == *hoveredUnit)
+            {
+                continue;
+            }
+            if (auto selected = simulation.tryGetUnitState(id); selected && !selected->get().isDead())
+            {
+                positions.push_back(selected->get().position);
+            }
+        }
+        if (auto move = std::get_if<MoveOrder>(&order))
+        {
+            return MoveOrder(formationDestination(positions, unit.position, move->destination));
+        }
+        return PatrolOrder(formationDestination(positions, unit.position, std::get<PatrolOrder>(order).destination));
+    }
+
     bool GameScene::issueDefaultAction(UnitId selectedUnit, DefaultActionScheme scheme)
     {
         auto action = computeDefaultAction(simulation, scheme, selectedUnit, hoveredUnit, hoveredFeature);
@@ -1133,11 +1160,11 @@ namespace rwe
 
         if (isShiftDown())
         {
-            localPlayerEnqueueUnitOrder(selectedUnit, *order);
+            localPlayerEnqueueUnitOrder(selectedUnit, mouseFormationOrder(selectedUnit, *order));
         }
         else
         {
-            localPlayerIssueUnitOrder(selectedUnit, *order);
+            localPlayerIssueUnitOrder(selectedUnit, mouseFormationOrder(selectedUnit, *order));
         }
 
         return true;

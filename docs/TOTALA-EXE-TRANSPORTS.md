@@ -628,6 +628,9 @@ A unit carrying cargo can itself never be picked up.
 
 ## 135. VTOL_Pickup builds a climb goal and never installs it
 
+**Implementation record, 2026-10-14.** No climb goal is installed after attaching, matching the verified behaviour. The loaded idle hop in section 128 is implemented. The proposed hung Loading mission remains inference and is not implemented without a black-box check.
+See [the port record](PORTING-125-138.md) for limitations and validation.
+
 Settled 2026-10-14 from the jump table `0x41153C` of the pick-up handler
 `0x4111B0`, read in the executable's disassembly. §36 gives state 4 as "goal at
 own position, altitude cruisealt, wake `|= 0xE0`, return 1 -- climb away
@@ -688,7 +691,7 @@ bearing, `rand(0x20)` for a radius of `r + 8` units from the anchor, and
 `rand(15)` for its timer (`+ 30`). With no passengers it does not hop: it pushes
 `VTOL_LandIfCan`.
 
-### RWE
+### RWE before integration
 
 RWE's order ends when the attach happens: `handleLoadOrder` completes and
 pops. **In effect it agrees**: there is no goal to model and an order that is
@@ -699,8 +702,8 @@ no test for "carrying", so a loaded transport with no orders goes to land (the
 bomber/fighter idle), where the original hops round its anchor while loaded and
 lands only when empty. That is a play-test question first: load an Atlas, give
 no further order, and watch whether it lands with its passenger, hops, or
-hangs. No code change is made from the static reading alone; if the hop is
-wanted it is the §13 hop restricted to a carrying transport, with the three
+hangs. The inferred hung Loading mission still needs observation. The idle hop is
+now implemented from section 128: it is the §13 hop restricted to a carrying transport, with the three
 draws above in that order.
 
 ### What would settle it

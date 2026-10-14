@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <memory>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/cob/CobOpCode.h>
 #include <rwe/io/cob/Cob.h>
@@ -7,7 +8,6 @@
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
-#include <memory>
 #include <rwe/sim/sim_test_util.h>
 
 /**
@@ -263,10 +263,10 @@ namespace rwe
         }
     }
 
-    TEST_CASE("the automatic sweep reaches no further than the unit's own sight", "[reclaim][autoreclaim]")
+    TEST_CASE("the sampled automatic sweep reaches half the unit's sight on each axis", "[reclaim][autoreclaim]")
     {
         // 0x405B74 reads def+0x202 -- SightDistance -- and hands it to the
-        // scan as the radius.
+        // scan as a side length (S:131), not a radius.
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
         auto player = addPlayerHolding(sim, 0.0f, 0.0f);
@@ -276,9 +276,9 @@ namespace rwe
         auto wreckId = sim.addFeature(wreckDef, 20, 20).value();
         auto wreckPosition = sim.getFeature(wreckId).position;
 
-        SECTION("something inside 235 units is picked up")
+        SECTION("a sampled feature inside the 117.5 half-extent is picked up")
         {
-            addPatrollingKbot(sim, player, wreckPosition + SimVector(200_ss, 0_ss, 0_ss), script);
+            addPatrollingKbot(sim, player, wreckPosition + SimVector(100_ss, 0_ss, 0_ss), script);
             for (int i = 0; i < 600 && sim.tryGetFeature(wreckId); ++i)
             {
                 sim.tick();
@@ -286,7 +286,7 @@ namespace rwe
             REQUIRE_FALSE(sim.tryGetFeature(wreckId).has_value());
         }
 
-        SECTION("something beyond it is not")
+        SECTION("something beyond the half-extent is not")
         {
             addPatrollingKbot(sim, player, wreckPosition + SimVector(400_ss, 0_ss, 0_ss), script);
             for (int i = 0; i < 600; ++i)
@@ -332,18 +332,9 @@ namespace rwe
             auto plantDef = sim.featureDefinitions.insert(makePlantDef());
             auto wreckId = sim.addFeature(wreckDef, 20, 20).value();
             auto plantId = sim.addFeature(plantDef, 20, 25).value();
-            auto wreckPosition = sim.getFeature(wreckId).position;
-            // Clear of the wreck itself. armsolar_dead is five cells across,
-            // forty world units either side of its centre, so the thirty the
-            // cases above use stands the builder inside its blocking
-            // footprint -- ground it cannot path out of. That never showed
-            // while a builder reclaimed from three hundred units away without
-            // moving, and the cases above still never move, because what they
-            // reclaim is the wreck they are standing in. This one walks to a
-            // different feature, so it has to start somewhere it can walk
-            // from. That a unit inside a blocking footprint cannot leave it
-            // is its own problem, filed separately.
-            addPatrollingKbot(sim, player, wreckPosition + SimVector(60_ss, 0_ss, 0_ss), script);
+            // A 69-unit offset puts the narrow plant on a 48-unit sample
+            // (69 - 69.5), while staying outside the blocking wreck.
+            addPatrollingKbot(sim, player, sim.getFeature(plantId).position + SimVector(69_ss, 0_ss, 69_ss), script);
 
             for (int i = 0; i < 800 && sim.tryGetFeature(plantId); ++i)
             {

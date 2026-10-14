@@ -1,15 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
+#include <memory>
+#include <optional>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
+#include <rwe/sim/FlatRange.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/WeaponDefinition.h>
-#include <memory>
-#include <optional>
 #include <vector>
 
 namespace rwe
@@ -262,7 +263,6 @@ namespace rwe
             REQUIRE_FALSE(weaponTarget(sim, shooterId).has_value());
             REQUIRE(sim.getUnitState(solarId).hitPoints == sim.unitDefinitions.at("enemySolar").maxHitPoints);
         }
-
     }
 
     TEST_CASE("a computer player's units go after buildings anyway", "[targeting]")
@@ -328,6 +328,69 @@ namespace rwe
             REQUIRE_FALSE(weaponTarget(sim, shooterId).has_value());
             REQUIRE(sim.getUnitState(tankId).hitPoints == sim.unitDefinitions.at("enemyTank").maxHitPoints);
         }
+    }
+
+    TEST_CASE("range is flat: an aircraft directly overhead is as near as one beside the gun", "[targeting]")
+    {
+        // TOTALA-EXE-WEAPONS.md S:127. Every range test the original makes
+        // is dx^2 + dz^2 in whole world units and never reads y (0x49ABB0,
+        // 0x49AA80, 0x40AD80). RWE used the full 3D distance, which kept a
+        // ground gun from reaching an aircraft cruising above its range in
+        // height; that test was the moved expectation.
+        auto script = makeTargetingScript();
+        GameSimulation sim(makeTargetingTerrain(), 0u, 0, 0);
+        auto us = addTargetingPlayer(sim, "us", GamePlayerType::Human);
+        auto them = addTargetingPlayer(sim, "them", GamePlayerType::Human);
+        registerTargetingModel(sim);
+        defineShooter(sim, "gun", std::string());
+        defineTarget(sim, "enemyPlane", "CORE VTOL LEVEL1 NOTSUB", true);
+        defineWeapon(sim, "cannon", false);
+
+        auto shooterId = spawnTargetingUnit(sim, "gun", us, SimVector(0_ss, 0_ss, 0_ss), script);
+        armWith(sim, shooterId, "cannon");
+
+        SECTION("straight above, higher than its reach, is within reach")
+        {
+            // 3D distance 450 against a range of 400; flat distance 0.
+            auto planeId = spawnTargetingUnit(sim, "enemyPlane", them, SimVector(64_ss, 450_ss, 0_ss), script);
+            putInTheAir(sim, planeId);
+            sim.getUnitState(planeId).position.x = 0_ss;
+
+            tickTwice(sim);
+
+            auto target = weaponTarget(sim, shooterId);
+            REQUIRE(target.has_value());
+            REQUIRE(target->value == planeId.value);
+        }
+
+        SECTION("out of range across the ground, at the same height, is still out of range")
+        {
+            auto planeId = spawnTargetingUnit(sim, "enemyPlane", them, SimVector(450_ss, 0_ss, 0_ss), script);
+            putInTheAir(sim, planeId);
+
+            tickTwice(sim);
+
+            REQUIRE_FALSE(weaponTarget(sim, shooterId).has_value());
+        }
+    }
+
+    TEST_CASE("the flat range test floors each square on its own", "[targeting]")
+    {
+        // S:127: each square is a 64-bit product shifted right 32, so it is
+        // floored separately, and the sum is compared with range * range.
+        SimVector origin(0_ss, 0_ss, 0_ss);
+
+        // Height is never an input.
+        REQUIRE(withinFlatRange(origin, SimVector(0_ss, 5000_ss, 0_ss), 100_ss));
+        REQUIRE(withinFlatRange(origin, SimVector(100_ss, -5000_ss, 0_ss), 100_ss));
+        REQUIRE_FALSE(withinFlatRange(origin, SimVector(101_ss, 0_ss, 0_ss), 100_ss));
+
+        // Against a range of 5 (25): 3.6^2 + 3.6^2 = 25.92 is outside by the
+        // real distance, but floors to 12 + 12 = 24 and is inside. 3.9 on
+        // both axes floors to 15 + 15 = 30 and is outside either way.
+        REQUIRE(flatRangeScore(origin, SimVector(3.6_ssf, 0_ss, 3.6_ssf)) == 24.0);
+        REQUIRE(withinFlatRange(origin, SimVector(3.6_ssf, 0_ss, 3.6_ssf), 5_ss));
+        REQUIRE_FALSE(withinFlatRange(origin, SimVector(3.9_ssf, 0_ss, 3.9_ssf), 5_ss));
     }
 
     TEST_CASE("a group spreads its fire instead of piling onto one unit", "[targeting]")
@@ -992,6 +1055,31 @@ namespace rwe
             sim.unitDefinitions["skeeter"].badTargetCategory[1] = "NOTAIR";
             tickFourScans();
             REQUIRE_FALSE(weaponTargetOfSlot(sim, shooterId, 1).has_value());
+        }
+    }
+
+    TEST_CASE("an out-of-range weapon retains its target without firing", "[targeting][porting]")
+    {
+        auto script = makeTargetingScript();
+        GameSimulation sim(makeTargetingTerrain(), 0u, 0, 0);
+        auto us = addTargetingPlayer(sim, "us", GamePlayerType::Human);
+        auto them = addTargetingPlayer(sim, "them", GamePlayerType::Human);
+        registerTargetingModel(sim);
+        defineShooter(sim, "gun", std::string());
+        defineTarget(sim, "target", "CORE NOTAIR NOTSUB", false);
+        defineWeapon(sim, "laser", false);
+        auto gun = spawnTargetingUnit(sim, "gun", us, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto target = spawnTargetingUnit(sim, "target", them, SimVector(450_ss, 0_ss, 0_ss), script);
+        armWith(sim, gun, "laser");
+        sim.getUnitState(gun).weapons[0]->state = UnitWeaponStateAttacking(target);
+        for (int i = 0; i < 5; ++i)
+        {
+            sim.tick();
+            REQUIRE(weaponTarget(sim, gun) == std::optional<UnitId>(target));
+            for (const auto& event : sim.events)
+            {
+                REQUIRE_FALSE(std::holds_alternative<FireWeaponEvent>(event));
+            }
         }
     }
 }

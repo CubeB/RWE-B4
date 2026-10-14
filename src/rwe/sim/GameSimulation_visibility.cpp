@@ -1,5 +1,6 @@
 #include "GameSimulation.h"
 
+#include <rwe/sim/FlatRange.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/util/Index.h>
@@ -458,7 +459,8 @@ namespace rwe
                 continue;
             }
 
-            if (victim.position.distanceSquared(attacker.position) > weaponDefinition.maxRange * weaponDefinition.maxRange)
+            // Flat (S:127): the same test the weapon's own fire check makes.
+            if (!withinFlatRange(victim.position, attacker.position, weaponDefinition.maxRange))
             {
                 continue;
             }

@@ -1,5 +1,6 @@
 #include "UnitBehaviorService_util.h"
 #include <algorithm>
+#include <rwe/sim/FlatRange.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/util/match.h>
@@ -106,6 +107,90 @@ namespace rwe
         }
 
         return SimAngle(cone);
+    }
+
+    uint64_t integerSquareRoot(uint64_t value)
+    {
+        // Digit-by-digit, two bits at a time: no float, so every toolchain
+        // agrees. Returns floor(sqrt(value)).
+        uint64_t result = 0;
+        uint64_t bit = uint64_t{1} << 62;
+        while (bit > value)
+        {
+            bit >>= 2;
+        }
+
+        while (bit != 0)
+        {
+            if (value >= result + bit)
+            {
+                value -= result + bit;
+                result = (result >> 1) + bit;
+            }
+            else
+            {
+                result >>= 1;
+            }
+            bit >>= 2;
+        }
+
+        return result;
+    }
+
+    SimVector computeAimLead(
+        const SimVector& shooterOrigin,
+        const SimVector& sweetSpot,
+        const SimVector& targetVelocity,
+        SimScalar weaponVelocityPerTick,
+        bool cruise,
+        unsigned int shooterKills)
+    {
+        // TOTALA-EXE-WEAPONS.md S:126, 0x48A1E0. A step, not a ramp: the
+        // shooter's kill count read as a word has to be six or more, and the
+        // weapon has to be moving at all. Bombs (no weaponvelocity) and the
+        // cruise missiles never lead.
+        const SimVector none(0_ss, 0_ss, 0_ss);
+        if (static_cast<uint16_t>(shooterKills) <= 5 || cruise)
+        {
+            return none;
+        }
+
+        // weaponvelocity is a whole number in the TDF and is carried here as
+        // weaponvelocity / 30, so multiply back to recover it exactly, then
+        // take the 16.16 per-tick figure the original keeps (weaponvelocity *
+        // 65536 / 30, an integer divide).
+        auto tdfVelocity = static_cast<int64_t>(std::llround(weaponVelocityPerTick.value * 30.0f));
+        auto s = (tdfVelocity * 65536) / 30;
+        if (s == 0)
+        {
+            return none;
+        }
+
+        // 1. The shooter's origin minus the sweet spot, on all three axes, in
+        // 16.16.
+        auto dx = static_cast<int64_t>(simScalarToFixed(shooterOrigin.x)) - static_cast<int64_t>(simScalarToFixed(sweetSpot.x));
+        auto dy = static_cast<int64_t>(simScalarToFixed(shooterOrigin.y)) - static_cast<int64_t>(simScalarToFixed(sweetSpot.y));
+        auto dz = static_cast<int64_t>(simScalarToFixed(shooterOrigin.z)) - static_cast<int64_t>(simScalarToFixed(sweetSpot.z));
+
+        // 2. D = trunc(sqrt(dx^2 + dy^2 + dz^2)), to a 32-bit integer.
+        auto sumOfSquares = static_cast<uint64_t>((dx * dx) + (dy * dy) + (dz * dz));
+        auto distance = static_cast<int32_t>(static_cast<uint32_t>(integerSquareRoot(sumOfSquares)));
+
+        // 3. T = (D << 16) / S, a signed 64-bit divide truncating toward zero,
+        // low 32 bits kept.
+        auto t = static_cast<int32_t>(static_cast<uint32_t>(static_cast<uint64_t>((static_cast<int64_t>(distance) << 16) / s)));
+
+        // 4. F = (T * 0xCCCC) >> 16, arithmetic, low 32 bits kept.
+        auto f = static_cast<int32_t>(static_cast<uint32_t>(static_cast<uint64_t>((static_cast<int64_t>(t) * 0xCCCC) >> 16)));
+
+        // 5. Per axis, (V * F) >> 16, low 32 bits kept; added to the sweet spot.
+        auto lead = [f](SimScalar velocity) {
+            auto v = static_cast<int64_t>(simScalarToFixed(velocity));
+            auto product = static_cast<int32_t>(static_cast<uint32_t>(static_cast<uint64_t>((v * static_cast<int64_t>(f)) >> 16)));
+            return simScalarFromFixed(product);
+        };
+
+        return SimVector(lead(targetVelocity.x), lead(targetVelocity.y), lead(targetVelocity.z));
     }
 
     GameTime computeReloadTicks(SimScalar reloadTime, unsigned int health, unsigned int maxHealth, unsigned int kills)
@@ -263,7 +348,8 @@ namespace rwe
         // (0x403010, 0x403040 -> 0x48B090). A pad that has been switched off,
         // or that is still going up and so has never been activated, is not
         // on the list and nothing lands on it.
-        return definition.builder && definition.isAirBase && state.activated && state.isAlive();
+        return definition.builder && definition.isAirBase && state.activated && state.isAlive()
+            && !state.isBeingBuilt(definition);
     }
 
     SimScalar airBaseRepairReach(const GameSimulation& sim, const UnitDefinition& padDefinition)
@@ -280,7 +366,8 @@ namespace rwe
             order,
             [](const AttackOrder&) { return true; },
             [](const PatrolOrder&) { return true; },
-            [](const GuardOrder&) { return true; },
+            // Not guard (S:130): VTOL_Follow has no health gate, and the
+            // fall-back to VTOL_SeekGuard that has one is not modelled.
             [](const auto&) { return false; });
     }
 
@@ -362,20 +449,11 @@ namespace rwe
                 continue;
             }
 
-            // On its way: the order is the claim. Scanning the whole deque
-            // rather than just the front, because a landing order can have
-            // something pushed in front of it and the pad is still spoken
-            // for.
-            auto claimsIt = false;
-            for (const auto& order : other.orders)
-            {
-                if (auto landing = std::get_if<LandOnAirBaseOrder>(&order); landing != nullptr && landing->target == padId)
-                {
-                    claimsIt = true;
-                    break;
-                }
-            }
-
+            // TOTALA-EXE-ECONOMY.md S:130: "free" is decided where the
+            // aircraft attaches (0x47E570, state 5 of VTOL_Landing), and
+            // nothing reserves a pad on the way in, so an aircraft merely
+            // flying towards it holds nothing. What does is being on it.
+            //
             // Already there: occupied until it has been repaired *and* has
             // left, so a healed aircraft still sitting on the pad keeps it.
             // Physical occupancy is unconditional -- an aircraft standing on
@@ -386,16 +464,18 @@ namespace rwe
                 return true;
             }
 
-            if (!claimsIt)
+            // And one already setting down on it, which is the attach
+            // happening: two that begin the descent on the same tick are
+            // settled by unit id, the one thing the original's attach order
+            // does that RWE has no other way to reproduce.
+            if (otherId.value < claimant.value
+                && distanceSquaredXZ(other.position, pad.position) <= reachSquared)
             {
-                continue;
-            }
-
-            // Two aircraft merely on their way to the same pad: the lower id
-            // keeps it and the other is told there are no pads available.
-            if (otherId.value < claimant.value)
-            {
-                return true;
+                if (auto otherAir = std::get_if<UnitPhysicsInfoAir>(&other.physics);
+                    otherAir != nullptr && std::holds_alternative<AirMovementStateLanding>(otherAir->movementState))
+                {
+                    return true;
+                }
             }
         }
 
@@ -414,12 +494,25 @@ namespace rwe
             return std::nullopt;
         }
 
+        // The list the query walks is rebuilt at most every 30 ticks from
+        // the player update, and each rebuild draws rand(30)
+        // (0x40B2C0 from 0x465037; S:130). The rebuild's schedule is kept on
+        // the player and taken when a query finds it due; the draw is
+        // consumed and has no other use that has been read. [open]
+        {
+            auto& player = sim.getPlayer(unitInfo.state->owner);
+            if (!player.airBasesRebuiltAt || sim.gameTime.value >= player.airBasesRebuiltAt->value + 30u)
+            {
+                player.airBasesRebuiltAt = sim.gameTime;
+                [[maybe_unused]] auto rebuildDraw = static_cast<unsigned int>(sim.rng() % 30u);
+            }
+        }
+
         // 0x40B530 walks the owner's air base list and keeps every one whose
         // flat distance is inside the radius the caller passed, which is
         // 0xf00 at all seven call sites. The comparison is on the squared
         // distance with the fractional part shifted off, so it is a plain
         // whole-unit radius of 3840.
-        auto radiusSquared = AirBaseSearchRadius * AirBaseSearchRadius;
         std::vector<UnitId> candidates;
         for (const auto& [otherId, other] : sim.units)
         {
@@ -432,21 +525,14 @@ namespace rwe
             {
                 continue;
             }
-            auto dx = other.position.x - unitInfo.state->position.x;
-            auto dz = other.position.z - unitInfo.state->position.z;
-            if ((dx * dx) + (dz * dz) > radiusSquared)
+            if (!withinFlatRange(other.position, unitInfo.state->position, AirBaseSearchRadius))
             {
                 continue;
             }
 
-            // Taken pads are not offered. A squadron coming home off one raid
-            // therefore spreads over the pads it has rather than piling onto
-            // one and waiting.
-            if (airBaseIsClaimedByAnother(sim, otherId, unitInfo.id))
-            {
-                continue;
-            }
-
+            // No filter on a free or a claimed pad: the query offers every
+            // one in range, one value is drawn, and a busy pad is dealt with
+            // while landing -- the aircraft circles it (S:130).
             candidates.push_back(otherId);
         }
 

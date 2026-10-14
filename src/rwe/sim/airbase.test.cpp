@@ -1,7 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
+#include <memory>
+#include <random>
 #include <rwe/cob/CobEnvironment.h>
-#include <rwe/grid/Grid.h>
 #include <rwe/cob/CobOpCode.h>
+#include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/LosTables.h>
@@ -9,8 +11,6 @@
 #include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
-#include <memory>
-#include <random>
 #include <vector>
 
 namespace rwe
@@ -459,15 +459,15 @@ namespace rwe
         };
     }
 
-TEST_CASE("a pad someone is already on their way to is taken", "[airbase]")
+    TEST_CASE("a pad someone is already on their way to is still offered", "[airbase]")
     {
-        // "When a plane is making its way back to the repair pad, that pad is
-        // considered to be occupied (even if the unit isn't there yet), so
-        // other damaged aircraft will not use that pad until the occupying
-        // aircraft has been repaired and has left."
-        //
-        // The same rule the original prints "Landing aborted: no pads
-        // available" for (0x501C30, from the re-test at 0x411DEB).
+        // MOVED by S:130 (TOTALA-EXE-ECONOMY.md): this used to say a pad
+        // someone is flying to is taken and is not offered. The original's
+        // pad query (0x40B530) has no filter on a free or a claimed pad, and
+        // nothing reserves a pad on the way in -- the only attach in
+        // VTOL_Landing is state 5 -- so the second aircraft is offered it
+        // and deals with a busy pad while landing (see the circling test
+        // below).
         AirBaseFixture f;
         auto pad = f.addPad(f.us, SimVector(500_ss, 0_ss, 0_ss));
         f.damageFighterTo(100);
@@ -485,13 +485,9 @@ TEST_CASE("a pad someone is already on their way to is taken", "[airbase]")
 
         const auto& secondState = f.sim.getUnitState(second);
         ConstUnitInfo secondInfo(second, &secondState, &f.sim.unitDefinitions.at(secondState.unitType));
-        REQUIRE_FALSE(findAirBaseToLandOn(f.sim, secondInfo).has_value());
-
-        // With a second pad there is somewhere else to go.
-        auto spare = f.addPad(f.us, SimVector(600_ss, 0_ss, 0_ss));
-        auto chosen = findAirBaseToLandOn(f.sim, secondInfo);
-        REQUIRE(chosen.has_value());
-        REQUIRE(*chosen == spare);
+        auto offered = findAirBaseToLandOn(f.sim, secondInfo);
+        REQUIRE(offered.has_value());
+        REQUIRE(*offered == pad);
     }
 
     TEST_CASE("a pad is still taken by an aircraft that has finished repairing but not left", "[airbase]")
@@ -515,7 +511,12 @@ TEST_CASE("a pad someone is already on their way to is taken", "[airbase]")
         }
 
         f.damageFighterTo(100);
-        REQUIRE_FALSE(findAirBaseToLandOn(f.sim, f.fighterInfo()).has_value());
+
+        // MOVED by S:130: the query still offers it (no free/claimed filter
+        // there); what holds the pad is the occupant, which the landing
+        // routine sees.
+        REQUIRE(findAirBaseToLandOn(f.sim, f.fighterInfo()).has_value());
+        REQUIRE(airBaseIsClaimedByAnother(f.sim, pad, f.fighter));
 
         // Once it takes off again the pad is free.
         {
@@ -524,9 +525,30 @@ TEST_CASE("a pad someone is already on their way to is taken", "[airbase]")
             r.position = SimVector(1200_ss, 200_ss, 1200_ss);
             f.sim.flyingUnitsSet.insert(resident);
         }
+        REQUIRE_FALSE(airBaseIsClaimedByAnother(f.sim, pad, f.fighter));
         auto chosen = findAirBaseToLandOn(f.sim, f.fighterInfo());
         REQUIRE(chosen.has_value());
         REQUIRE(*chosen == pad);
+    }
+
+    TEST_CASE("two aircraft heading for one pad hold nothing until one of them is on it", "[airbase]")
+    {
+        // S:130: nothing reserves a pad before an aircraft arrives, so an
+        // order to land on it is not a claim. The old tie-break by unit id
+        // between two merely en-route aircraft is gone.
+        AirBaseFixture f;
+        auto pad = f.addPad(f.us, SimVector(500_ss, 0_ss, 0_ss));
+        f.damageFighterTo(100);
+
+        auto second = spawnAirBaseUnit(f.sim, "fighter", f.us, SimVector(40_ss, 200_ss, 0_ss), f.script);
+        f.sim.getUnitState(second).physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+        f.sim.flyingUnitsSet.insert(second);
+
+        f.sim.getUnitState(f.fighter).orders.push_front(LandOnAirBaseOrder(pad));
+        f.sim.getUnitState(second).orders.push_front(LandOnAirBaseOrder(pad));
+
+        REQUIRE_FALSE(airBaseIsClaimedByAnother(f.sim, pad, f.fighter));
+        REQUIRE_FALSE(airBaseIsClaimedByAnother(f.sim, pad, second));
     }
 
     TEST_CASE("switching a pad off turns away new arrivals but not one already coming", "[airbase]")
@@ -759,13 +781,19 @@ TEST_CASE("a pad someone is already on their way to is taken", "[airbase]")
         // once and takes the remainder. Every peer has to draw the same
         // number of times or the simulations part company, so the early
         // return is as much a determinism rule as a faithfulness one.
+        //
+        // S:130 adds one draw in front of it: the player's air base list is
+        // rebuilt at most every 30 ticks and each rebuild draws rand(30), so
+        // the first query takes that draw and the ones inside the next
+        // thirty ticks do not.
         AirBaseFixture f;
         f.damageFighterTo(100);
         auto first = f.addPad(f.us, SimVector(500_ss, 0_ss, 0_ss));
 
-        auto rngBefore = f.sim.rng;
+        std::minstd_rand afterRebuild = f.sim.rng;
+        afterRebuild();
         REQUIRE(*findAirBaseToLandOn(f.sim, f.fighterInfo()) == first);
-        REQUIRE(f.sim.rng == rngBefore);
+        REQUIRE(f.sim.rng == afterRebuild);
 
         auto second = f.addPad(f.us, SimVector(-500_ss, 0_ss, 0_ss));
         std::minstd_rand expected = f.sim.rng;
@@ -1022,8 +1050,113 @@ TEST_CASE("a pad someone is already on their way to is taken", "[airbase]")
         REQUIRE_FALSE(f.sim.getUnitState(resident).orders.empty());
         REQUIRE(std::holds_alternative<UnitPhysicsInfoGround>(f.sim.getUnitState(resident).physics));
 
-        // ...and the newcomer is the one told there is nowhere to go.
-        REQUIRE(f.sim.getUnitState(f.fighter).orders.empty());
+        // ...and the newcomer is not turned away (S:130 removed the abort):
+        // it keeps its order and circles the pad, in the air, until it is
+        // free.
+        const auto& newcomer = f.sim.getUnitState(f.fighter);
+        REQUIRE_FALSE(newcomer.orders.empty());
+        REQUIRE(std::holds_alternative<LandOnAirBaseOrder>(newcomer.orders.front()));
+        REQUIRE(std::holds_alternative<UnitPhysicsInfoAir>(newcomer.physics));
+        REQUIRE(newcomer.airLoiter.has_value());
+        REQUIRE(newcomer.airLoiter->reason == UnitState::AirLoiterState::Reason::PadQueue);
+    }
+
+    TEST_CASE("an aircraft waiting on an occupied pad flies a quarter turn a leg round it and lands when it is free", "[airbase]")
+    {
+        // S:130, VTOL_Landing state 1: no free slot, so circle the pad at
+        // weapon 0's range, a quarter turn a leg. This fixture's fighter has
+        // no weapon, so the unarmed ring (320) is the radius.
+        AirBaseFixture f;
+        auto padPosition = SimVector(500_ss, 0_ss, 0_ss);
+        auto pad = f.addPad(f.us, padPosition);
+
+        auto resident = spawnAirBaseUnit(f.sim, "fighter", f.us, SimVector(1200_ss, 0_ss, 1200_ss), f.script);
+        {
+            auto& r = f.sim.getUnitState(resident);
+            r.position = padPosition + SimVector(0_ss, 20_ss, 0_ss);
+            r.previousPosition = r.position;
+            r.physics = UnitPhysicsInfoGround();
+            r.hitPoints = 196;
+            r.orders.push_back(LandOnAirBaseOrder(pad));
+        }
+
+        f.damageFighterTo(100);
+        f.sim.getUnitState(f.fighter).orders.push_back(LandOnAirBaseOrder(pad));
+
+        for (int i = 0; i < 400; ++i)
+        {
+            f.sim.tick();
+            const auto& s = f.sim.getUnitState(f.fighter);
+            REQUIRE_FALSE(s.orders.empty());
+            REQUIRE(std::holds_alternative<UnitPhysicsInfoAir>(s.physics));
+        }
+
+        // Still flying, and keeping to the ring rather than sitting on it.
+        const auto& waiting = f.sim.getUnitState(f.fighter);
+        auto dx = waiting.position.x - padPosition.x;
+        auto dz = waiting.position.z - padPosition.z;
+        auto distance = hypot(dx, dz);
+        INFO("distance from the pad " << simScalarToFloat(distance));
+        REQUIRE(distance > 200_ss);
+        REQUIRE(distance < 500_ss);
+
+        // The resident leaves, and the waiter is free to come in.
+        {
+            auto& r = f.sim.getUnitState(resident);
+            r.orders.clear();
+            r.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+            r.position = SimVector(1500_ss, 200_ss, 1500_ss);
+            f.sim.flyingUnitsSet.insert(resident);
+        }
+        auto landed = false;
+        for (int i = 0; i < 2000 && !landed; ++i)
+        {
+            f.sim.tick();
+            landed = std::holds_alternative<UnitPhysicsInfoGround>(f.sim.getUnitState(f.fighter).physics);
+        }
+        REQUIRE(landed);
+    }
+
+    TEST_CASE("the repair break-off runs on the mission's own cadence and not on guard", "[airbase]")
+    {
+        // S:130: the gate runs when the mission's handler does, on a timer,
+        // and guard has none (VTOL_Follow carries no health test).
+        AirBaseFixture f;
+        f.addPad(f.us, SimVector(500_ss, 0_ss, 0_ss));
+        f.damageFighterTo(100);
+
+        SECTION("patrol is gated once every thirty ticks")
+        {
+            f.sim.getUnitState(f.fighter).orders.push_back(PatrolOrder(SimVector(-800_ss, 0_ss, 0_ss)));
+
+            int brokeOff = -1;
+            for (int tick = 0; tick < 90 && brokeOff < 0; ++tick)
+            {
+                f.sim.tick();
+                const auto& orders = f.sim.getUnitState(f.fighter).orders;
+                if (!orders.empty() && std::holds_alternative<LandOnAirBaseOrder>(orders.front()))
+                {
+                    brokeOff = static_cast<int>(f.sim.gameTime.value);
+                }
+            }
+            REQUIRE(brokeOff > 0);
+            REQUIRE(((static_cast<unsigned int>(brokeOff) + f.fighter.value) % 30u) == 0u);
+        }
+
+        SECTION("a guard order never breaks off")
+        {
+            auto friendUnit = spawnAirBaseUnit(f.sim, "fighter", f.us, SimVector(100_ss, 200_ss, 0_ss), f.script);
+            f.sim.getUnitState(friendUnit).physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+            f.sim.flyingUnitsSet.insert(friendUnit);
+            f.sim.getUnitState(f.fighter).orders.push_back(GuardOrder(friendUnit));
+
+            for (int tick = 0; tick < 150; ++tick)
+            {
+                f.sim.tick();
+                const auto& orders = f.sim.getUnitState(f.fighter).orders;
+                REQUIRE((orders.empty() || !std::holds_alternative<LandOnAirBaseOrder>(orders.front())));
+            }
+        }
     }
 
     /**
@@ -1121,10 +1254,10 @@ TEST_CASE("a pad someone is already on their way to is taken", "[airbase]")
         const auto& fighterState = f.sim.getUnitState(f.fighter);
         INFO(
             "after 2000 ticks the aircraft is "
-                << (std::holds_alternative<UnitPhysicsInfoGround>(fighterState.physics) ? "down" : "still airborne")
-                << " at (" << simScalarToFloat(fighterState.position.x) << ", " << simScalarToFloat(fighterState.position.y)
-                << ", " << simScalarToFloat(fighterState.position.z) << "), carrier at (" << simScalarToFloat(carrierState.position.x)
-                << ", " << simScalarToFloat(carrierState.position.y) << ", " << simScalarToFloat(carrierState.position.z) << ")");
+            << (std::holds_alternative<UnitPhysicsInfoGround>(fighterState.physics) ? "down" : "still airborne")
+            << " at (" << simScalarToFloat(fighterState.position.x) << ", " << simScalarToFloat(fighterState.position.y)
+            << ", " << simScalarToFloat(fighterState.position.z) << "), carrier at (" << simScalarToFloat(carrierState.position.x)
+            << ", " << simScalarToFloat(carrierState.position.y) << ", " << simScalarToFloat(carrierState.position.z) << ")");
         INFO("lowest height reached: " << simScalarToFloat(lowest));
 
         // What this case pins is the water guard, so what it asserts is that

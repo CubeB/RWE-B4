@@ -2216,6 +2216,9 @@ Nothing in the table was changed. Row 7 is the one worth a decision.
 
 ## 134. Cancelling a build refunds the metal that was spent
 
+**Implementation record, 2026-10-14.** Deletion of the active product refunds truncated metal through the builder's production buffer and removes the frame silently. Decay credits untruncated metal for removed work to the frame. Ordinary settlement applies the income handicap; energy is never refunded. External product death clears queue and rally. Builder death earns no refund.
+See [the port record](PORTING-125-138.md) for limitations and validation.
+
 Settled 2026-10-14 from the order destructor `0x43A1F0`, the factory mission
 `0x402640` and the frame-decay routine `0x41BA60`, read in the executable's
 disassembly. §93 said of the decay path's refund that it "was read from `fxch`
@@ -2295,7 +2298,7 @@ bit, and `0x4872B1`, the apply of a received `0x2c` record's word, is the only
 route in. [Inferred from the absence; an unreached branch rather than a
 decoded one.] RWE has no analogue and needs none.
 
-### What RWE does, and the change
+### RWE before integration, and the change
 
 `clearBuild`, `removeFrameIfStanding` and `removeUnfinishedUnit`
 (`GameSimulation.cpp`) discard the product's progress without crediting
@@ -2394,6 +2397,9 @@ is recorded as a divergence in §88.
 
 ## 130. Breaking off to repair: seven places, and no pad is ever refused for being taken
 
+**Implementation record, 2026-10-14.** Guard, Move, idle and air-to-air pursuit do not divert. Busy pads remain candidates; arrivals circle until a slot is free. The rebuild timestamp and draw are saved and hashed. Handler timer/goal-event alignment and live pad-list refresh remain `[open]`.
+See [the port record](PORTING-125-138.md) for limitations and validation.
+
 *Spec-room finding, 2026-10-14 (ADR-0004). Read from the disassembly of the
 GOG `TotalA.exe` (MD5 `8e74a1dffa1f5988624c52048f5b20cd`). Settles a claim made
 by an independent reading, both halves of which are right. It also qualifies
@@ -2467,7 +2473,7 @@ way in. §94 says a pad is "taken from the moment someone sets out"; this
 routine does not support that. **[inferred]**: no other routine writes the
 reservation. It needs a black-box check with two aircraft and one pad.
 
-### What RWE does
+### RWE before integration
 
 `maybeBreakOffToRepairPad` (`UnitBehaviorService.cpp`, about 361 and
 2138-2182) runs **every tick, before the order handler**, gated by
@@ -2503,6 +2509,9 @@ the flat distance (§127) is a nit.
 
 
 ## 131. A constructor on patrol repairs, helps build and reclaims, in that order of preference
+
+**Implementation record, 2026-10-14.** Integrated repair-before-reclaim patrol decisions, the 60/45-tick cadence, allied ground/frame candidates, random repair selection and sampled best-of-three reclaim selection. Jobs are independent orders; move posture decides their leash and return trip. Within-cell candidate order, list draw order, timer phase and leash placement remain `[open]`.
+See [the port record](PORTING-125-138.md) for limitations and validation.
 
 *Spec-room finding, 2026-10-14 (ADR-0004). Read from the disassembly of the
 GOG `TotalA.exe` (MD5 `8e74a1dffa1f5988624c52048f5b20cd`). Settles a claim made
@@ -2647,7 +2656,7 @@ the list chosen by flag `0x40000` (`+0x60` queued, `+0x5C` otherwise). This
 mirrors `0x43B1F0`, the attack variant (command 3), which refuses mode 0 or
 Hold Fire unless forced.
 
-### What RWE does, and the change
+### RWE before integration, and the change
 
 `handlePatrolOrder` (`UnitBehaviorService.cpp`, about 4595-4826) does reclaim
 only. `findFeatureToAutoReclaim` takes the **nearest** metal or energy feature

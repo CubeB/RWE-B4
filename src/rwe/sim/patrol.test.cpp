@@ -1,4 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
+#include <limits>
+#include <memory>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
@@ -10,8 +12,6 @@
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/UnitWeapon.h>
 #include <rwe/sim/WeaponDefinition.h>
-#include <limits>
-#include <memory>
 #include <rwe/sim/sim_test_util.h>
 
 namespace rwe
@@ -223,6 +223,7 @@ namespace rwe
         sim.unitScriptDefinitions["FACT"] = *script;
 
         auto productDef = makeTankDef();
+        productDef.canPatrol = true;
         productDef.objectName = "model";
         productDef.buildTime = 100u;
         productDef.buildCostMetal = Metal(1.0f);

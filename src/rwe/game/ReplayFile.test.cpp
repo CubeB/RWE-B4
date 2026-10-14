@@ -303,6 +303,16 @@ namespace rwe
             REQUIRE(!readReplayFile(file.path).has_value());
         }
 
+        SECTION("a replay from before the unit behaviour ports is refused")
+        {
+            ReplayWriter(file.path, makeHeader()).close();
+            std::fstream out(file.path, std::ios::binary | std::ios::in | std::ios::out);
+            out.seekp(9);
+            out.put('\x01');
+            out.close();
+            REQUIRE_FALSE(readReplayFile(file.path).has_value());
+        }
+
         SECTION("a replay from a version this build cannot read")
         {
             ReplayWriter(file.path, makeHeader()).close();

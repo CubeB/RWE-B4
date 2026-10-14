@@ -27,6 +27,7 @@ namespace rwe
         GameSimulation* const sim;
 
     public:
+        void clearBuild(UnitInfo unitInfo);
         UnitBehaviorService(GameSimulation* sim);
 
         void onCreate(UnitId unitId);
@@ -118,12 +119,15 @@ namespace rwe
         void dropAirAttackRun(UnitInfo unitInfo);
 
         /**
-         * The nearest thing a construction unit on patrol should clear away,
-         * or nothing. This is the original's only automatic reclaim and the
-         * only reader of a feature's `autoreclaimable` bit -- see
-         * TOTALA-EXE.md §97.
+         * One decision of a constructor on patrol: the original's
+         * RepairPatrol (0x405980 ground, 0x4152F0 air), S:131 of
+         * TOTALA-EXE-ECONOMY.md. Repairs or helps build what is hurt nearby,
+         * or reclaims what is lying about, by putting that order in front of
+         * the patrol. True when it did, and the patrol should do nothing
+         * else this tick. This is the original's only automatic reclaim and
+         * the only reader of a feature's `autoreclaimable` bit -- S:97.
          */
-        std::optional<FeatureId> findFeatureToAutoReclaim(UnitInfo unitInfo);
+        bool runRepairPatrolDecision(UnitInfo unitInfo);
 
         /**
          * How empty a store has to be before a patrolling builder goes looking
@@ -155,6 +159,22 @@ namespace rwe
          * time the aircraft reaches its station.
          */
         void flyAirLoiterCircuit(UnitInfo unitInfo, UnitState::AirLoiterState::Reason reason, const SimVector& anchor, SimAngle stepBase);
+
+        /**
+         * VTOL_Standby's hop (0x40F7D0, TOTALA-EXE-MOVEMENT.md S:128): an idle
+         * aircraft that is airborne and carrying something hops to a fresh
+         * point within 8..39 units of where it went idle, every 30..44 ticks,
+         * at full cruising altitude, instead of landing.
+         */
+        void flyIdleHop(UnitInfo unitInfo);
+
+        /**
+         * One tick of VTOL_Patrol's travelling phase (0x410E70, S:125): the
+         * goal is the waypoint plus 320 along the line from the aircraft, the
+         * leg is done when the aircraft is within 336 of that goal. True when
+         * the leg is complete.
+         */
+        bool flyAirPatrolLeg(UnitInfo unitInfo, const SimVector& waypoint);
 
         /** How far out an aircraft holds on one of those circuits. */
         SimScalar airLoiterRadius(UnitInfo unitInfo) const;
@@ -231,7 +251,6 @@ namespace rwe
 
         bool handleBuild(UnitInfo unitInfo, const std::string& unitType);
 
-        void clearBuild(UnitInfo unitInfo);
 
         void updateWeapon(UnitId id, unsigned int weaponIndex);
 

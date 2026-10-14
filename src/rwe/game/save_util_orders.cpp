@@ -92,7 +92,16 @@ namespace rwe
             [&](const CompleteBuildOrder& c) { return json{{"kind", "completeBuild"}, {"target", saveUnitIdRef(c.target, ctx)}}; },
             [&](const GuardOrder& g) { return json{{"kind", "guard"}, {"target", saveUnitIdRef(g.target, ctx)}}; },
             [&](const ReclaimOrder& r) { return json{{"kind", "reclaim"}, {"target", saveReclaimTarget(r.target, ctx)}}; },
-            [&](const RepairOrder& r) { return json{{"kind", "repair"}, {"target", saveUnitIdRef(r.target, ctx)}}; },
+            [&](const RepairOrder& r) {
+                // The leash a patrolling constructor's job carries (S:131).
+                auto j = json{{"kind", "repair"}, {"target", saveUnitIdRef(r.target, ctx)}};
+                if (r.leash)
+                {
+                    j["leashAnchor"] = saveSimVector(r.leash->anchor);
+                    j["leashDistance"] = saveSimScalar(r.leash->distance);
+                }
+                return j;
+            },
             [](const PatrolOrder& p) { return json{{"kind", "patrol"}, {"destination", saveSimVector(p.destination)}}; },
             [&](const ResurrectOrder& r) {
                 // The countdown rides on the order, as capture's progress
@@ -177,7 +186,12 @@ namespace rwe
         }
         if (kind == "repair")
         {
-            return RepairOrder(loadUnitIdRef(j.at("target"), ctx));
+            RepairOrder order(loadUnitIdRef(j.at("target"), ctx));
+            if (j.contains("leashAnchor"))
+            {
+                order.leash = AttackLeash(loadSimVector(j.at("leashAnchor")), loadSimScalar(j.at("leashDistance")));
+            }
+            return order;
         }
         if (kind == "patrol")
         {
@@ -843,14 +857,26 @@ namespace rwe
         return json{
             {"reason", saveEnum(s.reason)},
             {"anchor", saveSimVector(s.anchor)},
-            {"bearing", saveSimAngle(s.bearing)}};
+            {"bearing", saveSimAngle(s.bearing)},
+            {"waypoint", saveSimVector(s.waypoint)},
+            {"dueAt", saveGameTime(s.dueAt)}};
     }
 
     UnitState::AirLoiterState loadAirLoiterState(const json& j)
     {
-        return UnitState::AirLoiterState{
+        UnitState::AirLoiterState s{
             loadEnum<UnitState::AirLoiterState::Reason>(j.at("reason")),
             loadSimVector(j.at("anchor")),
             loadSimAngle(j.at("bearing"))};
+        // The hop's two fields arrived later than the circuit's three.
+        if (j.contains("waypoint"))
+        {
+            s.waypoint = loadSimVector(j.at("waypoint"));
+        }
+        if (j.contains("dueAt"))
+        {
+            s.dueAt = loadGameTime(j.at("dueAt"));
+        }
+        return s;
     }
 }

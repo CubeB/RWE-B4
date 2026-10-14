@@ -1,34 +1,34 @@
 #include "GameSimulation.h"
-#include <rwe/sim/UnitBehaviorService_util.h>
-#include <rwe/sim/MixedOwnership.h>
-#include <rwe/sim/SimRandom.h>
-#include <rwe/sim/SimulationOwnership.h>
-#include <rwe/sim/TaLiveSenderHooks.h>
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <random>
 #include <rwe/ai/AiController.h>
 #include <rwe/sim/DemoRecorder.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
+#include <rwe/sim/MixedOwnership.h>
 #include <rwe/sim/ResourceSharing.h>
+#include <rwe/sim/SimRandom.h>
 #include <rwe/sim/SimScalar.h>
 #include <rwe/sim/SimTicksPerSecond.h>
+#include <rwe/sim/SimulationOwnership.h>
+#include <rwe/sim/TaLiveSenderHooks.h>
 #include <rwe/sim/UnitBehaviorService.h>
-#include <chrono>
-#include <rwe/util/SimpleLogger.h>
+#include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/cob.h>
 #include <rwe/sim/movement.h>
-#include <rwe/sim/util.h>
 #include <rwe/sim/sim_prof.h>
+#include <rwe/sim/util.h>
 #include <rwe/util/Index.h>
+#include <rwe/util/SimpleLogger.h>
 #include <rwe/util/collection_util.h>
 #include <rwe/util/match.h>
 #include <rwe/util/rwe_string.h>
 #include <type_traits>
-#include <random>
 #include <unordered_set>
 
 namespace rwe
@@ -1000,7 +1000,6 @@ namespace rwe
     }
 
 
-
     void GameSimulation::updateCarriedUnits()
     {
         for (auto& [unitId, unit] : units)
@@ -1448,6 +1447,13 @@ namespace rwe
                 unit.nanoframeDecayRemainder = numerator % energyCost;
             }
 
+            // TOTALA-EXE-ECONOMY S:134: decay returns metal, without truncation.
+            // Income receives the owner's handicap at the ordinary settle.
+            auto removed = std::min(step, unit.buildTimeCompleted);
+            if (unitDefinition.buildTime > 0)
+            {
+                addResourceDelta(entry.first, Energy(0), Metal(unitDefinition.buildCostMetal.value * static_cast<float>(removed) / static_cast<float>(unitDefinition.buildTime)));
+            }
             if (unit.removeBuildProgress(unitDefinition, step))
             {
                 gone.push_back(entry.first);
@@ -2147,11 +2153,6 @@ namespace rwe
     }
 
 
-
-
-
-
-
     UnitState& GameSimulation::getUnitState(UnitId id)
     {
         auto it = units.find(id);
@@ -2264,7 +2265,6 @@ namespace rwe
     {
         getUnitState(unitId).stopSpinObject(name, axis, deceleration);
     }
-
 
 
     std::optional<SimVector> GameSimulation::intersectLineWithTerrain(const Line3x<SimScalar>& line) const
@@ -2977,8 +2977,6 @@ namespace rwe
     {
         getUnitState(unitId).cloakRequested = value;
     }
-
-
 
 
     MovementClassDefinition GameSimulation::getAdHocMovementClass(const UnitDefinition::MovementCollisionInfo& info) const
@@ -4889,6 +4887,11 @@ namespace rwe
                     s->status = UnitCreationStatusPending{0, gameTime + GameTime(FactoryPadRetryTicks)};
                     continue;
                 }
+
+                // TOTALA-EXE-INTERFACE S:133: posture is stamped before its first tick.
+                auto& product = getUnitState(*newUnitId);
+                product.moveOrders = unit->get().moveOrders;
+                product.fireOrders = unit->get().fireOrders;
 
                 // A factory's frame is a build start like a builder's: the
                 // 0x09 names the frame and the 0x12 names the yard that

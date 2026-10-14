@@ -8,32 +8,31 @@
 #include <rwe/CroppedViewport.h>
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuScene.h>
-#include <rwe/game/SaveFile.h>
-#include <rwe/io/gui/gui.h>
-#include <rwe/game/save_util.h>
-#include <rwe/ui/UiTextBox.h>
-#include <rwe/util.h>
-#include <rwe/MainMenuScene.h>
-#include <rwe/ai/AiPlayerController.h>
 #include <rwe/Mesh.h>
+#include <rwe/ai/AiPlayerController.h>
 #include <rwe/camera_util.h>
 #include <rwe/game/GameScene_util.h>
 #include <rwe/game/OrderButtons.h>
-#include <rwe/mesh_util.h>
 #include <rwe/game/PlayerCommandApplication.h>
+#include <rwe/game/SaveFile.h>
 #include <rwe/game/dump_util.h>
 #include <rwe/game/matrix_util.h>
+#include <rwe/game/save_util.h>
+#include <rwe/io/gui/gui.h>
+#include <rwe/mesh_util.h>
 #include <rwe/render/render_prof.h>
-#include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/resource_io.h>
 #include <rwe/sim/ResourceSharing.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitBehaviorService.h>
+#include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/ui/UiStagedButton.h>
+#include <rwe/ui/UiTextBox.h>
+#include <rwe/util.h>
 #include <rwe/util/CrashHandler.h>
 #include <rwe/util/Index.h>
-#include <rwe/util/match.h>
 #include <rwe/util/SimpleLogger.h>
+#include <rwe/util/match.h>
 #include <rwe/util/rwe_string.h>
 
 // Cursor picking and the local player's commands, split out of GameScene.cpp
@@ -1612,6 +1611,21 @@ namespace rwe
                         }
                     }
                 },
+                [&](const UnitFromFactoryEvent& e) {
+                    auto product = simulation.tryGetUnitState(e.unitId);
+                    if (product && product->get().owner == localPlayerId
+                        && simulation.getPlayer(product->get().owner).type == GamePlayerType::Human)
+                    {
+                        // S:133: local UI squads inherit at the factory door.
+                        for (auto& group : controlGroups)
+                        {
+                            if (group.count(e.factoryId))
+                            {
+                                group.insert(e.unitId);
+                            }
+                        }
+                    }
+                },
                 [&](const UnitCompleteEvent& e) {
                     auto unit = tryGetUnit(e.unitId);
                     if (unit)
@@ -2173,32 +2187,27 @@ namespace rwe
 
         if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "FIREORD"))
         {
-            p->get().addSubscription(fireOrders.subscribe([&p = p->get(), showFace](const auto& v) {
-                showFace(p, toggleFace(v, 3), static_cast<unsigned int>(v.value)); }));
+            p->get().addSubscription(fireOrders.subscribe([&p = p->get(), showFace](const auto& v) { showFace(p, toggleFace(v, 3), static_cast<unsigned int>(v.value)); }));
         }
 
         if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "MOVEORD"))
         {
-            p->get().addSubscription(moveOrders.subscribe([&p = p->get(), showFace](const auto& v) {
-                showFace(p, toggleFace(v, 3), static_cast<unsigned int>(v.value)); }));
+            p->get().addSubscription(moveOrders.subscribe([&p = p->get(), showFace](const auto& v) { showFace(p, toggleFace(v, 3), static_cast<unsigned int>(v.value)); }));
         }
 
         if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "ONOFF"))
         {
-            p->get().addSubscription(onOff.subscribe([&p = p->get(), showFace](const auto& v) {
-                showFace(p, toggleFace(v, 2), v.value ? 1u : 0u); }));
+            p->get().addSubscription(onOff.subscribe([&p = p->get(), showFace](const auto& v) { showFace(p, toggleFace(v, 2), v.value ? 1u : 0u); }));
         }
 
         if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "CLOAK"))
         {
-            p->get().addSubscription(cloak.subscribe([&p = p->get(), showFace](const auto& v) {
-                showFace(p, toggleFace(v, 2), v.value ? 1u : 0u); }));
+            p->get().addSubscription(cloak.subscribe([&p = p->get(), showFace](const auto& v) { showFace(p, toggleFace(v, 2), v.value ? 1u : 0u); }));
         }
 
         if (auto p = findWithSidePrefix<UiStagedButton>(*currentPanel, "REPEAT"))
         {
-            p->get().addSubscription(repeatBuildQueue.subscribe([&p = p->get(), showFace](const auto& v) {
-                showFace(p, toggleFace(v, 2), v.value ? 1u : 0u); }));
+            p->get().addSubscription(repeatBuildQueue.subscribe([&p = p->get(), showFace](const auto& v) { showFace(p, toggleFace(v, 2), v.value ? 1u : 0u); }));
         }
 
         // The BUILD/ORDERS tabs draw the section the unit's panel is showing,

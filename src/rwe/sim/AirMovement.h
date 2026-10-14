@@ -204,6 +204,36 @@ namespace rwe
         /** The next bearing, stepped back by the base amount plus the drawn jitter. */
         static SimAngle nextLoiterBearing(SimAngle bearing, SimAngle stepBase, unsigned int draw);
 
+        // --- VTOL_Standby's hop (0x40F7D0, TOTALA-EXE-MOVEMENT.md S:128) ---
+
+        /** The hop's distance is rand(0x20) + 8 world units: 8..39. */
+        static constexpr unsigned int IdleHopRadiusSpan = 0x20;
+        static constexpr unsigned int IdleHopRadiusMin = 8;
+
+        /** The wait before the next hop is rand(15) + 30 ticks: 30..44. */
+        static constexpr unsigned int IdleHopTimerSpan = 15;
+        static constexpr unsigned int IdleHopTimerMin = 30;
+
+        /**
+         * The original spends state 0 on recording the anchor and state 1 on
+         * the sight search before state 2 hops, one tick each.
+         */
+        static constexpr unsigned int IdleHopFirstDelayTicks = 2;
+
+        /** The hop's point: the anchor displaced along the drawn bearing. Height is the caller's. */
+        static SimVector idleHopWaypoint(const SimVector& anchor, unsigned int bearingDraw, unsigned int radiusDraw);
+
+        // --- VTOL_Patrol's travelling phase (0x410E70, TOTALA-EXE-MOVEMENT.md S:125) ---
+
+        /** The goal sits this far past the waypoint, on the line from the aircraft: 0x1400000. */
+        static constexpr SimScalar PatrolOvershoot = 320_ss;
+
+        /** The goal's arrival tolerance, 0x150, strict: the leg is done inside this of the goal. */
+        static constexpr SimScalar PatrolArrivalTolerance = 336_ss;
+
+        /** The goal is re-aimed from the aircraft's position this often: 0x439E80(mission, 0x1E). */
+        static constexpr unsigned int PatrolReaimTicks = 30;
+
         // --- repair diversion ---
 
         /**

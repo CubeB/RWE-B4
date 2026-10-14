@@ -1,7 +1,6 @@
 #pragma once
 
-#include <rwe/sim/PlayerVisibility.h>
-#include <rwe/sim/SimTicksPerSecond.h>
+#include <map>
 #include <memory>
 #include <random>
 #include <rwe/cob/CobUnitId.h>
@@ -26,11 +25,13 @@
 #include <rwe/sim/MovementClassId.h>
 #include <rwe/sim/OccupiedGrid.h>
 #include <rwe/sim/PlayerId.h>
+#include <rwe/sim/PlayerVisibility.h>
 #include <rwe/sim/Projectile.h>
 #include <rwe/sim/ProjectileId.h>
 #include <rwe/sim/ProjectileSpawn.h>
 #include <rwe/sim/ResourceSettler.h>
 #include <rwe/sim/SimAxis.h>
+#include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/TaLiveSenderHooks.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitId.h>
@@ -38,7 +39,6 @@
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/UnitSpatialIndex.h>
 #include <rwe/sim/UnitState.h>
-#include <map>
 #include <set>
 #include <unordered_map>
 #include <vector>
@@ -185,6 +185,13 @@ namespace rwe
     struct UnitDeactivatedEvent
     {
         UnitId unitId;
+    };
+
+    /** UI-only inheritance at the factory door (TOTALA-EXE-INTERFACE S:133). */
+    struct UnitFromFactoryEvent
+    {
+        UnitId unitId;
+        UnitId factoryId;
     };
 
     struct UnitCompleteEvent
@@ -430,6 +437,7 @@ namespace rwe
         UnitActivatedEvent,
         UnitDeactivatedEvent,
         UnitCompleteEvent,
+        UnitFromFactoryEvent,
         EmitParticleFromPieceEvent,
         UnitSpawnedEvent,
         UnitDiedEvent,

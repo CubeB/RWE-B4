@@ -93,7 +93,9 @@ namespace rwe
             (p.shareMetal ? 1u : 0u) | (p.shareEnergy ? 2u : 0u),
             p.metalReserve,
             p.energyReserve,
-            p.energyReserve);
+            p.energyReserve,
+            // S:130: when the air base list was last rebuilt (the draw's schedule).
+            p.airBasesRebuiltAt);
     }
 
     /**
@@ -139,7 +141,7 @@ namespace rwe
     GameHash computeHashOf(const CompleteBuildOrder& o) { return computeHashOf(o.target); }
     GameHash computeHashOf(const GuardOrder& o) { return computeHashOf(o.target); }
     GameHash computeHashOf(const ReclaimOrder& o) { return computeHashOf(o.target); }
-    GameHash computeHashOf(const RepairOrder& o) { return computeHashOf(o.target); }
+    GameHash computeHashOf(const RepairOrder& o) { return combineHashes(o.target, o.leash); }
     GameHash computeHashOf(const PatrolOrder& o) { return computeHashOf(o.destination); }
 
     GameHash computeHashOf(const CaptureOrder& o)
@@ -359,7 +361,9 @@ namespace rwe
         return combineHashes(
             static_cast<uint32_t>(s.reason),
             s.anchor,
-            s.bearing);
+            s.bearing,
+            s.waypoint,
+            s.dueAt);
     }
 
     GameHash computeHashOf(const MapFeature& f, const std::string& definitionName)

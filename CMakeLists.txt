@@ -388,6 +388,7 @@ set(SOURCE_FILES
     src/rwe/game/InGameSoundsInfo.h
     src/rwe/game/OrderButtons.cpp
     src/rwe/game/OrderButtons.h
+    src/rwe/game/OrderDispatch.h
     src/rwe/game/MapTerrainGraphics.cpp
     src/rwe/game/MapTerrainGraphics.h
     src/rwe/game/Particle.cpp
@@ -684,6 +685,7 @@ src/rwe/net/EndpointFamily.h
     src/rwe/sim/Energy.h
     src/rwe/sim/FeatureDefinition.cpp
     src/rwe/sim/FeatureDefinition.h
+    src/rwe/sim/FlatRange.h
     src/rwe/sim/FeatureDefinitionId.h
     src/rwe/sim/FeatureId.h
     src/rwe/sim/GameHash.cpp
@@ -743,6 +745,8 @@ src/rwe/net/EndpointFamily.h
     src/rwe/sim/ResourceSettler.h
     src/rwe/sim/ResourceSharing.cpp
     src/rwe/sim/ResourceSharing.h
+    src/rwe/sim/RepairPatrol.cpp
+    src/rwe/sim/RepairPatrol.h
     src/rwe/sim/SimAngle.cpp
     src/rwe/sim/SimAngle.h
     src/rwe/sim/SimAxis.h
@@ -1234,6 +1238,7 @@ set(TEST_FILES
     src/rwe/sim/GameHash_util.test.cpp
     src/rwe/sim/demorecorder.test.cpp
     src/rwe/sim/accuracy.test.cpp
+    src/rwe/sim/aimlead.test.cpp
     src/rwe/sim/waterline.test.cpp
     src/rwe/game/screenshake.test.cpp
     src/rwe/game/shatter.test.cpp
@@ -1293,6 +1298,7 @@ set(TEST_FILES
     src/rwe/sim/gunship.test.cpp
     src/rwe/sim/aircraftidle.test.cpp
     src/rwe/sim/airbase.test.cpp
+    src/rwe/sim/repairpatrol.test.cpp
     src/rwe/game/noshadow.test.cpp
     src/rwe/sim/missile.test.cpp
     src/rwe/sim/seacollision.test.cpp

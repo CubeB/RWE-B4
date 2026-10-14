@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <memory>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/cob/CobOpCode.h>
 #include <rwe/game/save_util.h>
@@ -10,10 +11,9 @@
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/WeaponDefinition.h>
-#include <rwe/util/OpaqueId_io.h>
-#include <memory>
-#include <vector>
 #include <rwe/sim/sim_test_util.h>
+#include <rwe/util/OpaqueId_io.h>
+#include <vector>
 
 namespace rwe
 {
@@ -54,13 +54,18 @@ namespace rwe
             script.instructions = {
                 op(OpCode::PUSH_CONSTANT), 42u,
                 // loop: (instruction index 2)
-                op(OpCode::PUSH_CONSTANT), 200u,
+                op(OpCode::PUSH_CONSTANT),
+                200u,
                 op(OpCode::SLEEP),
-                op(OpCode::PUSH_STATIC), 0u,
-                op(OpCode::PUSH_CONSTANT), 1u,
+                op(OpCode::PUSH_STATIC),
+                0u,
+                op(OpCode::PUSH_CONSTANT),
+                1u,
                 op(OpCode::ADD),
-                op(OpCode::POP_STATIC), 0u,
-                op(OpCode::JUMP), 2u};
+                op(OpCode::POP_STATIC),
+                0u,
+                op(OpCode::JUMP),
+                2u};
             return script;
         }
 
@@ -775,4 +780,32 @@ namespace rwe
         REQUIRE(simA.isExploredBy(us, somewhereExplored));
         REQUIRE(simB.isExploredBy(us, somewhereExplored));
     }
+
+    TEST_CASE("ported patrol and pad state resumes with the same hash and generator", "[saveload][porting]")
+    {
+        auto simA = makeBaseSim();
+        buildScenario(simA);
+        auto id = spawnUnit(simA, "TANK", PlayerId(0), SimVector(300_ss, 0_ss, 300_ss));
+        simA.tick();
+        auto& unit = simA.getUnitState(id);
+        unit.airLoiter = UnitState::AirLoiterState{UnitState::AirLoiterState::Reason::Patrol,
+            SimVector(400_ss, 0_ss, 400_ss),
+            SimAngle(123)};
+        unit.airLoiter->waypoint = SimVector(620_ss, 0_ss, 620_ss);
+        unit.airLoiter->dueAt = GameTime(35);
+        unit.orders.push_front(RepairOrder(id, AttackLeash(unit.position, 123_ss)));
+        simA.getPlayer(PlayerId(0)).airBasesRebuiltAt = GameTime(12);
+        auto saved = saveSimulationToJson(simA);
+        auto simB = makeBaseSim();
+        loadSimulationFromJson(saved, simB);
+        REQUIRE(saveSimulationToJson(simB) == saved);
+        REQUIRE(computeHashOf(simA) == computeHashOf(simB));
+        for (int i = 0; i < 60; ++i)
+        {
+            simA.tick();
+            simB.tick();
+            REQUIRE(computeHashOf(simA) == computeHashOf(simB));
+        }
+    }
+
 }

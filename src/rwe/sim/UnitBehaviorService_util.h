@@ -40,6 +40,31 @@ namespace rwe
     GameTime computeReloadTicks(SimScalar reloadTime, unsigned int health, unsigned int maxHealth, unsigned int kills);
 
     /**
+     * The aim lead of a veteran shooter, TOTALA-EXE-WEAPONS.md S:126
+     * (0x48A1E0): where the sweet spot would be in 0.8 * D / S ticks if the
+     * target kept its present velocity. Returns the vector to ADD to the sweet
+     * spot; zero when the shooter has fewer than six kills, the weapon has no
+     * velocity or is a cruise missile.
+     *
+     * Integer throughout, as the original: positions and velocities are taken
+     * to 16.16, the distance is an integer square root truncated, and the two
+     * divides and shifts are int64.
+     *
+     * @param weaponVelocityPerTick the weapon's `weaponvelocity / 30`, in world units/tick.
+     * @param targetVelocity the target's per-tick velocity, in world units/tick.
+     */
+    SimVector computeAimLead(
+        const SimVector& shooterOrigin,
+        const SimVector& sweetSpot,
+        const SimVector& targetVelocity,
+        SimScalar weaponVelocityPerTick,
+        bool cruise,
+        unsigned int shooterKills);
+
+    /** Floor of the square root of a 64-bit integer, with no floating point. */
+    uint64_t integerSquareRoot(uint64_t value);
+
+    /**
      * Nudges a launch direction by an independent heading and pitch error,
      * the way the original nudges the two angles on the weapon mount.
      */

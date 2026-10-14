@@ -3,6 +3,7 @@
 #include <optional>
 #include <rwe/game/PlayerColorIndex.h>
 #include <rwe/sim/Energy.h>
+#include <rwe/sim/GameTime.h>
 #include <rwe/sim/Metal.h>
 #include <string>
 
@@ -101,6 +102,19 @@ namespace rwe
         bool shareEnergy{false};
         Metal metalReserve{0};
         Energy energyReserve{0};
+
+        /**
+         * When the player's air base list was last rebuilt, if it ever has
+         * been. The original rebuilds it at most every 30 ticks from the
+         * player update (0x40B2C0 from 0x465037) and draws `rand(30)` each
+         * time; here the rebuild is taken when a pad query finds the last one
+         * 30 or more ticks old (TOTALA-EXE-ECONOMY.md S:130). Only the
+         * schedule and its draw are kept: the list itself is always read live,
+         * so a pad completed or switched on inside the window is offered at
+         * once where the original would make the aircraft wait. [open]
+         * Hashed and saved, because it decides when the draw is taken.
+         */
+        std::optional<GameTime> airBasesRebuiltAt{std::nullopt};
 
         /** Enemy (or, with friendly fire, any) units this player's units have destroyed. */
         unsigned int unitsKilled{0};

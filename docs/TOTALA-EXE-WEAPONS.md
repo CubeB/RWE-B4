@@ -1127,10 +1127,11 @@ unit would engage a submarine, neither of which the original can do.
 - **The ballistic arc test** (`0x49A890`). RWE has no arc solver and aims its
   ballistic projectiles from their own code; a reachability gate here would
   need that solver first.
-- **The flat range test.** RWE measures the full 3D distance. The original's
-  `dx² + dz²` makes a target directly overhead free, which — given that nothing
-  else stops a ground weapon engaging an aircraft — would make ground fire at
-  aircraft *more* common than RWE's, not less.
+- ~~**The flat range test.**~~ **Superseded by §127, 2026-10-14: ported.** RWE
+  measured the full 3D distance. The original's `dx² + dz²` makes a target
+  directly overhead free, which — given that nothing else stops a ground weapon
+  engaging an aircraft — would make ground fire at aircraft *more* common than
+  RWE's, not less. The maintainer's decision was to follow the original.
 
 ### One correction to §9
 
@@ -2870,9 +2871,20 @@ target directly overhead free, and since nothing else stops a ground weapon
 engaging an aircraft, ground fire at aircraft would become more common than it
 is in RWE now.
 
-**RWE differs.** The reason is a decision and not a finding: the original is
+**RWE differed.** The reason was a decision and not a finding: the original is
 flat, and the original has the aircraft-overhead behaviour that the entry
-describes. Whether it is wanted is the maintainer's call.
+describes. Whether it is wanted was the maintainer's call.
+
+**Ported, 2026-10-14**, the maintainer having decided to follow the original.
+`sim/FlatRange.h` is the one test (`flatRangeScore`, `withinFlatRange`: each
+square floored on its own, in double, compared with the whole-unit range
+squared). Sites changed: the fire-time range gate, acquisition gather and chooser's
+score, attack chase distance, D-gun approach, return fire, repair-pad radius
+and constructor repair scan. The ballistic arc solver remains three-dimensional.
+Out-of-range targets are retained: firing waits until the flat range gate passes,
+rather than clearing the target. The kamikaze trigger and interceptor coverage
+retain their separate rules. Mission leash arithmetic remains an `[open]`
+approximation where noted in code.
 
 ### The change, if it is made
 

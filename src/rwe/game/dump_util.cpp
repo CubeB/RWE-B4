@@ -67,7 +67,8 @@ namespace rwe
             {"shareMetal", dumpJson(p.shareMetal)},
             {"shareEnergy", dumpJson(p.shareEnergy)},
             {"metalReserve", dumpJson(p.metalReserve)},
-            {"energyReserve", dumpJson(p.energyReserve)}};
+            {"energyReserve", dumpJson(p.energyReserve)},
+            {"airBasesRebuiltAt", dumpJson(p.airBasesRebuiltAt)}};
     }
     /**
      * The desync dump's page of the unit, walked from the field table
@@ -140,10 +141,18 @@ namespace rwe
         const char* phaseName = "Approaching";
         switch (p.phase)
         {
-            case AirMovementStateAttackRun::Phase::Approaching: phaseName = "Approaching"; break;
-            case AirMovementStateAttackRun::Phase::Engaging:    phaseName = "Engaging";    break;
-            case AirMovementStateAttackRun::Phase::Departing:   phaseName = "Departing";   break;
-            case AirMovementStateAttackRun::Phase::Breaking:    phaseName = "Breaking";    break;
+            case AirMovementStateAttackRun::Phase::Approaching:
+                phaseName = "Approaching";
+                break;
+            case AirMovementStateAttackRun::Phase::Engaging:
+                phaseName = "Engaging";
+                break;
+            case AirMovementStateAttackRun::Phase::Departing:
+                phaseName = "Departing";
+                break;
+            case AirMovementStateAttackRun::Phase::Breaking:
+                phaseName = "Breaking";
+                break;
         }
         return nlohmann::json{
             {"phase", phaseName},
@@ -158,10 +167,18 @@ namespace rwe
         const char* phaseName = "Pursuing";
         switch (p.phase)
         {
-            case AirMovementStateDogfight::Phase::Pursuing:     phaseName = "Pursuing";     break;
-            case AirMovementStateDogfight::Phase::Extending:    phaseName = "Extending";    break;
-            case AirMovementStateDogfight::Phase::BreakingOut:  phaseName = "BreakingOut";  break;
-            case AirMovementStateDogfight::Phase::BreakingAway: phaseName = "BreakingAway"; break;
+            case AirMovementStateDogfight::Phase::Pursuing:
+                phaseName = "Pursuing";
+                break;
+            case AirMovementStateDogfight::Phase::Extending:
+                phaseName = "Extending";
+                break;
+            case AirMovementStateDogfight::Phase::BreakingOut:
+                phaseName = "BreakingOut";
+                break;
+            case AirMovementStateDogfight::Phase::BreakingAway:
+                phaseName = "BreakingAway";
+                break;
         }
         return nlohmann::json{
             {"phase", phaseName},
@@ -179,8 +196,12 @@ namespace rwe
         const char* phaseName = "Closing";
         switch (p.phase)
         {
-            case AirMovementStateHoverAttack::Phase::Closing:  phaseName = "Closing";  break;
-            case AirMovementStateHoverAttack::Phase::Swinging: phaseName = "Swinging"; break;
+            case AirMovementStateHoverAttack::Phase::Closing:
+                phaseName = "Closing";
+                break;
+            case AirMovementStateHoverAttack::Phase::Swinging:
+                phaseName = "Swinging";
+                break;
         }
         return nlohmann::json{
             {"phase", phaseName},
@@ -252,7 +273,7 @@ namespace rwe
 
     nlohmann::json dumpJson(const RepairOrder& o)
     {
-        return nlohmann::json{{"target", dumpJson(o.target)}};
+        return nlohmann::json{{"target", dumpJson(o.target)}, {"leash", dumpJson(o.leash)}};
     }
 
     nlohmann::json dumpJson(const PatrolOrder& o)
@@ -306,13 +327,28 @@ namespace rwe
         const char* reasonName = "AttackEnded";
         switch (s.reason)
         {
-            case UnitState::AirLoiterState::Reason::AttackEnded: reasonName = "AttackEnded"; break;
-            case UnitState::AirLoiterState::Reason::Guarding:    reasonName = "Guarding";    break;
+            case UnitState::AirLoiterState::Reason::AttackEnded:
+                reasonName = "AttackEnded";
+                break;
+            case UnitState::AirLoiterState::Reason::Guarding:
+                reasonName = "Guarding";
+                break;
+            case UnitState::AirLoiterState::Reason::IdleHop:
+                reasonName = "IdleHop";
+                break;
+            case UnitState::AirLoiterState::Reason::Patrol:
+                reasonName = "Patrol";
+                break;
+            case UnitState::AirLoiterState::Reason::PadQueue:
+                reasonName = "PadQueue";
+                break;
         }
         return nlohmann::json{
             {"reason", reasonName},
             {"anchor", dumpJson(s.anchor)},
             {"bearing", dumpJson(s.bearing)},
+            {"waypoint", dumpJson(s.waypoint)},
+            {"dueAt", dumpJson(s.dueAt)},
         };
     }
 

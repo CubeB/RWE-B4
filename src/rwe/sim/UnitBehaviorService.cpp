@@ -1,24 +1,27 @@
 #include "UnitBehaviorService.h"
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <rwe/cob/CobExecutionContext.h>
+#include <rwe/cob/cob_util.h>
 #include <rwe/sim/AirMovement.h>
 #include <rwe/sim/DemoRecorder.h>
+#include <rwe/sim/FlatRange.h>
 #include <rwe/sim/MissionScripts.h>
+#include <rwe/sim/ProjectileSpawn.h>
+#include <rwe/sim/RepairPatrol.h>
 #include <rwe/sim/SimRandom.h>
+#include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/SimulationOwnership.h>
 #include <rwe/sim/TaLiveSenderHooks.h>
-#include <algorithm>
-#include <limits>
-#include <rwe/util/SimpleLogger.h>
-#include <rwe/cob/CobExecutionContext.h>
-#include <rwe/sim/SimTicksPerSecond.h>
-#include <rwe/util/rwe_string.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
-#include <rwe/sim/sim_prof.h>
-#include <rwe/cob/cob_util.h>
 #include <rwe/sim/cob.h>
-#include <rwe/sim/ProjectileSpawn.h>
 #include <rwe/sim/movement.h>
+#include <rwe/sim/sim_prof.h>
 #include <rwe/util/Index.h>
+#include <rwe/util/SimpleLogger.h>
 #include <rwe/util/match.h>
+#include <rwe/util/rwe_string.h>
 
 namespace rwe
 {
@@ -453,6 +456,16 @@ namespace rwe
                     auto anchor = unitInfo.state->airLoiter->anchor;
                     flyAirLoiterCircuit(unitInfo, UnitState::AirLoiterState::Reason::AttackEnded, anchor, AirMovement::LoiterSeekStep);
                 }
+                else if (unitInfo.definition->canFly
+                    && !unitInfo.state->carriedUnits.empty()
+                    && std::holds_alternative<AirMovementStateFlying>(airPhysics->movementState))
+                {
+                    // Airborne and carrying: VTOL_Standby's state 2 takes its
+                    // hop branch and never lands (0x40F823, S:128). Only when
+                    // empty does it push VTOL_LandIfCan, which is the branch
+                    // below.
+                    flyIdleHop(unitInfo);
+                }
                 else
                 {
                     // Anything else that has simply run out of orders does go
@@ -463,39 +476,39 @@ namespace rwe
                     // pushes VTOL_LandIfCan and sets down.
                     unitInfo.state->airLoiter = std::nullopt;
                     match(
-                    airPhysics->movementState,
-                    [&](AirMovementStateFlying& m) {
-                        if (navigateTo(unitInfo, NavigationGoalLandingLocation()))
-                        {
-                            m.shouldLand = true;
-                        }
-                    },
-                    [&](const AirMovementStateLanding&) {
-                        // do nothing
-                    },
-                    [&](const AirMovementStateTakingOff&) {
-                        // do nothing
-                    },
-                    [&](const AirMovementStateAttackRun&) {
-                        // Order list is now empty (e.g. player issued Stop),
-                        // but the AttackRun handler is no longer driving us.
-                        // Drop back to Flying so the idle/landing path can
-                        // run; without this the aircraft freezes mid-air.
-                        airPhysics->movementState = AirMovementStateFlying();
-                        unitInfo.state->clearWeaponTargets();
-                    },
-                    [&](const AirMovementStateDogfight&) {
-                        // A fighter whose bandit is gone has nothing to
-                        // pursue; level out and let the idle path decide.
-                        airPhysics->movementState = AirMovementStateFlying();
-                    },
-                    [&](const AirMovementStateHoverAttack&) {
-                        // Same again: a gunship left on station with no orders
-                        // and nothing in range would otherwise shuttle back and
-                        // forth for ever.
-                        airPhysics->movementState = AirMovementStateFlying();
-                        unitInfo.state->clearWeaponTargets();
-                    });
+                        airPhysics->movementState,
+                        [&](AirMovementStateFlying& m) {
+                            if (navigateTo(unitInfo, NavigationGoalLandingLocation()))
+                            {
+                                m.shouldLand = true;
+                            }
+                        },
+                        [&](const AirMovementStateLanding&) {
+                            // do nothing
+                        },
+                        [&](const AirMovementStateTakingOff&) {
+                            // do nothing
+                        },
+                        [&](const AirMovementStateAttackRun&) {
+                            // Order list is now empty (e.g. player issued Stop),
+                            // but the AttackRun handler is no longer driving us.
+                            // Drop back to Flying so the idle/landing path can
+                            // run; without this the aircraft freezes mid-air.
+                            airPhysics->movementState = AirMovementStateFlying();
+                            unitInfo.state->clearWeaponTargets();
+                        },
+                        [&](const AirMovementStateDogfight&) {
+                            // A fighter whose bandit is gone has nothing to
+                            // pursue; level out and let the idle path decide.
+                            airPhysics->movementState = AirMovementStateFlying();
+                        },
+                        [&](const AirMovementStateHoverAttack&) {
+                            // Same again: a gunship left on station with no orders
+                            // and nothing in range would otherwise shuttle back and
+                            // forth for ever.
+                            airPhysics->movementState = AirMovementStateFlying();
+                            unitInfo.state->clearWeaponTargets();
+                        });
                 }
             }
             else if (!padIsMending)
@@ -1146,6 +1159,31 @@ namespace rwe
 
             auto targetPosition = getTargetPosition(aimingState->target);
 
+            // TOTALA-EXE-WEAPONS.md S:126 (0x48A1E0): a shooter with six or
+            // more kills leads a moving unit target. The one point it
+            // produces is what the range test, the heading/pitch solve and the
+            // launch all read, so it is added here and goes everywhere.
+            if (targetPosition)
+            {
+                if (auto leadTargetId = std::get_if<UnitId>(&aimingState->target); leadTargetId != nullptr)
+                {
+                    if (auto leadTarget = sim->tryGetUnitState(*leadTargetId))
+                    {
+                        const auto& leadTargetState = leadTarget->get();
+                        auto targetVelocity = match(
+                            leadTargetState.physics,
+                            [&](const UnitPhysicsInfoAir& a) { return airVelocity(a.movementState); },
+                            [&](const UnitPhysicsInfoGround& g) { return UnitState::toDirection(leadTargetState.rotation) * g.currentSpeed; });
+                        bool cruise = false;
+                        if (auto selfPropelled = std::get_if<ProjectilePhysicsTypeSelfPropelled>(&weaponDefinition.physicsType))
+                        {
+                            cruise = selfPropelled->cruise;
+                        }
+                        *targetPosition = *targetPosition + computeAimLead(unit.position, *targetPosition, targetVelocity, weaponDefinition.velocity, cruise, unit.kills);
+                    }
+                }
+            }
+
             // An interceptor's engagement rule is `coverage`, not `range`: both
             // anti-nukes say range=32000, which is the whole map, and coverage
             // 2000. What it is held against is the missile's aim point, the
@@ -1159,14 +1197,17 @@ namespace rwe
                 targetLost = !projectile || projectile->get().isDead || !projectile->get().targetPosition
                     || !GameSimulation::isWithinCoverage(unit.position, *projectile->get().targetPosition, weaponDefinition.coverage);
             }
-            else
-            {
-                targetLost = targetLost || unit.position.distanceSquared(*targetPosition) > weaponDefinition.maxRange * weaponDefinition.maxRange;
-            }
 
             if (targetLost)
             {
                 unit.clearWeaponTarget(weaponIndex);
+            }
+            else if (!weaponDefinition.interceptor
+                && !std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType)
+                && !withinFlatRange(unit.position, *targetPosition, weaponDefinition.maxRange))
+            {
+                // S:127: out of range prevents firing, but retains the target.
+                return;
             }
             else if (std::holds_alternative<ProjectilePhysicsTypeBomb>(weaponDefinition.physicsType))
             {
@@ -2147,8 +2188,9 @@ namespace rwe
         //
         // Which seven matters as much as the gate itself. VTOL_Move and
         // VTOL_Standby are not among them, so a plane merely sent somewhere,
-        // or one standing idle, never goes off to be mended; patrol, guard
-        // and every attack mission but one are, so a plane in a fight does.
+        // or one standing idle, never goes off to be mended. Patrol and the
+        // eligible attack missions do; Follow (the modelled Guard mission)
+        // does not. The original SeekGuard fallback is not modelled here.
         auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics);
 
         // AirToAir (0x412D40) is the one attack handler with no health gate
@@ -2157,8 +2199,35 @@ namespace rwe
         auto inDogfight = airPhysics != nullptr
             && std::holds_alternative<AirMovementStateDogfight>(airPhysics->movementState);
 
-        auto frontOrderBreaksOff = !unitInfo.state->orders.empty()
-            && orderBreaksOffForRepair(unitInfo.state->orders.front());
+        // TOTALA-EXE-ECONOMY.md S:130: the test runs only when the mission's
+        // own handler does -- on its timer, 30 ticks for the attack missions
+        // and patrol and 45 for a constructor's RepairPatrol -- and not
+        // every tick. The handlers' timers are not modelled one by one; each
+        // unit is given its own phase of the period, which keeps the cadence
+        // and is stateless. [open] The gunship's gate is in the swing branch
+        // only, so it is not applied while the ring is still being closed.
+        auto frontOrderBreaksOff = false;
+        if (!unitInfo.state->orders.empty() && orderBreaksOffForRepair(unitInfo.state->orders.front()))
+        {
+            frontOrderBreaksOff = true;
+            unsigned int period = 30;
+            if (std::holds_alternative<PatrolOrder>(unitInfo.state->orders.front()) && unitInfo.definition->canReclamate)
+            {
+                period = repairPatrolPeriod(true);
+            }
+            if (airPhysics != nullptr)
+            {
+                if (auto hover = std::get_if<AirMovementStateHoverAttack>(&airPhysics->movementState);
+                    hover != nullptr && hover->phase != AirMovementStateHoverAttack::Phase::Swinging)
+                {
+                    frontOrderBreaksOff = false;
+                }
+            }
+            if (frontOrderBreaksOff)
+            {
+                frontOrderBreaksOff = (sim->gameTime.value + unitInfo.id.value) % period == 0;
+            }
+        }
 
         if (!AirMovement::canDivertForRepair(
                 unitInfo.definition->canFly,
@@ -2231,11 +2300,79 @@ namespace rwe
         auto parked = std::holds_alternative<UnitPhysicsInfoGround>(unitInfo.state->physics)
             && distanceSquaredXZ(unitInfo.state->position, pad.position) <= (reach * reach);
 
-        // Somebody else got there first.
+        // Somebody is on it. VTOL_Landing does not abort for that (S:130):
+        // state 1 finds no free slot and circles the pad at weapon 0's range,
+        // advancing a quarter turn a leg with a tolerance of 128, and the
+        // order stays until a slot is free. The pre-filter that used to turn
+        // such an aircraft away with "no pads available" is gone; the
+        // original's own message belongs to state 5's failed attach, which
+        // here is the same test and is never reached with the pad taken.
         if (!parked && airBaseIsClaimedByAnother(*sim, order.target, unitInfo.id))
         {
-            sim->events.push_back(UnitCannotComplyEvent{unitInfo.id, "Landing aborted: no pads available"});
-            return true;
+            auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics);
+            if (airPhysics == nullptr)
+            {
+                // Standing somewhere else on the ground: get airborne first.
+                if (auto groundPhysics = std::get_if<UnitPhysicsInfoGround>(&unitInfo.state->physics))
+                {
+                    groundPhysics->steeringInfo.shouldTakeOff = true;
+                }
+                return false;
+            }
+
+            if (auto landing = std::get_if<AirMovementStateLanding>(&airPhysics->movementState))
+            {
+                // Part way through setting down on a pad that has been
+                // taken from under it: climb away rather than stack.
+                landing->shouldAbort = true;
+                return false;
+            }
+            if (std::holds_alternative<AirMovementStateTakingOff>(airPhysics->movementState))
+            {
+                return false;
+            }
+
+            if (!std::holds_alternative<AirMovementStateFlying>(airPhysics->movementState))
+            {
+                AirMovementStateFlying flying;
+                flying.currentVelocity = airVelocity(airPhysics->movementState);
+                airPhysics->movementState = flying;
+                unitInfo.state->clearWeaponTargets();
+            }
+            auto& flying = std::get<AirMovementStateFlying>(airPhysics->movementState);
+
+            if (!unitInfo.state->airLoiter || unitInfo.state->airLoiter->reason != UnitState::AirLoiterState::Reason::PadQueue)
+            {
+                // Entered at the bearing the aircraft is already on, so no
+                // draw is taken.
+                auto bearing = atan2(unitInfo.state->position.x - pad.position.x, unitInfo.state->position.z - pad.position.z);
+                unitInfo.state->airLoiter = UnitState::AirLoiterState{UnitState::AirLoiterState::Reason::PadQueue, pad.position, bearing};
+            }
+            auto& loiter = *unitInfo.state->airLoiter;
+            loiter.anchor = pad.position;
+
+            // Weapon 0's range, or the unarmed ring's radius for an aircraft
+            // with none. [open]
+            const auto& primary = unitInfo.state->weapons[0];
+            auto radius = primary
+                ? sim->weaponDefinitions.at(primary->weaponType).maxRange
+                : AirMovement::LoiterUnarmedRadius;
+
+            auto station = AirMovement::loiterStation(loiter.anchor, loiter.bearing, radius);
+            if (AirMovement::loiterArrived(unitInfo.state->position, station))
+            {
+                loiter.bearing = loiter.bearing - SimAngle(0x4000);
+                station = AirMovement::loiterStation(loiter.anchor, loiter.bearing, radius);
+            }
+            station.y = getTargetAltitude(sim->terrain, station.x, station.z, *unitInfo.definition);
+            flying.targetPosition = station;
+            return false;
+        }
+
+        // A slot is free: the wait, if there was one, is over.
+        if (unitInfo.state->airLoiter && unitInfo.state->airLoiter->reason == UnitState::AirLoiterState::Reason::PadQueue)
+        {
+            unitInfo.state->airLoiter = std::nullopt;
         }
 
         if (parked)
@@ -2294,7 +2431,10 @@ namespace rwe
         // Any order at all ends an idle circuit, so that when this one is done
         // the aircraft goes home as it should. A guard order is the exception:
         // it flies a circuit of its own and needs the bearing it has built up.
-        if (!std::holds_alternative<GuardOrder>(order))
+        // Patrol legs and occupied-pad circuits retain their navigation state.
+        if (!std::holds_alternative<GuardOrder>(order)
+            && !std::holds_alternative<PatrolOrder>(order)
+            && !std::holds_alternative<LandOnAirBaseOrder>(order))
         {
             unitInfo.state->airLoiter = std::nullopt;
         }
@@ -2490,6 +2630,106 @@ namespace rwe
 
         station.y = getTargetAltitude(sim->terrain, station.x, station.z, *unitInfo.definition);
         flying.targetPosition = station;
+    }
+
+    void UnitBehaviorService::flyIdleHop(UnitInfo unitInfo)
+    {
+        auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics);
+        if (airPhysics == nullptr)
+        {
+            return;
+        }
+        auto flying = std::get_if<AirMovementStateFlying>(&airPhysics->movementState);
+        if (flying == nullptr)
+        {
+            return;
+        }
+
+        // An airborne aircraft carrying something does not land (S:128).
+        flying->shouldLand = false;
+
+        const auto& position = unitInfo.state->position;
+        if (!unitInfo.state->airLoiter || unitInfo.state->airLoiter->reason != UnitState::AirLoiterState::Reason::IdleHop)
+        {
+            // State 0 (0x40F9B8): the anchor is where the aircraft went idle,
+            // taken as the integer x and z words of its position, so the hop
+            // is about that spot and not about wherever it has drifted to.
+            // The first hop follows on the tick state 2 is reached.
+            SimVector anchor(
+                SimScalar(std::floor(simScalarToFloat(position.x))),
+                0_ss,
+                SimScalar(std::floor(simScalarToFloat(position.z))));
+
+            UnitState::AirLoiterState hop;
+            hop.reason = UnitState::AirLoiterState::Reason::IdleHop;
+            hop.anchor = anchor;
+            hop.waypoint = anchor;
+            hop.dueAt = sim->gameTime + GameTime(AirMovement::IdleHopFirstDelayTicks);
+            unitInfo.state->airLoiter = hop;
+            return;
+        }
+
+        auto& hop = *unitInfo.state->airLoiter;
+        if (sim->gameTime >= hop.dueAt)
+        {
+            // Three draws, in the original's order (0x40F82F-0x40F8D4): the
+            // bearing, then the distance, then the wait.
+            auto bearingDraw = randomBelow(sim->rng, 0x10000u);
+            auto radiusDraw = randomBelow(sim->rng, AirMovement::IdleHopRadiusSpan);
+            auto timerDraw = randomBelow(sim->rng, AirMovement::IdleHopTimerSpan);
+
+            hop.waypoint = AirMovement::idleHopWaypoint(hop.anchor, bearingDraw, radiusDraw);
+            hop.dueAt = sim->gameTime + GameTime(AirMovement::IdleHopTimerMin + timerDraw);
+        }
+
+        // Full cruising altitude, no tolerance: the ordinary arrival test.
+        auto target = hop.waypoint;
+        target.y = getTargetAltitude(sim->terrain, target.x, target.z, *unitInfo.definition);
+        flying->targetPosition = target;
+    }
+
+    bool UnitBehaviorService::flyAirPatrolLeg(UnitInfo unitInfo, const SimVector& waypoint)
+    {
+        auto& loiter = unitInfo.state->airLoiter;
+        const auto& position = unitInfo.state->position;
+
+        // State 2 re-derives the goal every time it runs (S:125): on the
+        // 30-tick timer, and when the waypoint is a new one. It is a point on
+        // the line from where the aircraft is now through the waypoint, 320
+        // beyond it, at the waypoint's own height; x and z are not clamped to
+        // the map, the original's goal constructor copies the vector as given.
+        if (!loiter
+            || loiter->reason != UnitState::AirLoiterState::Reason::Patrol
+            || loiter->anchor != waypoint
+            || sim->gameTime >= loiter->dueAt)
+        {
+            SimVector toWaypoint(waypoint.x - position.x, 0_ss, waypoint.z - position.z);
+            // atan2(0, 0) is the bearing 0 (0x48A980).
+            auto bearing = toWaypoint.lengthSquared() == 0_ss ? SimAngle(0) : UnitState::toRotation(toWaypoint);
+            auto beyond = UnitState::toDirection(bearing) * AirMovement::PatrolOvershoot;
+
+            UnitState::AirLoiterState leg;
+            leg.reason = UnitState::AirLoiterState::Reason::Patrol;
+            leg.anchor = waypoint;
+            leg.waypoint = SimVector(waypoint.x + beyond.x, waypoint.y, waypoint.z + beyond.z);
+            leg.dueAt = sim->gameTime + GameTime(AirMovement::PatrolReaimTicks);
+            loiter = leg;
+        }
+
+        // Steer at the goal, not the waypoint.
+        navigateTo(unitInfo, loiter->waypoint);
+
+        // Still on the ground: state 0 takes off first, and a leg that began
+        // within 336 of its goal must not be retired before it has flown.
+        if (!std::holds_alternative<UnitPhysicsInfoAir>(unitInfo.state->physics))
+        {
+            return false;
+        }
+
+        // Complete when strictly inside the tolerance of the goal, every tick
+        // (0x44E5B0): 16 short of the waypoint for an aircraft on the line.
+        SimVector toGoal(loiter->waypoint.x - position.x, 0_ss, loiter->waypoint.z - position.z);
+        return toGoal.lengthSquared() < AirMovement::PatrolArrivalTolerance * AirMovement::PatrolArrivalTolerance;
     }
 
     bool UnitBehaviorService::hoverTowards(UnitInfo unitInfo, const SimVector& point)
@@ -3198,7 +3438,6 @@ namespace rwe
         // test the whole-list walk made is still made here, against the live
         // unit, and only the candidates that could not possibly matter are
         // skipped.
-        auto searchRadiusSquared = searchRadius * searchRadius;
         const auto& candidates = sim->getUnitSpatialIndex().collectEnemiesNear(
             simScalarToFloat(unit.position.x),
             simScalarToFloat(unit.position.z),
@@ -3227,8 +3466,10 @@ namespace rwe
             // applied in is not observable -- and the lookup is of a unit
             // type name in a hash map, many times the cost of a squared
             // distance.
-            auto distanceSquared = unit.position.distanceSquared(otherUnit.position);
-            if (distanceSquared > searchRadiusSquared)
+            //
+            // Flat, like every range test the original has (S:127, 0x40AD80):
+            // a target directly overhead is as near as one beside the gun.
+            if (!withinFlatRange(unit.position, otherUnit.position, searchRadius))
             {
                 continue;
             }
@@ -3285,10 +3526,11 @@ namespace rwe
 
             // The draw is over whole world units squared, and the original's
             // random number generator returns zero for anything under two.
+            // The two squares are floored separately (0x40B7B0, S:127).
             // Taken modulo rather than through a uniform_int_distribution,
             // whose bias correction is implementation-defined and would put
             // two builds of the engine out of step with one another.
-            auto range = static_cast<int>(simScalarToUInt(distanceSquared));
+            auto range = static_cast<int>(flatRangeScore(unit.position, otherUnit.position));
             auto score = 0;
             if (range > 1)
             {
@@ -3399,8 +3641,8 @@ namespace rwe
             return true;
         }
 
-        auto maxRangeSquared = weaponDefinition.maxRange * weaponDefinition.maxRange;
-        if (unitInfo.state->position.distanceSquared(*targetPosition) > maxRangeSquared)
+        // The chase distance is flat too (S:127, 0x4034A0).
+        if (!withinFlatRange(unitInfo.state->position, *targetPosition, weaponDefinition.maxRange))
         {
             // A unit target gets a stand-off point of its own rather than
             // the target's bare centre -- see attackApproachGoal. A ground
@@ -4093,11 +4335,10 @@ namespace rwe
         const auto& unitPosition = unitInfo.state->position;
 
         SimVector fromTarget(unitPosition.x - targetPosition.x, 0_ss, unitPosition.z - targetPosition.z);
-        if (fromTarget.lengthSquared() <= weaponMaxRange * weaponMaxRange)
-        {
-            hover.outOfRangeArrivals = 0;
-        }
-        else
+        // The miss counter is cumulative: it moves only on a miss and an
+        // in-range arrival leaves it alone (TOTALA-EXE-MISSIONS.md S:129).
+        // It is reset when the ring is entered and at the reroll below.
+        if (fromTarget.lengthSquared() > weaponMaxRange * weaponMaxRange)
         {
             ++hover.outOfRangeArrivals;
         }
@@ -4108,12 +4349,19 @@ namespace rwe
 
         if (hover.outOfRangeArrivals >= 2)
         {
-            // Two arrivals running without a shot: something is in the way, or
-            // the target has moved off. Stop working round from here and take
-            // a fresh bearing at full range instead.
+            // The reroll is a no-op in the original (S:129). It draws a
+            // bearing (rand(0x10000), 0x413929) and builds a goal at range
+            // R on it, then never installs the goal: nothing is told to
+            // move. The draw is the only effect, and it is kept because the
+            // generator's sequence is shared with everything else. The
+            // station stays where the aircraft is, so the next arrival test
+            // passes at once and the ordinary swing installs the next
+            // 45-degree station a tick later, as the original's does.
             hover.outOfRangeArrivals = 0;
 
-            auto station = hoverAttackStation(targetPosition, SimAngle(sim->rng() % 0x10000u), weaponMaxRange);
+            [[maybe_unused]] auto discarded = sim->rng() % 0x10000u;
+
+            auto station = unitPosition;
             station.y = stationAltitude(station);
             return station;
         }
@@ -4388,6 +4636,19 @@ namespace rwe
             return true;
         }
 
+        // A job a patrolling constructor started for itself ends when it is
+        // `leash` from where it stood (S:131, 0x43B400); tested as an
+        // attack's is -- flat, in whole world units. [open]
+        if (repairOrder.leash && repairOrder.leash->distance > 0_ss)
+        {
+            auto dx = unitInfo.state->position.x - repairOrder.leash->anchor.x;
+            auto dz = unitInfo.state->position.z - repairOrder.leash->anchor.z;
+            if ((dx * dx) + (dz * dz) >= repairOrder.leash->distance * repairOrder.leash->distance)
+            {
+                return true;
+            }
+        }
+
         auto targetRef = sim->tryGetUnitState(repairOrder.target);
         if (!targetRef || targetRef->get().isDead())
         {
@@ -4562,10 +4823,7 @@ namespace rwe
         // The approach closes to the weapon's full range -- 0x403623 asks
         // 0x49ADF0 for it, which is just wdef+0xDC -- and the range test is
         // flat: 0x49AD7E squares dx and dz and never looks at y.
-        auto dx = unitInfo.state->position.x - targetPosition->x;
-        auto dz = unitInfo.state->position.z - targetPosition->z;
-        auto flatDistanceSquared = (dx * dx) + (dz * dz);
-        if (flatDistanceSquared > weaponDefinition.maxRange * weaponDefinition.maxRange)
+        if (!withinFlatRange(unitInfo.state->position, *targetPosition, weaponDefinition.maxRange))
         {
             // The disintegrator reaches 240, which is nothing: walking into
             // range is most of what this order does.
@@ -4666,58 +4924,42 @@ namespace rwe
         // `0x41564F`. There is no area-reclaim command and no idle-builder
         // sweep anywhere in the binary, so this is where the key belongs.
         // See TOTALA-EXE.md §97.
-        if (unitInfo.definition->canReclamate && unitInfo.definition->builder)
+        //
+        // S:131: the decision is taken on the mission's timer -- 60 ticks on
+        // the ground, 45 in the air -- and what it chooses is pushed in front
+        // of the patrol as an order of its own, which owns the unit until it
+        // is done: 0x405CA2-0x405D18 builds a RECLAIM mission, 0x43B400 a
+        // REPAIR or HELPBUILD one. The timer is a phase of the period per
+        // unit rather than a counter; see runRepairPatrolDecision. [open]
+        if (repairs
+            && (sim->gameTime.value + unitInfo.id.value) % repairPatrolPeriod(unitInfo.definition->canFly) == 0
+            && runRepairPatrolDecision(unitInfo))
         {
-            // A job, once begun, belongs to the unit until the feature is
-            // gone. The original does not leave that to a scan it runs again
-            // every tick: the patrol builds a RECLAIM mission of its own for
-            // whatever the scan picked -- 0x405CA2 allocates it, 0x405D0A
-            // names it from `0x5016C4` ("RECLAIM"), 0x405D11 initialises it
-            // and 0x405D18 pushes it in front of the patrol -- and then
-            // resets its own state (0x405D1D) and stands down. The mission
-            // owns the target from there; the scan, and the two store
-            // comparisons that gate it (S:97), are not consulted again until
-            // the job is over.
-            //
-            // RWE re-decided every tick, and a target that changes under a
-            // job in progress sends the builder through
-            // UnitBehaviorStateIdle -- which stows the nanolathe and then
-            // deploys it again for the new wreck. Anything that moved the
-            // scan's answer did it: a store creeping past the fifth that
-            // opened the scan, so the metal candidate gave way to the energy
-            // one; or simply something dying nearer than the wreck already
-            // being worked on, which in a wreck field is most of the time.
-            std::optional<FeatureId> wreck;
-            if (auto reclaimingState = std::get_if<UnitBehaviorStateReclaiming>(&unitInfo.state->behaviourState))
-            {
-                if (auto inProgress = std::get_if<FeatureId>(&reclaimingState->target); inProgress != nullptr && sim->tryGetFeature(*inProgress))
-                {
-                    wreck = *inProgress;
-                }
-            }
-            if (!wreck)
-            {
-                wreck = findFeatureToAutoReclaim(unitInfo);
-            }
-
-            if (wreck)
-            {
-                // Run the ordinary reclaim machinery against it; when the
-                // feature is gone the job ends, the arm stows the way the
-                // original's mission teardown stows it (0x43A21E in the
-                // mission destructor, guarded on the same mission having
-                // issued StartBuilding), and the patrol resumes.
-                if (!handleReclaimOrder(unitInfo, ReclaimOrder(*wreck)))
-                {
-                    return false;
-                }
-            }
+            return false;
         }
 
         // Nothing to fight: this order is steering again, so an aircraft
         // still holding a run from a target that has died or moved out of
         // reach hands it back before navigating.
         dropAirAttackRun(unitInfo);
+
+        // An aircraft's leg is not flown at the waypoint but at a goal 320
+        // past it (S:125). A construction aircraft is on VTOL_RepairPatrol
+        // instead, which has no overshoot (S:131), so it keeps the ordinary
+        // arrival below.
+        if (unitInfo.definition->canFly && !repairs)
+        {
+            if (flyAirPatrolLeg(unitInfo, patrolOrder.destination))
+            {
+                // The mission retires the waypoint and goes to the tail of the
+                // list (return 6): copy first, the caller pops the front.
+                auto destination = patrolOrder.destination;
+                unitInfo.state->airLoiter = std::nullopt;
+                unitInfo.state->orders.push_back(PatrolOrder(destination));
+                return true;
+            }
+            return false;
+        }
 
         if (navigateTo(unitInfo, patrolOrder.destination))
         {
@@ -4733,87 +4975,101 @@ namespace rwe
         return false;
     }
 
-    std::optional<FeatureId> UnitBehaviorService::findFeatureToAutoReclaim(UnitInfo unitInfo)
+    bool UnitBehaviorService::runRepairPatrolDecision(UnitInfo unitInfo)
     {
-        const auto& player = sim->getPlayer(unitInfo.state->owner);
+        // TOTALA-EXE-ECONOMY.md S:131. State 1 of the original's
+        // RepairPatrol, in the order it takes things: the repair stage (own
+        // or allied, hurt, in sight, one random pick), then the reclaim
+        // stage. Both pick with the sim's generator, and the number and
+        // order of the draws is the register's.
+        const bool flies = unitInfo.definition->canFly;
+        auto& orders = unitInfo.state->orders;
+        const auto here = unitInfo.state->position;
 
-        // 0x405B18-0x405B54: the scan is not run at all unless one of the two
-        // stores is under a fifth of its capacity. The fifth is the double at
-        // 0x4FC950, and the same pair of comparisons decides afterwards which
-        // of the two candidates the unit actually goes for.
-        auto wantsMetal = player.metal.value < player.maxMetal.value * AutoReclaimWantedFraction;
-        auto wantsEnergy = player.energy.value < player.maxEnergy.value * AutoReclaimWantedFraction;
-        if (!wantsMetal && !wantsEnergy)
+        // 0x43B400 returning non-zero makes the patrol return 6, which
+        // retires the waypoint: the patrol order goes to the back of the
+        // list, behind the job that was just put in front of it. [open] --
+        // the register glosses 6 that way only for the arrival case.
+        auto retireWaypoint = [&](std::size_t pushed) {
+            if (orders.size() > pushed && std::holds_alternative<PatrolOrder>(orders[pushed]))
+            {
+                auto destination = std::get<PatrolOrder>(orders[pushed]).destination;
+                orders.erase(orders.begin() + static_cast<std::ptrdiff_t>(pushed));
+                orders.push_back(PatrolOrder(destination));
+            }
+        };
+
+        if (auto candidate = pickRepairPatrolRepairTarget(*sim, unitInfo))
         {
-            return std::nullopt;
+            const auto& candidateState = sim->getUnitState(*candidate);
+            const auto finished = !candidateState.isBeingBuilt(sim->unitDefinitions.at(candidateState.unitType));
+
+            if (flies && !finished)
+            {
+                // VTOL_HELPBUILD at the front with no position and no leash,
+                // and the timer left to run (return 3).
+                orders.push_front(RepairOrder(*candidate));
+                return true;
+            }
+
+            // 0x43B400, by the unit's own move-order mode.
+            std::optional<AttackLeash> leash;
+            bool moveHome = true;
+            switch (unitInfo.state->moveOrders)
+            {
+                case UnitMovementOrders::HoldPosition:
+                    leash = AttackLeash(here, SimScalar(static_cast<float>(unitInfo.definition->sightDistance)));
+                    break;
+                case UnitMovementOrders::Maneuver:
+                    leash = AttackLeash(here, unitInfo.definition->maneuverLeashLength);
+                    break;
+                case UnitMovementOrders::Roam:
+                    moveHome = false;
+                    break;
+            }
+
+            // [job][move home][old head...]
+            std::size_t pushed = 1;
+            if (moveHome)
+            {
+                orders.push_front(MoveOrder(here));
+                ++pushed;
+            }
+            if (leash)
+            {
+                orders.push_front(RepairOrder(*candidate, *leash));
+            }
+            else
+            {
+                orders.push_front(RepairOrder(*candidate));
+            }
+            retireWaypoint(pushed);
+            return true;
         }
 
-        // The radius is the unit's own SightDistance -- 0x405B74 reads
-        // def+0x202 and shifts it into 16.16 for the scan -- not a constant.
-        auto radius = SimScalar(static_cast<float>(unitInfo.definition->sightDistance));
-        auto limit = radius * radius;
-
-        // The scan keeps two nearest candidates rather than one: whatever
-        // carries metal and whatever carries energy (0x47EB24 and 0x47EB72
-        // test featdef+0xEC and +0xF0 for non-zero, and something carrying
-        // both goes into both lists). Both are gated on `reclaimable` *and*
-        // `autoreclaimable` -- 0x47EB13 and 0x47EB1B, the only reader of the
-        // second bit anywhere in the binary.
-        std::optional<FeatureId> nearestMetal;
-        std::optional<FeatureId> nearestEnergy;
-        auto nearestMetalDistance = limit;
-        auto nearestEnergyDistance = limit;
-        for (const auto& [featureId, feature] : sim->features)
+        // The reclaim stage: always in the air, with a side of 240; on the
+        // ground only while one of the stores is under a fifth, with the
+        // unit's sight as the side (so the half-extent is half of it).
+        SimScalar side = 240_ss;
+        if (!flies)
         {
-            const auto& featureDefinition = sim->getFeatureDefinition(feature.featureName);
-            if (!featureDefinition.reclaimable || !featureDefinition.autoreclaimable)
-            {
-                continue;
-            }
-            auto distanceSquared = unitInfo.state->position.distanceSquared(feature.position);
-            if (featureDefinition.metal > 0 && distanceSquared < nearestMetalDistance)
-            {
-                nearestMetalDistance = distanceSquared;
-                nearestMetal = featureId;
-            }
-            if (featureDefinition.energy > 0 && distanceSquared < nearestEnergyDistance)
-            {
-                nearestEnergyDistance = distanceSquared;
-                nearestEnergy = featureId;
-            }
-        }
-
-        // 0x405BA0 onwards, in the order the original tries them: the store
-        // that is actually short comes first, and only then the weaker test of
-        // whether the payout would still fit in what is left.
-        auto fits = [&](const std::optional<FeatureId>& candidate, bool metalSide) {
-            if (!candidate)
+            const auto& player = sim->getPlayer(unitInfo.state->owner);
+            const auto metalShort = static_cast<double>(player.metal.value) < 0.2 * static_cast<double>(player.maxMetal.value);
+            const auto energyShort = static_cast<double>(player.energy.value) < 0.2 * static_cast<double>(player.maxEnergy.value);
+            if (!metalShort && !energyShort)
             {
                 return false;
             }
-            const auto& d = sim->getFeatureDefinition(sim->getFeature(*candidate).featureName);
-            return metalSide
-                ? player.metal.value + static_cast<float>(d.metal) <= player.maxMetal.value
-                : player.energy.value + static_cast<float>(d.energy) <= player.maxEnergy.value;
-        };
+            side = SimScalar(static_cast<float>(unitInfo.definition->sightDistance));
+        }
 
-        if (nearestMetal && wantsMetal)
+        if (auto feature = pickRepairPatrolReclaimTarget(*sim, unitInfo, side))
         {
-            return nearestMetal;
+            orders.push_front(ReclaimOrder(*feature));
+            return true;
         }
-        if (nearestEnergy && wantsEnergy)
-        {
-            return nearestEnergy;
-        }
-        if (fits(nearestMetal, true))
-        {
-            return nearestMetal;
-        }
-        if (fits(nearestEnergy, false))
-        {
-            return nearestEnergy;
-        }
-        return std::nullopt;
+
+        return false;
     }
 
     bool UnitBehaviorService::handleCaptureOrder(UnitInfo unitInfo, CaptureOrder& captureOrder)
@@ -5043,10 +5299,15 @@ namespace rwe
                 }
 
                 auto targetUnitOption = sim->tryGetUnitState(state.targetUnit->first);
-                if (!targetUnitOption)
+                if (!targetUnitOption || targetUnitOption->get().isDead())
                 {
-                    unitInfo.state->factoryState = FactoryBehaviorStateCreatingUnit{unitType, unitInfo.state->owner, buildPieceInfo.position, buildPieceInfo.rotation};
-                    sim->unitCreationRequests.push_back(unitInfo.id);
+                    // TOTALA-EXE-ECONOMY S:134: an externally killed product
+                    // flushes the complete primary list, including the rally.
+                    unitInfo.state->clearOrders();
+                    unitInfo.state->buildQueue.clear();
+                    unitInfo.state->cobEnvironment->createThread("StopBuilding");
+                    sim->deactivateUnit(unitInfo.id);
+                    unitInfo.state->factoryState = FactoryBehaviorStateIdle();
                     return false;
                 }
 
@@ -5075,14 +5336,26 @@ namespace rwe
 
                 if (!targetUnit.isBeingBuilt(targetUnitDefinition))
                 {
-                    if (unitInfo.state->orders.empty())
+                    // TOTALA-EXE-INTERFACE S:133: only mobile products inherit
+                    // the current posture and the route their capabilities allow.
+                    if (targetUnitDefinition.isMobile)
                     {
-                        auto footprintRect = sim->computeFootprintRegion(unitInfo.state->position, unitInfo.definition->movementCollisionInfo);
-                        targetUnit.addOrder(BuggerOffOrder(footprintRect));
-                    }
-                    else
-                    {
-                        targetUnit.replaceOrders(unitInfo.state->orders);
+                        targetUnit.moveOrders = unitInfo.state->moveOrders;
+                        targetUnit.fireOrders = unitInfo.state->fireOrders;
+                        for (const auto& rally : unitInfo.state->orders)
+                        {
+                            if ((targetUnitDefinition.canMove && std::holds_alternative<MoveOrder>(rally))
+                                || (targetUnitDefinition.canPatrol && std::holds_alternative<PatrolOrder>(rally)))
+                            {
+                                targetUnit.addOrder(rally);
+                            }
+                        }
+                        if (targetUnit.orders.empty())
+                        {
+                            auto footprintRect = sim->computeFootprintRegion(unitInfo.state->position, unitInfo.definition->movementCollisionInfo);
+                            targetUnit.addOrder(BuggerOffOrder(footprintRect));
+                        }
+                        sim->events.push_back(UnitFromFactoryEvent{state.targetUnit->first, unitInfo.id});
                     }
                     unitInfo.state->cobEnvironment->createThread("StopBuilding");
                     sim->deactivateUnit(unitInfo.id);
@@ -5157,7 +5430,16 @@ namespace rwe
         auto removeFrameIfStanding = [&](UnitId frameId) {
             if (auto frame = sim->tryGetUnitState(frameId); frame && !frame->get().isDead())
             {
-                sim->removeUnfinishedUnit(frameId);
+                const auto& definition = sim->unitDefinitions.at(frame->get().unitType);
+                if (frame->get().isBeingBuilt(definition) && definition.buildTime > 0)
+                {
+                    // S:134: cancellation truncates before the income handicap;
+                    // the refund settles with the rest of this second's income.
+                    auto refund = std::trunc(static_cast<double>(frame->get().buildTimeCompleted)
+                        * definition.buildCostMetal.value / definition.buildTime);
+                    sim->addResourceDelta(unitInfo.id, Energy(0), Metal(static_cast<float>(refund)));
+                    sim->removeUnfinishedUnit(frameId);
+                }
             }
         };
 

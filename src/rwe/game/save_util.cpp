@@ -302,7 +302,9 @@ namespace rwe
                 {"metalRequestBuffer", saveMetal(p.metalRequestBuffer)},
                 {"energyRequestBuffer", saveEnergy(p.energyRequestBuffer)},
                 {"metalDebt", saveMetal(p.metalDebt)},
-                {"energyDebt", saveEnergy(p.energyDebt)}};
+                {"energyDebt", saveEnergy(p.energyDebt)},
+                // S:130: the schedule of the air base list rebuild and its draw.
+                {"airBasesRebuiltAt", saveOptional(p.airBasesRebuiltAt, [](GameTime t) { return saveGameTime(t); })}};
         }
 
         GamePlayerInfo loadGamePlayerInfo(const json& j)
@@ -365,6 +367,12 @@ namespace rwe
             p.energyRequestBuffer = loadEnergy(j.at("energyRequestBuffer"));
             p.metalDebt = loadMetal(j.at("metalDebt"));
             p.energyDebt = loadEnergy(j.at("energyDebt"));
+            // Added with the air base query's schedule (S:130); an older
+            // save has never rebuilt.
+            if (j.contains("airBasesRebuiltAt"))
+            {
+                p.airBasesRebuiltAt = loadOptional(j.at("airBasesRebuiltAt"), [](const json& v) { return loadGameTime(v); });
+            }
             return p;
         }
 
@@ -428,8 +436,7 @@ namespace rwe
                     ? json()
                     : j.at(field.name);
                 std::visit(
-                    [&](const auto& w)
-                    {
+                    [&](const auto& w) {
                         using T = std::decay_t<decltype(w)>;
                         if constexpr (!std::is_same_v<T, UnitStateFieldSaveOnly>)
                         {

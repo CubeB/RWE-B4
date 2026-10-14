@@ -1,11 +1,11 @@
 #pragma once
 
+#include <optional>
 #include <rwe/grid/DiscreteRect.h>
 #include <rwe/sim/FeatureId.h>
 #include <rwe/sim/GameTime.h>
 #include <rwe/sim/SimVector.h>
 #include <rwe/sim/UnitId.h>
-#include <optional>
 #include <variant>
 
 namespace rwe
@@ -127,7 +127,19 @@ namespace rwe
     struct RepairOrder
     {
         UnitId target;
+
+        /**
+         * Set when a constructor on patrol started the job itself
+         * (TOTALA-EXE-ECONOMY.md S:131, 0x43B400): the unit gives up once it
+         * is `distance` from `anchor`, the spot it was standing on when it
+         * picked the job. A player's order carries none. [open] where in the
+         * repair handlers the original tests it is not given; it is tested
+         * as an attack's leash is.
+         */
+        std::optional<AttackLeash> leash;
+
         explicit RepairOrder(const UnitId& target) : target(target) {}
+        RepairOrder(const UnitId& target, const AttackLeash& leash) : target(target), leash(leash) {}
     };
 
     /**

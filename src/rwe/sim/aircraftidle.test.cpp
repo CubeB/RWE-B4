@@ -1,7 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
+#include <cstdlib>
+#include <iostream>
+#include <memory>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
+#include <rwe/sim/AirMovement.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/LosTables.h>
 #include <rwe/sim/MapTerrain.h>
@@ -9,9 +13,6 @@
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/WeaponDefinition.h>
-#include <cstdlib>
-#include <iostream>
-#include <memory>
 #include <vector>
 
 namespace rwe
@@ -457,5 +458,131 @@ namespace rwe
         }
 
         REQUIRE(settled);
+    }
+
+    namespace
+    {
+        /** An airborne construction aircraft with one passenger hung on it by hand, as the transport tests do. */
+        struct LoadedAircraftScene
+        {
+            GameSimulation sim;
+            UnitId aircraftId;
+            UnitId cargoId;
+
+            LoadedAircraftScene() : sim(makeIdleTerrain(128, 128), 0u, 0, 0)
+            {
+                auto script = makeIdleScript();
+                auto us = addIdlePlayer(sim, "us");
+                sim.unitDefinitions["transport"] = makeIdleBuilderDef();
+                sim.unitDefinitions["cargo"] = makeIdleTargetDef();
+                registerIdleModel(sim, "model");
+                sim.losTables = generateLosTables(8);
+
+                aircraftId = spawnIdleUnit(sim, "transport", us, SimVector(100_ss, 70_ss, 100_ss), script);
+                cargoId = spawnIdleUnit(sim, "cargo", us, SimVector(140_ss, 70_ss, 100_ss), script);
+                sim.nextWindSpeedChange = GameTime(1000000u);
+                sim.getUnitState(aircraftId).physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+                sim.flyingUnitsSet.insert(aircraftId);
+                sim.getUnitState(aircraftId).carriedUnits.push_back(cargoId);
+                sim.getUnitState(cargoId).carriedBy = aircraftId;
+            }
+
+            void dropCargo()
+            {
+                sim.getUnitState(aircraftId).carriedUnits.clear();
+                sim.getUnitState(cargoId).carriedBy = std::nullopt;
+            }
+        };
+    }
+
+    TEST_CASE("an idle aircraft that is carrying something hangs in the air instead of landing", "[aircraftidle]")
+    {
+        // TOTALA-EXE-MOVEMENT.md S:128. VTOL_Standby (0x40F7D0) lands an idle
+        // aircraft only when unit+0x8A, the head of its attached chain, is
+        // null; airborne and carrying it hops about where it went idle.
+        LoadedAircraftScene scene;
+
+        auto anchor = scene.sim.getUnitState(scene.aircraftId).position;
+        auto furthest = 0_ss;
+        auto lowest = 100000_ss;
+        for (int tick = 0; tick < 900; ++tick)
+        {
+            scene.sim.tick();
+            const auto& a = scene.sim.getUnitState(scene.aircraftId);
+            REQUIRE_FALSE(isLanding(a));
+            REQUIRE(std::holds_alternative<UnitPhysicsInfoAir>(a.physics));
+            furthest = rweMax(furthest, idleFlatDistance(a.position, anchor));
+            lowest = rweMin(lowest, a.position.y);
+        }
+
+        const auto& a = scene.sim.getUnitState(scene.aircraftId);
+        REQUIRE(a.airLoiter.has_value());
+        REQUIRE(a.airLoiter->reason == UnitState::AirLoiterState::Reason::IdleHop);
+        // It keeps to the neighbourhood of the spot it went idle on: the hop
+        // is 8..39 units about the anchor, not a wander.
+        CAPTURE(simScalarToFloat(furthest));
+        REQUIRE(furthest < 120_ss);
+        // ...and stays up at its working height.
+        REQUIRE(lowest > 40_ss);
+    }
+
+    TEST_CASE("the hop draws a bearing, a distance and a wait, in that order", "[aircraftidle]")
+    {
+        // S:128 change 2: three draws per hop from the simulation's generator,
+        // theta = rand(0x10000), r = rand(0x20) + 8, timer = rand(15) + 30.
+        LoadedAircraftScene scene;
+        auto expectedRng = scene.sim.rng;
+
+        // Tick until the first hop has been chosen: the waypoint leaves the anchor.
+        bool hopped = false;
+        for (int tick = 0; tick < 20 && !hopped; ++tick)
+        {
+            scene.sim.tick();
+            const auto& loiter = scene.sim.getUnitState(scene.aircraftId).airLoiter;
+            hopped = loiter && loiter->reason == UnitState::AirLoiterState::Reason::IdleHop
+                && (loiter->waypoint.x != loiter->anchor.x || loiter->waypoint.z != loiter->anchor.z);
+        }
+        REQUIRE(hopped);
+
+        const auto& loiter = *scene.sim.getUnitState(scene.aircraftId).airLoiter;
+        auto theta = static_cast<unsigned int>(expectedRng() % 0x10000u);
+        auto r = static_cast<unsigned int>(expectedRng() % 0x20u);
+        auto timer = static_cast<unsigned int>(expectedRng() % 15u);
+
+        auto expected = AirMovement::idleHopWaypoint(loiter.anchor, theta, r);
+        REQUIRE(loiter.waypoint.x == expected.x);
+        REQUIRE(loiter.waypoint.z == expected.z);
+        // 8..39 units from the anchor.
+        auto d = idleFlatDistance(loiter.waypoint, loiter.anchor);
+        REQUIRE(d >= 7_ss);
+        REQUIRE(d <= 40_ss);
+        // Exactly three values were drawn, and the next hop is 30..44 ticks off.
+        REQUIRE(scene.sim.rng == expectedRng);
+        REQUIRE(loiter.dueAt == scene.sim.gameTime + GameTime(30u + timer));
+        REQUIRE(timer < 15u);
+    }
+
+    TEST_CASE("an aircraft hanging in the air lands once its cargo is gone", "[aircraftidle]")
+    {
+        // S:128 "Not settled": cargo lost mid-hop, state 2 is entered again
+        // and the empty case pushes VTOL_LandIfCan from wherever it is.
+        LoadedAircraftScene scene;
+        for (int tick = 0; tick < 200; ++tick)
+        {
+            scene.sim.tick();
+        }
+        REQUIRE_FALSE(isLanding(scene.sim.getUnitState(scene.aircraftId)));
+
+        scene.dropCargo();
+
+        auto settled = false;
+        for (int tick = 0; tick < 900 && !settled; ++tick)
+        {
+            scene.sim.tick();
+            const auto& a = scene.sim.getUnitState(scene.aircraftId);
+            settled = isLanding(a) || std::holds_alternative<UnitPhysicsInfoGround>(a.physics);
+        }
+        REQUIRE(settled);
+        REQUIRE_FALSE(scene.sim.getUnitState(scene.aircraftId).airLoiter.has_value());
     }
 }

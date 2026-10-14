@@ -1,7 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
+#include <memory>
+#include <optional>
 #include <rwe/cob/CobEnvironment.h>
-#include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/game/PlayerCommand.h>
+#include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/game/save_util.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/sim/GameHash_util.h>
@@ -9,8 +11,6 @@
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
-#include <memory>
-#include <optional>
 #include <rwe/sim/sim_test_util.h>
 #include <string>
 
@@ -353,4 +353,89 @@ namespace rwe
             PlayerUnitCommand(yard.yardId, PlayerUnitCommand::SetBuildQueueRepeat{true})));
         REQUIRE_FALSE(yard.sim.getUnitState(yard.yardId).repeatBuildQueue);
     }
+
+    TEST_CASE("factory products take posture at creation and refresh it at the door, with only a valid rally route", "[factoryinheritance]")
+    {
+        Yard yard;
+        auto& plant = yard.sim.getUnitState(yard.yardId);
+        plant.moveOrders = UnitMovementOrders::Roam;
+        plant.fireOrders = UnitFireOrders::HoldFire;
+        plant.orders = {MoveOrder(SimVector(900_ss, 0_ss, 600_ss)), ReclaimOrder(UnitId(999)), PatrolOrder(SimVector(900_ss, 0_ss, 900_ss))};
+        yard.sim.unitDefinitions["TANK"].canPatrol = true;
+        yard.queue("TANK", 1);
+        for (int i = 0; i < 20 && yard.sim.units.slotCount() == 1; ++i)
+        {
+            yard.sim.tick();
+        }
+        std::optional<UnitId> productId;
+        for (const auto& [id, unit] : yard.sim.units)
+        {
+            if (unit.unitType == "TANK")
+            {
+                productId = id;
+            }
+        }
+        REQUIRE(productId);
+        auto& product = yard.sim.getUnitState(*productId);
+        REQUIRE(product.moveOrders == UnitMovementOrders::Roam);
+        REQUIRE(product.fireOrders == UnitFireOrders::HoldFire);
+        plant.moveOrders = UnitMovementOrders::HoldPosition;
+        plant.fireOrders = UnitFireOrders::ReturnFire;
+        REQUIRE(tickUntilProduced(yard, "TANK", 1));
+        REQUIRE(product.moveOrders == UnitMovementOrders::HoldPosition);
+        REQUIRE(product.fireOrders == UnitFireOrders::ReturnFire);
+        REQUIRE(product.orders.size() == 2);
+        REQUIRE(std::holds_alternative<PatrolOrder>(product.orders[0]));
+        REQUIRE(std::holds_alternative<PatrolOrder>(product.orders[1]));
+    }
+
+    TEST_CASE("removing the active factory queue node refunds truncated metal and removes the frame", "[buildrefund]")
+    {
+        Yard yard;
+        yard.sim.unitDefinitions["TANK"].buildCostMetal = Metal(53.0f);
+        auto& plant = yard.sim.getUnitState(yard.yardId);
+        yard.queue("TANK", 2);
+        for (int i = 0; i < 8; ++i)
+        {
+            yard.sim.tick();
+        }
+        auto* building = std::get_if<FactoryBehaviorStateBuilding>(&plant.factoryState);
+        REQUIRE(building);
+        REQUIRE(building->targetUnit);
+        auto frame = building->targetUnit->first;
+        const auto& product = yard.sim.getUnitState(frame);
+        auto refund = static_cast<float>((product.buildTimeCompleted * 53u) / 100u);
+        auto before = plant.metalProductionBuffer.value;
+        auto energyBefore = plant.energyProductionBuffer.value;
+        REQUIRE(applyUnitCommandToSimulation(yard.sim, yard.player, PlayerUnitCommand(yard.yardId, PlayerUnitCommand::ModifyBuildQueue(-1, "TANK"))));
+        REQUIRE_FALSE(yard.sim.getUnitState(frame).isDead());
+        REQUIRE(plant.metalProductionBuffer.value == before);
+        REQUIRE(applyUnitCommandToSimulation(yard.sim, yard.player, PlayerUnitCommand(yard.yardId, PlayerUnitCommand::ModifyBuildQueue(-1, "TANK"))));
+        REQUIRE(yard.sim.getUnitState(frame).isDead());
+        REQUIRE(plant.metalProductionBuffer.value == before + refund);
+        REQUIRE(plant.energyProductionBuffer.value == energyBefore);
+        REQUIRE(yard.sim.features.begin() == yard.sim.features.end());
+    }
+
+    TEST_CASE("a factory loses its entire build queue and rally when its product dies", "[buildrefund]")
+    {
+        Yard yard;
+        auto& plant = yard.sim.getUnitState(yard.yardId);
+        plant.orders.push_back(MoveOrder(SimVector(900_ss, 0_ss, 900_ss)));
+        yard.queue("TANK", 3);
+        yard.queue("BOT", 2);
+        for (int i = 0; i < 8; ++i)
+        {
+            yard.sim.tick();
+        }
+        auto* building = std::get_if<FactoryBehaviorStateBuilding>(&plant.factoryState);
+        REQUIRE(building);
+        REQUIRE(building->targetUnit);
+        yard.sim.killUnit(building->targetUnit->first);
+        yard.sim.tick();
+        REQUIRE(plant.buildQueue.empty());
+        REQUIRE(plant.orders.empty());
+        REQUIRE(plant.metalProductionBuffer == Metal(0));
+    }
+
 }

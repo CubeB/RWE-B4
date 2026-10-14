@@ -1954,6 +1954,9 @@ measured loss into a measured win (see `targetConstructionShipCount`).
 
 ## 133. What a factory hands its product: standing orders, squad and route
 
+**Implementation record, 2026-10-14.** Factory spawn stamps posture before the first tick. Mobile completion refreshes it, copies only capability-valid Move/Patrol rally orders, or uses BuggerOff when none applies. A factory-door event copies the local human's UI control groups. Buildings skip completion inheritance.
+See [the port record](PORTING-125-138.md) for limitations and validation.
+
 Settled 2026-10-14, read from the factory mission `0x402640` (BuildingBuild) and
 the product's `GetBuilt` mission `0x402DA0` in the executable's disassembly. An
 independent reading of the same binary said a factory's product takes the
@@ -2030,7 +2033,7 @@ nothing about that: they matter only for a unit that appears without a factory
 The Thunder, Roach and the other units whose FBIs ask for Hold Fire are
 therefore at will out of a factory unless the factory's buttons were changed.
 
-### What RWE does
+### RWE before integration
 
 `createUnit` seeds `moveOrders` and `fireOrders` from the definition only. The
 completion path (`UnitBehaviorService`, the factory's finished-build branch)
@@ -2071,6 +2074,9 @@ depending on whether the product's slot comes before or after the factory's in
 §132's walk. It is inferred, not traced.
 
 ## 136. The queue modifier toggles, and a group move keeps its formation
+
+**Implementation record, 2026-10-14.** Queued commands remove the first matching order, with inclusive 16-unit x/z tolerance and unit type ignored for build placement. Removing the head interrupts its work. Mouse Move/Patrol computes the integer-coordinate centroid and offsets eligible receivers within 3000 times the selection count. Factories retain one rally point. Explicit scenario commands keep their supplied positions. Command replay version is now 2.
+See [the port record](PORTING-125-138.md) for limitations and validation.
 
 Settled 2026-10-14 from the selection dispatch `0x48CF30`, the toggle routine
 `0x43AFC0` and the order-descriptor tables, read in the executable's
@@ -2155,7 +2161,7 @@ no position: `0x40000` is the secondary list, `0x4` survives replacement
 (§134), `0x40` does not clear the list on issue, `0x10000` does not free weapons
 on destroy.
 
-### What RWE does
+### RWE before integration
 
 `GameScene_input.cpp` (the issue handlers near lines 599-882 and 1110-1144) sends
 the **same click** to every selected unit as one `PlayerCommand`;

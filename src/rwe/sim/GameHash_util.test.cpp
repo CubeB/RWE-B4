@@ -1,14 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
-#include <rwe/game/dump_util.h>
-#include <rwe/sim/FeatureDefinition.h>
-#include <rwe/sim/GameHash_util.h>
-#include <rwe/sim/sim_test_util.h>
-#include <rwe/sim/UnitState.h>
-#include <rwe/util/OpaqueId_io.h>
 #include <cstddef>
 #include <cstring>
 #include <memory>
 #include <new>
+#include <rwe/game/dump_util.h>
+#include <rwe/sim/FeatureDefinition.h>
+#include <rwe/sim/GameHash_util.h>
+#include <rwe/sim/UnitState.h>
+#include <rwe/sim/sim_test_util.h>
+#include <rwe/util/OpaqueId_io.h>
 
 namespace rwe
 {
@@ -609,4 +609,24 @@ namespace rwe
         REQUIRE(hashOverFill(0x00) == hashOverFill(0xAB));
     }
 
+
+    TEST_CASE("the ported navigation timers and repair leash affect the sync hash", "[porting][hash]")
+    {
+        UnitState::AirLoiterState leg;
+        leg.anchor = SimVector(0_ss, 0_ss, 0_ss);
+        auto baseline = computeHashOf(leg);
+        leg.waypoint.x = 1_ss;
+        REQUIRE(computeHashOf(leg) != baseline);
+        leg.waypoint.x = 0_ss;
+        leg.dueAt = GameTime(1);
+        REQUIRE(computeHashOf(leg) != baseline);
+        RepairOrder repair(UnitId(1));
+        auto repairHash = computeHashOf(repair);
+        repair.leash = AttackLeash(SimVector(0_ss, 0_ss, 0_ss), 1_ss);
+        REQUIRE(computeHashOf(repair) != repairHash);
+        GamePlayerInfo player{std::nullopt, GamePlayerType::Human, PlayerColorIndex(0), GamePlayerStatus::Alive, "ARM", Metal(0), Energy(0), Metal(0), Energy(0), Metal(0), Energy(0)};
+        auto playerHash = computeHashOf(player);
+        player.airBasesRebuiltAt = GameTime(1);
+        REQUIRE(computeHashOf(player) != playerHash);
+    }
 }

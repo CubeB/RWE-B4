@@ -1,4 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
+#include <cstdlib>
+#include <iostream>
+#include <memory>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
@@ -9,9 +12,6 @@
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/WeaponDefinition.h>
-#include <cstdlib>
-#include <iostream>
-#include <memory>
 #include <vector>
 
 namespace rwe
@@ -381,5 +381,114 @@ namespace rwe
         REQUIRE(furthest < ring * 1.2_ssf);
         // ...and it is shooting the whole time it does so.
         REQUIRE(sim.getUnitState(targetId).hitPoints < startingHitPoints);
+    }
+
+    namespace
+    {
+        /**
+         * A Brawler already on the ring (Swinging) with its station on top of
+         * itself, so that the next tick is an arrival, `distance` units south
+         * of an immobile target at the origin, with `misses` out-of-range
+         * arrivals already counted.
+         */
+        struct RingScene
+        {
+            GameSimulation sim;
+            UnitId gunshipId;
+            UnitId targetId;
+
+            RingScene(SimScalar distance, unsigned int misses, bool swingPositive)
+                : sim(makeGunshipTerrain(256, 256), 0u, 0, 0)
+            {
+                sim.nextWindSpeedChange = GameTime(1000000u);
+                auto script = makeGunshipScript();
+                auto us = addGunshipPlayer(sim, "us");
+                auto them = addGunshipPlayer(sim, "them");
+                sim.unitDefinitions["gunship"] = makeGunshipDef();
+                sim.unitDefinitions["target"] = makeGunshipTargetDef();
+                registerGunshipModel(sim, "model");
+                defineGun(sim);
+                sim.losTables = generateLosTables(8);
+
+                targetId = spawnGunshipUnit(sim, "target", them, SimVector(0_ss, 0_ss, 0_ss), script);
+                sim.getUnitState(targetId).hitPoints = 1000000;
+
+                auto position = SimVector(0_ss, 60_ss, -distance);
+                gunshipId = spawnGunshipUnit(sim, "gunship", us, position, script);
+                auto& g = sim.getUnitState(gunshipId);
+                AirMovementStateHoverAttack hover{AttackTarget(targetId)};
+                hover.phase = AirMovementStateHoverAttack::Phase::Swinging;
+                hover.station = position;
+                hover.targetPosition = SimVector(0_ss, 0_ss, 0_ss);
+                hover.swingPositive = swingPositive;
+                hover.outOfRangeArrivals = misses;
+                g.physics = UnitPhysicsInfoAir{hover};
+                UnitWeapon weapon;
+                weapon.weaponType = "emg";
+                g.weapons[0] = weapon;
+                g.orders.push_back(createAttackOrder(targetId));
+                sim.flyingUnitsSet.insert(gunshipId);
+            }
+
+            const AirMovementStateHoverAttack& hover() const
+            {
+                const auto& air = std::get<UnitPhysicsInfoAir>(sim.getUnitState(gunshipId).physics);
+                return std::get<AirMovementStateHoverAttack>(air.movementState);
+            }
+        };
+    }
+
+    TEST_CASE("a gunship's second miss is a reroll that draws a number and moves nothing", "[gunship]")
+    {
+        // TOTALA-EXE-MISSIONS.md S:129. The original's reroll at 0x41391E builds
+        // a goal on a random bearing at range R and never installs it.
+        // RWE used to fly to that point.
+        RingScene scene(450_ss, 1u, false);
+        auto expected = scene.sim.rng;
+        expected();
+
+        auto before = scene.sim.getUnitState(scene.gunshipId).position;
+        scene.sim.tick();
+
+        // The counter is back at zero, exactly one value was drawn...
+        REQUIRE(scene.hover().outOfRangeArrivals == 0u);
+        REQUIRE(scene.sim.rng == expected);
+        // ...no new station was installed: it is still where it was told to
+        // be, which is the aircraft's own position at the moment of the draw.
+        REQUIRE(gunshipFlatDistance(scene.hover().station, before) < 1_ss);
+        // ...and the side of the swing was not toggled by it.
+        REQUIRE_FALSE(scene.hover().swingPositive);
+    }
+
+    TEST_CASE("the tick after a gunship's reroll is the ordinary 45 degree swing", "[gunship]")
+    {
+        RingScene scene(450_ss, 1u, false);
+        scene.sim.tick(); // the reroll
+        auto expected = scene.sim.rng;
+
+        scene.sim.tick(); // arrival at the (unmoved) station: counter 0 -> 1, swing
+
+        REQUIRE(scene.hover().outOfRangeArrivals == 1u);
+        // The swing draws nothing and flips the side.
+        REQUIRE(scene.sim.rng == expected);
+        REQUIRE(scene.hover().swingPositive);
+        // The new station is on the ring, two thirds of the weapon's range from the target.
+        const auto ring = (2_ss * 370_ss) / 3_ss;
+        auto d = gunshipFlatDistance(scene.hover().station, SimVector(0_ss, 0_ss, 0_ss));
+        REQUIRE(d > ring - 2_ss);
+        REQUIRE(d < ring + 2_ss);
+    }
+
+    TEST_CASE("a gunship's miss counter is not reset by an arrival in range", "[gunship]")
+    {
+        // TOTALA-EXE-MISSIONS.md S:129: cumulative. RWE used to zero it.
+        RingScene scene(300_ss, 1u, false);
+        auto expected = scene.sim.rng;
+
+        scene.sim.tick(); // an arrival with the target in range: a plain swing
+
+        REQUIRE(scene.hover().outOfRangeArrivals == 1u);
+        REQUIRE(scene.sim.rng == expected);
+        REQUIRE(scene.hover().swingPositive);
     }
 }

@@ -210,13 +210,14 @@ Everything else lives in a subject file. **The numbers never move**, so a
 **The default computer player is now the original's (2026-10-14, ADR-0005).**
 RWE's own computer player, which transports, fights with aircraft and guards,
 is the `rwe` engine and an option; sections 119-123 are what the default is
-written from. Sections 125-138 record behaviours verified against the
-executable on 2026-10-14 that RWE's units do **not** yet follow: the air patrol
-leg (125), aim lead (126), flat range (127), the idle loaded transport (128),
-the hover reroll (129), repair break-off (130), constructor patrols (131), the
-order of work inside a unit tick (132), what a factory hands its product (133),
-build refunds (134), the queue toggle and formation (136) and the idle poll
-cadences (138). Each section says what to change.
+written from. The unfinished implementation work for sections 125-131, 133,
+134 and 136 is integrated (2026-10-14); [the port record](PORTING-125-138.md)
+lists the changes and remaining uncertainties. Section 137 already has equivalent
+queue behaviour. Section 135's discarded climb goal requires no new navigation
+code; its inferred hung Loading mission remains unported, pending observation.
+Sections **132 and 138 remain deferred on purpose**, as documented in ROADMAP.
+The classic AI's `[open]` choices remain assumptions, not verified original
+behaviour; deterministic tests do not settle them.
 
 Recorded so these do not get "fixed" back later by someone comparing against the
 original. `docs/compatibility.md` is the same list in plain language, grouped by
@@ -628,6 +629,16 @@ quirks of the original that RWE reproduces although they look like defects.
   enemy's dragon's teeth, towers, storage and Mohos, mostly. A unit or another
   building in the way still keeps a mission building out, 4 to 6 per
   difficulty.
+- ~~**Weapon range is measured in three axes.**~~ **Superseded, 2026-10-14
+  (§127).** RWE once measured the full 3D distance in the range tests, on the
+  reasoning that the original's flat `dx^2 + dz^2` makes a target directly
+  overhead free and that, since nothing else stops a ground weapon engaging an
+  aircraft, ground fire at aircraft would become more common than RWE's. The
+  reason was a decision, not something the original forces; the maintainer's
+  call is to follow the original ("port everything verified"), so every range
+  test is flat now, with each square floored separately. Only the ballistic
+  arc check keeps three axes. Do not put the 3D test back on the strength of
+  that reasoning.
 
 
 ## 91. Still unknown or unported

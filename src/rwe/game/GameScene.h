@@ -8,9 +8,8 @@
 #include <map>
 #include <optional>
 #include <queue>
+#include <random>
 #include <rwe/AudioService.h>
-#include <rwe/game/AiArenaReport.h>
-#include <rwe/game/ReplayFile.h>
 #include <rwe/CroppedViewport.h>
 #include <rwe/CursorService.h>
 #include <rwe/RenderService.h>
@@ -18,6 +17,7 @@
 #include <rwe/TextureService.h>
 #include <rwe/UiRenderService.h>
 #include <rwe/Viewport.h>
+#include <rwe/game/AiArenaReport.h>
 #include <rwe/game/BuilderGuisDatabase.h>
 #include <rwe/game/DefaultAction.h>
 #include <rwe/game/EndGameStats.h>
@@ -26,20 +26,21 @@
 #include <rwe/game/GameNetworkService.h>
 #include <rwe/game/GameScene_util.h>
 #include <rwe/game/GameSpeed.h>
-#include <rwe/game/SaveFile.h>
 #include <rwe/game/InGameSoundsInfo.h>
 #include <rwe/game/LockstepStats.h>
 #include <rwe/game/NetworkHistory.h>
-#include <random>
+#include <rwe/game/OrderButtons.h>
 #include <rwe/game/Particle.h>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/game/PlayerCommandService.h>
+#include <rwe/game/ReplayFile.h>
+#include <rwe/game/SaveFile.h>
 #include <rwe/game/SceneTime.h>
 #include <rwe/game/UnitSoundType.h>
 #include <rwe/game/WeaponMediaInfo.h>
-#include <rwe/network_util.h>
 #include <rwe/grid/DiscreteRect.h>
 #include <rwe/io/featuretdf/FeatureTdf.h>
+#include <rwe/network_util.h>
 #include <rwe/observable/BehaviorSubject.h>
 #include <rwe/render/FogTiles.h>
 #include <rwe/scene/Scene.h>
@@ -53,7 +54,6 @@
 #include <rwe/sim/UnitId.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/ui/UiFactory.h>
-#include <rwe/game/OrderButtons.h>
 #include <rwe/ui/UiPanel.h>
 #include <rwe/ui/UiStagedButton.h>
 #include <unordered_set>
@@ -265,9 +265,9 @@ namespace rwe
         SceneContext sceneContext;
 
         /**
-          * The audio service outlives every scene, so this subscription has
-          * to be given back by hand in the destructor: see Subscription.
-          */
+         * The audio service outlives every scene, so this subscription has
+         * to be given back by hand in the destructor: see Subscription.
+         */
         std::unique_ptr<Subscription> audioSub = sceneContext.audioService->getChannelFinished().subscribe([this](int channel) { onChannelFinished(channel); });
 
         CroppedViewport worldViewport;
@@ -1866,6 +1866,8 @@ namespace rwe
          * A select is not handled here: the selection is not per unit, and
          * the caller has already dealt with it.
          */
+        UnitOrder mouseFormationOrder(UnitId receiver, const UnitOrder& order) const;
+
         bool issueDefaultAction(UnitId selectedUnit, DefaultActionScheme scheme);
 
         /**

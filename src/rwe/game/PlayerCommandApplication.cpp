@@ -1,6 +1,7 @@
 #include "PlayerCommandApplication.h"
 
 #include <algorithm>
+#include <rwe/game/OrderDispatch.h>
 #include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/UnitBehaviorService.h>
 #include <rwe/sim/UnitState.h>
@@ -98,6 +99,23 @@ namespace rwe
             auto unit = simulation.tryGetUnitState(unitId);
             if (!unit)
             {
+                return;
+            }
+
+            // TOTALA-EXE-INTERFACE S:136: remove the first matching queued
+            // mission, interrupting the active task only when it is the head.
+            auto& orders = unit->get().orders;
+            auto found = std::find_if(orders.begin(), orders.end(), [&](const UnitOrder& old) {
+                return ordersMatchForQueueToggle(old, order);
+            });
+            if (found != orders.end())
+            {
+                if (found == orders.begin())
+                {
+                    UnitBehaviorService(&simulation).interruptCurrentTask(unitId);
+                    unit->get().buildOrderUnitId.reset();
+                }
+                orders.erase(found);
                 return;
             }
 
@@ -295,7 +313,19 @@ namespace rwe
             [&](const PlayerUnitCommand::ModifyBuildQueue& c) {
                 if (auto unit = simulation.tryGetUnitState(unitCommand.unit))
                 {
+                    auto& queue = unit->get().buildQueue;
+                    bool cancelActive = false;
+                    if (c.count < 0 && !queue.empty() && queue.front().first == c.unitType)
+                    {
+                        // S:137 removes from the back. Only deletion of the
+                        // active node cancels the product (S:134).
+                        cancelActive = -c.count >= unit->get().getBuildQueueTotal(c.unitType);
+                    }
                     unit->get().modifyBuildQueue(c.unitType, c.count);
+                    if (cancelActive)
+                    {
+                        UnitBehaviorService(&simulation).clearBuild(simulation.getUnitInfo(unitCommand.unit));
+                    }
                 }
             },
             [&](const PlayerUnitCommand::ModifyStockpile& c) {

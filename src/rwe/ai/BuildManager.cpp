@@ -5208,7 +5208,7 @@ namespace rwe
             // patrol reclaims what it passes and that this is the original's
             // only automatic reclaim. Both halves of that are true and the
             // conclusion still did not hold, because of the gate at the top of
-            // findFeatureToAutoReclaim: the scan does not run at all unless one
+            // the ground repair patrol (S:131): the scan does not run at all unless one
             // of the player's two stores is under a fifth of its capacity
             // (0x405B18-0x405B54). That is faithful and stays -- but it is an
             // economy heuristic, and a builder sent to take down a wall is not

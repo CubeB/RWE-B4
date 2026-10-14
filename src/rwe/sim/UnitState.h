@@ -505,7 +505,12 @@ namespace rwe
         /** Which way round the ring the next swing goes; the first one is negative. */
         bool swingPositive{false};
 
-        /** Arrivals in a row with the target out of reach. Two of them send it to a fresh bearing. */
+        /**
+         * Arrivals with the target out of reach since the ring was entered or
+         * the last reroll. Cumulative: an in-range arrival does not reset it
+         * (TOTALA-EXE-MISSIONS.md S:129). The second miss is a reroll, which
+         * in the original draws a random number and moves nothing.
+         */
         unsigned int outOfRangeArrivals{0};
 
         Phase phase{Phase::Closing};
@@ -848,6 +853,32 @@ namespace rwe
 
                 /** Guarding something idle. Lasts only as long as the guard order. */
                 Guarding,
+
+                /**
+                 * VTOL_Standby's hop (0x40F7D0, TOTALA-EXE-MOVEMENT.md S:128):
+                 * an idle aircraft that is airborne and carrying something
+                 * hovers about the spot it went idle on instead of landing.
+                 * `anchor` is that spot, `waypoint` the current hop's point
+                 * and `dueAt` when the next one is due. `bearing` is
+                 * unused.
+                 */
+                IdleHop,
+
+                /**
+                 * VTOL_Patrol's travelling phase (0x410E70, S:125): a goal
+                 * 320 past the waypoint, re-aimed from where the aircraft is
+                 * every 30 ticks. `anchor` is the waypoint the goal was made
+                 * for, `waypoint` the goal itself and `dueAt` when it is next
+                 * re-aimed. Ends with any order but a patrol.
+                 */
+                Patrol,
+
+                /**
+                 * Waiting for a repair pad that is occupied: VTOL_Landing's
+                 * state 1 circles the pad at weapon 0's range, a quarter turn
+                 * a leg (TOTALA-EXE-ECONOMY.md S:130).
+                 */
+                PadQueue,
             };
 
             Reason reason{Reason::AttackEnded};
@@ -857,6 +888,12 @@ namespace rwe
 
             /** Bearing of the current station as seen from the anchor. */
             SimAngle bearing{0};
+
+            /** IdleHop and Patrol only: the point being flown to. */
+            SimVector waypoint{0_ss, 0_ss, 0_ss};
+
+            /** IdleHop: the tick the next hop is chosen on. Patrol: the tick the goal is next re-aimed. */
+            GameTime dueAt{0u};
         };
         std::optional<AirLoiterState> airLoiter;
 

@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <memory>
 #include <rwe/LoadingScene_util.h>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/io/cob/Cob.h>
@@ -10,7 +11,6 @@
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
-#include <memory>
 #include <rwe/sim/sim_test_util.h>
 #include <string>
 #include <vector>
@@ -69,65 +69,60 @@ namespace rwe
 
         // rev31 units/ARMSOLAR.fbi. 760 energy, so a full frame takes 760
         // ticks -- 25.3 seconds -- to decay away.
-        const char* ArmSolarKeys =
-            "FootprintX=5;\n"
-            "FootprintZ=5;\n"
-            "BuildCostEnergy=760;\n"
-            "BuildCostMetal=145;\n"
-            "MaxDamage=326;\n"
-            "BuildTime=2495;\n"
-            "BMcode=0;\n"
-            "YardMap=ooooooooooooooooooooooooooo;\n"
-            "Corpse=armsolar_dead;\n";
+        const char* ArmSolarKeys = "FootprintX=5;\n"
+                                   "FootprintZ=5;\n"
+                                   "BuildCostEnergy=760;\n"
+                                   "BuildCostMetal=145;\n"
+                                   "MaxDamage=326;\n"
+                                   "BuildTime=2495;\n"
+                                   "BMcode=0;\n"
+                                   "YardMap=ooooooooooooooooooooooooooo;\n"
+                                   "Corpse=armsolar_dead;\n";
 
         // rev31 units/ARMPW.fbi -- a Peewee, the cheapest thing here.
-        const char* ArmPwKeys =
-            "FootprintX=2;\n"
-            "FootprintZ=2;\n"
-            "BuildCostEnergy=697;\n"
-            "BuildCostMetal=53;\n"
-            "MaxDamage=250;\n"
-            "BuildTime=1452;\n"
-            "BMcode=1;\n";
+        const char* ArmPwKeys = "FootprintX=2;\n"
+                                "FootprintZ=2;\n"
+                                "BuildCostEnergy=697;\n"
+                                "BuildCostMetal=53;\n"
+                                "MaxDamage=250;\n"
+                                "BuildTime=1452;\n"
+                                "BMcode=1;\n";
 
         // rev31 units/ARMLAB.fbi.
-        const char* ArmLabKeys =
-            "FootprintX=6;\n"
-            "FootprintZ=5;\n"
-            "BuildCostEnergy=1130;\n"
-            "BuildCostMetal=705;\n"
-            "MaxDamage=2690;\n"
-            "BuildTime=6760;\n"
-            "BMcode=0;\n"
-            "YardMap=oooooooooooooooooooooooooooooo;\n";
+        const char* ArmLabKeys = "FootprintX=6;\n"
+                                 "FootprintZ=5;\n"
+                                 "BuildCostEnergy=1130;\n"
+                                 "BuildCostMetal=705;\n"
+                                 "MaxDamage=2690;\n"
+                                 "BuildTime=6760;\n"
+                                 "BMcode=0;\n"
+                                 "YardMap=oooooooooooooooooooooooooooooo;\n";
 
         // rev31 units/ARMFUS.fbi. 36058 energy is twenty minutes: a half-built
         // fusion plant effectively never goes away, and that spread is the
         // point of the rule.
-        const char* ArmFusKeys =
-            "FootprintX=7;\n"
-            "FootprintZ=7;\n"
-            "BuildCostEnergy=36058;\n"
-            "BuildCostMetal=5130;\n"
-            "MaxDamage=3100;\n"
-            "BuildTime=93768;\n"
-            "BMcode=0;\n"
-            "YardMap=ooooooooooooooooooooooooooooooooooooooooooooooooo;\n";
+        const char* ArmFusKeys = "FootprintX=7;\n"
+                                 "FootprintZ=7;\n"
+                                 "BuildCostEnergy=36058;\n"
+                                 "BuildCostMetal=5130;\n"
+                                 "MaxDamage=3100;\n"
+                                 "BuildTime=93768;\n"
+                                 "BMcode=0;\n"
+                                 "YardMap=ooooooooooooooooooooooooooooooooooooooooooooooooo;\n";
 
         // rev31 units/ARMCK.fbi -- a Construction Kbot, worker time 80, which
         // the parser divides by the tick rate to two work units a tick.
-        const char* ArmCkKeys =
-            "FootprintX=2;\n"
-            "FootprintZ=2;\n"
-            "BuildCostEnergy=2410;\n"
-            "BuildCostMetal=120;\n"
-            "MaxDamage=700;\n"
-            "BuildTime=5597;\n"
-            "WorkerTime=80;\n"
-            "BMcode=1;\n"
-            "Builder=1;\n"
-            "Builddistance=40;\n"
-            "CanReclamate=1;\n";
+        const char* ArmCkKeys = "FootprintX=2;\n"
+                                "FootprintZ=2;\n"
+                                "BuildCostEnergy=2410;\n"
+                                "BuildCostMetal=120;\n"
+                                "MaxDamage=700;\n"
+                                "BuildTime=5597;\n"
+                                "WorkerTime=80;\n"
+                                "BMcode=1;\n"
+                                "Builder=1;\n"
+                                "Builddistance=40;\n"
+                                "CanReclamate=1;\n";
 
         FeatureDefinition makeWreckDef(const std::string& name)
         {
@@ -503,4 +498,22 @@ namespace rwe
             REQUIRE(sim.features.begin() != sim.features.end());
         }
     }
+
+    TEST_CASE("frame decay refunds the exact removed work fraction as metal only", "[nanoframe][buildrefund]")
+    {
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        registerTestModel(sim);
+        defineUnit(sim, "ARMSOLAR", ArmSolarKeys, *script);
+        auto player = addWellStockedPlayer(sim, "ARM");
+        auto frame = placeNanoframe(sim, "ARMSOLAR", player, SimVector(100_ss, 0_ss, 100_ss), 1200u);
+        auto& unit = sim.getUnitState(frame);
+        unit.nanoframeDecayTime = sim.gameTime;
+        sim.tick();
+        auto removed = 1200u - unit.buildTimeCompleted;
+        REQUIRE(removed > 0);
+        REQUIRE(unit.metalProductionBuffer.value == 145.0f * removed / 2495.0f);
+        REQUIRE(unit.energyProductionBuffer == Energy(0));
+    }
+
 }

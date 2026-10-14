@@ -427,11 +427,13 @@ Decoded here and deliberately **not** ported:
   equivalent — see §90 — and its own idle weapon acquisition stands in.
 - **The go-home-when-hurt branch** is now ported — see §94. This bullet used to
   say RWE had no air repair pads and nothing to fly to; it has both.
-- **`VTOL_Standby`'s carrying-something hop** (8–39 units around the idle spot,
-  every 30–44 ticks). It only applies to a transport with units aboard, and RWE
+- ~~**`VTOL_Standby`'s carrying-something hop**~~ (ported, §128) (8–39 units
+  around the idle spot, every 30–44 ticks). It only applies to a transport with units aboard, and RWE
   parks a loaded transport rather than fidgeting. **Corrected by §128:** at
-  `d0b65e9a` RWE lands every idle aircraft, loaded or not; it does not park a
-  loaded transport in the air.
+  `d0b65e9a` RWE landed every idle aircraft, loaded or not; it did not park a
+  loaded transport in the air. **Ported, 2026-10-14:** an airborne idle
+  aircraft that is carrying something now hops about the spot it went idle on
+  exactly as above, and only an empty one lands.
 - **`VTOL_Follow`'s work copying** — the `0x43F0E0` order build at `0x40FE86`
   and the mission clone at `0x40FEDC`. RWE's guard already assists a builder and
   a factory through `handleGuardOrder`'s own branches; what the original does
@@ -2327,11 +2329,27 @@ is a horizontal distance under `max(8, 4 * maxVelocity)`
 (`UnitBehaviorService_util.cpp`, about 1393). The waypoint is pushed to the back
 of the queue when `navigateTo` reports arrival.
 
-**RWE differs.** An aircraft with `maxVelocity` 9 arrives within 36 units of the
+**RWE differed.** An aircraft with `maxVelocity` 9 arrived within 36 units of the
 node, aiming at the node, with the speed profile drawing it down to a stop
 there; the original arrives 16 short, aimed 320 past, without braking. On a
 route of short legs the two are visibly different, the original's being the
 smooth chain of flat passes and RWE's a series of near-stops.
+
+**Ported, 2026-10-14.** For a unit with `canFly` that is not a builder
+(`flyAirPatrolLeg`, `UnitBehaviorService.cpp`): the patrol goal is an
+`AirLoiterState` of reason `Patrol` (anchor = the waypoint it was made for,
+`waypoint` = the goal, `dueAt` = set tick + 30). It is made when there is none,
+when the waypoint changed, and when `dueAt` passes; it is cleared by any order
+other than a patrol or a guard, which is what makes a return from an attack or
+a pad trip take it afresh. The aircraft steers at the goal through the ordinary
+navigation (`navigateTo`), and the leg is complete when the squared horizontal
+distance to the goal is strictly under 336 squared, tested every tick, on the
+full-precision position; the order then goes to the back as before and the goal
+is dropped. A landed aircraft is not tested until it is airborne, so a leg that
+begins inside 336 of its goal is still flown. A construction aircraft keeps the
+old arrival because it is on `VTOL_RepairPatrol`, which has no overshoot
+(§131). The goal is not clamped to the map. `bomberpatrol.test.cpp` pins the
+goal, the 336 arrival and the 30-tick re-aim.
 
 ### The change
 
@@ -2424,13 +2442,27 @@ replayed.
 
 ### What RWE does
 
-`UnitBehaviorService.cpp` about 456-499 lands any flying idle aircraft
-(`shouldLand`, `navigateTo` with a `NavigationGoalLandingLocation`) and does not
+`UnitBehaviorService.cpp` about 456-499 landed any flying idle aircraft
+(`shouldLand`, `navigateTo` with a `NavigationGoalLandingLocation`) and did not
 look at `carriedUnits`. §13.5's sentence that "RWE parks a loaded transport"
-is **wrong at this commit**: it parks every idle aircraft, loaded or not.
+was **wrong at that commit**: it parked every idle aircraft, loaded or not.
 
-**RWE differs.** A loaded transport in the original hangs in the air; in RWE it
-comes down and sits on the ground with its passengers.
+**RWE differed.** A loaded transport in the original hangs in the air; in RWE it
+came down and sat on the ground with its passengers.
+
+**Ported, 2026-10-14.** The idle branch tests `canFly`, an airborne
+(`AirMovementStateFlying`) body and a non-empty `carriedUnits` before the
+landing decision and runs `flyIdleHop`. The state is an `AirLoiterState` of
+reason `IdleHop` (anchor, current waypoint, and `dueAt` for the next hop), so it
+is saved, hashed and dumped with the loiter. The anchor is the floored x and z
+of the position on the first idle tick; the first hop is two ticks later (state
+0, state 1, state 2); each hop draws the bearing, the distance, then the wait,
+in that order, and sets the unit's flying target to the waypoint at full
+cruising altitude. Any order clears the hop, and an empty aircraft falls into
+the old landing branch from wherever it is. **[inferred]** from this section's
+own reading: the aircraft's goal between hops is the last waypoint, and a
+landed aircraft's 30-59 tick sleep (case 1) is not modelled because RWE has no
+equivalent wait. `aircraftidle.test.cpp` pins all three.
 
 ### The change
 
