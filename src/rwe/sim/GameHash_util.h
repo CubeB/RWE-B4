@@ -123,7 +123,8 @@ namespace rwe
      * the same map with different extra content hold the same wreck under
      * different numbers, and a hash that read the number desynced at tick 1
      * with every other field equal (2026-10-13, two real machines). The
-     * definition's name is what both agree on.
+     * definition's name, folded to ASCII uppercase as for feature lookup,
+     * is what both agree on. Archive order can change the retained spelling.
      */
     GameHash computeHashOf(const MapFeature& f, const std::string& definitionName);
     GameHash computeHashOf(const UnitState::AirWorkOrbitState& s);

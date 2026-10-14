@@ -405,7 +405,7 @@ namespace rwe
             other.height = 1_ss;
 
             FeatureDefinition rock{};
-            rock.name = "rock";
+            rock.name = otherFirst ? "ROCK" : "rock";
             rock.footprintX = 1;
             rock.footprintZ = 1;
             rock.height = 1_ss;
@@ -442,6 +442,17 @@ namespace rwe
         auto treeId = c->featureDefinitions.insert(tree);
         c->features.begin()->second.featureName = treeId;
         REQUIRE(computeHashOf(*a) != computeHashOf(*c));
+    }
+
+    TEST_CASE("feature name casing does not cause a tick-one desync", "[hash]")
+    {
+        // The two 1a0848cd reports differed by exactly 384: these two names
+        // each contributed six lowercase ASCII letters, worth 6 * 32.
+        MapFeature feature{};
+        feature.position = SimVector(0_ss, 0_ss, 0_ss);
+        REQUIRE(computeHashOf(feature, "Tree1Dead") == computeHashOf(feature, "TREE1DEAD"));
+        REQUIRE(computeHashOf(feature, "Tree2Dead") == computeHashOf(feature, "TREE2DEAD"));
+        REQUIRE(computeHashOf(feature, "Tree1Dead") != computeHashOf(feature, "TREE2DEAD"));
     }
 
     TEST_CASE("the simulation dump names the definitions its feature numbers stand for")

@@ -368,8 +368,16 @@ namespace rwe
 
     GameHash computeHashOf(const MapFeature& f, const std::string& definitionName)
     {
+        // Feature lookup is case-insensitive. Different archive/load orders
+        // can retain Tree2Dead or TREE2DEAD for the same definition. Fold ASCII
+        // explicitly so the hash also stays independent of the host locale.
+        uint32_t nameHash = 0;
+        for (unsigned char c : definitionName)
+        {
+            nameHash += (c >= 'a' && c <= 'z') ? c - 'a' + 'A' : c;
+        }
         return combineHashes(
-            definitionName,
+            GameHash(nameHash),
             f.position,
             f.rotation,
             f.velocity,
