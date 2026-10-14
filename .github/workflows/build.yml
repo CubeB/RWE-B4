@@ -634,7 +634,12 @@ jobs:
       - name: build rwe
         env:
           CCACHE_DIR: ${{ github.workspace }}\.ccache
-          CCACHE_MAXSIZE: 500M
+          # The precompiled-header objects below are large and now all
+          # cacheable, so the working set is far bigger than the old 500M
+          # cap: ccache filled it, evicted, and then re-missed what it had
+          # just thrown away (its own statistics read "0.5 / 0.5 (99.96%)"
+          # on 2026-10-14).
+          CCACHE_MAXSIZE: 2G
           # The compiler is reinstalled each run; hash it by content, not by
           # a modification time that has no reason to repeat.
           CCACHE_COMPILERCHECK: content
@@ -647,6 +652,10 @@ jobs:
           # __DATE__ or __TIME__, so the sloppiness is safe.
           CCACHE_SLOPPINESS: pch_defines,time_macros
         run: |
+          # The statistics live in the cache directory, so a cache restored
+          # from the previous run arrives carrying its counters; zero them
+          # first so the numbers printed below are this run's alone.
+          ccache --zero-stats
           mkdir build
           pushd build
           cmake -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DRWE_WERROR=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ..
