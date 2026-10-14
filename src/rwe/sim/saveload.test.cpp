@@ -497,6 +497,70 @@ namespace rwe
         REQUIRE(saveSimulationToJson(simB) == saved);
     }
 
+    TEST_CASE("a player's sharing flags and reserves round-trip through a save", "[saveload]")
+    {
+        // The original does not save these (TOTALA-EXE-COMMANDS.md section
+        // 124); RWE does, because they are hashed and steer the automatic
+        // pass, and a resume that forgot them would part company with the
+        // game it came from at the next two-second pass.
+        auto simA = makeBaseSim();
+        buildScenario(simA);
+
+        // Different on the two players, and different between the two
+        // resources, so a serialiser that wrote one value for all of them
+        // would not pass.
+        simA.players[0].shareMetal = true;
+        simA.players[0].shareEnergy = false;
+        simA.players[0].metalReserve = Metal(125.0f);
+        simA.players[0].energyReserve = Energy(-40.0f);
+        simA.players[1].shareMetal = false;
+        simA.players[1].shareEnergy = true;
+        simA.players[1].metalReserve = Metal(0.0f);
+        simA.players[1].energyReserve = Energy(900.0f);
+
+        auto saved = saveSimulationToJson(simA);
+
+        auto simB = makeBaseSim();
+        loadSimulationFromJson(saved, simB);
+
+        REQUIRE(simB.players[0].shareMetal);
+        REQUIRE_FALSE(simB.players[0].shareEnergy);
+        REQUIRE(simB.players[0].metalReserve == Metal(125.0f));
+        REQUIRE(simB.players[0].energyReserve == Energy(-40.0f));
+        REQUIRE_FALSE(simB.players[1].shareMetal);
+        REQUIRE(simB.players[1].shareEnergy);
+        REQUIRE(simB.players[1].metalReserve == Metal(0.0f));
+        REQUIRE(simB.players[1].energyReserve == Energy(900.0f));
+
+        REQUIRE(saveSimulationToJson(simB) == saved);
+        REQUIRE(computeHashOf(simB) == computeHashOf(simA));
+    }
+
+    TEST_CASE("a save from before resource sharing loads with it off", "[saveload]")
+    {
+        auto simA = makeBaseSim();
+        buildScenario(simA);
+
+        auto saved = saveSimulationToJson(simA);
+        for (auto& pj : saved.at("players"))
+        {
+            pj.erase("shareMetal");
+            pj.erase("shareEnergy");
+            pj.erase("metalReserve");
+            pj.erase("energyReserve");
+        }
+
+        auto simB = makeBaseSim();
+        REQUIRE_NOTHROW(loadSimulationFromJson(saved, simB));
+        for (const auto& player : simB.players)
+        {
+            REQUIRE_FALSE(player.shareMetal);
+            REQUIRE_FALSE(player.shareEnergy);
+            REQUIRE(player.metalReserve == Metal(0.0f));
+            REQUIRE(player.energyReserve == Energy(0.0f));
+        }
+    }
+
     TEST_CASE("a unit json missing a mayBeMissing key loads its default", "[saveload]")
     {
         // commandFireShotFired is the row that opts in: saves written before

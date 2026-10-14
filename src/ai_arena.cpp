@@ -59,6 +59,7 @@
 #include <rwe/game/GameSimulationLoader.h>
 #include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/game/PlayerCommandService.h>
+#include <rwe/sim/ResourceSharing.h>
 #include <rwe/game/ReplayFile.h>
 #include <rwe/game/SimDiagnostics.h>
 #include <rwe/io/ota/ota.h>
@@ -706,6 +707,12 @@ int main(int argc, char* argv[])
                     if (const auto* unitCommand = std::get_if<PlayerUnitCommand>(&command))
                     {
                         applyUnitCommandToSimulation(loaded.simulation, issuingPlayer, *unitCommand);
+                    }
+                    else if (const auto* shareCommand = std::get_if<PlayerShareCommand>(&command))
+                    {
+                        // A recorded game's toggles and gifts, applied by the
+                        // same function the windowed scene calls.
+                        applyPlayerShareCommand(loaded.simulation, issuingPlayer, *shareCommand);
                     }
                 }
             }

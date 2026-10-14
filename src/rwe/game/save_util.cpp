@@ -277,6 +277,14 @@ namespace rwe
                 {"hasBaseStorage", p.hasBaseStorage},
                 {"metalStalled", p.metalStalled},
                 {"energyStalled", p.energyStalled},
+                // The original does not save these (TOTALA-EXE-COMMANDS.md
+                // section 124); RWE does, because they steer the simulation
+                // and a lockstep resume or replay keyframe without them would
+                // diverge from the game it came from.
+                {"shareMetal", p.shareMetal},
+                {"shareEnergy", p.shareEnergy},
+                {"metalReserve", saveMetal(p.metalReserve)},
+                {"energyReserve", saveEnergy(p.energyReserve)},
                 {"unitsKilled", p.unitsKilled},
                 {"unitsLost", p.unitsLost},
                 {"metalProduced", saveMetal(p.metalProduced)},
@@ -316,6 +324,24 @@ namespace rwe
             p.hasBaseStorage = j.contains("hasBaseStorage") && j.at("hasBaseStorage").get<bool>();
             p.metalStalled = j.at("metalStalled").get<bool>();
             p.energyStalled = j.at("energyStalled").get<bool>();
+            // Resource sharing came later; an older save has it off, with no
+            // reserve, which is what a game that never used it looks like.
+            if (j.contains("shareMetal"))
+            {
+                p.shareMetal = j.at("shareMetal").get<bool>();
+            }
+            if (j.contains("shareEnergy"))
+            {
+                p.shareEnergy = j.at("shareEnergy").get<bool>();
+            }
+            if (j.contains("metalReserve"))
+            {
+                p.metalReserve = loadMetal(j.at("metalReserve"));
+            }
+            if (j.contains("energyReserve"))
+            {
+                p.energyReserve = loadEnergy(j.at("energyReserve"));
+            }
             p.unitsKilled = j.at("unitsKilled").get<unsigned int>();
             p.unitsLost = j.at("unitsLost").get<unsigned int>();
             // Added after the first saves were written; an older file simply

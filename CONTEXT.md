@@ -211,6 +211,23 @@ most wanted -- and so it is not simulation state: never hashed, never saved,
 never recorded in a replay, and never seen by any peer's `GameSimulation`.
 _Avoid_: chat message (that is the wire type, `proto::ChatMessage`)
 
+**Chat command**:
+A message-bar line whose first non-space character is `+`. Never sent as chat:
+it is read locally (`parseChatCommand`) and, for the sharing commands, becomes
+a `PlayerShareCommand` in the ordinary command stream -- so, unlike a chat line,
+what it changes is hashed, saved and recorded in a replay.
+_Avoid_: slash command, console command
+
+**Resource sharing**:
+A player's `shareMetal` / `shareEnergy` toggles and `metalReserve` /
+`energyReserve` amounts, plus the gift. Every two seconds each human with a
+toggle set offers a third of its metal surplus (half of its energy) to the last
+allied human that holds less; a gift goes to anyone. One definition of the
+rules, `applyPlayerShareCommand` and `runAutomaticSharing`
+(`src/rwe/sim/ResourceSharing.h`); TOTALA-EXE-COMMANDS.md section 124. The
+original does not save these and RWE does.
+_Avoid_: trading, donation
+
 **Hashed state**:
 Sim state the sync hash reads. Must be initialised by the time the object
 exists, and kept in step across the hash, the save and the dump.

@@ -146,4 +146,34 @@ namespace rwe
         REQUIRE(unnamed.empty());
     }
 
+    TEST_CASE("a player's sharing flags and reserves reach the desync dump", "[dump]")
+    {
+        // They are hashed (resource sharing, TOTALA-EXE-COMMANDS.md section
+        // 124), so a report that did not carry them could not say which of
+        // them two peers disagreed about.
+        GamePlayerInfo p{
+            std::optional<std::string>("p"),
+            GamePlayerType::Human,
+            PlayerColorIndex(0),
+            GamePlayerStatus::Alive,
+            std::string("ARM"),
+            Metal(100.0f),
+            Energy(100.0f),
+            Metal(1000.0f),
+            Energy(1000.0f),
+            Metal(100.0f),
+            Energy(100.0f),
+        };
+        p.shareMetal = true;
+        p.shareEnergy = false;
+        p.metalReserve = Metal(250.0f);
+        p.energyReserve = Energy(-5.0f);
+
+        auto j = dumpJson(p);
+        REQUIRE(j.at("shareMetal") == true);
+        REQUIRE(j.at("shareEnergy") == false);
+        REQUIRE(j.at("metalReserve") == 250.0f);
+        REQUIRE(j.at("energyReserve") == -5.0f);
+    }
+
 }

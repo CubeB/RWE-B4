@@ -80,6 +80,28 @@ namespace rwe
         bool metalStalled{false};
         bool energyStalled{false};
 
+        /**
+         * Resource sharing between allies (TOTALA-EXE-COMMANDS.md section 124).
+         *
+         * `shareMetal` and `shareEnergy` are the player's `+ShareMetal` and
+         * `+ShareEnergy` toggles: while one is set, every two seconds the
+         * player offers part of what it holds above its reserve to an allied
+         * human (ResourceSharing.h). `metalReserve` and `energyReserve` are
+         * absolute amounts, not fractions, set by `+SetShareMetal` and
+         * `+SetShareEnergy`; a negative one is stored as typed.
+         *
+         * The original keeps these in a byte of the replicated player record
+         * and does not save them, so they reset on a load. RWE saves and
+         * hashes them: they steer the simulation, so a lockstep resume or a
+         * replay keyframe that forgot them would diverge from the game it
+         * came from. Every one has an initialiser because the sync hash
+         * reads them from the moment the player exists.
+         */
+        bool shareMetal{false};
+        bool shareEnergy{false};
+        Metal metalReserve{0};
+        Energy energyReserve{0};
+
         /** Enemy (or, with friendly fire, any) units this player's units have destroyed. */
         unsigned int unitsKilled{0};
         /** Units this player has lost, by any cause. */

@@ -63,7 +63,11 @@ namespace rwe
             {"metalProductionBuffer", dumpJson(p.metalProductionBuffer)},
             {"energyProductionBuffer", dumpJson(p.energyProductionBuffer)},
             {"previousMetalProductionBuffer", dumpJson(p.previousMetalProductionBuffer)},
-            {"previousEnergyProductionBuffer", dumpJson(p.previousEnergyProductionBuffer)}};
+            {"previousEnergyProductionBuffer", dumpJson(p.previousEnergyProductionBuffer)},
+            {"shareMetal", dumpJson(p.shareMetal)},
+            {"shareEnergy", dumpJson(p.shareEnergy)},
+            {"metalReserve", dumpJson(p.metalReserve)},
+            {"energyReserve", dumpJson(p.energyReserve)}};
     }
     /**
      * The desync dump's page of the unit, walked from the field table

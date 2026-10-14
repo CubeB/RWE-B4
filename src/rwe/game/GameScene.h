@@ -1789,6 +1789,14 @@ namespace rwe
         void sendChatMessage();
 
         /**
+         * Runs a `+` line typed into the bar as a command instead of sending
+         * it as chat (TOTALA-EXE-COMMANDS.md section 124): the sharing
+         * commands become PlayerShareCommands in the ordinary command stream,
+         * everything else says so locally. Nothing is ever sent as chat.
+         */
+        void runChatCommand(const std::string& line);
+
+        /**
          * RWE_CHAT_TEST=<tick>:<text>, which says that line once at that tick.
          *
          * There is nobody at the keyboard in a headless two-peer run, so this
