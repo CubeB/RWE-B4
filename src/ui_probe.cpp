@@ -850,14 +850,39 @@ int main(int argc, char* argv[])
                 run(1.5);
                 check(hm.players[5].type.getValue() == MainMenuModel::PlayerSettings::Type::Computer, "the host adds a computer to an open seat");
                 check(MenuProbe::model(guest).players[5].type.getValue() == MainMenuModel::PlayerSettings::Type::Computer, "and the guest sees it");
-                check(buttonLabel(host, "PLAYER5") == "Computer", "the seat reads Computer");
+                // A computer seat is the original's by default, then RWE's own
+                // (ADR-0005), then open again; the seat button's face names the
+                // engine and the host's choice reaches every guest.
+                check(hm.players[5].personality.getValue() == "Original TA", "a new computer is Original TA");
+                check(MenuProbe::model(guest).players[5].personality.getValue() == "Original TA", "and the guest sees which engine");
+                check(MenuProbe::model(guest2).players[5].personality.getValue() == "Original TA", "and so does the other guest");
+                check(buttonLabel(host, "PLAYER5") == "Original TA", "the seat reads Original TA");
                 check(buttonVisible(host, "PLAYER5_ready") && buttonVisible(host, "PLAYER5_side"), "a computer shows its choices");
                 check(!buttonVisible(host, "PLAYER5_personality"), "there is no AI personality picker on a computer's row");
+
+                // A guest's click on a computer seat changes neither the
+                // engine nor the seat.
+                clickGadget(guest, "PLAYER" + std::to_string(5));
+                run(1.5);
+                check(hm.players[5].type.getValue() == MainMenuModel::PlayerSettings::Type::Computer, "a guest cannot remove the host's computer");
+                check(hm.players[5].personality.getValue() == "Original TA", "and cannot change its engine");
+
+                clickGadget(host, "PLAYER" + std::to_string(5));
+                run(1.5);
+                check(hm.players[5].type.getValue() == MainMenuModel::PlayerSettings::Type::Computer, "the next click keeps it a computer");
+                check(hm.players[5].personality.getValue() == "Balanced", "and makes it RWE AI");
+                check(buttonLabel(host, "PLAYER5") == "RWE AI", "the seat reads RWE AI");
+                check(MenuProbe::model(guest).players[5].personality.getValue() == "Balanced", "the guest sees the change");
+                check(buttonLabel(guest, "PLAYER5") == "RWE AI", "and its button reads RWE AI too");
+                check(MenuProbe::model(guest2).players[5].personality.getValue() == "Balanced", "and so does the other guest");
+
                 clickGadget(host, "PLAYER" + std::to_string(5));
                 run(1.0);
-                check(hm.players[5].type.getValue() == MainMenuModel::PlayerSettings::Type::Open, "and takes it away again");
+                check(hm.players[5].type.getValue() == MainMenuModel::PlayerSettings::Type::Open, "and a third takes it away again");
+                check(buttonLabel(host, "PLAYER5") == "Open", "the seat reads Open");
                 clickGadget(host, "PLAYER" + std::to_string(5));
                 run(1.0);
+                check(hm.players[5].personality.getValue() == "Original TA", "opened again, it starts as Original TA");
             }
 
             std::cout << "---- the game's options: the button's face says what the model holds\n";

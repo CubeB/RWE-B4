@@ -465,13 +465,18 @@ namespace rwe
         /** An airborne construction aircraft with one passenger hung on it by hand, as the transport tests do. */
         struct LoadedAircraftScene
         {
+            // Declared BEFORE `sim`: the simulation's CobEnvironment borrows
+            // the script, so it has to be destroyed after the simulation. A
+            // constructor-local one died before the first tick and MSVC
+            // Debug read freed memory (the gunship ring scene had the same
+            // fault).
+            std::shared_ptr<CobScript> script{makeIdleScript()};
             GameSimulation sim;
             UnitId aircraftId;
             UnitId cargoId;
 
             LoadedAircraftScene() : sim(makeIdleTerrain(128, 128), 0u, 0, 0)
             {
-                auto script = makeIdleScript();
                 auto us = addIdlePlayer(sim, "us");
                 sim.unitDefinitions["transport"] = makeIdleBuilderDef();
                 sim.unitDefinitions["cargo"] = makeIdleTargetDef();

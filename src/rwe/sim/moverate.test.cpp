@@ -219,7 +219,7 @@ namespace rwe
             UnitPath path;
             path.waypoints.push_back(unit.position);
             path.waypoints.push_back(SimVector(400_ss, 0_ss, 0_ss));
-            NavigationStateMoving moving;
+            NavigationStateMoving moving{};
             moving.movementGoal = SimVector(400_ss, 0_ss, 0_ss);
             moving.pathDestination = SimVector(400_ss, 0_ss, 0_ss);
             moving.path = PathFollowingInfo(std::move(path), sim.gameTime);
