@@ -189,6 +189,7 @@ namespace rwe
         };
 
         constexpr BoolKnob boolKnobs[] = {
+            {"metalMakerUseSurplus", &AiTuningProfile::metalMakerUseSurplus},
             {"expansionContestsMiddleWhenBoxedIn", &AiTuningProfile::expansionContestsMiddleWhenBoxedIn},
             {"dgunByValue", &AiTuningProfile::dgunByValue},
             {"kiteWithLongerRange", &AiTuningProfile::kiteWithLongerRange},

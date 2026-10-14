@@ -51,6 +51,14 @@ namespace rwe
         REQUIRE(p.targetSolarCount == 42);
     }
 
+    TEST_CASE("surplus metal maker control is available for paired comparisons")
+    {
+        AiTuningProfile p;
+        CHECK_FALSE(p.metalMakerUseSurplus);
+        REQUIRE(applyAiTuning(p, "metalMakerUseSurplus", "true"));
+        CHECK(p.metalMakerUseSurplus);
+    }
+
     TEST_CASE("applyAiTuning sets a bool knob by name")
     {
         AiTuningProfile p;

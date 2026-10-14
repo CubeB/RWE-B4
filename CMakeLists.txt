@@ -1100,6 +1100,7 @@ set(TEST_FILES
     src/rwe/ai/AiTuningProfile.test.cpp
     src/rwe/ai/AiBehaviour.test.cpp
     src/rwe/ai/EconomyManager.test.cpp
+    src/rwe/ai/MetalMakerManager.test.cpp
     src/rwe/ai/AiBehaviour_army.test.cpp
     src/rwe/ai/AiBehaviour_commander.test.cpp
     src/rwe/ai/AiBehaviour_defences.test.cpp

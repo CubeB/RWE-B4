@@ -149,3 +149,61 @@ each, with a byte-identical hash log while the knob is off.
   expensive units for many cheap ones scores worse than it played.
   `decidedDelta` (games actually ended) is the check against that, and it
   moved the same way in every accepted result.
+
+## Individual metal-maker budgeting (2026-10-14, experimental)
+
+The original checks positive net energy before activating a converter
+(`TOTALA-EXE-COMPUTER-PLAYER.md` section 121). RWE's controller switched all
+makers together from storage percentages. The new `metalMakerUseSurplus`
+experiment budgets them individually, preferring the most metal per energy
+and breaking ties by unit id. It subtracts the makers' own draw from the same
+resource sample that supplied the demand, rather than subtracting the current
+activation count from an older sample. Pending commands are remembered, so an
+emergency can cancel a queued activation without flooding the command stream.
+
+Storage hysteresis and the existing stall/attack shutdown remain. A surplus
+smaller than one converter's cost can fund one extra converter in a cycle:
+start at 95% storage and stop at `metalMakerOnAbovePercent` (70% by default).
+Otherwise that fractional surplus would be discarded indefinitely.
+
+**It has not earned a default.** `metalMakerUseSurplus` remains false. In 18
+paired comparisons on Great Divide, Standard difficulty, seeds 701-706, at a
+1,800-second cap (ARM mirror, CORE mirror and ARM-versus-CORE):
+
+| Measure | Result |
+| --- | --- |
+| Better / same / worse, unit-margin deadband 10 | 8 / 3 / 7 |
+| Mean unit-margin delta | -15.6 |
+| Mean delta, ARM mirror / CORE mirror / cross | -32.5 / -10.0 / -4.2 |
+| Tuned-seat decided-win rate, experiment / control | 0.22 / 0.33 |
+| Mean resource-waste delta | +1.8 percentage points |
+| Sign test | p = 1.0 |
+
+These are 36 actual games; the cross comparison applies the tune to both
+seats, as the existing tuner does. The results do not establish a strength
+improvement. In five experimental CSV samples, energy was at least 95% full,
+metal below 25, and desired energy demand exceeded income by more than 120;
+the controls had none. A possible next investigation is whether unfulfilled
+construction demand during metal stalls makes this budget too conservative.
+That is a hypothesis, not a confirmed explanation of the match results.
+
+The candidate is in `tools/ai-evaluate-surplus.toml`; use it with
+`tools/ai-autotune.py --evaluate`, explicitly using `--ai-engine rwe` for
+manual arena runs. `--ai-tune 0:metalMakerUseSurplus=true` enables the experiment
+for one seat. Great Divide results and hashes are retained locally under
+`.local/ai-surplus/`. The initially requested Acid Foursome four-player check
+could not load because this installation has no OTA for that map. The check
+was rerun on installed Painted Desert, ARM/CORE/ARM/CORE, seeds 707-708 and a
+1,200-second cap: both paired comparisons improved, mean margin delta +34.5,
+sign-test p = 0.5. Four successful games are under
+`.local/ai-surplus/painted-desert-fourplayer/`. Two pairs are a spot check and
+do not overturn the mixed 1v1 results.
+
+Release game and test builds succeeded. All 1,549 runnable test cases and
+174,961 assertions passed (one external game-data lookup skipped). Four
+transient Windows socket-bind failures on the first full run passed both a
+focused host recheck and the repeated full run. The policy has a real resource
+settlement test with a 14-tick command delay as well as threshold, efficiency,
+sample alignment, frame/death and pending-command cases. With the experiment
+disabled, a 900-second control has byte-identical hashes to the previous
+executable; two enabled 1,800-second games also have byte-identical hashes.

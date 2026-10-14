@@ -1,0 +1,4 @@
+# Experimental converter control; paired evaluation has not justified a default.
+[[candidate]]
+name = "surplus-converters"
+knobs = { metalMakerUseSurplus = true }

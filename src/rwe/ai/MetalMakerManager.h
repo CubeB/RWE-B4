@@ -1,10 +1,11 @@
 #pragma once
 
+#include <map>
 #include <rwe/ai/AiBlackboard.h>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/game/PlayerCommand.h>
-#include <map>
 #include <rwe/sim/PlayerId.h>
+#include <set>
 #include <vector>
 
 namespace rwe
@@ -45,6 +46,21 @@ namespace rwe
          * while the level sits on it.
          */
         bool makersOn{false};
+
+        void updateFromSurplus(
+            const GameSimulation& sim,
+            const AiTuningProfile& profile,
+            const AiBlackboard& bb,
+            std::vector<PlayerCommand>& outCommands);
+
+        // Sample the converters that will be charged by the coming resource
+        // settle. The next tick's demand includes precisely this draw, even
+        // if a switch has arrived or a converter has died in the meantime.
+        float settledMakerDraw{0.0f};
+        bool surplusReady{false};
+        bool overflowOn{false};
+        std::set<unsigned int> makersToRun;
+        std::map<unsigned int, bool> lastToldState;
 
         /**
          * When each maker was last told, by unit id. A command takes half a

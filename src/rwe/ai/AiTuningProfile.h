@@ -414,6 +414,12 @@ namespace rwe
          */
         int metalMakerOffBelowPercent{25};
         int metalMakerOnAbovePercent{70};
+        /**
+         * Budget individual converters from surplus generation after other
+         * demand, retaining the storage thresholds above as a safety reserve.
+         * Experimental until paired arena runs justify changing the default.
+         */
+        bool metalMakerUseSurplus{false};
         int targetAirPlantCount{1};
         int targetVehiclePlantCount{1};
         /**
