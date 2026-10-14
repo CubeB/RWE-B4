@@ -195,6 +195,10 @@ set(SOURCE_FILES
     src/rwe/ai/BuilderSafety.h
     src/rwe/ai/AiPersonality.cpp
     src/rwe/ai/AiPersonality.h
+    src/rwe/ai/AiController.cpp
+    src/rwe/ai/AiController.h
+    src/rwe/ai/classic/ClassicAiController.cpp
+    src/rwe/ai/classic/ClassicAiController.h
     src/rwe/ai/AiBuildTree.cpp
     src/rwe/ai/AiBuildTree.h
     src/rwe/ai/AiUnitDefIndex.cpp
