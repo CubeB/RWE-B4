@@ -10,6 +10,8 @@
 
 namespace rwe
 {
+    struct AiBuildTree;
+
     /**
      * What a ClassicAiController is built from, all of it read before the
      * game starts so that two peers given the same files play the same game.
@@ -37,6 +39,24 @@ namespace rwe
          * AiTuningProfile::idle.
          */
         bool idle{false};
+
+        /**
+         * What each builder may build: the same table AiPlayerController is
+         * given, read from the build menus. A builder the table does not know
+         * (or no table at all) may build anything, which is what a test with
+         * no menus gets.
+         *
+         * Shared and read-only: it describes the game's data and no controller
+         * ever writes it.
+         */
+        std::shared_ptr<const AiBuildTree> buildTree;
+
+        /**
+         * The seat's unit limit (the mission's `maxunits`, 200 by default).
+         * The original adds half a type's value to its rating once the player
+         * owns more than half of this.
+         */
+        unsigned int unitLimit{200};
     };
 
     /**
