@@ -3,7 +3,7 @@
 Split out of [TOTALA-EXE.md](TOTALA-EXE.md) on 2026-09-21, which had reached
 14,000 lines. **The section numbers are the stable identifier and do not**
 **change** -- every `§n` reference in the tree, the commit log and the other
-documents still resolves. This file holds §3, §20, §23, §29, §93, §94, §96, §97, §98, §110, §111.
+documents still resolves. This file holds §3, §20, §23, §29, §93, §94, §96, §97, §98, §110, §111, §112, §134.
 
 The full index across every file, and §88 (where RWE deliberately differs)
 and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
@@ -21,6 +21,8 @@ and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
 98. [Resurrect: a real mission, a crude corpse mapping, and nothing that can use it](#98-resurrect-a-real-mission-a-crude-corpse-mapping-and-nothing-that-can-use-it)
 110. [Why a construction aircraft finishes a build one tick early: a second lathe on the creation tick](#110-why-a-construction-aircraft-finishes-a-build-one-tick-early-a-second-lathe-on-the-creation-tick)
 111. [The settle, re-read: one phase for every player, and what a refusal costs](#111-the-settle-re-read-one-phase-for-every-player-and-what-a-refusal-costs)
+112. [`BUGGER_OFF` is write-only, and a blocked site only waits](#112-bugger_off-is-write-only-and-a-blocked-site-only-waits)
+134. [Cancelling a build refunds the metal that was spent](#134-cancelling-a-build-refunds-the-metal-that-was-spent)
 
 ## 3. Nanolathe spray and the construction display
 
@@ -971,6 +973,12 @@ Two deliberate departures, both small:
   (`0x41BBA1`), scaled by difficulty for AI players, but that half was read from
   `fxch` ordering rather than a direct store and is the weaker claim. It is
   deliberately left out; a frame that decays away in RWE pays nothing back.
+
+  > **Corrected by §134 (2026-10-14).** The refund is real: the decay path
+  > credits `buildCostMetal` times the fraction removed to the frame's own
+  > production, scaled for a computer owner by the difficulty (x0.5, x0.7,
+  > else x1.0), and cancelling a factory's build refunds the metal that was
+  > in it. RWE pays neither.
 
 The disarm in state 0 needed nothing: RWE's behaviour pass already returns early
 for a unit that `isBeingBuilt`, so a nanoframe never runs a weapon.
@@ -1969,6 +1977,9 @@ sleep), aircraft **564** with a stale event and 565 without. The answers are the
 same whichever order the COB and mission passes run in, which is not settled
 here.
 
+> **Settled by §132 (2026-10-14):** within a unit's slot the weapons run first,
+> then the script threads and pieces, then the order lists, then motion.
+
 ### Why the event is always there in Escalation
 
 The corpus's three airborne builders ship scripts (read with
@@ -2194,6 +2205,111 @@ Checked against `GameSimulation::updateResources`, `settleResourcePool`,
 | 10 | The computer player's production handicap. | §23, not ported. | Tuning, not compatibility. |
 
 Nothing in the table was changed. Row 7 is the one worth a decision.
+
+## 134. Cancelling a build refunds the metal that was spent
+
+Settled 2026-10-14 from the order destructor `0x43A1F0`, the factory mission
+`0x402640` and the frame-decay routine `0x41BA60`, read in the executable's
+disassembly. §93 said of the decay path's refund that it "was read from `fxch`
+ordering rather than a direct store and is the weaker claim" and left it out.
+**It is a real refund, there are two of them, and RWE pays neither.** The
+independent reading of the same binary that raised it was right.
+
+### The cancellation: a build that is thrown away returns what it had cost
+
+When an order is destroyed (`0x43A1F0`) and its wake mask (`mission+6`) has bit 1
+set, the destructor first calls the mission's handler with flags 2. The factory
+mission sets its mask to `0xA` (bits 1 and 3) each time it goes to sleep with a
+product on the pad, so **while a product exists bit 1 is set** and removing the
+order runs this path (`0x40264D`-`0x402723`):
+
+1. If the mission has a product reference (`mission+0x16`) it computes
+   `(1.0 - product.remaining) * productDef.buildCostMetal` (`def+0x18A`) and
+   **truncates it to an integer** (the constant 1.0 is at `0x4FC6D4`). That is
+   the metal that had been put into the product: the fraction built times the
+   unit's metal cost.
+2. It adds the amount to the **builder's** metal-produced-this-second
+   accumulator (`unit+0xD4`, the block at `+0xBC` that the thirty-tick settle
+   folds into income, §111). The factor is by the **owner's type byte**: a human
+   or remote owner takes it whole (x1.0); a computer owner (type 2) takes it by
+   the difficulty at `[g+0x37EEE]`: level 0 x0.5 (the constant -0.5 at `0x4FC6E0`,
+   subtracted), level 1 x0.7 (-0.7 at `0x4FC6D8`), anything else x1.0. This is
+   the handicap of COMPUTER-PLAYER §123 applied to a refund. **Energy is not
+   refunded.**
+3. It then runs the ordinary completion routine `0x41B8D0(builder, product)`
+   (remaining set to zero, bit 13 of the product's `unit+0x110`, the `0x12`
+   completion record to peers through `0x4560C0`, the BUILDER.GUI refresh) and
+   kills the product with `0x489BB0(builder, product, 30000, cause 9, 0)`. Cause
+   9 is the silent one of WRECKS: no wreck, no `Killed` script, no corpse.
+4. Returns 5.
+
+### Frame decay: the same refund, a step at a time
+
+The decay of an abandoned frame (§93, one step every 11 ticks through
+`0x41BCD0(unit, 11)`) calls the build-progress routine `0x41BA60` with a
+negative amount. Its negative branch (`0x41BBA1`) credits the metal cost times
+the (negative) fraction step, negated, to the **frame's own** `unit+0xD4`,
+with the same owner-type factors (the constants at `0x4FCC90`, -0.7, and
+`0x4FCC98`, -0.5), and **not truncated**. Energy is not refunded here either.
+A step removes `11 / buildCostEnergy` of the build (clamped), so the whole
+decay of a frame at fraction `f` returns `f * buildCostMetal` of metal, spread
+over the decay -- the same total as the cancellation, paid in instalments.
+
+### Which actions cancel, and which do not
+
+| Action | What happens to the product |
+|---|---|
+| Remove a queue entry (`0x419B00` -> `0x43B0B0`) that is the one being built, count reaches zero | The order is destroyed: refund above, product killed |
+| Remove, but the count stays at one or more | The build goes on; nothing refunded |
+| Remove an entry not yet started | There is no product; nothing |
+| Issue another plain order to the factory | **Nothing cancelled.** The factory mission carries the "survives replacement" flag (0x4 of the mission's flag dword, set at `0x43ADC0`) |
+| Stop on a factory (`0x401C20`) | Deletes the rally `QMove`/`QPatrol` only; queue and current build stay (§137) |
+| Another order to a **mobile** builder | `MobileBuild` (`0x403A20`, VTOL `0x413D80`) has no 0x4 flag: it is destroyed; its flags-2 path only detaches (`0x41C110`, return 5) and **the frame stays and decays**, refunding as above |
+| The builder dies | The death routine `0x4866D0` clears the primary list through `0x439EB0(unit, 1)` at `0x4867A1`, before the unit's type index is cleared at `0x486DC7`; the order is destroyed, the product is killed and the refund goes into the dying builder's accumulator. [Inferred: whether the dead unit's accumulator is still swept; it very probably is not, so the metal is lost.] |
+| The **product** is destroyed from outside | See below: the whole list is flushed |
+
+### A frame killed from outside flushes the factory's whole list
+
+The factory's state 3 (`0x4029CA`) finds the product reference null (references
+are nulled on death, `0x489789`) and returns 7. Return 7 is the "flush" code of
+the mission loop (`0x43BA3D`): **the factory's entire primary list is
+destroyed** -- every queued build and the rally orders with it. RWE instead
+subtracts one from the head entry's count and carries on (the
+`targetUnit.isDead()` branch of the factory handler). This is gameplay-visible:
+shoot a half-built unit on the pad and the original factory goes idle with an
+empty queue.
+
+### Where a flags-8 path would come from
+
+The mission's flags-8 path ("Construction stopped", the unit event word's bit 3)
+has no setter anywhere in `.text`: no store to `+0xBA` or `+0xBB` writes that
+bit, and `0x4872B1`, the apply of a received `0x2c` record's word, is the only
+route in. [Inferred from the absence; an unreached branch rather than a
+decoded one.] RWE has no analogue and needs none.
+
+### What RWE does, and the change
+
+`clearBuild`, `removeFrameIfStanding` and `removeUnfinishedUnit`
+(`GameSimulation.cpp`) discard the product's progress without crediting
+anything; `updateNanoframeDecay` pays nothing back (§93's bullet, corrected by
+this section). Changes, in order of confidence:
+
+1. **Cancel refund (decoded).** Where a queue removal discards the active
+   product, credit `trunc(builtFraction * buildCostMetal)` times the handicap to
+   the builder's metal production for this second (the buffer §111 settles).
+   Metal only.
+2. **Decay refund (decoded).** In each decay step credit
+   `buildCostMetal * deltaFraction` times the handicap, untruncated, to the
+   frame's owner. RWE's integer work units and `nanoframeDecayRemainder` mean the
+   fraction is `deltaWork / buildTime`; carry the remainder so the total is
+   `builtFraction * buildCostMetal` exactly.
+3. **Builder death (inferred).** Credit nothing.
+4. **Frame killed from outside (decoded).** Destroy the factory's whole order
+   list and queue. Gameplay-visible and hashed; a version gate applies, and
+   the choice to take it is the maintainer's.
+
+Items 1-2 change income and so every economy fixture that cancels; the oracle is
+`tools/tad-storagecapacity.py` and the economy episodes.
 
 ## 112. `BUGGER_OFF` is write-only, and a blocked site only waits
 

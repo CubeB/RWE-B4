@@ -685,6 +685,12 @@ That is the only copy: from there on the two are the unit's own state and only
 the buttons and the COB `SET` move them. So the FBI decides what a unit is
 built doing, not what it can be told to do.
 
+> **Corrected by §133 (2026-10-14).** This is the only copy for a unit that
+> appears *without a factory*. A unit a factory builds has bits 18-21 of
+> `unit+0x110` overwritten with the **factory's** move and fire modes at
+> creation (`0x402950`-`0x40298C`) and again at completion, so every shipped
+> factory's products start Fire At Will whatever their FBI says.
+
 The parser puts `standingmoveorder` in **bits 0–1 of `def+0x241`** (`0x42C419`,
 stored `0x42C445` with the usual xor-and-xor bitfield insert) and
 `standingfireorder` in **bits 2–3 of the same dword** (`0x42C437`, stored

@@ -190,6 +190,13 @@ Everything else lives in a subject file. **The numbers never move**, so a
 116. [What a round aims at on a unit, and why the water comes after it](TOTALA-EXE-WEAPONS.md#116-what-a-round-aims-at-on-a-unit-and-why-the-water-comes-after-it)
 117. [The map checksum, and the unit id that shares its routine](TOTALA-EXE-DATA.md#117-the-map-checksum-and-the-unit-id-that-shares-its-routine)
 118. [A peer's `0x2c` records, and the stub navigator that cannot retire a waypoint](TOTALA-EXE-MOVEMENT.md#118-a-peers-0x2c-records-and-the-stub-navigator-that-cannot-retire-a-waypoint)
+132. [The order of work inside a unit tick: weapons, scripts, orders, motion](TOTALA-EXE-MOVEMENT.md#132-the-order-of-work-inside-a-unit-tick-weapons-scripts-orders-motion)
+133. [What a factory hands its product: standing orders, squad and route](TOTALA-EXE-INTERFACE.md#133-what-a-factory-hands-its-product-standing-orders-squad-and-route)
+134. [Cancelling a build refunds the metal that was spent](TOTALA-EXE-ECONOMY.md#134-cancelling-a-build-refunds-the-metal-that-was-spent)
+135. [VTOL_Pickup builds a climb goal and never installs it](TOTALA-EXE-TRANSPORTS.md#135-vtol_pickup-builds-a-climb-goal-and-never-installs-it)
+136. [The queue modifier toggles, and a group move keeps its formation](TOTALA-EXE-INTERFACE.md#136-the-queue-modifier-toggles-and-a-group-move-keeps-its-formation)
+137. [Editing a factory queue: merge at the tail, remove from the back](TOTALA-EXE-INTERFACE.md#137-editing-a-factory-queue-merge-at-the-tail-remove-from-the-back)
+138. [How often an idle unit looks for a fight: the poll timers and their draws](TOTALA-EXE-MOVEMENT.md#138-how-often-an-idle-unit-looks-for-a-fight-the-poll-timers-and-their-draws)
 
 ## 88. Where RWE deliberately differs
 

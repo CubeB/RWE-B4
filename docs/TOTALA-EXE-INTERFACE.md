@@ -3,7 +3,7 @@
 Split out of [TOTALA-EXE.md](TOTALA-EXE.md) on 2026-09-21, which had reached
 14,000 lines. **The section numbers are the stable identifier and do not**
 **change** -- every `§n` reference in the tree, the commit log and the other
-documents still resolves. This file holds §19, §60, §61, §62, §63, §64, §65, §66, §67, §68, §69, §70, §71, §99, §103, §104, §107, §108.
+documents still resolves. This file holds §19, §60, §61, §62, §63, §64, §65, §66, §67, §68, §69, §70, §71, §99, §103, §104, §107, §108, §133, §136, §137.
 
 The full index across every file, and §88 (where RWE deliberately differs)
 and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
@@ -28,6 +28,9 @@ and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
 104. [The end of a game: a banner, a fade, and a chart that runs its bars up](#104-the-end-of-a-game-a-banner-a-fade-and-a-chart-that-runs-its-bars-up)
 107. [Download menus: how a patch adds a button to a builder it does not ship](#107-download-menus-how-a-patch-adds-a-button-to-a-builder-it-does-not-ship)
 108. [What Space shows: a strip from the bottom and the players at the top right](#108-what-space-shows-a-strip-from-the-bottom-and-the-players-at-the-top-right)
+133. [What a factory hands its product: standing orders, squad and route](#133-what-a-factory-hands-its-product-standing-orders-squad-and-route)
+136. [The queue modifier toggles, and a group move keeps its formation](#136-the-queue-modifier-toggles-and-a-group-move-keeps-its-formation)
+137. [Editing a factory queue: merge at the tail, remove from the back](#137-editing-a-factory-queue-merge-at-the-tail-remove-from-the-back)
 
 ## 19. The order panel, and which flag gates which button
 
@@ -1340,6 +1343,10 @@ given `"PARK"` (`0x501358`). RWE dropped a patrol from a unit with no mover on
 the tick it arrived, so only Move ever reached a product; fixed 2026-10-10 by
 keeping the order in the factory's queue as `handleMoveOrder` does.
 
+> **Refined by §133 (2026-10-14):** the posture is also stamped at creation;
+> only `QMove` and `QPatrol` are copied; the squad number goes with them for
+> a local human; and a unit with no mover gets nothing at all.
+
 **Trace a Peewee down that list against a friendly Hulk.** Not an enemy, so the
 capture and reclaim arms are skipped. `CanRepair` fails — a Peewee is not a
 builder. Not `canfly`. `CanLoadUnit(peewee, hulk)` fails at its second test,
@@ -1944,6 +1951,303 @@ builder GUIs are read. The log line is the check: on the full install it reads
 Because the AI's build tree is made from the same pages, the AI gains all 53
 units by the same stroke -- which is what turned construction ships from a
 measured loss into a measured win (see `targetConstructionShipCount`).
+
+## 133. What a factory hands its product: standing orders, squad and route
+
+Settled 2026-10-14, read from the factory mission `0x402640` (BuildingBuild) and
+the product's `GetBuilt` mission `0x402DA0` in the executable's disassembly. An
+independent reading of the same binary said a factory's product takes the
+factory's fire and move postures, its squad number and its rally route. All
+three are right, and the first is a larger fact than it sounds: **a factory-built
+unit does not use its own FBI's standing orders at all.** WEAPONS "That is the
+only copy" and §83 describe a unit that *spawns* by another route.
+
+### Creation: the posture is stamped before the unit has a tick
+
+The factory's state 2 creates the product (`0x4028EA`, through the unit
+constructor `0x485F50`), stores a reference to it in the mission (`0x489690`)
+and attaches it to the factory's build piece (`0x48AAC0` with mode 1). Between
+the creation and the first tick, at `0x402950`-`0x40298C`, it overwrites two
+bit fields of the **product's** `unit+0x110` with the factory's own:
+
+- bits 18-19 (`0xC0000`), the move mode: Hold Position, Maneuver, Roam;
+- bits 20-21 (`0x300000`), the fire mode: Hold Fire, Return Fire, Fire At Will.
+
+The factory's field is whatever the player last set on the factory, which began
+as the factory's own FBI value (below). The product's `StandingMoveOrder` and
+`StandingFireOrder` (`def+0x241`, the single copy at `0x485C8A`-`0x485CB6` that
+the earlier paragraph found) have already been written by the unit constructor,
+and this store is what they are written over. Then the same routine appends a
+`getbuilt` mission (string `0x5012EC`) to the product with the factory as its
+target (`mission+0x16`).
+
+### Completion: the same two fields again, the squad, and the route
+
+`GetBuilt` waits until the product's remaining-work float (`unit+0x104`) is
+zero, then runs `0x41C110`. For a product with **no mover** (a building) it
+returns 5 there and nothing is copied: not the posture, not the route, not even
+`PARK`. For a mobile product it goes on, in this order:
+
+1. **The route.** It reads the factory out of `mission+0x16`, looks up the ids of
+   `QMove` (`0x5010A4`) and `QPatrol` (`0x50109C`), and walks the factory's
+   *primary* list (`unit+0x5C`, link `+0x4A`). Each `QMove` is turned into an
+   order for the product by the ordinary order builder `0x43F0E0` with command 2
+   (Move) and each `QPatrol` with command 9 (Patrol), at the position stored in
+   the rally mission (`mission+0x22`); a non-zero result is appended to the
+   product's list (`0x43ADC0`). Nothing else on the factory's list is looked at.
+   Because the builder is asked about **the product**, an aircraft comes out
+   with `VTOL_Move`/`VTOL_Patrol`, a constructor with `RepairPatrol`, and a unit
+   that cannot take the order gets nothing. (§103 for the builder's tests.)
+2. **The posture again.** If the product and the factory are both alive (bit 28
+   of `unit+0x110` set, bit 14 clear), bits 18-19 and 20-21 of the product are
+   set from the factory's current ones a second time. So a factory switched to
+   Hold Fire while a unit was half built hands over Hold Fire at the door, not
+   what it had at the start of the build.
+3. **The squad.** When the product's **owner is a local human** (player type
+   byte 1) and its record is live, `unit+0xAC` of the product is set to the
+   factory's `unit+0xAC`. That byte is the squad number of KEYBOARD's control
+   groups: a factory that is in group 3 stamps group 3 on everything it builds.
+   Computer and remote owners skip it.
+4. **`PARK`.** If step 1 produced no order at all, the product gets `PARK`
+   (`0x501358`). Its handler was not read here; `-EXTERNAL`'s account (not
+   verified in this project) is a rectangle goal on the product's own cell, so
+   it walks to the nearest border of the footprint -- the way a stock factory
+   disperses output with no rally set. RWE's `BuggerOffOrder` is its stand-in.
+
+It returns 5 and the mission is gone.
+
+### What a factory's own posture is
+
+Every shipped factory sets both `firestandorders=1` and `mobilestandorders=1`
+(the two flags at `def+0x245` bits 1 and 0 that make the buttons exist), with
+`StandingMoveOrder` 1 (Maneuver) on the labs, plants, aircraft plants and
+shipyards, advanced ones included, and 2 (Roam) on the ARM vehicle plant, and
+`StandingFireOrder` 2 or the default 2 (Fire At Will). So **every unit a shipped
+factory builds starts Fire At Will, and Maneuver or Roam per the factory**, and
+the product's own `standingfireorder=0` or `standingmoveorder=0` changes
+nothing about that: they matter only for a unit that appears without a factory
+(a map's start units, a mission script, a drop, a morph, `RWE_DEBUG_SPAWN`).
+The Thunder, Roach and the other units whose FBIs ask for Hold Fire are
+therefore at will out of a factory unless the factory's buttons were changed.
+
+### What RWE does
+
+`createUnit` seeds `moveOrders` and `fireOrders` from the definition only. The
+completion path (`UnitBehaviorService`, the factory's finished-build branch)
+copies the factory's **whole** order list to the product verbatim, or gives it
+`BuggerOffOrder` when the list is empty. It does not stamp the posture at
+creation, does not refresh it at completion, does not filter the list to the two
+rally missions, and does not resolve the route for the product's capabilities.
+The squad is a `GameScene` UI table (`controlGroups`) and the simulation does
+not know it.
+
+| | Original | RWE | Visible as |
+|---|---|---|---|
+| Posture at creation | factory's | definition's | FBI-Hold-Fire units fire unprompted in the original |
+| Posture at completion | factory's again | unchanged | factory switched mid-build |
+| Route copied | `QMove`, `QPatrol` only, resolved for the product | the whole list | a factory with a queued `Reclaim` hands it on |
+| Nothing to copy | `PARK` | `BuggerOffOrder` | -- |
+| Squad | factory's, local human only | none | control groups |
+
+### The change
+
+1. In the spawn path that builds a factory product (`trySpawnUnit` /
+   `spawnNewUnits`), set the product's `moveOrders` and `fireOrders` from the
+   builder's current ones. This is one line and it moves hashed state: an
+   FBI with a non-default standing order built from a factory now differs from
+   today, so a replay version gate applies.
+2. At completion, for a mobile product when both are alive, set the two again
+   (the refresh), and copy **only** `Move` and `Patrol` orders of the factory's
+   list, built for the product (a flyer gets its air equivalent; a unit that
+   cannot take it gets none), then `BuggerOff` if none was copied.
+3. Squad: GameScene-side only, for the local human's factory, add the product
+   to the factory's control group at the same event. No simulation change.
+
+### Unclear
+
+The tick on which `GetBuilt` runs relative to the product's slot is from the
+factory's wake of event bit 15; it is zero or one tick after the finish
+depending on whether the product's slot comes before or after the factory's in
+§132's walk. It is inferred, not traced.
+
+## 136. The queue modifier toggles, and a group move keeps its formation
+
+Settled 2026-10-14 from the selection dispatch `0x48CF30`, the toggle routine
+`0x43AFC0` and the order-descriptor tables, read in the executable's
+disassembly. An independent reading of the same binary said two things about
+issuing an order to a selection: that holding Shift and repeating an order
+**removes** it, and that a group's Move is not the same click for every unit. It
+is right on both, with refinements that are in the numbers below. RWE does
+neither.
+
+### The dispatch
+
+`0x48CF30` takes six arguments: the input record (whose `+8` bit 2 is Shift, the
+"queue" flag), the command byte, a mission id for the commands that name one
+directly, the click position (`[g+0x2CAA]`), and two more that a few callers
+use. The STOP button (`0x419CED`), the mouse issue (`0x499087`, `0x4991F5`) and
+the keyboard shortcuts all arrive here. For each selected unit it builds the
+mission id for that unit (`0x43F0E0(&out, command, unit, hovered, &click)` when a
+command byte is given, so a unit that cannot take the order gets none) and
+skips that unit when there is none; `Standing_FireOrder` and `Standing_MoveOrder`
+are skipped for a unit whose definition has the matching button flag
+(`def+0x245` bits 1 and 0) clear.
+
+### Claim A: a queued order that is already there is removed
+
+The routine is `0x43AFC0(type, queueFlag, unit, targetUnit, pos, a6, a7)`.
+
+- **Only when the queue flag is set**, and **only on the primary list**: it walks
+  `unit+0x5C` for a match. Without Shift it does nothing special and the plain
+  issue replaces the list as ever.
+- A mission **matches** when its type byte equals the new one **and** (the new
+  order's target is null, or equals the mission's `+0x16`) **and** (the new
+  position is null, or `|dx|` and `|dz|` are each at most `0x100000` in 16.16,
+  that is **16.0 world units on each axis, inclusive**, against `+0x22` and
+  `+0x2A`). The `a6` unit-type argument is not compared. With both target and
+  position null any mission of that type matches.
+- The **first** match is destroyed (its destructor runs, so §134 applies if it
+  was a build) and freed, and **nothing is appended**: Shift-clicking the spot of
+  a queued Move cancels that Move. With no match the order is appended as usual
+  (`0x43ADC0`).
+
+### Claim B: formation offset
+
+For a command whose mission descriptor allows a position, the dispatch first
+decides whether the **hovered unit** is excluded from the group. The hover
+(`[g+0x2CBA]`, an id into the unit table at `[g+0x14357]`, stride `0x118`) is
+excluded from the receivers only when the command takes a unit target:
+`0x43E470(command)` is false for Unload (5), Stop (10) and placement (14), and
+otherwise the descriptor's flag word has bit 9 ("takes a unit target").
+
+Then, over the local player's units (`[g+0x2A42]`) that have bit 4 of
+`unit+0x110` set (selected) and are not the hovered one, the dispatch forms the
+**average position**: the integer world coordinate of each (the high word of the
+16.16 x at `+0x6A` and z at `+0x72`, sign-extended), summed and divided by the
+count with integer division (truncating), then back to 16.16 (`x 65536.0`,
+`0x4FD760`).
+
+For each receiver the offset applies when **all** hold:
+
+- the mission descriptor's flag bit 1 of byte `+0x11` (bit 9 of the dword at
+  `+0x10`) is set -- the "formation" flag;
+- the click position pointer is not null;
+- the receiver's squared distance from the average is within
+  `3000 * count` -- computed as `(dx*dx >> 32) + (dz*dz >> 32)` with `dx` and `dz`
+  the raw 16.16 differences, so in world units squared. A receiver **strictly
+  beyond** is an outlier and gets the click unchanged.
+
+The receiver's destination is then `click + (position - average)` in x and z,
+in 16.16, keeping the unit's own fraction; y is the click's. There is no clamp
+here (the command validity and the walker take what they take).
+
+**Which missions carry the formation flag.** Read from the three static tables
+(`0x4FC490` ground, 23 rows; `0x4FC6E8`, 22 rows; `0x4FCA18` VTOL, 22 rows):
+`Move` (ground), `VTOL_Move`, `Patrol`, `VTOL_Patrol`, `RepairPatrol` and
+`VTOL_RepairPatrol`. `QMove` and `QPatrol` are **not** among them: a factory's
+rally point is one point. Attack, Reclaim, Repair, Capture, Load, Guard and Unload
+are not either; they all go to the one target.
+
+Two descriptor-flag facts that matter to the order's life, from the mission
+constructor `0x43A0C0`, which copies the dword at descriptor `+0x11` to the
+instance's `+0x42` and clears bit 9 if there is no target and bit 10 if there is
+no position: `0x40000` is the secondary list, `0x4` survives replacement
+(§134), `0x40` does not clear the list on issue, `0x10000` does not free weapons
+on destroy.
+
+### What RWE does
+
+`GameScene_input.cpp` (the issue handlers near lines 599-882 and 1110-1144) sends
+the **same click** to every selected unit as one `PlayerCommand`;
+`PlayerCommandApplication.cpp` `enqueueOrder` always appends and never
+searches. Neither a toggle nor a formation exists.
+
+### The change
+
+1. **Toggle** (`enqueueOrder`, the queued kind): before appending, search the
+   unit's order list for an order of the same kind whose target equals the new
+   one (or the new has none) and whose position is within 16.0 on both axes (or
+   the new has none), with the front order interrupted if that is the one that
+   went. Small, simulation-side, hashed: it needs a command-version gate.
+2. **Formation** (command creation, `GameScene`): for Move and Patrol (and the
+   air and repair variants) compute the average over the selection excluding the
+   hovered unit, and per receiver add `(unit - average)` when its squared
+   distance is at most `3000 * n`. The simulation need not change; the command
+   already carries one position per unit if the per-unit message exists, and if
+   it does not this wants one (medium).
+
+### Unclear
+
+`QMove` for a factory: the factory is a unit with no mover, so the Move
+descriptor is the rally one and has no formation flag. That the whole group of
+factories on a drag-select puts one rally on one point follows from the table;
+it is worth a glance at a real game, not a decode.
+
+## 137. Editing a factory queue: merge at the tail, remove from the back
+
+Settled 2026-10-14 from `0x43B0B0` and its only callers, read in the
+executable's disassembly. An independent reading of the same binary said that
+adding to a factory queue merges only into the **tail** entry, and that removing
+searches from the **back**. Both are right, and RWE's behaviour is equivalent in
+everything but the node structure.
+
+### Who calls it
+
+`0x43B0B0(missionType, unit, unitTypeIndex, count)` has two call sites, `0x419B8C`
+and `0x419BA8`, both inside the interface routine `0x419B00(name, unit, count)`.
+That routine picks the mission from the unit definition's weapon name and the
+unit: a name containing `MAKENUKE` or `MAKEANTI` is a `BuildWeapon` with unit-type
+0 (a stockpile weapon); otherwise `MobileBuild` when the unit has a mover and
+`BuildingBuild` when it does not. The count is +1 on a left click and +5 with the
+modifier, -1 and -5 on a right click (`0x41AC3C`); the computer player queues +1
+at a time (`0x408620`, `0x4087C4`). The local player hears the add or the remove
+sound.
+
+### Adding (count above zero)
+
+The list is the **secondary** one when the mission's descriptor flag is `0x40000`
+(`BuildWeapon`) and the **primary** one otherwise. The routine looks at the
+**tail node only**: if its type byte equals `missionType` and its unit-type dword
+(`+0x36`) equals the requested one, its count (`+0x3A`) is increased by the
+amount. Otherwise a new node is appended with `0x43ADC0`. A matching entry
+earlier in the list is **not** merged into: queue Peewee, Flash, Peewee and the
+list has three nodes, not two; queue Peewee, Flash, Flash and it has two.
+
+### Removing (count of zero or below)
+
+It walks to find the **last** matching node anywhere in the list (same type byte
+and same unit type), not the tail specifically. If that node's count is larger
+than the amount it is reduced and the routine stops. Otherwise the node is
+destroyed -- its destructor runs, so if it is the one being built the refund and
+kill of §134 follow -- and the node's count is **added to the (negative)
+request**, so what is left to remove shrinks by what the node absorbed, and the
+search starts again. A right click of five on a list holding Peewee x2, Flash,
+Peewee x1 takes the Peewee x1, then the Peewee x2, then finds no Peewee and
+stops: three removed, not five, and the Flash stays.
+
+### Stop does not clear the queue
+
+Stop on a factory (`0x401C20`) deletes the unprotected missions -- the rally
+`QMove` and `QPatrol` -- and leaves the queue and the current build. This is the
+"survives replacement" flag of §136 again and agrees with §134's table.
+
+### RWE
+
+`UnitState::modifyBuildQueue` appends a new entry on every add rather than
+merging into the tail. `removeFromBuildQueue` (`UnitState_util.cpp`) already
+searches from the back and carries the remainder, which is the original's
+shape. The merge is not observable in totals, in removal, or in build order: the
+queue is a list of (type, count) and a tail-merge versus a new node with
+identical type is the same sequence of builds. It changes only the display (two
+adjacent identical nodes show as two buttons' worth of count rather than one) if
+RWE's panel shows per-node counts; and it changes the *number of nodes*, which is
+saved and hashed state. A match of the structure is a two-line change in
+`modifyBuildQueue` (look at `back()` before `emplace_back`) with a save/hash
+consequence for old saves; it has no gameplay value and is not recommended
+unless a recorded-demo comparison ever hashes the node list.
+
+Stop agrees: RWE's Stop clears the order list (`clearOrders`,
+`PlayerCommandApplication.cpp`), which is separate from `buildQueue`.
 
 ## 108. What Space shows: a strip from the bottom and the players at the top right
 
