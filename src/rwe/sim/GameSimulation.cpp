@@ -8,7 +8,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
-#include <rwe/ai/AiPlayerController.h>
+#include <rwe/ai/AiController.h>
 #include <rwe/sim/DemoRecorder.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/MissionRules.h>
@@ -248,8 +248,8 @@ namespace rwe
     {
     }
 
-    // Out-of-line because `aiControllers` holds unique_ptr<AiPlayerController>
-    // and AiPlayerController is forward-declared in the header. Move-assign
+    // Out-of-line because `aiControllers` holds unique_ptr<AiController>
+    // and AiController is forward-declared in the header. Move-assign
     // is intentionally absent (declared `=delete` in the header) because the
     // simulation has const wind-speed members.
     GameSimulation::~GameSimulation() = default;
@@ -265,7 +265,7 @@ namespace rwe
         taLiveSender = hooks;
     }
 
-    void GameSimulation::addAiController(PlayerId playerId, std::unique_ptr<AiPlayerController> controller)
+    void GameSimulation::addAiController(PlayerId playerId, std::unique_ptr<AiController> controller)
     {
         // A player whose units another machine decides is never given one.
         if (!simulatesLocally(*this, playerId))

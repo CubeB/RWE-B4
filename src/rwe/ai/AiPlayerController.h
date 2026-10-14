@@ -4,6 +4,7 @@
 #include <map>
 #include <random>
 #include <rwe/ai/AiBlackboard.h>
+#include <rwe/ai/AiController.h>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/ai/AirManager.h>
 #include <rwe/ai/ArmyManager.h>
@@ -63,7 +64,7 @@ namespace rwe
      * One computer player. Runs inside the deterministic simulation and only
      * ever talks to it through the same PlayerCommand stream a human uses.
      */
-    class AiPlayerController
+    class AiPlayerController final : public AiController
     {
     public:
         AiPlayerController(
@@ -82,12 +83,14 @@ namespace rwe
          * afford (CLAUDE.md, "A translation unit can outgrow what a COFF
          * object can describe").
          */
-        ~AiPlayerController();
+        ~AiPlayerController() override;
 
-        void tick(const GameSimulation& sim, std::vector<PlayerCommand>& outCommands);
+        void tick(const GameSimulation& sim, std::vector<PlayerCommand>& outCommands) override;
 
-        PlayerId getPlayerId() const { return playerId; }
-        const AiTuningProfile& getProfile() const { return profile; }
+        PlayerId getPlayerId() const override { return playerId; }
+        const AiTuningProfile& getProfile() const override { return profile; }
+        AiEngine engine() const override { return AiEngine::Rwe; }
+        const AiPlayerController* asRweController() const override { return this; }
         const AiBlackboard& getBlackboard() const { return blackboard; }
         const ThreatMap& getThreatMap() const { return threatMap; }
         const ReachabilityMap& getReachabilityMap() const { return reachability; }

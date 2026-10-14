@@ -45,7 +45,7 @@
 
 namespace rwe
 {
-    class AiPlayerController;
+    class AiController;
     class DemoRecorder;
     struct MissionRules;
     struct MissionScripts;
@@ -637,9 +637,11 @@ namespace rwe
         // Computer-player controllers, owned by the simulation per the
         // locked decision in docs/ai-architecture-proposal.md §12-Q4.
         // Pointed-to via unique_ptr so the AI subsystem header is not
-        // forced into every TU that pulls in GameSimulation.h.
+        // forced into every TU that pulls in GameSimulation.h. They are
+        // held as the AiController interface, so which engine plays a seat
+        // (ADR-0005) is nothing the simulation knows or asks.
         // Iterated in deterministic key order via `aiPlayerOrder`.
-        std::unordered_map<PlayerId, std::unique_ptr<AiPlayerController>> aiControllers;
+        std::unordered_map<PlayerId, std::unique_ptr<AiController>> aiControllers;
 
         // Sorted list of AI player ids that mirrors the `aiControllers` keys.
         // Maintained when AIs are registered so per-tick iteration order is
@@ -670,7 +672,7 @@ namespace rwe
 
         /**
          * The demo recorder, when one is attached. A pure observer, pointed-to
-         * rather than held by value for the same two reasons AiPlayerController
+         * rather than held by value for the same two reasons AiController
          * is: the demo subsystem header stays out of every translation unit
          * that includes this one, and the COFF section budget with it. Nothing
          * it holds is hashed, saved or dumped, and the simulation never reads
@@ -716,8 +718,8 @@ namespace rwe
 
         explicit GameSimulation(MapTerrain&& terrain, unsigned char surfaceMetal, int minWindSpeed, int maxWindSpeed);
 
-        // GameSimulation owns AiPlayerController via unique_ptr. We need an
-        // explicit destructor because AiPlayerController is forward-declared
+        // GameSimulation owns AiController via unique_ptr. We need an
+        // explicit destructor because AiController is forward-declared
         // here; the definition becomes available only in GameSimulation.cpp,
         // which is where the destructor body is generated.
         ~GameSimulation();
@@ -1532,7 +1534,7 @@ namespace rwe
         // ownership. Multiple registrations for the same playerId replace
         // the previous controller. Must be called only at game setup time;
         // there is no thread-safety on this map.
-        void addAiController(PlayerId playerId, std::unique_ptr<AiPlayerController> controller);
+        void addAiController(PlayerId playerId, std::unique_ptr<AiController> controller);
 
         // Drain and return the commands the AI controller for `playerId`
         // has accumulated. Returns an empty vector if no commands are

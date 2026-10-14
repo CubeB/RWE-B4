@@ -1,5 +1,6 @@
 #pragma once
 
+#include <rwe/ai/AiEngine.h>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/sim/PlayerId.h>
@@ -9,21 +10,6 @@ namespace rwe
 {
     struct GameSimulation;
     class AiPlayerController;
-
-    /** Which computer player a seat plays: see ADR-0005. */
-    enum class AiEngine
-    {
-        /** The original's: ClassicAiController, written from TOTALA-EXE-COMPUTER-PLAYER.md. The default. */
-        Classic,
-        /** RWE's own, improved one: AiPlayerController. */
-        Rwe,
-    };
-
-    /** "classic" or "rwe", as --ai-engine and the save file spell it. */
-    const char* aiEngineName(AiEngine engine);
-
-    /** The inverse of aiEngineName, ignoring case; nothing for a name it does not know. */
-    bool aiEngineFromName(const char* name, AiEngine& out);
 
     /**
      * One computer player, whichever engine plays it. It runs inside the

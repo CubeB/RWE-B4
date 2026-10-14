@@ -2468,9 +2468,16 @@ namespace rwe
                 {
                     continue;
                 }
-                const auto& ai = *it->second;
-                const auto& bb = ai.getBlackboard();
-                ImGui::Text("Player %d (%s)", static_cast<int>(i), aiDifficultyName(ai.getProfile().difficulty));
+                const auto& controller = *it->second;
+                ImGui::Text("Player %d (%s engine, %s)", static_cast<int>(i), aiEngineName(controller.engine()), aiDifficultyName(controller.getProfile().difficulty));
+                // The blackboard is RWE's engine's. The original's has
+                // nothing of the kind to show.
+                const auto* rweController = controller.asRweController();
+                if (rweController == nullptr)
+                {
+                    continue;
+                }
+                const auto& bb = rweController->getBlackboard();
                 ImGui::Text("  phase: %s", gamePhaseName(bb.phase));
                 ImGui::Text("  metal %.0f/%.0f%s  energy %.0f/%.0f%s",
                     bb.currentMetal.value, bb.metalStorage.value, bb.metalStalled ? " (stalled)" : "",

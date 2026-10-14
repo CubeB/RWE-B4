@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include <rwe/ai/AiController.h>
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/config.h>
 #include <rwe/game/GameParameters.h>
@@ -121,6 +122,9 @@ namespace rwe
             }
 
             j["players"] = nlohmann::json::array();
+            // The simulation numbers its players densely, in slot order, so
+            // the controller of the nth filled slot is PlayerId n.
+            unsigned int simPlayerIndex = 0;
             for (std::size_t i = 0; i < parameters.players.size(); ++i)
             {
                 const auto& player = parameters.players[i];
@@ -128,6 +132,7 @@ namespace rwe
                 {
                     continue;
                 }
+                const PlayerId simPlayerId(simPlayerIndex++);
                 nlohmann::json p;
                 p["index"] = static_cast<int>(i);
                 p["name"] = player->name.value_or("");
@@ -139,6 +144,15 @@ namespace rwe
                     p["team"] = *player->teamId;
                 }
                 p["difficulty"] = difficultyName(parameters.aiDifficulty);
+                // Which computer player ran the seat (ADR-0005): "classic" or
+                // "rwe", and null for a seat nobody's controller plays. The
+                // knobs and the personality below are RWE's alone, so a
+                // classic seat reports them empty rather than meaning
+                // something by them.
+                const auto controllerIt = sim.aiControllers.find(simPlayerId);
+                p["engine"] = controllerIt != sim.aiControllers.end() && controllerIt->second
+                    ? nlohmann::json(aiEngineName(controllerIt->second->engine()))
+                    : nlohmann::json(nullptr);
                 p["personality"] = player->aiPersonality ? nlohmann::json(*player->aiPersonality) : nlohmann::json(nullptr);
                 p["tune"] = tuneForPlayer(parameters, static_cast<unsigned int>(i));
                 j["players"].push_back(std::move(p));
@@ -370,10 +384,13 @@ namespace rwe
             r.metalExcess = p.metalExcess.value;
             r.energyProduced = p.energyProduced.value;
             r.energyExcess = p.energyExcess.value;
+            // The blackboard's phase is RWE's engine's; the classic one has
+            // no such thing, and a seat nobody plays has no controller.
             auto controller = sim.aiControllers.find(PlayerId(static_cast<unsigned int>(i)));
-            r.phase = controller != sim.aiControllers.end() && controller->second
-                ? gamePhaseName(controller->second->getBlackboard().phase)
-                : "-";
+            const AiPlayerController* rweController = controller != sim.aiControllers.end() && controller->second
+                ? controller->second->asRweController()
+                : nullptr;
+            r.phase = rweController != nullptr ? gamePhaseName(rweController->getBlackboard().phase) : "-";
             current.push_back(r);
         }
 
