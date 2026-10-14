@@ -1442,8 +1442,9 @@ One table step is **128 of 65536, 0.703°**. Whatever the double-precision solve
 decides, the shell leaves the barrel on one of 512 headings and one of 512
 pitches. Replaying it, half a step of pitch moves the fall of shot by up to 98
 units for a Big Bertha and 180 for an Intimidator. RWE's `sin`/`cos` in
-`SimAngle.cpp` are `std::sin`/`std::cos` on a float, so RWE is *more* precise
-here than the original, not less.
+`SimAngle.cpp` are `detSin`/`detCos` (`math/det_math.h`: correctly rounded to a
+float, and the same on every toolchain, which `std::sin` is not), so RWE is
+*more* precise here than the original, not less.
 
 ### `accuracy`, `WORD wdef+0x104`
 
@@ -1546,7 +1547,7 @@ reload is for.
 ### And what RWE does instead
 
 The same replay, run through RWE's own arithmetic — `computeFiringAngles` in
-float, `SimAngle`'s `std::sin`, and `updateProjectiles`' integration:
+float, `SimAngle`'s `detSin`, and `updateProjectiles`' integration:
 
 | Weapon | TA solved pitch | RWE solved pitch | TA lands at | RWE lands at |
 |---|---|---|---|---|

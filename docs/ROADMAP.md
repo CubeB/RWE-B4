@@ -371,6 +371,13 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
       by unit tests and `ui_probe --multiplayer-flow`; **not yet on two real
       connections**, which is the one thing that is still owed. A router that gives
       each destination its own port cannot be punched and is named as such.
+      **Tried on two real connections 2026-10-13/14**, and it found four faults no
+      unit test could: two desyncs (a feature table index in the hash; libm trig
+      that differs per toolchain, fixed by `math/det_math`), a build identity that
+      read empty on MSVC, and -- when the game started -- a carrier NAT that gave
+      one machine two outside addresses, which the lobby threw away
+      (`sameCarrierBlock`). Starting a game across them has not yet been seen to
+      work end to end.
 
 - [x] **Launcher dependency refresh** (2026-09-23, #11). Electron 22 to 44, React 16
       to 18, Material-UI v4 to MUI v7, Redux Toolkit, socket.io 2 to 4, ESLint 9 flat

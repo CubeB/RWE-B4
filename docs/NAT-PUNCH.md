@@ -178,5 +178,14 @@ particular carrier's NAT reuses the game port's mapping after this socket is
 closed and the game's is opened is a property of that NAT. The MR500/Smarty
 connection was measured endpoint-independent -- the same outside port from four
 different STUN servers -- which is the property the whole design rests on;
-Starlink's has not been measured. A two-connection test is the thing
-that remains.
+Starlink's has not been measured.
+
+The two-connection test has now been done once (2026-10-13/14, a 4G carrier
+NAT against a home line running the Linux build). The lobby, the codes and the
+punch worked. Starting the game did not, for the reason in "One machine, two
+outside addresses" above; the fix is `sameCarrierBlock`. What is *still* open is
+the step after it: whether the game port's mapping survives `NatTraversal`
+closing its socket and `LoadingNetworkService` binding the same port, which is
+a property of the carrier's NAT and has not been observed. If a game gets as
+far as "ready" and stops there again, the two `rwe.log` files say where each
+side is aiming (`Sending notification to ...`) and whether anything arrived.
