@@ -361,6 +361,30 @@ namespace rwe
         CHECK(gameAddress("[::1]:1338", 15338) == "[::1]:15338");
     }
 
+    TEST_CASE("a game address announced from a neighbouring outside address is believed", "[multiplayer]")
+    {
+        // The Smarty/Three 4G connection, 2026-10-14: the discovery socket
+        // left as .165 and the game port as .167. Not believing the second
+        // sent the game to .165:1337, where nothing listened, and both
+        // machines sat on "starting game".
+        DiscoveredGame heard;
+        heard.sourceAddress = "92.40.168.165:17992";
+        heard.port = 1337;
+        heard.gameAddress = "92.40.168.167:57274";
+        CHECK(announcedGameAddress(heard, true) == "92.40.168.167:57274");
+
+        SECTION("only by a reader that is traversing")
+        {
+            CHECK(announcedGameAddress(heard, false) == "92.40.168.165:1337");
+        }
+
+        SECTION("an address on another network is somebody aiming traffic, and is not")
+        {
+            heard.gameAddress = "198.51.100.9:57274";
+            CHECK(announcedGameAddress(heard, true) == "92.40.168.165:1337");
+        }
+    }
+
     TEST_CASE("a row of the game list says what SELGAME's columns ask", "[multiplayer]")
     {
         auto host = hostModel();

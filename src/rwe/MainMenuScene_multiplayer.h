@@ -422,7 +422,9 @@ namespace rwe
      * The host half has to be the same machine's -- an announcement that
      * points a game's packets at somebody else's address is somebody using
      * a lobby to aim traffic -- so a reflexive address with another host
-     * part is not believed.
+     * part is not believed. "The same" is `sameCarrierBlock`: a carrier's
+     * NAT gave one machine's two sockets two outside addresses a few apart
+     * (2026-10-14), and requiring the identical one stranded a game.
      */
     std::string announcedGameAddress(const DiscoveredGame& announcement, bool believeAnnounced);
 

@@ -1,5 +1,10 @@
 #include "network_util.h"
+#include <algorithm>
+#include <array>
 #include <cstdint>
+#include <cstdlib>
+#include <optional>
+#include <string>
 
 namespace rwe
 {
@@ -256,4 +261,93 @@ namespace rwe
         return crc ^ 0xFFFFFFFFu;
     }
 
+    namespace
+    {
+        // "a.b.c.d" out of "[::ffff:a.b.c.d]:port", "a.b.c.d:port" and the
+        // bare form; nothing if what is left is not an IPv4 address.
+        std::optional<std::array<unsigned int, 4>> ipv4Octets(std::string text)
+        {
+            if (!text.empty() && text.front() == '[')
+            {
+                const auto close = text.find(']');
+                if (close == std::string::npos)
+                {
+                    return std::nullopt;
+                }
+                text = text.substr(1, close - 1);
+            }
+            else if (std::count(text.begin(), text.end(), ':') == 1)
+            {
+                text = text.substr(0, text.find(':'));
+            }
+
+            const auto mapped = text.rfind(':');
+            if (mapped != std::string::npos)
+            {
+                // Only the v4-mapped form carries a dotted quad after a colon.
+                if (text.size() < 7 || text.compare(0, 7, "::ffff:") != 0 || mapped != 6)
+                {
+                    return std::nullopt;
+                }
+                text = text.substr(7);
+            }
+
+            std::array<unsigned int, 4> octets{};
+            std::size_t at = 0;
+            for (std::size_t i = 0; i < 4; ++i)
+            {
+                const auto end = text.find('.', at);
+                const auto part = text.substr(at, end == std::string::npos ? std::string::npos : end - at);
+                if (part.empty() || part.size() > 3
+                    || !std::all_of(part.begin(), part.end(), [](char c) { return c >= '0' && c <= '9'; }))
+                {
+                    return std::nullopt;
+                }
+                const auto value = static_cast<unsigned int>(std::atoi(part.c_str()));
+                if (value > 255)
+                {
+                    return std::nullopt;
+                }
+                octets[i] = value;
+                if (i < 3)
+                {
+                    if (end == std::string::npos)
+                    {
+                        return std::nullopt;
+                    }
+                    at = end + 1;
+                }
+                else if (end != std::string::npos)
+                {
+                    return std::nullopt;
+                }
+            }
+            return octets;
+        }
+
+        std::string hostOnly(std::string text)
+        {
+            if (!text.empty() && text.front() == '[')
+            {
+                const auto close = text.find(']');
+                return close == std::string::npos ? text : text.substr(1, close - 1);
+            }
+            if (std::count(text.begin(), text.end(), ':') == 1)
+            {
+                return text.substr(0, text.find(':'));
+            }
+            return text;
+        }
+    }
+
+    bool sameCarrierBlock(const std::string& a, const std::string& b)
+    {
+        const auto left = ipv4Octets(a);
+        const auto right = ipv4Octets(b);
+        if (left && right)
+        {
+            return (*left)[0] == (*right)[0] && (*left)[1] == (*right)[1];
+        }
+        return !left && !right && hostOnly(a) == hostOnly(b);
+    }
 }

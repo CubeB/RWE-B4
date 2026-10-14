@@ -84,9 +84,9 @@ namespace rwe
 
         SECTION("a different address is not followed, whatever it says")
         {
-            // The peer was given as 127.0.0.2; the packets come from
-            // 127.0.0.1. Only the port may differ.
-            GameNetworkService a(PlayerId(0), portA, {GameNetworkService::EndpointInfo(PlayerId(1), at("127.0.0.2", wrongPort))}, &commandsA);
+            // The peer was given as 192.0.2.7; the packets come from
+            // 127.0.0.1, which is not the same carrier block.
+            GameNetworkService a(PlayerId(0), portA, {GameNetworkService::EndpointInfo(PlayerId(1), at("192.0.2.7", wrongPort))}, &commandsA);
             GameNetworkService b(PlayerId(1), portB, {GameNetworkService::EndpointInfo(PlayerId(0), at("127.0.0.1", portA))}, &commandsB);
             a.start();
             b.start();
@@ -97,6 +97,21 @@ namespace rwe
                 std::this_thread::sleep_for(std::chrono::milliseconds(25));
             }
             CHECK_FALSE(hasHeardAPeer(a));
+        }
+
+        SECTION("a neighbouring address of the same carrier block is followed")
+        {
+            // Given as 127.0.0.2, heard from 127.0.0.1: one machine's two
+            // sockets on a carrier's NAT leave from two neighbouring addresses.
+            GameNetworkService a(PlayerId(0), portA, {GameNetworkService::EndpointInfo(PlayerId(1), at("127.0.0.2", wrongPort))}, &commandsA);
+            GameNetworkService b(PlayerId(1), portB, {GameNetworkService::EndpointInfo(PlayerId(0), at("127.0.0.1", portA))}, &commandsB);
+            a.start();
+            b.start();
+
+            REQUIRE(waitUntil([&]() {
+                b.submitCommands(SceneTime(1), {});
+                return hasHeardAPeer(a);
+            }));
         }
 
         SECTION("a seat that is not the one expected from that address is not followed")

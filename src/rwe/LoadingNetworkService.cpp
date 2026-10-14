@@ -161,7 +161,9 @@ namespace rwe
             // allowed to differ: this is not authentication -- the CRC is
             // not a MAC -- but spoofing the address was already enough to
             // inject packets, and a different port of the same address buys
-            // an attacker nothing it did not have.
+            // an attacker nothing it did not have. A carrier's NAT can also
+            // put one machine's sockets on neighbouring outside addresses,
+            // so "the same address" is the same /16 (sameCarrierBlock).
             if (!message.has_loading_status() || !message.loading_status().has_sender_slot())
             {
                 LOG_DEBUG << "Sender was unknown, aborting";
@@ -170,7 +172,8 @@ namespace rwe
 
             const auto slot = static_cast<int>(message.loading_status().sender_slot());
             it = std::find_if(remoteEndpoints.begin(), remoteEndpoints.end(), [&](const auto& p) {
-                return p.playerIndex == slot && p.endpoint.address() == currentRemoteEndpoint.address();
+                return p.playerIndex == slot
+                    && sameCarrierBlock(p.endpoint.address().to_string(), currentRemoteEndpoint.address().to_string());
             });
             if (it == remoteEndpoints.end())
             {

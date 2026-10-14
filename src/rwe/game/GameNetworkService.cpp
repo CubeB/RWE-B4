@@ -498,13 +498,16 @@ namespace rwe
             // game update that names a peer, from the address that peer is
             // already known at, moves that peer's endpoint here.
             //
-            // The address has to match; only the port may differ. This is
+            // The address has to match -- or sit in the same /16, which is
+            // what a carrier's address pool gives one machine's sockets
+            // (sameCarrierBlock); only the port may differ. This is
             // not authentication -- the CRC is not a MAC -- but spoofing the
             // address was already all it took to inject packets, and another
             // port of the same address gives an attacker nothing it lacked.
             const PlayerId sender(outerMessage.game_update().player_id());
             endpointIt = std::find_if(endpoints.begin(), endpoints.end(), [&](const auto& e) {
-                return e.playerId == sender && e.endpoint.address() == currentRemoteEndpoint.address();
+                return e.playerId == sender
+                    && sameCarrierBlock(e.endpoint.address().to_string(), currentRemoteEndpoint.address().to_string());
             });
             if (endpointIt == endpoints.end())
             {

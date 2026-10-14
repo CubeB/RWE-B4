@@ -9,6 +9,7 @@
 #include <rwe/MultiplayerSetup.h>
 #include <rwe/TextureService.h>
 #include <rwe/net/InviteCode.h>
+#include <rwe/network_util.h>
 #include <rwe/rwe_time.h>
 #include <rwe/ui/UiFactory.h>
 #include <rwe/ui/UiLabel.h>
@@ -991,7 +992,7 @@ namespace rwe
     std::string announcedGameAddress(const DiscoveredGame& announcement, bool believeAnnounced)
     {
         if (believeAnnounced && !announcement.gameAddress.empty()
-            && hostPartOf(announcement.gameAddress) == hostPartOf(announcement.sourceAddress))
+            && sameCarrierBlock(announcement.gameAddress, announcement.sourceAddress))
         {
             // The port has to be one too: it is what a game is started with.
             const auto& text = announcement.gameAddress;

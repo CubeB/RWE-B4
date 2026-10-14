@@ -8,6 +8,49 @@
 
 namespace rwe
 {
+    TEST_CASE("sameCarrierBlock")
+    {
+        SECTION("an address is its own block")
+        {
+            CHECK(sameCarrierBlock("90.249.127.187", "90.249.127.187"));
+            CHECK(sameCarrierBlock("90.249.127.187:1338", "90.249.127.187"));
+            CHECK(sameCarrierBlock("[::1]:1338", "::1"));
+            CHECK(sameCarrierBlock("fe80::1", "fe80::1"));
+        }
+
+        SECTION("a carrier pool's neighbours are one machine")
+        {
+            // What the discovery socket and the game port left as, on the
+            // Smarty/Three connection, from one machine.
+            CHECK(sameCarrierBlock("92.40.168.165:17992", "92.40.168.167:57274"));
+            CHECK(sameCarrierBlock("92.40.168.165", "92.40.7.3"));
+        }
+
+        SECTION("a v4-mapped address is its v4 address")
+        {
+            CHECK(sameCarrierBlock("::ffff:90.249.127.187", "90.249.127.187"));
+            CHECK(sameCarrierBlock("[::ffff:90.249.127.187]:1338", "90.249.1.1"));
+        }
+
+        SECTION("another network is not")
+        {
+            CHECK_FALSE(sameCarrierBlock("92.40.168.165", "90.249.127.187"));
+            CHECK_FALSE(sameCarrierBlock("92.40.168.165", "92.41.168.165"));
+            CHECK_FALSE(sameCarrierBlock("127.0.0.1", "192.0.2.7"));
+            CHECK_FALSE(sameCarrierBlock("fe80::1", "fe80::2"));
+            CHECK_FALSE(sameCarrierBlock("fe80::1", "92.40.168.165"));
+        }
+
+        SECTION("rubbish is only ever its own block")
+        {
+            CHECK_FALSE(sameCarrierBlock("", "92.40.168.165"));
+            CHECK_FALSE(sameCarrierBlock("92.40.168", "92.40.168.165"));
+            CHECK_FALSE(sameCarrierBlock("92.40.168.999", "92.40.168.165"));
+            CHECK_FALSE(sameCarrierBlock("92.40.168.165.1", "92.40.168.165"));
+            CHECK(sameCarrierBlock("", ""));
+        }
+    }
+
     TEST_CASE("ema")
     {
         SECTION("combines value with average according to weight")

@@ -123,6 +123,23 @@ address and not give the same port. So both transports follow a peer:
   inject packets, and another port of the same address gives an attacker nothing it
   lacked. An older build never sends the field and is never relearned.
 
+## One machine, two outside addresses
+
+A carrier's NAT can give one machine's sockets different outside *addresses*,
+not only different ports. Measured 2026-10-14 on the Smarty/Three 4G connection:
+the discovery socket left as `92.40.168.165:17992` and the game port, a moment
+later, as `92.40.168.167:57274`. The lobby used to believe a `gaddr` only when
+its host part equalled the sender's, so it threw the game port's address away
+and fell back to "source address and 1337": both machines reached
+"starting game", sent their "ready" every 100 ms to an address nothing was
+listening at, and waited for ever (the other end's log showed
+`Sending notification to ::ffff:92.40.168.165 1337` and no datagram received).
+
+The rule is now `sameCarrierBlock` (`network_util.h`): equal, or both IPv4 in
+the same /16. It guards `announcedGameAddress` and both transports' peer
+following. It is still not authentication -- it stops a lobby aiming a peer's
+packets at an arbitrary address, and nothing more.
+
 ## What it cannot do
 
 - **A router that gives each destination its own port** (a "symmetric" NAT) cannot

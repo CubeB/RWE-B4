@@ -8,6 +8,7 @@
 #include <rwe/rwe_time.h>
 #include <rwe/sim/PlayerId.h>
 #include <rwe/sim/SimTicksPerSecond.h>
+#include <string>
 #include <vector>
 
 namespace rwe
@@ -272,4 +273,24 @@ namespace rwe
     unsigned int readInt(const char* buffer);
 
     unsigned int computeCrc(const char* buffer, unsigned int size);
+
+    /**
+     * Whether two addresses, written as text (brackets, a v4-mapped prefix
+     * and a port are all tolerated and ignored), are the same machine's or
+     * near enough to be one machine behind a carrier's address pool: equal,
+     * or both IPv4 and sharing their first two octets.
+     *
+     * The second half exists because a carrier-grade NAT hands one
+     * subscriber more than one outside address. Measured 2026-10-14 on the
+     * Smarty/Three 4G connection: the discovery socket left as 92.40.168.165
+     * and the game port, from the same machine a moment later, as
+     * 92.40.168.167. Insisting on one address threw the game port's address
+     * away and sent the whole game to a port nothing was listening on.
+     *
+     * It is a guard, not authentication: it stops a lobby from aiming a
+     * peer's packets at an arbitrary address on the internet, and nothing
+     * more. Anything inside one /16 was reachable by whoever could send the
+     * datagram in the first place.
+     */
+    bool sameCarrierBlock(const std::string& a, const std::string& b);
 }

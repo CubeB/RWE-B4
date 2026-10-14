@@ -134,7 +134,7 @@ namespace rwe
         SECTION("a different address is not followed, whatever it says")
         {
             LoadingNetworkService a;
-            a.addEndpoint(1, "127.0.0.2", std::to_string(wrongPort));
+            a.addEndpoint(1, "192.0.2.7", std::to_string(wrongPort));
             LoadingNetworkService b;
             b.setLocalSlot(1);
             b.addEndpoint(0, "127.0.0.1", std::to_string(portA));
@@ -145,6 +145,24 @@ namespace rwe
             std::this_thread::sleep_for(std::chrono::milliseconds(600));
             CHECK_FALSE(a.areAllClientsReady());
             CHECK(a.getEndpoint(1).port() == wrongPort);
+        }
+
+        SECTION("a neighbouring address of the same carrier block is followed")
+        {
+            // 127.0.0.2 was the address given and the datagram comes from
+            // 127.0.0.1: what 92.40.168.165 and .167 are on a carrier's NAT,
+            // where one machine's two sockets leave through two addresses.
+            LoadingNetworkService a;
+            a.addEndpoint(1, "127.0.0.2", std::to_string(wrongPort));
+            LoadingNetworkService b;
+            b.setLocalSlot(1);
+            b.addEndpoint(0, "127.0.0.1", std::to_string(portA));
+            a.start(std::to_string(portA));
+            b.start(std::to_string(portB));
+            b.setDoneLoading();
+
+            REQUIRE(waitUntil([&]() { return a.areAllClientsReady(); }));
+            CHECK(a.getEndpoint(1).port() == portB);
         }
 
         SECTION("a seat that is not the one expected is not followed")
