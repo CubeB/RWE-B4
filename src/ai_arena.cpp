@@ -255,6 +255,8 @@ int main(int argc, char* argv[])
                       << "  --player <spec>         name;Computer;SIDE;colour[;team] (repeatable)\n"
                       << "  --seed <n>              vary the simulation seed\n"
                       << "  --ai-difficulty <d>     idle | easy | standard | hard | brutal\n"
+                      << "  --ai-engine <e>         classic | rwe: the computer player a seat with no personality\n"
+                      << "                          plays (default classic, the original's; --ai-tune needs rwe)\n"
                       << "  --start-location <m>    fixed | random\n"
                       << "  --ai-tune <p>:<k>=<v>   override one AI knob for player p (repeatable)\n"
                       << "  --ai-personality <p>:<name>  play player p as a personality (repeatable)\n"
@@ -358,6 +360,17 @@ int main(int argc, char* argv[])
             if (args.getUint("seed", 0) > 0)
             {
                 gameParameters.randomSeed = args.getUint("seed", 0);
+            }
+
+            // The original's computer player is the default (ADR-0005), so a
+            // run that means to measure RWE's own says --ai-engine rwe, and
+            // --ai-tune on a seat that plays the original is an error.
+            {
+                const auto engineName = args.getString("ai-engine", "classic");
+                if (!aiEngineFromName(engineName.c_str(), gameParameters.aiEngine))
+                {
+                    throw std::runtime_error("--ai-engine: no such engine: " + engineName + " (classic or rwe)");
+                }
             }
 
             auto difficulty = args.getString("ai-difficulty", "standard");

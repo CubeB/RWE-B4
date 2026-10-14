@@ -115,12 +115,14 @@ int main(int argc, char* argv[])
                       << "  --log <path>          Log output file path\n"
                       << "  --state-log <path>    Sim-state log file (desync debugging)\n"
                       << "  --ai-difficulty <d>   idle | easy | standard | hard | brutal (default: standard)\n"
+                      << "  --ai-engine <e>       classic | rwe: which computer player plays a seat that\n"
+                      << "                        names no personality (default: classic, the original's)\n"
                       << "  --ai-arena <seconds>  computer-vs-computer measurement run: draws nothing,\n"
                       << "                        runs flat out, writes ai-arena.csv and quits\n"
                       << "  --seed <n>            vary the simulation seed, for averaging arena runs\n"
                       << "  --ai-tune <p>:<k>=<v> override one AI knob for player p (see applyAiTuning)\n"
                       << "  --ai-personality <p>:<name>  play computer player p as a personality:\n"
-                      << "                        Balanced, Rush, Turtle, Tech Rush, Easy, Medium, Hard,\n"
+                      << "                        Original TA, Balanced, Rush, Turtle, Tech Rush, Easy, Medium, Hard,\n"
                       << "                        or one written in the local data folder's ai directory\n"
                       << "  --record-replay <f>   write every command to a replay file as you play\n"
                       << "  --record-demo <f>     write a TA demo of the game to this file as you play\n"
@@ -393,6 +395,16 @@ int main(int argc, char* argv[])
                     }
 
                     gameParameters->taHostGame = std::make_shared<rwe::TaHostGame>(std::move(hostConfig));
+                }
+                // Which computer player a seat with no personality gets. The
+                // original's is the default (ADR-0005); the arena tools that
+                // measure RWE's own say --ai-engine rwe.
+                {
+                    const auto engineName = args.getString("ai-engine", "classic");
+                    if (!rwe::aiEngineFromName(engineName.c_str(), gameParameters->aiEngine))
+                    {
+                        throw std::runtime_error("--ai-engine: no such engine: " + engineName + " (classic or rwe)");
+                    }
                 }
                 auto difficulty = args.getString("ai-difficulty", "standard");
                 for (auto& c : difficulty)
