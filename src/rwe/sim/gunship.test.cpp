@@ -393,6 +393,8 @@ namespace rwe
          */
         struct RingScene
         {
+            // CobEnvironment borrows its script; keep it alive for every tick.
+            std::shared_ptr<CobScript> script{makeGunshipScript()};
             GameSimulation sim;
             UnitId gunshipId;
             UnitId targetId;
@@ -401,7 +403,6 @@ namespace rwe
                 : sim(makeGunshipTerrain(256, 256), 0u, 0, 0)
             {
                 sim.nextWindSpeedChange = GameTime(1000000u);
-                auto script = makeGunshipScript();
                 auto us = addGunshipPlayer(sim, "us");
                 auto them = addGunshipPlayer(sim, "them");
                 sim.unitDefinitions["gunship"] = makeGunshipDef();
