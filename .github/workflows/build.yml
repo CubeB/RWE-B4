@@ -368,33 +368,62 @@ jobs:
         working-directory: launcher
         run: npm run package
       - run: python3 fetch-msvc-libs.py
+      # Chocolatey's download is the one step here that fails for reasons that
+      # are nobody's code (2026-10-14: a MinGW Release job died in 3.5 minutes
+      # at `choco install nsis`), so it is tried three times.
       - name: install tools
-        run: choco install sccache nsis -y
+        run: |
+          for ($i = 1; $i -le 3; $i++) {
+            choco install sccache nsis ninja -y --no-progress
+            if ($LASTEXITCODE -eq 0) { break }
+            Write-Host "choco install failed (attempt $i of 3)"
+            Start-Sleep -Seconds (10 * $i)
+          }
+          exit $LASTEXITCODE
+      # The cache lives in the workspace, where it is known to exist: the
+      # default sits under the user profile and the step that saved it
+      # reported "Path Validation Error ... no cache is being saved" on every
+      # run, so no Windows job had ever started from a warm cache.
       - name: restore sccache
         uses: actions/cache@v5
         with:
-          path: ~\AppData\Local\Mozilla\sccache
+          path: .sccache
           key: sccache-${{ runner.os }}-msvc-${{ matrix.configuration }}-${{ github.sha }}
           restore-keys: sccache-${{ runner.os }}-msvc-${{ matrix.configuration }}-
+      # Ninja, not the Visual Studio generator: CMake only honours a compiler
+      # launcher under Makefile and Ninja generators, so with "Visual Studio 18
+      # 2026" sccache sat in the command line and was never run. Ninja needs
+      # the compiler's environment, hence vcvars64. /Z7 (Embedded) because
+      # sccache cannot cache an object that shares a PDB (/Zi).
       - name: build rwe
+        shell: cmd
+        env:
+          SCCACHE_DIR: ${{ github.workspace }}\.sccache
+          SCCACHE_CACHE_SIZE: 1G
         run: |
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 exit /b 1
           mkdir build
           cd build
-          cmake -G "Visual Studio 18 2026" -A x64 -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ..
-          cmake --build . --config ${{ matrix.configuration }} --parallel 4
-          cd ..
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache .. || exit /b 1
+          cmake --build . || exit /b 1
+          sccache --show-stats
       - name: test rwe
         working-directory: build
         env:
           RWE_TEST_ANNOUNCE: 1
-        run: .\${{ matrix.configuration }}\rwe_test.exe --durations yes
+        run: .\rwe_test.exe --durations yes
       # Release only: nothing downloads a Debug installer -- the release job
       # takes the MSVC Release pair and the AppImage -- and building one costs
       # about four minutes a job.
       - name: package rwe
         if: matrix.configuration == 'Release'
-        working-directory: build
-        run: cmake --build . --target package --config ${{ matrix.configuration }} --parallel 4
+        shell: cmd
+        run: |
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 exit /b 1
+          cd build
+          cmake --build . --target package || exit /b 1
       - name: upload zip artifact
         if: matrix.configuration == 'Release'
         uses: actions/upload-artifact@v6
@@ -449,7 +478,14 @@ jobs:
         working-directory: launcher
         run: npm run package
       - name: install nsis
-        run: choco install nsis -y
+        run: |
+          for ($i = 1; $i -le 3; $i++) {
+            choco install nsis -y --no-progress
+            if ($LASTEXITCODE -eq 0) { break }
+            Write-Host "choco install failed (attempt $i of 3)"
+            Start-Sleep -Seconds (10 * $i)
+          }
+          exit $LASTEXITCODE
       # Third-party actions are pinned to a commit rather than a tag, which
       # its owner can move. Bump the hash and the comment together. Issue #75.
       - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
@@ -466,10 +502,14 @@ jobs:
             mingw-w64-x86_64-zlib
             mingw-w64-x86_64-libpng
             mingw-w64-x86_64-ccache
+      # `~/.cache/ccache` here is the *Windows* profile and ccache, running
+      # inside MSYS2, wrote to the MSYS2 home, so the directory this step
+      # saved never existed and no MinGW job had ever started from a warm
+      # cache. The build step sets CCACHE_DIR to this workspace path instead.
       - name: restore ccache
         uses: actions/cache@v5
         with:
-          path: ~/.cache/ccache
+          path: .ccache
           key: ccache-${{ runner.os }}-mingw64-${{ matrix.configuration }}-${{ github.sha }}
           restore-keys: ccache-${{ runner.os }}-mingw64-${{ matrix.configuration }}-
       # `git rev-parse HEAD:libs/protobuf` is the gitlink SHA the superproject
@@ -499,12 +539,19 @@ jobs:
           path: libs/_protobuf-install
           key: ${{ steps.cache-protobuf-restore.outputs.cache-primary-key }}
       - name: build rwe
+        env:
+          CCACHE_DIR: ${{ github.workspace }}\.ccache
+          CCACHE_MAXSIZE: 500M
+          # The compiler is reinstalled each run; hash it by content, not by
+          # a modification time that has no reason to repeat.
+          CCACHE_COMPILERCHECK: content
         run: |
           mkdir build
           pushd build
           cmake -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DRWE_WERROR=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ..
           make -j 4
           popd
+          ccache --show-stats
         shell: msys2 {0}
       # Debug only, and only here: the section ceiling is a COFF limit and it
       # is Debug that pays it -- Release folds the template instantiations away
