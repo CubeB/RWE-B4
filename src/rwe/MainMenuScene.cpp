@@ -1688,20 +1688,20 @@ namespace rwe
                 }
                 else
                 {
-                    player.type.next(MainMenuModel::PlayerSettings::Type::Computer);
+                    cycleComputerSeat(player);
                 }
                 player.colorIndex.next(color);
                 break;
             }
             case MainMenuModel::PlayerSettings::Type::Human:
-                player.type.next(MainMenuModel::PlayerSettings::Type::Computer);
+                cycleComputerSeat(player);
                 break;
             case MainMenuModel::PlayerSettings::Type::Computer:
                 // Network sits between Computer and Open, and only on the
                 // multiplayer screen: a skirmish has nobody to connect to, and
                 // a slot that could be set to Network there would be a slot
                 // that stops the game starting.
-                player.type.next(multiplayerSetup
+                cycleComputerSeat(player, multiplayerSetup
                         ? MainMenuModel::PlayerSettings::Type::Network
                         : MainMenuModel::PlayerSettings::Type::Open);
                 break;
@@ -2097,6 +2097,29 @@ namespace rwe
                     b->setLabel(captionForSeat(i));
                 });
                 b->addSubscription(std::move(nameSub));
+
+                auto aiSub = model.players[i].personality.subscribe([b = b.get(), this, i](const std::string&) {
+                    b->setLabel(captionForSeat(i));
+                });
+                b->addSubscription(std::move(aiSub));
+
+                if (auto help = panel.find<UiLabel>("HELPTEXT"))
+                {
+                    const auto name = b->getName();
+                    auto hoverSub = b->onHover().subscribe([this, label = &help->get(), name](bool entered) {
+                        if (entered)
+                        {
+                            hoveredSkirmishOption = name;
+                            label->setText("Click a player slot to choose Original TA or RWE AI, or reopen it.");
+                        }
+                        else if (hoveredSkirmishOption == name)
+                        {
+                            hoveredSkirmishOption.clear();
+                            label->setText(std::string());
+                        }
+                    });
+                    hoverSub.reset();
+                }
 
                 panel.appendChild(std::move(b));
             }

@@ -262,6 +262,12 @@ namespace rwe
      */
     SeatControls seatControls(RoomRole role, MainMenuModel::PlayerSettings::Type type, bool ownSeat);
 
+    /** A seat button cycles Original TA, RWE AI, then the next seat type. */
+    void cycleComputerSeat(MainMenuModel::PlayerSettings& seat, MainMenuModel::PlayerSettings::Type afterComputer = MainMenuModel::PlayerSettings::Type::Open);
+
+    /** The person's name or the selected computer engine, clipped to the seat button. */
+    std::string seatCaption(MainMenuModel::PlayerSettings::Type type, const std::string& name, const std::string& personality);
+
     /**
      * Why the host cannot start, in the sentence the help line says; nothing
      * when it can. `ready` is per seat, as in LobbyIdentity. A game with no

@@ -35,6 +35,12 @@ RWE's, which is also how the two are measured against each other in the arena.
   and in a game started from a command line with no personality. A seat whose
   personality is unknown (a saved game outliving a personality file) falls back
   to `GameParameters::aiEngine`, which is `Classic`.
+- **Setup offers both engines per computer seat.** Click a player-slot button
+  to cycle `Original TA` -> `RWE AI` -> `Open`. RWE AI uses the Balanced
+  personality. A newly added computer starts as Original TA; changing engines
+  keeps its faction, colour, team and resources. In the multiplayer battleroom
+  only the host edits computer seats, and announcements carry the selection to
+  guests before launch. The direct-address setup offers Network after RWE AI.
 - **A saved game records the engine per seat.** A save with no engine recorded
   was written before the choice existed and so by RWE's own computer player;
   it loads as `Rwe`, not as the new default, or a game in progress would change
@@ -57,6 +63,6 @@ RWE's, which is also how the two are measured against each other in the arena.
 - **The handicap is the engine's to supply.** The economy reads the income
   multiplier from the controller's profile (`AiController::getProfile`); the
   classic engine reports the original's 0.5 / 0.7 / 1.0.
-- **A network game plays the default.** The launcher sends no personality, so
+- **A launcher network game plays the default.** The launcher sends no personality, so
   both peers run the classic engine; a peer that has set `rwe.cfg` differently
   would not, which is the existing difficulty caveat and no worse.

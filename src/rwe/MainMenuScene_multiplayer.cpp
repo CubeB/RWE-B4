@@ -490,6 +490,39 @@ namespace rwe
         return controls;
     }
 
+    void cycleComputerSeat(MainMenuModel::PlayerSettings& seat, PlayerType afterComputer)
+    {
+        if (seat.type.getValue() != PlayerType::Computer)
+        {
+            seat.personality.next(std::string("Original TA"));
+            seat.type.next(PlayerType::Computer);
+        }
+        else if (seat.personality.getValue() == "Original TA")
+        {
+            seat.personality.next(std::string("Balanced"));
+        }
+        else
+        {
+            seat.type.next(afterComputer);
+        }
+    }
+
+    std::string seatCaption(PlayerType type, const std::string& name, const std::string& personality)
+    {
+        switch (type)
+        {
+            case PlayerType::Open:
+                return "Open";
+            case PlayerType::Computer:
+                return personality == "Original TA" ? "Original TA" : "RWE AI";
+            case PlayerType::Human:
+                return name.empty() ? "Player" : name.substr(0, 14);
+            case PlayerType::Network:
+                return name.empty() ? "Network" : name.substr(0, 14);
+        }
+        return std::string();
+    }
+
     std::optional<std::string> startBlocker(const MainMenuModel& model, const std::vector<bool>& ready, bool mapChosen)
     {
         if (!mapChosen)
@@ -1434,9 +1467,8 @@ namespace rwe
         //                                  memory and its CD: nothing is
         //                                  known about another machine's.
         //                                  The Resolution column is left
-        //                                  empty rather than given to an AI
-        //                                  personality picker: RWE has none
-        //                                  on any screen.
+        //                                  empty; AI selection uses the seat
+        //                                  name button instead.
         //   SYNCHING, battlestart          the "Synching" overlay, which
         //                                  covers the Start button while the
         //                                  units are checked against each
@@ -1687,23 +1719,6 @@ namespace rwe
             return out;
         }
 
-        /** The seat's caption: the person's name if it has one, clipped to the button. */
-        std::string seatCaption(PlayerType type, const std::string& name)
-        {
-            switch (type)
-            {
-                case PlayerType::Open:
-                    return "Open";
-                case PlayerType::Computer:
-                    return "Computer";
-                case PlayerType::Human:
-                    return name.empty() ? "Player" : name.substr(0, 14);
-                case PlayerType::Network:
-                    return name.empty() ? "Network" : name.substr(0, 14);
-            }
-            return std::string();
-        }
-
         UiLabel* helpLabel(UiPanel& panel)
         {
             auto label = panel.find<UiLabel>("HELPTEXT");
@@ -1788,7 +1803,7 @@ namespace rwe
     std::string MainMenuScene::captionForSeat(int playerIndex) const
     {
         const auto& p = model.players[static_cast<std::size_t>(playerIndex)];
-        return seatCaption(p.type.getValue(), p.name.getValue());
+        return seatCaption(p.type.getValue(), p.name.getValue(), p.personality.getValue());
     }
 
     void MainMenuScene::goToMultiplayerMenu()
@@ -2425,7 +2440,7 @@ namespace rwe
 
             if (auto b = panel.find<UiStagedButton>(seatName))
             {
-                b->get().setLabel(seatCaption(type, p.name.getValue()));
+                b->get().setLabel(seatCaption(type, p.name.getValue(), p.personality.getValue()));
                 b->get().setEnabled(controls.name);
             }
             if (auto b = panel.find<UiStagedButton>(seatName + "_side"))
@@ -2563,7 +2578,7 @@ namespace rwe
             std::string text;
             if (role == RoomRole::Host)
             {
-                text = flow.launching ? "Starting game..." : blocker.value_or("Everyone is ready. Press Start Game.");
+                text = flow.launching ? "Starting game..." : blocker.value_or("Ready. Click seats for Original TA / RWE AI, or Start Game.");
             }
             else if (!flow.accepted)
             {
@@ -2751,11 +2766,11 @@ namespace rwe
                         case PlayerType::Open:
                             // A colour the seat comes in with that another
                             // seat has is changed for the first that is free.
-                            p.type.next(PlayerType::Computer);
+                            cycleComputerSeat(p);
                             ensureFreeColour(model, i);
                             break;
                         case PlayerType::Computer:
-                            p.type.next(PlayerType::Open);
+                            cycleComputerSeat(p);
                             break;
                         case PlayerType::Network:
                         {

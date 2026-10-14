@@ -63,10 +63,9 @@ namespace rwe
             BehaviorSubject<Energy> energy;
             /**
              * The AI personality a computer player plays, by name (see AiPersonality.h).
-             * No screen picks it any more -- the setup screen's picker was taken out --
-             * so a menu game plays Original TA, the original's own computer player
-             * (ADR-0005); it is still carried through a LAN lobby and into
-             * GameParameters, which is where `--player` and the arena set it.
+             * Setup seat buttons choose Original TA (the default, ADR-0005) or
+             * Balanced (RWE AI). Carried through the LAN lobby and into
+             * GameParameters so every peer launches the selected engine.
              */
             BehaviorSubject<std::string> personality{std::string("Original TA")};
 

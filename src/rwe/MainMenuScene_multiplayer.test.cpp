@@ -1,6 +1,7 @@
-#include <catch2/catch_test_macros.hpp>
 #include <algorithm>
+#include <catch2/catch_test_macros.hpp>
 #include <rwe/MainMenuScene_multiplayer.h>
+#include <rwe/game/AiSeat.h>
 #include <set>
 
 namespace rwe
@@ -35,6 +36,63 @@ namespace rwe
         std::vector<std::string> noTokens()
         {
             return std::vector<std::string>(10);
+        }
+    }
+
+    TEST_CASE("setup seat buttons offer both AI engines and return to an open seat", "[multiplayer][ai][battleroom]")
+    {
+        auto model = hostModel();
+        auto& seat = model.players[1];
+        seat.colorIndex.next(PlayerColorIndex(3));
+        seat.teamIndex.next(2);
+        // Reopening a formerly RWE seat still starts with the default engine.
+        seat.personality.next("Balanced");
+        cycleComputerSeat(seat);
+        CHECK(seat.type.getValue() == Type::Computer);
+        CHECK(seat.personality.getValue() == "Original TA");
+        CHECK(seatCaption(seat.type.getValue(), "Old name", seat.personality.getValue()) == "Original TA");
+        cycleComputerSeat(seat);
+        CHECK(seat.type.getValue() == Type::Computer);
+        CHECK(seat.personality.getValue() == "Balanced");
+        CHECK(seatCaption(seat.type.getValue(), "Old name", seat.personality.getValue()) == "RWE AI");
+        CHECK(seat.colorIndex.getValue() == PlayerColorIndex(3));
+        CHECK(seat.teamIndex.getValue() == 2);
+
+        SECTION("skirmish and battleroom reopen the seat")
+        {
+            cycleComputerSeat(seat);
+            CHECK(seat.type.getValue() == Type::Open);
+            cycleComputerSeat(seat);
+            CHECK(seat.personality.getValue() == "Original TA");
+        }
+        SECTION("direct multiplayer setup next offers a network seat")
+        {
+            cycleComputerSeat(seat, Type::Network);
+            CHECK(seat.type.getValue() == Type::Network);
+        }
+    }
+
+    TEST_CASE("a setup AI selection reaches a guest with the same launch engine", "[multiplayer][ai][engine]")
+    {
+        auto host = hostModel();
+        host.players[1].type.next(Type::Network);
+        const auto personalities = builtInAiPersonalities();
+        for (const auto expected : {AiEngine::Classic, AiEngine::Rwe})
+        {
+            cycleComputerSeat(host.players[2]);
+            const auto lobby = lobbyFromModel(host, identityFor("ai-choice"), "Great Divide", noTokens());
+            const auto encoded = LanDiscovery::encode(lobby);
+            REQUIRE(encoded);
+            const auto wire = LanDiscovery::decode(*encoded);
+            REQUIRE(wire);
+            MainMenuModel guest;
+            applyLobbyToModel(guest, *wire, 1, "127.0.0.1:1337", "Ada");
+            const auto& choice = guest.players[2].personality.getValue();
+            CHECK(choice == host.players[2].personality.getValue());
+            const auto personality = findAiPersonality(personalities, choice);
+            REQUIRE(personality);
+            CHECK(chooseAiEngine(personality, std::nullopt, AiEngine::Classic) == expected);
+            CHECK(seatCaption(Type::Computer, "", choice) == (expected == AiEngine::Classic ? "Original TA" : "RWE AI"));
         }
     }
 
@@ -934,7 +992,7 @@ namespace rwe
         CHECK(lobby.slots[0].ready); // the host
         CHECK_FALSE(lobby.slots[1].ready);
         CHECK(lobby.slots[2].ready);
-        CHECK(lobby.slots[3].ready); // a computer
+        CHECK(lobby.slots[3].ready);       // a computer
         CHECK_FALSE(lobby.slots[4].ready); // open
 
         // Only the newest lines an announcement can carry.
