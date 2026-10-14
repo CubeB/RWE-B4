@@ -3,7 +3,7 @@
 Split out of [TOTALA-EXE.md](TOTALA-EXE.md) on 2026-09-21, which had reached
 14,000 lines. **The section numbers are the stable identifier and do not**
 **change** -- every `§n` reference in the tree, the commit log and the other
-documents still resolves. This file holds §1, §13, §16, §86, §87, §95, §102, §118, §125, §128.
+documents still resolves. This file holds §1, §13, §16, §86, §87, §95, §102, §118, §125, §128, §132, §138.
 
 The full index across every file, and §88 (where RWE deliberately differs)
 and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
@@ -20,6 +20,8 @@ and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
 118. [A peer's `0x2c` records, and the stub navigator that cannot retire a waypoint](#118-a-peers-0x2c-records-and-the-stub-navigator-that-cannot-retire-a-waypoint)
 125. [The air patrol leg: a goal 320 past the waypoint, re-aimed every thirty ticks](#125-the-air-patrol-leg-a-goal-320-past-the-waypoint-re-aimed-every-thirty-ticks)
 128. [An idle aircraft that is carrying something hops about instead of landing](#128-an-idle-aircraft-that-is-carrying-something-hops-about-instead-of-landing)
+132. [The order of work inside a unit tick: weapons, scripts, orders, motion](#132-the-order-of-work-inside-a-unit-tick-weapons-scripts-orders-motion)
+138. [How often an idle unit looks for a fight: the poll timers and their draws](#138-how-often-an-idle-unit-looks-for-a-fight-the-poll-timers-and-their-draws)
 
 ## 1. Aircraft flight model
 
@@ -860,6 +862,9 @@ return 6 comes first. The air leg's goal is aimed **320 world units past** the
 waypoint with a 336 tolerance (`0x410EC4`–`0x410F21`), which is a 16-unit
 arrival radius and a deliberate fly-through; and it carries no altitude
 instruction, only the state-0 take-off climb to `cruisealt/2`.
+
+> **Extended by §138 (2026-10-14):** the same cadence table for the standby
+> missions, and the draws each poll costs, in order.
 
 ## 87. Pathfinding: one scheduler, a bug-walk, and a unit that never waits
 
@@ -1913,6 +1918,234 @@ stops it now.
 - **Bit 2 of `mover+0x2E`.** Read as "blocked" here and in §87, and the only writer found is `0x43D92C`, which sets it when `0x47DB70` — §95's footprint test for a unit definition — refuses the square. But that writer sits inside a branch gated on `unit+0x96` (`0x43D8E3`), so there may be a second writer on a path not walked here.
 - **The exact sign convention of the pitch index** into the slope table. The table is asymmetric, so which end is uphill matters; the code is `clamp(pitch >> 11, -5, +5)` with no negation, and the table's shape (100% at −1 and 0, falling faster on the positive side) reads as positive = uphill, but that is inference from the numbers rather than a decode.
 - **Whether ships differ.** They do not take a different follower — `0x43DD3E` branches on `canfly` alone — but `0x43DB50`, the waterline step, was not read past its first few instructions and may adjust the speed for a floater in a way the follower does not see.
+
+---
+
+## 132. The order of work inside a unit tick: weapons, scripts, orders, motion
+
+Settled 2026-10-14 from the unit pass `0x48AD30`, read in the disassembly of the
+GOG executable (the build identified at the top of [TOTALA-EXE.md](TOTALA-EXE.md))
+and from nothing else. An independent reading of the same binary claimed the
+order below. It is right, RWE's per-unit order differs from it, and the register
+had not recorded it: §110 said of the COB pass and the mission pass that which
+runs first "is not settled here", and it is settled here -- the scripts run
+first, and the weapons before both.
+
+### The walk
+
+`0x48AD30` visits players 0 to 9 in index order. A player is skipped when its
+record is empty, when its type byte (`player+0x73`) is not 1, 2 or 3, or when
+`player+0x146` is 10. Within a player it walks that player's own unit array
+(`player+0x67` to `player+0x6B`, stride `0x118`) in slot order and skips a slot
+whose type index (`unit+0xA6`) is 0. So the order is **player first, then
+slot**, not the creation order across the whole game that RWE's unit map gives.
+
+For each unit, in this order:
+
+| # | Stage | Site | Which owners |
+|---|---|---|---|
+| 1 | Wind notice. When `def+0x1D2` (a float) is above zero and the wind switch `[g+0x37EE2]` is set, starts the COB functions `SetSpeed` and `SetDirection` (`0x437910`, through `0x4B0A70`). They run in stage 3 of this same slot | `0x48ADC4` | type 1, 2, 3 |
+| 2 | **Weapons**, `0x49E1A0` (WEAPONS "One aim per shot") | `0x48ADDA` | type 1, 2 |
+| 3 | **COB**, `0x4B0D60` with argument 1, on the script object at `unit+0x9A` when there is one. It services the thread slots one by one (`0x4B0DA0`, eight of them) and **then** runs the piece animation, `0x4B1C00` | `0x48ADEB` | type 1, 2, 3 |
+| 4 | Two countdown fields (byte `+0xFA`, dword `+0xFB`); the selection housekeeping at `0x48AE13` (bit 4 of `unit+0x110`, "selected", is cleared for a unit that is not selectable, is unfinished, has `+0xFB` running, or is carried by a carrier without bit 30); on every 30th tick the two health-percentage bytes `+0xF6` and `+0xF7` are rolled | inline | all |
+| 5 | Periodic effects: acid water once every 30 ticks (cause 11, `0x48AF32`, WRECKS table) and the unit's own regeneration every 8th tick, through the repair tick `0x41BD10` (`0x48AF92`) | inline | type 1, 2 |
+| 6 | **Primary order list**, `0x43B7C0`: the head mission only, re-run in the same tick while it asks to be (MISSIONS §2, ECONOMY §110) | `0x48AF98` | type 1, 2 |
+| 7 | **Secondary order list**, `0x43BAD0`: every mission on `unit+0x60`, each through the same wake test and return-code table | `0x48AF9E` | type 1, 2 |
+| 8 | **Motion**: for a unit with a mover, `Mover::Update` `0x43DD20` (§87, §102), then the placement `0x48A870` | `0x48AFAA` | type 1, 2 |
+| 9 | When bit 14 of `unit+0x110` has been raised, the kill `0x4864B0` with the cause byte at `+0xF5` | `0x48AFD1` | all |
+
+After a player's last slot the pass calls the record builder `0x48B710` for that
+player when the recording switch `[g+0x2A44]` bit 0 is set (the `0x2c` stream of
+TA-DEMOS).
+
+**A remote player's unit (type 3) takes stages 1, 3, 4 and 9 and nothing else.**
+Stages 2 and 5 to 8 sit behind the owner's type test (`0x48AEBE`-`0x48AECD`),
+which is why such a unit's position comes only from applying its owner's records
+(§118) and why `0x43DD20` is called again from the receive case.
+
+### Where the strategic work sits
+
+A whole tick (`0x4954BD`) is: increment the tick, **this pass**, the projectile
+pass `0x49B720`, the feature pass `0x420F30`, and only then the per-player pass
+`0x464F80`. That last one holds the controller: the squad manager's tick
+(`0x408C40`), which for **every** player runs the weapon re-targeting sweep
+`0x4089A0` (WEAPONS "The scan"; COMPUTER-PLAYER §119 and §122), then the
+strategy table. So whatever the computer player decides is decided after every
+unit has had its tick, and an order it issues or a target the sweep picks is
+first read on **the next tick**.
+
+### What a stage reads that an earlier one wrote
+
+- **Orders write weapon targets** (`0x48A060`, `0x48A0A0`, `0x48A0F0`, and the
+  weapon-free bit through `0x489800` and `0x4898B0`); the weapon stage that
+  reads them has already run. So **a target set by an order on tick T is first
+  acted on at T+1**. An aim script started there runs in stage 3 of T+1 and its
+  answer is read by stage 2 of T+2, so a turret's first shot from an attack order
+  leaves on **T+2** at the earliest; RWE's is one tick earlier, on T+1. A target picked by the re-targeting sweep on T is likewise first acted on
+  at T+1.
+- **Weapons write the unit's event word**: `0x49E50B` raises bits 10 and 11,
+  `0x49E53A` and `0x49D664` raise bit 12 (WEAPONS, "the original refuses the
+  shot"). The order stage follows in the same slot, so **orders see weapon
+  events the tick they are raised.**
+- **COB writes the event word and the state the handlers poll**: the script
+  `set` family ends in `or [unit+0xBA], 4` (`0x480B57`-`0x480BF1`), and the busy
+  flag at `+0x10F` bit 1 and the build stance are script-written. Stage 3
+  precedes stage 6, so **a mission handler sees what a script did on the same
+  tick**.
+- **Orders write the goal and motion reads it** on the same tick. RWE already
+  does this.
+- **COB reads the position the previous tick's motion left**, because stage 8
+  follows it. A script's `get` of the unit's own position or height, or of a
+  piece's world position, is one tick behind what RWE shows it.
+- Inside the COB call the threads run **before** the piece animation, so a
+  `turn` or `move` that a thread starts takes its first step on that tick. A
+  thread waiting on it is released one tick after the step that completes it;
+  the two orders give the same wake tick, so nothing a script can see moved,
+  only the displayed pose is one step further along.
+
+### What RWE does, and the change
+
+`GameSimulation::tick` runs the behaviour pass (`UnitBehaviorService::update`:
+build queue and orders, then weapons, then motion) over every unit in id order,
+then the piece animation for every unit, then `runUnitCobScripts` for every
+unit, then `updateSelfRepair` and `updateWaterDamage`.
+
+| | Original | RWE |
+|---|---|---|
+| Weapons against orders | before | after |
+| COB against orders and motion | before both, in the unit's own slot | after everyone's motion, in its own pass |
+| Piece animation against threads | after | before |
+| Self-repair and acid water | before orders | after the COB pass |
+| Visiting order | player index, then slot | unit id |
+
+To match: inside one unit's update run (a) the wind notice, (b) the weapon block
+that now sits at the end of the `!paralyzed && !isBeingBuilt` block, (c) that
+unit's script threads and then that unit's piece animation, (d) its self-repair
+and water damage, then the build queue and orders as now, then motion; and drop
+the two all-units passes. A paralysed unit keeps its early-out *after* (c), since
+its scripts go on running. Visit units owner by owner if the unit table can say
+it; a stable per-owner order is enough, because the original only reuses a slot
+after a death.
+
+This changes hashed behaviour: every recorded replay and every fixture that
+counts ticks (first shot, the nanolathe creation tick, build completion) moves by
+a tick, so it wants a version gate on replays. The acceptance check is the demo
+oracles (`tools/tad-buildtime.py`, `tad-weapontime.py`, `tad-stalltime.py`), not
+a visual one. Size: about sixty lines of one function moved and two passes
+folded in.
+
+### Unclear
+
+Whether `0x4B0D60`'s argument 1 is a time step in ticks or a multiplier on the
+script's own millisecond sleeps was not traced. RWE's `SimMillisecondsPerTick`
+decrement is what the oracles agree with (§110), so it stays.
+
+---
+
+## 138. How often an idle unit looks for a fight: the poll timers and their draws
+
+Settled 2026-10-14 from the patrol, standby and chooser routines named below,
+read in the executable's disassembly. §86 recorded the patrol cadence (air 30, ground 45-74) and WEAPONS "The scan"
+the sweep; what neither gave is the **standby missions' cadence**, the
+**draws** each poll costs and where in the state machine they sit. An independent reading of the same binary said an
+idle unit does not choose a target every tick. It does not, and the table below
+is the cadence by mission. RWE calls its chooser every tick.
+
+Terms. `rand(n)` is `0x4B6C30`, which returns 0 **without advancing the
+generator** when `n < 2`. A timer of N set through `0x439E80` fires exactly N
+ticks later. The **poll** is `0x43B700(unit)`: it does anything only when the
+unit's fire mode (bits 20-21 of `unit+0x110`) is Fire At Will; it then calls the
+chooser `0x40B7B0(unit, 0, 0)` (up to fifty candidate draws, each `rand(pool)`
+with a swap-remove, then a `rand(dx^2 + dz^2)` per survivor, WEAPONS "The
+scan") and, on a candidate, gates it through `0x43B1F0` on the move mode (Hold
+Position refuses) and the fire mode, and builds an Attack order with command 3.
+"Hit" below is a poll that made an order.
+
+### Ground Patrol, `0x4033A0`
+
+| State | Does | Next |
+|---|---|---|
+| 0 | Needs a mover (else return 7). Appends the closing waypoint once (`0x43A020`), timer 1 | 1 |
+| 1 | Frees the weapons (`0x489800` with 3), installs the point goal (`0x438930`), timer 15, wake mask `|= 0xE0` | 2 |
+| 2, woken by the goal event (`flags & 0xE0`) | return 6 (rotate to the tail, no draw) | 1 |
+| 2, woken by the timer | **poll.** Hit and an order made: mask cleared, state 1, return 3 (timer `rand(15) + 30`, **one** `rand(15)`). Miss: **one** `rand(30)`; timer `rand(30) + 30`; state set to 1; wake mask is the timer alone | 1 |
+
+So a patrol that finds nothing polls at the end of its 15-tick goal timer,
+sleeps 30 to 59 ticks **deaf to arrival events** (the mask is the timer only),
+reinstalls the goal and starts a new 15: **a poll every 45 to 74 ticks**, one
+draw per poll. A hit costs one `rand(15)` and the chooser's own draws.
+
+### Ground Standby, `0x405FE0`, and Standby_Mine, `0x406090`
+
+State 0 needs a mover (Standby_Mine instead needs the building bit, 29, of the
+flags), frees the weapons, sets the wake bit `0x10000`, timer 1, state 1. State 1
+polls; a hit returns 5 (done, the new Attack order is now at the head). A miss
+sets the bit again, timer `rand(30) + 30` (**one** draw) and returns 2: **a
+poll every 30 to 59 ticks.** `Guard_NoMove` (`0x4021F0`) never polls: it sleeps
+30 and re-reads, which is what makes it the hold-position idle.
+
+### VTOL_Standby, `0x40F7D0`
+
+State 0 needs a mover and `canfly` (else 7), frees the weapons (`0x4898B0`,
+3), sets `0x10000`, timer 1 and records the unit's x and z as its anchor.
+State 1 polls: a hit clears the mask, goes to state 0, returns 3 (timer
+`rand(15) + 30`); a miss returns 1 into state 2 **in the same tick**. State 2:
+
+- not `canfly` or not airborne: set `0x10000`, timer `rand(30) + 30`, state 1,
+  return 2 (one draw);
+- airborne **with no passengers** (`unit+0x8A` empty): push `VTOL_LandIfCan`,
+  return 5;
+- airborne **and carrying**: draws in this order -- `rand(0x10000)` (bearing),
+  `rand(0x20)` (radius `r + 8` from the anchor, 8 to 39 units), then `rand(15)`
+  (timer `+ 30`) -- sets the hop goal, state 1, returns 2.
+
+An idle fighter or bomber therefore does not hover: it lands. A loaded transport
+hops (§135). The cadence is the 30-to-59 of the ground standby.
+
+### VTOL_Patrol, `0x410E70`
+
+State 0 appends the closing waypoint, announces, frees the weapons and lifts a
+landed unit; state 1 clears pending bits 5 and up; state 2: woken by a goal
+event (`flags & 0xE0`) -> return 6; otherwise reinstall the point goal 320 units
+beyond the waypoint (`0x1400000`, tolerance `0x150`), wake `|= 0xE0`. **Then**,
+if hit points are below three quarters of `maxdamage >> 2 * 3`, search for a
+repair pad (`0x40B530`, radius `0xF00`, picking `rand(count)`) and push the pad
+mission (string `0x501B94`) instead of polling; else **poll**. A hit clears the
+mask and returns 3 (`rand(15) + 30`); a miss sets a timer of **exactly 30** and
+returns 2. **A poll every 30 ticks and no draw on a miss.**
+
+### Not polls
+
+`RepairPatrol` handlers never call the chooser. `VTOL_LandIfCan` (`0x40F2A0`) is
+a position search: when the spot is not clear it draws `rand(0x81) - 0x40` twice
+per ring step, rings of 0x81 to 0x201 in steps of 0x20, and has nothing to do
+with targets.
+
+### What RWE does, and the change
+
+`handlePatrolOrder` (`UnitBehaviorService.cpp`, near line 4600) and the idle
+`findEnemyToEngage` call run the chooser **every tick** for every unit that is
+patrolling or standing; the weapon's own drop test is the only phased part
+(`(gameTime + id) % 30`). That is observably different: a patrolling or standing unit
+notices an enemy within one tick in RWE and within 30 to 74 in the original, so a
+fast unit can cross a patrol's whole detection ring between two original polls;
+and each unit's share of the random generator is a draw per tick against one per
+30 to 74, so the sequence every other draw sees is shifted.
+
+To match: give each patrol and standby order its own **next-poll tick** and the
+state-1/state-2 boundary of the ground patrol (a goal reinstall at the end of
+the 15, a deaf wait of `rand(30) + 30`), and draw exactly the numbers above in
+exactly that order. Do not call the chooser outside the poll. Medium; hashed;
+it wants the replay gate of §132 and would be best landed with it, because the
+two interact (the poll is a stage-6 act and a target it sets is first acted on
+at the next tick).
+
+### What would settle the leftover
+
+The ground patrol's "deaf" wait is read from the mask value; a unit that
+reaches its waypoint during that wait should show a stand-still of up to 59
+ticks before turning for the next waypoint. That is checkable by timing a
+single Peewee's patrol legs against the arithmetic: leg time plus 45 to 74.
 
 ---
 

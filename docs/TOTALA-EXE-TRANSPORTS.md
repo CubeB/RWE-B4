@@ -3,7 +3,7 @@
 Split out of [TOTALA-EXE.md](TOTALA-EXE.md) on 2026-09-21, which had reached
 14,000 lines. **The section numbers are the stable identifier and do not**
 **change** -- every `§n` reference in the tree, the commit log and the other
-documents still resolves. This file holds §31, §32, §33, §34, §35, §36, §37, §38, §39, §40, §41.
+documents still resolves. This file holds §31, §32, §33, §34, §35, §36, §37, §38, §39, §40, §41, §135.
 
 The full index across every file, and §88 (where RWE deliberately differs)
 and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
@@ -21,6 +21,7 @@ and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
 39. [The hover transport flow -- what the Bear and Turtle actually are](#39-the-hover-transport-flow----what-the-bear-and-turtle-actually-are)
 40. [Implementation spec for RWE](#40-implementation-spec-for-rwe)
 41. [Loose ends](#41-loose-ends)
+135. [VTOL_Pickup builds a climb goal and never installs it](#135-vtol_pickup-builds-a-climb-goal-and-never-installs-it)
 
 ## 31. Load eligibility -- `0x489A90`, `CanLoadUnit(transport, candidate)`, in full
 
@@ -321,6 +322,10 @@ state 4 (0x411479)  if flags & 0x42 -> run "EndTransport", return 8 (aborted)
 state 5 (0x4114fe)  return 5 - done
 ```
 
+> **Corrected by §135 (2026-10-14).** State 4's goal is built and never
+> installed (no call to `0x4388D0`), so there is no "climb away loaded"; the
+> mission probably hangs at `Loading` in state 5.
+
 ### VTOL_Unload, jump table `0x411828`, four states
 
 Preamble: empty passenger list -> return 5.
@@ -618,6 +623,92 @@ On attach: remove from collision/targeting, hide iff attached to piece -1
 landed/airborne per the detach mode. On carrier death: deal each passenger
 30000 armour-ignoring damage credited to the carrier's killer, then detach.
 A unit carrying cargo can itself never be picked up.
+
+---
+
+## 135. VTOL_Pickup builds a climb goal and never installs it
+
+Settled 2026-10-14 from the jump table `0x41153C` of the pick-up handler
+`0x4111B0`, read in the executable's disassembly. §36 gives state 4 as "goal at
+own position, altitude cruisealt, wake `|= 0xE0`, return 1 -- climb away
+loaded". The independent reading that this section answers said the climb goal
+is built and dropped. **That is right**, and what is left is a question the
+static reading cannot close.
+
+### What state 4 does
+
+State 4 (`0x411479`) first tests the abort flags (`flags & 0x42`): if set it
+runs the script's `EndTransport` (`0x4B0940`) and returns 8, as §36 says.
+Otherwise:
+
+1. Attach the target to the transport at the piece the script returned in state 2
+   (`0x48AAC0(target, transport, mission+0x36)`), play sound 12.
+2. Allocate a goal object of `0x36` bytes (`0x4114B5`), construct it as a point
+   goal at the unit's own position (`0x44E2D0(mission, &unit+0x6A)`), and set its
+   altitude to the definition's `cruisealt` (`def+0x21C`, `0x44E6C0`).
+3. **There is no call to the navigator's install routine, `0x4388D0`.** States 0,
+   1 and 3 of the same handler each end their goal construction with it. In state
+   4 the freshly built goal is left where it was allocated and nothing refers to
+   it again: it is a leak of 0x36 bytes per pick-up, and it never steers
+   anything.
+4. Raise the wake mask by `0xE0` (the goal-event bits) and return 1, which is the
+   "stay, sleep until woken" code; state 5 (`0x4114FE`) is just "return 5, done".
+
+### What the unit is steering by afterwards
+
+The goal that is still installed is **state 3's**: the point goal on the
+target's position, altitude `-(piece y offset)`, which is the descent to bring
+the hook piece to the target's top. The attach does not clear it. The navigator
+(`0x44F1A0`) raises event bit `0x20` on the mission on each tick the goal is
+satisfied, and then drops a point goal that is not tracking a unit (the goal's
+vtable slot `+0x2C`, `0x44E3A0`, returns 0 for an absolute point) by installing
+a null goal. The satisfaction that woke state 4 is that event, so the goal is
+dropped in the same tick state 4 runs. After it the unit has no goal.
+
+### What happens next [inferred]
+
+State 4 left the wake mask at `0xE0` and returns 1. The event that the mask
+listens for has just been consumed (it is what woke state 4), no new goal exists
+to raise another, and the timer is not in the mask. So the mission probably
+**sits in state 5 never being woken, which is to say it stays on `Loading` in the
+order panel**, the transport hanging at its descent altitude with the passenger
+slung beneath it, until the player gives it another order (which replaces the
+mission, §134's table). That is what the code says; it is not what has been
+observed. §36's "climbs away loaded" is not supported by the code; the flight
+back up to `cruisealt` that players see after a load is then the next order's
+doing, which for an order-less transport is the idle behaviour below.
+
+### What an idle loaded transport does
+
+With the mission gone or hung, the idle behaviour is that of §13: the standby
+mission `0x40F7D0` (VTOL_Standby). For a transport that is *carrying* (the
+passenger list at `unit+0x8A` is not empty) the idle hop is the only one that
+runs: state 2 of that handler draws, in this order, `rand(0x10000)` for a
+bearing, `rand(0x20)` for a radius of `r + 8` units from the anchor, and
+`rand(15)` for its timer (`+ 30`). With no passengers it does not hop: it pushes
+`VTOL_LandIfCan`.
+
+### RWE
+
+RWE's order ends when the attach happens: `handleLoadOrder` completes and
+pops. **In effect it agrees**: there is no goal to model and an order that is
+not left on the list is the same observable for everything except the panel's
+"Loading" text and the hang in place. What RWE differs on is the idle branch: its
+air-idle code (`UnitBehaviorService`, the fly-idle branch near line 440-520) has
+no test for "carrying", so a loaded transport with no orders goes to land (the
+bomber/fighter idle), where the original hops round its anchor while loaded and
+lands only when empty. That is a play-test question first: load an Atlas, give
+no further order, and watch whether it lands with its passenger, hops, or
+hangs. No code change is made from the static reading alone; if the hop is
+wanted it is the §13 hop restricted to a carrying transport, with the three
+draws above in that order.
+
+### What would settle it
+
+One observation: load a unit into an Atlas, give nothing after the load, and
+read the order panel and the altitude for ten seconds. "Loading" held, altitude
+falling to the descent height and staying there, means the hang; "Ready with
+orders" or a climb means something wakes state 5 that this reading did not find.
 
 ---
 

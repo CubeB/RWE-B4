@@ -197,6 +197,13 @@ Everything else lives in a subject file. **The numbers never move**, so a
 129. [The gunship's reroll is a no-op: the goal is built and never installed](TOTALA-EXE-MISSIONS.md#129-the-gunships-reroll-is-a-no-op-the-goal-is-built-and-never-installed)
 130. [Breaking off to repair: seven places, and no pad is ever refused for being taken](TOTALA-EXE-ECONOMY.md#130-breaking-off-to-repair-seven-places-and-no-pad-is-ever-refused-for-being-taken)
 131. [A constructor on patrol repairs, helps build and reclaims, in that order of preference](TOTALA-EXE-ECONOMY.md#131-a-constructor-on-patrol-repairs-helps-build-and-reclaims-in-that-order-of-preference)
+132. [The order of work inside a unit tick: weapons, scripts, orders, motion](TOTALA-EXE-MOVEMENT.md#132-the-order-of-work-inside-a-unit-tick-weapons-scripts-orders-motion)
+133. [What a factory hands its product: standing orders, squad and route](TOTALA-EXE-INTERFACE.md#133-what-a-factory-hands-its-product-standing-orders-squad-and-route)
+134. [Cancelling a build refunds the metal that was spent](TOTALA-EXE-ECONOMY.md#134-cancelling-a-build-refunds-the-metal-that-was-spent)
+135. [VTOL_Pickup builds a climb goal and never installs it](TOTALA-EXE-TRANSPORTS.md#135-vtol_pickup-builds-a-climb-goal-and-never-installs-it)
+136. [The queue modifier toggles, and a group move keeps its formation](TOTALA-EXE-INTERFACE.md#136-the-queue-modifier-toggles-and-a-group-move-keeps-its-formation)
+137. [Editing a factory queue: merge at the tail, remove from the back](TOTALA-EXE-INTERFACE.md#137-editing-a-factory-queue-merge-at-the-tail-remove-from-the-back)
+138. [How often an idle unit looks for a fight: the poll timers and their draws](TOTALA-EXE-MOVEMENT.md#138-how-often-an-idle-unit-looks-for-a-fight-the-poll-timers-and-their-draws)
 
 ## 88. Where RWE deliberately differs
 
