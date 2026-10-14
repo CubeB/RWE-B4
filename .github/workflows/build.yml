@@ -638,6 +638,14 @@ jobs:
           # The compiler is reinstalled each run; hash it by content, not by
           # a modification time that has no reason to repeat.
           CCACHE_COMPILERCHECK: content
+          # librwe and rwe_test compile through a precompiled header, and
+          # ccache refuses a compilation that uses one unless pch_defines is
+          # sloppy -- on 2026-10-14 that was "Could not use precompiled
+          # header" for 80% of the calls, the whole of both targets, so the
+          # warm cache only ever held the libraries and the probes. The
+          # header is standard headers only and nothing in src/ uses
+          # __DATE__ or __TIME__, so the sloppiness is safe.
+          CCACHE_SLOPPINESS: pch_defines,time_macros
         run: |
           mkdir build
           pushd build
