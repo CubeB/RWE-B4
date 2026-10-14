@@ -1,7 +1,11 @@
 #include "GameScene.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
+#include <rwe/game/chat_command.h>
 #include <rwe/game/chat_util.h>
+#include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
 
 // In-game chat, and the message bar the original opens on Enter (issue #30,
@@ -69,6 +73,16 @@ namespace rwe
             return;
         }
 
+        // A line that starts with `+` is a command to the game and is never
+        // chat, whether or not it turns out to be one this build knows: the
+        // original's talk dialog hands it to the command interpreter locally,
+        // so it must not reach the other players' screens either.
+        if (parseChatCommand(text))
+        {
+            runChatCommand(text);
+            return;
+        }
+
         if (!gameNetworkService->submitChatMessage(text))
         {
             printConsole("Message not sent: a player is not answering", Color(252, 252, 0));
@@ -78,6 +92,142 @@ namespace rwe
         // Shown from here rather than waited for, because it never comes back:
         // each peer is sent it once and nobody echoes it.
         printChatLine(localPlayerId, text);
+    }
+
+    void GameScene::runChatCommand(const std::string& line)
+    {
+        auto parsed = parseChatCommand(line);
+        if (!parsed || parsed->kind == ChatCommand::Kind::Empty)
+        {
+            return;
+        }
+
+        const auto& command = *parsed;
+        const Color feedbackColor(252, 252, 0);
+
+        if (command.kind == ChatCommand::Kind::Unknown)
+        {
+            printConsole("Unknown command: " + command.word, feedbackColor);
+            return;
+        }
+
+        // Every sharing command needs a network game and acts on the local
+        // player, and a computer player or a watcher has no stock to share.
+        // An own-clock game is a peer that owns its own clock and its own
+        // units: there is no one here to share with.
+        const auto& local = simulation.getPlayer(localPlayerId);
+        if (isPlayback() || isOwnClock() || !gameNetworkService->hasRemotePeers() || local.type != GamePlayerType::Human)
+        {
+            printConsole("That command only works in a network game.", feedbackColor);
+            return;
+        }
+
+        auto onOff = [](bool on) { return on ? "on" : "off"; };
+        auto submit = [&](PlayerShareCommand::Kind kind, float amount = 0.0f) {
+            PlayerShareCommand share;
+            share.kind = kind;
+            share.amount = amount;
+            localPlayerCommandBuffer.push_back(share);
+        };
+
+        // The state printed is the simulation's as it stands, before the flip
+        // this line asks for; the flip itself lands a few ticks later, with
+        // everyone's, through the command stream.
+        switch (command.kind)
+        {
+            case ChatCommand::Kind::ShareMetal:
+                printConsole(std::string("ShareMetal: ") + onOff(!local.shareMetal), feedbackColor);
+                submit(PlayerShareCommand::Kind::ToggleMetal);
+                break;
+
+            case ChatCommand::Kind::ShareEnergy:
+                printConsole(std::string("ShareEnergy: ") + onOff(!local.shareEnergy), feedbackColor);
+                submit(PlayerShareCommand::Kind::ToggleEnergy);
+                break;
+
+            case ChatCommand::Kind::ShareAll:
+                // Two independent toggles, as in the original: with mixed
+                // starting states it is not "all on".
+                printConsole(std::string("ShareMetal: ") + onOff(!local.shareMetal), feedbackColor);
+                printConsole(std::string("ShareEnergy: ") + onOff(!local.shareEnergy), feedbackColor);
+                submit(PlayerShareCommand::Kind::ToggleMetal);
+                submit(PlayerShareCommand::Kind::ToggleEnergy);
+                break;
+
+            case ChatCommand::Kind::ShareMapping:
+                printConsole("ShareMapping: allies already share their map in RWE.", feedbackColor);
+                break;
+
+            case ChatCommand::Kind::ShareRadar:
+                printConsole("ShareRadar: allies already share their radar in RWE.", feedbackColor);
+                break;
+
+            case ChatCommand::Kind::SetShareMetal:
+                // The number typed, not the number stored: the original
+                // prints what it was given and stores the capped value.
+                printConsole("SetShareMetal: " + std::to_string(command.number), feedbackColor);
+                submit(PlayerShareCommand::Kind::SetMetalReserve, static_cast<float>(command.number));
+                break;
+
+            case ChatCommand::Kind::SetShareEnergy:
+                printConsole("SetShareEnergy: " + std::to_string(command.number), feedbackColor);
+                submit(PlayerShareCommand::Kind::SetEnergyReserve, static_cast<float>(command.number));
+                break;
+
+            case ChatCommand::Kind::Give:
+            {
+                // A player is named as the game names them: by the name they
+                // joined with, or as "Player n" with n counted from one.
+                std::optional<PlayerId> target;
+                for (Index i = 0; i < getSize(simulation.players); ++i)
+                {
+                    PlayerId id(static_cast<unsigned int>(i));
+                    auto name = playerDisplayName(id);
+                    if (name.size() == command.playerToken.size()
+                        && std::equal(name.begin(), name.end(), command.playerToken.begin(), [](char a, char b) {
+                               return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
+                           }))
+                    {
+                        target = id;
+                        break;
+                    }
+                }
+
+                if (!target)
+                {
+                    auto number = chatAtoi(command.playerToken);
+                    if (number >= 1 && number <= getSize(simulation.players))
+                    {
+                        target = PlayerId(static_cast<unsigned int>(number - 1));
+                    }
+                }
+
+                if (!target || *target == localPlayerId)
+                {
+                    printConsole("Give: no such player.", feedbackColor);
+                    break;
+                }
+
+                PlayerShareCommand give;
+                give.kind = PlayerShareCommand::Kind::Give;
+                give.amount = static_cast<float>(command.number);
+                give.target = target;
+                give.giveMetal = command.giveMetal;
+                localPlayerCommandBuffer.push_back(give);
+                printConsole(
+                    "Give: " + std::to_string(command.number) + (command.giveMetal ? " metal to " : " energy to ") + playerDisplayName(*target),
+                    feedbackColor);
+                break;
+            }
+
+            case ChatCommand::Kind::GiveUsage:
+                printConsole("Usage: +Give player amount metal|energy", feedbackColor);
+                break;
+
+            case ChatCommand::Kind::Empty:
+            case ChatCommand::Kind::Unknown:
+                break;
+        }
     }
 
     void GameScene::updateChatTest()

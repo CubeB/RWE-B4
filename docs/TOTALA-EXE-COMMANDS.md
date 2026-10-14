@@ -108,6 +108,24 @@ move.
 bonuses and alliances. It does **not** save the sharing byte or the reserves,
 so neither survives a load in the original.
 
+**What RWE does with this** (`src/rwe/sim/ResourceSharing.*`,
+`src/rwe/game/chat_command.*`). The toggles, reserves and the automatic pass
+are as above, run by every peer from the command stream, so the two toggles and
+the two reserves are hashed, saved and dumped -- a deliberate difference from
+the original, which does not save them, because lockstep resume needs them. The
+differences, all hardenings or consequences of lockstep: a **negative gift is
+ignored** (the original does not clamp it, so a packet could take stock from
+the recipient); a reserve below zero makes the offer capped at the donor's own
+stock; a gift to or from a player simulated on another machine (a TA peer) is
+not applied, since RWE does not speak the `0x16` packet; a gift's credit goes
+through the recipient's production buffer, so a computer player's handicap is
+applied once, by the settle, not a second time. `+Give` names the recipient by
+the name they joined with or as `Player n` counted from one; that choice is
+RWE's, the account does not say how the original reads its argument. Mapping,
+radar and line-of-sight carry no state (RWE's teams share sight and radar
+unconditionally, the **[open]** above), and none of the other registered
+commands is built: each answers "Unknown command".
+
 **Other registered commands** (mask 1, effects are options and display and
 none touches the simulation): `NoShake`, `Contour`, `ScrollSpeed`, `IFace`,
 `CDPlay`, `CDStop`, `Sound3D`, `Shading`, `AntiAlias`, `Shadow`, `Dither`,
