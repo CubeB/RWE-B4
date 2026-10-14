@@ -190,6 +190,13 @@ Everything else lives in a subject file. **The numbers never move**, so a
 116. [What a round aims at on a unit, and why the water comes after it](TOTALA-EXE-WEAPONS.md#116-what-a-round-aims-at-on-a-unit-and-why-the-water-comes-after-it)
 117. [The map checksum, and the unit id that shares its routine](TOTALA-EXE-DATA.md#117-the-map-checksum-and-the-unit-id-that-shares-its-routine)
 118. [A peer's `0x2c` records, and the stub navigator that cannot retire a waypoint](TOTALA-EXE-MOVEMENT.md#118-a-peers-0x2c-records-and-the-stub-navigator-that-cannot-retire-a-waypoint)
+125. [The air patrol leg: a goal 320 past the waypoint, re-aimed every thirty ticks](TOTALA-EXE-MOVEMENT.md#125-the-air-patrol-leg-a-goal-320-past-the-waypoint-re-aimed-every-thirty-ticks)
+126. [Aim lead: a weapon leads a moving target, but only once its unit has six kills](TOTALA-EXE-WEAPONS.md#126-aim-lead-a-weapon-leads-a-moving-target-but-only-once-its-unit-has-six-kills)
+127. [Range is flat in the original, everywhere it is asked](TOTALA-EXE-WEAPONS.md#127-range-is-flat-in-the-original-everywhere-it-is-asked)
+128. [An idle aircraft that is carrying something hops about instead of landing](TOTALA-EXE-MOVEMENT.md#128-an-idle-aircraft-that-is-carrying-something-hops-about-instead-of-landing)
+129. [The gunship's reroll is a no-op: the goal is built and never installed](TOTALA-EXE-MISSIONS.md#129-the-gunships-reroll-is-a-no-op-the-goal-is-built-and-never-installed)
+130. [Breaking off to repair: seven places, and no pad is ever refused for being taken](TOTALA-EXE-ECONOMY.md#130-breaking-off-to-repair-seven-places-and-no-pad-is-ever-refused-for-being-taken)
+131. [A constructor on patrol repairs, helps build and reclaims, in that order of preference](TOTALA-EXE-ECONOMY.md#131-a-constructor-on-patrol-repairs-helps-build-and-reclaims-in-that-order-of-preference)
 
 ## 88. Where RWE deliberately differs
 

@@ -612,7 +612,8 @@ Geometry, verified by replay with ARMBRAWL numbers (R = 370, `cruisealt` 60):
 
 After **two arrivals at which the target was out of weapon range**, it jumps to
 a uniformly random bearing at **exactly** weapon range and starts the pendulum
-again from there. (The goal here is a plain `0x44E2D0` absolute-position goal;
+again from there. **Corrected by §129: the goal is built and never installed,
+so nothing moves; only the random draw has an effect.** (The goal here is a plain `0x44E2D0` absolute-position goal;
 no altitude call, so it keeps whatever altitude the previous goal set.)
 
 **What stops it closing in.** Three things, all explicit:
@@ -819,3 +820,76 @@ Relevant FBI values, for reference:
   (weapon 1) was actually read out of the binary. **[inferred]**
 * `0x48AAC0(unit, 0, -1, 2)` named as "detach from carrier/pad". **[inferred]**
   from its guard on `unit+0x86` and that field's role in `0x47CB73`.
+
+
+---
+
+## 129. The gunship's reroll is a no-op: the goal is built and never installed
+
+*Spec-room finding, 2026-10-14 (ADR-0004). Read from the disassembly of the
+GOG `TotalA.exe` (MD5 `8e74a1dffa1f5988624c52048f5b20cd`). Settles a claim made
+by an independent reading, which is right; and corrects section 6 above, which
+says the reroll "jumps to a uniformly random bearing at exactly weapon range and
+starts the pendulum again from there". It does not.*
+
+### The reroll block, `0x41391E`-`0x41399E`
+
+`AirToGroundHover` (`0x413470`) state 3 reaches the reroll through exactly one
+branch, the `jl` at `0x413918`, taken when the miss counter at `mission+0x3A`
+has reached 2. The block:
+
+1. sets the counter to 0;
+2. draws `rand(0x10000)` at `0x413929` -- **the draw happens**, so the
+   generator advances;
+3. builds a goal at the target's position plus `Dir(phi) * R` where `R` is
+   weapon 0's range shifted to 16.16 (`0x4B4F10`, then `0x44E2D0`);
+4. gives it an arrival tolerance of `0x80` = 128;
+5. ORs `0x110E8` into the wake mask (`mission+0x06`) and **returns 2**.
+
+**No path through the block calls `0x4388D0`.** The goal object is built,
+configured and dropped; it is never made the mission's goal. Nothing is told
+to move. The goal the aircraft had before the reroll had already completed and
+been cleared -- that is what woke state 3 -- so on this tick the aircraft has
+**no goal at all**; what the air mover does for that single tick is not
+decoded here (**[inferred]**: it keeps its heading and speed, §1).
+
+### What follows
+
+**[inferred] from the event wiring, not replayed.** The new mask carries bit
+`0x1000`, the out-of-range event; the weapon update raises that event on every
+tick on which the weapon's reload is at zero and the target is out of range
+(§127). So the mission wakes again the next tick, state 3 runs, the miss
+counter is now 0 and goes to 1, which is under 2, and the swing branch runs:
+**a new +/-45 degree station is installed, as in the ordinary pendulum**. The
+reroll costs one tick and a random draw and moves nothing.
+
+### The counter is cumulative
+
+The counter is incremented **only on a miss** and is **not reset on an in-range
+pass**. It is reset in state 2 (the take) and at the reroll. So "after two
+arrivals at which the target was out of range" in section 6 is "after two such
+arrivals since the state was last entered or last rerolled, however many
+in-range passes lie between them". The other half of the health test is not in
+the reroll either: the 75% gate (section 130) is in the swing branch only
+(`0x413A97`).
+
+### What RWE does
+
+`nextHoverAttackStation` (`UnitBehaviorService.cpp`, about 4109-4119) resets
+the counter on an in-range arrival, and on the second miss attaches a fresh
+random-bearing station at range `R` and flies it.
+
+**RWE differs** twice: it resets the counter where the original does not, and
+it flies to the reroll point where the original does not.
+
+### The change
+
+1. Do not reset the miss counter on an in-range pass.
+2. On the miss that takes it to 2: reset it to 0, **draw one value from the
+   simulation's generator** (`rand(0x10000)`; the result is discarded), keep
+   the aircraft's present position, install **no** new station and no goal, and
+   let the next tick's swing branch install the ordinary +/-45 degree station.
+3. Leave the health test in the swing only.
+
+About 15 lines. Keep the draw: determinism against a recording and the
+generator's sequence for everything else both depend on it.

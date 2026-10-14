@@ -3,7 +3,7 @@
 Split out of [TOTALA-EXE.md](TOTALA-EXE.md) on 2026-09-21, which had reached
 14,000 lines. **The section numbers are the stable identifier and do not**
 **change** -- every `§n` reference in the tree, the commit log and the other
-documents still resolves. This file holds §1, §13, §16, §86, §87, §95, §102.
+documents still resolves. This file holds §1, §13, §16, §86, §87, §95, §102, §118, §125, §128.
 
 The full index across every file, and §88 (where RWE deliberately differs)
 and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
@@ -18,6 +18,8 @@ and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
 95. [What blocks a unit: the map square, the passability class, and why a hovercraft cannot cross a wreck](#95-what-blocks-a-unit-the-map-square-the-passability-class-and-why-a-hovercraft-cannot-cross-a-wreck)
 102. [The ground path follower: an aim point on the segment, and two brakes into the corner](#102-the-ground-path-follower-an-aim-point-on-the-segment-and-two-brakes-into-the-corner)
 118. [A peer's `0x2c` records, and the stub navigator that cannot retire a waypoint](#118-a-peers-0x2c-records-and-the-stub-navigator-that-cannot-retire-a-waypoint)
+125. [The air patrol leg: a goal 320 past the waypoint, re-aimed every thirty ticks](#125-the-air-patrol-leg-a-goal-320-past-the-waypoint-re-aimed-every-thirty-ticks)
+128. [An idle aircraft that is carrying something hops about instead of landing](#128-an-idle-aircraft-that-is-carrying-something-hops-about-instead-of-landing)
 
 ## 1. Aircraft flight model
 
@@ -425,7 +427,9 @@ Decoded here and deliberately **not** ported:
   say RWE had no air repair pads and nothing to fly to; it has both.
 - **`VTOL_Standby`'s carrying-something hop** (8–39 units around the idle spot,
   every 30–44 ticks). It only applies to a transport with units aboard, and RWE
-  parks a loaded transport rather than fidgeting.
+  parks a loaded transport rather than fidgeting. **Corrected by §128:** at
+  `d0b65e9a` RWE lands every idle aircraft, loaded or not; it does not park a
+  loaded transport in the air.
 - **`VTOL_Follow`'s work copying** — the `0x43F0E0` order build at `0x40FE86`
   and the mission clone at `0x40FEDC`. RWE's guard already assists a builder and
   a factory through `handleGuardOrder`'s own branches; what the original does
@@ -1996,3 +2000,216 @@ in game, from two timers, so TA flushes early throughout. Matching the original
 — no in-game pings — removes the early flushes.
 
 ---
+
+## 125. The air patrol leg: a goal 320 past the waypoint, re-aimed every thirty ticks
+
+*Spec-room finding, 2026-10-14 (ADR-0004). Read from the disassembly of the
+GOG `TotalA.exe` (MD5 `8e74a1dffa1f5988624c52048f5b20cd`); no decompilation was
+consulted. Settles a claim made by an independent reading, which turns out to
+be right.*
+
+§86 recorded the last sentence of this in a paragraph on cadence, and nobody
+has checked RWE against it since. This is the whole routine, with the arrival
+arithmetic, because the arithmetic is what decides how an aircraft looks on a
+route.
+
+### `VTOL_Patrol`, `0x410E70` -- row 6 of the VTOL table
+
+Arguments `(unit, mission, events)`; the state byte is `mission+0x05`. A state
+above 2 returns 7 (flush the list).
+
+**State 0 (`0x4110C3`).** No mover, or `canfly` clear (`def+0x241` bit 11):
+return 7. Otherwise `0x43A020` closes the route with the loop-closing waypoint
+(§86), the mission announces "Patrolling" (`0x50145C`), takes the three weapons
+(`0x4898B0`), detaches from a carrier or pad if `unit+0x86` is set, sets bit 0
+of `unit+0x10E`, and -- only if the mover is in landed mode -- switches it to
+flying with a goal at the aircraft's own position at altitude
+`cruisealt / 2` (halved toward zero). Mask `|= 0xE0`, weapons freed again
+(`0x489800`, slot 3), return 1.
+
+**State 1 (`0x4110AC`).** Clears bits 5 and up of the mission's pending-event
+word (`mission+0x4E &= 0x1F`) and returns 1. A one-tick pause.
+
+**State 2 (`0x410E97`) is the travelling phase and never advances.** Each time
+the handler runs in it, in this order:
+
+1. If any of events `0xE0` is set, **return 6**: the waypoint is retired and
+   the mission goes to the tail of the list (§86's cycling mechanism).
+2. The horizontal bearing from the aircraft's current position to the
+   waypoint at `mission+0x22` is taken with `0x48A980`. The goal is the
+   waypoint **plus 320 world units** (`0x1400000` in 16.16) along that bearing,
+   i.e. 320 beyond the waypoint on the far side from the aircraft. x and z are
+   displaced; y is the waypoint's own. It is built as an absolute-position
+   goal (`0x44E2D0`), given an **arrival tolerance of `0x150` = 336** world
+   units (`0x44E730`), **no altitude instruction** (`0x44E6C0` is not called),
+   and installed with `0x4388D0`, which also clears event bits 5-9. Mask
+   `|= 0xE0`.
+3. The 75% health gate and pad query -- the third of the seven sites in §130.
+4. The sight search `0x43B700`; if it finds something and `0x43B1F0` turns it
+   into a mission, mask = 0 and **return 3**.
+5. Otherwise `0x439E80(mission, 0x1E)` -- **wake in 30 ticks** -- and return 2.
+
+So the goal is **re-derived from where the aircraft is** every time the handler
+runs: on the 30-tick timer, and whenever a goal event wakes it. It is a point
+on the line from the aircraft through the waypoint, 320 past the waypoint; it
+is not fixed to the leg.
+
+### The arrival arithmetic
+
+Goal satisfaction (`0x44E5B0`, §MISSIONS 2) with a tolerance set is purely
+`horizontalDistance(unit, goal) < tolerance`, strict, on the full 16.16
+position. The air navigator's per-tick update (`0x490690`) asks it at
+`0x4907A8`; on success it posts event `0x20` to the goal's mission
+(`0x44CED0` at `0x4907B4`) and clears its own goal.
+
+With the goal 320 past the waypoint and a tolerance of 336, **an aircraft
+flying the line completes the goal when it is 16 units short of the
+waypoint**: its distance to the goal is then 320 + 16 = 336 and the next unit
+of travel makes it strictly less. Off the line, the set of satisfying
+positions is the disc of radius 336 about the goal, which contains the
+waypoint with 16 units to spare. That is all the "arrival radius" there is --
+**16 units, on the near side only**.
+
+What it does not do is brake. The air mover's speed profile (§1) is
+`sqrt(2 * acceleration * max(distance, 8))` to the *goal*, and the distance to
+the goal stays at or above about 320 until the goal completes. The aircraft
+therefore reaches the 16-unit radius at whatever speed it was cruising at and
+turns for the next waypoint without having slowed for this one. **[inferred]
+from the profile and the geometry; the speed itself was not replayed.**
+
+### What RWE does
+
+`handlePatrolOrder` (`src/rwe/sim/UnitBehaviorService.cpp`, about 4595-4734)
+hands the waypoint itself to `navigateTo`, whose arrival test for a flying unit
+is a horizontal distance under `max(8, 4 * maxVelocity)`
+(`UnitBehaviorService_util.cpp`, about 1393). The waypoint is pushed to the back
+of the queue when `navigateTo` reports arrival.
+
+**RWE differs.** An aircraft with `maxVelocity` 9 arrives within 36 units of the
+node, aiming at the node, with the speed profile drawing it down to a stop
+there; the original arrives 16 short, aimed 320 past, without braking. On a
+route of short legs the two are visibly different, the original's being the
+smooth chain of flat passes and RWE's a series of near-stops.
+
+### The change
+
+For a unit with `canFly`, in the patrol handler only:
+
+1. Hold a *patrol goal* and the tick it was set. Recompute it when there is
+   none, when 30 ticks have passed since it was set, or when the aircraft has
+   just come back from an interruption (an attack, a repair-pad trip) and the
+   patrol order is at the front again.
+2. The goal is `node + 320 * unit(node - position)`, horizontal, where
+   `position` is the aircraft's position at the moment of recomputing and
+   `unit(...)` is the unit vector of the x,z difference. A zero difference gives
+   the bearing 0 of the original's `atan2(0,0)`; not worth special handling.
+   Do not clamp it to the map -- the original does not (the goal constructor
+   copies the vector verbatim).
+3. The leg is complete when the horizontal distance to the goal, taken on the
+   full-precision position, is **strictly less than 336**, tested every tick.
+   Then the order is pushed to the back as it is now.
+4. Steer at the goal, not the node, and ask for no altitude change after the
+   take-off climb.
+
+### Not settled
+
+- The relative order of the navigator's arrival test and the mission handler
+  inside one tick (so whether the retirement lands the same tick or the
+  next). Not worth a tick of precision in RWE's model.
+- Whether any caller clamps a goal that lands off the map. None was found in
+  the goal constructor or the navigator update.
+
+## 128. An idle aircraft that is carrying something hops about instead of landing
+
+*Spec-room finding, 2026-10-14 (ADR-0004). Read from the disassembly of the
+GOG `TotalA.exe` (MD5 `8e74a1dffa1f5988624c52048f5b20cd`). Settles a claim
+made by an independent reading: the behaviour is right, the address it was
+filed under is not, and §13 had already decoded the routine.*
+
+### Which routine
+
+`0x40F2A0` is `VTOL_LandIfCan`, not the standby routine. `VTOL_Standby` is
+`0x40F7D0` (§13.2 had the address right). Both are below, because the standby
+routine hands over to the other.
+
+### `VTOL_Standby`, `0x40F7D0` -- what an idle aircraft runs
+
+The anchor is recorded in state 0: the integer x and z words of the unit's
+position (`unit+0x6C`, `unit+0x74`) go into the mission, so **the hop is about
+where the aircraft went idle, not about where it is now**.
+
+State 2 is the one that matters, and its cases are exclusive:
+
+1. **Cannot fly, or not airborne** (`canfly` clear, or the placement state in
+   `unit+0x110` bits 0-1 is not 2): sleep. Mask `|= 0x10000`, timer
+   **`rand(30) + 30`** = 30..59 ticks, state back to 1, return 2. This is the
+   landed aircraft's 30-59 tick wait, and it is the only place that wait is.
+2. **Airborne and carrying something** (`unit+0x8A`, the head of the attached
+   chain, is non-null): **hop**. Draw `theta = rand(0x10000)` *first*, then
+   `r = (rand(0x20) + 8) << 16`, i.e. 8..39 units in 16.16. The waypoint is the
+   anchor displaced by `r` along `Dir(theta)`, with y = 0; it becomes an
+   absolute-position goal (`0x44E2D0`) at **full cruising altitude**
+   (`0x44E6C0`), **no tolerance** (so satisfaction is the default arrival
+   test), installed by `0x4388D0`. Timer `rand(15) + 30` = 30..44 ticks, state
+   1, return 2.
+3. **Airborne and empty**: push `VTOL_LandIfCan` (`0x5012BC`) at the front of
+   the list with the mission's own target position at `mission+0x22`, and
+   return 5 (delete this mission). **There is no wait first.**
+
+State 1 runs the sight search (`0x43B700`, then `0x43B1F0` if it finds
+something) and returns 1, so state 2 is evaluated again the next tick; the mask
+is zero there, so it runs every tick, not on the timer.
+
+So an airborne transport with cargo **never lands on its own**. It sits in the
+air, hopping to a fresh random point within 8..39 units of where it went idle
+every 30..44 ticks, at full cruising altitude, until the cargo is gone or it is
+given something to do. An airborne aircraft without cargo lands at once.
+
+### `VTOL_LandIfCan`, `0x40F2A0` -- what it does, as far as it matters here
+
+Returns 5 immediately if `mission+0x4A` is non-zero or events carry `0x40`.
+State 0 initialises the take-off bookkeeping and stores `rand(0x10000)` at
+`mission+0x36`. State 1 asks `0x47E2D0(unit, &pos)` whether the aircraft may
+land where it is; if so, goal at that position, mask `|= 0xE0`, `0x48B090(1,0)`
+(mover to landing mode), return 1. If not, it tries up to **12 candidate
+spots**, each the position plus `(rand(0x81 + 0x20*k) - (0x40 + 0x10*k)) << 16`
+on both x and z, **snapped to the 16-unit grid**, each tested with `0x47E2D0`;
+if none will do, the bearing at `mission+0x36` is reduced by `0x5555` (a third
+of a turn), the waypoint is the anchor plus `Dir(bearing) * 160`, tolerance
+`0x40` = 64, and it returns 2. State 2: event `0x20` with the mover in mode 1
+returns 5, otherwise 8. **[inferred]** from reading the states; no landing was
+replayed.
+
+### What RWE does
+
+`UnitBehaviorService.cpp` about 456-499 lands any flying idle aircraft
+(`shouldLand`, `navigateTo` with a `NavigationGoalLandingLocation`) and does not
+look at `carriedUnits`. §13.5's sentence that "RWE parks a loaded transport"
+is **wrong at this commit**: it parks every idle aircraft, loaded or not.
+
+**RWE differs.** A loaded transport in the original hangs in the air; in RWE it
+comes down and sits on the ground with its passengers.
+
+### The change
+
+In the idle branch, before the landing decision: if the unit `canFly`, is
+airborne, and `carriedUnits` is non-empty, run the hop instead.
+
+1. Record the anchor (integer x,z of the position) when the unit goes idle --
+   not on every tick.
+2. When the hop timer is due: draw, **in this order**, `theta = rand(0x10000)`,
+   `r = rand(0x20) + 8`, then the timer `rand(15) + 30`. Waypoint = anchor +
+   `r * Dir(theta)` on x,z; steer to it at the unit's full cruising altitude,
+   with the ordinary arrival test.
+3. Draws are from the simulation's generator and the order is part of the
+   result; three draws per hop.
+4. When the unit is not carrying, or lands: the existing behaviour.
+
+About 40 lines. The count and order of draws matters for determinism against a
+recording but not between RWE peers, which run the same code.
+
+### Not settled
+
+- What the original does when the cargo is lost mid-hop: state 2 is entered
+  again next tick and case 3 fires, so it lands from wherever it is. This is
+  read from the state machine, not observed.
