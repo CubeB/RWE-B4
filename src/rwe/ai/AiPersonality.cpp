@@ -35,6 +35,17 @@ namespace rwe
         {
             std::vector<AiPersonality> all;
 
+            // The default seat (ADR-0005): the original's computer player,
+            // read from its profile file and played as the executable plays
+            // it. It has no knobs and no difficulty of its own -- the game's
+            // difficulty button applies to it.
+            all.push_back(AiPersonality{
+                "Original TA",
+                "The original Total Annihilation computer player, as the executable plays it.",
+                std::nullopt,
+                {},
+                AiEngine::Classic});
+
             all.push_back(AiPersonality{"Balanced", "The computer player as it is tuned: expands, defends what it takes, and attacks in waves.", std::nullopt, {}});
 
             // Raiders early and often, and nothing spent standing still:
@@ -148,6 +159,10 @@ namespace rwe
         std::istringstream in(text);
         std::string line;
         int lineNumber = 0;
+        // The first knob's line, for the error a classic personality gets
+        // however far down the file its `engine` line comes.
+        int firstKnobLine = 0;
+        std::string firstKnob;
         while (std::getline(in, line))
         {
             ++lineNumber;
@@ -181,6 +196,13 @@ namespace rwe
                 }
                 personality.difficulty = difficulty;
             }
+            else if (lowerKey == "engine")
+            {
+                if (!aiEngineFromName(value.c_str(), personality.engine))
+                {
+                    throw std::runtime_error("line " + std::to_string(lineNumber) + ": no such AI engine: " + value + " (classic or rwe)");
+                }
+            }
             else
             {
                 // Tried on a scratch profile here, so a misspelt knob is
@@ -200,8 +222,17 @@ namespace rwe
                 {
                     throw std::runtime_error("line " + std::to_string(lineNumber) + ": no such AI knob: " + key);
                 }
+                if (personality.knobs.empty())
+                {
+                    firstKnobLine = lineNumber;
+                    firstKnob = key;
+                }
                 personality.knobs.emplace_back(key, value);
             }
+        }
+        if (personality.engine == AiEngine::Classic && !personality.knobs.empty())
+        {
+            throw std::runtime_error("line " + std::to_string(firstKnobLine) + ": the classic engine has no knobs (" + firstKnob + "); use engine=rwe to tune one");
         }
         if (personality.name.empty())
         {

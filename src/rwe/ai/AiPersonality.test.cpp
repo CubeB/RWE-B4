@@ -10,12 +10,30 @@ namespace rwe
     {
         const auto& all = builtInAiPersonalities();
         REQUIRE(!all.empty());
-        CHECK(all.front().name == "Balanced");
+        CHECK(all.front().name == "Original TA");
         for (const auto& personality : all)
         {
             INFO(personality.name);
             AiTuningProfile profile;
             CHECK(applyAiPersonality(profile, personality) == std::nullopt);
+        }
+    }
+
+    TEST_CASE("Original TA is the classic engine and every other built-in is RWE's", "[ai]")
+    {
+        const auto& all = builtInAiPersonalities();
+        REQUIRE(!all.empty());
+        const auto& original = all.front();
+        CHECK(original.name == "Original TA");
+        CHECK(original.description == "The original Total Annihilation computer player, as the executable plays it.");
+        CHECK(original.engine == AiEngine::Classic);
+        CHECK(original.difficulty == std::nullopt);
+        CHECK(original.knobs.empty());
+
+        for (std::size_t i = 1; i < all.size(); ++i)
+        {
+            INFO(all[i].name);
+            CHECK(all[i].engine == AiEngine::Rwe);
         }
     }
 
@@ -107,6 +125,61 @@ namespace rwe
         SECTION("an unknown difficulty is refused")
         {
             CHECK_THROWS_AS(parseAiPersonality("difficulty=impossible\n", "x"), std::runtime_error);
+        }
+    }
+
+    TEST_CASE("a personality file names its engine, and is RWE's when it does not", "[ai]")
+    {
+        SECTION("no engine line is RWE's, as every file written before the choice was")
+        {
+            auto p = parseAiPersonality("attackArmySize=4\n", "old");
+            CHECK(p.engine == AiEngine::Rwe);
+        }
+
+        SECTION("engine=rwe")
+        {
+            auto p = parseAiPersonality("engine=rwe\nattackArmySize=4\n", "x");
+            CHECK(p.engine == AiEngine::Rwe);
+            CHECK(p.knobs.size() == 1);
+        }
+
+        SECTION("engine=classic, in any case, with a difficulty and no knobs")
+        {
+            auto p = parseAiPersonality("name=Plain\nEngine = Classic\ndifficulty=hard\n", "x");
+            CHECK(p.engine == AiEngine::Classic);
+            CHECK(p.difficulty == AiDifficulty::Hard);
+            CHECK(p.knobs.empty());
+        }
+
+        SECTION("an engine it does not know is refused, naming the line")
+        {
+            try
+            {
+                parseAiPersonality("name=X\nengine=quantum\n", "x");
+                FAIL("an unknown engine was accepted");
+            }
+            catch (const std::runtime_error& e)
+            {
+                CHECK(std::string(e.what()).find("line 2") != std::string::npos);
+                CHECK(std::string(e.what()).find("quantum") != std::string::npos);
+            }
+        }
+
+        SECTION("a classic personality that lists a knob is refused, wherever the engine line is")
+        {
+            for (const char* text : {"engine=classic\nattackArmySize=4\n", "attackArmySize=4\nengine=classic\n"})
+            {
+                INFO(text);
+                try
+                {
+                    parseAiPersonality(text, "x");
+                    FAIL("a knob on a classic personality was accepted");
+                }
+                catch (const std::runtime_error& e)
+                {
+                    CHECK(std::string(e.what()).find("the classic engine has no knobs") != std::string::npos);
+                }
+            }
         }
     }
 
