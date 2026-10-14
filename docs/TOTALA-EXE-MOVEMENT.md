@@ -1923,6 +1923,10 @@ stops it now.
 
 ## 132. The order of work inside a unit tick: weapons, scripts, orders, motion
 
+> **Status: decoded, not ported, deferred on purpose** (2026-10-14). See
+> `ROADMAP.md`, "Deferred on purpose", for why and for how to pick it up. It
+> belongs with §138.
+
 Settled 2026-10-14 from the unit pass `0x48AD30`, read in the disassembly of the
 GOG executable (the build identified at the top of [TOTALA-EXE.md](TOTALA-EXE.md))
 and from nothing else. An independent reading of the same binary claimed the
@@ -2043,6 +2047,11 @@ decrement is what the oracles agree with (§110), so it stays.
 ---
 
 ## 138. How often an idle unit looks for a fight: the poll timers and their draws
+
+> **Status: decoded, not ported, deferred on purpose** (2026-10-14). See
+> `ROADMAP.md`, "Deferred on purpose". It belongs with §132, and it makes idle
+> units notice enemies *later*, which is the original's behaviour and not an
+> improvement.
 
 Settled 2026-10-14 from the patrol, standby and chooser routines named below,
 read in the executable's disassembly. §86 recorded the patrol cadence (air 30, ground 45-74) and WEAPONS "The scan"

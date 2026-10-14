@@ -790,6 +790,64 @@ Demos and mod files never enter the repository; only extracted numbers do, and
 delta against `TOTALA-EXE.md` §88 rather than a bare equality, so that a corpus
 this size cannot quietly regress a deliberate difference.
 
+### Deferred on purpose: the unit tick's stage order and the idle poll cadences
+
+Settled against the executable on 2026-10-14 (`TOTALA-EXE-MOVEMENT.md` §132 and
+§138) and **deliberately not ported**. Written down here so that nobody
+rediscovers them as bugs, and so that a later session can pick them up with the
+whole decision in front of it. Neither is an improvement to play; both are
+fidelity, and both are hash-affecting for every game.
+
+- [ ] **Stage order inside a unit's tick (§132).** The original runs, per unit,
+      weapons, then that unit's script threads and piece animation, then
+      self-repair and acid water, then the primary and secondary order lists,
+      then motion, and visits units player by player and slot by slot. RWE runs
+      orders, weapons, motion, then two all-units passes (pieces, scripts), then
+      self-repair, and visits by unit id. Observable: the first shot from an
+      attack order leaves on T+2 in the original and T+1 in RWE; a script's
+      `get` of its own position is one tick older; the displayed pose is one
+      animation step further on. The register has the exact change (about sixty
+      lines of `UnitBehaviorService::update` and `GameSimulation::tick`).
+- [ ] **Idle poll cadences (§138).** The original's patrol and standby
+      handlers poll for a target on timers -- ground patrol every 45 to 74
+      ticks, ground standby and Standby_Mine every 30 to 59, air patrol every
+      30, an airborne idle aircraft every 30 to 59 -- and draw a fixed number
+      of random values per poll in a fixed order (the section lists them).
+      RWE's chooser runs every tick for every patrolling or standing unit.
+      Observable: a unit notices an enemy up to about two and a half seconds
+      later, which is how the original behaves and why its idle units can stand
+      and be shot; and every other random draw in the game sees a different
+      sequence.
+
+**Why they are not done.** They do not make anything better to play. §138 makes
+idle units *worse* by design; §132 moves a shot by one tick, which no one can
+see. The cost is real: every recorded replay and every fixture that counts
+ticks (first shot, nanolathe creation tick, build completion) moves, RWE's
+tuned computer player (`docs/AI-TUNING.md`) was measured against per-tick
+noticing and would need re-measuring, and the section budget has little room in
+`GameSimulation.cpp`.
+
+**If it is ever picked up.**
+
+1. Land **both together**: a poll is an order-stage act and the target it sets
+   is first used on the next tick, so the two interact (§138 says so).
+2. **Measure first, decide second.** Run `tools/tad-buildtime.py`,
+   `tad-weapontime.py` and `tad-stalltime.py` before and after, on the demo
+   corpus. If the oracles do not fit better, the change is not worth the break.
+3. **Gate it.** Find out first how replays and the protocol are versioned
+   (it was not established when this was written); if there is no
+   simulation-version switch, add one (the replay header is the place) so that
+   an older recording still plays under the old order. A lockstep game needs
+   both peers on the same rule, which `BuildIdentity` already enforces between
+   two builds of one commit and would not across a release unless the lobby
+   carries the switch too.
+4. **Keep the option.** Offer it as a game option defaulting to RWE's order,
+   like the four switches in `docs/compatibility.md`, until the oracle result is
+   in; a skirmish setting costs nothing and a default flip can follow evidence.
+5. Re-run the RWE computer player's arena baselines (`--ai-engine rwe`) and
+   `tools/hash-oracle.sh` afterwards, and update the fixtures that count ticks
+   with a comment citing the section.
+
 ### The v3.1 interface features
 
 `docs/TA-PATCHES.md` settles what the two patches did. The GOG executable is

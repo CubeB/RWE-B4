@@ -632,6 +632,11 @@ quirks of the original that RWE reproduces although they look like defects.
 
 ## 91. Still unknown or unported
 
+- **The unit tick's stage order (§132) and the idle poll cadences (§138)** are
+  decoded against the executable and **deliberately not ported**: they change
+  nothing a player would call better, and they move every replay and every
+  tick-counting fixture. The decision, the acceptance check and the order to
+  do it in are in `ROADMAP.md`, "Deferred on purpose".
 - **The campaign's win and lose rules** (§113) are decoded and not ported:
   all eighteen `[GlobalHeader]` conditions, checked once a second, all
   victory rules in order and any defeat rule, victory first, then a
