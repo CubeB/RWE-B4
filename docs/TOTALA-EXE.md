@@ -207,6 +207,17 @@ Everything else lives in a subject file. **The numbers never move**, so a
 
 ## 88. Where RWE deliberately differs
 
+**The default computer player is now the original's (2026-10-14, ADR-0005).**
+RWE's own computer player, which transports, fights with aircraft and guards,
+is the `rwe` engine and an option; sections 119-123 are what the default is
+written from. Sections 125-138 record behaviours verified against the
+executable on 2026-10-14 that RWE's units do **not** yet follow: the air patrol
+leg (125), aim lead (126), flat range (127), the idle loaded transport (128),
+the hover reroll (129), repair break-off (130), constructor patrols (131), the
+order of work inside a unit tick (132), what a factory hands its product (133),
+build refunds (134), the queue toggle and formation (136) and the idle poll
+cadences (138). Each section says what to change.
+
 Recorded so these do not get "fixed" back later by someone comparing against the
 original. `docs/compatibility.md` is the same list in plain language, grouped by
 why rather than by subsystem, and adds the other half of the question -- the

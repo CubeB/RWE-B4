@@ -1007,6 +1007,7 @@ namespace rwe
             request.idle = gameParameters.replayFile && !gameParameters.replayShadowAi;
             request.vfs = services.vfs;
             request.aiProfileName = ota.schemas.at(gameParameters.schemaIndex).aiProfile;
+            request.unitLimit = static_cast<unsigned int>(std::max(1, ota.maxUnits));
 
             simulation.addAiController(aiPlayerId, createAiController(simulation, request, mapIntel, buildTree));
         }

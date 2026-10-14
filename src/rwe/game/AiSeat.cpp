@@ -104,6 +104,10 @@ namespace rwe
             ClassicAiConfig config;
             config.difficulty = difficulty;
             config.idle = request.idle;
+            config.unitLimit = request.unitLimit;
+            // Read-only and the same for every seat; a copy per seat keeps
+            // the controller from outliving the loader's table.
+            config.buildTree = std::make_shared<const AiBuildTree>(buildTree);
             if (request.vfs != nullptr)
             {
                 auto file = readClassicAiProfile(*request.vfs, request.aiProfileName);
