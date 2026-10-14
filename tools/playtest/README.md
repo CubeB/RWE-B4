@@ -28,7 +28,7 @@ Hand-made minimal tables, one per rule's hit and clean case. To refresh one,
 capture a real run and trim:
 
     build/ai_arena --map "Coast To Coast" --ai-arena 900 --seed 1 \
-      --player "A;Computer;ARM;0" --player "B;Computer;CORE;1" \
+      --player "A;Computer;ARM;0" --player "B;Computer;CORE;1" --ai-engine rwe \
       --out /tmp/x --log /tmp/x/game.log
 
 then copy the relevant rows into the fixture by hand. The point is a small,

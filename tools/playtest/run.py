@@ -217,6 +217,10 @@ def build_command(binary, run: PlannedRun, run_dir) -> list:
             spec += f";{p['team']}"
         cmd += ["--player", spec]
 
+    # The playtest matrix measures RWE's own computer player, so say so: the
+    # default seat is the original's (ADR-0005).
+    cmd += ["--ai-engine", "rwe"]
+
     difficulties = {p["difficulty"] for p in run.players}
     if len(difficulties) == 1:
         cmd += ["--ai-difficulty", difficulties.pop()]

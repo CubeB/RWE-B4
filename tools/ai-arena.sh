@@ -134,7 +134,7 @@ run_game() {
     local log="$out/game-$seed-$arm.log"
     local args=(--log "$log" --ai-arena "$seconds" --seed "$seed" --map "$map"
         --player "A;Computer;$side_a;0" --player "B;Computer;$side_b;1"
-        --ai-difficulty "$difficulty" --start-location "$start_location")
+        --ai-engine rwe --ai-difficulty "$difficulty" --start-location "$start_location")
     if [ "$tuned" -ge 0 ]; then
         local IFS=','
         local knob

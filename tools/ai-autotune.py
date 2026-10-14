@@ -412,6 +412,7 @@ def build_command(exe: str, data_path: str, task: GameTask, specs_by_name: Dict[
         "--map", task.map_name,
         "--ai-arena", str(task.seconds),
         "--seed", str(task.seed),
+        "--ai-engine", "rwe",
         "--ai-difficulty", task.difficulty,
         "--start-location", task.start_location,
         "--data-path", data_path,

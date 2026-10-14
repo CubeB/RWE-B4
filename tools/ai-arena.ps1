@@ -115,6 +115,7 @@ function Invoke-ArenaGame {
         '--map', ('"' + $map + '"'),
         '--player', ('"A;Computer;' + $sideA + ';0"'),
         '--player', ('"B;Computer;' + $sideB + ';1"'),
+        '--ai-engine', 'rwe',
         '--ai-difficulty', $difficulty,
         '--start-location', $startLocation
     )

@@ -58,7 +58,7 @@ run_one() {
 
     RWE_HASH_LOG="$win_dir\\$out-$tag.txt" \
         "$EXE" --ai-arena "$SECONDS_OF_GAME" --seed "$seed" --map "$map" \
-            --player "A;Computer;ARM;0" --player "B;Computer;CORE;1" \
+            --player "A;Computer;ARM;0" --player "B;Computer;CORE;1" --ai-engine rwe \
             --data-path "$DATA" > /dev/null 2>&1 || {
         echo "  $tag: engine exited non-zero" >&2
         return 1

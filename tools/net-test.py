@@ -259,6 +259,9 @@ class Harness:
             args += ["--player", spec]
         if self.args.ai:
             args += ["--player", f"Computer;Computer;{SIDES[self.count % 2]};{self.count}"]
+            # The computer player this test is about is RWE's own; the
+            # default seat is the original's (ADR-0005).
+            args += ["--ai-engine", "rwe"]
         args += ["--log", str(log)]
         if record_replay:
             args += ["--record-replay", str(self.out_dir / f"peer{me}.rwereplay")]

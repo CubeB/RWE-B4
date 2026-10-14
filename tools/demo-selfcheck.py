@@ -278,6 +278,7 @@ def main() -> int:
             "--ai-arena", str(args.seconds),
             "--seed", str(args.seed),
             "--start-location", args.start_location,
+            "--ai-engine", "rwe",
             "--ai-difficulty", args.ai_difficulty,
             "--out", work,
             "--log", work / "ai_arena.log",
