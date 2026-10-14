@@ -344,7 +344,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        configuration: [Debug, Release]
+        configuration: [Release]
     runs-on: windows-2025-vs2026
     steps:
       - uses: actions/checkout@v6
@@ -438,6 +438,99 @@ jobs:
           name: RWE Installer ${{ runner.os }} MSVC ${{ matrix.configuration }}
           path: build/dist/RobotWarEngine-*-Windows-${{ matrix.configuration }}.exe
           if-no-files-found: error
+
+  build-windows-msvc-debug:
+    # Two questions, and both must pass. Which label was just added, if
+    # this was a label at all -- only ci:full starts anything, so putting
+    # any other label on a pull request that already carries ci:full does
+    # not set the Windows matrix going again. And then the ordinary one:
+    # is this a push, or a pull request that asked for the full matrix.
+    # Split from build-windows-msvc so that the nightly does not wait for it:
+    # a Debug build ships nothing, and a matrix job cannot be depended on one
+    # leg at a time. It is still a required part of a release (see `release`)
+    # and of every run's own result -- it is only the nightly that does not
+    # hold for it.
+    if: |
+      (github.event.action != 'labeled' || github.event.label.name == 'ci:full')
+      && (github.event_name != 'pull_request'
+          || contains(github.event.pull_request.labels.*.name, 'ci:full'))
+    # A job that hangs should fail in a reasonable time rather than
+    # hold a runner for GitHub's six-hour default: on 2026-09-06 a
+    # modal assertion dialog in the MSVC Debug test run sat for two
+    # hours and eighteen minutes before it was cancelled by hand.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug]
+    runs-on: windows-2025-vs2026
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: init submodules (shallow)
+        run: git submodule update --init --recursive --depth 1
+      - name: install node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: launcher/package-lock.json
+      - name: install npm packages
+        working-directory: launcher
+        run: npm ci
+      # CPack installs launcher/rwe-launcher-win32-x64/, so the packaged
+      # launcher is a build input here, not a check. The checks live in the
+      # `launcher` job.
+      - name: package launcher
+        working-directory: launcher
+        run: npm run package
+      - run: python3 fetch-msvc-libs.py
+      # Chocolatey's download is the one step here that fails for reasons that
+      # are nobody's code (2026-10-14: a MinGW Release job died in 3.5 minutes
+      # at `choco install nsis`), so it is tried three times.
+      - name: install tools
+        run: |
+          for ($i = 1; $i -le 3; $i++) {
+            choco install sccache nsis ninja -y --no-progress
+            if ($LASTEXITCODE -eq 0) { break }
+            Write-Host "choco install failed (attempt $i of 3)"
+            Start-Sleep -Seconds (10 * $i)
+          }
+          exit $LASTEXITCODE
+      # The cache lives in the workspace, where it is known to exist: the
+      # default sits under the user profile and the step that saved it
+      # reported "Path Validation Error ... no cache is being saved" on every
+      # run, so no Windows job had ever started from a warm cache.
+      - name: restore sccache
+        uses: actions/cache@v5
+        with:
+          path: .sccache
+          key: sccache-${{ runner.os }}-msvc-${{ matrix.configuration }}-${{ github.sha }}
+          restore-keys: sccache-${{ runner.os }}-msvc-${{ matrix.configuration }}-
+      # Ninja, not the Visual Studio generator: CMake only honours a compiler
+      # launcher under Makefile and Ninja generators, so with "Visual Studio 18
+      # 2026" sccache sat in the command line and was never run. Ninja needs
+      # the compiler's environment, hence vcvars64. /Z7 (Embedded) because
+      # sccache cannot cache an object that shares a PDB (/Zi).
+      - name: build rwe
+        shell: cmd
+        env:
+          SCCACHE_DIR: ${{ github.workspace }}\.sccache
+          SCCACHE_CACHE_SIZE: 1G
+        run: |
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 exit /b 1
+          mkdir build
+          cd build
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache .. || exit /b 1
+          cmake --build . || exit /b 1
+          sccache --show-stats
+      - name: test rwe
+        working-directory: build
+        env:
+          RWE_TEST_ANNOUNCE: 1
+        run: .\rwe_test.exe --durations yes
 
   build-windows-mingw64:
     # Two questions, and both must pass. Which label was just added, if
@@ -592,7 +685,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [launcher, build-linux, build-windows-msvc]
+    needs: [launcher, build-linux, build-windows-msvc, build-windows-msvc-debug]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -632,6 +725,10 @@ jobs:
   # is and what changed since the previous nightly. The tag is lightweight on
   # purpose -- CMake's `git describe` sees only annotated tags, so it never
   # leaks into the version the binaries report.
+  # Publishes when the Linux builds and the MSVC *Release* build have passed.
+  # MSVC Debug is its own job and is deliberately not waited for: it ships
+  # nothing, and it was the slowest thing the nightly sat behind. A Debug-only
+  # failure still fails the run -- it just no longer holds the nightly back.
   nightly:
     if: github.event_name == 'push' && github.ref == 'refs/heads/revival'
     needs: [launcher, build-linux, build-windows-msvc]
