@@ -371,6 +371,8 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_util.cpp
     src/rwe/game/featureplacement.cpp
     src/rwe/game/GameScene_util.h
+    src/rwe/game/AiSeat.cpp
+    src/rwe/game/AiSeat.h
     src/rwe/game/GameSimulationLoader.cpp
     src/rwe/game/GameSimulationLoader.h
     src/rwe/game/InGameSoundsInfo.cpp
@@ -1139,6 +1141,7 @@ set(TEST_FILES
     src/rwe/game/GameNetworkService.test.cpp
     src/rwe/game/GameEndedReport.test.cpp
     src/rwe/game/aicommandfeed.test.cpp
+    src/rwe/game/AiSeat.test.cpp
     src/rwe/game/commandorder.test.cpp
     src/rwe/game/playerdrop.test.cpp
     src/rwe/game/LockstepStats.test.cpp

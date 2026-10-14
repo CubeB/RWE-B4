@@ -13,7 +13,7 @@
 #include <rwe/LoadingScene_util.h>
 #include <rwe/sim/MissionScripts.h>
 #include <rwe/ai/AiPersonality.h>
-#include <rwe/ai/AiPlayerController.h>
+#include <rwe/game/AiSeat.h>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/game/DownloadMenus.h>
 #include <rwe/game/FeatureMediaInfo.h>
@@ -943,9 +943,10 @@ namespace rwe
         // Read once, and only if some seat asks for a personality.
         std::optional<std::vector<AiPersonality>> aiPersonalities;
 
-        // Instantiate one AiPlayerController per Computer player.
-        // The controller's RNG is sub-seeded from simulation.rng so its
-        // sequence is part of the seeded sim and survives replays
+        // Instantiate one controller per Computer player, whichever engine
+        // plays the seat (ADR-0005; see createAiController). The controller's
+        // RNG is sub-seeded from simulation.rng so its sequence is part of the
+        // seeded sim and survives replays
         // (docs/ai-architecture-proposal.md §12-Q6).
         for (Index i = 0; i < getSize(simulation.players); ++i)
         {
@@ -964,13 +965,20 @@ namespace rwe
                 continue;
             }
 
-            // The personality chosen for this seat, if any. The seat is the
-            // lobby's slot, which is not the player's index once an empty
-            // slot has been skipped.
-            std::optional<AiPersonality> personality;
+            // The personality chosen for this seat, if any, and the engine a
+            // saved game recorded for it. The seat is the lobby's slot, which
+            // is not the player's index once an empty slot has been skipped.
+            AiSeatRequest request;
+            request.playerId = aiPlayerId;
+            request.side = player.side;
             for (Index slot = 0; slot < getSize(gamePlayers); ++slot)
             {
-                if (gamePlayers[slot] != aiPlayerId || !gameParameters.players[slot] || !gameParameters.players[slot]->aiPersonality)
+                if (gamePlayers[slot] != aiPlayerId || !gameParameters.players[slot])
+                {
+                    continue;
+                }
+                request.savedEngine = gameParameters.players[slot]->aiEngine;
+                if (!gameParameters.players[slot]->aiPersonality)
                 {
                     continue;
                 }
@@ -979,79 +987,28 @@ namespace rwe
                 {
                     aiPersonalities = loadAiPersonalities(aiPersonalityDirectory());
                 }
-                personality = findAiPersonality(*aiPersonalities, name);
-                if (!personality)
+                request.personality = findAiPersonality(*aiPersonalities, name);
+                if (!request.personality)
                 {
                     // A saved game can outlive the file it was played with;
-                    // the game still loads, as the difficulty's own.
+                    // the game still loads, on the engine it recorded or the
+                    // game's default, as the difficulty's own.
                     LOG_WARN << "Player " << i << ": no AI personality called " << name << ", playing the default";
                 }
             }
 
-            // Every computer player in a game shares the difficulty chosen for
-            // the game (--ai-difficulty, rwe.cfg or the skirmish menu), unless
-            // its personality names one of its own.
-            auto profile = makeProfileForDifficulty(personality && personality->difficulty ? *personality->difficulty : gameParameters.aiDifficulty);
-            // What this player's faction plays differently, before its
-            // personality and any --ai-tune, so that either can set a knob
-            // back.
-            applyFactionDefaults(profile, player.side);
-            if (personality)
-            {
-                if (auto knob = applyAiPersonality(profile, *personality))
-                {
-                    LOG_WARN << "Player " << i << ": the " << personality->name << " personality sets " << *knob << ", which is no AI knob";
-                }
-                LOG_INFO << "Player " << i << " plays the " << personality->name << " personality";
-            }
-            for (const auto& entry : gameParameters.aiTuning)
-            {
-                auto colon = entry.find(':');
-                auto equals = entry.find('=');
-                if (colon == std::string::npos || equals == std::string::npos || equals < colon)
-                {
-                    throw std::runtime_error("--ai-tune wants <player>:<knob>=<value>, got " + entry);
-                }
-                if (std::stoul(entry.substr(0, colon)) != static_cast<unsigned long>(i))
-                {
-                    continue;
-                }
-                auto knob = entry.substr(colon + 1, equals - colon - 1);
-                auto value = entry.substr(equals + 1);
-                // A misspelt knob that silently did nothing would make an
-                // arena comparison between two identical AIs look like a
-                // result, so it is fatal.
-                if (!applyAiTuning(profile, knob, value))
-                {
-                    throw std::runtime_error("--ai-tune: no such AI knob: " + knob);
-                }
-                LOG_INFO << "Player " << i << " AI knob " << knob << " = " << value;
-            }
-            if (gameParameters.replayFile && !gameParameters.replayShadowAi)
-            {
-                // Watching rather than playing: the commands come out of the
-                // file, so a thinking AI would only add its own on top.
-                //
-                // The controller is still CONSTRUCTED, and that is the whole
-                // point of idling it here rather than skipping it. Building
-                // one draws a value from simulation.rng, and the start
-                // positions are dealt from that same stream a few lines
-                // further down -- skip the draw and every commander spawns
-                // somewhere else, which is a divergence on the very first
-                // tick and looks like anything except an off-by-one in the
-                // random number generator.
-                profile.idle = true;
-            }
-            LOG_INFO << "Player " << i << " is a computer player at " << aiDifficultyName(profile.difficulty) << " difficulty";
+            request.defaultEngine = gameParameters.aiEngine;
+            request.gameDifficulty = gameParameters.aiDifficulty;
+            request.tuning = gameParameters.aiTuning;
+            // Watching rather than playing: a replay's commands come out of
+            // the file. The controller is still built and still draws, which
+            // is why the loader idles it rather than skipping it -- see
+            // createAiController.
+            request.idle = gameParameters.replayFile && !gameParameters.replayShadowAi;
+            request.vfs = services.vfs;
+            request.aiProfileName = ota.schemas.at(gameParameters.schemaIndex).aiProfile;
 
-            // Pull a single value from the sim RNG to seed the AI's
-            // sub-RNG. This keeps AI choices reproducible across clients
-            // that share `simulation.rng`'s seed.
-            const std::uint64_t aiSeed = static_cast<std::uint64_t>(simulation.rng());
-
-            simulation.addAiController(
-                aiPlayerId,
-                std::make_unique<AiPlayerController>(aiPlayerId, std::move(profile), aiSeed, mapIntel, buildTree));
+            simulation.addAiController(aiPlayerId, createAiController(simulation, request, mapIntel, buildTree));
         }
 
         // Which of the map's start positions each filled slot takes. Fixed

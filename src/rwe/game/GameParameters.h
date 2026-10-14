@@ -3,6 +3,7 @@
 #include <array>
 #include <memory>
 #include <optional>
+#include <rwe/ai/AiEngine.h>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/game/PlayerColorIndex.h>
 #include <rwe/pathfinding/PathfindingBackend.h>
@@ -79,6 +80,15 @@ namespace rwe
          * the launcher does not send one, and a network game has none.
          */
         std::optional<std::string> aiPersonality{};
+
+        /**
+         * The engine a saved game recorded this computer player as having
+         * played (ADR-0005). Nothing for a fresh game, where the personality
+         * and then GameParameters::aiEngine decide; a save from before the
+         * choice existed reads back as Rwe, because it was played by RWE's
+         * own computer player and must not change opponent on load.
+         */
+        std::optional<AiEngine> aiEngine{};
     };
 
     /** SKIRMISH.GUI's Line of Sight button. */
@@ -212,6 +222,13 @@ namespace rwe
         std::optional<std::string> stateLogFile;
         /** Tuning profile given to every computer player in this game. */
         AiDifficulty aiDifficulty{AiDifficulty::Standard};
+
+        /**
+         * The computer player a seat plays when nothing more specific says
+         * (its personality, or what a saved game recorded): the original's,
+         * by ADR-0005. --ai-engine sets it.
+         */
+        AiEngine aiEngine{AiEngine::Classic};
 
         /**
          * Single AI knobs overridden for one player, each as
