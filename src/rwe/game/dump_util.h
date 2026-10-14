@@ -137,7 +137,12 @@ namespace rwe
 
     nlohmann::json dumpJson(const DiscreteRect& r);
 
-    /** The explored grid as a flat array of its per-cell group masks. */
+    /**
+     * The explored grid as `{width, height, rows}`: a string a row, each a
+     * space-separated list of `mask*count` runs left to right, so a row that
+     * is all unexplored is `0*200`. Not one number a cell: that was 40000
+     * lines of a desync report on an ordinary map.
+     */
     nlohmann::json dumpJson(const Grid<ExploredMask>& grid);
 
     nlohmann::json dumpJson(const GameSimulation& simulation);

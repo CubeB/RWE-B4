@@ -16,6 +16,39 @@ namespace rwe
 
     using TestVariant = std::variant<int, bool, float>;
 
+    TEST_CASE("the explored grid is dumped as runs, a string a row")
+    {
+        SECTION("an unexplored map is one short line a row")
+        {
+            Grid<ExploredMask> grid(6, 2, ExploredMask(0));
+            const auto j = dumpJson(grid);
+            CHECK(j["width"] == 6);
+            CHECK(j["height"] == 2);
+            REQUIRE(j["rows"].size() == 2);
+            CHECK(j["rows"][0] == "0*6");
+            CHECK(j["rows"][1] == "0*6");
+        }
+
+        SECTION("a run stops where the value changes, and a row stops where the row does")
+        {
+            Grid<ExploredMask> grid(5, 2, ExploredMask(0));
+            grid.set(1, 0, ExploredMask(3));
+            grid.set(2, 0, ExploredMask(3));
+            grid.set(4, 0, ExploredMask(1));
+            // the second row starts with the value the first ended on
+            grid.set(0, 1, ExploredMask(1));
+            const auto j = dumpJson(grid);
+            CHECK(j["rows"][0] == "0*1 3*2 0*1 1*1");
+            CHECK(j["rows"][1] == "1*1 0*4");
+        }
+
+        SECTION("a degenerate grid has no rows")
+        {
+            Grid<ExploredMask> grid(0, 0, ExploredMask(0));
+            CHECK(dumpJson(grid)["rows"].empty());
+        }
+    }
+
     TEST_CASE("dumpJson")
     {
         SECTION("works on float")

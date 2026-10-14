@@ -470,12 +470,44 @@ namespace rwe
     }
     nlohmann::json dumpJson(const Grid<ExploredMask>& grid)
     {
-        auto cells = nlohmann::json::array();
-        for (auto cell : grid.getVector())
+        // One string a row, each a space-separated list of "mask*count"
+        // runs. The report used to carry one number per cell, which on a
+        // 200 x 200 map was 40000 lines of a file whose other sections are a
+        // few hundred, and a pretty-printed array of [mask, count] pairs is
+        // four lines a pair. A row of strings is a line a row: an unexplored
+        // row is "0*200", and a diff between two peers' reports lands on the
+        // row that differs, which is what anybody reading it wants.
+        const auto width = static_cast<std::size_t>(grid.getWidth());
+        const auto height = static_cast<std::size_t>(grid.getHeight());
+        const auto& cells = grid.getVector();
+
+        auto rows = nlohmann::json::array();
+        for (std::size_t y = 0; y < height; ++y)
         {
-            cells.push_back(static_cast<std::uint32_t>(cell));
+            std::string row;
+            std::size_t x = 0;
+            while (x < width)
+            {
+                const auto mask = cells[y * width + x];
+                std::size_t end = x + 1;
+                while (end < width && cells[y * width + end] == mask)
+                {
+                    ++end;
+                }
+                if (!row.empty())
+                {
+                    row += ' ';
+                }
+                row += std::to_string(static_cast<std::uint32_t>(mask)) + "*" + std::to_string(end - x);
+                x = end;
+            }
+            rows.push_back(std::move(row));
         }
-        return cells;
+
+        return nlohmann::json{
+            {"width", grid.getWidth()},
+            {"height", grid.getHeight()},
+            {"rows", std::move(rows)}};
     }
     nlohmann::json dumpJson(const MissionRules& m)
     {
