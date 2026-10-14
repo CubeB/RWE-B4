@@ -1,5 +1,6 @@
 #include "PlayerCommandApplication.h"
 
+#include <algorithm>
 #include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/UnitBehaviorService.h>
 #include <rwe/sim/UnitState.h>
@@ -23,6 +24,17 @@ namespace rwe
             if (bufferedCount <= bufferDepth)
             {
                 auto aiCommands = simulation.takeAiCommandsForPlayer(id);
+
+                // Resource sharing is a human's preference (the automatic
+                // pass skips computer players altogether), and the AI has no
+                // business toggling it. Dropped here, before it reaches a
+                // command set, so that every peer drops the same ones.
+                aiCommands.erase(
+                    std::remove_if(aiCommands.begin(), aiCommands.end(), [](const PlayerCommand& c) {
+                        return std::holds_alternative<PlayerShareCommand>(c);
+                    }),
+                    aiCommands.end());
+
                 playerCommandService.pushCommands(id, aiCommands);
                 ++bufferedCount;
             }

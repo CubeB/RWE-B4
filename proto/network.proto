@@ -259,6 +259,26 @@ message PlayerRejoinedCommand
     required uint32 from_tick = 2;
 }
 
+// One resource-sharing action: a toggle, a reserve, or a gift. The issuer is
+// the sender's player, as for every command. `amount` is the reserve to set
+// or the quantity to give; `target` and `give_metal` are for Give only.
+message PlayerShareCommand
+{
+    enum Kind
+    {
+        ToggleMetal = 0;
+        ToggleEnergy = 1;
+        SetMetalReserve = 2;
+        SetEnergyReserve = 3;
+        Give = 4;
+    }
+
+    required Kind kind = 1;
+    optional float amount = 2;
+    optional uint32 target = 3;
+    optional bool give_metal = 4;
+}
+
 message PlayerCommand
 {
     oneof command
@@ -269,6 +289,7 @@ message PlayerCommand
         PlayerSetGameSpeedCommand set_game_speed = 4;
         PlayerDroppedCommand dropped = 5;
         PlayerRejoinedCommand rejoined = 6;
+        PlayerShareCommand share = 7;
     }
 }
 

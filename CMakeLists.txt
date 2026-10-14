@@ -402,6 +402,8 @@ set(SOURCE_FILES
     src/rwe/game/DesyncReport.cpp
     src/rwe/game/chat_util.cpp
     src/rwe/game/chat_util.h
+    src/rwe/game/chat_command.cpp
+    src/rwe/game/chat_command.h
     src/rwe/game/DesyncReport.h
     src/rwe/game/dump_util.cpp
     src/rwe/game/dump_util.h
@@ -727,6 +729,8 @@ src/rwe/net/EndpointFamily.h
     src/rwe/sim/TaWireTape.h
     src/rwe/sim/ResourceSettler.cpp
     src/rwe/sim/ResourceSettler.h
+    src/rwe/sim/ResourceSharing.cpp
+    src/rwe/sim/ResourceSharing.h
     src/rwe/sim/SimAngle.cpp
     src/rwe/sim/SimAngle.h
     src/rwe/sim/SimAxis.h
@@ -1131,6 +1135,9 @@ set(TEST_FILES
     src/rwe/game/PlayerCommand_hotkey.test.cpp
     src/rwe/game/PlayerCommand_patrol.test.cpp
     src/rwe/game/PlayerCommand_speed.test.cpp
+    src/rwe/game/PlayerCommand_share.test.cpp
+    src/rwe/game/chat_command.test.cpp
+    src/rwe/sim/ResourceSharing.test.cpp
     src/rwe/game/PlayerCommandService.test.cpp
     src/rwe/game/EndGameStats.test.cpp
     src/rwe/game/dump_util.test.cpp

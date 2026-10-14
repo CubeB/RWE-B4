@@ -83,7 +83,17 @@ namespace rwe
             p.metalProductionBuffer,
             p.energyProductionBuffer,
             p.previousMetalProductionBuffer,
-            p.previousEnergyProductionBuffer);
+            p.previousEnergyProductionBuffer,
+            // The hash is a sum, so two members of equal value are
+            // interchangeable in it: one peer with metal sharing on and
+            // another with energy sharing on would agree. The flags are
+            // therefore packed into one number whose bits differ, and the
+            // energy reserve is counted twice so that a metal reserve of 250
+            // and an energy reserve of 250 do not add to the same thing.
+            (p.shareMetal ? 1u : 0u) | (p.shareEnergy ? 2u : 0u),
+            p.metalReserve,
+            p.energyReserve,
+            p.energyReserve);
     }
 
     /**

@@ -279,6 +279,35 @@ namespace rwe
             out.set_player(c.player.value);
             out.set_from_tick(c.fromTick);
         }
+
+        void operator()(const PlayerShareCommand& c)
+        {
+            auto& out = *cmd->mutable_share();
+            switch (c.kind)
+            {
+                case PlayerShareCommand::Kind::ToggleMetal:
+                    out.set_kind(proto::PlayerShareCommand::ToggleMetal);
+                    break;
+                case PlayerShareCommand::Kind::ToggleEnergy:
+                    out.set_kind(proto::PlayerShareCommand::ToggleEnergy);
+                    break;
+                case PlayerShareCommand::Kind::SetMetalReserve:
+                    out.set_kind(proto::PlayerShareCommand::SetMetalReserve);
+                    break;
+                case PlayerShareCommand::Kind::SetEnergyReserve:
+                    out.set_kind(proto::PlayerShareCommand::SetEnergyReserve);
+                    break;
+                case PlayerShareCommand::Kind::Give:
+                    out.set_kind(proto::PlayerShareCommand::Give);
+                    break;
+            }
+            out.set_amount(c.amount);
+            if (c.target)
+            {
+                out.set_target(c.target->value);
+            }
+            out.set_give_metal(c.giveMetal);
+        }
     };
 
     void serializeVector(const SimVector& v, proto::SimVector& out)
@@ -376,6 +405,41 @@ namespace rwe
         if (cmd.has_rejoined())
         {
             return PlayerRejoinedCommand{PlayerId(cmd.rejoined().player()), cmd.rejoined().from_tick()};
+        }
+
+        if (cmd.has_share())
+        {
+            const auto& in = cmd.share();
+            PlayerShareCommand out;
+            // The enum is proto2 and open to any number a peer writes; a
+            // value this build does not know costs that command, not the game.
+            switch (in.kind())
+            {
+                case proto::PlayerShareCommand::ToggleMetal:
+                    out.kind = PlayerShareCommand::Kind::ToggleMetal;
+                    break;
+                case proto::PlayerShareCommand::ToggleEnergy:
+                    out.kind = PlayerShareCommand::Kind::ToggleEnergy;
+                    break;
+                case proto::PlayerShareCommand::SetMetalReserve:
+                    out.kind = PlayerShareCommand::Kind::SetMetalReserve;
+                    break;
+                case proto::PlayerShareCommand::SetEnergyReserve:
+                    out.kind = PlayerShareCommand::Kind::SetEnergyReserve;
+                    break;
+                case proto::PlayerShareCommand::Give:
+                    out.kind = PlayerShareCommand::Kind::Give;
+                    break;
+                default:
+                    throw std::runtime_error("Unknown share command kind");
+            }
+            out.amount = in.amount();
+            if (in.has_target())
+            {
+                out.target = PlayerId(in.target());
+            }
+            out.giveMetal = !in.has_give_metal() || in.give_metal();
+            return out;
         }
 
         if (cmd.has_unit_command())

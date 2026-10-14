@@ -534,4 +534,79 @@ namespace rwe
         REQUIRE(computeHashOf(makePopulatedUnitState()) == GameHash(469200814u));
     }
 
+    TEST_CASE("a player's sharing flags and reserves are hashed", "[hash]")
+    {
+        // Resource sharing (TOTALA-EXE-COMMANDS.md section 124) moves stock
+        // between players, so two peers that disagree about a toggle or a
+        // reserve diverge at the next automatic pass. Each of the four is
+        // checked alone, so a slip that drops one names which.
+        auto make = []() {
+            return GamePlayerInfo{
+                std::optional<std::string>("p"),
+                GamePlayerType::Human,
+                PlayerColorIndex(0),
+                GamePlayerStatus::Alive,
+                std::string("ARM"),
+                Metal(100.0f),
+                Energy(100.0f),
+                Metal(1000.0f),
+                Energy(1000.0f),
+                Metal(100.0f),
+                Energy(100.0f),
+            };
+        };
+
+        auto base = computeHashOf(make());
+
+        auto shareMetal = make();
+        shareMetal.shareMetal = true;
+        REQUIRE(computeHashOf(shareMetal) != base);
+
+        auto shareEnergy = make();
+        shareEnergy.shareEnergy = true;
+        REQUIRE(computeHashOf(shareEnergy) != base);
+        REQUIRE(computeHashOf(shareEnergy) != computeHashOf(shareMetal));
+
+        auto metalReserve = make();
+        metalReserve.metalReserve = Metal(250.0f);
+        REQUIRE(computeHashOf(metalReserve) != base);
+
+        auto energyReserve = make();
+        energyReserve.energyReserve = Energy(250.0f);
+        REQUIRE(computeHashOf(energyReserve) != base);
+
+        // The hash is a sum, so equal values in the two accounts must not be
+        // interchangeable in it.
+        REQUIRE(computeHashOf(metalReserve) != computeHashOf(energyReserve));
+    }
+
+    TEST_CASE("a new player's sharing state is the same wherever in memory it was built", "[hash]")
+    {
+        // The hash reads these from the moment the player exists, so each
+        // has to come up initialised: filled storage, built over twice with
+        // different bytes, must hash the same as a default.
+        auto hashOverFill = [](unsigned char fill) {
+            alignas(GamePlayerInfo) unsigned char storage[sizeof(GamePlayerInfo)];
+            std::memset(storage, fill, sizeof(storage));
+            auto* p = new (storage) GamePlayerInfo{
+                std::optional<std::string>("p"),
+                GamePlayerType::Human,
+                PlayerColorIndex(0),
+                GamePlayerStatus::Alive,
+                std::string("ARM"),
+                Metal(100.0f),
+                Energy(100.0f),
+                Metal(1000.0f),
+                Energy(1000.0f),
+                Metal(100.0f),
+                Energy(100.0f),
+            };
+            auto hash = computeHashOf(*p);
+            p->~GamePlayerInfo();
+            return hash;
+        };
+
+        REQUIRE(hashOverFill(0x00) == hashOverFill(0xAB));
+    }
+
 }

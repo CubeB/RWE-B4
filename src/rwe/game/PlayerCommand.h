@@ -6,6 +6,7 @@
 #include <rwe/sim/UnitMovementOrders.h>
 #include <rwe/sim/UnitId.h>
 #include <rwe/sim/UnitOrder.h>
+#include <optional>
 #include <variant>
 
 namespace rwe
@@ -184,5 +185,48 @@ namespace rwe
         unsigned int fromTick;
     };
 
-    using PlayerCommand = std::variant<PlayerUnitCommand, PlayerPauseGameCommand, PlayerUnpauseGameCommand, PlayerSetGameSpeedCommand, PlayerDroppedCommand, PlayerRejoinedCommand>;
+    /**
+     * One resource-sharing action by the issuing player: a toggle, a reserve,
+     * or a gift (TOTALA-EXE-COMMANDS.md section 124).
+     *
+     * One alternative with a kind rather than five, because every alternative
+     * added to PlayerCommand costs GameSimulation.cpp hundreds of COFF
+     * sections. The chat bar's `+ShareMetal`, `+ShareEnergy`, `+SetShareMetal`,
+     * `+SetShareEnergy` and `+Give` each become exactly one of these, and
+     * `+ShareAll` becomes two.
+     *
+     * The issuer is the player the command arrives under, as for every other
+     * command, never a field of the command: a peer can only give away its
+     * own stock. It is applied by applyPlayerShareCommand (sim/ResourceSharing.h)
+     * so that a live game, a replay and the headless arena agree.
+     */
+    struct PlayerShareCommand
+    {
+        enum class Kind
+        {
+            /** Flip the player's metal-sharing flag. */
+            ToggleMetal,
+            /** Flip the player's energy-sharing flag. */
+            ToggleEnergy,
+            /** Set the metal reserve to min(storage, amount). Negative amounts are accepted. */
+            SetMetalReserve,
+            /** Set the energy reserve to min(storage, amount). Negative amounts are accepted. */
+            SetEnergyReserve,
+            /** Hand `amount` of metal (giveMetal) or energy to `target`. */
+            Give,
+        };
+
+        Kind kind{Kind::ToggleMetal};
+
+        /** The reserve to set, or the amount to give. Unused by the toggles. */
+        float amount{0.0f};
+
+        /** Give only: the recipient. */
+        std::optional<PlayerId> target;
+
+        /** Give only: metal if true, energy if false. */
+        bool giveMetal{true};
+    };
+
+    using PlayerCommand = std::variant<PlayerUnitCommand, PlayerPauseGameCommand, PlayerUnpauseGameCommand, PlayerSetGameSpeedCommand, PlayerDroppedCommand, PlayerRejoinedCommand, PlayerShareCommand>;
 }

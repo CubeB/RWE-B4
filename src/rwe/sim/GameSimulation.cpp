@@ -13,6 +13,7 @@
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
+#include <rwe/sim/ResourceSharing.h>
 #include <rwe/sim/SimScalar.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitBehaviorService.h>
@@ -5071,6 +5072,10 @@ namespace rwe
         {
             missionRules->update(*this);
         }
+
+        // Allies' automatic sharing goes in just before the settle, so what it
+        // moves is paid out in the same second (ResourceSharing.h).
+        runAutomaticSharing(*this);
 
         updateResources();
 

@@ -26,6 +26,7 @@
 #include <rwe/render/render_prof.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/resource_io.h>
+#include <rwe/sim/ResourceSharing.h>
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitBehaviorService.h>
 #include <rwe/ui/UiStagedButton.h>
@@ -3149,6 +3150,13 @@ namespace rwe
                 }
 
                 onPlayerRejoined(c.player, c.fromTick);
+            },
+            [&](const PlayerShareCommand& c) {
+                // The simulation half is shared with the headless arena and
+                // the replay player, so the three cannot drift. The issuer is
+                // whoever the command arrived under; a peer can only move its
+                // own stock.
+                applyPlayerShareCommand(simulation, issuingPlayer, c);
             });
     }
 
