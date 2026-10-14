@@ -64,10 +64,11 @@ namespace rwe
             /**
              * The AI personality a computer player plays, by name (see AiPersonality.h).
              * No screen picks it any more -- the setup screen's picker was taken out --
-             * so a menu game plays Balanced; it is still carried through a LAN lobby and
-             * into GameParameters, which is where `--player` and the arena set it.
+             * so a menu game plays Original TA, the original's own computer player
+             * (ADR-0005); it is still carried through a LAN lobby and into
+             * GameParameters, which is where `--player` and the arena set it.
              */
-            BehaviorSubject<std::string> personality{std::string("Balanced")};
+            BehaviorSubject<std::string> personality{std::string("Original TA")};
 
             /**
              * Where a Network player is, as typed: host:port, and the same
