@@ -3,7 +3,7 @@
 Split out of [TOTALA-EXE.md](TOTALA-EXE.md) on 2026-09-21, which had reached
 14,000 lines. **The section numbers are the stable identifier and do not**
 **change** -- every `§n` reference in the tree, the commit log and the other
-documents still resolves. This file holds §3, §20, §23, §29, §93, §94, §96, §97, §98, §110, §111.
+documents still resolves. This file holds §3, §20, §23, §29, §93, §94, §96, §97, §98, §110, §111, §112, §130, §131.
 
 The full index across every file, and §88 (where RWE deliberately differs)
 and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
@@ -21,6 +21,9 @@ and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
 98. [Resurrect: a real mission, a crude corpse mapping, and nothing that can use it](#98-resurrect-a-real-mission-a-crude-corpse-mapping-and-nothing-that-can-use-it)
 110. [Why a construction aircraft finishes a build one tick early: a second lathe on the creation tick](#110-why-a-construction-aircraft-finishes-a-build-one-tick-early-a-second-lathe-on-the-creation-tick)
 111. [The settle, re-read: one phase for every player, and what a refusal costs](#111-the-settle-re-read-one-phase-for-every-player-and-what-a-refusal-costs)
+112. [`BUGGER_OFF` is write-only, and a blocked site only waits](#112-bugger_off-is-write-only-and-a-blocked-site-only-waits)
+130. [Breaking off to repair: seven places, and no pad is ever refused for being taken](#130-breaking-off-to-repair-seven-places-and-no-pad-is-ever-refused-for-being-taken)
+131. [A constructor on patrol repairs, helps build and reclaims, in that order of preference](#131-a-constructor-on-patrol-repairs-helps-build-and-reclaims-in-that-order-of-preference)
 
 ## 3. Nanolathe spray and the construction display
 
@@ -1043,6 +1046,10 @@ nearer one is worked on.
 
 ### A pad is taken from the moment someone sets out for it
 
+*(§130 qualifies this heading: the only attach in `VTOL_Landing` is state 5,
+and no routine was found that reserves a pad en route. The re-test below is
+real; "taken from the moment someone sets out" is [inferred] and unproven.)*
+
 `VTOL_Landing` re-tests its pad before it commits, and what it tests is
 availability rather than existence:
 
@@ -1581,7 +1588,9 @@ with the area-reclaim command" describes something the original does not have.
 ### What the patrol does with the two lists
 
 The radius is the unit's own sight: `0x405B74` reads `def+0x202`
-(`SightDistance`) and shifts it into 16.16 for the scan. The decision is four
+(`SightDistance`) and shifts it into 16.16 for the scan. (**Read §131:** that
+argument is the scan's *side length*, so the half-extent is half the sight, on
+a 48-unit sample grid.) The decision is four
 comparisons against the player's stores, `player+0x8C`/`+0xA4` for energy and
 `player+0x98`/`+0xA8` for metal (§23), all against the double `0.2` at
 `0x4FC950`:
@@ -2266,3 +2275,297 @@ yard for as long as it stands there. RWE's one-shot sweep on the set was an
 invention of 2019 (commit 6191923a) rather than a port. What RWE does instead
 -- sweep the site on every blocked attempt, so the blocker is told to move --
 is recorded as a divergence in §88.
+
+
+## 130. Breaking off to repair: seven places, and no pad is ever refused for being taken
+
+*Spec-room finding, 2026-10-14 (ADR-0004). Read from the disassembly of the
+GOG `TotalA.exe` (MD5 `8e74a1dffa1f5988624c52048f5b20cd`). Settles a claim made
+by an independent reading, both halves of which are right. It also qualifies
+§94: nothing in the landing routine reserves a pad before an aircraft arrives
+at it.*
+
+### The gate, and where it is
+
+An aircraft decides it is hurt enough to go home with one test: its health word
+(`unit+0x108`, sign-extended) is under `(def+0x1FA >> 2) * 3`, three quarters
+of `maxdamage`, compared **unsigned**. A grep of the image for that constant
+expression finds **exactly seven sites**, all in the VTOL mission handlers:
+
+| Mission | Address | Where in the handler |
+|---|---|---|
+| `VTOL_SeekAttack` | `0x410525` | state 1 |
+| `VTOL_SeekGuard` | `0x41097F` | state 1 |
+| `VTOL_Patrol` | `0x410F4F` | state 2, after the goal is re-aimed (§125) |
+| `AirStrike` | `0x4125CF` | state 6, after the egress goal is installed |
+| `AirToGround` | `0x412B4C` | state 4 |
+| `AirToGroundHover` | `0x413A97` | the swing branch only -- not the reroll (§129) |
+| `VTOL_RepairPatrol` | `0x4153A4` | state 1, after the goal and the 45-tick timer (§131) |
+
+It is **not** in `VTOL_Move`, `VTOL_Follow` (`0x40FBE0`; it falls back to
+`VTOL_SeekGuard` only when the guardee is gone or the events carry `0x48`, and
+`VTOL_SeekGuard` has the gate), `VTOL_Standby`, `AirToAir`, `VTOL_Landing` or
+`VTOL_LandIfCan`. **So a guarding or a following aircraft has no break-off of
+its own, and an air-to-air pursuit never breaks off at all.**
+
+And each test runs **only when the handler runs**: on the mission's timer (30
+to 59 ticks in most) or on a goal event. It is not a per-tick check.
+
+### What a hit does
+
+The pad query `0x40B530(player, &centre, radius, &out)` is called with the
+unit's own position and radius `0xF00` = 3840 world units. It walks the
+player's list of air bases (player record `+0x25`, a vector built by `0x40AA40`
+and rebuilt at most every 30 ticks by `0x40B2C0` from the player update at
+`0x465037`; each rebuild also draws `rand(30)`). The rebuild admits a unit that
+is alive, is the player's, is finished (`unit+0x104` is `0.0`), has `def+0x241`
+bit 6 (builder) **and** bit 9 (`isairbase`), and has bit 0 of `unit+0x10E`
+(active). The query re-tests those three bits and then the **flat** distance
+squared, `<= 3840^2`.
+
+**There is no filter on a free or a claimed pad.** One value is drawn,
+`rand(n)` over the candidates, and `VTOL_LANDING` (`0x501B94`) is pushed to the
+front of the list; the mask goes to 0 and the handler returns 0.
+
+### Where "free" is decided: `VTOL_Landing`, `0x4118E0`
+
+The slot test is `0x47E570(pad, slot)`: false if `pad+0x86` is set, or if any
+unit in the pad's attached chain (`pad+0x8A`, next at `+0x8E`) has the byte at
+`+0xF9` equal to `slot`.
+
+- **State 1** asks the pad's script `QueryLandingPad` (`0x501C14`) for up to
+  four slot ids. If none is free, the aircraft **circles the pad** at radius
+  weapon 0's range, advancing by `0x4000` per leg, tolerance 128.
+- **State 2** approaches to within 160.
+- **State 3** chooses a slot; failing, "Landing failed" (`0x501C7C`) and
+  return 0 -- the order restarts.
+- **State 4** flies to the slot with tolerance `0x30`; on a fault "Landing
+  aborted: all pads are occupied" (`0x501C54`), return 0.
+- **State 5**: events `0x40` returns 8; `0x47E570` failing says "Landing
+  aborted: no pads available" (`0x501C30`) and returns 0 (a restart);
+  otherwise it **attaches** (`0x48AAC0` at `0x411E41` and `0x411E56`) and, if
+  hurt and the pad is a finished builder and air base, pushes `SELFREPAIR`
+  (`0x501C24`) and returns 5.
+
+The only attach in `VTOL_Landing` is in state 5. Nothing reserves a pad on the
+way in. §94 says a pad is "taken from the moment someone sets out"; this
+routine does not support that. **[inferred]**: no other routine writes the
+reservation. It needs a black-box check with two aircraft and one pad.
+
+### What RWE does
+
+`maybeBreakOffToRepairPad` (`UnitBehaviorService.cpp`, about 361 and
+2138-2182) runs **every tick, before the order handler**, gated by
+`orderBreaksOffForRepair`, which says yes for Attack, Patrol **and Guard**. And
+`findAirBaseToLandOn` (`UnitBehaviorService_util.cpp`, about 445) pre-filters
+with `airBaseIsClaimedByAnother`; when it finds nothing it drops the order with
+"Landing aborted: no pads available".
+
+**RWE differs on both halves.** It breaks off every tick rather than at the
+handler's cadence and on orders the original does not test, and it refuses a
+claimed pad where the original goes to it and circles.
+
+### The change
+
+1. Move the gate to the seven placements above: each tested when that
+   mission's own handler runs, and with the order shown (after the goal is
+   installed for Patrol, Strike and RepairPatrol).
+2. Remove Guard from the gating list, except that a guarder falling back to
+   `SeekGuard` has the gate there.
+3. Rebuild the player's list of air bases at most every 30 ticks, drawing
+   `rand(30)` at each rebuild (the draw is part of the sequence).
+4. Delete the claimed-pad pre-filter. Choose a random candidate with one
+   draw. Let the landing logic handle the busy pad: circle at weapon-0 range,
+   restart on the failure messages above.
+
+About 100 lines and a rewrite of the existing tests. The per-term flooring of
+the flat distance (§127) is a nit.
+
+### Not settled
+
+- Whether the timer on each handler is the same 30-59 as the rest; read for
+  Patrol (30) and RepairPatrol (45) only.
+
+
+## 131. A constructor on patrol repairs, helps build and reclaims, in that order of preference
+
+*Spec-room finding, 2026-10-14 (ADR-0004). Read from the disassembly of the
+GOG `TotalA.exe` (MD5 `8e74a1dffa1f5988624c52048f5b20cd`). Settles a claim made
+by an independent reading, which is largely right with two corrections: the
+candidate radius for repairs is the unit's **sight**, not its build range, and
+the reclaim scan's argument is a **side length**, not a radius. The second also
+corrects §97.*
+
+### Two routines
+
+A patrolling constructor runs `RepairPatrol`. The ground routine is at
+`0x405980`; the air one, `VTOL_RepairPatrol`, at `0x4152F0`. They share a
+shape and differ in four things, set out below.
+
+Throughout: `def+0x245` bit 9 is "can repair", a copy of `canreclamate`;
+`SightDistance` is `def+0x202`; `unit+0x104` is the build fraction **remaining**
+(`0.0` is finished; `0x4FCC40`, `0x4FD2E8` and `0x4FC920` are all `0.0f`);
+`unit+0x110` bits 0-1 are the placement state (1 on the ground **[inferred]**,
+2 airborne); the player's stored energy is `player+0x8C` with its cap at
+`+0xA4`, stored metal `+0x98` with its cap at `+0xA8`.
+
+### The air routine, `VTOL_RepairPatrol` `0x4152F0`
+
+**State 0 (`0x4157CC`).** Needs a mover, `canfly` and `def+0x245` bit 9;
+copies the target position to `mission+0x22`, closes the route (`0x43A020`),
+announces "Patrolling", takes the weapons, detaches from a pad, and takes off
+to `cruisealt / 2` as `VTOL_Patrol` does (§125). Mask `|= 0xE0`, return 1.
+
+The prologue: events with `0x48` set set the timer to 30 and return 0.
+
+**State 1**, in this order:
+
+1. Events `0xE0` -> return 6 (the waypoint is retired).
+2. Goal at `mission+0x22` as an **absolute point**, at **full cruising
+   altitude**, **no tolerance** (so arrival is the default: under half a unit
+   horizontally and at most one unit vertically); timer **45**; mask `|= 0xE0`.
+   There is no 320-unit overshoot here, unlike §125.
+3. The 75% health gate and pad query (§130).
+4. **The repair stage**, only if `player.energy >= 0.2 * player.energyCap` (the
+   double `0.2` at `0x4FCC58`). The query is `0x47E890(unit position,
+   SightDistance << 16, callback, &out)`: a **flat** radius query over the
+   128-unit cells, outer z ascending, inner x ascending, within a cell in the
+   chain order (`cell+6` then `+0x8E`). The callback, `0x4158D0` (vtable
+   `0x4FCC64`), accepts a candidate that
+   - is not the unit itself,
+   - has a non-zero alliance byte, `[mine+0x108 + candidateOwner]` -- **own or
+     allied**,
+   - has `cand+0x110` bits 0-1 equal to 1 (on the ground),
+   - has health below maximum **or** a non-zero build fraction remaining,
+   - and is not being reclaimed by this player (`cand+0xF4` is the player and
+     `cand+0xF5` is 5: rejected).
+
+   **One** candidate is chosen, `rand(n)`. Then, if `0x4899B0` (CanRepair: the
+   target is non-null, the unit's `def+0x245` bit 9 is set, the target's health
+   is below maximum, its mode is not 2, and the water and altitude checks
+   pass):
+   - and the candidate is **finished**: `0x43B400(unit, cand, 0)`; a non-zero
+     result returns 6, zero returns 3;
+   - and **unfinished**: drop the goal, push `VTOL_HELPBUILD` (`0x501B2C`)
+     with the candidate as its target, no position and no leash, to the
+     **front** (`0x43ACB0`), mask 0, return 3.
+
+   Otherwise it falls to the reclaim stage.
+5. **The reclaim stage runs unconditionally** (see below), with a side length
+   of `240.0` (`0xF00000`).
+
+### The reclaim scan, `0x47EA40(position, side, ...)`
+
+The second argument is a **side length**, not a radius. The half-extent is
+`side / 2`: **120 world units** in the air routine.
+
+- Samples are taken every **48 units**, from `position - half` while `<=
+  position + half`: **6 by 6 = 36 samples**, z outer, x inner.
+- Each sample is looked up on the 16-unit map square (`0x4815A0`, `0x421E60`);
+  a feature larger than one square is found through its `0xFFFE` back-offset.
+- The feature's definition (`[globals+0x1426F] + index * 256`) must have bit 7
+  (reclaimable) **and** bit 8 (`autoreclaimable`) of its flag word at `+0xFE`.
+- A non-zero energy (`+0xEC`) puts it on the energy list, a non-zero metal
+  (`+0xF0`) on the metal list; both if both.
+- Each list yields **the best of three random draws**, `rand(count)` taken with
+  replacement, keeping a draw only if its amount is strictly greater than the
+  best so far (initially `0.0`, index 0). The outputs are the sample's position
+  and the amount. The scan returns 1 if either list produced one.
+
+### The decision ladder
+
+With `MA` and `EA` the amounts, taken in this order:
+
+- a metal candidate and `metalStored < 0.2 * metalCap`: reclaim metal;
+- else an energy candidate and `energyStored < 0.2 * energyCap`: reclaim
+  energy;
+- else a metal candidate and `metalStored + MA <= metalCap`: reclaim metal;
+- else an energy candidate and `energyStored + EA <= energyCap`: reclaim
+  energy;
+- else return 2.
+
+Reclaim is `VTOL_RECLAIM` (`0x501B68`) with target 0 and position pointing at
+the sample position, pushed to the **front**, mask 0, **return 3**, whose timer
+is `rand(15) + 30`.
+
+### The ground routine, `0x405980`
+
+Differences from the air one:
+
+- State 0 copies the target position, closes the route and returns 1. No
+  take-off, no announcement.
+- State 1: events `0xE0` -> return 6; the goal is `0x438930(&mission+0x22,
+  16)`, a ground move with radius 16; timer **60**; mask `|= 0xE0`. **No health
+  gate.**
+- The repair stage has the same filter and the same radius, but its own
+  callback, `0x405D90` (vtable `0x4FC960`; the double `0.2` is at `0x4FC950`).
+  After the random pick it needs the alliance byte non-zero, then
+  `0x43F0E0(&out, 8, unit, cand, 0)` to produce a mission, then
+  `0x43B400(unit, cand, 0)` (non-zero -> return 6, zero -> return 3). It does
+  not push `HELPBUILD` itself; an unfinished candidate is turned into one by
+  `0x43F0E0`.
+- **The reclaim scan runs only if** `energyStored < 0.2 * energyCap` or
+  `metalStored < 0.2 * metalCap`, and it is called with `SightDistance << 16`
+  as the **side**: the half-extent is **half the unit's sight**, not the sight.
+  The same ladder follows, pushing `RECLAIM` (`0x5016C4`) and returning 3;
+  otherwise return 2.
+
+### `0x43B400(unit, target, forced)`
+
+It asks `0x43F0E0` for a mission with command 8 (REPAIR). If `CanRepair` is
+false, there is none. A finished target (`+0x104 == 0.0`) gives `REPAIRUNIT`
+(or `VTOL_REPAIRUNIT`, `0x501B78`, for a flier); an unfinished one gives
+`HELPBUILD` (`VTOL_HELPBUILD`, `0x501B2C`). If `forced` is non-zero it
+returns 0 here. Otherwise it reads the move-order mode (`unit+0x110 &
+0xC0000`):
+
+| Mode | Result |
+|---|---|
+| 0, Hold | the job with a **leash of `SightDistance`**, in front of a "move home" mission (command 2 to the unit's own position) |
+| `0x40000`, Maneuver | the same, with the leash `maneuverleashlength` (`def+0x214`) |
+| `0x80000`, Roam | the job alone, leash 0 |
+| anything else | 0: nothing is done |
+
+Both missions are anchored at the unit's current integer x,z
+(`mission+0x2E`/`+0x30`); the list ends `[job][move home][old head...]`, in
+the list chosen by flag `0x40000` (`+0x60` queued, `+0x5C` otherwise). This
+mirrors `0x43B1F0`, the attack variant (command 3), which refuses mode 0 or
+Hold Fire unless forced.
+
+### What RWE does, and the change
+
+`handlePatrolOrder` (`UnitBehaviorService.cpp`, about 4595-4826) does reclaim
+only. `findFeatureToAutoReclaim` takes the **nearest** metal or energy feature
+in a full circle of `SightDistance`, gated on the store being under 20% for
+both the ground and air cases, and re-decides every tick until the job has
+begun. There is no repair, no help-build, no 45- or 60-tick cadence, no
+best-of-three and no 36-sample grid.
+
+**RWE differs.** The change is to implement the above, per routine:
+
+1. A 45-tick (air) or 60-tick (ground) cadence, not per tick.
+2. The repair stage, with the filter, the flat sight-radius query in cell
+   order and the single random pick; finished -> repair with the leash by
+   move-order mode; unfinished -> help build, at the front.
+3. The reclaim scan as a 6x6 grid at 48 units over `side/2` (`120` for air,
+   `sight/2` for ground), best of three draws per list, then the ladder.
+4. For air, the reclaim stage runs always; for ground, only below 20%.
+
+About 200 lines and tests; `src/rwe/sim/autoreclaim.test.cpp` exists and will
+need its expectations moved from "nearest" to "best of three". The number of
+random draws per decision (the repair pick, then three per non-empty list) is
+part of the sequence.
+
+### §97's radius
+
+§97 says the ground patrol's radius "is the unit's own sight". That figure is
+the **side length**; the circle it implies is a square of half that sight on a
+48-unit grid, and the air constant is a 240-unit side, 120 half.
+
+### Not settled
+
+- Whether the 6x6 samples are clipped to the map. The loop bounds are on the
+  world position; the map-square lookup rejects out-of-range squares, which
+  is the only clipping seen.
+- `0x4899B0`'s "water and altitude checks" were read as present, not
+  enumerated.

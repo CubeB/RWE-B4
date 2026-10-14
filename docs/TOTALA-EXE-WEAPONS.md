@@ -3,7 +3,7 @@
 Split out of [TOTALA-EXE.md](TOTALA-EXE.md) on 2026-09-21, which had reached
 14,000 lines. **The section numbers are the stable identifier and do not**
 **change** -- every `§n` reference in the tree, the commit log and the other
-documents still resolves. This file holds §6, §7, §9, §10, §11, §12, §14, §21, §22, §85, §90, §92, §116.
+documents still resolves. This file holds §6, §7, §9, §10, §11, §12, §14, §21, §22, §85, §90, §92, §116, §126, §127.
 
 The full index across every file, and §88 (where RWE deliberately differs)
 and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
@@ -23,6 +23,8 @@ and §91 (decoded but not ported), are in [TOTALA-EXE.md](TOTALA-EXE.md).
 90. [`AirToAir`: a pursuit, and the twenty units that are not a hop](#90-airtoair-a-pursuit-and-the-twenty-units-that-are-not-a-hop)
 92. [The D-gun's projectile: `noexplode`, the full-range flight, and who gets hurt](#92-the-d-guns-projectile-noexplode-the-full-range-flight-and-who-gets-hurt)
 116. [What a round aims at on a unit, and why the water comes after it](#116-what-a-round-aims-at-on-a-unit-and-why-the-water-comes-after-it)
+126. [Aim lead: a weapon leads a moving target, but only once its unit has six kills](#126-aim-lead-a-weapon-leads-a-moving-target-but-only-once-its-unit-has-six-kills)
+127. [Range is flat in the original, everywhere it is asked](#127-range-is-flat-in-the-original-everywhere-it-is-asked)
 
 ## 6. The damage pipeline
 
@@ -2686,3 +2688,202 @@ water, the longer the range at which they get through.
 
 Nothing from this section. `unitsonly` was the last of it (B4 #405), and §91
 is where what is still open is kept.
+
+
+## 126. Aim lead: a weapon leads a moving target, but only once its unit has six kills
+
+*Spec-room finding, 2026-10-14 (ADR-0004). Read from the disassembly of the
+GOG `TotalA.exe` (MD5 `8e74a1dffa1f5988624c52048f5b20cd`). Settles a claim made
+by an independent reading, which turns out to be right in every particular but
+one: the threshold is six kills, not five.*
+
+### Where it lives
+
+`0x48A1E0(unit, out, slot)` produces the point a weapon slot shoots at. It has
+one caller, `0x49E1E1`, inside the per-tick weapon update `0x49E1A0`, and the
+one vector it returns feeds everything downstream: the heading and pitch solve
+(`0x49E570`, `0x4B715A`, `0x49A890`), the range test `0x49AA80`
+(`0x49E3C8`), and the launch handler at `wdef+0x60`. There is no second,
+"real" aim point; what the gun is pointed at, what it is range-checked against
+and where the round is thrown to are the same.
+
+### The target
+
+- **A position target** (the slot's word at +2 is not `0x8000`): x and z are
+  the slot's words shifted left 16; y is `max(terrain height, sea level)`
+  shifted left 16. **No lead.**
+- **A unit target**: id 0 returns 0 (nothing to aim at). A target whose
+  `+0xA6` word is 0 (dead) clears the slot's target, runs the
+  `TargetCleared` script, and returns 0. Otherwise the point is the target's
+  sweet spot, `0x43E3C0` -- the COB `SweetSpot` query (`0x5052C8`) turned into a
+  world position by `0x43E0B0`; this is §116.
+
+### When the lead is added
+
+**All four** must hold:
+
+1. the slot's flag byte (`unit+0x1F+28*slot`) has bit 1 (enabled) set;
+2. `wdef+0x111` bit 25 (`cruise`) is **clear**;
+3. the target has a mover (`unit+0x00` non-null; a structure has none);
+4. the *shooter's* kill count `unit+0xB8`, read as a 16-bit unsigned word, is
+   **greater than 5**, i.e. six or more; and `wdef+0x68` (`weaponvelocity`) is
+   non-zero. A negative velocity is accepted.
+
+The "tier" thresholds of §6 (5, 10, 15...) are not this: it is a separate
+cut-off, a step and not a ramp. A unit with five kills does not lead.
+
+### The arithmetic
+
+All integers in 16.16 except the one square root.
+
+1. `dx, dy, dz` = the shooter's origin (`unit+0x6A`..., **the unit's origin,
+   not the weapon piece**) minus the sweet spot, all three axes.
+2. `D` = the square root of `dx^2 + dy^2 + dz^2` computed in the x87 unit and
+   **truncated** to a 32-bit integer (sign-extended into a 64-bit pair for the
+   next step).
+3. `T = (D << 16) / S`, `S = wdef+0x68` -- the weapon's velocity in 16.16 per
+   tick, i.e. the TDF `weaponvelocity * 65536 / 30` (§7). A **signed 64-bit
+   divide, truncating toward zero**; the low 32 bits are kept.
+4. `F = (T * 0xCCCC) >> 16`, arithmetic shift, low 32 bits kept. `0xCCCC` is
+   0.79998, the nearest 16.16 to four fifths.
+5. For each axis, `lead = (V * F) >> 16` (64-bit product, arithmetic shift, low
+   32 bits kept), where `V` is the target mover's velocity per tick:
+   `+0x08`, `+0x0C`, `+0x10` of the mover record for x, y, z. The lead is
+   **added** to the sweet spot on that axis.
+
+In ordinary terms: aim at where the target would be in `0.8 * D / S` ticks if
+it kept its present velocity. It uses `weaponvelocity`, the cap, never
+`startvelocity` (§7); so a missile that is still accelerating is led as though
+it were already at full speed.
+
+### What it applies to
+
+- **Ground and air targets alike.** There is one mover class, and `+0x08..+0x10`
+  are read the same way. The y term is included, so a climbing or diving
+  aircraft is led vertically.
+- **Any weapon with a non-zero velocity**, including lasers and beams (their
+  velocities are large, so the term is small: **[inferred]**), and excluding
+  bombs, whose velocity is zero (the only base-game weapons with no
+  `weaponvelocity` are the four bombs). `cruise` weapons -- the nuclear missile and
+  `CRBLMSSL` -- are excluded by test 2.
+- Veterancy is the only thing that turns it on. A new unit never leads; the
+  effect belongs with the others a veteran has -- damage +6% per tier (§6),
+  reload (§21) and accuracy -- but with a cut-off of its own.
+
+I counted this against the base game's weapon TDFs: of 110 weapon blocks
+parsed, the four that have no `weaponvelocity` are the four bombs. This was a
+spot check and not an exhaustive one.
+
+### What RWE does
+
+RWE has no lead: it aims at the target's present sweet spot
+(`getTargetPosition` and `tryGetSweetSpot`, `UnitBehaviorService.cpp` about
+2101-2119 and 5262-5285; the weapon update's aim near line 1147), and uses that
+point for the aim, the range test and the launch. **RWE differs.** It does not
+read the kill count for anything beyond §6's damage tiers.
+
+### The change
+
+At the single point RWE turns a unit target into an aim vector, and after the
+sweet spot is chosen, when the four conditions above hold:
+
+1. `delta = shooterOrigin - sweetSpot` (3D), `D = isqrt(dx^2 + dy^2 + dz^2)`
+   **on integers** -- do not use a float `sqrt` in the sim, and truncate.
+2. `T = (D << 16) / S` with `S` the weapon's per-tick velocity in 16.16, in
+   `int64`, truncating toward zero.
+3. `F = (T * 0xCCCC) >> 16` and, per axis, `(V * F) >> 16`, all `int64`, then
+   narrowed to 32 bits.
+4. Add to the sweet spot. Feed the result to aim, range and launch together.
+
+Roughly 25 lines and a test. The target's per-tick velocity has to be the one
+the movement code integrated, in the same units as the position.
+
+### Not settled
+
+- The x87 precision-control state when the square root is taken. With the
+  usual extended precision the truncated result is the exact integer part of
+  the true root for every input the game produces; not checked for a
+  double-rounded case.
+- Whether `unit+0xB8` also counts kills of a transported or a reclaimed unit.
+  §6's tiers read the same word, so whatever is true there is true here.
+
+
+## 127. Range is flat in the original, everywhere it is asked
+
+*Spec-room finding, 2026-10-14 (ADR-0004). Read from the disassembly of the
+GOG `TotalA.exe` (MD5 `8e74a1dffa1f5988624c52048f5b20cd`). Settles a claim
+made by an independent reading, which is right. It also qualifies the
+"Deliberately not ported" entry on the flat range test in
+`TOTALA-EXE-WEAPONS.md`: that entry records a decision, and this section
+records that the decision was not forced by anything the original does.*
+
+### What the original measures
+
+**Horizontal distance only, x and z, whole world units.** Each square is taken
+as a 64-bit product shifted right 32 -- so each is floored *separately* -- and
+the sum is compared `<= range^2`. The y axis is not an input. Every test below
+does this and no test in the family uses three axes, with the one exception
+named at the end.
+
+| Site | What it asks |
+|---|---|
+| `0x49ABB0` (both branches, wet `0x49AC47`, dry `0x49AD7E`) | the weapon eligibility test (§10) |
+| `0x49AA80` | the range test the weapon update runs at fire time; range first, then the shooter-above-water test, then the ballistic arc |
+| `0x40AD80` | the candidate gather for acquisition, both unit lists, `<= r^2` with `r` = the weapon's range (`0x49ADF0`) in mode 1 or `def+0x202` (sight) in mode 0 |
+| `0x40B7B0` | the chooser's score: `rand(floor(dx^2) + floor(dz^2))` -- the per-term flooring matters because `rand` is a modulo |
+| `0x40B530` | the repair-pad radius query (§130) |
+| `0x47E890` | the cell query behind repair-patrol and anything that asks "who is near" |
+| the mission leash tests | the hypot of the integer parts |
+| `Attack_Chase`, `0x4034A0` | the chase distance; `|dy| > 8` units is used only to choose an approach pattern |
+
+The callers of `0x49ABB0` are `0x402302`, `0x4035D6`, `0x4037D7`, `0x406461`,
+`0x4070D0`, `0x407125`, `0x40714F`, `0x40B914`, `0x40FE07`, `0x413908` and
+`0x43E59E`.
+
+**The exception is `0x49A890`**, the ballistic arc solver, which works in three
+axes because it has to. It is reached from `0x49AA80` only after the flat range
+test has passed.
+
+### Nothing drops a target for being out of range
+
+The per-tick scan `0x4089A0` re-picks a target only when it has become allied,
+is in a bad category, or is paralysed already (§9's correction). It has **no
+range test**. At fire time an out-of-range target takes `0x49E3CD` to
+`0x49E53A`, which raises bit 12 (`0x1000`) of `unit+0xBA` -- the "out of range"
+event -- and **does not clear the target**; the mission above responds (a chase,
+a swing, a reroll -- §129 is one). RWE's `targetLost` test (`UnitBehaviorService.cpp`
+about 1164) has no counterpart.
+
+### What RWE does
+
+RWE measures the full 3D distance at about 1164, 3230, 3291 and 3401 of
+`UnitBehaviorService.cpp`, at about 461 of `GameSimulation_visibility.cpp`, and
+in `weaponCanHitUnit`. The reason on record
+(`TOTALA-EXE-WEAPONS.md`, "Deliberately not ported") is that a flat test makes a
+target directly overhead free, and since nothing else stops a ground weapon
+engaging an aircraft, ground fire at aircraft would become more common than it
+is in RWE now.
+
+**RWE differs.** The reason is a decision and not a finding: the original is
+flat, and the original has the aircraft-overhead behaviour that the entry
+describes. Whether it is wanted is the maintainer's call.
+
+### The change, if it is made
+
+At each of the sites above, use the horizontal distance with each square
+floored separately and compare `<= range * range` in whole world units; keep
+the 3D form only inside the ballistic solver. About ten sites; the one that
+changes outcomes most is the eligibility test, because it is where a ground
+gun's reach over an aircraft is decided. Every one changes hashes.
+
+If it is *not* made, §88 should say so: it is a divergence on purpose and the
+register treats those as findings in their own right.
+
+### Not settled
+
+- The strict-versus-inclusive form at the mission leash tests. They are the
+  hypot of the integer parts compared with the leash; the direction of each
+  comparison was not recorded one by one.
+- Whether the missing range-based drop matters to RWE's chase. It does in
+  principle: a target that kept out of range and in sight would be held for
+  ever by the original. No measurement of that.
