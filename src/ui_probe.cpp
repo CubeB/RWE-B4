@@ -1113,12 +1113,12 @@ int main(int argc, char* argv[])
                 LanDiscovery requester;
                 requester.start(1363);
                 requester.setAnnounceTargets({"127.0.0.1:1361"});
-                requester.probe("127.0.0.1:1361");
-                runInternet(1.0);
-                const auto requestGames = requester.games();
+                // Reuse the real guest's discovery: probes are rate limited
+                // by IP, and both test clients share loopback's address.
+                const auto requestGames = MenuProbe::flow(invGuest)->discovery.games();
                 const auto requestHost = std::find_if(requestGames.begin(), requestGames.end(),
                     [](const auto& game) { return !isClaimSession(game.session) && game.label == "Across the sea"; });
-                check(requestHost != requestGames.end(), "the second requester sees the invitation lobby");
+                check(requestHost != requestGames.end(), "the test requester has the discovered invitation lobby");
                 if (requestHost != requestGames.end())
                 {
                     auto request = claimAnnouncement(*requestHost, 1, "cafe1234", "Other Player", 1373);
