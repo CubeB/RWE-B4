@@ -111,6 +111,8 @@ jobs:
       - uses: actions/checkout@v6
       - name: class keys
         run: ./tools/class-key.sh src
+      - name: test multiplayer harness
+        run: python3 -m unittest discover -s tools -p test_net_test.py
 
   # A pull request builds one configuration -- Linux gcc-14 Debug, which is
   # the one that runs the test suite with asserts live. Everything else waits
@@ -253,8 +255,8 @@ jobs:
           fi
           mkdir -p "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
-          timeout 300 python3 tools/net-test.py --ai --seconds 30 --data-path "$SCENARIO_DATA"
-          timeout 300 python3 tools/net-test.py --peers 3 --kill 2 --seconds 30 --data-path "$SCENARIO_DATA"
+          timeout 300 python3 tools/net-test.py --ai --seconds 30 --min-ticks 600 --data-path "$SCENARIO_DATA"
+          timeout 300 python3 tools/net-test.py --peers 3 --kill 2 --seconds 30 --min-ticks 600 --data-path "$SCENARIO_DATA"
       - name: build AppImage
         if: matrix.cc == 'gcc-14' && matrix.configuration == 'Release'
         run: |

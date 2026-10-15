@@ -33,6 +33,8 @@ wherever the window manager puts them; nothing here depends on user32.
                                                  # own stdin and stdout
   uv run tools/net-test.py --lag 1:50            # peer 1 sleeps 50 ms after every
                                                  # tick, to reproduce a slow machine
+  uv run tools/net-test.py --peer-data-path "0:D:/GOG/TA" --peer-data-path "1:D:/Steam/TA"
+                                                # load each installation independently
 
 Two things it is good for beyond drop handling: any change to the simulation
 can be run past it to see whether two peers still agree, and RWE_DESYNC_AT
@@ -217,6 +219,7 @@ class Harness:
         self.diverged = False
         self.first_divergence = 0
         self.compared = False
+        self.compared_ticks = 0
 
     def _child_env(self) -> dict[str, str]:
         env = dict(os.environ)
@@ -247,7 +250,7 @@ class Harness:
             "--map", self.args.map,
             "--width", "320",
             "--height", "240",
-            "--seed", "7",
+            "--seed", str(self.args.seed),
             "--port", str(self.ports[me]),
         ]
         for p in range(self.count):
@@ -259,13 +262,13 @@ class Harness:
             args += ["--player", spec]
         if self.args.ai:
             args += ["--player", f"Computer;Computer;{SIDES[self.count % 2]};{self.count}"]
-            # The computer player this test is about is RWE's own; the
-            # default seat is the original's (ADR-0005).
-            args += ["--ai-engine", "rwe"]
+            # Keep RWE's AI as this harness's default, independently of the
+            # game's default seat engine (ADR-0005).
+            args += ["--ai-engine", self.args.ai_engine]
         args += ["--log", str(log)]
         if record_replay:
             args += ["--record-replay", str(self.out_dir / f"peer{me}.rwereplay")]
-        for path in self.args.data_path or []:
+        for path in self.args.peer_data_paths.get(me, self.args.data_path or []):
             args += ["--data-path", path]
         return args
 
@@ -463,9 +466,11 @@ class Harness:
             return agreed, compared
 
         reference = read_lines(self.peers[survivors[0]].hashes)
+        self.compared_ticks = len(reference)
         for s in survivors[1:]:
             other = read_lines(self.peers[s].hashes)
             n = min(len(reference), len(other))
+            self.compared_ticks = min(self.compared_ticks, n)
             if n > 0:
                 compared = True
             first_diff = 0
@@ -495,6 +500,9 @@ class Harness:
             code = 1
         elif not compared:
             say("RESULT: nothing was compared")
+            code = 1
+        elif self.compared_ticks < self.args.min_ticks:
+            say(f"RESULT: only {self.compared_ticks} ticks compared; required {self.args.min_ticks}")
             code = 1
         elif self.diverged:
             say(f"RESULT: peers diverged from hash line {self.first_divergence}")
@@ -598,9 +606,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--peers", type=int, default=2, help="how many peers (default 2)")
     parser.add_argument("--seconds", type=int, default=60, help="how long to let them play (default 60)")
+    parser.add_argument("--min-ticks", type=int, default=1, help="fail if fewer common ticks were compared (default 1)")
     parser.add_argument("--kill", type=int, default=-1, metavar="P", help="kill peer P part way through")
     parser.add_argument("--kill-after", type=int, default=20, metavar="SEC", help="seconds before the kill (default 20)")
     parser.add_argument("--ai", action="store_true", help="add a computer player at the end")
+    parser.add_argument("--ai-engine", choices=("rwe", "classic"), default="rwe", help="computer player's engine (default rwe)")
+    parser.add_argument("--seed", type=int, default=7, help="shared simulation seed (default 7)")
     parser.add_argument("--desync-at", type=int, default=0, metavar="T", help="make peer 0 report a wrong hash from tick T")
     parser.add_argument("--chat", action="store_true", help="have every peer say one line")
     parser.add_argument("--lag", default="", metavar="P:MS[@TICK]", help="sleep MS after every tick on peer P")
@@ -612,7 +623,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--exe", type=Path, help="engine binary; default build-release/rwe then build/rwe")
     parser.add_argument("--out-dir", type=Path, help="where logs and hash logs go; default a temp directory")
     parser.add_argument("--data-path", action="append", metavar="DIR", help="game data search path; may be repeated")
-    return parser.parse_args(argv)
+    parser.add_argument("--peer-data-path", action="append", default=[], metavar="P:DIR",
+                        help="override data paths for peer P; repeat for multiple paths on that peer")
+    args = parser.parse_args(argv)
+    args.peer_data_paths = {}
+    for spec in args.peer_data_path:
+        peer, colon, path = spec.partition(":")
+        if not colon or not peer.isdigit() or int(peer) >= args.peers or not path:
+            parser.error(f"Bad --peer-data-path '{spec}': expected <peer>:<directory> with a peer from 0 to {args.peers - 1}")
+        args.peer_data_paths.setdefault(int(peer), []).append(path)
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:

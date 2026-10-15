@@ -60,13 +60,12 @@ namespace rwe
         rejoiningAtTick = atTick;
 
         // The viewer's own machinery, deliberately. While this is set the tick
-        // loop takes every player's commands from the recording rather than
-        // from the network or the local player, feeds no computer player, and
-        // neither computes nor sends a sync hash -- all four of which are what
-        // winding forward wants, and none of which this file has to write
-        // again. What it does *not* do is the viewer's presentation: this is
-        // a game being joined, not a recording being watched, so the fog and
-        // the spectator's whole-map view stay as the lobby set them.
+        // loop takes human commands from the recording and reconstructs the
+        // computer players' live command queues from their controllers. Those
+        // queues survive the transition back to live play. No sync hash is
+        // sent while winding forward. Presentation stays as the lobby set
+        // it: this peer is joining a game, so the viewer's whole-map view
+        // and fog changes do not apply.
         replayPlayback = std::move(catchUp);
 
         // Wound rather than watched. Without this the catch-up runs at the

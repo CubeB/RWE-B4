@@ -93,7 +93,7 @@ endfunction()
 function(target_copy_file target file)
     if(WIN32)
         add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy ${file} $<TARGET_FILE_DIR:${target}>)
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${file} $<TARGET_FILE_DIR:${target}>)
 
         get_filename_component("${file}_NAME" ${file} NAME)
         install(FILES $<TARGET_FILE_DIR:${target}>/${${file}_NAME} DESTINATION ".")
@@ -847,7 +847,7 @@ target_include_directories(glad PUBLIC ${CMAKE_SOURCE_DIR}/libs/glad/include)
 add_library(librwe STATIC ${SOURCE_FILES} ${PROTO_SOURCE_FILES} ${PROTO_HEADER_FILES})
 set_target_properties(librwe PROPERTIES PREFIX "")
 if(MSVC)
-    target_compile_options(librwe PUBLIC "/std:c++20" "/EHsc")
+    target_compile_options(librwe PUBLIC "/std:c++20" "/EHsc" "/fp:precise")
 else()
     # Contraction off, so that a multiply and an add are never fused into
     # one rounding on a machine that has the instruction and left as two on
@@ -1461,3 +1461,7 @@ target_link_libraries(crash_probe librwe)
 if(NOT WIN32)
     set_target_properties(rwe battle_test scenario replay_viewer crash_probe PROPERTIES ENABLE_EXPORTS ON)
 endif()
+
+# Check after all target options and dependency usage requirements are set.
+include(cmake/RequireDeterministicFloatingPoint.cmake)
+rwe_require_deterministic_floating_point(librwe)
