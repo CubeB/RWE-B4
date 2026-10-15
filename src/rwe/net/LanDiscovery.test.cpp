@@ -64,6 +64,25 @@ namespace rwe
             REQUIRE_FALSE(LanDiscovery::decode(*plain + "\napproval=perhaps\n"));
         }
 
+        SECTION("the reply-code endpoint survives and is bounded")
+        {
+            auto game = sampleGame();
+            auto plain = LanDiscovery::encode(game);
+            REQUIRE(plain);
+            auto older = LanDiscovery::decode(*plain);
+            REQUIRE(older);
+            CHECK(older->discoveryAddress.empty());
+            game.discoveryAddress = "203.0.113.42:2463";
+            auto text = LanDiscovery::encode(game);
+            REQUIRE(text);
+            auto back = LanDiscovery::decode(*text);
+            REQUIRE(back);
+            CHECK(back->discoveryAddress == game.discoveryAddress);
+            game.discoveryAddress.assign(65, 'x'); // Discovery endpoints are capped at 64 bytes.
+            REQUIRE_FALSE(LanDiscovery::encode(game));
+            REQUIRE_FALSE(LanDiscovery::decode(*plain + "\ndaddr=" + game.discoveryAddress + "\n"));
+        }
+
         SECTION("the build that announced a lobby survives, and a value that is not one is refused")
         {
             auto game = sampleGame();

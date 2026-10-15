@@ -605,6 +605,11 @@ namespace rwe
             if (game.gameAddress.size() > maxGameAddressLength) return std::nullopt;
             out += "\ngaddr=" + percentEncode(game.gameAddress);
         }
+        if (!game.discoveryAddress.empty())
+        {
+            if (game.discoveryAddress.size() > maxGameAddressLength) return std::nullopt;
+            out += "\ndaddr=" + percentEncode(game.discoveryAddress);
+        }
         if (game.launching)
         {
             out += "\nlaunch=1";
@@ -786,6 +791,11 @@ namespace rwe
             {
                 if (!percentDecode(value, game.gameAddress)) return std::nullopt;
                 if (game.gameAddress.size() > maxGameAddressLength) return std::nullopt;
+            }
+            else if (key == "daddr")
+            {
+                if (!percentDecode(value, game.discoveryAddress)) return std::nullopt;
+                if (game.discoveryAddress.size() > maxGameAddressLength) return std::nullopt;
             }
             else if (key == "approval")
             {

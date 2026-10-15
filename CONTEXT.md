@@ -582,7 +582,8 @@ A seat claim waiting for the host's approval. Issuing `/invite` makes new
 claims wait; the battleroom shows the guest's nickname, and `/accept` admits
 the oldest request or `/accept Name` selects one by name. Approval belongs
 to the claim token, not the nickname or requested seat. Pasting a reply code
-also approves claims from that exact discovery endpoint, without another
+also approves claims from that exact observed or STUN-announced discovery
+endpoint (`daddr`), without another
 `/accept`; a different port on the same IP stays unapproved. Guests show only
 the host-acknowledged roster while waiting. A request that stops
 announcing expires. Ordinary LAN rooms without `/invite` still seat claims

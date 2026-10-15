@@ -359,6 +359,7 @@ namespace rwe
 
             SeatClaim claim;
             claim.sourceAddress = g.sourceAddress;
+            claim.discoveryAddress = g.discoveryAddress;
             claim.token = g.session.substr(prefix.size());
             claim.build = g.build;
             claim.seat = g.slots.front().index;
@@ -2994,7 +2995,11 @@ namespace rwe
             {
                 continue;
             }
-            const bool replyApproved = std::find(flow.invitedGuests.begin(), flow.invitedGuests.end(), claim.sourceAddress) != flow.invitedGuests.end();
+            // A reply code names the STUN endpoint, not necessarily the
+            // packet source: a LAN path or NAT translation can change that.
+            const bool replyApproved = std::any_of(flow.invitedGuests.begin(), flow.invitedGuests.end(), [&](const auto& endpoint) {
+                return endpoint == claim.sourceAddress || endpoint == claim.discoveryAddress;
+            });
             if (!replyApproved && (flow.approvalRequired || claim.approvalRequired)
                 && std::find(flow.approvedJoinTokens.begin(), flow.approvedJoinTokens.end(), claim.token) == flow.approvedJoinTokens.end())
             {
@@ -3257,6 +3262,7 @@ namespace rwe
         }
         auto announcement = claimAnnouncement(*host, flow.mySeat, flow.claimToken, flow.nickname, port, choice, flow.sentChat, reachableAt);
         announcement.approvalRequired = flow.approvalRequired;
+        announcement.discoveryAddress = flow.replyAddress;
         flow.discovery.advertise(announcement);
 
         // -- the host has pressed Start --

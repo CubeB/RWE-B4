@@ -165,6 +165,9 @@ namespace rwe
 
         /** Host requires approval, or guest requests it. Wire key `approval`. */
         bool approvalRequired{false};
+
+        /** Guest's STUN discovery endpoint, which its reply code names. Wire key `daddr`. */
+        std::string discoveryAddress;
     };
 
     /**

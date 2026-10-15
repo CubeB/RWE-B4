@@ -34,8 +34,10 @@ omits that field. No new server or game-simulation command is involved.
 This cannot make a blocked first packet arrive. When no game appears, the
 guest's status line still provides a copied reply code. Send that to the host,
 who pastes it into the battleroom to open the route and approve that endpoint.
-Then press Join; no second `/accept` is needed. Approval is bound to the full
-discovery IP and port, so another player sharing that IP stays unapproved.
+Then press Join; no second `/accept` is needed. The claim carries the guest's
+STUN discovery endpoint as `daddr`, because the packet's observed source can
+differ on a LAN or behind a NAT. Approval matches the full announced or
+observed discovery IP and port, so another port sharing that IP stays unapproved.
 The two-code exchange below describes this
 fallback path.
 
