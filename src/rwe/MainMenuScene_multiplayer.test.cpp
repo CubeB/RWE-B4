@@ -1032,6 +1032,7 @@ namespace rwe
         CHECK(claims[0].colour == 6u);
         CHECK(claims[0].team == 2);
         CHECK(claims[0].ready);
+        CHECK_FALSE(claims[0].approvalRequired);
         REQUIRE(claims[0].chat.size() == 2);
         CHECK(claims[0].chat[1].text == "anyone there");
 
@@ -1043,6 +1044,22 @@ namespace rwe
             CHECK(plain.slots[0].colour == lobby.slots[1].colour);
             CHECK_FALSE(plain.slots[0].ready);
             CHECK(plain.chat.empty());
+        }
+        SECTION("an approval lobby's guest keeps its name and approval requirement on the wire")
+        {
+            auto identity = identityFor("0123456789abcdef");
+            identity.approvalRequired = true;
+            lobby = lobbyFromModel(host, identity, "Coast To Coast", noTokens());
+            REQUIRE(lobby.approvalRequired);
+            auto request = claimAnnouncement(lobby, 1, "deadbeef", "Guest Name", 1400);
+            auto text = LanDiscovery::encode(request);
+            REQUIRE(text);
+            auto heard = LanDiscovery::decode(*text);
+            REQUIRE(heard);
+            auto requests = claimsOn({*heard}, lobby.session);
+            REQUIRE(requests.size() == 1);
+            REQUIRE(requests.front().name == "Guest Name");
+            REQUIRE(requests.front().approvalRequired);
         }
     }
 

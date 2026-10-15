@@ -609,6 +609,10 @@ namespace rwe
         {
             out += "\nlaunch=1";
         }
+        if (game.approvalRequired)
+        {
+            out += "\napproval=1";
+        }
 
         for (const auto& slot : game.slots)
         {
@@ -782,6 +786,11 @@ namespace rwe
             {
                 if (!percentDecode(value, game.gameAddress)) return std::nullopt;
                 if (game.gameAddress.size() > maxGameAddressLength) return std::nullopt;
+            }
+            else if (key == "approval")
+            {
+                if (value != "0" && value != "1") return std::nullopt;
+                game.approvalRequired = value == "1";
             }
             else if (key == "launch")
             {
