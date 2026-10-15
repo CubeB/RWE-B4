@@ -1080,20 +1080,8 @@ int main(int argc, char* argv[])
                 check(panelName(invGuest) == "SELGAME", "the guest is on the game list");
                 const auto replyCode = MenuProbe::flow(invGuest) != nullptr ? MenuProbe::flow(invGuest)->replyCode : std::string();
                 check(!replyCode.empty(), "the guest has a reply code: '" + replyCode + "'");
-                check(codeIn(helpLine(invGuest)) == replyCode, "the guest is shown its reply code: '" + helpLine(invGuest) + "'");
+                check(helpLine(invGuest).find("Join") != std::string::npos || codeIn(helpLine(invGuest)) == replyCode, "the guest is offered Join or the fallback reply code");
                 check(replyCode != inviteCode, "the reply is the guest's own address, not the invite again");
-
-                // -- the host takes the reply --
-                say(invHost, replyCode);
-                runInternet(1.0);
-                {
-                    const auto lines = transcript(invHost);
-                    // Both ends are 127.0.0.1 here, which is exactly "the same
-                    // router", so that is the sentence the host is given.
-                    check(std::any_of(lines.begin(), lines.end(), [](const std::string& l) { return l.find("That code is on this router") != std::string::npos; }),
-                        "the host is told when the reply is from its own router");
-                    check(!contains(lines, replyCode), "the reply code is not said to the room as chat");
-                }
 
                 // The host's lobby reaches the guest, which lists it.
                 runInternet(3.0);
@@ -1107,14 +1095,80 @@ int main(int argc, char* argv[])
                 click(invGuest, 40, 128);
                 runInternet(0.2);
                 press(invGuest, "guest", "SELGAME", "JOINGAME");
-                runInternet(3.5);
+                runInternet(9.5);
+                check(panelName(invGuest) == "LOUNGE2", "the guest can wait for approval beyond eight seconds");
+                check(!MenuProbe::flow(invGuest)->accepted, "the guest is not accepted automatically");
+                check(MenuProbe::model(invHost).players[1].type.getValue() == MainMenuModel::PlayerSettings::Type::Open,
+                    "the requested seat stays open until the host accepts");
+                check(contains(transcript(invHost), "Net wants to join. Type /accept to allow."), "the join request includes the player's name");
+                check(MenuProbe::flow(invHost)->pendingJoins.size() == 1, "repeated claims make one pending request");
+                const auto netToken = MenuProbe::flow(invGuest)->claimToken;
+                check(MenuProbe::flow(invHost)->invitedGuests.empty(), "no reply code was needed for the direct request");
+                say(invHost, "/accept Nobody");
+                runInternet(0.3);
+                check(!MenuProbe::flow(invGuest)->accepted, "an unknown name does not admit a different request");
+
+                // A second client deliberately omits the approval flag: the
+                // host's own policy must still keep it outside the room.
+                LanDiscovery requester;
+                requester.start(1363);
+                requester.setAnnounceTargets({"127.0.0.1:1361"});
+                requester.probe("127.0.0.1:1361");
+                runInternet(1.0);
+                const auto requestGames = requester.games();
+                const auto requestHost = std::find_if(requestGames.begin(), requestGames.end(),
+                    [](const auto& game) { return !isClaimSession(game.session) && game.label == "Across the sea"; });
+                check(requestHost != requestGames.end(), "the second requester sees the invitation lobby");
+                if (requestHost != requestGames.end())
+                {
+                    auto request = claimAnnouncement(*requestHost, 1, "cafe1234", "Other Player", 1373);
+                    request.approvalRequired = false;
+                    requester.advertise(request);
+                    runInternet(1.5);
+                    check(MenuProbe::flow(invHost)->pendingJoins.size() == 2, "the host enforces its approval policy");
+                    check(MenuProbe::model(invHost).players[1].type.getValue() == MainMenuModel::PlayerSettings::Type::Open,
+                        "a request cannot bypass approval by dropping its flag");
+                    requester.stopAdvertising();
+                    runInternet(4.5);
+                    check(MenuProbe::flow(invHost)->pendingJoins.size() == 1, "a cancelled request expires");
+                    requester.advertise(request);
+                    runInternet(1.5);
+                    say(invHost, "/accept oTHER pLAYER");
+                    runInternet(1.5);
+                    check(MenuProbe::model(invHost).players[1].name.getValue() == "Other Player", "accept by name selects that requester");
+                    check(!MenuProbe::flow(invGuest)->accepted, "accept by name leaves the other guest waiting");
+                    check(MenuProbe::flow(invGuest)->claimToken == netToken, "a waiting request keeps its approval token when its seat is taken");
+                    check(MenuProbe::flow(invGuest)->mySeat != 1, "the waiting guest asks for a different open seat");
+                }
+                say(invHost, "/accept");
+                runInternet(2.0);
+                check(MenuProbe::flow(invGuest)->accepted, "bare accept admits the oldest pending guest");
+                check(contains(transcript(invHost), "Net has joined"), "the host sees the accepted guest join");
+                check(!contains(transcript(invHost), "/accept Nobody"), "accept commands are not sent as chat");
+                requester.stop();
+                runInternet(4.5);
+                check(MenuProbe::flow(invHost)->pendingJoins.empty(), "accepted and cancelled requests leave no pending entries");
+                say(invHost, "/accept");
+                runInternet(0.3);
+                check(contains(transcript(invHost), "No join requests are waiting."), "accept reports an empty request queue");
                 snap(invHost, "probe_flow_internet_host.ppm");
                 snap(invGuest, "probe_flow_internet_guest.ppm");
+                const auto heardGuests = MenuProbe::flow(invHost)->nat.heardFrom();
+                check(std::any_of(heardGuests.begin(), heardGuests.end(), [](const auto& endpoint) {
+                    return endpoint.address().to_string() == "127.0.0.1" && endpoint.port() == 1372;
+                }), "the guest's game port is reachable after approval");
 
-                check(panelName(invGuest) == "LOUNGE2", "the guest is in the host's battleroom");
-                check(contains(transcript(invHost), "Net has joined"), "the host sees the guest join");
+                // -- the host takes the reply --
+                say(invHost, replyCode);
                 runInternet(1.0);
-                check(contains(transcript(invHost), "Net is reachable directly"), "the host is told the guest's datagram got through");
+                {
+                    const auto lines = transcript(invHost);
+                    // Both ends are 127.0.0.1 here, which is exactly "the same
+                    // router", so that is the sentence the host is given.
+                    check(std::any_of(lines.begin(), lines.end(), [](const std::string& l) { return l.find("That code is on this router") != std::string::npos; }),
+                        "the host is told when the reply is from its own router");
+                    check(!contains(lines, replyCode), "the reply code is not said to the room as chat");
+                }
 
                 // The addresses the game would be started with.
                 {

@@ -152,6 +152,7 @@ namespace rwe
         game.hostName = identity.hostName.substr(0, maxPlayerNameLength);
         game.passwordHash = identity.passwordHash;
         game.launching = identity.launching;
+        game.approvalRequired = identity.approvalRequired;
         game.gameAddress = identity.gameAddress;
         game.options = optionsFromModel(model);
 
@@ -372,6 +373,7 @@ namespace rwe
             claim.team = g.slots.front().team;
             claim.ready = g.slots.front().ready;
             claim.chat = g.chat;
+            claim.approvalRequired = g.approvalRequired;
             claims.push_back(std::move(claim));
         }
         return claims;
@@ -393,6 +395,7 @@ namespace rwe
         claim.port = gamePort;
         claim.gameAddress = reachableAt;
         claim.hostName = name.substr(0, maxPlayerNameLength);
+        claim.approvalRequired = host.approvalRequired;
 
         DiscoveredSlot slot;
         slot.index = seat;
@@ -1761,6 +1764,9 @@ namespace rwe
             flow.seatReady.assign(seats, false);
             flow.claimMemory.clear();
             flow.removedTokens.clear();
+            flow.pendingJoins.clear();
+            flow.approvedJoinTokens.clear();
+            flow.approvalRequired = false;
             flow.wanted = GuestChoice{};
             flow.choicePending = false;
             flow.myReady = false;
@@ -2056,7 +2062,7 @@ namespace rwe
                     }
                     else if (!flow.replyCode.empty())
                     {
-                        text = "Reply code " + flow.replyCode + " is copied. Send it to the host and wait here.";
+                        text = "No answer yet. Reply code " + flow.replyCode + " is copied; send it to the host if needed.";
                     }
                     else
                     {
@@ -2074,9 +2080,7 @@ namespace rwe
             }
             else if (flow.invited && !flow.replyCode.empty())
             {
-                // The host's game is on the list, which on some routers it
-                // is before the host has the reply. Still owed.
-                text = "Reply code " + flow.replyCode + " is copied. Send it to the host, then Join.";
+                text = "Enter your name and press Join to send a join request.";
             }
             else
             {
@@ -2165,6 +2169,7 @@ namespace rwe
         flow.claimedAt = getTimestamp();
         flow.hostSeenAt = getTimestamp();
         resetRoom(flow, model.players.size());
+        flow.approvalRequired = flow.invited || game.approvalRequired;
 
         // A broadcast stays on this subnet. The claim is also sent to the
         // address the host's announcement came from, which is what makes a
@@ -2579,10 +2584,14 @@ namespace rwe
             if (role == RoomRole::Host)
             {
                 text = flow.launching ? "Starting game..." : blocker.value_or("Ready. Click seats for Original TA / RWE AI, or Start Game.");
+                if (!flow.launching && !flow.pendingJoins.empty())
+                {
+                    text = flow.pendingJoins.front().name + " wants to join. Type /accept.";
+                }
             }
             else if (!flow.accepted)
             {
-                text = "Asking the host for a seat...";
+                text = flow.approvalRequired ? "Waiting for the host to accept your join request..." : "Asking the host for a seat...";
             }
             else
             {
@@ -2637,8 +2646,8 @@ namespace rwe
             return;
         }
 
-        // The host's `/invite`, and the reply code a guest sent back: both
-        // are said to the program and not to the room.
+        // The host's `/invite` or `/accept`, and a guest's fallback reply code:
+        // these are said to the program and not to the room.
         if (takeInviteInput(text))
         {
             return;
@@ -2873,6 +2882,14 @@ namespace rwe
 
         // -- who has asked for a seat --
         const auto claims = claimsOn(flow.discovery.games(flow.session), flow.session);
+        const auto hostBuild = flow.discovery.buildIdentity();
+        const auto stillClaiming = [&](const auto& token) {
+            return std::any_of(claims.begin(), claims.end(), [&](const auto& c) { return c.token == token; });
+        };
+        flow.pendingJoins.erase(std::remove_if(flow.pendingJoins.begin(), flow.pendingJoins.end(),
+            [&](const auto& request) { return !stillClaiming(request.token); }), flow.pendingJoins.end());
+        flow.approvedJoinTokens.erase(std::remove_if(flow.approvedJoinTokens.begin(), flow.approvedJoinTokens.end(),
+            [&](const auto& token) { return !stillClaiming(token); }), flow.approvedJoinTokens.end());
 
         // A guest that was put out stays in `removedTokens` for as long as
         // its claim is still being heard, and not a moment longer.
@@ -2891,8 +2908,7 @@ namespace rwe
             {
                 continue;
             }
-            const bool stillClaiming = std::any_of(claims.begin(), claims.end(), [&](const auto& c) { return c.token == token; });
-            if (!stillClaiming)
+            if (!stillClaiming(token))
             {
                 auto& p = model.players[seat];
                 if (p.type.getValue() == PlayerType::Network)
@@ -2923,7 +2939,6 @@ namespace rwe
             // A guest on another build would start a game that desyncs at
             // its first tick, and be reported as a fault in the engine. It
             // is not seated, and the room is told why, once.
-            const auto hostBuild = flow.discovery.buildIdentity();
             if (!buildsCompatible(hostBuild, claim.build))
             {
                 if (std::find(flow.refusedTokens.begin(), flow.refusedTokens.end(), claim.token) == flow.refusedTokens.end())
@@ -2970,7 +2985,29 @@ namespace rwe
                 continue;
             }
 
-            // First come, first seated. A claim for a seat that is not open
+            if (flow.launching)
+            {
+                continue;
+            }
+            if ((flow.approvalRequired || claim.approvalRequired)
+                && std::find(flow.approvedJoinTokens.begin(), flow.approvedJoinTokens.end(), claim.token) == flow.approvedJoinTokens.end())
+            {
+                auto pending = std::find_if(flow.pendingJoins.begin(), flow.pendingJoins.end(),
+                    [&](const auto& request) { return request.token == claim.token; });
+                if (pending != flow.pendingJoins.end())
+                {
+                    *pending = claim;
+                }
+                else if (flow.pendingJoins.size() < model.players.size())
+                {
+                    flow.pendingJoins.push_back(claim);
+                    const auto who = claim.name.empty() ? std::string("A player") : claim.name;
+                    flow.chat.say(std::string(), who + " wants to join. Type /accept to allow.");
+                }
+                continue;
+            }
+
+            // First come, first seated once approved. A claim for a seat that is not open
             // is simply not honoured, and the guest sees that from the
             // seat's description and asks for another.
             auto seat = static_cast<std::size_t>(claim.seat);
@@ -3021,6 +3058,7 @@ namespace rwe
             identity.port = 1337;
         }
         identity.launching = flow.launching;
+        identity.approvalRequired = flow.approvalRequired;
         identity.ready = flow.seatReady;
         identity.chat = flow.chat.tail();
         {
@@ -3072,6 +3110,8 @@ namespace rwe
         }
         flow.hostSeenAt = getTimestamp();
 
+        flow.approvalRequired = flow.approvalRequired || host->approvalRequired;
+
         // Keep asking the host to announce. On the same network its own
         // broadcasts do it; across one a host only speaks when spoken to,
         // and an announcement is forgotten after three and a half seconds.
@@ -3107,14 +3147,9 @@ namespace rwe
                     returnToGameList("You were removed from the game");
                     return;
                 }
-                if (secondsSince(flow.claimedAt) > 8.0f)
+                if (!flow.approvalRequired && secondsSince(flow.claimedAt) > 8.0f)
                 {
-                    // Across routers the likeliest reason is that the host
-                    // has not been given this machine's reply code, so the
-                    // router in front of it is still dropping what arrives.
-                    returnToGameList(flow.invited && !flow.replyCode.empty()
-                            ? "The host did not answer. Has it been sent your reply code, " + flow.replyCode + "?"
-                            : std::string("The host did not answer"));
+                    returnToGameList("The host did not answer");
                     return;
                 }
                 break;
@@ -3136,7 +3171,10 @@ namespace rwe
                         return;
                     }
                     flow.mySeat = *next;
-                    flow.claimToken = randomHex(claimTokenLength);
+                    if (!flow.approvalRequired)
+                    {
+                        flow.claimToken = randomHex(claimTokenLength);
+                    }
                     flow.claimedAt = getTimestamp();
                 }
                 break;
@@ -3208,7 +3246,9 @@ namespace rwe
                 reachableAt = InviteCode::toAddressString(*status.gameAddress);
             }
         }
-        flow.discovery.advertise(claimAnnouncement(*host, flow.mySeat, flow.claimToken, flow.nickname, port, choice, flow.sentChat, reachableAt));
+        auto announcement = claimAnnouncement(*host, flow.mySeat, flow.claimToken, flow.nickname, port, choice, flow.sentChat, reachableAt);
+        announcement.approvalRequired = flow.approvalRequired;
+        flow.discovery.advertise(announcement);
 
         // -- the host has pressed Start --
         if (host->launching && flow.accepted)
@@ -3296,6 +3336,30 @@ namespace rwe
 
         std::string lowered = text;
         std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (lowered == "/accept" || lowered.compare(0, 8, "/accept ") == 0)
+        {
+            if (flow.launching)
+            {
+                flow.chat.say(std::string(), "Cannot accept a join request while the game is starting.");
+                return true;
+            }
+            const auto name = lowered.size() > 7 ? trimmed(lowered.substr(8)) : std::string();
+            auto request = std::find_if(flow.pendingJoins.begin(), flow.pendingJoins.end(), [&](const auto& pending) {
+                auto candidate = pending.name;
+                std::transform(candidate.begin(), candidate.end(), candidate.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                return name.empty() || candidate == name;
+            });
+            if (request == flow.pendingJoins.end())
+            {
+                flow.chat.say(std::string(), name.empty() ? "No join requests are waiting." : "No join request from that name is waiting.");
+                return true;
+            }
+            flow.approvedJoinTokens.push_back(request->token);
+            const auto who = request->name.empty() ? std::string("A player") : request->name;
+            flow.chat.say(std::string(), "Accepted " + who + "'s join request.");
+            flow.pendingJoins.erase(request);
+            return true;
+        }
         if (lowered == "/invite")
         {
             if (!flow.discoveryRunning)
@@ -3304,6 +3368,7 @@ namespace rwe
                 return true;
             }
             flow.inviteRequested = true;
+            flow.approvalRequired = true;
             startNatTraversal();
             flow.chat.say(std::string(), "Finding this computer's internet address...");
             return true;
@@ -3359,7 +3424,8 @@ namespace rwe
                     flow.inviteAddress = InviteCode::toAddressString(*status.discoveryAddress);
                     copyToClipboard(*code);
                     flow.chat.say(std::string(), "Invite code: " + *code + " (copied)");
-                    flow.chat.say(std::string(), "Send it, then paste the reply code you get back here.");
+                    flow.chat.say(std::string(), "Send this code. Type /accept when a named join request arrives.");
+                    flow.chat.say(std::string(), "If no request arrives, paste the player's reply code here.");
                 }
             }
             else if (status.phase == NatTraversal::Phase::Failed)

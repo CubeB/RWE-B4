@@ -4,8 +4,37 @@ Two machines on different home or mobile connections cannot reach each other
 by address: each sits behind a router, and behind a carrier's router on 4G,
 5G and satellite, so the address a machine has is not one anybody can send to
 and there is no port to forward. RWE does it by *hole punching*, with no server
-of its own: the people pass two short codes to each other, and each machine
+of its own: the host shares an invite code, and each machine
 asks a public STUN server only "what address did this datagram come from?".
+If the guest's initial probe reaches the host, no reply code is needed. If the
+router blocks it, the guest sends a reply code back as a fallback.
+
+## Named join requests
+
+After `/invite`, new players need the host's approval. The guest enters the
+invite code, types their nickname on the game list and presses Join. The host
+sees `Name wants to join. Type /accept to allow.` in the battleroom, with a
+reminder on the status line. `/accept` admits the oldest waiting request;
+`/accept Name` admits the oldest request matching that name, ignoring case.
+The commands are handled locally and are not sent as player chat.
+
+The guest sees that it is waiting for acceptance and can wait longer than the
+ordinary eight-second join timeout while the host remains connected. Repeated
+announcements update one request, and a request that disappears expires. The
+grant belongs to the claim token, so accepting one name does not authorize
+another player using the same nickname. Build, map and password checks remain
+in place. Ordinary LAN rooms that have not used `/invite` still seat guests
+automatically.
+
+The host announces its approval requirement as `approval=1`; invited guests also
+set it on their claim. The host enforces its own requirement even if a guest
+omits that field. No new server or game-simulation command is involved.
+
+This cannot make a blocked first packet arrive. When no game appears, the
+guest's status line still provides a copied reply code. Send that to the host,
+who pastes it into the battleroom to open the route. Then press Join and have
+the host accept the named request. The two-code exchange below describes this
+fallback path.
 
 Everything here is `src/rwe/net/`:
 
@@ -46,8 +75,9 @@ host                         STUN                       guest
 3. The host pastes the reply into the message box. It is not said to the room.
    The host's announcements now go to that address, which is what makes the
    host's router expect what the guest has been sending.
-4. The lobby then runs over those two discovery sockets exactly as it does on a
-   LAN: claim, seat, ready, chat. What is new is that each side announces the
+4. The guest enters their name and presses Join; the host types `/accept`.
+   The lobby then runs over those two discovery sockets: claim, seat, ready,
+   chat. Each side announces the
    *game port's* outside address in a `gaddr` key (host's announcement, guest's
    claim), and the seats' addresses in the lobby are those, not "source address
    and 1337".

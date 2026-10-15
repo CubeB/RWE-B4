@@ -566,7 +566,17 @@ nobody claims, or a claim that goes quiet, is open again. The claim is also
 how a guest speaks to the room: its side, colour, team and ready flag, and its
 last few chat lines, ride it, and the host acts on a choice only when it
 changes (and refuses a colour another seat holds).
-_Avoid_: join request, handshake (that is the TA session's)
+_Avoid_: handshake (that is the TA session's)
+
+**Join request**:
+A seat claim waiting for the host's approval. Issuing `/invite` makes new
+claims wait; the battleroom shows the guest's nickname, and `/accept` admits
+the oldest request or `/accept Name` selects one by name. Approval belongs
+to the claim token, not the nickname or requested seat. A request that stops
+announcing expires. Ordinary LAN rooms without `/invite` still seat claims
+automatically. This uses the existing discovery connection with no rendezvous
+service; a reply code remains the fallback when the first probe cannot reach
+the host. See `docs/NAT-PUNCH.md`.
 
 ### The instruments
 

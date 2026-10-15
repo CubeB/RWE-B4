@@ -87,6 +87,7 @@ namespace rwe
 
         /** The room's transcript, as announced: the newest lines, oldest first. */
         std::vector<DiscoveredChatLine> chat{};
+        bool approvalRequired{false};
     };
 
     /**
@@ -174,6 +175,7 @@ namespace rwe
 
         /** The guest's most recent lines, by its own sequence numbers. */
         std::vector<DiscoveredChatLine> chat;
+        bool approvalRequired{false};
     };
 
     constexpr std::size_t claimTokenLength = 8;
@@ -584,6 +586,8 @@ namespace rwe
 
         /** Guest: the address came from an invite code, so the host is across a router. */
         bool invited{false};
+        /** Guest waits for approval; host requires approval after issuing an invite. */
+        bool approvalRequired{false};
         /** Guest: this machine's own code, to be sent back to the host once it is known. */
         std::string replyCode;
         /** Host: the invite was asked for and is waiting on the lookup. */
@@ -602,6 +606,10 @@ namespace rwe
         std::vector<std::string> heardReported;
         /** Host: claims turned away for being another build, said to the room once each. */
         std::vector<std::string> refusedTokens;
+        /** Invite-code claims awaiting host approval, oldest first. */
+        std::vector<SeatClaim> pendingJoins;
+        /** Approval follows the claim token, not a display name or a requested seat. */
+        std::vector<std::string> approvedJoinTokens;
 
         /** The name this machine plays under, once one has been given. */
         std::string nickname;

@@ -162,6 +162,9 @@ namespace rwe
         /** Where the announcement came from, host:port. Not part of the wire. */
         std::string sourceAddress;
         Timestamp lastSeen{};
+
+        /** Host requires approval, or guest requests it. Wire key `approval`. */
+        bool approvalRequired{false};
     };
 
     /**

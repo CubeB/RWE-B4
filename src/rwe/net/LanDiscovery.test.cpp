@@ -51,6 +51,19 @@ namespace rwe
             }
         }
 
+        SECTION("join approval is explicit and defaults off for older announcements")
+        {
+            auto game = sampleGame();
+            auto plain = LanDiscovery::encode(game);
+            REQUIRE(plain);
+            REQUIRE_FALSE(LanDiscovery::decode(*plain)->approvalRequired);
+            game.approvalRequired = true;
+            auto text = LanDiscovery::encode(game);
+            REQUIRE(text);
+            REQUIRE(LanDiscovery::decode(*text)->approvalRequired);
+            REQUIRE_FALSE(LanDiscovery::decode(*plain + "\napproval=perhaps\n"));
+        }
+
         SECTION("the build that announced a lobby survives, and a value that is not one is refused")
         {
             auto game = sampleGame();

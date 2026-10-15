@@ -317,7 +317,7 @@ namespace rwe
 
         /**
          * The internet side of a lobby, every update and for any role: the
-         * invite code a host asked for and the reply code a guest owes, and
+         * invite code a host asked for and a guest's fallback reply code, and
          * the addresses the game port keeps a way open to.
          */
         void updateNatTraversal();
@@ -327,7 +327,7 @@ namespace rwe
 
         /**
          * A line typed in the battleroom, before it is chat. True if it was
-         * the host's `/invite` or a guest's reply code and has been dealt
+         * the host's `/invite`, `/accept` or a guest's reply code and has been dealt
          * with, so that it is not said to the room.
          */
         bool takeInviteInput(const std::string& text);
