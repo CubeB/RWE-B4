@@ -588,6 +588,22 @@ namespace rwe
         // 0.1ms per real ms; at 5000 we accumulate 5ms per real ms.
         // The sim tick threshold (SimMillisecondsPerTick) is unchanged.
         pollTaHostInbound();
+        if (!isPlayback() && !isOwnClock() && gameNetworkService->hasRemotePeers())
+        {
+            const auto state = gameNetworkService->sharedPauseState();
+            if (paused != state.paused)
+            {
+                LOG_INFO << "Shared pause " << state.revision << " by player " << state.player
+                         << (state.paused ? ": paused" : ": resumed") << " at tick " << sceneTime.value;
+            }
+            paused = state.paused;
+        }
+        if (paused && !isPlayback())
+        {
+            // Discard a fractional tick too: a paused world must not keep
+            // dispatching the remainder or jitter between interpolated states.
+            millisecondsBuffer = 0;
+        }
         if (replaySeekTarget)
         {
             // Seeking: fill the accumulator past anything the cap will

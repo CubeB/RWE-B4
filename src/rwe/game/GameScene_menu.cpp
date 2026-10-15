@@ -257,11 +257,29 @@ namespace rwe
         setCameraPosition(save.cameraPosition);
     }
 
+    void GameScene::togglePause()
+    {
+        if (!isPlayback() && !isOwnClock() && gameNetworkService->hasRemotePeers())
+        {
+            paused = gameNetworkService->togglePause().paused;
+            if (paused)
+            {
+                millisecondsBuffer = 0;
+            }
+            return;
+        }
+        paused = !paused;
+        localPlayerCommandBuffer.push_back(paused ? PlayerCommand(PlayerPauseGameCommand{}) : PlayerCommand(PlayerUnpauseGameCommand{}));
+    }
+
     void GameScene::setMenuPause(bool wantPaused)
     {
-        // The original pauses when the game menu opens in single player and
-        // never in multiplayer; RWE routes it through the same command path
-        // as the Pause key so peers stay in step either way.
+        // F2 pauses only single player. Opening or closing options must not
+        // alter a multiplayer pause issued by somebody else.
+        if (isOwnClock() || gameNetworkService->hasRemotePeers())
+        {
+            return;
+        }
         if (wantPaused && !paused)
         {
             paused = true;
@@ -309,7 +327,12 @@ namespace rwe
         // Tab opens it in single player (the sliding TABMENU bar it shares a
         // key with is multiplayer-only), F2 opens it anywhere.
         const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
-        auto panel = uiFactory.panelFromGuiFile(sidePrefix + "OPT");
+        const auto sideMenu = sidePrefix + "OPT";
+        // Retail data can contain only ARMOPT. Like the original's literal
+        // ARMOPT lookup, keep that shared menu when no side override exists.
+        const auto menu = sceneContext.vfs->readFile(sceneContext.pathMapping->guis + "/" + sideMenu + ".GUI")
+            ? sideMenu : std::string("ARMOPT");
+        auto panel = uiFactory.panelFromGuiFile(menu);
 
         // The briefing and help do not exist in RWE yet; the original greys
         // what does not apply rather than hiding it.
@@ -845,7 +868,7 @@ namespace rwe
     void GameScene::gameMenuMessageNow(const std::string& topic, const std::string& control)
     {
         const auto& sidePrefix = sceneContext.sideData->at(getPlayer(localPlayerId).side).namePrefix;
-        if (topic == sidePrefix + "OPT")
+        if (topic == sidePrefix + "OPT" || topic == "ARMOPT")
         {
             if (control == "OK")
             {

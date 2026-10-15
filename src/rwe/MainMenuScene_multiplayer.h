@@ -156,6 +156,9 @@ namespace rwe
      */
     struct SeatClaim
     {
+        /** Observed discovery endpoint and the endpoint named by its reply code. */
+        std::string sourceAddress;
+        std::string discoveryAddress;
         std::string token;
         int seat{-1};
         std::string name;

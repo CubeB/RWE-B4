@@ -95,6 +95,35 @@ namespace rwe
         });
     }
 
+    void GameNetworkService::mergePauseState(const SharedPauseState& state)
+    {
+        if (sharedPause.merge(state))
+        {
+            for (auto& e : endpoints)
+            {
+                e.link->submitPauseState(sharedPause);
+            }
+        }
+    }
+
+    SharedPauseState GameNetworkService::togglePause()
+    {
+        std::promise<SharedPauseState> result;
+        asio::post(ioContext, [this, &result]() {
+            mergePauseState(SharedPauseState{sharedPause.revision + 1, localPlayerId.value, !sharedPause.paused});
+            result.set_value(sharedPause);
+            sendToAll();
+        });
+        return result.get_future().get();
+    }
+
+    SharedPauseState GameNetworkService::sharedPauseState()
+    {
+        std::promise<SharedPauseState> result;
+        asio::post(ioContext, [this, &result]() { result.set_value(sharedPause); });
+        return result.get_future().get();
+    }
+
     void GameNetworkService::submitGameHash(GameHash hash)
     {
         asio::post(ioContext, [this, hash]() {
@@ -256,6 +285,7 @@ namespace rwe
                 [this]() { return nextPacketId(); },
                 resume);
             link->setAcceptingCommands(acceptingCommands);
+            link->submitPauseState(sharedPause);
             link->restoreUnackedCommands(localStream.historyFrom(fromSequence));
 
             forgottenEndpoints.erase(known);
@@ -521,6 +551,7 @@ namespace rwe
         }
 
         endpointIt->link->onPacket(outerMessage.game_update(), receiveTime);
+        mergePauseState(endpointIt->link->pauseState());
 
         auto messages = endpointIt->link->takeReceivedChat();
         if (!messages.empty())

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <rwe/game/SharedPauseState.h>
+
 #include <chrono>
 #include <cstddef>
 #include <deque>
@@ -213,6 +215,9 @@ namespace rwe
          */
         void submitRunState(unsigned int speedPermille, bool paused, bool stalled, unsigned int sustainableSpeedPermille);
 
+        void submitPauseState(const SharedPauseState& state) { sharedPause.merge(state); }
+        const SharedPauseState& pauseState() const { return sharedPause; }
+
         void submitGameHash(GameHash hash);
 
         /** Whether this peer is already owed too much chat to take a new line. */
@@ -336,6 +341,7 @@ namespace rwe
         /** How this peer last said it was running, sent in every packet. */
         unsigned int localSpeedPermille{1000};
         bool localPaused{false};
+        SharedPauseState sharedPause;
         bool localStalled{false};
         unsigned int localSustainableSpeedPermille{1000};
 

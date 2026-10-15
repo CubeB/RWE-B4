@@ -1098,6 +1098,8 @@ int main(int argc, char* argv[])
                 runInternet(9.5);
                 check(panelName(invGuest) == "LOUNGE2", "the guest can wait for approval beyond eight seconds");
                 check(!MenuProbe::flow(invGuest)->accepted, "the guest is not accepted automatically");
+                check(MenuProbe::model(invGuest).players[1].type.getValue() == MainMenuModel::PlayerSettings::Type::Open,
+                    "a waiting guest does not display an unacknowledged local seat");
                 check(MenuProbe::model(invHost).players[1].type.getValue() == MainMenuModel::PlayerSettings::Type::Open,
                     "the requested seat stays open until the host accepts");
                 check(contains(transcript(invHost), "Net wants to join. Type /accept to allow."), "the join request includes the player's name");
@@ -1159,6 +1161,47 @@ int main(int argc, char* argv[])
                 }), "the guest's game port is reachable after approval");
 
                 // -- the host takes the reply --
+                // A new unapproved claim at the reply endpoint is admitted
+                // by the pasted code, without any /accept command. Sharing
+                // an IP with Net must not approve a different port earlier.
+                LanDiscovery fallback;
+                fallback.start(1363);
+                fallback.setAnnounceTargets({"127.0.0.1:1361"});
+                LanDiscovery unapproved;
+                unapproved.start(1364);
+                unapproved.setAnnounceTargets({"127.0.0.1:1361"});
+                auto fallbackGames = MenuProbe::flow(invGuest)->discovery.games();
+                auto fallbackHost = std::find_if(fallbackGames.begin(), fallbackGames.end(),
+                    [](const auto& game) { return !isClaimSession(game.session) && game.label == "Across the sea"; });
+                check(fallbackHost != fallbackGames.end(), "the fallback requester has the host's session");
+                if (fallbackHost != fallbackGames.end())
+                {
+                    auto fallbackRequest = claimAnnouncement(*fallbackHost, 1, "face1234", "Fallback", 1373);
+                    // The STUN mapping deliberately differs from the real
+                    // source address and port; no external router is needed.
+                    fallbackRequest.discoveryAddress = "127.0.0.2:2463";
+                    fallback.advertise(fallbackRequest);
+                    auto otherRequest = claimAnnouncement(*fallbackHost, 3, "face5678", "Unapproved", 1374);
+                    otherRequest.discoveryAddress = "127.0.0.2:2464";
+                    unapproved.advertise(otherRequest);
+                    runInternet(1.5);
+                    check(MenuProbe::flow(invHost)->pendingJoins.size() == 2, "both fallback requesters initially wait for approval");
+                    const auto fallbackCode = InviteCode::encode(asio::ip::udp::endpoint(asio::ip::make_address_v4("127.0.0.2"), 2463));
+                    check(fallbackCode.has_value(), "the fallback requester has a reply code");
+                    if (fallbackCode)
+                    {
+                        say(invHost, *fallbackCode);
+                        runInternet(1.5);
+                        check(MenuProbe::model(invHost).players[1].name.getValue() == "Fallback", "pasting a reply code admits its requester without accept");
+                        check(MenuProbe::flow(invHost)->pendingJoins.size() == 1, "reply-code approval clears only its matching pending request");
+                        check(MenuProbe::model(invHost).players[3].type.getValue() == MainMenuModel::PlayerSettings::Type::Open,
+                            "a different reply port on the same IP stays unapproved");
+                    }
+                }
+                fallback.stop();
+                unapproved.stop();
+                runInternet(4.5);
+                check(MenuProbe::flow(invHost)->pendingJoins.empty(), "cancelled unmatched requests expire after reply-code admission");
                 say(invHost, replyCode);
                 runInternet(1.0);
                 {

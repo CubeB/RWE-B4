@@ -18,7 +18,8 @@ reminder on the status line. `/accept` admits the oldest waiting request;
 `/accept Name` admits the oldest request matching that name, ignoring case.
 The commands are handled locally and are not sent as player chat.
 
-The guest sees that it is waiting for acceptance and can wait longer than the
+The guest sees the host's actual roster while it is waiting for acceptance,
+without showing itself as admitted early, and can wait longer than the
 ordinary eight-second join timeout while the host remains connected. Repeated
 announcements update one request, and a request that disappears expires. The
 grant belongs to the claim token, so accepting one name does not authorize
@@ -32,8 +33,12 @@ omits that field. No new server or game-simulation command is involved.
 
 This cannot make a blocked first packet arrive. When no game appears, the
 guest's status line still provides a copied reply code. Send that to the host,
-who pastes it into the battleroom to open the route. Then press Join and have
-the host accept the named request. The two-code exchange below describes this
+who pastes it into the battleroom to open the route and approve that endpoint.
+Then press Join; no second `/accept` is needed. The claim carries the guest's
+STUN discovery endpoint as `daddr`, because the packet's observed source can
+differ on a LAN or behind a NAT. Approval matches the full announced or
+observed discovery IP and port, so another port sharing that IP stays unapproved.
+The two-code exchange below describes this
 fallback path.
 
 Everything here is `src/rwe/net/`:
@@ -75,7 +80,8 @@ host                         STUN                       guest
 3. The host pastes the reply into the message box. It is not said to the room.
    The host's announcements now go to that address, which is what makes the
    host's router expect what the guest has been sending.
-4. The guest enters their name and presses Join; the host types `/accept`.
+4. The guest enters their name and presses Join. The pasted reply code has
+   already approved that discovery endpoint, so no `/accept` is needed.
    The lobby then runs over those two discovery sockets: claim, seat, ready,
    chat. Each side announces the
    *game port's* outside address in a `gaddr` key (host's announcement, guest's

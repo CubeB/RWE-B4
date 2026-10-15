@@ -16,7 +16,7 @@ namespace rwe
      */
     struct ControlRequest
     {
-        /** "rejoin", and nothing else yet. */
+        /** "rejoin", "pause", "game-menu" or "game-status". */
         std::string command;
 
         unsigned int player{0};
@@ -34,10 +34,9 @@ namespace rwe
      * only be cut by the peer holding it.
      *
      * It is a side channel and never a simulation input. A request arriving
-     * here is exactly like a key being pressed: it is turned into an ordinary
-     * PlayerCommand on the tick the local player next submits one, and every
-     * peer sees it in the same place in the same stream. Nothing read here is
-     * hashed, saved or replayed.
+     * here is exactly like a key being pressed. Simulation actions become
+     * ordinary PlayerCommands; pause uses the shared control state, and menu
+     * actions affect only the local UI. Nothing read here is hashed or saved.
      *
      * Off unless --bridge was given, in which case every method below is a
      * cheap no-op; the game is ordinarily started by a person and not by a
@@ -47,6 +46,7 @@ namespace rwe
      * The events, each an object with an `event` name:
      *
      *   player-dropped   {player, tick}
+     *   game-status      {tick, paused, menuOpen}
      *   rejoin-bundle    {player, tick, file}
      *   rejoin-refused   {player, reason}
      *   game-ended       {outcome, tick, gameTime, engineBuild, replay,
@@ -75,6 +75,9 @@ namespace rwe
 
         /** A peer has been dropped, and could be asked back. */
         void sendPlayerDropped(unsigned int player, unsigned int fromTick);
+
+        /** Current scene state, including while simulation ticks are stopped. */
+        void sendGameStatus(unsigned int tick, bool paused, bool menuOpen);
 
         /**
          * The recording a returning peer needs is on disk at this path, and

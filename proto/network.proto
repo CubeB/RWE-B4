@@ -342,6 +342,16 @@ message GameUpdateMessage
     // the effective speed every peer runs at. Absent means no opinion, read
     // as normal speed.
     optional uint32 sustainable_speed_permille = 17 [default = 1000];
+
+    // Repeated in every packet, even while ticks are stopped. Revision and
+    // issuing seat order simultaneous updates and reject reordered packets.
+    message PauseState
+    {
+        required uint64 revision = 1;
+        required uint32 player = 2;
+        required bool paused = 3;
+    }
+    optional PauseState pause_state = 18;
 }
 
 message NetworkMessage

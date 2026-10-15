@@ -1052,14 +1052,18 @@ namespace rwe
             lobby = lobbyFromModel(host, identity, "Coast To Coast", noTokens());
             REQUIRE(lobby.approvalRequired);
             auto request = claimAnnouncement(lobby, 1, "deadbeef", "Guest Name", 1400);
+            request.discoveryAddress = "203.0.113.42:2463";
             auto text = LanDiscovery::encode(request);
             REQUIRE(text);
             auto heard = LanDiscovery::decode(*text);
             REQUIRE(heard);
+            heard->sourceAddress = "192.168.0.2:1363";
             auto requests = claimsOn({*heard}, lobby.session);
             REQUIRE(requests.size() == 1);
             REQUIRE(requests.front().name == "Guest Name");
             REQUIRE(requests.front().approvalRequired);
+            REQUIRE(requests.front().discoveryAddress == request.discoveryAddress);
+            REQUIRE(requests.front().sourceAddress == heard->sourceAddress);
         }
     }
 
