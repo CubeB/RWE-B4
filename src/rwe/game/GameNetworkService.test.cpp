@@ -57,6 +57,16 @@ namespace rwe
         REQUIRE(waitUntil([&]() { return !b.sharedPauseState().paused; }));
         REQUIRE(a.sharedPauseState().revision == 4);
         REQUIRE(b.sharedPauseState().revision == 4);
+
+        // A returning link must inherit changes made while it was absent.
+        // Otherwise it can keep advertising its old pause indefinitely.
+        a.forgetPeer(PlayerId(1));
+        REQUIRE(a.getPeerStatuses().empty());
+        REQUIRE(a.togglePause().paused);
+        REQUIRE(a.rememberPeer(PlayerId(1), SequenceNumber(0), SequenceNumber(0)));
+        REQUIRE(waitUntil([&]() { return b.sharedPauseState().paused; }));
+        REQUIRE_FALSE(b.togglePause().paused);
+        REQUIRE(waitUntil([&]() { return !a.sharedPauseState().paused; }));
     }
 
     TEST_CASE("GameNetworkService follows a peer that is sending from somewhere it was not told")
