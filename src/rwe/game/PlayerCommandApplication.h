@@ -6,6 +6,16 @@
 
 namespace rwe
 {
+    struct Replay;
+
+    /**
+     * Feed one recorded tick. Rejoining also rebuilds the computer players'
+     * live delay queues from their deterministic controllers, so the first
+     * live tick has the same pending orders as the peers that stayed.
+     */
+    void feedReplayCommands(GameSimulation& simulation, PlayerCommandService& playerCommandService,
+        const Replay& replay, unsigned int tick, bool rejoining);
+
     /**
      * Takes what every computer player asked for on the tick just run and
      * queues it, keeping each one's buffer topped up to `bufferDepth`.

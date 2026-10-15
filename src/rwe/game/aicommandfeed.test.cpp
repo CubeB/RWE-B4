@@ -2,8 +2,10 @@
 #include <limits>
 #include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/game/PlayerCommandService.h>
+#include <rwe/game/ReplayFile.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/sim_test_util.h>
+#include <rwe/util/OpaqueId_io.h>
 
 namespace rwe
 {
@@ -164,6 +166,98 @@ namespace rwe
             feedAiCommands(sim, service, depth);
             REQUIRE(service.bufferedCommandCount(ai) == depth + 1);
         }
+    }
+
+    TEST_CASE("rejoin catch-up preserves the AI orders already waiting for live ticks", "[ai][rejoin]")
+    {
+        GameSimulation live(makeFlatTerrain(32, 32), 0u, 100, 3000);
+        GameSimulation returning(makeFlatTerrain(32, 32), 0u, 100, 3000);
+        auto human = addPlayer(live);
+        auto ai = addComputerPlayer(live);
+        REQUIRE(addPlayer(returning) == human);
+        REQUIRE(addComputerPlayer(returning) == ai);
+        PlayerCommandService liveCommands;
+        PlayerCommandService returningCommands;
+        for (auto* service : {&liveCommands, &returningCommands})
+        {
+            service->registerPlayer(human);
+            service->registerPlayer(ai);
+        }
+        auto generated = [](unsigned int tick) -> PlayerCommand {
+            return PlayerUnitCommand(UnitId(1000 + tick), PlayerUnitCommand::Stop{});
+        };
+        auto markers = [](const std::vector<PlayerCommand>& commands) {
+            std::vector<UnitId> ids;
+            for (const auto& command : commands)
+            {
+                ids.push_back(std::get<PlayerUnitCommand>(command).unit);
+            }
+            return ids;
+        };
+
+        Replay bundle;
+        constexpr unsigned int resumeAt = 20;
+        std::vector<std::vector<PlayerCommand>> expected;
+        for (unsigned int tick = 0; tick < 40; ++tick)
+        {
+            live.aiPendingCommands[ai].push_back(generated(tick));
+            feedAiCommands(live, liveCommands, aiCommandBufferDepth());
+            expected.push_back(popOneTick(liveCommands, human, ai));
+            if (tick < resumeAt)
+            {
+                bundle.commands[tick][ai.value] = expected.back();
+            }
+        }
+        for (unsigned int tick = 0; tick < 40; ++tick)
+        {
+            INFO("tick " << tick);
+            returning.aiPendingCommands[ai].push_back(generated(tick));
+            std::vector<PlayerCommand> actual;
+            if (tick < resumeAt)
+            {
+                feedReplayCommands(returning, returningCommands, bundle, tick, true);
+                auto popped = returningCommands.tryPopCommands();
+                REQUIRE(popped);
+                for (const auto& [player, commands] : *popped)
+                {
+                    if (player == ai)
+                    {
+                        actual = commands;
+                    }
+                }
+            }
+            else
+            {
+                feedAiCommands(returning, returningCommands, aiCommandBufferDepth());
+                actual = popOneTick(returningCommands, human, ai);
+            }
+            REQUIRE(markers(actual) == markers(expected[tick]));
+        }
+    }
+
+    TEST_CASE("ordinary playback uses recorded AI commands without a live controller", "[ai][replay]")
+    {
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 100, 3000);
+        auto human = addPlayer(sim);
+        auto ai = addComputerPlayer(sim);
+        PlayerCommandService service;
+        service.registerPlayer(human);
+        service.registerPlayer(ai);
+        Replay replay;
+        replay.commands[0][ai.value].push_back(PlayerUnitCommand(UnitId(123), PlayerUnitCommand::Stop{}));
+        sim.aiPendingCommands[ai].push_back(PlayerUnitCommand(UnitId(456), PlayerUnitCommand::Stop{}));
+        feedReplayCommands(sim, service, replay, 0, false);
+        auto popped = service.tryPopCommands();
+        REQUIRE(popped);
+        for (const auto& [player, commands] : *popped)
+        {
+            if (player == ai)
+            {
+                REQUIRE(commands.size() == 1);
+                REQUIRE(std::get<PlayerUnitCommand>(commands.front()).unit == UnitId(123));
+            }
+        }
+        REQUIRE(sim.aiPendingCommands[ai].size() == 1);
     }
 
     TEST_CASE("aiCommandBufferDepth")

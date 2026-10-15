@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <rwe/game/OrderDispatch.h>
+#include <rwe/game/ReplayFile.h>
 #include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/UnitBehaviorService.h>
 #include <rwe/sim/UnitState.h>
@@ -11,6 +12,48 @@
 
 namespace rwe
 {
+    void feedReplayCommands(GameSimulation& simulation, PlayerCommandService& playerCommandService,
+        const Replay& replay, unsigned int tick, bool rejoining)
+    {
+        auto tickIt = replay.commands.find(tick);
+        for (Index i = 0; i < getSize(simulation.players); ++i)
+        {
+            // A rejoining peer runs the same controllers from the beginning.
+            // Feeding their recorded output instead leaves their generated
+            // orders undrained and loses the seven-tick live command pipeline.
+            if (rejoining && simulation.players[i].type == GamePlayerType::Computer)
+            {
+                continue;
+            }
+            if (!playerCommandService.needsCommandsForTick(PlayerId(i), tick + 1))
+            {
+                continue;
+            }
+            std::vector<PlayerCommand> commands;
+            if (tickIt != replay.commands.end())
+            {
+                auto playerIt = tickIt->second.find(static_cast<unsigned int>(i));
+                if (playerIt != tickIt->second.end())
+                {
+                    commands = playerIt->second;
+                }
+            }
+            // Recorded pauses and speed changes must not control playback.
+            commands.erase(
+                std::remove_if(commands.begin(), commands.end(), [](const PlayerCommand& c) {
+                    return std::holds_alternative<PlayerPauseGameCommand>(c)
+                        || std::holds_alternative<PlayerUnpauseGameCommand>(c)
+                        || std::holds_alternative<PlayerSetGameSpeedCommand>(c);
+                }),
+                commands.end());
+            playerCommandService.pushCommands(PlayerId(i), commands);
+        }
+        if (rejoining)
+        {
+            feedAiCommands(simulation, playerCommandService, aiCommandBufferDepth());
+        }
+    }
+
     void feedAiCommands(GameSimulation& simulation, PlayerCommandService& playerCommandService, unsigned int bufferDepth)
     {
         for (Index i = 0; i < getSize(simulation.players); ++i)

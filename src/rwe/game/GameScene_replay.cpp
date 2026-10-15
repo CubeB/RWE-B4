@@ -46,45 +46,7 @@ namespace rwe
 {
     void GameScene::pushReplayCommandsForTick(unsigned int tick)
     {
-        auto tickIt = replayPlayback->commands.find(tick);
-        for (Index i = 0; i < getSize(simulation.players); ++i)
-        {
-            // The set number rather than the scene time: the scene counts its
-            // ticks from zero and the streams number their sets from one, so
-            // the set about to be popped is one above the tick about to run.
-            // False for a player whose stream has been cut, and for the ticks
-            // a rejoin has already filled in -- see needsCommandsForTick, and
-            // note that a recording crosses both of those in any game that
-            // lost a peer.
-            if (!playerCommandService->needsCommandsForTick(PlayerId(i), tick + 1))
-            {
-                continue;
-            }
-
-            std::vector<PlayerCommand> commands;
-            if (tickIt != replayPlayback->commands.end())
-            {
-                auto playerIt = tickIt->second.find(static_cast<unsigned int>(i));
-                if (playerIt != tickIt->second.end())
-                {
-                    commands = playerIt->second;
-                }
-            }
-
-            // The recorded game's pauses and speed changes are not the
-            // viewer's. Replaying them would stop the playback wherever
-            // whoever recorded it happened to stop, and fight the controls in
-            // the replay window for the rest of the game.
-            commands.erase(
-                std::remove_if(commands.begin(), commands.end(), [](const PlayerCommand& c) {
-                    return std::holds_alternative<PlayerPauseGameCommand>(c)
-                        || std::holds_alternative<PlayerUnpauseGameCommand>(c)
-                        || std::holds_alternative<PlayerSetGameSpeedCommand>(c);
-                }),
-                commands.end());
-
-            playerCommandService->pushCommands(PlayerId(i), commands);
-        }
+        feedReplayCommands(simulation, *playerCommandService, *replayPlayback, tick, rejoiningAtTick.has_value());
     }
 
     void GameScene::enableReplayPlayback(Replay&& replay)
