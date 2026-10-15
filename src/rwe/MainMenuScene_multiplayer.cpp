@@ -358,6 +358,7 @@ namespace rwe
             }
 
             SeatClaim claim;
+            claim.sourceAddress = g.sourceAddress;
             claim.token = g.session.substr(prefix.size());
             claim.build = g.build;
             claim.seat = g.slots.front().index;
@@ -2195,6 +2196,10 @@ namespace rwe
             flow.wanted = GuestChoice{mine.side.getValue(), mine.colorIndex.getValue(), mine.teamIndex.getValue(), false};
         }
 
+        // A request is not a seat. Show the host's actual roster until its
+        // announcement acknowledges our token.
+        applyLobbyToModel(model, game, -1, announcedGameAddress(game, flow.invited), nickname);
+
         goToBattleroom();
     }
 
@@ -2989,7 +2994,8 @@ namespace rwe
             {
                 continue;
             }
-            if ((flow.approvalRequired || claim.approvalRequired)
+            const bool replyApproved = std::find(flow.invitedGuests.begin(), flow.invitedGuests.end(), claim.sourceAddress) != flow.invitedGuests.end();
+            if (!replyApproved && (flow.approvalRequired || claim.approvalRequired)
                 && std::find(flow.approvedJoinTokens.begin(), flow.approvedJoinTokens.end(), claim.token) == flow.approvedJoinTokens.end())
             {
                 auto pending = std::find_if(flow.pendingJoins.begin(), flow.pendingJoins.end(),
@@ -3006,6 +3012,9 @@ namespace rwe
                 }
                 continue;
             }
+
+            flow.pendingJoins.erase(std::remove_if(flow.pendingJoins.begin(), flow.pendingJoins.end(),
+                [&](const auto& request) { return request.token == claim.token; }), flow.pendingJoins.end());
 
             // First come, first seated once approved. A claim for a seat that is not open
             // is simply not honoured, and the guest sees that from the
@@ -3181,7 +3190,7 @@ namespace rwe
         }
 
         // -- mirror the host, whole --
-        applyLobbyToModel(model, *host, flow.mySeat, announcedGameAddress(*host, flow.invited), flow.nickname);
+        applyLobbyToModel(model, *host, flow.accepted ? flow.mySeat : -1, announcedGameAddress(*host, flow.invited), flow.nickname);
 
         // -- the room: what was said, and who is ready --
         flow.chat.merge(host->chat);
@@ -3424,8 +3433,9 @@ namespace rwe
                     flow.inviteAddress = InviteCode::toAddressString(*status.discoveryAddress);
                     copyToClipboard(*code);
                     flow.chat.say(std::string(), "Invite code: " + *code + " (copied)");
-                    flow.chat.say(std::string(), "Send this code. Type /accept when a named join request arrives.");
-                    flow.chat.say(std::string(), "If no request arrives, paste the player's reply code here.");
+                    flow.chat.say(std::string(), "Guest: enter the code and your name, then press Join.");
+                    flow.chat.say(std::string(), "Host: type /accept when their named request arrives.");
+                    flow.chat.say(std::string(), "Or paste their reply code here to approve and open the route.");
                 }
             }
             else if (status.phase == NatTraversal::Phase::Failed)

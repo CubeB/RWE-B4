@@ -43,6 +43,16 @@ namespace rwe
 {
     void GameScene::onKeyDown(const SDL_KeyboardEvent& keysym)
     {
+        // The shared pause key remains available while options or chat owns
+        // other keys. Holding it must not generate repeated toggles.
+        if (keysym.key == SDLK_PAUSE)
+        {
+            if (!keysym.repeat)
+            {
+                togglePause();
+            }
+            return;
+        }
         // The message bar owns the keyboard ahead of anything else, the menu
         // included: while it is open, every key on the board is a letter.
         if (isChatBarOpen())
@@ -297,24 +307,6 @@ namespace rwe
         {
             // Slow down: see SDLK_EQUALS comment.
             localPlayerCommandBuffer.push_back(PlayerSetGameSpeedCommand{gameSpeed.decreased().index()});
-        }
-        else if (keysym.key == SDLK_PAUSE)
-        {
-            // Toggle the local paused flag immediately so the tick loop can
-            // resume on unpause; the lockstep-routed command handler is what
-            // drives the tick loop and would otherwise never run while paused.
-            // Pause/unpause is scene state (not deterministic sim state), so
-            // toggling locally is fine; the command still goes through the
-            // command stream so peers stay in sync.
-            paused = !paused;
-            if (paused)
-            {
-                localPlayerCommandBuffer.push_back(PlayerPauseGameCommand{});
-            }
-            else
-            {
-                localPlayerCommandBuffer.push_back(PlayerUnpauseGameCommand{});
-            }
         }
         else if (keysym.key == SDLK_A && isCtrlDown() && !isShiftDown())
         {

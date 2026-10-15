@@ -3092,18 +3092,15 @@ namespace rwe
                 processUnitCommand(issuingPlayer, c);
             },
             [&](const PlayerPauseGameCommand&) {
-                // Pause is open to any player. The local player toggles
-                // `paused` immediately in the key handler so the tick loop
-                // can resume to process the unpause; ignoring the round-tripped
-                // command here prevents a stale pause from re-applying after
-                // the user has already unpaused.
-                if (issuingPlayer != localPlayerId)
+                // Live multiplayer pause travels outside the stopped tick
+                // stream. A delayed command must not overwrite that state.
+                if (!gameNetworkService->hasRemotePeers() && issuingPlayer != localPlayerId)
                 {
                     paused = true;
                 }
             },
             [&](const PlayerUnpauseGameCommand&) {
-                if (issuingPlayer != localPlayerId)
+                if (!gameNetworkService->hasRemotePeers() && issuingPlayer != localPlayerId)
                 {
                     paused = false;
                 }

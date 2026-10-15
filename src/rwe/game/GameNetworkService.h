@@ -89,6 +89,10 @@ namespace rwe
          */
         void submitRunState(unsigned int speedPermille, bool paused, bool stalled, unsigned int sustainableSpeedPermille);
 
+        /** Toggle the latest shared state, even while no simulation tick runs. */
+        SharedPauseState togglePause();
+        SharedPauseState sharedPauseState();
+
         void submitGameHash(GameHash hash);
 
         /**
@@ -206,6 +210,8 @@ namespace rwe
 
         /** This peer's own command and hash streams, shared by every peer. */
         LocalStream localStream;
+        SharedPauseState sharedPause;
+        void mergePauseState(const SharedPauseState& state);
 
         /**
          * Whether anybody is on the other end of this game. Fixed when the

@@ -269,6 +269,38 @@ namespace rwe
         REQUIRE(messages.front().text == "hello there");
     }
 
+    TEST_CASE("Shared pause rejects stale updates and orders concurrent writers", "[pause]")
+    {
+        SharedPauseState a{1, 0, true};
+        SharedPauseState b{1, 1, false};
+        REQUIRE(a.merge(b));
+        REQUIRE_FALSE(a.paused);
+        REQUIRE_FALSE(a.merge(SharedPauseState{1, 0, true}));
+        REQUIRE_FALSE(a.merge(b));
+        REQUIRE(a.merge(SharedPauseState{2, 0, true}));
+        REQUIRE(a.paused);
+        REQUIRE(a.merge(SharedPauseState{3, 1, false}));
+        REQUIRE_FALSE(a.paused);
+    }
+
+    TEST_CASE("PeerLink repeats shared pause without any command sets", "[pause]")
+    {
+        FakePeerLink::Options options;
+        options.maxJitter = std::chrono::milliseconds(200);
+        options.loss = 0.25;
+        FakePeerLink link(options);
+        link.link(0).submitPauseState(SharedPauseState{1, 0, true});
+        link.run(std::chrono::seconds(1));
+        REQUIRE(link.link(1).pauseState().paused);
+        // Resuming is independent of the original pausing player's flags.
+        link.link(1).submitPauseState(SharedPauseState{2, 1, false});
+        link.run(std::chrono::seconds(1));
+        REQUIRE_FALSE(link.link(0).pauseState().paused);
+        link.link(0).submitPauseState(SharedPauseState{1, 0, true});
+        link.run(std::chrono::seconds(1));
+        REQUIRE_FALSE(link.link(1).pauseState().paused);
+    }
+
     TEST_CASE("PeerLink carries the sender's run state")
     {
         FakePeerLink link;

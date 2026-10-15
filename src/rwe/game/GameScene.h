@@ -633,7 +633,7 @@ namespace rwe
          * The in-game GAME OPTIONS menu (the original's ARMOPT/COROPT panel,
          * opened by Tab or F2) and whatever screen hangs off it -- the exit
          * menu, or the options composite. While anything is here, it owns
-         * the input and the game is paused.
+         * the input; only single player pauses for it.
          */
         std::vector<std::unique_ptr<UiPanel>> gameMenuPanels;
         bool menuPausedGame{false};
@@ -1188,6 +1188,7 @@ namespace rwe
 
         GameSpeed gameSpeed;
         bool paused{false};
+        void togglePause();
 
         /**
          * The speed everyone is actually running at: the chosen ceiling,
@@ -2197,7 +2198,7 @@ namespace rwe
         void openRestartMenu();
         /** Reloads the current map and players from scratch, the way a fresh game starts. */
         void restartGame();
-        /** Pause the sim for the menu, through the same command path the Pause key uses. */
+        /** Pause a single-player game for its menu; multiplayer keeps running. */
         void setMenuPause(bool wantPaused);
 
         void renderUnitOrders(UnitId unitId, bool drawLines);

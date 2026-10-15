@@ -156,6 +156,8 @@ namespace rwe
      */
     struct SeatClaim
     {
+        /** Discovery endpoint, used to bind manual reply-code approval. */
+        std::string sourceAddress;
         std::string token;
         int seat{-1};
         std::string name;

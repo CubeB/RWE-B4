@@ -147,9 +147,18 @@ _Avoid_: damage queue, send buffer
 The launcher's channel to the engine, one JSON object a line over standard
 input and output. `rwe_bridge` answers questions about the data files before
 a game; `rwe --bridge` answers for a game in progress. Never a simulation
-input: what arrives becomes an ordinary command in the local peer's own
-stream, like a keypress.
+input: simulation actions become ordinary commands in the local peer's own
+stream, like a keypress. Pause and game-menu requests use the same keyboard
+path as the player; `game-status` reports the current tick, pause and menu.
 _Avoid_: IPC, RPC
+
+**Shared pause**:
+One multiplayer pause state that any player can toggle, including resuming
+another player's pause. It travels in every network packet independently of
+simulation ticks, so an unpause cannot wait behind the stopped clock. A
+revision and issuing seat order concurrent updates and reject stale packets.
+It is scene state, not hashed simulation state. F2 options do not change it;
+only single player automatically pauses for its options menu.
 
 **Desync**:
 Two peers' simulations diverging, first visible as a sync hash mismatch.
@@ -572,7 +581,10 @@ _Avoid_: handshake (that is the TA session's)
 A seat claim waiting for the host's approval. Issuing `/invite` makes new
 claims wait; the battleroom shows the guest's nickname, and `/accept` admits
 the oldest request or `/accept Name` selects one by name. Approval belongs
-to the claim token, not the nickname or requested seat. A request that stops
+to the claim token, not the nickname or requested seat. Pasting a reply code
+also approves claims from that exact discovery endpoint, without another
+`/accept`; a different port on the same IP stays unapproved. Guests show only
+the host-acknowledged roster while waiting. A request that stops
 announcing expires. Ordinary LAN rooms without `/invite` still seat claims
 automatically. This uses the existing discovery connection with no rendezvous
 service; a reply code remains the fallback when the first probe cannot reach

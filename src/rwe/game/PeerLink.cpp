@@ -131,6 +131,13 @@ namespace rwe
         m.set_paused(localPaused);
         m.set_stalled(localStalled);
         m.set_sustainable_speed_permille(localSustainableSpeedPermille);
+        if (sharedPause.revision != 0)
+        {
+            auto& state = *m.mutable_pause_state();
+            state.set_revision(sharedPause.revision);
+            state.set_player(sharedPause.player);
+            state.set_paused(sharedPause.paused);
+        }
 
         for (std::size_t i = 0; i < setCount; ++i)
         {
@@ -249,6 +256,11 @@ namespace rwe
         remotePaused_ = message.paused();
         remoteStalled_ = message.stalled();
         remoteSustainableSpeedPermille_ = static_cast<unsigned int>(message.sustainable_speed_permille());
+        if (message.has_pause_state())
+        {
+            const auto& state = message.pause_state();
+            sharedPause.merge(SharedPauseState{state.revision(), state.player(), state.paused()});
+        }
 
         LOG_DEBUG << "Received ack to " << message.next_command_set_to_receive() << " and " << message.command_set_size() << " commands starting at " << message.next_command_set_to_send();
 

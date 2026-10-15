@@ -26,6 +26,7 @@ wherever the window manager puts them; nothing here depends on user32.
                                                  # tick 200, to fire the report
   uv run tools/net-test.py --chat                # every peer says one line, to
                                                  # show chat crossing the wire
+  uv run tools/net-test.py --controls            # F2 and shared pause on live clients
   uv run tools/net-test.py --rejoin              # kill a peer, then bring it back
                                                  # and check it is still in step
   uv run tools/net-test.py --rejoin --bridge     # the same, asked for the way a
@@ -214,6 +215,7 @@ class Harness:
         self.peers: list[Peer] = []
         self.survivors: list[int] = []
         self.bridge_reader: BridgeReader | None = None
+        self.bridge_readers: dict[int, BridgeReader] = {}
         self.use_xvfb = use_xvfb()
         self.base_env = self._child_env()
         self.diverged = False
@@ -298,11 +300,11 @@ class Harness:
     def launch(self, me: int, args: list[str], env: dict[str, str], bridge: bool) -> Peer:
         log = self.out_dir / f"peer{me}.log"
         hashes = self.out_dir / f"peer{me}.hashes"
-        if bridge and me == 0:
+        if bridge and (me == 0 or self.args.controls):
             args.append("--bridge")
         command = ["xvfb-run", "-a", str(self.exe), *args] if self.use_xvfb else [str(self.exe), *args]
         out_handle = open(self.out_dir / f"peer{me}.stdout", "wb")
-        if bridge and me == 0:
+        if bridge and (me == 0 or self.args.controls):
             proc = subprocess.Popen(
                 command,
                 env=env,
@@ -312,7 +314,10 @@ class Harness:
                 text=True,
                 **os_proc_kwargs(),
             )
-            self.bridge_reader = BridgeReader(proc.stdout)
+            reader = BridgeReader(proc.stdout)
+            self.bridge_readers[me] = reader
+            if me == 0:
+                self.bridge_reader = reader
         else:
             proc = subprocess.Popen(
                 command,
@@ -368,6 +373,10 @@ class Harness:
     def run(self) -> int:
         self.start()
         self.wait_until_ready()
+
+        if self.args.controls:
+            from net_control_test import exercise_controls
+            exercise_controls(self.peers, self.bridge_readers)
 
         if self.kill >= 0:
             time.sleep(self.args.kill_after)
@@ -617,6 +626,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--lag", default="", metavar="P:MS[@TICK]", help="sleep MS after every tick on peer P")
     parser.add_argument("--rejoin", action="store_true", help="kill a peer and bring it back")
     parser.add_argument("--bridge", action="store_true", help="drive the rejoin over the game's stdin and stdout")
+    parser.add_argument("--controls", action="store_true", help="test shared pause and F2 through both clients' real keyboard paths")
     parser.add_argument("--rejoin-after", type=int, default=8, metavar="SEC", help="seconds after the drop before asking (default 8)")
     parser.add_argument("--map", default="Coast To Coast", help="map name (default 'Coast To Coast')")
     parser.add_argument("--base-port", type=int, default=0, metavar="N", help="first port to use; default picks free ports")
@@ -626,6 +636,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--peer-data-path", action="append", default=[], metavar="P:DIR",
                         help="override data paths for peer P; repeat for multiple paths on that peer")
     args = parser.parse_args(argv)
+    if args.controls:
+        args.bridge = True
+        if args.peers < 2 or args.rejoin or args.kill >= 0:
+            parser.error("--controls needs at least two peers and no kill/rejoin")
     args.peer_data_paths = {}
     for spec in args.peer_data_path:
         peer, colon, path = spec.partition(":")

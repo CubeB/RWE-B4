@@ -137,6 +137,20 @@ namespace rwe
     {
         for (const auto& request : getControlChannel().take())
         {
+            if (request.command == "pause" || request.command == "game-menu")
+            {
+                // Exercise the actual keyboard path, including menu input
+                // ownership, rather than a second implementation of controls.
+                SDL_KeyboardEvent key{};
+                key.key = request.command == "pause" ? SDLK_PAUSE : SDLK_F2;
+                onKeyDown(key);
+                continue;
+            }
+            if (request.command == "game-status")
+            {
+                getControlChannel().sendGameStatus(sceneTime.value, paused, isGameMenuOpen());
+                continue;
+            }
             if (request.command != "rejoin")
             {
                 LOG_ERROR << "Bridge: nothing here answers to the command " << request.command;

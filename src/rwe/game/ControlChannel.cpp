@@ -97,6 +97,14 @@ namespace rwe
         return out;
     }
 
+    void ControlChannel::sendGameStatus(unsigned int tick, bool paused, bool menuOpen)
+    {
+        if (on)
+        {
+            writeLine(nlohmann::json{{"event", "game-status"}, {"tick", tick}, {"paused", paused}, {"menuOpen", menuOpen}});
+        }
+    }
+
     void ControlChannel::sendPlayerDropped(unsigned int player, unsigned int fromTick)
     {
         if (!on)
