@@ -175,8 +175,10 @@ namespace rwe
         if (unitDefinition.extractsMetal != Metal(0))
         {
             auto footprint = sim->computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
-            auto metalValue = sim->metalGrid.accumulate(sim->metalGrid.clipRegion(footprint), 0u, std::plus<>());
-            unit.cobEnvironment->createThread("SetSpeed", {static_cast<int>(metalValue)});
+            // BT-3: N = sum(metal byte + 1) over the in-map cells, handed over
+            // as a signed 16-bit value (0x437840).
+            auto work = sim->extractorMetalWork(footprint);
+            unit.cobEnvironment->createThread("SetSpeed", {static_cast<int>(static_cast<std::int16_t>(work))});
         }
 
         runUnitCobScripts(*sim, unitId);

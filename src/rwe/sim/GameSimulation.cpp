@@ -1934,6 +1934,16 @@ namespace rwe
         return DiscreteRect(cell.x, cell.y, footprintX, footprintZ);
     }
 
+    unsigned int GameSimulation::extractorMetalWork(const DiscreteRect& footprint) const
+    {
+        // 0x437840: the sum gains the metal byte plus one for each cell the
+        // bounds-checked lookup (0x481550) finds, and nothing for one it does
+        // not. A footprint with no metal under it is still worth one a cell.
+        auto region = metalGrid.clipRegion(footprint);
+        auto metalBytes = metalGrid.accumulate(region, 0u, std::plus<>());
+        return metalBytes + static_cast<unsigned int>(region.width) * static_cast<unsigned int>(region.height);
+    }
+
     DiscreteRect GameSimulation::computeFootprintRegion(const SimVector& position, const UnitDefinition::MovementCollisionInfo& collisionInfo) const
     {
         auto [footprintX, footprintZ] = getFootprintXZ(collisionInfo);
@@ -4460,8 +4470,12 @@ namespace rwe
                         if (unitDefinition.extractsMetal != Metal(0))
                         {
                             auto footprint = computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
-                            auto metalValue = metalGrid.accumulate(metalGrid.clipRegion(footprint), 0u, std::plus<>());
-                            addResourceDelta(unitId, Energy(0), Metal(metalValue * unitDefinition.extractsMetal.value));
+                            // The original caches rating * N at creation
+                            // (unit+0x58); the grid is constant afterwards in
+                            // the reference, so reading it here is the same.
+                            // float(double(rating) * N), rounded once.
+                            auto work = extractorMetalWork(footprint);
+                            addResourceDelta(unitId, Energy(0), Metal(static_cast<float>(static_cast<double>(unitDefinition.extractsMetal.value) * static_cast<double>(work))));
                         }
 
                         if (unitDefinition.makesMetal != Metal(0))

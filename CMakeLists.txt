@@ -1343,6 +1343,7 @@ set(TEST_FILES
     src/rwe/sim/targetsearch.test.cpp
     src/rwe/sim/turret.test.cpp
     src/rwe/sim/maxreloadtime.test.cpp
+    src/rwe/sim/extractor.test.cpp
     src/rwe/sim/aimpershot.test.cpp
     src/rwe/sim/SimRandom.test.cpp
     src/rwe/sim/resurrect.test.cpp

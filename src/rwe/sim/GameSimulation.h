@@ -1114,6 +1114,15 @@ namespace rwe
 
         DiscreteRect computeFootprintRegion(const SimVector& position, const UnitDefinition::MovementCollisionInfo& collisionInfo) const;
 
+        /**
+         * The integer an extractor's rate is multiplied by (BT-3, 0x437840):
+         * every footprint cell inside the map contributes its metal byte plus
+         * one, and a cell off the map contributes nothing, not even the one.
+         * The settle credits `ExtractsMetal * N` and the unit's `SetSpeed`
+         * script is told `N`.
+         */
+        unsigned int extractorMetalWork(const DiscreteRect& footprint) const;
+
         bool anyFeatureOccupies(const DiscreteRect& rect) const;
 
         /** The grid side of placing a feature, shared by addFeature and addFeatureInSlot. */
