@@ -74,6 +74,23 @@ namespace rwe
             std::optional<SimVector> station{};
             /** The hull has come near enough its station and been sent on to the loads. */
             bool atStation{false};
+            /**
+             * The attack target an army ferry was sent for, so a landing that
+             * proves unusable is remembered against the objective the next
+             * search is asked about (bb.ferryLandingRefusals). Unset for a
+             * builder ferry.
+             */
+            std::optional<SimVector> objective{};
+            /**
+             * The loaded-ferry watchdog's last sign of life: where the hull
+             * was and how many heads were aboard when it last moved or set
+             * one down, and when. Sim ticks only. See
+             * AiTuningProfile::loadedFerryStallSeconds.
+             */
+            bool progressSet{false};
+            SimVector progressPosition{};
+            std::size_t progressCarried{0};
+            GameTime progressAt{0};
         };
 
         /** A shore point to gather a sea lift at, and the water beside it. */
@@ -137,7 +154,7 @@ namespace rwe
          */
         std::optional<Muster> seaMuster(const GameSimulation& sim, const ReachabilityMap& reachability, const AiBlackboard& bb);
 
-        void tendFerries(const GameSimulation& sim, const AiTuningProfile& profile, AiBlackboard& bb, std::vector<PlayerCommand>& outCommands);
+        void tendFerries(const GameSimulation& sim, const AiTuningProfile& profile, const ReachabilityMap& reachability, const ThreatMap& threatMap, AiBlackboard& bb, std::vector<PlayerCommand>& outCommands);
 
         void refreshExpansionSite(const GameSimulation& sim, const ReachabilityMap& reachability, const BuildManager& build, const AiBlackboard& bb, std::minstd_rand& rng);
 

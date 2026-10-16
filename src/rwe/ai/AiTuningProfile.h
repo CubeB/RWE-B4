@@ -2498,6 +2498,23 @@ namespace rwe
          */
         int ferryLandingRefusalCell{192};
         /**
+         * How long a loaded sea ferry may go without moving or setting
+         * anyone down before its unload is re-aimed (zero switches the
+         * watchdog off).
+         *
+         * ferryTimeoutSeconds is for a pickup that never happened and leaves
+         * a loaded hull alone, so a hull that stopped at the water's edge
+         * more than the crane's 200 units from its drop point -- the landing
+         * search used to accept water up to 384 units away -- held its cargo
+         * for the rest of the game. Twenty seconds is far longer than a hull
+         * takes to swing the crane between heads and shorter than the
+         * cargo's patience. The new landing is searched from the hull's
+         * position, and the stalled one is remembered in
+         * bb.ferryLandingRefusals against the ferry's objective.
+         * RWE-original; the original's computer player has no ferry.
+         */
+        int loadedFerryStallSeconds{20};
+        /**
          * Scoring the CROSSING as well as the landing was tried and does not
          * work. Recorded here so it is not tried again without a better idea
          * behind it.

@@ -68,6 +68,22 @@ namespace rwe
          */
         const SimScalar StationReach = 64_ss;
 
+        /**
+         * How far from a dry drop point the water its hull will float in may
+         * be. The simulation's ship unload (UnitBehaviorService's
+         * handleUnloadOrder) keeps navigating until the hull is within its
+         * CraneReach of 200 units of the drop point and never swings the crane
+         * from further out, so a landing whose nearest navigable water is 384
+         * units away leaves the hull stopped at the water's edge, out of
+         * reach, for ever. CraneReach is private to that file; this stays
+         * well inside it so a hull that stops a little short of the probe
+         * point still unloads.
+         */
+        const float MaxLandingWaterDistance = 150.0f;
+
+        /** How far a loaded hull must have moved to count as making progress. */
+        const SimScalar LoadedFerryProgressDistance = 24_ss;
+
         /** The loads and the unloads, the first load now: the hull is where it loads from. */
         void issueLoadOrders(std::vector<PlayerCommand>& outCommands, UnitId transportId, const TransportManager::Ferry& ferry)
         {
@@ -214,7 +230,7 @@ namespace rwe
         }
     }
 
-    void TransportManager::tendFerries(const GameSimulation& sim, const AiTuningProfile& profile, AiBlackboard& bb, std::vector<PlayerCommand>& outCommands)
+    void TransportManager::tendFerries(const GameSimulation& sim, const AiTuningProfile& profile, const ReachabilityMap& reachability, const ThreatMap& threatMap, AiBlackboard& bb, std::vector<PlayerCommand>& outCommands)
     {
         bb.ferryPassengers.clear();
         auto timeout = GameTime(static_cast<unsigned int>(std::max(1, profile.ferryTimeoutSeconds)) * static_cast<unsigned int>(SimTicksPerSecond));
@@ -320,6 +336,74 @@ namespace rwe
                     // Never picked anyone up and has nothing to do: try again
                     // from the top, muster included.
                     issueFerryOrders(outCommands, transportId, ferry);
+                }
+            }
+
+            // The watchdog for a loaded hull. The overdue timeout above is for
+            // a pickup that never happened and excludes a ferry that has
+            // loaded, so a hull that stopped where its crane cannot reach the
+            // drop point -- or never got there -- held its cargo for the rest
+            // of the game. A ship that has neither moved nor set anyone down
+            // for loadedFerryStallSeconds is given a fresh landing, searched
+            // from where it actually is. Air lifts are not tended this way:
+            // they hover over their drop point and carry no water margin.
+            if (ferry.loaded && carryingAny && profile.loadedFerryStallSeconds > 0
+                && !sim.unitDefinitions.at(transport.unitType).canFly)
+            {
+                bool moved = !ferry.progressSet
+                    || transport.carriedUnits.size() != ferry.progressCarried
+                    || SimVector(transport.position.x - ferry.progressPosition.x, 0_ss, transport.position.z - ferry.progressPosition.z).length() >= LoadedFerryProgressDistance;
+                auto stall = GameTime(static_cast<unsigned int>(profile.loadedFerryStallSeconds) * static_cast<unsigned int>(SimTicksPerSecond));
+                if (moved)
+                {
+                    ferry.progressSet = true;
+                    ferry.progressPosition = transport.position;
+                    ferry.progressCarried = transport.carriedUnits.size();
+                    ferry.progressAt = sim.gameTime;
+                }
+                else if (sim.gameTime >= ferry.progressAt + stall)
+                {
+                    // The drop point the hull could not get to. It is
+                    // remembered against the objective the ferry was sent
+                    // for, which is the point the dispatch search is asked
+                    // about, so the same shore is not chosen again at once.
+                    auto objective = ferry.objective ? *ferry.objective : ferry.destination;
+                    if (profile.ferryLandingRefusalCooldownSeconds > 0)
+                    {
+                        bb.ferryLandingRefusals[ferryLandingRefusalCell(objective, profile.ferryLandingRefusalCell)] = sim.gameTime
+                            + GameTime(static_cast<unsigned int>(profile.ferryLandingRefusalCooldownSeconds) * static_cast<unsigned int>(SimTicksPerSecond));
+                    }
+
+                    // Searched with the old drop point as the target and the
+                    // hull as "home", the way the dispatch search is with the
+                    // objective and the base: the candidates lie towards the
+                    // hull and their water is probed back towards it.
+                    LandingSearchTally tally;
+                    auto landing = navalLandingNear(sim, reachability, profile, threatMap, ferry.destination, transport.position, tally);
+                    LOG_DEBUG << "AI transport " << transportId.value << ": loaded ferry stalled at "
+                              << transport.position.x.value << "," << transport.position.z.value
+                              << (landing ? ", reissuing the unload" : ", no other landing found");
+                    sim.eventLog.event(sim.gameTime.value, "transport_ferry")
+                        .set("player", transport.owner.value)
+                        .set("unit", transportId.value)
+                        .set("passengers", ferry.passengers.size())
+                        .set("carried", transport.carriedUnits.size())
+                        .set("at_x", static_cast<double>(transport.position.x.value))
+                        .set("at_z", static_cast<double>(transport.position.z.value))
+                        .set("x", static_cast<double>(ferry.destination.x.value))
+                        .set("z", static_cast<double>(ferry.destination.z.value))
+                        .set("replanned", landing.has_value())
+                        .set("why", "stalled")
+                        .detail("loaded ferry made no progress, unload re-aimed");
+                    if (landing)
+                    {
+                        ferry.destination = *landing;
+                        queueUnloads(outCommands, transportId, ferry.destination, transport.carriedUnits.size(), IssueKind::Immediate);
+                    }
+                    // Whether or not something better was found, give the new
+                    // orders (or the next search) a full interval of their own.
+                    ferry.progressPosition = transport.position;
+                    ferry.progressAt = sim.gameTime;
                 }
             }
 
@@ -598,12 +682,18 @@ namespace rwe
         // not START at that exact tile without running onto the bank. A
         // point safely inside the water, clear of that shoreline margin, is
         // what actually answers "is there water here our navy can reach";
-        // eight steps covers hulls a good deal wider than anything the game
-        // ships without ever being asked to search past a channel a couple
-        // of hundred units wide.
+        // up to MaxLandingWaterDistance covers hulls a good deal wider than
+        // anything the game ships. It used to look eight steps (384 units)
+        // out, which accepted a drop point the hull could never unload at:
+        // the crane reaches 200 units and the hull stops at the water's edge,
+        // so the loaded ferry sat there for the rest of the game.
         auto hasReachableWaterNearby = [&](const SimVector& dry) {
             for (float stepsTowardsHome : {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f})
             {
+                if (stepsTowardsHome * 48.0f > MaxLandingWaterDistance)
+                {
+                    break;
+                }
                 auto probe = dry + (direction * SimScalar(stepsTowardsHome * 48.0f));
                 auto probeHeight = sim.terrain.tryGetHeightAt(probe.x, probe.z);
                 if (!probeHeight)
@@ -650,7 +740,7 @@ namespace rwe
         }
         ticksSinceLastUpdate = 0;
 
-        tendFerries(sim, profile, bb, outCommands);
+        tendFerries(sim, profile, reachability, threatMap, bb, outCommands);
         refreshExpansionSite(sim, reachability, build, bb, rng);
 
         // Is there anywhere worth going that needs a lift?
@@ -1103,6 +1193,7 @@ namespace rwe
                     continue;
                 }
                 Ferry ferry{passengers, *landing, sim.gameTime, false};
+                ferry.objective = *bb.attackTarget;
                 if (!transportDef.canFly && muster)
                 {
                     ferry.muster = muster->shore;

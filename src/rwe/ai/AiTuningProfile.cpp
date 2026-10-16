@@ -45,6 +45,7 @@ namespace rwe
         constexpr IntKnob intKnobs[] = {
             {"ferryLandingRefusalCooldownSeconds", &AiTuningProfile::ferryLandingRefusalCooldownSeconds},
             {"ferryLandingRefusalCell", &AiTuningProfile::ferryLandingRefusalCell},
+            {"loadedFerryStallSeconds", &AiTuningProfile::loadedFerryStallSeconds},
             {"openingMetalExtractorCount", &AiTuningProfile::openingMetalExtractorCount},
             {"openingSolarCount", &AiTuningProfile::openingSolarCount},
             {"targetSolarCount", &AiTuningProfile::targetSolarCount},
