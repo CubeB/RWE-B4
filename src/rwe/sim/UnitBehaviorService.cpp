@@ -5366,6 +5366,25 @@ namespace rwe
 
                 if (!targetUnit.isBeingBuilt(targetUnitDefinition))
                 {
+                    // The product is released, and the ordinary height rule
+                    // applies: a ground or sea unit with a mover is on the
+                    // terrain under its centre, so a submarine drops straight
+                    // down to the sea bed below the pad (owner's observation,
+                    // NAVAL-CONSTRUCTION-DGUN-FINDINGS.md). RWE re-snaps height
+                    // only when a unit moves, so it is done here, same x and z.
+                    // Floaters and hovers keep sea level as their floor, as
+                    // they do whenever they move.
+                    if (targetUnitDefinition.isMobile && !targetUnitDefinition.canFly)
+                    {
+                        auto settled = sim->terrain.getHeightAt(targetUnit.position.x, targetUnit.position.z);
+                        if (targetUnitDefinition.floater || targetUnitDefinition.canHover)
+                        {
+                            settled = rweMax(settled, sim->terrain.getSeaLevel());
+                        }
+                        targetUnit.position.y = settled;
+                        targetUnit.previousPosition.y = settled;
+                    }
+
                     // TOTALA-EXE-INTERFACE S:133: only mobile products inherit
                     // the current posture and the route their capabilities allow.
                     if (targetUnitDefinition.isMobile)
@@ -5393,20 +5412,26 @@ namespace rwe
                     return true;
                 }
 
-                if (targetUnitDefinition.floater || targetUnitDefinition.canHover)
+                // While the product is attached it follows the build piece in
+                // all three coordinates (NAVAL-SYSTEMS-PARITY.md section 1).
+                // Only a Floater is given a floor, sea level minus its
+                // WaterLine, and nothing is ever pushed down. A submarine is
+                // not a floater, so it gets none: the owner watched retail TA
+                // draw an unfinished sub with its top poking out of the water
+                // above the yard (NAVAL-CONSTRUCTION-DGUN-FINDINGS.md,
+                // "submarine under construction"). The seabed placement
+                // applies when the product is released, below. A hover
+                // product keeps RWE's sea-level floor, which the reference
+                // does not give it; no shipped yard builds one over water.
+                if (targetUnitDefinition.floater)
+                {
+                    buildPieceInfo.position.y = rweMax(
+                        buildPieceInfo.position.y,
+                        sim->terrain.getSeaLevel() - intToSimScalar(static_cast<int>(targetUnitDefinition.waterLine)));
+                }
+                else if (targetUnitDefinition.canHover)
                 {
                     buildPieceInfo.position.y = rweMax(buildPieceInfo.position.y, sim->terrain.getSeaLevel());
-                }
-                else if (targetUnitDefinition.isMobile && !targetUnitDefinition.canFly)
-                {
-                    // The same rule trySpawnUnit applies at creation, and for
-                    // the same reason: a ground or sea unit with a mover is
-                    // settled onto the terrain every tick (0x48A870), so a
-                    // submarine's frame sits on the sea bed under the yard.
-                    // Taking the build piece's own height here instead put it
-                    // at the pad, floating, with its shadow -- which the
-                    // original projects from the ground -- far beneath it.
-                    buildPieceInfo.position.y = sim->terrain.getHeightAt(buildPieceInfo.position.x, buildPieceInfo.position.z);
                 }
 
                 tryApplyMovementToPosition(sim->getUnitInfo(state.targetUnit->first), buildPieceInfo.position);
