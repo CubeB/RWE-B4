@@ -837,7 +837,10 @@ namespace rwe
         }
 
         auto effectiveMaxSpeed = unitDefinition.maxVelocity;
-        if (unit.position.y < terrain.getSeaLevel())
+        // Halved when the origin is under the sea, unless the unit is a
+        // floater or a hover craft (the field table's exemption). It matters
+        // now that a floater with a WaterLine sits below sea level by design.
+        if (unit.position.y < terrain.getSeaLevel() && !unitDefinition.floater && !unitDefinition.canHover)
         {
             effectiveMaxSpeed /= 2_ss;
         }
@@ -1163,6 +1166,25 @@ namespace rwe
         auto fallTicks = rweSqrt((2_ss * unitDefinition.cruiseAltitude) / gravityPerTick);
         auto lead = SimScalar(static_cast<float>(static_cast<int>(simScalarToFloat(fallTicks * speed))));
         return 1_ss + unitDefinition.attackRunLength + lead;
+    }
+
+    SimScalar computeGroundUnitHeight(const MapTerrain& terrain, const UnitDefinition& unitDefinition, SimScalar x, SimScalar z)
+    {
+        auto sample = terrain.getHeightAt(x, z);
+        auto seaLevel = terrain.getSeaLevel();
+        auto waterlineHeight = seaLevel - intToSimScalar(static_cast<int>(unitDefinition.waterLine));
+
+        if (unitDefinition.upright)
+        {
+            return unitDefinition.canHover ? rweMax(sample, waterlineHeight) : sample;
+        }
+
+        if (unitDefinition.floater)
+        {
+            return waterlineHeight;
+        }
+
+        return unitDefinition.canHover ? rweMax(sample, seaLevel) : sample;
     }
 
     GroundTilt computeGroundTilt(const MapTerrain& terrain, const SimVector& position, SimAngle rotation, SimScalar halfLength, SimScalar halfWidth, bool holdAtSeaLevel)

@@ -774,11 +774,7 @@ namespace rwe
         if (physics.currentSpeed > 0_ss)
         {
             auto newPosition = unitInfo.state->position + (direction * physics.currentSpeed);
-            newPosition.y = sim->terrain.getHeightAt(newPosition.x, newPosition.z);
-            if (unitInfo.definition->floater || unitInfo.definition->canHover)
-            {
-                newPosition.y = rweMax(newPosition.y, sim->terrain.getSeaLevel());
-            }
+            newPosition.y = computeGroundUnitHeight(sim->terrain, *unitInfo.definition, newPosition.x, newPosition.z);
 
             // The owner already resolved unit collisions along this path, so a
             // step is never refused here: a peer's stale footprint must not pin
@@ -1874,10 +1870,13 @@ namespace rwe
         // stays vertical off one sample under its centre (0x48A8BF), anything
         // else tilts to the slope under four rotated footprint corners
         // (0x48A490 writes unit+0x68 and unit+0x64). Every tick, moving or
-        // not, since the ground can change under a standing unit.
+        // not, since the ground can change under a standing unit. A floater
+        // that is not upright is not aligned at all (BT-42): its height is
+        // fixed by sea level and its pitch and bank are never touched, so a
+        // ship does not tilt. Only canhover holds the corner samples at sea.
         physics.previousPitch = physics.pitch;
         physics.previousRoll = physics.roll;
-        if (unitInfo.definition->upright)
+        if (unitInfo.definition->upright || unitInfo.definition->floater)
         {
             physics.pitch = 0_ss;
             physics.roll = 0_ss;
@@ -1886,7 +1885,7 @@ namespace rwe
         auto [footprintX, footprintZ] = sim->getFootprintXZ(unitInfo.definition->movementCollisionInfo);
         auto halfWidth = SimScalar(static_cast<float>(footprintX) * 8.0f);
         auto halfLength = SimScalar(static_cast<float>(footprintZ) * 8.0f);
-        auto tilt = computeGroundTilt(sim->terrain, unitInfo.state->position, unitInfo.state->rotation, halfLength, halfWidth, unitInfo.definition->floater || unitInfo.definition->canHover);
+        auto tilt = computeGroundTilt(sim->terrain, unitInfo.state->position, unitInfo.state->rotation, halfLength, halfWidth, unitInfo.definition->canHover);
         physics.pitch = tilt.pitch;
         physics.roll = tilt.roll;
     }
@@ -1898,11 +1897,7 @@ namespace rwe
         if (physics.currentSpeed > 0_ss)
         {
             auto newPosition = unitInfo.state->position + (direction * physics.currentSpeed);
-            newPosition.y = sim->terrain.getHeightAt(newPosition.x, newPosition.z);
-            if (unitInfo.definition->floater || unitInfo.definition->canHover)
-            {
-                newPosition.y = rweMax(newPosition.y, sim->terrain.getSeaLevel());
-            }
+            newPosition.y = computeGroundUnitHeight(sim->terrain, *unitInfo.definition, newPosition.x, newPosition.z);
 
             if (!tryApplyMovementToPosition(unitInfo, newPosition))
             {
@@ -1931,11 +1926,7 @@ namespace rwe
                     std::clamp(newPosition.x, centreX - reach, centreX + reach),
                     0_ss,
                     std::clamp(newPosition.z, centreZ - reach, centreZ + reach));
-                held.y = sim->terrain.getHeightAt(held.x, held.z);
-                if (unitInfo.definition->floater || unitInfo.definition->canHover)
-                {
-                    held.y = rweMax(held.y, sim->terrain.getSeaLevel());
-                }
+                held.y = computeGroundUnitHeight(sim->terrain, *unitInfo.definition, held.x, held.z);
                 tryApplyMovementToPosition(unitInfo, held);
 
                 const auto halfMax = unitInfo.definition->maxVelocity / 2_ss;
@@ -5379,15 +5370,12 @@ namespace rwe
                     // down to the sea bed below the pad (owner's observation,
                     // NAVAL-CONSTRUCTION-DGUN-FINDINGS.md). RWE re-snaps height
                     // only when a unit moves, so it is done here, same x and z.
-                    // Floaters and hovers keep sea level as their floor, as
-                    // they do whenever they move.
+                    // A floater sits at sea level minus its WaterLine and a
+                    // hover craft is held at sea level, as whenever they move
+                    // (computeGroundUnitHeight).
                     if (targetUnitDefinition.isMobile && !targetUnitDefinition.canFly)
                     {
-                        auto settled = sim->terrain.getHeightAt(targetUnit.position.x, targetUnit.position.z);
-                        if (targetUnitDefinition.floater || targetUnitDefinition.canHover)
-                        {
-                            settled = rweMax(settled, sim->terrain.getSeaLevel());
-                        }
+                        auto settled = computeGroundUnitHeight(sim->terrain, targetUnitDefinition, targetUnit.position.x, targetUnit.position.z);
                         targetUnit.position.y = settled;
                         targetUnit.previousPosition.y = settled;
                     }

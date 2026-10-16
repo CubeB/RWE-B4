@@ -410,6 +410,24 @@ namespace rwe
     GroundTilt computeGroundTilt(const MapTerrain& terrain, const SimVector& position, SimAngle rotation, SimScalar halfLength, SimScalar halfWidth, bool holdAtSeaLevel);
 
     /**
+     * The height the original's per-tick placement (0x48A870) gives a ground
+     * unit standing at (x, z), by the definition flags it tests (BT-42):
+     *
+     *   upright         one sample under the origin; if the unit can also
+     *                   hover, no lower than sea level minus WaterLine
+     *   floater         no alignment at all: sea level minus WaterLine,
+     *                   whatever the ground below
+     *   canhover        the sampled ground, no lower than sea level
+     *   anything else   the sampled ground
+     *
+     * The sea hold is keyed on canhover (bit 12), not on floater (bit 19);
+     * the floater's own fixed height is the only thing floater decides.
+     * There is no wave here: it is real-time in the original and render-only
+     * in RWE, so it never enters simulation state.
+     */
+    SimScalar computeGroundUnitHeight(const MapTerrain& terrain, const UnitDefinition& unitDefinition, SimScalar x, SimScalar z);
+
+    /**
      * Pure state-machine step for an aircraft attack run. Given the unit's
      * current XZ position and heading, the resolved target XZ position, the
      * geometry of its attack pattern and the current run state, this advances

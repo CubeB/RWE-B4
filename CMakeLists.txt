@@ -1308,6 +1308,7 @@ set(TEST_FILES
     src/rwe/sim/aircraft.test.cpp
     src/rwe/sim/groundtilt.test.cpp
     src/rwe/sim/blockedcell.test.cpp
+    src/rwe/sim/seahold.test.cpp
     src/rwe/sim/selfdestruct.test.cpp
     src/rwe/sim/damage.test.cpp
     src/rwe/sim/stockpile.test.cpp

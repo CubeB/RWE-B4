@@ -959,11 +959,7 @@ namespace rwe
             corner.x + (SimScalar(static_cast<float>(mc.footprintX)) * MapTerrain::HeightTileWidthInWorldUnits / 2_ss),
             0_ss,
             corner.z + (SimScalar(static_cast<float>(mc.footprintZ)) * MapTerrain::HeightTileHeightInWorldUnits / 2_ss));
-        newPosition.y = terrain.getHeightAt(newPosition.x, newPosition.z);
-        if (unitDefinition.floater || unitDefinition.canHover)
-        {
-            newPosition.y = rweMax(newPosition.y, terrain.getSeaLevel());
-        }
+        newPosition.y = computeGroundUnitHeight(terrain, unitDefinition, newPosition.x, newPosition.z);
         return UnloadSpot{*spot, newPosition};
     }
 
@@ -1695,7 +1691,14 @@ namespace rwe
             unit.position.y = computeBuildHeight(unitDefinition, footprint);
             unit.previousPosition.y = unit.position.y;
         }
-        else if (unitDefinition.floater || unitDefinition.canHover)
+        else if (unitDefinition.floater && !unitDefinition.upright)
+        {
+            // Not aligned at all: sea level minus WaterLine, whatever the
+            // ground (0x48A870, BT-42).
+            unit.position.y = terrain.getSeaLevel() - intToSimScalar(static_cast<int>(unitDefinition.waterLine));
+            unit.previousPosition.y = unit.position.y;
+        }
+        else if (unitDefinition.canHover)
         {
             unit.position.y = rweMax(terrain.getSeaLevel(), unit.position.y);
             unit.previousPosition.y = unit.position.y;
