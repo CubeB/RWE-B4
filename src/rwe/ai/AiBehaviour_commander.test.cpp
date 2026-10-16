@@ -610,13 +610,20 @@ namespace rwe
         auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(-400_ss, 90_ss, 0_ss), script);
         addUnit(sim, "ARMLAB", ai, SimVector(-450_ss, 90_ss, 40_ss), script);
         auto shipId = addUnit(sim, "ARMPT", human, SimVector(-250_ss, 60_ss, 0_ss), script);
-        (void)shipId;
+
+        // The harness loads no models, so every unit's model is 0 tall and the
+        // commander's eye sits exactly at the plateau's height; the
+        // shadow-cast then hides every cell not strictly above it, ship
+        // included. The shipped ARMCOM's model stands about 30 tall, which is
+        // what lets it see over the shore, so give the stand-in one rather
+        // than letting the AI cheat.
+        std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+        sim.unitModelDefinitions["commodel"] = createUnitModelDefinition(30_ss, std::move(pieces));
+        sim.unitDefinitions["ARMCOM"].objectName = "commodel";
 
         auto profile = makeDefaultStandardProfile();
         profile.scoutCount = 0;
-        // What the commander can see is not under test, and the shore's line
-        // of sight is the map's business.
-        profile.cheatModeOmniscient = true;
+        REQUIRE(!profile.cheatModeOmniscient);
 
         SECTION("it moves inland, away from the ship")
         {
@@ -624,6 +631,8 @@ namespace rwe
             std::vector<PlayerCommand> commands;
             runTicks(sim, controller, 20, commands);
 
+            // Seen honestly, not handed over by the omniscience knob.
+            REQUIRE(sim.canSeeUnit(ai, shipId));
             REQUIRE(controller.getBlackboard().commanderInDanger);
             REQUIRE(controller.getBlackboard().commanderFleeing);
             REQUIRE(ordersFor<AttackOrder>(commands, commanderId).empty());
