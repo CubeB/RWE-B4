@@ -38,6 +38,7 @@ namespace rwe
         auto d = createUnitModelDefinition(
             simScalarFromFixed(findHighestVertex(objects.front()).y),
             unitMeshFrom3do(objects.front()));
+        d.vertices = unitVerticesFrom3do(objects.front());
 
         std::vector<std::pair<std::string, UnitPieceMeshInfo>> meshes;
         if (graphics != nullptr)

@@ -6,11 +6,14 @@
 #include <rwe/io/_3do/_3do.h>
 #include <rwe/render/GraphicsContext.h>
 #include <rwe/sim/UnitPieceDefinition.h>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace rwe
 {
+    struct UnitModelVertices;
+
     struct TextureRegionInfo
     {
         bool isTeamColor;
@@ -60,6 +63,9 @@ namespace rwe
 
     std::vector<UnitPieceDefinition> unitMeshFrom3do(const _3do::Object& o, const std::optional<std::string>& parent);
     std::vector<UnitPieceDefinition> unitMeshFrom3do(const _3do::Object& o);
+
+    /** The vertices of every piece, in the same order unitMeshFrom3do lists the pieces. */
+    std::shared_ptr<const UnitModelVertices> unitVerticesFrom3do(const _3do::Object& o);
 
     Vector3f vertexToVector(const _3do::Vertex& v);
 }

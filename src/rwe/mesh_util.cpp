@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <map>
 #include <rwe/fixed_point.h>
+#include <rwe/sim/UnitModelVertices.h>
 #include <rwe/util/rwe_string.h>
 
 namespace rwe
@@ -447,6 +448,32 @@ namespace rwe
     std::vector<UnitPieceDefinition> unitMeshFrom3do(const _3do::Object& o)
     {
         return unitMeshFrom3do(o, std::nullopt);
+    }
+
+    namespace
+    {
+        void collectPieceVertices(const _3do::Object& o, std::vector<std::vector<SimVector>>& out)
+        {
+            // The same pre-order as unitMeshFrom3do, so index i here is piece i
+            // there. The z flip is the one the piece origins get.
+            auto& vertices = out.emplace_back();
+            vertices.reserve(o.vertices.size());
+            for (const auto& v : o.vertices)
+            {
+                vertices.emplace_back(simScalarFromFixed(v.x), simScalarFromFixed(v.y), -simScalarFromFixed(v.z));
+            }
+            for (const auto& c : o.children)
+            {
+                collectPieceVertices(c, out);
+            }
+        }
+    }
+
+    std::shared_ptr<const UnitModelVertices> unitVerticesFrom3do(const _3do::Object& o)
+    {
+        auto table = std::make_shared<UnitModelVertices>();
+        collectPieceVertices(o, table->perPiece);
+        return table;
     }
 
     Vector3f vertexToVector(const _3do::Vertex& v)

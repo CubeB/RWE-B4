@@ -1287,6 +1287,7 @@ set(TEST_FILES
     src/rwe/sim/pathfollowing.test.cpp
     src/rwe/sim/goalsquare.test.cpp
     src/rwe/sim/unreachablemove.test.cpp
+    src/rwe/sim/sweetspot.test.cpp
     src/rwe/sim/transport.test.cpp
     src/rwe/sim/bomber.test.cpp
     src/rwe/sim/bomberpatrol.test.cpp

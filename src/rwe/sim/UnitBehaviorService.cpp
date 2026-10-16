@@ -15,6 +15,7 @@
 #include <rwe/sim/SimulationOwnership.h>
 #include <rwe/sim/TaLiveSenderHooks.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
+#include <rwe/sim/UnitModelVertices.h>
 #include <rwe/sim/cob.h>
 #include <rwe/sim/movement.h>
 #include <rwe/sim/sim_prof.h>
@@ -2169,15 +2170,76 @@ namespace rwe
         return getPieceLocalPosition(id, *pieceId);
     }
 
+    /**
+     * BT-60 (0x43E3C0 and 0x43E0B0): the aim point of a unit target. The script
+     * is asked for SweetSpot with a default of piece 0; the piece's posed
+     * vertices are bounded on each axis with zero always inside the box; the
+     * result per axis is the box's midpoint plus the unit's position. Nothing
+     * is added for the piece offset (the posed points already include it) and
+     * nothing is rotated afterwards.
+     *
+     * The z axis is the uncertain part (medium confidence in the finding). The
+     * original's model z is the world's reversed, and the routine adds the
+     * box's z as it stands without negating it, so an off-centre box is
+     * mirrored in z against where the piece is drawn. RWE's pieces are in the
+     * right-handed frame already (the 3DO z is negated at load), so the
+     * original's z is minus RWE's. A box symmetric about zero shows nothing.
+     *
+     * Not modelled: the original poses the vertices lazily, so the point lags
+     * a slow turn by up to eight angle units; and its midpoint truncates the
+     * 16.16 sum toward zero.
+     */
     SimVector UnitBehaviorService::getSweetSpot(UnitId id)
     {
+        const auto& unit = sim->getUnitState(id);
+
         auto pieceId = runCobQuery(id, "SweetSpot");
-        if (!pieceId)
+        auto pieceNumber = pieceId ? *pieceId : 0;
+
+        // A unit with no model definition at all (some fixtures) has no
+        // vertices to bound, which is the same as a model with none.
+        const auto& unitDefinition = sim->unitDefinitions.at(unit.unitType);
+        auto modelIt = sim->unitModelDefinitions.find(unitDefinition.objectName);
+        const auto& scriptPieces = unit.cobEnvironment->_script->pieces;
+        if (modelIt == sim->unitModelDefinitions.end() || !modelIt->second.vertices
+            || pieceNumber < 0 || static_cast<std::size_t>(pieceNumber) >= scriptPieces.size())
         {
-            return sim->getUnitState(id).position;
+            return unit.position;
+        }
+        const auto& model = modelIt->second;
+
+        const auto& pieceName = scriptPieces[static_cast<std::size_t>(pieceNumber)];
+        auto pieceIndex = model.pieceIndicesByName.find(toUpper(pieceName));
+        if (pieceIndex == model.pieceIndicesByName.end()
+            || static_cast<std::size_t>(pieceIndex->second) >= model.vertices->perPiece.size())
+        {
+            return unit.position;
         }
 
-        return getPiecePosition(id, *pieceId);
+        auto local = sim->getUnitPieceLocalTransform(id, pieceName);
+        auto turn = Matrix4x<SimScalar>::rotationY(sin(unit.rotation), cos(unit.rotation));
+
+        auto minX = 0_ss;
+        auto maxX = 0_ss;
+        auto minY = 0_ss;
+        auto maxY = 0_ss;
+        auto minZ = 0_ss;
+        auto maxZ = 0_ss;
+        for (const auto& vertex : model.vertices->perPiece[static_cast<std::size_t>(pieceIndex->second)])
+        {
+            auto posed = turn * (local * vertex);
+            minX = rweMin(minX, posed.x);
+            maxX = rweMax(maxX, posed.x);
+            minY = rweMin(minY, posed.y);
+            maxY = rweMax(maxY, posed.y);
+            minZ = rweMin(minZ, posed.z);
+            maxZ = rweMax(maxZ, posed.z);
+        }
+
+        return SimVector(
+            unit.position.x + ((minX + maxX) / 2_ss),
+            unit.position.y + ((minY + maxY) / 2_ss),
+            unit.position.z - ((minZ + maxZ) / 2_ss));
     }
 
     std::optional<SimVector> UnitBehaviorService::tryGetSweetSpot(UnitId id)
