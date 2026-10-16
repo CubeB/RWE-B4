@@ -239,6 +239,7 @@ namespace rwe
             {"reserveAnswersIntruders", &AiTuningProfile::reserveAnswersIntruders},
             {"noticeProductionHarassment", &AiTuningProfile::noticeProductionHarassment},
             {"commanderAnswersHarassment", &AiTuningProfile::commanderAnswersHarassment},
+            {"commanderShunsShips", &AiTuningProfile::commanderShunsShips},
             {"raidingParties", &AiTuningProfile::raidingParties},
             {"huntEnemyCommander", &AiTuningProfile::huntEnemyCommander},
             {"focusOneEnemy", &AiTuningProfile::focusOneEnemy},

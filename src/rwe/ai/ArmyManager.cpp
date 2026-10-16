@@ -959,6 +959,14 @@ namespace rwe
             canFight = canFireFrom(sim, commander)
                 && std::max(threats, static_cast<int>(bb.enemiesNearBase.size())) <= std::max(1, profile.commanderDefendsAloneMaxIntruders) && !losing;
         }
+        // Everything near it is on the water: it can neither be attacked
+        // (nearestOnLand) nor D-gunned from here, so "can fight" would mean
+        // standing still under fire. Treated as a threat it cannot answer.
+        bool shunningShips = canFight && profile.commanderShunsShips && threats > 0 && !nearestOnLand;
+        if (shunningShips)
+        {
+            canFight = false;
+        }
         if (canFight)
         {
             if (profile.commanderStandsItsGround && nearestOnLand)
@@ -1043,6 +1051,13 @@ namespace rwe
         else if (bb.rallyPoint)
         {
             refuge = *bb.rallyPoint;
+        }
+        // Away from a ship is inland, unless the shore bends: a point that
+        // is itself under water is no refuge, so home is.
+        if (shunningShips && refuge && bb.baseAnchor
+            && sim.terrain.getHeightAt(refuge->x, refuge->z) < sim.terrain.getSeaLevel())
+        {
+            refuge = *bb.baseAnchor;
         }
         if (refuge)
         {

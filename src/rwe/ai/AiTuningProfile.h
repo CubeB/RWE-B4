@@ -2133,6 +2133,20 @@ namespace rwe
          */
         bool commanderAnswersHarassment{false};
         /**
+         * Treat a commander whose only threats are on the water as unable to
+         * fight, so the refuge logic walks it off the shore.
+         *
+         * The commander is sent only at enemies standing on land (a ship is
+         * walked after into the seabed, where it cannot fire -- see
+         * commanderAnswersHarassment) and the D-gun skips them too, so with
+         * nothing but ships near it canFight was true and no order was
+         * issued: the commander stood on the beach, under fire, doing
+         * nothing. With this on it retreats from them like any threat it
+         * cannot answer. RWE-original; the original's computer player has no
+         * such rule.
+         */
+        bool commanderShunsShips{true};
+        /**
          * Units built while a wave is out join it once this many have
          * gathered, rather than waiting for the wave to be spent. This keeps
          * what attackInWaves was for -- a lone kbot does not walk to the

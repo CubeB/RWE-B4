@@ -594,4 +594,56 @@ namespace rwe
             CHECK(*std::get_if<UnitId>(&shots.front().target) == cheapId);
         }
     }
+
+    TEST_CASE("a commander on the shore walks away from ships it cannot answer", "[ai]")
+    {
+        // The commander is only ever sent at enemies standing on land and the
+        // D-gun skips the water too, so with nothing but a ship near it the
+        // "can fight" branch issued no order at all and it stood on the beach
+        // being shot. Land is the dry strip along the west edge (shore at
+        // world x -352); the ship sits in the water 150 units off it.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeWaterMapTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(-400_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-450_ss, 90_ss, 40_ss), script);
+        auto shipId = addUnit(sim, "ARMPT", human, SimVector(-250_ss, 60_ss, 0_ss), script);
+        (void)shipId;
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        // What the commander can see is not under test, and the shore's line
+        // of sight is the map's business.
+        profile.cheatModeOmniscient = true;
+
+        SECTION("it moves inland, away from the ship")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(controller.getBlackboard().commanderInDanger);
+            REQUIRE(controller.getBlackboard().commanderFleeing);
+            REQUIRE(ordersFor<AttackOrder>(commands, commanderId).empty());
+            auto moves = ordersFor<MoveOrder>(commands, commanderId);
+            REQUIRE(!moves.empty());
+            REQUIRE(moves.back().destination.x < -400_ss);
+            // And onto dry ground, not out to sea.
+            REQUIRE(sim.terrain.getHeightAt(moves.back().destination.x, moves.back().destination.z) >= sim.terrain.getSeaLevel());
+        }
+
+        SECTION("switched off, it stands there as it used to")
+        {
+            profile.commanderShunsShips = false;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(controller.getBlackboard().commanderInDanger);
+            REQUIRE(!controller.getBlackboard().commanderFleeing);
+            REQUIRE(ordersFor<MoveOrder>(commands, commanderId).empty());
+        }
+    }
 }
