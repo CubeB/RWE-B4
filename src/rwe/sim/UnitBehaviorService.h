@@ -73,7 +73,7 @@ namespace rwe
         void updateRemoteGroundPosition(UnitInfo unitInfo, UnitPhysicsInfoGround& physics);
 
         /** Returns true if the order has been completed. */
-        bool handleMoveOrder(UnitInfo unitInfo, const MoveOrder& moveOrder);
+        bool handleMoveOrder(UnitInfo unitInfo, MoveOrder& moveOrder);
 
         /** Returns true if the order has been completed. */
         bool handleAttackOrder(UnitInfo unitInfo, AttackOrder& attackOrder);

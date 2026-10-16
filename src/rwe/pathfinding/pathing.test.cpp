@@ -460,7 +460,12 @@ namespace rwe
         }
     }
 
-    TEST_CASE("a move order to an unreachable point completes at the closest reachable point", "[pathing]")
+    // BT-100: this used to be "completes at the closest reachable point". The
+    // original keeps a lone unreachable Move alive and asks again after 30 to
+    // 59 ticks; see unreachablemove.test.cpp for the retry and the deletion
+    // when another order follows. What is left to pin here is where the unit
+    // stands meanwhile: short of the wall, not inside it.
+    TEST_CASE("a lone move order to an unreachable point does not complete and the unit stays short of the wall", "[pathing]")
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(16, 16), 0u, 0, 0);
@@ -513,7 +518,7 @@ namespace rwe
                         << " speed=" << (ground ? ground->currentSpeed.value : -1.0f)
                         << " inCollision=" << tank.inCollision
                         << " pendingRequests=" << sim.pathRequests.size());
-            REQUIRE(tank.orders.empty());
+            REQUIRE(tank.orders.size() == 1);
         }
         // We stopped next to the wall, not inside it.
         auto cell = sim.terrain.worldToHeightmapCoordinate(tank.position);
@@ -573,8 +578,9 @@ namespace rwe
         REQUIRE(sim.pathFindingService.counters.searchesRegionUnreachable >= 1);
         REQUIRE(sim.pathFindingService.counters.searchesExhausted == 0);
 
-        // The order completed, and the unit stopped on its own bank.
-        REQUIRE(sim.getUnitState(tankId).orders.empty());
+        // The order did not complete (BT-100: it asks again after 30 to 59
+        // ticks), and the unit stopped on its own bank.
+        REQUIRE(sim.getUnitState(tankId).orders.size() == 1);
         auto cell = sim.terrain.worldToHeightmapCoordinate(sim.getUnitState(tankId).position);
         REQUIRE(cell.x < 30);
     }

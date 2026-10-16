@@ -231,7 +231,7 @@ namespace rwe
 
     nlohmann::json dumpJson(const MoveOrder& o)
     {
-        return nlohmann::json{{"destination", dumpJson(o.destination)}};
+        return nlohmann::json{{"destination", dumpJson(o.destination)}, {"unreachableRetryTicks", o.unreachableRetryTicks}};
     }
 
     nlohmann::json dumpJson(const AttackOrder& o)

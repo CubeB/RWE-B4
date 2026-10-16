@@ -73,7 +73,7 @@ namespace rwe
     {
         return match(
             o,
-            [](const MoveOrder& m) { return json{{"kind", "move"}, {"destination", saveSimVector(m.destination)}}; },
+            [](const MoveOrder& m) { return json{{"kind", "move"}, {"destination", saveSimVector(m.destination)}, {"unreachableRetryTicks", m.unreachableRetryTicks}}; },
             [&](const AttackOrder& a) {
                 auto j = json{{"kind", "attack"}, {"target", saveAttackTarget(a.target, ctx)}};
                 if (a.leash)
@@ -134,7 +134,9 @@ namespace rwe
         const auto& kind = j.at("kind").get_ref<const std::string&>();
         if (kind == "move")
         {
-            return MoveOrder(loadSimVector(j.at("destination")));
+            MoveOrder move(loadSimVector(j.at("destination")));
+            move.unreachableRetryTicks = j.value("unreachableRetryTicks", 0u);
+            return move;
         }
         if (kind == "attack")
         {

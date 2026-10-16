@@ -13,6 +13,16 @@ namespace rwe
     struct MoveOrder
     {
         SimVector destination;
+
+        /**
+         * BT-100: ticks left before a Move whose goal no route reaches asks
+         * for the same goal again. The original's executor resets the mission
+         * to state 0 and waits 30 plus a random 0 to 29 ticks on result 9
+         * (0x43B8E5); the wait lives on the order because that is where the
+         * mission keeps its state. Zero when not waiting. Hashed and saved.
+         */
+        unsigned int unreachableRetryTicks{0};
+
         explicit MoveOrder(const SimVector& destination) : destination(destination) {}
     };
 

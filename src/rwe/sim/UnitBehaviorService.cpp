@@ -2471,7 +2471,7 @@ namespace rwe
 
         return match(
             order,
-            [&](const MoveOrder& o) {
+            [&](MoveOrder& o) {
                 return handleMoveOrder(unitInfo, o);
             },
             [&](AttackOrder& o) {
@@ -3220,14 +3220,62 @@ namespace rwe
         return true;
     }
 
-    bool UnitBehaviorService::handleMoveOrder(UnitInfo unitInfo, const MoveOrder& moveOrder)
+    bool UnitBehaviorService::handleMoveOrder(UnitInfo unitInfo, MoveOrder& moveOrder)
     {
         if (!unitInfo.definition->isMobile)
         {
             return false;
         }
 
-        if (navigateTo(unitInfo, moveOrder.destination))
+        // BT-100: a Move whose goal no route reaches is waiting out its retry.
+        // The unit asks for nothing this tick, so it stands, as the original's
+        // mission does asleep with no path.
+        if (moveOrder.unreachableRetryTicks > 0)
+        {
+            --moveOrder.unreachableRetryTicks;
+            if (moveOrder.unreachableRetryTicks > 0)
+            {
+                return false;
+            }
+        }
+
+        auto arrived = navigateTo(unitInfo, moveOrder.destination);
+
+        // BT-100 (0x4031D0, 0x44F080, and the executor's result-9 arm at
+        // 0x43B8E5): when the search finds no route and the unit is not
+        // already at the goal, the Move mission is woken with bit 0x40, which
+        // is not arrival, and returns 9. The executor then deletes the node if
+        // another follows, and otherwise resets it to state 0 and sleeps 30
+        // plus a random 0 to 29 ticks before asking for the same goal again --
+        // so a lone unreachable Move never ends. RWE's pathfinder records the
+        // closest reachable point as reachableDestination, and a point goal
+        // used to count as reached there, which ended the order. A ground
+        // unit standing on the real goal square has still arrived.
+        if (!unitInfo.definition->canFly)
+        {
+            auto moving = std::get_if<NavigationStateMoving>(&unitInfo.state->navigationState.state);
+            if (moving != nullptr && moving->reachableDestination)
+            {
+                auto goalPoint = std::get_if<SimVector>(&moving->movementGoal);
+                if (goalPoint != nullptr && *goalPoint == moveOrder.destination
+                    && !isOnGoalSquare(*sim, *unitInfo.state, *unitInfo.definition, moveOrder.destination))
+                {
+                    if (unitInfo.state->orders.size() > 1)
+                    {
+                        // The next order runs; the caller pops this one.
+                        return true;
+                    }
+
+                    // The draw is a modulo of the generator's raw output, never
+                    // uniform_int_distribution (CLAUDE.md, Determinism).
+                    moveOrder.unreachableRetryTicks = 30u + randomBelow(sim->rng, 30u);
+                    unitInfo.state->navigationState.desiredDestination = std::nullopt;
+                    return false;
+                }
+            }
+        }
+
+        if (arrived)
         {
             // Only report in on arriving at the last waypoint. A unit given a
             // string of shift-queued moves is still on its way until the queue
