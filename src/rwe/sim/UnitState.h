@@ -711,6 +711,23 @@ namespace rwe
         unsigned int kills{0};
 
         /**
+         * The unit's health as a whole percentage (0 to 100), sampled on every
+         * tick whose number is a multiple of thirty -- the original's
+         * `unit+0xF6`. Zero at creation.
+         */
+        unsigned int healthPercentSample{0};
+
+        /**
+         * The sample before that one -- the original's `unit+0xF7`, and the
+         * second term of the severity the `Killed` script is given (BT-43).
+         * At each sampling tick this takes the old `healthPercentSample`
+         * before that takes the new reading, so a kill reads a health
+         * percentage from thirty to fifty-nine ticks ago. Zero at creation,
+         * and hashed, so it needs the initialiser.
+         */
+        unsigned int previousHealthPercentSample{0};
+
+        /**
          * The last water state handed to the unit's `setSFXoccupy`. The
          * original keeps the same thing at unit+0x10A and only calls the
          * script when the state changes, and it also feeds the value back in

@@ -3247,10 +3247,57 @@ namespace rwe
         return level;
     }
 
-    int computeKilledSeverity(unsigned int overkill, unsigned int maxHitPoints)
+    int computeKilledSeverity(unsigned int overkill, unsigned int maxHitPoints, unsigned int previousHealthPercent)
     {
-        auto scaled = maxHitPoints == 0 ? 0u : (100u * overkill) / maxHitPoints;
-        return static_cast<int>(std::clamp(scaled / 2u, 1u, 100u));
+        // 0x486578-0x4865AB: the overkill percentage is an unsigned division
+        // of 100 * the deficit by the maximum health, the severity is the
+        // floor of half its sum with unit+0xF7, and the result is raised to 1
+        // and cut to 100. Both terms are non-negative, so the halving is an
+        // ordinary floor.
+        auto scaled = maxHitPoints == 0
+            ? std::uint64_t(0)
+            : (std::uint64_t(100) * overkill) / maxHitPoints;
+        auto severity = (scaled + previousHealthPercent) / 2u;
+        return static_cast<int>(std::clamp<std::uint64_t>(severity, 1u, 100u));
+    }
+
+    namespace
+    {
+        /**
+         * Once a second the original's unit pass copies unit+0xF6 into
+         * unit+0xF7 and then stores the unit's health percentage in unit+0xF6
+         * (0x48AE71-0x48AEAF), on every tick whose number is a multiple of
+         * thirty. RWE numbers its first tick 1, as the original does.
+         *
+         * The sample in unit+0xF7 is the second term of the kill severity, so
+         * a kill reads the health the unit had thirty to fifty-nine ticks
+         * earlier: a unit at full health for the last second that is flattened
+         * by one blow has 100 there whatever the overkill.
+         */
+        constexpr unsigned int HealthSampleInterval = 30;
+
+        void sampleUnitHealth(GameSimulation& sim)
+        {
+            if (sim.gameTime.value % HealthSampleInterval != 0)
+            {
+                return;
+            }
+
+            for (auto& entry : sim.units)
+            {
+                auto& unit = entry.second;
+                if (unit.isDead())
+                {
+                    continue;
+                }
+
+                const auto maxHitPoints = sim.unitDefinitions.at(unit.unitType).maxHitPoints;
+                unit.previousHealthPercentSample = unit.healthPercentSample;
+                unit.healthPercentSample = maxHitPoints == 0
+                    ? 0u
+                    : static_cast<unsigned int>(std::min<std::uint64_t>(100u, (std::uint64_t(100) * unit.hitPoints) / maxHitPoints));
+            }
+        }
     }
 
     void GameSimulation::killUnit(UnitId unitId, std::optional<UnitId> attacker)
@@ -3259,10 +3306,15 @@ namespace rwe
         // its cargo, a script asking to die. The original's own severity
         // arithmetic degenerates to its floor for these, and the shipped
         // ladders read that as the intact wreck.
-        killUnit(unitId, attacker, 0u);
+        killUnitWithSeverity(unitId, attacker, 0u, false);
     }
 
     void GameSimulation::killUnit(UnitId unitId, std::optional<UnitId> attacker, unsigned int overkill)
+    {
+        killUnitWithSeverity(unitId, attacker, overkill, true);
+    }
+
+    void GameSimulation::killUnitWithSeverity(UnitId unitId, std::optional<UnitId> attacker, unsigned int overkill, bool measured)
     {
         auto& unit = getUnitState(unitId);
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
@@ -3326,13 +3378,21 @@ namespace rwe
         events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, deathType, unit.owner, killerOwner});
 
         // The severity is `clamp(1, 100, (100*overkill/maxdamage + X) / 2)`,
-        // where X is `unit+0xF7` -- the one term in this formula with no
-        // known writer anywhere in the binary, so it is taken as zero.
+        // where X is `unit+0xF7`: the unit's health percentage as sampled
+        // every thirtieth tick, one sample back (BT-43,
+        // BYTE-TACTICS-SPEC-ROOM-FINDINGS.md; sampleUnitHealth). A kill
+        // that no blow measured -- a scuttling, a transport going down --
+        // has no such second term here and keeps the floor of 1; the
+        // original queries no script at all for a unit that still has
+        // health, which this does not yet reproduce.
         // What the script does with the number is its own business: a
         // shipped `Killed` is a three-band ladder that picks a corpse
         // level from it and throws a different amount of the unit about
         // on the way.
-        const int severity = computeKilledSeverity(overkill, unitDefinition.maxHitPoints);
+        const int severity = computeKilledSeverity(
+            overkill,
+            unitDefinition.maxHitPoints,
+            measured ? unit.previousHealthPercentSample : 0u);
 
         // Run the script's Killed(severity, corpsetype) now, while the unit
         // still exists: the piece explosions it fires before its first sleep
@@ -5113,6 +5173,10 @@ namespace rwe
         }
 
         updateWind();
+
+        // Where the original's unit pass takes it, ahead of any kill a unit
+        // suffers later in the tick.
+        sampleUnitHealth(*this);
 
         // Before the settle, which the countdown the rules may start this
         // second freezes (0x4650A9 comes before 0x46554F in the same pass).

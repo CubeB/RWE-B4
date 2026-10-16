@@ -137,6 +137,16 @@ namespace rwe
             u.*Member = j.is_null() ? false : j.get<bool>();
         }
 
+        /**
+         * A number that saves older than the field may omit: absence stands
+         * for the member's creation value, zero.
+         */
+        template <auto Member>
+        void loadPlainOrZeroUnitStateField(const json& j, UnitState& u, const LoadContext&)
+        {
+            u.*Member = j.is_null() ? 0u : j.get<unsigned int>();
+        }
+
         json savePiecesUnitStateField(const UnitState& u, const SaveContext&)
         {
             json pieces = json::array();
@@ -376,6 +386,8 @@ namespace rwe
             {"buggerOffActive", hashedPlain<&UnitState::buggerOffActive>()},
             {"armored", hashedPlain<&UnitState::armored>()},
             {"kills", hashedPlain<&UnitState::kills>()},
+            {"healthPercentSample", hashed<&UnitState::healthPercentSample>(savePlainUnitStateField<&UnitState::healthPercentSample>, loadPlainOrZeroUnitStateField<&UnitState::healthPercentSample>), true},
+            {"previousHealthPercentSample", hashed<&UnitState::previousHealthPercentSample>(savePlainUnitStateField<&UnitState::previousHealthPercentSample>, loadPlainOrZeroUnitStateField<&UnitState::previousHealthPercentSample>), true},
             {"sfxOccupyState", hashedPlain<&UnitState::sfxOccupyState>()},
             {"buildTimeCompleted", hashedPlain<&UnitState::buildTimeCompleted>()},
             {"nanoframeDecayTime", hashed<&UnitState::nanoframeDecayTime>(saveOptionalGameTimeUnitStateField<&UnitState::nanoframeDecayTime>, loadOptionalGameTimeUnitStateField<&UnitState::nanoframeDecayTime>)},

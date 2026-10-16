@@ -456,14 +456,15 @@ namespace rwe
      *
      * `clamp(1, 100, (100 * overkill / maxdamage + X) / 2)`, where `overkill`
      * is the damage the killing blow had left over once the unit's remaining
-     * hit points were paid for, and `X` is `unit+0xF7` -- the one term in the
-     * formula with no known writer anywhere in the binary, taken as zero here
-     * and recorded as a gap in TOTALA-EXE.md section 88.
+     * hit points were paid for, and `X` is `unit+0xF7`, the unit's health
+     * percentage as sampled every thirtieth tick one sample back
+     * (`UnitState::previousHealthPercentSample`, BT-43). This used to be
+     * taken as zero for want of a known writer.
      *
      * A shipped `Killed` reads it as a three-band ladder: a gentle kill picks
      * the intact wreck, a heavy one picks rubble.
      */
-    int computeKilledSeverity(unsigned int overkill, unsigned int maxHitPoints);
+    int computeKilledSeverity(unsigned int overkill, unsigned int maxHitPoints, unsigned int previousHealthPercent);
 
     /**
      * The corpse level a `Killed` script wrote into its second parameter, if
@@ -1416,6 +1417,13 @@ namespace rwe
          * script is given -- see the note at the call site.
          */
         void killUnit(UnitId unitId, std::optional<UnitId> attacker, unsigned int overkill);
+
+        /**
+         * The one body behind the overloads above. `measured` says whether
+         * a blow of known size caused the death, and so whether the unit's
+         * sampled health enters the severity.
+         */
+        void killUnitWithSeverity(UnitId unitId, std::optional<UnitId> attacker, unsigned int overkill, bool measured);
 
         void applyDamage(UnitId unitId, unsigned int damagePoints);
 
