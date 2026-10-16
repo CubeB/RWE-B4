@@ -1891,7 +1891,7 @@ namespace rwe
         physics.roll = tilt.roll;
     }
 
-    void UnitBehaviorService::updateGroundUnitPosition(UnitInfo unitInfo, const UnitPhysicsInfoGround& physics)
+    void UnitBehaviorService::updateGroundUnitPosition(UnitInfo unitInfo, UnitPhysicsInfoGround& physics)
     {
         auto direction = UnitState::toDirection(unitInfo.state->rotation);
 
@@ -1908,35 +1908,40 @@ namespace rwe
             {
                 unitInfo.state->inCollision = true;
 
-                // if we failed to move, try in each axis separately
-                // to see if we can complete a "partial" movement
-                const SimVector maskX(0_ss, 1_ss, 1_ss);
-                const SimVector maskZ(1_ss, 1_ss, 0_ss);
+                // 0x43D6D0, the blocked branch (BT-12): a refused step does
+                // not slide along the obstacle. The unit is held inside the
+                // window that maps to the cell it is already in -- the
+                // centre of its footprint block, plus or minus just under
+                // eight world units on each axis -- and, if its stored speed
+                // is above half the type's maximum, speed is dropped to that
+                // half. The velocity is speed along the current heading, so
+                // storing the speed recomputes it.
+                auto region = sim->computeFootprintRegion(unitInfo.state->position, unitInfo.definition->movementCollisionInfo);
+                auto [footprintX, footprintZ] = sim->getFootprintXZ(unitInfo.definition->movementCollisionInfo);
+                auto corner = sim->terrain.heightmapIndexToWorldCorner(region.x, region.y);
+                // The original stops 0x7FFFF in 16.16 (just under eight) short of
+                // the edge. A float world coordinate cannot resolve that at the
+                // far side of a big map, and a position that rounds into the
+                // next cell is refused again, so the margin is 1/64.
+                const auto reach = 8_ss - SimScalar(1.0f / 64.0f);
+                const auto centreX = corner.x + SimScalar(static_cast<float>(footprintX) * 8.0f);
+                const auto centreZ = corner.z + SimScalar(static_cast<float>(footprintZ) * 8.0f);
 
-                SimVector newPos1;
-                SimVector newPos2;
-                if (direction.x > direction.z)
-                {
-                    newPos1 = unitInfo.state->position + (direction * maskZ * physics.currentSpeed);
-                    newPos2 = unitInfo.state->position + (direction * maskX * physics.currentSpeed);
-                }
-                else
-                {
-                    newPos1 = unitInfo.state->position + (direction * maskX * physics.currentSpeed);
-                    newPos2 = unitInfo.state->position + (direction * maskZ * physics.currentSpeed);
-                }
-                newPos1.y = sim->terrain.getHeightAt(newPos1.x, newPos1.z);
-                newPos2.y = sim->terrain.getHeightAt(newPos2.x, newPos2.z);
-
+                SimVector held(
+                    std::clamp(newPosition.x, centreX - reach, centreX + reach),
+                    0_ss,
+                    std::clamp(newPosition.z, centreZ - reach, centreZ + reach));
+                held.y = sim->terrain.getHeightAt(held.x, held.z);
                 if (unitInfo.definition->floater || unitInfo.definition->canHover)
                 {
-                    newPos1.y = rweMax(newPos1.y, sim->terrain.getSeaLevel());
-                    newPos2.y = rweMax(newPos2.y, sim->terrain.getSeaLevel());
+                    held.y = rweMax(held.y, sim->terrain.getSeaLevel());
                 }
+                tryApplyMovementToPosition(unitInfo, held);
 
-                if (!tryApplyMovementToPosition(unitInfo, newPos1))
+                const auto halfMax = unitInfo.definition->maxVelocity / 2_ss;
+                if (physics.currentSpeed > halfMax)
                 {
-                    tryApplyMovementToPosition(unitInfo, newPos2);
+                    physics.currentSpeed = halfMax;
                 }
             }
         }

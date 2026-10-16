@@ -268,7 +268,7 @@ namespace rwe
         void updateUnitRotation(UnitInfo unitInfo);
         void updateUnitSpeed(UnitInfo unitInfo);
 
-        void updateGroundUnitPosition(UnitInfo unitInfo, const UnitPhysicsInfoGround& physics);
+        void updateGroundUnitPosition(UnitInfo unitInfo, UnitPhysicsInfoGround& physics);
 
         /** The slope tilt under a ground unit, the original's 0x48A490, or none for an upright one. */
         void updateGroundTilt(UnitInfo unitInfo, UnitPhysicsInfoGround& physics);
