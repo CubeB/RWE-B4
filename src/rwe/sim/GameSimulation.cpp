@@ -5012,6 +5012,30 @@ namespace rwe
                 product.moveOrders = unit->get().moveOrders;
                 product.fireOrders = unit->get().fireOrders;
 
+                // An unfinished product is attached to the yard's build piece
+                // and follows it in height (the yard's building pass does so
+                // from the next tick on), so its first appearance must not be
+                // the seabed trySpawnUnit settled it on: a submarine would be
+                // drawn on the bottom for a tick or two and then jump to the
+                // pad. A floater is held to sea level minus its WaterLine, as
+                // the building pass does; hovers keep the sea-level floor
+                // trySpawnUnit gave them. Aircraft were never settled.
+                // NAVAL-CONSTRUCTION-DGUN-FINDINGS.md, "submarine under
+                // construction"; NAVAL-SYSTEMS-PARITY.md section 1.
+                {
+                    const auto& productDefinition = unitDefinitions.at(s->unitType);
+                    if (productDefinition.isMobile && !productDefinition.canFly && !productDefinition.canHover)
+                    {
+                        auto attachedHeight = s->position.y;
+                        if (productDefinition.floater)
+                        {
+                            attachedHeight = rweMax(attachedHeight, terrain.getSeaLevel() - intToSimScalar(static_cast<int>(productDefinition.waterLine)));
+                        }
+                        product.position.y = attachedHeight;
+                        product.previousPosition.y = attachedHeight;
+                    }
+                }
+
                 // A factory's frame is a build start like a builder's: the
                 // 0x09 names the frame and the 0x12 names the yard that
                 // finished it.
