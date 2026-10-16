@@ -4394,7 +4394,7 @@ namespace rwe
             // thing that outlives the change.
             currentWindVector = computeWindVector(currentWindDirection, currentWindSpeed);
 
-            UnitBehaviorService(this).updateWind(currentWindGenerationFactor, currentWindDirection);
+            UnitBehaviorService(this).updateWind(currentWindSpeed, currentWindDirection);
         }
     }
 

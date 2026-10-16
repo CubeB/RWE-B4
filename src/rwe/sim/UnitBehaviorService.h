@@ -32,7 +32,13 @@ namespace rwe
 
         void onCreate(UnitId unitId);
 
-        void updateWind(SimScalar windSpeed, SimAngle windDirection);
+        /**
+         * Tells every wind generator the new wind. The script's SetSpeed gets
+         * the map's integer wind speed times sixteen (shl 4 at 0x43797B), an
+         * angular speed for the blades, and not the 0..1 fraction the economy
+         * uses (BT-46).
+         */
+        void updateWind(int windSpeed, SimAngle windDirection);
 
         void update(UnitId unitId);
 

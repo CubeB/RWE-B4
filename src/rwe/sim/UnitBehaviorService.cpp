@@ -196,15 +196,18 @@ namespace rwe
         }
     }
 
-    void UnitBehaviorService::updateWind(SimScalar windGenerationFactor, SimAngle windDirection)
+    void UnitBehaviorService::updateWind(int windSpeed, SimAngle windDirection)
     {
-        int cobWindSpeed = static_cast<int>(toCobSpeed(windGenerationFactor).value);
+        // The integer speed the map's range drew, shifted left four bits
+        // (0x43797B). The shipped wind scripts spin their blades at this
+        // value in 1/65536-turn units a second.
+        int cobWindSpeed = windSpeed * 16;
         int cobWindDirection = toCobAngle(windDirection).value;
 
         for (auto& [id, unit] : sim->units)
         {
             const auto& unitDefinition = sim->unitDefinitions.at(unit.unitType);
-            if (unitDefinition.windGenerator != Energy(0))
+            if (unitDefinition.windGenerator > Energy(0))
             {
                 unit.cobEnvironment->createThread("SetSpeed", {cobWindSpeed});
                 unit.cobEnvironment->createThread("SetDirection", {cobWindDirection});

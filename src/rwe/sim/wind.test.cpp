@@ -1,15 +1,21 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <rwe/cob/CobOpCode.h>
 #include <rwe/grid/Grid.h>
+#include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/ProjectilePhysicsType.h>
 #include <rwe/sim/SimAngle.h>
 #include <rwe/sim/SimVector.h>
+#include <rwe/sim/UnitDefinition.h>
+#include <rwe/sim/UnitModelDefinition.h>
+#include <rwe/sim/UnitPieceDefinition.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/WeaponDefinition.h>
 #include <rwe/sim/sim_test_util.h>
 #include <cmath>
+#include <memory>
 #include <string>
 
 namespace rwe
@@ -166,6 +172,52 @@ namespace rwe
             REQUIRE(std::sqrt((x * x) + (z * z)) == Approx(BrainCoralDrift));
             REQUIRE(simScalarToFloat(sim.currentWindVector.y) == 0.0f);
         }
+    }
+
+    TEST_CASE("a wind generator's SetSpeed is the integer wind speed times sixteen", "[wind][cob]")
+    {
+        // BT-46: 0x43797B shifts the stored speed left four bits. The shipped
+        // armwin and corwin spin their blades at the argument in 1/65536-turn
+        // units a second, so the old fraction of 65536 was 18% slow at the top
+        // of the range and flat above 5000.
+        auto script = std::make_shared<CobScript>();
+        script->staticVariableCount = 1;
+        script->pieces.push_back("base");
+        script->functions.push_back(CobFunctionInfo{"SetSpeed", 0u});
+        script->instructions = {
+            static_cast<uint32_t>(OpCode::PUSH_LOCAL_VAR), 0u,
+            static_cast<uint32_t>(OpCode::POP_STATIC), 0u,
+            static_cast<uint32_t>(OpCode::PUSH_CONSTANT), 0u,
+            static_cast<uint32_t>(OpCode::RETURN)};
+
+        auto speedGiven = [&](int windSpeed) {
+            GameSimulation sim(makeFlatTerrain(32, 32), 0u, windSpeed, windSpeed);
+            auto player = addPlayer(sim);
+            std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+            sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(pieces));
+            UnitDefinition d{};
+            d.objectName = "model";
+            d.maxHitPoints = 100;
+            d.buildTime = 0u;
+            d.windGenerator = Energy(25.0f);
+            d.yardMap = Grid<YardMapCell>(2u, 2u, YardMapCell::Ground);
+            d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
+            sim.unitDefinitions["ARMWIN"] = d;
+            sim.unitScriptDefinitions["ARMWIN"] = *script;
+            auto id = sim.trySpawnCompletedUnit("ARMWIN", player, SimVector(16_ss, 0_ss, 16_ss), std::nullopt);
+            REQUIRE(id);
+
+            // The first tick draws the wind, as above, and the thread it
+            // starts runs in that tick's script pass or the next.
+            tick(sim, 3);
+            return sim.getUnitState(*id).cobEnvironment->_statics.at(0);
+        };
+
+        REQUIRE(speedGiven(100) == 1600);
+        REQUIRE(speedGiven(2000) == 32000);
+        REQUIRE(speedGiven(5000) == 80000);
+        // Not capped at the economy's 5000.
+        REQUIRE(speedGiven(7000) == 112000);
     }
 
     TEST_CASE("the wind reaches the rounds that are supposed to feel it", "[wind]")
