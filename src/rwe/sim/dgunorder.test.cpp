@@ -252,4 +252,96 @@ namespace rwe
             REQUIRE(!sim.getUnitState(commanderId).orders.empty());
         }
     }
+
+    TEST_CASE("a D-gun order obeys the water rule an ordinary weapon does", "[dgun][naval]")
+    {
+        // NAVAL-CONSTRUCTION-DGUN-FINDINGS.md, "A fully submerged target
+        // normally fails acquisition". The disintegrator carries no
+        // WaterWeapon key and nothing exempts a ship or a submarine from the
+        // gate, so a unit target needs the top of its model, in whole units,
+        // strictly above the sea, and so does the shooter. Static reference
+        // comparison only: no original-runtime check of this has been run.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto us = addRichPlayer(sim, "us");
+        auto them = addRichPlayer(sim, "them");
+        sim.unitDefinitions["commander"] = makeCommanderDef();
+        sim.unitDefinitions["victim"] = makeVictimDef();
+        registerModel(sim);
+        defineDisintegrator(sim);
+
+        // CORSUB's model is 15.6478 tall (the findings measured it from the
+        // 3DO): the whole-unit gate reads 15, so at the legal flat-water
+        // depth of 15 it fails, where the fraction would have carried it
+        // across.
+        std::vector<UnitPieceDefinition> subPieces{UnitPieceDefinition{"base", SimVector(0_ss, 20_ss, 0_ss), std::nullopt}};
+        sim.unitModelDefinitions["subModel"] = createUnitModelDefinition(SimScalar(15.6478118896f), std::move(subPieces));
+        auto subDefinition = makeVictimDef();
+        subDefinition.objectName = "subModel";
+        sim.unitDefinitions["sub"] = subDefinition;
+
+        auto commanderId = spawnCommander(sim, us, SimVector(0_ss, 0_ss, 0_ss), script);
+        // Whether a round was ever in the air. The player's energy is no
+        // witness: the stores move for reasons of their own in this fixture.
+        bool fired = false;
+        auto runTicks = [&]() {
+            for (int tick = 0; tick < 90; ++tick)
+            {
+                sim.tick();
+                fired = fired || sim.projectiles.begin() != sim.projectiles.end();
+            }
+        };
+        auto runOrder = [&](UnitId target) {
+            sim.getUnitState(commanderId).orders.push_back(DgunOrder(target));
+            runTicks();
+        };
+
+        SECTION("a submarine wholly under the sea is refused and nothing is spent")
+        {
+            auto subId = spawnUnit(sim, "sub", them, SimVector(100_ss, -30_ss, 0_ss), script);
+            runOrder(subId);
+
+            REQUIRE(sim.getUnitState(commanderId).orders.empty());
+            REQUIRE_FALSE(fired);
+            REQUIRE(sim.getUnitState(subId).hitPoints == 500);
+        }
+
+        SECTION("fifteen down fails the gate on its whole-unit top, equality included")
+        {
+            auto subId = spawnUnit(sim, "sub", them, SimVector(100_ss, -15_ss, 0_ss), script);
+            runOrder(subId);
+
+            REQUIRE(sim.getUnitState(commanderId).orders.empty());
+            REQUIRE_FALSE(fired);
+            REQUIRE(sim.getUnitState(subId).hitPoints == 500);
+        }
+
+        SECTION("fourteen down has a whole-unit top of one above the sea and is shot")
+        {
+            auto subId = spawnUnit(sim, "sub", them, SimVector(100_ss, -14_ss, 0_ss), script);
+            runOrder(subId);
+
+            REQUIRE(fired);
+        }
+
+        SECTION("a surface ship is a legal target")
+        {
+            auto shipId = spawnUnit(sim, "victim", them, SimVector(100_ss, 0_ss, 0_ss), script);
+            runOrder(shipId);
+
+            REQUIRE(!sim.units.tryGet(shipId).has_value());
+        }
+
+        SECTION("a shooter whose model top is under the sea does not fire at a point either")
+        {
+            // Ten tall, so forty down is wholly under the surface.
+            sim.getUnitState(commanderId).position = SimVector(0_ss, -40_ss, 0_ss);
+            sim.getUnitState(commanderId).previousPosition = SimVector(0_ss, -40_ss, 0_ss);
+            sim.getUnitState(commanderId).orders.push_back(DgunOrder(SimVector(100_ss, 0_ss, 0_ss)));
+            runTicks();
+
+            REQUIRE(sim.getUnitState(commanderId).orders.empty());
+            REQUIRE_FALSE(fired);
+        }
+    }
 }

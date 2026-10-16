@@ -3,6 +3,7 @@
 #include <rwe/LoadingScene_util.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/io/weapontdf/WeaponTdf.h>
+#include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitWeapon.h>
 #include <rwe/sim/WeaponDefinition.h>
@@ -225,6 +226,62 @@ namespace rwe
         }
 
         FAIL("the round went past the unit and never detonated");
+    }
+
+    TEST_CASE("a unitsonly round goes through a wreck", "[weapon]")
+    {
+        // NAVAL-CONSTRUCTION-DGUN-FINDINGS.md: the flag is tested between the
+        // unit slots and the feature, so it bypasses features as well as the
+        // two surfaces; the older register said the feature was tested first.
+        // Static comparison only. A twenty-high wreck on ground at 16 is in
+        // the way of a round dropped from sixty.
+        auto drop = [](bool unitsOnly) {
+            GameSimulation sim(makeFlatGroundAt(16, 0_ss), 0u, 0, 0);
+            sim.weaponDefinitions["MINDGUN"] = shippedMindGun(unitsOnly);
+
+            FeatureDefinition d{};
+            d.name = "wreck";
+            d.footprintX = 2;
+            d.footprintZ = 2;
+            d.height = 20_ss;
+            d.blocking = true;
+            d.reclaimable = true;
+            d.metal = 10;
+            d.damage = 100000;
+            auto definitionId = sim.featureDefinitions.insert(d);
+            sim.featureNameIndex.insert_or_assign("WRECK", definitionId);
+            sim.trySpawnFeature("WRECK", SimVector(0_ss, 16_ss, 0_ss), SimAngle(0), false);
+            REQUIRE(sim.features.begin() != sim.features.end());
+
+            auto gunner = addPlayer(sim, "gunner");
+            sim.spawnProjectile(ProjectileSpawn{
+                .owner = gunner,
+                .weaponType = "MINDGUN",
+                .position = SimVector(0_ss, 60_ss, 0_ss),
+                .direction = SimVector(0_ss, -1_ss, 0_ss),
+                .distanceToTarget = 100_ss});
+
+            std::optional<SimScalar> deathHeight;
+            for (int i = 0; i < 20 && !deathHeight; ++i)
+            {
+                sim.events.clear();
+                sim.tick();
+                for (const auto& e : sim.events)
+                {
+                    if (const auto* died = std::get_if<ProjectileDiedEvent>(&e); died != nullptr)
+                    {
+                        deathHeight = died->position.y;
+                    }
+                }
+            }
+            return deathHeight;
+        };
+
+        auto ordinary = drop(false);
+        REQUIRE(ordinary.has_value());
+        CHECK(*ordinary > 20_ss);
+
+        CHECK_FALSE(drop(true).has_value());
     }
 
     TEST_CASE("a weapon TDF's unitsonly key reaches the weapon definition", "[weapon]")

@@ -293,6 +293,52 @@ namespace rwe
         CHECK(wetDeath == ProjectileDiedEvent::DeathType::WaterImpact);
     }
 
+    TEST_CASE("a round exactly at sea level has not yet reached the sea", "[weapon][water]")
+    {
+        // NAVAL-CONSTRUCTION-DGUN-FINDINGS.md, "Water detonations do not
+        // consume this projectile": below sea level a non-water round
+        // detonates; exactly at it, that test does not fire. Five units a tick
+        // from thirty over a sea at twenty lands the round on the surface at
+        // the second step and under it at the third. Static comparison only.
+        GameSimulation sim(makeFloodedTerrain(64, 64), 0u, 0, 0);
+        auto gunner = addPlayer(sim, "gunner");
+
+        WeaponDefinition w{};
+        w.physicsType = ProjectilePhysicsTypeLineOfSight();
+        w.maxRange = 500_ss;
+        w.reloadTime = SimScalar(1.0f);
+        w.burst = 1;
+        w.burstInterval = 0_ss;
+        w.velocity = 5_ss;
+        w.damageRadius = 4_ss;
+        w.damage["DEFAULT"] = 1;
+        sim.weaponDefinitions["PLAIN"] = w;
+
+        sim.spawnProjectile(ProjectileSpawn{
+            .owner = gunner,
+            .weaponType = "PLAIN",
+            .position = SimVector(0_ss, 30_ss, 0_ss),
+            .direction = SimVector(0_ss, -1_ss, 0_ss),
+            .distanceToTarget = 100_ss});
+
+        for (int ticks = 0; ticks < 10; ++ticks)
+        {
+            sim.events.clear();
+            sim.tick();
+            for (const auto& e : sim.events)
+            {
+                if (const auto* died = std::get_if<ProjectileDiedEvent>(&e); died != nullptr)
+                {
+                    CHECK(died->deathType == ProjectileDiedEvent::DeathType::WaterImpact);
+                    CHECK(died->position.y == 15_ss);
+                    return;
+                }
+            }
+        }
+
+        FAIL("the round never came down");
+    }
+
     TEST_CASE("the last row and column of heightmap corners start no square", "[weapon][water]")
     {
         // All under twenty units of water. The squares are the cells between

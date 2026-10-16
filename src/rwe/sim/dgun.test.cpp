@@ -925,4 +925,102 @@ namespace rwe
             REQUIRE(taken <= 30);
         }
     }
+
+    TEST_CASE("the blast is judged in whole units and stops short of the rim", "[dgun][naval]")
+    {
+        // NAVAL-CONSTRUCTION-DGUN-FINDINGS.md, "Splash can hurt ships and
+        // submarines": the distance to the unit's box is reduced to whole
+        // units before it is compared with the 24-unit radius or curved, and
+        // damage needs it strictly under the radius. Static comparison only.
+        auto script = makeDgunScript();
+        GameSimulation sim(makeDgunTerrain(), 0u, 0, 0);
+        auto us = addDgunPlayer(sim, "us", 1000.0f, 1000.0f);
+        auto them = addDgunPlayer(sim, "them", 1000.0f, 1000.0f);
+        registerDgunModel(sim);
+        defineDgunUnit(sim, "victim", false, 1000000);
+        giveShippedDisintegrator(sim, "disintegrator");
+        auto weapon = sim.weaponDefinitions.at("disintegrator");
+
+        auto probeId = spawnDgunUnit(sim, "victim", them, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto probeBox = sim.createBoundingBox(sim.getUnitState(probeId));
+        auto boxEdge = probeBox.center.x + probeBox.extents.x;
+        sim.quietlyKillUnit(probeId);
+        sim.deleteDeadUnits();
+
+        struct Case
+        {
+            float distance;
+            unsigned int expected;
+        };
+
+        // 30000 * (1 - 23/24)^2 = 52.08 for anything from 23 up to 24, where
+        // the fraction used to count: 23.5 gave 13.
+        const Case cases[] = {
+            {0.9f, 30000},
+            {23.0f, 52},
+            {23.5f, 52},
+            {23.99f, 52},
+            {24.0f, 0},
+        };
+
+        for (const auto& c : cases)
+        {
+            auto victimId = spawnDgunUnit(sim, "victim", them, SimVector(0_ss, 0_ss, 0_ss), script);
+            auto blastPosition = SimVector(boxEdge + SimScalar(c.distance), 0_ss, 0_ss);
+
+            Projectile p{};
+            p.owner = us;
+            p.position = blastPosition;
+            p.previousPosition = blastPosition;
+            p.origin = blastPosition;
+            p.weaponType = "disintegrator";
+            p.damage = weapon.damage;
+            p.damageRadius = weapon.damageRadius;
+            p.edgeEffectiveness = weapon.edgeEffectiveness;
+
+            sim.applyDamageInRadius(blastPosition, p.damageRadius, p);
+            CAPTURE(c.distance);
+            REQUIRE(damageTaken(sim, victimId) == c.expected);
+
+            sim.quietlyKillUnit(victimId);
+            sim.deleteDeadUnits();
+        }
+    }
+
+    TEST_CASE("a blast has no underwater filter: a submerged unit takes the splash", "[dgun][naval]")
+    {
+        // The area routine knows nothing about water. A submarine resting on
+        // the seabed, wholly under the surface and so not a legal target for
+        // this weapon, still takes the blast of a round that goes off within
+        // twenty-four units of its box. The distance is three-dimensional:
+        // here the box top is twenty below the burst, so (1 - 20/24)^2 of
+        // 30000 is 833.
+        auto script = makeDgunScript();
+        GameSimulation sim(makeDgunTerrain(), 0u, 0, 0);
+        auto us = addDgunPlayer(sim, "us", 1000.0f, 1000.0f);
+        auto them = addDgunPlayer(sim, "them", 1000.0f, 1000.0f);
+        registerDgunModel(sim);
+        defineDgunUnit(sim, "victim", false, 1000000);
+        giveShippedDisintegrator(sim, "disintegrator");
+        auto weapon = sim.weaponDefinitions.at("disintegrator");
+
+        auto subId = spawnDgunUnit(sim, "victim", them, SimVector(0_ss, -30_ss, 0_ss), script);
+        auto box = sim.createBoundingBox(sim.getUnitState(subId));
+        auto blastPosition = SimVector(box.center.x, 0_ss, box.center.z);
+        REQUIRE(blastPosition.y - (box.center.y + box.extents.y) == 20_ss);
+
+        Projectile p{};
+        p.owner = us;
+        p.position = blastPosition;
+        p.previousPosition = blastPosition;
+        p.origin = blastPosition;
+        p.weaponType = "disintegrator";
+        p.damage = weapon.damage;
+        p.damageRadius = weapon.damageRadius;
+        p.edgeEffectiveness = weapon.edgeEffectiveness;
+
+        sim.applyDamageInRadius(blastPosition, p.damageRadius, p);
+
+        REQUIRE(damageTaken(sim, subId) == 833u);
+    }
 }

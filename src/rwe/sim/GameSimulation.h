@@ -992,6 +992,16 @@ namespace rwe
         bool weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& attacker, const UnitState& target) const;
 
         /**
+         * The shooter half of the same rule, for a shot at a point on the
+         * ground, where there is no target unit to test: a weapon that is not
+         * a water weapon needs its shooter's model top above the sea, and
+         * nothing else about the water enters into it. NAVAL-CONSTRUCTION-
+         * DGUN-FINDINGS.md, "A fully submerged target normally fails
+         * acquisition".
+         */
+        bool weaponCanFireFrom(const WeaponDefinition& weaponDefinition, const UnitState& attacker) const;
+
+        /**
          * The height a building stands at on a given footprint (0x47D820).
          *
          * A building whose yardmap has any land cell in it stands on the
@@ -1510,6 +1520,9 @@ namespace rwe
 
         /** The height of a definition's model, or zero if it has none loaded. */
         SimScalar modelHeightOf(const UnitDefinition& unitDefinition) const;
+
+        /** Whole-unit origin height plus whole-unit model height, strictly above sea level. */
+        bool modelTopIsAboveSea(const UnitState& unit) const;
 
         void deleteDeadProjectiles();
 
