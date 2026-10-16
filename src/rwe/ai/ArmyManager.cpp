@@ -1,6 +1,7 @@
 #include "ArmyManager.h"
 #include <rwe/ai/PerceptionManager.h>
 #include <algorithm>
+#include <cmath>
 #include <set>
 #include <rwe/ai/AiMapBounds.h>
 #include <rwe/ai/BuilderSafety.h>
@@ -194,6 +195,131 @@ namespace rwe
             }
             auto move = std::get_if<MoveOrder>(&unit.orders.front());
             return move != nullptr && move->destination.distanceSquared(destination) < (64_ss * 64_ss);
+        }
+
+        /** An enemy on the water that the commander cannot answer, and how far it shoots. */
+        struct ShipThreat
+        {
+            SimVector position;
+            SimScalar reach;
+        };
+
+        /**
+         * How far past a ship's reach a retreat has to end. A ship that is
+         * moving closes some of it while the commander walks.
+         */
+        const SimScalar ShipRefugeMargin = 100_ss;
+
+        bool outOfReachOfShips(const std::vector<ShipThreat>& ships, const SimVector& p)
+        {
+            for (const auto& ship : ships)
+            {
+                auto safe = ship.reach + ShipRefugeMargin;
+                if (p.distanceSquared(ship.position) < safe * safe)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /**
+         * Dry ground the commander can walk to that no ship in `ships` can
+         * reach. Home is the usual refuge, but a base on a coast is itself
+         * inside a destroyer's range (a CORROY shells 660 units, farther than
+         * the commander's danger radius), and a point "straight away" from the
+         * nearest ship is as often as not still in range of the next. So: the
+         * nearest candidate, on sixteen bearings and six distances, that
+         * stands on land, is joined to the commander by land all the way (the
+         * simulation's pathfinder will not wade, and an island's far shore is
+         * not a refuge) and clears every ship's reach by the margin; of those
+         * at the same distance, the one with the most room. Where no dry
+         * point clears them (a small island), the one with the most room
+         * if that is a real gain on where the commander stands -- the reach
+         * is a ceiling, and every step out of it takes shells off the count.
+         * Nothing better means the caller falls back to its old rule.
+         */
+        std::optional<SimVector> refugeFromShips(const GameSimulation& sim, const UnitState& commander, const std::vector<ShipThreat>& ships)
+        {
+            static const float bearings[16][2] = {
+                {1.0f, 0.0f}, {0.9239f, 0.3827f}, {0.7071f, 0.7071f}, {0.3827f, 0.9239f},
+                {0.0f, 1.0f}, {-0.3827f, 0.9239f}, {-0.7071f, 0.7071f}, {-0.9239f, 0.3827f},
+                {-1.0f, 0.0f}, {-0.9239f, -0.3827f}, {-0.7071f, -0.7071f}, {-0.3827f, -0.9239f},
+                {0.0f, -1.0f}, {0.3827f, -0.9239f}, {0.7071f, -0.7071f}, {0.9239f, -0.3827f}};
+            static const float distances[6] = {200.0f, 350.0f, 500.0f, 700.0f, 900.0f, 1200.0f};
+
+            auto seaLevel = sim.terrain.getSeaLevel();
+            auto dry = [&](const SimVector& p) {
+                auto ground = sim.terrain.tryGetHeightAt(p.x, p.z);
+                return ground && *ground >= seaLevel;
+            };
+
+            auto roomAt = [&](const SimVector& p) {
+                SimScalar room = 100000_ss;
+                for (const auto& ship : ships)
+                {
+                    room = rweMin(room, SimScalar(std::sqrt(p.distanceSquared(ship.position).value)) - ship.reach);
+                }
+                return room;
+            };
+
+            std::optional<SimVector> bestOverall;
+            SimScalar bestOverallRoom = 0_ss;
+            for (auto distance : distances)
+            {
+                std::optional<SimVector> best;
+                SimScalar bestRoom = 0_ss;
+                for (const auto& b : bearings)
+                {
+                    auto raw = SimVector(
+                        commander.position.x + (SimScalar(distance) * SimScalar(b[0])),
+                        commander.position.y,
+                        commander.position.z + (SimScalar(distance) * SimScalar(b[1])));
+                    auto candidate = clampInsideVisibleMap(sim.terrain, raw, 64_ss);
+                    if (!dry(candidate))
+                    {
+                        continue;
+                    }
+                    bool landAllTheWay = true;
+                    for (int step = 1; step < 8 && landAllTheWay; ++step)
+                    {
+                        auto t = SimScalar(static_cast<float>(step) / 8.0f);
+                        landAllTheWay = dry(SimVector(
+                            commander.position.x + ((candidate.x - commander.position.x) * t),
+                            commander.position.y,
+                            commander.position.z + ((candidate.z - commander.position.z) * t)));
+                    }
+                    if (!landAllTheWay)
+                    {
+                        continue;
+                    }
+                    // Room: the smallest gap between a ship's reach and the point.
+                    auto room = roomAt(candidate);
+                    if (!bestOverall || room > bestOverallRoom)
+                    {
+                        bestOverall = candidate;
+                        bestOverallRoom = room;
+                    }
+                    if (!outOfReachOfShips(ships, candidate))
+                    {
+                        continue;
+                    }
+                    if (!best || room > bestRoom)
+                    {
+                        best = candidate;
+                        bestRoom = room;
+                    }
+                }
+                if (best)
+                {
+                    return best;
+                }
+            }
+            if (bestOverall && bestOverallRoom > roomAt(commander.position) + ShipRefugeMargin)
+            {
+                return bestOverall;
+            }
+            return std::nullopt;
         }
 
         /** Distance across the ground, ignoring height: units stand on terrain and targets are flat points. */
@@ -841,7 +967,7 @@ namespace rwe
         bool hurt = bb.commanderLastHitPoints > 0 && commander.hitPoints < bb.commanderLastHitPoints;
         bb.commanderLastHitPoints = commander.hitPoints;
 
-        auto radiusSquared = profile.commanderDangerRadius * profile.commanderDangerRadius;
+        std::vector<ShipThreat> ships;
         SimScalar nearest = 0_ss;
         int threats = 0;
         // What the threats cost to build, summed in id order, which is the
@@ -867,15 +993,28 @@ namespace rwe
                 continue;
             }
             auto d = commander.position.distanceSquared(enemy.lastKnownPosition);
-            if (d > radiusSquared)
+            const auto& enemyPosition = enemy.lastKnownPosition;
+            bool onLand = sim.terrain.getHeightAt(enemyPosition.x, enemyPosition.z) >= sim.terrain.getSeaLevel();
+            // A ship shoots further than the danger radius (a destroyer's
+            // gun reaches 660, the radius is 450), so one standing off the
+            // shore was only a threat once it was inside the range it was
+            // already hitting from; its own range is how close it is a threat.
+            auto reach = profile.commanderDangerRadius;
+            if (!onLand)
+            {
+                reach = rweMax(reach, SimScalar(bestRange(sim, sim.unitDefinitions.at(enemy.unitType))));
+            }
+            if (d > reach * reach)
             {
                 continue;
             }
             ++threats;
             threatMetal += sim.unitDefinitions.at(enemy.unitType).buildCostMetal.value;
-            const auto& enemyPosition = enemy.lastKnownPosition;
-            if (sim.terrain.getHeightAt(enemyPosition.x, enemyPosition.z) >= sim.terrain.getSeaLevel()
-                && (!nearestOnLand || d < nearestOnLandDistance))
+            if (!onLand)
+            {
+                ships.push_back(ShipThreat{enemyPosition, reach});
+            }
+            if (onLand && (!nearestOnLand || d < nearestOnLandDistance))
             {
                 nearestOnLand = enemy.unitId;
                 nearestOnLandDistance = d;
@@ -1030,7 +1169,40 @@ namespace rwe
         // towers and the army are; and if it is already there, straight away
         // from whatever is shooting, toward the rally point failing that.
         std::optional<SimVector> refuge;
-        if (bb.baseAnchor && commander.position.distanceSquared(*bb.baseAnchor) > (300_ss * 300_ss))
+        bool shipRefuge = false;
+        if (shunningShips)
+        {
+            // Out of the ships' reach, not "home": see refugeFromShips. One
+            // it is already walking to that still clears them is kept, so the
+            // order is not reissued every pass as the ships drift.
+            if (!commander.orders.empty())
+            {
+                if (auto move = std::get_if<MoveOrder>(&commander.orders.front());
+                    move != nullptr && outOfReachOfShips(ships, move->destination)
+                    && sim.terrain.getHeightAt(move->destination.x, move->destination.z) >= sim.terrain.getSeaLevel())
+                {
+                    refuge = move->destination;
+                }
+            }
+            if (!refuge)
+            {
+                refuge = refugeFromShips(sim, commander, ships);
+            }
+            if (!refuge)
+            {
+                // Nowhere on this ground is better than where it stands. Home
+                // is still the answer if the ships cannot reach it; otherwise
+                // it holds, rather than walking back and forth between a
+                // point that gains nothing and a base that is in range.
+                refuge = (bb.baseAnchor && outOfReachOfShips(ships, *bb.baseAnchor)) ? *bb.baseAnchor : commander.position;
+            }
+            shipRefuge = true;
+        }
+        if (refuge)
+        {
+            // Settled above.
+        }
+        else if (bb.baseAnchor && commander.position.distanceSquared(*bb.baseAnchor) > (300_ss * 300_ss))
         {
             refuge = *bb.baseAnchor;
         }
@@ -1054,7 +1226,7 @@ namespace rwe
         }
         // Away from a ship is inland, unless the shore bends: a point that
         // is itself under water is no refuge, so home is.
-        if (shunningShips && refuge && bb.baseAnchor
+        if (shunningShips && !shipRefuge && refuge && bb.baseAnchor
             && sim.terrain.getHeightAt(refuge->x, refuge->z) < sim.terrain.getSeaLevel())
         {
             refuge = *bb.baseAnchor;
@@ -1062,8 +1234,25 @@ namespace rwe
         if (refuge)
         {
             bb.commanderFleeing = true;
-            if (!isMovingTo(commander, *refuge))
+            // Standing on it with nothing else in hand needs no order; with
+            // something else in hand (a build) it is told to stay.
+            bool arrived = commander.position.distanceSquared(*refuge) <= (32_ss * 32_ss);
+            if (!isMovingTo(commander, *refuge) && (!arrived || !commander.orders.empty()))
             {
+                if (shunningShips)
+                {
+                    sim.eventLog.event(sim.gameTime.value, "army_commander_shuns_ships")
+                        .set("player", aiOwner.value)
+                        .set("unit", bb.commanderUnitId->value)
+                        .set("x", static_cast<int>(commander.position.x.value))
+                        .set("z", static_cast<int>(commander.position.z.value))
+                        .set("refuge_x", static_cast<int>(refuge->x.value))
+                        .set("refuge_z", static_cast<int>(refuge->z.value))
+                        .set("threats", threats)
+                        .set("clear_of_ships", shipRefuge && outOfReachOfShips(ships, *refuge))
+                        .set("why", "ships_only")
+                        .detail("the commander walks away from ships it cannot answer");
+                }
                 outCommands.push_back(moveCommand(*bb.commanderUnitId, *refuge));
             }
         }

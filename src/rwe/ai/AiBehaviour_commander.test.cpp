@@ -1,4 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <rwe/ai/ai_test_util.h>
 
 /**
@@ -653,6 +656,96 @@ namespace rwe
             REQUIRE(controller.getBlackboard().commanderInDanger);
             REQUIRE(!controller.getBlackboard().commanderFleeing);
             REQUIRE(ordersFor<MoveOrder>(commands, commanderId).empty());
+        }
+    }
+
+    TEST_CASE("a commander shelled from the water walks out of the ships' range, not merely to the base", "[ai]")
+    {
+        // Hundred Isles, seed 3: the commander fled to its base, which stood
+        // on the coast inside a destroyer's range (CORROY, 660), sat there,
+        // went back to building mexes on the shore whenever the ships were
+        // more than the 450-unit danger radius away, and was sunk. The shore
+        // here is at world x -256 with a broad plain behind it; the ship has
+        // a 660 gun and floats 100 units off the beach.
+        auto script = makeEmptyCobScript();
+        Grid<unsigned char> heights(192, 64, static_cast<unsigned char>(0));
+        for (int y = 0; y < 64; ++y)
+        {
+            for (int x = 0; x < 80; ++x)
+            {
+                heights.set(x, y, static_cast<unsigned char>(90));
+            }
+        }
+        GameSimulation sim(MapTerrain(std::move(heights), 60_ss), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        WeaponDefinition gun{};
+        gun.maxRange = 660_ss;
+        gun.reloadTime = 1_ss;
+        gun.burst = 1;
+        gun.damage["DEFAULT"] = 30u;
+        sim.weaponDefinitions["BIGGUN"] = gun;
+        sim.unitDefinitions["ARMDEST"] = sim.unitDefinitions["ARMPT"];
+        sim.unitDefinitions["ARMDEST"].weapon1 = "BIGGUN";
+
+        auto commanderId = addUnit(sim, "ARMCOM", ai, SimVector(-300_ss, 90_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-340_ss, 90_ss, 40_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.cheatModeOmniscient = true;
+        profile.tacticalTickInterval = 1;
+        sim.eventLog.setRecording(true);
+
+        SECTION("a ship in the water 200 off the beach is answered by going out of its 660")
+        {
+            auto shipId = addUnit(sim, "ARMDEST", human, SimVector(-100_ss, 60_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            REQUIRE(controller.getBlackboard().commanderInDanger);
+            REQUIRE(controller.getBlackboard().commanderFleeing);
+            auto moves = ordersFor<MoveOrder>(commands, commanderId);
+            REQUIRE(!moves.empty());
+            const auto& to = moves.back().destination;
+            INFO("retreat to " << to.x.value << "," << to.z.value);
+            REQUIRE(sim.terrain.getHeightAt(to.x, to.z) >= sim.terrain.getSeaLevel());
+            REQUIRE(to.distanceSquared(sim.getUnitState(shipId).position) > 660_ss * 660_ss);
+
+            auto path = std::filesystem::temp_directory_path() / "rwe-commander-shuns-ships.jsonl";
+            sim.eventLog.write(path);
+            std::ifstream in(path);
+            std::stringstream text;
+            text << in.rdbuf();
+            in.close();
+            std::filesystem::remove(path);
+            REQUIRE(text.str().find("army_commander_shuns_ships") != std::string::npos);
+        }
+
+        SECTION("a ship that out-ranges the danger radius is a threat at its own range")
+        {
+            // 600 away, past the 450 radius, inside its 660: it is shelling
+            // the commander, so it counts.
+            addUnit(sim, "ARMDEST", human, SimVector(300_ss, 60_ss, 0_ss), script);
+            sim.getUnitState(commanderId).position = SimVector(-300_ss, 90_ss, 0_ss);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            REQUIRE(controller.getBlackboard().commanderInDanger);
+            REQUIRE(controller.getBlackboard().commanderFleeing);
+        }
+
+        SECTION("a ship with a short gun the same distance away is no threat")
+        {
+            auto shortGun = sim.unitDefinitions["ARMPT"];
+            sim.unitDefinitions["ARMSHORT"] = shortGun;
+            addUnit(sim, "ARMSHORT", human, SimVector(300_ss, 60_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            REQUIRE(!controller.getBlackboard().commanderInDanger);
         }
     }
 }
