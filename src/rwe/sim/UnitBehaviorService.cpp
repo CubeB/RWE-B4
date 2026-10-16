@@ -3626,6 +3626,13 @@ namespace rwe
                 return true;
             }
         }
+        else if (!sim->weaponCanFireFrom(sim->weaponDefinitions.at(unitInfo.state->weapons[0]->weaponType), *unitInfo.state))
+        {
+            // A shot at a point has no target to test, but the shooter's half
+            // of the water rule still holds: a gun under the sea does not fire
+            // at the ground either (NAVAL-CONSTRUCTION-DGUN-FINDINGS.md).
+            return true;
+        }
 
         // Aircraft execute attack runs rather than the ground-unit
         // approach/aim/fire pattern.
@@ -4819,6 +4826,29 @@ namespace rwe
         }
 
         const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[weaponIndex]->weaponType);
+
+        // The D-gun is an ordinary weapon to the water rule: it has no
+        // WaterWeapon key and no exemption for ships or submarines. A unit
+        // target needs both ends of the shot out of the sea, so a submerged
+        // submarine cannot be picked as the target, while a ship with its
+        // model top above the surface can. A point on the ground is judged on
+        // the shooter alone. A refused acquisition ends the order here, as it
+        // does for an ordinary attack. NAVAL-CONSTRUCTION-DGUN-FINDINGS.md,
+        // "A fully submerged target normally fails acquisition".
+        if (auto targetUnitId = std::get_if<UnitId>(&order.target))
+        {
+            auto targetUnit = sim->tryGetUnitState(*targetUnitId);
+            if (targetUnit && !sim->weaponCanHitUnit(weaponDefinition, *unitInfo.state, targetUnit->get()))
+            {
+                unitInfo.state->clearWeaponTarget(weaponIndex);
+                return true;
+            }
+        }
+        else if (!sim->weaponCanFireFrom(weaponDefinition, *unitInfo.state))
+        {
+            unitInfo.state->clearWeaponTarget(weaponIndex);
+            return true;
+        }
 
         // The approach closes to the weapon's full range -- 0x403623 asks
         // 0x49ADF0 for it, which is just wdef+0xDC -- and the range test is

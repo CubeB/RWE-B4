@@ -339,6 +339,25 @@ namespace rwe
         unitSpatialIndexStamp = std::nullopt;
     }
 
+    bool GameSimulation::weaponCanFireFrom(const WeaponDefinition& weaponDefinition, const UnitState& attacker) const
+    {
+        return weaponDefinition.waterWeapon || modelTopIsAboveSea(attacker);
+    }
+
+    bool GameSimulation::modelTopIsAboveSea(const UnitState& unit) const
+    {
+        // The gate is made of whole units: the original keeps heights in 16.16
+        // and reads the integer half of each, so it is the unit's origin
+        // height plus its model height, each with the fraction dropped, that
+        // has to be strictly greater than the sea. Equality fails. CORSUB's
+        // model is 15.65 tall and ARMSUB's 14.07, so at the legal flat-water
+        // depth of 15 neither is a target, where the unfloored sum would have
+        // let CORSUB through on its 0.65.
+        auto whole = [](SimScalar s) { return static_cast<int>(std::floor(s.value)); };
+        const auto& definition = unitDefinitions.at(unit.unitType);
+        return whole(unit.position.y) + whole(modelHeightOf(definition)) > whole(terrain.getSeaLevel());
+    }
+
     bool GameSimulation::weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& attacker, const UnitState& target) const
     {
         // 0x49ABB0, asked of every candidate before range comes into it. The
@@ -374,13 +393,7 @@ namespace rwe
         // submarine unshootable by anything that is not a torpedo, and a
         // surfaced one shootable by everything. The shooter has to be up there
         // too: a submarine's deck gun does not fire from underneath.
-        const auto& attackerDefinition = unitDefinitions.at(attacker.unitType);
-        if (attacker.position.y + modelHeightOf(attackerDefinition) <= seaLevel)
-        {
-            return false;
-        }
-
-        if (target.position.y + modelHeightOf(targetDefinition) <= seaLevel)
+        if (!modelTopIsAboveSea(attacker) || !modelTopIsAboveSea(target))
         {
             return false;
         }

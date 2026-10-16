@@ -3026,7 +3026,7 @@ namespace rwe
         return Matrix4x<SimScalar>::rotationAxisAngle(cross, angle) * v;
     }
 
-    bool projectileCollides(const GameSimulation& sim, const Projectile& projectile, const OccupiedCell& cellValue)
+    bool projectileCollides(const GameSimulation& sim, const Projectile& projectile, const OccupiedCell& cellValue, bool unitsOnly)
     {
         if (cellValue.mobileUnitId)
         {
@@ -3068,7 +3068,11 @@ namespace rwe
             return true;
         }
 
-        if (cellValue.featureId)
+        // `unitsonly` is tested between the unit slots and the feature, so a
+        // round carrying it passes through a wreck as it passes through the
+        // ground and the sea (NAVAL-CONSTRUCTION-DGUN-FINDINGS.md, "Water
+        // detonations do not consume this projectile").
+        if (cellValue.featureId && !unitsOnly)
         {
             const auto& feature = sim.getFeature(*cellValue.featureId);
             const auto& featureDefinition = sim.getFeatureDefinition(feature.featureName);
@@ -3148,9 +3152,12 @@ namespace rwe
         // ground -- which a `groundbounce` round bounces off (issue #350).
         // Which art a detonation throws up is decided by the square, not by
         // this order; see isSquareUnderSea.
+        auto weaponIt = simulation.weaponDefinitions.find(projectile.weaponType);
+        auto unitsOnly = weaponIt != simulation.weaponDefinitions.end() && weaponIt->second.unitsOnly;
+
         auto heightMapPos = simulation.terrain.worldToHeightmapCoordinate(projectile.position);
         auto cellValue = simulation.occupiedGrid.tryGet(heightMapPos);
-        if (cellValue && projectileCollides(simulation, projectile, cellValue->get()))
+        if (cellValue && projectileCollides(simulation, projectile, cellValue->get(), unitsOnly))
         {
             return ProjectileCollisionInfoUnitOrFeatureOrBuilding();
         }
@@ -3170,8 +3177,7 @@ namespace rwe
         // detonates on something alive. Nothing else about it changes: it
         // still explodes on a unit, still hurts one, and still dies when its
         // time or its range runs out.
-        auto weaponIt = simulation.weaponDefinitions.find(projectile.weaponType);
-        if (weaponIt != simulation.weaponDefinitions.end() && weaponIt->second.unitsOnly)
+        if (unitsOnly)
         {
             return std::nullopt;
         }
@@ -3184,7 +3190,9 @@ namespace rwe
         auto seaLevel = simulation.terrain.getSeaLevel();
 
         bool waterWeapon = weaponIt != simulation.weaponDefinitions.end() && weaponIt->second.waterWeapon;
-        if (!waterWeapon && !simulation.noSeaLevelTrigger && seaLevel > *terrainHeight && projectile.position.y <= seaLevel)
+        // Strictly below: a round exactly at sea level does not trigger the
+        // sea test (NAVAL-CONSTRUCTION-DGUN-FINDINGS.md).
+        if (!waterWeapon && !simulation.noSeaLevelTrigger && seaLevel > *terrainHeight && projectile.position.y < seaLevel)
         {
             return ProjectileCollisionInfoSea();
         }
@@ -3675,6 +3683,35 @@ namespace rwe
             auto t = std::clamp(1_ss - (distance / radius), 0_ss, 1_ss);
             return (t * t * (1_ss - edgeEffectiveness)) + edgeEffectiveness;
         }
+
+        /**
+         * The scale a unit takes from a blast, or nothing if the blast does not
+         * reach it. The distance the original compares and curves is a whole
+         * number of world units, the integer half of its 16.16 distance to the
+         * unit's box (0x49A397), so it is floored here before either use, and
+         * it has to be strictly less than the radius: a unit at the radius
+         * takes nothing even from a weapon whose edge effectiveness would give
+         * the rim some damage. NAVAL-CONSTRUCTION-DGUN-FINDINGS.md, "Splash
+         * can hurt ships and submarines". Nothing here looks at the water.
+         */
+        std::optional<SimScalar> blastDamageScaleForUnit(SimScalar distanceSquared, SimScalar radius, SimScalar edgeEffectiveness)
+        {
+            // A blast this small is not the area routine at all but the
+            // single-target path at full strength (0x49A049), so the area
+            // routine's rim rule does not apply to it.
+            if (radius <= SmallestSpreadingBlastRadius)
+            {
+                return 1_ss;
+            }
+
+            auto wholeDistance = SimScalar(std::floor(rweSqrt(distanceSquared).value));
+            if (wholeDistance >= radius)
+            {
+                return std::nullopt;
+            }
+
+            return blastDamageScale(wholeDistance, radius, edgeEffectiveness);
+        }
     }
 
     void GameSimulation::applyDamageInRadius(const SimVector& position, SimScalar radius, const Projectile& projectile)
@@ -3829,9 +3866,13 @@ namespace rwe
               return;
           }
 
-          auto damageScale = blastDamageScale(rweSqrt(unitDistanceSquared), radius, projectile.edgeEffectiveness);
+          auto damageScale = blastDamageScaleForUnit(unitDistanceSquared, radius, projectile.edgeEffectiveness);
+          if (!damageScale)
+          {
+              return;
+          }
           auto rawDamage = projectile.getDamage(unit.unitType);
-          auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * damageScale);
+          auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * *damageScale);
           applyDamage(*u, scaledDamage, projectile.attacker, paralyzer, projectile.owner); });
 
         for (const auto& flyingUnitId : flyingUnitsSet)
@@ -3855,9 +3896,13 @@ namespace rwe
                 continue;
             }
 
-            auto damageScale = blastDamageScale(rweSqrt(unitDistanceSquared), radius, projectile.edgeEffectiveness);
+            auto damageScale = blastDamageScaleForUnit(unitDistanceSquared, radius, projectile.edgeEffectiveness);
+            if (!damageScale)
+            {
+                continue;
+            }
             auto rawDamage = projectile.getDamage(unit.unitType);
-            auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * damageScale);
+            auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * *damageScale);
             applyDamage(flyingUnitId, scaledDamage, projectile.attacker, paralyzer, projectile.owner);
         }
     }
