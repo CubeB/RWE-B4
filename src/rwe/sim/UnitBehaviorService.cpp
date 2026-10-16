@@ -3614,6 +3614,14 @@ namespace rwe
             return true;
         }
 
+        // Which of the first two slots carries the chase (BT-63: the order
+        // builder works from those two and never the third). Slot 0 unless it
+        // cannot reach the target and an enabled second slot can -- a
+        // Crusader's depth charge in Weapon2 against a submerged submarine,
+        // which the order builder accepts and whose chase this keeps going
+        // instead of finishing on the first tick.
+        std::size_t chaseSlot = 0;
+
         // A water weapon ordered at a unit on dry land has nothing to do.
         if (auto targetUnitId = std::get_if<UnitId>(&target))
         {
@@ -3621,7 +3629,16 @@ namespace rwe
             const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[0]->weaponType);
             if (targetUnit && !weaponCanHitUnit(weaponDefinition, *unitInfo.state, targetUnit->get()))
             {
-                return true;
+                if (!unitInfo.definition->canFly
+                    && unitInfo.state->weapons[1]
+                    && weaponCanHitUnit(sim->weaponDefinitions.at(unitInfo.state->weapons[1]->weaponType), *unitInfo.state, targetUnit->get()))
+                {
+                    chaseSlot = 1;
+                }
+                else
+                {
+                    return true;
+                }
             }
         }
         else if (!sim->weaponCanFireFrom(sim->weaponDefinitions.at(unitInfo.state->weapons[0]->weaponType), *unitInfo.state))
@@ -3639,7 +3656,7 @@ namespace rwe
             return attackTargetAir(unitInfo, target, targetPosition);
         }
 
-        const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[0]->weaponType);
+        const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[chaseSlot]->weaponType);
 
         if (!targetPosition)
         {
@@ -3666,7 +3683,7 @@ namespace rwe
         }
         else
         {
-            for (unsigned int i = 0; i < 2; ++i)
+            for (unsigned int i = static_cast<unsigned int>(chaseSlot); i < 2; ++i)
             {
                 match(
                     target,

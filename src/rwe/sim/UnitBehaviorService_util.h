@@ -121,6 +121,20 @@ namespace rwe
     bool canRepairUnit(const GameSimulation& sim, const UnitDefinition& repairerDefinition, const UnitState& target);
 
     /**
+     * Whether the original's attack-order builder (command 3, 0x43F154) would
+     * make an order of an attack click on this unit, or answer "no order" and
+     * leave the queue alone. BT-63, the water half of it.
+     *
+     * Only an enemy target is tested. The builder works from the unit's first
+     * two weapon slots and never the third. A target whose top is below sea
+     * level needs the first weapon to be a water weapon or the second slot to
+     * be filled with one; a target at or above it is refused to an orderer that
+     * is itself a `canhover` unit if either slot is a water weapon. The hover
+     * test is the orderer's, not the target's.
+     */
+    bool attackOrderIsAccepted(const GameSimulation& sim, const UnitDefinition& ordererDefinition, const UnitState& orderer, const UnitState& target);
+
+    /**
      * Picks a repair pad for a damaged aircraft, or nothing if it is not hurt
      * enough or there is none within reach. Draws from the simulation's
      * generator when there is more than one to choose from.

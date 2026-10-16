@@ -597,6 +597,17 @@ namespace rwe
                     {
                         if (hoveredUnit)
                         {
+                            // The original's attack arm can answer "no order"
+                            // (a ground gun against a submerged submarine) and
+                            // then the unit keeps its queue. BT-63.
+                            auto orderer = simulation.tryGetUnitState(selectedUnit);
+                            auto victim = simulation.tryGetUnitState(*hoveredUnit);
+                            if (orderer && victim
+                                && !attackOrderIsAccepted(simulation, simulation.unitDefinitions.at(orderer->get().unitType), orderer->get(), victim->get()))
+                            {
+                                continue;
+                            }
+
                             if (isShiftDown())
                             {
                                 localPlayerEnqueueUnitOrder(selectedUnit, AttackOrder(*hoveredUnit));

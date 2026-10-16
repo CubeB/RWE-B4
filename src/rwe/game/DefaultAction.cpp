@@ -85,6 +85,28 @@ namespace rwe
         }
 
         /**
+         * The attack arm is the order builder's own recursion with command 3
+         * and returns whatever that yields, an order or nothing, and the
+         * ladder stops there (0x43FA00-0x43FA0D). Nothing is a unit that
+         * cannot carry the attack out -- a ground gun against a submerged
+         * submarine -- and a click that gives it leaves the queue alone.
+         * BT-63.
+         */
+        DefaultAction attackArm(
+            const GameSimulation& sim,
+            const UnitState& orderer,
+            const UnitDefinition& ordererDefinition,
+            UnitId targetId,
+            const UnitState& target)
+        {
+            if (!attackOrderIsAccepted(sim, ordererDefinition, orderer, target))
+            {
+                return DefaultAction{DefaultActionNothing(), CursorType::Normal};
+            }
+            return issue(AttackOrder(targetId), CursorType::Attack);
+        }
+
+        /**
          * The arms shared by Interface Type 1's default action and by the
          * MOVE button, which are the same ladder: 0x43FA00 is command 2's
          * chain (0x43F845) with the capture arm brought to the front, and the
@@ -117,7 +139,7 @@ namespace rwe
             // the worse mistake, so it is kept and recorded as unsettled.
             if (!allied && ordererDefinition.canAttack)
             {
-                return issue(AttackOrder(targetId), CursorType::Attack);
+                return attackArm(sim, orderer, ordererDefinition, targetId, target);
             }
 
             if (allied && canRepairUnit(sim, ordererDefinition, target) && isUnderConstruction(sim, target))
@@ -168,7 +190,7 @@ namespace rwe
 
             if (!allied && ordererDefinition.canAttack)
             {
-                return issue(AttackOrder(targetId), CursorType::Attack);
+                return attackArm(sim, orderer, ordererDefinition, targetId, target);
             }
 
             if (!allied && ordererDefinition.canReclamate)

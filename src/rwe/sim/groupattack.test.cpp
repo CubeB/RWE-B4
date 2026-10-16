@@ -245,4 +245,71 @@ namespace rwe
         // the fight being an artifact of the state check above.
         REQUIRE(target.hitPoints < 100000);
     }
+
+    TEST_CASE("a ship with the depth charge in Weapon2 keeps chasing a submerged submarine", "[groupattack][attackeligibility]")
+    {
+        // BT-63. ARMROY and CORROY (and ARMCRUS and CORCRUS) carry the gun in
+        // Weapon1 and ARMDEPTHCHARGE in Weapon2. The gun cannot reach a
+        // submarine whose top is under the sea, but the order builder looks at
+        // the second slot as well and accepts the order; RWE finished it on
+        // the first tick because only slot 0 was asked.
+        GameSimulation sim(MapTerrain(Grid<unsigned char>(128, 128, static_cast<unsigned char>(0)), 20_ss), 0u, 0, 0);
+        auto owner = addPlayer(sim, "a");
+        auto enemy = addPlayer(sim, "b");
+        registerGroupAttackModel(sim, "attackermodel");
+        registerGroupAttackModel(sim, "targetmodel");
+        auto script = makeEmptyCobScript({"base"});
+
+        auto defineWeapon = [&](const std::string& name, SimScalar range, bool water) {
+            WeaponDefinition w{};
+            w.physicsType = ProjectilePhysicsTypeLineOfSight();
+            w.maxRange = range;
+            w.reloadTime = 1_ss;
+            w.burst = 1;
+            w.turret = true;
+            w.velocity = 300_ss / 30_ss;
+            w.damageRadius = 0_ss;
+            w.damage["DEFAULT"] = 1;
+            w.waterWeapon = water;
+            sim.weaponDefinitions[name] = w;
+        };
+        defineWeapon("ARM_ROY", 660_ss, false);
+        defineWeapon("ARMDEPTHCHARGE", 410_ss, true);
+
+        auto shipDef = makeAttackerDef();
+        shipDef.floater = true;
+        shipDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{1u, 1u, 255u, 255u, 0u, 255u};
+        sim.unitDefinitions["ARMROY"] = shipDef;
+
+        auto subDef = makeTargetDef();
+        subDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
+        sim.unitDefinitions["ARMSUB"] = subDef;
+
+        auto ship = spawnGroupAttackUnit(sim, "ARMROY", owner, SimVector(-800_ss, 20_ss, 0_ss), script);
+        auto sub = spawnGroupAttackUnit(sim, "ARMSUB", enemy, SimVector(500_ss, 0_ss, 0_ss), script);
+        {
+            UnitWeapon gun;
+            gun.weaponType = "ARM_ROY";
+            UnitWeapon charge;
+            charge.weaponType = "ARMDEPTHCHARGE";
+            sim.getUnitState(ship).weapons[0] = gun;
+            sim.getUnitState(ship).weapons[1] = charge;
+        }
+        sim.getUnitState(ship).orders.push_back(AttackOrder(sub));
+
+        auto distance = [&]() { return sim.getUnitState(ship).position.distance(sim.getUnitState(sub).position); };
+        auto start = distance();
+
+        tick(sim, 60);
+        REQUIRE(sim.getUnitState(ship).orders.size() == 1);
+        REQUIRE(distance() < start);
+
+        // It closes to the depth charge's reach, not the gun's, and the gun is
+        // never pointed at a target it cannot hit.
+        tick(sim, 900);
+        REQUIRE(sim.getUnitState(ship).orders.size() == 1);
+        REQUIRE(distance() < 410_ss);
+        REQUIRE(distance() > 300_ss);
+        REQUIRE_FALSE(isEngaging(sim, ship, sub));
+    }
 }

@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
 #include <rwe/game/DefaultAction.h>
+#include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/sim_test_util.h>
 
 namespace rwe
@@ -490,5 +491,166 @@ namespace rwe
         REQUIRE(preferredCursor(CursorType::Guard, CursorType::Repair) == CursorType::Guard);
         REQUIRE(originalCursorId(CursorType::Pickup) == 8);
         REQUIRE(originalCursorId(CursorType::Load) == 12);
+    }
+
+    namespace
+    {
+        /**
+         * A sea map: every cell is water, the surface at 20. The ships carry
+         * the weapon slots of the shipped FBIs: ARMROY and CORROY have the
+         * gun in Weapon1 (ARM_ROY, range 660) and the depth charge in Weapon2
+         * (ARMDEPTHCHARGE, range 410, WaterWeapon=1); ARMSUB has the torpedo
+         * (ARM_TORPEDO, range 400, a water weapon) in Weapon1.
+         */
+        struct SeaFixture
+        {
+            GameSimulation sim;
+            PlayerId player;
+            PlayerId enemy;
+            std::shared_ptr<CobScript> script;
+
+            SeaFixture() : sim(MapTerrain(Grid<unsigned char>(64, 64, static_cast<unsigned char>(0)), 20_ss), 0u, 0, 0),
+                           player(addPlayer(sim, "me")),
+                           enemy(addPlayer(sim, "them")),
+                           script(makeEmptyCobScript({"base"}))
+            {
+                registerModel(sim);
+
+                WeaponDefinition gun{};
+                gun.maxRange = 660_ss;
+                sim.weaponDefinitions["ARM_ROY"] = gun;
+
+                WeaponDefinition charge{};
+                charge.maxRange = 410_ss;
+                charge.waterWeapon = true;
+                sim.weaponDefinitions["ARMDEPTHCHARGE"] = charge;
+
+                WeaponDefinition torpedo{};
+                torpedo.maxRange = 400_ss;
+                torpedo.waterWeapon = true;
+                sim.weaponDefinitions["ARM_TORPEDO"] = torpedo;
+
+                // ARMROY: Floater, CanAttack, Weapon1 + Weapon2.
+                auto ship = makeMobileDef();
+                ship.canAttack = true;
+                ship.floater = true;
+                sim.unitDefinitions["ARMROY"] = ship;
+                sim.unitDefinitions["CORROY"] = ship;
+                sim.unitDefinitions["ARMCRUS"] = ship;
+                sim.unitDefinitions["CORCRUS"] = ship;
+
+                // ARMSUB: WaterLine=20, so the origin sits at the surface minus 20.
+                auto sub = makeMobileDef();
+                sub.canAttack = true;
+                sim.unitDefinitions["ARMSUB"] = sub;
+                sim.unitDefinitions["CORSUB"] = sub;
+
+                // ARMPW stands in for any unit with a gun and no depth charge.
+                sim.unitDefinitions["peewee"] = makePeeweeDef();
+                // A hovercraft with a gun and a depth charge, which no shipped unit is.
+                auto hover = ship;
+                hover.floater = false;
+                hover.canHover = true;
+                sim.unitDefinitions["hovership"] = hover;
+            }
+
+            DefaultAction act(DefaultActionScheme scheme, UnitId orderer, UnitId hovered)
+            {
+                return computeDefaultAction(sim, scheme, orderer, hovered, std::nullopt);
+            }
+
+            UnitId spawn(const std::string& unitType, PlayerId owner, SimScalar x, SimScalar y, std::initializer_list<const char*> weapons)
+            {
+                auto id = addUnitOfType(sim, unitType, owner, SimVector(x, y, 0_ss), script);
+                std::size_t slot = 0;
+                for (const auto* weaponType : weapons)
+                {
+                    UnitWeapon weapon;
+                    weapon.weaponType = weaponType;
+                    sim.getUnitState(id).weapons[slot++] = weapon;
+                }
+                return id;
+            }
+        };
+    }
+
+    TEST_CASE("an attack click counts both of the first two weapon slots against a submerged target", "[defaultaction][attackeligibility]")
+    {
+        SeaFixture f;
+
+        // ARMSUB and CORSUB ride 20 below the surface; the test model is ten
+        // tall, so the top is at -10 and the target is under the sea.
+        auto submerged = f.spawn("ARMSUB", f.enemy, 500_ss, 0_ss, {"ARM_TORPEDO"});
+        auto surfaced = f.spawn("ARMSUB", f.enemy, 600_ss, 20_ss, {"ARM_TORPEDO"});
+
+        auto acts = [&](UnitId orderer, UnitId target) {
+            return f.act(DefaultActionScheme::LeftClickDefault, orderer, target);
+        };
+
+        SECTION("the Crusader and the Enforcer, depth charge in Weapon2, accept it")
+        {
+            for (const auto* type : {"ARMROY", "CORROY", "ARMCRUS", "CORCRUS"})
+            {
+                auto ship = f.spawn(type, f.player, 0_ss, 20_ss, {"ARM_ROY", "ARMDEPTHCHARGE"});
+                auto action = acts(ship, submerged);
+                REQUIRE(orderOf<AttackOrder>(action) != nullptr);
+                REQUIRE(action.cursor == CursorType::Attack);
+                REQUIRE(attackOrderIsAccepted(f.sim, f.sim.unitDefinitions.at(type), f.sim.getUnitState(ship), f.sim.getUnitState(submerged)));
+            }
+        }
+
+        SECTION("a submarine with a torpedo in Weapon1 accepts it")
+        {
+            auto sub = f.spawn("ARMSUB", f.player, 0_ss, 0_ss, {"ARM_TORPEDO"});
+            REQUIRE(orderOf<AttackOrder>(acts(sub, submerged)) != nullptr);
+        }
+
+        SECTION("a unit with no water weapon in either slot gets no order, and the ladder stops there")
+        {
+            for (const auto* type : {"peewee", "ARMROY"})
+            {
+                auto gunOnly = f.spawn(type, f.player, 0_ss, 20_ss, {"ARM_ROY"});
+                for (auto scheme : {DefaultActionScheme::LeftClickDefault, DefaultActionScheme::RightClickDefault, DefaultActionScheme::MoveButton})
+                {
+                    auto action = f.act(scheme, gunOnly, submerged);
+                    REQUIRE(orderOf<AttackOrder>(action) == nullptr);
+                    REQUIRE(std::holds_alternative<DefaultActionNothing>(action.action));
+                }
+                REQUIRE_FALSE(attackOrderIsAccepted(f.sim, f.sim.unitDefinitions.at(type), f.sim.getUnitState(gunOnly), f.sim.getUnitState(submerged)));
+            }
+        }
+
+        SECTION("the third slot is never consulted")
+        {
+            auto ship = f.spawn("ARMROY", f.player, 0_ss, 20_ss, {"ARM_ROY"});
+            UnitWeapon third;
+            third.weaponType = "ARMDEPTHCHARGE";
+            f.sim.getUnitState(ship).weapons[2] = third;
+            REQUIRE(orderOf<AttackOrder>(acts(ship, submerged)) == nullptr);
+        }
+
+        SECTION("a surfaced target needs no water weapon")
+        {
+            auto gunOnly = f.spawn("ARMROY", f.player, 0_ss, 20_ss, {"ARM_ROY"});
+            REQUIRE(orderOf<AttackOrder>(acts(gunOnly, surfaced)) != nullptr);
+            auto charged = f.spawn("ARMROY", f.player, 100_ss, 20_ss, {"ARM_ROY", "ARMDEPTHCHARGE"});
+            REQUIRE(orderOf<AttackOrder>(acts(charged, surfaced)) != nullptr);
+        }
+
+        SECTION("the hover test is the orderer's canhover: a hovercraft with a water weapon gets no order against a surfaced target")
+        {
+            auto hover = f.spawn("hovership", f.player, 0_ss, 20_ss, {"ARM_ROY", "ARMDEPTHCHARGE"});
+            REQUIRE(orderOf<AttackOrder>(acts(hover, surfaced)) == nullptr);
+
+            auto hoverFirst = f.spawn("hovership", f.player, 100_ss, 20_ss, {"ARMDEPTHCHARGE"});
+            REQUIRE(orderOf<AttackOrder>(acts(hoverFirst, surfaced)) == nullptr);
+
+            // Without a water weapon the same hovercraft attacks normally, and
+            // a non-hover ship with the depth charge is not refused.
+            auto hoverGun = f.spawn("hovership", f.player, 200_ss, 20_ss, {"ARM_ROY"});
+            REQUIRE(orderOf<AttackOrder>(acts(hoverGun, surfaced)) != nullptr);
+            auto ship = f.spawn("ARMROY", f.player, 300_ss, 20_ss, {"ARM_ROY", "ARMDEPTHCHARGE"});
+            REQUIRE(orderOf<AttackOrder>(acts(ship, surfaced)) != nullptr);
+        }
     }
 }

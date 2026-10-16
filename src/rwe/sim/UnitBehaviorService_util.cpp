@@ -340,6 +340,61 @@ namespace rwe
         return state.hitPoints < threshold;
     }
 
+    namespace
+    {
+        int wholeUnits(SimScalar s)
+        {
+            return static_cast<int>(std::floor(s.value));
+        }
+
+        /** The target's top: its Y word plus its definition's eye height, each in whole units. */
+        int wholeTopOf(const GameSimulation& sim, const UnitState& unit)
+        {
+            return wholeUnits(unit.position.y) + wholeUnits(sim.modelHeightOf(sim.unitDefinitions.at(unit.unitType)));
+        }
+
+        int wholeSeaLevel(const GameSimulation& sim)
+        {
+            return wholeUnits(sim.terrain.getSeaLevel());
+        }
+    }
+
+    bool attackOrderIsAccepted(const GameSimulation& sim, const UnitDefinition& ordererDefinition, const UnitState& orderer, const UnitState& target)
+    {
+        // 0x43F154-0x43F3B9. A friendly or neutral target has no water test.
+        if (sim.arePlayersAllied(orderer.owner, target.owner))
+        {
+            return true;
+        }
+
+        // A unit with no weapon in either slot reaches the kamikaze arm (or
+        // nothing) and is not judged here.
+        const auto& first = orderer.weapons[0];
+        const auto& second = orderer.weapons[1];
+        if (!first && !second)
+        {
+            return true;
+        }
+
+        auto isWater = [&](const std::optional<UnitWeapon>& slot) {
+            // The second slot counts when it is filled, which is as near to
+            // the original's "enabled" flag (value 2 at unit+0x3B) as RWE has.
+            return slot && sim.weaponDefinitions.at(slot->weaponType).waterWeapon;
+        };
+
+        if (wholeTopOf(sim, target) < wholeSeaLevel(sim))
+        {
+            return isWater(first) || isWater(second);
+        }
+
+        if (ordererDefinition.canHover && (isWater(first) || isWater(second)))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     bool canRepairUnit(const GameSimulation& sim, const UnitDefinition& repairerDefinition, const UnitState& target)
     {
         // 0x4899B0. The first test on the orderer is flags2 bit 9, the copy of
@@ -364,9 +419,8 @@ namespace rwe
             return false;
         }
 
-        auto whole = [](SimScalar s) { return static_cast<int>(std::floor(s.value)); };
-        auto top = whole(target.position.y) + whole(sim.modelHeightOf(targetDefinition));
-        auto seaLevel = whole(sim.terrain.getSeaLevel());
+        auto top = wholeTopOf(sim, target);
+        auto seaLevel = wholeSeaLevel(sim);
 
         // The FBI's `amphibious` key is not parsed, so every flier takes the
         // first branch; no shipped aircraft sets it.
