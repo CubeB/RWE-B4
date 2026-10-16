@@ -26,17 +26,22 @@ namespace rwe
 
         // One UnloadOrder sets down exactly one passenger -- the crane
         // stows itself between each unit and VTOL_Unload does the same one
-        // hook at a time (UnitBehaviorService::handleUnloadOrder) -- so a
-        // group ferry needs one order per head, not one for the whole
-        // party. firstKind lets a caller reissuing from a clean order queue
-        // send the first Immediate and the rest Queued, exactly as the
-        // matching load commands do.
-        void queueUnloads(std::vector<PlayerCommand>& outCommands, UnitId transport, const SimVector& at, std::size_t count, IssueKind firstKind)
+        // hook at a time (UnitBehaviorService::handleUnloadOrder) -- but only
+        // one is ever sent at a time. A queued order that matches one already
+        // in the queue (same kind, destination within 16 units) is a toggle,
+        // not an addition: it takes the first one out
+        // (PlayerCommandApplication's enqueueOrder, TOTALA-EXE-INTERFACE
+        // S:136). A row of N identical unloads therefore cancels itself
+        // pairwise, an even party was left with an empty order queue and a
+        // hull full of cargo, and an odd one set down a single unit and then
+        // met the even case with the rest aboard (measured on Coast To
+        // Coast: a CORTSHIP with four aboard stalled for 320 seconds with
+        // no orders at all). The rest are sent as each one finishes: the
+        // order queue running empty with cargo still aboard is what
+        // tendFerries answers by sending the next.
+        void queueUnload(std::vector<PlayerCommand>& outCommands, UnitId transport, const SimVector& at, IssueKind kind)
         {
-            for (std::size_t i = 0; i < std::max<std::size_t>(count, 1); ++i)
-            {
-                outCommands.push_back(unloadCommand(transport, at, i == 0 ? firstKind : IssueKind::Queued));
-            }
+            outCommands.push_back(unloadCommand(transport, at, kind));
         }
 
         PlayerCommand stopCommand(UnitId unit)
@@ -91,7 +96,7 @@ namespace rwe
             {
                 outCommands.push_back(loadCommand(transportId, ferry.passengers[i], i == 0 ? IssueKind::Immediate : IssueKind::Queued));
             }
-            queueUnloads(outCommands, transportId, ferry.destination, ferry.passengers.size(), IssueKind::Queued);
+            queueUnload(outCommands, transportId, ferry.destination, IssueKind::Queued);
         }
 
         /**
@@ -117,7 +122,7 @@ namespace rwe
             {
                 outCommands.push_back(loadCommand(transportId, ferry.passengers[i], i == 0 ? loadKind : IssueKind::Queued));
             }
-            queueUnloads(outCommands, transportId, ferry.destination, ferry.passengers.size(), IssueKind::Queued);
+            queueUnload(outCommands, transportId, ferry.destination, IssueKind::Queued);
         }
     }
 
@@ -314,8 +319,8 @@ namespace rwe
                 if (carryingAny)
                 {
                     // Loaded but the unload order got lost: set them all down
-                    // where they were going, one order per head aboard.
-                    queueUnloads(outCommands, transportId, ferry.destination, transport.carriedUnits.size(), IssueKind::Immediate);
+                    // where they were going, the next one aboard first.
+                    queueUnload(outCommands, transportId, ferry.destination, IssueKind::Immediate);
                 }
                 else if (ferry.loaded)
                 {
@@ -398,7 +403,7 @@ namespace rwe
                     if (landing)
                     {
                         ferry.destination = *landing;
-                        queueUnloads(outCommands, transportId, ferry.destination, transport.carriedUnits.size(), IssueKind::Immediate);
+                        queueUnload(outCommands, transportId, ferry.destination, IssueKind::Immediate);
                     }
                     // Whether or not something better was found, give the new
                     // orders (or the next search) a full interval of their own.
