@@ -2242,6 +2242,23 @@ namespace rwe
         int targetFighterCount{2};
         int targetBomberCount{4};
         /**
+         * The standing air patrol: this many fighters and this many bombers,
+         * kept alive whenever the side owns a finished air plant, whether or
+         * not any enemy aircraft has been seen, and flown round a loop just
+         * beyond the edge of the base (airPatrolMargin) so that whatever
+         * comes at the base meets something on the way in. A patrol
+         * engages what it meets, ground or air, and the AirManager hands a
+         * fighter that has finished a chase back to it. Zero switches that
+         * half of the patrol off; both zero is the old behaviour.
+         *
+         * The wing is part of the air arm, not on top of it: the bomber
+         * wing does not go on sorties, so a side with exactly this many
+         * bombers has bombers for defence and none for offence. The default
+         * targetBomberCount of four leaves two over.
+         */
+        int airPatrolFighters{2};
+        int airPatrolBombers{2};
+        /**
          * How many armed enemy buildings it takes before the air tier counts
          * as worth its metal (AiBlackboard::airWorthIt), on top of the two
          * cases that need no counting: a map the ground arm cannot cross,
@@ -2275,6 +2292,13 @@ namespace rwe
         int gunshipPackSize{2};
         /** How far a fighter will chase something before it is called home. */
         SimScalar fighterLeash{2400_ss};
+        /**
+         * How far outside the edge of the built-up base the air patrol
+         * flies (airPatrolFighters). The edge is the furthest building of
+         * ours from the base anchor, bounded below by a small floor and
+         * above by defendRadius, as the first towers' perimeter is.
+         */
+        SimScalar airPatrolMargin{400_ss};
         /**
          * What a bomber will fly into. A bombing run is a trade: an aircraft
          * for a building. Sent at the dearest thing the enemy owns, it flies
