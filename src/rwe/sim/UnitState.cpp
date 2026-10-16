@@ -116,16 +116,36 @@ namespace rwe
 
     unsigned int UnitState::getBuildPercentLeft(const UnitDefinition& unitDefinition) const
     {
+        // A mod's FBI can say BuildTime=0. isBeingBuilt is then never true, so
+        // the unit counts as fully built: nothing is left, and the division
+        // below (which crashed, and is reachable from the COB script's
+        // BUILD_PERCENT_LEFT) is not made. RWE robustness; no original
+        // counterpart is claimed.
+        if (unitDefinition.buildTime == 0u)
+        {
+            return 0u;
+        }
         return 100u - ((buildTimeCompleted * 100u) / unitDefinition.buildTime);
     }
 
     float UnitState::getPreciseCompletePercent(const UnitDefinition& unitDefinition) const
     {
+        // As getBuildPercentLeft: a zero BuildTime is complete, not NaN.
+        if (unitDefinition.buildTime == 0u)
+        {
+            return 1.0f;
+        }
         return static_cast<float>(buildTimeCompleted) / static_cast<float>(unitDefinition.buildTime);
     }
 
     UnitState::BuildCostInfo UnitState::getBuildCostInfo(const UnitDefinition& unitDefinition, unsigned int buildTimeContribution)
     {
+        // A zero BuildTime has nothing left to build and nothing to charge for.
+        if (unitDefinition.buildTime == 0u)
+        {
+            return BuildCostInfo{0u, Energy(0.0f), Metal(0.0f)};
+        }
+
         auto remainingBuildTime = unitDefinition.buildTime - buildTimeCompleted;
         if (buildTimeContribution > remainingBuildTime)
         {
@@ -166,6 +186,13 @@ namespace rwe
      */
     bool UnitState::addBuildProgress(const UnitDefinition& unitDefinition, unsigned int buildTimeContribution)
     {
+        // A zero BuildTime is finished already (and the hit point shares
+        // below divide by it).
+        if (unitDefinition.buildTime == 0u)
+        {
+            return true;
+        }
+
         auto remainingBuildTime = unitDefinition.buildTime - buildTimeCompleted;
         if (buildTimeContribution > remainingBuildTime)
         {
@@ -194,6 +221,13 @@ namespace rwe
 
     bool UnitState::removeBuildProgress(const UnitDefinition& unitDefinition, unsigned int buildTimeReduction)
     {
+        // As addBuildProgress: no hit point share can be taken of a zero BuildTime.
+        if (unitDefinition.buildTime == 0u)
+        {
+            buildTimeCompleted = 0u;
+            return true;
+        }
+
         if (buildTimeReduction > buildTimeCompleted)
         {
             buildTimeReduction = buildTimeCompleted;

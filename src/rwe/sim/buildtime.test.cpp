@@ -297,4 +297,34 @@ namespace rwe
 
         REQUIRE(checked >= 1u);
     }
+
+    // RWE robustness; the original has no counterpart claimed. A mod's FBI can
+    // say BuildTime=0, and the percentage, progress and cost helpers divided by
+    // it: an integer division by zero is a crash, reachable from a COB script's
+    // BUILD_PERCENT_LEFT.
+    TEST_CASE("a unit definition with a zero BuildTime is complete and divides nothing")
+    {
+        auto script = makeEmptyCobScript();
+        auto env = std::make_unique<CobEnvironment>(script.get());
+        std::vector<UnitMesh> pieces;
+        UnitState unit(pieces, std::move(env));
+
+        UnitDefinition def{};
+        def.buildTime = 0u;
+        def.maxHitPoints = 100u;
+        def.buildCostMetal = Metal(50.0f);
+        def.buildCostEnergy = Energy(60.0f);
+
+        REQUIRE_FALSE(unit.isBeingBuilt(def));
+        REQUIRE(unit.getBuildPercentLeft(def) == 0u);
+        REQUIRE(unit.getPreciseCompletePercent(def) == 1.0f);
+
+        auto costs = unit.getBuildCostInfo(def, 10u);
+        REQUIRE(costs.workerTime == 0u);
+        REQUIRE(costs.energyCost.value == 0.0f);
+        REQUIRE(costs.metalCost.value == 0.0f);
+
+        REQUIRE(unit.addBuildProgress(def, 10u));
+        REQUIRE(unit.removeBuildProgress(def, 10u));
+    }
 }
