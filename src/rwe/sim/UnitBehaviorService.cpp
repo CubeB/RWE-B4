@@ -4402,8 +4402,14 @@ namespace rwe
     bool UnitBehaviorService::handleGuardOrder(UnitInfo unitInfo, const GuardOrder& guardOrder)
     {
         auto target = sim->tryGetUnitState(guardOrder.target);
-        // TODO: real allied check here
-        if (!target || !target->get().isOwnedBy(unitInfo.state->owner))
+
+        // Neither escort handler (0x406300 on the ground, 0x40FBE0 in the air)
+        // asks who owns the guarded unit: the order ends on a missing target and
+        // on nothing about alliance, and an ally later captured by an enemy is
+        // still followed. The alliance table gates only the offer (the default
+        // ladder's `allied && canGuard`) and the retaliation step, which looks
+        // at the attacker. BT-98.
+        if (!target)
         {
             return true;
         }
