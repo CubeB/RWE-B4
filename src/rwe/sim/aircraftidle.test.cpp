@@ -166,6 +166,90 @@ namespace rwe
         }
     }
 
+    TEST_CASE("an idle aircraft hunts by sight on Fire At Will only, and answers fire on Return Fire (BT-74)", "[aircraftidle]")
+    {
+        // The sight search an idle unit runs (0x43B700) returns nothing
+        // unless the fire mode is exactly Fire At Will; the attack-issue
+        // routine behind it (0x43B1F0) accepts Return Fire too, which is how a
+        // Return Fire unit answers the damage handler's call.
+        auto script = makeIdleScript();
+
+        struct Scene
+        {
+            GameSimulation sim;
+            UnitId targetId;
+            UnitId bomberId;
+            PlayerId us;
+            PlayerId them;
+
+            Scene(const std::shared_ptr<CobScript>& script, UnitFireOrders fireOrders)
+                : sim(makeIdleTerrain(256, 256), 0u, 0, 0)
+            {
+                us = addIdlePlayer(sim, "us");
+                them = addIdlePlayer(sim, "them");
+                sim.unitDefinitions["bomber"] = makeIdleBomberDef();
+                sim.unitDefinitions["target"] = makeIdleTargetDef();
+                registerIdleModel(sim, "model");
+                defineIdleBomb(sim);
+                sim.losTables = generateLosTables(8);
+
+                targetId = spawnIdleUnit(sim, "target", them, SimVector(0_ss, 0_ss, 0_ss), script);
+                bomberId = spawnIdleUnit(sim, "bomber", us, SimVector(-200_ss, 200_ss, 0_ss), script);
+                auto& bomber = sim.getUnitState(bomberId);
+                bomber.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+                UnitWeapon weapon;
+                weapon.weaponType = "bomb";
+                bomber.weapons[0] = weapon;
+                bomber.fireOrders = fireOrders;
+                sim.flyingUnitsSet.insert(bomberId);
+            }
+
+            bool everOrderedToAttack(int ticks)
+            {
+                for (int i = 0; i < ticks; ++i)
+                {
+                    sim.tick();
+                    for (const auto& order : sim.getUnitState(bomberId).orders)
+                    {
+                        if (std::holds_alternative<AttackOrder>(order))
+                        {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+        };
+
+        SECTION("Fire At Will acquires what is in sight")
+        {
+            Scene scene(script, UnitFireOrders::FireAtWill);
+            REQUIRE(scene.everOrderedToAttack(30));
+        }
+
+        SECTION("Return Fire does not go hunting for it")
+        {
+            Scene scene(script, UnitFireOrders::ReturnFire);
+            REQUIRE_FALSE(scene.everOrderedToAttack(30));
+        }
+
+        SECTION("Hold Fire does not either")
+        {
+            Scene scene(script, UnitFireOrders::HoldFire);
+            REQUIRE_FALSE(scene.everOrderedToAttack(30));
+        }
+
+        SECTION("a Return Fire aircraft that is shot answers the shooter")
+        {
+            Scene scene(script, UnitFireOrders::ReturnFire);
+            scene.sim.applyDamage(scene.bomberId, 1u, scene.targetId);
+
+            const auto& weapon = scene.sim.getUnitState(scene.bomberId).weapons[0];
+            REQUIRE(weapon.has_value());
+            REQUIRE(std::holds_alternative<UnitWeaponStateAttacking>(weapon->state));
+        }
+    }
+
     TEST_CASE("a bomber whose target dies keeps flying instead of setting down where it stands", "[aircraftidle]")
     {
         // Reported from play: once the structure was destroyed the bomber

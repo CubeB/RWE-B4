@@ -411,8 +411,14 @@ namespace rwe
                 // callers, Standby included, gets nothing back for a unit
                 // whose movement mode is 0 (0x43B211), so such a unit shoots
                 // from where it is and never goes after anything (issue #109).
+                //
+                // And on Fire At Will exactly (BT-74): 0x43B700, which every
+                // standby, patrol and seek-attack mission calls first, is
+                // `cmp ecx,0x200000 / jne`, so a unit on Return Fire answers
+                // being shot (returnFire, from the damage handler) but never
+                // goes hunting for something it merely saw.
                 std::optional<UnitId> freeTarget;
-                if (unitInfo.definition->canAttack && unitInfo.state->fireOrders != UnitFireOrders::HoldFire
+                if (unitInfo.definition->canAttack && unitInfo.state->fireOrders == UnitFireOrders::FireAtWill
                     && unitInfo.state->moveOrders != UnitMovementOrders::HoldPosition)
                 {
                     freeTarget = findEnemyToEngage(unitInfo);
