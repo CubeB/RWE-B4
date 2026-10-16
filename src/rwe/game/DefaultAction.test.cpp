@@ -360,24 +360,75 @@ namespace rwe
             REQUIRE(orderOf<RepairOrder>(f.act(DefaultActionScheme::MoveButton, aircraft, hurt)) != nullptr);
         }
 
-        SECTION("a Commander over an enemy captures it")
+        SECTION("a Commander right-clicking an enemy attacks it, and only the MOVE button captures")
         {
-            // Capture is the first arm of the ladder, above reclaim and above
-            // the attack arm RWE keeps, so a Commander with cancapture takes
-            // the unit rather than shooting it.
+            // BT-61: the right-click chain at 0x43FA00 opens with the attack
+            // arm and has no capture arm (cancapture, bit 12, is never
+            // tested there). Capture is command 2's ladder, the MOVE
+            // button's, and the armed CAPTURE button.
             auto commander = f.spawn("commander", f.player, 0_ss);
             auto target = f.spawn("peewee", f.enemy, 100_ss);
 
             auto action = f.act(DefaultActionScheme::RightClickDefault, commander, target);
-            REQUIRE(orderOf<CaptureOrder>(action) != nullptr);
-            REQUIRE(orderOf<CaptureOrder>(action)->target == target);
+            REQUIRE(orderOf<AttackOrder>(action) != nullptr);
+            REQUIRE(std::get<UnitId>(orderOf<AttackOrder>(action)->target) == target);
+            REQUIRE(orderOf<CaptureOrder>(action) == nullptr);
             REQUIRE(action.cursor == CursorType::Red);
 
-            // With the MOVE button armed the same ladder runs, and there the
+            // With the MOVE button armed the other ladder runs, and there the
             // cursor is the ladder's own rather than the red/green feedback.
             auto armed = f.act(DefaultActionScheme::MoveButton, commander, target);
             REQUIRE(orderOf<CaptureOrder>(armed) != nullptr);
             REQUIRE(armed.cursor == CursorType::Capture);
+        }
+
+        SECTION("a unit that can reclaim but not attack reclaims an enemy on a right-click")
+        {
+            // The arm an earlier reading called capture: canreclamate, tested
+            // after the attack arm.
+            auto kbot = f.spawn("conkbot", f.player, 0_ss);
+            auto target = f.spawn("peewee", f.enemy, 100_ss);
+
+            auto action = f.act(DefaultActionScheme::RightClickDefault, kbot, target);
+            REQUIRE(orderOf<ReclaimOrder>(action) != nullptr);
+            REQUIRE(std::get<UnitId>(orderOf<ReclaimOrder>(action)->target) == target);
+        }
+
+        SECTION("a Commander right-clicking a reclaimable feature reclaims it, behind the unit arms")
+        {
+            FeatureDefinition tree{};
+            tree.name = "tree";
+            tree.footprintX = 1;
+            tree.footprintZ = 1;
+            tree.height = 1_ss;
+            tree.reclaimable = true;
+            auto treeId = f.sim.featureDefinitions.insert(tree);
+            auto feature = f.sim.addFeature(treeId, 4, 4);
+            REQUIRE(feature.has_value());
+
+            auto commander = f.spawn("commander", f.player, 0_ss);
+            auto action = computeDefaultAction(f.sim, DefaultActionScheme::RightClickDefault, commander, std::nullopt, feature);
+            REQUIRE(orderOf<ReclaimOrder>(action) != nullptr);
+
+            // A friendly peewee standing over the wreck: the unit arms (guard)
+            // answer first, as in the original's chain.
+            auto friendly = f.spawn("peewee", f.player, 100_ss);
+            f.sim.getUnitState(friendly).hitPoints = 200;
+            auto over = computeDefaultAction(f.sim, DefaultActionScheme::RightClickDefault, commander, friendly, feature);
+            REQUIRE(orderOf<GuardOrder>(over) != nullptr);
+        }
+
+        SECTION("a Commander right-clicking a damaged ally repairs it and a sound one is guarded")
+        {
+            auto commander = f.spawn("commander", f.player, 0_ss);
+            auto ally = f.spawn("peewee", f.player, 100_ss);
+
+            f.sim.getUnitState(ally).hitPoints = 50;
+            REQUIRE(orderOf<RepairOrder>(f.act(DefaultActionScheme::RightClickDefault, commander, ally)) != nullptr);
+
+            f.sim.getUnitState(ally).hitPoints = 200;
+            REQUIRE(orderOf<RepairOrder>(f.act(DefaultActionScheme::RightClickDefault, commander, ally)) == nullptr);
+            REQUIRE(orderOf<GuardOrder>(f.act(DefaultActionScheme::RightClickDefault, commander, ally)) != nullptr);
         }
 
         SECTION("a fighter over a friendly repair pad lands on it")
@@ -450,7 +501,7 @@ namespace rwe
         // does not answer before the guard arm this case is about.
         f.sim.getUnitState(theirs).hitPoints = 200;
 
-        SECTION("right-click on a teammate's unit guards it, where the same click on an enemy's captures it")
+        SECTION("right-click on a teammate's unit guards it, where the same click on an enemy's attacks it")
         {
             auto onAlly = f.act(DefaultActionScheme::RightClickDefault, commander, theirs);
             REQUIRE(orderOf<CaptureOrder>(onAlly) == nullptr);
@@ -459,7 +510,7 @@ namespace rwe
             REQUIRE(onAlly.cursor == CursorType::Green);
 
             auto onEnemy = f.act(DefaultActionScheme::RightClickDefault, commander, enemys);
-            REQUIRE(orderOf<CaptureOrder>(onEnemy) != nullptr);
+            REQUIRE(orderOf<AttackOrder>(onEnemy) != nullptr);
             REQUIRE(onEnemy.cursor == CursorType::Red);
         }
 

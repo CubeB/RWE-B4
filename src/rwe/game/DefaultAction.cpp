@@ -107,50 +107,20 @@ namespace rwe
         }
 
         /**
-         * The arms shared by Interface Type 1's default action and by the
-         * MOVE button, which are the same ladder: 0x43FA00 is command 2's
-         * chain (0x43F845) with the capture arm brought to the front, and the
-         * cursor chooser mirrors it arm for arm at 0x43E8BB.
+         * The tail the two unit chains share once their repair arms have
+         * declined: landing, pickup and follow. The repair arms are the
+         * callers', because the two chains test differently there.
          */
-        std::optional<DefaultAction> unitLadderRightClick(
+        std::optional<DefaultAction> alliedAndLoadArms(
             const GameSimulation& sim,
             UnitId ordererId,
             const UnitState& orderer,
             const UnitDefinition& ordererDefinition,
             UnitId targetId,
-            const UnitState& target)
+            const UnitState& target,
+            bool allied)
         {
-            auto allied = isAlliedTarget(sim, orderer, target);
             const auto& targetDefinition = sim.unitDefinitions.at(target.unitType);
-
-            if (!allied && ordererDefinition.canCapture)
-            {
-                return issue(CaptureOrder(targetId), CursorType::Capture);
-            }
-
-            if (!allied && ordererDefinition.canReclamate)
-            {
-                return issue(ReclaimOrder(targetId), CursorType::Reclaim);
-            }
-
-            // Not in the decode. S:103's reading of 0x43FA00 lists no attack
-            // arm, but right-clicking an enemy has always attacked it in RWE
-            // and taking that away on the strength of an elided list would be
-            // the worse mistake, so it is kept and recorded as unsettled.
-            if (!allied && ordererDefinition.canAttack)
-            {
-                return attackArm(sim, orderer, ordererDefinition, targetId, target);
-            }
-
-            if (allied && canRepairUnit(sim, ordererDefinition, target) && isUnderConstruction(sim, target))
-            {
-                return issue(CompleteBuildOrder(targetId), CursorType::Repair);
-            }
-
-            if (allied && canRepairUnit(sim, ordererDefinition, target) && isDamaged(sim, target))
-            {
-                return issue(RepairOrder(targetId), CursorType::Repair);
-            }
 
             if (ordererDefinition.canFly && allied && targetId != ordererId && unitIsAnUsableAirBase(target, targetDefinition))
             {
@@ -170,6 +140,94 @@ namespace rwe
             }
 
             return std::nullopt;
+        }
+
+        /**
+         * Interface Type 1's default action, the chain at 0x43FA00 (BT-61).
+         * It opens with the attack arm, which returns whatever the attack
+         * recursion yields, an order or nothing, so an enemy a unit cannot
+         * attack ends the click there. It has no capture arm: what an
+         * earlier reading called capture was the reclaim arm (`canreclamate`,
+         * bit 10, not `cancapture`, bit 12), and capture is reachable only
+         * from the armed CAPTURE button and from command 2's ladder. Its
+         * repair arm has no hit-point test beyond the predicate's own.
+         */
+        std::optional<DefaultAction> unitLadderRightClick(
+            const GameSimulation& sim,
+            UnitId ordererId,
+            const UnitState& orderer,
+            const UnitDefinition& ordererDefinition,
+            UnitId targetId,
+            const UnitState& target)
+        {
+            auto allied = isAlliedTarget(sim, orderer, target);
+
+            if (!allied && ordererDefinition.canAttack)
+            {
+                return attackArm(sim, orderer, ordererDefinition, targetId, target);
+            }
+
+            if (!allied && ordererDefinition.canReclamate)
+            {
+                return issue(ReclaimOrder(targetId), CursorType::Reclaim);
+            }
+
+            if (allied && canRepairUnit(sim, ordererDefinition, target))
+            {
+                if (isUnderConstruction(sim, target))
+                {
+                    return issue(CompleteBuildOrder(targetId), CursorType::Repair);
+                }
+                return issue(RepairOrder(targetId), CursorType::Repair);
+            }
+
+            return alliedAndLoadArms(sim, ordererId, orderer, ordererDefinition, targetId, target, allied);
+        }
+
+        /**
+         * The MOVE button's ladder, command 2's chain (0x43F845), which is
+         * the one place capture is an arm of a ladder: it is tried before
+         * reclaim and before the attack arm RWE keeps.
+         */
+        std::optional<DefaultAction> unitLadderMoveButton(
+            const GameSimulation& sim,
+            UnitId ordererId,
+            const UnitState& orderer,
+            const UnitDefinition& ordererDefinition,
+            UnitId targetId,
+            const UnitState& target)
+        {
+            auto allied = isAlliedTarget(sim, orderer, target);
+
+            if (!allied && ordererDefinition.canCapture)
+            {
+                return issue(CaptureOrder(targetId), CursorType::Capture);
+            }
+
+            if (!allied && ordererDefinition.canReclamate)
+            {
+                return issue(ReclaimOrder(targetId), CursorType::Reclaim);
+            }
+
+            // Not in the decode of this chain. Right-clicking an enemy has
+            // always attacked it in RWE, and the MOVE button's ladder is
+            // kept as it was while BT-61 settles the right-click chain only.
+            if (!allied && ordererDefinition.canAttack)
+            {
+                return attackArm(sim, orderer, ordererDefinition, targetId, target);
+            }
+
+            if (allied && canRepairUnit(sim, ordererDefinition, target) && isUnderConstruction(sim, target))
+            {
+                return issue(CompleteBuildOrder(targetId), CursorType::Repair);
+            }
+
+            if (allied && canRepairUnit(sim, ordererDefinition, target) && isDamaged(sim, target))
+            {
+                return issue(RepairOrder(targetId), CursorType::Repair);
+            }
+
+            return alliedAndLoadArms(sim, ordererId, orderer, ordererDefinition, targetId, target, allied);
         }
 
         /**
@@ -288,24 +346,23 @@ namespace rwe
             targetRef = sim.tryGetUnitState(*hoveredUnit);
         }
 
+        // Interface Type 1's cursor is feedback and nothing more: 0x43EB02
+        // answers 15 for one of your own, 17 for an enemy and 18 for an ally,
+        // and the right button issues without consulting it at all
+        // (0x4991D5). So in that scheme the cursor and the order genuinely
+        // come apart, and they are meant to.
+        auto feedbackCursor = [&](const UnitState& target) {
+            if (target.isSelectableBy(sim.unitDefinitions.at(target.unitType), orderer.owner))
+            {
+                return CursorType::Select;
+            }
+            return isAlliedTarget(sim, orderer, target) ? CursorType::Green : CursorType::Red;
+        };
+
         auto result = [&]() -> DefaultAction {
             if (targetRef)
             {
                 const auto& target = targetRef->get();
-
-                // Interface Type 1's cursor is feedback and nothing more:
-                // 0x43EB02 answers 15 for one of your own, 17 for an enemy
-                // and 18 for an ally, and the right button issues without
-                // consulting it at all (0x4991D5). So in that scheme the
-                // cursor and the order genuinely come apart, and they are
-                // meant to.
-                auto feedbackCursor = [&]() {
-                    if (target.isSelectableBy(sim.unitDefinitions.at(target.unitType), orderer.owner))
-                    {
-                        return CursorType::Select;
-                    }
-                    return isAlliedTarget(sim, orderer, target) ? CursorType::Green : CursorType::Red;
-                };
 
                 switch (scheme)
                 {
@@ -319,18 +376,15 @@ namespace rwe
                     }
                     case DefaultActionScheme::RightClickDefault:
                     {
-                        auto a = unitLadderRightClick(sim, ordererId, orderer, ordererDefinition, *hoveredUnit, target);
-                        if (a)
+                        if (auto a = unitLadderRightClick(sim, ordererId, orderer, ordererDefinition, *hoveredUnit, target); a)
                         {
-                            return DefaultAction{a->action, feedbackCursor()};
+                            return DefaultAction{a->action, feedbackCursor(target)};
                         }
-                        return DefaultAction{
-                            ordererDefinition.canMove && ordererDefinition.isMobile ? DefaultActionKind(DefaultActionMove()) : DefaultActionKind(DefaultActionNothing()),
-                            feedbackCursor()};
+                        break;
                     }
                     case DefaultActionScheme::MoveButton:
                     {
-                        if (auto a = unitLadderRightClick(sim, ordererId, orderer, ordererDefinition, *hoveredUnit, target); a)
+                        if (auto a = unitLadderMoveButton(sim, ordererId, orderer, ordererDefinition, *hoveredUnit, target); a)
                         {
                             return *a;
                         }
@@ -378,6 +432,14 @@ namespace rwe
 
             return DefaultAction{DefaultActionNothing(), CursorType::Normal};
         }();
+
+        // Over a unit, Interface Type 1 shows the feedback cursor whatever the
+        // chain went on to do after its unit arms (a feature under the unit,
+        // a plain move).
+        if (scheme == DefaultActionScheme::RightClickDefault && targetRef)
+        {
+            result.cursor = feedbackCursor(targetRef->get());
+        }
 
         // The issue loop skips a selected unit that is also the thing clicked
         // (0x48D07B), so a unit never orders itself. It still contributes a
