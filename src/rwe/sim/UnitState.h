@@ -1104,9 +1104,10 @@ namespace rwe
 
         bool isSelectableBy(const UnitDefinition& unitDefinition, PlayerId player) const;
 
-        void activate();
+        /** Returns whether the activation state changed; the script runs only if so (BT-66). */
+        bool activate();
 
-        void deactivate();
+        bool deactivate();
 
         Metal getMetalMake() const;
         Energy getEnergyMake() const;

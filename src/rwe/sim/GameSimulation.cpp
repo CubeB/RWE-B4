@@ -2758,15 +2758,20 @@ namespace rwe
     void GameSimulation::activateUnit(UnitId unitId)
     {
         auto& unit = getUnitState(unitId);
-        unit.activate();
-        events.push_back(UnitActivatedEvent{unitId});
+        // Script and event only on a real change (BT-66).
+        if (unit.activate())
+        {
+            events.push_back(UnitActivatedEvent{unitId});
+        }
     }
 
     void GameSimulation::deactivateUnit(UnitId unitId)
     {
         auto& unit = getUnitState(unitId);
-        unit.deactivate();
-        events.push_back(UnitDeactivatedEvent{unitId});
+        if (unit.deactivate())
+        {
+            events.push_back(UnitDeactivatedEvent{unitId});
+        }
     }
 
     void GameSimulation::modifyStockpileQueue(UnitId unitId, int count)

@@ -1240,6 +1240,7 @@ set(TEST_FILES
     src/rwe/sim/demorecorder.test.cpp
     src/rwe/sim/accuracy.test.cpp
     src/rwe/sim/aimlead.test.cpp
+    src/rwe/sim/activation.test.cpp
     src/rwe/sim/waterline.test.cpp
     src/rwe/game/screenshake.test.cpp
     src/rwe/game/shatter.test.cpp

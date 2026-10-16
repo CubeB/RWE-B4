@@ -618,16 +618,28 @@ namespace rwe
         return !isDead() && isOwnedBy(player) && !isBeingBuilt(unitDefinition) && !carriedBy && !heldByMission;
     }
 
-    void UnitState::activate()
+    bool UnitState::activate()
     {
+        // The original's one setter (0x48B090) returns at once when the new
+        // activation byte equals the old: no script, no sound, no event. BT-66.
+        if (activated)
+        {
+            return false;
+        }
         activated = true;
         cobEnvironment->createThread("Activate");
+        return true;
     }
 
-    void UnitState::deactivate()
+    bool UnitState::deactivate()
     {
+        if (!activated)
+        {
+            return false;
+        }
         activated = false;
         cobEnvironment->createThread("Deactivate");
+        return true;
     }
 
     Metal UnitState::getMetalMake() const
