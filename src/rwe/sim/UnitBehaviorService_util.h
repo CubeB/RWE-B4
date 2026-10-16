@@ -106,6 +106,21 @@ namespace rwe
     bool unitIsAnUsableAirBase(const UnitState& state, const UnitDefinition& definition);
 
     /**
+     * The original's one "can this unit repair that one" predicate (0x4899B0),
+     * which every help-build and repair arm and cursor calls. BT-62.
+     *
+     * The orderer is keyed on the loader's copy of `canreclamate` (flags2 bit 9)
+     * and not on `builder`, so a factory, a mine layer or a carrier is not a
+     * repairer. The target must not be at full health (an unfinished unit sits
+     * below it), must not be in the flying placement mode, and must be out of
+     * the water far enough: an orderer that can fly needs the target's top at
+     * or above sea level, any other needs it at or above sea level minus the
+     * orderer's maximum water depth. Tops are whole units, as everywhere else
+     * the original compares heights.
+     */
+    bool canRepairUnit(const GameSimulation& sim, const UnitDefinition& repairerDefinition, const UnitState& target);
+
+    /**
      * Picks a repair pad for a damaged aircraft, or nothing if it is not hurt
      * enough or there is none within reach. Draws from the simulation's
      * generator when there is more than one to choose from.

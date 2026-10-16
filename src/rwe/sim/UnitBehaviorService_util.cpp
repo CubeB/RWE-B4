@@ -1,5 +1,6 @@
 #include "UnitBehaviorService_util.h"
 #include <algorithm>
+#include <cmath>
 #include <rwe/sim/FlatRange.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/SimTicksPerSecond.h>
@@ -337,6 +338,45 @@ namespace rwe
         // exactly three quarters is not damaged enough.
         auto threshold = (definition.maxHitPoints / 4u) * 3u;
         return state.hitPoints < threshold;
+    }
+
+    bool canRepairUnit(const GameSimulation& sim, const UnitDefinition& repairerDefinition, const UnitState& target)
+    {
+        // 0x4899B0. The first test on the orderer is flags2 bit 9, the copy of
+        // canreclamate the loader writes -- not Builder. 27 of the 53 shipped
+        // builders lack it (plants, shipyards, pads, mine layers, carriers).
+        if (!repairerDefinition.canReclamate)
+        {
+            return false;
+        }
+
+        const auto& targetDefinition = sim.unitDefinitions.at(target.unitType);
+
+        // Not equal to the maximum, so an unfinished unit below it qualifies.
+        if (target.hitPoints == targetDefinition.maxHitPoints)
+        {
+            return false;
+        }
+
+        // Placement mode 2 is the flying mode.
+        if (isFlying(target.physics))
+        {
+            return false;
+        }
+
+        auto whole = [](SimScalar s) { return static_cast<int>(std::floor(s.value)); };
+        auto top = whole(target.position.y) + whole(sim.modelHeightOf(targetDefinition));
+        auto seaLevel = whole(sim.terrain.getSeaLevel());
+
+        // The FBI's `amphibious` key is not parsed, so every flier takes the
+        // first branch; no shipped aircraft sets it.
+        if (repairerDefinition.canFly)
+        {
+            return top >= seaLevel;
+        }
+
+        auto maxWaterDepth = static_cast<int>(sim.getAdHocMovementClass(repairerDefinition.movementCollisionInfo).maxWaterDepth);
+        return top >= seaLevel - maxWaterDepth;
     }
 
     bool unitIsAnUsableAirBase(const UnitState& state, const UnitDefinition& definition)

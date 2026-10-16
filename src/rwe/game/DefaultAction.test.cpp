@@ -90,6 +90,29 @@ namespace rwe
             return d;
         }
 
+        /**
+         * ARMCARRY, from its FBI: Builder=1, canmove=1, canguard=1 and no
+         * CanReclamate, one of the 27 shipped builders that the original's
+         * repair predicate (0x4899B0) does not admit. BT-62.
+         */
+        UnitDefinition makeCarrierDef()
+        {
+            auto d = makeMobileDef();
+            d.builder = true;
+            d.canFly = false;
+            return d;
+        }
+
+        /** ARMCA: Builder, CanFly, CanReclamate, MaxWaterDepth=0. */
+        UnitDefinition makeConstructionAircraftDef()
+        {
+            auto d = makeMobileDef();
+            d.builder = true;
+            d.canReclamate = true;
+            d.canFly = true;
+            return d;
+        }
+
         /** ARMLAB: canmove, so it has a MOVE button, but bmcode=0 and no mover. */
         UnitDefinition makeFactoryDef()
         {
@@ -158,6 +181,8 @@ namespace rwe
                 sim.unitDefinitions["fighter"] = makeFighterDef();
                 sim.unitDefinitions["pad"] = makeRepairPadDef();
                 sim.unitDefinitions["factory"] = makeFactoryDef();
+                sim.unitDefinitions["carrier"] = makeCarrierDef();
+                sim.unitDefinitions["conaircraft"] = makeConstructionAircraftDef();
             }
 
             UnitId spawn(const std::string& unitType, PlayerId owner, SimScalar x)
@@ -270,6 +295,68 @@ namespace rwe
             auto armed = f.act(DefaultActionScheme::MoveButton, kbot, hurt);
             REQUIRE(orderOf<RepairOrder>(armed) != nullptr);
             REQUIRE(armed.cursor == CursorType::Repair);
+        }
+
+        SECTION("a factory or a carrier over a damaged friendly gets no repair, though both are builders")
+        {
+            // BT-62: the original keys repair and help-build on the copy of
+            // canreclamate (flags2 bit 9), not on Builder, and ARMLAB and
+            // ARMCARRY are among the 27 shipped builders without it.
+            auto hurt = f.spawn("peewee", f.player, 100_ss);
+            f.sim.getUnitState(hurt).hitPoints = 50;
+
+            for (const auto* type : {"factory", "carrier"})
+            {
+                auto builder = f.spawn(type, f.player, 0_ss);
+                for (auto scheme : {DefaultActionScheme::RightClickDefault, DefaultActionScheme::MoveButton, DefaultActionScheme::LeftClickDefault})
+                {
+                    auto action = f.act(scheme, builder, hurt);
+                    REQUIRE(orderOf<RepairOrder>(action) == nullptr);
+                    REQUIRE(orderOf<CompleteBuildOrder>(action) == nullptr);
+                }
+            }
+        }
+
+        SECTION("a Construction Kbot leaves a full-health friendly alone")
+        {
+            auto kbot = f.spawn("conkbot", f.player, 0_ss);
+            auto sound = f.spawn("peewee", f.player, 100_ss);
+            f.sim.getUnitState(sound).hitPoints = 200;
+            auto action = f.act(DefaultActionScheme::MoveButton, kbot, sound);
+            REQUIRE(orderOf<RepairOrder>(action) == nullptr);
+        }
+
+        SECTION("a Construction Kbot does not repair an airborne friendly")
+        {
+            auto kbot = f.spawn("conkbot", f.player, 0_ss);
+            auto hurt = f.spawn("fighter", f.player, 100_ss);
+            f.sim.getUnitState(hurt).hitPoints = 50;
+            REQUIRE(orderOf<RepairOrder>(f.act(DefaultActionScheme::MoveButton, kbot, hurt)) != nullptr);
+
+            f.sim.getUnitState(hurt).physics = UnitPhysicsInfoAir();
+            REQUIRE(orderOf<RepairOrder>(f.act(DefaultActionScheme::MoveButton, kbot, hurt)) == nullptr);
+        }
+
+        SECTION("the depth test: a ground builder wades to its maximum water depth, a flier needs the target out of the water")
+        {
+            // ARMCK has MaxWaterDepth=25 and ARMCA flies. The sea is at zero
+            // here and the test model is ten tall, so a target at height -20
+            // has its top at -10: inside the Kbot's 25 and under the sea.
+            std::get<UnitDefinition::AdHocMovementClass>(f.sim.unitDefinitions.at("conkbot").movementCollisionInfo).maxWaterDepth = 25u;
+            auto kbot = f.spawn("conkbot", f.player, 0_ss);
+            auto aircraft = f.spawn("conaircraft", f.player, 50_ss);
+            auto hurt = f.spawn("peewee", f.player, 100_ss);
+            f.sim.getUnitState(hurt).hitPoints = 50;
+
+            f.sim.getUnitState(hurt).position.y = -20_ss;
+            REQUIRE(orderOf<RepairOrder>(f.act(DefaultActionScheme::MoveButton, kbot, hurt)) != nullptr);
+            REQUIRE(orderOf<RepairOrder>(f.act(DefaultActionScheme::MoveButton, aircraft, hurt)) == nullptr);
+
+            f.sim.getUnitState(hurt).position.y = -40_ss;
+            REQUIRE(orderOf<RepairOrder>(f.act(DefaultActionScheme::MoveButton, kbot, hurt)) == nullptr);
+
+            f.sim.getUnitState(hurt).position.y = 0_ss;
+            REQUIRE(orderOf<RepairOrder>(f.act(DefaultActionScheme::MoveButton, aircraft, hurt)) != nullptr);
         }
 
         SECTION("a Commander over an enemy captures it")

@@ -120,12 +120,12 @@ namespace rwe
                 return issue(AttackOrder(targetId), CursorType::Attack);
             }
 
-            if (allied && ordererDefinition.builder && isUnderConstruction(sim, target))
+            if (allied && canRepairUnit(sim, ordererDefinition, target) && isUnderConstruction(sim, target))
             {
                 return issue(CompleteBuildOrder(targetId), CursorType::Repair);
             }
 
-            if (allied && ordererDefinition.builder && isDamaged(sim, target))
+            if (allied && canRepairUnit(sim, ordererDefinition, target) && isDamaged(sim, target))
             {
                 return issue(RepairOrder(targetId), CursorType::Repair);
             }
@@ -176,7 +176,7 @@ namespace rwe
                 return issue(ReclaimOrder(targetId), CursorType::Reclaim);
             }
 
-            if (allied && ordererDefinition.builder && isUnderConstruction(sim, target))
+            if (allied && canRepairUnit(sim, ordererDefinition, target) && isUnderConstruction(sim, target))
             {
                 return issue(CompleteBuildOrder(targetId), CursorType::Repair);
             }
@@ -192,7 +192,7 @@ namespace rwe
             // without being your own. RWE has no such unit yet; the arm is
             // written the way the order builder has it so that it does the
             // right thing when it does.
-            if (allied && ordererDefinition.builder && isDamaged(sim, target))
+            if (allied && canRepairUnit(sim, ordererDefinition, target) && isDamaged(sim, target))
             {
                 return issue(RepairOrder(targetId), CursorType::Repair);
             }
