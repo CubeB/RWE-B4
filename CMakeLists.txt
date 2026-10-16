@@ -1285,6 +1285,7 @@ set(TEST_FILES
     src/rwe/sim/moverate.test.cpp
     src/rwe/sim/movement.test.cpp
     src/rwe/sim/pathfollowing.test.cpp
+    src/rwe/sim/goalsquare.test.cpp
     src/rwe/sim/transport.test.cpp
     src/rwe/sim/bomber.test.cpp
     src/rwe/sim/bomberpatrol.test.cpp

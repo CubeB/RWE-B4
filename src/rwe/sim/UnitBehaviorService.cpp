@@ -720,7 +720,7 @@ namespace rwe
         }
     }
 
-    bool followPath(UnitInfo unitInfo, UnitPhysicsInfoGround& physics, PathFollowingInfo& path);
+    bool followPath(const GameSimulation& sim, UnitInfo unitInfo, UnitPhysicsInfoGround& physics, PathFollowingInfo& path);
 
     void UnitBehaviorService::updateRemote(UnitInfo unitInfo)
     {
@@ -741,7 +741,7 @@ namespace rwe
                 {
                     if (moving->path)
                     {
-                        followPath(unitInfo, p, *moving->path);
+                        followPath(*sim, unitInfo, p, *moving->path);
                     }
                 }
                 applyUnitSteering(unitInfo);
@@ -899,7 +899,7 @@ namespace rwe
      * waypoints[currentWaypoint] the one it is heading for, which is the
      * navigator's wp[0] and wp[1].
      */
-    bool followPath(UnitInfo unitInfo, UnitPhysicsInfoGround& physics, PathFollowingInfo& path)
+    bool followPath(const GameSimulation& sim, UnitInfo unitInfo, UnitPhysicsInfoGround& physics, PathFollowingInfo& path)
     {
         SimVector xzPosition(unitInfo.state->position.x, 0_ss, unitInfo.state->position.z);
 
@@ -914,7 +914,30 @@ namespace rwe
             SimVector xzNext(next.x, 0_ss, next.z);
             auto isFinal = path.currentWaypoint == (path.path.waypoints.end() - 1);
             auto radius = isFinal ? PathFinalWaypointAdvanceDistance : PathWaypointAdvanceDistance;
-            if (xzPosition.distanceSquared(xzNext) <= (radius * radius))
+            auto closeEnough = xzPosition.distanceSquared(xzNext) <= (radius * radius);
+
+            // BT-96: a ground Move to a point ends when the unit stands on the
+            // goal's map square, not when it is within eight units of the
+            // click. The last corner is the click itself, so a unit that is
+            // within eight units of it but on the neighbouring square has not
+            // arrived, and retiring the corner here would brake it where it
+            // is -- and the repath would then find it "already there" and
+            // never move it again. Keep steering at the corner until the unit
+            // is on its square; the goal test ends the order on entering it.
+            if (closeEnough && isFinal && !unitInfo.definition->canFly)
+            {
+                if (auto* moving = std::get_if<NavigationStateMoving>(&unitInfo.state->navigationState.state))
+                {
+                    auto goalPoint = std::get_if<SimVector>(&moving->movementGoal);
+                    if (goalPoint != nullptr && goalPoint->x == next.x && goalPoint->z == next.z
+                        && !isOnGoalSquare(sim, *unitInfo.state, *unitInfo.definition, *goalPoint))
+                    {
+                        closeEnough = false;
+                    }
+                }
+            }
+
+            if (closeEnough)
             {
                 if (isFinal)
                 {
@@ -5799,7 +5822,7 @@ namespace rwe
             {
                 throw std::logic_error("ground unit does not have ground physics");
             }
-            if (followPath(unitInfo, *groundPhysics, *movingState->path))
+            if (followPath(*sim, unitInfo, *groundPhysics, *movingState->path))
             {
                 // We finished following the path.
                 // This doesn't necessarily mean we are at the goal.

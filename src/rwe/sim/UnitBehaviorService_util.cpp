@@ -1531,6 +1531,13 @@ namespace rwe
         return findClosestPointOnPerimeter(targetWorldRect, p);
     }
 
+    bool isOnGoalSquare(const GameSimulation& sim, const UnitState& unit, const UnitDefinition& unitDefinition, const SimVector& goalPoint)
+    {
+        auto unitSquare = sim.computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
+        auto goalSquare = sim.computeFootprintRegion(goalPoint, unitDefinition.movementCollisionInfo);
+        return unitSquare.x == goalSquare.x && unitSquare.y == goalSquare.y;
+    }
+
     bool hasReachedGoal(const GameSimulation& sim, const MapTerrain& terrain, const UnitState& unit, const UnitDefinition& unitDefinition, const NavigationGoal& goal)
     {
         auto destination = match(
@@ -1577,6 +1584,17 @@ namespace rwe
         if (!destination)
         {
             return false;
+        }
+
+        // BT-96: a ground unit's point goal is reached on the goal's map
+        // square (a plain Move asks for radius tolerance + 4, which divides
+        // down to zero squares), not within eight world units of the point.
+        // A square is sixteen units, so the unit can stop up to fifteen from
+        // where the click was. Rectangles keep the closest-point test below,
+        // and an aircraft keeps its own goal handling.
+        if (!unitDefinition.canFly && std::holds_alternative<SimVector>(goal))
+        {
+            return isOnGoalSquare(sim, unit, unitDefinition, *destination);
         }
 
         SimVector xzPosition(unit.position.x, 0_ss, unit.position.z);

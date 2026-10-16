@@ -483,6 +483,18 @@ namespace rwe
 
     SimVector findClosestPointToFootprintXZForUnit(const MapTerrain& terrain, const DiscreteRect& targetFootprintRect, const SimVector& p, int unitFootprintX, int unitFootprintZ);
 
+    /**
+     * BT-96: whether the unit stands on the map square a point goal falls in.
+     * TotalA.exe's point goal (0x44CF60) turns a position into a square with
+     * the unit's footprint correction -- position minus the footprint word
+     * shifted left 19, plus 0x80000, shifted right 20 -- which is the
+     * footprint's top-left cell, rounded to nearest, that computeFootprintRegion
+     * already finds. Both the unit's square and the goal's are taken that way
+     * with the unit's own footprint, and the test (0x44D310) with a radius
+     * below sixteen units is that they are the same square.
+     */
+    bool isOnGoalSquare(const GameSimulation& sim, const UnitState& unit, const UnitDefinition& unitDefinition, const SimVector& goalPoint);
+
     bool hasReachedGoal(const GameSimulation& sim, const MapTerrain& terrain, const UnitState& unit, const UnitDefinition& unitDefinition, const NavigationGoal& goal);
 
     std::string getAimScriptName(unsigned int weaponIndex);
