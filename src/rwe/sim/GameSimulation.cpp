@@ -4402,6 +4402,12 @@ namespace rwe
                 continue;
             }
 
+            // The whole-unit height this round had when its update began, for
+            // the water-entry splash at the end of it (BT-14). A local: the
+            // comparison is between this update's start and its end, so no
+            // state has to persist between ticks.
+            const auto wholeHeightAtStart = std::floor(projectile.position.y.value);
+
             bool detonated = false;
             match(
                 weaponDefinition.physicsType,
@@ -4555,6 +4561,25 @@ namespace rwe
                         projectile.isDead = true;
                         events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, impactDeath});
                     });
+            }
+
+            // The entry splash (the tail of 0x49B720): a round still alive
+            // after its collision test whose whole-unit height was strictly
+            // above sea level when the update began and is at or below it now,
+            // over a square that is under the sea, on a map whose sea trigger
+            // is not switched off, throws up the weapon's splash. Art only.
+            // A round the crossing step killed gets the impact's art instead,
+            // and an ordinary shot that lands exactly on the surface gets this
+            // first and its detonation a step later.
+            if (!projectile.isDead && !noSeaLevelTrigger)
+            {
+                const auto seaWhole = std::floor(terrain.getSeaLevel().value);
+                if (wholeHeightAtStart > seaWhole
+                    && std::floor(projectile.position.y.value) <= seaWhole
+                    && terrain.isSquareUnderSea(projectile.position.x, projectile.position.z))
+                {
+                    events.push_back(ProjectileDetonatedEvent{projectile.weaponType, projectile.position, true, true});
+                }
             }
         }
     }

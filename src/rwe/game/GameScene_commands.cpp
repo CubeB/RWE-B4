@@ -1856,6 +1856,14 @@ namespace rwe
                     }
                 },
                 [&](const ProjectileDetonatedEvent& e) {
+                    if (e.splashOnly)
+                    {
+                        // A live round crossing the surface: the weapon's
+                        // splash and nothing else (BT-14).
+                        spawnWeaponImpactExplosion(simVectorToFloat(e.position), e.weaponType, ImpactType::Water, positionIsVisibleToLocalPlayer(e.position));
+                        return;
+                    }
+
                     // A `noexplode` round that went off and kept flying. It
                     // gets the impact art and the shake of an ordinary hit --
                     // the disintegrator's explode5, once per tick along its

@@ -380,6 +380,13 @@ namespace rwe
         std::string weaponType;
         SimVector position;
         bool inWater;
+
+        /**
+         * Not a detonation at all but the weapon's splash as a live round
+         * crosses the surface (0x49B720's tail, BT-14): the art and nothing
+         * else -- no sound, no shake, no damage. Presentation only.
+         */
+        bool splashOnly{false};
     };
 
     struct UnitCapturedEvent
