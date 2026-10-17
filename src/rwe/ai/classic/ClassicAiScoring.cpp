@@ -194,7 +194,7 @@ namespace rwe
         {
             return 0;
         }
-        if (limit >= 0 && completedOfType >= limit)
+        if (limit != -1 && completedOfType >= limit)
         {
             return 0;
         }

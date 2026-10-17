@@ -251,6 +251,76 @@ namespace rwe
         CHECK(e[3].multiplier == 0);
     }
 
+    TEST_CASE("a missing number on a limit or weight line is zero, and a negative limit blocks (BT-128)", "[ai][classic]")
+    {
+        SECTION("Limit with a subject and no number forbids the type")
+        {
+            auto e = run("limit armmex\n", ClassicPlan::Hard);
+            CHECK(e[1].limit == 0);
+            CHECK(e[1].limitLocked);
+            CHECK(e[0].limit == -1);
+        }
+
+        SECTION("Weight with a subject and no number zeroes it")
+        {
+            auto e = run("weight armsolar\n", ClassicPlan::Hard);
+            CHECK(e[0].multiplier == 0);
+            CHECK(e[1].multiplier == 100);
+        }
+
+        SECTION("a category with no number takes the zero too")
+        {
+            auto e = run("limit core\n", ClassicPlan::Hard);
+            CHECK(e[2].limit == 0);
+            CHECK(e[0].limit == -1);
+        }
+
+        SECTION("a line with no subject changes nothing")
+        {
+            auto e = run("limit\nweight\n", ClassicPlan::Hard);
+            for (const auto& entry : e)
+            {
+                CHECK(entry.limit == -1);
+                CHECK(entry.multiplier == 100);
+            }
+        }
+
+        SECTION("a negative limit other than -1 is kept, and -1 is still unlimited")
+        {
+            auto e = run("limit armsolar -1\nlimit armmex -2\nlimit corsolar -7.9\n", ClassicPlan::Hard);
+            CHECK(e[0].limit == -1);
+            CHECK(e[1].limit == -2);
+            CHECK(e[2].limit == -7);
+        }
+
+        SECTION("the rating of a type with a negative limit below -1 is zero")
+        {
+            ClassicEconomy economy;
+            economy.energy = 900.0;
+            economy.metal = 450.0;
+            economy.energyStorage = 1000.0;
+            economy.metalStorage = 500.0;
+            economy.netEnergy = 10.0;
+            economy.netMetal = 10.0;
+            economy.energyIncome = 300.0;
+            economy.metalIncome = 10.0;
+            ClassicRatings ratings;
+            ratings.normal = 100;
+            CHECK(classicFinalRating(ratings, economy, 100, -1, 0) > 0);
+            CHECK(classicFinalRating(ratings, economy, 100, -2, 0) == 0);
+        }
+
+        SECTION("any counts only as the first word after plan")
+        {
+            auto e = run("plan easy any\nweight armsolar 0.5\n", ClassicPlan::Hard);
+            CHECK(e[0].multiplier == 100);
+            auto first = run("plan any easy\nweight armsolar 0.5\n", ClassicPlan::Hard);
+            CHECK(first[0].multiplier == 50);
+            auto easy = run("plan easy any\nweight armsolar 0.5\n", ClassicPlan::Easy);
+            CHECK(easy[0].multiplier == 50);
+        }
+    }
+
     TEST_CASE("a name that matches nothing is reported once and changes nothing", "[ai][classic]")
     {
         ClassicScriptReport report;

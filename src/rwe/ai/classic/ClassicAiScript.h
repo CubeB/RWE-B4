@@ -85,7 +85,11 @@ namespace rwe
      * for a matching `easy`, `medium`, `hard` or `any`; directives before the
      * first `plan` always run. `weight <x> <n>` scales the multiplier by n,
      * truncating and clamping to [0, 100], unless that entry's multiplier is
-     * locked; `limit <x> <n>` writes the limit unless its own lock holds.
+     * locked; `limit <x> <n>` writes the limit unless its own lock holds. A
+     * line with a subject and no number takes the number as zero, so
+     * `limit armsabo` forbids the type; a negative limit other than -1 stays
+     * negative and blocks it too (BT-128). `any` counts only as the first word
+     * after `plan`.
      *
      * `x` names a unit type, which affects that one type and LOCKS what it
      * wrote, or a category, which affects every type carrying it and does not

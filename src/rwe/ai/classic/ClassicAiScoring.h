@@ -144,8 +144,9 @@ namespace rwe
 
     /**
      * The final rating for one candidate (0x40bb00): 0 under 50 stored energy
-     * or 25 stored metal, and when `completedOfType >= limit` for a
-     * non-negative limit; otherwise
+     * or 25 stored metal, and when `completedOfType >= limit` for any limit
+     * other than -1 (unlimited), so a negative limit below -1 blocks the type
+     * (BT-128); otherwise
      * (normalWeight * normal + metalWeight * metal + energyWeight * energy)
      * * multiplier / 10000, in integers.
      */
