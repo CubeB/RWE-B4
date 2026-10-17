@@ -201,11 +201,11 @@ namespace rwe
                 break;
 
             case ChatCommand::Kind::ShareMapping:
-                printConsole("ShareMapping: allies already share their map in RWE.", feedbackColor);
+                printConsole(shareNoticeMessage(command.kind), feedbackColor);
                 break;
 
             case ChatCommand::Kind::ShareRadar:
-                printConsole("ShareRadar: allies already share their radar in RWE.", feedbackColor);
+                printConsole(shareNoticeMessage(command.kind), feedbackColor);
                 break;
 
             case ChatCommand::Kind::SetShareMetal:
