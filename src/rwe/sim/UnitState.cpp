@@ -493,6 +493,14 @@ namespace rwe
 
         // not clear if this really belongs here
         clearWeaponTargets();
+
+        // BT-99: the aircraft's search circuit is a mission of its own in the
+        // original (VTOL_SeekAttack, VTOL_SeekGuard), and the order list's
+        // replacement rule removes every node that lacks the preservation
+        // flag, which those do. RWE keeps the circuit on the unit, so it goes
+        // with the list; left behind it was flown again as soon as the next
+        // order ended, and a stopped bomber went on circling its dead target.
+        airLoiter = std::nullopt;
     }
 
     namespace

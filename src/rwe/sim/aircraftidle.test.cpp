@@ -775,4 +775,58 @@ namespace rwe
             REQUIRE(std::holds_alternative<MoveOrder>(orders.back()));
         }
     }
+
+    TEST_CASE("Stop ends an aircraft's search circuit and the airborne flier sets down (BT-99)", "[aircraftidle][bt99]")
+    {
+        // Stop removes every node that lacks the preservation flag, and
+        // SeekAttack carries none; the Stop handler (0x401C20) then builds a
+        // VTOL_LandIfCan at the aircraft's position when it is airborne and
+        // flying. A bomber circling its dead target that is stopped lands.
+        auto script = makeIdleScript();
+        GameSimulation sim(makeIdleTerrain(256, 256), 0u, 0, 0);
+        auto us = addIdlePlayer(sim, "us");
+        auto them = addIdlePlayer(sim, "them");
+        sim.unitDefinitions["bomber"] = makeIdleBomberDef();
+        sim.unitDefinitions["target"] = makeIdleTargetDef();
+        registerIdleModel(sim, "model");
+        defineIdleBomb(sim);
+        sim.losTables = generateLosTables(8);
+
+        auto targetId = spawnIdleUnit(sim, "target", them, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto bomberId = spawnIdleUnit(sim, "bomber", us, SimVector(-900_ss, 200_ss, 0_ss), script);
+        {
+            auto& bomber = sim.getUnitState(bomberId);
+            bomber.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+            UnitWeapon weapon;
+            weapon.weaponType = "bomb";
+            bomber.weapons[0] = weapon;
+            bomber.orders.push_back(createAttackOrder(targetId));
+        }
+        sim.flyingUnitsSet.insert(bomberId);
+
+        for (int tick = 0; tick < 120; ++tick)
+        {
+            sim.tick();
+        }
+        sim.getUnitState(targetId).markAsDeadNoCorpse();
+        for (int tick = 0; tick < 200; ++tick)
+        {
+            sim.tick();
+        }
+        REQUIRE(sim.getUnitState(bomberId).airLoiter.has_value());
+        REQUIRE_FALSE(isLanding(sim.getUnitState(bomberId)));
+
+        REQUIRE(applyUnitCommandToSimulation(sim, us, PlayerUnitCommand(bomberId, PlayerUnitCommand::Stop())));
+        CHECK_FALSE(sim.getUnitState(bomberId).airLoiter.has_value());
+
+        auto settled = false;
+        for (int tick = 0; tick < 900 && !settled; ++tick)
+        {
+            sim.tick();
+            const auto& b = sim.getUnitState(bomberId);
+            settled = isLanding(b) || std::holds_alternative<UnitPhysicsInfoGround>(b.physics);
+        }
+        CHECK(settled);
+        CHECK_FALSE(sim.getUnitState(bomberId).airLoiter.has_value());
+    }
 }
