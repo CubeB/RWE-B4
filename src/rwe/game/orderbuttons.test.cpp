@@ -178,6 +178,26 @@ namespace rwe
         REQUIRE_FALSE(selectionOffersOrderButton(together, OrderButton::Blast));
     }
 
+    TEST_CASE("BLAST is greyed, not hidden, when nothing in the selection can load (BT-105)", "[orderbuttons]")
+    {
+        auto kbot = makeKbot();
+        auto commander = makeCommander();
+        auto transport = makeTransport();
+
+        // A Peewee alone: no D-gun and no transport. The slot shows a dimmed
+        // BLAST, and LOAD is the one that is hidden.
+        std::vector<OrderButtonUnit> peewee{unarmed(kbot)};
+        REQUIRE_FALSE(selectionOffersOrderButton(peewee, OrderButton::Blast));
+        REQUIRE_FALSE(unavailableOrderButtonIsHidden(peewee, OrderButton::Blast));
+        REQUIRE(unavailableOrderButtonIsHidden(peewee, OrderButton::Load));
+        REQUIRE_FALSE(unavailableOrderButtonIsHidden(peewee, OrderButton::Unload));
+
+        // A transport in the selection takes the slot for LOAD and hides BLAST.
+        std::vector<OrderButtonUnit> together{withDgun(commander), unarmed(transport)};
+        REQUIRE(unavailableOrderButtonIsHidden(together, OrderButton::Blast));
+        REQUIRE(selectionOffersOrderButton(together, OrderButton::Load));
+    }
+
     TEST_CASE("repair comes and goes with reclaim", "[orderbuttons]")
     {
         // There is no CanRepair key. The parser copies canreclamate into a

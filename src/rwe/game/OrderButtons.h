@@ -99,6 +99,19 @@ namespace rwe
     bool selectionOffersOrderButton(const std::vector<OrderButtonUnit>& selection, OrderButton button);
 
     /**
+     * Whether a button that the selection does not offer is taken off the panel
+     * rather than greyed (BT-105). The original greys every unavailable button
+     * except where two share a slot: LOAD and BLAST sit at the same place in
+     * ARMGEN.GUI. The slot logic (0x41A3A0 to 0x41A48D) branches on the
+     * selection's load capability. With it, BLAST is hidden and LOAD and
+     * UNLOAD show. Without it, LOAD is hidden, UNLOAD is greyed and BLAST is
+     * greyed unless something in the selection can fire the D-gun, so a
+     * selection with no transport in it shows a dimmed BLAST face rather than
+     * an empty slot.
+     */
+    bool unavailableOrderButtonIsHidden(const std::vector<OrderButtonUnit>& selection, OrderButton button);
+
+    /**
      * The state one of the four stateful toggles (fire orders, move orders,
      * on/off, cloak) shows for a selection. The original gathers it in the
      * selection walk at 0x41B403-0x41B449 into a sentinel accumulator: a unit

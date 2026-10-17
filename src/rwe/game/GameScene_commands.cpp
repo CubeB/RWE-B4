@@ -1007,10 +1007,11 @@ namespace rwe
         }
 
         // The original greys these out rather than taking them away, except
-        // LOAD and BLAST which share a slot and so have to be hidden
-        // (0x41A412 and 0x41A471 call the "make inactive" helper, everything
-        // else calls the "grey" one). The greyed frame is in every button's
-        // own GAF, one past the pressed frame.
+        // LOAD and BLAST which share a slot: LOAD is hidden when nothing can
+        // load, BLAST when something can, and otherwise a dimmed BLAST face
+        // stays (BT-105, 0x41A3A0-0x41A48D; the "make inactive" helper hides,
+        // the other greys). The greyed frame is in every button's own GAF,
+        // one past the pressed frame.
         std::vector<std::string> doomed;
         for (const auto& child : panel.getChildren())
         {
@@ -1023,7 +1024,7 @@ namespace rwe
             auto button = orderButtonFromName(name.substr(sidePrefix.size()));
             if (button && !selectionOffersOrderButton(selection, *button))
             {
-                if (*button == OrderButton::Load || *button == OrderButton::Blast)
+                if (unavailableOrderButtonIsHidden(selection, *button))
                 {
                     doomed.push_back(name);
                 }
