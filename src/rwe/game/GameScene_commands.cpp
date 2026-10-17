@@ -308,8 +308,11 @@ namespace rwe
         }
         else
         {
+            // The order acknowledgement is a unit voice, so SOUNDS.GUI's Unit
+            // Sounds Off silences it like the notifications (BT-SOUND-PARITY
+            // gap 1; Medium keeps it, as it always has here).
             const auto& unit = getUnit(unitId);
-            auto handle = getSound(simulation, gameMediaDatabase, unit.unitType, UnitSoundType::Ok1);
+            auto handle = unitSpeechSetting != UnitSpeechLevel::Off ? getSound(simulation, gameMediaDatabase, unit.unitType, UnitSoundType::Ok1) : std::nullopt;
             if (handle)
             {
                 playUiSound(*handle);
@@ -342,8 +345,9 @@ namespace rwe
     {
         localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::Stop()));
 
+        // A unit voice: silent with Unit Sounds Off (BT-SOUND-PARITY gap 1).
         const auto& unit = getUnit(unitId);
-        auto handle = getSound(simulation, gameMediaDatabase, unit.unitType, UnitSoundType::Ok1);
+        auto handle = unitSpeechSetting != UnitSpeechLevel::Off ? getSound(simulation, gameMediaDatabase, unit.unitType, UnitSoundType::Ok1) : std::nullopt;
         if (handle)
         {
             playUiSound(*handle);
@@ -2808,8 +2812,10 @@ namespace rwe
     {
         selectedUnits.insert(unitId);
 
+        // The selection voice is a unit voice: silent with Unit Sounds Off
+        // (BT-SOUND-PARITY gap 1).
         const auto& unit = getUnit(unitId);
-        auto selectionSound = getSound(simulation, gameMediaDatabase, unit.unitType, UnitSoundType::Select1);
+        auto selectionSound = unitSpeechSetting != UnitSpeechLevel::Off ? getSound(simulation, gameMediaDatabase, unit.unitType, UnitSoundType::Select1) : std::nullopt;
         if (selectionSound)
         {
             playUiSound(*selectionSound);
@@ -2843,7 +2849,7 @@ namespace rwe
         if (selectedUnits.size() == 1)
         {
             const auto& unit = getUnit(*units.begin());
-            auto selectionSound = getSound(simulation, gameMediaDatabase, unit.unitType, UnitSoundType::Select1);
+            auto selectionSound = unitSpeechSetting != UnitSpeechLevel::Off ? getSound(simulation, gameMediaDatabase, unit.unitType, UnitSoundType::Select1) : std::nullopt;
             if (selectionSound)
             {
                 playUiSound(*selectionSound);
