@@ -102,6 +102,9 @@ namespace rwe
         unsigned int damageDealt{0};
         bool peerPaused{false};
 
+        /** Whether the joiner has unpaused yet; a pause before that is held back (#610). */
+        PeerPauseGate pauseGate;
+
         /**
          * The scene tick the driver counts from.
          *
@@ -387,8 +390,20 @@ namespace rwe
             auto packet = decodePeerSpeedPacket(*change);
             if (packet.kind == PeerSpeedPacket::Kind::Pause)
             {
-                link.peerPaused = packet.paused;
-                setPeerPaused(packet.paused);
+                // A pause before the first simulated tick, or before the
+                // joiner's first unpause, is logged and not obeyed (#610): it
+                // is probably the start-up record, and a host that obeyed it
+                // would wait for an unpause that may never come.
+                if (peerPauseAllowed(link.pauseGate, packet.paused, simulation.gameTime.value > 0))
+                {
+                    link.peerPaused = packet.paused;
+                    setPeerPaused(packet.paused);
+                }
+                else
+                {
+                    LOG_INFO << "TA host: ignoring the peer's pause at tick " << simulation.gameTime.value
+                             << " (before the game's first tick or the peer's first unpause)";
+                }
             }
             else if (packet.kind == PeerSpeedPacket::Kind::Speed)
             {

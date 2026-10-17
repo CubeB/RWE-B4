@@ -44,6 +44,16 @@ namespace rwe
         return packet;
     }
 
+    bool peerPauseAllowed(PeerPauseGate& gate, bool paused, bool gameStarted)
+    {
+        if (!paused)
+        {
+            gate.seenUnpause = true;
+            return true;
+        }
+        return gameStarted && gate.seenUnpause;
+    }
+
     std::string gameSpeedMessage(int level)
     {
         auto offset = std::clamp(level, 1, 20) - 10;

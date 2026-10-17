@@ -71,6 +71,26 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a TA joiner's start-up pause does not hold the host paused (#610)", "[ownclock]")
+    {
+        SECTION("a pause before the first simulated tick is held back")
+        {
+            PeerPauseGate gate;
+            REQUIRE_FALSE(peerPauseAllowed(gate, true, false));
+            // Even after the game starts, with no unpause yet, it is still held back.
+            REQUIRE_FALSE(peerPauseAllowed(gate, true, true));
+        }
+
+        SECTION("a pause is obeyed once the game runs and the joiner has unpaused")
+        {
+            PeerPauseGate gate;
+            REQUIRE(peerPauseAllowed(gate, false, false));
+            REQUIRE_FALSE(peerPauseAllowed(gate, true, false));
+            REQUIRE(peerPauseAllowed(gate, true, true));
+            REQUIRE(peerPauseAllowed(gate, false, true));
+        }
+    }
+
     TEST_CASE("the speed line reads Normal at level 10 and the signed step otherwise (BT-178)", "[ownclock]")
     {
         REQUIRE(gameSpeedMessage(10) == "Game Speed Normal");

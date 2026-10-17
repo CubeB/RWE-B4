@@ -65,6 +65,25 @@ namespace rwe
     PeerSpeedPacket decodePeerSpeedPacket(std::uint16_t wire);
 
     /**
+     * Whether a TA joiner's pause may pause the own-clock host (#610). Since
+     * BT-178 the start-up record every sender puts out (`00 01` after the
+     * code) reads as a pause-on, and the ruling only says the senders appear
+     * to start paused: whether a real TotalA.exe then sends the unpause is not
+     * checked. A host that obeyed a start-up pause would sit paused for ever
+     * if it never came, so a pause-on is applied only once the game has
+     * simulated its first tick AND the joiner has sent an unpause of its own.
+     * An unpause is always applied. Anything held back is logged by the caller.
+     * Awaits a check against a real TotalA.exe.
+     */
+    struct PeerPauseGate
+    {
+        bool seenUnpause{false};
+    };
+
+    /** True when the pause state should be applied; records an unpause as it passes. */
+    bool peerPauseAllowed(PeerPauseGate& gate, bool paused, bool gameStarted);
+
+    /**
      * What the in-game exit menu and the save and load dialogs may offer
      * (#658). Restart and load rebuild the scene, and in a network game that
      * drops one player out of the lockstep (or out of the peer's clock) and
