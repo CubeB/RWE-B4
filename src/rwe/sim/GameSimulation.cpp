@@ -1257,6 +1257,28 @@ namespace rwe
         unit.behaviourState = UnitBehaviorStateIdle();
         unit.clearWeaponTargets();
 
+        // BT-73 (0x488570). An owner change is not an owner swap: the
+        // original builds a new unit for the new owner and copies across the
+        // health, build-left, angles, stockpiles and activation mask, and
+        // nothing else -- not the kill count, not the order list, not the
+        // standing postures. The creation routine's postures are then cleared
+        // outright (flag bits 18 to 21): Hold Position and Hold Fire, for any
+        // recipient simulated on this machine, human or computer. A captured
+        // veteran is therefore a recruit that stands still and does not shoot
+        // until told to. (The kill reset rests on the field being absent from
+        // the copy list: medium confidence.)
+        //
+        // The unit is changed in place, so everything above is what the
+        // rebuild amounts to for state that is hashed. Two things are not
+        // reproduced: the unit keeps its id, and its script keeps running
+        // where a new unit would start a fresh instance.
+        unit.kills = 0;
+        if (simulatesLocally(*this, captor))
+        {
+            unit.moveOrders = UnitMovementOrders::HoldPosition;
+            unit.fireOrders = UnitFireOrders::HoldFire;
+        }
+
         events.push_back(UnitCapturedEvent{targetId, previousOwner, captor, captorUnitId});
         return true;
     }

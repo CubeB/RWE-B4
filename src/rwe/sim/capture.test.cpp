@@ -347,4 +347,59 @@ namespace rwe
         REQUIRE(sim.getUnitState(builderId).orders.empty());
         REQUIRE(sim.getUnitState(solarId).isOwnedBy(enemy));
     }
+
+    TEST_CASE("a captured unit is a new unit for the new owner", "[capture]")
+    {
+        // BT-73 (0x488570): the original makes a new unit and copies only
+        // the health, build-left, angles, stockpiles and activation mask. The
+        // kill count and the standing postures are not among them, and the
+        // creation routine's postures are cleared to Hold Position and Hold
+        // Fire for any recipient simulated on this machine.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
+        auto player = addPlayer(sim, "captor");
+        auto enemy = addPlayer(sim, "enemy");
+        sim.unitDefinitions["solar"] = makeSolarDef();
+        auto solarId = addUnitOfType(sim, "solar", enemy, SimVector(100_ss, 0_ss, 100_ss), script);
+        auto& solar = sim.getUnitState(solarId);
+        solar.kills = 12;
+        solar.hitPoints = 200;
+        solar.activated = true;
+        solar.moveOrders = UnitMovementOrders::Maneuver;
+        solar.fireOrders = UnitFireOrders::FireAtWill;
+
+        SECTION("kills are not carried and both postures are cleared")
+        {
+            REQUIRE(sim.captureUnit(solarId, player));
+            REQUIRE(solar.kills == 0);
+            REQUIRE(solar.moveOrders == UnitMovementOrders::HoldPosition);
+            REQUIRE(solar.fireOrders == UnitFireOrders::HoldFire);
+        }
+
+        SECTION("health, activation and position are carried")
+        {
+            REQUIRE(sim.captureUnit(solarId, player));
+            REQUIRE(solar.hitPoints == 200u);
+            REQUIRE(solar.activated);
+            REQUIRE((solar.position == SimVector(100_ss, 0_ss, 100_ss)));
+        }
+
+        SECTION("a recipient simulated elsewhere does not get its postures reset here")
+        {
+            // The original sends a packet and destroys its own copy; the
+            // new unit, and its postures, are the other machine's to make.
+            sim.getPlayer(player).simulation = PlayerSimulation::Remote;
+            REQUIRE(sim.captureUnit(solarId, player));
+            REQUIRE(solar.moveOrders == UnitMovementOrders::Maneuver);
+            REQUIRE(solar.fireOrders == UnitFireOrders::FireAtWill);
+        }
+
+        SECTION("a computer recipient is not told apart from a human one")
+        {
+            sim.getPlayer(player).type = GamePlayerType::Computer;
+            REQUIRE(sim.captureUnit(solarId, player));
+            REQUIRE(solar.moveOrders == UnitMovementOrders::HoldPosition);
+            REQUIRE(solar.fireOrders == UnitFireOrders::HoldFire);
+        }
+    }
 }

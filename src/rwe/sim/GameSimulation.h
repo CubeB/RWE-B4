@@ -852,7 +852,9 @@ namespace rwe
 
         /**
          * Hands an enemy unit to a new owner: it drops its orders and weapon
-         * targets and a UnitCapturedEvent is emitted. Returns true when the
+         * targets, loses its kills, stands on Hold Position and Hold Fire
+         * when the new owner is simulated here (BT-73), and a
+         * UnitCapturedEvent is emitted. Returns true when the
          * unit changed hands, was already the captor's, or no longer exists.
          *
          * The work of getting here is counted on the capture order, not here
