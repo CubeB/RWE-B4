@@ -215,6 +215,24 @@ namespace rwe
             CHECK(e[1].limit == 4);
         }
 
+        SECTION("ALL is a category every type is in, listed or not (BT-78)")
+        {
+            auto e = run("weight all 0.5\nlimit all 4\n", ClassicPlan::Hard);
+            for (const auto& entry : e)
+            {
+                CHECK(entry.multiplier == 50);
+                CHECK(entry.limit == 4);
+                CHECK(!entry.multiplierLocked);
+            }
+        }
+
+        SECTION("ALL does not override a name that claimed the type")
+        {
+            auto e = run("weight armmex 0.2\nweight all 0.5\n", ClassicPlan::Hard);
+            CHECK(e[1].multiplier == 20);
+            CHECK(e[0].multiplier == 50);
+        }
+
         SECTION("the side names are categories too")
         {
             auto e = run("weight core 0.1\n", ClassicPlan::Hard);

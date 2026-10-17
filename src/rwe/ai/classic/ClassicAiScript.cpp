@@ -63,6 +63,13 @@ namespace rwe
             {
                 return false;
             }
+            // The category registrar (0x488E70) always sets a definition's bit
+            // in the category named ALL, whether or not its FBI listed it, so
+            // every type is in it (BT-78).
+            if (token == "ALL")
+            {
+                return true;
+            }
             std::size_t i = 0;
             while (i < categoryList.size())
             {
