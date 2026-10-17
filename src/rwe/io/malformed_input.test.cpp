@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <rwe/LoadingScene_util.h>
 #include <rwe/MovieScene.h>
 #include <rwe/SceneContext.h>
@@ -38,6 +40,7 @@
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/sim_test_util.h>
 #include <rwe/sim/util.h>
+#include <rwe/vfs/CompositeVirtualFileSystem.h>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -173,6 +176,66 @@ namespace rwe
             append(bytes, HpiVersion{HpiMagicNumber, HpiVersionNumber});
             std::istringstream in(bytes);
             REQUIRE_THROWS_AS(HpiArchive(&in), HpiException);
+        }
+    }
+
+    namespace
+    {
+        class ThrowingLeafFileSystem final : public LeafVirtualFileSystem
+        {
+        public:
+            std::string name{"throwing"};
+            const std::string& getPath() const override { return name; }
+            std::optional<std::vector<char>> readFile(const std::string&) const override { throw HpiException("damaged chunk"); }
+            std::vector<std::string> getFileNames(const std::string&, const std::string&) override { return {}; }
+            std::vector<std::string> getDirectoryNames(const std::string&) override { return {}; }
+            std::vector<std::string> getFileNamesRecursive(const std::string&, const std::string&) override { return {}; }
+        };
+
+        class OneFileSystem final : public LeafVirtualFileSystem
+        {
+        public:
+            std::string name{"one"};
+            const std::string& getPath() const override { return name; }
+            std::optional<std::vector<char>> readFile(const std::string&) const override { return std::vector<char>{'o', 'k'}; }
+            std::vector<std::string> getFileNames(const std::string&, const std::string&) override { return {}; }
+            std::vector<std::string> getDirectoryNames(const std::string&) override { return {}; }
+            std::vector<std::string> getFileNamesRecursive(const std::string&, const std::string&) override { return {}; }
+        };
+    }
+
+    TEST_CASE("a file that will not extract, or an archive that will not open, costs only itself", "[malformed]")
+    {
+        SECTION("an entry that throws on extraction is missing from that archive, and the search goes on")
+        {
+            CompositeVirtualFileSystem vfs;
+            vfs.emplaceFileSystem<ThrowingLeafFileSystem>();
+            REQUIRE_FALSE(vfs.readFile("units/x.fbi").has_value());
+
+            vfs.emplaceFileSystem<OneFileSystem>();
+            auto file = vfs.readFile("units/x.fbi");
+            REQUIRE(file.has_value());
+            REQUIRE(file->size() == 2);
+        }
+
+        SECTION("an archive in the data folder that is not an archive is skipped")
+        {
+            auto folder = std::filesystem::temp_directory_path() / "rwe-malformed-archive-test";
+            std::filesystem::create_directories(folder);
+            {
+                std::ofstream bad(folder / "broken.hpi", std::ios::binary);
+                bad << "this is not an HPI";
+            }
+            {
+                std::ofstream empty(folder / "empty.ufo", std::ios::binary);
+            }
+
+            CompositeVirtualFileSystem vfs;
+            REQUIRE_NOTHROW(addToVfs(vfs, folder));
+            REQUIRE_FALSE(vfs.readFile("anything").has_value());
+
+            std::error_code ec;
+            std::filesystem::remove_all(folder, ec);
         }
     }
 
