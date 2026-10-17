@@ -57,6 +57,15 @@ namespace rwe
             REQUIRE_THROWS_AS(decompressZLib(stream.data(), stream.size(), out.data(), out.size()), HpiException);
         }
 
+        SECTION("a whole stream that ends before the declared size is refused, not zero-padded")
+        {
+            // The stream is complete and says so; it just holds fewer bytes
+            // than the chunk header promised. The caller's buffer would have
+            // kept a tail nothing wrote.
+            std::string out(text.size() + 10, '\0');
+            REQUIRE_THROWS_AS(decompressZLib(stream.data(), stream.size(), out.data(), out.size()), HpiException);
+        }
+
         SECTION("garbage is refused")
         {
             std::vector<char> junk(40, 'x');

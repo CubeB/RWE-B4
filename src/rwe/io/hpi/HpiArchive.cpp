@@ -104,7 +104,21 @@ namespace rwe
 
     HpiArchive::HpiArchive(std::istream* stream) : stream(stream)
     {
-        auto v = readRaw<HpiVersion>(*stream);
+        // A file shorter than its own header is an HPI error, not the
+        // stack's contents.
+        auto readHeaderPart = [&stream](auto tag) {
+            using T = decltype(tag);
+            try
+            {
+                return readRaw<T>(*stream);
+            }
+            catch (const TruncatedInputError&)
+            {
+                throw HpiException("HPI file is shorter than its header");
+            }
+        };
+
+        auto v = readHeaderPart(HpiVersion{});
         if (v.marker != HpiMagicNumber)
         {
             throw HpiException("Invalid HPI file marker");
@@ -115,7 +129,7 @@ namespace rwe
             throw HpiException("Unsupported HPI version");
         }
 
-        auto h = readRaw<HpiHeader>(*stream);
+        auto h = readHeaderPart(HpiHeader{});
 
         decryptionKey = transformKey(static_cast<unsigned char>(h.headerKey));
 

@@ -128,6 +128,10 @@ def decompress_lz77(src, max_bytes):
                 in_pos += 2
                 offset = packed >> 4
                 if offset == 0:
+                    # A chunk that ends short of its declared size is refused,
+                    # as hpi_util.cpp refuses it.
+                    if len(out) != max_bytes:
+                        raise HpiError('LZ77 ended before its declared output size')
                     return bytes(out)
                 count = (packed & 0x0F) + 2
                 if len(out) + count > max_bytes:

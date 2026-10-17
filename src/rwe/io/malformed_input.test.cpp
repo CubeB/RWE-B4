@@ -161,6 +161,21 @@ namespace rwe
         REQUIRE_THROWS_AS(HpiArchive(&in), HpiException);
     }
 
+    TEST_CASE("an HPI shorter than its own header is refused, not read from the stack", "[malformed]")
+    {
+        {
+            std::istringstream in(std::string(5, 'x'));
+            REQUIRE_THROWS_AS(HpiArchive(&in), HpiException);
+        }
+        {
+            // The marker and version are there; the header after them is not.
+            std::string bytes;
+            append(bytes, HpiVersion{HpiMagicNumber, HpiVersionNumber});
+            std::istringstream in(bytes);
+            REQUIRE_THROWS_AS(HpiArchive(&in), HpiException);
+        }
+    }
+
     TEST_CASE("an HPI directory that contains itself is refused", "[malformed]")
     {
         // Root directory data at 20: one entry, listed at 28. The entry is a
@@ -181,6 +196,76 @@ namespace rwe
         append(bytes, HpiDirectoryEntry{5000, 20, 0});
         std::istringstream in(bytes);
         REQUIRE_THROWS_AS(HpiArchive(&in), HpiException);
+    }
+
+    TEST_CASE("an HPI LZ77 chunk that ends early or reads an unwritten window is not trusted", "[malformed]")
+    {
+        SECTION("an end marker before the declared size is refused, not left as a zero tail")
+        {
+            // Tag 0b10: a literal 'a', then a pointer whose offset is 0, the
+            // end marker. The chunk header promised five bytes.
+            const char stream[] = {'\x02', 'a', '\x00', '\x00'};
+            char out[5] = {};
+            REQUIRE_THROWS_AS(decompressLZ77(stream, sizeof(stream), out, 5), HpiException);
+        }
+
+        SECTION("the same stream is fine when the size is the size")
+        {
+            const char stream[] = {'\x02', 'a', '\x00', '\x00'};
+            char out[1] = {};
+            decompressLZ77(stream, sizeof(stream), out, 1);
+            REQUIRE(out[0] == 'a');
+        }
+
+        SECTION("a copy from a window position nothing has written reads zero")
+        {
+            // Tag 0b111: two pointers to window offset 5 (length 2 each,
+            // four bytes) then the end marker. The ring was the stack's.
+            const char stream[] = {'\x07', '\x50', '\x00', '\x50', '\x00', '\x00', '\x00'};
+            char out[4];
+            std::memset(out, 0x55, sizeof(out));
+            decompressLZ77(stream, sizeof(stream), out, 4);
+            REQUIRE(out[0] == 0);
+            REQUIRE(out[1] == 0);
+            REQUIRE(out[2] == 0);
+            REQUIRE(out[3] == 0);
+        }
+    }
+
+    TEST_CASE("an HPI file whose chunks add up to less than its declared size is refused", "[malformed]")
+    {
+        // One stored chunk of five bytes inside a file that says it is ten.
+        const std::string body = "hello";
+        std::string bytes;
+        append(bytes, uint32_t{5}); // the chunk size table
+        HpiChunk chunk{};
+        chunk.marker = HpiChunkMagicNumber;
+        chunk.version = 2;
+        chunk.compressionScheme = 0;
+        chunk.encrypted = 0;
+        chunk.compressedSize = 5;
+        chunk.decompressedSize = 5;
+        chunk.checksum = computeChecksum(body.data(), body.size());
+        append(bytes, chunk);
+        bytes += body;
+
+        std::vector<char> out(10, 'z');
+        {
+            std::istringstream in(bytes);
+            REQUIRE_THROWS_AS(extractCompressed(in, 0, out.data(), 10), HpiException);
+        }
+        {
+            std::istringstream in(bytes);
+            std::vector<char> exact(5, 'z');
+            extractCompressed(in, 0, exact.data(), 5);
+            REQUIRE(std::string(exact.begin(), exact.end()) == "hello");
+        }
+        {
+            // And a file that ends inside the chunk's body is refused.
+            std::istringstream in(bytes.substr(0, bytes.size() - 2));
+            std::vector<char> exact(5, 'z');
+            REQUIRE_THROWS_AS(extractCompressed(in, 0, exact.data(), 5), HpiException);
+        }
     }
 
     namespace

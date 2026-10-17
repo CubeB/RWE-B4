@@ -32,7 +32,7 @@ namespace rwe
     template <typename T>
     T readAndDecryptRaw(std::istream& stream, unsigned char key)
     {
-        T val;
+        T val{};
         readAndDecrypt(stream, key, reinterpret_cast<char*>(&val), sizeof(T));
         return val;
     }
