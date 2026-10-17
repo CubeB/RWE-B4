@@ -280,4 +280,82 @@ namespace rwe
         }
     }
 
+    TEST_CASE("an attack order the unit cannot carry out is refused for every sender and leaves its queue alone (BT-63)", "[game][attackeligibility]")
+    {
+        // The interface refuses these before it sends them; the computer
+        // player and a peer do not go through the interface, so the command
+        // refuses them too and every peer agrees.
+        GameSimulation sim(makeFloodedTerrain(64), 0u, 0, 0);
+        auto us = addPlayer(sim, "us");
+        auto them = addPlayer(sim, "them");
+
+        auto gunnerDef = makeTankDef();
+        gunnerDef.canAttack = true;
+        sim.unitDefinitions["gunner"] = gunnerDef;
+        sim.unitDefinitions["target"] = makeTankDef();
+        sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, {UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}});
+        sim.unitDefinitions["target"].objectName = "model";
+
+        WeaponDefinition gun{};
+        gun.maxRange = 300_ss;
+        sim.weaponDefinitions["GUN"] = gun;
+        WeaponDefinition torpedo{};
+        torpedo.maxRange = 400_ss;
+        torpedo.waterWeapon = true;
+        sim.weaponDefinitions["TORPEDO"] = torpedo;
+        WeaponDefinition flak{};
+        flak.maxRange = 680_ss;
+        flak.toAirWeapon = true;
+        sim.weaponDefinitions["FLAK"] = flak;
+
+        auto armed = [&](const char* weaponType) {
+            auto id = addUnitOfType(sim, "gunner", us, SimVector(0_ss, 20_ss, 0_ss), makeEmptyCobScript());
+            UnitWeapon weapon;
+            weapon.weaponType = weaponType;
+            sim.getUnitState(id).weapons[0] = weapon;
+            return id;
+        };
+
+        // Its whole hull is under the sea at 20: origin 0, top 10.
+        auto submerged = addUnitOfType(sim, "target", them, SimVector(500_ss, 0_ss, 0_ss), makeEmptyCobScript());
+
+        auto send = [&](UnitId attacker, const AttackOrder& order) {
+            return applyUnitCommandToSimulation(sim, us, PlayerUnitCommand(attacker, PlayerUnitCommand::IssueOrder(order, Kind::Immediate)));
+        };
+        auto attack = [&](UnitId attacker, UnitId target) { return send(attacker, AttackOrder(target)); };
+        auto attackPlace = [&](UnitId attacker, const SimVector& place) { return send(attacker, AttackOrder(place)); };
+
+        SECTION("a gun against a submerged unit is refused and the queue it has is kept")
+        {
+            auto id = armed("GUN");
+            issue(sim, id, MoveOrder(SimVector(50_ss, 20_ss, 50_ss)), Kind::Immediate);
+            REQUIRE_FALSE(attack(id, submerged));
+            REQUIRE(sim.getUnitState(id).orders.size() == 1);
+            REQUIRE(std::holds_alternative<MoveOrder>(sim.getUnitState(id).orders.front()));
+        }
+
+        SECTION("a torpedo against a submerged unit is accepted")
+        {
+            auto id = armed("TORPEDO");
+            REQUIRE(attack(id, submerged));
+            REQUIRE(std::holds_alternative<AttackOrder>(sim.getUnitState(id).orders.front()));
+        }
+
+        SECTION("an anti-air first weapon is refused a place and accepted nothing on the ground")
+        {
+            auto id = armed("FLAK");
+            REQUIRE_FALSE(attackPlace(id, SimVector(300_ss, 20_ss, 300_ss)));
+            REQUIRE(sim.getUnitState(id).orders.empty());
+
+            auto gunnerId = armed("GUN");
+            REQUIRE(attackPlace(gunnerId, SimVector(300_ss, 20_ss, 300_ss)));
+        }
+
+        SECTION("a unit with no weapon in either slot is not judged")
+        {
+            auto id = addUnitOfType(sim, "gunner", us, SimVector(0_ss, 20_ss, 0_ss), makeEmptyCobScript());
+            REQUIRE(attack(id, submerged));
+        }
+    }
+
 }

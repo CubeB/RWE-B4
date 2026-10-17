@@ -331,6 +331,28 @@ namespace rwe
                 // top is under the surface, and a ground or sea repairer not to
                 // one deeper than it can wade (BT-13). A refusal leaves the
                 // queue alone.
+                // The attack arm can answer "no order" (0x43F154): a unit that
+                // cannot carry the attack out keeps its queue. The interface
+                // asks the same question before it sends the command; the
+                // rule belongs here too, so that the computer player and every
+                // peer see the same refusal (BT-63).
+                if (const auto* attack = std::get_if<AttackOrder>(&issue->order); attack != nullptr)
+                {
+                    const auto& attacker = simulation.getUnitState(unitCommand.unit);
+                    if (const auto* targetUnit = std::get_if<UnitId>(&attack->target))
+                    {
+                        auto target = simulation.tryGetUnitState(*targetUnit);
+                        if (target && !attackOrderIsAccepted(simulation, simulation.unitDefinitions.at(attacker.unitType), attacker, target->get()))
+                        {
+                            return "that unit cannot carry out the attack";
+                        }
+                    }
+                    else if (!attackGroundOrderIsAccepted(simulation, attacker))
+                    {
+                        return "that unit cannot carry out the attack";
+                    }
+                }
+
                 if (const auto* repair = std::get_if<RepairOrder>(&issue->order); repair != nullptr)
                 {
                     auto target = simulation.tryGetUnitState(repair->target);
