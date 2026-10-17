@@ -362,12 +362,17 @@ namespace rwe
 
         auto series = std::make_shared<SpriteSeries>();
 
+        // The blitter draws the glyph's first row at the requested Y minus the
+        // file's signed vertical offset, so text sits that many rows above the
+        // Y it was asked for (BT-162).
+        series->verticalOffset = static_cast<float>(fnt.verticalOffset());
+
+        std::vector<char> glyphBits;
         for (unsigned int i = 0; i < 256; ++i)
         {
-            std::vector<char> glyphBits(512);
-            auto bytesRead = fnt.extract(i, glyphBits.data());
-
-            auto width = bytesRead / 2;
+            auto glyph = fnt.extractGlyph(i, glyphBits);
+            auto width = glyph.width;
+            auto bytesRead = glyph.byteCount;
 
             std::vector<Color> rgbGlyph;
             rgbGlyph.reserve(bytesRead * 8);

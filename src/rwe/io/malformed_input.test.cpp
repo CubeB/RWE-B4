@@ -817,10 +817,41 @@ namespace rwe
         std::istringstream in(fntBytes(16, {{'B', 516}, {'A', 519}, {'C', 5000}}, tail));
         FntArchive font(&in);
 
-        std::vector<char> buffer(512);
-        REQUIRE(font.extract('C', buffer.data()) == 0);
-        REQUIRE(font.extract('A', buffer.data()) == 1);
-        REQUIRE(font.extract('B', buffer.data()) == 2);
+        std::vector<char> buffer;
+        REQUIRE(font.extractGlyph('C', buffer).byteCount == 0);
+        REQUIRE(font.extractGlyph('A', buffer).byteCount == 1);
+        REQUIRE(font.extractGlyph('B', buffer).byteCount == 2);
+    }
+
+    TEST_CASE("a bitmap font glyph is ceil(width x height / 8) bytes, so a 17-row font keeps its last row (BT-162)", "[malformed]")
+    {
+        // A glyph of width 2 and 17 rows is 34 bits: five bytes. The old read
+        // of two bytes a column of width (four) cut the bottom rows off.
+        std::string tail;
+        tail += std::string(1, '');
+        tail += std::string("ÿÿÿÿ", 5);
+        auto bytes = fntBytes(17, {{'A', 516}}, tail);
+
+        // Byte 2 of the file is the signed vertical offset the blitter
+        // subtracts from Y; byte 3 is the first character.
+        bytes[2] = '';
+        std::istringstream in(bytes);
+        FntArchive font(&in);
+        REQUIRE(font.glyphHeight() == 17);
+        REQUIRE(font.verticalOffset() == 3);
+
+        std::vector<char> buffer;
+        auto glyph = font.extractGlyph('A', buffer);
+        REQUIRE(glyph.width == 2);
+        REQUIRE(glyph.byteCount == 5);
+        REQUIRE(buffer.size() == 5);
+        REQUIRE(static_cast<unsigned char>(buffer[4]) == 0x80);
+
+        // A 16-row glyph of the same width is still two bytes a column.
+        std::istringstream in16(fntBytes(16, {{'A', 516}}, tail));
+        FntArchive font16(&in16);
+        REQUIRE(font16.extractGlyph('A', buffer).byteCount == 4);
+        REQUIRE(font16.verticalOffset() == 0);
     }
 
     TEST_CASE("an FBI with no SoundCategory is silent, not refused", "[malformed]")

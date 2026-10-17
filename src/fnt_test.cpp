@@ -12,7 +12,7 @@ void renderFontFile(std::istream& in, std::ostream& out)
 {
     rwe::FntArchive fnt(&in);
 
-    std::vector<char> v(512);
+    std::vector<char> v;
 
     rwe::PngImage image(256, 512);
     for (unsigned int i = 0; i < 256; ++i)
@@ -20,9 +20,13 @@ void renderFontFile(std::istream& in, std::ostream& out)
         auto charX = (i % 16) * 16;
         auto charY = (i / 16) * 32;
 
-        auto byteLength = fnt.extract(i, v.data());
-        auto width = byteLength / 2;
-        auto bitLength = byteLength * 8;
+        auto glyph = fnt.extractGlyph(i, v);
+        auto width = glyph.width;
+        auto bitLength = glyph.byteCount * 8;
+        if (width == 0)
+        {
+            continue;
+        }
 
         for (unsigned int j = 0; j < bitLength; ++j)
         {

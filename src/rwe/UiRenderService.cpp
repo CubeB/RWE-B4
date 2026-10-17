@@ -150,7 +150,7 @@ namespace rwe
 
             if (ch != ' ')
             {
-                drawSprite(x, y, sprite, tint);
+                drawSprite(x, y - font.verticalOffset, sprite, tint);
             }
 
             x += sprite.bounds.right();
@@ -242,7 +242,7 @@ namespace rwe
 
                 const auto& sprite = *font.sprites[ch];
 
-                drawSprite(area.left() + x, area.top() + y, sprite);
+                drawSprite(area.left() + x, area.top() + y - font.verticalOffset, sprite);
 
                 x += sprite.bounds.right();
             }
