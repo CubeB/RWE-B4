@@ -331,6 +331,19 @@ int main(int argc, char* argv[])
                 std::cout << "launching: " << (room->launch(params) ? "yes" : "refused") << "\n" << std::flush;
             }
         });
+        // A launch asked for while the unit sync was still running is asked
+        // for again when it finishes (BT-212).
+        room->onSynced([&](const rwe::TaBattleroomPeer& peer) {
+            if (autoLaunch && peer.ready && room->state() == rwe::TaBattleroomState::Waiting)
+            {
+                rwe::TaBattleroom::LaunchParams params;
+                params.commanderTypeIndex = CommanderTypeIndex;
+                params.commanderUnitId = static_cast<std::uint16_t>(commanderUnitId);
+                params.commanderPosition = hostCommander().position;
+                std::cout << "launching: " << (room->launch(params) ? "yes" : "refused") << "
+" << std::flush;
+            }
+        });
         room->onRefused([&](const std::string& reason) {
             std::cout << "launch refused: " << reason << "\n" << std::flush;
         });

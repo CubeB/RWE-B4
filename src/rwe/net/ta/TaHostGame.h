@@ -79,6 +79,9 @@ namespace rwe
 
         /** Bit 0x20 of the player's own state byte. */
         bool ready{false};
+
+        /** The unit sync is through (BT-212); until it is the panel says SYNCHING and Launch waits. */
+        bool synced{true};
     };
 
     struct TaHostLobbyState

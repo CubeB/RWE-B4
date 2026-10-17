@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdint>
 #include <string>
+#include <thread>
 #include <vector>
 
 /** The battleroom built from fields: a status against a recorded one, the unit
@@ -168,6 +169,9 @@ namespace rwe
                 config.keepaliveInterval = std::chrono::milliseconds(60000);
                 config.pingInterval = pingInterval;
                 config.loadingStepInterval = std::chrono::milliseconds(1);
+                // The unit sync gate has tests of its own; every other case
+                // launches as soon as someone has joined.
+                config.unitSyncTimeout = std::chrono::milliseconds(0);
                 config.gameStartDelay = std::chrono::milliseconds(1);
                 room = std::make_unique<TaBattleroom>(
                     ioContext,
@@ -919,6 +923,75 @@ namespace rwe
         REQUIRE(reason.empty());
     }
 
+    TEST_CASE("a launch waits for the joiner's unit sync, and goes ahead when it is through (BT-212)", "[net][ta]")
+    {
+        Harness h;
+        h.config.unitSyncTimeout = std::chrono::milliseconds(30000);
+        h.room = std::make_unique<TaBattleroom>(h.ioContext, h.session, h.traffic, [&h] { return h.now; }, h.config);
+        std::string reason;
+        int syncedTold = 0;
+        h.room->onRefused([&](const std::string& why) { reason = why; });
+        h.room->onSynced([&](const TaBattleroomPeer&) { ++syncedTold; });
+        h.room->peerJoined(JoinerId);
+        TaPacket team;
+        team.subpackets.push_back(taBuildTeam(JoinerId, 1));
+        h.deliver(team);
+
+        REQUIRE_FALSE(h.room->peer(JoinerId)->synced);
+        REQUIRE_FALSE(h.room->launch(launchParams()));
+        REQUIRE(reason == "units are still syncing");
+        REQUIRE(h.room->state() == TaBattleroomState::Waiting);
+
+        // The joiner declares two types and sends a key for each; the host
+        // has now sent 1 + 2 * 2 = 5 records.
+        TaPacket keys;
+        keys.subpackets.push_back(taBuildUnitSyncTypes(2));
+        keys.subpackets.push_back(taBuildUnitSyncKey(0x1111, 7));
+        keys.subpackets.push_back(taBuildUnitSyncKey(0x2222, 8));
+        h.deliver(keys);
+        REQUIRE_FALSE(h.room->peer(JoinerId)->synced);
+
+        TaPacket partway;
+        partway.subpackets.push_back(taBuildUnitSyncProgress(3));
+        h.deliver(partway);
+        REQUIRE_FALSE(h.room->peer(JoinerId)->synced);
+        REQUIRE(syncedTold == 0);
+
+        TaPacket done;
+        done.subpackets.push_back(taBuildUnitSyncProgress(5));
+        h.deliver(done);
+        REQUIRE(h.room->peer(JoinerId)->synced);
+        REQUIRE(syncedTold == 1);
+
+        reason.clear();
+        REQUIRE(h.room->launch(launchParams()));
+        REQUIRE(reason.empty());
+    }
+
+    TEST_CASE("a joiner that never finishes its unit sync is waited for only so long (BT-212)", "[net][ta]")
+    {
+        Harness h;
+        h.config.unitSyncTimeout = std::chrono::milliseconds(30);
+        h.room = std::make_unique<TaBattleroom>(h.ioContext, h.session, h.traffic, [&h] { return h.now; }, h.config);
+        h.room->peerJoined(JoinerId);
+        TaPacket team;
+        team.subpackets.push_back(taBuildTeam(JoinerId, 1));
+        h.deliver(team);
+
+        REQUIRE_FALSE(h.room->launch(launchParams()));
+        std::this_thread::sleep_for(std::chrono::milliseconds(60));
+        REQUIRE(h.room->peer(JoinerId)->synced);
+        REQUIRE(h.room->launch(launchParams()));
+    }
+
+    TEST_CASE("the unit sync counts are read from bytes 10-13 of sub-types 1 and 4 only (BT-212)", "[net][ta]")
+    {
+        REQUIRE(taParseUnitSyncCount(taBuildUnitSyncTypes(278), 1) == 278u);
+        REQUIRE(taParseUnitSyncCount(taBuildUnitSyncProgress(557), 4) == 557u);
+        REQUIRE_FALSE(taParseUnitSyncCount(taBuildUnitSyncTypes(278), 4));
+        REQUIRE_FALSE(taParseUnitSyncCount(TadBytes{0x1a, 0x01, 0, 0}, 1));
+    }
+
     TEST_CASE("a launch is refused when nobody has joined", "[net][ta]")
     {
         Harness h;
@@ -953,8 +1026,13 @@ namespace rwe
 
         // Over TCP, exactly as a real host sends it (ta-baseline.pcap): 08 06,
         // then 2a/06 and 07 a step, the last 07 with the 1e, and 2a 64/06
-        // alongside the move to UDP.
+        // alongside the move to UDP. This joiner never answers, so the 1e is
+        // sent again while the host waits (BT-228); those resends are taken
+        // out here and counted in a test of their own.
         auto tcp = codeList(h.codesTo(JoinerId, TaTransport::Tcp));
+        auto firstStart = std::find(tcp.begin(), tcp.end(), 0x1E);
+        REQUIRE(firstStart != tcp.end());
+        tcp.erase(std::remove(firstStart + 1, tcp.end(), 0x1E), tcp.end());
         REQUIRE(tcp == std::vector<std::uint8_t>({
                            0x08, 0x06,
                            0x2A, 0x06, 0x07,
@@ -1019,6 +1097,77 @@ namespace rwe
         REQUIRE(launched.address.udp.port() == 34751);
         REQUIRE(launched.team == TaNoTeam);
         REQUIRE(launched.name == "rwe");
+    }
+
+    TEST_CASE("the 1e is the joiner's own start-position index, and is sent again until its 1f arrives (BT-228)", "[net][ta]")
+    {
+        Harness h;
+        h.config.maxLoadedWaits = 1000000;
+        h.config.startResendSteps = 2;
+        h.room = std::make_unique<TaBattleroom>(h.ioContext, h.session, h.traffic, [&h] { return h.now; }, h.config);
+        h.room->peerJoined(JoinerId);
+        h.sent.clear();
+
+        REQUIRE(h.room->launch(launchParams()));
+        h.ioContext.run_for(std::chrono::milliseconds(300));
+        auto count1e = [&] {
+            std::size_t n = 0;
+            for (const auto& one : h.codesTo(JoinerId, TaTransport::Tcp))
+            {
+                if (one[0] == 0x1E)
+                {
+                    REQUIRE(one == taBuildStart(1));
+                    ++n;
+                }
+            }
+            return n;
+        };
+        // The first, then at least one resend: nothing has answered.
+        REQUIRE(count1e() >= 2);
+        REQUIRE(h.room->startResent() >= 1);
+        REQUIRE_FALSE(h.room->startAcknowledged(JoinerId));
+
+        // An acknowledgement naming somebody else is not this joiner's.
+        TaPacket forged;
+        forged.subpackets.push_back(taBuildStartAck(0x12345678));
+        h.deliver(forged);
+        REQUIRE_FALSE(h.room->startAcknowledged(JoinerId));
+
+        TaPacket ack;
+        ack.subpackets.push_back(taBuildStartAck(JoinerId));
+        h.deliver(ack);
+        REQUIRE(h.room->startAcknowledged(JoinerId));
+
+        auto before = count1e();
+        h.ioContext.run_for(std::chrono::milliseconds(200));
+        REQUIRE(count1e() == before);
+    }
+
+    TEST_CASE("a second joiner's 1e carries index 2, the host being 0 (BT-228)", "[net][ta]")
+    {
+        constexpr std::uint32_t Second = 0x08D90E72;
+        Harness h;
+        h.room->peerJoined(JoinerId);
+        h.room->peerJoined(Second);
+        h.sent.clear();
+        // Teams differ so the launch is allowed.
+        TaPacket team;
+        team.subpackets.push_back(taBuildTeam(JoinerId, 1));
+        h.deliver(team, JoinerId);
+
+        REQUIRE(h.room->launch(launchParams()));
+        h.ioContext.run_for(std::chrono::milliseconds(400));
+        auto first = h.codesTo(JoinerId, TaTransport::Tcp);
+        auto second = h.codesTo(Second, TaTransport::Tcp);
+        REQUIRE(std::find(first.begin(), first.end(), taBuildStart(1)) != first.end());
+        REQUIRE(std::find(second.begin(), second.end(), taBuildStart(2)) != second.end());
+    }
+
+    TEST_CASE("a 0x1f is read from its five bytes and nothing else (BT-228)", "[net][ta]")
+    {
+        REQUIRE(taParseStartAck(taBuildStartAck(JoinerId)) == JoinerId);
+        REQUIRE_FALSE(taParseStartAck(TadBytes{0x1f, 1, 2, 3}));
+        REQUIRE_FALSE(taParseStartAck(TadBytes{0x1e, 1, 2, 3, 4}));
     }
 
     TEST_CASE("no in-game record reaches a joiner until it has answered the 1e", "[net][ta]")

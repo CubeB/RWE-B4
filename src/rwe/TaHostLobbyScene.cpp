@@ -359,13 +359,14 @@ namespace rwe
         }
         else
         {
-            if (ImGui::BeginTable("joiners", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
+            if (ImGui::BeginTable("joiners", 6, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
             {
                 ImGui::TableSetupColumn("name");
                 ImGui::TableSetupColumn("side");
                 ImGui::TableSetupColumn("colour");
                 ImGui::TableSetupColumn("team");
                 ImGui::TableSetupColumn("ready");
+                ImGui::TableSetupColumn("units");
                 ImGui::TableHeadersRow();
 
                 for (const auto& peer : lobby.peers)
@@ -381,6 +382,8 @@ namespace rwe
                     ImGui::TextUnformatted(teamName(peer.team).c_str());
                     ImGui::TableNextColumn();
                     ImGui::TextUnformatted(peer.ready ? "yes" : "no");
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(peer.synced ? "synced" : "SYNCHING");
                 }
                 ImGui::EndTable();
             }
@@ -398,10 +401,15 @@ namespace rwe
         else
         {
             ImGui::Separator();
-            if (ImGui::Button("Launch (Enter)", ImVec2(160.0f, 0.0f)))
+            // The original greys Start until every joiner's units have synced
+            // and shows SYNCHING in its place (BT-212).
+            bool synching = std::any_of(lobby.peers.begin(), lobby.peers.end(), [](const auto& peer) { return !peer.synced; });
+            ImGui::BeginDisabled(synching);
+            if (ImGui::Button(synching ? "SYNCHING" : "Launch (Enter)", ImVec2(160.0f, 0.0f)))
             {
                 tryLaunch();
             }
+            ImGui::EndDisabled();
         }
 
         ImGui::End();

@@ -177,7 +177,7 @@ namespace rwe
             {
                 if (auto peer = room->peer(id))
                 {
-                    peers.push_back(TaHostLobbyPeer{peer->name, peer->side, peer->colour, peer->team, peer->ready});
+                    peers.push_back(TaHostLobbyPeer{peer->name, peer->side, peer->colour, peer->team, peer->ready, peer->synced});
                 }
             }
 
@@ -462,6 +462,12 @@ namespace rwe
             return;
         }
         if (std::none_of(lobby.peers.begin(), lobby.peers.end(), [](const auto& peer) { return peer.ready; }))
+        {
+            return;
+        }
+        // A launch the battleroom would refuse for an unfinished unit sync is
+        // not asked for once a frame (BT-212).
+        if (std::any_of(lobby.peers.begin(), lobby.peers.end(), [](const auto& peer) { return !peer.synced; }))
         {
             return;
         }
