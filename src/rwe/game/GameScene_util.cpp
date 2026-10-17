@@ -1949,8 +1949,13 @@ namespace rwe
             return std::nullopt;
         }
 
+        return orderTargetUnit(unit.orders.front(), unit);
+    }
+
+    std::optional<UnitId> orderTargetUnit(const UnitOrder& order, const UnitState& unit)
+    {
         return match(
-            unit.orders.front(),
+            order,
             [](const MoveOrder&) { return std::optional<UnitId>(); },
             [](const AttackOrder& o) {
                 if (auto target = std::get_if<UnitId>(&o.target); target != nullptr)
@@ -1985,6 +1990,37 @@ namespace rwe
                 return std::optional<UnitId>();
             },
             [](const LandOnAirBaseOrder& o) { return std::optional<UnitId>(o.target); });
+    }
+
+    int targetRingRadius(std::optional<std::pair<unsigned int, unsigned int>> targetFootprint)
+    {
+        if (!targetFootprint)
+        {
+            return TargetRingDefaultRadius;
+        }
+        // Half the footprint's longer side, in world units (a footprint cell
+        // is sixteen). The ruling names the radius only as a word in the
+        // target's definition; the register calls it the footprint radius.
+        return static_cast<int>(std::max(targetFootprint->first, targetFootprint->second)) * 8;
+    }
+
+    std::vector<Vector2f> targetRingSegments(const Vector2f& centre, int radius)
+    {
+        // An ellipse of sixteen segments: R across, (int)(R x 0.89) up and
+        // down (BT-185, 0x4399F0). Each segment is a pair of points.
+        constexpr int segments = 16;
+        auto horizontal = static_cast<float>(radius);
+        auto vertical = static_cast<float>(static_cast<int>(static_cast<double>(radius) * 0.89));
+        std::vector<Vector2f> points;
+        points.reserve(static_cast<std::size_t>(segments) * 2);
+        for (int i = 0; i < segments; ++i)
+        {
+            auto angleA = (2.0f * Pif * static_cast<float>(i)) / static_cast<float>(segments);
+            auto angleB = (2.0f * Pif * static_cast<float>(i + 1)) / static_cast<float>(segments);
+            points.emplace_back(centre.x + (std::cos(angleA) * horizontal), centre.y + (std::sin(angleA) * vertical));
+            points.emplace_back(centre.x + (std::cos(angleB) * horizontal), centre.y + (std::sin(angleB) * vertical));
+        }
+        return points;
     }
 
     VentSteamDrawMode ventSteamDrawMode(bool explored, bool visible)

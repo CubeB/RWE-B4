@@ -1484,6 +1484,27 @@ namespace rwe
 
                 auto uiDest = worldToUi * simVectorToFloat(nextPos);
                 worldUiRenderService.drawSprite(uiDest.x, uiDest.y, *(frames[frameIndex]), Color(255, 255, 255, 100));
+
+                // The ring around the order's target while Shift is held
+                // (BT-185): an ellipse of sixteen segments in interface slot
+                // 12, R across and 0.89 R up and down, raised by half the
+                // target's height. It sits on the marker's position, so a
+                // target the player cannot see is ringed where it was last
+                // seen -- the original rings its live position, which gives a
+                // hidden target away, and that is not copied.
+                std::optional<std::pair<unsigned int, unsigned int>> ringFootprint;
+                auto ringCentre = simVectorToFloat(nextPos);
+                if (auto ringTargetId = orderTargetUnit(order, unit))
+                {
+                    if (auto ringTarget = tryGetUnit(*ringTargetId))
+                    {
+                        const auto& ringDefinition = simulation.unitDefinitions.at(ringTarget->get().unitType);
+                        ringFootprint = simulation.getFootprintXZ(ringDefinition.movementCollisionInfo);
+                        ringCentre.y += simScalarToFloat(simulation.unitModelDefinitions.at(ringDefinition.objectName).height) / 2.0f;
+                    }
+                }
+                auto ringUi = worldToUi * ringCentre;
+                worldUiRenderService.drawLines(targetRingSegments(Vector2f(ringUi.x, ringUi.y), targetRingRadius(ringFootprint)), Color(255, 71, 0));
             }
 
             if (drawLines)
