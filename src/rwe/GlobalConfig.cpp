@@ -261,6 +261,61 @@ namespace rwe
         return "Windowed";
     }
 
+    std::optional<OptionsPage> optionsPageFromName(const std::string& name)
+    {
+        if (name == "SOUNDS" || name == "SOUNDSRT")
+        {
+            return OptionsPage::Sound;
+        }
+        if (name == "MUSIC" || name == "MUSICRT")
+        {
+            return OptionsPage::Music;
+        }
+        if (name == "SPEEDS" || name == "SPEEDSRT")
+        {
+            return OptionsPage::Speed;
+        }
+        if (name == "VISUALS" || name == "VISUALRT")
+        {
+            return OptionsPage::Visual;
+        }
+        return std::nullopt;
+    }
+
+    GameOptions optionsWithPageFrom(const GameOptions& base, const GameOptions& source, OptionsPage page)
+    {
+        auto result = base;
+        switch (page)
+        {
+            case OptionsPage::Sound:
+                result.soundVolume = source.soundVolume;
+                result.soundMode = source.soundMode;
+                result.unitSpeech = source.unitSpeech;
+                break;
+            case OptionsPage::Music:
+                result.musicVolume = source.musicVolume;
+                result.musicEnabled = source.musicEnabled;
+                result.musicTrackMode = source.musicTrackMode;
+                result.musicTrackTypes = source.musicTrackTypes;
+                break;
+            case OptionsPage::Speed:
+                result.scrollSpeed = source.scrollSpeed;
+                result.uiScale = source.uiScale;
+                break;
+            case OptionsPage::Visual:
+                result.windowMode = source.windowMode;
+                result.shadows = source.shadows;
+                result.shading = source.shading;
+                result.antiAlias = source.antiAlias;
+                result.buildingHalo = source.buildingHalo;
+                result.antiAliasUnits = source.antiAliasUnits;
+                result.gamma = source.gamma;
+                result.cameraZoom = source.cameraZoom;
+                break;
+        }
+        return result;
+    }
+
     void writeGameOptions(const std::filesystem::path& configPath, const GameOptions& options)
     {
         updateConfigFile(configPath, {

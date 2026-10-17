@@ -771,8 +771,10 @@ namespace rwe
     GameOptions GameScene::currentInGameOptions() const
     {
         return GameOptions{
-            static_cast<unsigned int>(sceneContext.audioService->getSoundVolume() * 100.0f),
-            static_cast<unsigned int>(sceneContext.audioService->getMusicVolume() * 100.0f),
+            // Rounded: 0.29f * 100 truncates to 28, and a page's Default or
+            // Undo re-applies the other pages' fields from here.
+            static_cast<unsigned int>(std::lround(sceneContext.audioService->getSoundVolume() * 100.0f)),
+            static_cast<unsigned int>(std::lround(sceneContext.audioService->getMusicVolume() * 100.0f)),
             sceneContext.audioService->isMusicEnabled(),
             pendingWindowMode,
             shadowsEnabled,
@@ -1107,14 +1109,22 @@ namespace rwe
                 applyInGameOptions(gameOptionsUndo);
                 openGameMenuRoot();
             }
-            else if (control == "RESTORE")
+            else if (control == "RESTORE" || control == "UNDO")
             {
-                applyInGameOptions(GameOptions{});
-                openInGameOptions(inGameOptionsPage);
-            }
-            else if (control == "UNDO")
-            {
-                applyInGameOptions(gameOptionsUndo);
+                // Each page has its own pair and they act on that page's
+                // fields alone (BT-213): the sound page's UNDO puts back only
+                // the sound fields from the opening snapshot, and its RESTORE
+                // writes only the sound defaults. CANCEL still puts every
+                // page back.
+                auto source = control == "RESTORE" ? GameOptions{} : gameOptionsUndo;
+                if (auto page = optionsPageFromName(inGameOptionsPage))
+                {
+                    applyInGameOptions(optionsWithPageFrom(currentInGameOptions(), source, *page));
+                }
+                else
+                {
+                    applyInGameOptions(source);
+                }
                 openInGameOptions(inGameOptionsPage);
             }
             else if (control == "NOTRAK")
@@ -1203,7 +1213,9 @@ namespace rwe
             }
             else if (control == "TEST")
             {
-                if (auto sound = sceneContext.audioService->loadSound("BUTTON10"))
+                // The sound test plays an explosion (sounds/explode.wav, the
+                // string at 0x5069D8; BT-213), at the volume as it now stands.
+                if (auto sound = sceneContext.audioService->loadSound("explode"))
                 {
                     sceneContext.audioService->playSound(*sound);
                 }

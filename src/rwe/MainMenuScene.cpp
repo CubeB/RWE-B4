@@ -176,8 +176,10 @@ namespace rwe
     GameOptions MainMenuScene::currentOptions() const
     {
         return GameOptions{
-            static_cast<unsigned int>(sceneContext.audioService->getSoundVolume() * 100.0f),
-            static_cast<unsigned int>(sceneContext.audioService->getMusicVolume() * 100.0f),
+            // Rounded: 0.29f * 100 truncates to 28, and a page's Default or
+            // Undo re-applies the other pages' fields from here.
+            static_cast<unsigned int>(std::lround(sceneContext.audioService->getSoundVolume() * 100.0f)),
+            static_cast<unsigned int>(std::lround(sceneContext.audioService->getMusicVolume() * 100.0f)),
             sceneContext.audioService->isMusicEnabled(),
             pendingWindowMode,
             pendingShadows,
@@ -922,7 +924,15 @@ namespace rwe
             }
             else if (message == "RESTORE")
             {
-                applyOptions(GameOptions{});
+                // This page's fields only (BT-213); CANCEL puts every page back.
+                if (auto page = optionsPageFromName(currentOptionsPage))
+                {
+                    applyOptions(optionsWithPageFrom(currentOptions(), GameOptions{}, *page));
+                }
+                else
+                {
+                    applyOptions(GameOptions{});
+                }
                 goToOptionsPage(currentOptionsPage);
             }
             else if (message == "BSHADOWS")
@@ -981,7 +991,14 @@ namespace rwe
             }
             else if (message == "UNDO")
             {
-                applyOptions(optionsUndo);
+                if (auto page = optionsPageFromName(currentOptionsPage))
+                {
+                    applyOptions(optionsWithPageFrom(currentOptions(), optionsUndo, *page));
+                }
+                else
+                {
+                    applyOptions(optionsUndo);
+                }
                 goToOptionsPage(currentOptionsPage);
             }
             else if (message == "NOTRAK")
@@ -1010,7 +1027,8 @@ namespace rwe
             }
             else if (message == "TEST")
             {
-                if (auto sound = sceneContext.audioService->loadSound("BUTTON10"))
+                // An explosion (sounds/explode.wav), at the volume as it now stands (BT-213).
+                if (auto sound = sceneContext.audioService->loadSound("explode"))
                 {
                     sceneContext.audioService->playSound(*sound);
                 }
