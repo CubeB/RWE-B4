@@ -10,12 +10,22 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace rwe
 {
     /** Type, checksum u16, the marker u32. */
     inline constexpr std::size_t TaPacketHeaderSize = 7;
+
+    /** Why a host turns a player away: the byte after the id in a 0x1b. */
+    inline constexpr std::uint8_t TaRejectClosed = 3;
+
+    /** A joiner that has been silent for too long (BT-233). */
+    inline constexpr std::uint8_t TaRejectSilent = 6;
+
+    /** The size of a 0x05 chat subpacket: the code and a 64-byte body (BT-203). */
+    inline constexpr std::size_t TaChatSubPacketSize = 65;
 
     /** What a reply wears. A sender's own traffic wears a count instead. */
     inline constexpr std::uint32_t TaReplyMarker = 0xFFFFFFFF;
@@ -76,4 +86,21 @@ namespace rwe
      * dropped at the door.
      */
     std::optional<TaPacketParse> taParsePacket(std::span<const std::uint8_t> bytes);
+
+    /**
+     * 0x1b: a player is turned away, six bytes -- the code, the rejected
+     * player's id and the reason (BT-242). A joiner reads its own id in it and
+     * leaves the session.
+     */
+    TadBytes taBuildReject(std::uint32_t playerId, std::uint8_t reason);
+
+    /**
+     * 0x05: one line of chat to a TA peer, 65 bytes -- the code and a 64-byte
+     * body (BT-203). The line is the whole text the peer prints, the sender's
+     * name already inside it as `<Name> text` or `<Name->Allies> text`, so the
+     * receiver adds nothing. The original copies the line with a bounded
+     * 64-byte copy and its receiver keeps 63 characters, so the line is cut to
+     * 63 bytes (never in the middle of a UTF-8 sequence) and padded with NULs.
+     */
+    TadBytes taBuildChat(const std::string& line);
 }

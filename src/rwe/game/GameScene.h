@@ -1828,6 +1828,24 @@ namespace rwe
         /** Puts one line of chat on screen and in the log. */
         void printChatLine(PlayerId sender, const std::string& text, ChatLabel label = ChatLabel::None);
 
+        /**
+         * A line of chat from a TA peer or a TA demo. The text already carries
+         * its own `<Name> ` label, so it is printed as it is, in the speaker's
+         * colour, without the name RWE's own lines are given (#656).
+         */
+        void printTaChatLine(PlayerId sender, const std::string& text);
+
+        /** The TA joiner's player, or nothing when this game has no TA peer. */
+        std::optional<PlayerId> taHostRemotePlayer() const;
+
+        /**
+         * Sends a line to the TA joiner as a 0x05, when it is among the
+         * recipients. `directed` is a line addressed to some players and not
+         * everyone: it goes as a directed send, which carries no sequence
+         * number (BT-203, BT-207). False when the peer cannot be reached.
+         */
+        bool submitTaHostChat(const std::string& wireText, ChatLabel label, bool directed, const std::vector<PlayerId>& recipients);
+
         /** The message bar itself, drawn over the world while it is open. */
         void renderChatBar();
 

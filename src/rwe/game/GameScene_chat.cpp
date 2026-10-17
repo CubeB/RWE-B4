@@ -105,10 +105,22 @@ namespace rwe
             return;
         }
 
+        // A TA joiner is the one remote player there is, and it is reached
+        // through its own link and not through the lockstep service, which has
+        // no peers in an own-clock game.
+        auto taPeer = taHostRemotePlayer();
+
         std::vector<unsigned int> peers;
-        for (const auto& id : gameNetworkService->remotePlayerIds())
+        if (taPeer)
         {
-            peers.push_back(id.value);
+            peers.push_back(taPeer->value);
+        }
+        else
+        {
+            for (const auto& id : gameNetworkService->remotePlayerIds())
+            {
+                peers.push_back(id.value);
+            }
         }
 
         auto chosen = chatRecipients(route.address, peers, localPlayerId.value, [&](unsigned int a, unsigned int b) {
@@ -129,7 +141,10 @@ namespace rwe
             recipients.push_back(PlayerId(id));
         }
 
-        if (!gameNetworkService->submitChatMessage(wireText, route.label, recipients))
+        auto delivered = taPeer
+            ? submitTaHostChat(wireText, route.label, route.address.kind != ChatAddress::Kind::Everyone, recipients)
+            : gameNetworkService->submitChatMessage(wireText, route.label, recipients);
+        if (!delivered)
         {
             printConsole("Message not sent: a player is not answering", Color(252, 252, 0));
             return;
@@ -329,6 +344,21 @@ namespace rwe
             playerColorToRgb(simulation.getPlayer(sender).color));
 
         LOG_INFO << "Chat from player " << sender.value << ": " << text;
+    }
+
+    void GameScene::printTaChatLine(PlayerId sender, const std::string& text)
+    {
+        // Off a socket or out of a recording, so it is cleaned as a peer's
+        // line is: invalid UTF-8 replaced, control characters dropped, length
+        // bounded.
+        auto clean = sanitizeChatText(text);
+        if (clean.empty())
+        {
+            return;
+        }
+
+        printConsole(clean, playerColorToRgb(simulation.getPlayer(sender).color));
+        LOG_INFO << "Chat from player " << sender.value << ": " << clean;
     }
 
     std::string GameScene::chatBarPrompt() const

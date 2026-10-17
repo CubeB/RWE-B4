@@ -4,6 +4,8 @@
 #include <imgui.h>
 #include <optional>
 #include <rwe/game/PlayerCommand.h>
+#include <rwe/game/chat_util.h>
+#include <rwe/net/ta/TaPacket.h>
 #include <rwe/net/ta/TaHostGame.h>
 #include <rwe/net/ta/TaOutboundBatcher.h>
 #include <rwe/puppet/TaLiveReceiver.h>
@@ -71,6 +73,9 @@ namespace rwe
 
         /** Its DirectPlay id, which is what a message to it is addressed by. */
         std::uint32_t peer{0};
+
+        /** The joiner has gone, so a line of chat has nobody to reach. */
+        bool joinerLeft{false};
 
         std::unique_ptr<TadPuppetDriver> driver;
         std::unique_ptr<TaLiveReceiver> receiver;
@@ -214,6 +219,54 @@ namespace rwe
         taHostLink = std::move(link);
     }
 
+    std::optional<PlayerId> GameScene::taHostRemotePlayer() const
+    {
+        if (!taHostLink)
+        {
+            return std::nullopt;
+        }
+        return taHostLink->remote;
+    }
+
+    bool GameScene::submitTaHostChat(const std::string& wireText, ChatLabel label, bool directed, const std::vector<PlayerId>& recipients)
+    {
+        if (!taHostLink || taHostLink->joinerLeft)
+        {
+            return false;
+        }
+        auto& link = *taHostLink;
+
+        // A line for players who are not the joiner has nobody here to go to;
+        // it was typed and shown, and there is nothing to send.
+        if (std::find(recipients.begin(), recipients.end(), link.remote) == recipients.end())
+        {
+            return true;
+        }
+
+        // The line is built here as the original builds it: `<Name> text`, or
+        // `<Name->Allies> text` for a restricted one, with the sender's name
+        // inside the text and nothing else naming the sender (BT-203).
+        std::string line = "<" + playerDisplayName(localPlayerId);
+        if (label != ChatLabel::None)
+        {
+            line += std::string("->") + chatLabelName(label);
+        }
+        line += "> " + wireText;
+
+        // Everyone is one broadcast with a sender's own count; a line for some
+        // players is a directed send to each, which carries minus one (BT-207).
+        if (directed)
+        {
+            link.traffic->queueReply(link.peer, taBuildChat(line), TaTransport::Udp);
+        }
+        else
+        {
+            link.traffic->queue(link.peer, taBuildChat(line), TaTransport::Udp);
+        }
+        link.traffic->flush();
+        return true;
+    }
+
     unsigned int GameScene::taHostTicksBehind() const
     {
         if (!taHostLink || !taHostLink->receiver)
@@ -260,9 +313,20 @@ namespace rwe
 
         for (auto& item : link.host->takeInbound())
         {
+            // Only the joiner's traffic is the joiner's, and only the joiner's
+            // departure removes it. The network thread filters the same way;
+            // this is the end that does the removing, so it asks again (#715).
+            if (item.peer != link.peer)
+            {
+                LOG_WARN << "TA host: dropped a message from peer 0x" << std::hex << item.peer << std::dec
+                         << ", which is not the joiner";
+                continue;
+            }
+
             if (item.kind == TaHostInbound::Kind::PeerLeft)
             {
                 LOG_INFO << "TA host: the joiner left";
+                link.joinerLeft = true;
                 removeRemotePlayer(simulation, link.remote);
                 continue;
             }
@@ -303,7 +367,10 @@ namespace rwe
 
         for (auto& line : link.driver->takeChat())
         {
-            printChatLine(line.player, line.ally ? "(ally) " + line.text : line.text);
+            // A live TA never sends the recorder's 0xF9: allied chat reaches
+            // here as an ordinary 0x05 whose label is inside the text, so no
+            // "(ally)" is added, and the name is not added again (#656, BT-205).
+            printTaChatLine(line.player, line.text);
         }
 
         if (auto change = link.driver->takeSpeedChange())

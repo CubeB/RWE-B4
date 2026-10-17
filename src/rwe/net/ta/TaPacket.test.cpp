@@ -319,4 +319,93 @@ namespace rwe
             REQUIRE(parsed->packet.subpackets[0].size() == size);
         }
     }
+
+    TEST_CASE("a packet with one byte changed after it was sealed reports a bad checksum", "[net][ta]")
+    {
+        TaPacket packet;
+        packet.type = TadPacketUncompressed;
+        packet.subpackets.push_back(TadBytes(36, 0x0d));
+        auto wire = packet.build();
+
+        auto good = taParsePacket(wire);
+        REQUIRE(good);
+        REQUIRE(good->checksumValid);
+
+        // Every position past the header, so the walk is told nothing by where
+        // the damage is: the live paths drop on this flag (#657).
+        for (std::size_t i = 3; i + 4 < wire.size(); i += 5)
+        {
+            CAPTURE(i);
+            auto damaged = wire;
+            damaged[i] = static_cast<std::uint8_t>(damaged[i] ^ 0x40);
+            auto parsed = taParsePacket(damaged);
+            REQUIRE(parsed);
+            REQUIRE_FALSE(parsed->checksumValid);
+        }
+    }
+
+    TEST_CASE("a reject is the code, the rejected player's id and a reason", "[net][ta]")
+    {
+        auto reject = taBuildReject(0x08D90E74, TaRejectClosed);
+        REQUIRE(reject == TadBytes{0x1b, 0x74, 0x0e, 0xd9, 0x08, 0x03});
+        REQUIRE(tadExpectedSubPacketSize(reject.data(), reject.size()) == reject.size());
+        REQUIRE(taBuildReject(1, TaRejectSilent).back() == 6);
+    }
+
+    TEST_CASE("a chat line is 65 bytes: the code and a 64-byte NUL-padded body", "[net][ta]")
+    {
+        auto chat = taBuildChat("<rwe> hello");
+        REQUIRE(chat.size() == TaChatSubPacketSize);
+        REQUIRE(chat[0] == 0x05);
+        REQUIRE(std::string(chat.begin() + 1, chat.begin() + 12) == "<rwe> hello");
+        REQUIRE(std::all_of(chat.begin() + 12, chat.end(), [](std::uint8_t b) { return b == 0; }));
+
+        // The splitter agrees on the length, so it cannot be mistaken for the
+        // longer-than-it-should-be form older recorders wrote.
+        REQUIRE(tadExpectedSubPacketSize(chat.data(), chat.size()) == chat.size());
+    }
+
+    TEST_CASE("a chat line is cut to 63 bytes so the body keeps a terminator", "[net][ta]")
+    {
+        auto chat = taBuildChat(std::string(200, 'a'));
+        REQUIRE(chat.size() == TaChatSubPacketSize);
+        REQUIRE(std::count(chat.begin() + 1, chat.end(), static_cast<std::uint8_t>('a')) == 63);
+        REQUIRE(chat.back() == 0);
+
+        // A 64th character does not survive either: the original's receiver
+        // keeps 63.
+        auto exact = taBuildChat(std::string(63, 'b'));
+        REQUIRE(exact[63] == 'b');
+        REQUIRE(exact[64] == 0);
+    }
+
+    TEST_CASE("a chat line is never cut inside a UTF-8 sequence, and holds no early NUL", "[net][ta]")
+    {
+        // 62 ASCII bytes, then a two-byte character straddling the 63-byte cut.
+        std::string line(62, 'x');
+        line += "\xC3\xA9";
+        auto chat = taBuildChat(line);
+        REQUIRE(chat[62] == 'x');
+        REQUIRE(chat[63] == 0);
+
+        auto withNul = taBuildChat(std::string("a\0b", 3));
+        REQUIRE(withNul[1] == 'a');
+        REQUIRE(withNul[2] == '?');
+        REQUIRE(withNul[3] == 'b');
+    }
+
+    TEST_CASE("a chat subpacket survives the envelope and is walked as one subpacket", "[net][ta]")
+    {
+        TaPacket packet;
+        packet.type = TadPacketCompressed;
+        packet.subpackets.push_back(taBuildChat("<Albert> wtf"));
+        packet.subpackets.push_back(TadBytes{0x06});
+
+        auto parsed = taParsePacket(packet.build());
+        REQUIRE(parsed);
+        REQUIRE(parsed->checksumValid);
+        REQUIRE(parsed->packet.subpackets.size() == 2);
+        REQUIRE(parsed->packet.subpackets[0].size() == TaChatSubPacketSize);
+        REQUIRE(parsed->packet.subpackets[1] == TadBytes{0x06});
+    }
 }
