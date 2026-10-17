@@ -221,14 +221,40 @@ namespace rwe
         // beside it is the only sign. RWE used to flash the whole bar red
         // while stalled, which the original never does.
 
+        // The displayed amounts glide toward the real ones (BT-148): once a
+        // call, by an eighth of the gap and at least one, held to the
+        // capacity. The ruling is medium-confident that the original runs it
+        // once per drawn frame; it is run here once per scene tick, so that
+        // the speed does not depend on the frame rate.
+        {
+            const auto& hudPlayer = getPlayer(hudPlayerId());
+            if (hudGlideTick != sceneTime.value)
+            {
+                hudGlideTick = sceneTime.value;
+                hudEnergyShown = hudGlideStep(hudEnergyShown, std::max(Energy(0), hudPlayer.energy).value, hudPlayer.maxEnergy.value);
+                hudMetalShown = hudGlideStep(hudMetalShown, std::max(Metal(0), hudPlayer.metal).value, hudPlayer.maxMetal.value);
+            }
+        }
+
         // draw energy bar
         {
             const auto& rect = localSideData.energyBar.toDiscreteRect();
             const auto& localPlayer = getPlayer(hudPlayerId());
-            auto rectWidth = localPlayer.maxEnergy == Energy(0) ? 0 : (rect.width * std::max(Energy(0), localPlayer.energy).value) / localPlayer.maxEnergy.value;
+            auto fillPixels = hudBarFillPixels(rect.width, hudEnergyShown, localPlayer.maxEnergy.value);
             const auto& colorIndex = localSideData.energyColor;
             const auto& color = sceneContext.palette->at(colorIndex);
-            chromeUiRenderService.fillColor(rect.x, rect.y, rectWidth, rect.height, color);
+            if (fillPixels > 0)
+            {
+                chromeUiRenderService.fillColor(rect.x, rect.y, fillPixels, rect.height, color);
+            }
+
+            // The share marker: three pixels wide over the bar's full height,
+            // interface slot 12, only while the real amount is above the
+            // player's share threshold (BT-148).
+            if (auto marker = hudShareMarkerOffset(rect.width, localPlayer.energyReserve.value, localPlayer.maxEnergy.value, localPlayer.energy.value))
+            {
+                chromeUiRenderService.fillColor(rect.x + *marker, rect.y, hudShareMarkerWidth, rect.height, Color(255, 71, 0));
+            }
         }
         {
             const auto& rect = localSideData.energy0;
@@ -241,17 +267,17 @@ namespace rwe
         }
         {
             const auto& rect = localSideData.energyNum;
-            auto text = formatResource(std::max(Energy(0), getPlayer(hudPlayerId()).energy));
+            auto text = formatResource(Energy(hudEnergyShown));
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont);
         }
         {
             const auto& rect = localSideData.energyProduced;
-            auto text = formatResourceDelta(getPlayer(hudPlayerId()).previousEnergyProductionBuffer);
+            auto text = formatHudEnergyIncome(getPlayer(hudPlayerId()).previousEnergyProductionBuffer);
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont, Color(83, 223, 79));
         }
         {
             const auto& rect = localSideData.energyConsumed;
-            auto text = formatResourceDelta(getPlayer(hudPlayerId()).previousDesiredEnergyConsumptionBuffer);
+            auto text = formatHudEnergyUse(getPlayer(hudPlayerId()).previousDesiredEnergyConsumptionBuffer);
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont, Color(255, 71, 0));
         }
 
@@ -259,10 +285,18 @@ namespace rwe
         {
             const auto& rect = localSideData.metalBar.toDiscreteRect();
             const auto& localPlayer = getPlayer(hudPlayerId());
-            auto rectWidth = localPlayer.maxMetal == Metal(0) ? 0 : (rect.width * std::max(Metal(0), localPlayer.metal).value) / localPlayer.maxMetal.value;
+            auto fillPixels = hudBarFillPixels(rect.width, hudMetalShown, localPlayer.maxMetal.value);
             const auto& colorIndex = localSideData.metalColor;
             const auto& color = sceneContext.palette->at(colorIndex);
-            chromeUiRenderService.fillColor(rect.x, rect.y, rectWidth, rect.height, color);
+            if (fillPixels > 0)
+            {
+                chromeUiRenderService.fillColor(rect.x, rect.y, fillPixels, rect.height, color);
+            }
+
+            if (auto marker = hudShareMarkerOffset(rect.width, localPlayer.metalReserve.value, localPlayer.maxMetal.value, localPlayer.metal.value))
+            {
+                chromeUiRenderService.fillColor(rect.x + *marker, rect.y, hudShareMarkerWidth, rect.height, Color(255, 71, 0));
+            }
         }
         {
             const auto& rect = localSideData.metal0;
@@ -275,7 +309,7 @@ namespace rwe
         }
         {
             const auto& rect = localSideData.metalNum;
-            auto text = formatResource(std::max(Metal(0), getPlayer(hudPlayerId()).metal));
+            auto text = formatResource(Metal(hudMetalShown));
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont);
         }
         {

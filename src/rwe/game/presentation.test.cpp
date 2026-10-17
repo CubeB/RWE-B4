@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/MovieScene.h>
 #include <rwe/game/GameScene_util.h>
+#include <rwe/resource_io.h>
 
 /**
  * Small pure rules of how the game is drawn, each pinned to a byte-tactics
@@ -88,6 +89,57 @@ namespace rwe
         auto full = moviePlacement(640, 480, 0);
         REQUIRE(full.y == 0);
         REQUIRE(full.height == 480);
+    }
+
+    TEST_CASE("the resource HUD's displayed amount moves an eighth of the gap, at least one (BT-148)", "[presentation]")
+    {
+        // 1000 away: an eighth is 125.
+        REQUIRE(hudGlideStep(0.0f, 1000.0f, 2000.0f) == Catch::Approx(125.0f));
+        // Both are truncated first: 10.9 is 10, 100.9 is 100, 90 / 8 is 11.
+        REQUIRE(hudGlideStep(10.9f, 100.9f, 2000.0f) == Catch::Approx(21.0f));
+        // Less than eight away the eighth truncates to zero and the step is forced to one.
+        REQUIRE(hudGlideStep(10.0f, 15.0f, 2000.0f) == Catch::Approx(11.0f));
+        REQUIRE(hudGlideStep(15.0f, 10.0f, 2000.0f) == Catch::Approx(14.0f));
+        // Downwards the division truncates toward zero: -90 / 8 is -11.
+        REQUIRE(hudGlideStep(100.0f, 10.0f, 2000.0f) == Catch::Approx(89.0f));
+        // Already there stays there.
+        REQUIRE(hudGlideStep(40.0f, 40.0f, 2000.0f) == Catch::Approx(40.0f));
+        // Held to the storage capacity.
+        REQUIRE(hudGlideStep(95.0f, 5000.0f, 100.0f) == Catch::Approx(100.0f));
+    }
+
+    TEST_CASE("a resource bar fills an inclusive rectangle and is drawn only with storage (BT-148)", "[presentation]")
+    {
+        // 100 pixels wide: the bar's width is 99 and the rectangle inclusive.
+        REQUIRE(hudBarFillPixels(100, 1000.0f, 1000.0f) == 100);
+        REQUIRE(hudBarFillPixels(100, 500.0f, 1000.0f) == 50);
+        REQUIRE(hudBarFillPixels(100, 0.0f, 1000.0f) == 1);
+        REQUIRE(hudBarFillPixels(100, 3000.0f, 1000.0f) == 100);
+        REQUIRE(hudBarFillPixels(100, 500.0f, 0.0f) == 0);
+    }
+
+    TEST_CASE("the share marker needs a threshold above zero and an amount above it (BT-148)", "[presentation]")
+    {
+        REQUIRE(hudShareMarkerWidth == 3);
+        // Threshold 500 of 1000 on a 100 pixel bar is 49 pixels in.
+        REQUIRE(hudShareMarkerOffset(100, 500.0f, 1000.0f, 800.0f) == 49);
+        // Strictly above: at the threshold, no marker.
+        REQUIRE_FALSE(hudShareMarkerOffset(100, 500.0f, 1000.0f, 500.0f).has_value());
+        REQUIRE_FALSE(hudShareMarkerOffset(100, 0.0f, 1000.0f, 800.0f).has_value());
+        REQUIRE_FALSE(hudShareMarkerOffset(100, -5.0f, 1000.0f, 800.0f).has_value());
+    }
+
+    TEST_CASE("energy income takes a K above 99999 and use only below minus 99999 (BT-148)", "[presentation]")
+    {
+        REQUIRE(formatHudEnergyIncome(Energy(1234.9f)) == "1234");
+        REQUIRE(formatHudEnergyIncome(Energy(99999.0f)) == "99999");
+        REQUIRE(formatHudEnergyIncome(Energy(123456.0f)) == "123K");
+
+        REQUIRE(formatHudEnergyUse(Energy(1234.9f)) == "1234");
+        // The quirk: a positive six-digit use prints in full.
+        REQUIRE(formatHudEnergyUse(Energy(123456.0f)) == "123456");
+        REQUIRE(formatHudEnergyUse(Energy(-250000.0f)) == "250K");
+        REQUIRE(formatHudEnergyUse(Energy(-99999.0f)) == "99999");
     }
 
     TEST_CASE("a feature marked nodisplayinfo shows no footer text (BT-147)", "[presentation]")

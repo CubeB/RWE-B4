@@ -597,6 +597,15 @@ namespace rwe
         int minimapFogWidth{0};
         int minimapFogHeight{0};
         GameTime fogSpriteTime{0};
+
+        /**
+         * The resource HUD's displayed amounts, which glide toward the real
+         * ones once per scene tick (BT-148). Presentation only: never saved,
+         * never hashed, never read by the simulation.
+         */
+        float hudEnergyShown{0.0f};
+        float hudMetalShown{0.0f};
+        unsigned int hudGlideTick{~0u};
         std::vector<unsigned char> fogVisibleSnapshot;
         std::vector<unsigned char> fogExploredSnapshot;
         /** TA's fog artwork, read from anims/fog.gaf the first time the fog is drawn. */
