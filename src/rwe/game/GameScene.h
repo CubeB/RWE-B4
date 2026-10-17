@@ -38,6 +38,7 @@
 #include <rwe/game/SceneTime.h>
 #include <rwe/game/UnitSoundType.h>
 #include <rwe/game/WeaponMediaInfo.h>
+#include <rwe/game/chat_util.h>
 #include <rwe/grid/DiscreteRect.h>
 #include <rwe/io/featuretdf/FeatureTdf.h>
 #include <rwe/network_util.h>
@@ -970,6 +971,9 @@ namespace rwe
          */
         std::optional<std::string> chatInput;
 
+        /** Who a line goes to unless it carries a one-message prefix (BT-176). Cycled with Tab in the bar. */
+        ChatSendMode chatSendMode;
+
         /** Whether RWE_CHAT_TEST has had its one say. */
         bool chatTestSent{false};
 
@@ -1809,10 +1813,13 @@ namespace rwe
         void receiveChatMessages();
 
         /** Puts one line of chat on screen and in the log. */
-        void printChatLine(PlayerId sender, const std::string& text);
+        void printChatLine(PlayerId sender, const std::string& text, ChatLabel label = ChatLabel::None);
 
         /** The message bar itself, drawn over the world while it is open. */
         void renderChatBar();
+
+        /** "Message: ", or which audience the bar is set to. */
+        std::string chatBarPrompt() const;
 
         /** A player's lobby name, or "Player n" when they gave none. */
         std::string playerDisplayName(PlayerId playerId) const;

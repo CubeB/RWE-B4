@@ -58,7 +58,18 @@ namespace rwe
             case SDLK_BACKSPACE:
                 chatTextBackspace(*chatInput);
                 break;
+            case SDLK_TAB:
+                // The talk dialog's SENDTYPE button: everybody, allies,
+                // non-allies, a custom list (BT-176).
+                chatSendMode.cycle();
+                break;
             default:
+                // Ctrl and a digit adds or removes that player slot from the
+                // custom list, the LIVEPLYR buttons' job in the original.
+                if ((keysym.mod & SDL_KMOD_CTRL) != 0 && keysym.key >= SDLK_0 && keysym.key <= SDLK_9)
+                {
+                    chatSendMode.toggleSlot(static_cast<unsigned int>(keysym.key - SDLK_0));
+                }
                 // Swallowed: while the bar is open the keyboard is the bar's,
                 // and the letters arrive as text input rather than as keys.
                 break;
@@ -83,7 +94,42 @@ namespace rwe
             return;
         }
 
-        if (!gameNetworkService->submitChatMessage(text))
+        // Who it is for is decided here, on the sending machine, and the line
+        // is queued only for those peers: a private line is never put on the
+        // wire to anyone else, so there is nothing for a modified client to
+        // read (BT-176). Nothing of this reaches the simulation.
+        auto route = routeChatLine(text, chatSendMode);
+        auto wireText = capChatForWire(playerDisplayName(localPlayerId), route.label, route.text);
+        if (wireText.empty())
+        {
+            return;
+        }
+
+        std::vector<unsigned int> peers;
+        for (const auto& id : gameNetworkService->remotePlayerIds())
+        {
+            peers.push_back(id.value);
+        }
+
+        auto chosen = chatRecipients(route.address, peers, localPlayerId.value, [&](unsigned int a, unsigned int b) {
+            return simulation.arePlayersAllied(PlayerId(a), PlayerId(b));
+        });
+
+        // A line aimed at particular slots, none of which is a player in the
+        // game, goes nowhere -- the original sends nothing either.
+        if (chosen.empty() && route.address.kind == ChatAddress::Kind::Players)
+        {
+            printConsole("Message not sent: no such player", Color(252, 252, 0));
+            return;
+        }
+
+        std::vector<PlayerId> recipients;
+        for (auto id : chosen)
+        {
+            recipients.push_back(PlayerId(id));
+        }
+
+        if (!gameNetworkService->submitChatMessage(wireText, route.label, recipients))
         {
             printConsole("Message not sent: a player is not answering", Color(252, 252, 0));
             return;
@@ -91,7 +137,7 @@ namespace rwe
 
         // Shown from here rather than waited for, because it never comes back:
         // each peer is sent it once and nobody echoes it.
-        printChatLine(localPlayerId, text);
+        printChatLine(localPlayerId, wireText, route.label);
     }
 
     void GameScene::runChatCommand(const std::string& line)
@@ -269,20 +315,45 @@ namespace rwe
     {
         for (const auto& message : gameNetworkService->takeChatMessages())
         {
-            printChatLine(message.sender, message.text);
+            printChatLine(message.sender, message.text, message.label);
         }
     }
 
-    void GameScene::printChatLine(PlayerId sender, const std::string& text)
+    void GameScene::printChatLine(PlayerId sender, const std::string& text, ChatLabel label)
     {
         // In the speaker's own colour, into the same console the game's own
         // announcements use -- so it ages out after its five seconds and F12
         // clears it, both of which the original's message list does too.
         printConsole(
-            formatChatLine(playerDisplayName(sender), text),
+            formatChatLine(playerDisplayName(sender), label, text),
             playerColorToRgb(simulation.getPlayer(sender).color));
 
         LOG_INFO << "Chat from player " << sender.value << ": " << text;
+    }
+
+    std::string GameScene::chatBarPrompt() const
+    {
+        switch (chatSendMode.mode)
+        {
+            case 1:
+                return "Message (Allies): ";
+            case 2:
+                return "Message (Enemies): ";
+            case 3:
+            {
+                std::string slots;
+                for (unsigned int i = 0; i < 10; ++i)
+                {
+                    if ((chatSendMode.customSlots >> i) & 1u)
+                    {
+                        slots += (slots.empty() ? "" : ",") + std::to_string(i);
+                    }
+                }
+                return "Message (Players " + slots + "): ";
+            }
+            default:
+                return "Message: ";
+        }
     }
 
     void GameScene::renderChatBar()
@@ -307,7 +378,7 @@ namespace rwe
         chromeUiRenderService.drawText(
             static_cast<float>(GuiSizeLeft) + 8.0f,
             y,
-            "Message: " + *chatInput + caret,
+            chatBarPrompt() + *chatInput + caret,
             *speechFont);
     }
 }

@@ -307,6 +307,12 @@ message ChatMessage
     // sender is the packet's sender. A line addressed to allies rather than
     // to everyone would want a field here, and nothing else would.
     required string text = 1;
+
+    // Who the line was meant for, as a ChatLabel: absent or 0 for everyone,
+    // 1 for allies, 2 for non-allies. It only tags the line for display; the
+    // sender has already chosen the recipients by choosing which peers to
+    // send it to, which is what keeps a private line private.
+    optional uint32 audience = 2;
 }
 
 message GameUpdateMessage

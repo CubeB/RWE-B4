@@ -10,6 +10,7 @@
 #include <optional>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/game/RoundTripWindow.h>
+#include <rwe/game/chat_util.h>
 #include <rwe/game/SceneTime.h>
 #include <rwe/rwe_time.h>
 #include <rwe/sim/GameHash.h>
@@ -95,6 +96,7 @@ namespace rwe
         {
             PlayerId sender;
             std::string text;
+            ChatLabel label{ChatLabel::None};
         };
 
         /** What a peer looks like from here, for the drop timer and overlay. */
@@ -223,7 +225,7 @@ namespace rwe
         /** Whether this peer is already owed too much chat to take a new line. */
         bool chatBacklogFull() const { return chatSendBuffer.size() >= MaxPendingChatMessages; }
 
-        void submitChatMessage(const std::string& text);
+        void submitChatMessage(const std::string& text, ChatLabel label = ChatLabel::None);
 
         /** Puts sets back in the send buffer for a peer that is listened to again. */
         void restoreUnackedCommands(const std::vector<CommandSet>& sets);
@@ -306,7 +308,12 @@ namespace rwe
 
         std::deque<CommandSet> sendBuffer;
         std::deque<GameHash> hashSendBuffer;
-        std::deque<std::string> chatSendBuffer;
+        struct PendingChat
+        {
+            std::string text;
+            ChatLabel label;
+        };
+        std::deque<PendingChat> chatSendBuffer;
 
         /**
          * The time at which we first sent a packet finishing at the given

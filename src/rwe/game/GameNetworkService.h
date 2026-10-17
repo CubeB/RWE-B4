@@ -104,6 +104,17 @@ namespace rwe
          */
         bool submitChatMessage(const std::string& text);
 
+        /**
+         * Queue a line of chat for the listed peers alone, tagged with the
+         * label its readers will see. A peer not in `recipients` is sent
+         * nothing at all, which is what keeps a line meant for allies from
+         * reaching an enemy. Refused, as above, if any recipient is backed up.
+         */
+        bool submitChatMessage(const std::string& text, ChatLabel label, const std::vector<PlayerId>& recipients);
+
+        /** The id of every remote peer this machine is sending to. */
+        std::vector<PlayerId> remotePlayerIds();
+
         /** Everything that has arrived since the last call, in the order it arrived. */
         std::vector<ReceivedChatMessage> takeChatMessages();
 
