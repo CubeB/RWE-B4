@@ -1111,15 +1111,18 @@ namespace rwe
         // way. It has to happen here, while the simulation is still ours --
         // a few lines further down it is moved into the GameScene.
         std::vector<Index> filledSlots;
-        std::vector<int> mapStartPositions;
         for (Index i = 0; i < getSize(gameParameters.players); ++i)
         {
             if (gameParameters.players[i])
             {
                 filledSlots.push_back(i);
-                mapStartPositions.push_back(static_cast<int>(i) + 1);
             }
         }
+        // Consecutive by participant order, as the original gives them
+        // (BT-237); a mission keeps its seat numbers.
+        auto mapStartPositions = startPositionsForSlots(
+            std::vector<std::size_t>(filledSlots.begin(), filledSlots.end()),
+            gameParameters.mission);
 
         auto dealtStartPositions = dealStartPositions(mapStartPositions, gameParameters.startLocation, simulation.rng);
 

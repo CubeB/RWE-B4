@@ -2091,13 +2091,20 @@ namespace rwe
         }
         const auto& schema = ota.schemas[params.schemaIndex];
 
+        // Positions go to participants consecutively by order, not by seat
+        // number (BT-237), so three players in seats 0, 1 and 5 need three
+        // positions, not six. A mission keeps its seat numbers.
+        std::vector<std::size_t> filled;
         for (Index i = 0; i < getSize(params.players); ++i)
         {
-            if (!params.players[i])
+            if (params.players[i])
             {
-                continue;
+                filled.push_back(i);
             }
-            auto slot = static_cast<int>(i) + 1;
+        }
+        const auto positions = startPositionsForSlots(filled, params.mission);
+        for (auto slot : positions)
+        {
             if (!findStartPosition(schema, slot))
             {
                 return "This map has no start position for slot " + std::to_string(slot)

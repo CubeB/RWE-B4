@@ -327,6 +327,23 @@ namespace rwe
         }
     }
 
+    TEST_CASE("fixed start positions go to participants consecutively, not by seat number (BT-237)", "[gameoptions]")
+    {
+        // Three humans in seats 0, 1 and 5 take positions 1, 2 and 3.
+        REQUIRE(startPositionsForSlots({0, 1, 5}, false) == std::vector<int>({1, 2, 3}));
+        REQUIRE(startPositionsForSlots({0, 1}, false) == std::vector<int>({1, 2}));
+        REQUIRE(startPositionsForSlots({}, false).empty());
+
+        // A mission's slots are its own and keep their numbers.
+        REQUIRE(startPositionsForSlots({0, 1, 5}, true) == std::vector<int>({1, 2, 6}));
+
+        // And the deal still permutes whatever set it is handed.
+        std::minstd_rand rng(99u);
+        auto dealt = dealStartPositions(startPositionsForSlots({2, 4, 9}, false), StartLocationMode::Random, rng);
+        std::sort(dealt.begin(), dealt.end());
+        REQUIRE(dealt == std::vector<int>({1, 2, 3}));
+    }
+
     TEST_CASE("start positions are dealt, never invented", "[gameoptions]")
     {
         std::vector<int> fourSlots{1, 2, 3, 4};

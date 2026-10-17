@@ -87,6 +87,22 @@ namespace rwe
     std::vector<int> dealStartPositions(const std::vector<int>& startPositions, StartLocationMode mode, std::minstd_rand& rng);
 
     /**
+     * The map start positions (1-based StartPos keys) a game's participants
+     * are dealt from, one per filled slot in slot order (BT-237). The
+     * original gives fixed starts consecutively by participant order, not by
+     * seat number: three players in seats 0, 1 and 5 take positions 1, 2 and
+     * 3, and a sparse set of seats needs only as many positions as there are
+     * players. A mission keeps the seat number, since its slots are the
+     * mission's own.
+     *
+     * This changes where a game with gaps among its seats starts its
+     * players. It is initial state every peer works out the same way from the
+     * same parameters, so it is not a desync, but a replay recorded with
+     * gaps before this rule replays from other positions.
+     */
+    std::vector<int> startPositionsForSlots(const std::vector<std::size_t>& filledSlots, bool keepSeatNumbers);
+
+    /**
      * Total worker-time needed to fully reclaim a feature, given how much of it
      * is still standing. Scales with both the feature's value and its remaining
      * hit points, so a boulder takes far longer than a bush and a wreck that has

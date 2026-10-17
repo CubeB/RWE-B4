@@ -2723,6 +2723,17 @@ namespace rwe
         return result;
     }
 
+    std::vector<int> startPositionsForSlots(const std::vector<std::size_t>& filledSlots, bool keepSeatNumbers)
+    {
+        std::vector<int> positions;
+        positions.reserve(filledSlots.size());
+        for (std::size_t k = 0; k < filledSlots.size(); ++k)
+        {
+            positions.push_back(static_cast<int>(keepSeatNumbers ? filledSlots[k] + 1 : k + 1));
+        }
+        return positions;
+    }
+
     WinStatus GameSimulation::computeWinStatus() const
     {
         // A mission is decided by its own rules and nothing else: a victory
