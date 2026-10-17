@@ -166,7 +166,8 @@ namespace rwe
         else if (keysym.key == SDLK_F4)
         {
             // 76: F4 is the only thing that touches the latch, and it does not
-            // persist -- a new game starts with the panel out.
+            // persist -- a new game starts without the list out. It latches the
+            // score panel's player list and nothing else (BT-183, 0x4963A3).
             panelHiddenLatch = !panelHiddenLatch;
         }
         else if (keysym.key == SDLK_SPACE)

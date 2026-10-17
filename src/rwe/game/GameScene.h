@@ -1314,8 +1314,9 @@ namespace rwe
 
         /**
          * How far the players' list has come in from the right, 0 to
-         * PanelSlideTravel. Space moves only the list; F4 moves the list and
-         * the side panel together.
+         * PanelSlideTravel. Space and F4 move only the list (BT-183); the left
+         * column stays where it is, so panelSlide is 0 unless something else
+         * drives it.
          * Presentation only, like panelSlide.
          */
         float playerListSlide{0.0f};
@@ -1324,7 +1325,7 @@ namespace rwe
          * How far the Space key's bottom strip has risen, 0 to
          * StatsBarTravel. TOTALA-EXE.md S:108: a slide of its own
          * (game+0x37e90, 0 to -31), driven by Space alone -- F4, which
-         * latches the side panel out, does not touch it -- and eased a third
+         * latches the players' list out, does not touch it -- and eased a third
          * of what is left at a time, at least a pixel, every ten
          * milliseconds.
          */
@@ -1337,7 +1338,8 @@ namespace rwe
         /**
          * F4's latch -- the original's display word bit 7 at game+0x37f06
          * (76). That bit has no registry name and only F4 touches it, so it
-         * lasts the session and no longer, and this bool does the same.
+         * lasts the session and no longer, and this bool does the same. Its
+         * only reader is the players' list's updater (BT-183).
          */
         bool panelHiddenLatch{false};
 

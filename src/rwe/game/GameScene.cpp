@@ -473,14 +473,16 @@ namespace rwe
             return;
         }
 
-        // Space brings the players' list out and leaves the side panel where
-        // it is, as the original does in play; F4 moves them together.
+        // Space and F4 bring the players' list out and leave the side panel and
+        // the minimap where they are. F4 latches only the list (BT-183): the
+        // one reader of its option bit is the routine that draws the list
+        // (0x4948E0), and nothing in it moves the left panel.
         auto wantList = playerListWantsOut(
             panelHiddenLatch,
             spaceDown && !isGameMenuOpen(),
             isCursorOverPanel());
         auto listTarget = wantList ? static_cast<float>(PanelSlideTravel) : 0.0f;
-        auto panelTarget = panelHiddenLatch ? static_cast<float>(PanelSlideTravel) : 0.0f;
+        auto panelTarget = 0.0f;
 
         panelSlide = advancePanelSlide(panelSlide, panelTarget, PanelSlidePixelsPerSecond, millisecondsElapsed);
 
