@@ -501,7 +501,15 @@ namespace rwe
     {
         std::minstd_rand rng;
 
+        /** The latched result of a game that is not a mission; see decidedStatus. */
         WinStatus gameStatus{WinStatusUndecided()};
+
+        /**
+         * The word at g+0x39239: -1 until a result is first seen, then 4, and
+         * one lower each second the result still holds (BT-82). Saved, hashed
+         * and dumped: it freezes the economy from its first step.
+         */
+        int endCountdown{-1};
 
         /**
          * The skirmish screen's rules, copied out of GameParameters before the
@@ -1381,6 +1389,28 @@ namespace rwe
         void spawnProjectile(const ProjectileSpawn& spawn);
 
         WinStatus computeWinStatus() const;
+
+        /**
+         * The result the game has decided on. A mission's is its rules'
+         * outcome; any other game's is the latch of the end countdown
+         * (BT-82), which is `gameStatus`: undecided until the result has held
+         * through a hundred and fifty ticks of observations. The scene and
+         * the arena read this, not computeWinStatus, which is the raw test
+         * the countdown observes once a second.
+         */
+        WinStatus decidedStatus() const;
+
+        /**
+         * The end-of-game countdown outside a campaign (BT-82, 0x464F80): the
+         * first second the win test answers sets `endCountdown` to 4, each
+         * later one takes one off, and the one that takes it below zero
+         * latches the result into `gameStatus`. A second the test does not
+         * answer neither resets nor advances it.
+         */
+        void updateEndCountdown();
+
+        /** Whether the countdown has started or latched, which holds every settle back. */
+        bool isEndCountdownFreezingEconomy() const;
 
         bool addResourceDelta(const UnitId& unitId, const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal, ResourceDebtGate gate = ResourceDebtGate::EnergyOrMetal);
         bool addResourceDelta(const UnitId& unitId, const Energy& energy, const Metal& metal, ResourceDebtGate gate = ResourceDebtGate::EnergyOrMetal);

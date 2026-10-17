@@ -437,6 +437,20 @@ namespace rwe
         return GameHash(accumulator);
     }
 
+    namespace
+    {
+        GameHash computeHashOfWinStatus(const WinStatus& status)
+        {
+            // The alternative, and for a win the player credited with it.
+            std::uint32_t winner = 0;
+            if (const auto* won = std::get_if<WinStatusWon>(&status))
+            {
+                winner = won->winner.value;
+            }
+            return GameHash((static_cast<std::uint32_t>(status.index()) * 1000003u) + winner);
+        }
+    }
+
     GameHash computeHashOf(const Grid<ExploredMask>& grid)
     {
         std::uint32_t accumulator = 0;
@@ -493,6 +507,10 @@ namespace rwe
             featuresHash,
             simulation.currentWindVector,
             static_cast<uint32_t>(simulation.currentWindDirection.value),
+            // BT-82: the end countdown freezes the economy from its first
+            // step, and the latched result decides how the game ends.
+            simulation.endCountdown,
+            computeHashOfWinStatus(simulation.gameStatus),
             simulation.featureRegrowthCursor,
             // The explored grid is per line-of-sight group and feeds canSeeUnit
             // in Permanent mode, where it decides targets. A peer that disagrees

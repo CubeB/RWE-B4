@@ -4727,6 +4727,14 @@ namespace rwe
             return;
         }
 
+        // And outside a mission, from the first second the win test answers
+        // until the end of the game (BT-82, 0x401360 runs only while the word
+        // is negative and the latch clear).
+        if (!missionRules && isEndCountdownFreezingEconomy())
+        {
+            return;
+        }
+
         // run resource updates once per second
         if (gameTime % GameTime(SimTicksPerSecond) == GameTime(0))
         {
@@ -5561,6 +5569,12 @@ namespace rwe
         if (missionRules)
         {
             missionRules->update(*this);
+        }
+        else
+        {
+            // Outside a mission the same pass runs the same countdown over
+            // the skirmish win test (BT-82).
+            updateEndCountdown();
         }
 
         // Allies' automatic sharing goes in just before the settle, so what it

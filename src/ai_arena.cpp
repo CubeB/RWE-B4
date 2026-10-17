@@ -731,7 +731,7 @@ int main(int argc, char* argv[])
             // previous tick. Match that, or the two stop a tick apart.
             if (!gameOver && loaded.simulation.players.size() >= 2)
             {
-                auto winStatus = loaded.simulation.computeWinStatus();
+                auto winStatus = loaded.simulation.decidedStatus();
                 if (!std::holds_alternative<WinStatusUndecided>(winStatus))
                 {
                     gameOver = winStatus;

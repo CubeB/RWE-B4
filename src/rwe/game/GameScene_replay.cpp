@@ -820,7 +820,7 @@ namespace rwe
         // is just exploring the map.
         if (!gameOver && simulation.players.size() >= 2)
         {
-            auto winStatus = simulation.computeWinStatus();
+            auto winStatus = simulation.decidedStatus();
             match(
                 winStatus,
                 [&](const WinStatusWon& w) {

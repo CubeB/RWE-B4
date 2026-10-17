@@ -611,6 +611,8 @@ namespace rwe
             {"features", dumpJson(simulation.features)},
             {"currentWindVector", dumpJson(simulation.currentWindVector)},
             {"currentWindDirection", simulation.currentWindDirection.value},
+            {"endCountdown", simulation.endCountdown},
+            {"gameStatus", simulation.gameStatus.index()},
             {"featureRegrowthCursor", simulation.featureRegrowthCursor},
             {"explored", dumpJson(simulation.explored)},
             {"cloakSeenEnemies", dumpJson(simulation.cloakSeenEnemies)},

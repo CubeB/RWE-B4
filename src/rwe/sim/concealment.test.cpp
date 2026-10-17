@@ -494,6 +494,9 @@ namespace rwe
         {
             sim.getPlayer(us).teamId = 1;
             sim.getPlayer(them).teamId = 1;
+            // Two allies alone are a won game, which freezes the economy the
+            // cloak is paid from (BT-82); a stranger keeps it open.
+            addConcealmentPlayer(sim, "stranger");
             auto allyId = spawn(sim, "scout", them, SimVector(20_ss, 0_ss, 0_ss), script);
             tickTo(sim, 3 * FirstEconomyTick);
             REQUIRE(sim.arePlayersAllied(us, them));

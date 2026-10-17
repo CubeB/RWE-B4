@@ -689,4 +689,103 @@ namespace rwe
             REQUIRE(sim.getPlayer(us).status == GamePlayerStatus::Alive);
         }
     }
+
+    TEST_CASE("a game outside a mission ends 150 ticks after the win test first answers, with the economy frozen", "[gameoptions][endgame]")
+    {
+        // BT-82 (0x464F80): once a second the win test is observed. The first
+        // positive observation sets the word to 4, each later one takes one
+        // off, and the one that takes it below zero latches the result: six
+        // observations, so 150 ticks. A second the test does not answer
+        // neither resets nor advances the word. The settle stops from the
+        // first observation.
+        auto script = makeOptionsScript();
+        GameSimulation sim(makeOptionsTerrain(), 0u, 0, 0);
+        auto us = addOptionsPlayer(sim, "us");
+        auto them = addOptionsPlayer(sim, "them");
+        defineOptionsUnit(sim, "tank", 100u);
+        sim.unitDefinitions["tank"].energyMake = Energy(10.0f);
+        sim.unitDefinitions["tank"].energyStorage = Energy(100000.0f);
+        addOptionsUnit(sim, "tank", us, SimVector(0_ss, 0_ss, 0_ss), script);
+        addOptionsUnit(sim, "tank", them, SimVector(64_ss, 0_ss, 0_ss), script);
+        sim.getPlayer(us).energy = Energy(0.0f);
+
+        auto tickTo = [&](unsigned int tick) {
+            while (sim.gameTime.value < tick)
+            {
+                sim.tick();
+            }
+        };
+
+        SECTION("an undecided game starts nothing")
+        {
+            tickTo(100);
+            CHECK(sim.endCountdown == -1);
+            CHECK_FALSE(sim.isEndCountdownFreezingEconomy());
+            CHECK(std::holds_alternative<WinStatusUndecided>(sim.decidedStatus()));
+        }
+
+        SECTION("the result latches 150 ticks after the first observation")
+        {
+            sim.killPlayer(them);
+            tickTo(29);
+            // The raw test already answers; the decision does not.
+            CHECK(std::holds_alternative<WinStatusWon>(sim.computeWinStatus()));
+            CHECK(sim.endCountdown == -1);
+
+            // Observation one, at tick 30, sets the word and nothing else.
+            tickTo(30);
+            CHECK(sim.endCountdown == 4);
+            CHECK(std::holds_alternative<WinStatusUndecided>(sim.decidedStatus()));
+
+            tickTo(60);
+            CHECK(sim.endCountdown == 3);
+            tickTo(150);
+            CHECK(sim.endCountdown == 0);
+            tickTo(179);
+            CHECK(std::holds_alternative<WinStatusUndecided>(sim.decidedStatus()));
+
+            // Observation six takes it below zero: 150 ticks after the first.
+            tickTo(180);
+            CHECK(sim.endCountdown == -1);
+            auto status = sim.decidedStatus();
+            REQUIRE(std::holds_alternative<WinStatusWon>(status));
+            CHECK(std::get<WinStatusWon>(status).winner == us);
+            CHECK(sim.isEndCountdownFreezingEconomy());
+
+            // And it stays decided.
+            tickTo(300);
+            CHECK(std::holds_alternative<WinStatusWon>(sim.decidedStatus()));
+        }
+
+        SECTION("nobody settles from the first observation on")
+        {
+            // Tick 30 is a settle: the unit's ten energy is paid out.
+            tickTo(30);
+            CHECK(sim.getPlayer(us).energy.value > 0.0f);
+            auto before = sim.getPlayer(us).energy;
+
+            sim.killPlayer(them);
+            tickTo(60);
+            // The settle at 60 sees the first observation first and is held
+            // back: the stockpile has not moved.
+            CHECK(sim.endCountdown == 4);
+            CHECK(sim.getPlayer(us).energy == before);
+            tickTo(120);
+            CHECK(sim.getPlayer(us).energy == before);
+        }
+
+        SECTION("a second the test does not answer does not advance the word")
+        {
+            // A third player keeps the game open, then is removed: the word
+            // waits through the seconds it did not answer.
+            auto third = addOptionsPlayer(sim, "third");
+            addOptionsUnit(sim, "tank", third, SimVector(128_ss, 0_ss, 0_ss), script);
+            sim.killPlayer(them);
+            tickTo(90);
+            CHECK(sim.endCountdown == -1);
+            sim.killPlayer(third);
+            tickTo(120);
+            CHECK(sim.endCountdown == 4);
+        }
+    }
 }

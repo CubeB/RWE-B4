@@ -44,7 +44,14 @@ namespace rwe
 
         GameSimulation makeSim()
         {
-            return GameSimulation(makeFlatTerrain(16, 16), 0u, 100, 3000);
+            GameSimulation sim(makeFlatTerrain(16, 16), 0u, 100, 3000);
+
+            // A stranger on no team, never given a unit, keeps the game
+            // undecided: players who are all allies are a won game, and a won
+            // game freezes every settle after 150 ticks (BT-82), which is not
+            // what these cases are about.
+            addSharer(sim, 0.0f, 0.0f, std::nullopt);
+            return sim;
         }
 
         PlayerShareCommand toggleMetal()

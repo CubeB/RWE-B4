@@ -680,6 +680,7 @@ namespace rwe
         }
 
         j["gameStatus"] = saveWinStatus(sim.gameStatus);
+        j["endCountdown"] = sim.endCountdown;
         j["currentWindGenerationFactor"] = saveSimScalar(sim.currentWindGenerationFactor);
         j["currentWindVector"] = saveSimVector(sim.currentWindVector);
         j["currentWindDirection"] = saveSimAngle(sim.currentWindDirection);
@@ -842,6 +843,8 @@ namespace rwe
             ss >> sim.rng;
         }
         sim.gameStatus = loadWinStatus(j.at("gameStatus"));
+        // Absent from saves made before BT-82; no countdown had started then.
+        sim.endCountdown = j.contains("endCountdown") ? j.at("endCountdown").get<int>() : -1;
         sim.currentWindGenerationFactor = loadSimScalar(j.at("currentWindGenerationFactor"));
         if (j.contains("currentWindVector"))
         {
