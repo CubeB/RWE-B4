@@ -704,4 +704,62 @@ namespace rwe
             REQUIRE(orderOf<AttackOrder>(acts(ship, surfaced)) != nullptr);
         }
     }
+
+    TEST_CASE("a first weapon that is anti-air makes no attack order against anything it cannot shoot", "[defaultaction][attackeligibility]")
+    {
+        // BT-63, 0x43F154: no enemy target (a place, or a friendly or neutral
+        // unit) with the first weapon anti-air gives no order, and so does an
+        // enemy that is not in the flying placement mode. Only four shipped
+        // weapons set toairweapon; ARMYORK_GUN is the Phalanx's.
+        SeaFixture f;
+
+        WeaponDefinition flak{};
+        flak.maxRange = 680_ss;
+        flak.physicsType = ProjectilePhysicsTypeBallistic();
+        flak.toAirWeapon = true;
+        f.sim.weaponDefinitions["ARMYORK_GUN"] = flak;
+
+        auto phalanx = f.spawn("peewee", f.player, 0_ss, 0_ss, {"ARMYORK_GUN"});
+        auto gunTank = f.spawn("peewee", f.player, 50_ss, 0_ss, {"ARM_ROY"});
+        auto tank = f.spawn("peewee", f.enemy, 500_ss, 20_ss, {"ARM_ROY"});
+        auto friend_ = f.spawn("peewee", f.player, 600_ss, 20_ss, {"ARM_ROY"});
+        f.sim.unitDefinitions["fighter"] = makeFighterDef();
+        auto plane = f.spawn("fighter", f.enemy, 700_ss, 100_ss, {"ARM_ROY"});
+        f.sim.getUnitState(plane).physics = UnitPhysicsInfoAir();
+
+        auto accepted = [&](UnitId orderer, UnitId target) {
+            return attackOrderIsAccepted(f.sim, f.sim.unitDefinitions.at(f.sim.getUnitState(orderer).unitType), f.sim.getUnitState(orderer), f.sim.getUnitState(target));
+        };
+
+        SECTION("an enemy on the ground is refused to an anti-air first weapon")
+        {
+            REQUIRE_FALSE(accepted(phalanx, tank));
+            REQUIRE(orderOf<AttackOrder>(f.act(DefaultActionScheme::LeftClickDefault, phalanx, tank)) == nullptr);
+            REQUIRE(accepted(gunTank, tank));
+        }
+
+        SECTION("an enemy in the air is accepted")
+        {
+            REQUIRE(accepted(phalanx, plane));
+        }
+
+        SECTION("a friendly unit is no enemy target, so an anti-air first weapon is refused it too")
+        {
+            REQUIRE_FALSE(accepted(phalanx, friend_));
+            REQUIRE(accepted(gunTank, friend_));
+        }
+
+        SECTION("a place is refused to an anti-air first weapon and not to a gun")
+        {
+            REQUIRE_FALSE(attackGroundOrderIsAccepted(f.sim, f.sim.getUnitState(phalanx)));
+            REQUIRE(attackGroundOrderIsAccepted(f.sim, f.sim.getUnitState(gunTank)));
+        }
+
+        SECTION("only the first weapon counts")
+        {
+            auto gunFirst = f.spawn("peewee", f.player, 100_ss, 0_ss, {"ARM_ROY", "ARMYORK_GUN"});
+            REQUIRE(accepted(gunFirst, tank));
+            REQUIRE(attackGroundOrderIsAccepted(f.sim, f.sim.getUnitState(gunFirst)));
+        }
+    }
 }

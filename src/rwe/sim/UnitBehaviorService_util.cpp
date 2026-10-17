@@ -380,12 +380,6 @@ namespace rwe
 
     bool attackOrderIsAccepted(const GameSimulation& sim, const UnitDefinition& ordererDefinition, const UnitState& orderer, const UnitState& target)
     {
-        // 0x43F154-0x43F3B9. A friendly or neutral target has no water test.
-        if (sim.arePlayersAllied(orderer.owner, target.owner))
-        {
-            return true;
-        }
-
         // A unit with no weapon in either slot reaches the kamikaze arm (or
         // nothing) and is not judged here.
         const auto& first = orderer.weapons[0];
@@ -393,6 +387,23 @@ namespace rwe
         if (!first && !second)
         {
             return true;
+        }
+
+        // 0x43F154-0x43F3B9. The first weapon being anti-air (bit 17,
+        // toairweapon) gives no order against a place or a friendly or neutral
+        // unit ("no enemy target"), and none against an enemy that is not in
+        // the flying placement mode.
+        auto firstIsAntiAir = first && sim.weaponDefinitions.at(first->weaponType).toAirWeapon;
+
+        // A friendly or neutral target has no water test.
+        if (sim.arePlayersAllied(orderer.owner, target.owner))
+        {
+            return !firstIsAntiAir;
+        }
+
+        if (firstIsAntiAir && !isFlying(target.physics))
+        {
+            return false;
         }
 
         auto isWater = [&](const std::optional<UnitWeapon>& slot) {
@@ -429,6 +440,15 @@ namespace rwe
 
         auto maxWaterDepth = static_cast<int>(sim.getAdHocMovementClass(repairerDefinition.movementCollisionInfo).maxWaterDepth);
         return top >= seaLevel - maxWaterDepth;
+    }
+
+    bool attackGroundOrderIsAccepted(const GameSimulation& sim, const UnitState& orderer)
+    {
+        // The "no enemy target" arm of the same builder (0x43F154): a ground
+        // point has no water test, but a first weapon that is anti-air gives
+        // no order. A unit with nothing in the first slot is not judged here.
+        const auto& first = orderer.weapons[0];
+        return !(first && sim.weaponDefinitions.at(first->weaponType).toAirWeapon);
     }
 
     bool canRepairUnit(const GameSimulation& sim, const UnitDefinition& repairerDefinition, const UnitState& target)

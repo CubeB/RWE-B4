@@ -156,6 +156,14 @@ namespace rwe
     bool attackOrderIsAccepted(const GameSimulation& sim, const UnitDefinition& ordererDefinition, const UnitState& orderer, const UnitState& target);
 
     /**
+     * The same builder's answer for a ground point: a first weapon that is
+     * anti-air (toairweapon) makes no order, so an anti-air-only unit told to
+     * attack a place keeps its queue instead of standing still on a useless
+     * order. There is no water test on a place. BT-63.
+     */
+    bool attackGroundOrderIsAccepted(const GameSimulation& sim, const UnitState& orderer);
+
+    /**
      * Picks a repair pad for a damaged aircraft, or nothing if it is not hurt
      * enough or there is none within reach. Draws from the simulation's
      * generator when there is more than one to choose from.

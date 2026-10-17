@@ -621,6 +621,13 @@ namespace rwe
                         else
                         {
                             auto coord = getMouseTerrainCoordinate();
+                            // And a first weapon that is anti-air makes no
+                            // order against a place either (BT-63).
+                            auto groundOrderer = simulation.tryGetUnitState(selectedUnit);
+                            if (coord && groundOrderer && !attackGroundOrderIsAccepted(simulation, groundOrderer->get()))
+                            {
+                                continue;
+                            }
                             if (coord)
                             {
                                 if (isShiftDown())
