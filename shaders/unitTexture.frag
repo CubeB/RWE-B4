@@ -31,6 +31,10 @@ uniform sampler2D paletteIndexSampler;
 // palettes/PALETTE.SHD as a 256x32 image: column t of row r is the colour of
 // SHD[r * 256 + t].
 uniform sampler2D shadeTableSampler;
+// 1 for a unit that is not the viewer's and not held on sonar: the parts of its
+// model at or below the water line are cut away (0x4BA1B0) rather than tinted
+// blue (BT-142). 0 tints them, as the viewer's own units and sonar contacts are.
+uniform float waterCut;
 uniform float seaLevel;
 uniform float shadeStrength;
 // How much of its own colour the model keeps where it covers the screen. 1 for
@@ -43,8 +47,6 @@ uniform float alpha;
 // see now.
 uniform float fogged;
 
-const vec3 waterTint = vec3(0.5, 0.5, 1.0);
-const vec3 normalTint = vec3(1.0, 1.0, 1.0);
 
 // TA lights its models after all -- its buildings and features, that is. The
 // renderer decoded earlier -- no normals, no sun, texels copied unmodified --
@@ -115,6 +117,26 @@ vec3 shadeTexel(vec3 unshaded)
     return mix(unshaded, tableColor, shadeStrength);
 }
 
+// The part of a model at or below the water line goes through the original's
+// blue table (BT-142, 0x4B96E0): red halved, green halved, blue halved plus 50,
+// snapped back to a palette entry -- not a multiplier. The tint is applied to
+// the finished, already shaded pixel, so the combined table image carries it
+// ready-made: rows 32..63 are the shade rows with every cell passed through the
+// blue table, and row 64 is the blue table alone for an unshaded texel.
+vec3 blueTexel()
+{
+    int texel = int((texture(paletteIndexSampler, fragTexCoord).r * 255.0) + 0.5);
+    vec3 blueUnshaded = texelFetch(shadeTableSampler, ivec2(texel, 64), 0).rgb;
+    if (shadeStrength <= 0.0)
+    {
+        return blueUnshaded;
+    }
+
+    int row = clamp(int(shadeLevel), 0, 31);
+    vec3 blueShaded = texelFetch(shadeTableSampler, ivec2(texel, 32 + row), 0).rgb;
+    return mix(blueUnshaded, blueShaded, shadeStrength);
+}
+
 void main(void)
 {
     vec4 baseColor = texture(textureSampler, fragTexCoord);
@@ -123,7 +145,13 @@ void main(void)
         discard;
     }
 
-    vec3 lit = shadeTexel(vec3(baseColor)) * (height > seaLevel ? normalTint : waterTint);
+    bool underWater = !(height > seaLevel);
+    if (underWater && waterCut > 0.5)
+    {
+        discard;
+    }
+
+    vec3 lit = underWater ? blueTexel() : shadeTexel(vec3(baseColor));
     float grey = dot(min(lit, vec3(1.0)), vec3(0.299, 0.587, 0.114)) * 0.7;
     lit = mix(lit, vec3(grey), fogged);
     outColor = vec4(min(lit, vec3(1.0)), alpha);

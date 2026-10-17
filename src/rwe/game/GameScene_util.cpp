@@ -2032,6 +2032,11 @@ namespace rwe
         return explored ? VentSteamDrawMode::Dimmed : VentSteamDrawMode::Hidden;
     }
 
+    bool unitWaterPartsAreCut(bool ownedByViewer, bool sonarContact)
+    {
+        return !ownedByViewer && !sonarContact;
+    }
+
     std::string unidentifiedObjectText(bool sonarContact)
     {
         return std::string(sonarContact ? "S: " : "R: ") + "Unidentified object";

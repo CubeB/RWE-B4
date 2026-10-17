@@ -386,7 +386,9 @@ namespace rwe
             return generateShadeTable(*palette);
         }();
 
-        SharedTextureHandle shadeTableTexture(graphics->createTexture(shadeTableToImage(shadeTable, *palette)));
+        // The shade table with the blue remap beneath it, for the part of a
+        // unit under water (BT-142): see shadeAndBlueTablesToImage.
+        SharedTextureHandle shadeTableTexture(graphics->createTexture(shadeAndBlueTablesToImage(shadeTable, generateBlueTable(*palette), *palette)));
 
         // The same story as the shade table, with one difference worth
         // knowing: the generator here is a reconstruction rather than a

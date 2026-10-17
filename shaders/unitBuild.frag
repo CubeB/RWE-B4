@@ -12,6 +12,10 @@ uniform sampler2D textureSampler;
 uniform sampler2D paletteIndexSampler;
 // palettes/PALETTE.SHD as a 256x32 image; see unitTexture.frag.
 uniform sampler2D shadeTableSampler;
+// 1 for a unit that is not the viewer's and not held on sonar: the parts of its
+// model at or below the water line are cut away (0x4BA1B0) rather than tinted
+// blue (BT-142). 0 tints them, as the viewer's own units and sonar contacts are.
+uniform float waterCut;
 uniform float unitY;
 uniform float seaLevel;
 uniform float shadeStrength;
@@ -37,9 +41,6 @@ const float bandThickness = 4.0;
 // The original's height buffer is the model-space Y biased by 50.
 const float heightBias = 50.0;
 
-const vec3 waterTint = vec3(0.5, 0.5, 1.0);
-const vec3 normalTint = vec3(1.0, 1.0, 1.0);
-
 // The shaded chain's lighting; see unitTexture.frag, which this must match.
 // The level is computed once per vertex and interpolated, and the row it
 // yields indexes PALETTE.SHD -- which stores palette INDICES from a
@@ -64,14 +65,41 @@ vec3 shadeTexel(vec3 unshaded)
     return mix(unshaded, tableColor, shadeStrength);
 }
 
+// The part of a model at or below the water line goes through the original's
+// blue table (BT-142, 0x4B96E0): red halved, green halved, blue halved plus 50,
+// snapped back to a palette entry -- not a multiplier. The tint is applied to
+// the finished, already shaded pixel, so the combined table image carries it
+// ready-made: rows 32..63 are the shade rows with every cell passed through the
+// blue table, and row 64 is the blue table alone for an unshaded texel.
+vec3 blueTexel()
+{
+    int texel = int((texture(paletteIndexSampler, fragTexCoord).r * 255.0) + 0.5);
+    vec3 blueUnshaded = texelFetch(shadeTableSampler, ivec2(texel, 64), 0).rgb;
+    if (shadeStrength <= 0.0)
+    {
+        return blueUnshaded;
+    }
+
+    int row = clamp(int(shadeLevel), 0, 31);
+    vec3 blueShaded = texelFetch(shadeTableSampler, ivec2(texel, 32 + row), 0).rgb;
+    return mix(blueUnshaded, blueShaded, shadeStrength);
+}
+
 vec3 shadeNormal()
 {
     vec3 baseColor = vec3(texture(textureSampler, fragTexCoord));
-    return min(shadeTexel(baseColor) * (height > seaLevel ? normalTint : waterTint), vec3(1.0));
+    return min(height > seaLevel ? shadeTexel(baseColor) : blueTexel(), vec3(1.0));
 }
 
 void main(void)
 {
+    // The cut applies to the whole finished picture, whichever way the build
+    // display would draw this fragment.
+    if (!(height > seaLevel) && waterCut > 0.5)
+    {
+        discard;
+    }
+
     // Where this fragment sits in the original's height buffer. It keeps the
     // topmost surface per pixel; shading each fragment by its own height is
     // the same thing wherever the model does not overhang itself, and is

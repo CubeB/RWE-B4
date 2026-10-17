@@ -142,6 +142,14 @@ namespace rwe
         REQUIRE(formatHudEnergyUse(Energy(-99999.0f)) == "99999");
     }
 
+    TEST_CASE("an enemy's underwater parts are cut, the viewer's own and sonar contacts are tinted (BT-142)", "[presentation]")
+    {
+        REQUIRE_FALSE(unitWaterPartsAreCut(true, false));
+        REQUIRE_FALSE(unitWaterPartsAreCut(true, true));
+        REQUIRE_FALSE(unitWaterPartsAreCut(false, true));
+        REQUIRE(unitWaterPartsAreCut(false, false));
+    }
+
     TEST_CASE("a feature marked nodisplayinfo shows no footer text (BT-147)", "[presentation]")
     {
         FeatureDefinition ordinary{};

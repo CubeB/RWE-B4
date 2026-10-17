@@ -43,6 +43,12 @@ namespace rwe
          * sprite features around it; 0 for everything else.
          */
         float fogged{0.0f};
+        /**
+         * 1 cuts the parts of the model at or below the water line away, 0
+         * tints them with the blue table (BT-142). A unit that is not the
+         * viewer's and is not held on sonar is cut; everything else is tinted.
+         */
+        float waterCut{0.0f};
     };
 
     /**
@@ -87,6 +93,8 @@ namespace rwe
         BuildFillMode belowMode;
         Vector3f buildColorA;
         Vector3f buildColorB;
+        /** As UnitTextureMeshRenderInfo::waterCut. */
+        float waterCut{0.0f};
     };
 
     /**

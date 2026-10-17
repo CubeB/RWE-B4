@@ -659,6 +659,15 @@ namespace rwe
     VentSteamDrawMode ventSteamDrawMode(bool explored, bool visible);
 
     /**
+     * Whether the parts of a unit's model at or below the water line are cut
+     * away rather than tinted blue (BT-142, 0x45972A to 0x459750): the original
+     * tints them for a unit owned by the displayed player or held on sonar, and
+     * cuts them for every other unit, so an enemy ship seen on the surface
+     * loses the part of its hull that is under water.
+     */
+    bool unitWaterPartsAreCut(bool ownedByViewer, bool sonarContact);
+
+    /**
      * What the footer prints for a hovered unit the viewer cannot identify
      * (BT-141, 0x46B6F3): the prefix "S: " when the unit is held on sonar and
      * "R: " otherwise, then "Unidentified object" -- no name, no health bar, no

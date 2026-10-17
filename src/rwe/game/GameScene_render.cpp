@@ -1936,7 +1936,25 @@ namespace rwe
                 }
                 const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
                 const auto& unitModelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
+                auto firstMesh = unitMeshBatch.meshes.size();
+                auto firstBuildingMesh = unitMeshBatch.buildingMeshes.size();
                 drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, unitId.value, renderTime().value, interpolationFraction, shadeStrengthFor(!unitDefinition.isMobile), unitAtlases, unitMeshBatch);
+
+                // The part of the model under water is tinted blue for the
+                // viewer's own units and for sonar contacts, and cut away for
+                // every other unit (BT-142).
+                const auto& heard = simulation.playerVisibility.at(localPlayerId.value).sonarContacts;
+                if (unitWaterPartsAreCut(unit.isOwnedBy(localPlayerId), heard.find(unitId) != heard.end()))
+                {
+                    for (auto i = firstMesh; i < unitMeshBatch.meshes.size(); ++i)
+                    {
+                        unitMeshBatch.meshes[i].waterCut = 1.0f;
+                    }
+                    for (auto i = firstBuildingMesh; i < unitMeshBatch.buildingMeshes.size(); ++i)
+                    {
+                        unitMeshBatch.buildingMeshes[i].waterCut = 1.0f;
+                    }
+                }
             }
             for (const auto& [_, feature] : simulation.features)
             {

@@ -236,6 +236,7 @@ namespace rwe
                 graphics->setUniformFloat(textureShader.shadeStrength, m.shadeStrength);
                 graphics->setUniformFloat(textureShader.maskValue, m.maskValue);
                 graphics->setUniformFloat(textureShader.fogged, m.fogged);
+                graphics->setUniformFloat(textureShader.waterCut, m.waterCut);
                 graphics->setActiveTextureSlot1();
                 graphics->bindTexture(m.paletteIndexTexture);
                 graphics->setActiveTextureSlot0();
@@ -261,6 +262,7 @@ namespace rwe
                 graphics->setUniformFloat(buildShader.unitHeight, m.unitHeight);
                 graphics->setUniformFloat(buildShader.shadeStrength, m.shadeStrength);
                 graphics->setUniformFloat(buildShader.buildRatio, m.buildRatio);
+                graphics->setUniformFloat(buildShader.waterCut, m.waterCut);
                 graphics->setUniformInt(buildShader.aboveMode, static_cast<int>(m.aboveMode));
                 graphics->setUniformInt(buildShader.bandMode, static_cast<int>(m.bandMode));
                 graphics->setUniformInt(buildShader.belowMode, static_cast<int>(m.belowMode));
@@ -290,8 +292,10 @@ namespace rwe
             graphics->bindShader(textureShader.handle.get());
             graphics->setUniformFloat(textureShader.seaLevel, seaLevel);
             // The program keeps the last mesh's value, and a cloaked unit is
-            // never fogged: it is only drawn where it can be seen.
+            // never fogged: it is only drawn where it can be seen. Nor is it
+            // ever cut at the water line: a cloaked unit is the viewer's own.
             graphics->setUniformFloat(textureShader.fogged, 0.0f);
+            graphics->setUniformFloat(textureShader.waterCut, 0.0f);
             graphics->setUniformInt(textureShader.paletteIndexSampler, 1);
             graphics->setUniformInt(textureShader.shadeTableSampler, 2);
             graphics->setActiveTextureSlot2();
@@ -383,6 +387,7 @@ namespace rwe
             graphics->setUniformFloat(outlineShader.shadeStrength, 0.0f);
             graphics->setUniformFloat(outlineShader.maskValue, 0.0f);
             graphics->setUniformFloat(outlineShader.fogged, 0.0f);
+            graphics->setUniformFloat(outlineShader.waterCut, 0.0f);
             graphics->setUniformInt(outlineShader.paletteIndexSampler, 1);
             graphics->setUniformInt(outlineShader.shadeTableSampler, 2);
             for (const auto& m : meshes)
