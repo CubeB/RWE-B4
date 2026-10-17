@@ -645,6 +645,14 @@ namespace rwe
     UnitActivity unitActivity(const UnitState& unit, bool underConstruction, bool weaponQueued);
 
     /**
+     * What the footer prints for a hovered unit the viewer cannot identify
+     * (BT-141, 0x46B6F3): the prefix "S: " when the unit is held on sonar and
+     * "R: " otherwise, then "Unidentified object" -- no name, no health bar, no
+     * figures.
+     */
+    std::string unidentifiedObjectText(bool sonarContact);
+
+    /**
      * Whether the footer says anything about a hovered feature (BT-147). The
      * feature branch of the footer (0x46B78C) tests the definition's
      * `nodisplayinfo` bit and skips the whole text when it is set -- the 46

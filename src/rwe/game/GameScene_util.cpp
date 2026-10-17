@@ -1987,6 +1987,11 @@ namespace rwe
             [](const LandOnAirBaseOrder& o) { return std::optional<UnitId>(o.target); });
     }
 
+    std::string unidentifiedObjectText(bool sonarContact)
+    {
+        return std::string(sonarContact ? "S: " : "R: ") + "Unidentified object";
+    }
+
     bool featureFooterIsShown(const FeatureDefinition& definition)
     {
         return !definition.noDisplayInfo;

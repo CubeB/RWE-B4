@@ -9,6 +9,12 @@
  */
 namespace rwe
 {
+    TEST_CASE("a contact that is not visible reads Unidentified object with its sensor prefix (BT-141)", "[presentation]")
+    {
+        REQUIRE(unidentifiedObjectText(false) == "R: Unidentified object");
+        REQUIRE(unidentifiedObjectText(true) == "S: Unidentified object");
+    }
+
     TEST_CASE("a feature marked nodisplayinfo shows no footer text (BT-147)", "[presentation]")
     {
         FeatureDefinition ordinary{};

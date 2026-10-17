@@ -311,7 +311,22 @@ namespace rwe
         // whole frame pixels, so the frame height alone can miss it by a
         // fraction of a UI pixel.
         auto extraBottom = static_cast<float>(worldViewport.bottom()) / uiScale + static_cast<float>(GuiSizeBottom) - 480.0f;
-        if (hoveredUnit)
+
+        // The minimap is not a footer source (BT-141): the original writes its
+        // hover id only from the world pick, and the minimap reads it back
+        // just to highlight a dot. Pointing at a dot names nothing.
+        const auto footerUnit = isCursorOverMinimap() ? std::nullopt : hoveredUnit;
+        if (footerUnit && !unitIsVisibleToLocalPlayer(*footerUnit, getUnit(*footerUnit)))
+        {
+            // Hovered but not visible (a contact): the can-see gate fails and
+            // the footer prints only "S: " or "R: " and "Unidentified object",
+            // with no definition name, no health bar and no figures. Sonar if
+            // the unit is held on sonar, radar otherwise.
+            const auto& heard = simulation.playerVisibility.at(localPlayerId.value).sonarContacts;
+            const auto& rect = localSideData.unitName;
+            chromeUiRenderService.drawTextCenteredX(rect.x1, extraBottom + rect.y1, unidentifiedObjectText(heard.find(*footerUnit) != heard.end()), *guiFont);
+        }
+        else if (footerUnit)
         {
             const auto& unit = getUnit(*hoveredUnit);
             const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
@@ -438,7 +453,10 @@ namespace rwe
                 }
                 else if (auto targetId = unitOrderTargetUnit(unit); targetId)
                 {
-                    if (auto target = tryGetUnit(*targetId); target && unitIsDetectableByLocalPlayer(*targetId, target->get()))
+                    // Only a target the viewer can see is named: the slot uses
+                    // the same gate as the footer and, when it fails, prints
+                    // nothing at all rather than the unknown text (BT-141).
+                    if (auto target = tryGetUnit(*targetId); target && unitIsVisibleToLocalPlayer(*targetId, target->get()))
                     {
                         const auto& targetUnit = target->get();
                         const auto& targetDefinition = simulation.unitDefinitions.at(targetUnit.unitType);
