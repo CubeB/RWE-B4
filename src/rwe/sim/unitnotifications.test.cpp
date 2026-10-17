@@ -463,6 +463,8 @@ namespace rwe
          */
         struct SubYardFixture
         {
+            // A unit holds a raw pointer to its script, so the script outlives the sim.
+            std::shared_ptr<CobScript> script = makeEmptyCobScript({"base"});
             GameSimulation sim;
             std::optional<UnitId> frameId;
             SimVector pad;
@@ -472,7 +474,6 @@ namespace rwe
                 : sim(MapTerrain(Grid<unsigned char>(128, 128, 0), 60_ss), 0u, 0, 0),
                   pad(600_ss, padHeight, 600_ss)
             {
-                auto script = makeEmptyCobScript({"base"});
                 auto player = addWellStockedPlayer(sim, "CORE");
                 registerTestModel(sim);
 
