@@ -92,6 +92,24 @@ namespace rwe
             return;
         }
 
+        // The picture and the chart each take a key (BT-199, 0x4C1AB0): any key
+        // dismisses the picture once its one-second lock is up, and a key fills
+        // the chart's bars at once. Ahead of Enter's message bar below, which
+        // must not open over either; on the chart Escape keeps leaving.
+        if (gameOver && keyDismissesEndScreen(keysym.key))
+        {
+            if (endGamePhase == EndGamePhase::Glamour)
+            {
+                glamourClicked();
+                return;
+            }
+            if (endGameChartVisible() && keysym.key != SDLK_ESCAPE)
+            {
+                finishEndGameBars();
+                return;
+            }
+        }
+
         // Enter opens the message bar, as it does in the original. Ahead of
         // the panel below, which would otherwise take Enter as an activation
         // of whichever button last had focus.
@@ -567,9 +585,11 @@ namespace rwe
         // and one on Main Menu leaves.
         if (gameOver)
         {
-            if (endGamePhase == EndGamePhase::Glamour && event.button == MouseButtonEvent::MouseButton::Left)
+            // The picture goes at the release of either button (BT-199): the
+            // original refreshes its pointer record on the left- and
+            // right-button-up messages and dismisses on that record.
+            if (endGamePhase == EndGamePhase::Glamour)
             {
-                glamourClicked();
                 return;
             }
 
@@ -1090,6 +1110,13 @@ namespace rwe
     {
         if (gameOver)
         {
+            if (endGamePhase == EndGamePhase::Glamour
+                && (event.button == MouseButtonEvent::MouseButton::Left || event.button == MouseButtonEvent::MouseButton::Right))
+            {
+                glamourClicked();
+                return;
+            }
+
             if (endGameChartVisible() && isGameMenuOpen())
             {
                 auto p = endGameScreenPoint(event.x, event.y);

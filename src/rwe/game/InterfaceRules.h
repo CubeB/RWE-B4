@@ -1,5 +1,6 @@
 #pragma once
 
+#include <SDL3/SDL_keycode.h>
 #include <cstddef>
 #include <rwe/sim/PlayerId.h>
 #include <vector>
@@ -98,6 +99,16 @@ namespace rwe
      * twenty ticks.
      */
     unsigned int endGameFadeStep(unsigned int elapsedTicks);
+
+    /**
+     * Whether a key press is one the original's key ring would hand to a
+     * screen waiting for "a key" (BT-199, 0x4C1AB0): a character or a
+     * function key, not a modifier or a lock. The glamour picture and the
+     * results chart both ask the ring. That the ring takes no modifier alone
+     * is RWE's reading; the ruling says only that the pop returns the next
+     * queued key.
+     */
+    bool keyDismissesEndScreen(SDL_Keycode key);
 
     BuildMenuPosition stepBuildMenu(BuildMenuPosition position, unsigned int pageCount, bool forward, bool toggle);
 }

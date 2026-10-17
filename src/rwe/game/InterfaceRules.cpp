@@ -54,6 +54,28 @@ namespace rwe
         return taken < EndGameFadeSteps ? taken : EndGameFadeSteps;
     }
 
+    bool keyDismissesEndScreen(SDL_Keycode key)
+    {
+        switch (key)
+        {
+            case SDLK_LSHIFT:
+            case SDLK_RSHIFT:
+            case SDLK_LCTRL:
+            case SDLK_RCTRL:
+            case SDLK_LALT:
+            case SDLK_RALT:
+            case SDLK_LGUI:
+            case SDLK_RGUI:
+            case SDLK_CAPSLOCK:
+            case SDLK_NUMLOCKCLEAR:
+            case SDLK_SCROLLLOCK:
+            case SDLK_UNKNOWN:
+                return false;
+            default:
+                return true;
+        }
+    }
+
     BuildMenuPosition stepBuildMenu(BuildMenuPosition position, unsigned int pageCount, bool forward, bool toggle)
     {
         if (pageCount == 0)

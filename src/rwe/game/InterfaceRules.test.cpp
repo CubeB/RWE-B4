@@ -109,6 +109,17 @@ namespace rwe
         REQUIRE(EndGameFadeSteps * EndGameFadeTicksPerStep == 20);
     }
 
+    TEST_CASE("any key but a bare modifier or lock dismisses the end screens (BT-199)")
+    {
+        REQUIRE(keyDismissesEndScreen(SDLK_RETURN));
+        REQUIRE(keyDismissesEndScreen(SDLK_SPACE));
+        REQUIRE(keyDismissesEndScreen(SDLK_ESCAPE));
+        REQUIRE(keyDismissesEndScreen(SDLK_A));
+        REQUIRE_FALSE(keyDismissesEndScreen(SDLK_LSHIFT));
+        REQUIRE_FALSE(keyDismissesEndScreen(SDLK_RCTRL));
+        REQUIRE_FALSE(keyDismissesEndScreen(SDLK_CAPSLOCK));
+    }
+
     TEST_CASE("an armed Build click goes to every mobile builder and to nothing else (BT-108)")
     {
         REQUIRE(buildClickTakesUnit(true, true));
