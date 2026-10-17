@@ -887,7 +887,17 @@ namespace rwe
                     energy = Energy(static_cast<float>(isComputer ? schema.computerEnergy : schema.humanEnergy));
                 }
                 GamePlayerInfo gpi{params->name, playerType, params->color, GamePlayerStatus::Alive, params->side, metal, energy, metal, energy, metal, energy, params->teamId};
-                gpi.hasBaseStorage = gameParameters.mission;
+                if (gameParameters.mission)
+                {
+                    gpi.hasBaseStorage = true;
+                }
+                else
+                {
+                    // A skirmish or multiplayer player: its own start amounts,
+                    // floored at 200, as a base that outlives the commander
+                    // (BT-165).
+                    applySkirmishBaseStorage(gpi);
+                }
                 auto playerId = simulation.addPlayer(gpi);
                 gamePlayers[i] = playerId;
 
@@ -1467,6 +1477,20 @@ namespace rwe
             }
         }
         return kept;
+    }
+
+    void applySkirmishBaseStorage(GamePlayerInfo& player)
+    {
+        constexpr float BaseStorageFloor = 200.0f;
+        if (player.startingMetal.value < BaseStorageFloor)
+        {
+            player.startingMetal = Metal(BaseStorageFloor);
+        }
+        if (player.startingEnergy.value < BaseStorageFloor)
+        {
+            player.startingEnergy = Energy(BaseStorageFloor);
+        }
+        player.hasBaseStorage = true;
     }
 
     MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers)

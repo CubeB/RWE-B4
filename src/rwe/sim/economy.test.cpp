@@ -4,6 +4,7 @@
 #include <memory>
 #include <optional>
 #include <rwe/cob/CobEnvironment.h>
+#include <rwe/game/GameSimulationLoader.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitDefinition.h>
@@ -144,6 +145,57 @@ namespace rwe
             addUnitOfType(sim, "commander", player, SimVector(200_ss, 0_ss, 100_ss), script);
             tickOneSecond(sim);
             REQUIRE(sim.getPlayer(player).maxMetal == Metal(1050.0f));
+        }
+    }
+
+    TEST_CASE("a skirmish player's base storage is its own start amount, at least 200, and needs no commander", "[economy]")
+    {
+        // BT-165: the skirmish and multiplayer starts write the player's own
+        // amounts, floored at 200, as the base from the first frame, so it is
+        // counted in every settle whether or not a commander is alive.
+        auto makePlayer = [](float metal, float energy) {
+            GamePlayerInfo p{
+                std::optional<std::string>("player"),
+                GamePlayerType::Human,
+                PlayerColorIndex(0),
+                GamePlayerStatus::Alive,
+                std::string("ARM"),
+                Metal(metal),
+                Energy(energy),
+                Metal(metal),
+                Energy(energy),
+                Metal(metal),
+                Energy(energy),
+            };
+            applySkirmishBaseStorage(p);
+            return p;
+        };
+
+        SECTION("a start amount under 200 gives a base of 200 and leaves the stock alone")
+        {
+            auto p = makePlayer(100.0f, 150.0f);
+            REQUIRE(p.hasBaseStorage);
+            REQUIRE(p.startingMetal == Metal(200.0f));
+            REQUIRE(p.startingEnergy == Energy(200.0f));
+            REQUIRE(p.metal == Metal(100.0f));
+            REQUIRE(p.energy == Energy(150.0f));
+        }
+
+        SECTION("each value is floored on its own, and 200 and over is kept")
+        {
+            auto p = makePlayer(50.0f, 5000.0f);
+            REQUIRE(p.startingMetal == Metal(200.0f));
+            REQUIRE(p.startingEnergy == Energy(5000.0f));
+        }
+
+        SECTION("a player with no commander and no units still holds the base after a settle")
+        {
+            GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
+            auto id = sim.addPlayer(makePlayer(100.0f, 100.0f));
+            tickOneSecond(sim);
+            REQUIRE(sim.getPlayer(id).maxMetal == Metal(200.0f));
+            REQUIRE(sim.getPlayer(id).maxEnergy == Energy(200.0f));
+            REQUIRE(sim.getPlayer(id).metal == Metal(100.0f));
         }
     }
 
