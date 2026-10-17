@@ -161,4 +161,60 @@ namespace rwe
             CHECK_FALSE(hasHeardAPeer(a));
         }
     }
+
+    TEST_CASE("a chat line addressed to some peers reaches only those peers (BT-176)")
+    {
+        // Three machines on loopback. Player 0 says a line to player 1 alone
+        // and then one to everybody; player 2 must see only the second.
+        PlayerCommandService commandsA;
+        PlayerCommandService commandsB;
+        PlayerCommandService commandsC;
+        for (auto* c : {&commandsA, &commandsB, &commandsC})
+        {
+            c->registerPlayer(PlayerId(0));
+            c->registerPlayer(PlayerId(1));
+            c->registerPlayer(PlayerId(2));
+        }
+
+        GameNetworkService a(PlayerId(0), 1441, {GameNetworkService::EndpointInfo(PlayerId(1), at("127.0.0.1", 1442)), GameNetworkService::EndpointInfo(PlayerId(2), at("127.0.0.1", 1443))}, &commandsA);
+        GameNetworkService b(PlayerId(1), 1442, {GameNetworkService::EndpointInfo(PlayerId(0), at("127.0.0.1", 1441)), GameNetworkService::EndpointInfo(PlayerId(2), at("127.0.0.1", 1443))}, &commandsB);
+        GameNetworkService c(PlayerId(2), 1443, {GameNetworkService::EndpointInfo(PlayerId(0), at("127.0.0.1", 1441)), GameNetworkService::EndpointInfo(PlayerId(1), at("127.0.0.1", 1442))}, &commandsC);
+        a.start();
+        b.start();
+        c.start();
+
+        auto ids = a.remotePlayerIds();
+        REQUIRE(ids.size() == 2);
+
+        REQUIRE(a.submitChatMessage("only for you", ChatLabel::Allies, {PlayerId(1)}));
+
+        std::vector<GameNetworkService::ReceivedChatMessage> atB;
+        REQUIRE(waitUntil([&]() {
+            for (auto& m : b.takeChatMessages())
+            {
+                atB.push_back(m);
+            }
+            return !atB.empty();
+        }));
+        REQUIRE(atB.front().text == "only for you");
+        REQUIRE(atB.front().label == ChatLabel::Allies);
+        REQUIRE(atB.front().sender == PlayerId(0));
+
+        REQUIRE(a.submitChatMessage("hello everyone", ChatLabel::None, {PlayerId(1), PlayerId(2)}));
+
+        std::vector<GameNetworkService::ReceivedChatMessage> atC;
+        REQUIRE(waitUntil([&]() {
+            for (auto& m : c.takeChatMessages())
+            {
+                atC.push_back(m);
+            }
+            return !atC.empty();
+        }));
+
+        // The first line was never put on the wire to player 2, so the only
+        // thing it ever heard is the public one.
+        REQUIRE(atC.size() == 1);
+        REQUIRE(atC.front().text == "hello everyone");
+        REQUIRE(atC.front().label == ChatLabel::None);
+    }
 }
