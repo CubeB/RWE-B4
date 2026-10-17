@@ -54,14 +54,18 @@ namespace rwe
         }
 
         /** ARMCK, the Arm construction kbot: WorkerTime 80, so 2 per tick. */
-        UnitDefinition makeBuilderDef(bool canResurrect)
+        UnitDefinition makeBuilderDef(bool canResurrect, bool canRepair)
         {
             UnitDefinition d{};
             d.objectName = "model";
             d.isMobile = true;
             d.canMove = true;
             d.builder = true;
-            d.canReclamate = true;
+            // canreclamate is also the repair capability (0x4899B0). The
+            // fixture's builder lacks it unless asked, which is the case the
+            // raise tests below were written for: what the resurrector does
+            // afterwards is BT-93's, tested on its own.
+            d.canReclamate = canRepair;
             d.canResurrect = canResurrect;
             d.workerTimePerTick = 80u / 30u;
             d.maxHitPoints = 260;
@@ -78,7 +82,7 @@ namespace rwe
             PlayerId owner;
             UnitId builder;
 
-            explicit ResurrectFixture(bool canResurrect = true)
+            explicit ResurrectFixture(bool canResurrect = true, bool canRepair = false)
                 : script(makeEmptyCobScript({"base"})),
                   sim(makeFlatTerrain(64, 64), 0u, 0, 0),
                   owner(addPlayer(sim, "us")),
@@ -89,7 +93,7 @@ namespace rwe
                 sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(pieces));
 
                 sim.unitDefinitions["ARMSOLAR"] = makeSolarDef();
-                sim.unitDefinitions["ARMCK"] = makeBuilderDef(canResurrect);
+                sim.unitDefinitions["ARMCK"] = makeBuilderDef(canResurrect, canRepair);
                 sim.unitScriptDefinitions["ARMSOLAR"] = *script;
                 sim.unitScriptDefinitions["ARMCK"] = *script;
 
@@ -297,5 +301,67 @@ namespace rwe
         const auto& order = std::get<ResurrectOrder>(orders.front());
         REQUIRE(order.remainingTicks.has_value());
         REQUIRE(*order.remainingTicks == 373);
+    }
+
+    TEST_CASE("a resurrector that can repair goes straight on to mend what it raised (BT-93)", "[resurrect][bt93]")
+    {
+        // State 6 of 0x404DB0 asks the order builder for command 8 on the new
+        // unit; CORNECRO has canreclamate, so it always yields REPAIRUNIT and
+        // the node goes in at the head of the resurrector's list.
+        ResurrectFixture f(true, true);
+        auto wreckDef = f.sim.featureDefinitions.insert(makeSolarWreckDef());
+        auto wreckId = f.sim.addFeature(wreckDef, 34, 34).value();
+        f.sim.getUnitState(f.builder).position = f.sim.getFeature(wreckId).position;
+        f.sim.getUnitState(f.builder).orders.push_back(ResurrectOrder(wreckId));
+
+        std::vector<std::string> refusals;
+        std::optional<UnitId> raised;
+        for (int t = 0; t < 600 && !raised; ++t)
+        {
+            f.sim.tick();
+            for (const auto& e : f.sim.events)
+            {
+                if (const auto* refused = std::get_if<UnitCannotComplyEvent>(&e))
+                {
+                    refusals.push_back(refused->message);
+                }
+            }
+            for (const auto& [id, unit] : f.sim.units)
+            {
+                if (id != f.builder && unit.unitType == "ARMSOLAR")
+                {
+                    raised = id;
+                }
+            }
+        }
+        REQUIRE(raised.has_value());
+
+        const auto& orders = f.sim.getUnitState(f.builder).orders;
+        REQUIRE(orders.size() == 1);
+        const auto* repair = std::get_if<RepairOrder>(&orders.front());
+        REQUIRE(repair != nullptr);
+        CHECK(repair->target == *raised);
+
+        // The spent resurrect order is not left to find no corpse.
+        f.sim.tick();
+        CHECK(refusals.empty());
+    }
+
+    TEST_CASE("a resurrector that cannot repair is left idle after the raise (BT-93)", "[resurrect][bt93]")
+    {
+        ResurrectFixture f(true, false);
+        auto wreckDef = f.sim.featureDefinitions.insert(makeSolarWreckDef());
+        auto wreckId = f.sim.addFeature(wreckDef, 34, 34).value();
+        f.sim.getUnitState(f.builder).position = f.sim.getFeature(wreckId).position;
+        f.sim.getUnitState(f.builder).orders.push_back(ResurrectOrder(wreckId));
+
+        REQUIRE(f.runUntilOrderDone(4000) > 0);
+        for (const auto& [id, unit] : f.sim.units)
+        {
+            if (id != f.builder && unit.unitType == "ARMSOLAR")
+            {
+                CHECK(unit.hitPoints == 1);
+            }
+        }
     }
 }

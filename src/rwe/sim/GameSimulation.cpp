@@ -5248,6 +5248,31 @@ namespace rwe
                 const auto& newUnitDefinition = unitDefinitions.at(newUnit.unitType);
                 newUnit.buildTimeCompleted = newUnitDefinition.buildTime;
                 newUnit.hitPoints = 1;
+
+                // BT-93 (state 6 of 0x404DB0, 0x405243): the resurrector goes
+                // straight on to mend the unit it raised. The mission asks the
+                // order builder for command 8 on the new unit; that arm needs
+                // the orderer's repair capability (canreclamate, 0x4899B0) and
+                // a target whose health differs from its maximum, and for a
+                // finished unit yields REPAIRUNIT. The node goes in at the head
+                // of the list and the resurrect mission ends, so its order is
+                // dropped here as well rather than left to find no corpse and
+                // complain.
+                const auto& resurrectorDefinition = unitDefinitions.at(unit->get().unitType);
+                if (resurrectorDefinition.canReclamate && newUnit.hitPoints < newUnitDefinition.maxHitPoints)
+                {
+                    auto& orders = unit->get().orders;
+                    for (auto it = orders.begin(); it != orders.end(); ++it)
+                    {
+                        if (const auto* resurrect = std::get_if<ResurrectOrder>(&*it); resurrect != nullptr && resurrect->target == s->target)
+                        {
+                            orders.erase(it);
+                            break;
+                        }
+                    }
+                    orders.push_front(RepairOrder(*newUnitId));
+                    UnitBehaviorService(this).interruptCurrentTask(unitId);
+                }
             }
         }
 
