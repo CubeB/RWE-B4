@@ -2987,6 +2987,26 @@ namespace rwe
         return std::nullopt;
     }
 
+    namespace
+    {
+        /**
+         * The interceptor's distance measure (0x49B106, 0x49A664): each axis
+         * of the 16.16 difference is cut to its whole-unit part (an arithmetic
+         * shift, so it floors) before it is squared, and the three squares are
+         * added. Cutting before squaring makes the result up to one whole unit
+         * of each axis smaller than the true squared distance. Compared
+         * strictly against the full `areaofeffect` squared.
+         */
+        SimScalar wholeUnitDistanceSquared(const SimVector& a, const SimVector& b)
+        {
+            auto whole = [](SimScalar v) { return SimScalar(std::floor(v.value)); };
+            auto dx = whole(a.x - b.x);
+            auto dy = whole(a.y - b.y);
+            auto dz = whole(a.z - b.z);
+            return dx * dx + dy * dy + dz * dz;
+        }
+    }
+
     void GameSimulation::detonateProjectilesInBlast(std::optional<ProjectileId> source, const SimVector& position, SimScalar radius)
     {
         // Gathered before anything is detonated: an impact can kill a unit,
@@ -2999,7 +3019,7 @@ namespace rwe
             {
                 continue;
             }
-            if (position.distanceSquared(entry.second.position) < radius * radius)
+            if (wholeUnitDistanceSquared(position, entry.second.position) < radius * radius)
             {
                 caught.push_back(entry.first);
             }
@@ -4147,7 +4167,9 @@ namespace rwe
         // (0x49A664) -- which is also why one anti-nuke can clear a salvo.
         if (auto it = weaponDefinitions.find(projectile.weaponType); it != weaponDefinitions.end() && it->second.interceptor)
         {
-            detonateProjectilesInBlast(projectileId, projectile.position, projectile.damageRadius);
+            // The full areaofeffect, not the halved radius the unit-damage
+            // routine uses (0x49A664; BT-111): damageRadius is half of it.
+            detonateProjectilesInBlast(projectileId, projectile.position, projectile.damageRadius * 2_ss);
         }
     }
 
@@ -4330,12 +4352,14 @@ namespace rwe
             // clause (0x49B106): if it is inside its own areaofeffect of the
             // missile it is chasing it goes off there and then, rather than
             // waiting to run into something. Strictly inside -- the original's
-            // `jge` at 0x49B1A4 skips at exactly the radius.
+            // `jge` at 0x49B1A4 skips at exactly the radius -- and the radius
+            // is the full areaofeffect, 96 for every shipped interceptor, in
+            // whole units on each axis (BT-111).
             if (projectile.targetProjectile)
             {
                 auto target = projectiles.tryGet(*projectile.targetProjectile);
                 if (target && !target->get().isDead
-                    && projectile.position.distanceSquared(target->get().position) < projectile.damageRadius * projectile.damageRadius)
+                    && wholeUnitDistanceSquared(projectile.position, target->get().position) < (projectile.damageRadius * 2_ss) * (projectile.damageRadius * 2_ss))
                 {
                     projectile.isDead = true;
                     doProjectileImpact(projectile, ImpactType::Normal, id);
