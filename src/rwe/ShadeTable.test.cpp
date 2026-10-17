@@ -198,6 +198,13 @@ namespace rwe
                 REQUIRE(gray[i] == i);
             }
 
+            // The ramp is the same table seen by the mean alone.
+            auto ramp = generateMeanGrayRamp(palette);
+            for (int m = 0; m < 256; ++m)
+            {
+                REQUIRE(ramp[m] == m);
+            }
+
             // A colour with unequal channels goes to the grey of its mean:
             // (90, 30, 0) averages 40.
             ColorPalette coloured = makeGreyRampPalette();

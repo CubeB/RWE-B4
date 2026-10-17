@@ -169,6 +169,83 @@ namespace rwe
         REQUIRE_FALSE(definitionFrom("").digger);
     }
 
+    TEST_CASE("the minimap picture is fitted into 126 pixels and centred (BT-152)", "[presentation]")
+    {
+        auto box = Rectangle2f::fromTopLeft(0.0f, 0.0f, 128.0f, 128.0f);
+
+        // A square map is 126 by 126, in the middle of the 128 box.
+        auto square = minimapPictureRect(box, 252.0f, 252.0f);
+        REQUIRE(square.width() == Catch::Approx(126.0f));
+        REQUIRE(square.height() == Catch::Approx(126.0f));
+        REQUIRE(square.left() == Catch::Approx(1.0f));
+        REQUIRE(square.top() == Catch::Approx(1.0f));
+
+        // Twice as wide as tall: 126 by 63, the shorter side centred.
+        auto wide = minimapPictureRect(box, 252.0f, 126.0f);
+        REQUIRE(wide.width() == Catch::Approx(126.0f));
+        REQUIRE(wide.height() == Catch::Approx(63.0f));
+        REQUIRE(wide.left() == Catch::Approx(1.0f));
+        REQUIRE(wide.top() == Catch::Approx(32.0f));
+
+        // The aspect is truncated in integers: 126 x 100 / 252 is 50.
+        auto tall = minimapPictureRect(box, 100.0f, 252.0f);
+        REQUIRE(tall.height() == Catch::Approx(126.0f));
+        REQUIRE(tall.width() == Catch::Approx(50.0f));
+        REQUIRE(tall.left() == Catch::Approx(1.0f + 38.0f));
+    }
+
+    TEST_CASE("the minimap picture is black unexplored, the base seen and grey remembered (BT-152)", "[presentation]")
+    {
+        // A grey-ramp palette, so the gray table has a known answer: the mean
+        // of a colour is a grey that is in the palette.
+        ColorPalette palette;
+        for (int i = 0; i < 256; ++i)
+        {
+            palette.emplace_back(static_cast<unsigned char>(i), static_cast<unsigned char>(i), static_cast<unsigned char>(i));
+        }
+        std::vector<unsigned char> ramp;
+        for (int i = 0; i < 256; ++i)
+        {
+            ramp.push_back(static_cast<unsigned char>(i));
+        }
+
+        // A 2 by 2 base, one picture pixel to each, one fog cell to each.
+        std::vector<Color> base{Color(90, 30, 0), Color(200, 100, 0), Color(10, 20, 30), Color(255, 255, 255)};
+        auto state = [](int x, int y) {
+            if (x == 0 && y == 0)
+            {
+                return MinimapCellState::Remembered;
+            }
+            if (x == 1 && y == 0)
+            {
+                return MinimapCellState::Seen;
+            }
+            return MinimapCellState::Unexplored;
+        };
+        auto picture = composeMinimapPicture(2, 2, base, 2, 2, ramp, palette, 2, 2, state);
+        REQUIRE(picture.size() == 4);
+
+        // (0, 0) is remembered: (90 + 30 + 0) / 3 = 40 in all three channels.
+        REQUIRE(picture[0].r == 40);
+        REQUIRE(picture[0].g == 40);
+        REQUIRE(picture[0].b == 40);
+        REQUIRE(picture[0].a == 255);
+
+        // (1, 0) is in sight: the base pixel untouched.
+        REQUIRE(picture[1].r == 200);
+        REQUIRE(picture[1].g == 100);
+        REQUIRE(picture[1].b == 0);
+
+        // The unexplored row is opaque black whatever the base holds.
+        for (int i = 2; i < 4; ++i)
+        {
+            REQUIRE(picture[i].r == 0);
+            REQUIRE(picture[i].g == 0);
+            REQUIRE(picture[i].b == 0);
+            REQUIRE(picture[i].a == 255);
+        }
+    }
+
     TEST_CASE("a feature marked nodisplayinfo shows no footer text (BT-147)", "[presentation]")
     {
         FeatureDefinition ordinary{};

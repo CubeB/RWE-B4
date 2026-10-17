@@ -56,6 +56,15 @@ namespace rwe
      */
     PaletteRemap generateGrayTable(const ColorPalette& palette);
 
+    /**
+     * The gray table reduced to its argument: entry m is the palette index
+     * the band matcher picks for (m, m, m). Entry i of the gray table is the
+     * ramp entry at the truncated mean of palette entry i, so a colour that
+     * is not itself a palette entry -- an average of several -- is greyed by
+     * the same rule through its own mean.
+     */
+    PaletteRemap generateMeanGrayRamp(const ColorPalette& palette);
+
     /** Reads the shipped table. Fails unless the file is exactly 8192 bytes. */
     std::optional<ShadeTable> readShadeTable(const std::vector<char>& bytes);
 

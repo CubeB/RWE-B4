@@ -1337,56 +1337,9 @@ namespace rwe
             }
         }
 
-        // The minimap keeps its own one-texel-per-cell copy of the whole map.
-        // It is only a hundred-odd pixels across, so the authored tiles would
-        // be thrown away by the downscale anyway, and this way it does not have
-        // to care where the world's window happens to be.
-        if (fogSprite && vis.visible.getVector() == fogVisibleSnapshot && explored.getVector() == fogExploredSnapshot)
-        {
-            return;
-        }
-        fogVisibleSnapshot = vis.visible.getVector();
-        fogExploredSnapshot = explored.getVector();
-
-        minimapFogPixels.resize(static_cast<size_t>(cellsWide) * static_cast<size_t>(cellsHigh));
-        auto* out = minimapFogPixels.data();
-        for (int y = 0; y < cellsHigh; ++y)
-        {
-            for (int x = 0; x < cellsWide; ++x)
-            {
-                if (vis.visible.get(x, y) != 0)
-                {
-                    *out++ = Color(0, 0, 0, 0);
-                }
-                else if (explored.get(x, y))
-                {
-                    *out++ = Color(0, 0, 0, 120);
-                }
-                else
-                {
-                    *out++ = Color(0, 0, 0, 255);
-                }
-            }
-        }
-
-        if (!minimapFogTexture.isValid() || minimapFogWidth != cellsWide || minimapFogHeight != cellsHigh)
-        {
-            minimapFogTexture = SharedTextureHandle(sceneContext.graphics->createTexture(cellsWide, cellsHigh, minimapFogPixels.data()));
-            minimapFogWidth = cellsWide;
-            minimapFogHeight = cellsHigh;
-
-            auto bounds = Rectangle2f::fromTopLeft(corner.x, corner.z, cellsWide * cellWorldUnits, cellsHigh * cellWorldUnits);
-            auto region = Rectangle2f::fromTopLeft(0.0f, 0.0f, 1.0f, 1.0f);
-            fogSprite = sceneContext.graphics->createSprite(bounds, region, minimapFogTexture);
-        }
-        else
-        {
-            sceneContext.graphics->updateTexture(
-                minimapFogTexture.get(),
-                static_cast<unsigned int>(cellsWide),
-                static_cast<unsigned int>(cellsHigh),
-                minimapFogPixels.data());
-        }
+        // The minimap keeps its own picture, composed from the map's embedded
+        // image and the fog cells (GameScene_minimap.cpp).
+        updateMinimapPicture(vis.visible, explored);
     }
 
     void GameScene::renderHelpOverlay()

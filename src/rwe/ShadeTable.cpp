@@ -143,17 +143,28 @@ namespace rwe
         return table;
     }
 
+    PaletteRemap generateMeanGrayRamp(const ColorPalette& palette)
+    {
+        PaletteMatcher matcher(palette);
+        PaletteRemap ramp{};
+        for (int m = 0; m < 256; ++m)
+        {
+            ramp[m] = static_cast<unsigned char>(matcher.nearest(m, m, m));
+        }
+        return ramp;
+    }
+
     PaletteRemap generateGrayTable(const ColorPalette& palette)
     {
         // 0x4BAD30: every channel becomes the truncated mean of the three,
         // matched. A desaturation, not a darkening.
-        PaletteMatcher matcher(palette);
+        auto ramp = generateMeanGrayRamp(palette);
         PaletteRemap table{};
         for (int i = 0; i < 256; ++i)
         {
             const auto& c = palette[i];
             auto mean = (static_cast<int>(c.r) + static_cast<int>(c.g) + static_cast<int>(c.b)) / 3;
-            table[i] = static_cast<unsigned char>(matcher.nearest(mean, mean, mean));
+            table[i] = ramp[mean];
         }
         return table;
     }

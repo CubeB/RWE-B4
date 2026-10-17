@@ -332,6 +332,8 @@ namespace rwe
             return (*p)[pixel];
         });
 
+        minimapPixelCache[mapName] = MinimapPixels{static_cast<unsigned int>(minimap.width), static_cast<unsigned int>(minimap.height), rgbMinimap};
+
         SharedTextureHandle texture(graphics->createTexture(minimap.width, minimap.height, rgbMinimap));
         auto sprite = graphics->createSprite(
             Rectangle2f::fromTopLeft(0.0f, 0.0f, minimap.width, minimap.height),
@@ -342,6 +344,12 @@ namespace rwe
         minimapCache.insert({mapName, spritePtr});
 
         return spritePtr;
+    }
+
+    const TextureService::MinimapPixels* TextureService::tryGetMinimapPixels(const std::string& mapName) const
+    {
+        auto it = minimapPixelCache.find(mapName);
+        return it == minimapPixelCache.end() ? nullptr : &it->second;
     }
 
     std::shared_ptr<Sprite> TextureService::getDefaultSprite()

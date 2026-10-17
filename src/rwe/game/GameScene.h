@@ -584,8 +584,10 @@ namespace rwe
 
         /** F1: the hotkey reference overlay. */
         bool helpVisible{false};
-        /** The minimap's fog: one texel per vision cell, alpha encodes unexplored / explored / visible. */
+        /** The minimap's picture, composed from the embedded image and the fog (BT-152). */
         std::optional<Sprite> fogSprite;
+        /** The gray table's ramp, indexed by the truncated mean of a colour; built with the first picture. */
+        std::vector<unsigned char> minimapGrayRamp;
         /**
          * The minimap's fog texture and the buffer it is filled from, both
          * kept for the life of the game: the size never changes, so there is
@@ -2100,6 +2102,13 @@ namespace rwe
         void renderHelpOverlay();
 
         void updateFogSprite();
+
+        /**
+         * Rebuilds the minimap picture when the fog it shows has changed
+         * (BT-152): the embedded image at 126 pixels, black where unexplored
+         * and grey-remapped where explored but not in sight.
+         */
+        void updateMinimapPicture(const Grid<unsigned char>& visible, const Grid<unsigned char>& explored);
 
         /**
          * What the local player can see, which with the fog switched off is

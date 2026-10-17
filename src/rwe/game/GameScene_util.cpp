@@ -2032,6 +2032,118 @@ namespace rwe
         return explored ? VentSteamDrawMode::Dimmed : VentSteamDrawMode::Hidden;
     }
 
+    Rectangle2f minimapPictureRect(const Rectangle2f& box, float imageWidth, float imageHeight)
+    {
+        auto width = static_cast<int>(imageWidth);
+        auto height = static_cast<int>(imageHeight);
+        if (width <= 0 || height <= 0)
+        {
+            return Rectangle2f::fromTopLeft(box.left(), box.top(), static_cast<float>(MinimapPictureSize), static_cast<float>(MinimapPictureSize));
+        }
+
+        int pictureWidth = MinimapPictureSize;
+        int pictureHeight = MinimapPictureSize;
+        if (width >= height)
+        {
+            pictureHeight = std::max(1, (height * MinimapPictureSize) / width);
+        }
+        else
+        {
+            pictureWidth = std::max(1, (width * MinimapPictureSize) / height);
+        }
+
+        // The 126 square sits centred in the box, and the shorter side
+        // centred in the square.
+        auto squareX = (static_cast<int>(box.width()) - MinimapPictureSize) / 2;
+        auto squareY = (static_cast<int>(box.height()) - MinimapPictureSize) / 2;
+        auto x = squareX + ((MinimapPictureSize - pictureWidth) / 2);
+        auto y = squareY + ((MinimapPictureSize - pictureHeight) / 2);
+        return Rectangle2f::fromTopLeft(box.left() + static_cast<float>(x), box.top() + static_cast<float>(y), static_cast<float>(pictureWidth), static_cast<float>(pictureHeight));
+    }
+
+    std::vector<Color> composeMinimapPicture(
+        int pictureWidth,
+        int pictureHeight,
+        const std::vector<Color>& base,
+        int baseWidth,
+        int baseHeight,
+        const std::vector<unsigned char>& grayRamp,
+        const ColorPalette& palette,
+        int cellsWide,
+        int cellsHigh,
+        const std::function<MinimapCellState(int, int)>& cellState)
+    {
+        std::vector<Color> picture;
+        if (pictureWidth <= 0 || pictureHeight <= 0)
+        {
+            return picture;
+        }
+        picture.reserve(static_cast<std::size_t>(pictureWidth) * static_cast<std::size_t>(pictureHeight));
+
+        for (int py = 0; py < pictureHeight; ++py)
+        {
+            for (int px = 0; px < pictureWidth; ++px)
+            {
+                auto cx = cellsWide > 0 ? (px * cellsWide) / pictureWidth : 0;
+                auto cy = cellsHigh > 0 ? (py * cellsHigh) / pictureHeight : 0;
+                auto state = cellState(cx, cy);
+                if (state == MinimapCellState::Unexplored)
+                {
+                    picture.emplace_back(0, 0, 0, 255);
+                    continue;
+                }
+
+                // The base pixel: the source pixels this picture pixel covers,
+                // averaged (one source pixel when the picture is larger).
+                unsigned int r = 0;
+                unsigned int g = 0;
+                unsigned int b = 0;
+                unsigned int count = 0;
+                if (baseWidth > 0 && baseHeight > 0 && base.size() >= static_cast<std::size_t>(baseWidth) * static_cast<std::size_t>(baseHeight))
+                {
+                    auto x0 = (px * baseWidth) / pictureWidth;
+                    auto x1 = std::max(x0 + 1, ((px + 1) * baseWidth) / pictureWidth);
+                    auto y0 = (py * baseHeight) / pictureHeight;
+                    auto y1 = std::max(y0 + 1, ((py + 1) * baseHeight) / pictureHeight);
+                    for (int sy = y0; sy < y1 && sy < baseHeight; ++sy)
+                    {
+                        for (int sx = x0; sx < x1 && sx < baseWidth; ++sx)
+                        {
+                            const auto& c = base[(static_cast<std::size_t>(sy) * static_cast<std::size_t>(baseWidth)) + static_cast<std::size_t>(sx)];
+                            r += c.r;
+                            g += c.g;
+                            b += c.b;
+                            ++count;
+                        }
+                    }
+                }
+                if (count == 0)
+                {
+                    picture.emplace_back(0, 0, 0, 255);
+                    continue;
+                }
+                r /= count;
+                g /= count;
+                b /= count;
+
+                if (state == MinimapCellState::Remembered && grayRamp.size() >= 256)
+                {
+                    // The gray table: the truncated mean of the three channels,
+                    // snapped to the palette.
+                    auto mean = static_cast<int>((r + g + b) / 3);
+                    const auto& grey = palette.at(grayRamp[static_cast<std::size_t>(mean)]);
+                    picture.emplace_back(grey.r, grey.g, grey.b, 255);
+                }
+                else
+                {
+                    picture.emplace_back(static_cast<unsigned char>(r), static_cast<unsigned char>(g), static_cast<unsigned char>(b), 255);
+                }
+            }
+        }
+
+        return picture;
+    }
+
     bool unitWaterPartsAreCut(bool ownedByViewer, bool sonarContact)
     {
         return !ownedByViewer && !sonarContact;

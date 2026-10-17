@@ -234,7 +234,7 @@ namespace rwe
           minimap(minimap),
           minimapDots(minimapDots),
           minimapDotHighlight(minimapDotHighlight),
-          minimapRect(minimapViewport.scaleToFit(this->minimap->bounds)),
+          minimapRect(minimapPictureRect(minimapViewport, this->minimap->bounds.width(), this->minimap->bounds.height())),
           minimapRectBase(minimapRect),
           sounds(std::move(sounds)),
           guiFont(guiFont),

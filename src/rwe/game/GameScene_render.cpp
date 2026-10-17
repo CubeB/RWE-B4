@@ -745,11 +745,15 @@ namespace rwe
 
     void GameScene::renderMinimap()
     {
-        // draw minimap
-        chromeUiRenderService.drawSpriteAbs(minimapRect, *minimap);
+        // draw minimap: the composed picture once the fog has built one, the
+        // map's own image until then
         if (fogSprite)
         {
             chromeUiRenderService.drawSpriteAbs(minimapRect, *fogSprite);
+        }
+        else
+        {
+            chromeUiRenderService.drawSpriteAbs(minimapRect, *minimap);
         }
 
         auto cameraInverse = computeInverseViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());

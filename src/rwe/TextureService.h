@@ -24,6 +24,16 @@ namespace rwe
             TextureInfo(unsigned int width, unsigned int height, const SharedTextureHandle& handle);
         };
 
+    public:
+        /** A map's embedded minimap as colours, row-major from the top-left. */
+        struct MinimapPixels
+        {
+            unsigned int width{0};
+            unsigned int height{0};
+            std::vector<Color> pixels;
+        };
+
+    private:
         GraphicsContext* graphics;
         AbstractVirtualFileSystem* fileSystem;
         const ColorPalette* palette;
@@ -33,6 +43,7 @@ namespace rwe
         std::unordered_map<std::string, std::shared_ptr<SpriteSeries>> animCache;
         std::unordered_map<std::string, TextureInfo> bitmapCache;
         std::unordered_map<std::string, std::shared_ptr<Sprite>> minimapCache;
+        std::unordered_map<std::string, MinimapPixels> minimapPixelCache;
         /** Misses too, since every button on every page asks and most are not units. */
         std::unordered_map<std::string, std::optional<std::shared_ptr<SpriteSeries>>> unitPicCache;
 
@@ -58,6 +69,12 @@ namespace rwe
         std::shared_ptr<SpriteSeries> getDefaultSpriteSeries();
         std::shared_ptr<Sprite> getDefaultSprite();
         std::shared_ptr<Sprite> getMinimap(const std::string& mapName);
+
+        /**
+         * The colours of a minimap getMinimap has already loaded, or nothing.
+         * The in-game minimap composes its own picture from them (BT-152).
+         */
+        const MinimapPixels* tryGetMinimapPixels(const std::string& mapName) const;
         std::shared_ptr<SpriteSeries> getFont(const std::string& fontName);
 
     private:

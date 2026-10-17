@@ -366,6 +366,7 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_endgame.cpp
     src/rwe/game/GameScene_input.cpp
     src/rwe/game/GameScene_menu.cpp
+    src/rwe/game/GameScene_minimap.cpp
     src/rwe/game/GameScene_peers.cpp
     src/rwe/game/GameScene_render.cpp
     src/rwe/game/panel_slide.cpp

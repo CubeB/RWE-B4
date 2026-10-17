@@ -659,6 +659,54 @@ namespace rwe
     VentSteamDrawMode ventSteamDrawMode(bool explored, bool visible);
 
     /**
+     * The side of the square the minimap picture is fitted into (BT-152,
+     * 0x466780): the map is fitted into 126 pixels, not 128.
+     */
+    constexpr int MinimapPictureSize = 126;
+
+    /**
+     * Where the minimap picture sits in its box (BT-152): the longer side of
+     * the map is 126 pixels and the shorter is its aspect times that, in
+     * integer arithmetic and truncated, and the shorter side is centred with an
+     * offset of half the difference. A square map is 126 by 126.
+     */
+    Rectangle2f minimapPictureRect(const Rectangle2f& box, float imageWidth, float imageHeight);
+
+    /** What the displayed player knows of one fog cell, for the minimap. */
+    enum class MinimapCellState
+    {
+        /** Never explored: opaque black. */
+        Unexplored,
+        /** Explored but not in sight now: the base pixel through the gray table. */
+        Remembered,
+        /** In sight: the base pixel. */
+        Seen,
+    };
+
+    /**
+     * The minimap picture (BT-152, 0x466C20): each picture pixel samples one
+     * fog cell -- column x cellsWide / pictureWidth, and the same down -- and is
+     * black if the cell was never explored, the base pixel if it is in sight
+     * now, and the base pixel passed through the gray table if it is explored
+     * but not in sight. The gray table makes every channel the truncated mean
+     * of the three and snaps that to the palette (grayRamp, indexed by the
+     * mean): a desaturation that keeps the brightness, where RWE laid 47
+     * percent black over the picture. The base is the map's embedded minimap
+     * averaged down to the picture's size.
+     */
+    std::vector<Color> composeMinimapPicture(
+        int pictureWidth,
+        int pictureHeight,
+        const std::vector<Color>& base,
+        int baseWidth,
+        int baseHeight,
+        const std::vector<unsigned char>& grayRamp,
+        const ColorPalette& palette,
+        int cellsWide,
+        int cellsHigh,
+        const std::function<MinimapCellState(int, int)>& cellState);
+
+    /**
      * Whether the parts of a unit's model at or below the water line are cut
      * away rather than tinted blue (BT-142, 0x45972A to 0x459750): the original
      * tints them for a unit owned by the displayed player or held on sonar, and
