@@ -84,7 +84,20 @@ namespace rwe
 
         /** The name CREATEPLAYER carried, or empty for a peer it has lost. */
         virtual std::string peerName(std::uint32_t peer) const = 0;
+
+        /**
+         * Closes the room at launch: a late joiner is rejected with reason 3
+         * and the session description carries the join-disabled flag (BT-242,
+         * BT-244). A host with nothing to close ignores it.
+         */
+        virtual void setAdmissionClosed(bool closed) { (void)closed; }
     };
+
+    /** DirectPlay's DPSESSION_JOINDISABLED, which the original sets once a game has started. */
+    inline constexpr std::uint32_t TaSessionJoinDisabled = 0x20;
+
+    /** The session advertises this many players and the host is one of them. */
+    inline constexpr std::size_t TaSessionMaxPlayers = 10;
 
     struct TaHostConfig
     {
@@ -97,7 +110,26 @@ namespace rwe
         std::string mapName;
 
         /** The host's options byte, in the session description's dwUser3. */
-        std::uint8_t options{0x4F};
+        std::uint8_t options{0x47};
+
+        /**
+         * How many joiners are taken. The session advertises ten players and
+         * the host is one, so nine is the most; a game that can only play one
+         * peer says so here and the rest are turned away with a rejection.
+         */
+        std::size_t maxJoiners{TaSessionMaxPlayers - 1};
+
+        /**
+         * How long a joined peer may say nothing before it is rejected (reason
+         * 6) and removed as if it had left. The original prompts after its
+         * timeout setting, 30 s by default, and rejects on its own at that
+         * setting plus 120 s (BT-233); with nobody to ask, RWE takes the
+         * second figure.
+         */
+        std::chrono::milliseconds silenceTimeout{150000};
+
+        /** How often the silence is looked at. */
+        std::chrono::milliseconds silenceCheckInterval{1000};
 
         /**
          * The host's named player: the "from" of its application data and the
@@ -117,9 +149,12 @@ namespace rwe
         std::uint32_t firstAssignedPlayerId{0x08D90E74};
         std::uint32_t firstAssignedSystemPlayerId{0x08D90E75};
 
-        std::array<std::uint8_t, 16> instanceGuid{
-            0x88, 0xFE, 0xCB, 0xC9, 0xEF, 0xDB, 0x94, 0x43,
-            0xB9, 0x5C, 0x0D, 0x53, 0xCC, 0x2C, 0x18, 0xD4};
+        /**
+         * Random per session: the original never writes one and DirectPlay
+         * makes it when the session opens, so two sessions, or a restarted
+         * one, are distinct (BT-208). The captured constant is not reused.
+         */
+        std::array<std::uint8_t, 16> instanceGuid{taRandomInstanceGuid()};
 
         /** How long a handshake may sit in flight before it is swept away. */
         std::chrono::milliseconds pendingHandshakeTimeout{30000};
@@ -140,7 +175,7 @@ namespace rwe
          * The session advertises maxPlayers = 10 and the host counts as one, so
          * at most this many joiners are accepted.
          */
-        static constexpr std::size_t MaxPlayers = 10;
+        static constexpr std::size_t MaxPlayers = TaSessionMaxPlayers;
 
         /**
          * The caps on the state a peer can grow before it has joined. A
@@ -160,6 +195,17 @@ namespace rwe
         };
 
         Load load() const;
+
+        /**
+         * Messages dropped because they claimed to be from a peer and came from
+         * somewhere else: application data stamped with another player's id, a
+         * DELETEPLAYER for a player its sender is not, a CREATEPLAYER taking
+         * over a joined player's id. A pure counter, for a log and a test.
+         */
+        std::uint64_t forgedMessages() const { return forged; }
+
+        /** Peers rejected and removed for saying nothing for `silenceTimeout`. */
+        std::uint64_t silentPeersDropped() const { return silentDropped; }
 
         TaHostSession(asio::io_context& ioContext, TaHostConfig config);
         ~TaHostSession();
@@ -188,6 +234,10 @@ namespace rwe
 
         /** Send SESSIONDESCCHANGED now; the host does this whenever an option changes. */
         void sendSessionDescChanged() override;
+
+        void setAdmissionClosed(bool closed) override;
+
+        bool admissionClosed() const { return closed; }
 
         /** Drop a peer, telling the remaining peers it left. */
         void deletePeer(PeerId peerId);
@@ -242,10 +292,21 @@ namespace rwe
             asio::ip::udp::endpoint udpEndpoint;
             std::string shortName;
             std::string longName;
+
+            /**
+             * Where its CREATEPLAYER came from. Application data and a
+             * DELETEPLAYER are believed only from this address: the ids are
+             * predictable and a datagram's source is the only thing here that
+             * a sender cannot simply name.
+             */
+            asio::ip::address sourceIp;
+
+            std::chrono::steady_clock::time_point lastHeard;
         };
 
         struct PendingHandshake
         {
+            asio::ip::address sourceIp;
             std::uint32_t systemPlayerId{0};
             asio::ip::tcp::endpoint tcpEndpoint;
             asio::ip::udp::endpoint udpEndpoint;
@@ -272,12 +333,18 @@ namespace rwe
         /** Sweeps handshakes that never reached CREATEPLAYER. */
         asio::steady_timer pruneTimer;
 
+        /** Looks for peers that have gone quiet. */
+        asio::steady_timer silenceTimer;
+
         std::array<std::uint8_t, 65536> udpBuffer{};
 
         std::uint32_t nextPlayerId{0};
         std::uint32_t nextSystemPlayerId{0};
 
         bool started{false};
+        bool closed{false};
+        std::uint64_t forged{0};
+        std::uint64_t silentDropped{0};
 
         PeerJoinedHandler peerJoinedHandler;
         PeerLeftHandler peerLeftHandler;
@@ -307,13 +374,27 @@ namespace rwe
         void handleUdp(const std::uint8_t* data, std::size_t len, const asio::ip::udp::endpoint& source);
 
         void handleSystemMessage(const std::vector<std::uint8_t>& bytes, const asio::ip::address& sourceIp);
-        void handleAppData(const std::uint8_t* data, std::size_t len, bool tcp);
+        void handleAppData(const std::uint8_t* data, std::size_t len, bool tcp, const asio::ip::address& sourceIp);
+
+        /** Arms the look for silent peers, and the look itself. */
+        void armSilenceCheck();
+        void dropSilentPeers();
+
+        /**
+         * Turns a joiner away: a 0x1b naming it with the reason, down a
+         * connection to the address it gave. A joiner that is not yet a peer
+         * has no other way to be told, and left unanswered it waits for ever.
+         */
+        void rejectJoiner(
+            std::uint32_t playerId,
+            const asio::ip::tcp::endpoint& tcpEndpoint,
+            std::uint8_t reason);
 
         void handleEnumSessions(const asio::ip::tcp::endpoint& reply);
         void handleRequestPlayerId(std::span<const std::uint8_t> payload, const asio::ip::tcp::endpoint& reply);
         void handleAddForwardRequest(std::span<const std::uint8_t> payload, const asio::ip::tcp::endpoint& reply);
         void handleCreatePlayer(std::span<const std::uint8_t> payload, const asio::ip::tcp::endpoint& reply);
-        void handleDeletePlayer(std::span<const std::uint8_t> payload);
+        void handleDeletePlayer(std::span<const std::uint8_t> payload, const asio::ip::address& sourceIp);
 
         /**
          * The outbound connection to a reply address, opened on first use. All

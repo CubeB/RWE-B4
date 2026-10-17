@@ -115,7 +115,11 @@ namespace rwe
                 return true;
             }
 
-            void sendSessionDescChanged() override { ++sessionDescChanged; }
+            void sendSessionDescChanged() override
+            {
+                ++sessionDescChanged;
+                closedWhenDescChanged.push_back(admissionClosed);
+            }
 
             std::optional<TaPeerAddress> peerAddress(std::uint32_t peer) const override
             {
@@ -127,7 +131,13 @@ namespace rwe
 
             std::string peerName(std::uint32_t) const override { return "rwe"; }
 
+            void setAdmissionClosed(bool closed) override { admissionClosed = closed; }
+
             int sessionDescChanged{0};
+            bool admissionClosed{false};
+
+            /** Whether the room was already closed at each SESSIONDESCCHANGED. */
+            std::vector<bool> closedWhenDescChanged;
 
             explicit Session(std::vector<Sent>* where) : sent(where)
             {
@@ -485,7 +495,9 @@ namespace rwe
         REQUIRE(status);
         REQUIRE(status->playerId == HostId);
         REQUIRE(status->mapName == "Canal Crossing");
-        REQUIRE(status->options == 0x4F);
+        // 0x47 and not the captured host's 0x4f: Game Ends is not played (BT-234).
+        REQUIRE(status->options == 0x47);
+        REQUIRE((status->options & 0x18) == 0);
         REQUIRE(sent[1][5] == 0);
 
         REQUIRE(sent[2] == taBuildUnitSyncHeader());
@@ -564,6 +576,104 @@ namespace rwe
                 }
             }
         }
+    }
+
+    TEST_CASE("the largest data set's whole unit table is echoed, and a longer one is not without bound (BT-211)", "[net][ta]")
+    {
+        auto recordFor = [](std::uint32_t id) {
+            TadBytes record{0x1A, 0x02, 0x00, 0x00, 0x00, 0x00};
+            for (std::size_t b = 0; b < 4; ++b)
+            {
+                record.push_back(static_cast<std::uint8_t>(id >> (8 * b)));
+            }
+            record.resize(14, 0);
+            return record;
+        };
+
+        SECTION("Escalation's 549 types are all answered")
+        {
+            Harness h;
+            h.room->peerJoined(JoinerId);
+            TaPacket table;
+            for (std::uint32_t i = 0; i < 549; ++i)
+            {
+                table.subpackets.push_back(recordFor(i));
+            }
+            h.deliver(table);
+            REQUIRE(h.room->unitSyncEchoed() == 549);
+            REQUIRE(h.room->unitSyncRefused() == 0);
+        }
+
+        SECTION("a message of more than 600 is cut there")
+        {
+            Harness h;
+            h.room->peerJoined(JoinerId);
+            TaPacket table;
+            for (std::uint32_t i = 0; i < 700; ++i)
+            {
+                table.subpackets.push_back(recordFor(i));
+            }
+            h.deliver(table);
+            REQUIRE(h.room->unitSyncEchoed() == 600);
+            REQUIRE(h.room->unitSyncRefused() == 100);
+        }
+    }
+
+    TEST_CASE("a packet whose checksum does not match is dropped unread (#657)", "[net][ta]")
+    {
+        Harness h;
+        h.room->peerJoined(JoinerId);
+
+        TaPacket team;
+        team.subpackets.push_back(taBuildTeam(JoinerId, 2));
+        auto wire = team.build();
+        wire[wire.size() - 5] = static_cast<std::uint8_t>(wire[wire.size() - 5] ^ 0x01);
+
+        h.room->handleAppData(JoinerId, wire, TaTransport::Tcp);
+        REQUIRE(h.room->badChecksumPackets() == 1);
+        REQUIRE(h.room->peer(JoinerId)->team == TaNoTeam);
+
+        // The same packet intact is applied.
+        h.room->handleAppData(JoinerId, team.build(), TaTransport::Tcp);
+        REQUIRE(h.room->badChecksumPackets() == 1);
+        REQUIRE(h.room->peer(JoinerId)->team == 2);
+    }
+
+    TEST_CASE("a unit table in a packet whose checksum does not match is not echoed (#657)", "[net][ta]")
+    {
+        Harness h;
+        h.room->peerJoined(JoinerId);
+        h.sent.clear();
+
+        TaPacket table;
+        table.subpackets.push_back(TadBytes{0x1A, 0x02, 0, 0, 0, 0, 0x10, 0, 0, 0, 0, 0, 0, 0});
+        auto wire = table.build();
+        wire[5] = static_cast<std::uint8_t>(wire[5] ^ 0x80);
+        h.room->handleAppData(JoinerId, wire, TaTransport::Tcp);
+
+        REQUIRE(h.room->unitSyncEchoed() == 0);
+        REQUIRE(h.sent.empty());
+    }
+
+    TEST_CASE("the launch closes the room before the first description goes out (BT-242)", "[net][ta]")
+    {
+        Harness h;
+        h.room->peerJoined(JoinerId);
+        REQUIRE_FALSE(h.session.admissionClosed);
+
+        REQUIRE(h.room->launch(launchParams()));
+        REQUIRE(h.session.admissionClosed);
+
+        // Every description the launch sends says so, the first included.
+        REQUIRE_FALSE(h.session.closedWhenDescChanged.empty());
+        REQUIRE(h.session.closedWhenDescChanged.front());
+    }
+
+    TEST_CASE("a launch that is refused leaves the room open", "[net][ta]")
+    {
+        Harness h;
+        REQUIRE_FALSE(h.room->launch(launchParams()));
+        REQUIRE_FALSE(h.session.admissionClosed);
     }
 
     TEST_CASE("a joiner's side and colour are read from its status and kept across beats", "[net][ta]")

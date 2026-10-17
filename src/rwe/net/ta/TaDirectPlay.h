@@ -247,10 +247,36 @@ namespace rwe
     std::vector<std::uint8_t> taEncodeDeletePlayer(std::uint32_t playerId);
 
     /**
+     * The longest a game name or a player's name is: the original keeps names
+     * in a 17-byte field and copies at most 16 characters into it (BT-209,
+     * BT-238). The session name is the game name padded to 16 and the first 15
+     * characters of the map's, 31 in all.
+     */
+    inline constexpr std::size_t TaMaxNameLength = 16;
+    inline constexpr std::size_t TaMaxSessionNameLength = 31;
+
+    /**
+     * The first `maxBytes` bytes of a name, backed off so a multi-byte UTF-8
+     * sequence is never cut in half.
+     */
+    std::string taCapName(const std::string& name, std::size_t maxBytes);
+
+    /**
      * A session name: the game name padded to 16 characters, then the map name,
-     * as Total Annihilation builds it (docs/TA-NETWORK.md, "DirectPlay").
+     * as Total Annihilation builds it (docs/TA-NETWORK.md, "DirectPlay"). The
+     * game name is cut to 16 and the map's to 15, so the whole is at most 31
+     * (BT-209).
      */
     std::string taSessionName(const std::string& gameName, const std::string& mapName);
+
+    /**
+     * A fresh session instance GUID from the operating system's entropy. The
+     * original never writes one: DirectPlay makes it when the session opens, so
+     * two sessions, or one restarted, are distinct (BT-208). It is host
+     * identity on the wire and never reaches the simulation, so it is not drawn
+     * from the sim's generator.
+     */
+    std::array<std::uint8_t, 16> taRandomInstanceGuid();
 
     std::string taUtf16LeToUtf8(const std::uint8_t* data, std::size_t len);
 

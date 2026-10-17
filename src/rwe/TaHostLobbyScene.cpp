@@ -260,8 +260,11 @@ namespace rwe
         parameters.netMode = NetMode::OwnClock;
         parameters.taHostGame = host;
 
-        // TA has no commander-death rule: a player whose commander dies keeps
-        // playing, and the peer owns the other half of the board besides.
+        // The game plays Continues: a player whose commander dies keeps
+        // playing, and the peer owns the other half of the board besides. TA
+        // does have a commander rule -- options bit 0x08 is Game Ends and 0x10
+        // is Deathmatch -- so the byte advertised must leave both clear, and
+        // the default does (0x47, not a captured host's 0x4f; BT-234).
         parameters.commanderDeath = CommanderDeathMode::GameContinues;
 
         // The options byte the joiner was told (docs/TA-NETWORK.md): LOS in

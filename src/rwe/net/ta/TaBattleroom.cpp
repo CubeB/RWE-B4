@@ -374,6 +374,14 @@ namespace rwe
             return;
         }
 
+        // The original discards a packet whose stored checksum is not the sum
+        // of its bytes; a packet a peer sent is someone else's input (#657).
+        if (!parsed->checksumValid)
+        {
+            ++badChecksum_;
+            return;
+        }
+
         const TaPacket& packet = parsed->packet;
         bool sawUnitSync = false;
         for (const auto& subpacket : packet.subpackets)
@@ -674,6 +682,11 @@ namespace rwe
             refuse(reason);
             return false;
         }
+
+        // The room closes as the launch starts, before the first description
+        // goes out, so the one that tells a joiner the game is on also tells it
+        // nobody else can come in (BT-242, BT-244).
+        session.setAdmissionClosed(true);
 
         launchParams_ = params;
         loadingStep_ = 0;

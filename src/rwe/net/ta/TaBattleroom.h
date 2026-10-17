@@ -215,8 +215,13 @@ namespace rwe
         /** The map, which the status record names and a launch compares against. */
         std::string mapName;
 
-        /** Byte 157. The bits are in docs/TA-NETWORK.md, "The battleroom". */
-        std::uint8_t options{0x4F};
+        /**
+         * Byte 157. The bits are in docs/TA-NETWORK.md, "The battleroom".
+         * 0x47 and not a captured host's 0x4f: bit 0x08 is the Game Ends
+         * commander rule, which a joining TA takes from this byte and applies to
+         * its own commander, in a game RWE plays as Continues (BT-234).
+         */
+        std::uint8_t options{0x47};
 
         std::uint8_t hostTeam{TaNoTeam};
 
@@ -261,11 +266,12 @@ namespace rwe
         std::size_t unitSyncBatchSize{35};
 
         /**
-         * Ids answered out of one message of sub-type 2 records. No data set has
-         * more unit types than this, so a long message cannot make the queue grow
-         * without bound.
+         * Ids answered out of one message of sub-type 2 records. The largest
+         * data set known, Escalation, has 549 unit types; this leaves room above
+         * it and still stops a long message making the queue grow without bound
+         * (BT-211).
          */
-        std::size_t maxUnitSyncIdsPerMessage{512};
+        std::size_t maxUnitSyncIdsPerMessage{600};
     };
 
     /**
@@ -368,6 +374,9 @@ namespace rwe
         std::uint32_t unitSyncEchoed() const { return unitSyncEchoed_; }
         std::uint32_t unitSyncRefused() const { return unitSyncRefused_; }
 
+        /** Packets dropped for a stored checksum that did not match their bytes (#657). */
+        std::uint32_t badChecksumPackets() const { return badChecksum_; }
+
         TaBattleroomState state() const { return state_; }
 
         /**
@@ -404,6 +413,7 @@ namespace rwe
         unsigned int loadedWaits_{0};
         std::uint32_t unitSyncEchoed_{0};
         std::uint32_t unitSyncRefused_{0};
+        std::uint32_t badChecksum_{0};
 
         std::function<void(const TaBattleroomPeer&)> readyHandler;
         std::function<void(const JoinerInfo&)> launchedHandler;

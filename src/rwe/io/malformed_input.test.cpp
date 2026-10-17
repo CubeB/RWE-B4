@@ -1443,6 +1443,42 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a TA packet with any one byte damaged says so, and the live paths drop it (#657)", "[malformed]")
+    {
+        // The envelope reports a checksum that does not match and the battleroom
+        // and the in-game path both read it; a packet off a socket is someone
+        // else's input, so damage anywhere in the checksummed body has to show.
+        for (std::uint8_t framing : {TadPacketUncompressed, TadPacketCompressed})
+        {
+            TaPacket packet;
+            packet.type = framing;
+            packet.marker = 0xfffffffe;
+            packet.subpackets.push_back(TadBytes(36, 0x0d));
+            packet.subpackets.push_back(TadBytes(5, 0x12));
+            auto wire = packet.build();
+
+            auto intact = taParsePacket(wire);
+            REQUIRE(intact);
+            REQUIRE(intact->checksumValid);
+
+            // The last four bytes are outside the checksum by design, so
+            // damage is applied up to the byte before them.
+            for (std::size_t i = 3; i + 4 < wire.size(); ++i)
+            {
+                auto damaged = wire;
+                damaged[i] = static_cast<std::uint8_t>(damaged[i] ^ 0x01);
+                auto parsed = taParsePacket(damaged);
+                CAPTURE(framing, i);
+                // A damaged compressed stream may not decompress at all, which
+                // costs the packet just as surely.
+                if (parsed)
+                {
+                    REQUIRE_FALSE(parsed->checksumValid);
+                }
+            }
+        }
+    }
+
     TEST_CASE("a live receiver refuses a serial it cannot make sense of", "[malformed][puppet]")
     {
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);

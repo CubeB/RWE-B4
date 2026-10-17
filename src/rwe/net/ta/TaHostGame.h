@@ -102,7 +102,10 @@ namespace rwe
     {
         std::string mapName;
 
-        /** The session's name is this padded to 16, then the map's. */
+        /**
+         * The session's name is this padded to 16, then the map's. Longer than
+         * 16 is cut to 16, and the host player's name with it (BT-209).
+         */
         std::string gameName{"rwe"};
 
         /** Bytes 150 and 151 of the host's own status, and RWE's own side. */
@@ -111,8 +114,12 @@ namespace rwe
 
         std::uint8_t team{TaNoTeam};
 
-        /** Byte 157; the bits are in docs/TA-NETWORK.md, "The battleroom". */
-        std::uint8_t options{0x4F};
+        /**
+         * Byte 157; the bits are in docs/TA-NETWORK.md, "The battleroom". 0x08
+         * is Game Ends, which RWE does not play, so the default leaves it clear
+         * (BT-234).
+         */
+        std::uint8_t options{0x47};
 
         /** The id block size both sides agree on, which sets the 0x2c cycle. */
         std::uint16_t maxUnits{250};
@@ -138,6 +145,12 @@ namespace rwe
 
         /** Messages that were not a TA packet, and cost themselves. */
         std::uint64_t packetsNotTa{0};
+
+        /** Packets whose stored checksum did not match their bytes, dropped unread (#657). */
+        std::uint64_t packetsBadChecksum{0};
+
+        /** In-game packets from a peer that is not the joiner, dropped (BT-244). */
+        std::uint64_t packetsFromStranger{0};
     };
 
     /**

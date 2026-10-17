@@ -1,6 +1,8 @@
 #include "TaDirectPlay.h"
 #include <algorithm>
+#include <chrono>
 #include <cstring>
+#include <random>
 
 namespace rwe
 {
@@ -618,15 +620,52 @@ namespace rwe
         return out;
     }
 
+    std::string taCapName(const std::string& name, std::size_t maxBytes)
+    {
+        if (name.size() <= maxBytes)
+        {
+            return name;
+        }
+
+        auto length = maxBytes;
+        while (length > 0 && (static_cast<std::uint8_t>(name[length]) & 0xC0) == 0x80)
+        {
+            --length;
+        }
+        return name.substr(0, length);
+    }
+
     std::string taSessionName(const std::string& gameName, const std::string& mapName)
     {
-        std::string name = gameName;
-        if (name.size() < 16)
+        std::string name = taCapName(gameName, TaMaxNameLength);
+        if (name.size() < TaMaxNameLength)
         {
-            name.append(16 - name.size(), ' ');
+            name.append(TaMaxNameLength - name.size(), ' ');
         }
-        name += mapName;
+        name += taCapName(mapName, TaMaxSessionNameLength - TaMaxNameLength);
         return name;
+    }
+
+    std::array<std::uint8_t, 16> taRandomInstanceGuid()
+    {
+        std::random_device entropy;
+        // Some old MinGW runtimes ship a deterministic random_device; the clock
+        // mixed in keeps a restarted session different even there.
+        auto clock = static_cast<std::uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+        std::array<std::uint8_t, 16> guid{};
+        for (std::size_t i = 0; i < guid.size(); i += 4)
+        {
+            auto word = static_cast<std::uint32_t>(entropy()) ^ static_cast<std::uint32_t>(clock >> (i * 4));
+            for (std::size_t j = 0; j < 4; ++j)
+            {
+                guid[i + j] = static_cast<std::uint8_t>(word >> (8 * j));
+            }
+        }
+        // A version-4 GUID, as Windows makes one: Data3's top nibble is 4 and
+        // Data4's top two bits are 10.
+        guid[7] = static_cast<std::uint8_t>((guid[7] & 0x0F) | 0x40);
+        guid[8] = static_cast<std::uint8_t>((guid[8] & 0x3F) | 0x80);
+        return guid;
     }
 
     std::string taUtf16LeToUtf8(const std::uint8_t* data, std::size_t len)
