@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/game/OrderDispatch.h>
 #include <rwe/game/PlayerCommandApplication.h>
+#include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
@@ -113,6 +114,53 @@ namespace rwe
         REQUIRE((std::get<MoveOrder>(unit.orders.front()).destination == a));
         REQUIRE((ordersMatchForQueueToggle(BuildOrder("A", a), BuildOrder("B", a))));
         REQUIRE_FALSE(ordersMatchForQueueToggle(AttackOrder(UnitId(2)), AttackOrder(UnitId(3))));
+    }
+
+    TEST_CASE("a queued reclaim toggles against any feature within sixteen units (BT-86)", "[game][patrol]")
+    {
+        // 0x43AFC0 matches a reclaim on its type and a sixteen-unit box (each
+        // axis, inclusive), since a feature is a position and not a unit
+        // target. Two features a heightmap cell apart are sixteen apart.
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
+        auto player = addPlayer(sim, "player");
+        sim.unitDefinitions["tank"] = makeTankDef();
+        auto id = addUnitOfType(sim, "tank", player, SimVector(0_ss, 0_ss, 0_ss), makeEmptyCobScript());
+
+        FeatureDefinition rock{};
+        rock.name = "rock";
+        rock.footprintX = 1;
+        rock.footprintZ = 1;
+        rock.height = 10_ss;
+        rock.reclaimable = true;
+        rock.metal = 10u;
+        rock.blocking = false;
+        auto rockDef = sim.featureDefinitions.insert(rock);
+        auto first = sim.addFeature(rockDef, 4, 4).value();
+        auto neighbour = sim.addFeature(rockDef, 5, 4).value();
+        auto far = sim.addFeature(rockDef, 7, 4).value();
+
+        auto& orders = sim.getUnitState(id).orders;
+        SECTION("a feature sixteen units away is the same order, and the second click removes the first")
+        {
+            issue(sim, id, ReclaimOrder(first), Kind::Queued);
+            REQUIRE((orders.size() == 1));
+            issue(sim, id, ReclaimOrder(neighbour), Kind::Queued);
+            REQUIRE(orders.empty());
+        }
+
+        SECTION("a feature further than that is another order")
+        {
+            issue(sim, id, ReclaimOrder(first), Kind::Queued);
+            issue(sim, id, ReclaimOrder(far), Kind::Queued);
+            REQUIRE((orders.size() == 2));
+        }
+
+        SECTION("the same feature still toggles")
+        {
+            issue(sim, id, ReclaimOrder(first), Kind::Queued);
+            issue(sim, id, ReclaimOrder(first), Kind::Queued);
+            REQUIRE(orders.empty());
+        }
     }
 
     TEST_CASE("formation keeps fractional offsets and height, while distant outliers get the click", "[formation]")

@@ -137,6 +137,37 @@ namespace rwe
             }
         }
 
+        /**
+         * The queued-order toggle's "same order" test (0x43AFC0). A feature
+         * reclaim has a position and no unit target, so it matches on type
+         * and the sixteen-unit box around the feature, and two features
+         * within sixteen units are one order (BT-86). RWE's order holds the
+         * feature rather than the clicked point, so the box is taken between
+         * the two features' positions. Everything else goes through
+         * ordersMatchForQueueToggle.
+         */
+        bool queuedOrdersMatch(const GameSimulation& simulation, const UnitOrder& existing, const UnitOrder& requested)
+        {
+            const auto* oldReclaim = std::get_if<ReclaimOrder>(&existing);
+            const auto* newReclaim = std::get_if<ReclaimOrder>(&requested);
+            if (oldReclaim != nullptr && newReclaim != nullptr)
+            {
+                const auto* oldFeature = std::get_if<FeatureId>(&oldReclaim->target);
+                const auto* newFeature = std::get_if<FeatureId>(&newReclaim->target);
+                if (oldFeature != nullptr && newFeature != nullptr)
+                {
+                    auto a = simulation.tryGetFeature(*oldFeature);
+                    auto b = simulation.tryGetFeature(*newFeature);
+                    if (a && b)
+                    {
+                        return queuePositionsMatch(a->get().position, b->get().position);
+                    }
+                    return *oldFeature == *newFeature;
+                }
+            }
+            return ordersMatchForQueueToggle(existing, requested);
+        }
+
         void enqueueOrder(GameSimulation& simulation, UnitId unitId, const UnitOrder& order)
         {
             auto unit = simulation.tryGetUnitState(unitId);
@@ -149,7 +180,7 @@ namespace rwe
             // mission, interrupting the active task only when it is the head.
             auto& orders = unit->get().orders;
             auto found = std::find_if(orders.begin(), orders.end(), [&](const UnitOrder& old) {
-                return ordersMatchForQueueToggle(old, order);
+                return queuedOrdersMatch(simulation, old, order);
             });
             if (found != orders.end())
             {
