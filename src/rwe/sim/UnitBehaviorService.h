@@ -211,6 +211,14 @@ namespace rwe
          */
         bool withinBuildReachOfRect(UnitInfo unitInfo, const DiscreteRect& rect) const;
 
+        /**
+         * BT-97: whether a build site the builder could not path to is still
+         * within its build distance, flat distance less half of each
+         * footprint's diagonal. The original ignores the no-route failure
+         * when it is.
+         */
+        bool siteWithinReachOfUnreachableSite(UnitInfo unitInfo, const UnitDefinition& siteDefinition, const SimVector& site) const;
+
         /** Whether this weapon can hit the unit at all (water weapons only reach units in the water, ordinary ones only reach units out of it). */
         bool weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& attacker, const UnitState& target) const;
 

@@ -846,43 +846,70 @@ namespace rwe
                     continue;
                 }
 
-                if (def->canCapture)
-                {
-                    // Held back at five builders, and after being attacked.
-                    if (completedBuilders >= BuilderCap || sim.gameTime.value < nextAction)
-                    {
-                        continue;
-                    }
-                    // Kept within (mapWidth + mapHeight) / 3 of the base.
-                    double dx = toDouble(unit.position.x) - baseX;
-                    double dz = toDouble(unit.position.z) - baseZ;
-                    if (std::sqrt(dx * dx + dz * dz) > leash)
-                    {
-                        out.emplace_back(issue(unitId, MoveOrder(base), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
-                        continue;
-                    }
-                }
+                // BT-117 (0x408100, first pass): a cancapture builder is held
+                // back at five builders and after being attacked, and only
+                // then. Held back is not the end of it: the idle fallback
+                // below is the second pass, and takes it at five or more.
+                const bool heldBack = def->canCapture
+                    && (completedBuilders >= BuilderCap || sim.gameTime.value < nextAction);
 
                 // Draw a type, search for a site, issue the build.
-                if (auto type = chooseType(sim, unit.unitType, false))
+                if (!heldBack)
                 {
-                    const auto& typeDef = sim.unitDefinitions.at(*type);
-                    if (auto site = placement.findSite(sim, typeDef, unit.position, base, rng))
+                    if (auto type = chooseType(sim, unit.unitType, false))
                     {
-                        out.emplace_back(issue(unitId, BuildOrder(*type, *site), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
-                        continue;
+                        const auto& typeDef = sim.unitDefinitions.at(*type);
+                        if (auto site = placement.findSite(sim, typeDef, unit.position, base, rng))
+                        {
+                            // The range limit is on the SITE, measured from the
+                            // base point: (mapWidth + mapHeight) / 3. A site
+                            // farther off is discarded and no order is issued;
+                            // the builder is never sent home for being far away.
+                            bool inRange = true;
+                            if (def->canCapture)
+                            {
+                                double dx = toDouble(site->x) - baseX;
+                                double dz = toDouble(site->z) - baseZ;
+                                inRange = std::sqrt(dx * dx + dz * dz) <= leash;
+                            }
+                            if (inRange)
+                            {
+                                out.emplace_back(issue(unitId, BuildOrder(*type, *site), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
+                                continue;
+                            }
+                        }
                     }
                 }
 
-                // Nothing to do: wander near the base.
+                // Nothing to do: the idle fallback (the second pass).
                 if (def->canCapture)
                 {
+                    // BT-117: a cancapture unit takes part only when five or
+                    // more builders exist (0x40830A), where RWE had it the
+                    // other way about.
+                    if (completedBuilders < BuilderCap)
+                    {
+                        continue;
+                    }
+                    // It moves to the mirror of its own position through the
+                    // base point -- the base plus the vector from itself to
+                    // the base -- unless that vector is longer than 640, when
+                    // a random direction of length 640 replaces it. A patrol
+                    // is queued after.
+                    double vx = baseX - toDouble(unit.position.x);
+                    double vz = baseZ - toDouble(unit.position.z);
+                    if (std::sqrt(vx * vx + vz * vz) > static_cast<double>(WanderLimit))
+                    {
+                        const float radians = static_cast<float>(rng.below(360)) * (3.14159265358979323846f / 180.0f);
+                        vx = static_cast<double>(detCos(radians)) * static_cast<double>(WanderLimit);
+                        vz = static_cast<double>(detSin(radians)) * static_cast<double>(WanderLimit);
+                    }
+                    out.emplace_back(issue(unitId, MoveOrder(groundAt(sim, baseX + vx, baseZ + vz)), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
                     auto around = [&]() {
                         double x = baseX + static_cast<double>(static_cast<int>(rng.below(2 * WanderLimit + 1)) - WanderLimit);
                         double z = baseZ + static_cast<double>(static_cast<int>(rng.below(2 * WanderLimit + 1)) - WanderLimit);
                         return groundAt(sim, x, z);
                     };
-                    out.emplace_back(issue(unitId, MoveOrder(around()), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
                     out.emplace_back(issue(unitId, PatrolOrder(around()), PlayerUnitCommand::IssueOrder::IssueKind::Queued));
                 }
                 else

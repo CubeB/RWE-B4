@@ -5991,6 +5991,22 @@ namespace rwe
         }
     }
 
+    bool UnitBehaviorService::siteWithinReachOfUnreachableSite(UnitInfo unitInfo, const UnitDefinition& siteDefinition, const SimVector& site) const
+    {
+        const auto dx = static_cast<double>(simScalarToFloat(unitInfo.state->position.x - site.x));
+        const auto dz = static_cast<double>(simScalarToFloat(unitInfo.state->position.z - site.z));
+        // Whole world units, from the high word of the original's 16.16.
+        const auto distance = std::floor(std::sqrt(dx * dx + dz * dz));
+
+        auto halfDiagonal = [&](const UnitDefinition& definition) {
+            const auto [fx, fz] = sim->getFootprintXZ(definition.movementCollisionInfo);
+            return 8.0 * std::sqrt(static_cast<double>(fx) * static_cast<double>(fx) + static_cast<double>(fz) * static_cast<double>(fz));
+        };
+
+        const auto left = distance - halfDiagonal(*unitInfo.definition) - halfDiagonal(siteDefinition);
+        return left <= static_cast<double>(simScalarToFloat(unitInfo.definition->buildDistance));
+    }
+
     UnitCreationStatus UnitBehaviorService::createNewUnit(UnitInfo unitInfo, const std::string& unitType, const SimVector& position)
     {
         if (auto s = std::get_if<UnitBehaviorStateCreatingUnit>(&unitInfo.state->behaviourState))
@@ -6018,10 +6034,22 @@ namespace rwe
             // and say so. This is a different refusal from a site that is
             // merely occupied: there is nothing to wait for, because nothing
             // about the ground in between is going to change.
+            //
+            // BT-97 (0x403B63): not when the site is still inside the builder's
+            // reach from where it stopped. The original measures the flat
+            // distance from the builder to the site, takes off half of each
+            // footprint's diagonal (the root of the two cell counts squared,
+            // times 8) and, if what is left is within the build distance,
+            // ignores the failure and carries on as for an arrival -- so a
+            // builder on one bank of a stream builds across it. Otherwise it
+            // says "I can't reach the construction site" (0x501580).
             if (auto moving = std::get_if<NavigationStateMoving>(&unitInfo.state->navigationState.state); moving != nullptr && moving->reachableDestination)
             {
-                sim->events.push_back(UnitCannotComplyEvent{unitInfo.id, "Target area was blocked"});
-                return UnitCreationStatusFailed();
+                if (!siteWithinReachOfUnreachableSite(unitInfo, targetUnitDefinition, position))
+                {
+                    sim->events.push_back(UnitCannotComplyEvent{unitInfo.id, "I can't reach the construction site"});
+                    return UnitCreationStatusFailed();
+                }
             }
 
             changeState(*unitInfo.state, UnitBehaviorStateCreatingUnit{unitType, unitInfo.state->owner, position});

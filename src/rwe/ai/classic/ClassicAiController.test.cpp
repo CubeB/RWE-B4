@@ -1006,4 +1006,86 @@ namespace rwe
             CHECK(w.sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)));
         }
     }
+
+    TEST_CASE("a cancapture builder is never ordered home, and wanders only at five builders (BT-117)", "[ai][classic][bt117]")
+    {
+        // 0x408100, 0x40830A: the range limit is on the site, so a builder far
+        // from the base is not sent back; the idle second pass takes a
+        // cancapture unit only when five or more builders exist, and moves it
+        // to its own position mirrored through the base point -- or, when that
+        // vector is longer than 640, 640 along a random bearing.
+        auto wanders = [](int labs, float cx, float cz) {
+            World w;
+            // Nothing buildable, so the first pass has nothing to draw and the
+            // second is all that is left.
+            w.tree->buildableBy["ARMCOM"].clear();
+            auto commander = w.add("ARMCOM", w.ai, cx, cz);
+            double sumW = 21.0;
+            double sumX = 21.0 * cx;
+            double sumZ = 21.0 * cz;
+            for (int i = 0; i < labs; ++i)
+            {
+                const float lx = 100.0f;
+                const float lz = 100.0f + 64.0f * static_cast<float>(i);
+                w.add("ARMLAB", w.ai, lx, lz);
+                sumW += 61.0;
+                sumX += 61.0 * lx;
+                sumZ += 61.0 * lz;
+            }
+            ClassicAiController controller(w.ai, w.config(), 7);
+            std::vector<PlayerCommand> out;
+            w.advance(controller, 400, out);
+            struct Result
+            {
+                std::vector<SimVector> moves;
+                std::vector<SimVector> patrols;
+                double baseX, baseZ;
+            } r{{}, {}, sumX / sumW, sumZ / sumW};
+            for (const auto& c : out)
+            {
+                if (auto u = std::get_if<PlayerUnitCommand>(&c); u && u->unit == commander)
+                {
+                    if (auto issue = std::get_if<PlayerUnitCommand::IssueOrder>(&u->command))
+                    {
+                        if (auto m = std::get_if<MoveOrder>(&issue->order))
+                        {
+                            r.moves.push_back(m->destination);
+                        }
+                        if (auto p = std::get_if<PatrolOrder>(&issue->order))
+                        {
+                            r.patrols.push_back(p->destination);
+                        }
+                    }
+                }
+            }
+            return r;
+        };
+
+        SECTION("below five builders, nothing, and a far commander is not sent to the base")
+        {
+            auto r = wanders(1, 1900.0f, 1900.0f);
+            CHECK(r.moves.empty());
+            CHECK(r.patrols.empty());
+        }
+
+        SECTION("at five builders it moves to the mirror of its position through the base")
+        {
+            auto r = wanders(4, 300.0f, 200.0f);
+            REQUIRE(!r.moves.empty());
+            REQUIRE(!r.patrols.empty());
+            const double expectedX = r.baseX + (r.baseX - 300.0);
+            const double expectedZ = r.baseZ + (r.baseZ - 200.0);
+            CHECK(std::abs(static_cast<double>(r.moves.front().x.value) - expectedX) < 1.0);
+            CHECK(std::abs(static_cast<double>(r.moves.front().z.value) - expectedZ) < 1.0);
+        }
+
+        SECTION("a vector longer than 640 is replaced by 640 along a random bearing")
+        {
+            auto r = wanders(4, 1900.0f, 1900.0f);
+            REQUIRE(!r.moves.empty());
+            const double dx = static_cast<double>(r.moves.front().x.value) - r.baseX;
+            const double dz = static_cast<double>(r.moves.front().z.value) - r.baseZ;
+            CHECK(std::abs(std::sqrt(dx * dx + dz * dz) - 640.0) < 2.0);
+        }
+    }
 }

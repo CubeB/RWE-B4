@@ -10,6 +10,8 @@
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/UnitDefinition.h>
+#include <rwe/sim/UnitModelDefinition.h>
+#include <rwe/sim/UnitPieceDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/movement.h>
@@ -663,7 +665,9 @@ namespace rwe
         sim.unitDefinitions["tank"] = makeTankDef(10u);
         auto tankId = addTank(sim, player, 8, 8, script);
         sim.unitDefinitions["tank"].builder = true;
-        sim.unitDefinitions["tank"].buildDistance = 64_ss;
+        // Short of the 96 to the site once half of each footprint's diagonal
+        // is taken off (BT-97), so the wall is a refusal here.
+        sim.unitDefinitions["tank"].buildDistance = 40_ss;
         for (int y = 6; y <= 10; ++y)
         {
             for (int x = 6; x <= 10; ++x)
@@ -683,13 +687,22 @@ namespace rwe
 
         sim.getUnitState(tankId).orders.push_back(BuildOrder("solar", cellCenter(sim, 14, 8)));
 
+        std::vector<std::string> refusals;
         for (int i = 0; i < 120 && !sim.getUnitState(tankId).orders.empty(); ++i)
         {
             sim.tick();
+            for (const auto& e : sim.events)
+            {
+                if (const auto* refused = std::get_if<UnitCannotComplyEvent>(&e))
+                {
+                    refusals.push_back(refused->message);
+                }
+            }
         }
 
         REQUIRE(sim.getUnitState(tankId).orders.empty());
         REQUIRE(sim.units.tryGet(tankId).has_value());
+        REQUIRE(refusals == std::vector<std::string>{"I can't reach the construction site"});
         // Nothing was lathed into existence across the wall.
         int units = 0;
         for (const auto& [_, u] : sim.units)
@@ -698,6 +711,68 @@ namespace rwe
             ++units;
         }
         REQUIRE(units == 1);
+    }
+
+    TEST_CASE("a builder walled in builds anyway when the site is within its reach (BT-97)", "[pathing][bt97]")
+    {
+        // The original ignores a no-route failure when the flat distance to
+        // the site, less half of the builder's footprint diagonal and half of
+        // the site's, is within the build distance (0x403B63). Same scene as
+        // the refusal above with a nearer site and a longer arm: 64 - 8*sqrt(2)
+        // - 8*sqrt(8) is about 30, inside 64.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(16, 16), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto wall = addWallDef(sim);
+
+        sim.unitDefinitions["tank"] = makeTankDef(10u);
+        auto tankId = addTank(sim, player, 8, 8, script);
+        sim.unitDefinitions["tank"].builder = true;
+        sim.unitDefinitions["tank"].buildDistance = 64_ss;
+        for (int y = 6; y <= 10; ++y)
+        {
+            for (int x = 6; x <= 10; ++x)
+            {
+                if (std::max(std::abs(x - 8), std::abs(y - 8)) == 2)
+                {
+                    placeWall(sim, wall, x, y);
+                }
+            }
+        }
+
+        auto solar = makeTankDef(10u);
+        solar.isMobile = false;
+        solar.canMove = false;
+        solar.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
+        // Spawned the real way, which wants a model and a script, and the
+        // upper-case name createUnit looks the type up by.
+        std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+        sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(pieces));
+        solar.objectName = "model";
+        solar.yardMap = Grid<YardMapCell>(2, 2, YardMapCell::Ground);
+        sim.unitDefinitions["SOLAR"] = solar;
+        sim.unitScriptDefinitions["SOLAR"] = *script;
+
+        sim.getUnitState(tankId).orders.push_back(BuildOrder("SOLAR", cellCenter(sim, 12, 8)));
+
+        std::vector<std::string> refusals;
+        bool sawBehaviour = false;
+        for (int i = 0; i < 200; ++i)
+        {
+            sim.tick();
+            for (const auto& e : sim.events)
+            {
+                if (const auto* refused = std::get_if<UnitCannotComplyEvent>(&e))
+                {
+                    refusals.push_back(refused->message);
+                }
+            }
+            sawBehaviour = sawBehaviour || std::holds_alternative<UnitBehaviorStateCreatingUnit>(sim.getUnitState(tankId).behaviourState)
+                || sim.getUnitState(tankId).buildOrderUnitId.has_value();
+        }
+
+        REQUIRE(refusals == std::vector<std::string>{});
+        REQUIRE(sawBehaviour);
     }
 
     TEST_CASE("a unit standing inside a blocking feature can walk out of it", "[pathing]")
