@@ -1313,6 +1313,11 @@ namespace rwe
         auto pos = unit.position;
         auto worldToUi = worldUiRenderService.getInverseViewProjectionMatrix()
             * computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
+        // A target the player cannot see is drawn where it was last seen, not
+        // where it is (BT-184); the height still follows it.
+        auto orderMarkerPosition = [&](UnitId targetId, const UnitState& target) {
+            return orderMarkers.resolve(targetId, target.position, unitIsVisibleToLocalPlayer(targetId, target));
+        };
         for (const auto& order : unit.orders)
         {
             auto nextPos = match(
@@ -1328,7 +1333,7 @@ namespace rwe
                                                     {
                                                         return pos;
                                                     }
-                                                    return unitOption->get().position;
+                                                    return orderMarkerPosition(u, unitOption->get());
                                                 }); },
                 [&](const BuggerOffOrder&) { return pos; },
                 [&](const CompleteBuildOrder& o) {
@@ -1337,7 +1342,7 @@ namespace rwe
                     {
                         return pos;
                     }
-                    return unitOption->get().position;
+                    return orderMarkerPosition(o.target, unitOption->get());
                 },
                 [&](const GuardOrder& o) {
                     auto unitOption = tryGetUnit(o.target);
@@ -1345,7 +1350,7 @@ namespace rwe
                     {
                         return pos;
                     }
-                    return unitOption->get().position;
+                    return orderMarkerPosition(o.target, unitOption->get());
                 },
                 [&](const RepairOrder& o) {
                     auto unitOption = tryGetUnit(o.target);
@@ -1353,7 +1358,7 @@ namespace rwe
                     {
                         return pos;
                     }
-                    return unitOption->get().position;
+                    return orderMarkerPosition(o.target, unitOption->get());
                 },
                 [&](const PatrolOrder& o) { return o.destination; },
                 [&](const CaptureOrder& o) {
@@ -1362,7 +1367,7 @@ namespace rwe
                     {
                         return pos;
                     }
-                    return unitOption->get().position;
+                    return orderMarkerPosition(o.target, unitOption->get());
                 },
                 [&](const LoadOrder& o) {
                     auto unitOption = tryGetUnit(o.target);
@@ -1370,7 +1375,7 @@ namespace rwe
                     {
                         return pos;
                     }
-                    return unitOption->get().position;
+                    return orderMarkerPosition(o.target, unitOption->get());
                 },
                 [&](const UnloadOrder& o) { return o.destination; },
                 [&](const LandOnAirBaseOrder& o) {
@@ -1379,7 +1384,7 @@ namespace rwe
                     {
                         return pos;
                     }
-                    return unitOption->get().position;
+                    return orderMarkerPosition(o.target, unitOption->get());
                 },
                 [&](const DgunOrder& o) {
                     return match(
@@ -1390,7 +1395,7 @@ namespace rwe
                             {
                                 return pos;
                             }
-                            return unitOption->get().position;
+                            return orderMarkerPosition(u, unitOption->get());
                         },
                         [&](const SimVector& v) { return v; });
                 },
@@ -1411,7 +1416,7 @@ namespace rwe
                             {
                                 return pos;
                             }
-                            return unitOption->get().position;
+                            return orderMarkerPosition(u, unitOption->get());
                         },
                         [&](const FeatureId& f) {
                             auto featureOption = simulation.tryGetFeature(f);

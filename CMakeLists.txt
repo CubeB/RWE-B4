@@ -414,6 +414,8 @@ set(SOURCE_FILES
     src/rwe/game/WeaponMediaInfo.h
     src/rwe/game/DesyncReport.cpp
     src/rwe/game/chat_util.cpp
+    src/rwe/game/OrderMarkerMemory.cpp
+    src/rwe/game/OrderMarkerMemory.h
     src/rwe/game/chat_util.h
     src/rwe/game/chat_command.cpp
     src/rwe/game/chat_command.h
@@ -1172,6 +1174,7 @@ set(TEST_FILES
     src/rwe/game/SimDiagnostics.test.cpp
     src/rwe/game/playerrejoin.test.cpp
     src/rwe/game/chat_util.test.cpp
+    src/rwe/game/OrderMarkerMemory.test.cpp
     src/rwe/game/PeerLink.test.cpp
     src/rwe/game/SimEventLog.test.cpp
     src/rwe/geometry/BoundingBox3f.test.cpp

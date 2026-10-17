@@ -30,6 +30,7 @@
 #include <rwe/game/LockstepStats.h>
 #include <rwe/game/NetworkHistory.h>
 #include <rwe/game/OrderButtons.h>
+#include <rwe/game/OrderMarkerMemory.h>
 #include <rwe/game/Particle.h>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/game/PlayerCommandService.h>
@@ -973,6 +974,9 @@ namespace rwe
 
         /** Who a line goes to unless it carries a one-message prefix (BT-176). Cycled with Tab in the bar. */
         ChatSendMode chatSendMode;
+
+        /** Where order markers are drawn for targets the local player cannot see (BT-184). */
+        OrderMarkerMemory orderMarkers;
 
         /** Whether RWE_CHAT_TEST has had its one say. */
         bool chatTestSent{false};
