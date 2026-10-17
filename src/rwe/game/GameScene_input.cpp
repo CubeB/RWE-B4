@@ -348,17 +348,33 @@ namespace rwe
             // Ctrl+D: self-destruct selected units (TA behaviour).
             // Routes through the deterministic command queue so the
             // explosion happens at the same game tick on all peers.
-            unsigned int toggled = 0;
+            //
+            // A selection where some units are already counting down cancels
+            // those and arms none of the others; only when none is counting
+            // does the key arm the lot (BT-181, 0x49641D). The command is the
+            // same toggle either way.
+            std::vector<UnitId> candidates;
             for (const auto& unitId : selectedUnits)
             {
                 const auto& unit = tryGetUnit(unitId);
                 if (unit && unit->get().isAlive() && unit->get().isOwnedBy(localPlayerId))
                 {
-                    localPlayerSelfDestructUnit(unitId);
-                    ++toggled;
+                    candidates.push_back(unitId);
                 }
             }
-            LOG_INFO << "Self-destruct toggled for " << toggled << " selected unit(s)";
+            std::sort(candidates.begin(), candidates.end());
+            std::vector<bool> counting;
+            counting.reserve(candidates.size());
+            for (const auto& unitId : candidates)
+            {
+                counting.push_back(getUnit(unitId).selfDestructTime.has_value());
+            }
+            auto recipients = selfDestructRecipients(counting);
+            for (auto index : recipients)
+            {
+                localPlayerSelfDestructUnit(candidates[index]);
+            }
+            LOG_INFO << "Self-destruct toggled for " << recipients.size() << " selected unit(s)";
         }
         else if (keysym.key == SDLK_Z && isCtrlDown() && !isShiftDown())
         {

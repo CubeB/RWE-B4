@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <rwe/sim/PlayerId.h>
+#include <vector>
 
 namespace rwe
 {
@@ -73,6 +75,17 @@ namespace rwe
      * carried is simply refused.
      */
     bool sweepSelectsUnit(bool underConstruction, bool carried);
+
+    /**
+     * Which of the selected units Ctrl+D sends a self-destruct toggle to
+     * (BT-181). The key looks for an existing self-destruct order on each
+     * selected unit (0x439E30) and removes it (0x439F80); only when none of
+     * them had one does it issue the order to the whole selection (0x48CF30).
+     * So a mixed selection cancels the units already counting and arms none of
+     * the rest. `counting[i]` says whether unit i has a countdown running; the
+     * result is the indices to toggle.
+     */
+    std::vector<std::size_t> selfDestructRecipients(const std::vector<bool>& counting);
 
     BuildMenuPosition stepBuildMenu(BuildMenuPosition position, unsigned int pageCount, bool forward, bool toggle);
 }

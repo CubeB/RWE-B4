@@ -86,6 +86,18 @@ namespace rwe
         REQUIRE_FALSE(sweepSelectsUnit(false, true));
     }
 
+    TEST_CASE("Ctrl+D on a mixed selection cancels the counting units and arms none (BT-181)")
+    {
+        auto recipients = selfDestructRecipients({false, true, false, true});
+        REQUIRE(recipients == std::vector<std::size_t>{1, 3});
+    }
+
+    TEST_CASE("Ctrl+D arms the whole selection when none is counting down (BT-181)")
+    {
+        REQUIRE(selfDestructRecipients({false, false, false}) == std::vector<std::size_t>{0, 1, 2});
+        REQUIRE(selfDestructRecipients({}).empty());
+    }
+
     TEST_CASE("an armed Build click goes to every mobile builder and to nothing else (BT-108)")
     {
         REQUIRE(buildClickTakesUnit(true, true));

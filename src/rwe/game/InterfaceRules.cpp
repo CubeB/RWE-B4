@@ -27,6 +27,27 @@ namespace rwe
         return !underConstruction && !carried;
     }
 
+    std::vector<std::size_t> selfDestructRecipients(const std::vector<bool>& counting)
+    {
+        std::vector<std::size_t> result;
+        for (std::size_t i = 0; i < counting.size(); ++i)
+        {
+            if (counting[i])
+            {
+                result.push_back(i);
+            }
+        }
+        if (!result.empty())
+        {
+            return result;
+        }
+        for (std::size_t i = 0; i < counting.size(); ++i)
+        {
+            result.push_back(i);
+        }
+        return result;
+    }
+
     BuildMenuPosition stepBuildMenu(BuildMenuPosition position, unsigned int pageCount, bool forward, bool toggle)
     {
         if (pageCount == 0)
