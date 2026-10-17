@@ -95,7 +95,7 @@ namespace rwe
 
         std::optional<Shot> fireAtDrivingTarget(unsigned int kills, bool cruise)
         {
-            auto script = makeEmptyCobScript({"base"});
+            static const auto script = makeEmptyCobScript({"base"});
             auto op = [](OpCode code) { return static_cast<uint32_t>(code); };
             script->functions = {{"AimPrimary", 0}, {"QueryPrimary", 3}};
             script->instructions = {op(OpCode::PUSH_CONSTANT), 1u, op(OpCode::RETURN), op(OpCode::PUSH_CONSTANT), 0u, op(OpCode::RETURN)};

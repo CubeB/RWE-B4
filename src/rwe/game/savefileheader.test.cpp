@@ -135,6 +135,38 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a save's name cannot leave the saves folder", "[savefile][malformed]")
+    {
+        REQUIRE(saveFileStem("Game 1") == "Game 1");
+        REQUIRE(saveFileStem("../../outside") == ".._.._outside");
+        REQUIRE(saveFileStem("a/b") == "a_b");
+        REQUIRE(saveFileStem("a\\b") == "a_b");
+        REQUIRE(saveFileStem("C:evil") == "C_evil");
+        REQUIRE(saveFileStem(std::string("tab\there", 8)) == "tab_here");
+        // What is left names a file, so no folder can be added to the path.
+        REQUIRE(fs::path(saveFileStem("../../outside") + ".rwesave").parent_path().empty());
+    }
+
+    TEST_CASE("a save that cannot be written is reported, and a good one is not damaged by the attempt", "[savefile][malformed]")
+    {
+        TempFile file;
+        auto save = makeSaveFile();
+        save.gameTimeSeconds = 7u;
+
+        REQUIRE(writeSaveFile(file.path, save));
+        // Writing over a save that exists replaces it.
+        save.gameTimeSeconds = 8u;
+        REQUIRE(writeSaveFile(file.path, save));
+        auto loaded = readSaveFile(file.path);
+        REQUIRE(loaded.has_value());
+        REQUIRE(loaded->gameTimeSeconds == std::optional<unsigned int>(8u));
+        REQUIRE_FALSE(fs::exists(fs::path(file.path.string() + ".tmp")));
+
+        // A folder that is not there: the stream fails, and it says so.
+        auto nowhere = file.path.parent_path() / "rwe-no-such-folder-for-saves" / "x.rwesave";
+        REQUIRE_FALSE(writeSaveFile(nowhere, save));
+    }
+
     TEST_CASE("SaveFile's header round-trips the pathfinding backend", "[saveload][savefile]")
     {
         SECTION("a save written with a backend reads it back")

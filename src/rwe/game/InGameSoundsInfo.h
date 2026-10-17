@@ -22,6 +22,15 @@ namespace rwe
 
         std::optional<AudioService::SoundHandle> selectMultipleUnits;
 
+        /**
+         * ALLSOUND's "CreateSquad" and "SelectSquad", both beep4 in the shipped
+         * data. Assigning a squad plays the first (0x495FAF); recalling one plays
+         * the second (0x496003), and so do saving and recalling a camera
+         * bookmark (0x496021, 0x49603D). BT-182.
+         */
+        std::optional<AudioService::SoundHandle> createSquad;
+        std::optional<AudioService::SoundHandle> selectSquad;
+
         /** The two the side panel's slide plays at its endpoints (76). */
         std::optional<AudioService::SoundHandle> panel;
         std::optional<AudioService::SoundHandle> options;

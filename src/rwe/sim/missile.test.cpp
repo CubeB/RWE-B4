@@ -387,4 +387,78 @@ namespace rwe
         REQUIRE(simScalarToFloat(late.x) > 0.0f);
         REQUIRE(simScalarToFloat(late.x) > std::abs(simScalarToFloat(late.y)));
     }
+
+    TEST_CASE("a cruise missile near its target falls through to the live target, then to the floored stored point", "[missile]")
+    {
+        // BT-115, 0x49B3E0. Above 1024 from the stored point it holds 700.
+        // Inside it does not stop: a target projectile, then a live target
+        // unit, then -- for a cruise weapon only -- the stored point with its
+        // height set to the higher of the ground there and sea level.
+        Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(0));
+        // A hill under the aim point.
+        for (int z = 20; z < 30; ++z)
+        {
+            for (int x = 20; x < 30; ++x)
+            {
+                heights.get(x, z) = 90;
+            }
+        }
+        GameSimulation sim(MapTerrain(std::move(heights), 30_ss), 0u, 0, 0);
+        defineNuke(sim);
+
+        const auto& p = std::get<ProjectilePhysicsTypeSelfPropelled>(sim.weaponDefinitions.at("nuke").physicsType);
+
+        auto nukeAt = [&](const SimVector& position, const SimVector& aim) {
+            auto projectile = sim.createProjectileFromWeapon(ProjectileSpawn{
+                .owner = PlayerId(1),
+                .weaponType = "nuke",
+                .position = position,
+                .direction = SimVector(0_ss, 1_ss, 0_ss),
+                .distanceToTarget = 100_ss,
+                .targetPosition = aim});
+            return projectile;
+        };
+
+        auto hill = sim.terrain.heightmapIndexToWorldCenter(25, 25);
+        auto lowGround = sim.terrain.heightmapIndexToWorldCenter(5, 5);
+
+        SECTION("far out it holds the cruise altitude")
+        {
+            auto aim = SimVector(hill.x, 400_ss, hill.z);
+            auto projectile = nukeAt(SimVector(hill.x + 2000_ss, 900_ss, hill.z), aim);
+            auto point = sim.getSelfPropelledAimPoint(projectile, p);
+            REQUIRE(point.has_value());
+            REQUIRE(point->y == 700_ss);
+        }
+
+        SECTION("near the target with nothing to follow it comes down to the ground under the aim point")
+        {
+            auto aim = SimVector(hill.x, 400_ss, hill.z);
+            auto projectile = nukeAt(SimVector(hill.x + 500_ss, 600_ss, hill.z), aim);
+            auto point = sim.getSelfPropelledAimPoint(projectile, p);
+            REQUIRE(point.has_value());
+            REQUIRE(point->x == hill.x);
+            REQUIRE(point->y == 90_ss);
+        }
+
+        SECTION("over low ground under the sea the floor is sea level")
+        {
+            auto aim = SimVector(lowGround.x, 400_ss, lowGround.z);
+            auto projectile = nukeAt(SimVector(lowGround.x + 500_ss, 600_ss, lowGround.z), aim);
+            auto point = sim.getSelfPropelledAimPoint(projectile, p);
+            REQUIRE(point.has_value());
+            REQUIRE(point->y == 30_ss);
+        }
+
+        SECTION("a weapon that does not cruise gets the stored point as it was")
+        {
+            auto plain = p;
+            plain.cruise = false;
+            auto aim = SimVector(hill.x, 400_ss, hill.z);
+            auto projectile = nukeAt(SimVector(hill.x + 500_ss, 600_ss, hill.z), aim);
+            auto point = sim.getSelfPropelledAimPoint(projectile, plain);
+            REQUIRE(point.has_value());
+            REQUIRE(point->y == 400_ss);
+        }
+    }
 }

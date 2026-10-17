@@ -8,11 +8,12 @@
 namespace rwe
 {
     /**
-     * The number the next screenshot takes: one past the highest SHOTnnnn.pcx
-     * already in the folder, as the original's 0x4cb170 does (TOTALA-EXE.md
-     * S:77). Anything that is not SHOT, four digits and .pcx, in any case, is
-     * ignored. With none there the first is 0; where the original starts is
-     * not decoded.
+     * The number the next screenshot takes: one past the highest number in
+     * the folder's SHOT*.pcx names, as the original's 0x4cb170 does
+     * (TOTALA-EXE.md S:77, BT-161). The number is the integer parse of the
+     * digits after SHOT, so SHOT12345.pcx counts and the width is not fixed;
+     * a name with no number, or numbered 0, counts as 0. Anything that is not
+     * SHOT...pcx, in any case, is ignored. In an empty folder the first is 1.
      */
     unsigned int nextScreenshotNumber(const std::vector<std::string>& fileNames);
 

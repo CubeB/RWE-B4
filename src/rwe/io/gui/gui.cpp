@@ -4,6 +4,7 @@
 #include <rwe/io/tdf/TdfBlock.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/optional_util.h>
+#include <rwe/util/SimpleLogger.h>
 #include <stdexcept>
 
 namespace rwe
@@ -57,6 +58,35 @@ namespace rwe
         return *v;
     }
 
+    namespace
+    {
+        /**
+         * The original keeps a gadget's position and size in a short and
+         * refuses a layout larger than its screen. Unchecked, a negative
+         * size became about four billion in the component constructors and a
+         * huge one was accepted, and every loop that tiles art across a gadget
+         * ran that many times (#664). No shipped gadget is larger than 640 by
+         * 480; 2048 leaves room for a mod's larger screen and still bounds
+         * every such loop.
+         */
+        constexpr int MaxGadgetExtent = 2048;
+        constexpr int MaxGadgetPosition = 32767;
+
+        /** `stages` is a byte in the original; each stage is a label and a sprite. */
+        constexpr int MaxGadgetStages = 255;
+
+        int clampField(int value, int lo, int hi, const std::string& gadget, const char* key)
+        {
+            if (value < lo || value > hi)
+            {
+                auto clamped = std::clamp(value, lo, hi);
+                LOG_WARN << "gui gadget '" << gadget << "': " << key << "=" << value << " is out of range; using " << clamped;
+                return clamped;
+            }
+            return value;
+        }
+    }
+
     std::optional<GuiEntry> parseGuiEntry(const TdfBlock& e)
     {
         GuiEntry g;
@@ -64,18 +94,28 @@ namespace rwe
         auto commonOption = e.findBlock("COMMON");
         if (!commonOption)
         {
-            throw GuiParseException("Block is missing common section");
+            LOG_WARN << "gui: a block has no COMMON section; the file is refused";
+            return std::nullopt;
         }
 
         auto common = &commonOption->get();
 
-        g.common.id = expectGuiElementType(*common, "id");
+        // A gadget with no readable type cannot be built, so the file is
+        // refused; every other missing key takes the default the original
+        // gives it (zero, or empty) -- see #663.
+        auto id = extractGuiElementType(*common, "id");
+        if (!id)
+        {
+            LOG_WARN << "gui: a gadget has a missing or unknown type (id); the file is refused";
+            return std::nullopt;
+        }
+        g.common.id = *id;
         g.common.assoc = common->extractInt("assoc").value_or(0);
-        g.common.name = common->expectString("name");
-        g.common.xpos = common->extractInt("xpos").value_or(0);
-        g.common.ypos = common->extractInt("ypos").value_or(0);
-        g.common.width = common->extractInt("width").value_or(0);
-        g.common.height = common->extractInt("height").value_or(0);
+        g.common.name = refToCopy(common->findValue("name")).value_or("");
+        g.common.xpos = clampField(common->extractInt("xpos").value_or(0), -MaxGadgetPosition - 1, MaxGadgetPosition, g.common.name, "xpos");
+        g.common.ypos = clampField(common->extractInt("ypos").value_or(0), -MaxGadgetPosition - 1, MaxGadgetPosition, g.common.name, "ypos");
+        g.common.width = clampField(common->extractInt("width").value_or(0), 0, MaxGadgetExtent, g.common.name, "width");
+        g.common.height = clampField(common->extractInt("height").value_or(0), 0, MaxGadgetExtent, g.common.name, "height");
 
         // "attribs" and "colorf" should be present in all gadgets,
         // but ARMGEN.GUI contains a gadget whose "attribs" property
@@ -108,9 +148,9 @@ namespace rwe
         {
             auto version = &versionOption->get();
 
-            auto major = version->expectInt("major");
-            auto minor = version->expectInt("minor");
-            auto revision = version->expectInt("revision");
+            auto major = version->extractInt("major").value_or(0);
+            auto minor = version->extractInt("minor").value_or(0);
+            auto revision = version->extractInt("revision").value_or(0);
             g.version = GuiVersion(major, minor, revision);
         }
 
@@ -119,6 +159,10 @@ namespace rwe
         g.quickKey = e.extractInt("quickkey");
         g.grayedOut = e.extractBool("grayedout");
         g.stages = e.extractInt("stages");
+        if (g.stages)
+        {
+            g.stages = clampField(*g.stages, 0, MaxGadgetStages, g.common.name, "stages");
+        }
         g.maxChars = e.extractInt("maxchars");
 
         return g;
@@ -128,15 +172,45 @@ namespace rwe
     {
         std::vector<GuiEntry> entries;
 
-        for (const auto& block : tdf)
+        // The original allocates 200 records and the largest shipped file has
+        // 44. A 16 MB file of minimal records otherwise builds millions of
+        // components (#666).
+        if (tdf.size() > MaxGuiRecords)
         {
-            auto guiEntry = parseGuiEntry(block);
-            if (!guiEntry)
-            {
-                return std::nullopt;
-            }
+            LOG_WARN << "gui: " << tdf.size() << " records; keeping the first " << MaxGuiRecords;
+        }
 
-            entries.push_back(*guiEntry);
+        // Nothing here may throw: this returns an optional so that a bad file
+        // costs the panel built from it and not the game (#663).
+        try
+        {
+            for (const auto& block : tdf)
+            {
+                if (entries.size() >= MaxGuiRecords)
+                {
+                    break;
+                }
+
+                auto guiEntry = parseGuiEntry(block);
+                if (!guiEntry)
+                {
+                    return std::nullopt;
+                }
+
+                entries.push_back(*guiEntry);
+            }
+        }
+        catch (const std::exception& e)
+        {
+            LOG_WARN << "gui: unreadable record (" << e.what() << "); the file is refused";
+            return std::nullopt;
+        }
+
+        // The first record is the panel; every caller indexes it (#662).
+        if (entries.empty())
+        {
+            LOG_WARN << "gui: the file holds no records; it is refused";
+            return std::nullopt;
         }
 
         return entries;
@@ -144,7 +218,15 @@ namespace rwe
 
     std::optional<std::vector<GuiEntry>> parseGuiFromBytes(const std::vector<char>& bytes)
     {
-        return parseGui(parseListTdfFromBytes(bytes));
+        try
+        {
+            return parseGui(parseListTdfFromBytes(bytes));
+        }
+        catch (const std::exception& e)
+        {
+            LOG_WARN << "gui: unreadable file (" << e.what() << ")";
+            return std::nullopt;
+        }
     }
 
     bool GuiEntry::operator==(const GuiEntry& rhs) const

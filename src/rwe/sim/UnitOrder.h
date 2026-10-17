@@ -13,6 +13,23 @@ namespace rwe
     struct MoveOrder
     {
         SimVector destination;
+
+        /**
+         * BT-100: ticks left before a Move whose goal no route reaches asks
+         * for the same goal again. The original's executor resets the mission
+         * to state 0 and waits 30 plus a random 0 to 29 ticks on result 9
+         * (0x43B8E5); the wait lives on the order because that is where the
+         * mission keeps its state. Zero when not waiting. Hashed and saved.
+         */
+        unsigned int unreachableRetryTicks{0};
+
+        /**
+         * BT-79: a node the unit made for itself while idle (the return move
+         * behind a Maneuver engagement), marked 0x4000 in the original. A
+         * Shift-queued order strips the leading run of these. Hashed and saved.
+         */
+        bool automatic{false};
+
         explicit MoveOrder(const SimVector& destination) : destination(destination) {}
     };
 
@@ -55,6 +72,16 @@ namespace rwe
          * for a unit target nobody has seen yet.
          */
         std::optional<SimVector> lastSeenPosition;
+
+        /**
+         * BT-79: an engagement the unit made for itself from idle, marked
+         * 0x4000 in the original (the sighting routine copies the mark from
+         * the default-mission node it is inserted in front of). A new primary
+         * order, a Shift-queued one included, removes the leading run of
+         * these. An engagement made in front of a real order is unmarked and
+         * stays. Hashed and saved.
+         */
+        bool automatic{false};
 
         explicit AttackOrder(UnitId target) : target(target) {}
         explicit AttackOrder(const SimVector& target) : target(target) {}

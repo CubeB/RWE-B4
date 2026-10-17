@@ -1,6 +1,8 @@
 #include "CompositeVirtualFileSystem.h"
 #include <filesystem>
 #include <map>
+#include <rwe/io/hpi/hpi_util.h>
+#include <rwe/util/SimpleLogger.h>
 #include <rwe/util/rwe_string.h>
 #include <rwe/vfs/DirectoryFileSystem.h>
 #include <rwe/vfs/HpiFileSystem.h>
@@ -14,10 +16,31 @@ namespace rwe
     {
         for (const auto& fs : filesystems)
         {
-            auto file = fs->readFile(filename);
-            if (file)
+            // An entry that will not extract (a damaged chunk, a size past
+            // the cap) is that entry missing from that archive; the search
+            // goes on, and the file costs itself rather than the launch.
+            try
             {
-                return file;
+                auto file = fs->readFile(filename);
+                if (file)
+                {
+                    // The whole-file loader (0x4BBE50) hands back nothing
+                    // unless the size is above zero, and does not go on to
+                    // another archive: an empty file here hides any copy
+                    // further down and then reads as missing (BT-170, #605;
+                    // static byte-tactics reading at 97d7ac59, not executed
+                    // against the original). Callers already treat nullopt
+                    // as no such file; the film player skips it.
+                    if (file->empty())
+                    {
+                        return std::nullopt;
+                    }
+                    return file;
+                }
+            }
+            catch (const HpiException& e)
+            {
+                LOG_WARN << "Ignoring " << filename << " in " << fs->getPath() << ": " << e.what();
             }
         }
 
@@ -34,7 +57,7 @@ namespace rwe
             }
 
             auto file = fs->readFile(filename);
-            if (file)
+            if (file && !file->empty())
             {
                 return file;
             }
@@ -139,7 +162,16 @@ namespace rwe
             auto ext = e.path().extension().string();
             if (toUpper(ext) == toUpper(extension))
             {
-                vfs.emplaceFileSystem<HpiFileSystem>(e.path().string());
+                // An archive that will not open is one archive less, not a
+                // launch that ends: its files are simply not there.
+                try
+                {
+                    vfs.emplaceFileSystem<HpiFileSystem>(e.path().string());
+                }
+                catch (const std::exception& ex)
+                {
+                    LOG_WARN << "Skipping the archive " << e.path().string() << ": " << ex.what();
+                }
             }
         }
     }

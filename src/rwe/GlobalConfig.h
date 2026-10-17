@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 #include <rwe/pathfinding/PathfindingBackend.h>
 #include <string>
 #include <vector>
@@ -438,6 +439,35 @@ namespace rwe
         /** UI scale setting as a percentage: 0 Auto, or 100, 200, 300. Final field. */
         unsigned int uiScale{0};
     };
+
+    /**
+     * The four pages of an options screen, which are the front end's SOUNDS,
+     * MUSIC, SPEEDS and VISUALS and the in-game screen's SOUNDSRT, MUSICRT,
+     * SPEEDSRT and VISUALRT (BT-213). Each has its own UNDO and RESTORE
+     * (Default) pair in the original (0x45D477/0x45D53C, 0x45DB5C/0x45DB75,
+     * 0x45E2FD/0x45E331, 0x45EBA7/0x45EC65), and each acts on that page's
+     * fields alone.
+     */
+    enum class OptionsPage
+    {
+        Sound,
+        Music,
+        Speed,
+        Visual,
+    };
+
+    /** The page a gui name stands for, with or without the in-game "RT" suffix; nothing for an empty or unknown name. */
+    std::optional<OptionsPage> optionsPageFromName(const std::string& name);
+
+    /**
+     * `base` with the fields that live on `page` taken from `source`. The sound
+     * page holds the effects volume, the sound mode and the unit speech; the
+     * music page the music volume, the on/off switch and the track mode and
+     * types; the speed and interface page the scroll speed and the UI scale;
+     * the visual page the window mode, shadows, shading, anti-aliasing, the
+     * fringe, gamma and the camera zoom.
+     */
+    GameOptions optionsWithPageFrom(const GameOptions& base, const GameOptions& source, OptionsPage page);
 
     /** The settings as the config file last left them. */
     GameOptions optionsFromConfig(const GlobalConfig& config);

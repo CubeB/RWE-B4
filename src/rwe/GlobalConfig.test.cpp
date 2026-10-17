@@ -4,6 +4,74 @@
 
 namespace rwe
 {
+    TEST_CASE("options pages name the four pages of both options screens (BT-213)")
+    {
+        REQUIRE(optionsPageFromName("SOUNDS") == OptionsPage::Sound);
+        REQUIRE(optionsPageFromName("SOUNDSRT") == OptionsPage::Sound);
+        REQUIRE(optionsPageFromName("MUSIC") == OptionsPage::Music);
+        REQUIRE(optionsPageFromName("MUSICRT") == OptionsPage::Music);
+        REQUIRE(optionsPageFromName("SPEEDS") == OptionsPage::Speed);
+        REQUIRE(optionsPageFromName("SPEEDSRT") == OptionsPage::Speed);
+        REQUIRE(optionsPageFromName("VISUALS") == OptionsPage::Visual);
+        REQUIRE(optionsPageFromName("VISUALRT") == OptionsPage::Visual);
+        REQUIRE_FALSE(optionsPageFromName("").has_value());
+        REQUIRE_FALSE(optionsPageFromName("PREFS").has_value());
+    }
+
+    TEST_CASE("Default and Undo restore only the page they are on (BT-213)")
+    {
+        GameOptions now;
+        now.soundVolume = 40;
+        now.soundMode = SoundMode::Off;
+        now.unitSpeech = UnitSpeechLevel::Off;
+        now.musicVolume = 30;
+        now.musicEnabled = false;
+        now.scrollSpeed = 150;
+        now.shadows = false;
+        now.gamma = 70;
+
+        GameOptions defaults;
+
+        SECTION("the sound page takes the sound fields and nothing else")
+        {
+            auto result = optionsWithPageFrom(now, defaults, OptionsPage::Sound);
+            REQUIRE(result.soundVolume == defaults.soundVolume);
+            REQUIRE(result.soundMode == defaults.soundMode);
+            REQUIRE(result.unitSpeech == defaults.unitSpeech);
+            REQUIRE(result.musicVolume == 30);
+            REQUIRE_FALSE(result.musicEnabled);
+            REQUIRE(result.scrollSpeed == 150);
+            REQUIRE_FALSE(result.shadows);
+            REQUIRE(result.gamma == 70);
+        }
+
+        SECTION("the music page takes the music fields and nothing else")
+        {
+            auto result = optionsWithPageFrom(now, defaults, OptionsPage::Music);
+            REQUIRE(result.musicVolume == defaults.musicVolume);
+            REQUIRE(result.musicEnabled == defaults.musicEnabled);
+            REQUIRE(result.soundVolume == 40);
+            REQUIRE(result.soundMode == SoundMode::Off);
+        }
+
+        SECTION("the speed page takes the scroll speed and the UI scale")
+        {
+            auto result = optionsWithPageFrom(now, defaults, OptionsPage::Speed);
+            REQUIRE(result.scrollSpeed == defaults.scrollSpeed);
+            REQUIRE(result.shadows == false);
+            REQUIRE(result.soundVolume == 40);
+        }
+
+        SECTION("the visual page takes the picture fields and nothing else")
+        {
+            auto result = optionsWithPageFrom(now, defaults, OptionsPage::Visual);
+            REQUIRE(result.shadows == defaults.shadows);
+            REQUIRE(result.gamma == defaults.gamma);
+            REQUIRE(result.scrollSpeed == 150);
+            REQUIRE(result.musicVolume == 30);
+        }
+    }
+
     TEST_CASE("ShadingMode")
     {
         SECTION("cycles through all four stages and wraps")

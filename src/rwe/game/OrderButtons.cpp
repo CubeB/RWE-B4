@@ -152,6 +152,19 @@ namespace rwe
         return anyOffers(button);
     }
 
+    bool unavailableOrderButtonIsHidden(const std::vector<OrderButtonUnit>& selection, OrderButton button)
+    {
+        switch (button)
+        {
+            case OrderButton::Load:
+                return true;
+            case OrderButton::Blast:
+                return std::any_of(selection.begin(), selection.end(), [](const auto& unit) { return unitOffersOrderButton(unit, OrderButton::Load); });
+            default:
+                return false;
+        }
+    }
+
     UnitFireOrders fireOrdersAfterClick(const GatheredToggle<UnitFireOrders>& shown)
     {
         if (shown.mixed)

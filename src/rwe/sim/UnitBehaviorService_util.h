@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <optional>
 #include <rwe/math/Vector2x.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/SimAngle.h>
@@ -25,7 +27,16 @@ namespace rwe
      * `setSFXoccupy` tells a script and what a ship waits on before it starts
      * laying a wake. Heights are in whole world units.
      */
-    int computeSfxOccupyState(int unitY, int seaLevel, unsigned int waterLine, bool isSurfaceMover, int previousState);
+    int computeSfxOccupyState(int unitY, int seaLevel, unsigned int waterLine, bool isSurfaceMover, int previousState, int modelTop);
+
+    /**
+     * The mover's last step each tick (0x43DB50 at the end of 0x43DD20, BT-11):
+     * work out the unit's water state and start `setSFXoccupy` with it when it
+     * differs from the stored one. Unconditional for every mobile unit --
+     * moving or not -- so a ship that was built and never ordered anywhere is
+     * told its state on its first tick, not after its first step.
+     */
+    void updateSfxOccupancy(GameSimulation& sim, UnitInfo unitInfo);
 
     /**
      * How wide the shot may stray, once the shooter's own damage and kill
@@ -104,6 +115,53 @@ namespace rwe
      * same one.
      */
     bool unitIsAnUsableAirBase(const UnitState& state, const UnitDefinition& definition);
+
+    /**
+     * The original's one "can this unit repair that one" predicate (0x4899B0),
+     * which every help-build and repair arm and cursor calls. BT-62.
+     *
+     * The orderer is keyed on the loader's copy of `canreclamate` (flags2 bit 9)
+     * and not on `builder`, so a factory, a mine layer or a carrier is not a
+     * repairer. The target must not be at full health (an unfinished unit sits
+     * below it), must not be in the flying placement mode, and must be out of
+     * the water far enough: an orderer that can fly needs the target's top at
+     * or above sea level, any other needs it at or above sea level minus the
+     * orderer's maximum water depth. Tops are whole units, as everywhere else
+     * the original compares heights.
+     */
+    bool canRepairUnit(const GameSimulation& sim, const UnitDefinition& repairerDefinition, const UnitState& target);
+
+    /**
+     * The water half of that predicate alone (its last test, in whole units):
+     * a repairer that can fly and is not amphibious is refused a target whose
+     * top is under the surface; any other is refused one whose top is deeper
+     * than its own maximum water depth below it. The order dispatcher
+     * (0x43F0E0) applies it where a repair or help-build is chosen, and the
+     * ownership and health tests are separate steps there. BT-13.
+     */
+    bool repairWaterReachAllows(const GameSimulation& sim, const UnitDefinition& repairerDefinition, const UnitState& target);
+
+    /**
+     * Whether the original's attack-order builder (command 3, 0x43F154) would
+     * make an order of an attack click on this unit, or answer "no order" and
+     * leave the queue alone. BT-63, the water half of it.
+     *
+     * Only an enemy target is tested. The builder works from the unit's first
+     * two weapon slots and never the third. A target whose top is below sea
+     * level needs the first weapon to be a water weapon or the second slot to
+     * be filled with one; a target at or above it is refused to an orderer that
+     * is itself a `canhover` unit if either slot is a water weapon. The hover
+     * test is the orderer's, not the target's.
+     */
+    bool attackOrderIsAccepted(const GameSimulation& sim, const UnitDefinition& ordererDefinition, const UnitState& orderer, const UnitState& target);
+
+    /**
+     * The same builder's answer for a ground point: a first weapon that is
+     * anti-air (toairweapon) makes no order, so an anti-air-only unit told to
+     * attack a place keeps its queue instead of standing still on a useless
+     * order. There is no water test on a place. BT-63.
+     */
+    bool attackGroundOrderIsAccepted(const GameSimulation& sim, const UnitState& orderer);
 
     /**
      * Picks a repair pad for a damaged aircraft, or nothing if it is not hurt
@@ -203,11 +261,11 @@ namespace rwe
      */
     long long stockpileRampTotal(int ticks, int totalTicks, float cost);
 
-    std::pair<SimAngle, SimAngle> computeHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, SimScalar zOffset, ProjectilePhysicsType projectileType);
+    std::pair<SimAngle, SimAngle> computeHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, ProjectilePhysicsType projectileType);
 
     std::pair<SimAngle, SimAngle> computeLineOfSightHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to);
 
-    std::pair<SimAngle, SimAngle> computeBallisticHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, SimScalar zOffset);
+    std::pair<SimAngle, SimAngle> computeBallisticHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity);
 
     std::optional<std::pair<SimAngle, SimAngle>> computeFiringAngles(SimScalar speed, SimScalar gravity, SimScalar targetX, SimScalar targetY);
 
@@ -388,7 +446,7 @@ namespace rwe
      * cruise altitude, not the aircraft's actual height, and the speed is
      * the current one, so the trigger is recomputed every tick.
      */
-    SimScalar bombReleaseTrigger(const UnitDefinition& unitDefinition, SimScalar speed);
+    SimScalar bombReleaseTrigger(const UnitDefinition& unitDefinition, SimScalar speed, SimScalar gravityPerTick);
 
     /**
      * The tilt of the ground under a footprint, the way the original's
@@ -408,6 +466,55 @@ namespace rwe
         SimScalar roll;
     };
     GroundTilt computeGroundTilt(const MapTerrain& terrain, const SimVector& position, SimAngle rotation, SimScalar halfLength, SimScalar halfWidth, bool holdAtSeaLevel);
+
+    /**
+     * Where a ground unit sits and how it tilts, from the four corners of its
+     * model's selection rectangle rather than its footprint (BT-41, 0x48A490).
+     *
+     * `corners` are model-space offsets (x across, z along the nose) as
+     * UnitModelVertices keeps them. Each is turned by the heading and sampled;
+     * the height is the mean of the four, pitch is the front pair against the
+     * back pair over the rectangle's length, and roll the right pair against
+     * the left over its width. `holdAtSeaLevel` clamps each sample at sea level
+     * before the tilt is taken, as a hover craft's are.
+     *
+     * Nothing when a sample falls on the last column or row of the map or off
+     * its north or west edge: the original returns at once there and leaves the
+     * unit's height, pitch and bank as they were.
+     *
+     * Two simplifications, both deliberate. The original pairs the corners by
+     * their index in the primitive (0 and 1 against 2 and 3), which for the
+     * usual corner order is the same pairing as this one by position but for an
+     * unusual order tilts the hull about the wrong axis; pairing by position
+     * is what the model's drawn outline asks for. And the height is the mean of
+     * RWE's own terrain sampler, not the original's tile-corner bilinear
+     * truncated to whole units.
+     */
+    struct GroundAlignment
+    {
+        SimScalar y;
+        SimScalar pitch;
+        SimScalar roll;
+    };
+    std::optional<GroundAlignment> computeSelectionAlignment(const MapTerrain& terrain, const SimVector& position, SimAngle rotation, const std::array<SimVector, 4>& corners, bool holdAtSeaLevel);
+
+    /**
+     * The height the original's per-tick placement (0x48A870) gives a ground
+     * unit standing at (x, z), by the definition flags it tests (BT-42):
+     *
+     *   upright         one sample under the origin; if the unit can also
+     *                   hover, no lower than sea level minus WaterLine
+     *   floater         no alignment at all: sea level minus WaterLine,
+     *                   whatever the ground below
+     *   canhover        the sampled ground, no lower than sea level
+     *   anything else   the sampled ground
+     *
+     * The sea hold is keyed on canhover (bit 12), not on floater (bit 19);
+     * the floater's own fixed height is the only thing floater decides.
+     * There is no wave here: it is real-time in the original and render-only
+     * in RWE, so it never enters simulation state.
+     */
+    SimScalar computeGroundUnitHeight(const MapTerrain& terrain, const UnitDefinition& unitDefinition, SimScalar x, SimScalar z);
 
     /**
      * Pure state-machine step for an aircraft attack run. Given the unit's
@@ -436,7 +543,36 @@ namespace rwe
 
     SimVector findClosestPointToFootprintXZForUnit(const MapTerrain& terrain, const DiscreteRect& targetFootprintRect, const SimVector& p, int unitFootprintX, int unitFootprintZ);
 
+    /**
+     * BT-96: whether the unit stands on the map square a point goal falls in.
+     * TotalA.exe's point goal (0x44CF60) turns a position into a square with
+     * the unit's footprint correction -- position minus the footprint word
+     * shifted left 19, plus 0x80000, shifted right 20 -- which is the
+     * footprint's top-left cell, rounded to nearest, that computeFootprintRegion
+     * already finds. Both the unit's square and the goal's are taken that way
+     * with the unit's own footprint, and the test (0x44D310) with a radius
+     * below sixteen units is that they are the same square.
+     */
+    bool isOnGoalSquare(const GameSimulation& sim, const UnitState& unit, const UnitDefinition& unitDefinition, const SimVector& goalPoint);
+
     bool hasReachedGoal(const GameSimulation& sim, const MapTerrain& terrain, const UnitState& unit, const UnitDefinition& unitDefinition, const NavigationGoal& goal);
+
+    /**
+     * The launch muzzle correction a weapon slot keeps (0x49E0FB-0x49E11B,
+     * BT-114): the Z difference of the Query piece over the AimFrom piece
+     * times 1.25, truncated in the 16.16 the original holds it in.
+     */
+    SimScalar muzzleCorrectionOf(SimScalar queryMinusAimFromZ);
+
+    /**
+     * How many whole ticks of gravity the ballistic spawn takes off the launch
+     * vertical velocity (0x49CE62-0x49CE8A): the slot's correction over the
+     * weapon's velocity, an unsigned integer division of two 16.16 numbers.
+     * A negative correction would be an enormous unsigned count in the
+     * original; here it is taken as none, the retail data being built so that
+     * it is not seen.
+     */
+    unsigned int launchCorrectionTicks(SimScalar slotCorrection, SimScalar weaponVelocity);
 
     std::string getAimScriptName(unsigned int weaponIndex);
     std::string getAimFromScriptName(unsigned int weaponIndex);

@@ -327,6 +327,23 @@ namespace rwe
         }
     }
 
+    TEST_CASE("fixed start positions go to participants consecutively, not by seat number (BT-237)", "[gameoptions]")
+    {
+        // Three humans in seats 0, 1 and 5 take positions 1, 2 and 3.
+        REQUIRE(startPositionsForSlots({0, 1, 5}, false) == std::vector<int>({1, 2, 3}));
+        REQUIRE(startPositionsForSlots({0, 1}, false) == std::vector<int>({1, 2}));
+        REQUIRE(startPositionsForSlots({}, false).empty());
+
+        // A mission's slots are its own and keep their numbers.
+        REQUIRE(startPositionsForSlots({0, 1, 5}, true) == std::vector<int>({1, 2, 6}));
+
+        // And the deal still permutes whatever set it is handed.
+        std::minstd_rand rng(99u);
+        auto dealt = dealStartPositions(startPositionsForSlots({2, 4, 9}, false), StartLocationMode::Random, rng);
+        std::sort(dealt.begin(), dealt.end());
+        REQUIRE(dealt == std::vector<int>({1, 2, 3}));
+    }
+
     TEST_CASE("start positions are dealt, never invented", "[gameoptions]")
     {
         std::vector<int> fourSlots{1, 2, 3, 4};
@@ -504,6 +521,93 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a simultaneous wipe is a defeat, not a draw (BT-191)", "[gameoptions]")
+    {
+        auto script = makeOptionsScript();
+        GameSimulation sim(makeOptionsTerrain(), 0u, 0, 0);
+        auto a = addOptionsPlayer(sim, "a");
+        auto b = addOptionsPlayer(sim, "b");
+        defineOptionsUnit(sim, "tank", 100u);
+        addOptionsUnit(sim, "tank", a, SimVector(0_ss, 0_ss, 0_ss), script);
+        addOptionsUnit(sim, "tank", b, SimVector(64_ss, 0_ss, 0_ss), script);
+
+        sim.killPlayer(a);
+        sim.killPlayer(b);
+        sim.tick();
+
+        // Nobody is left to be credited with anything.
+        REQUIRE(std::holds_alternative<WinStatusNoSurvivors>(sim.computeWinStatus()));
+
+        // And neither seat shares a victory that nobody has.
+        REQUIRE_FALSE(sim.sharesVictory(a, b));
+        REQUIRE_FALSE(sim.sharesVictory(b, a));
+    }
+
+    TEST_CASE("every surviving teammate shares the win (BT-192)", "[gameoptions]")
+    {
+        auto script = makeOptionsScript();
+        GameSimulation sim(makeOptionsTerrain(), 0u, 0, 0);
+        std::vector<PlayerId> ids;
+        for (int i = 0; i < 4; ++i)
+        {
+            auto id = addOptionsPlayer(sim, "p" + std::to_string(i));
+            // 0 and 1 against 2 and 3.
+            sim.getPlayer(id).teamId = i < 2 ? 1 : 2;
+            ids.push_back(id);
+        }
+        defineOptionsUnit(sim, "tank", 100u);
+        for (int i = 0; i < 4; ++i)
+        {
+            addOptionsUnit(sim, "tank", ids[i], SimVector(SimScalar(i * 64.0f), 0_ss, 0_ss), script);
+        }
+
+        sim.killPlayer(ids[2]);
+        sim.killPlayer(ids[3]);
+        sim.tick();
+
+        auto status = sim.computeWinStatus();
+        REQUIRE(std::holds_alternative<WinStatusWon>(status));
+        auto winner = std::get<WinStatusWon>(status).winner;
+        REQUIRE(winner == ids[0]);
+
+        // The status names the lowest id, but the higher-numbered teammate
+        // wins too.
+        CHECK(sim.sharesVictory(ids[0], winner));
+        CHECK(sim.sharesVictory(ids[1], winner));
+
+        // The losers do not.
+        CHECK_FALSE(sim.sharesVictory(ids[2], winner));
+        CHECK_FALSE(sim.sharesVictory(ids[3], winner));
+    }
+
+    TEST_CASE("a dead teammate has taken the defeat (BT-192)", "[gameoptions]")
+    {
+        auto script = makeOptionsScript();
+        GameSimulation sim(makeOptionsTerrain(), 0u, 0, 0);
+        std::vector<PlayerId> ids;
+        for (int i = 0; i < 3; ++i)
+        {
+            auto id = addOptionsPlayer(sim, "p" + std::to_string(i));
+            sim.getPlayer(id).teamId = i < 2 ? 1 : 2;
+            ids.push_back(id);
+        }
+        defineOptionsUnit(sim, "tank", 100u);
+        for (int i = 0; i < 3; ++i)
+        {
+            addOptionsUnit(sim, "tank", ids[i], SimVector(SimScalar(i * 64.0f), 0_ss, 0_ss), script);
+        }
+
+        sim.killPlayer(ids[1]);
+        sim.killPlayer(ids[2]);
+        sim.tick();
+
+        auto status = sim.computeWinStatus();
+        REQUIRE(std::holds_alternative<WinStatusWon>(status));
+        auto winner = std::get<WinStatusWon>(status).winner;
+        CHECK(sim.sharesVictory(ids[0], winner));
+        CHECK_FALSE(sim.sharesVictory(ids[1], winner));
+    }
+
     TEST_CASE("what losing the commander costs", "[gameoptions]")
     {
         auto script = makeOptionsScript();
@@ -600,6 +704,158 @@ namespace rwe
             }
 
             REQUIRE(sim.getPlayer(us).status == GamePlayerStatus::Alive);
+        }
+    }
+
+    TEST_CASE("a game outside a mission ends 150 ticks after the win test first answers, with the economy frozen", "[gameoptions][endgame]")
+    {
+        // BT-82 (0x464F80): once a second the win test is observed. The first
+        // positive observation sets the word to 4, each later one takes one
+        // off, and the one that takes it below zero latches the result: six
+        // observations, so 150 ticks. A second the test does not answer
+        // neither resets nor advances the word. The settle stops from the
+        // first observation.
+        auto script = makeOptionsScript();
+        GameSimulation sim(makeOptionsTerrain(), 0u, 0, 0);
+        auto us = addOptionsPlayer(sim, "us");
+        auto them = addOptionsPlayer(sim, "them");
+        defineOptionsUnit(sim, "tank", 100u);
+        sim.unitDefinitions["tank"].energyMake = Energy(10.0f);
+        sim.unitDefinitions["tank"].energyStorage = Energy(100000.0f);
+        addOptionsUnit(sim, "tank", us, SimVector(0_ss, 0_ss, 0_ss), script);
+        addOptionsUnit(sim, "tank", them, SimVector(64_ss, 0_ss, 0_ss), script);
+        sim.getPlayer(us).energy = Energy(0.0f);
+
+        auto tickTo = [&](unsigned int tick) {
+            while (sim.gameTime.value < tick)
+            {
+                sim.tick();
+            }
+        };
+
+        SECTION("an undecided game starts nothing")
+        {
+            tickTo(100);
+            CHECK(sim.endCountdown == -1);
+            CHECK_FALSE(sim.isEndCountdownFreezingEconomy());
+            CHECK(std::holds_alternative<WinStatusUndecided>(sim.decidedStatus()));
+        }
+
+        SECTION("the result latches 150 ticks after the first observation")
+        {
+            sim.killPlayer(them);
+            tickTo(29);
+            // The raw test already answers; the decision does not.
+            CHECK(std::holds_alternative<WinStatusWon>(sim.computeWinStatus()));
+            CHECK(sim.endCountdown == -1);
+
+            // Observation one, at tick 30, sets the word and nothing else.
+            tickTo(30);
+            CHECK(sim.endCountdown == 4);
+            CHECK(std::holds_alternative<WinStatusUndecided>(sim.decidedStatus()));
+
+            tickTo(60);
+            CHECK(sim.endCountdown == 3);
+            tickTo(150);
+            CHECK(sim.endCountdown == 0);
+            tickTo(179);
+            CHECK(std::holds_alternative<WinStatusUndecided>(sim.decidedStatus()));
+
+            // Observation six takes it below zero: 150 ticks after the first.
+            tickTo(180);
+            CHECK(sim.endCountdown == -1);
+            auto status = sim.decidedStatus();
+            REQUIRE(std::holds_alternative<WinStatusWon>(status));
+            CHECK(std::get<WinStatusWon>(status).winner == us);
+            CHECK(sim.isEndCountdownFreezingEconomy());
+
+            // And it stays decided.
+            tickTo(300);
+            CHECK(std::holds_alternative<WinStatusWon>(sim.decidedStatus()));
+        }
+
+        SECTION("nobody settles from the first observation on")
+        {
+            // Tick 30 is a settle: the unit's ten energy is paid out.
+            tickTo(30);
+            CHECK(sim.getPlayer(us).energy.value > 0.0f);
+            auto before = sim.getPlayer(us).energy;
+
+            sim.killPlayer(them);
+            tickTo(60);
+            // The settle at 60 sees the first observation first and is held
+            // back: the stockpile has not moved.
+            CHECK(sim.endCountdown == 4);
+            CHECK(sim.getPlayer(us).energy == before);
+            tickTo(120);
+            CHECK(sim.getPlayer(us).energy == before);
+        }
+
+        SECTION("a second the test does not answer does not advance the word")
+        {
+            // A third player keeps the game open, then is removed: the word
+            // waits through the seconds it did not answer.
+            auto third = addOptionsPlayer(sim, "third");
+            addOptionsUnit(sim, "tank", third, SimVector(128_ss, 0_ss, 0_ss), script);
+            sim.killPlayer(them);
+            tickTo(90);
+            CHECK(sim.endCountdown == -1);
+            sim.killPlayer(third);
+            tickTo(120);
+            CHECK(sim.endCountdown == 4);
+        }
+    }
+
+    TEST_CASE("a seat that never held a unit blocks victory in multiplayer and counts for nothing in a skirmish", "[gameoptions][endgame]")
+    {
+        // BT-193: the multiplayer win test (0x490080) returns "not won" at once
+        // for an occupied seat whose has-created-units dword is zero; the
+        // skirmish one (0x49027B) just counts the units that are not allied.
+        GameSimulation sim(makeOptionsTerrain(), 0u, 0, 0);
+        auto us = addOptionsPlayer(sim, "us");
+        auto them = addOptionsPlayer(sim, "them");
+        auto late = addOptionsPlayer(sim, "late");
+        sim.getPlayer(us).hasCreatedUnits = true;
+        sim.getPlayer(them).hasCreatedUnits = true;
+        sim.killPlayer(them);
+
+        SECTION("in multiplayer, the empty seat holds the game open until it fields something")
+        {
+            REQUIRE_FALSE(sim.skirmishVictoryRules);
+            CHECK(std::holds_alternative<WinStatusUndecided>(sim.computeWinStatus()));
+
+            sim.getPlayer(late).hasCreatedUnits = true;
+            sim.killPlayer(late);
+            auto status = sim.computeWinStatus();
+            REQUIRE(std::holds_alternative<WinStatusWon>(status));
+            CHECK(std::get<WinStatusWon>(status).winner == us);
+        }
+
+        SECTION("in a skirmish, it contributes nothing")
+        {
+            sim.skirmishVictoryRules = true;
+            auto status = sim.computeWinStatus();
+            REQUIRE(std::holds_alternative<WinStatusWon>(status));
+            CHECK(std::get<WinStatusWon>(status).winner == us);
+        }
+
+        SECTION("in a skirmish, a game nobody has fielded anything in is not decided")
+        {
+            // The first seconds of a game whose units are still being placed.
+            sim.skirmishVictoryRules = true;
+            sim.getPlayer(us).hasCreatedUnits = false;
+            sim.getPlayer(them).hasCreatedUnits = false;
+            CHECK(std::holds_alternative<WinStatusUndecided>(sim.computeWinStatus()));
+        }
+
+        SECTION("a unit added for a seat is what marks it")
+        {
+            REQUIRE_FALSE(sim.getPlayer(late).hasCreatedUnits);
+            defineOptionsUnit(sim, "TANK", 100u);
+            sim.unitDefinitions.at("TANK").isMobile = true;
+            sim.unitScriptDefinitions["TANK"] = *makeOptionsScript();
+            REQUIRE(sim.trySpawnCompletedUnit("TANK", late, SimVector(64_ss, 0_ss, 64_ss), std::nullopt));
+            CHECK(sim.getPlayer(late).hasCreatedUnits);
         }
     }
 }

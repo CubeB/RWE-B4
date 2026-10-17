@@ -184,6 +184,18 @@ namespace rwe
     std::size_t applyMissionUnitList(std::unordered_map<std::string, UnitDefinition>& unitDefinitions, BuilderGuisDatabase& builderGuis, const std::set<std::string>& allowed);
 
     /**
+     * The storage base of a player who did not come from a mission (BT-165).
+     * The skirmish commander spawn (0x496EE0) and the multiplayer start
+     * (0x4977D8) write the player's own start amounts, each floored at 200,
+     * as the base at player+0xDC / +0xE0 and set the flag (player+0x149 bit
+     * 0) from the first frame, so the base is added in every settle and
+     * outlives the commander. Each player gets its own value: the
+     * running-maximum routine (0x497080) is never called, and is not ported.
+     * The opening stock is left as it was.
+     */
+    void applySkirmishBaseStorage(GamePlayerInfo& player);
+
+    /**
      * A mission's rules as the builder at 0x48E010 makes them from the
      * [GlobalHeader], in its order: the eleven victory keys, then the seven
      * defeat keys, with DestroyAllUnits standing in when no victory rule is

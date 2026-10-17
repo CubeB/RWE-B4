@@ -24,6 +24,25 @@ namespace rwe
             return static_cast<uint8_t>((v << 2) | (v >> 4));
         }
 
+        /**
+         * A tree of n leaves has 2n - 1 nodes: a byte tree has at most 256
+         * leaves, and a 16-bit one at most 65,536 (the five shipped films
+         * reach 511 and 59,041 nodes). The recursion that builds a tree is
+         * bounded by its depth, which a real code keeps to a few dozen bits
+         * and which the node count alone would leave at tens of thousands.
+         */
+        constexpr std::size_t MaxByteTreeNodes = 511;
+        constexpr std::size_t MaxWordTreeNodes = 131071;
+        constexpr unsigned int MaxTreeDepth = 256;
+
+        /**
+         * The most a packed audio chunk may unpack to. A frame of TA's
+         * stereo 16-bit sound is a few kilobytes; the field is 32 bits and
+         * was reserved as declared, and a one-leaf tree costs no bits per
+         * sample, so it could also be walked for four billion samples.
+         */
+        constexpr uint32_t MaxUnpackedAudioBytes = 4u * 1024u * 1024u;
+
         /** Run lengths for the block-type chains. */
         unsigned int sizeTable(unsigned int index)
         {
@@ -88,6 +107,7 @@ namespace rwe
         frameCount = readU32(p + 12);
         auto frameRate = static_cast<int32_t>(readU32(p + 16));
         auto flags = readU32(p + 20);
+        headerFlags = flags;
 
         // frameRate > 0: milliseconds per frame; < 0: hundredths of a
         // millisecond per frame; 0: ten frames a second.
@@ -119,16 +139,21 @@ namespace rwe
 
         // A "ring frame" is an extra frame for seamless looping; it has
         // entries in both tables but is not part of the advertised count.
-        auto tableFrames = frameCount + ((flags & 1u) ? 1u : 0u);
+        // Taken in 64 bits: in 32, a frame count near 2^32 wrapped the table
+        // size to something the file satisfied, and the tables were then
+        // reserved and read at the true count -- gigabytes, off the end of the
+        // buffer -- or, with the ring flag, wrapped to an empty table that
+        // decodeNextFrame indexed anyway.
+        std::uint64_t tableFrames = static_cast<std::uint64_t>(frameCount) + ((flags & 1u) ? 1u : 0u);
 
-        std::size_t offset = 104;
+        std::uint64_t offset = 104;
         if (fileData.size() < offset + (tableFrames * 5) + treesSize)
         {
             throw std::runtime_error("SMK file truncated");
         }
 
         frameSizes.reserve(tableFrames);
-        for (unsigned int i = 0; i < tableFrames; ++i)
+        for (std::uint64_t i = 0; i < tableFrames; ++i)
         {
             frameSizes.push_back(readU32(p + offset) & ~3u);
             offset += 4;
@@ -147,14 +172,21 @@ namespace rwe
         currentOffset = offset;
     }
 
-    int SmkDecoder::buildTree8Recursive(BitReader& reader, HuffTree& tree)
+    int SmkDecoder::buildTree8Recursive(BitReader& reader, HuffTree& tree, unsigned int depth)
     {
+        // The recursion goes one level deeper for every set bit, bounded only
+        // by the length of the tree block, so a block of ones recursed
+        // millions deep and exhausted the stack.
+        if (tree.nodes.size() >= MaxByteTreeNodes || depth > MaxTreeDepth)
+        {
+            throw std::runtime_error("SMK Huffman tree too large");
+        }
         auto index = static_cast<int>(tree.nodes.size());
         tree.nodes.emplace_back();
         if (reader.readBit())
         {
-            auto left = buildTree8Recursive(reader, tree);
-            auto right = buildTree8Recursive(reader, tree);
+            auto left = buildTree8Recursive(reader, tree, depth + 1);
+            auto right = buildTree8Recursive(reader, tree, depth + 1);
             tree.nodes[index].left = left;
             tree.nodes[index].right = right;
         }
@@ -172,20 +204,25 @@ namespace rwe
         {
             return tree;
         }
-        tree.root = buildTree8Recursive(reader, tree);
+        tree.root = buildTree8Recursive(reader, tree, 0);
         // The tree is closed by a zero bit.
         reader.readBit();
         return tree;
     }
 
-    int SmkDecoder::buildTree16Recursive(BitReader& reader, HuffTree& tree, HuffTree& low, HuffTree& high)
+    int SmkDecoder::buildTree16Recursive(BitReader& reader, HuffTree& tree, HuffTree& low, HuffTree& high, unsigned int depth)
     {
+        // As buildTree8Recursive.
+        if (tree.nodes.size() >= MaxWordTreeNodes || depth > MaxTreeDepth)
+        {
+            throw std::runtime_error("SMK Huffman tree too large");
+        }
         auto index = static_cast<int>(tree.nodes.size());
         tree.nodes.emplace_back();
         if (reader.readBit())
         {
-            auto left = buildTree16Recursive(reader, tree, low, high);
-            auto right = buildTree16Recursive(reader, tree, low, high);
+            auto left = buildTree16Recursive(reader, tree, low, high, depth + 1);
+            auto right = buildTree16Recursive(reader, tree, low, high, depth + 1);
             tree.nodes[index].left = left;
             tree.nodes[index].right = right;
         }
@@ -227,7 +264,7 @@ namespace rwe
         tree.cache[1] = static_cast<uint16_t>(reader.readBits(16));
         tree.cache[2] = static_cast<uint16_t>(reader.readBits(16));
 
-        tree.root = buildTree16Recursive(reader, tree, low, high);
+        tree.root = buildTree16Recursive(reader, tree, low, high, 0);
         reader.readBit();
         return tree;
     }
@@ -337,6 +374,10 @@ namespace rwe
             return;
         }
         auto unpackedSize = readU32(data);
+        if (unpackedSize > MaxUnpackedAudioBytes)
+        {
+            throw std::runtime_error("SMK audio chunk unpacks to too much");
+        }
         BitReader reader(data + 4, size - 4);
 
         if (!reader.readBit())
@@ -491,7 +532,7 @@ namespace rwe
 
     bool SmkDecoder::decodeNextFrame()
     {
-        if (currentFrame >= frameCount)
+        if (currentFrame >= frameCount || currentFrame >= frameSizes.size() || currentFrame >= frameTypes.size())
         {
             return false;
         }

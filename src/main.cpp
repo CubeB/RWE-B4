@@ -145,10 +145,11 @@ int main(int argc, char* argv[])
                       << "                        playing one: wait in a lobby, then load --map with RWE's\n"
                       << "                        player and the joiner, on the peer's own clock\n"
                       << "  --game-name <name>    The session's name, padded to 16 (default: rwe)\n"
+                      << "  --password <text>     With --ta-host: turn away a joiner with another password\n"
                       << "  --side <arm|core>     RWE's own side, which is the host's in the battleroom\n"
                       << "  --colour <n>          RWE's own colour, 0 to 255 (default: 0)\n"
                       << "  --team <n>            RWE's team in the battleroom, 5 (the default) for none\n"
-                      << "  --options <byte>      The host's options byte, 0x4f by default\n"
+                      << "  --options <byte>      The host's options byte, 0x47 by default\n"
                       << "  --max-units <n>       The id block size both sides agree on (default: 250)\n"
                       << "  --auto-launch         Launch as soon as the joiner is ready\n"
                       << "  --port-base <n>       Every DirectPlay port is the real one plus this (default: 0)\n"
@@ -353,7 +354,7 @@ int main(int argc, char* argv[])
                     hostConfig.gameName = args.getString("game-name", "rwe");
                     {
                         // Base-detected, since the byte is always written in hex (0x48).
-                        auto text = args.getString("options", "0x4f");
+                        auto text = args.getString("options", "0x47");
                         std::size_t used = 0;
                         unsigned long value = 0;
                         try
@@ -374,6 +375,7 @@ int main(int argc, char* argv[])
                     hostConfig.maxUnits = static_cast<std::uint16_t>(std::min(0xffffu, args.getUint("max-units", 250)));
                     hostConfig.colour = static_cast<std::uint8_t>(args.getUint("colour", 0));
                     hostConfig.autoLaunch = args.getBool("auto-launch");
+                    hostConfig.password = args.getString("password", "");
                     hostConfig.ports = rwe::TaHostPorts::atBase(static_cast<int>(args.getUint("port-base", 0)));
 
                     auto side = args.getString("side", "arm");

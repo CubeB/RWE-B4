@@ -18,7 +18,7 @@
 //   --map           the map name appended to it
 //   --port-base     every port is the real one plus this; 0 (the default) is
 //                   the real ports
-//   --options       the host's options byte (docs/TA-NETWORK.md), default 0x4f
+//   --options       the host's options byte (docs/TA-NETWORK.md), default 0x47
 //   --battleroom    hold a battleroom, answer unit sync and launch
 //   --auto-launch   with --battleroom, launch as soon as a joiner is ready
 //   --team          the host's team in the battleroom, 5 (the default) for none
@@ -223,13 +223,13 @@ int main(int argc, char* argv[])
 
     if (args.isHelpRequested() || !args.contains("session-name") || !args.contains("map"))
     {
-        std::cout << "usage: ta_host_probe --session-name x --map <map> [--port-base N] [--options 0x4f]\n"
+        std::cout << "usage: ta_host_probe --session-name x --map <map> [--port-base N] [--options 0x47]\n"
                      "                          [--battleroom] [--auto-launch]\n"
                   << "\n"
                   << "  --session-name  the game's name, padded to 16 in the session name\n"
                   << "  --map           the map name appended to it\n"
                   << "  --port-base     every port is the real one plus this (default 0)\n"
-                  << "  --options       the host's options byte (default 0x4f)\n"
+                  << "  --options       the host's options byte (default 0x47)\n"
                   << "  --battleroom    hold a battleroom, echo unit sync and launch\n"
                   << "  --auto-launch   with --battleroom, launch as soon as a joiner is ready\n"
                   << "  --team          the host's team in the battleroom, 5 for none (default)\n"
@@ -246,7 +246,7 @@ int main(int argc, char* argv[])
     config.gameName = args.getString("session-name");
     config.mapName = args.getString("map");
     config.ports = rwe::TaHostPorts::atBase(static_cast<int>(args.getUint("port-base", 0)));
-    config.options = static_cast<std::uint8_t>(args.getUint("options", 0x4f));
+    config.options = static_cast<std::uint8_t>(args.getUint("options", 0x47));
 
     rwe::TaBattleroomConfig roomConfig;
     roomConfig.mapName = config.mapName;
@@ -329,6 +329,19 @@ int main(int argc, char* argv[])
                 params.commanderUnitId = static_cast<std::uint16_t>(commanderUnitId);
                 params.commanderPosition = hostCommander().position;
                 std::cout << "launching: " << (room->launch(params) ? "yes" : "refused") << "\n" << std::flush;
+            }
+        });
+        // A launch asked for while the unit sync was still running is asked
+        // for again when it finishes (BT-212).
+        room->onSynced([&](const rwe::TaBattleroomPeer& peer) {
+            if (autoLaunch && peer.ready && room->state() == rwe::TaBattleroomState::Waiting)
+            {
+                rwe::TaBattleroom::LaunchParams params;
+                params.commanderTypeIndex = CommanderTypeIndex;
+                params.commanderUnitId = static_cast<std::uint16_t>(commanderUnitId);
+                params.commanderPosition = hostCommander().position;
+                std::cout << "launching: " << (room->launch(params) ? "yes" : "refused") << "
+" << std::flush;
             }
         });
         room->onRefused([&](const std::string& reason) {

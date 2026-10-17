@@ -5,6 +5,7 @@
 #include <rwe/io/gaf/GafArchive.h>
 #include <rwe/io/pcx/pcx.h>
 #include <rwe/io/tnt/TntArchive.h>
+#include <rwe/util/SimpleLogger.h>
 #include <rwe/util/rwe_string.h>
 
 namespace rwe
@@ -111,20 +112,31 @@ namespace rwe
             return std::nullopt;
         }
 
-        rwe::SpanStream gafStream(gafBytes->data(), gafBytes->size());
-        GafArchive gafArchive(&gafStream);
-
-        auto gafEntry = gafArchive.findEntry(normEntryName);
-        if (!gafEntry)
+        // A GAF that will not read costs the sprites in it and nothing else:
+        // it answers as the entry being absent, which the callers already
+        // handle by showing the default series.
+        try
         {
+            rwe::SpanStream gafStream(gafBytes->data(), gafBytes->size());
+            GafArchive gafArchive(&gafStream);
+
+            auto gafEntry = gafArchive.findEntry(normEntryName);
+            if (!gafEntry)
+            {
+                return std::nullopt;
+            }
+
+            BufferGafAdapter adapter(graphics, palette);
+            gafArchive.extract(*gafEntry, adapter);
+            auto ptr = std::make_shared<SpriteSeries>(adapter.extractSpriteSeries());
+            animCache[key] = ptr;
+            return ptr;
+        }
+        catch (const std::exception& e)
+        {
+            LOG_WARN << "Ignoring " << gafName << " entry " << entryName << ": " << e.what();
             return std::nullopt;
         }
-
-        BufferGafAdapter adapter(graphics, palette);
-        gafArchive.extract(*gafEntry, adapter);
-        auto ptr = std::make_shared<SpriteSeries>(adapter.extractSpriteSeries());
-        animCache[key] = ptr;
-        return ptr;
     }
 
     std::optional<std::shared_ptr<SpriteSeries>>
@@ -177,11 +189,25 @@ namespace rwe
             return std::nullopt;
         }
 
-        PcxDecoder<std::vector<char>::const_iterator> decoder(entry->begin(), entry->end());
-        auto decodedData = decoder.decodePalettedImage();
-        auto palette = decoder.decodePalette();
-        auto width = decoder.getWidth();
-        auto height = decoder.getHeight();
+        // A picture that will not decode leaves that button blank.
+        std::vector<char> decodedData;
+        std::vector<PcxPaletteColor> palette;
+        unsigned int width = 0;
+        unsigned int height = 0;
+        try
+        {
+            PcxDecoder<std::vector<char>::const_iterator> decoder(entry->begin(), entry->end());
+            decodedData = decoder.decodePalettedImage();
+            palette = decoder.decodePalette();
+            width = decoder.getWidth();
+            height = decoder.getHeight();
+        }
+        catch (const std::exception& e)
+        {
+            LOG_WARN << "Ignoring unit picture " << unitName << ": " << e.what();
+            unitPicCache.emplace(key, std::nullopt);
+            return std::nullopt;
+        }
 
         std::vector<Color> buffer(decodedData.size());
         for (std::size_t i = 0; i < decodedData.size(); ++i)
@@ -246,13 +272,27 @@ namespace rwe
             throw std::runtime_error("bitmap not found");
         }
 
-        PcxDecoder<std::vector<char>::const_iterator> decoder(entry->begin(), entry->end());
-
-        auto decodedData = decoder.decodePalettedImage();
-        auto palette = decoder.decodePalette();
-
-        auto width = decoder.getWidth();
-        auto height = decoder.getHeight();
+        // A bitmap that will not decode shows as the default colour in its
+        // place, once and logged once, rather than ending the launch.
+        std::vector<char> decodedData;
+        std::vector<PcxPaletteColor> palette;
+        unsigned int width = 0;
+        unsigned int height = 0;
+        try
+        {
+            PcxDecoder<std::vector<char>::const_iterator> decoder(entry->begin(), entry->end());
+            decodedData = decoder.decodePalettedImage();
+            palette = decoder.decodePalette();
+            width = decoder.getWidth();
+            height = decoder.getHeight();
+        }
+        catch (const std::exception& e)
+        {
+            LOG_WARN << "Ignoring bitmap " << bitmapName << ": " << e.what();
+            TextureInfo fallback(1, 1, getDefaultTexture());
+            bitmapCache[bitmapName] = fallback;
+            return fallback;
+        }
 
         std::vector<Color> buffer(decodedData.size());
         for (std::size_t i = 0; i < decodedData.size(); ++i)
@@ -292,6 +332,8 @@ namespace rwe
             return (*p)[pixel];
         });
 
+        minimapPixelCache[mapName] = MinimapPixels{static_cast<unsigned int>(minimap.width), static_cast<unsigned int>(minimap.height), rgbMinimap};
+
         SharedTextureHandle texture(graphics->createTexture(minimap.width, minimap.height, rgbMinimap));
         auto sprite = graphics->createSprite(
             Rectangle2f::fromTopLeft(0.0f, 0.0f, minimap.width, minimap.height),
@@ -302,6 +344,12 @@ namespace rwe
         minimapCache.insert({mapName, spritePtr});
 
         return spritePtr;
+    }
+
+    const TextureService::MinimapPixels* TextureService::tryGetMinimapPixels(const std::string& mapName) const
+    {
+        auto it = minimapPixelCache.find(mapName);
+        return it == minimapPixelCache.end() ? nullptr : &it->second;
     }
 
     std::shared_ptr<Sprite> TextureService::getDefaultSprite()
@@ -322,12 +370,17 @@ namespace rwe
 
         auto series = std::make_shared<SpriteSeries>();
 
+        // The blitter draws the glyph's first row at the requested Y minus the
+        // file's signed vertical offset, so text sits that many rows above the
+        // Y it was asked for (BT-162).
+        series->verticalOffset = static_cast<float>(fnt.verticalOffset());
+
+        std::vector<char> glyphBits;
         for (unsigned int i = 0; i < 256; ++i)
         {
-            std::vector<char> glyphBits(512);
-            auto bytesRead = fnt.extract(i, glyphBits.data());
-
-            auto width = bytesRead / 2;
+            auto glyph = fnt.extractGlyph(i, glyphBits);
+            auto width = glyph.width;
+            auto bytesRead = glyph.byteCount;
 
             std::vector<Color> rgbGlyph;
             rgbGlyph.reserve(bytesRead * 8);

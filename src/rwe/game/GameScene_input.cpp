@@ -11,6 +11,7 @@
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/camera_util.h>
 #include <rwe/game/GameScene_util.h>
+#include <rwe/game/InterfaceRules.h>
 #include <rwe/game/OrderButtons.h>
 #include <rwe/game/OrderDispatch.h>
 #include <rwe/game/SaveFile.h>
@@ -91,6 +92,24 @@ namespace rwe
             return;
         }
 
+        // The picture and the chart each take a key (BT-199, 0x4C1AB0): any key
+        // dismisses the picture once its one-second lock is up, and a key fills
+        // the chart's bars at once. Ahead of Enter's message bar below, which
+        // must not open over either; on the chart Escape keeps leaving.
+        if (gameOver && keyDismissesEndScreen(keysym.key))
+        {
+            if (endGamePhase == EndGamePhase::Glamour)
+            {
+                glamourClicked();
+                return;
+            }
+            if (endGameChartVisible() && keysym.key != SDLK_ESCAPE)
+            {
+                finishEndGameBars();
+                return;
+            }
+        }
+
         // Enter opens the message bar, as it does in the original. Ahead of
         // the panel below, which would otherwise take Enter as an activation
         // of whichever button last had focus.
@@ -165,7 +184,8 @@ namespace rwe
         else if (keysym.key == SDLK_F4)
         {
             // 76: F4 is the only thing that touches the latch, and it does not
-            // persist -- a new game starts with the panel out.
+            // persist -- a new game starts without the list out. It latches the
+            // score panel's player list and nothing else (BT-183, 0x4963A3).
             panelHiddenLatch = !panelHiddenLatch;
         }
         else if (keysym.key == SDLK_SPACE)
@@ -179,18 +199,35 @@ namespace rwe
         else if (keysym.key == SDLK_COMMA || keysym.key == SDLK_PERIOD)
         {
             // ',' and '.' page the selected builder's build menu, the
-            // original's default paging keys.
+            // original's default paging keys. They page with the toggle
+            // argument set (BT-104, 0x41BDE0 and 0x41BF10): stepping past
+            // the last page closes the menu, and stepping from closed opens
+            // the first page going forward or the last going back. The
+            // panel's NEXT and PREV buttons pass it clear and wrap. The
+            // sound plays whether or not there is a unit to page.
+            if (sounds.nextBuildMenu)
+            {
+                sceneContext.audioService->playSound(*sounds.nextBuildMenu);
+            }
             if (auto selectedUnit = getSingleSelectedUnit())
             {
-                auto pages = getBuildPageCount(builderGuisDatabase, getUnit(*selectedUnit).unitType);
-                if (pages > 1)
+                const auto& unit = getUnit(*selectedUnit);
+                auto pages = getBuildPageCount(builderGuisDatabase, unit.unitType);
+                if (pages > 0)
                 {
                     auto& guiInfo = getGuiInfo(*selectedUnit);
-                    auto step = keysym.key == SDLK_PERIOD ? 1u : pages - 1u;
-                    guiInfo.currentBuildPage = (guiInfo.currentBuildPage + step) % pages;
-                    guiInfo.section = UnitGuiInfo::Section::Build;
-                    const auto& unit = getUnit(*selectedUnit);
-                    if (auto buildPanelDefinition = getBuilderGui(builderGuisDatabase, unit.unitType, guiInfo.currentBuildPage))
+                    auto next = stepBuildMenu(
+                        BuildMenuPosition{guiInfo.section == UnitGuiInfo::Section::Build, guiInfo.currentBuildPage},
+                        pages,
+                        keysym.key == SDLK_PERIOD,
+                        true);
+                    guiInfo.currentBuildPage = next.page;
+                    guiInfo.section = next.open ? UnitGuiInfo::Section::Build : UnitGuiInfo::Section::Orders;
+                    if (!next.open)
+                    {
+                        setNextPanel(createOrdersPanel());
+                    }
+                    else if (auto buildPanelDefinition = getBuilderGui(builderGuisDatabase, unit.unitType, guiInfo.currentBuildPage))
                     {
                         setNextPanel(createBuildPanel(unit.unitType + std::to_string(guiInfo.currentBuildPage + 1), *buildPanelDefinition, unit.getBuildQueueTotals()));
                     }
@@ -207,10 +244,18 @@ namespace rwe
             if (isCtrlDown())
             {
                 cameraBookmarks[slot] = worldCameraState.position;
+                if (sounds.selectSquad)
+                {
+                    playUiSound(*sounds.selectSquad);
+                }
             }
             else if (cameraBookmarks[slot])
             {
                 setCameraPosition(*cameraBookmarks[slot]);
+                if (sounds.selectSquad)
+                {
+                    playUiSound(*sounds.selectSquad);
+                }
             }
         }
         else if (keysym.key == SDLK_F3)
@@ -312,7 +357,12 @@ namespace rwe
         {
             // Ctrl+A selects every unit the player owns, anywhere on the map
             // -- the original's special case, not merely what is on screen.
-            selectAllWhere([](const UnitState&, const UnitDefinition& d) { return d.canMove; });
+            // Every selectable, finished, uncarried one, buildings and
+            // factories included: "idle" and "movers" are not what the
+            // service (0x48BD50) tests (BT-180). It also lets go of the
+            // camera if it was following a unit.
+            selectAllWhere([](const UnitState& u, const UnitDefinition& d) { return sweepSelectsUnit(u.isBeingBuilt(d), u.carriedBy.has_value()); });
+            startTrackInternal({});
         }
         else if (keysym.key == SDLK_S && isCtrlDown() && !isShiftDown())
         {
@@ -325,17 +375,33 @@ namespace rwe
             // Ctrl+D: self-destruct selected units (TA behaviour).
             // Routes through the deterministic command queue so the
             // explosion happens at the same game tick on all peers.
-            unsigned int toggled = 0;
+            //
+            // A selection where some units are already counting down cancels
+            // those and arms none of the others; only when none is counting
+            // does the key arm the lot (BT-181, 0x49641D). The command is the
+            // same toggle either way.
+            std::vector<UnitId> candidates;
             for (const auto& unitId : selectedUnits)
             {
                 const auto& unit = tryGetUnit(unitId);
                 if (unit && unit->get().isAlive() && unit->get().isOwnedBy(localPlayerId))
                 {
-                    localPlayerSelfDestructUnit(unitId);
-                    ++toggled;
+                    candidates.push_back(unitId);
                 }
             }
-            LOG_INFO << "Self-destruct toggled for " << toggled << " selected unit(s)";
+            std::sort(candidates.begin(), candidates.end());
+            std::vector<bool> counting;
+            counting.reserve(candidates.size());
+            for (const auto& unitId : candidates)
+            {
+                counting.push_back(getUnit(unitId).selfDestructTime.has_value());
+            }
+            auto recipients = selfDestructRecipients(counting);
+            for (auto index : recipients)
+            {
+                localPlayerSelfDestructUnit(candidates[index]);
+            }
+            LOG_INFO << "Self-destruct toggled for " << recipients.size() << " selected unit(s)";
         }
         else if (keysym.key == SDLK_Z && isCtrlDown() && !isShiftDown())
         {
@@ -369,9 +435,13 @@ namespace rwe
         {
             // Control groups: keys 1-0 map to groups 0-9.
             // Ctrl+digit  → bind current selection to group (replace).
-            // Shift+digit → add current selection to group.
+            // Shift+digit → recall group, adding it to the current selection
+            //               (the squad recall's second argument is the Shift
+            //               state, BT-182: 0x48D9A0).
             // Digit alone → recall group (replace current selection).
-            // Ctrl+Shift+digit is treated the same as Shift+digit (add).
+            // Ctrl+Shift+digit adds the current selection to the group; it is
+            // RWE's own, the original having no such binding.
+            // Assigning plays CreateSquad and recalling SelectSquad.
             std::optional<int> groupIndex;
             if (keysym.key >= SDLK_1 && keysym.key <= SDLK_9)
             {
@@ -385,25 +455,24 @@ namespace rwe
             if (groupIndex)
             {
                 auto idx = *groupIndex;
-                if (isCtrlDown() && isShiftDown())
+                if (isCtrlDown())
                 {
-                    // Ctrl+Shift+digit: add selection to control group.
-                    for (const auto& unitId : selectedUnits)
+                    if (isShiftDown())
                     {
-                        controlGroups[idx].insert(unitId);
+                        // Ctrl+Shift+digit: add selection to control group.
+                        for (const auto& unitId : selectedUnits)
+                        {
+                            controlGroups[idx].insert(unitId);
+                        }
                     }
-                }
-                else if (isCtrlDown())
-                {
-                    // Ctrl+digit: bind (replace) control group with current selection.
-                    controlGroups[idx] = selectedUnits;
-                }
-                else if (isShiftDown())
-                {
-                    // Shift+digit: add current selection to control group.
-                    for (const auto& unitId : selectedUnits)
+                    else
                     {
-                        controlGroups[idx].insert(unitId);
+                        // Ctrl+digit: bind (replace) control group with current selection.
+                        controlGroups[idx] = selectedUnits;
+                    }
+                    if (sounds.createSquad)
+                    {
+                        playUiSound(*sounds.createSquad);
                     }
                 }
                 else
@@ -411,18 +480,34 @@ namespace rwe
                     // Digit alone: recall control group.
                     // Filter out any units that are now dead or no longer owned
                     // by the local player so stale IDs do not pollute the set.
+                    // The test is the select-everything sweep's (BT-180).
                     std::unordered_set<UnitId> liveUnits;
                     for (const auto& unitId : controlGroups[idx])
                     {
                         auto unitRef = tryGetUnit(unitId);
-                        if (unitRef && unitRef->get().isAlive() && unitRef->get().isOwnedBy(localPlayerId) && !unitRef->get().heldByMission)
+                        if (unitRef && unitRef->get().isAlive() && unitRef->get().isOwnedBy(localPlayerId) && !unitRef->get().heldByMission
+                            && sweepSelectsUnit(unitRef->get().isBeingBuilt(simulation.unitDefinitions.at(unitRef->get().unitType)), unitRef->get().carriedBy.has_value()))
                         {
                             liveUnits.insert(unitId);
                         }
                     }
                     // Prune the stored group to remove dead entries.
                     controlGroups[idx] = liveUnits;
-                    replaceUnitSelection(liveUnits);
+                    if (sounds.selectSquad)
+                    {
+                        playUiSound(*sounds.selectSquad);
+                    }
+                    if (isShiftDown())
+                    {
+                        // Shift adds the squad to what is selected already.
+                        auto combined = selectedUnits;
+                        combined.insert(liveUnits.begin(), liveUnits.end());
+                        replaceUnitSelection(combined);
+                    }
+                    else
+                    {
+                        replaceUnitSelection(liveUnits);
+                    }
                 }
             }
         }
@@ -500,9 +585,11 @@ namespace rwe
         // and one on Main Menu leaves.
         if (gameOver)
         {
-            if (endGamePhase == EndGamePhase::Glamour && event.button == MouseButtonEvent::MouseButton::Left)
+            // The picture goes at the release of either button (BT-199): the
+            // original refreshes its pointer record on the left- and
+            // right-button-up messages and dismisses on that record.
+            if (endGamePhase == EndGamePhase::Glamour)
             {
-                glamourClicked();
                 return;
             }
 
@@ -597,6 +684,17 @@ namespace rwe
                     {
                         if (hoveredUnit)
                         {
+                            // The original's attack arm can answer "no order"
+                            // (a ground gun against a submerged submarine) and
+                            // then the unit keeps its queue. BT-63.
+                            auto orderer = simulation.tryGetUnitState(selectedUnit);
+                            auto victim = simulation.tryGetUnitState(*hoveredUnit);
+                            if (orderer && victim
+                                && !attackOrderIsAccepted(simulation, simulation.unitDefinitions.at(orderer->get().unitType), orderer->get(), victim->get()))
+                            {
+                                continue;
+                            }
+
                             if (isShiftDown())
                             {
                                 localPlayerEnqueueUnitOrder(selectedUnit, AttackOrder(*hoveredUnit));
@@ -610,6 +708,13 @@ namespace rwe
                         else
                         {
                             auto coord = getMouseTerrainCoordinate();
+                            // And a first weapon that is anti-air makes no
+                            // order against a place either (BT-63).
+                            auto groundOrderer = simulation.tryGetUnitState(selectedUnit);
+                            if (coord && groundOrderer && !attackGroundOrderIsAccepted(simulation, groundOrderer->get()))
+                            {
+                                continue;
+                            }
                             if (coord)
                             {
                                 if (isShiftDown())
@@ -696,7 +801,13 @@ namespace rwe
                 [&](const CaptureCursorMode&) {
                     for (const auto& selectedUnit : selectedUnits)
                     {
-                        if (hoveredUnit && isEnemy(*hoveredUnit))
+                        // The armed button asks only that the unit can capture
+                        // and that the target belongs to someone else: an ally's
+                        // unit is accepted (BT-107, 0x43F6D1 and 0x43E797).
+                        auto orderer = simulation.tryGetUnitState(selectedUnit);
+                        auto victim = hoveredUnit ? simulation.tryGetUnitState(*hoveredUnit) : std::nullopt;
+                        if (orderer && victim
+                            && armedCaptureAccepts(simulation.unitDefinitions.at(orderer->get().unitType).canCapture, orderer->get().owner, victim->get().owner))
                         {
                             if (isShiftDown())
                             {
@@ -819,54 +930,84 @@ namespace rwe
                     }
                 },
                 [&](const BuildCursorMode& buildCursor) {
-                    if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit)
+                    // Every selected builder gets the site (BT-108, 0x419670):
+                    // the original walks the whole selection and gives each
+                    // builder its own order, with no lead-builder rule and no
+                    // limit of one. The armed cursor is not disarmed by a
+                    // change of selection, so it follows whoever is selected
+                    // when the click lands.
+                    std::vector<UnitId> builders;
+                    for (const auto& selectedUnit : selectedUnits)
                     {
-                        if (hoverBuildInfo)
+                        if (auto unit = simulation.tryGetUnitState(selectedUnit); unit && !unit->get().isDead())
                         {
-                            if (hoverBuildInfo->isValid)
+                            const auto& definition = simulation.unitDefinitions.at(unit->get().unitType);
+                            if (buildClickTakesUnit(definition.builder, definition.isMobile))
                             {
-                                auto topLeftWorld = simulation.terrain.heightmapIndexToWorldCorner(hoverBuildInfo->rect.x,
-                                    hoverBuildInfo->rect.y);
-                                auto x = topLeftWorld.x + ((SimScalar(hoverBuildInfo->rect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss);
-                                auto z = topLeftWorld.z + ((SimScalar(hoverBuildInfo->rect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss);
-                                auto y = simulation.terrain.getHeightAt(x, z);
-                                SimVector buildPos(x, y, z);
-                                if (isShiftDown())
+                                builders.push_back(selectedUnit);
+                            }
+                        }
+                    }
+                    // The set has no order of its own; the commands should not
+                    // depend on how it happens to hash.
+                    std::sort(builders.begin(), builders.end());
+
+                    if (!builders.empty() && hoverBuildInfo)
+                    {
+                        if (hoverBuildInfo->isValid)
+                        {
+                            auto topLeftWorld = simulation.terrain.heightmapIndexToWorldCorner(hoverBuildInfo->rect.x,
+                                hoverBuildInfo->rect.y);
+                            auto x = topLeftWorld.x + ((SimScalar(hoverBuildInfo->rect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss);
+                            auto z = topLeftWorld.z + ((SimScalar(hoverBuildInfo->rect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss);
+                            auto y = simulation.terrain.getHeightAt(x, z);
+                            SimVector buildPos(x, y, z);
+                            if (isShiftDown())
+                            {
+                                for (const auto& builder : builders)
                                 {
                                     // Shift-clicking a building already in the plan takes it out again.
-                                    if (auto planned = plannedBuildOrderAt(*selectedUnit, buildPos))
+                                    if (auto planned = plannedBuildOrderAt(builder, buildPos))
                                     {
-                                        localPlayerCancelBuildOrder(*selectedUnit, *planned);
+                                        localPlayerCancelBuildOrder(builder, *planned);
                                     }
                                     else
                                     {
-                                        localPlayerEnqueueUnitOrder(*selectedUnit, BuildOrder(buildCursor.unitType, buildPos));
+                                        localPlayerEnqueueUnitOrder(builder, BuildOrder(buildCursor.unitType, buildPos));
                                     }
-                                }
-                                else
-                                {
-                                    localPlayerIssueUnitOrder(*selectedUnit, BuildOrder(buildCursor.unitType, buildPos));
-                                    cursorMode.next(NormalCursorMode());
-                                }
-                            }
-                            else if (isShiftDown() && getMouseTerrainCoordinate())
-                            {
-                                // The spot is blocked by our own plan: shift-click removes that plan.
-                                if (auto planned = plannedBuildOrderAt(*selectedUnit, *getMouseTerrainCoordinate()))
-                                {
-                                    localPlayerCancelBuildOrder(*selectedUnit, *planned);
-                                }
-                                else if (sounds.notOkToBuild)
-                                {
-                                    playUiSound(*sounds.notOkToBuild);
                                 }
                             }
                             else
                             {
-                                if (sounds.notOkToBuild)
+                                for (const auto& builder : builders)
                                 {
-                                    playUiSound(*sounds.notOkToBuild);
+                                    localPlayerIssueUnitOrder(builder, BuildOrder(buildCursor.unitType, buildPos));
                                 }
+                                cursorMode.next(NormalCursorMode());
+                            }
+                        }
+                        else if (isShiftDown() && getMouseTerrainCoordinate())
+                        {
+                            // The spot is blocked by our own plan: shift-click removes that plan.
+                            auto cancelled = false;
+                            for (const auto& builder : builders)
+                            {
+                                if (auto planned = plannedBuildOrderAt(builder, *getMouseTerrainCoordinate()))
+                                {
+                                    localPlayerCancelBuildOrder(builder, *planned);
+                                    cancelled = true;
+                                }
+                            }
+                            if (!cancelled && sounds.notOkToBuild)
+                            {
+                                playUiSound(*sounds.notOkToBuild);
+                            }
+                        }
+                        else
+                        {
+                            if (sounds.notOkToBuild)
+                            {
+                                playUiSound(*sounds.notOkToBuild);
                             }
                         }
                     }
@@ -889,7 +1030,7 @@ namespace rwe
                     else if (isCursorOverWorld())
                     {
                         auto worldViewportPos = sceneContext.viewport->toOtherViewport(worldViewport, Point(event.x, event.y));
-                        cursorMode.next(NormalCursorMode{NormalCursorMode::SelectingState(sceneTime, worldViewportToCameraPlane(worldViewportPos))});
+                        cursorMode.next(NormalCursorMode{NormalCursorMode::SelectingState(sceneTime, worldViewportToCameraPlane(worldViewportPos), sceneContext.timeService->getTicks())});
                     }
                 });
         }
@@ -969,6 +1110,13 @@ namespace rwe
     {
         if (gameOver)
         {
+            if (endGamePhase == EndGamePhase::Glamour
+                && (event.button == MouseButtonEvent::MouseButton::Left || event.button == MouseButtonEvent::MouseButton::Right))
+            {
+                glamourClicked();
+                return;
+            }
+
             if (endGameChartVisible() && isGameMenuOpen())
             {
                 auto p = endGameScreenPoint(event.x, event.y);
@@ -1022,7 +1170,13 @@ namespace rwe
                             auto worldViewportPos = sceneContext.viewport->toOtherViewport(worldViewport, Point(event.x, event.y));
                             auto startViewportPos = cameraPlaneToWorldViewport(state.startPosition);
 
-                            if (sceneTime - state.startTime < SceneTime(30) && startViewportPos.maxSingleDimensionDistance(worldViewportPos) < 32)
+                            // A click or a drag is decided on the wall clock and on
+                            // the map, not on simulation ticks and screen pixels:
+                            // fewer than 25 of the clock's thirtieths of a second
+                            // and fewer than 32 world units on each axis
+                            // (BT-102, 0x4995AE).
+                            auto releasePosition = worldViewportToCameraPlane(worldViewportPos);
+                            if (pressIsClick(state.startMillis, sceneContext.timeService->getTicks(), state.startPosition.x - releasePosition.x, state.startPosition.y - releasePosition.y))
                             {
                                 if (hoveredUnit && getUnit(*hoveredUnit).isSelectableBy(simulation.unitDefinitions.at(getUnit(*hoveredUnit).unitType), localPlayerId))
                                 {

@@ -97,6 +97,16 @@ namespace rwe
         std::uint32_t hostPlayerId{0};
         std::uint32_t hostSystemPlayerId{0};
 
+        /**
+         * The one machine this game is played against. The game has a single
+         * remote player, so the session takes a single joiner (a second is
+         * turned away with a rejection rather than numbered and told a slot
+         * table nothing here would use, #721), and everything that reaches the
+         * game thread is checked against this id: a packet or a departure
+         * from any other peer is not the joiner's (#715, #716).
+         */
+        std::optional<std::uint32_t> joinerPeer;
+
         void start();
         void stop();
         void run();
@@ -167,7 +177,7 @@ namespace rwe
             {
                 if (auto peer = room->peer(id))
                 {
-                    peers.push_back(TaHostLobbyPeer{peer->name, peer->side, peer->colour, peer->team, peer->ready});
+                    peers.push_back(TaHostLobbyPeer{peer->name, peer->side, peer->colour, peer->team, peer->ready, peer->synced});
                 }
             }
 
@@ -208,6 +218,8 @@ namespace rwe
         hostConfig.mapName = config.mapName;
         hostConfig.options = config.options;
         hostConfig.ports = config.ports;
+        hostConfig.maxJoiners = 1;
+        hostConfig.password = config.password;
         hostPlayerId = hostConfig.hostPlayerId;
         hostSystemPlayerId = hostConfig.hostSystemPlayerId;
 
@@ -245,6 +257,10 @@ namespace rwe
         room = std::make_unique<TaBattleroom>(io, *session, *traffic, nowMs, std::move(roomConfig));
 
         session->onPeerJoined([this](TaHostSession::PeerId id) {
+            if (!joinerPeer)
+            {
+                joinerPeer = id;
+            }
             room->peerJoined(id);
             refreshLobby();
             LOG_INFO << "TA host: peer 0x" << std::hex << id << std::dec << " joined";
@@ -259,15 +275,24 @@ namespace rwe
 
             if (inGame)
             {
-                TaHostInbound item;
-                item.kind = TaHostInbound::Kind::PeerLeft;
-                item.peer = id;
-                item.sender = JoinerSender;
-                pushInbound(std::move(item));
+                // Only the joiner's departure is the game's business; the
+                // scene compares the id again before it removes anyone.
+                if (joinerPeer && *joinerPeer == id)
+                {
+                    TaHostInbound item;
+                    item.kind = TaHostInbound::Kind::PeerLeft;
+                    item.peer = id;
+                    item.sender = JoinerSender;
+                    pushInbound(std::move(item));
+                }
             }
             else
             {
                 room->peerLeft(id);
+            }
+            if (joinerPeer && *joinerPeer == id)
+            {
+                joinerPeer.reset();
             }
             refreshLobby();
             LOG_INFO << "TA host: peer 0x" << std::hex << id << std::dec << " left";
@@ -288,11 +313,30 @@ namespace rwe
                 return;
             }
 
+            // The session has already checked that the id is the address it
+            // joined from; this is that the id is the joiner's. Nothing else
+            // is stamped as the joiner (BT-244).
+            if (!joinerPeer || *joinerPeer != id)
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                ++stats.packetsFromStranger;
+                return;
+            }
+
             auto parsed = taParsePacket(bytes);
             if (!parsed)
             {
                 std::lock_guard<std::mutex> lock(mutex);
                 ++stats.packetsNotTa;
+                return;
+            }
+
+            // The original discards a packet whose checksum does not match;
+            // so does this, before anything in it is answered or queued (#657).
+            if (!parsed->checksumValid)
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                ++stats.packetsBadChecksum;
                 return;
             }
 
@@ -419,6 +463,12 @@ namespace rwe
             return;
         }
         if (std::none_of(lobby.peers.begin(), lobby.peers.end(), [](const auto& peer) { return peer.ready; }))
+        {
+            return;
+        }
+        // A launch the battleroom would refuse for an unfinished unit sync is
+        // not asked for once a frame (BT-212).
+        if (std::any_of(lobby.peers.begin(), lobby.peers.end(), [](const auto& peer) { return !peer.synced; }))
         {
             return;
         }

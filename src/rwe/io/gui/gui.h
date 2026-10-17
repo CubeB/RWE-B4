@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <optional>
 #include <rwe/io/tdf/TdfBlock.h>
 #include <string>
@@ -146,6 +147,15 @@ namespace rwe
     };
 
 
+    /** The original's record table holds 200; the largest shipped file has 44. */
+    constexpr std::size_t MaxGuiRecords = 200;
+
+    /**
+     * Never throws. Nullopt means the file cannot make a panel: no records, a
+     * record with no COMMON block or no readable gadget type, or text the TDF
+     * reader refused. Gadget sizes, positions and stage counts are clamped
+     * into the original's ranges, and at most MaxGuiRecords are read.
+     */
     std::optional<std::vector<GuiEntry>> parseGui(const std::vector<TdfBlock>& tdf);
     std::optional<std::vector<GuiEntry>> parseGuiFromBytes(const std::vector<char>& bytes);
 }

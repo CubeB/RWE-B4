@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/net/ta/TaDirectPlay.h>
 #include <rwe/net/ta/TaHostSession.h>
+#include <rwe/net/ta/TaPacket.h>
 
 #include <algorithm>
 #include <chrono>
@@ -73,13 +74,38 @@ namespace rwe
             return body;
         }
 
-        std::vector<std::uint8_t> createPlayerPayload(std::uint32_t playerId, const std::string& name, std::uint16_t tcpPort, std::uint16_t udpPort)
+        /**
+         * The 21 bytes of player data a joining TA sends: a 17-byte password,
+         * then the protocol shorts zero and 0x50 (BT-242).
+         */
+        std::vector<std::uint8_t> joinerPlayerData(const std::string& password = "")
+        {
+            std::vector<std::uint8_t> data(21, 0);
+            for (std::size_t i = 0; i < password.size() && i < 16; ++i)
+            {
+                data[i] = static_cast<std::uint8_t>(password[i]);
+            }
+            data[19] = 0x50;
+            return data;
+        }
+
+        std::vector<std::uint8_t> createPlayerPayload(
+            std::uint32_t playerId,
+            const std::string& name,
+            std::uint16_t tcpPort,
+            std::uint16_t udpPort,
+            const std::vector<std::uint8_t>& playerData = joinerPlayerData())
         {
             std::vector<std::uint8_t> body(120, 0);
             putU32(body, 28, playerId);
+            putU32(body, 32, 10); // short name, bytes
+            putU32(body, 36, 10); // long name, bytes
+            putU32(body, 40, 32); // service provider data: the two addresses
+            putU32(body, 44, static_cast<std::uint32_t>(playerData.size()));
             putUtf16(body, 68, name);
             putAddress(body, 88, tcpPort);
             putAddress(body, 104, udpPort);
+            body.insert(body.end(), playerData.begin(), playerData.end());
             return body;
         }
 
@@ -95,12 +121,32 @@ namespace rwe
         class TestJoiner
         {
         public:
-            TestJoiner(asio::io_context& ioContext, std::uint16_t hostGameTcp, std::uint16_t hostGameUdp)
+            /**
+             * `sourceAddress` is the loopback address this joiner's packets come
+             * from. Everything in 127.0.0.0/8 is this machine, so a second
+             * joiner on 127.0.0.2 is a second source to the host, which is what
+             * a forgery test needs. The 127.x.0.0/16 blocks are the "other
+             * networks" (the host's rule for one peer is the same /16, as the
+             * lobby's is); `udpSourceAddress` puts the UDP socket on another
+             * address than the TCP one.
+             */
+            TestJoiner(
+                asio::io_context& ioContext,
+                std::uint16_t hostGameTcp,
+                std::uint16_t hostGameUdp,
+                const std::string& sourceAddress = "127.0.0.1",
+                const std::string& udpSourceAddress = "")
                 : ioContext(ioContext),
                   tcpListener(ioContext),
                   udpSocket(ioContext),
                   toHost(ioContext)
             {
+                auto source = asio::ip::make_address_v4(sourceAddress);
+                // A joiner's UDP can leave from another address than its TCP.
+                auto udpSource = asio::ip::make_address_v4(udpSourceAddress.empty() ? sourceAddress : udpSourceAddress);
+
+                // Listens on every address so the host's connection back to
+                // whichever source it saw reaches it.
                 tcpListener.open(asio::ip::tcp::v4());
                 tcpListener.set_option(asio::ip::tcp::acceptor::reuse_address(true));
                 tcpListener.bind(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 0));
@@ -108,10 +154,11 @@ namespace rwe
                 replyPort = tcpListener.local_endpoint().port();
 
                 udpSocket.open(asio::ip::udp::v4());
-                udpSocket.bind(asio::ip::udp::endpoint(asio::ip::udp::v4(), 0));
+                udpSocket.bind(asio::ip::udp::endpoint(udpSource, 0));
                 udpPort = udpSocket.local_endpoint().port();
 
                 toHost.open(asio::ip::tcp::v4());
+                toHost.bind(asio::ip::tcp::endpoint(source, 0));
                 toHost.connect(asio::ip::tcp::endpoint(asio::ip::make_address_v4("127.0.0.1"), hostGameTcp));
                 hostUdpEndpoint = asio::ip::udp::endpoint(asio::ip::make_address_v4("127.0.0.1"), hostGameUdp);
 
@@ -132,15 +179,55 @@ namespace rwe
                 asio::write(toHost, asio::buffer(message));
             }
 
-            void sendAppDataTcp(std::uint32_t to, const std::vector<std::uint8_t>& payload)
+            void sendAppDataTcp(std::uint32_t to, const std::vector<std::uint8_t>& payload, std::uint32_t from = 0x08D90E74)
             {
-                sendToHost(taEncodeAppDataTcp(taMakeReplyAddress(replyPort, {127, 0, 0, 1}), 0x08D90E74, to, payload));
+                sendToHost(taEncodeAppDataTcp(taMakeReplyAddress(replyPort, {127, 0, 0, 1}), from, to, payload));
             }
 
-            void sendAppDataUdp(std::uint32_t to, const std::vector<std::uint8_t>& payload)
+            void sendAppDataUdp(std::uint32_t to, const std::vector<std::uint8_t>& payload, std::uint32_t from = 0x08D90E74)
             {
-                auto message = taEncodeAppDataUdp(0x08D90E74, to, payload);
+                auto message = taEncodeAppDataUdp(from, to, payload);
                 sendUdp(hostUdpEndpoint, message);
+            }
+
+            /** CREATEPLAYER for `playerId`, as the handshake's last step. */
+            void createPlayer(std::uint32_t playerId, const std::string& name, const std::vector<std::uint8_t>& playerData = joinerPlayerData())
+            {
+                sendToHost(taEncodeSystemMessage(
+                    TaDirectPlayCommand::CreatePlayer,
+                    taMakeReplyAddress(replyPort, {127, 0, 0, 1}),
+                    createPlayerPayload(playerId, name, replyPort, udpPort, playerData)));
+            }
+
+            /** DELETEPLAYER for `playerId`, which only the player's own address may send. */
+            void deletePlayer(std::uint32_t playerId)
+            {
+                sendToHost(taEncodeSystemMessage(
+                    TaDirectPlayCommand::DeletePlayer,
+                    taMakeReplyAddress(replyPort, {127, 0, 0, 1}),
+                    taEncodeDeletePlayer(playerId)));
+            }
+
+            /** The reject reasons the host has sent this joiner, as 0x1b subpackets. */
+            std::vector<TadBytes> rejects() const
+            {
+                std::vector<TadBytes> found;
+                for (const auto& app : receivedAppDataTcp)
+                {
+                    auto parsed = taParsePacket(app.payload);
+                    if (!parsed || !parsed->checksumValid)
+                    {
+                        continue;
+                    }
+                    for (const auto& subpacket : parsed->packet.subpackets)
+                    {
+                        if (!subpacket.empty() && subpacket[0] == 0x1b)
+                        {
+                            found.push_back(subpacket);
+                        }
+                    }
+                }
+                return found;
             }
 
             /** Every framed message the host has sent, in arrival order. */
@@ -355,7 +442,9 @@ namespace rwe
             auto* superMessage = joiner.findCommand(TaDirectPlayCommand::SuperEnumPlayersReply);
             auto reply = taDecodeSuperEnumPlayersReply(taDecodeDirectPlayMessage(superMessage->data(), superMessage->size()).payload);
             REQUIRE(reply.session.hostPlayerId == 0x08D80E77u);
-            REQUIRE(reply.session.user3 == 0x4F010001u);
+            REQUIRE(reply.session.user3 == 0x47010001u);
+            REQUIRE(reply.session.instanceGuid == config.instanceGuid);
+            REQUIRE((reply.session.flags & TaSessionJoinDisabled) == 0);
 
             auto hostSystem = std::find_if(reply.players.begin(), reply.players.end(), [](const auto& p) { return p.id == 0x08D90E77u; });
             REQUIRE(hostSystem != reply.players.end());
@@ -510,23 +599,520 @@ namespace rwe
             joiner.sendToHost(taEncodeSystemMessage(
                 TaDirectPlayCommand::CreatePlayer,
                 reply,
-                createPlayerPayload(0x08D90E74u + i, "p" + std::to_string(i), joiner.tcpPort(), joiner.udpPortValue())));
+                // Down in pairs, as the host hands them out; counting up would
+                // run into the host's own ids, which a joiner may not take.
+                createPlayerPayload(0x08D90E74u - 2 * i, "p" + std::to_string(i), joiner.tcpPort(), joiner.udpPortValue())));
         }
 
         runUntil(ioContext, [&] { return host.load().peers == roomFor; });
         REQUIRE(joined.size() == roomFor);
 
-        // The next one is over the advertised maximum and is dropped.
+        // The next one is over the advertised maximum and is turned away --
+        // and told so, since a joiner left waiting is the worse outcome (#718).
         joiner.sendToHost(taEncodeSystemMessage(
             TaDirectPlayCommand::CreatePlayer,
             reply,
-            createPlayerPayload(0x08D90EFF, "one too many", joiner.tcpPort(), joiner.udpPortValue())));
+            createPlayerPayload(0x08D90EFF, "toomany", joiner.tcpPort(), joiner.udpPortValue())));
 
-        runFor(ioContext, std::chrono::milliseconds(200));
+        runUntil(ioContext, [&] { return !joiner.rejects().empty(); });
         REQUIRE(joined.size() == roomFor);
         REQUIRE(host.load().peers == roomFor);
+        REQUIRE(joiner.rejects().size() == 1);
+        REQUIRE(joiner.rejects()[0] == taBuildReject(0x08D90EFF, TaRejectClosed));
+        REQUIRE(host.load().pendingHandshakes == 0);
 
         host.stop();
+    }
+
+    TEST_CASE("a game that plays one peer takes one joiner and tells the second why not (#721)", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        config.maxJoiners = 1;
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+
+        TestJoiner first(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+        TestJoiner second(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.0.0.2");
+
+        first.createPlayer(0x08D90E74, "first");
+        runUntil(ioContext, [&] { return joined.size() == 1; });
+
+        second.createPlayer(0x08D90E72, "second");
+        runUntil(ioContext, [&] { return !second.rejects().empty(); });
+
+        REQUIRE(joined.size() == 1);
+        REQUIRE(host.load().peers == 1);
+        REQUIRE(second.rejects()[0] == taBuildReject(0x08D90E72, TaRejectClosed));
+        REQUIRE(first.rejects().empty());
+
+        host.stop();
+    }
+
+    TEST_CASE("a peer is removed only by a DELETEPLAYER from the address it joined from (#715)", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        std::vector<TaHostSession::PeerId> left;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+        host.onPeerLeft([&](TaHostSession::PeerId id) { left.push_back(id); });
+
+        TestJoiner player(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+        TestJoiner stranger(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.2.0.2");
+
+        const std::uint32_t playerId = 0x08D90E74;
+        player.createPlayer(playerId, "player");
+        runUntil(ioContext, [&] { return joined.size() == 1; });
+
+        // The ids are handed out in a fixed order, so anyone can name one.
+        stranger.deletePlayer(playerId);
+        runUntil(ioContext, [&] { return host.forgedMessages() == 1; });
+        runFor(ioContext, std::chrono::milliseconds(100));
+        REQUIRE(left.empty());
+        REQUIRE(host.load().peers == 1);
+
+        // The player's own address is believed.
+        player.deletePlayer(playerId);
+        runUntil(ioContext, [&] { return left.size() == 1; });
+        REQUIRE(left[0] == playerId);
+        REQUIRE(host.load().peers == 0);
+
+        host.stop();
+    }
+
+    TEST_CASE("a DELETEPLAYER by the system player's id removes its peer, from its own address only", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        std::vector<TaHostSession::PeerId> left;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+        host.onPeerLeft([&](TaHostSession::PeerId id) { left.push_back(id); });
+
+        TestJoiner player(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+        TestJoiner stranger(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.2.0.2");
+
+        // The system player's id comes from the host, as a real joiner's does.
+        player.sendToHost(taEncodeSystemMessage(
+            TaDirectPlayCommand::RequestPlayerId,
+            taMakeReplyAddress(player.tcpPort(), {127, 0, 0, 1}),
+            taEncodeRequestPlayerId(9)));
+        runUntil(ioContext, [&] { return player.hasCommand(TaDirectPlayCommand::RequestPlayerReply); });
+        auto* systemReply = player.findCommand(TaDirectPlayCommand::RequestPlayerReply);
+        auto systemPlayerId = taDecodeRequestPlayerReply(
+            taDecodeDirectPlayMessage(systemReply->data(), systemReply->size()).payload);
+        player.sendToHost(taEncodeSystemMessage(
+            TaDirectPlayCommand::AddForwardRequest,
+            taMakeReplyAddress(player.tcpPort(), {127, 0, 0, 1}),
+            addForwardRequestPayload(systemPlayerId, player.tcpPort(), player.udpPortValue(), config.sessionHostId)));
+        runUntil(ioContext, [&] { return player.hasCommand(TaDirectPlayCommand::SuperEnumPlayersReply); });
+        player.createPlayer(0x08D90E74, "player");
+        runUntil(ioContext, [&] { return joined.size() == 1; });
+
+        stranger.deletePlayer(systemPlayerId);
+        runUntil(ioContext, [&] { return host.forgedMessages() == 1; });
+        REQUIRE(left.empty());
+
+        player.deletePlayer(systemPlayerId);
+        runUntil(ioContext, [&] { return left.size() == 1; });
+        REQUIRE(left[0] == 0x08D90E74u);
+
+        // The named player's own delete afterwards finds nobody and is quiet.
+        player.deletePlayer(0x08D90E74);
+        runFor(ioContext, std::chrono::milliseconds(100));
+        REQUIRE(left.size() == 1);
+
+        host.stop();
+    }
+
+    TEST_CASE("application data in a joined player's name from another address is not that player's (#716)", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+        std::vector<std::vector<std::uint8_t>> heard;
+        host.onAppData([&](TaHostSession::PeerId, const std::vector<std::uint8_t>& bytes, TaTransport) { heard.push_back(bytes); });
+
+        TestJoiner player(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+        TestJoiner stranger(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.2.0.2");
+
+        const std::uint32_t playerId = 0x08D90E74;
+        player.createPlayer(playerId, "player");
+        runUntil(ioContext, [&] { return joined.size() == 1; });
+
+        // Over UDP and over TCP, stamped with the player's id.
+        stranger.sendAppDataUdp(config.hostPlayerId, {0xDE, 0xAD}, playerId);
+        stranger.sendAppDataTcp(config.hostPlayerId, {0xBE, 0xEF}, playerId);
+        runUntil(ioContext, [&] { return host.forgedMessages() == 2; });
+        REQUIRE(heard.empty());
+
+        // The player's own is passed up.
+        player.sendAppDataUdp(config.hostPlayerId, {0x01}, playerId);
+        runUntil(ioContext, [&] { return heard.size() == 1; });
+        REQUIRE(heard[0] == std::vector<std::uint8_t>{0x01});
+        REQUIRE(host.forgedMessages() == 2);
+
+        host.stop();
+    }
+
+    TEST_CASE("a second machine cannot take a joined player's id or the host's", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+
+        TestJoiner player(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+        TestJoiner stranger(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.2.0.2");
+
+        const std::uint32_t playerId = 0x08D90E74;
+        player.createPlayer(playerId, "player");
+        runUntil(ioContext, [&] { return joined.size() == 1; });
+        auto before = host.peerAddress(playerId);
+        REQUIRE(before);
+
+        stranger.createPlayer(playerId, "impostor");
+        stranger.createPlayer(config.hostPlayerId, "host");
+        stranger.createPlayer(config.hostSystemPlayerId, "hostsys");
+        runUntil(ioContext, [&] { return host.forgedMessages() == 3; });
+
+        REQUIRE(joined.size() == 1);
+        REQUIRE(host.load().peers == 1);
+        auto after = host.peerAddress(playerId);
+        REQUIRE(after);
+        REQUIRE(after->tcp == before->tcp);
+        REQUIRE(after->udp == before->udp);
+        REQUIRE(host.peerName(playerId) == "player");
+
+        // The same machine saying its own id again is only a re-announce.
+        // (The wire holds a name in 20 bytes before the addresses begin, so a
+        // name here is nine characters at most.)
+        player.createPlayer(playerId, "again");
+        runUntil(ioContext, [&] { return host.peerName(playerId) == "again"; });
+        REQUIRE(host.load().peers == 1);
+
+        host.stop();
+    }
+
+    TEST_CASE("a joiner whose UDP and TCP leave from neighbouring addresses is still one peer, a forger in another /16 is not (#715)", "[ta][host]")
+    {
+        // One machine behind a carrier's NAT was seen with its UDP on .165 and
+        // its TCP on .167. "The same IP" is never the test: the same /16 is.
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        std::vector<TaHostSession::PeerId> left;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+        host.onPeerLeft([&](TaHostSession::PeerId id) { left.push_back(id); });
+        std::vector<std::vector<std::uint8_t>> heard;
+        host.onAppData([&](TaHostSession::PeerId, const std::vector<std::uint8_t>& bytes, TaTransport) { heard.push_back(bytes); });
+
+        // TCP from 127.0.0.9, UDP from 127.0.0.7: same /16, different hosts.
+        TestJoiner player(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.0.0.9", "127.0.0.7");
+        TestJoiner forger(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.2.0.2");
+
+        const std::uint32_t playerId = 0x08D90E74;
+        player.createPlayer(playerId, "player");
+        runUntil(ioContext, [&] { return joined.size() == 1; });
+
+        // Its UDP, from the neighbouring address, is the joiner's.
+        player.sendAppDataUdp(config.hostPlayerId, {0x01}, playerId);
+        runUntil(ioContext, [&] { return heard.size() == 1; });
+        player.sendAppDataTcp(config.hostPlayerId, {0x02}, playerId);
+        runUntil(ioContext, [&] { return heard.size() == 2; });
+        REQUIRE(host.forgedMessages() == 0);
+
+        // A machine in another /16 naming the same id is not.
+        forger.sendAppDataUdp(config.hostPlayerId, {0xDE}, playerId);
+        forger.sendAppDataTcp(config.hostPlayerId, {0xAD}, playerId);
+        forger.deletePlayer(playerId);
+        forger.createPlayer(playerId, "impostor");
+        runUntil(ioContext, [&] { return host.forgedMessages() == 4; });
+        REQUIRE(heard.size() == 2);
+        REQUIRE(left.empty());
+        REQUIRE(host.peerName(playerId) == "player");
+
+        // And the joiner's own delete is believed.
+        player.deletePlayer(playerId);
+        runUntil(ioContext, [&] { return left.size() == 1; });
+        REQUIRE(host.load().peers == 0);
+
+        host.stop();
+    }
+
+    TEST_CASE("a joiner's player data must be 21 bytes with the protocol shorts zero and 0x50, else reason 8 (BT-242)", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+
+        TestJoiner bad(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.0.0.1");
+
+        auto shortBlock = joinerPlayerData();
+        shortBlock.pop_back();
+        bad.createPlayer(0x08D90E74, "short", shortBlock);
+        runUntil(ioContext, [&] { return bad.rejects().size() == 1; });
+        REQUIRE(bad.rejects()[0] == taBuildReject(0x08D90E74, TaRejectVersion));
+
+        auto wrongTag = joinerPlayerData();
+        wrongTag[19] = 0x51;
+        bad.createPlayer(0x08D90E74, "tag", wrongTag);
+        runUntil(ioContext, [&] { return bad.rejects().size() == 2; });
+        REQUIRE(bad.rejects()[1] == taBuildReject(0x08D90E74, TaRejectVersion));
+
+        auto wrongFirst = joinerPlayerData();
+        wrongFirst[17] = 1;
+        bad.createPlayer(0x08D90E74, "first", wrongFirst);
+        runUntil(ioContext, [&] { return bad.rejects().size() == 3; });
+
+        bad.createPlayer(0x08D90E74, "none", {});
+        runUntil(ioContext, [&] { return bad.rejects().size() == 4; });
+
+        REQUIRE(joined.empty());
+        REQUIRE(host.load().peers == 0);
+
+        // The right block is admitted.
+        bad.createPlayer(0x08D90E74, "fine");
+        runUntil(ioContext, [&] { return joined.size() == 1; });
+        host.stop();
+    }
+
+    TEST_CASE("a host with a password turns away a joiner with another, ignoring case, with reason 4 (BT-242)", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        config.password = "Secret";
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+
+        TestJoiner joiner(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+
+        joiner.createPlayer(0x08D90E74, "none", joinerPlayerData());
+        runUntil(ioContext, [&] { return joiner.rejects().size() == 1; });
+        REQUIRE(joiner.rejects()[0] == taBuildReject(0x08D90E74, TaRejectPassword));
+
+        joiner.createPlayer(0x08D90E74, "wrong", joinerPlayerData("Secrex"));
+        runUntil(ioContext, [&] { return joiner.rejects().size() == 2; });
+        REQUIRE(joined.empty());
+
+        joiner.createPlayer(0x08D90E74, "right", joinerPlayerData("sECRET"));
+        runUntil(ioContext, [&] { return joined.size() == 1; });
+        REQUIRE(joiner.rejects().size() == 2);
+
+        host.stop();
+    }
+
+    TEST_CASE("a host with no password does not look at the one a joiner sends (BT-242)", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+
+        TestJoiner joiner(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+        joiner.createPlayer(0x08D90E74, "pw", joinerPlayerData("whatever"));
+        runUntil(ioContext, [&] { return joined.size() == 1; });
+        REQUIRE(joiner.rejects().empty());
+        host.stop();
+    }
+
+    TEST_CASE("the closed test comes before the player data tests (BT-242)", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        TaHostSession host(ioContext, config);
+        host.start();
+        host.setAdmissionClosed(true);
+
+        TestJoiner joiner(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+        joiner.createPlayer(0x08D90E74, "late", {});
+        runUntil(ioContext, [&] { return joiner.rejects().size() == 1; });
+        REQUIRE(joiner.rejects()[0] == taBuildReject(0x08D90E74, TaRejectClosed));
+        host.stop();
+    }
+
+    TEST_CASE("a launched game turns a late joiner away with reason 3 and says it is closed (#716)", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+
+        TestJoiner player(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+        TestJoiner late(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.0.0.2");
+
+        player.createPlayer(0x08D90E74, "player");
+        runUntil(ioContext, [&] { return joined.size() == 1; });
+
+        // The launch closes the room and republishes the description.
+        host.setAdmissionClosed(true);
+        host.sendSessionDescChanged();
+        runUntil(ioContext, [&] {
+            // The second SESSIONDESCCHANGED the player has been sent is the one
+            // after the close.
+            std::size_t count = 0;
+            for (const auto* message : player.received())
+            {
+                if (taIsDirectPlayMessage(message->data(), message->size())
+                    && taDecodeDirectPlayMessage(message->data(), message->size()).command == TaDirectPlayCommand::SessionDescChanged)
+                {
+                    ++count;
+                }
+            }
+            return count >= 2;
+        });
+        const std::vector<std::uint8_t>* newest = nullptr;
+        for (const auto* message : player.received())
+        {
+            if (taIsDirectPlayMessage(message->data(), message->size())
+                && taDecodeDirectPlayMessage(message->data(), message->size()).command == TaDirectPlayCommand::SessionDescChanged)
+            {
+                newest = message;
+            }
+        }
+        REQUIRE(newest != nullptr);
+        auto changed = taDecodeSessionDescChanged(taDecodeDirectPlayMessage(newest->data(), newest->size()).payload);
+        REQUIRE((changed.session.flags & TaSessionJoinDisabled) != 0);
+
+        late.createPlayer(0x08D90E72, "late");
+        runUntil(ioContext, [&] { return !late.rejects().empty(); });
+        REQUIRE(late.rejects()[0] == taBuildReject(0x08D90E72, TaRejectClosed));
+        REQUIRE(joined.size() == 1);
+        REQUIRE(host.load().peers == 1);
+
+        // A player already in is not turned away for saying so again.
+        player.createPlayer(0x08D90E74, "player");
+        runFor(ioContext, std::chrono::milliseconds(100));
+        REQUIRE(player.rejects().empty());
+        REQUIRE(host.load().peers == 1);
+
+        // And the room can be opened again.
+        host.setAdmissionClosed(false);
+        auto joinedBefore = joined.size();
+        late.createPlayer(0x08D90E72, "late");
+        runUntil(ioContext, [&] { return host.load().peers == 2; });
+        REQUIRE(joined.size() == joinedBefore + 1);
+
+        host.stop();
+    }
+
+    TEST_CASE("a joined peer that says nothing is rejected with reason 6 and removed (#717)", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        config.silenceTimeout = std::chrono::milliseconds(250);
+        config.silenceCheckInterval = std::chrono::milliseconds(20);
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        std::vector<TaHostSession::PeerId> left;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+        host.onPeerLeft([&](TaHostSession::PeerId id) { left.push_back(id); });
+        host.onAppData([](TaHostSession::PeerId, const std::vector<std::uint8_t>&, TaTransport) {});
+
+        TestJoiner joiner(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+        const std::uint32_t silentId = 0x08D90E74;
+        const std::uint32_t chattyId = 0x08D90E72;
+        joiner.createPlayer(silentId, "silent");
+        joiner.createPlayer(chattyId, "chatty");
+        runUntil(ioContext, [&] { return joined.size() == 2; });
+
+        // One keeps talking, the other does not.
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+        while (left.empty() && std::chrono::steady_clock::now() < deadline)
+        {
+            joiner.sendAppDataUdp(config.hostPlayerId, {0x06}, chattyId);
+            runFor(ioContext, std::chrono::milliseconds(20));
+        }
+
+        REQUIRE(left == std::vector<TaHostSession::PeerId>{silentId});
+        REQUIRE(host.silentPeersDropped() == 1);
+        REQUIRE(host.load().peers == 1);
+
+        // It was told why, and told the others as a leaving player is.
+        runUntil(ioContext, [&] { return !joiner.rejects().empty(); });
+        REQUIRE(joiner.rejects()[0] == taBuildReject(silentId, TaRejectSilent));
+        runUntil(ioContext, [&] { return joiner.hasCommand(TaDirectPlayCommand::DeletePlayer); });
+
+        host.stop();
+    }
+
+    TEST_CASE("a game name and a map name that are too long are cut to the 31 the original keeps", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        config.gameName = "a game name that runs on and on";
+        config.mapName = "a map name that is far too long to fit";
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+
+        TestJoiner joiner(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+        joiner.createPlayer(0x08D90E74, "nine char");
+        runUntil(ioContext, [&] { return joined.size() == 1 && joiner.hasCommand(TaDirectPlayCommand::SessionDescChanged); });
+
+        auto* message = joiner.findCommand(TaDirectPlayCommand::SessionDescChanged);
+        auto changed = taDecodeSessionDescChanged(taDecodeDirectPlayMessage(message->data(), message->size()).payload);
+        REQUIRE(changed.name.size() == TaMaxSessionNameLength);
+        REQUIRE(changed.name.substr(0, 16) == "a game name that");
+
+        host.stop();
+    }
+
+    TEST_CASE("two sessions do not share a GUID", "[ta][host]")
+    {
+        TaHostConfig first;
+        TaHostConfig second;
+        REQUIRE(first.instanceGuid != second.instanceGuid);
     }
 
     TEST_CASE("accepted connections are capped", "[ta][host]")

@@ -65,7 +65,10 @@ namespace rwe
 
     void decompressLZ77(const char* in, std::size_t len, char* out, std::size_t maxBytes)
     {
-        char window[4096];
+        // Zeroed, as the original's and tools/hpi.py's are: a stream may
+        // copy from a position it has not written, and this was whatever the
+        // stack held.
+        char window[4096] = {};
 
         std::size_t inPos = 0;
         std::size_t outPos = 0;
@@ -113,6 +116,13 @@ namespace rwe
 
                     if (offset == 0)
                     {
+                        // The end marker. A chunk that ends before the size
+                        // it declared left the rest of its output unwritten,
+                        // and the caller used it.
+                        if (outPos != maxBytes)
+                        {
+                            throw HpiException("LZ77 chunk ended before its declared output size");
+                        }
                         return;
                     }
 
@@ -166,8 +176,11 @@ namespace rwe
         // V Maps pack, and the original engine, which only ever asks for
         // its bytes, reads them without complaint. The chunk's own checksum
         // still covers the compressed data, so nothing is taken on trust.
-        auto complete = result == Z_STREAM_END
-            || ((result == Z_OK || result == Z_BUF_ERROR) && stream.avail_in == 0 && stream.total_out == maxBytes);
+        // Either way the declared number of bytes must have come out: a
+        // stream that ends early left the rest of the output unwritten.
+        auto complete = stream.total_out == maxBytes
+            && (result == Z_STREAM_END
+                || ((result == Z_OK || result == Z_BUF_ERROR) && stream.avail_in == 0));
 
         inflateEnd(&stream);
 
@@ -200,11 +213,19 @@ namespace rwe
 
         auto chunkSizes = std::make_unique<uint32_t[]>(chunkCount);
         readAndDecryptRawArray(stream, decryptionKey, chunkSizes.get(), chunkCount);
+        if (stream.fail())
+        {
+            throw HpiException("Archive ends inside a chunk table");
+        }
 
         std::size_t bufferOffset = 0;
         for (std::size_t i = 0; i < chunkCount; ++i)
         {
             auto chunkHeader = readAndDecryptRaw<HpiChunk>(stream, decryptionKey);
+            if (stream.fail())
+            {
+                throw HpiException("Archive ends inside a chunk header");
+            }
             if (chunkHeader.marker != HpiChunkMagicNumber)
             {
                 throw HpiException("Invalid chunk header");
@@ -225,6 +246,10 @@ namespace rwe
             }
             auto chunkBuffer = std::make_unique<char[]>(chunkHeader.compressedSize);
             readAndDecrypt(stream, decryptionKey, chunkBuffer.get(), chunkHeader.compressedSize);
+            if (stream.fail())
+            {
+                throw HpiException("Archive ends inside a chunk");
+            }
 
             auto checksum = computeChecksum(chunkBuffer.get(), chunkHeader.compressedSize);
             if (checksum != chunkHeader.checksum)
@@ -261,6 +286,13 @@ namespace rwe
                 default:
                     throw HpiException("Invalid compression scheme");
             }
+        }
+
+        // The chunks together are the file; fewer bytes than it declared
+        // leaves the end of the caller's buffer unwritten.
+        if (bufferOffset != size)
+        {
+            throw HpiException("Chunks add up to less than the declared file size");
         }
     }
 }

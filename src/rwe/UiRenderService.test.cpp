@@ -44,6 +44,58 @@ namespace rwe
         }
     }
 
+    TEST_CASE("text with a byte that is not valid UTF-8 is measured, not thrown out of the frame", "[ui][malformed]")
+    {
+        // 0xE9 is "e acute" in Windows-1252, which is how 309 of the 435
+        // shipped FBIs carry their accented words. The checked UTF-8 iterator
+        // throws on it, from inside the render call.
+        auto font = makeFont();
+        UiRenderService service(nullptr, nullptr, nullptr);
+
+        std::string accented = "caf";
+        accented.push_back(static_cast<char>(0xE9));
+
+        // c, a, f at 7 each, then the Latin-1 character, which this 128-glyph
+        // font does not have and so draws as glyph 0 (7 wide).
+        REQUIRE_NOTHROW(service.getTextWidth(accented, font));
+        REQUIRE(service.getTextWidth(accented, font) == Catch::Approx(28.0f));
+        REQUIRE_NOTHROW(findCharacterInText(accented, 'c', font));
+    }
+
+    TEST_CASE("the health bar's colour compares with the integer thirds (BT-146)", "[ui]")
+    {
+        const Color green(83, 223, 79);
+        const Color yellow(247, 227, 103);
+        const Color red(255, 71, 0);
+        auto sameColor = [](const Color& a, const Color& b) { return a.r == b.r && a.g == b.g && a.b == b.b; };
+
+        // A maximum divisible by three: the third is exactly 100, and health
+        // exactly at a third is red, exactly at two thirds yellow.
+        CHECK(sameColor(healthBarColor(300, 300), green));
+        CHECK(sameColor(healthBarColor(201, 300), green));
+        CHECK(sameColor(healthBarColor(200, 300), yellow));
+        CHECK(sameColor(healthBarColor(101, 300), yellow));
+        CHECK(sameColor(healthBarColor(100, 300), red));
+        CHECK(sameColor(healthBarColor(1, 300), red));
+
+        // Not divisible: the third is truncated (100 of 301), so health 100 is
+        // red and 101 yellow, 200 yellow and 201 green.
+        CHECK(sameColor(healthBarColor(100, 301), red));
+        CHECK(sameColor(healthBarColor(101, 301), yellow));
+        CHECK(sameColor(healthBarColor(200, 301), yellow));
+        CHECK(sameColor(healthBarColor(201, 301), green));
+    }
+
+    TEST_CASE("the health bar fills one pixel plus 32 times health over maximum (BT-146)", "[ui]")
+    {
+        CHECK(healthBarFill(100, 100) == 33);
+        CHECK(healthBarFill(1, 100) == 1);
+        CHECK(healthBarFill(50, 100) == 17);
+        CHECK(healthBarFill(99, 100) == 32);
+        // Above the maximum the bar stays full rather than running past its frame.
+        CHECK(healthBarFill(150, 100) == 33);
+    }
+
     TEST_CASE("findCharacterInText locates the quick key in a caption", "[ui]")
     {
         // What the quick-key underline is measured with (S:99, 0x4A5B2C):

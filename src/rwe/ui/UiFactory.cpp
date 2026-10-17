@@ -12,10 +12,32 @@
 #include <memory>
 #include <rwe/MainMenuScene.h>
 #include <rwe/ui/UiComponent.h>
+#include <rwe/util/SimpleLogger.h>
 #include <rwe/util/rwe_string.h>
 
 namespace rwe
 {
+    namespace
+    {
+        /**
+         * The first frame of a GAF entry, or null if the entry has none. A mod's
+         * art can carry a frame-less series, and sprites.at(0) on it threw out
+         * of the frame or the launch (#665); a gadget without its picture is a
+         * smaller loss.
+         */
+        std::shared_ptr<Sprite> firstFrame(const SpriteSeries& series, const std::string& name)
+        {
+            if (series.sprites.empty() || !series.sprites[0])
+            {
+                LOG_WARN << "gui art '" << name << "' has no frames; drawn blank";
+                return nullptr;
+            }
+            return series.sprites[0];
+        }
+
+        const char* const emptyGuiMessage = "GUI file has no records";
+    }
+
     /**
      * Converts a quickkey value into the equivalent SDL key code.
      *
@@ -68,7 +90,10 @@ namespace rwe
     std::unique_ptr<UiPanel> UiFactory::panelFromGuiFile(const std::string& name, const std::string& background, const std::vector<GuiEntry>& entries)
     {
         // first entry sets up the panel
-        assert(entries.size() > 0);
+        if (entries.empty())
+        {
+            throw std::runtime_error(emptyGuiMessage);
+        }
         auto panelEntry = entries[0];
 
         auto texture = textureService->getBitmapRegion(
@@ -154,7 +179,10 @@ namespace rwe
     std::unique_ptr<UiPanel> UiFactory::panelFromGuiFile(const std::string& name, const std::vector<GuiEntry>& entries)
     {
         // first entry sets up the panel
-        assert(entries.size() > 0);
+        if (entries.empty())
+        {
+            throw std::runtime_error(emptyGuiMessage);
+        }
         const auto& panelEntry = entries[0];
         auto panel = createPanel(
             panelEntry.common.xpos,
@@ -202,7 +230,10 @@ namespace rwe
         {
             if (auto backgroundSpriteSeries = textureService->getGuiTexture(name, *background))
             {
-                backgroundSprite = (*backgroundSpriteSeries)->sprites.at(0);
+                if (auto frame = firstFrame(**backgroundSpriteSeries, *background))
+                {
+                    backgroundSprite = frame;
+                }
             }
         }
         if (!backgroundSprite)
@@ -228,7 +259,11 @@ namespace rwe
                 {
                     continue;
                 }
-                const auto& sprite = (*series)->sprites.at(0);
+                const auto sprite = firstFrame(**series, candidate);
+                if (!sprite)
+                {
+                    continue;
+                }
                 auto coversPanel = sprite->bounds.width() >= static_cast<float>(width) * 0.9f
                     && sprite->bounds.height() >= static_cast<float>(height) * 0.9f;
                 if (coversPanel)
@@ -306,9 +341,9 @@ namespace rwe
                     std::copy_n(sprites.begin(), 9, frames.begin());
                     panel->setPlateFrames(std::move(frames));
                 }
-                else
+                else if (auto frame = firstFrame(**tile, plateTileName))
                 {
-                    panel->setPlateTile(sprites.at(0));
+                    panel->setPlateTile(frame);
                 }
             }
         }
@@ -558,7 +593,9 @@ namespace rwe
         }
         if (!sprites)
         {
-            throw std::runtime_error("Missing SLIDERS gaf entry");
+            // A slider is drawn with plain fills and never reads the art.
+            LOG_WARN << "no SLIDERS gaf entry for " << guiName;
+            return std::make_unique<UiSlider>(x, y, width, height, nullptr);
         }
 
         return std::make_unique<UiSlider>(x, y, width, height, *sprites);
@@ -665,8 +702,11 @@ namespace rwe
                     entry.common.height);
                 if (auto series = textureService->getGuiTexture(guiName, entry.common.name))
                 {
-                    surface->setBackground((*series)->sprites.at(0));
-                    surface->setAbsolutePlacement(true);
+                    if (auto frame = firstFrame(**series, entry.common.name))
+                    {
+                        surface->setBackground(frame);
+                        surface->setAbsolutePlacement(true);
+                    }
                 }
                 return surface;
             }
@@ -875,7 +915,10 @@ namespace rwe
         }
         if (!sprites)
         {
-            throw std::runtime_error("Missing SLIDERS gaf entry");
+            // The scroll bar draws nothing without the art (a blank), and a
+            // slider never reads it.
+            LOG_WARN << "no SLIDERS gaf entry for " << guiName << "; the scroll bar is blank";
+            sprites = std::make_shared<SpriteSeries>();
         }
 
         // The gui declares which way the gadget runs. The vertical ones are

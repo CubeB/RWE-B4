@@ -1,4 +1,5 @@
 #include "SideData.h"
+#include <rwe/util/SimpleLogger.h>
 
 namespace rwe
 {
@@ -69,6 +70,25 @@ namespace rwe
         return parseSideDataRect(*b);
     }
 
+    namespace
+    {
+        /**
+         * A colour is an index into a 256-entry palette and the HUD draws
+         * with palette->at(index), so a mod's 300 would throw on every frame.
+         * Clamp it, once, here, and say so; the fault costs the bar its
+         * colour, not the game its frames (docs/SECURITY-AUDIT.md, #649).
+         */
+        unsigned int clampPaletteIndex(unsigned int value, const char* key)
+        {
+            if (value > 255)
+            {
+                LOG_WARN << "sidedata " << key << "=" << value << " is not a palette index (0-255); using 255";
+                return 255;
+            }
+            return value;
+        }
+    }
+
     SideData parseSideData(const TdfBlock& t)
     {
         SideData s;
@@ -79,8 +99,8 @@ namespace rwe
 
         s.font = t.expectString("font");
         s.fontGui = t.expectString("fontgui");
-        s.energyColor = t.expectUint("energycolor");
-        s.metalColor = t.expectUint("metalcolor");
+        s.energyColor = clampPaletteIndex(t.expectUint("energycolor"), "energycolor");
+        s.metalColor = clampPaletteIndex(t.expectUint("metalcolor"), "metalcolor");
 
         s.logo = expectSideDataRect(t, "LOGO");
         s.energyBar = expectSideDataRect(t, "ENERGYBAR");

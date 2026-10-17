@@ -95,9 +95,9 @@ namespace rwe
         hashSendBuffer.push_back(hash);
     }
 
-    void PeerLink::submitChatMessage(const std::string& text)
+    void PeerLink::submitChatMessage(const std::string& text, ChatLabel label)
     {
-        chatSendBuffer.push_back(text);
+        chatSendBuffer.push_back(PendingChat{text, label});
     }
 
     void PeerLink::restoreUnackedCommands(const std::vector<CommandSet>& sets)
@@ -157,7 +157,12 @@ namespace rwe
 
         for (std::size_t i = 0; i < chatCount; ++i)
         {
-            m.add_chat()->set_text(chatSendBuffer[i]);
+            auto* chat = m.add_chat();
+            chat->set_text(chatSendBuffer[i].text);
+            if (chatSendBuffer[i].label != ChatLabel::None)
+            {
+                chat->set_audience(static_cast<std::uint32_t>(chatSendBuffer[i].label));
+            }
         }
 
         return outerMessage;
@@ -426,7 +431,8 @@ namespace rwe
                 continue;
             }
 
-            receivedChat.push_back(ReceivedChatMessage{remotePlayerId, text});
+            auto label = message.chat(i).has_audience() ? chatLabelFromWire(message.chat(i).audience()) : ChatLabel::None;
+            receivedChat.push_back(ReceivedChatMessage{remotePlayerId, text, label});
         }
     }
 

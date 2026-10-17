@@ -172,6 +172,71 @@ namespace rwe
             }
         }
 
+        SECTION("the blue table halves red and green, halves blue and adds 50, and snaps (BT-142)")
+        {
+            auto palette = makeGreyRampPalette();
+            auto blue = generateBlueTable(palette);
+
+            // Entry 0 asks for (0, 0, 50). On a grey ramp the band holds the
+            // entries 4 to 30 and the least squared distance is 17 (1667
+            // against 1668 for 16 and 1672 for 18).
+            REQUIRE(blue[0] == 17);
+            // Entry 100 asks for (50, 50, 100): 67. Entry 255 asks for
+            // (127, 127, 177): 144.
+            REQUIRE(blue[100] == 67);
+            REQUIRE(blue[255] == 144);
+        }
+
+        SECTION("the gray table is the truncated mean of the three channels, snapped (BT-152)")
+        {
+            auto palette = makeGreyRampPalette();
+            auto gray = generateGrayTable(palette);
+
+            // The mean of a grey is itself, and itself is in the palette.
+            for (int i = 0; i < 256; ++i)
+            {
+                REQUIRE(gray[i] == i);
+            }
+
+            // The ramp is the same table seen by the mean alone.
+            auto ramp = generateMeanGrayRamp(palette);
+            for (int m = 0; m < 256; ++m)
+            {
+                REQUIRE(ramp[m] == m);
+            }
+
+            // A colour with unequal channels goes to the grey of its mean:
+            // (90, 30, 0) averages 40.
+            ColorPalette coloured = makeGreyRampPalette();
+            coloured[7] = Color(90, 30, 0);
+            REQUIRE(generateGrayTable(coloured)[7] == 40);
+        }
+
+        SECTION("the combined image carries the shade rows, then the blue-remapped rows, then the blue table")
+        {
+            auto palette = makeGreyRampPalette();
+            auto table = generateShadeTable(palette);
+            auto blue = generateBlueTable(palette);
+            auto image = shadeAndBlueTablesToImage(table, blue, palette);
+
+            REQUIRE(image.getWidth() == 256);
+            REQUIRE(image.getHeight() == 65);
+
+            for (unsigned int r = 0; r < 32; r += 5)
+            {
+                for (unsigned int t = 0; t < 256; t += 17)
+                {
+                    auto shaded = table[(r * 256) + t];
+                    REQUIRE(image.get(static_cast<int>(t), static_cast<int>(r)).r == palette[shaded].r);
+                    REQUIRE(image.get(static_cast<int>(t), static_cast<int>(32 + r)).r == palette[blue[shaded]].r);
+                }
+            }
+            for (unsigned int t = 0; t < 256; t += 17)
+            {
+                REQUIRE(image.get(static_cast<int>(t), 64).r == palette[blue[t]].r);
+            }
+        }
+
         SECTION("shadeTableToImage")
         {
             auto palette = makeGreyRampPalette();

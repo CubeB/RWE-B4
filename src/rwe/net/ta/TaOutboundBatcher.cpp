@@ -33,9 +33,18 @@ namespace rwe
 
     void TaOutboundBatcher::queueForAll(std::span<const PeerId> peers, TadBytes subpacket, TaTransport transport)
     {
+        // One count for the broadcast, the same one in every peer's packet: the
+        // original's everyone channel lowers its counter once per send, not once
+        // per recipient, and a receiver that sees a gap holds the bundle back
+        // (BT-207).
+        if (peers.empty())
+        {
+            return;
+        }
+        const auto marker = markerCounter.take();
         for (PeerId peer : peers)
         {
-            append(peer, subpacket, transport, markerCounter.take());
+            append(peer, subpacket, transport, marker);
         }
     }
 

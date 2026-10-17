@@ -10,6 +10,8 @@
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/UnitDefinition.h>
+#include <rwe/sim/UnitModelDefinition.h>
+#include <rwe/sim/UnitPieceDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/movement.h>
@@ -460,7 +462,12 @@ namespace rwe
         }
     }
 
-    TEST_CASE("a move order to an unreachable point completes at the closest reachable point", "[pathing]")
+    // BT-100: this used to be "completes at the closest reachable point". The
+    // original keeps a lone unreachable Move alive and asks again after 30 to
+    // 59 ticks; see unreachablemove.test.cpp for the retry and the deletion
+    // when another order follows. What is left to pin here is where the unit
+    // stands meanwhile: short of the wall, not inside it.
+    TEST_CASE("a lone move order to an unreachable point does not complete and the unit stays short of the wall", "[pathing]")
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(16, 16), 0u, 0, 0);
@@ -513,7 +520,7 @@ namespace rwe
                         << " speed=" << (ground ? ground->currentSpeed.value : -1.0f)
                         << " inCollision=" << tank.inCollision
                         << " pendingRequests=" << sim.pathRequests.size());
-            REQUIRE(tank.orders.empty());
+            REQUIRE(tank.orders.size() == 1);
         }
         // We stopped next to the wall, not inside it.
         auto cell = sim.terrain.worldToHeightmapCoordinate(tank.position);
@@ -573,8 +580,9 @@ namespace rwe
         REQUIRE(sim.pathFindingService.counters.searchesRegionUnreachable >= 1);
         REQUIRE(sim.pathFindingService.counters.searchesExhausted == 0);
 
-        // The order completed, and the unit stopped on its own bank.
-        REQUIRE(sim.getUnitState(tankId).orders.empty());
+        // The order did not complete (BT-100: it asks again after 30 to 59
+        // ticks), and the unit stopped on its own bank.
+        REQUIRE(sim.getUnitState(tankId).orders.size() == 1);
         auto cell = sim.terrain.worldToHeightmapCoordinate(sim.getUnitState(tankId).position);
         REQUIRE(cell.x < 30);
     }
@@ -657,7 +665,9 @@ namespace rwe
         sim.unitDefinitions["tank"] = makeTankDef(10u);
         auto tankId = addTank(sim, player, 8, 8, script);
         sim.unitDefinitions["tank"].builder = true;
-        sim.unitDefinitions["tank"].buildDistance = 64_ss;
+        // Short of the 96 to the site once half of each footprint's diagonal
+        // is taken off (BT-97), so the wall is a refusal here.
+        sim.unitDefinitions["tank"].buildDistance = 40_ss;
         for (int y = 6; y <= 10; ++y)
         {
             for (int x = 6; x <= 10; ++x)
@@ -677,13 +687,22 @@ namespace rwe
 
         sim.getUnitState(tankId).orders.push_back(BuildOrder("solar", cellCenter(sim, 14, 8)));
 
+        std::vector<std::string> refusals;
         for (int i = 0; i < 120 && !sim.getUnitState(tankId).orders.empty(); ++i)
         {
             sim.tick();
+            for (const auto& e : sim.events)
+            {
+                if (const auto* refused = std::get_if<UnitCannotComplyEvent>(&e))
+                {
+                    refusals.push_back(refused->message);
+                }
+            }
         }
 
         REQUIRE(sim.getUnitState(tankId).orders.empty());
         REQUIRE(sim.units.tryGet(tankId).has_value());
+        REQUIRE(refusals == std::vector<std::string>{"I can't reach the construction site"});
         // Nothing was lathed into existence across the wall.
         int units = 0;
         for (const auto& [_, u] : sim.units)
@@ -692,6 +711,68 @@ namespace rwe
             ++units;
         }
         REQUIRE(units == 1);
+    }
+
+    TEST_CASE("a builder walled in builds anyway when the site is within its reach (BT-97)", "[pathing][bt97]")
+    {
+        // The original ignores a no-route failure when the flat distance to
+        // the site, less half of the builder's footprint diagonal and half of
+        // the site's, is within the build distance (0x403B63). Same scene as
+        // the refusal above with a nearer site and a longer arm: 64 - 8*sqrt(2)
+        // - 8*sqrt(8) is about 30, inside 64.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(16, 16), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto wall = addWallDef(sim);
+
+        sim.unitDefinitions["tank"] = makeTankDef(10u);
+        auto tankId = addTank(sim, player, 8, 8, script);
+        sim.unitDefinitions["tank"].builder = true;
+        sim.unitDefinitions["tank"].buildDistance = 64_ss;
+        for (int y = 6; y <= 10; ++y)
+        {
+            for (int x = 6; x <= 10; ++x)
+            {
+                if (std::max(std::abs(x - 8), std::abs(y - 8)) == 2)
+                {
+                    placeWall(sim, wall, x, y);
+                }
+            }
+        }
+
+        auto solar = makeTankDef(10u);
+        solar.isMobile = false;
+        solar.canMove = false;
+        solar.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
+        // Spawned the real way, which wants a model and a script, and the
+        // upper-case name createUnit looks the type up by.
+        std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+        sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(pieces));
+        solar.objectName = "model";
+        solar.yardMap = Grid<YardMapCell>(2, 2, YardMapCell::Ground);
+        sim.unitDefinitions["SOLAR"] = solar;
+        sim.unitScriptDefinitions["SOLAR"] = *script;
+
+        sim.getUnitState(tankId).orders.push_back(BuildOrder("SOLAR", cellCenter(sim, 12, 8)));
+
+        std::vector<std::string> refusals;
+        bool sawBehaviour = false;
+        for (int i = 0; i < 200; ++i)
+        {
+            sim.tick();
+            for (const auto& e : sim.events)
+            {
+                if (const auto* refused = std::get_if<UnitCannotComplyEvent>(&e))
+                {
+                    refusals.push_back(refused->message);
+                }
+            }
+            sawBehaviour = sawBehaviour || std::holds_alternative<UnitBehaviorStateCreatingUnit>(sim.getUnitState(tankId).behaviourState)
+                || sim.getUnitState(tankId).buildOrderUnitId.has_value();
+        }
+
+        REQUIRE(refusals == std::vector<std::string>{});
+        REQUIRE(sawBehaviour);
     }
 
     TEST_CASE("a unit standing inside a blocking feature can walk out of it", "[pathing]")
@@ -912,5 +993,97 @@ namespace rwe
         // unit followed the route rather than being wedged in the queue.
         auto start = cellCenter(sim, 2, 2);
         REQUIRE(sim.getUnitState(first).position.distanceSquared(start) > 0_ss);
+    }
+
+    TEST_CASE("a unit that moved in the last thirty ticks is not a wall to a path search", "[pathing][bt58]")
+    {
+        // BT-58, BT-59: the original's pass map excuses a mobile occupant
+        // whose occupancy stamp is no older than the search tick less thirty.
+        // A column of units that is moving does not wall itself in; one that
+        // has stood still for thirty ticks does.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto wall = addWallDef(sim);
+
+        // A wall across the map with one gap, at row 32, and a unit in it.
+        for (int y = 0; y < 64; ++y)
+        {
+            if (y != 32)
+            {
+                // The last rows of the map cannot hold a feature, and cannot
+                // hold a unit's footprint to walk through either.
+                sim.addFeature(wall, 20, y);
+            }
+        }
+        auto searcher = addTank(sim, player, 2, 32, script);
+        auto plug = addTank(sim, player, 20, 32, script);
+
+        auto routeThroughTheGap = [&]() {
+            UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, searcher, std::nullopt, 1u, 1u, Point(40, 32));
+            return pathFinder.findPath(Point(2, 32)).type == AStarPathType::Complete;
+        };
+
+        SECTION("freshly inserted, the plug is transparent")
+        {
+            sim.gameTime = GameTime(10);
+            sim.getUnitState(plug).occupancyStamp = GameTime(10);
+            REQUIRE(routeThroughTheGap());
+        }
+
+        SECTION("exactly thirty ticks old it still is, and a tick older it is a wall")
+        {
+            sim.gameTime = GameTime(100);
+            sim.getUnitState(plug).occupancyStamp = GameTime(70);
+            REQUIRE(routeThroughTheGap());
+            sim.getUnitState(plug).occupancyStamp = GameTime(69);
+            REQUIRE_FALSE(routeThroughTheGap());
+        }
+
+        SECTION("in the first thirty ticks the class stamp reads zero, so nothing is old yet")
+        {
+            sim.gameTime = GameTime(25);
+            sim.getUnitState(plug).occupancyStamp = GameTime(0);
+            REQUIRE(routeThroughTheGap());
+            sim.gameTime = GameTime(31);
+            REQUIRE_FALSE(routeThroughTheGap());
+        }
+
+        SECTION("a building is a wall however recently it was put down")
+        {
+            sim.gameTime = GameTime(10);
+            sim.getUnitState(plug).occupancyStamp = GameTime(10);
+            sim.occupiedGrid.get(20, 32).buildingInfo = OccupiedCellBuildingInfo{plug, false};
+            REQUIRE_FALSE(routeThroughTheGap());
+        }
+
+        SECTION("the search remembers the tick it began on")
+        {
+            sim.gameTime = GameTime(100);
+            sim.getUnitState(plug).occupancyStamp = GameTime(70);
+            UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, searcher, std::nullopt, 1u, 1u, Point(40, 32));
+            REQUIRE(pathFinder.searchTime() == GameTime(100));
+            // The game moves on; the search keeps the window it began with.
+            sim.gameTime = GameTime(500);
+            REQUIRE(pathFinder.findPath(Point(2, 32)).type == AStarPathType::Complete);
+        }
+    }
+
+    TEST_CASE("a mobile unit's occupancy stamp is written when it is inserted and when it changes square", "[pathing][bt58]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(16, 16), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        sim.gameTime = GameTime(40);
+        auto tank = addTank(sim, player, 2, 2, script);
+        REQUIRE(sim.getUnitState(tank).occupancyStamp == GameTime(40));
+
+        // Same square: no insertion, no stamp.
+        sim.gameTime = GameTime(50);
+        sim.moveUnitOccupiedArea(DiscreteRect(2, 2, 1, 1), DiscreteRect(2, 2, 1, 1), tank);
+        REQUIRE(sim.getUnitState(tank).occupancyStamp == GameTime(40));
+
+        sim.moveUnitOccupiedArea(DiscreteRect(2, 2, 1, 1), DiscreteRect(3, 2, 1, 1), tank);
+        REQUIRE(sim.getUnitState(tank).occupancyStamp == GameTime(50));
     }
 }

@@ -178,7 +178,24 @@ namespace rwe
         return activeSearch->pathFinder->expansionsSoFar();
     }
 
-    void PathFindingService::restoreSuspendedSearch(const GameSimulation& simulation, const DiscreteRect& start, std::size_t expansions)
+    std::optional<GameTime> PathFindingService::suspendedSearchTime() const
+    {
+        if (!activeSearch)
+        {
+            return std::nullopt;
+        }
+        if (activeSearch->oaSearch)
+        {
+            return activeSearch->oaSearch->searchTime();
+        }
+        if (activeSearch->pathFinder)
+        {
+            return activeSearch->pathFinder->searchTime();
+        }
+        return std::nullopt;
+    }
+
+    void PathFindingService::restoreSuspendedSearch(const GameSimulation& simulation, const DiscreteRect& start, std::size_t expansions, std::optional<GameTime> searchTime)
     {
         if (simulation.pathRequests.empty())
         {
@@ -213,7 +230,7 @@ namespace rwe
             return;
         }
 
-        beginSearch(simulation, unitId, movingState->pathDestination, start);
+        beginSearch(simulation, unitId, movingState->pathDestination, start, searchTime);
 
         // Deterministic, so running the expansions again lands on exactly the
         // state that was suspended. It cannot finish part way: it did not
@@ -442,7 +459,7 @@ namespace rwe
         last = counters;
     }
 
-    void PathFindingService::beginSearch(const GameSimulation& simulation, UnitId unitId, const PathDestination& destination, const std::optional<DiscreteRect>& startOverride)
+    void PathFindingService::beginSearch(const GameSimulation& simulation, UnitId unitId, const PathDestination& destination, const std::optional<DiscreteRect>& startOverride, const std::optional<GameTime>& searchTimeOverride)
     {
         const auto& unit = simulation.getUnitState(unitId);
         const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
@@ -477,11 +494,19 @@ namespace rwe
                     // not ported yet.
                     oaSearch = std::make_unique<OaUnitPathSearch>(
                         &simulation, unitId, movementClassId, start.width, start.height, goal, 0);
+                    if (searchTimeOverride)
+                    {
+                        oaSearch->setSearchTime(*searchTimeOverride);
+                    }
                     oaSearch->beginSearch(startPoint);
                     return;
                 }
 
                 auto finder = std::make_unique<UnitPathFinder>(&simulation, &simulation.movementClassCollisionService, unitId, movementClassId, start.width, start.height, goal, &scratch);
+                if (searchTimeOverride)
+                {
+                    finder->setSearchTime(*searchTimeOverride);
+                }
                 // Something is standing on the goal, so the goal is not a
                 // cell this unit can ever occupy, and asking A* for it is
                 // asking it to prove a negative over the whole map.
@@ -563,6 +588,10 @@ namespace rwe
                 goal = Point(goalRect.x, goalRect.y);
 
                 auto finder = std::make_unique<UnitPerimeterPathFinder>(&simulation, &simulation.movementClassCollisionService, unitId, movementClassId, start.width, start.height, goalRect, &scratch);
+                if (searchTimeOverride)
+                {
+                    finder->setSearchTime(*searchTimeOverride);
+                }
                 finder->beginSearch(startPoint);
                 pathFinder = std::move(finder);
             });

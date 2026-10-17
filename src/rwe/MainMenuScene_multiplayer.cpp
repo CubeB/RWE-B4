@@ -9,6 +9,7 @@
 #include <rwe/MultiplayerSetup.h>
 #include <rwe/TextureService.h>
 #include <rwe/net/InviteCode.h>
+#include <rwe/net/MapIdentity.h>
 #include <rwe/network_util.h>
 #include <rwe/rwe_time.h>
 #include <rwe/ui/UiFactory.h>
@@ -154,6 +155,8 @@ namespace rwe
         game.launching = identity.launching;
         game.approvalRequired = identity.approvalRequired;
         game.gameAddress = identity.gameAddress;
+        game.mapIdentity = identity.mapIdentity;
+        game.setupEpoch = identity.setupEpoch;
         game.options = optionsFromModel(model);
 
         // The newest lines only, which is all an announcement has room for.
@@ -374,6 +377,7 @@ namespace rwe
             claim.colour = g.slots.front().colour;
             claim.team = g.slots.front().team;
             claim.ready = g.slots.front().ready;
+            claim.setupEpoch = g.setupEpoch;
             claim.chat = g.chat;
             claim.approvalRequired = g.approvalRequired;
             claims.push_back(std::move(claim));
@@ -398,6 +402,8 @@ namespace rwe
         claim.gameAddress = reachableAt;
         claim.hostName = name.substr(0, maxPlayerNameLength);
         claim.approvalRequired = host.approvalRequired;
+        // Ready is given under the version of the setup the guest has read.
+        claim.setupEpoch = host.setupEpoch;
 
         DiscoveredSlot slot;
         slot.index = seat;
@@ -421,6 +427,28 @@ namespace rwe
         const auto firstLine = chat.size() > LanDiscovery::maxChatLines ? chat.size() - LanDiscovery::maxChatLines : 0;
         claim.chat.assign(chat.begin() + static_cast<std::ptrdiff_t>(firstLine), chat.end());
         return claim;
+    }
+
+    std::string setupFingerprint(const DiscoveredGame& game)
+    {
+        std::string out = game.map + "|";
+        for (const auto& [name, value] : game.options)
+        {
+            out += name + "=" + value + ";";
+        }
+        for (const auto& slot : game.slots)
+        {
+            out += "|" + std::to_string(slot.index) + ":" + slot.controller + ":" + slot.side + ":"
+                + std::to_string(slot.colour) + ":" + std::to_string(slot.team) + ":"
+                + std::to_string(slot.metal) + ":" + std::to_string(slot.energy);
+            // A computer's personality is a rule; a network seat's is the
+            // token of whoever holds it, which is not.
+            if (slot.controller == "computer")
+            {
+                out += ":" + slot.personality;
+            }
+        }
+        return out;
     }
 
     ClaimState claimState(const DiscoveredGame& host, int seat, const std::string& token)
@@ -1762,6 +1790,9 @@ namespace rwe
         void resetRoom(MultiplayerFlow& flow, std::size_t seats)
         {
             flow.chat = ChatTranscript{};
+            flow.setupFingerprint.clear();
+            flow.setupEpoch = 1;
+            flow.seenEpoch = 0;
             flow.shownChatSequence = 0;
             flow.seatReady.assign(seats, false);
             flow.claimMemory.clear();
@@ -2150,6 +2181,14 @@ namespace rwe
         if (!sceneContext.vfs->readFile("maps/" + game.map + ".ota"))
         {
             openMessageBox("You do not have the map " + game.map);
+            return;
+        }
+
+        // And so would a guest on a map of the same name that is not the same
+        // map: sizes and a hash over both files, when the host says (#720).
+        if (!game.mapIdentity.empty() && mapIdentity(*sceneContext.vfs, game.map) != game.mapIdentity)
+        {
+            openMessageBox("Your copy of the map " + game.map + " is not the host's");
             return;
         }
 
@@ -2986,7 +3025,8 @@ namespace rwe
                     memory.team = claim.team;
                 }
 
-                flow.seatReady[seat] = claim.ready;
+                // Ready under an older setup is not ready (#719).
+                flow.seatReady[seat] = claim.ready && (claim.setupEpoch == 0 || claim.setupEpoch == flow.setupEpoch);
                 takeClaimChat(flow.chat, memory.lastChat, p.name.getValue(), claim.chat);
                 continue;
             }
@@ -3047,7 +3087,7 @@ namespace rwe
             memory.team = claim.team;
             memory.lastChat = 0;
 
-            flow.seatReady[seat] = claim.ready;
+            flow.seatReady[seat] = claim.ready && (claim.setupEpoch == 0 || claim.setupEpoch == flow.setupEpoch);
             flow.chat.say(std::string(), (claim.name.empty() ? std::string("A player") : claim.name) + " has joined");
             takeClaimChat(flow.chat, memory.lastChat, claim.name, claim.chat);
         }
@@ -3085,6 +3125,31 @@ namespace rwe
 
         if (const auto& map = model.selectedMap.getValue())
         {
+            // The map's identity, worked out once for each map it is on.
+            if (flow.mapIdentityFor != map->name)
+            {
+                flow.mapIdentityFor = map->name;
+                flow.mapIdentityValue = mapIdentity(*sceneContext.vfs, map->name);
+            }
+            identity.mapIdentity = flow.mapIdentityValue;
+
+            // A change to the map, a rule or the seat table raises the
+            // setup version and drops every ready flag, which a guest's next
+            // claim cannot bring back until it has read the new version
+            // (#719). The first announcement of a room only records it.
+            auto fingerprint = setupFingerprint(lobbyFromModel(model, identity, map->name, flow.seatTokens));
+            if (fingerprint != flow.setupFingerprint)
+            {
+                if (!flow.setupFingerprint.empty())
+                {
+                    ++flow.setupEpoch;
+                    flow.seatReady.assign(flow.seatReady.size(), false);
+                    identity.ready = flow.seatReady;
+                }
+                flow.setupFingerprint = std::move(fingerprint);
+            }
+            identity.setupEpoch = flow.setupEpoch;
+
             flow.discovery.advertise(lobbyFromModel(model, identity, map->name, flow.seatTokens));
         }
         else
@@ -3196,6 +3261,13 @@ namespace rwe
 
         // -- mirror the host, whole --
         applyLobbyToModel(model, *host, flow.accepted ? flow.mySeat : -1, announcedGameAddress(*host, flow.invited), flow.nickname);
+
+        // -- a new version of the setup unreadies this guest (#719) --
+        if (host->setupEpoch != 0 && host->setupEpoch != flow.seenEpoch)
+        {
+            flow.myReady = false;
+            flow.seenEpoch = host->setupEpoch;
+        }
 
         // -- the room: what was said, and who is ready --
         flow.chat.merge(host->chat);

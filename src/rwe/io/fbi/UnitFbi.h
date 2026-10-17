@@ -124,6 +124,9 @@ namespace rwe
         unsigned int minWaterDepth;
         unsigned int maxWaterDepth;
 
+        /** Whether the FBI wrote MinWaterDepth at all (BT-109): an absent key is the signed word -10000. */
+        bool hasMinWaterDepth{false};
+
         bool canAttack;
         bool canMove;
         bool canGuard;
@@ -167,6 +170,14 @@ namespace rwe
         bool bmCode;
 
         bool floater;
+
+        /**
+         * `amphibious`, bit 21 of the first flag word (0x42BF40, beside
+         * `upright` and `floater`). The FBI key and nothing derived from the
+         * movement class. It exempts a flying repairer from the water reach
+         * test (BT-13).
+         */
+        bool amphibious;
         bool canHover;
 
         /**
@@ -215,6 +226,12 @@ namespace rwe
 
         /** Casts no shadow. Fifteen units name it, mostly the map props. */
         bool noShadow;
+
+        /**
+         * The pop-up defences (ARMAMB, CORTOAST) say digger=1: the part of the
+         * model at or below the origin plane is never drawn (BT-143).
+         */
+        bool digger;
 
         /**
          * Whether the unit's cached bitmap carries a height plane. Every

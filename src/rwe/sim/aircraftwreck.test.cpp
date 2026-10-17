@@ -248,29 +248,29 @@ namespace rwe
         // whatever killed it.
         SECTION("a kill with nothing to spare is the gentlest there is")
         {
-            REQUIRE(computeKilledSeverity(0, 100) == 1);
+            REQUIRE(computeKilledSeverity(0, 100, 0) == 1);
         }
 
         SECTION("overkill equal to the unit's whole health is halfway up")
         {
-            REQUIRE(computeKilledSeverity(100, 100) == 50);
+            REQUIRE(computeKilledSeverity(100, 100, 0) == 50);
         }
 
         SECTION("a shell worth twice the unit saturates the scale")
         {
-            REQUIRE(computeKilledSeverity(200, 100) == 100);
-            REQUIRE(computeKilledSeverity(1000, 100) == 100);
+            REQUIRE(computeKilledSeverity(200, 100, 0) == 100);
+            REQUIRE(computeKilledSeverity(1000, 100, 0) == 100);
         }
 
         SECTION("the bands in between")
         {
             // A commander's 3000 hit points against a 1500-point overkill.
-            REQUIRE(computeKilledSeverity(1500, 3000) == 25);
+            REQUIRE(computeKilledSeverity(1500, 3000, 0) == 25);
         }
 
         SECTION("a definition with no hit points at all does not divide by zero")
         {
-            REQUIRE(computeKilledSeverity(50, 0) == 1);
+            REQUIRE(computeKilledSeverity(50, 0, 0) == 1);
         }
     }
 
@@ -531,6 +531,171 @@ namespace rwe
 
             sim.tick();
             REQUIRE(countFeatures(sim) == 0);
+        }
+    }
+
+    TEST_CASE("the severity's second term is the health percentage sampled thirty ticks back (BT-43)", "[wreckage]")
+    {
+        // BT-43, docs/BYTE-TACTICS-SPEC-ROOM-FINDINGS.md: the severity is
+        // floor((floor(100 * overkill / maxHealth) + B) / 2) clamped to 1..100,
+        // where B is unit+0xF7. Every tick numbered a multiple of thirty
+        // the unit pass copies unit+0xF6 into +0xF7 and stores the current
+        // health percentage in +0xF6, so a kill reads a percentage from
+        // thirty to fifty-nine ticks earlier. Both are zero at creation.
+
+        SECTION("the formula, with ARMPW's 250 hit points")
+        {
+            // 125 over is 50 percent of 250.
+            REQUIRE(computeKilledSeverity(125, 250, 100) == 75);
+            REQUIRE(computeKilledSeverity(125, 250, 0) == 25);
+            // Both terms are non-negative, so the halving is a floor: 51 / 2.
+            REQUIRE(computeKilledSeverity(125, 250, 1) == 25);
+            // Nothing to spare and a unit that was at full health: half of 100.
+            REQUIRE(computeKilledSeverity(0, 250, 100) == 50);
+            // The percentage is floored before it is added: 2 over 250 is 0.
+            REQUIRE(computeKilledSeverity(2, 250, 99) == 49);
+            REQUIRE(computeKilledSeverity(3, 250, 99) == 50);
+        }
+
+        SECTION("the clamps")
+        {
+            // Raised to 1 from 0 -- and from 0 that stays 1 until B reaches 4.
+            REQUIRE(computeKilledSeverity(0, 250, 0) == 1);
+            REQUIRE(computeKilledSeverity(0, 250, 3) == 1);
+            REQUIRE(computeKilledSeverity(0, 250, 4) == 2);
+            // Cut to 100 from 200 and from far past it.
+            REQUIRE(computeKilledSeverity(750, 250, 100) == 100);
+            REQUIRE(computeKilledSeverity(1000000, 250, 100) == 100);
+        }
+
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        std::vector<UnitPieceDefinition> modelPieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+        sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(modelPieces));
+        auto hulk = sim.featureDefinitions.insert(makeWreckDef("HULK"));
+        auto rubble = sim.featureDefinitions.insert(makeWreckDef("RUBBLE"));
+        sim.featureNameIndex.insert_or_assign("HULK", hulk);
+        sim.featureNameIndex.insert_or_assign("RUBBLE", rubble);
+        sim.featureDefinitions.get(hulk).featureDead = rubble;
+
+        // ARMPW: MaxDamage=250 in its shipped FBI.
+        sim.unitDefinitions["armpw"] = makeUnitDef("HULK");
+        sim.unitDefinitions["armpw"].maxHitPoints = 250;
+
+        // Rung 25 -> level 1, rung 50 -> level 2, past that level 3, so the
+        // level a kill reads back is a coarse view of the severity it was given.
+        auto script = makeKilledLadderScript(stockLadder());
+        auto id = spawn(sim, "armpw", player, SimVector(100_ss, 0_ss, 100_ss), script);
+
+        auto tickTo = [&](unsigned int tick) {
+            while (sim.gameTime.value < tick)
+            {
+                sim.tick();
+            }
+        };
+
+        auto corpseLevel = [&]() {
+            return std::get<UnitState::LifeStateDead>(sim.getUnitState(id).lifeState).corpseLevel;
+        };
+
+        SECTION("a new unit has taken no sample")
+        {
+            REQUIRE(sim.getUnitState(id).healthPercentSample == 0);
+            REQUIRE(sim.getUnitState(id).previousHealthPercentSample == 0);
+        }
+
+        SECTION("samples fall on ticks 30, 60, 90 and each takes the last one's place")
+        {
+            tickTo(29);
+            REQUIRE(sim.getUnitState(id).healthPercentSample == 0);
+
+            tickTo(30);
+            REQUIRE(sim.getUnitState(id).healthPercentSample == 100);
+            REQUIRE(sim.getUnitState(id).previousHealthPercentSample == 0);
+
+            tickTo(59);
+            REQUIRE(sim.getUnitState(id).previousHealthPercentSample == 0);
+
+            tickTo(60);
+            REQUIRE(sim.getUnitState(id).healthPercentSample == 100);
+            REQUIRE(sim.getUnitState(id).previousHealthPercentSample == 100);
+        }
+
+        SECTION("the percentage is floored")
+        {
+            sim.getUnitState(id).hitPoints = 124; // 49.6 percent
+            tickTo(30);
+            REQUIRE(sim.getUnitState(id).healthPercentSample == 49);
+        }
+
+        SECTION("a kill in the unit's first second sees no second term")
+        {
+            tickTo(10);
+            sim.killUnit(id, std::nullopt, 0u);
+            // Severity 1.
+            REQUIRE(corpseLevel() == 1);
+        }
+
+        SECTION("a kill in the second second still sees no second term")
+        {
+            // The sample at tick 30 has been taken, but it is still in the
+            // newer of the two slots; the older one is read.
+            tickTo(45);
+            sim.killUnit(id, std::nullopt, 0u);
+            REQUIRE(corpseLevel() == 1);
+        }
+
+        SECTION("a full-health unit felled by one blow after two samples has severity at least 50")
+        {
+            tickTo(65);
+            sim.killUnit(id, std::nullopt, 0u);
+            // floor((0 + 100) / 2) = 50, the top of the second rung.
+            REQUIRE(corpseLevel() == 2);
+        }
+
+        SECTION("the sample lags: health lost since the last sample does not count yet")
+        {
+            tickTo(60);
+            // 25 of 250 is 10 percent, but nothing has sampled it.
+            sim.getUnitState(id).hitPoints = 25;
+            tickTo(89);
+            REQUIRE(sim.getUnitState(id).previousHealthPercentSample == 100);
+
+            // The sample at tick 90 sees 10 percent, but the kill still reads
+            // the one before it.
+            tickTo(90);
+            REQUIRE(sim.getUnitState(id).healthPercentSample == 10);
+            REQUIRE(sim.getUnitState(id).previousHealthPercentSample == 100);
+            sim.killUnit(id, std::nullopt, 0u);
+            REQUIRE(corpseLevel() == 2);
+        }
+
+        SECTION("two samples on, the wounded unit's severity falls to the overkill term")
+        {
+            tickTo(60);
+            sim.getUnitState(id).hitPoints = 25;
+            tickTo(120);
+            REQUIRE(sim.getUnitState(id).previousHealthPercentSample == 10);
+            // Overkill 125 is 50 percent; floor((50 + 10) / 2) = 30: level 2.
+            sim.killUnit(id, std::nullopt, 125u);
+            REQUIRE(corpseLevel() == 2);
+        }
+
+        SECTION("the same wounded unit, killed with nothing to spare, is gentler still")
+        {
+            tickTo(60);
+            sim.getUnitState(id).hitPoints = 25;
+            tickTo(120);
+            // floor((0 + 10) / 2) = 5: level 1.
+            sim.killUnit(id, std::nullopt, 0u);
+            REQUIRE(corpseLevel() == 1);
+        }
+
+        SECTION("a kill no blow measured keeps the floor, whatever was sampled")
+        {
+            tickTo(65);
+            sim.killUnit(id, std::nullopt);
+            REQUIRE(corpseLevel() == 1);
         }
     }
 }

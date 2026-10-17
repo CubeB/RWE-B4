@@ -215,6 +215,24 @@ namespace rwe
             CHECK(e[1].limit == 4);
         }
 
+        SECTION("ALL is a category every type is in, listed or not (BT-78)")
+        {
+            auto e = run("weight all 0.5\nlimit all 4\n", ClassicPlan::Hard);
+            for (const auto& entry : e)
+            {
+                CHECK(entry.multiplier == 50);
+                CHECK(entry.limit == 4);
+                CHECK(!entry.multiplierLocked);
+            }
+        }
+
+        SECTION("ALL does not override a name that claimed the type")
+        {
+            auto e = run("weight armmex 0.2\nweight all 0.5\n", ClassicPlan::Hard);
+            CHECK(e[1].multiplier == 20);
+            CHECK(e[0].multiplier == 50);
+        }
+
         SECTION("the side names are categories too")
         {
             auto e = run("weight core 0.1\n", ClassicPlan::Hard);
@@ -231,6 +249,76 @@ namespace rwe
         // 100 * 0.29 is 28.999999999999996 in a double, and a truncation is a truncation.
         CHECK(e[2].multiplier == 28);
         CHECK(e[3].multiplier == 0);
+    }
+
+    TEST_CASE("a missing number on a limit or weight line is zero, and a negative limit blocks (BT-128)", "[ai][classic]")
+    {
+        SECTION("Limit with a subject and no number forbids the type")
+        {
+            auto e = run("limit armmex\n", ClassicPlan::Hard);
+            CHECK(e[1].limit == 0);
+            CHECK(e[1].limitLocked);
+            CHECK(e[0].limit == -1);
+        }
+
+        SECTION("Weight with a subject and no number zeroes it")
+        {
+            auto e = run("weight armsolar\n", ClassicPlan::Hard);
+            CHECK(e[0].multiplier == 0);
+            CHECK(e[1].multiplier == 100);
+        }
+
+        SECTION("a category with no number takes the zero too")
+        {
+            auto e = run("limit core\n", ClassicPlan::Hard);
+            CHECK(e[2].limit == 0);
+            CHECK(e[0].limit == -1);
+        }
+
+        SECTION("a line with no subject changes nothing")
+        {
+            auto e = run("limit\nweight\n", ClassicPlan::Hard);
+            for (const auto& entry : e)
+            {
+                CHECK(entry.limit == -1);
+                CHECK(entry.multiplier == 100);
+            }
+        }
+
+        SECTION("a negative limit other than -1 is kept, and -1 is still unlimited")
+        {
+            auto e = run("limit armsolar -1\nlimit armmex -2\nlimit corsolar -7.9\n", ClassicPlan::Hard);
+            CHECK(e[0].limit == -1);
+            CHECK(e[1].limit == -2);
+            CHECK(e[2].limit == -7);
+        }
+
+        SECTION("the rating of a type with a negative limit below -1 is zero")
+        {
+            ClassicEconomy economy;
+            economy.energy = 900.0;
+            economy.metal = 450.0;
+            economy.energyStorage = 1000.0;
+            economy.metalStorage = 500.0;
+            economy.netEnergy = 10.0;
+            economy.netMetal = 10.0;
+            economy.energyIncome = 300.0;
+            economy.metalIncome = 10.0;
+            ClassicRatings ratings;
+            ratings.normal = 100;
+            CHECK(classicFinalRating(ratings, economy, 100, -1, 0) > 0);
+            CHECK(classicFinalRating(ratings, economy, 100, -2, 0) == 0);
+        }
+
+        SECTION("any counts only as the first word after plan")
+        {
+            auto e = run("plan easy any\nweight armsolar 0.5\n", ClassicPlan::Hard);
+            CHECK(e[0].multiplier == 100);
+            auto first = run("plan any easy\nweight armsolar 0.5\n", ClassicPlan::Hard);
+            CHECK(first[0].multiplier == 50);
+            auto easy = run("plan easy any\nweight armsolar 0.5\n", ClassicPlan::Easy);
+            CHECK(easy[0].multiplier == 50);
+        }
     }
 
     TEST_CASE("a name that matches nothing is reported once and changes nothing", "[ai][classic]")
@@ -427,6 +515,18 @@ namespace rwe
         f.metalCost = 40.0;
         CHECK(classicRatings(f, 1, context(3, 0, false)).normal == 1);
         CHECK(classicRatings(f, 1, context(3, 0, true)).normal == 0);
+    }
+
+    TEST_CASE("low wind is the map's maximum below 2500", "[ai][classic]")
+    {
+        // BT-120: not a mean. A map of 1500 to 2400 has a mean of 1950, which
+        // the old test (mean below 1250) called windy and the original calls
+        // low; 0 is the absent key.
+        CHECK(classicLowWind(0));
+        CHECK(classicLowWind(2400));
+        CHECK(classicLowWind(2499));
+        CHECK_FALSE(classicLowWind(2500));
+        CHECK_FALSE(classicLowWind(3000));
     }
 
     TEST_CASE("a transport and a feature rate zero", "[ai][classic]")

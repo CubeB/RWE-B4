@@ -10,30 +10,35 @@ namespace rwe
 {
     unsigned int nextScreenshotNumber(const std::vector<std::string>& fileNames)
     {
-        std::optional<unsigned int> highest;
+        // The original lists "<prefix>*.pcx", takes the integer parse of
+        // whatever follows the prefix, and keeps the largest positive value
+        // starting from 0 (BT-161), so a name with any number of digits counts
+        // and a file numbered 0000 does not.
+        constexpr unsigned long long Ceiling = 999999999ull;
+        unsigned long long highest = 0;
         for (const auto& name : fileNames)
         {
-            if (name.size() != 12)
+            if (name.size() < 8)
             {
                 continue;
             }
             std::string lower(name);
             std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (lower.compare(0, 4, "shot") != 0 || lower.compare(8, 4, ".pcx") != 0)
+            if (lower.compare(0, 4, "shot") != 0 || lower.compare(lower.size() - 4, 4, ".pcx") != 0)
             {
                 continue;
             }
-            if (!std::all_of(lower.begin() + 4, lower.begin() + 8, [](unsigned char c) { return std::isdigit(c) != 0; }))
+
+            // The digits straight after the prefix; the parse stops at the
+            // first character that is not one, as an integer parse does.
+            unsigned long long number = 0;
+            for (std::size_t i = 4; i < lower.size() - 4 && std::isdigit(static_cast<unsigned char>(lower[i])) != 0; ++i)
             {
-                continue;
+                number = std::min(Ceiling, (number * 10) + static_cast<unsigned long long>(lower[i] - '0'));
             }
-            auto number = static_cast<unsigned int>(std::stoul(lower.substr(4, 4)));
-            if (!highest || number > *highest)
-            {
-                highest = number;
-            }
+            highest = std::max(highest, number);
         }
-        return highest ? *highest + 1 : 0;
+        return static_cast<unsigned int>(highest + 1);
     }
 
     std::string screenshotFileName(unsigned int number)

@@ -366,6 +366,7 @@ namespace rwe
 
         REQUIRE(simB.pathFindingService.suspendedSearchStart() == simA.pathFindingService.suspendedSearchStart());
         REQUIRE(simB.pathFindingService.suspendedSearchExpansions() == simA.pathFindingService.suspendedSearchExpansions());
+        REQUIRE(simB.pathFindingService.suspendedSearchTime() == simA.pathFindingService.suspendedSearchTime());
         REQUIRE(computeHashOf(simA) == computeHashOf(simB));
         REQUIRE(saveSimulationToJson(simB) == saved);
 
@@ -537,6 +538,48 @@ namespace rwe
         REQUIRE(simB.players[1].metalReserve == Metal(0.0f));
         REQUIRE(simB.players[1].energyReserve == Energy(900.0f));
 
+        REQUIRE(saveSimulationToJson(simB) == saved);
+        REQUIRE(computeHashOf(simB) == computeHashOf(simA));
+    }
+
+    TEST_CASE("the cloak fuse's lists of seen enemies round-trip through a save", "[saveload]")
+    {
+        // BT-140: the lists persist between their 30-tick rebuilds and decide
+        // the cloak flag, so they are saved, hashed and dumped.
+        auto simA = makeBaseSim();
+        buildScenario(simA);
+        for (int i = 0; i < 5; ++i)
+        {
+            simA.tick();
+        }
+
+        std::vector<UnitId> ids;
+        for (const auto& [id, unit] : simA.units)
+        {
+            ids.push_back(id);
+        }
+        REQUIRE(ids.size() >= 2);
+
+        // Different on the two players, so a serialiser or a hash that lost
+        // which list an id sat in would not pass.
+        simA.cloakSeenEnemies = {{}, {ids[0], ids[1]}};
+        auto hashWithLists = computeHashOf(simA);
+        simA.cloakSeenEnemies = {{ids[0], ids[1]}, {}};
+        REQUIRE(computeHashOf(simA) != hashWithLists);
+        simA.cloakSeenEnemies = {{}, {ids[0], ids[1]}};
+        REQUIRE(computeHashOf(simA) == hashWithLists);
+        simA.cloakSeenEnemies.clear();
+        REQUIRE(computeHashOf(simA) != hashWithLists);
+        simA.cloakSeenEnemies = {{}, {ids[0], ids[1]}};
+
+        auto saved = saveSimulationToJson(simA);
+
+        auto simB = makeBaseSim();
+        loadSimulationFromJson(saved, simB);
+
+        REQUIRE(simB.cloakSeenEnemies.size() == 2);
+        REQUIRE(simB.cloakSeenEnemies[0].empty());
+        REQUIRE(simB.cloakSeenEnemies[1] == simA.cloakSeenEnemies[1]);
         REQUIRE(saveSimulationToJson(simB) == saved);
         REQUIRE(computeHashOf(simB) == computeHashOf(simA));
     }

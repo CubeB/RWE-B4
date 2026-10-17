@@ -16,11 +16,14 @@ namespace rwe
         constexpr std::size_t UnitSyncSize = 14;
         constexpr std::size_t ColourRequestSize = 2;
         constexpr std::size_t PlayerNumberSize = 6;
+        constexpr std::size_t StartAckSize = 5;
 
         /** 0x1a sub-types, which are the byte after the code. */
         constexpr std::uint8_t UnitSyncHeaderSubType = 0x00;
+        constexpr std::uint8_t UnitSyncTypesSubType = 0x01;
         constexpr std::uint8_t UnitSyncIdSubType = 0x02;
         constexpr std::uint8_t UnitSyncEchoSubType = 0x03;
+        constexpr std::uint8_t UnitSyncProgressSubType = 0x04;
 
         void writeU16(TadBytes& out, std::uint16_t value)
         {
@@ -204,6 +207,23 @@ namespace rwe
         return TadBytes{static_cast<std::uint8_t>(TadSubPacketCode::Start1e), value};
     }
 
+    TadBytes taBuildStartAck(std::uint32_t playerId)
+    {
+        TadBytes out{static_cast<std::uint8_t>(TadSubPacketCode::Unk1f)};
+        writeU32(out, playerId);
+        return out;
+    }
+
+    std::optional<std::uint32_t> taParseStartAck(const TadBytes& subpacket)
+    {
+        if (subpacket.size() < StartAckSize ||
+            subpacket[0] != static_cast<std::uint8_t>(TadSubPacketCode::Unk1f))
+        {
+            return std::nullopt;
+        }
+        return readU32(&subpacket[1]);
+    }
+
     TadBytes taBuildUnitStateWord(std::uint16_t unitId, std::uint8_t value)
     {
         TadBytes out;
@@ -242,6 +262,49 @@ namespace rwe
             return std::nullopt;
         }
         return readU32(&subpacket[6]);
+    }
+
+    std::optional<std::uint32_t> taParseUnitSyncCount(const TadBytes& subpacket, std::uint8_t subType)
+    {
+        if (subpacket.size() < UnitSyncSize ||
+            subpacket[0] != static_cast<std::uint8_t>(TadSubPacketCode::UnitData) ||
+            subpacket[1] != subType)
+        {
+            return std::nullopt;
+        }
+        return readU32(&subpacket[10]);
+    }
+
+    TadBytes taBuildUnitSyncTypes(std::uint32_t count)
+    {
+        TadBytes out(UnitSyncSize, 0);
+        out[0] = static_cast<std::uint8_t>(TadSubPacketCode::UnitData);
+        out[1] = UnitSyncTypesSubType;
+        for (std::size_t i = 0; i < 4; ++i)
+        {
+            out[10 + i] = static_cast<std::uint8_t>(count >> (8 * i));
+        }
+        return out;
+    }
+
+    TadBytes taBuildUnitSyncProgress(std::uint32_t count)
+    {
+        auto out = taBuildUnitSyncTypes(count);
+        out[1] = UnitSyncProgressSubType;
+        return out;
+    }
+
+    TadBytes taBuildUnitSyncKey(std::uint32_t unitTypeId, std::uint32_t checksum)
+    {
+        TadBytes out(UnitSyncSize, 0);
+        out[0] = static_cast<std::uint8_t>(TadSubPacketCode::UnitData);
+        out[1] = UnitSyncIdSubType;
+        for (std::size_t i = 0; i < 4; ++i)
+        {
+            out[6 + i] = static_cast<std::uint8_t>(unitTypeId >> (8 * i));
+            out[10 + i] = static_cast<std::uint8_t>(checksum >> (8 * i));
+        }
+        return out;
     }
 
     bool taEveryPlayerOnOneTeam(std::span<const std::uint8_t> teams)
@@ -301,6 +364,29 @@ namespace rwe
         launchedHandler = std::move(handler);
     }
 
+    void TaBattleroom::onSynced(std::function<void(const TaBattleroomPeer&)> handler)
+    {
+        syncedHandler = std::move(handler);
+    }
+
+    bool TaBattleroom::isSynced(PeerId id, const TaBattleroomPeer& state) const
+    {
+        if (config.unitSyncTimeout.count() == 0)
+        {
+            return true;
+        }
+        auto joined = joinedAt_.find(id);
+        if (joined != joinedAt_.end() && std::chrono::steady_clock::now() - joined->second >= config.unitSyncTimeout)
+        {
+            return true;
+        }
+        // The original's test (BT-212): the expected count is nonzero, the
+        // keys reported make it, and what was sent has been handled.
+        return state.unitTypesDeclared > 0
+            && state.unitKeysReceived >= state.unitTypesDeclared
+            && state.unitRecordsHandled >= state.unitRecordsSent;
+    }
+
     void TaBattleroom::onRefused(std::function<void(const std::string&)> handler)
     {
         refusedHandler = std::move(handler);
@@ -325,7 +411,9 @@ namespace rwe
         {
             return std::nullopt;
         }
-        return it->second;
+        auto found = it->second;
+        found.synced = isSynced(peer, found);
+        return found;
     }
 
     std::optional<std::uint32_t> TaBattleroom::roundTripTicks(PeerId peer) const
@@ -344,6 +432,9 @@ namespace rwe
         joined.playerId = peer;
         peers_[peer] = std::move(joined);
         peers_[peer].name = session.peerName(peer);
+        // The header goes out below and is the first of the 1 + 2n records.
+        peers_[peer].unitRecordsSent = 1;
+        joinedAt_[peer] = std::chrono::steady_clock::now();
         readyAnnounced_[peer] = false;
         if (std::find(joinOrder_.begin(), joinOrder_.end(), peer) == joinOrder_.end())
         {
@@ -363,6 +454,8 @@ namespace rwe
     {
         peers_.erase(peer);
         readyAnnounced_.erase(peer);
+        startAcked_.erase(peer);
+        joinedAt_.erase(peer);
         joinOrder_.erase(std::remove(joinOrder_.begin(), joinOrder_.end(), peer), joinOrder_.end());
     }
 
@@ -374,8 +467,20 @@ namespace rwe
             return;
         }
 
+        // The original discards a packet whose stored checksum is not the sum
+        // of its bytes; a packet a peer sent is someone else's input (#657).
+        if (!parsed->checksumValid)
+        {
+            ++badChecksum_;
+            return;
+        }
+
         const TaPacket& packet = parsed->packet;
         bool sawUnitSync = false;
+        bool const wasSynced = [&] {
+            auto before = peer(from);
+            return !before || before->synced;
+        }();
         for (const auto& subpacket : packet.subpackets)
         {
             switch (static_cast<TadSubPacketCode>(subpacket[0]))
@@ -426,8 +531,26 @@ namespace rwe
                 }
 
                 case TadSubPacketCode::UnitData:
+                {
                     sawUnitSync = true;
+                    auto it = peers_.find(from);
+                    if (it == peers_.end())
+                    {
+                        break;
+                    }
+                    // The joiner's count of unit types (sub-type 1), and how
+                    // many of the host's records it has handled (sub-type 4),
+                    // which only ever grows (BT-212).
+                    if (auto declared = taParseUnitSyncCount(subpacket, UnitSyncTypesSubType))
+                    {
+                        it->second.unitTypesDeclared = *declared;
+                    }
+                    else if (auto handled = taParseUnitSyncCount(subpacket, UnitSyncProgressSubType))
+                    {
+                        it->second.unitRecordsHandled = std::max(it->second.unitRecordsHandled, *handled);
+                    }
                     break;
+                }
 
                 case TadSubPacketCode::Unk17:
                     // A joiner asks for a colour and waits for the host's 0x18; a
@@ -437,6 +560,18 @@ namespace rwe
                         grantColour(from, subpacket[1]);
                     }
                     break;
+
+                case TadSubPacketCode::Unk1f:
+                {
+                    // The answer to our 0x1e names the sender; one naming
+                    // anybody else is not that peer's to give (BT-228).
+                    auto acked = taParseStartAck(subpacket);
+                    if (acked && *acked == from && peers_.count(from) != 0 && state_ == TaBattleroomState::Launching)
+                    {
+                        startAcked_.insert(from);
+                    }
+                    break;
+                }
 
                 case TadSubPacketCode::Start15:
                     // A joiner's TCP 0x15 answers our 0x1e: it is through loading.
@@ -462,6 +597,14 @@ namespace rwe
 
         traffic.flush();
         pings.flush();
+
+        if (syncedHandler && !wasSynced)
+        {
+            if (auto after = peer(from); after && after->synced)
+            {
+                syncedHandler(*after);
+            }
+        }
     }
 
     void TaBattleroom::grantColour(PeerId from, std::uint8_t wanted)
@@ -531,6 +674,11 @@ namespace rwe
         // ever computed here. Each id is answered twice, in the joiner's order.
         auto answered = std::min(ids.size(), config.maxUnitSyncIdsPerMessage);
         unitSyncRefused_ += static_cast<std::uint32_t>(ids.size() - answered);
+        if (auto joiner = peers_.find(from); joiner != peers_.end())
+        {
+            joiner->second.unitKeysReceived += static_cast<std::uint32_t>(ids.size());
+            joiner->second.unitRecordsSent += static_cast<std::uint32_t>(2 * answered);
+        }
 
         std::size_t batched = 0;
         for (std::size_t i = 0; i < answered; ++i)
@@ -638,6 +786,16 @@ namespace rwe
             return "nobody has joined";
         }
 
+        // The original greys its Start button, and shows SYNCHING in its
+        // place, until every remote human's unit sync is through (BT-212).
+        for (const auto& [id, state] : peers_)
+        {
+            if (!isSynced(id, state))
+            {
+                return "units are still syncing";
+            }
+        }
+
         std::vector<std::uint8_t> teams{config.hostTeam};
         for (const auto& [id, peer] : peers_)
         {
@@ -675,10 +833,17 @@ namespace rwe
             return false;
         }
 
+        // The room closes as the launch starts, before the first description
+        // goes out, so the one that tells a joiner the game is on also tells it
+        // nobody else can come in (BT-242, BT-244).
+        session.setAdmissionClosed(true);
+
         launchParams_ = params;
         loadingStep_ = 0;
         joinerLoaded_ = false;
         loadedWaits_ = 0;
+        startAcked_.clear();
+        stepsSinceStart_ = 0;
         state_ = TaBattleroomState::Launching;
 
         // The real host's launch, from ta-baseline.pcap and ta-small.pcap:
@@ -729,7 +894,7 @@ namespace rwe
             traffic.queueForAll(ids, code(TadSubPacketCode::Unk07), TaTransport::Tcp);
             if (loadingStep_ + 1 == last)
             {
-                traffic.queueForAll(ids, taBuildStart(1), TaTransport::Tcp);
+                sendStartPositions(ids);
             }
             traffic.flush();
             ++loadingStep_;
@@ -742,10 +907,43 @@ namespace rwe
         if (!joinerLoaded_ && loadedWaits_ < config.maxLoadedWaits)
         {
             ++loadedWaits_;
+
+            // The original sends the 0x1e again to any slot that has not
+            // answered with its 0x1f (BT-228).
+            if (++stepsSinceStart_ >= config.startResendSteps)
+            {
+                std::vector<PeerId> unanswered;
+                for (PeerId id : ids)
+                {
+                    if (startAcked_.count(id) == 0)
+                    {
+                        unanswered.push_back(id);
+                    }
+                }
+                if (!unanswered.empty())
+                {
+                    startResent_ += static_cast<std::uint32_t>(unanswered.size());
+                    sendStartPositions(unanswered);
+                    traffic.flush();
+                }
+            }
             armLoadingStep();
             return;
         }
         finishLaunch();
+    }
+
+    void TaBattleroom::sendStartPositions(const std::vector<PeerId>& ids)
+    {
+        stepsSinceStart_ = 0;
+        for (PeerId id : ids)
+        {
+            // The host takes index 0 and the joiners follow in the order they
+            // joined; a lone joiner is 1, as in every capture.
+            auto at = std::find(joinOrder_.begin(), joinOrder_.end(), id);
+            auto index = static_cast<std::uint8_t>(at == joinOrder_.end() ? 1 : (at - joinOrder_.begin()) + 1);
+            traffic.queue(id, taBuildStart(index), TaTransport::Tcp);
+        }
     }
 
     void TaBattleroom::finishLaunch()

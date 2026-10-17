@@ -56,6 +56,10 @@ namespace rwe
         UniformLocation shadeTableSampler;
         /** 1 for a cached piece of a finished building, 0.5 otherwise. */
         UniformLocation maskValue;
+        /** 1 cuts the parts at or below the water line, 0 tints them blue (BT-142). */
+        UniformLocation waterCut;
+        /** The height at or below which a fragment is cut: a digger's origin plane (BT-143). */
+        UniformLocation cutBelowY;
         /** 1 draws the mesh in the grey of remembered ground, 0 normally. */
         UniformLocation fogged;
     };
@@ -77,6 +81,8 @@ namespace rwe
         UniformLocation modelMatrix;
         UniformLocation unitY;
         UniformLocation seaLevel;
+        UniformLocation waterCut;
+        UniformLocation cutBelowY;
         UniformLocation shadeStrength;
         UniformLocation unitHeight;
         UniformLocation buildRatio;

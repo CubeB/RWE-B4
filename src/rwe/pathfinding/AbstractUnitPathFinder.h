@@ -6,6 +6,7 @@
 #include <rwe/pathfinding/AStarScratch.h>
 #include <rwe/pathfinding/PathCost.h>
 #include <rwe/pathfinding/pathfinding_utils.h>
+#include <rwe/sim/GameTime.h>
 #include <rwe/sim/MovementClassCollisionService.h>
 #include <rwe/sim/UnitId.h>
 
@@ -59,6 +60,13 @@ namespace rwe
          * Ships and other units that live in the water are never penalised.
          */
         const bool waterIsSlow;
+        /**
+         * The tick this search began on. Other units that moved within the
+         * thirty ticks before it are not walls to it (BT-58, BT-59). Fixed
+         * for the search so a cell reads the same on every tick the search
+         * is sliced across, and so a saved game can put it back.
+         */
+        GameTime searchTimeValue;
 
     public:
         AbstractUnitPathFinder(
@@ -71,6 +79,9 @@ namespace rwe
             AStarScratch* scratch = nullptr);
 
         bool isWalkable(const Point& p) const;
+
+        GameTime searchTime() const { return searchTimeValue; }
+        void setSearchTime(GameTime t) { searchTimeValue = t; }
 
         /**
          * The same answer without going through the search's scratch.

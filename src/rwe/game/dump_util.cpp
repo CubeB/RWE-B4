@@ -44,6 +44,7 @@ namespace rwe
             {"energy", dumpJson(p.energy)},
             {"maxEnergy", dumpJson(p.maxEnergy)},
             {"hasBaseStorage", dumpJson(p.hasBaseStorage)},
+            {"hasCreatedUnits", dumpJson(p.hasCreatedUnits)},
             {"metalStalled", dumpJson(p.metalStalled)},
             {"energyStalled", dumpJson(p.energyStalled)},
             {"unitsKilled", dumpJson(p.unitsKilled)},
@@ -231,7 +232,7 @@ namespace rwe
 
     nlohmann::json dumpJson(const MoveOrder& o)
     {
-        return nlohmann::json{{"destination", dumpJson(o.destination)}};
+        return nlohmann::json{{"destination", dumpJson(o.destination)}, {"unreachableRetryTicks", o.unreachableRetryTicks}, {"automatic", o.automatic}};
     }
 
     nlohmann::json dumpJson(const AttackOrder& o)
@@ -240,6 +241,7 @@ namespace rwe
             {"target", dumpJson(o.target)},
             {"leash", dumpJson(o.leash)},
             {"lastSeenPosition", dumpJson(o.lastSeenPosition)},
+            {"automatic", o.automatic},
         };
     }
 
@@ -609,8 +611,13 @@ namespace rwe
             {"projectiles", dumpJson(simulation.projectiles)},
             {"features", dumpJson(simulation.features)},
             {"currentWindVector", dumpJson(simulation.currentWindVector)},
+            {"currentWindDirection", simulation.currentWindDirection.value},
+            {"endCountdown", simulation.endCountdown},
+            {"skirmishVictoryRules", simulation.skirmishVictoryRules},
+            {"gameStatus", simulation.gameStatus.index()},
             {"featureRegrowthCursor", simulation.featureRegrowthCursor},
             {"explored", dumpJson(simulation.explored)},
+            {"cloakSeenEnemies", dumpJson(simulation.cloakSeenEnemies)},
         };
 
         // What each "featureName" above stands for. The number is a table

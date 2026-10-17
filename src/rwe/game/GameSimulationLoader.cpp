@@ -113,14 +113,37 @@ namespace rwe
 
                 if (modelDefinitions.find(normalizedObjectName) == modelDefinitions.end())
                 {
-                    auto meshInfo = services.meshService->loadProjectileMesh(normalizedObjectName);
-                    modelDefinitions.insert({normalizedObjectName, std::move(meshInfo.modelDefinition)});
-                    for (const auto& m : meshInfo.pieceMeshes)
+                    try
                     {
-                        gameMediaDatabase.addUnitPieceMesh(normalizedObjectName, m.first, m.second);
+                        auto meshInfo = services.meshService->loadProjectileMesh(normalizedObjectName);
+                        modelDefinitions.insert({normalizedObjectName, std::move(meshInfo.modelDefinition)});
+                        for (const auto& m : meshInfo.pieceMeshes)
+                        {
+                            gameMediaDatabase.addUnitPieceMesh(normalizedObjectName, m.first, m.second);
+                        }
+                    }
+                    catch (const std::exception& e)
+                    {
+                        // A model that will not parse costs this one feature
+                        // its picture, not the load.
+                        LOG_WARN << "Feature " << tdf.object << " has an unreadable model, drawing it as nothing: " << e.what();
                     }
                 }
-                f.renderInfo = FeatureObjectInfo{normalizedObjectName};
+                if (modelDefinitions.find(normalizedObjectName) != modelDefinitions.end())
+                {
+                    f.renderInfo = FeatureObjectInfo{normalizedObjectName};
+                }
+                else
+                {
+                    FeatureSpriteInfo spriteInfo;
+                    spriteInfo.transparentAnimation = tdf.animTrans;
+                    spriteInfo.transparentShadow = tdf.shadTrans;
+                    if (services.textureService != nullptr)
+                    {
+                        spriteInfo.animation = services.textureService->getDefaultSpriteSeries();
+                    }
+                    f.renderInfo = std::move(spriteInfo);
+                }
             }
             else
             {
@@ -131,7 +154,12 @@ namespace rwe
                 {
                     if (!tdf.fileName.empty() && !tdf.seqName.empty())
                     {
-                        spriteInfo.animation = services.textureService->getGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqName);
+                        // A sequence that is absent or whose GAF will not read
+                        // draws as the default series just below.
+                        if (auto animation = services.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqName))
+                        {
+                            spriteInfo.animation = *animation;
+                        }
                     }
                     if (!spriteInfo.animation)
                     {
@@ -272,10 +300,23 @@ namespace rwe
             std::vector<std::vector<GuiEntry>> entries;
             for (int i = 1; auto rawGui = services.vfs->readFile(services.pathMapping->guis + "/" + unitName + std::to_string(i) + ".GUI"); ++i)
             {
-                auto parsedGui = parseGuiFromBytes(*rawGui);
+                // A builder page comes with the unit, so a bad one in one mod
+                // must cost that unit its pages and not stop every peer's game
+                // from loading. The pages are numbered, so the first bad one
+                // ends the list (#663).
+                std::optional<std::vector<GuiEntry>> parsedGui;
+                try
+                {
+                    parsedGui = parseGuiFromBytes(*rawGui);
+                }
+                catch (const std::exception& e)
+                {
+                    LOG_WARN << "unit builder GUI " << unitName << i << " is unreadable (" << e.what() << ")";
+                }
                 if (!parsedGui)
                 {
-                    throw std::runtime_error("Failed to parse unit builder GUI: " + unitName + std::to_string(i));
+                    LOG_WARN << "unit builder GUI " << unitName << i << " could not be parsed; " << unitName << " keeps only the pages before it";
+                    break;
                 }
                 entries.push_back(std::move(*parsedGui));
             }
@@ -405,11 +446,21 @@ namespace rwe
 
                         if (auto modelRenderType = std::get_if<ProjectileRenderTypeModel>(&weaponMediaInfo.renderType); modelRenderType != nullptr)
                         {
-                            auto meshInfo = services.meshService->loadProjectileMesh(modelRenderType->objectName);
-                            dataMaps.modelDefinitions.insert({modelRenderType->objectName, std::move(meshInfo.modelDefinition)});
-                            for (const auto& m : meshInfo.pieceMeshes)
+                            try
                             {
-                                dataMaps.gameMediaDatabase.addUnitPieceMesh(modelRenderType->objectName, m.first, m.second);
+                                auto meshInfo = services.meshService->loadProjectileMesh(modelRenderType->objectName);
+                                dataMaps.modelDefinitions.insert({modelRenderType->objectName, std::move(meshInfo.modelDefinition)});
+                                for (const auto& m : meshInfo.pieceMeshes)
+                                {
+                                    dataMaps.gameMediaDatabase.addUnitPieceMesh(modelRenderType->objectName, m.first, m.second);
+                                }
+                            }
+                            catch (const std::exception& e)
+                            {
+                                // A round whose model will not parse is not drawn;
+                                // the weapon still fires and hits.
+                                LOG_WARN << "Weapon " << pair.first << " has an unreadable projectile model, drawing it as nothing: " << e.what();
+                                weaponMediaInfo.renderType = ProjectileRenderTypeNone{};
                             }
                         }
 
@@ -417,12 +468,12 @@ namespace rwe
                         {
                             if (weaponMediaInfo.explosionAnim)
                             {
-                                auto anim = services.textureService->getGafEntry("anims/" + weaponMediaInfo.explosionAnim->gafName + ".gaf", weaponMediaInfo.explosionAnim->animName);
+                                auto anim = services.textureService->tryGetGafEntry("anims/" + weaponMediaInfo.explosionAnim->gafName + ".gaf", weaponMediaInfo.explosionAnim->animName).value_or(services.textureService->getDefaultSpriteSeries());
                                 dataMaps.gameMediaDatabase.addSpriteSeries(weaponMediaInfo.explosionAnim->gafName, weaponMediaInfo.explosionAnim->animName, anim);
                             }
                             if (weaponMediaInfo.waterExplosionAnim)
                             {
-                                auto anim = services.textureService->getGafEntry("anims/" + weaponMediaInfo.waterExplosionAnim->gafName + ".gaf", weaponMediaInfo.waterExplosionAnim->animName);
+                                auto anim = services.textureService->tryGetGafEntry("anims/" + weaponMediaInfo.waterExplosionAnim->gafName + ".gaf", weaponMediaInfo.waterExplosionAnim->animName).value_or(services.textureService->getDefaultSpriteSeries());
                                 dataMaps.gameMediaDatabase.addSpriteSeries(weaponMediaInfo.waterExplosionAnim->gafName, weaponMediaInfo.waterExplosionAnim->animName, anim);
                             }
                         }
@@ -469,6 +520,20 @@ namespace rwe
                     std::string fbiString(bytes->data(), bytes->size());
                     auto fbi = parseUnitFbi(parseTdfFromString(fbiString));
 
+                    // The model first: a unit whose model will not parse is
+                    // left out whole, with a line in the log, rather than
+                    // ending the launch -- and nothing of it is half-registered.
+                    std::optional<MeshService::UnitMeshInfo> loadedMesh;
+                    try
+                    {
+                        loadedMesh = services.meshService->loadUnitMesh(fbi.objectName);
+                    }
+                    catch (const std::exception& e)
+                    {
+                        LOG_WARN << "Skipping unit " << fbi.unitName << ": its model " << fbi.objectName << " could not be read: " << e.what();
+                        continue;
+                    }
+
                     if (auto warning = transportCapacityWarning(fbi))
                     {
                         LOG_WARN << *warning;
@@ -496,7 +561,7 @@ namespace rwe
                         dataMaps.builderGuisDatabase.addBuilderGui(fbi.unitName, std::move(*guiPages));
                     }
 
-                    auto meshInfo = services.meshService->loadUnitMesh(fbi.objectName);
+                    auto& meshInfo = *loadedMesh;
                     dataMaps.modelDefinitions.insert({toUpper(fbi.objectName), std::move(meshInfo.modelDefinition)});
                     for (const auto& m : meshInfo.pieceMeshes)
                     {
@@ -695,6 +760,7 @@ namespace rwe
         simulation.killMul = mapData.killMul;
         simulation.timeMul = mapData.timeMul;
         simulation.noSeaLevelTrigger = ota.noSeaLevelTrigger;
+        simulation.gravity = ota.gravity;
         simulation.waterDamage = ota.waterDoesDamage ? std::max(0, ota.waterDamage) : 0;
 
         // The skirmish options the simulation itself has to know about. They
@@ -801,6 +867,21 @@ namespace rwe
 
         std::array<std::optional<PlayerId>, 10> gamePlayers;
 
+        // A game with no peer in it follows the skirmish's rule about a seat
+        // that never held a unit; one with a network seat, or a TA peer on its
+        // own clock, follows the multiplayer's (BT-193).
+        {
+            auto anyNetworkSeat = false;
+            for (const auto& params : gameParameters.players)
+            {
+                if (params && std::holds_alternative<PlayerControllerTypeNetwork>(params->controller))
+                {
+                    anyNetworkSeat = true;
+                }
+            }
+            simulation.skirmishVictoryRules = !anyNetworkSeat && gameParameters.netMode == NetMode::Lockstep;
+        }
+
         for (Index i = 0; i < getSize(gameParameters.players); ++i)
         {
             const auto& params = gameParameters.players[i];
@@ -821,7 +902,17 @@ namespace rwe
                     energy = Energy(static_cast<float>(isComputer ? schema.computerEnergy : schema.humanEnergy));
                 }
                 GamePlayerInfo gpi{params->name, playerType, params->color, GamePlayerStatus::Alive, params->side, metal, energy, metal, energy, metal, energy, params->teamId};
-                gpi.hasBaseStorage = gameParameters.mission;
+                if (gameParameters.mission)
+                {
+                    gpi.hasBaseStorage = true;
+                }
+                else
+                {
+                    // A skirmish or multiplayer player: its own start amounts,
+                    // floored at 200, as a base that outlives the commander
+                    // (BT-165).
+                    applySkirmishBaseStorage(gpi);
+                }
                 auto playerId = simulation.addPlayer(gpi);
                 gamePlayers[i] = playerId;
 
@@ -1020,15 +1111,18 @@ namespace rwe
         // way. It has to happen here, while the simulation is still ours --
         // a few lines further down it is moved into the GameScene.
         std::vector<Index> filledSlots;
-        std::vector<int> mapStartPositions;
         for (Index i = 0; i < getSize(gameParameters.players); ++i)
         {
             if (gameParameters.players[i])
             {
                 filledSlots.push_back(i);
-                mapStartPositions.push_back(static_cast<int>(i) + 1);
             }
         }
+        // Consecutive by participant order, as the original gives them
+        // (BT-237); a mission keeps its seat numbers.
+        auto mapStartPositions = startPositionsForSlots(
+            std::vector<std::size_t>(filledSlots.begin(), filledSlots.end()),
+            gameParameters.mission);
 
         auto dealtStartPositions = dealStartPositions(mapStartPositions, gameParameters.startLocation, simulation.rng);
 
@@ -1401,6 +1495,20 @@ namespace rwe
             }
         }
         return kept;
+    }
+
+    void applySkirmishBaseStorage(GamePlayerInfo& player)
+    {
+        constexpr float BaseStorageFloor = 200.0f;
+        if (player.startingMetal.value < BaseStorageFloor)
+        {
+            player.startingMetal = Metal(BaseStorageFloor);
+        }
+        if (player.startingEnergy.value < BaseStorageFloor)
+        {
+            player.startingEnergy = Energy(BaseStorageFloor);
+        }
+        player.hasBaseStorage = true;
     }
 
     MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers)

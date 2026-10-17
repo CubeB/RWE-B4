@@ -146,6 +146,7 @@ namespace rwe
         mc.footprintX = tdf.footprintX;
         mc.footprintZ = tdf.footprintZ;
         mc.minWaterDepth = tdf.minWaterDepth;
+        mc.minWaterDepthPresent = tdf.hasMinWaterDepth;
         mc.maxWaterDepth = tdf.maxWaterDepth;
         mc.maxSlope = tdf.maxSlope;
         mc.maxWaterSlope = tdf.maxWaterSlope;
@@ -537,6 +538,7 @@ namespace rwe
         u.isMobile = fbi.bmCode;
 
         u.floater = fbi.floater;
+        u.amphibious = fbi.amphibious;
         u.isFeature = fbi.isFeature;
         u.canHover = fbi.canHover;
         u.waterLine = fbi.waterLine;
@@ -548,6 +550,7 @@ namespace rwe
         u.cantBeTransported = fbi.cantBeTransported;
         u.isAirBase = fbi.isAirBase;
         u.noShadow = fbi.noShadow;
+        u.digger = fbi.digger;
         u.zBuffer = fbi.zBuffer;
 
         u.cruiseAltitude = SimScalar(fbi.cruiseAlt);
@@ -644,6 +647,7 @@ namespace rwe
                 fbi.maxWaterSlope,
                 fbi.minWaterDepth,
                 fbi.maxWaterDepth,
+                fbi.hasMinWaterDepth,
             };
 
             u.yardMap = parseYardMap(fbi.footprintX, fbi.footprintZ, fbi.yardMap);

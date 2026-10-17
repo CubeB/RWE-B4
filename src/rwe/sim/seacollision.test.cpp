@@ -70,7 +70,7 @@ namespace rwe
             model.height = simScalarFromFixed(1700296);
             sim.unitModelDefinitions["CORSTORM"] = model;
 
-            auto script = makeEmptyCobScript();
+            static const auto script = makeEmptyCobScript();
             auto env = std::make_unique<CobEnvironment>(script.get());
             std::vector<UnitMesh> pieces;
             UnitState unit(pieces, std::move(env));
@@ -150,10 +150,12 @@ namespace rwe
         // Eight units up and eight out, the missile's first step takes it past
         // the edge and below the surface at once. The original tests the
         // square's units before the water (0x49B090), so the Storm takes it --
-        // and throws up spray, the square being under the sea (0x499ECF).
+        // and, having been handed a unit, the detonation routine plays the
+        // ordinary hit art rather than the splash, the square being wet or not
+        // (0x499EB0, BT-9).
         auto shot = fireAtStorm(8_ss, 8_ss, false);
         CHECK(shot.stormDamaged);
-        CHECK(shot.deathType == ProjectileDiedEvent::DeathType::WaterImpact);
+        CHECK(shot.deathType == ProjectileDiedEvent::DeathType::NormalImpact);
     }
 
     TEST_CASE("a missile that reaches sea level short of a wading unit hits the water", "[weapon][water]")
@@ -167,11 +169,12 @@ namespace rwe
 
     TEST_CASE("on a map with nosealeveltrigger a missile goes through the water to its target", "[weapon][water]")
     {
-        // Still spray when it gets there: the art is the square's, and
-        // nosealeveltrigger switches off the sea test and nothing else.
+        // The hit is a direct one, so it takes the ordinary art even though
+        // the square is wet (BT-9); nosealeveltrigger switches off the sea
+        // test and nothing else.
         auto shot = fireAtStorm(80_ss, 10_ss, true);
         CHECK(shot.stormDamaged);
-        CHECK(shot.deathType == ProjectileDiedEvent::DeathType::WaterImpact);
+        CHECK(shot.deathType == ProjectileDiedEvent::DeathType::NormalImpact);
     }
 
     namespace
@@ -352,5 +355,74 @@ namespace rwe
 
         auto lastCorner = terrain.heightmapIndexToWorldCorner(15, 15);
         CHECK_FALSE(terrain.isSquareUnderSea(lastCorner.x + 2_ss, lastCorner.z + 2_ss));
+    }
+
+    namespace
+    {
+        /**
+         * Drops a round from thirty over twenty units of water at eight a
+         * tick and counts the entry splashes it throws up, and the deaths.
+         */
+        std::pair<int, int> dropAndCountSplashes(bool waterWeapon, bool noSeaLevelTrigger, bool wetSquare)
+        {
+            Grid<unsigned char> heights(16, 16, static_cast<unsigned char>(wetSquare ? 0 : 40));
+            GameSimulation sim(MapTerrain(std::move(heights), SeaLevel), 0u, 0, 0);
+            sim.noSeaLevelTrigger = noSeaLevelTrigger;
+            defineShell(sim, false);
+            sim.weaponDefinitions.at("SHELL").waterWeapon = waterWeapon;
+            auto gunner = addPlayer(sim, "gunner");
+            sim.spawnProjectile(ProjectileSpawn{
+                .owner = gunner,
+                .weaponType = "SHELL",
+                .position = SimVector(40_ss, 30_ss, 40_ss),
+                .direction = SimVector(0_ss, -1_ss, 0_ss),
+                .distanceToTarget = 100_ss});
+            sim.projectiles.begin()->second.velocity = SimVector(0_ss, -8_ss, 0_ss);
+
+            int splashes = 0;
+            int deaths = 0;
+            for (int t = 0; t < 8; ++t)
+            {
+                sim.events.clear();
+                sim.tick();
+                for (const auto& e : sim.events)
+                {
+                    if (const auto* d = std::get_if<ProjectileDetonatedEvent>(&e); d != nullptr && d->splashOnly)
+                    {
+                        ++splashes;
+                    }
+                    if (std::get_if<ProjectileDiedEvent>(&e) != nullptr)
+                    {
+                        ++deaths;
+                    }
+                }
+            }
+            return {splashes, deaths};
+        }
+    }
+
+    TEST_CASE("a live round crossing the surface over water throws up one entry splash", "[weapon][water]")
+    {
+        // BT-14. A water weapon is not stopped by the sea test, so it goes
+        // through the surface alive: strictly above on the step it started,
+        // at or below on the step it ended.
+        auto [splashes, deaths] = dropAndCountSplashes(true, false, true);
+        CHECK(splashes == 1);
+        CHECK(deaths == 1); // it comes to rest on the seabed in the end
+    }
+
+    TEST_CASE("a round the crossing step killed throws up no entry splash", "[weapon][water]")
+    {
+        // An ordinary shot dies in the water on its first step below the
+        // surface and gets the impact's art, not this.
+        auto [splashes, deaths] = dropAndCountSplashes(false, false, true);
+        CHECK(splashes == 0);
+        CHECK(deaths == 1);
+    }
+
+    TEST_CASE("there is no entry splash on a map with the sea trigger off, or over a square that is not wet", "[weapon][water]")
+    {
+        CHECK(dropAndCountSplashes(true, true, true).first == 0);
+        CHECK(dropAndCountSplashes(true, false, false).first == 0);
     }
 }

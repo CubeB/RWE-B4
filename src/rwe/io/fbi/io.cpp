@@ -77,6 +77,7 @@ namespace rwe
         tdf.readOrDefault("MaxSlope", u.maxSlope, 255u);
         tdf.readOrDefault("MaxWaterSlope", u.maxWaterSlope, u.maxSlope);
         tdf.readOrDefault("MinWaterDepth", u.minWaterDepth);
+        u.hasMinWaterDepth = tdf.findValue("MinWaterDepth").has_value();
         tdf.readOrDefault("MaxWaterDepth", u.maxWaterDepth);
         if (u.maxWaterDepth < u.minWaterDepth)
         {
@@ -110,6 +111,7 @@ namespace rwe
         tdf.readOrDefault("BMCode", u.bmCode);
 
         tdf.readOrDefault("Floater", u.floater);
+        tdf.readOrDefault("Amphibious", u.amphibious);
         tdf.readOrDefault("isfeature", u.isFeature);
         tdf.readOrDefault("CanHover", u.canHover);
         tdf.readOrDefault("WaterLine", u.waterLine);
@@ -122,6 +124,7 @@ namespace rwe
         tdf.readOrDefault("CantBeTransported", u.cantBeTransported);
         tdf.readOrDefault("IsAirBase", u.isAirBase);
         tdf.readOrDefault("NoShadow", u.noShadow);
+        tdf.readOrDefault("Digger", u.digger);
         tdf.readOrDefault("ZBuffer", u.zBuffer, true);
 
         tdf.readOrDefault("CruiseAlt", u.cruiseAlt);

@@ -64,6 +64,7 @@ namespace rwe
             p.energy,
             p.maxEnergy,
             p.hasBaseStorage,
+            p.hasCreatedUnits,
             p.metalStalled,
             p.energyStalled,
             p.unitsKilled,
@@ -134,8 +135,8 @@ namespace rwe
         return combineHashes(l.anchor, l.distance);
     }
 
-    GameHash computeHashOf(const MoveOrder& o) { return computeHashOf(o.destination); }
-    GameHash computeHashOf(const AttackOrder& o) { return combineHashes(o.target, o.leash, o.lastSeenPosition); }
+    GameHash computeHashOf(const MoveOrder& o) { return combineHashes(o.destination, o.unreachableRetryTicks, o.automatic); }
+    GameHash computeHashOf(const AttackOrder& o) { return combineHashes(o.target, o.leash, o.lastSeenPosition, o.automatic); }
     GameHash computeHashOf(const BuildOrder& o) { return combineHashes(o.unitType, o.position); }
     GameHash computeHashOf(const BuggerOffOrder& o) { return computeHashOf(o.rect); }
     GameHash computeHashOf(const CompleteBuildOrder& o) { return computeHashOf(o.target); }
@@ -437,6 +438,20 @@ namespace rwe
         return GameHash(accumulator);
     }
 
+    namespace
+    {
+        GameHash computeHashOfWinStatus(const WinStatus& status)
+        {
+            // The alternative, and for a win the player credited with it.
+            std::uint32_t winner = 0;
+            if (const auto* won = std::get_if<WinStatusWon>(&status))
+            {
+                winner = won->winner.value;
+            }
+            return GameHash((static_cast<std::uint32_t>(status.index()) * 1000003u) + winner);
+        }
+    }
+
     GameHash computeHashOf(const Grid<ExploredMask>& grid)
     {
         std::uint32_t accumulator = 0;
@@ -445,6 +460,32 @@ namespace rwe
             accumulator = (accumulator * 31u) + static_cast<std::uint32_t>(cell);
         }
         return GameHash(accumulator);
+    }
+
+    namespace
+    {
+        /**
+         * Only entries naming a unit that still exists: a unit gone since the
+         * list was built can never match again, and a save does not carry it,
+         * so the hash must not either.
+         */
+        GameHash computeHashOfCloakSeenEnemies(const GameSimulation& simulation)
+        {
+            std::uint32_t sum = 0;
+            const auto& lists = simulation.cloakSeenEnemies;
+            for (std::size_t player = 0; player < lists.size(); ++player)
+            {
+                auto weight = (static_cast<std::uint32_t>(player) * 2u) + 3u;
+                for (const auto& id : lists[player])
+                {
+                    if (simulation.tryGetUnitState(id))
+                    {
+                        sum += (id.value + 1u) * weight;
+                    }
+                }
+            }
+            return GameHash(sum);
+        }
     }
 
     GameHash computeHashOf(const GameSimulation& simulation)
@@ -466,12 +507,23 @@ namespace rwe
             simulation.projectiles,
             featuresHash,
             simulation.currentWindVector,
+            static_cast<uint32_t>(simulation.currentWindDirection.value),
+            // BT-82: the end countdown freezes the economy from its first
+            // step, and the latched result decides how the game ends.
+            simulation.endCountdown,
+            simulation.skirmishVictoryRules,
+            computeHashOfWinStatus(simulation.gameStatus),
             simulation.featureRegrowthCursor,
             // The explored grid is per line-of-sight group and feeds canSeeUnit
             // in Permanent mode, where it decides targets. A peer that disagrees
             // about what it has seen is a desync to catch, not player-facing
             // state to leave out.
             simulation.explored,
+            // BT-140: the cloak fuse's lists of seen enemies persist across
+            // ticks and decide the cloak flag. A sum of ids would let one
+            // player's list stand in for another's, so each id is mixed with
+            // the index of the player whose list holds it.
+            computeHashOfCloakSeenEnemies(simulation),
             // Absent in a skirmish, and then it adds nothing, so a skirmish's
             // hashes are what they were.
             simulation.missionRules ? computeHashOf(*simulation.missionRules) : GameHash(0),

@@ -87,6 +87,22 @@ namespace rwe
     std::vector<int> dealStartPositions(const std::vector<int>& startPositions, StartLocationMode mode, std::minstd_rand& rng);
 
     /**
+     * The map start positions (1-based StartPos keys) a game's participants
+     * are dealt from, one per filled slot in slot order (BT-237). The
+     * original gives fixed starts consecutively by participant order, not by
+     * seat number: three players in seats 0, 1 and 5 take positions 1, 2 and
+     * 3, and a sparse set of seats needs only as many positions as there are
+     * players. A mission keeps the seat number, since its slots are the
+     * mission's own.
+     *
+     * This changes where a game with gaps among its seats starts its
+     * players. It is initial state every peer works out the same way from the
+     * same parameters, so it is not a desync, but a replay recorded with
+     * gaps before this rule replays from other positions.
+     */
+    std::vector<int> startPositionsForSlots(const std::vector<std::size_t>& filledSlots, bool keepSeatNumbers);
+
+    /**
      * Total worker-time needed to fully reclaim a feature, given how much of it
      * is still standing. Scales with both the feature's value and its remaining
      * hit points, so a boulder takes far longer than a bush and a wreck that has
@@ -153,13 +169,18 @@ namespace rwe
     {
         PlayerId winner;
     };
-    struct WinStatusDraw
+    /**
+     * Every player is out. There is no draw in the original (BT-191): the
+     * defeat test counts the local player's own units and runs before the
+     * victory test, so a simultaneous wipe is a defeat for every machine.
+     */
+    struct WinStatusNoSurvivors
     {
     };
     struct WinStatusUndecided
     {
     };
-    using WinStatus = std::variant<WinStatusWon, WinStatusDraw, WinStatusUndecided>;
+    using WinStatus = std::variant<WinStatusWon, WinStatusNoSurvivors, WinStatusUndecided>;
 
     struct FireWeaponEvent
     {
@@ -375,6 +396,13 @@ namespace rwe
         std::string weaponType;
         SimVector position;
         bool inWater;
+
+        /**
+         * Not a detonation at all but the weapon's splash as a live round
+         * crosses the surface (0x49B720's tail, BT-14): the art and nothing
+         * else -- no sound, no shake, no damage. Presentation only.
+         */
+        bool splashOnly{false};
     };
 
     struct UnitCapturedEvent
@@ -456,14 +484,28 @@ namespace rwe
      *
      * `clamp(1, 100, (100 * overkill / maxdamage + X) / 2)`, where `overkill`
      * is the damage the killing blow had left over once the unit's remaining
-     * hit points were paid for, and `X` is `unit+0xF7` -- the one term in the
-     * formula with no known writer anywhere in the binary, taken as zero here
-     * and recorded as a gap in TOTALA-EXE.md section 88.
+     * hit points were paid for, and `X` is `unit+0xF7`, the unit's health
+     * percentage as sampled every thirtieth tick one sample back
+     * (`UnitState::previousHealthPercentSample`, BT-43). This used to be
+     * taken as zero for want of a known writer.
      *
      * A shipped `Killed` reads it as a three-band ladder: a gentle kill picks
      * the intact wreck, a heavy one picks rubble.
      */
-    int computeKilledSeverity(unsigned int overkill, unsigned int maxHitPoints);
+    int computeKilledSeverity(unsigned int overkill, unsigned int maxHitPoints, unsigned int previousHealthPercent);
+
+    /**
+     * What the COB `HitByWeapon` script is told about where a hit came from
+     * (BT-54, TotalA.exe 0x489CE0): the cosine and then the sine of the hit
+     * direction, each times 400. The direction is the angle from the victim
+     * to where the round burst, minus the victim's heading, and only its high
+     * byte survives (256 steps, 0x499CD0); the sine table at 0x509F00 holds
+     * 8192 for 1.0, and the products are rounded to nearest.
+     */
+    std::pair<int, int> computeHitByWeaponArguments(SimAngle direction);
+
+    /** What `TakeDamage` is told: `100 * health / maxHealth`, clamped to 0 to 100. */
+    int computeTakeDamagePercent(unsigned int hitPoints, unsigned int maxHitPoints);
 
     /**
      * The corpse level a `Killed` script wrote into its second parameter, if
@@ -475,7 +517,25 @@ namespace rwe
     {
         std::minstd_rand rng;
 
+        /** The latched result of a game that is not a mission; see decidedStatus. */
         WinStatus gameStatus{WinStatusUndecided()};
+
+        /**
+         * The word at g+0x39239: -1 until a result is first seen, then 4, and
+         * one lower each second the result still holds (BT-82). Saved, hashed
+         * and dumped: it freezes the economy from its first step.
+         */
+        int endCountdown{-1};
+
+        /**
+         * Whether the win test follows the skirmish's rule about a seat that
+         * never held a unit (BT-193): it contributes nothing, where in a
+         * multiplayer game it blocks everybody's victory until it fields
+         * something (0x490080 against 0x49027B). Off by default, which is the
+         * multiplayer rule; the loader turns it on for a game with no network
+         * seat. Fixed for the life of a game, saved, hashed and dumped.
+         */
+        bool skirmishVictoryRules{false};
 
         /**
          * The skirmish screen's rules, copied out of GameParameters before the
@@ -597,6 +657,14 @@ namespace rwe
          */
         SimVector currentWindVector{0_ss, 0_ss, 0_ss};
 
+        /**
+         * The direction the wind last blew in. Kept because a change to a
+         * wind of zero draws no new direction (BT-26, 0x490C40) and the wind
+         * generators' SetDirection is told the stale one; saved and hashed
+         * for that reason. Zero until the first change that has a speed.
+         */
+        SimAngle currentWindDirection = SimAngle(0);
+
         const int minWindSpeed;
 
         const int maxWindSpeed;
@@ -626,6 +694,24 @@ namespace rwe
         bool noSeaLevelTrigger{false};
 
         /**
+         * The map's `gravity` key, whole world units per second squared: 112
+         * on the great majority of shipped maps and something else on 83 of
+         * 272. The original reads it at 0x436542 (default zero) and the
+         * ballistic solver, the projectile fall, wreck sinking, the bomber's
+         * release timing and an aircraft's bank all take their acceleration
+         * from it (BT-124). Map data like the tide: saved, not hashed, and
+         * spent through `gravityPerTick`. A simulation built without a map
+         * keeps the usual 112.
+         */
+        int gravity{112};
+
+        /** The per-tick acceleration `gravity` stands for: units per second squared over 30 squared. */
+        SimScalar gravityPerTick() const
+        {
+            return intToSimScalar(gravity) / (30_ss * 30_ss);
+        }
+
+        /**
          * What the sea takes off a unit in it once a second: the map's
          * `waterdamage` when it sets `waterdoesdamage`, the acid of the Core
          * Contingency's acid worlds, and 0 on any other map (0x48AEDF).
@@ -641,6 +727,20 @@ namespace rwe
          * big the map is. -1 means the sweep just wrapped and this tick is idle.
          */
         int featureRegrowthCursor{0};
+
+        /**
+         * Per player, the enemy units that player's cloakers' proximity fuse
+         * reads (BT-140, 0x40AA40 and 0x40B0D0): live, not dying, not allied
+         * to the player, and passing the can-see gate for that player when
+         * the list was last rebuilt. The original rebuilds it every 30 ticks,
+         * so a unit that walks into a cloaker's range can take up to that long
+         * to be noticed, and a cloaked enemy never enters it. Indexed by
+         * player, kept in unit order; empty for a player with no cloakers.
+         *
+         * Saved, hashed and dumped, because it persists across ticks and
+         * decides the cloak flag, which decides targeting.
+         */
+        std::vector<std::vector<UnitId>> cloakSeenEnemies;
 
         // Computer-player controllers, owned by the simulation per the
         // locked decision in docs/ai-architecture-proposal.md §12-Q4.
@@ -806,7 +906,9 @@ namespace rwe
 
         /**
          * Hands an enemy unit to a new owner: it drops its orders and weapon
-         * targets and a UnitCapturedEvent is emitted. Returns true when the
+         * targets, loses its kills, stands on Hold Position and Hold Fire
+         * when the new owner is simulated here (BT-73), and a
+         * UnitCapturedEvent is emitted. Returns true when the
          * unit changed hands, was already the captor's, or no longer exists.
          *
          * The work of getting here is counted on the capture order, not here
@@ -905,8 +1007,20 @@ namespace rwe
          *
          * Everything that samples the vision grids - the fog renderer
          * included - must apply this identical transform.
+         *
+         * That is the cell of a piece of *ground*. A unit is not ground: its
+         * sight is centred, and it is seen, at the height it is drawn at
+         * (BT-110, BT-81), so those go through visionCellAtHeight instead.
          */
         Point visionCellAt(const SimVector& position) const;
+
+        /**
+         * The vision cell of a point at the given height above the map's
+         * zero, skewed by that height and not by the terrain under it. The
+         * height is the unit's eye for its sight origin, and the sample's own
+         * y for the fog lookup of the can-see predicate.
+         */
+        Point visionCellAtHeight(const SimVector& position, SimScalar height) const;
 
         /** The heightmap sample under a world position; 0 off the map. */
         int terrainSampleHeightAt(const SimVector& position) const;
@@ -940,6 +1054,15 @@ namespace rwe
          * same player. A player with no team has no allies but itself.
          */
         bool arePlayersAllied(PlayerId a, PlayerId b) const;
+
+        /**
+         * Whether `player` shares the victory that `winner` is credited with
+         * (BT-192). Victory is evaluated for each local player: a teammate
+         * still in the game wins with the team, a teammate already out has
+         * taken the defeat. Only the sides decide this; a mission names its
+         * own winner, who alone wins.
+         */
+        bool sharesVictory(PlayerId player, PlayerId winner) const;
 
         /**
          * Forgets every player and the visibility that belongs to them. The
@@ -1113,6 +1236,15 @@ namespace rwe
 
         DiscreteRect computeFootprintRegion(const SimVector& position, const UnitDefinition::MovementCollisionInfo& collisionInfo) const;
 
+        /**
+         * The integer an extractor's rate is multiplied by (BT-3, 0x437840):
+         * every footprint cell inside the map contributes its metal byte plus
+         * one, and a cell off the map contributes nothing, not even the one.
+         * The settle credits `ExtractsMetal * N` and the unit's `SetSpeed`
+         * script is told `N`.
+         */
+        unsigned int extractorMetalWork(const DiscreteRect& footprint) const;
+
         bool anyFeatureOccupies(const DiscreteRect& rect) const;
 
         /** The grid side of placing a feature, shared by addFeature and addFeatureInSlot. */
@@ -1152,6 +1284,21 @@ namespace rwe
          * of a wall it is half inside but not through one.
          */
         bool isCollisionAt(const DiscreteRect& rect, UnitId self, const DiscreteRect& passableRegion) const;
+
+        /**
+         * As isCollisionAt(rect, self, passableRegion), the way a path search
+         * asks: a mobile occupant that was put into the occupancy map within
+         * the thirty ticks before `searchTime` is not an obstacle.
+         *
+         * The original's pass map reads the occupant's stamp (mover+0x26)
+         * against the movement class's stamp, which a search start sets to the
+         * current tick minus thirty (floored, so the first thirty ticks read
+         * zero); an occupant with no mover, a building, always blocks, and one
+         * whose stamp is older than that blocks too (BT-58, BT-59). The
+         * movement code does not use this: a unit that walks into another
+         * is still stopped by it.
+         */
+        bool isCollisionAtForSearch(const DiscreteRect& rect, UnitId self, const DiscreteRect& passableRegion, GameTime searchTime) const;
 
         bool isYardmapBlocked(unsigned int x, unsigned int y, const Grid<YardMapCell>& yardMap, bool open, UnitId self) const;
 
@@ -1213,6 +1360,14 @@ namespace rwe
          */
         bool unloadUnitFromTransport(UnitId transportId, UnitId unitId, const SimVector& position);
 
+        /**
+         * A transport script's drop-unit (0x4813B0): the drop-legality test at
+         * the passenger's own cell, and if it passes the unit lets go where it
+         * hangs. If it fails nothing happens and the unit stays attached; there
+         * is no search for a nearby cell (BT-75).
+         */
+        bool dropCarriedUnitInPlace(UnitId transportId, UnitId unitId);
+
         /** Moves carried units along with their transports; run after unit behaviour each tick. */
         void updateCarriedUnits();
 
@@ -1260,6 +1415,28 @@ namespace rwe
         void spawnProjectile(const ProjectileSpawn& spawn);
 
         WinStatus computeWinStatus() const;
+
+        /**
+         * The result the game has decided on. A mission's is its rules'
+         * outcome; any other game's is the latch of the end countdown
+         * (BT-82), which is `gameStatus`: undecided until the result has held
+         * through a hundred and fifty ticks of observations. The scene and
+         * the arena read this, not computeWinStatus, which is the raw test
+         * the countdown observes once a second.
+         */
+        WinStatus decidedStatus() const;
+
+        /**
+         * The end-of-game countdown outside a campaign (BT-82, 0x464F80): the
+         * first second the win test answers sets `endCountdown` to 4, each
+         * later one takes one off, and the one that takes it below zero
+         * latches the result into `gameStatus`. A second the test does not
+         * answer neither resets nor advances it.
+         */
+        void updateEndCountdown();
+
+        /** Whether the countdown has started or latched, which holds every settle back. */
+        bool isEndCountdownFreezingEconomy() const;
 
         bool addResourceDelta(const UnitId& unitId, const Energy& apparentEnergy, const Metal& apparentMetal, const Energy& actualEnergy, const Metal& actualMetal, ResourceDebtGate gate = ResourceDebtGate::EnergyOrMetal);
         bool addResourceDelta(const UnitId& unitId, const Energy& energy, const Metal& metal, ResourceDebtGate gate = ResourceDebtGate::EnergyOrMetal);
@@ -1395,7 +1572,7 @@ namespace rwe
         std::pair<unsigned int, unsigned int> getFootprintXZ(const UnitDefinition::MovementCollisionInfo& info) const;
 
         /** Whether a cell blocks a unit other than `self`. */
-        bool cellBlocksUnit(const OccupiedCell& cell, UnitId self) const;
+        bool cellBlocksUnit(const OccupiedCell& cell, UnitId self, bool excuseMobile = false) const;
 
         BoundingBox3x<SimScalar> createBoundingBox(const UnitState& unit) const;
 
@@ -1416,6 +1593,13 @@ namespace rwe
          * script is given -- see the note at the call site.
          */
         void killUnit(UnitId unitId, std::optional<UnitId> attacker, unsigned int overkill);
+
+        /**
+         * The one body behind the overloads above. `measured` says whether
+         * a blow of known size caused the death, and so whether the unit's
+         * sampled health enters the severity.
+         */
+        void killUnitWithSeverity(UnitId unitId, std::optional<UnitId> attacker, unsigned int overkill, bool measured);
 
         void applyDamage(UnitId unitId, unsigned int damagePoints);
 
@@ -1438,6 +1622,12 @@ namespace rwe
          * A hit a Remote player ran is the victim's owner's to report and
          * reaches us as an incoming 0x0b, so `reportedByOwner` marks that call
          * and is the only way such a hit is applied here.
+         *
+         * `burstPosition` is where the round burst, and it is what makes a hit
+         * the original's damage kind 1 (ordinary weapon damage): only a hit
+         * that names it and leaves the unit standing starts the unit's
+         * `HitByWeapon(cos * 400, sin * 400)` and then `TakeDamage(percent)`
+         * scripts (BT-54). Water, a wipe and the rest never do.
          */
         void applyDamage(
             UnitId unitId,
@@ -1446,7 +1636,8 @@ namespace rwe
             bool paralyzer,
             std::optional<PlayerId> sourceOwner = std::nullopt,
             const char* deathCause = "weapon",
-            bool reportedByOwner = false);
+            bool reportedByOwner = false,
+            std::optional<SimVector> burstPosition = std::nullopt);
 
         /**
          * The acid in the sea, once a second (0x48AED3-0x48AF32): every unit
@@ -1458,7 +1649,13 @@ namespace rwe
 
         void applyDamageInRadius(const SimVector& position, SimScalar radius, const Projectile& projectile);
 
-        void doProjectileImpact(const Projectile& projectile, ImpactType impactType, std::optional<ProjectileId> projectileId = std::nullopt);
+        /**
+         * `struckUnit` is the unit the round ran into, when it was a unit
+         * (0x499EB0's optional unit argument). With one, a blast of
+         * areaofeffect 16 or less hurts that unit alone; without, it is an
+         * ordinary area blast. BT-112.
+         */
+        void doProjectileImpact(const Projectile& projectile, ImpactType impactType, std::optional<ProjectileId> projectileId = std::nullopt, std::optional<UnitId> struckUnit = std::nullopt);
 
         std::optional<SimVector> getSelfPropelledAimPoint(const Projectile& projectile, const ProjectilePhysicsTypeSelfPropelled& p);
 
@@ -1517,6 +1714,9 @@ namespace rwe
          * tick one was that close.
          */
         void updateCloakSuppression();
+
+        /** Rebuilds cloakSeenEnemies; run on the 30-tick cadence of the original. */
+        void refreshCloakSeenEnemies();
 
         /** The height of a definition's model, or zero if it has none loaded. */
         SimScalar modelHeightOf(const UnitDefinition& unitDefinition) const;

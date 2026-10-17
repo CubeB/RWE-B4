@@ -158,4 +158,15 @@ namespace rwe
         }
         REQUIRE(parseChatCommand(line)->kind == Kind::Give);
     }
+
+    TEST_CASE("+ShareMapping and +ShareRadar no longer claim allies share radar", "[chat]")
+    {
+        auto radar = shareNoticeMessage(Kind::ShareRadar);
+        REQUIRE(radar.find("already share") == std::string::npos);
+        REQUIRE(radar.find("not shared with allies") != std::string::npos);
+
+        auto mapping = shareNoticeMessage(Kind::ShareMapping);
+        REQUIRE(mapping.find("already share") == std::string::npos);
+        REQUIRE(mapping.find("always share what they see") != std::string::npos);
+    }
 }

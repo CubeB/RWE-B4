@@ -221,14 +221,40 @@ namespace rwe
         // beside it is the only sign. RWE used to flash the whole bar red
         // while stalled, which the original never does.
 
+        // The displayed amounts glide toward the real ones (BT-148): once a
+        // call, by an eighth of the gap and at least one, held to the
+        // capacity. The ruling is medium-confident that the original runs it
+        // once per drawn frame; it is run here once per scene tick, so that
+        // the speed does not depend on the frame rate.
+        {
+            const auto& hudPlayer = getPlayer(hudPlayerId());
+            if (hudGlideTick != sceneTime.value)
+            {
+                hudGlideTick = sceneTime.value;
+                hudEnergyShown = hudGlideStep(hudEnergyShown, std::max(Energy(0), hudPlayer.energy).value, hudPlayer.maxEnergy.value);
+                hudMetalShown = hudGlideStep(hudMetalShown, std::max(Metal(0), hudPlayer.metal).value, hudPlayer.maxMetal.value);
+            }
+        }
+
         // draw energy bar
         {
             const auto& rect = localSideData.energyBar.toDiscreteRect();
             const auto& localPlayer = getPlayer(hudPlayerId());
-            auto rectWidth = localPlayer.maxEnergy == Energy(0) ? 0 : (rect.width * std::max(Energy(0), localPlayer.energy).value) / localPlayer.maxEnergy.value;
+            auto fillPixels = hudBarFillPixels(rect.width, hudEnergyShown, localPlayer.maxEnergy.value);
             const auto& colorIndex = localSideData.energyColor;
             const auto& color = sceneContext.palette->at(colorIndex);
-            chromeUiRenderService.fillColor(rect.x, rect.y, rectWidth, rect.height, color);
+            if (fillPixels > 0)
+            {
+                chromeUiRenderService.fillColor(rect.x, rect.y, fillPixels, rect.height, color);
+            }
+
+            // The share marker: three pixels wide over the bar's full height,
+            // interface slot 12, only while the real amount is above the
+            // player's share threshold (BT-148).
+            if (auto marker = hudShareMarkerOffset(rect.width, localPlayer.energyReserve.value, localPlayer.maxEnergy.value, localPlayer.energy.value))
+            {
+                chromeUiRenderService.fillColor(rect.x + *marker, rect.y, hudShareMarkerWidth, rect.height, Color(255, 71, 0));
+            }
         }
         {
             const auto& rect = localSideData.energy0;
@@ -241,17 +267,17 @@ namespace rwe
         }
         {
             const auto& rect = localSideData.energyNum;
-            auto text = formatResource(std::max(Energy(0), getPlayer(hudPlayerId()).energy));
+            auto text = formatResource(Energy(hudEnergyShown));
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont);
         }
         {
             const auto& rect = localSideData.energyProduced;
-            auto text = formatResourceDelta(getPlayer(hudPlayerId()).previousEnergyProductionBuffer);
+            auto text = formatHudEnergyIncome(getPlayer(hudPlayerId()).previousEnergyProductionBuffer);
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont, Color(83, 223, 79));
         }
         {
             const auto& rect = localSideData.energyConsumed;
-            auto text = formatResourceDelta(getPlayer(hudPlayerId()).previousDesiredEnergyConsumptionBuffer);
+            auto text = formatHudEnergyUse(getPlayer(hudPlayerId()).previousDesiredEnergyConsumptionBuffer);
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont, Color(255, 71, 0));
         }
 
@@ -259,10 +285,18 @@ namespace rwe
         {
             const auto& rect = localSideData.metalBar.toDiscreteRect();
             const auto& localPlayer = getPlayer(hudPlayerId());
-            auto rectWidth = localPlayer.maxMetal == Metal(0) ? 0 : (rect.width * std::max(Metal(0), localPlayer.metal).value) / localPlayer.maxMetal.value;
+            auto fillPixels = hudBarFillPixels(rect.width, hudMetalShown, localPlayer.maxMetal.value);
             const auto& colorIndex = localSideData.metalColor;
             const auto& color = sceneContext.palette->at(colorIndex);
-            chromeUiRenderService.fillColor(rect.x, rect.y, rectWidth, rect.height, color);
+            if (fillPixels > 0)
+            {
+                chromeUiRenderService.fillColor(rect.x, rect.y, fillPixels, rect.height, color);
+            }
+
+            if (auto marker = hudShareMarkerOffset(rect.width, localPlayer.metalReserve.value, localPlayer.maxMetal.value, localPlayer.metal.value))
+            {
+                chromeUiRenderService.fillColor(rect.x + *marker, rect.y, hudShareMarkerWidth, rect.height, Color(255, 71, 0));
+            }
         }
         {
             const auto& rect = localSideData.metal0;
@@ -275,7 +309,7 @@ namespace rwe
         }
         {
             const auto& rect = localSideData.metalNum;
-            auto text = formatResource(std::max(Metal(0), getPlayer(hudPlayerId()).metal));
+            auto text = formatResource(Metal(hudMetalShown));
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont);
         }
         {
@@ -311,7 +345,22 @@ namespace rwe
         // whole frame pixels, so the frame height alone can miss it by a
         // fraction of a UI pixel.
         auto extraBottom = static_cast<float>(worldViewport.bottom()) / uiScale + static_cast<float>(GuiSizeBottom) - 480.0f;
-        if (hoveredUnit)
+
+        // The minimap is not a footer source (BT-141): the original writes its
+        // hover id only from the world pick, and the minimap reads it back
+        // just to highlight a dot. Pointing at a dot names nothing.
+        const auto footerUnit = isCursorOverMinimap() ? std::nullopt : hoveredUnit;
+        if (footerUnit && !unitIsVisibleToLocalPlayer(*footerUnit, getUnit(*footerUnit)))
+        {
+            // Hovered but not visible (a contact): the can-see gate fails and
+            // the footer prints only "S: " or "R: " and "Unidentified object",
+            // with no definition name, no health bar and no figures. Sonar if
+            // the unit is held on sonar, radar otherwise.
+            const auto& heard = simulation.playerVisibility.at(localPlayerId.value).sonarContacts;
+            const auto& rect = localSideData.unitName;
+            chromeUiRenderService.drawTextCenteredX(rect.x1, extraBottom + rect.y1, unidentifiedObjectText(heard.find(*footerUnit) != heard.end()), *guiFont);
+        }
+        else if (footerUnit)
         {
             const auto& unit = getUnit(*hoveredUnit);
             const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
@@ -438,7 +487,10 @@ namespace rwe
                 }
                 else if (auto targetId = unitOrderTargetUnit(unit); targetId)
                 {
-                    if (auto target = tryGetUnit(*targetId); target && unitIsDetectableByLocalPlayer(*targetId, target->get()))
+                    // Only a target the viewer can see is named: the slot uses
+                    // the same gate as the footer and, when it fails, prints
+                    // nothing at all rather than the unknown text (BT-141).
+                    if (auto target = tryGetUnit(*targetId); target && unitIsVisibleToLocalPlayer(*targetId, target->get()))
                     {
                         const auto& targetUnit = target->get();
                         const auto& targetDefinition = simulation.unitDefinitions.at(targetUnit.unitType);
@@ -471,6 +523,9 @@ namespace rwe
             const auto& featureDefinition = simulation.getFeatureDefinition(feature.featureName);
             const auto& featureMediaInfo = gameMediaDatabase.getFeature(feature.featureName);
 
+            // A feature marked `nodisplayinfo` says nothing in the footer
+            // (BT-147), as the footer's feature branch tests that bit first.
+            if (featureFooterIsShown(featureDefinition))
             {
                 const auto& rect = localSideData._name;
                 auto text = featureMediaInfo.description;
@@ -690,11 +745,15 @@ namespace rwe
 
     void GameScene::renderMinimap()
     {
-        // draw minimap
-        chromeUiRenderService.drawSpriteAbs(minimapRect, *minimap);
+        // draw minimap: the composed picture once the fog has built one, the
+        // map's own image until then
         if (fogSprite)
         {
             chromeUiRenderService.drawSpriteAbs(minimapRect, *fogSprite);
+        }
+        else
+        {
+            chromeUiRenderService.drawSpriteAbs(minimapRect, *minimap);
         }
 
         auto cameraInverse = computeInverseViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
@@ -1313,6 +1372,11 @@ namespace rwe
         auto pos = unit.position;
         auto worldToUi = worldUiRenderService.getInverseViewProjectionMatrix()
             * computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
+        // A target the player cannot see is drawn where it was last seen, not
+        // where it is (BT-184); the height still follows it.
+        auto orderMarkerPosition = [&](UnitId targetId, const UnitState& target) {
+            return orderMarkers.resolve(targetId, target.position, unitIsVisibleToLocalPlayer(targetId, target));
+        };
         for (const auto& order : unit.orders)
         {
             auto nextPos = match(
@@ -1328,7 +1392,7 @@ namespace rwe
                                                     {
                                                         return pos;
                                                     }
-                                                    return unitOption->get().position;
+                                                    return orderMarkerPosition(u, unitOption->get());
                                                 }); },
                 [&](const BuggerOffOrder&) { return pos; },
                 [&](const CompleteBuildOrder& o) {
@@ -1337,7 +1401,7 @@ namespace rwe
                     {
                         return pos;
                     }
-                    return unitOption->get().position;
+                    return orderMarkerPosition(o.target, unitOption->get());
                 },
                 [&](const GuardOrder& o) {
                     auto unitOption = tryGetUnit(o.target);
@@ -1345,7 +1409,7 @@ namespace rwe
                     {
                         return pos;
                     }
-                    return unitOption->get().position;
+                    return orderMarkerPosition(o.target, unitOption->get());
                 },
                 [&](const RepairOrder& o) {
                     auto unitOption = tryGetUnit(o.target);
@@ -1353,7 +1417,7 @@ namespace rwe
                     {
                         return pos;
                     }
-                    return unitOption->get().position;
+                    return orderMarkerPosition(o.target, unitOption->get());
                 },
                 [&](const PatrolOrder& o) { return o.destination; },
                 [&](const CaptureOrder& o) {
@@ -1362,7 +1426,7 @@ namespace rwe
                     {
                         return pos;
                     }
-                    return unitOption->get().position;
+                    return orderMarkerPosition(o.target, unitOption->get());
                 },
                 [&](const LoadOrder& o) {
                     auto unitOption = tryGetUnit(o.target);
@@ -1370,7 +1434,7 @@ namespace rwe
                     {
                         return pos;
                     }
-                    return unitOption->get().position;
+                    return orderMarkerPosition(o.target, unitOption->get());
                 },
                 [&](const UnloadOrder& o) { return o.destination; },
                 [&](const LandOnAirBaseOrder& o) {
@@ -1379,7 +1443,7 @@ namespace rwe
                     {
                         return pos;
                     }
-                    return unitOption->get().position;
+                    return orderMarkerPosition(o.target, unitOption->get());
                 },
                 [&](const DgunOrder& o) {
                     return match(
@@ -1390,7 +1454,7 @@ namespace rwe
                             {
                                 return pos;
                             }
-                            return unitOption->get().position;
+                            return orderMarkerPosition(u, unitOption->get());
                         },
                         [&](const SimVector& v) { return v; });
                 },
@@ -1411,7 +1475,7 @@ namespace rwe
                             {
                                 return pos;
                             }
-                            return unitOption->get().position;
+                            return orderMarkerPosition(u, unitOption->get());
                         },
                         [&](const FeatureId& f) {
                             auto featureOption = simulation.tryGetFeature(f);
@@ -1458,6 +1522,27 @@ namespace rwe
 
                 auto uiDest = worldToUi * simVectorToFloat(nextPos);
                 worldUiRenderService.drawSprite(uiDest.x, uiDest.y, *(frames[frameIndex]), Color(255, 255, 255, 100));
+
+                // The ring around the order's target while Shift is held
+                // (BT-185): an ellipse of sixteen segments in interface slot
+                // 12, R across and 0.89 R up and down, raised by half the
+                // target's height. It sits on the marker's position, so a
+                // target the player cannot see is ringed where it was last
+                // seen -- the original rings its live position, which gives a
+                // hidden target away, and that is not copied.
+                std::optional<std::pair<unsigned int, unsigned int>> ringFootprint;
+                auto ringCentre = simVectorToFloat(nextPos);
+                if (auto ringTargetId = orderTargetUnit(order, unit))
+                {
+                    if (auto ringTarget = tryGetUnit(*ringTargetId))
+                    {
+                        const auto& ringDefinition = simulation.unitDefinitions.at(ringTarget->get().unitType);
+                        ringFootprint = simulation.getFootprintXZ(ringDefinition.movementCollisionInfo);
+                        ringCentre.y += simScalarToFloat(simulation.unitModelDefinitions.at(ringDefinition.objectName).height) / 2.0f;
+                    }
+                }
+                auto ringUi = worldToUi * ringCentre;
+                worldUiRenderService.drawLines(targetRingSegments(Vector2f(ringUi.x, ringUi.y), targetRingRadius(ringFootprint)), Color(255, 71, 0));
             }
 
             if (drawLines)
@@ -1855,7 +1940,45 @@ namespace rwe
                 }
                 const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
                 const auto& unitModelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
+                auto firstMesh = unitMeshBatch.meshes.size();
+                auto firstBuildingMesh = unitMeshBatch.buildingMeshes.size();
+                auto firstCloakedMesh = unitMeshBatch.cloakedMeshes.size();
                 drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, unitId.value, renderTime().value, interpolationFraction, shadeStrengthFor(!unitDefinition.isMobile), unitAtlases, unitMeshBatch);
+
+                // A digger (the pop-up turrets) shows nothing at or below its
+                // origin plane, wet or dry (BT-143).
+                if (unitDefinition.digger)
+                {
+                    auto originY = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), interpolationFraction).y;
+                    for (auto i = firstMesh; i < unitMeshBatch.meshes.size(); ++i)
+                    {
+                        unitMeshBatch.meshes[i].cutBelowY = originY;
+                    }
+                    for (auto i = firstBuildingMesh; i < unitMeshBatch.buildingMeshes.size(); ++i)
+                    {
+                        unitMeshBatch.buildingMeshes[i].cutBelowY = originY;
+                    }
+                    for (auto i = firstCloakedMesh; i < unitMeshBatch.cloakedMeshes.size(); ++i)
+                    {
+                        unitMeshBatch.cloakedMeshes[i].cutBelowY = originY;
+                    }
+                }
+
+                // The part of the model under water is tinted blue for the
+                // viewer's own units and for sonar contacts, and cut away for
+                // every other unit (BT-142).
+                const auto& heard = simulation.playerVisibility.at(localPlayerId.value).sonarContacts;
+                if (unitWaterPartsAreCut(unit.isOwnedBy(localPlayerId), heard.find(unitId) != heard.end()))
+                {
+                    for (auto i = firstMesh; i < unitMeshBatch.meshes.size(); ++i)
+                    {
+                        unitMeshBatch.meshes[i].waterCut = 1.0f;
+                    }
+                    for (auto i = firstBuildingMesh; i < unitMeshBatch.buildingMeshes.size(); ++i)
+                    {
+                        unitMeshBatch.buildingMeshes[i].waterCut = 1.0f;
+                    }
+                }
             }
             for (const auto& [_, feature] : simulation.features)
             {
@@ -2104,6 +2227,25 @@ namespace rwe
                 {
                     continue;
                 }
+                if (particle.dimmedInRememberedGround)
+                {
+                    // Thermal vent steam: drawn over explored ground and
+                    // greyed like remembered ground where it is not in sight
+                    // (BT-151).
+                    auto at = floatToSimVector(particle.position);
+                    auto mode = ventSteamDrawMode(positionIsExploredByLocalPlayer(at), positionIsVisibleToLocalPlayer(at));
+                    if (mode == VentSteamDrawMode::Hidden)
+                    {
+                        continue;
+                    }
+                    auto drawnBefore = spriteParticlesBatch.sprites.size();
+                    drawSpriteParticle(gameMediaDatabase, renderTime(), viewProjectionMatrix, particle, spriteParticlesBatch);
+                    if (mode == VentSteamDrawMode::Dimmed && spriteParticlesBatch.sprites.size() > drawnBefore)
+                    {
+                        spriteParticlesBatch.sprites.back().fogged = true;
+                    }
+                    continue;
+                }
                 drawSpriteParticle(gameMediaDatabase, renderTime(), viewProjectionMatrix, particle, spriteParticlesBatch);
             }
             worldRenderService.drawSpriteBatch(spriteParticlesBatch);
@@ -2180,7 +2322,7 @@ namespace rwe
                 auto uiPos = worldUiRenderService.getInverseViewProjectionMatrix()
                     * viewProjectionMatrix
                     * simVectorToFloat(unit.position);
-                worldUiRenderService.drawHealthBar(uiPos.x, uiPos.y, static_cast<float>(unit.hitPoints) / static_cast<float>(unitDefinition.maxHitPoints));
+                worldUiRenderService.drawHealthBar(uiPos.x, uiPos.y, static_cast<int>(unit.hitPoints), static_cast<int>(unitDefinition.maxHitPoints));
             }
         }
 

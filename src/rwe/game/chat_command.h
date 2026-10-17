@@ -32,9 +32,9 @@ namespace rwe
             ShareEnergy,
             /** The metal and the energy toggles, in that order. */
             ShareAll,
-            /** Accepted, but RWE's teams already share sight; nothing to flip. */
+            /** Accepted, but there is no toggle: allies always share sight. */
             ShareMapping,
-            /** Accepted, but RWE's teams already share radar; nothing to flip. */
+            /** Accepted, but there is no toggle: radar and sonar are never shared with allies. */
             ShareRadar,
             /** `+SetShareMetal n`: `number` is what was typed. */
             SetShareMetal,
@@ -68,6 +68,14 @@ namespace rwe
      * to be sent as chat.
      */
     std::optional<ChatCommand> parseChatCommand(const std::string& line);
+
+    /**
+     * What +ShareMapping and +ShareRadar print. RWE has neither toggle: allies
+     * always share what they see (BT-57), and since BT-139 nobody shares a
+     * radar or sonar picture, so the old line "allies already share their
+     * radar" was false.
+     */
+    std::string shareNoticeMessage(ChatCommand::Kind kind);
 
     /**
      * `atoi` without its undefined behaviour: optional leading white space,

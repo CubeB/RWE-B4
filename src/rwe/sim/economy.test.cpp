@@ -4,6 +4,7 @@
 #include <memory>
 #include <optional>
 #include <rwe/cob/CobEnvironment.h>
+#include <rwe/game/GameSimulationLoader.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitDefinition.h>
@@ -144,6 +145,93 @@ namespace rwe
             addUnitOfType(sim, "commander", player, SimVector(200_ss, 0_ss, 100_ss), script);
             tickOneSecond(sim);
             REQUIRE(sim.getPlayer(player).maxMetal == Metal(1050.0f));
+        }
+    }
+
+    TEST_CASE("a skirmish player's base storage is its own start amount, at least 200, and needs no commander", "[economy]")
+    {
+        // BT-165: the skirmish and multiplayer starts write the player's own
+        // amounts, floored at 200, as the base from the first frame, so it is
+        // counted in every settle whether or not a commander is alive.
+        auto makePlayer = [](float metal, float energy) {
+            GamePlayerInfo p{
+                std::optional<std::string>("player"),
+                GamePlayerType::Human,
+                PlayerColorIndex(0),
+                GamePlayerStatus::Alive,
+                std::string("ARM"),
+                Metal(metal),
+                Energy(energy),
+                Metal(metal),
+                Energy(energy),
+                Metal(metal),
+                Energy(energy),
+            };
+            applySkirmishBaseStorage(p);
+            return p;
+        };
+
+        SECTION("a start amount under 200 gives a base of 200 and leaves the stock alone")
+        {
+            auto p = makePlayer(100.0f, 150.0f);
+            REQUIRE(p.hasBaseStorage);
+            REQUIRE(p.startingMetal == Metal(200.0f));
+            REQUIRE(p.startingEnergy == Energy(200.0f));
+            REQUIRE(p.metal == Metal(100.0f));
+            REQUIRE(p.energy == Energy(150.0f));
+        }
+
+        SECTION("each value is floored on its own, and 200 and over is kept")
+        {
+            auto p = makePlayer(50.0f, 5000.0f);
+            REQUIRE(p.startingMetal == Metal(200.0f));
+            REQUIRE(p.startingEnergy == Energy(5000.0f));
+        }
+
+        SECTION("a player with no commander and no units still holds the base after a settle")
+        {
+            GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
+            auto id = sim.addPlayer(makePlayer(100.0f, 100.0f));
+            tickOneSecond(sim);
+            REQUIRE(sim.getPlayer(id).maxMetal == Metal(200.0f));
+            REQUIRE(sim.getPlayer(id).maxEnergy == Energy(200.0f));
+            REQUIRE(sim.getPlayer(id).metal == Metal(100.0f));
+        }
+    }
+
+    TEST_CASE("a player that has created units and has none stops settling", "[economy]")
+    {
+        // BT-28 (the gate in 0x464F80): the settle runs for a slot with units
+        // or one that has never had any. One that had some and lost them all
+        // is out of the game and its stockpile stays where it stood, where it
+        // used to be clamped to the (now empty) storage every second.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
+        auto player = addPlayerWithResources(sim, 500.0f, 500.0f, 0.0f);
+
+        SECTION("a player that never had a unit still settles")
+        {
+            tickOneSecond(sim);
+            REQUIRE(sim.getPlayer(player).maxMetal == Metal(0.0f));
+            REQUIRE(sim.getPlayer(player).metal == Metal(0.0f));
+        }
+
+        SECTION("one that had units and has none keeps its stockpile")
+        {
+            sim.getPlayer(player).hasCreatedUnits = true;
+            tickOneSecond(sim);
+            REQUIRE(sim.getPlayer(player).metal == Metal(500.0f));
+            REQUIRE(sim.getPlayer(player).energy == Energy(500.0f));
+        }
+
+        SECTION("one that has a unit settles")
+        {
+            sim.getPlayer(player).hasCreatedUnits = true;
+            sim.unitDefinitions["inert"] = makeInertDef(50.0f);
+            addUnitOfType(sim, "inert", player, SimVector(100_ss, 0_ss, 100_ss), script);
+            tickOneSecond(sim);
+            REQUIRE(sim.getPlayer(player).maxMetal == Metal(50.0f));
+            REQUIRE(sim.getPlayer(player).metal == Metal(50.0f));
         }
     }
 
@@ -464,7 +552,7 @@ namespace rwe
             commander.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
             sim.unitDefinitions["commander"] = commander;
 
-            auto script = makeEmptyCobScript();
+            static const auto script = makeEmptyCobScript();
             auto next = 0;
             auto place = [&]() {
                 auto x = SimScalar(static_cast<float>(64 + 16 * (next % 8)));
@@ -688,7 +776,7 @@ namespace rwe
             auto factoryDef = makeInertDef(1.0e9f);
             factoryDef.workerTimePerTick = p;
             sim.unitDefinitions["factory"] = factoryDef;
-            auto script = makeEmptyCobScript();
+            static const auto script = makeEmptyCobScript();
             auto factory = addUnitOfType(sim, "factory", owner, SimVector(64_ss, 0_ss, 64_ss), script);
 
             // The job it was finishing: one tick of it is left, on

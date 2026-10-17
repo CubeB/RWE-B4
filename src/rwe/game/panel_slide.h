@@ -7,7 +7,8 @@ namespace rwe
      *
      * TOTALA-EXE.md 76 and 108: a display-word bit that only F4 toggles holds
      * it out, and so does Space while the cursor is off the side panel's own
-     * gadget. The side panel follows the F4 bit alone.
+     * gadget. The bit's only reader is the list's updater (0x4948E0), so F4
+     * moves the list and not the side panel (BT-183).
      */
     bool playerListWantsOut(bool f4Latch, bool spaceHeld, bool cursorOnPanel);
 

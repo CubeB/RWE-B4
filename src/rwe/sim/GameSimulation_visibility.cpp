@@ -8,6 +8,7 @@
 #include <rwe/util/match.h>
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace rwe
@@ -21,11 +22,50 @@ namespace rwe
          */
         constexpr unsigned int CloakSuppressionTicks = 90;
 
+        /** How often the cloak fuse's list of seen enemies is rebuilt (BT-140). */
+        constexpr unsigned int CloakSeenEnemiesPeriodTicks = 30;
+
         /**
          * Whether any of the dishes or jammers of the given kind reaches the
          * point, measured in the map plane. Both lists carry their radius
          * already squared.
          */
+        /**
+         * The distance measure of the sensor tests (0x467840, 0x47E890): each
+         * axis difference squared and cut to a whole number before the two
+         * are added, so it can sit up to one under the true squared distance.
+         */
+        SimScalar truncatedSquaredDistance(const SimVector& a, const SimVector& b)
+        {
+            auto dx = a.x - b.x;
+            auto dz = a.z - b.z;
+            return SimScalar(std::floor((dx * dx).value)) + SimScalar(std::floor((dz * dz).value));
+        }
+
+        /** Whether the detector's reach takes in the point: strict or inclusive as it was built (BT-6). */
+        bool detectorReaches(const PlayerVisibility::RadarDetector& detector, const SimVector& position)
+        {
+            auto distance = truncatedSquaredDistance(position, detector.position);
+            return detector.strict ? distance < detector.rangeSquared : distance <= detector.rangeSquared;
+        }
+
+        bool jammerReaches(const PlayerVisibility::RadarJammer& jammer, const SimVector& position)
+        {
+            auto dx = position.x - jammer.position.x;
+            auto dz = position.z - jammer.position.z;
+            return ((dx * dx) + (dz * dz)) <= jammer.rangeSquared;
+        }
+
+        bool reaches(const PlayerVisibility::RadarDetector& source, const SimVector& position)
+        {
+            return detectorReaches(source, position);
+        }
+
+        bool reaches(const PlayerVisibility::RadarJammer& source, const SimVector& position)
+        {
+            return jammerReaches(source, position);
+        }
+
         template <typename T>
         bool isInRangeOfAny(const std::vector<T>& sources, const SimVector& position, bool sonar)
         {
@@ -36,9 +76,7 @@ namespace rwe
                     continue;
                 }
 
-                auto dx = position.x - source.position.x;
-                auto dz = position.z - source.position.z;
-                if (((dx * dx) + (dz * dz)) <= source.rangeSquared)
+                if (reaches(source, position))
                 {
                     return true;
                 }
@@ -145,6 +183,12 @@ namespace rwe
         return heightmapToVisionCell(tile.x, tile.z, heightMapSampleAt(terrain.getHeightMap(), tile));
     }
 
+    Point GameSimulation::visionCellAtHeight(const SimVector& position, SimScalar height) const
+    {
+        auto tile = terrain.worldToHeightmapSpace(position);
+        return heightmapToVisionCellAtHeight(tile.x, tile.z, height);
+    }
+
     bool GameSimulation::isExploredBy(PlayerId player, const SimVector& position) const
     {
         auto cell = visionCellAt(position);
@@ -170,6 +214,7 @@ namespace rwe
         players.clear();
         playerVisibility.clear();
         playerLosGroupBits.clear();
+        cloakSeenEnemies.clear();
 
         // The explored grid belongs to the players whose groups own its bits,
         // so it goes with them. Leaving it set would hand a fresh game the
@@ -188,6 +233,22 @@ namespace rwe
         return first.has_value() && second.has_value() && *first == *second;
     }
 
+    bool GameSimulation::sharesVictory(PlayerId player, PlayerId winner) const
+    {
+        if (player == winner)
+        {
+            return true;
+        }
+
+        // A mission names its own winner, who alone wins.
+        if (missionRules)
+        {
+            return false;
+        }
+
+        return players.at(player.value).status == GamePlayerStatus::Alive && arePlayersAllied(player, winner);
+    }
+
     bool GameSimulation::isVisibleTo(PlayerId player, const SimVector& position) const
     {
         return playerVisibility.at(player.value).isVisible(visionCellAt(position));
@@ -199,9 +260,7 @@ namespace rwe
         // active dishes, measured in the map plane.
         for (const auto& detector : playerVisibility.at(player.value).radarDetectors)
         {
-            auto dx = position.x - detector.position.x;
-            auto dz = position.z - detector.position.z;
-            if (((dx * dx) + (dz * dz)) <= detector.rangeSquared)
+            if (detectorReaches(detector, position))
             {
                 return true;
             }
@@ -253,9 +312,38 @@ namespace rwe
             }
         }
 
-        // 0x465B6A onwards: the fog grid, asked of each corner of the unit's
-        // footprint in turn. RWE asks it once, of the unit's position.
-        return isVisibleTo(viewer, unit.position);
+        // 0x465B6A onwards (BT-81): the fog grid, asked in a fixed order of
+        // up to four corners of the unit's model bounding box, stopping at
+        // the first lit one. The corner is the unit's position plus the
+        // definition's minimum X and Z (+0x15E, +0x166: minus half the
+        // footprint in world units) and its top height (+0x16E). The extents
+        // (+0x176, +0x17A, +0x17E) are the footprint in world units and the
+        // model's height. Each sample reads the fog at its own height, not at
+        // the terrain's: (X >> 5, (Z - Y / 2) >> 5), with X and Z taken as
+        // whole units and the half of Y at full precision.
+        //
+        // The bounding box is taken from the footprint and the model height,
+        // the decoded loader (TOTALA-EXE-RENDER.md, 0x42D079); the box is
+        // assumed to start at the model's origin height.
+        const auto& visibility = playerVisibility.at(viewer.value);
+        auto [footprintX, footprintZ] = getFootprintXZ(unitDefinition.movementCollisionInfo);
+        auto extentX = intToSimScalar(static_cast<int>(footprintX) * 16);
+        auto extentZ = intToSimScalar(static_cast<int>(footprintZ) * 16);
+        auto extentY = modelHeightOf(unitDefinition);
+
+        auto whole = [](SimScalar s) { return SimScalar(std::floor(s.value)); };
+        auto lit = [&](SimScalar x, SimScalar y, SimScalar z) {
+            return visibility.isVisible(visionCellAtHeight(SimVector(whole(x), 0_ss, whole(z)), y));
+        };
+
+        auto a = unit.position.x - (extentX / 2_ss);
+        auto b = unit.position.y + extentY;
+        auto c = unit.position.z - (extentZ / 2_ss);
+
+        return lit(a, b, c)
+            || lit(a + extentX, b, c)
+            || lit(a + extentX, b - extentY, c + extentZ)
+            || lit(a, b - extentY, c + extentZ);
     }
 
     bool GameSimulation::canDetectUnit(PlayerId viewer, UnitId unitId) const
@@ -418,7 +506,7 @@ namespace rwe
         {
             auto aim = target.position - attacker.position;
             SimVector aimXZ(aim.x, 0_ss, aim.z);
-            auto gravity = 112_ss / (30_ss * 30_ss);
+            auto gravity = gravityPerTick();
             if (!computeFiringAngles(weaponDefinition.velocity, gravity, aimXZ.length(), aim.y))
             {
                 return false;
@@ -533,7 +621,27 @@ namespace rwe
                 static_cast<int>(unitDefinition.sightDistance) / cellWorldUnits,
                 circular ? MaxCircularSightRadiusInCells : losTables.maxRadius());
 
-            auto cell = visionCellAt(unit.position);
+            // Where the unit's sight is centred (BT-110, 0x4825B0). Terrain
+            // height is not consulted: the origin is skewed by the unit's own
+            // height, so an aircraft's patch of sight is where it is drawn
+            // and not under its shadow. A ray-traced origin skews by half the
+            // eye (the whole Y plus the model top, clamped to a byte). The
+            // circular mask has no model top in it: it shifts the whole-unit
+            // Z cell up by the floored Y shifted right six, which is the same
+            // half-altitude in cells.
+            Point cell;
+            if (circular)
+            {
+                auto tile = terrain.worldToHeightmapSpace(unit.position);
+                auto cells = intToSimScalar(PlayerVisibility::VisionCellSizeInTiles);
+                cell = Point(
+                    static_cast<int>(std::floor((tile.x / cells).value)),
+                    static_cast<int>(std::floor((tile.z / cells).value)) - (groundLevel >> 6));
+            }
+            else
+            {
+                cell = visionCellAtHeight(unit.position, intToSimScalar(eyeHeight));
+            }
 
             // The unit's bit in the one shared explored grid. Every player in
             // the owner's line-of-sight group owns that same bit, so revealing
@@ -576,14 +684,17 @@ namespace rwe
                 continue;
             }
 
-            auto altitude = rweMax(unit.position.y, 0_ss);
-            for (std::size_t i = 0; i < playerVisibility.size() && i < players.size(); ++i)
+            // BT-139 (0x467440): the sensor pass works for the displayed
+            // player alone and its emission loop walks only that player's
+            // own units, so an ally's dish or sonar set is never visited.
+            // Sight is shared between allies (above); detectors are not. The
+            // share-radar bit only shows your units as contacts on an ally's
+            // picture, and has nothing to do with whose detectors work. In
+            // particular an ally's sonar must not lift the below-surface veto
+            // that canSeeUnit applies to your weapons.
+            if (unit.owner.value < playerVisibility.size() && unit.owner.value < players.size())
             {
-                if (!arePlayersAllied(unit.owner, PlayerId(static_cast<unsigned int>(i))))
-                {
-                    continue;
-                }
-                auto& alliedVis = playerVisibility[i];
+                auto& ownVis = playerVisibility[unit.owner.value];
                 if (unitDefinition.radarDistance > 0)
                 {
                     // Altitude extends radar, and then an outer cap takes it
@@ -599,16 +710,28 @@ namespace rwe
                     // its minimap ring draws -- and RWE, having the bonus
                     // without the cap, was detecting half as far again as it
                     // drew.
-                    auto declared = intToSimScalar(static_cast<int>(unitDefinition.radarDistance));
-                    auto lifted = declared + (2_ss * altitude);
-                    auto cap = rweMax(declared, intToSimScalar(static_cast<int>(unitDefinition.sonarDistance)));
-                    auto range = rweMin(lifted, cap);
-                    alliedVis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, false});
+                    //
+                    // The two stages differ in sense (BT-6). The sweep takes
+                    // everything inside-or-on the cap; the per-contact test is
+                    // strict against the lifted range, with the lift twice the
+                    // detector's signed whole-unit y. Where the lift exceeds the
+                    // cap -- every shipped radar at height -- the sweep's
+                    // inclusive edge is what limits it; otherwise the
+                    // per-contact test does, and it is strict.
+                    auto declared = static_cast<int>(unitDefinition.radarDistance);
+                    auto liftedRange = declared + (2 * static_cast<int>(std::floor(unit.position.y.value)));
+                    auto cap = std::max(declared, static_cast<int>(unitDefinition.sonarDistance));
+                    auto strictLimit = liftedRange <= cap;
+                    auto range = intToSimScalar(strictLimit ? std::max(liftedRange, 0) : cap);
+                    ownVis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, false, strictLimit});
                 }
                 if (unitDefinition.sonarDistance > 0)
                 {
                     auto range = intToSimScalar(static_cast<int>(unitDefinition.sonarDistance));
-                    alliedVis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, true});
+                    // Strictly inside: a target at exactly the sonar distance is
+                    // not a contact (0x467840), and the sweep's inclusive edge
+                    // never admits one the per-contact test refuses.
+                    ownVis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, true, true});
                 }
             }
 
@@ -716,6 +839,51 @@ namespace rwe
         }
     }
 
+    void GameSimulation::refreshCloakSeenEnemies()
+    {
+        // BT-140: the per-player list of seen enemies that the cloak fuse
+        // reads (0x40AA40, enemy branch 0x40AAEF to 0x40AB65). A unit enters
+        // it only if it is live, not dying, not allied to the player (the
+        // player's own units are allied to it) and passes the can-see gate
+        // 0x465AC0 for that player, which rejects a cloaked enemy before it
+        // looks at the fog. Nothing tests construction state, so an
+        // unfinished enemy counts. Only players that own a cloakable unit
+        // read the list, so only those are rebuilt.
+        cloakSeenEnemies.resize(players.size());
+
+        std::vector<bool> hasCloaker(players.size(), false);
+        for (const auto& [unitId, unit] : units)
+        {
+            if (!unit.isDead() && unit.owner.value < hasCloaker.size() && unitDefinitions.at(unit.unitType).cloakable)
+            {
+                hasCloaker[unit.owner.value] = true;
+            }
+        }
+
+        for (std::size_t i = 0; i < players.size(); ++i)
+        {
+            auto& seen = cloakSeenEnemies[i];
+            seen.clear();
+            if (!hasCloaker[i])
+            {
+                continue;
+            }
+
+            PlayerId viewer(static_cast<unsigned int>(i));
+            for (const auto& [unitId, other] : units)
+            {
+                if (other.isDead() || arePlayersAllied(viewer, other.owner))
+                {
+                    continue;
+                }
+                if (canSeeUnit(viewer, unitId))
+                {
+                    seen.push_back(unitId);
+                }
+            }
+        }
+    }
+
     void GameSimulation::updateCloakSuppression()
     {
         // The original runs this in the same per-tick pass as the radar
@@ -724,6 +892,15 @@ namespace rwe
         // for the next ninety ticks. The flag is a timestamp rather than a
         // latch, so the unit stays visible for three seconds after the enemy
         // walks away instead of blinking back the moment it is out of range.
+        //
+        // "A live enemy" is the owner's list of seen enemies (BT-140), which
+        // is rebuilt every 30 ticks and not walked live: allies, enemies the
+        // owner cannot see and cloaked enemies do not count.
+        if (gameTime.value % CloakSeenEnemiesPeriodTicks == 0)
+        {
+            refreshCloakSeenEnemies();
+        }
+
         for (auto& entry : units)
         {
             auto& unit = entry.second;
@@ -738,17 +915,23 @@ namespace rwe
                 continue;
             }
 
+            if (unit.owner.value >= cloakSeenEnemies.size())
+            {
+                continue;
+            }
+
             auto minDistance = intToSimScalar(static_cast<int>(unitDefinition.minCloakDistance));
             auto minDistanceSquared = minDistance * minDistance;
 
-            for (const auto& otherEntry : units)
+            for (const auto& otherId : cloakSeenEnemies[unit.owner.value])
             {
-                const auto& otherUnit = otherEntry.second;
-                if (otherUnit.isDead() || otherUnit.isOwnedBy(unit.owner))
+                auto other = tryGetUnitState(otherId);
+                if (!other || other->get().isDead())
                 {
                     continue;
                 }
 
+                const auto& otherUnit = other->get();
                 auto dx = otherUnit.position.x - unit.position.x;
                 auto dz = otherUnit.position.z - unit.position.z;
                 if (((dx * dx) + (dz * dz)) <= minDistanceSquared)

@@ -30,6 +30,7 @@
 #include <rwe/game/LockstepStats.h>
 #include <rwe/game/NetworkHistory.h>
 #include <rwe/game/OrderButtons.h>
+#include <rwe/game/OrderMarkerMemory.h>
 #include <rwe/game/Particle.h>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/game/PlayerCommandService.h>
@@ -38,6 +39,7 @@
 #include <rwe/game/SceneTime.h>
 #include <rwe/game/UnitSoundType.h>
 #include <rwe/game/WeaponMediaInfo.h>
+#include <rwe/game/chat_util.h>
 #include <rwe/grid/DiscreteRect.h>
 #include <rwe/io/featuretdf/FeatureTdf.h>
 #include <rwe/network_util.h>
@@ -148,10 +150,17 @@ namespace rwe
             SceneTime startTime;
             /** On the camera plane in world units, so it stays put while the camera scrolls or zooms. */
             Vector2f startPosition;
-            explicit SelectingState(SceneTime startTime, const Vector2f& startPosition) : startTime(startTime), startPosition(startPosition) {}
+            /**
+             * The wall clock at the press, in milliseconds. The click-or-drag test
+             * runs on this and not on startTime: the original's clock is the
+             * operating system's, in thirtieths of a second, and goes on while the
+             * game is paused (BT-102).
+             */
+            unsigned int startMillis;
+            explicit SelectingState(SceneTime startTime, const Vector2f& startPosition, unsigned int startMillis = 0) : startTime(startTime), startPosition(startPosition), startMillis(startMillis) {}
             bool operator==(const SelectingState& rhs) const
             {
-                return startTime == rhs.startTime && startPosition == rhs.startPosition;
+                return startTime == rhs.startTime && startPosition == rhs.startPosition && startMillis == rhs.startMillis;
             }
             bool operator!=(const SelectingState& rhs) const
             {
@@ -575,8 +584,10 @@ namespace rwe
 
         /** F1: the hotkey reference overlay. */
         bool helpVisible{false};
-        /** The minimap's fog: one texel per vision cell, alpha encodes unexplored / explored / visible. */
+        /** The minimap's picture, composed from the embedded image and the fog (BT-152). */
         std::optional<Sprite> fogSprite;
+        /** The gray table's ramp, indexed by the truncated mean of a colour; built with the first picture. */
+        std::vector<unsigned char> minimapGrayRamp;
         /**
          * The minimap's fog texture and the buffer it is filled from, both
          * kept for the life of the game: the size never changes, so there is
@@ -588,6 +599,15 @@ namespace rwe
         int minimapFogWidth{0};
         int minimapFogHeight{0};
         GameTime fogSpriteTime{0};
+
+        /**
+         * The resource HUD's displayed amounts, which glide toward the real
+         * ones once per scene tick (BT-148). Presentation only: never saved,
+         * never hashed, never read by the simulation.
+         */
+        float hudEnergyShown{0.0f};
+        float hudMetalShown{0.0f};
+        unsigned int hudGlideTick{~0u};
         std::vector<unsigned char> fogVisibleSnapshot;
         std::vector<unsigned char> fogExploredSnapshot;
         /** TA's fog artwork, read from anims/fog.gaf the first time the fog is drawn. */
@@ -957,7 +977,8 @@ namespace rwe
             std::string text;
             /** Nothing draws the glyphs in their own colours, as the original does. */
             std::optional<Color> color;
-            SceneTime expires;
+            /** The game tick it is retired after, not scene time: a paused game keeps its lines (BT-206). */
+            std::uint32_t expiresAtGameTick;
         };
         std::deque<ConsoleMessage> consoleMessages;
 
@@ -969,6 +990,12 @@ namespace rwe
          * letter -- without that, typing "stop" would stop the selection.
          */
         std::optional<std::string> chatInput;
+
+        /** Who a line goes to unless it carries a one-message prefix (BT-176). Cycled with Tab in the bar. */
+        ChatSendMode chatSendMode;
+
+        /** Where order markers are drawn for targets the local player cannot see (BT-184). */
+        OrderMarkerMemory orderMarkers;
 
         /** Whether RWE_CHAT_TEST has had its one say. */
         bool chatTestSent{false};
@@ -1299,8 +1326,9 @@ namespace rwe
 
         /**
          * How far the players' list has come in from the right, 0 to
-         * PanelSlideTravel. Space moves only the list; F4 moves the list and
-         * the side panel together.
+         * PanelSlideTravel. Space and F4 move only the list (BT-183); the left
+         * column stays where it is, so panelSlide is 0 unless something else
+         * drives it.
          * Presentation only, like panelSlide.
          */
         float playerListSlide{0.0f};
@@ -1309,7 +1337,7 @@ namespace rwe
          * How far the Space key's bottom strip has risen, 0 to
          * StatsBarTravel. TOTALA-EXE.md S:108: a slide of its own
          * (game+0x37e90, 0 to -31), driven by Space alone -- F4, which
-         * latches the side panel out, does not touch it -- and eased a third
+         * latches the players' list out, does not touch it -- and eased a third
          * of what is left at a time, at least a pixel, every ten
          * milliseconds.
          */
@@ -1322,7 +1350,8 @@ namespace rwe
         /**
          * F4's latch -- the original's display word bit 7 at game+0x37f06
          * (76). That bit has no registry name and only F4 touches it, so it
-         * lasts the session and no longer, and this bool does the same.
+         * lasts the session and no longer, and this bool does the same. Its
+         * only reader is the players' list's updater (BT-183).
          */
         bool panelHiddenLatch{false};
 
@@ -1470,6 +1499,14 @@ namespace rwe
 
         /** Whether this game may be saved. An own-clock game may not; see GameScene_ownclock.cpp. */
         bool canSave() const;
+
+        /**
+         * A lockstep game with a remote peer, and a network game of either
+         * kind: restart, load and (with a peer) save are not offered in one,
+         * because each leaves or forks the scene for this player alone (#658).
+         */
+        bool isLockstepNetworkGame() const;
+        bool isNetworkGame() const { return isOwnClock() || isLockstepNetworkGame(); }
 
         /** Whose resources the top bar reads out; the local player unless a replay says otherwise. */
         PlayerId hudPlayerId() const { return hudPlayerOverride.value_or(localPlayerId); }
@@ -1809,10 +1846,31 @@ namespace rwe
         void receiveChatMessages();
 
         /** Puts one line of chat on screen and in the log. */
-        void printChatLine(PlayerId sender, const std::string& text);
+        void printChatLine(PlayerId sender, const std::string& text, ChatLabel label = ChatLabel::None);
+
+        /**
+         * A line of chat from a TA peer or a TA demo. The text already carries
+         * its own `<Name> ` label, so it is printed as it is, in the speaker's
+         * colour, without the name RWE's own lines are given (#656).
+         */
+        void printTaChatLine(PlayerId sender, const std::string& text);
+
+        /** The TA joiner's player, or nothing when this game has no TA peer. */
+        std::optional<PlayerId> taHostRemotePlayer() const;
+
+        /**
+         * Sends a line to the TA joiner as a 0x05, when it is among the
+         * recipients. `directed` is a line addressed to some players and not
+         * everyone: it goes as a directed send, which carries no sequence
+         * number (BT-203, BT-207). False when the peer cannot be reached.
+         */
+        bool submitTaHostChat(const std::string& wireText, ChatLabel label, bool directed, const std::vector<PlayerId>& recipients);
 
         /** The message bar itself, drawn over the world while it is open. */
         void renderChatBar();
+
+        /** "Message: ", or which audience the bar is set to. */
+        std::string chatBarPrompt() const;
 
         /** A player's lobby name, or "Player n" when they gave none. */
         std::string playerDisplayName(PlayerId playerId) const;
@@ -2044,6 +2102,13 @@ namespace rwe
         void renderHelpOverlay();
 
         void updateFogSprite();
+
+        /**
+         * Rebuilds the minimap picture when the fog it shows has changed
+         * (BT-152): the embedded image at 126 pixels, black where unexplored
+         * and grey-remapped where explored but not in sight.
+         */
+        void updateMinimapPicture(const Grid<unsigned char>& visible, const Grid<unsigned char>& explored);
 
         /**
          * What the local player can see, which with the fog switched off is
@@ -2332,7 +2397,7 @@ namespace rwe
          * smoke and a thermal vent's steam share this emitter class in the
          * original and differ only in that.
          */
-        void spawnSmokePuff(const Vector3f& position, const std::string& anim, float riseRate);
+        void spawnSmokePuff(const Vector3f& position, const std::string& anim, float riseRate, bool dimmedInRememberedGround = false);
 
         /** This tick's steam from every thermal vent on the map. */
         void spawnGeoVentSteam();

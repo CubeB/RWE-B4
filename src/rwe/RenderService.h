@@ -15,6 +15,9 @@ namespace rwe
         std::vector<GlColoredVertex> triangles;
     };
 
+    /** A cut height far below any world: the value for everything that is not a digger. */
+    constexpr float NoCutBelowY = -1.0e30f;
+
     struct UnitTextureMeshRenderInfo
     {
         const GlMesh* mesh;
@@ -43,6 +46,17 @@ namespace rwe
          * sprite features around it; 0 for everything else.
          */
         float fogged{0.0f};
+        /**
+         * 1 cuts the parts of the model at or below the water line away, 0
+         * tints them with the blue table (BT-142). A unit that is not the
+         * viewer's and is not held on sonar is cut; everything else is tinted.
+         */
+        float waterCut{0.0f};
+        /**
+         * World height at or below which every fragment is cut away: a
+         * digger's origin plane (BT-143). NoCutBelowY for every other mesh.
+         */
+        float cutBelowY{NoCutBelowY};
     };
 
     /**
@@ -87,6 +101,10 @@ namespace rwe
         BuildFillMode belowMode;
         Vector3f buildColorA;
         Vector3f buildColorB;
+        /** As UnitTextureMeshRenderInfo::waterCut. */
+        float waterCut{0.0f};
+        /** As UnitTextureMeshRenderInfo::cutBelowY. */
+        float cutBelowY{NoCutBelowY};
     };
 
     /**

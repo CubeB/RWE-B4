@@ -74,6 +74,13 @@ namespace rwe
         unsigned int getWidth() const { return width; }
         unsigned int getHeight() const { return height; }
         unsigned int getFrameCount() const { return frameCount; }
+        /**
+         * The header's flag word: bit 0 a ring frame, bit 1 the library's
+         * Y-scale/Y-interlace mode, which doubles the height on screen, and
+         * bit 2 its Y-interlace twin. Films 1 to 4 are 640x240 with bit 1 set;
+         * film 5 is 640x304 with none.
+         */
+        unsigned int getHeaderFlags() const { return headerFlags; }
         /** Duration of one frame, in microseconds. */
         unsigned int getMicrosecondsPerFrame() const { return microsecondsPerFrame; }
         std::optional<AudioInfo> getAudioInfo() const { return audioInfo; }
@@ -113,6 +120,7 @@ namespace rwe
         unsigned int width{0};
         unsigned int height{0};
         unsigned int frameCount{0};
+        unsigned int headerFlags{0};
         unsigned int microsecondsPerFrame{0};
         std::optional<AudioInfo> audioInfo;
         uint32_t audioTrackFlags[7] = {};
@@ -136,9 +144,9 @@ namespace rwe
 
         void parseHeader();
         HuffTree buildTree8(BitReader& reader);
-        int buildTree8Recursive(BitReader& reader, HuffTree& tree);
+        int buildTree8Recursive(BitReader& reader, HuffTree& tree, unsigned int depth);
         HuffTree buildTree16(BitReader& reader);
-        int buildTree16Recursive(BitReader& reader, HuffTree& tree, HuffTree& low, HuffTree& high);
+        int buildTree16Recursive(BitReader& reader, HuffTree& tree, HuffTree& low, HuffTree& high, unsigned int depth);
         static uint16_t decodeTree(BitReader& reader, HuffTree& tree);
 
         void decodePalette(const uint8_t* data, std::size_t size);

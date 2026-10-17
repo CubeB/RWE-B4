@@ -15,6 +15,7 @@
 #include <rwe/sim/SimulationOwnership.h>
 #include <rwe/sim/TaLiveSenderHooks.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
+#include <rwe/sim/UnitModelVertices.h>
 #include <rwe/sim/cob.h>
 #include <rwe/sim/movement.h>
 #include <rwe/sim/sim_prof.h>
@@ -175,8 +176,10 @@ namespace rwe
         if (unitDefinition.extractsMetal != Metal(0))
         {
             auto footprint = sim->computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
-            auto metalValue = sim->metalGrid.accumulate(sim->metalGrid.clipRegion(footprint), 0u, std::plus<>());
-            unit.cobEnvironment->createThread("SetSpeed", {static_cast<int>(metalValue)});
+            // BT-3: N = sum(metal byte + 1) over the in-map cells, handed over
+            // as a signed 16-bit value (0x437840).
+            auto work = sim->extractorMetalWork(footprint);
+            unit.cobEnvironment->createThread("SetSpeed", {static_cast<int>(static_cast<std::int16_t>(work))});
         }
 
         runUnitCobScripts(*sim, unitId);
@@ -190,19 +193,28 @@ namespace rwe
             }
             auto localAimingPoint = getLocalAimingPoint(unitId, i);
             auto localFiringPoint = getLocalFiringPoint(unitId, i);
-            weapon->ballisticZOffset = localFiringPoint.z - localAimingPoint.z;
+            // 0x49E070 (0x49E0FB-0x49E11B): the Z difference of the Query piece
+            // over the AimFrom piece, times the double 1.25 at 0x4FDA98,
+            // truncated, kept in 16.16 and never rewritten. Taken in the
+            // unit's own frame, which is the frame the original sees when the
+            // unit is built facing 0 -- the heading it has at that moment is
+            // not established for a factory's product.
+            weapon->ballisticZOffset = muzzleCorrectionOf(localFiringPoint.z - localAimingPoint.z);
         }
     }
 
-    void UnitBehaviorService::updateWind(SimScalar windGenerationFactor, SimAngle windDirection)
+    void UnitBehaviorService::updateWind(int windSpeed, SimAngle windDirection)
     {
-        int cobWindSpeed = static_cast<int>(toCobSpeed(windGenerationFactor).value);
+        // The integer speed the map's range drew, shifted left four bits
+        // (0x43797B). The shipped wind scripts spin their blades at this
+        // value in 1/65536-turn units a second.
+        int cobWindSpeed = windSpeed * 16;
         int cobWindDirection = toCobAngle(windDirection).value;
 
         for (auto& [id, unit] : sim->units)
         {
             const auto& unitDefinition = sim->unitDefinitions.at(unit.unitType);
-            if (unitDefinition.windGenerator != Energy(0))
+            if (unitDefinition.windGenerator > Energy(0))
             {
                 unit.cobEnvironment->createThread("SetSpeed", {cobWindSpeed});
                 unit.cobEnvironment->createThread("SetDirection", {cobWindDirection});
@@ -365,6 +377,11 @@ namespace rwe
 
             if (!unitInfo.state->orders.empty())
             {
+                // An order of its own takes the weapons off the guard mission.
+                if (unitInfo.state->guardPhase != 0 || unitInfo.state->guardTarget)
+                {
+                    resetGuardNoMove(*unitInfo.state);
+                }
                 RWE_SIMPROF("b.orders");
                 // Non-const: a capture order counts its own progress, so it
                 // is written back through this reference. Taking a
@@ -406,8 +423,14 @@ namespace rwe
                 // callers, Standby included, gets nothing back for a unit
                 // whose movement mode is 0 (0x43B211), so such a unit shoots
                 // from where it is and never goes after anything (issue #109).
+                //
+                // And on Fire At Will exactly (BT-74): 0x43B700, which every
+                // standby, patrol and seek-attack mission calls first, is
+                // `cmp ecx,0x200000 / jne`, so a unit on Return Fire answers
+                // being shot (returnFire, from the damage handler) but never
+                // goes hunting for something it merely saw.
                 std::optional<UnitId> freeTarget;
-                if (unitInfo.definition->canAttack && unitInfo.state->fireOrders != UnitFireOrders::HoldFire
+                if (unitInfo.definition->canAttack && unitInfo.state->fireOrders == UnitFireOrders::FireAtWill
                     && unitInfo.state->moveOrders != UnitMovementOrders::HoldPosition)
                 {
                     freeTarget = findEnemyToEngage(unitInfo);
@@ -433,13 +456,25 @@ namespace rwe
                     // own sight, so a unit that re-decided every tick would
                     // reach its station, lose the target it was already
                     // shooting at, and go looking for somewhere to land.
-                    unitInfo.state->orders.push_back(createAttackOrder(*freeTarget));
+                    //
+                    // BT-79: the unit is idle, so what the original has at
+                    // the head is its default-mission node, marked 0x4000,
+                    // and the sighting routine copies that mark onto what it
+                    // inserts in front of it. The nodes are automatic, and a
+                    // Shift-queued order drops them. (A unit with no default
+                    // mission has no such head, and its nodes stay.)
+                    const bool automatic = unitInfo.definition->defaultMission != DefaultMission::None;
+                    auto attack = createAttackOrder(*freeTarget);
+                    std::get<AttackOrder>(attack).automatic = automatic;
+                    unitInfo.state->orders.push_back(std::move(attack));
                     if (unitInfo.state->moveOrders == UnitMovementOrders::Maneuver)
                     {
                         // Maneuver comes back to where it was when it saw
                         // the target (0x43B25D-0x43B2B1): the same return
                         // move the patrol break-off plants, behind the attack.
-                        unitInfo.state->orders.push_back(MoveOrder(unitInfo.state->position));
+                        MoveOrder back(unitInfo.state->position);
+                        back.automatic = automatic;
+                        unitInfo.state->orders.push_back(std::move(back));
                     }
                 }
                 else if (unitInfo.state->airLoiter && unitInfo.state->airLoiter->reason == UnitState::AirLoiterState::Reason::AttackEnded)
@@ -531,6 +566,10 @@ namespace rwe
                 {
                     pollMine(unitInfo);
                 }
+                else if (unitInfo.definition->defaultMission == DefaultMission::GuardNoMove)
+                {
+                    runGuardNoMove(unitInfo);
+                }
             }
 
             // A spray that is already running follows its nozzle. Without this
@@ -582,6 +621,10 @@ namespace rwe
             updateUnitPosition(unitInfo);
 
             updateMoveRateBand(unitInfo);
+
+            // The last step of the mover (0x43DD20): tell the script its water
+            // state if it has changed, whether or not the unit moved (BT-11).
+            updateSfxOccupancy(*sim, unitInfo);
 
             match(
                 unitInfo.state->physics,
@@ -709,7 +752,7 @@ namespace rwe
         }
     }
 
-    bool followPath(UnitInfo unitInfo, UnitPhysicsInfoGround& physics, PathFollowingInfo& path);
+    bool followPath(const GameSimulation& sim, UnitInfo unitInfo, UnitPhysicsInfoGround& physics, PathFollowingInfo& path);
 
     void UnitBehaviorService::updateRemote(UnitInfo unitInfo)
     {
@@ -730,7 +773,7 @@ namespace rwe
                 {
                     if (moving->path)
                     {
-                        followPath(unitInfo, p, *moving->path);
+                        followPath(*sim, unitInfo, p, *moving->path);
                     }
                 }
                 applyUnitSteering(unitInfo);
@@ -761,6 +804,9 @@ namespace rwe
         // The owner sends no walk animation: each machine starts it from the
         // unit's own movement, as TA does, so a puppet walks rather than slides.
         updateMoveRateBand(unitInfo);
+
+        // And the same occupancy step runs again for a puppet (BT-11).
+        updateSfxOccupancy(*sim, unitInfo);
     }
 
     void UnitBehaviorService::updateRemoteGroundPosition(UnitInfo unitInfo, UnitPhysicsInfoGround& physics)
@@ -772,11 +818,7 @@ namespace rwe
         if (physics.currentSpeed > 0_ss)
         {
             auto newPosition = unitInfo.state->position + (direction * physics.currentSpeed);
-            newPosition.y = sim->terrain.getHeightAt(newPosition.x, newPosition.z);
-            if (unitInfo.definition->floater || unitInfo.definition->canHover)
-            {
-                newPosition.y = rweMax(newPosition.y, sim->terrain.getSeaLevel());
-            }
+            newPosition.y = computeGroundUnitHeight(sim->terrain, *unitInfo.definition, newPosition.x, newPosition.z);
 
             // The owner already resolved unit collisions along this path, so a
             // step is never refused here: a peer's stale footprint must not pin
@@ -892,7 +934,7 @@ namespace rwe
      * waypoints[currentWaypoint] the one it is heading for, which is the
      * navigator's wp[0] and wp[1].
      */
-    bool followPath(UnitInfo unitInfo, UnitPhysicsInfoGround& physics, PathFollowingInfo& path)
+    bool followPath(const GameSimulation& sim, UnitInfo unitInfo, UnitPhysicsInfoGround& physics, PathFollowingInfo& path)
     {
         SimVector xzPosition(unitInfo.state->position.x, 0_ss, unitInfo.state->position.z);
 
@@ -907,7 +949,30 @@ namespace rwe
             SimVector xzNext(next.x, 0_ss, next.z);
             auto isFinal = path.currentWaypoint == (path.path.waypoints.end() - 1);
             auto radius = isFinal ? PathFinalWaypointAdvanceDistance : PathWaypointAdvanceDistance;
-            if (xzPosition.distanceSquared(xzNext) <= (radius * radius))
+            auto closeEnough = xzPosition.distanceSquared(xzNext) <= (radius * radius);
+
+            // BT-96: a ground Move to a point ends when the unit stands on the
+            // goal's map square, not when it is within eight units of the
+            // click. The last corner is the click itself, so a unit that is
+            // within eight units of it but on the neighbouring square has not
+            // arrived, and retiring the corner here would brake it where it
+            // is -- and the repath would then find it "already there" and
+            // never move it again. Keep steering at the corner until the unit
+            // is on its square; the goal test ends the order on entering it.
+            if (closeEnough && isFinal && !unitInfo.definition->canFly)
+            {
+                if (auto* moving = std::get_if<NavigationStateMoving>(&unitInfo.state->navigationState.state))
+                {
+                    auto goalPoint = std::get_if<SimVector>(&moving->movementGoal);
+                    if (goalPoint != nullptr && goalPoint->x == next.x && goalPoint->z == next.z
+                        && !isOnGoalSquare(sim, *unitInfo.state, *unitInfo.definition, *goalPoint))
+                    {
+                        closeEnough = false;
+                    }
+                }
+            }
+
+            if (closeEnough)
             {
                 if (isFinal)
                 {
@@ -1142,6 +1207,10 @@ namespace rwe
                         }
                     }
 
+                    // A target the guard mission handed the weapons is theirs
+                    // to keep, as an ordered one is (BT-91).
+                    orderedAtIt = orderedAtIt || (unit.guardTarget && *unit.guardTarget == *targetUnit);
+
                     if (!orderedAtIt)
                     {
                         const auto& unitDefinition = sim->unitDefinitions.at(unit.unitType);
@@ -1247,7 +1316,7 @@ namespace rwe
                     const auto& bomberDefinition = sim->unitDefinitions.at(unit.unitType);
                     SimVector flatToTarget(targetPosition->x - unit.position.x, 0_ss, targetPosition->z - unit.position.z);
                     SimVector flatVelocity(bomberVelocity.x, 0_ss, bomberVelocity.z);
-                    auto trigger = bombReleaseTrigger(bomberDefinition, flatVelocity.length());
+                    auto trigger = bombReleaseTrigger(bomberDefinition, flatVelocity.length(), sim->gravityPerTick());
 
                     bool releasing = false;
                     if (runState && runState->releasePoint)
@@ -1284,7 +1353,7 @@ namespace rwe
             {
                 auto aimFromPosition = getAimingPoint(id, weaponIndex);
 
-                auto headingAndPitch = computeHeadingAndPitch(unit.rotation, aimFromPosition, *targetPosition, weaponDefinition.velocity, (112_ss / (30_ss * 30_ss)), weapon->ballisticZOffset, weaponDefinition.physicsType);
+                auto headingAndPitch = computeHeadingAndPitch(unit.rotation, aimFromPosition, *targetPosition, weaponDefinition.velocity, sim->gravityPerTick(), weaponDefinition.physicsType);
                 auto heading = headingAndPitch.first;
                 auto pitch = headingAndPitch.second;
 
@@ -1380,7 +1449,7 @@ namespace rwe
                     // against the angles the script was sent.
                     auto aimFromPosition = getAimingPoint(id, weaponIndex);
 
-                    auto headingAndPitch = computeHeadingAndPitch(unit.rotation, aimFromPosition, *targetPosition, weaponDefinition.velocity, (112_ss / (30_ss * 30_ss)), weapon->ballisticZOffset, weaponDefinition.physicsType);
+                    auto headingAndPitch = computeHeadingAndPitch(unit.rotation, aimFromPosition, *targetPosition, weaponDefinition.velocity, sim->gravityPerTick(), weaponDefinition.physicsType);
                     auto heading = headingAndPitch.first;
                     auto pitch = headingAndPitch.second;
 
@@ -1634,6 +1703,9 @@ namespace rwe
             .inheritedVelocity = inheritedVelocity,
             .targetPosition = fireInfo->targetPosition,
             .targetProjectile = targetProjectileOption,
+            .burstChildHorizontalDistance = fireInfo->burstsFired > 0
+                ? std::make_optional(SimVector(fireInfo->targetPosition.x - firingPoint.x, 0_ss, fireInfo->targetPosition.z - firingPoint.z).length())
+                : std::nullopt,
         });
 
         // The demo's 0x0d, and the only place the ids exist: the event carries
@@ -1675,6 +1747,11 @@ namespace rwe
             --weapon->stockedRounds;
         }
 
+        // The Fire script and RockUnit are started inside the spawn routines,
+        // which run once for the first round of a burst; the later rounds are
+        // made by the per-tick projectile update and start no script at all
+        // (BT-113, 0x49C9C0/0x49CC20/0x49CDE0 against 0x49B810-0x49BE5C). A
+        // bomb handler starts neither.
         if (fireInfo->burstsFired == 0)
         {
             unit.cobEnvironment->createThread(getFireScriptName(weaponIndex));
@@ -1707,7 +1784,7 @@ namespace rwe
         // variant; for the other hundred and eighty-three the original's
         // script lookup comes back empty and starts nothing, which is what
         // createThread does here too.
-        if (!isBomb)
+        if (!isBomb && fireInfo->burstsFired == 0)
         {
             // Which way it heels is worked out in the unit's own frame, so a
             // tank broadside on to its target rolls rather than pitches.
@@ -1862,7 +1939,7 @@ namespace rwe
                 p.currentSpeed = computeNewGroundUnitSpeed(sim->terrain, *unitInfo.state, *unitInfo.definition, p, sim->getAdHocMovementClass(unitInfo.definition->movementCollisionInfo).maxSlope);
             },
             [&](UnitPhysicsInfoAir& p) {
-                AirMovement::updateVelocity(p, *unitInfo.state, *unitInfo.definition);
+                AirMovement::updateVelocity(p, *unitInfo.state, *unitInfo.definition, sim->gravity);
             });
     }
 
@@ -1872,69 +1949,96 @@ namespace rwe
         // stays vertical off one sample under its centre (0x48A8BF), anything
         // else tilts to the slope under four rotated footprint corners
         // (0x48A490 writes unit+0x68 and unit+0x64). Every tick, moving or
-        // not, since the ground can change under a standing unit.
+        // not, since the ground can change under a standing unit. A floater
+        // that is not upright is not aligned at all (BT-42): its height is
+        // fixed by sea level and its pitch and bank are never touched, so a
+        // ship does not tilt. Only canhover holds the corner samples at sea.
         physics.previousPitch = physics.pitch;
         physics.previousRoll = physics.roll;
-        if (unitInfo.definition->upright)
+        if (unitInfo.definition->upright || unitInfo.definition->floater)
         {
             physics.pitch = 0_ss;
             physics.roll = 0_ss;
             return;
         }
+        // BT-41 (0x48A490): the four points are vertices of the root model's
+        // selection primitive, not the footprint's corners, and the unit's
+        // height is the mean of the four samples. A model that was read from a
+        // 3DO but has no selection primitive is left exactly as it is, as the
+        // original leaves it; a model with no vertex data at all (a fixture
+        // built by hand) keeps the footprint's corners.
+        //
+        // Not for an aircraft sitting on the ground or a unit hanging from a
+        // transport: their height is somebody else's (a pad's, a hook's), and
+        // this routine would drop them to the ground under them.
+        auto modelIt = sim->unitModelDefinitions.find(unitInfo.definition->objectName);
+        if (!unitInfo.definition->canFly && !unitInfo.state->carriedBy
+            && modelIt != sim->unitModelDefinitions.end() && modelIt->second.vertices)
+        {
+            const auto& rectangle = modelIt->second.vertices->selectionRectangle;
+            if (!rectangle)
+            {
+                return;
+            }
+            if (auto aligned = computeSelectionAlignment(sim->terrain, unitInfo.state->position, unitInfo.state->rotation, *rectangle, unitInfo.definition->canHover))
+            {
+                physics.pitch = aligned->pitch;
+                physics.roll = aligned->roll;
+                unitInfo.state->position.y = aligned->y;
+            }
+            return;
+        }
         auto [footprintX, footprintZ] = sim->getFootprintXZ(unitInfo.definition->movementCollisionInfo);
         auto halfWidth = SimScalar(static_cast<float>(footprintX) * 8.0f);
         auto halfLength = SimScalar(static_cast<float>(footprintZ) * 8.0f);
-        auto tilt = computeGroundTilt(sim->terrain, unitInfo.state->position, unitInfo.state->rotation, halfLength, halfWidth, unitInfo.definition->floater || unitInfo.definition->canHover);
+        auto tilt = computeGroundTilt(sim->terrain, unitInfo.state->position, unitInfo.state->rotation, halfLength, halfWidth, unitInfo.definition->canHover);
         physics.pitch = tilt.pitch;
         physics.roll = tilt.roll;
     }
 
-    void UnitBehaviorService::updateGroundUnitPosition(UnitInfo unitInfo, const UnitPhysicsInfoGround& physics)
+    void UnitBehaviorService::updateGroundUnitPosition(UnitInfo unitInfo, UnitPhysicsInfoGround& physics)
     {
         auto direction = UnitState::toDirection(unitInfo.state->rotation);
 
         if (physics.currentSpeed > 0_ss)
         {
             auto newPosition = unitInfo.state->position + (direction * physics.currentSpeed);
-            newPosition.y = sim->terrain.getHeightAt(newPosition.x, newPosition.z);
-            if (unitInfo.definition->floater || unitInfo.definition->canHover)
-            {
-                newPosition.y = rweMax(newPosition.y, sim->terrain.getSeaLevel());
-            }
+            newPosition.y = computeGroundUnitHeight(sim->terrain, *unitInfo.definition, newPosition.x, newPosition.z);
 
             if (!tryApplyMovementToPosition(unitInfo, newPosition))
             {
                 unitInfo.state->inCollision = true;
 
-                // if we failed to move, try in each axis separately
-                // to see if we can complete a "partial" movement
-                const SimVector maskX(0_ss, 1_ss, 1_ss);
-                const SimVector maskZ(1_ss, 1_ss, 0_ss);
+                // 0x43D6D0, the blocked branch (BT-12): a refused step does
+                // not slide along the obstacle. The unit is held inside the
+                // window that maps to the cell it is already in -- the
+                // centre of its footprint block, plus or minus just under
+                // eight world units on each axis -- and, if its stored speed
+                // is above half the type's maximum, speed is dropped to that
+                // half. The velocity is speed along the current heading, so
+                // storing the speed recomputes it.
+                auto region = sim->computeFootprintRegion(unitInfo.state->position, unitInfo.definition->movementCollisionInfo);
+                auto [footprintX, footprintZ] = sim->getFootprintXZ(unitInfo.definition->movementCollisionInfo);
+                auto corner = sim->terrain.heightmapIndexToWorldCorner(region.x, region.y);
+                // The original stops 0x7FFFF in 16.16 (just under eight) short of
+                // the edge. A float world coordinate cannot resolve that at the
+                // far side of a big map, and a position that rounds into the
+                // next cell is refused again, so the margin is 1/64.
+                const auto reach = 8_ss - SimScalar(1.0f / 64.0f);
+                const auto centreX = corner.x + SimScalar(static_cast<float>(footprintX) * 8.0f);
+                const auto centreZ = corner.z + SimScalar(static_cast<float>(footprintZ) * 8.0f);
 
-                SimVector newPos1;
-                SimVector newPos2;
-                if (direction.x > direction.z)
-                {
-                    newPos1 = unitInfo.state->position + (direction * maskZ * physics.currentSpeed);
-                    newPos2 = unitInfo.state->position + (direction * maskX * physics.currentSpeed);
-                }
-                else
-                {
-                    newPos1 = unitInfo.state->position + (direction * maskX * physics.currentSpeed);
-                    newPos2 = unitInfo.state->position + (direction * maskZ * physics.currentSpeed);
-                }
-                newPos1.y = sim->terrain.getHeightAt(newPos1.x, newPos1.z);
-                newPos2.y = sim->terrain.getHeightAt(newPos2.x, newPos2.z);
+                SimVector held(
+                    std::clamp(newPosition.x, centreX - reach, centreX + reach),
+                    0_ss,
+                    std::clamp(newPosition.z, centreZ - reach, centreZ + reach));
+                held.y = computeGroundUnitHeight(sim->terrain, *unitInfo.definition, held.x, held.z);
+                tryApplyMovementToPosition(unitInfo, held);
 
-                if (unitInfo.definition->floater || unitInfo.definition->canHover)
+                const auto halfMax = unitInfo.definition->maxVelocity / 2_ss;
+                if (physics.currentSpeed > halfMax)
                 {
-                    newPos1.y = rweMax(newPos1.y, sim->terrain.getSeaLevel());
-                    newPos2.y = rweMax(newPos2.y, sim->terrain.getSeaLevel());
-                }
-
-                if (!tryApplyMovementToPosition(unitInfo, newPos1))
-                {
-                    tryApplyMovementToPosition(unitInfo, newPos2);
+                    physics.currentSpeed = halfMax;
                 }
             }
         }
@@ -2049,22 +2153,10 @@ namespace rwe
 
         unitInfo.state->position = newPosition;
 
-        // Tell the script how the unit is now sitting in the water, if that
-        // has changed. The original asks the unit's own height rather than the
-        // height of the ground under it, which is what lets a ship at its
-        // waterline be told apart from one merely standing over deep water,
-        // and it is state 2 that a ship's script waits for before it lays a
-        // wake (0x43DB50).
-        auto seaLevel = static_cast<int>(sim->terrain.getSeaLevel().value);
-        auto unitY = static_cast<int>(unitInfo.state->position.y.value);
-        auto isSurfaceMover = !unitInfo.definition->canFly;
-        auto newState = computeSfxOccupyState(unitY, seaLevel, unitInfo.definition->waterLine, isSurfaceMover, unitInfo.state->sfxOccupyState);
-        if (newState != unitInfo.state->sfxOccupyState)
-        {
-            unitInfo.state->sfxOccupyState = newState;
-            unitInfo.state->cobEnvironment->createThread("setSFXoccupy", std::vector<int>{newState});
-        }
-
+        // The script is told how the unit sits in the water from
+        // updateSfxOccupancy, once a tick at the end of the mover's update
+        // (0x43DD20) and not from here: the original asks every mobile unit
+        // every tick, moving or not (BT-11).
         return true;
     }
 
@@ -2139,15 +2231,76 @@ namespace rwe
         return getPieceLocalPosition(id, *pieceId);
     }
 
+    /**
+     * BT-60 (0x43E3C0 and 0x43E0B0): the aim point of a unit target. The script
+     * is asked for SweetSpot with a default of piece 0; the piece's posed
+     * vertices are bounded on each axis with zero always inside the box; the
+     * result per axis is the box's midpoint plus the unit's position. Nothing
+     * is added for the piece offset (the posed points already include it) and
+     * nothing is rotated afterwards.
+     *
+     * The z axis is the uncertain part (medium confidence in the finding). The
+     * original's model z is the world's reversed, and the routine adds the
+     * box's z as it stands without negating it, so an off-centre box is
+     * mirrored in z against where the piece is drawn. RWE's pieces are in the
+     * right-handed frame already (the 3DO z is negated at load), so the
+     * original's z is minus RWE's. A box symmetric about zero shows nothing.
+     *
+     * Not modelled: the original poses the vertices lazily, so the point lags
+     * a slow turn by up to eight angle units; and its midpoint truncates the
+     * 16.16 sum toward zero.
+     */
     SimVector UnitBehaviorService::getSweetSpot(UnitId id)
     {
+        const auto& unit = sim->getUnitState(id);
+
         auto pieceId = runCobQuery(id, "SweetSpot");
-        if (!pieceId)
+        auto pieceNumber = pieceId ? *pieceId : 0;
+
+        // A unit with no model definition at all (some fixtures) has no
+        // vertices to bound, which is the same as a model with none.
+        const auto& unitDefinition = sim->unitDefinitions.at(unit.unitType);
+        auto modelIt = sim->unitModelDefinitions.find(unitDefinition.objectName);
+        const auto& scriptPieces = unit.cobEnvironment->_script->pieces;
+        if (modelIt == sim->unitModelDefinitions.end() || !modelIt->second.vertices
+            || pieceNumber < 0 || static_cast<std::size_t>(pieceNumber) >= scriptPieces.size())
         {
-            return sim->getUnitState(id).position;
+            return unit.position;
+        }
+        const auto& model = modelIt->second;
+
+        const auto& pieceName = scriptPieces[static_cast<std::size_t>(pieceNumber)];
+        auto pieceIndex = model.pieceIndicesByName.find(toUpper(pieceName));
+        if (pieceIndex == model.pieceIndicesByName.end()
+            || static_cast<std::size_t>(pieceIndex->second) >= model.vertices->perPiece.size())
+        {
+            return unit.position;
         }
 
-        return getPiecePosition(id, *pieceId);
+        auto local = sim->getUnitPieceLocalTransform(id, pieceName);
+        auto turn = Matrix4x<SimScalar>::rotationY(sin(unit.rotation), cos(unit.rotation));
+
+        auto minX = 0_ss;
+        auto maxX = 0_ss;
+        auto minY = 0_ss;
+        auto maxY = 0_ss;
+        auto minZ = 0_ss;
+        auto maxZ = 0_ss;
+        for (const auto& vertex : model.vertices->perPiece[static_cast<std::size_t>(pieceIndex->second)])
+        {
+            auto posed = turn * (local * vertex);
+            minX = rweMin(minX, posed.x);
+            maxX = rweMax(maxX, posed.x);
+            minY = rweMin(minY, posed.y);
+            maxY = rweMax(maxY, posed.y);
+            minZ = rweMin(minZ, posed.z);
+            maxZ = rweMax(maxZ, posed.z);
+        }
+
+        return SimVector(
+            unit.position.x + ((minX + maxX) / 2_ss),
+            unit.position.y + ((minY + maxY) / 2_ss),
+            unit.position.z - ((minZ + maxZ) / 2_ss));
     }
 
     std::optional<SimVector> UnitBehaviorService::tryGetSweetSpot(UnitId id)
@@ -2441,7 +2594,7 @@ namespace rwe
 
         return match(
             order,
-            [&](const MoveOrder& o) {
+            [&](MoveOrder& o) {
                 return handleMoveOrder(unitInfo, o);
             },
             [&](AttackOrder& o) {
@@ -2494,7 +2647,7 @@ namespace rwe
         return withinBuildReachOfRect(unitInfo, sim->computeFootprintRegion(target.position, targetDefinition.movementCollisionInfo));
     }
 
-    bool UnitBehaviorService::withinBuildReachOfRect(UnitInfo unitInfo, const DiscreteRect& rect) const
+    bool UnitBehaviorService::withinBuildReachOfRect(UnitInfo unitInfo, const DiscreteRect& rect, SimScalar extraReach) const
     {
         auto corner = sim->terrain.heightmapIndexToWorldCorner(rect.x, rect.y);
         auto minX = corner.x;
@@ -2507,7 +2660,7 @@ namespace rwe
         auto nearestZ = rweMax(minZ, rweMin(maxZ, position.z));
         auto dx = position.x - nearestX;
         auto dz = position.z - nearestZ;
-        auto reach = unitInfo.definition->buildDistance;
+        auto reach = unitInfo.definition->buildDistance + extraReach;
         return (dx * dx) + (dz * dz) <= reach * reach;
     }
 
@@ -3190,14 +3343,62 @@ namespace rwe
         return true;
     }
 
-    bool UnitBehaviorService::handleMoveOrder(UnitInfo unitInfo, const MoveOrder& moveOrder)
+    bool UnitBehaviorService::handleMoveOrder(UnitInfo unitInfo, MoveOrder& moveOrder)
     {
         if (!unitInfo.definition->isMobile)
         {
             return false;
         }
 
-        if (navigateTo(unitInfo, moveOrder.destination))
+        // BT-100: a Move whose goal no route reaches is waiting out its retry.
+        // The unit asks for nothing this tick, so it stands, as the original's
+        // mission does asleep with no path.
+        if (moveOrder.unreachableRetryTicks > 0)
+        {
+            --moveOrder.unreachableRetryTicks;
+            if (moveOrder.unreachableRetryTicks > 0)
+            {
+                return false;
+            }
+        }
+
+        auto arrived = navigateTo(unitInfo, moveOrder.destination);
+
+        // BT-100 (0x4031D0, 0x44F080, and the executor's result-9 arm at
+        // 0x43B8E5): when the search finds no route and the unit is not
+        // already at the goal, the Move mission is woken with bit 0x40, which
+        // is not arrival, and returns 9. The executor then deletes the node if
+        // another follows, and otherwise resets it to state 0 and sleeps 30
+        // plus a random 0 to 29 ticks before asking for the same goal again --
+        // so a lone unreachable Move never ends. RWE's pathfinder records the
+        // closest reachable point as reachableDestination, and a point goal
+        // used to count as reached there, which ended the order. A ground
+        // unit standing on the real goal square has still arrived.
+        if (!unitInfo.definition->canFly)
+        {
+            auto moving = std::get_if<NavigationStateMoving>(&unitInfo.state->navigationState.state);
+            if (moving != nullptr && moving->reachableDestination)
+            {
+                auto goalPoint = std::get_if<SimVector>(&moving->movementGoal);
+                if (goalPoint != nullptr && *goalPoint == moveOrder.destination
+                    && !isOnGoalSquare(*sim, *unitInfo.state, *unitInfo.definition, moveOrder.destination))
+                {
+                    if (unitInfo.state->orders.size() > 1)
+                    {
+                        // The next order runs; the caller pops this one.
+                        return true;
+                    }
+
+                    // The draw is a modulo of the generator's raw output, never
+                    // uniform_int_distribution (CLAUDE.md, Determinism).
+                    moveOrder.unreachableRetryTicks = 30u + randomBelow(sim->rng, 30u);
+                    unitInfo.state->navigationState.desiredDestination = std::nullopt;
+                    return false;
+                }
+            }
+        }
+
+        if (arrived)
         {
             // Only report in on arriving at the last waypoint. A unit given a
             // string of shift-queued moves is still on its way until the queue
@@ -3616,6 +3817,14 @@ namespace rwe
             return true;
         }
 
+        // Which of the first two slots carries the chase (BT-63: the order
+        // builder works from those two and never the third). Slot 0 unless it
+        // cannot reach the target and an enabled second slot can -- a
+        // Crusader's depth charge in Weapon2 against a submerged submarine,
+        // which the order builder accepts and whose chase this keeps going
+        // instead of finishing on the first tick.
+        std::size_t chaseSlot = 0;
+
         // A water weapon ordered at a unit on dry land has nothing to do.
         if (auto targetUnitId = std::get_if<UnitId>(&target))
         {
@@ -3623,7 +3832,16 @@ namespace rwe
             const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[0]->weaponType);
             if (targetUnit && !weaponCanHitUnit(weaponDefinition, *unitInfo.state, targetUnit->get()))
             {
-                return true;
+                if (!unitInfo.definition->canFly
+                    && unitInfo.state->weapons[1]
+                    && weaponCanHitUnit(sim->weaponDefinitions.at(unitInfo.state->weapons[1]->weaponType), *unitInfo.state, targetUnit->get()))
+                {
+                    chaseSlot = 1;
+                }
+                else
+                {
+                    return true;
+                }
             }
         }
         else if (!sim->weaponCanFireFrom(sim->weaponDefinitions.at(unitInfo.state->weapons[0]->weaponType), *unitInfo.state))
@@ -3641,7 +3859,7 @@ namespace rwe
             return attackTargetAir(unitInfo, target, targetPosition);
         }
 
-        const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[0]->weaponType);
+        const auto& weaponDefinition = sim->weaponDefinitions.at(unitInfo.state->weapons[chaseSlot]->weaponType);
 
         if (!targetPosition)
         {
@@ -3668,7 +3886,7 @@ namespace rwe
         }
         else
         {
-            for (unsigned int i = 0; i < 2; ++i)
+            for (unsigned int i = static_cast<unsigned int>(chaseSlot); i < 2; ++i)
             {
                 match(
                     target,
@@ -4404,13 +4622,52 @@ namespace rwe
     bool UnitBehaviorService::handleGuardOrder(UnitInfo unitInfo, const GuardOrder& guardOrder)
     {
         auto target = sim->tryGetUnitState(guardOrder.target);
-        // TODO: real allied check here
-        if (!target || !target->get().isOwnedBy(unitInfo.state->owner))
+
+        // Neither escort handler (0x406300 on the ground, 0x40FBE0 in the air)
+        // asks who owns the guarded unit: the order ends on a missing target and
+        // on nothing about alliance, and an ally later captured by an enemy is
+        // still followed. The alliance table gates only the offer (the default
+        // ladder's `allied && canGuard`) and the retaliation step, which looks
+        // at the attacker. BT-98.
+        if (!target)
         {
             return true;
         }
         auto& targetUnit = target->get();
 
+        // An escort reacts to whoever hit the guarded unit, unless the attacker
+        // is an ally of the escort's owner or the escort's NoChaseCategory
+        // names it (the retaliation step of 0x406300 and 0x40FBE0, the only
+        // place either reads the alliance table, which is why the guarded unit
+        // may be a teammate's; BT-98, #643). An attack order first; failing
+        // that the weapon slots are retargeted onto it. Once per hit: the
+        // escort remembers the hit it has answered. A hit counts for a second;
+        // the original delivers it as an event on the tick it lands, which
+        // RWE's unit pass would otherwise see a tick late or twice.
+        if (targetUnit.lastAttacker
+            && targetUnit.lastAttackedAt > unitInfo.state->guardSeenAttackAt
+            && targetUnit.lastAttackedAt + GameTime(SimTicksPerSecond) >= sim->gameTime)
+        {
+            unitInfo.state->guardSeenAttackAt = targetUnit.lastAttackedAt;
+            auto attackerId = *targetUnit.lastAttacker;
+            auto attackerRef = sim->tryGetUnitState(attackerId);
+            if (attackerRef && !attackerRef->get().isDead() && attackerId != unitInfo.id
+                && !sim->arePlayersAllied(unitInfo.state->owner, attackerRef->get().owner)
+                && !categoryListContains(sim->unitDefinitions.at(attackerRef->get().unitType).category, unitInfo.definition->noChaseCategory)
+                && unitInfo.state->fireOrders != UnitFireOrders::HoldFire)
+            {
+                if (unitInfo.definition->canAttack && sim->canSeeUnit(unitInfo.state->owner, attackerId)
+                    && attackOrderIsAccepted(*sim, *unitInfo.definition, *unitInfo.state, attackerRef->get()))
+                {
+                    auto attack = createAttackOrder(attackerId);
+                    std::get<AttackOrder>(attack).automatic = unitInfo.definition->defaultMission != DefaultMission::None;
+                    unitInfo.state->orders.push_front(std::move(attack));
+                    return false;
+                }
+
+                sim->returnFire(unitInfo.id, attackerId);
+            }
+        }
 
         if (auto bs = std::get_if<UnitBehaviorStateBuilding>(&targetUnit.behaviourState); unitInfo.definition->builder && bs)
         {
@@ -4699,6 +4956,278 @@ namespace rwe
         }
 
         return repairExistingUnit(unitInfo, repairOrder.target);
+    }
+
+    void UnitBehaviorService::mendRaisedUnit(UnitId resurrectorId, FeatureId corpse, UnitId raisedId)
+    {
+        auto& resurrector = sim->getUnitState(resurrectorId);
+        const auto& raised = sim->getUnitState(raisedId);
+
+        // The order builder's command 8 needs the orderer's repair capability
+        // (canreclamate, 0x4899B0) and a target whose health differs from its
+        // maximum; for a finished unit it yields REPAIRUNIT, which goes in at
+        // the head of the list as the mission ends. The mission's own order is
+        // dropped with it rather than left to find no corpse and complain.
+        if (!sim->unitDefinitions.at(resurrector.unitType).canReclamate
+            || raised.hitPoints >= sim->unitDefinitions.at(raised.unitType).maxHitPoints)
+        {
+            return;
+        }
+
+        auto& orders = resurrector.orders;
+        for (auto it = orders.begin(); it != orders.end(); ++it)
+        {
+            if (const auto* resurrect = std::get_if<ResurrectOrder>(&*it); resurrect != nullptr && resurrect->target == corpse)
+            {
+                orders.erase(it);
+                break;
+            }
+        }
+        orders.push_front(RepairOrder(raisedId));
+        interruptCurrentTask(resurrectorId);
+    }
+
+    void UnitBehaviorService::resetGuardNoMove(UnitState& unit)
+    {
+        unit.guardPhase = 0;
+        unit.guardWakeAt = GameTime(0);
+        unit.guardTarget = std::nullopt;
+        unit.guardPosition = std::nullopt;
+        unit.guardLimit = 0;
+        unit.guardCounter = 0;
+    }
+
+    bool UnitBehaviorService::guardCanEngage(const UnitState& unit, UnitId target) const
+    {
+        // 0x49ABB0 for the mission's target: it is there, the owner can see it,
+        // and some weapon of the tower's can reach and hit it.
+        auto targetRef = sim->tryGetUnitState(target);
+        if (!targetRef || targetRef->get().isDead() || !sim->canSeeUnit(unit.owner, target))
+        {
+            return false;
+        }
+        const auto& other = targetRef->get();
+        for (const auto& weapon : unit.weapons)
+        {
+            if (!weapon)
+            {
+                continue;
+            }
+            const auto& definition = sim->weaponDefinitions.at(weapon->weaponType);
+            if (withinFlatRange(unit.position, other.position, definition.maxRange) && weaponCanHitUnit(definition, unit, other))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void UnitBehaviorService::guardAssignWeapons(UnitState& unit, UnitId target)
+    {
+        // 0x48A060: every slot that can take a target is aimed at it. The ones
+        // that never acquire a target of their own -- interceptors, bombs, a
+        // hand-fired weapon -- are left to whatever fires them.
+        for (auto& weapon : unit.weapons)
+        {
+            if (!weapon)
+            {
+                continue;
+            }
+            const auto& definition = sim->weaponDefinitions.at(weapon->weaponType);
+            if (definition.interceptor || definition.commandFire || std::holds_alternative<ProjectilePhysicsTypeBomb>(definition.physicsType))
+            {
+                continue;
+            }
+            if (const auto* attacking = std::get_if<UnitWeaponStateAttacking>(&weapon->state))
+            {
+                if (const auto* current = std::get_if<UnitId>(&attacking->target); current != nullptr && *current == target)
+                {
+                    continue;
+                }
+            }
+            weapon->state = UnitWeaponStateAttacking(target);
+        }
+    }
+
+    /**
+     * BT-91 (0x4021F0): what Guard_NoMove does, which is not only to free the
+     * weapons. It is a four-state machine over weapon slot 0's own pick:
+     *
+     *   0  release the weapons, sleep 30, go to 1.
+     *   1  adopt slot 0's target. Live: remember where it stands, aim every
+     *      weapon at it, set the persistence limit to 3 plus 0 to 2 and the
+     *      counter to 0, go to 2. None: sleep 30 and look again.
+     *   2  hold. Each pass clears the counter when a weapon has fired and
+     *      adds one when none has. Within the limit and still engageable, wait.
+     *      Otherwise a draw below 100: 80 or more starts again from 0; below
+     *      80 clears the counter and adopts again.
+     *   3  the target died or the weapons were cleared: pick one of the
+     *      visible enemies within 640 of where it stood and aim at it (go to
+     *      1); none starts again from 0.
+     *
+     * RWE's own weapon scan lets each slot choose and keep its own target
+     * with nothing to make them agree and nothing to make a tower give up,
+     * which is what this replaces for the 26 armed towers that name it.
+     *
+     * What the finding leaves open, and what stands in for it: the node's
+     * wake bits are unnamed, so a pass is every 30 ticks and "the wake carried
+     * 0x4000", which clears the counter, is taken to mean a weapon fired
+     * within the pass (a reload still running).
+     */
+    void UnitBehaviorService::runGuardNoMove(UnitInfo unitInfo)
+    {
+        auto& unit = *unitInfo.state;
+        constexpr unsigned int PassTicks = 30;
+        constexpr float RecoveryRadius = 640.0f;
+
+        // An unarmed tower has nothing to hand out, and a tower told to hold
+        // fire has nothing taking a target.
+        if (!unit.weapons[0] || unit.fireOrders == UnitFireOrders::HoldFire)
+        {
+            if (unit.guardPhase != 0 || unit.guardTarget)
+            {
+                resetGuardNoMove(unit);
+            }
+            return;
+        }
+
+        const auto now = sim->gameTime;
+
+        // The entry guard (wake 0x10008): the target died or the weapons were
+        // cleared. It does not wait out a sleep.
+        if (unit.guardPhase == 2)
+        {
+            auto stillThere = unit.guardTarget && sim->tryGetUnitState(*unit.guardTarget)
+                && !sim->getUnitState(*unit.guardTarget).isDead();
+            if (!stillThere || std::holds_alternative<UnitWeaponStateIdle>(unit.weapons[0]->state))
+            {
+                if (stillThere && unit.guardTarget)
+                {
+                    unit.guardPosition = sim->getUnitState(*unit.guardTarget).position;
+                }
+                unit.guardTarget = std::nullopt;
+                unit.guardPhase = 3;
+                unit.guardWakeAt = now;
+            }
+        }
+
+        if (now < unit.guardWakeAt)
+        {
+            return;
+        }
+
+        switch (unit.guardPhase)
+        {
+            case 0:
+            {
+                for (unsigned int i = 0; i < unit.weapons.size(); ++i)
+                {
+                    if (unit.weapons[i])
+                    {
+                        unit.clearWeaponTarget(i);
+                    }
+                }
+                unit.guardTarget = std::nullopt;
+                unit.guardWakeAt = now + GameTime(PassTicks);
+                unit.guardPhase = 1;
+                return;
+            }
+            case 1:
+            {
+                std::optional<UnitId> picked;
+                if (const auto* attacking = std::get_if<UnitWeaponStateAttacking>(&unit.weapons[0]->state))
+                {
+                    if (const auto* targetUnit = std::get_if<UnitId>(&attacking->target))
+                    {
+                        auto targetRef = sim->tryGetUnitState(*targetUnit);
+                        if (targetRef && !targetRef->get().isDead())
+                        {
+                            picked = *targetUnit;
+                            unit.guardPosition = targetRef->get().position;
+                        }
+                    }
+                }
+                if (!picked)
+                {
+                    unit.guardWakeAt = now + GameTime(PassTicks);
+                    return;
+                }
+                unit.guardTarget = picked;
+                guardAssignWeapons(unit, *picked);
+                // Drawn from the one stream, never uniform_int_distribution.
+                unit.guardLimit = 3u + randomBelow(sim->rng, 3u);
+                unit.guardCounter = 0;
+                unit.guardPhase = 2;
+                unit.guardWakeAt = now + GameTime(PassTicks);
+                return;
+            }
+            case 2:
+            {
+                bool fired = false;
+                for (const auto& weapon : unit.weapons)
+                {
+                    fired = fired || (weapon && weapon->readyTime > now);
+                }
+                unit.guardCounter = fired ? 0u : unit.guardCounter + 1u;
+
+                if (unit.guardCounter <= unit.guardLimit && unit.guardTarget && guardCanEngage(unit, *unit.guardTarget))
+                {
+                    unit.guardWakeAt = now + GameTime(PassTicks);
+                    return;
+                }
+
+                if (randomBelow(sim->rng, 100u) >= 80u)
+                {
+                    unit.guardPhase = 0;
+                }
+                else
+                {
+                    unit.guardCounter = 0;
+                    unit.guardPhase = 1;
+                }
+                unit.guardWakeAt = now;
+                return;
+            }
+            default:
+            {
+                // 3: look round the place the target stood.
+                std::vector<UnitId> candidates;
+                if (unit.guardPosition)
+                {
+                    auto found = sim->getUnitSpatialIndex().collectEnemiesNear(
+                        simScalarToFloat(unit.guardPosition->x),
+                        simScalarToFloat(unit.guardPosition->z),
+                        RecoveryRadius,
+                        unit.owner);
+                    for (auto candidateId : found)
+                    {
+                        auto candidate = sim->tryGetUnitState(candidateId);
+                        if (!candidate || candidate->get().isDead() || sim->arePlayersAllied(unit.owner, candidate->get().owner)
+                            || !sim->canSeeUnit(unit.owner, candidateId))
+                        {
+                            continue;
+                        }
+                        if (!withinFlatRange(*unit.guardPosition, candidate->get().position, SimScalar(RecoveryRadius)))
+                        {
+                            continue;
+                        }
+                        candidates.push_back(candidateId);
+                    }
+                }
+                if (candidates.empty())
+                {
+                    unit.guardPhase = 0;
+                    unit.guardWakeAt = now;
+                    return;
+                }
+                auto chosen = candidates[randomBelow(sim->rng, static_cast<unsigned int>(candidates.size()))];
+                unit.guardTarget = chosen;
+                guardAssignWeapons(unit, chosen);
+                unit.guardPhase = 1;
+                unit.guardWakeAt = now;
+                return;
+            }
+        }
     }
 
     void UnitBehaviorService::pollMine(UnitInfo unitInfo)
@@ -5366,6 +5895,22 @@ namespace rwe
 
                 if (!targetUnit.isBeingBuilt(targetUnitDefinition))
                 {
+                    // The product is released, and the ordinary height rule
+                    // applies: a ground or sea unit with a mover is on the
+                    // terrain under its centre, so a submarine drops straight
+                    // down to the sea bed below the pad (owner's observation,
+                    // NAVAL-CONSTRUCTION-DGUN-FINDINGS.md). RWE re-snaps height
+                    // only when a unit moves, so it is done here, same x and z.
+                    // A floater sits at sea level minus its WaterLine and a
+                    // hover craft is held at sea level, as whenever they move
+                    // (computeGroundUnitHeight).
+                    if (targetUnitDefinition.isMobile && !targetUnitDefinition.canFly)
+                    {
+                        auto settled = computeGroundUnitHeight(sim->terrain, targetUnitDefinition, targetUnit.position.x, targetUnit.position.z);
+                        targetUnit.position.y = settled;
+                        targetUnit.previousPosition.y = settled;
+                    }
+
                     // TOTALA-EXE-INTERFACE S:133: only mobile products inherit
                     // the current posture and the route their capabilities allow.
                     if (targetUnitDefinition.isMobile)
@@ -5393,20 +5938,26 @@ namespace rwe
                     return true;
                 }
 
-                if (targetUnitDefinition.floater || targetUnitDefinition.canHover)
+                // While the product is attached it follows the build piece in
+                // all three coordinates (NAVAL-SYSTEMS-PARITY.md section 1).
+                // Only a Floater is given a floor, sea level minus its
+                // WaterLine, and nothing is ever pushed down. A submarine is
+                // not a floater, so it gets none: the owner watched retail TA
+                // draw an unfinished sub with its top poking out of the water
+                // above the yard (NAVAL-CONSTRUCTION-DGUN-FINDINGS.md,
+                // "submarine under construction"). The seabed placement
+                // applies when the product is released, below. A hover
+                // product keeps RWE's sea-level floor, which the reference
+                // does not give it; no shipped yard builds one over water.
+                if (targetUnitDefinition.floater)
+                {
+                    buildPieceInfo.position.y = rweMax(
+                        buildPieceInfo.position.y,
+                        sim->terrain.getSeaLevel() - intToSimScalar(static_cast<int>(targetUnitDefinition.waterLine)));
+                }
+                else if (targetUnitDefinition.canHover)
                 {
                     buildPieceInfo.position.y = rweMax(buildPieceInfo.position.y, sim->terrain.getSeaLevel());
-                }
-                else if (targetUnitDefinition.isMobile && !targetUnitDefinition.canFly)
-                {
-                    // The same rule trySpawnUnit applies at creation, and for
-                    // the same reason: a ground or sea unit with a mover is
-                    // settled onto the terrain every tick (0x48A870), so a
-                    // submarine's frame sits on the sea bed under the yard.
-                    // Taking the build piece's own height here instead put it
-                    // at the pad, floating, with its shadow -- which the
-                    // original projects from the ground -- far beneath it.
-                    buildPieceInfo.position.y = sim->terrain.getHeightAt(buildPieceInfo.position.x, buildPieceInfo.position.z);
                 }
 
                 tryApplyMovementToPosition(sim->getUnitInfo(state.targetUnit->first), buildPieceInfo.position);
@@ -5747,7 +6298,7 @@ namespace rwe
             {
                 throw std::logic_error("ground unit does not have ground physics");
             }
-            if (followPath(unitInfo, *groundPhysics, *movingState->path))
+            if (followPath(*sim, unitInfo, *groundPhysics, *movingState->path))
             {
                 // We finished following the path.
                 // This doesn't necessarily mean we are at the goal.
@@ -5794,6 +6345,22 @@ namespace rwe
         }
     }
 
+    bool UnitBehaviorService::siteWithinReachOfUnreachableSite(UnitInfo unitInfo, const UnitDefinition& siteDefinition, const SimVector& site) const
+    {
+        const auto dx = static_cast<double>(simScalarToFloat(unitInfo.state->position.x - site.x));
+        const auto dz = static_cast<double>(simScalarToFloat(unitInfo.state->position.z - site.z));
+        // Whole world units, from the high word of the original's 16.16.
+        const auto distance = std::floor(std::sqrt(dx * dx + dz * dz));
+
+        auto halfDiagonal = [&](const UnitDefinition& definition) {
+            const auto [fx, fz] = sim->getFootprintXZ(definition.movementCollisionInfo);
+            return 8.0 * std::sqrt(static_cast<double>(fx) * static_cast<double>(fx) + static_cast<double>(fz) * static_cast<double>(fz));
+        };
+
+        const auto left = distance - halfDiagonal(*unitInfo.definition) - halfDiagonal(siteDefinition);
+        return left <= static_cast<double>(simScalarToFloat(unitInfo.definition->buildDistance));
+    }
+
     UnitCreationStatus UnitBehaviorService::createNewUnit(UnitInfo unitInfo, const std::string& unitType, const SimVector& position)
     {
         if (auto s = std::get_if<UnitBehaviorStateCreatingUnit>(&unitInfo.state->behaviourState))
@@ -5821,10 +6388,22 @@ namespace rwe
             // and say so. This is a different refusal from a site that is
             // merely occupied: there is nothing to wait for, because nothing
             // about the ground in between is going to change.
+            //
+            // BT-97 (0x403B63): not when the site is still inside the builder's
+            // reach from where it stopped. The original measures the flat
+            // distance from the builder to the site, takes off half of each
+            // footprint's diagonal (the root of the two cell counts squared,
+            // times 8) and, if what is left is within the build distance,
+            // ignores the failure and carries on as for an arrival -- so a
+            // builder on one bank of a stream builds across it. Otherwise it
+            // says "I can't reach the construction site" (0x501580).
             if (auto moving = std::get_if<NavigationStateMoving>(&unitInfo.state->navigationState.state); moving != nullptr && moving->reachableDestination)
             {
-                sim->events.push_back(UnitCannotComplyEvent{unitInfo.id, "Target area was blocked"});
-                return UnitCreationStatusFailed();
+                if (!siteWithinReachOfUnreachableSite(unitInfo, targetUnitDefinition, position))
+                {
+                    sim->events.push_back(UnitCannotComplyEvent{unitInfo.id, "I can't reach the construction site"});
+                    return UnitCreationStatusFailed();
+                }
             }
 
             changeState(*unitInfo.state, UnitBehaviorStateCreatingUnit{unitType, unitInfo.state->owner, position});
@@ -5928,7 +6507,22 @@ namespace rwe
                 return sim->computeFootprintRegion(f.position, static_cast<unsigned int>(d.footprintX), static_cast<unsigned int>(d.footprintZ));
             });
 
-        if (!withinBuildReachOfRect(unitInfo, rect))
+        // BT-92 (0x404730, work check at 0x4048FB): the ground handler's reach
+        // is the build distance plus a term of the target's own, the integer
+        // part of (X extent + Z extent) / 3 in world units. The aircraft
+        // handler adds nothing. The extents are the definition's +0x176 and
+        // +0x17E, which the loader writes at the 0x42D10A block as the
+        // footprint in world units, 16 a cell; that reading is the corpus's
+        // (TOTALA-EXE-DATA.md) and matches the finding's "roughly 10 to 40".
+        SimScalar extraReach = 0_ss;
+        if (const auto* targetUnitId = std::get_if<UnitId>(&target); targetUnitId != nullptr && !unitInfo.definition->canFly)
+        {
+            const auto& targetUnit = sim->getUnitState(*targetUnitId);
+            const auto [fx, fz] = sim->getFootprintXZ(sim->unitDefinitions.at(targetUnit.unitType).movementCollisionInfo);
+            extraReach = intToSimScalar(static_cast<int>((fx * 16u + fz * 16u) / 3u));
+        }
+
+        if (!withinBuildReachOfRect(unitInfo, rect, extraReach))
         {
             // Walk at the thing itself, not at a ring drawn one build
             // distance around it. hasReachedGoal reports success as soon as
@@ -6621,6 +7215,7 @@ namespace rwe
             cell.mobileUnitId = unitInfo.id;
         });
         sim->flyingUnitsSet.erase(unitInfo.id);
+        unitInfo.state->occupancyStamp = sim->gameTime;
 
         unitInfo.state->physics = UnitPhysicsInfoGround();
 

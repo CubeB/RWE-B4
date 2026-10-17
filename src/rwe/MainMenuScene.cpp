@@ -176,8 +176,10 @@ namespace rwe
     GameOptions MainMenuScene::currentOptions() const
     {
         return GameOptions{
-            static_cast<unsigned int>(sceneContext.audioService->getSoundVolume() * 100.0f),
-            static_cast<unsigned int>(sceneContext.audioService->getMusicVolume() * 100.0f),
+            // Rounded: 0.29f * 100 truncates to 28, and a page's Default or
+            // Undo re-applies the other pages' fields from here.
+            static_cast<unsigned int>(std::lround(sceneContext.audioService->getSoundVolume() * 100.0f)),
+            static_cast<unsigned int>(std::lround(sceneContext.audioService->getMusicVolume() * 100.0f)),
             sceneContext.audioService->isMusicEnabled(),
             pendingWindowMode,
             pendingShadows,
@@ -491,14 +493,9 @@ namespace rwe
             return;
         }
 
-        // The menu's own music has to stop -- the movie's soundtrack plays
-        // through the same track.
-        sceneContext.audioService->stopMusic();
-        bgm = AudioService::LoopToken();
-
         auto context = sceneContext;
         auto lookup = soundLookup;
-        auto scene = std::make_shared<MovieScene>(
+        auto scene = tryMakeMovieScene(
             sceneContext,
             std::move(*movieBytes),
             [context, lookup]() {
@@ -509,6 +506,16 @@ namespace rwe
                     context.viewport->height());
                 context.sceneManager->setNextScene(menu);
             });
+        if (!scene)
+        {
+            // Empty or undecodable: the menu stays, with its music.
+            return;
+        }
+
+        // The menu's own music has to stop -- the movie's soundtrack plays
+        // through the same track.
+        sceneContext.audioService->stopMusic();
+        bgm = AudioService::LoopToken();
         sceneContext.sceneManager->setNextScene(scene);
     }
 
@@ -614,13 +621,14 @@ namespace rwe
 
     void MainMenuScene::goToPreviousMenu()
     {
-        if (!dialogStack.empty())
+        auto action = previousMenuAction(!dialogStack.empty(), panelStack.size());
+        if (action == PreviousMenuAction::CloseDialog)
         {
             dialogStack.pop_back();
             return;
         }
 
-        if (panelStack.size() > 1)
+        if (action == PreviousMenuAction::PopPanel)
         {
             // The multiplayer screens know where Previous Menu goes: the list
             // back to the address dialog, the setup screen back to the list.
@@ -633,7 +641,9 @@ namespace rwe
             return;
         }
 
-        exit();
+        // Only the main menu is left. The original's main menu does not quit
+        // on a cancel (BT-201): it acts on SINGLE, MULTI, INTRO and EXIT alone.
+        // Leaving is the Exit button, its quick key or the window close.
     }
 
     void MainMenuScene::goToMenu(std::unique_ptr<UiPanel>&& panel)
@@ -914,7 +924,15 @@ namespace rwe
             }
             else if (message == "RESTORE")
             {
-                applyOptions(GameOptions{});
+                // This page's fields only (BT-213); CANCEL puts every page back.
+                if (auto page = optionsPageFromName(currentOptionsPage))
+                {
+                    applyOptions(optionsWithPageFrom(currentOptions(), GameOptions{}, *page));
+                }
+                else
+                {
+                    applyOptions(GameOptions{});
+                }
                 goToOptionsPage(currentOptionsPage);
             }
             else if (message == "BSHADOWS")
@@ -973,7 +991,14 @@ namespace rwe
             }
             else if (message == "UNDO")
             {
-                applyOptions(optionsUndo);
+                if (auto page = optionsPageFromName(currentOptionsPage))
+                {
+                    applyOptions(optionsWithPageFrom(currentOptions(), optionsUndo, *page));
+                }
+                else
+                {
+                    applyOptions(optionsUndo);
+                }
                 goToOptionsPage(currentOptionsPage);
             }
             else if (message == "NOTRAK")
@@ -1002,7 +1027,8 @@ namespace rwe
             }
             else if (message == "TEST")
             {
-                if (auto sound = sceneContext.audioService->loadSound("BUTTON10"))
+                // An explosion (sounds/explode.wav), at the volume as it now stands (BT-213).
+                if (auto sound = sceneContext.audioService->loadSound("explode"))
                 {
                     sceneContext.audioService->playSound(*sound);
                 }
@@ -1948,6 +1974,13 @@ namespace rwe
                 openMessageBox(*problem);
                 return std::nullopt;
             }
+
+            // The battle room refuses a start with everyone on one team (BT-194).
+            if (auto problem = allOnOneTeamProblem(setupSeats()))
+            {
+                openMessageBox(*problem);
+                return std::nullopt;
+            }
         }
 
         GameParameters params{model.selectedMap.getValue()->name, 0};
@@ -2001,7 +2034,46 @@ namespace rwe
             return std::nullopt;
         }
 
+        // The skirmish Start button's other two checks (BT-194): somebody to
+        // play and somebody to play against, and not all on one team.
+        if (!multiplayerSetup)
+        {
+            if (auto problem = skirmishSetupProblem(setupSeats()))
+            {
+                openMessageBox(*problem);
+                return std::nullopt;
+            }
+        }
+
         return params;
+    }
+
+    std::vector<SetupSeat> MainMenuScene::setupSeats() const
+    {
+        std::vector<SetupSeat> seats;
+        seats.reserve(model.players.size());
+        for (const auto& player : model.players)
+        {
+            SetupSeat seat;
+            switch (player.type.getValue())
+            {
+                case MainMenuModel::PlayerSettings::Type::Human:
+                    seat.kind = SetupSeat::Kind::Human;
+                    break;
+                case MainMenuModel::PlayerSettings::Type::Computer:
+                    seat.kind = SetupSeat::Kind::Computer;
+                    break;
+                case MainMenuModel::PlayerSettings::Type::Network:
+                    seat.kind = SetupSeat::Kind::Network;
+                    break;
+                default:
+                    seat.kind = SetupSeat::Kind::Open;
+                    break;
+            }
+            seat.team = player.teamIndex.getValue();
+            seats.push_back(seat);
+        }
+        return seats;
     }
 
     std::optional<std::string> MainMenuScene::startPositionProblem(const GameParameters& params)
@@ -2019,13 +2091,20 @@ namespace rwe
         }
         const auto& schema = ota.schemas[params.schemaIndex];
 
+        // Positions go to participants consecutively by order, not by seat
+        // number (BT-237), so three players in seats 0, 1 and 5 need three
+        // positions, not six. A mission keeps its seat numbers.
+        std::vector<std::size_t> filled;
         for (Index i = 0; i < getSize(params.players); ++i)
         {
-            if (!params.players[i])
+            if (params.players[i])
             {
-                continue;
+                filled.push_back(i);
             }
-            auto slot = static_cast<int>(i) + 1;
+        }
+        const auto positions = startPositionsForSlots(filled, params.mission);
+        for (auto slot : positions)
+        {
             if (!findStartPosition(schema, slot))
             {
                 return "This map has no start position for slot " + std::to_string(slot)

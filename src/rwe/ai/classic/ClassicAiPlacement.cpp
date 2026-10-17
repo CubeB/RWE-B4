@@ -193,9 +193,9 @@ namespace rwe
         // shared radius is a choice, and so are the jitter of one cell and the
         // reading of "margin" as cells kept from the map's edge.
         // The second lattice is the one for `MinWaterDepth >= 0`, written as
-        // the register writes it. [open] RWE reads an absent key as 0, so this
-        // is always true of a loaded type.
-        const auto& lattice = static_cast<int>(mc.minWaterDepth) >= 0 ? second : first;
+        // the register writes it, on the signed word: an absent key is -10000
+        // and takes the first lattice, a written one the second (BT-109).
+        const auto& lattice = mc.signedMinWaterDepth() >= 0 ? second : first;
         const unsigned int metalLimit = static_cast<unsigned int>(sim.surfaceMetal) * static_cast<unsigned int>(footprintX) * static_cast<unsigned int>(footprintZ) * 2u;
         const int widthCells = sim.occupiedGrid.getWidth();
         const int heightCells = sim.occupiedGrid.getHeight();

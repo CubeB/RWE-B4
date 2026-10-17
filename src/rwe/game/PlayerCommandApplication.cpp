@@ -5,6 +5,7 @@
 #include <rwe/game/ReplayFile.h>
 #include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/UnitBehaviorService.h>
+#include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
@@ -137,6 +138,37 @@ namespace rwe
             }
         }
 
+        /**
+         * The queued-order toggle's "same order" test (0x43AFC0). A feature
+         * reclaim has a position and no unit target, so it matches on type
+         * and the sixteen-unit box around the feature, and two features
+         * within sixteen units are one order (BT-86). RWE's order holds the
+         * feature rather than the clicked point, so the box is taken between
+         * the two features' positions. Everything else goes through
+         * ordersMatchForQueueToggle.
+         */
+        bool queuedOrdersMatch(const GameSimulation& simulation, const UnitOrder& existing, const UnitOrder& requested)
+        {
+            const auto* oldReclaim = std::get_if<ReclaimOrder>(&existing);
+            const auto* newReclaim = std::get_if<ReclaimOrder>(&requested);
+            if (oldReclaim != nullptr && newReclaim != nullptr)
+            {
+                const auto* oldFeature = std::get_if<FeatureId>(&oldReclaim->target);
+                const auto* newFeature = std::get_if<FeatureId>(&newReclaim->target);
+                if (oldFeature != nullptr && newFeature != nullptr)
+                {
+                    auto a = simulation.tryGetFeature(*oldFeature);
+                    auto b = simulation.tryGetFeature(*newFeature);
+                    if (a && b)
+                    {
+                        return queuePositionsMatch(a->get().position, b->get().position);
+                    }
+                    return *oldFeature == *newFeature;
+                }
+            }
+            return ordersMatchForQueueToggle(existing, requested);
+        }
+
         void enqueueOrder(GameSimulation& simulation, UnitId unitId, const UnitOrder& order)
         {
             auto unit = simulation.tryGetUnitState(unitId);
@@ -149,7 +181,7 @@ namespace rwe
             // mission, interrupting the active task only when it is the head.
             auto& orders = unit->get().orders;
             auto found = std::find_if(orders.begin(), orders.end(), [&](const UnitOrder& old) {
-                return ordersMatchForQueueToggle(old, order);
+                return queuedOrdersMatch(simulation, old, order);
             });
             if (found != orders.end())
             {
@@ -160,6 +192,31 @@ namespace rwe
                 }
                 orders.erase(found);
                 return;
+            }
+
+            // BT-79: a new primary order, a Shift-queued one included, removes
+            // the leading run of nodes the unit made for itself from idle
+            // (the loop at 0x43AE7C in AddOrder). Engagements made in front
+            // of a real order are unmarked and stay.
+            auto isAutomatic = [](const UnitOrder& o) {
+                if (const auto* attack = std::get_if<AttackOrder>(&o))
+                {
+                    return attack->automatic;
+                }
+                if (const auto* move = std::get_if<MoveOrder>(&o))
+                {
+                    return move->automatic;
+                }
+                return false;
+            };
+            if (!orders.empty() && isAutomatic(orders.front()))
+            {
+                UnitBehaviorService(&simulation).interruptCurrentTask(unitId);
+                unit->get().buildOrderUnitId.reset();
+                while (!orders.empty() && isAutomatic(orders.front()))
+                {
+                    orders.pop_front();
+                }
             }
 
             // An idle unit has nothing to queue behind, so this order starts
@@ -266,6 +323,44 @@ namespace rwe
                 if (const auto* build = std::get_if<BuildOrder>(&issue->order); build != nullptr && isExcludedByMission(simulation, build->unitType))
                 {
                     return "the mission does not offer that unit";
+                }
+
+                // A repair or help-build is accepted where the order is chosen
+                // (0x43F0E0), and the water reach test is part of that choice:
+                // a flier that is not amphibious cannot be sent to a unit whose
+                // top is under the surface, and a ground or sea repairer not to
+                // one deeper than it can wade (BT-13). A refusal leaves the
+                // queue alone.
+                // The attack arm can answer "no order" (0x43F154): a unit that
+                // cannot carry the attack out keeps its queue. The interface
+                // asks the same question before it sends the command; the
+                // rule belongs here too, so that the computer player and every
+                // peer see the same refusal (BT-63).
+                if (const auto* attack = std::get_if<AttackOrder>(&issue->order); attack != nullptr)
+                {
+                    const auto& attacker = simulation.getUnitState(unitCommand.unit);
+                    if (const auto* targetUnit = std::get_if<UnitId>(&attack->target))
+                    {
+                        auto target = simulation.tryGetUnitState(*targetUnit);
+                        if (target && !attackOrderIsAccepted(simulation, simulation.unitDefinitions.at(attacker.unitType), attacker, target->get()))
+                        {
+                            return "that unit cannot carry out the attack";
+                        }
+                    }
+                    else if (!attackGroundOrderIsAccepted(simulation, attacker))
+                    {
+                        return "that unit cannot carry out the attack";
+                    }
+                }
+
+                if (const auto* repair = std::get_if<RepairOrder>(&issue->order); repair != nullptr)
+                {
+                    auto target = simulation.tryGetUnitState(repair->target);
+                    const auto& repairer = simulation.getUnitState(unitCommand.unit);
+                    if (target && !repairWaterReachAllows(simulation, simulation.unitDefinitions.at(repairer.unitType), target->get()))
+                    {
+                        return "the target is under the water beyond that repairer's reach";
+                    }
                 }
             }
             if (const auto* queue = std::get_if<PlayerUnitCommand::ModifyBuildQueue>(&unitCommand.command))

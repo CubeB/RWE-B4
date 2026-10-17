@@ -1,4 +1,5 @@
 #include "LoadingScene.h"
+#include <rwe/MainMenuScene.h>
 #include <rwe/game/SaveFile.h>
 #include <algorithm>
 #include <rwe/util/CrashHandler.h>
@@ -124,7 +125,38 @@ namespace rwe
         }
         networkService.start(gameParameters.localNetworkPort);
 
-        sceneContext.sceneManager->setNextScene(std::shared_ptr<Scene>(createGameScene(gameParameters.mapName, gameParameters.schemaIndex)));
+        std::shared_ptr<Scene> gameScene;
+        if (gameParameters.loadFromSaveFile)
+        {
+            // The header of a save was checked when it was listed; its body is
+            // read only now, and a hand-edited or damaged one used to end the
+            // process through main's "Critical Error" box. It costs the load:
+            // the menu opens, and says so.
+            try
+            {
+                gameScene = createGameScene(gameParameters.mapName, gameParameters.schemaIndex);
+            }
+            catch (const std::exception& e)
+            {
+                LOG_ERROR << "Could not load the saved game " << *gameParameters.loadFromSaveFile << ": " << e.what();
+                auto menu = std::make_shared<MainMenuScene>(
+                    sceneContext,
+                    audioLookup,
+                    sceneContext.viewport->width(),
+                    sceneContext.viewport->height());
+                auto* menuPtr = menu.get();
+                menu->pendingMenuActions.push_back([menuPtr]() {
+                    menuPtr->openMessageBox("That saved game could not be loaded");
+                });
+                sceneContext.sceneManager->setNextScene(menu);
+                return;
+            }
+        }
+        else
+        {
+            gameScene = createGameScene(gameParameters.mapName, gameParameters.schemaIndex);
+        }
+        sceneContext.sceneManager->setNextScene(gameScene);
 
         // wait for other players before starting
         networkService.setDoneLoading();
@@ -275,6 +307,8 @@ namespace rwe
         sounds.okToBuild = lookUpSound("OKTOBUILD");
         sounds.notOkToBuild = lookUpSound("NOTOKTOBUILD");
         sounds.selectMultipleUnits = lookUpSound("SelectMultipleUnits");
+        sounds.createSquad = lookUpSound("CreateSquad");
+        sounds.selectSquad = lookUpSound("SelectSquad");
         sounds.panel = lookUpSound("PANEL");
         sounds.options = lookUpSound("OPTIONS");
         sounds.smallButton = lookUpSound("SMALLBUTTON");

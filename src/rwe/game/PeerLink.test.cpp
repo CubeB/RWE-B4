@@ -269,6 +269,19 @@ namespace rwe
         REQUIRE(messages.front().text == "hello there");
     }
 
+    TEST_CASE("PeerLink carries the label a chat line was sent with")
+    {
+        FakePeerLink link;
+        link.link(0).submitChatMessage("push now", ChatLabel::Allies);
+        link.link(0).submitChatMessage("hello all");
+        link.run(std::chrono::seconds(1));
+
+        auto messages = link.link(1).takeReceivedChat();
+        REQUIRE(messages.size() == 2);
+        REQUIRE(messages[0].label == ChatLabel::Allies);
+        REQUIRE(messages[1].label == ChatLabel::None);
+    }
+
     TEST_CASE("Shared pause rejects stale updates and orders concurrent writers", "[pause]")
     {
         SharedPauseState a{1, 0, true};

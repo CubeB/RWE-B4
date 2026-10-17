@@ -185,3 +185,16 @@ namespace rwe
         return command;
     }
 }
+
+namespace rwe
+{
+    std::string shareNoticeMessage(ChatCommand::Kind kind)
+    {
+        if (kind == ChatCommand::Kind::ShareRadar)
+        {
+            return "ShareRadar: not available in RWE. Radar and sonar are not shared with allies.";
+        }
+
+        return "ShareMapping: there is no toggle in RWE. Allies always share what they see.";
+    }
+}

@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <rwe/util/CrashHandler.h>
+#include <rwe/util/SimpleLogger.h>
 
 namespace rwe
 {
@@ -46,6 +47,16 @@ namespace rwe
         }
     }
 
+    MoviePlacement moviePlacement(unsigned int filmWidth, unsigned int filmHeight, unsigned int headerFlags)
+    {
+        constexpr int ScreenHeight = 480;
+        // Bits 1 and 2 are the library's Y-scale and Y-interlace modes, which
+        // both put two rows on the screen for each stored one.
+        auto doubled = (headerFlags & 0x6u) != 0;
+        auto drawnHeight = static_cast<int>(filmHeight) * (doubled ? 2 : 1);
+        return MoviePlacement{0, (ScreenHeight - drawnHeight) >> 1, static_cast<int>(filmWidth), drawnHeight};
+    }
+
     MovieScene::MovieScene(const SceneContext& sceneContext, std::vector<char>&& movieData, std::function<void()>&& onFinish)
         : sceneContext(sceneContext),
           uiRenderService(sceneContext.graphics, sceneContext.shaders, sceneContext.viewport),
@@ -60,32 +71,50 @@ namespace rwe
         // First pass: pull all the audio out. The audio chunks sit before the
         // video data in every frame and decode independently of it, so the
         // pass can skip the expensive half entirely.
-        if (auto audioInfo = decoder.getAudioInfo())
+        //
+        // A film that will not decode ends there, as if it had finished: it
+        // costs the film and never the process.
+        try
         {
-            std::vector<int16_t> samples;
-            decoder.setSkipVideo(true);
-            while (decoder.decodeNextFrame())
+            if (auto audioInfo = decoder.getAudioInfo())
             {
-                const auto& frameAudio = decoder.getFrameAudio();
-                samples.insert(samples.end(), frameAudio.begin(), frameAudio.end());
-            }
-            decoder.rewind();
-            decoder.setSkipVideo(false);
+                // About half an hour of 22 kHz stereo, for a ceiling on what
+                // a hostile file can have the pass accumulate.
+                constexpr std::size_t MaxSamples = 64u * 1024u * 1024u;
+                std::vector<int16_t> samples;
+                decoder.setSkipVideo(true);
+                while (decoder.decodeNextFrame())
+                {
+                    const auto& frameAudio = decoder.getFrameAudio();
+                    if (samples.size() + frameAudio.size() > MaxSamples)
+                    {
+                        throw std::runtime_error("SMK soundtrack is too long");
+                    }
+                    samples.insert(samples.end(), frameAudio.begin(), frameAudio.end());
+                }
+                decoder.rewind();
+                decoder.setSkipVideo(false);
 
-            if (!samples.empty())
+                if (!samples.empty())
+                {
+                    sceneContext.audioService->playMusicFromMemory(
+                        buildWav(samples, audioInfo->sampleRate, audioInfo->stereo ? 2 : 1), false);
+                }
+            }
+
+            if (decoder.decodeNextFrame())
             {
-                sceneContext.audioService->playMusicFromMemory(
-                    buildWav(samples, audioInfo->sampleRate, audioInfo->stereo ? 2 : 1), false);
+                framesPresented = 1;
+                uploadFrame();
+            }
+            else
+            {
+                finish();
             }
         }
-
-        if (decoder.decodeNextFrame())
+        catch (const std::exception& e)
         {
-            framesPresented = 1;
-            uploadFrame();
-        }
-        else
-        {
+            LOG_WARN << "Ending a film that could not be decoded: " << e.what();
             finish();
         }
     }
@@ -101,15 +130,24 @@ namespace rwe
         auto targetFrames = (elapsedMicroseconds / decoder.getMicrosecondsPerFrame()) + 1;
 
         bool decodedAny = false;
-        while (framesPresented < targetFrames)
+        try
         {
-            if (!decoder.decodeNextFrame())
+            while (framesPresented < targetFrames)
             {
-                finish();
-                return;
+                if (!decoder.decodeNextFrame())
+                {
+                    finish();
+                    return;
+                }
+                ++framesPresented;
+                decodedAny = true;
             }
-            ++framesPresented;
-            decodedAny = true;
+        }
+        catch (const std::exception& e)
+        {
+            LOG_WARN << "Ending a film that could not be decoded: " << e.what();
+            finish();
+            return;
         }
         if (decodedAny)
         {
@@ -146,23 +184,34 @@ namespace rwe
             return;
         }
 
-        // The movies are stored anamorphic -- 640x240 shown on a 640x480
-        // screen -- so the frame is presented as the largest 4:3 rectangle
+        // The original draws into its 640 by 480 screen: the film at x 0,
+        // y = (480 - height) / 2 and in its own pixels (BT-157), a 640 by 304
+        // film with bars above and below it. The films stored at 640x240 are
+        // drawn height-doubled by the library, so they fill the screen. That
+        // 640 by 480 screen is itself presented as the largest 4:3 rectangle
         // the window will hold, whatever its own pixel shape.
         auto viewWidth = static_cast<float>(sceneContext.viewport->width());
         auto viewHeight = static_cast<float>(sceneContext.viewport->height());
 
-        auto width = viewWidth;
-        auto height = width * 3.0f / 4.0f;
-        if (height > viewHeight)
+        auto screenWidth = viewWidth;
+        auto screenHeight = screenWidth * 3.0f / 4.0f;
+        if (screenHeight > viewHeight)
         {
-            height = viewHeight;
-            width = height * 4.0f / 3.0f;
+            screenHeight = viewHeight;
+            screenWidth = screenHeight * 4.0f / 3.0f;
         }
 
-        auto x = std::floor((viewWidth - width) / 2.0f);
-        auto y = std::floor((viewHeight - height) / 2.0f);
-        uiRenderService.drawSpriteAbs(x, y, width, height, *frameSprite);
+        auto screenX = std::floor((viewWidth - screenWidth) / 2.0f);
+        auto screenY = std::floor((viewHeight - screenHeight) / 2.0f);
+        auto scale = screenWidth / 640.0f;
+
+        auto placement = moviePlacement(decoder.getWidth(), decoder.getHeight(), decoder.getHeaderFlags());
+        uiRenderService.drawSpriteAbs(
+            screenX + (static_cast<float>(placement.x) * scale),
+            screenY + (static_cast<float>(placement.y) * scale),
+            static_cast<float>(placement.width) * scale,
+            static_cast<float>(placement.height) * scale,
+            *frameSprite);
     }
 
     void MovieScene::onKeyDown(const SDL_KeyboardEvent& /*key*/)
@@ -186,6 +235,25 @@ namespace rwe
         onFinish();
     }
 
+    std::shared_ptr<MovieScene> tryMakeMovieScene(const SceneContext& sceneContext, std::vector<char>&& movieData, std::function<void()>&& onFinish)
+    {
+        // The original skips a zero-length film like a missing one.
+        if (movieData.empty())
+        {
+            return nullptr;
+        }
+
+        try
+        {
+            return std::make_shared<MovieScene>(sceneContext, std::move(movieData), std::move(onFinish));
+        }
+        catch (const std::exception& e)
+        {
+            LOG_WARN << "Skipping a film that could not be opened: " << e.what();
+            return nullptr;
+        }
+    }
+
     std::shared_ptr<Scene> filmsThen(const SceneContext& sceneContext, std::vector<std::string> vfsPaths, std::function<std::shared_ptr<Scene>()> then)
     {
         for (std::size_t i = 0; i < vfsPaths.size(); ++i)
@@ -197,12 +265,16 @@ namespace rwe
             }
             std::vector<std::string> rest(vfsPaths.begin() + static_cast<std::ptrdiff_t>(i) + 1, vfsPaths.end());
             auto context = sceneContext;
-            return std::make_shared<MovieScene>(
+            auto film = tryMakeMovieScene(
                 sceneContext,
                 std::move(*bytes),
-                [context, rest = std::move(rest), then = std::move(then)]() {
+                [context, rest, then]() {
                     context.sceneManager->setNextScene(filmsThen(context, rest, then));
                 });
+            if (film)
+            {
+                return film;
+            }
         }
         return then();
     }

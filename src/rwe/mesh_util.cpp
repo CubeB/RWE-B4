@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <map>
 #include <rwe/fixed_point.h>
+#include <rwe/sim/UnitModelVertices.h>
 #include <rwe/util/rwe_string.h>
 
 namespace rwe
@@ -447,6 +448,59 @@ namespace rwe
     std::vector<UnitPieceDefinition> unitMeshFrom3do(const _3do::Object& o)
     {
         return unitMeshFrom3do(o, std::nullopt);
+    }
+
+    namespace
+    {
+        void collectPieceVertices(const _3do::Object& o, std::vector<std::vector<SimVector>>& out)
+        {
+            // The same pre-order as unitMeshFrom3do, so index i here is piece i
+            // there. The z flip is the one the piece origins get.
+            auto& vertices = out.emplace_back();
+            vertices.reserve(o.vertices.size());
+            for (const auto& v : o.vertices)
+            {
+                vertices.emplace_back(simScalarFromFixed(v.x), simScalarFromFixed(v.y), -simScalarFromFixed(v.z));
+            }
+            for (const auto& c : o.children)
+            {
+                collectPieceVertices(c, out);
+            }
+        }
+    }
+
+    std::shared_ptr<const UnitModelVertices> unitVerticesFrom3do(const _3do::Object& o)
+    {
+        auto table = std::make_shared<UnitModelVertices>();
+        collectPieceVertices(o, table->perPiece);
+
+        // BT-41: the root object's selection primitive and its first four
+        // vertex indices. A primitive that names fewer than four, or an index
+        // outside the object's vertices, is no rectangle at all.
+        if (o.selectionPrimitiveIndex && *o.selectionPrimitiveIndex < o.primitives.size())
+        {
+            const auto& indices = o.primitives[*o.selectionPrimitiveIndex].vertices;
+            if (indices.size() >= 4)
+            {
+                std::array<SimVector, 4> corners;
+                bool valid = true;
+                for (std::size_t i = 0; i < 4; ++i)
+                {
+                    if (indices[i] >= o.vertices.size())
+                    {
+                        valid = false;
+                        break;
+                    }
+                    const auto& v = o.vertices[indices[i]];
+                    corners[i] = SimVector(simScalarFromFixed(v.x), simScalarFromFixed(v.y), -simScalarFromFixed(v.z));
+                }
+                if (valid)
+                {
+                    table->selectionRectangle = corners;
+                }
+            }
+        }
+        return table;
     }
 
     Vector3f vertexToVector(const _3do::Vertex& v)

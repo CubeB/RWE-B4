@@ -25,7 +25,7 @@ namespace rwe
             void operator()(const ScrollPositionMessage& msg) const
             {
                 auto scrollPos = static_cast<unsigned int>(msg.scrollPosition * listBox->maxScrollPosition());
-                listBox->scrollPositionSubject.next(scrollPos);
+                listBox->setScrollPosition(scrollPos);
             }
 
             void operator()(const ScrollUpMessage& /*msg*/) const

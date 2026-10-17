@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
@@ -46,4 +47,50 @@ namespace rwe
      * business and a player who asks for one on purpose is entitled to it.
      */
     bool isUsablePort(const std::string& port);
+
+    /**
+     * One occupied-or-open seat on a setup screen, as far as the team rules are
+     * concerned. `team` is the allegiance group; none means the seat is on no
+     * team (the original's team 5), which is nobody's ally, another such seat
+     * included.
+     */
+    struct SetupSeat
+    {
+        enum class Kind
+        {
+            Open,
+            Human,
+            Computer,
+            Network,
+        };
+
+        Kind kind{Kind::Open};
+        std::optional<int> team;
+    };
+
+    /**
+     * The original's fourth launch check (BT-194): the occupied seats must not
+     * all fall in one allegiance group, or the game is won on the first tick.
+     * Seats on no team are each their own group. Both the skirmish Start button
+     * and the multiplayer battle room make it.
+     */
+    std::optional<std::string> allOnOneTeamProblem(const std::vector<SetupSeat>& seats);
+
+    /**
+     * The skirmish Start button's own launch checks (BT-194), in the original's
+     * order: at least one computer and at least one human seat, then the team
+     * check. The map and start-position checks need the map and are made by
+     * the scene.
+     */
+    std::optional<std::string> skirmishSetupProblem(const std::vector<SetupSeat>& seats);
+
+    /** What Previous Menu (or Escape) does, given what the front end is showing (BT-201). */
+    enum class PreviousMenuAction
+    {
+        CloseDialog,
+        PopPanel, // the multiplayer screens may route this somewhere else first
+        Nothing, // already at the root main menu: the original does not quit on a cancel
+    };
+
+    PreviousMenuAction previousMenuAction(bool dialogOpen, std::size_t panelCount);
 }

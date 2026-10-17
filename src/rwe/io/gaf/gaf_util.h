@@ -1,6 +1,8 @@
 #pragma once
 
 #include <istream>
+#include <rwe/io/io_util.h>
+#include <stdexcept>
 #include <rwe/io/gaf/GafReaderAdapter.h>
 #include <rwe/io/gaf/gaf_headers.h>
 #include <vector>
@@ -12,6 +14,23 @@ namespace rwe
     public:
         explicit GafException(const char* message);
     };
+
+    /**
+     * readRaw, with a short read reported as the GAF reader's own exception,
+     * so a truncated file costs one sprite sheet and is caught as one.
+     */
+    template <typename T>
+    T readGafRaw(std::istream& stream)
+    {
+        try
+        {
+            return readRaw<T>(stream);
+        }
+        catch (const TruncatedInputError&)
+        {
+            throw GafException("truncated GAF");
+        }
+    }
 
     void decompressRow(std::istream& stream, char* buffer, std::size_t rowLength, char transparencyIndex);
 

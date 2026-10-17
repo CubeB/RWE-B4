@@ -959,12 +959,45 @@ namespace rwe
             corner.x + (SimScalar(static_cast<float>(mc.footprintX)) * MapTerrain::HeightTileWidthInWorldUnits / 2_ss),
             0_ss,
             corner.z + (SimScalar(static_cast<float>(mc.footprintZ)) * MapTerrain::HeightTileHeightInWorldUnits / 2_ss));
-        newPosition.y = terrain.getHeightAt(newPosition.x, newPosition.z);
-        if (unitDefinition.floater || unitDefinition.canHover)
-        {
-            newPosition.y = rweMax(newPosition.y, terrain.getSeaLevel());
-        }
+        newPosition.y = computeGroundUnitHeight(terrain, unitDefinition, newPosition.x, newPosition.z);
         return UnloadSpot{*spot, newPosition};
+    }
+
+    bool GameSimulation::dropCarriedUnitInPlace(UnitId transportId, UnitId unitId)
+    {
+        auto transportRef = tryGetUnitState(transportId);
+        auto unitRef = tryGetUnitState(unitId);
+        if (!transportRef || !unitRef || unitRef->get().carriedBy != transportId || !unitRef->get().isAlive())
+        {
+            return false;
+        }
+        auto& transport = transportRef->get();
+        auto& unit = unitRef->get();
+
+        // The drop-legality test (0x47DB70, mode 1) at the passenger's own
+        // cell: occupancy, then water depth and slope for its movement
+        // class. No ring search and no nearest-fit; a refusal changes
+        // nothing and the script tries again (BT-75).
+        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+        auto mc = getAdHocMovementClass(unitDefinition.movementCollisionInfo);
+        auto footprint = computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
+        auto region = occupiedGrid.tryToRegion(footprint);
+        if (!region || isCollisionAt(*region) || !isGridPointWalkable(terrain, mc, static_cast<unsigned int>(footprint.x), static_cast<unsigned int>(footprint.y)))
+        {
+            return false;
+        }
+
+        occupiedGrid.forEach(*region, [unitId](auto& cell) { cell.mobileUnitId = unitId; });
+        unit.occupancyStamp = gameTime;
+
+        unit.position.y = computeGroundUnitHeight(terrain, unitDefinition, unit.position.x, unit.position.z);
+        unit.previousPosition = unit.position;
+        unit.rotation = transport.rotation;
+        unit.previousRotation = transport.rotation;
+        unit.carriedBy = std::nullopt;
+        unit.carriedPiece.clear();
+        transport.carriedUnits.erase(std::remove(transport.carriedUnits.begin(), transport.carriedUnits.end(), unitId), transport.carriedUnits.end());
+        return true;
     }
 
     bool GameSimulation::unloadUnitFromTransport(UnitId transportId, UnitId unitId, const SimVector& position)
@@ -988,6 +1021,7 @@ namespace rwe
         {
             occupiedGrid.forEach(*region, [unitId](auto& cell) { cell.mobileUnitId = unitId; });
         }
+        unit.occupancyStamp = gameTime;
 
         unit.position = spot->position;
         unit.previousPosition = spot->position;
@@ -1260,6 +1294,28 @@ namespace rwe
         unit.buildOrderUnitId = std::nullopt;
         unit.behaviourState = UnitBehaviorStateIdle();
         unit.clearWeaponTargets();
+
+        // BT-73 (0x488570). An owner change is not an owner swap: the
+        // original builds a new unit for the new owner and copies across the
+        // health, build-left, angles, stockpiles and activation mask, and
+        // nothing else -- not the kill count, not the order list, not the
+        // standing postures. The creation routine's postures are then cleared
+        // outright (flag bits 18 to 21): Hold Position and Hold Fire, for any
+        // recipient simulated on this machine, human or computer. A captured
+        // veteran is therefore a recruit that stands still and does not shoot
+        // until told to. (The kill reset rests on the field being absent from
+        // the copy list: medium confidence.)
+        //
+        // The unit is changed in place, so everything above is what the
+        // rebuild amounts to for state that is hashed. Two things are not
+        // reproduced: the unit keeps its id, and its script keeps running
+        // where a new unit would start a fresh instance.
+        unit.kills = 0;
+        if (simulatesLocally(*this, captor))
+        {
+            unit.moveOrders = UnitMovementOrders::HoldPosition;
+            unit.fireOrders = UnitFireOrders::HoldFire;
+        }
 
         events.push_back(UnitCapturedEvent{targetId, previousOwner, captor, captorUnitId});
         return true;
@@ -1695,7 +1751,14 @@ namespace rwe
             unit.position.y = computeBuildHeight(unitDefinition, footprint);
             unit.previousPosition.y = unit.position.y;
         }
-        else if (unitDefinition.floater || unitDefinition.canHover)
+        else if (unitDefinition.floater && !unitDefinition.upright)
+        {
+            // Not aligned at all: sea level minus WaterLine, whatever the
+            // ground (0x48A870, BT-42).
+            unit.position.y = terrain.getSeaLevel() - intToSimScalar(static_cast<int>(unitDefinition.waterLine));
+            unit.previousPosition.y = unit.position.y;
+        }
+        else if (unitDefinition.canHover)
         {
             unit.position.y = rweMax(terrain.getSeaLevel(), unit.position.y);
             unit.previousPosition.y = unit.position.y;
@@ -1774,6 +1837,13 @@ namespace rwe
             return std::nullopt;
         }
 
+        // The win test reads this (BT-193); the first unit made for a player
+        // is what sets it in the original.
+        if (unit.owner.value < players.size())
+        {
+            players[unit.owner.value].hasCreatedUnits = true;
+        }
+
         auto unitId = units.emplace(std::move(unit));
         const auto& insertedUnit = units.tryGet(unitId)->get();
 
@@ -1787,6 +1857,8 @@ namespace rwe
         if (unitDefinition.isMobile)
         {
             occupiedGrid.forEach(*footprintRegion, [unitId](auto& cell) { cell.mobileUnitId = unitId; });
+            // A map insertion, so the occupancy stamp is now (BT-58).
+            units.tryGet(unitId)->get().occupancyStamp = gameTime;
         }
         else
         {
@@ -1932,6 +2004,16 @@ namespace rwe
         auto cell = terrain.worldToHeightmapCoordinateNearest(topLeft);
 
         return DiscreteRect(cell.x, cell.y, footprintX, footprintZ);
+    }
+
+    unsigned int GameSimulation::extractorMetalWork(const DiscreteRect& footprint) const
+    {
+        // 0x437840: the sum gains the metal byte plus one for each cell the
+        // bounds-checked lookup (0x481550) finds, and nothing for one it does
+        // not. A footprint with no metal under it is still worth one a cell.
+        auto region = metalGrid.clipRegion(footprint);
+        auto metalBytes = metalGrid.accumulate(region, 0u, std::plus<>());
+        return metalBytes + static_cast<unsigned int>(region.width) * static_cast<unsigned int>(region.height);
     }
 
     DiscreteRect GameSimulation::computeFootprintRegion(const SimVector& position, const UnitDefinition::MovementCollisionInfo& collisionInfo) const
@@ -2087,9 +2169,42 @@ namespace rwe
         });
     }
 
-    bool GameSimulation::cellBlocksUnit(const OccupiedCell& cell, UnitId self) const
+    bool GameSimulation::isCollisionAtForSearch(const DiscreteRect& rect, UnitId self, const DiscreteRect& passableRegion, GameTime searchTime) const
     {
-        if (cell.mobileUnitId && *cell.mobileUnitId != self)
+        auto region = occupiedGrid.tryToRegion(rect);
+        if (!region)
+        {
+            return true;
+        }
+
+        // The class stamp: this search's tick less the thirty-tick window,
+        // read as zero until the game is that old.
+        constexpr unsigned int recentlyMovedWindow = 30;
+        const auto classStamp = searchTime.value < recentlyMovedWindow ? 0u : searchTime.value - recentlyMovedWindow;
+
+        return region->any([&](const GridCoordinates& c) {
+            if (passableRegion.contains(Point(c.x, c.y)))
+            {
+                return false;
+            }
+            const auto& cell = occupiedGrid.get(c);
+            if (cell.mobileUnitId && *cell.mobileUnitId != self)
+            {
+                auto occupant = tryGetUnitState(*cell.mobileUnitId);
+                if (!occupant || occupant->get().occupancyStamp.value < classStamp)
+                {
+                    return true;
+                }
+            }
+            // The mobile occupant has been excused; the building and the
+            // feature are judged as ever.
+            return cellBlocksUnit(cell, self, true);
+        });
+    }
+
+    bool GameSimulation::cellBlocksUnit(const OccupiedCell& cell, UnitId self, bool excuseMobile) const
+    {
+        if (!excuseMobile && cell.mobileUnitId && *cell.mobileUnitId != self)
         {
             return true;
         }
@@ -2281,6 +2396,17 @@ namespace rwe
 
         occupiedGrid.forEach(*oldRegion, [](auto& cell) { cell.mobileUnitId = std::nullopt; });
         occupiedGrid.forEach(*newRegion, [unitId](auto& cell) { cell.mobileUnitId = unitId; });
+
+        // Changing square is a map insertion in the original, and a map
+        // insertion writes the occupancy stamp (mover+0x26, BT-58). A step
+        // that stays inside the same footprint does not.
+        if (!(oldRect == newRect))
+        {
+            if (auto unit = tryGetUnitState(unitId))
+            {
+                unit->get().occupancyStamp = gameTime;
+            }
+        }
     }
 
     void GameSimulation::requestPath(UnitId unitId)
@@ -2413,6 +2539,18 @@ namespace rwe
             projectile.velocity = projectile.velocity + *inheritedVelocity;
         }
 
+        // The ballistic spawn's launch correction (0x49CE62-0x49CE8A, BT-114):
+        // sin(pitch) times the speed MINUS trunc(slot / weaponvelocity) whole
+        // ticks of gravity, the slot being the 1.25 x Z difference between the
+        // weapon's Query and AimFrom pieces written when the unit was built.
+        // The solver that chose the pitch never sees it, so the shell leaves
+        // flatter than the angle it solved.
+        if (spawn.weapon && std::holds_alternative<ProjectilePhysicsTypeBallistic>(weaponDefinition.physicsType))
+        {
+            auto ticks = launchCorrectionTicks(spawn.weapon->ballisticZOffset, weaponDefinition.velocity);
+            projectile.velocity.y -= gravityPerTick() * intToSimScalar(static_cast<int>(ticks));
+        }
+
         projectile.lastSmoke = gameTime;
 
         projectile.damage = weaponDefinition.damage;
@@ -2457,6 +2595,7 @@ namespace rwe
 
         projectile.createdAt = gameTime;
         projectile.groundBounce = weaponDefinition.groundBounce;
+        const bool isBurstChild = spawn.burstChildHorizontalDistance.has_value();
 
         projectile.targetUnit = targetUnit;
         projectile.targetPosition = targetPosition;
@@ -2511,6 +2650,49 @@ namespace rwe
             projectile.dieOnFrame = std::nullopt;
         }
 
+        if (isBurstChild)
+        {
+            // A child of a burst has a life of its own (0x49B87F-0x49B8BC): the
+            // tick plus the weapon's timer when the weapon names one, else the
+            // stored horizontal distance plus 16 world units over the child's
+            // own scalar speed, with randomdecay moving it about half its
+            // interval either way (0x49B8BF-0x49B8EB). A missile's expiry is
+            // the end of its burn, as the first round's is.
+            GameTime expiry;
+            if (weaponDefinition.weaponTimer)
+            {
+                expiry = gameTime + *weaponDefinition.weaponTimer;
+            }
+            else
+            {
+                auto childSpeed = projectile.velocity.length();
+                if (std::holds_alternative<ProjectilePhysicsTypeSelfPropelled>(weaponDefinition.physicsType))
+                {
+                    childSpeed = projectile.speed > 0_ss ? projectile.speed : std::get<ProjectilePhysicsTypeSelfPropelled>(weaponDefinition.physicsType).maxVelocity;
+                }
+                if (childSpeed <= 0_ss)
+                {
+                    childSpeed = weaponDefinition.velocity;
+                }
+                auto distanceFixed = static_cast<int64_t>(simScalarToFixed(*spawn.burstChildHorizontalDistance + 16_ss));
+                auto speedFixed = static_cast<int64_t>(simScalarToFixed(childSpeed));
+                auto lifeTicks = speedFixed > 0 ? std::max<int64_t>(distanceFixed / speedFixed, 1) : int64_t(1);
+                expiry = gameTime + GameTime(static_cast<unsigned int>(lifeTicks));
+            }
+            auto randomDecay = weaponDefinition.randomDecay.value_or(GameTime(0)).value;
+            auto randomVal = randomBelow(rng, randomDecay + 1u);
+            expiry = expiry - GameTime(randomDecay / 2) + GameTime(randomVal);
+
+            if (std::holds_alternative<ProjectilePhysicsTypeSelfPropelled>(weaponDefinition.physicsType))
+            {
+                projectile.motorOutFrame = expiry;
+            }
+            else
+            {
+                projectile.dieOnFrame = expiry;
+            }
+        }
+
         return projectile;
     }
 
@@ -2541,6 +2723,17 @@ namespace rwe
         return result;
     }
 
+    std::vector<int> startPositionsForSlots(const std::vector<std::size_t>& filledSlots, bool keepSeatNumbers)
+    {
+        std::vector<int> positions;
+        positions.reserve(filledSlots.size());
+        for (std::size_t k = 0; k < filledSlots.size(); ++k)
+        {
+            positions.push_back(static_cast<int>(keepSeatNumbers ? filledSlots[k] + 1 : k + 1));
+        }
+        return positions;
+    }
+
     WinStatus GameSimulation::computeWinStatus() const
     {
         // A mission is decided by its own rules and nothing else: a victory
@@ -2554,7 +2747,7 @@ namespace rwe
             const auto& winner = *missionRules->outcome == MissionOutcome::Victory ? missionRules->human : missionRules->computer;
             if (!winner)
             {
-                return WinStatusDraw();
+                return WinStatusNoSurvivors();
             }
             return WinStatusWon{*winner};
         }
@@ -2570,6 +2763,14 @@ namespace rwe
         // A player on no team is nobody's ally, including of another player
         // on no team, which is what makes a free-for-all behave exactly as
         // it did.
+        //
+        // A seat that never held a unit (BT-193): in a multiplayer game it
+        // blocks victory, being alive, until it has; in a skirmish it
+        // contributes nothing. The skirmish rule needs somebody to have
+        // fielded something first, so that the first seconds of a game whose
+        // units are still being placed are not read as everyone being out.
+        const auto skipsNeverFielded = skirmishVictoryRules
+            && std::any_of(players.begin(), players.end(), [](const GamePlayerInfo& q) { return q.hasCreatedUnits; });
         std::optional<PlayerId> livingPlayer;
         std::optional<int> livingTeam;
         for (Index i = 0; i < getSize(players); ++i)
@@ -2577,6 +2778,11 @@ namespace rwe
             const auto& p = players[i];
 
             if (p.status != GamePlayerStatus::Alive)
+            {
+                continue;
+            }
+
+            if (skipsNeverFielded && !p.hasCreatedUnits)
             {
                 continue;
             }
@@ -2604,7 +2810,7 @@ namespace rwe
             return WinStatusWon{*livingPlayer};
         }
 
-        return WinStatusDraw();
+        return WinStatusNoSurvivors();
     }
 
     bool GameSimulation::addResourceDelta(const UnitId& unitId, const Energy& energy, const Metal& metal, ResourceDebtGate gate)
@@ -2745,15 +2951,20 @@ namespace rwe
     void GameSimulation::activateUnit(UnitId unitId)
     {
         auto& unit = getUnitState(unitId);
-        unit.activate();
-        events.push_back(UnitActivatedEvent{unitId});
+        // Script and event only on a real change (BT-66).
+        if (unit.activate())
+        {
+            events.push_back(UnitActivatedEvent{unitId});
+        }
     }
 
     void GameSimulation::deactivateUnit(UnitId unitId)
     {
         auto& unit = getUnitState(unitId);
-        unit.deactivate();
-        events.push_back(UnitDeactivatedEvent{unitId});
+        if (unit.deactivate())
+        {
+            events.push_back(UnitDeactivatedEvent{unitId});
+        }
     }
 
     void GameSimulation::modifyStockpileQueue(UnitId unitId, int count)
@@ -2863,6 +3074,26 @@ namespace rwe
         return std::nullopt;
     }
 
+    namespace
+    {
+        /**
+         * The interceptor's distance measure (0x49B106, 0x49A664): each axis
+         * of the 16.16 difference is cut to its whole-unit part (an arithmetic
+         * shift, so it floors) before it is squared, and the three squares are
+         * added. Cutting before squaring makes the result up to one whole unit
+         * of each axis smaller than the true squared distance. Compared
+         * strictly against the full `areaofeffect` squared.
+         */
+        SimScalar wholeUnitDistanceSquared(const SimVector& a, const SimVector& b)
+        {
+            auto whole = [](SimScalar v) { return SimScalar(std::floor(v.value)); };
+            auto dx = whole(a.x - b.x);
+            auto dy = whole(a.y - b.y);
+            auto dz = whole(a.z - b.z);
+            return dx * dx + dy * dy + dz * dz;
+        }
+    }
+
     void GameSimulation::detonateProjectilesInBlast(std::optional<ProjectileId> source, const SimVector& position, SimScalar radius)
     {
         // Gathered before anything is detonated: an impact can kill a unit,
@@ -2875,7 +3106,7 @@ namespace rwe
             {
                 continue;
             }
-            if (position.distanceSquared(entry.second.position) < radius * radius)
+            if (wholeUnitDistanceSquared(position, entry.second.position) < radius * radius)
             {
                 caught.push_back(entry.first);
             }
@@ -2995,7 +3226,8 @@ namespace rwe
                     mc.maxSlope,
                     mc.maxWaterSlope,
                     mc.maxSlope / 2,
-                    mc.maxWaterSlope / 2};
+                    mc.maxWaterSlope / 2,
+                    mc.minWaterDepthPresent};
             },
             [&](const UnitDefinition::NamedMovementClass& mc) {
                 return movementClassDatabase.getMovementClass(mc.movementClassId);
@@ -3026,7 +3258,7 @@ namespace rwe
         return Matrix4x<SimScalar>::rotationAxisAngle(cross, angle) * v;
     }
 
-    bool projectileCollides(const GameSimulation& sim, const Projectile& projectile, const OccupiedCell& cellValue, bool unitsOnly)
+    bool projectileCollides(const GameSimulation& sim, const Projectile& projectile, const OccupiedCell& cellValue, bool unitsOnly, std::optional<UnitId>& struckUnit)
     {
         if (cellValue.mobileUnitId)
         {
@@ -3045,6 +3277,7 @@ namespace rwe
                 return false;
             }
 
+            struckUnit = *cellValue.mobileUnitId;
             return true;
         }
 
@@ -3065,6 +3298,7 @@ namespace rwe
                 return false;
             }
 
+            struckUnit = cellValue.buildingInfo->unit;
             return true;
         }
 
@@ -3129,6 +3363,13 @@ namespace rwe
     };
     struct ProjectileCollisionInfoUnitOrFeatureOrBuilding
     {
+        /**
+         * The unit that was struck, when it was one. The detonation routine
+         * is handed it for the two unit-slot hits and nothing for a feature
+         * (0x49B090), and it decides both the single-target damage path
+         * (BT-112) and whether the water art is used (BT-9).
+         */
+        std::optional<UnitId> struckUnit;
     };
     using ProjectileCollisionInfo = std::variant<
         ProjectileCollisionInfoOutOfBounds,
@@ -3157,16 +3398,17 @@ namespace rwe
 
         auto heightMapPos = simulation.terrain.worldToHeightmapCoordinate(projectile.position);
         auto cellValue = simulation.occupiedGrid.tryGet(heightMapPos);
-        if (cellValue && projectileCollides(simulation, projectile, cellValue->get(), unitsOnly))
+        std::optional<UnitId> struckUnit;
+        if (cellValue && projectileCollides(simulation, projectile, cellValue->get(), unitsOnly, struckUnit))
         {
-            return ProjectileCollisionInfoUnitOrFeatureOrBuilding();
+            return ProjectileCollisionInfoUnitOrFeatureOrBuilding{struckUnit};
         }
 
         for (auto unitId : simulation.flyingUnitsSet)
         {
             if (projectileCollidesWithUnit(simulation, projectile, unitId))
             {
-                return ProjectileCollisionInfoUnitOrFeatureOrBuilding();
+                return ProjectileCollisionInfoUnitOrFeatureOrBuilding{unitId};
             }
         }
 
@@ -3247,10 +3489,57 @@ namespace rwe
         return level;
     }
 
-    int computeKilledSeverity(unsigned int overkill, unsigned int maxHitPoints)
+    int computeKilledSeverity(unsigned int overkill, unsigned int maxHitPoints, unsigned int previousHealthPercent)
     {
-        auto scaled = maxHitPoints == 0 ? 0u : (100u * overkill) / maxHitPoints;
-        return static_cast<int>(std::clamp(scaled / 2u, 1u, 100u));
+        // 0x486578-0x4865AB: the overkill percentage is an unsigned division
+        // of 100 * the deficit by the maximum health, the severity is the
+        // floor of half its sum with unit+0xF7, and the result is raised to 1
+        // and cut to 100. Both terms are non-negative, so the halving is an
+        // ordinary floor.
+        auto scaled = maxHitPoints == 0
+            ? std::uint64_t(0)
+            : (std::uint64_t(100) * overkill) / maxHitPoints;
+        auto severity = (scaled + previousHealthPercent) / 2u;
+        return static_cast<int>(std::clamp<std::uint64_t>(severity, 1u, 100u));
+    }
+
+    namespace
+    {
+        /**
+         * Once a second the original's unit pass copies unit+0xF6 into
+         * unit+0xF7 and then stores the unit's health percentage in unit+0xF6
+         * (0x48AE71-0x48AEAF), on every tick whose number is a multiple of
+         * thirty. RWE numbers its first tick 1, as the original does.
+         *
+         * The sample in unit+0xF7 is the second term of the kill severity, so
+         * a kill reads the health the unit had thirty to fifty-nine ticks
+         * earlier: a unit at full health for the last second that is flattened
+         * by one blow has 100 there whatever the overkill.
+         */
+        constexpr unsigned int HealthSampleInterval = 30;
+
+        void sampleUnitHealth(GameSimulation& sim)
+        {
+            if (sim.gameTime.value % HealthSampleInterval != 0)
+            {
+                return;
+            }
+
+            for (auto& entry : sim.units)
+            {
+                auto& unit = entry.second;
+                if (unit.isDead())
+                {
+                    continue;
+                }
+
+                const auto maxHitPoints = sim.unitDefinitions.at(unit.unitType).maxHitPoints;
+                unit.previousHealthPercentSample = unit.healthPercentSample;
+                unit.healthPercentSample = maxHitPoints == 0
+                    ? 0u
+                    : static_cast<unsigned int>(std::min<std::uint64_t>(100u, (std::uint64_t(100) * unit.hitPoints) / maxHitPoints));
+            }
+        }
     }
 
     void GameSimulation::killUnit(UnitId unitId, std::optional<UnitId> attacker)
@@ -3259,10 +3548,15 @@ namespace rwe
         // its cargo, a script asking to die. The original's own severity
         // arithmetic degenerates to its floor for these, and the shipped
         // ladders read that as the intact wreck.
-        killUnit(unitId, attacker, 0u);
+        killUnitWithSeverity(unitId, attacker, 0u, false);
     }
 
     void GameSimulation::killUnit(UnitId unitId, std::optional<UnitId> attacker, unsigned int overkill)
+    {
+        killUnitWithSeverity(unitId, attacker, overkill, true);
+    }
+
+    void GameSimulation::killUnitWithSeverity(UnitId unitId, std::optional<UnitId> attacker, unsigned int overkill, bool measured)
     {
         auto& unit = getUnitState(unitId);
         const auto& unitDefinition = unitDefinitions.at(unit.unitType);
@@ -3322,17 +3616,32 @@ namespace rwe
             }
         }
 
-        auto deathType = unit.position.y < terrain.getSeaLevel() ? UnitDiedEvent::DeathType::WaterExploded : UnitDiedEvent::DeathType::NormalExploded;
+        // An unfinished unit sets off nothing: the death weapon is skipped
+        // while the build-left fraction is non-zero (0x486D2F-0x486D40,
+        // BT-45), and the scene's blast and screen shake hang off the event
+        // type, so it reports a plain deletion. Its pieces still fly (below).
+        const bool unfinished = unit.isBeingBuilt(unitDefinition);
+        auto deathType = unfinished
+            ? UnitDiedEvent::DeathType::Deleted
+            : (unit.position.y < terrain.getSeaLevel() ? UnitDiedEvent::DeathType::WaterExploded : UnitDiedEvent::DeathType::NormalExploded);
         events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, deathType, unit.owner, killerOwner});
 
         // The severity is `clamp(1, 100, (100*overkill/maxdamage + X) / 2)`,
-        // where X is `unit+0xF7` -- the one term in this formula with no
-        // known writer anywhere in the binary, so it is taken as zero.
+        // where X is `unit+0xF7`: the unit's health percentage as sampled
+        // every thirtieth tick, one sample back (BT-43,
+        // BYTE-TACTICS-SPEC-ROOM-FINDINGS.md; sampleUnitHealth). A kill
+        // that no blow measured -- a scuttling, a transport going down --
+        // has no such second term here and keeps the floor of 1; the
+        // original queries no script at all for a unit that still has
+        // health, which this does not yet reproduce.
         // What the script does with the number is its own business: a
         // shipped `Killed` is a three-band ladder that picks a corpse
         // level from it and throws a different amount of the unit about
         // on the way.
-        const int severity = computeKilledSeverity(overkill, unitDefinition.maxHitPoints);
+        const int severity = computeKilledSeverity(
+            overkill,
+            unitDefinition.maxHitPoints,
+            measured ? unit.previousHealthPercentSample : 0u);
 
         // Run the script's Killed(severity, corpsetype) now, while the unit
         // still exists: the piece explosions it fires before its first sleep
@@ -3393,7 +3702,7 @@ namespace rwe
             }
         }
 
-        if (!unitDefinition.explodeAs.empty())
+        if (!unitDefinition.explodeAs.empty() && !unfinished)
         {
             auto impactType = unit.position.y < terrain.getSeaLevel() ? ImpactType::Water : ImpactType::Normal;
             // The explodeAs projectile is environmental: deaths it causes
@@ -3491,7 +3800,33 @@ namespace rwe
         applyDamage(unitId, damagePoints, attacker, false);
     }
 
-    void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer, std::optional<PlayerId> sourceOwner, const char* deathCause, bool reportedByOwner)
+    std::pair<int, int> computeHitByWeaponArguments(SimAngle direction)
+    {
+        // Only the high byte of the angle is kept (0x499CD0), so the direction
+        // has 256 steps, and the sine table holds 8192 for 1.0 (0x509F00).
+        // The cosine is the sine a quarter turn on.
+        auto step = SimAngle(static_cast<std::uint16_t>(direction.value & 0xFF00u));
+        auto tableValue = [](SimAngle a) {
+            return static_cast<std::int64_t>(std::lround(sin(a).value * 8192.0f));
+        };
+        auto scaled = [](std::int64_t t) {
+            // Times 400 over 8192, rounded to nearest; the shift is a floor,
+            // so half a unit is added first.
+            return static_cast<int>((t * 400 + 4096) >> 13);
+        };
+        return {scaled(tableValue(step + QuarterTurn)), scaled(tableValue(step))};
+    }
+
+    int computeTakeDamagePercent(unsigned int hitPoints, unsigned int maxHitPoints)
+    {
+        if (maxHitPoints == 0)
+        {
+            return 0;
+        }
+        return static_cast<int>(std::min<std::uint64_t>(100u, (std::uint64_t(100) * hitPoints) / maxHitPoints));
+    }
+
+    void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer, std::optional<PlayerId> sourceOwner, const char* deathCause, bool reportedByOwner, std::optional<SimVector> burstPosition)
     {
         // Damage to a Remote player's unit is the owner's to report. When this
         // machine ran the hit, its attacker side shows the damage and records a
@@ -3549,6 +3884,12 @@ namespace rwe
 
         if (attacker)
         {
+            // Who hit it last, and when: an escort of this unit reacts to it
+            // (unit+0xF0, BT-98).
+            auto& hit = getUnitState(unitId);
+            hit.lastAttacker = *attacker;
+            hit.lastAttackedAt = gameTime;
+
             // The original shoots back from inside the damage message
             // handler, before the hit points come off, which is the only
             // thing that makes return fire a firing mode rather than a
@@ -3616,55 +3957,82 @@ namespace rwe
         if (unit.hitPoints <= damagePoints)
         {
             recordUnitDeath(*this, unitId, deathCause, attacker);
-            if (unit.isBeingBuilt(unitDefinition))
-            {
-                // Units that are still under construction
-                // die quietly without a corpse.
-                // FIXME: units in TA that are not actively receiving build input
-                // die with an explosion, even though they leave no corpse.
-                //
-                // This is still death cause 1, an ordinary weapon kill, so the
-                // owner takes the loss -- and the attacker is credited nothing,
-                // which used to be an accident of the code path and is now the
-                // rule: both the veterancy counter and the player's Kills sit
-                // behind the build-progress test at 0x4869A7. See §5.
-                quietlyKillUnit(unitId);
-                // A nanoframe runs no Killed script, so it leaves no corpse
-                // and has no severity: cause 1 with both nibbles empty,
-                // which is what the corpus's cause-9 and cause-5 deaths
-                // read too.
-                notifyUnitDied(*this, unitId, attacker, 0, 1, 0);
-            }
-            else
-            {
-                // What the blow had left over once the unit's remaining hit
-                // points were paid for. The original works the severity out
-                // of exactly this.
-                killUnit(unitId, attacker, damagePoints - unit.hitPoints);
-            }
+
+            // What the blow had left over once the unit's remaining hit
+            // points were paid for. The original works the severity out of
+            // exactly this.
+            //
+            // A unit still under construction goes the same way (BT-45): it
+            // is death cause 1, an ordinary weapon kill, so the owner takes
+            // the loss and the Killed script runs, its pieces flying off as
+            // debris. What the unfinished state withholds is the corpse, the
+            // death weapon's blast and the attacker's credit, and
+            // killUnitWithSeverity says where each of those three goes.
+            killUnit(unitId, attacker, damagePoints - unit.hitPoints);
         }
         else
         {
             unit.hitPoints -= damagePoints;
+
+            // A hit that leaves the unit standing tells its script (0x489CE0,
+            // BT-54), for ordinary weapon damage only: HitByWeapon with the
+            // direction the burst came from, then TakeDamage with the health
+            // left. A solar collector's and a radar tower's HitByWeapon
+            // switch the unit off for eight seconds, so this is economy as
+            // well as animation. A script without the function costs nothing.
+            if (burstPosition && unit.cobEnvironment)
+            {
+                auto toBurst = *burstPosition - unit.position;
+                auto bearing = UnitState::toRotation(SimVector(toBurst.x, 0_ss, toBurst.z)) - unit.rotation;
+                auto [cosine, sine] = computeHitByWeaponArguments(bearing);
+                unit.cobEnvironment->createThread("HitByWeapon", {cosine, sine});
+                unit.cobEnvironment->createThread("TakeDamage", {computeTakeDamagePercent(unit.hitPoints, unitDefinition.maxHitPoints)});
+            }
         }
     }
 
     namespace
     {
         /**
-         * A blast too small to be worth spreading. The original checks
-         * AreaOfEffect against sixteen (0x49A049) and, under that, skips the
-         * falloff entirely for a flat 1.0 (0x49A05B). Our radius is already
-         * half the AreaOfEffect, so the same test is eight.
+         * The largest blast that takes the single-target path. The original
+         * checks AreaOfEffect against sixteen (0x49A049) and, at or under it
+         * AND with a unit that was struck (0x49A053), hurts that unit alone
+         * at scale 1.0. Our radius is already half the AreaOfEffect, so the
+         * same test is eight.
          *
-         * This is not a rounding detail. Forty-three of the hundred and
-         * thirty-six shipped weapons are inside it, including the twenty-eight
-         * at AreaOfEffect eight -- the machine guns and light lasers that do
-         * most of the shooting in a game -- and under the quadratic curve a
-         * hit landing six units off centre would otherwise come out at a
-         * sixteenth strength.
+         * Forty-three of the hundred and thirty-six shipped weapons are
+         * inside it, including the twenty-eight at AreaOfEffect eight -- the
+         * machine guns and light lasers that do most of the shooting. A round
+         * of one of them that strikes nothing (a miss into the ground, a
+         * death blast) is NOT exempt from the falloff: it goes to the area
+         * routine with this radius like any other blast (0x49A0A7, BT-112).
          */
         const SimScalar SmallestSpreadingBlastRadius = 8_ss;
+
+        /**
+         * How many units and features the area routine remembers (the
+         * compares at 0x49A28F and 0x49A5FA). An object already in its list
+         * is skipped. One met once the list is full is not recorded but is
+         * still processed, so it is hit again for every further map square it
+         * covers inside the blast (BT-112).
+         */
+        constexpr std::size_t BlastUnitListCapacity = 20;
+        constexpr std::size_t BlastFeatureListCapacity = 64;
+
+        /** True when the id is already listed; otherwise lists it if there is room and says false. */
+        template <typename Id>
+        bool alreadyListedOrRecord(std::vector<Id>& list, const Id& id, std::size_t capacity)
+        {
+            if (std::find(list.begin(), list.end(), id) != list.end())
+            {
+                return true;
+            }
+            if (list.size() < capacity)
+            {
+                list.push_back(id);
+            }
+            return false;
+        }
 
         /**
          * The original's blast falloff (TotalA.exe 0x49A3B6). The curve is
@@ -3675,11 +4043,6 @@ namespace rwe
          */
         SimScalar blastDamageScale(SimScalar distance, SimScalar radius, SimScalar edgeEffectiveness)
         {
-            if (radius <= SmallestSpreadingBlastRadius)
-            {
-                return 1_ss;
-            }
-
             auto t = std::clamp(1_ss - (distance / radius), 0_ss, 1_ss);
             return (t * t * (1_ss - edgeEffectiveness)) + edgeEffectiveness;
         }
@@ -3696,14 +4059,6 @@ namespace rwe
          */
         std::optional<SimScalar> blastDamageScaleForUnit(SimScalar distanceSquared, SimScalar radius, SimScalar edgeEffectiveness)
         {
-            // A blast this small is not the area routine at all but the
-            // single-target path at full strength (0x49A049), so the area
-            // routine's rim rule does not apply to it.
-            if (radius <= SmallestSpreadingBlastRadius)
-            {
-                return 1_ss;
-            }
-
             auto wholeDistance = SimScalar(std::floor(rweSqrt(distanceSquared).value));
             if (wholeDistance >= radius)
             {
@@ -3756,8 +4111,8 @@ namespace rwe
         // something at arm's length can still be hurt by what it killed.
         auto firer = projectile.attacker;
 
-        std::unordered_set<UnitId> seenUnits;
-        std::unordered_set<FeatureId> seenFeatures;
+        std::vector<UnitId> seenUnits;
+        std::vector<FeatureId> seenFeatures;
 
         // Blasts hurt features too: force-attacking a wreck field to clear a
         // lane is a standing part of play, and controlling one is an economy
@@ -3788,9 +4143,8 @@ namespace rwe
           if (damagesFeatures && !paralyzer && !remoteSource)
           {
               const auto& cell = occupiedGrid.get(coords);
-              if (cell.featureId && seenFeatures.find(*cell.featureId) == seenFeatures.end())
+              if (cell.featureId && !alreadyListedOrRecord(seenFeatures, *cell.featureId, BlastFeatureListCapacity))
               {
-                  seenFeatures.insert(*cell.featureId);
                   if (auto featureRef = tryGetFeature(*cell.featureId))
                   {
                       auto& feature = featureRef->get();
@@ -3817,7 +4171,7 @@ namespace rwe
                               // would go in the same shell that made it.
                               if (auto replacement = replaceFeature(*cell.featureId, featureDefinition.featureDead))
                               {
-                                  seenFeatures.insert(*replacement);
+                                  alreadyListedOrRecord(seenFeatures, *replacement, BlastFeatureListCapacity);
                               }
                           }
                           else
@@ -3841,8 +4195,7 @@ namespace rwe
               return;
           }
 
-          auto pair = seenUnits.insert(*u);
-          if (!pair.second)
+          if (alreadyListedOrRecord(seenUnits, *u, BlastUnitListCapacity))
           {
               return;
           }
@@ -3873,7 +4226,7 @@ namespace rwe
           }
           auto rawDamage = projectile.getDamage(unit.unitType);
           auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * *damageScale);
-          applyDamage(*u, scaledDamage, projectile.attacker, paralyzer, projectile.owner); });
+          applyDamage(*u, scaledDamage, projectile.attacker, paralyzer, projectile.owner, "weapon", false, projectile.position); });
 
         for (const auto& flyingUnitId : flyingUnitsSet)
         {
@@ -3903,18 +4256,35 @@ namespace rwe
             }
             auto rawDamage = projectile.getDamage(unit.unitType);
             auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * *damageScale);
-            applyDamage(flyingUnitId, scaledDamage, projectile.attacker, paralyzer, projectile.owner);
+            applyDamage(flyingUnitId, scaledDamage, projectile.attacker, paralyzer, projectile.owner, "weapon", false, projectile.position);
         }
     }
 
-    void GameSimulation::doProjectileImpact(const Projectile& projectile, ImpactType /*impactType*/, std::optional<ProjectileId> projectileId)
+    void GameSimulation::doProjectileImpact(const Projectile& projectile, ImpactType /*impactType*/, std::optional<ProjectileId> projectileId, std::optional<UnitId> struckUnit)
     {
         // A Remote player's round sets nothing off here: not our units, which
         // its owner's 0x0b accounts for, and not a feature, which is the fire
         // starter's to ignite.
         if (!isRemoteRound(*this, projectile))
         {
-            applyDamageInRadius(projectile.position, projectile.damageRadius, projectile);
+            if (struckUnit && projectile.damageRadius <= SmallestSpreadingBlastRadius)
+            {
+                // areaofeffect 16 or less AND a unit that was struck (0x49A049,
+                // 0x49A053): one hit at scale 1.0 on that unit and nothing
+                // else, neighbours and features included. A round with no
+                // unit, or a bigger blast, goes through the area routine.
+                // BT-112.
+                auto weaponIt = weaponDefinitions.find(projectile.weaponType);
+                auto paralyzer = weaponIt != weaponDefinitions.end() && weaponIt->second.paralyzer;
+                if (auto struck = tryGetUnitState(*struckUnit); struck && !struck->get().isDead())
+                {
+                    applyDamage(*struckUnit, projectile.getDamage(struck->get().unitType), projectile.attacker, paralyzer, projectile.owner, "weapon", false, projectile.position);
+                }
+            }
+            else
+            {
+                applyDamageInRadius(projectile.position, projectile.damageRadius, projectile);
+            }
 
             if (auto it = weaponDefinitions.find(projectile.weaponType); it != weaponDefinitions.end() && it->second.fireStarter > 0)
             {
@@ -3928,7 +4298,9 @@ namespace rwe
         // (0x49A664) -- which is also why one anti-nuke can clear a salvo.
         if (auto it = weaponDefinitions.find(projectile.weaponType); it != weaponDefinitions.end() && it->second.interceptor)
         {
-            detonateProjectilesInBlast(projectileId, projectile.position, projectile.damageRadius);
+            // The full areaofeffect, not the halved radius the unit-damage
+            // routine uses (0x49A664; BT-111): damageRadius is half of it.
+            detonateProjectilesInBlast(projectileId, projectile.position, projectile.damageRadius * 2_ss);
         }
     }
 
@@ -3965,6 +4337,20 @@ namespace rwe
             }
         }
 
+        // With nothing live to follow, a cruise weapon steers at its stored
+        // destination with the height set to the higher of the ground there
+        // and sea level (0x49B3E0, ground read at 0x485070), so the final
+        // approach comes down to the surface and not to wherever the point
+        // was stored. A weapon that does not cruise gets the point as it is
+        // (BT-115).
+        if (p.cruise && projectile.targetPosition)
+        {
+            auto point = *projectile.targetPosition;
+            auto ground = terrain.tryGetHeightAt(point.x, point.z).value_or(terrain.getSeaLevel());
+            point.y = rweMax(ground, terrain.getSeaLevel());
+            return point;
+        }
+
         return projectile.targetPosition;
     }
 
@@ -3982,7 +4368,7 @@ namespace rwe
             // TA takes one tick of gravity on the changeover without rebuilding
             // the velocity from the attitude, so a vertical launch is still
             // climbing on the tick it turns over.
-            projectile.velocity.y -= 112_ss / (30_ss * 30_ss);
+            projectile.velocity.y -= gravityPerTick();
 
             if (p.twoPhase && !projectile.secondPhase)
             {
@@ -4053,6 +4439,12 @@ namespace rwe
                 continue;
             }
 
+            // The whole-unit height this round had when its update began, for
+            // the water-entry splash at the end of it (BT-14). A local: the
+            // comparison is between this update's start and its end, so no
+            // state has to persist between ticks.
+            const auto wholeHeightAtStart = std::floor(projectile.position.y.value);
+
             bool detonated = false;
             match(
                 weaponDefinition.physicsType,
@@ -4062,7 +4454,7 @@ namespace rwe
                     // displacement the shell never accumulates, so a long
                     // flight drifts linearly rather than curving away.
                     projectile.position += currentWindVector;
-                    projectile.velocity.y -= 112_ss / (30_ss * 30_ss);
+                    projectile.velocity.y -= gravityPerTick();
                 },
                 [&](const ProjectilePhysicsTypeBomb&) {
                     // Bombs follow the same gravity model as ballistic
@@ -4073,7 +4465,7 @@ namespace rwe
                     // -- the release trigger (bombReleaseTrigger) does not
                     // model the wind, and neither does the original's.
                     projectile.position += currentWindVector;
-                    projectile.velocity.y -= 112_ss / (30_ss * 30_ss);
+                    projectile.velocity.y -= gravityPerTick();
                 },
                 [&](const ProjectilePhysicsTypeLineOfSight&) {
 
@@ -4111,12 +4503,14 @@ namespace rwe
             // clause (0x49B106): if it is inside its own areaofeffect of the
             // missile it is chasing it goes off there and then, rather than
             // waiting to run into something. Strictly inside -- the original's
-            // `jge` at 0x49B1A4 skips at exactly the radius.
+            // `jge` at 0x49B1A4 skips at exactly the radius -- and the radius
+            // is the full areaofeffect, 96 for every shipped interceptor, in
+            // whole units on each axis (BT-111).
             if (projectile.targetProjectile)
             {
                 auto target = projectiles.tryGet(*projectile.targetProjectile);
                 if (target && !target->get().isDead
-                    && projectile.position.distanceSquared(target->get().position) < projectile.damageRadius * projectile.damageRadius)
+                    && wholeUnitDistanceSquared(projectile.position, target->get().position) < (projectile.damageRadius * 2_ss) * (projectile.damageRadius * 2_ss))
                 {
                     projectile.isDead = true;
                     doProjectileImpact(projectile, ImpactType::Normal, id);
@@ -4141,11 +4535,17 @@ namespace rwe
             auto collisionInfo = checkProjectileCollision(*this, projectile);
             if (collisionInfo)
             {
-                // Spray or earth by the square the round went off in, whatever
-                // it struck (0x499ECF): a hit on a wading unit in a wet square
-                // splashes, and a round into the shallows of a square with a
-                // dry corner throws up earth.
-                auto inWater = terrain.isSquareUnderSea(projectile.position.x, projectile.position.z);
+                // Spray or earth by the square the round went off in -- but
+                // only when no unit was struck (0x499EB0, BT-9). The routine
+                // plays the water sound and requests the splash when the
+                // square is wet AND it was handed no unit; a hull hit over a
+                // wet square takes the ordinary hit sound and explosion, and
+                // so does anything that is not given a unit's name. A round
+                // into the shallows of a square with a dry corner throws up
+                // earth.
+                const auto* unitHit = std::get_if<ProjectileCollisionInfoUnitOrFeatureOrBuilding>(&*collisionInfo);
+                const auto struckAUnit = unitHit != nullptr && unitHit->struckUnit.has_value();
+                auto inWater = !struckAUnit && terrain.isSquareUnderSea(projectile.position.x, projectile.position.z);
                 auto impactType = inWater ? ImpactType::Water : ImpactType::Normal;
                 auto impactDeath = inWater ? ProjectileDiedEvent::DeathType::WaterImpact : ProjectileDiedEvent::DeathType::NormalImpact;
                 match(
@@ -4188,8 +4588,8 @@ namespace rwe
                             events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, impactDeath});
                         }
                     },
-                    [&](const ProjectileCollisionInfoUnitOrFeatureOrBuilding&) {
-                        doProjectileImpact(projectile, impactType);
+                    [&](const ProjectileCollisionInfoUnitOrFeatureOrBuilding& hit) {
+                        doProjectileImpact(projectile, impactType, std::nullopt, hit.struckUnit);
                         if (noExplode)
                         {
                             events.push_back(ProjectileDetonatedEvent{projectile.weaponType, projectile.position, inWater});
@@ -4198,6 +4598,25 @@ namespace rwe
                         projectile.isDead = true;
                         events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, impactDeath});
                     });
+            }
+
+            // The entry splash (the tail of 0x49B720): a round still alive
+            // after its collision test whose whole-unit height was strictly
+            // above sea level when the update began and is at or below it now,
+            // over a square that is under the sea, on a map whose sea trigger
+            // is not switched off, throws up the weapon's splash. Art only.
+            // A round the crossing step killed gets the impact's art instead,
+            // and an ordinary shot that lands exactly on the surface gets this
+            // first and its detonation a step later.
+            if (!projectile.isDead && !noSeaLevelTrigger)
+            {
+                const auto seaWhole = std::floor(terrain.getSeaLevel().value);
+                if (wholeHeightAtStart > seaWhole
+                    && std::floor(projectile.position.y.value) <= seaWhole
+                    && terrain.isSquareUnderSea(projectile.position.x, projectile.position.z))
+                {
+                    events.push_back(ProjectileDetonatedEvent{projectile.weaponType, projectile.position, true, true});
+                }
             }
         }
     }
@@ -4302,21 +4721,31 @@ namespace rwe
             // the wind speed will last between 5 and 14 seconds before changing
             nextWindSpeedChange = gameTime + GameTime(randomBetween(rng, 5, 14) * SimTicksPerSecond);
 
-            auto currentWindSpeed = randomBetween(rng, minWindSpeed, std::max(minWindSpeed, maxWindSpeed));
+            // The minimum plus a draw below the span (BT-130, 0x4B6C30). The
+            // draw is a modulo of the span, so the map's maximum is never
+            // reached unless the two bounds are equal, and a span under two
+            // draws nothing at all: the routine returns zero without
+            // advancing the seed. randomBelow would draw for a span of one.
+            const int windSpan = maxWindSpeed - minWindSpeed;
+            const int currentWindSpeed = minWindSpeed + (windSpan < 2 ? 0 : static_cast<int>(randomBelow(rng, static_cast<unsigned int>(windSpan))));
 
-            auto currentWindDirection = SimAngle(static_cast<uint16_t>(randomBetween(rng, MinAngle.value, MaxAngle.value)));
+            // Only a wind that blows is given a direction (BT-26, 0x490C40):
+            // at speed zero no draw is made and the stale direction stays,
+            // which the wind generators' SetDirection is still told.
+            if (currentWindSpeed != 0)
+            {
+                currentWindDirection = SimAngle(static_cast<uint16_t>(randomBetween(rng, MinAngle.value, MaxAngle.value)));
+            }
 
             // A generator gets the wind as a fraction of the speed the game
             // considers a full gale, and no more than all of it however hard
             // the map says the wind blows (TotalA.exe 0x490D5E).
             currentWindGenerationFactor = rweMin(1_ss, SimScalar(currentWindSpeed) / SimScalar(MaxUtilizableWindSpeed));
 
-            // The same draw also aims the wind that pushes shells about. The
-            // speed and direction above are locals, so this vector is the only
-            // thing that outlives the change.
+            // The same draw also aims the wind that pushes shells about.
             currentWindVector = computeWindVector(currentWindDirection, currentWindSpeed);
 
-            UnitBehaviorService(this).updateWind(currentWindGenerationFactor, currentWindDirection);
+            UnitBehaviorService(this).updateWind(currentWindSpeed, currentWindDirection);
         }
     }
 
@@ -4329,12 +4758,38 @@ namespace rwe
             return;
         }
 
+        // And outside a mission, from the first second the win test answers
+        // until the end of the game (BT-82, 0x401360 runs only while the word
+        // is negative and the latch clear).
+        if (!missionRules && isEndCountdownFreezingEconomy())
+        {
+            return;
+        }
+
         // run resource updates once per second
         if (gameTime % GameTime(SimTicksPerSecond) == GameTime(0))
         {
+            // Which players settle (BT-28, the gate in 0x464F80): one this
+            // machine simulates, that has units or has never had any. A player
+            // that has created units and now has none is out of the game, and
+            // its economy stops where it stood.
+            std::vector<bool> hasLivingUnit(players.size(), false);
+            for (const auto& entry : units)
+            {
+                if (!entry.second.isDead() && entry.second.owner.value < players.size())
+                {
+                    hasLivingUnit[entry.second.owner.value] = true;
+                }
+            }
+            std::vector<bool> settles(players.size(), false);
             for (Index i = 0; i < getSize(players); ++i)
             {
-                if (!simulatesLocally(*this, PlayerId(i)))
+                settles[i] = simulatesLocally(*this, PlayerId(i)) && (hasLivingUnit[i] || !players[i].hasCreatedUnits);
+            }
+
+            for (Index i = 0; i < getSize(players); ++i)
+            {
+                if (!settles[i])
                 {
                     continue;
                 }
@@ -4347,7 +4802,7 @@ namespace rwe
             for (auto& entry : units)
             {
                 auto& unit = entry.second;
-                if (!simulatesLocally(*this, unit.owner))
+                if (unit.owner.value >= players.size() || !settles[unit.owner.value])
                 {
                     continue;
                 }
@@ -4379,7 +4834,7 @@ namespace rwe
             {
                 const auto& unitId = entry.first;
                 auto& unit = entry.second;
-                if (!simulatesLocally(*this, unit.owner))
+                if (unit.owner.value >= players.size() || !settles[unit.owner.value])
                 {
                     continue;
                 }
@@ -4400,8 +4855,12 @@ namespace rwe
                         if (unitDefinition.extractsMetal != Metal(0))
                         {
                             auto footprint = computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
-                            auto metalValue = metalGrid.accumulate(metalGrid.clipRegion(footprint), 0u, std::plus<>());
-                            addResourceDelta(unitId, Energy(0), Metal(metalValue * unitDefinition.extractsMetal.value));
+                            // The original caches rating * N at creation
+                            // (unit+0x58); the grid is constant afterwards in
+                            // the reference, so reading it here is the same.
+                            // float(double(rating) * N), rounded once.
+                            auto work = extractorMetalWork(footprint);
+                            addResourceDelta(unitId, Energy(0), Metal(static_cast<float>(static_cast<double>(unitDefinition.extractsMetal.value) * static_cast<double>(work))));
                         }
 
                         if (unitDefinition.makesMetal != Metal(0))
@@ -4469,7 +4928,7 @@ namespace rwe
             // is paid before anything new.
             for (Index i = 0; i < getSize(players); ++i)
             {
-                if (!simulatesLocally(*this, PlayerId(i)))
+                if (!settles[i])
                 {
                     continue;
                 }
@@ -4664,7 +5123,7 @@ namespace rwe
             {
                 // Still in the air above the water: the map's gravity.
                 // 0x4242A5.
-                feature.velocity.y -= 112_ss / (30_ss * 30_ss);
+                feature.velocity.y -= gravityPerTick();
             }
         }
     }
@@ -4938,6 +5397,30 @@ namespace rwe
                 product.moveOrders = unit->get().moveOrders;
                 product.fireOrders = unit->get().fireOrders;
 
+                // An unfinished product is attached to the yard's build piece
+                // and follows it in height (the yard's building pass does so
+                // from the next tick on), so its first appearance must not be
+                // the seabed trySpawnUnit settled it on: a submarine would be
+                // drawn on the bottom for a tick or two and then jump to the
+                // pad. A floater is held to sea level minus its WaterLine, as
+                // the building pass does; hovers keep the sea-level floor
+                // trySpawnUnit gave them. Aircraft were never settled.
+                // NAVAL-CONSTRUCTION-DGUN-FINDINGS.md, "submarine under
+                // construction"; NAVAL-SYSTEMS-PARITY.md section 1.
+                {
+                    const auto& productDefinition = unitDefinitions.at(s->unitType);
+                    if (productDefinition.isMobile && !productDefinition.canFly && !productDefinition.canHover)
+                    {
+                        auto attachedHeight = s->position.y;
+                        if (productDefinition.floater)
+                        {
+                            attachedHeight = rweMax(attachedHeight, terrain.getSeaLevel() - intToSimScalar(static_cast<int>(productDefinition.waterLine)));
+                        }
+                        product.position.y = attachedHeight;
+                        product.previousPosition.y = attachedHeight;
+                    }
+                }
+
                 // A factory's frame is a build start like a builder's: the
                 // 0x09 names the frame and the 0x12 names the yard that
                 // finished it.
@@ -5001,6 +5484,20 @@ namespace rwe
                 const auto& newUnitDefinition = unitDefinitions.at(newUnit.unitType);
                 newUnit.buildTimeCompleted = newUnitDefinition.buildTime;
                 newUnit.hitPoints = 1;
+
+                // BT-93 (state 6 of 0x404DB0, 0x405243): the resurrector goes
+                // straight on to mend the unit it raised. The mission asks the
+                // order builder for command 8 on the new unit; that arm needs
+                // the orderer's repair capability (canreclamate, 0x4899B0) and
+                // a target whose health differs from its maximum, and for a
+                // finished unit yields REPAIRUNIT. The node goes in at the head
+                // of the list and the resurrect mission ends, so its order is
+                // dropped here as well rather than left to find no corpse and
+                // complain.
+                // The order work sits in UnitBehaviorService, not here: a deque
+                // of the order variant instantiated in this file costs most of
+                // its section budget (CLAUDE.md, the COFF ceiling).
+                UnitBehaviorService(this).mendRaisedUnit(unitId, s->target, *newUnitId);
             }
         }
 
@@ -5112,7 +5609,9 @@ namespace rwe
             runAiControllers();
         }
 
-        updateWind();
+        // Where the original's unit pass takes it, ahead of any kill a unit
+        // suffers later in the tick.
+        sampleUnitHealth(*this);
 
         // Before the settle, which the countdown the rules may start this
         // second freezes (0x4650A9 comes before 0x46554F in the same pass).
@@ -5120,12 +5619,20 @@ namespace rwe
         {
             missionRules->update(*this);
         }
-
-        // Allies' automatic sharing goes in just before the settle, so what it
-        // moves is paid out in the same second (ResourceSharing.h).
-        runAutomaticSharing(*this);
+        else
+        {
+            // Outside a mission the same pass runs the same countdown over
+            // the skirmish win test (BT-82).
+            updateEndCountdown();
+        }
 
         updateResources();
+
+        // After the player pass, as the original does it (0x490C40 follows
+        // 0x464F80; BT-26): on a tick that is both a settle and a change the
+        // settle has used the old fraction. Still ahead of the unit passes,
+        // so the scripts it starts run this tick.
+        updateWind();
 
         {
             RWE_SIMPROF("path");
@@ -5241,6 +5748,13 @@ namespace rwe
             RWE_SIMPROF("visibility");
             updateVisibility();
         }
+
+        // Allies' automatic sharing is the last thing in the original's tick
+        // (0x457D30; BT-27): the donor's stockpile falls at the end of tick T
+        // and the gift reaches the receiver at the next settle, a second
+        // later when T is a multiple of sixty. Sizes are taken on the
+        // balances as the tick leaves them (ResourceSharing.h).
+        runAutomaticSharing(*this);
 
         // Last, once every phase has left its mark on the tick: the recorder
         // reads the end-of-tick state, which is the state TA's sender would

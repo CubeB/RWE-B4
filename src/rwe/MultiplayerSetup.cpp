@@ -74,3 +74,61 @@ namespace rwe
         return std::nullopt;
     }
 }
+
+namespace rwe
+{
+    std::optional<std::string> allOnOneTeamProblem(const std::vector<SetupSeat>& seats)
+    {
+        std::optional<int> sharedTeam;
+        std::size_t occupied = 0;
+        for (const auto& seat : seats)
+        {
+            if (seat.kind == SetupSeat::Kind::Open)
+            {
+                continue;
+            }
+
+            ++occupied;
+            if (!seat.team)
+            {
+                // A seat on no team is a group of its own.
+                return std::nullopt;
+            }
+
+            if (sharedTeam && *sharedTeam != *seat.team)
+            {
+                return std::nullopt;
+            }
+            sharedTeam = seat.team;
+        }
+
+        if (occupied < 2)
+        {
+            return std::nullopt;
+        }
+
+        return std::string("Can not start game with all players on the same team.");
+    }
+
+    std::optional<std::string> skirmishSetupProblem(const std::vector<SetupSeat>& seats)
+    {
+        auto humans = std::count_if(seats.begin(), seats.end(), [](const auto& s) { return s.kind == SetupSeat::Kind::Human; });
+        auto computers = std::count_if(seats.begin(), seats.end(), [](const auto& s) { return s.kind == SetupSeat::Kind::Computer; });
+        if (humans == 0 || computers == 0)
+        {
+            return std::string("A skirmish needs at least one human player and at least one computer player.");
+        }
+
+        return allOnOneTeamProblem(seats);
+    }
+
+    PreviousMenuAction previousMenuAction(bool dialogOpen, std::size_t panelCount)
+    {
+        if (dialogOpen)
+        {
+            return PreviousMenuAction::CloseDialog;
+        }
+
+        return panelCount > 1 ? PreviousMenuAction::PopPanel : PreviousMenuAction::Nothing;
+    }
+}

@@ -1,5 +1,6 @@
 #include "GameScene_ownclock.h"
 #include "GameScene.h"
+#include <algorithm>
 #include <rwe/util/SimpleLogger.h>
 
 // The own-clock game: a live game whose scene advances on its own clock like
@@ -23,6 +24,44 @@ namespace rwe
     {
         clock.paused = paused;
         return clock;
+    }
+
+    PeerSpeedPacket decodePeerSpeedPacket(std::uint16_t wire)
+    {
+        PeerSpeedPacket packet;
+        auto subtype = static_cast<unsigned int>(wire & 0xFFu);
+        auto value = static_cast<unsigned int>(wire >> 8);
+        if (subtype == 0)
+        {
+            packet.kind = PeerSpeedPacket::Kind::Pause;
+            packet.paused = (value & 1u) != 0;
+        }
+        else if (subtype == 1)
+        {
+            packet.kind = PeerSpeedPacket::Kind::Speed;
+            packet.level = static_cast<int>(std::clamp(value, 1u, 20u));
+        }
+        return packet;
+    }
+
+    bool peerPauseAllowed(PeerPauseGate& gate, bool paused, bool gameStarted)
+    {
+        if (!paused)
+        {
+            gate.seenUnpause = true;
+            return true;
+        }
+        return gameStarted && gate.seenUnpause;
+    }
+
+    std::string gameSpeedMessage(int level)
+    {
+        auto offset = std::clamp(level, 1, 20) - 10;
+        if (offset == 0)
+        {
+            return "Game Speed Normal";
+        }
+        return std::string("Game Speed  ") + (offset > 0 ? "+" : "") + std::to_string(offset);
     }
 
     void GameScene::setPeerGameSpeedLevel(int peerSpeedLevel)
@@ -51,6 +90,23 @@ namespace rwe
         gameSpeed = clock.speed;
         this->paused = clock.paused;
         LOG_INFO << "Peer " << (paused ? "paused" : "unpaused") << " the game";
+    }
+
+    GameMenuGate gameMenuGate(bool ownClock, bool lockstepNetwork)
+    {
+        GameMenuGate gate;
+        if (ownClock || lockstepNetwork)
+        {
+            gate.restart = false;
+            gate.load = false;
+            gate.save = false;
+        }
+        return gate;
+    }
+
+    bool GameScene::isLockstepNetworkGame() const
+    {
+        return !isPlayback() && !isOwnClock() && gameNetworkService->hasRemotePeers();
     }
 
     bool GameScene::canSave() const

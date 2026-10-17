@@ -71,6 +71,12 @@ namespace rwe
         unsigned int port{1337};
         bool launching{false};
 
+        /** The map's identity (MapIdentity.h), empty when it could not be worked out. */
+        std::string mapIdentity;
+
+        /** The lobby's setup version; see DiscoveredGame::setupEpoch. */
+        unsigned int setupEpoch{0};
+
         /**
          * Where this machine's game port is as the internet sees it, once
          * it has found out (NatTraversal), or empty. See
@@ -176,10 +182,28 @@ namespace rwe
         int team{-1};
         bool ready{false};
 
+        /**
+         * The setup version the guest was ready under, as it read it off the
+         * host's announcement; zero from a build that does not say. A `ready`
+         * at any other version than the host's current one is stale (#719).
+         */
+        unsigned int setupEpoch{0};
+
         /** The guest's most recent lines, by its own sequence numbers. */
         std::vector<DiscoveredChatLine> chat;
         bool approvalRequired{false};
     };
+
+    /**
+     * What a guest's readiness is a promise about: the map, the game's rules
+     * and the seat table, as an announcement has them. Two announcements with
+     * the same fingerprint are the same game for the purpose of "I am ready";
+     * ready flags, names, addresses, chat and the launching flag are not part
+     * of it, so a person typing or joining under a name does not unready
+     * everyone, while a seat opening or closing, a colour or team moving, a
+     * rule changing or another map does (#719).
+     */
+    std::string setupFingerprint(const DiscoveredGame& game);
 
     constexpr std::size_t claimTokenLength = 8;
 
@@ -629,6 +653,20 @@ namespace rwe
         std::string password;
         std::vector<std::string> seatTokens = std::vector<std::string>(10);
         bool launching{false};
+
+        /**
+         * Host: the fingerprint of the setup last announced and the version
+         * number it carries, which rises when the fingerprint changes so that
+         * a ready flag given under an older one stops counting (#719). The
+         * map's identity is worked out once per map name and kept.
+         */
+        std::string setupFingerprint;
+        unsigned int setupEpoch{1};
+        std::string mapIdentityFor;
+        std::string mapIdentityValue;
+
+        /** Guest: the setup version last read off the host, so that a new one clears the guest's own ready. */
+        unsigned int seenEpoch{0};
         Timestamp launchBeganAt{};
 
         /** What the host has heard of each guest, by claim token, so that only a change is acted on. */

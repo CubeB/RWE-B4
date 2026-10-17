@@ -686,11 +686,29 @@ namespace rwe
          * away, and the third the difference, which is what was actually put
          * to use. No L2 tool reads them; the JSON dump carries them for the
          * argument that would name them.
+         *
+         * The 17 bytes before the floats are a share flag and four counters
+         * the original widens from 16 bits to 32 (BT-231). The flag is set
+         * only when answering the view handshake, which RWE does not hold, so
+         * it is zero. The first two counters are this player's kills and
+         * losses, the only statistics RWE keeps; the original's other two were
+         * never traced to what they count and stay zero. Read-only: nothing
+         * here reaches the simulation or its hash.
          */
         TadResourceStats resourceStatsFor(const GameSimulation& simulation, PlayerId player) const
         {
             const auto& info = simulation.getPlayer(player);
             TadResourceStats stats{};
+            auto putCounter = [&stats](std::size_t slot, unsigned int count) {
+                // Bytes 1-4, 5-8, 9-12 and 13-16 of the prefix; byte 0 is the flag.
+                auto widened = std::min<unsigned int>(count, 0xFFFFu);
+                for (std::size_t i = 0; i < 4; ++i)
+                {
+                    stats.prefix[1 + slot * 4 + i] = static_cast<uint8_t>((widened >> (8 * i)) & 0xFFu);
+                }
+            };
+            putCounter(0, info.unitsKilled);
+            putCounter(1, info.unitsLost);
             stats.metalStored = info.metal.value;
             stats.energyStored = info.energy.value;
             stats.metalStorage = info.maxMetal.value;

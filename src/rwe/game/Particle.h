@@ -142,6 +142,16 @@ namespace rwe
          */
         bool driftsWithWind{false};
 
+        /**
+         * Thermal vent steam (BT-151). The vent emitter's class has a draw
+         * routine with no sight test of any kind, so its steam shows wherever
+         * the ground is explored; the fog frames laid afterwards dim it where
+         * the ground is explored but not in sight, as they dim everything
+         * else in remembered ground. Unexplored ground hides it under the
+         * opaque fog fill. See ventSteamDrawMode.
+         */
+        bool dimmedInRememberedGround{false};
+
         bool isStarted(GameTime currentTime) const;
         unsigned int getFrameIndex(GameTime currentTime, const ParticleRenderTypeSprite& renderType, int totalFrames) const;
         bool isFinished(GameTime currentTime, const ParticleRenderTypeSprite& renderType, int numberOfFrames) const;

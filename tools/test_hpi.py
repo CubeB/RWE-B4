@@ -521,6 +521,11 @@ class Lz77Test(unittest.TestCase):
     def test_running_over_the_declared_output_size(self):
         self._refused(b'\x00' + b'ab' * 8, 4)
 
+    def test_an_end_marker_before_the_declared_output_size(self):
+        # The same stream as the terminator test, one byte long, asked for
+        # five: hpi_util.cpp refuses it, where it used to leave a zero tail.
+        self._refused(bytes([0b010]) + b'a' + struct.pack('<H', 0), 5)
+
 
 class ZlibTest(unittest.TestCase):
     """decompressZLib, including its second definition of a finished chunk:

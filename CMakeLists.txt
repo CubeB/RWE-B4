@@ -336,6 +336,8 @@ set(SOURCE_FILES
     src/rwe/game/DownloadMenus.h
     src/rwe/game/DefaultAction.cpp
     src/rwe/game/DefaultAction.h
+    src/rwe/game/InterfaceRules.cpp
+    src/rwe/game/InterfaceRules.h
     src/rwe/game/FeatureMediaInfo.cpp
     src/rwe/game/FeatureMediaInfo.h
     src/rwe/game/EndGameStats.cpp
@@ -364,6 +366,7 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_endgame.cpp
     src/rwe/game/GameScene_input.cpp
     src/rwe/game/GameScene_menu.cpp
+    src/rwe/game/GameScene_minimap.cpp
     src/rwe/game/GameScene_peers.cpp
     src/rwe/game/GameScene_render.cpp
     src/rwe/game/panel_slide.cpp
@@ -414,6 +417,8 @@ set(SOURCE_FILES
     src/rwe/game/WeaponMediaInfo.h
     src/rwe/game/DesyncReport.cpp
     src/rwe/game/chat_util.cpp
+    src/rwe/game/OrderMarkerMemory.cpp
+    src/rwe/game/OrderMarkerMemory.h
     src/rwe/game/chat_util.h
     src/rwe/game/chat_command.cpp
     src/rwe/game/chat_command.h
@@ -548,6 +553,8 @@ set(SOURCE_FILES
     src/rwe/net/InviteCode.h
     src/rwe/net/LanDiscovery.cpp
     src/rwe/net/LanDiscovery.h
+    src/rwe/net/MapIdentity.cpp
+    src/rwe/net/MapIdentity.h
     src/rwe/net/NatTraversal.cpp
     src/rwe/net/NatTraversal.h
     src/rwe/net/Stun.cpp
@@ -694,6 +701,7 @@ src/rwe/net/EndpointFamily.h
     src/rwe/sim/GameHash_util.h
     src/rwe/sim/GameSimulation.cpp
     src/rwe/sim/GameSimulation_visibility.cpp
+    src/rwe/sim/GameSimulation_endgame.cpp
     src/rwe/sim/GameSimulation.h
     src/rwe/sim/GameTime.cpp
     src/rwe/sim/GameTime.h
@@ -1133,6 +1141,7 @@ set(TEST_FILES
     src/rwe/observable/Subject.test.cpp
     src/rwe/collections/VectorMap.test.cpp
     src/rwe/game/DefaultAction.test.cpp
+    src/rwe/game/InterfaceRules.test.cpp
     src/rwe/game/GameScene_audio.test.cpp
     src/rwe/game/GameScene_ownclock.test.cpp
     src/rwe/game/panel_slide.test.cpp
@@ -1171,7 +1180,9 @@ set(TEST_FILES
     src/rwe/game/LockstepStats.test.cpp
     src/rwe/game/SimDiagnostics.test.cpp
     src/rwe/game/playerrejoin.test.cpp
+    src/rwe/game/presentation.test.cpp
     src/rwe/game/chat_util.test.cpp
+    src/rwe/game/OrderMarkerMemory.test.cpp
     src/rwe/game/PeerLink.test.cpp
     src/rwe/game/SimEventLog.test.cpp
     src/rwe/geometry/BoundingBox3f.test.cpp
@@ -1215,6 +1226,7 @@ set(TEST_FILES
     src/rwe/BuildIdentity.test.cpp
     src/rwe/net/InviteCode.test.cpp
     src/rwe/net/LanDiscovery.test.cpp
+    src/rwe/net/MapIdentity.test.cpp
     src/rwe/net/NatTraversal.test.cpp
     src/rwe/net/Stun.test.cpp
     src/rwe/math/Matrix4f.test.cpp
@@ -1240,6 +1252,7 @@ set(TEST_FILES
     src/rwe/sim/demorecorder.test.cpp
     src/rwe/sim/accuracy.test.cpp
     src/rwe/sim/aimlead.test.cpp
+    src/rwe/sim/activation.test.cpp
     src/rwe/sim/waterline.test.cpp
     src/rwe/game/screenshake.test.cpp
     src/rwe/game/shatter.test.cpp
@@ -1262,6 +1275,7 @@ set(TEST_FILES
     src/rwe/sim/autoreclaim.test.cpp
     src/rwe/sim/reclaim.test.cpp
     src/rwe/sim/repair.test.cpp
+    src/rwe/sim/guardnomove.test.cpp
     src/rwe/sim/mine.test.cpp
     src/rwe/sim/nanoframedecay.test.cpp
     src/rwe/sim/patrol.test.cpp
@@ -1284,6 +1298,9 @@ set(TEST_FILES
     src/rwe/sim/moverate.test.cpp
     src/rwe/sim/movement.test.cpp
     src/rwe/sim/pathfollowing.test.cpp
+    src/rwe/sim/goalsquare.test.cpp
+    src/rwe/sim/unreachablemove.test.cpp
+    src/rwe/sim/sweetspot.test.cpp
     src/rwe/sim/transport.test.cpp
     src/rwe/sim/bomber.test.cpp
     src/rwe/sim/bomberpatrol.test.cpp
@@ -1307,6 +1324,8 @@ set(TEST_FILES
     src/rwe/sim/acidwater.test.cpp
     src/rwe/sim/aircraft.test.cpp
     src/rwe/sim/groundtilt.test.cpp
+    src/rwe/sim/blockedcell.test.cpp
+    src/rwe/sim/seahold.test.cpp
     src/rwe/sim/selfdestruct.test.cpp
     src/rwe/sim/damage.test.cpp
     src/rwe/sim/stockpile.test.cpp
@@ -1317,6 +1336,9 @@ set(TEST_FILES
     src/rwe/sim/groupattack.test.cpp
     src/rwe/sim/fogattack.test.cpp
     src/rwe/sim/ballisticair.test.cpp
+    src/rwe/sim/mapgravity.test.cpp
+    src/rwe/sim/nanoframedeath.test.cpp
+    src/rwe/sim/hitbyweapon.test.cpp
     src/rwe/sim/wind.test.cpp
     src/rwe/pathfinding/pathing.test.cpp
     src/rwe/pathfinding/PathfindingBackend.test.cpp
@@ -1343,6 +1365,7 @@ set(TEST_FILES
     src/rwe/sim/targetsearch.test.cpp
     src/rwe/sim/turret.test.cpp
     src/rwe/sim/maxreloadtime.test.cpp
+    src/rwe/sim/extractor.test.cpp
     src/rwe/sim/aimpershot.test.cpp
     src/rwe/sim/SimRandom.test.cpp
     src/rwe/sim/resurrect.test.cpp

@@ -428,9 +428,12 @@ namespace rwe
         tickTo(sim, FirstEconomyTick);
         REQUIRE(sim.getUnitState(unitId).cloaked);
 
-        // Twenty units away, inside the Commander's forty.
+        // Twenty units away, inside the Commander's forty. The fuse reads the
+        // owner's list of seen enemies (BT-140), rebuilt every 30 ticks, so
+        // the scout is first noticed at the rebuild on tick 60 and the cloak
+        // is dropped by the economy pass of the second after that.
         sim.getUnitState(scoutId).position = SimVector(20_ss, 0_ss, 0_ss);
-        tickTo(sim, 2 * FirstEconomyTick);
+        tickTo(sim, 3 * FirstEconomyTick);
 
         SECTION("standing next to it decloaks it")
         {
@@ -439,15 +442,15 @@ namespace rwe
 
         SECTION("and it stays decloaked for three seconds after the enemy leaves")
         {
-            // The last stamp lands on tick 60, so the cloak is held off until
-            // tick 150.
+            // The last stamp lands on tick 90, so the cloak is held off until
+            // tick 180.
             sim.getUnitState(scoutId).position = SimVector(400_ss, 0_ss, 0_ss);
 
-            tickTo(sim, 3 * FirstEconomyTick);
-            REQUIRE_FALSE(sim.getUnitState(unitId).cloaked);
             tickTo(sim, 4 * FirstEconomyTick);
             REQUIRE_FALSE(sim.getUnitState(unitId).cloaked);
             tickTo(sim, 5 * FirstEconomyTick);
+            REQUIRE_FALSE(sim.getUnitState(unitId).cloaked);
+            tickTo(sim, 6 * FirstEconomyTick);
             REQUIRE(sim.getUnitState(unitId).cloaked);
         }
 
@@ -455,8 +458,117 @@ namespace rwe
         {
             sim.getUnitState(scoutId).position = SimVector(400_ss, 0_ss, 0_ss);
             spawn(sim, "scout", us, SimVector(0_ss, 0_ss, 20_ss), script);
-            tickTo(sim, 5 * FirstEconomyTick);
+            // The stamps already laid down while the enemy stood there run
+            // out at tick 180; after that nothing renews them.
+            tickTo(sim, 7 * FirstEconomyTick);
             REQUIRE(sim.getUnitState(unitId).cloaked);
+        }
+    }
+
+    TEST_CASE("the cloak fuse reads a list of seen enemies, refreshed every 30 ticks", "[concealment]")
+    {
+        // BT-140. 0x40B0D0 does not scan the unit array: it walks the owner's
+        // own list of seen enemies, which 0x40AA40 rebuilds every 30 ticks.
+        // A unit enters it only if it is live, not dying, not allied to the
+        // owner and passes the can-see gate 0x465AC0, which rejects a cloaked
+        // enemy before it looks at the fog. Nothing tests construction state.
+        auto script = makeConcealmentScript();
+        GameSimulation sim(makeConcealmentTerrain(), 0u, 0, 0);
+        auto us = addConcealmentPlayer(sim, "us");
+        auto them = addConcealmentPlayer(sim, "them");
+        registerConcealmentModel(sim);
+
+        defineUnit(sim, "commander", UnitSpec{.cloakable = true, .cloakCost = 200.0f, .cloakCostMoving = 1000.0f, .minCloakDistance = 40u});
+        defineUnit(sim, "scout", UnitSpec{});
+        defineUnit(sim, "eye", UnitSpec{.sightDistance = 200u});
+        {
+            // A scout still on the slip: nothing in the chain tests that.
+            defineUnit(sim, "frame", UnitSpec{});
+            sim.unitDefinitions.at("frame").buildTime = 1000u;
+        }
+
+        auto unitId = spawn(sim, "commander", us, SimVector(0_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(unitId).cloakRequested = true;
+
+        SECTION("an ally standing inside the range does not count")
+        {
+            sim.getPlayer(us).teamId = 1;
+            sim.getPlayer(them).teamId = 1;
+            // Two allies alone are a won game, which freezes the economy the
+            // cloak is paid from (BT-82); a stranger keeps it open.
+            addConcealmentPlayer(sim, "stranger");
+            auto allyId = spawn(sim, "scout", them, SimVector(20_ss, 0_ss, 0_ss), script);
+            tickTo(sim, 3 * FirstEconomyTick);
+            REQUIRE(sim.arePlayersAllied(us, them));
+            REQUIRE(sim.canSeeUnit(us, allyId));
+            REQUIRE(sim.getUnitState(unitId).cloaked);
+        }
+
+        SECTION("an enemy the owner cannot see does not count, however close")
+        {
+            // 39 units east of a commander standing mid-cell is inside the
+            // forty, but the scout's whole bounding box is in the next 32
+            // unit vision cell, which the commander's zero sight does not
+            // light.
+            sim.getUnitState(unitId).position = SimVector(16_ss, 0_ss, 16_ss);
+            sim.getUnitState(unitId).previousPosition = SimVector(16_ss, 0_ss, 16_ss);
+            auto scoutId = spawn(sim, "scout", them, SimVector(55_ss, 0_ss, 16_ss), script);
+            tickTo(sim, 3 * FirstEconomyTick);
+            REQUIRE_FALSE(sim.canSeeUnit(us, scoutId));
+            REQUIRE(sim.getUnitState(unitId).cloaked);
+
+            // Give the owner an eye on that ground and it is noticed at the
+            // next rebuild of the list.
+            spawn(sim, "eye", us, SimVector(120_ss, 0_ss, 16_ss), script);
+            tickTo(sim, 5 * FirstEconomyTick);
+            REQUIRE(sim.canSeeUnit(us, scoutId));
+            REQUIRE_FALSE(sim.getUnitState(unitId).cloaked);
+        }
+
+        SECTION("an enemy that is itself cloaked does not count")
+        {
+            auto enemyId = spawn(sim, "commander", them, SimVector(400_ss, 0_ss, 0_ss), script);
+            sim.getUnitState(enemyId).cloakRequested = true;
+
+            // Both cloak first, then the enemy walks in.
+            tickTo(sim, FirstEconomyTick + 1);
+            REQUIRE(sim.getUnitState(enemyId).cloaked);
+            REQUIRE(sim.getUnitState(unitId).cloaked);
+            sim.getUnitState(enemyId).position = SimVector(20_ss, 0_ss, 0_ss);
+            sim.getUnitState(enemyId).previousPosition = SimVector(20_ss, 0_ss, 0_ss);
+            tickTo(sim, 3 * FirstEconomyTick);
+            REQUIRE(sim.getUnitState(enemyId).cloaked);
+            REQUIRE(sim.getUnitState(unitId).cloaked);
+
+            // Take the other cloak away and each is at once the other's fuse.
+            sim.getUnitState(enemyId).cloakRequested = false;
+            tickTo(sim, 5 * FirstEconomyTick);
+            REQUIRE_FALSE(sim.getUnitState(unitId).cloaked);
+        }
+
+        SECTION("an unfinished enemy does")
+        {
+            spawn(sim, "frame", them, SimVector(20_ss, 0_ss, 0_ss), script);
+            tickTo(sim, 3 * FirstEconomyTick);
+            REQUIRE_FALSE(sim.getUnitState(unitId).cloaked);
+        }
+
+        SECTION("an enemy that walks in is noticed at the next rebuild, not at once")
+        {
+            auto scoutId = spawn(sim, "scout", them, SimVector(400_ss, 0_ss, 0_ss), script);
+
+            // Run past a rebuild with the scout far away, then bring it in.
+            tickTo(sim, 61);
+            REQUIRE(sim.getUnitState(unitId).cloakSuppressedUntil.value == 0u);
+            sim.getUnitState(scoutId).position = SimVector(20_ss, 0_ss, 0_ss);
+
+            // Not yet on the list, so nothing is stamped on the next tick.
+            tickTo(sim, 62);
+            REQUIRE(sim.getUnitState(unitId).cloakSuppressedUntil.value == 0u);
+
+            // Within thirty ticks of the rebuild it is.
+            tickTo(sim, 95);
+            REQUIRE(sim.getUnitState(unitId).cloakSuppressedUntil.value != 0u);
         }
     }
 }

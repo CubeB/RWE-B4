@@ -308,8 +308,11 @@ namespace rwe
         }
         else
         {
+            // The order acknowledgement is a unit voice, so SOUNDS.GUI's Unit
+            // Sounds Off silences it like the notifications (BT-SOUND-PARITY
+            // gap 1; Medium keeps it, as it always has here).
             const auto& unit = getUnit(unitId);
-            auto handle = getSound(simulation, gameMediaDatabase, unit.unitType, UnitSoundType::Ok1);
+            auto handle = unitSpeechSetting != UnitSpeechLevel::Off ? getSound(simulation, gameMediaDatabase, unit.unitType, UnitSoundType::Ok1) : std::nullopt;
             if (handle)
             {
                 playUiSound(*handle);
@@ -342,8 +345,9 @@ namespace rwe
     {
         localPlayerCommandBuffer.push_back(PlayerUnitCommand(unitId, PlayerUnitCommand::Stop()));
 
+        // A unit voice: silent with Unit Sounds Off (BT-SOUND-PARITY gap 1).
         const auto& unit = getUnit(unitId);
-        auto handle = getSound(simulation, gameMediaDatabase, unit.unitType, UnitSoundType::Ok1);
+        auto handle = unitSpeechSetting != UnitSpeechLevel::Off ? getSound(simulation, gameMediaDatabase, unit.unitType, UnitSoundType::Ok1) : std::nullopt;
         if (handle)
         {
             playUiSound(*handle);
@@ -1003,10 +1007,11 @@ namespace rwe
         }
 
         // The original greys these out rather than taking them away, except
-        // LOAD and BLAST which share a slot and so have to be hidden
-        // (0x41A412 and 0x41A471 call the "make inactive" helper, everything
-        // else calls the "grey" one). The greyed frame is in every button's
-        // own GAF, one past the pressed frame.
+        // LOAD and BLAST which share a slot: LOAD is hidden when nothing can
+        // load, BLAST when something can, and otherwise a dimmed BLAST face
+        // stays (BT-105, 0x41A3A0-0x41A48D; the "make inactive" helper hides,
+        // the other greys). The greyed frame is in every button's own GAF,
+        // one past the pressed frame.
         std::vector<std::string> doomed;
         for (const auto& child : panel.getChildren())
         {
@@ -1019,7 +1024,7 @@ namespace rwe
             auto button = orderButtonFromName(name.substr(sidePrefix.size()));
             if (button && !selectionOffersOrderButton(selection, *button))
             {
-                if (*button == OrderButton::Load || *button == OrderButton::Blast)
+                if (unavailableOrderButtonIsHidden(selection, *button))
                 {
                     doomed.push_back(name);
                 }
@@ -1142,7 +1147,7 @@ namespace rwe
 
         auto heading = toRadians(e.rotation).value;
         auto turn = Matrix4f::rotationY(heading);
-        auto gravity = 112.0f / 900.0f;
+        auto gravity = static_cast<float>(simulation.gravity) / 900.0f;
         auto draw = [this](unsigned int n) { return n < 2 ? 0u : static_cast<unsigned int>(effectsRng() % n); };
 
         auto shards = static_cast<std::size_t>(std::count_if(debris.begin(), debris.end(), [](const Debris& d) { return d.shard; }));
@@ -1192,11 +1197,11 @@ namespace rwe
             if (d.shard && d.fragmentMesh)
             {
                 // The original's effects-pool step (0x420F30), gravity the
-                // 112 nearly every map uses.
+                // map's own key (BT-124).
                 ShatterFragmentMotion m{d.position, d.velocity, d.rotation, d.angularVelocity};
                 bool onMap = m.position.x > corner.x + tile && m.position.x < corner.x + mapWidth - tile
                     && m.position.z > corner.z + tile && m.position.z < corner.z + mapHeight - tile;
-                auto fate = onMap ? stepShatterFragment(m, 112.0f / 900.0f, seaLevel, groundAt) : ShatterFragmentFate::Stopped;
+                auto fate = onMap ? stepShatterFragment(m, static_cast<float>(simulation.gravity) / 900.0f, seaLevel, groundAt) : ShatterFragmentFate::Stopped;
                 d.position = m.position;
                 d.velocity = m.velocity;
                 d.rotation = m.rotation;
@@ -1332,56 +1337,9 @@ namespace rwe
             }
         }
 
-        // The minimap keeps its own one-texel-per-cell copy of the whole map.
-        // It is only a hundred-odd pixels across, so the authored tiles would
-        // be thrown away by the downscale anyway, and this way it does not have
-        // to care where the world's window happens to be.
-        if (fogSprite && vis.visible.getVector() == fogVisibleSnapshot && explored.getVector() == fogExploredSnapshot)
-        {
-            return;
-        }
-        fogVisibleSnapshot = vis.visible.getVector();
-        fogExploredSnapshot = explored.getVector();
-
-        minimapFogPixels.resize(static_cast<size_t>(cellsWide) * static_cast<size_t>(cellsHigh));
-        auto* out = minimapFogPixels.data();
-        for (int y = 0; y < cellsHigh; ++y)
-        {
-            for (int x = 0; x < cellsWide; ++x)
-            {
-                if (vis.visible.get(x, y) != 0)
-                {
-                    *out++ = Color(0, 0, 0, 0);
-                }
-                else if (explored.get(x, y))
-                {
-                    *out++ = Color(0, 0, 0, 120);
-                }
-                else
-                {
-                    *out++ = Color(0, 0, 0, 255);
-                }
-            }
-        }
-
-        if (!minimapFogTexture.isValid() || minimapFogWidth != cellsWide || minimapFogHeight != cellsHigh)
-        {
-            minimapFogTexture = SharedTextureHandle(sceneContext.graphics->createTexture(cellsWide, cellsHigh, minimapFogPixels.data()));
-            minimapFogWidth = cellsWide;
-            minimapFogHeight = cellsHigh;
-
-            auto bounds = Rectangle2f::fromTopLeft(corner.x, corner.z, cellsWide * cellWorldUnits, cellsHigh * cellWorldUnits);
-            auto region = Rectangle2f::fromTopLeft(0.0f, 0.0f, 1.0f, 1.0f);
-            fogSprite = sceneContext.graphics->createSprite(bounds, region, minimapFogTexture);
-        }
-        else
-        {
-            sceneContext.graphics->updateTexture(
-                minimapFogTexture.get(),
-                static_cast<unsigned int>(cellsWide),
-                static_cast<unsigned int>(cellsHigh),
-                minimapFogPixels.data());
-        }
+        // The minimap keeps its own picture, composed from the map's embedded
+        // image and the fog cells (GameScene_minimap.cpp).
+        updateMinimapPicture(vis.visible, explored);
     }
 
     void GameScene::renderHelpOverlay()
@@ -1852,6 +1810,14 @@ namespace rwe
                     }
                 },
                 [&](const ProjectileDetonatedEvent& e) {
+                    if (e.splashOnly)
+                    {
+                        // A live round crossing the surface: the weapon's
+                        // splash and nothing else (BT-14).
+                        spawnWeaponImpactExplosion(simVectorToFloat(e.position), e.weaponType, ImpactType::Water, positionIsVisibleToLocalPlayer(e.position));
+                        return;
+                    }
+
                     // A `noexplode` round that went off and kept flying. It
                     // gets the impact art and the shake of an ordinary hit --
                     // the disintegrator's explode5, once per tick along its
@@ -2808,8 +2774,10 @@ namespace rwe
     {
         selectedUnits.insert(unitId);
 
+        // The selection voice is a unit voice: silent with Unit Sounds Off
+        // (BT-SOUND-PARITY gap 1).
         const auto& unit = getUnit(unitId);
-        auto selectionSound = getSound(simulation, gameMediaDatabase, unit.unitType, UnitSoundType::Select1);
+        auto selectionSound = unitSpeechSetting != UnitSpeechLevel::Off ? getSound(simulation, gameMediaDatabase, unit.unitType, UnitSoundType::Select1) : std::nullopt;
         if (selectionSound)
         {
             playUiSound(*selectionSound);
@@ -2843,7 +2811,7 @@ namespace rwe
         if (selectedUnits.size() == 1)
         {
             const auto& unit = getUnit(*units.begin());
-            auto selectionSound = getSound(simulation, gameMediaDatabase, unit.unitType, UnitSoundType::Select1);
+            auto selectionSound = unitSpeechSetting != UnitSpeechLevel::Off ? getSound(simulation, gameMediaDatabase, unit.unitType, UnitSoundType::Select1) : std::nullopt;
             if (selectionSound)
             {
                 playUiSound(*selectionSound);
@@ -3261,7 +3229,7 @@ namespace rwe
         particles.push_back(particle);
     }
 
-    void GameScene::spawnSmokePuff(const Vector3f& position, const std::string& anim, float riseRate)
+    void GameScene::spawnSmokePuff(const Vector3f& position, const std::string& anim, float riseRate, bool dimmedInRememberedGround)
     {
         auto numberOfFrames = static_cast<int>(gameMediaDatabase.getSpriteSeries("FX", anim).value()->sprites.size());
 
@@ -3272,9 +3240,8 @@ namespace rwe
         // every tick -- four for a damaged unit, sixteen for a thermal vent.
         // On the 112 that nearly every shipped map uses four works out at
         // 0.498 world units, so the callers here pass half a unit and two,
-        // which is the right answer for all but a handful of maps and saves
-        // threading the map's gravity through to reach.
-        particle.velocity = Vector3f(0.0f, riseRate, 0.0f);
+        // and the rate is scaled by the map's own key over 112 (BT-124).
+        particle.velocity = Vector3f(0.0f, riseRate * (static_cast<float>(simulation.gravity) / 112.0f), 0.0f);
 
         // And sideways with the wind, damage smoke and vent steam alike
         // (0x475380 and 0x475640 differ only in the lift).
@@ -3290,6 +3257,7 @@ namespace rwe
             makeSmokePuffFrameSchedule(numberOfFrames, [](int n) { return std::rand() % n; }),
         };
         particle.startTime = simulation.gameTime;
+        particle.dimmedInRememberedGround = dimmedInRememberedGround;
 
         particles.push_back(particle);
     }
@@ -3306,12 +3274,15 @@ namespace rwe
 
         for (const auto& point : findGeoVentSteamPoints(simulation))
         {
-            // A vent under the fog of war keeps its steam to itself.
-            if (!positionIsVisibleToLocalPlayer(SimVector(SimScalar(point.x), SimScalar(point.y), SimScalar(point.z))))
+            // The vent's emitter has no sight test (BT-151): its steam is made
+            // and drawn wherever the ground is explored, and dimmed like the
+            // rest of the remembered scene where it is not in sight. Only
+            // unexplored ground, which the fog fill hides, keeps it back.
+            if (!positionIsExploredByLocalPlayer(SimVector(SimScalar(point.x), SimScalar(point.y), SimScalar(point.z))))
             {
                 continue;
             }
-            spawnSmokePuff(point, "smoke 1", geoVentSteamRiseRate);
+            spawnSmokePuff(point, "smoke 1", geoVentSteamRiseRate, true);
         }
     }
 
@@ -3358,8 +3329,9 @@ namespace rwe
 
             // Where the spray lands. The original samples a uniform point in
             // the target's bounding box, shrunk first to the middle three
-            // elevenths of each axis, so the stream fans across the middle of
-            // what is being worked on rather than converging on a point.
+            // elevenths of each axis (4/11 to 7/11 of the extent, BT-144), so
+            // the stream fans across the middle of what is being worked on
+            // rather than converging on a point.
             //
             // The one place we depart from it is the height: the original
             // samples inside the model too, which it can afford because its
@@ -3409,7 +3381,9 @@ namespace rwe
             }
 
             auto nozzle = simVectorToFloat(std::get<1>(*nanolatheTarget));
-            std::uniform_real_distribution<float> centralThird(-3.0f / 11.0f, 3.0f / 11.0f);
+            // The window about the centre of each axis: 4/11 to 7/11 of the
+            // extent from the minimum is -1.5/11 to +1.5/11 from the middle.
+            std::uniform_real_distribution<float> centralThird(NanoLandingWindowStart - 0.5f, NanoLandingWindowEnd - 0.5f);
 
             // The original emits a burst of five every tick, and each emitter
             // fires again on the following tick, so ten particles a tick are in

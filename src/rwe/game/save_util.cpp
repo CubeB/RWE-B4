@@ -83,7 +83,7 @@ namespace rwe
             return match(
                 s,
                 [](const WinStatusWon& w) { return json{{"kind", "won"}, {"winner", w.winner.value}}; },
-                [](const WinStatusDraw&) { return json{{"kind", "draw"}}; },
+                [](const WinStatusNoSurvivors&) { return json{{"kind", "nosurvivors"}}; },
                 [](const WinStatusUndecided&) { return json{{"kind", "undecided"}}; });
         }
 
@@ -94,9 +94,10 @@ namespace rwe
             {
                 return WinStatusWon{PlayerId(j.at("winner").get<unsigned int>())};
             }
-            if (kind == "draw")
+            // "draw" is what saves written before BT-191 call it.
+            if (kind == "nosurvivors" || kind == "draw")
             {
-                return WinStatusDraw();
+                return WinStatusNoSurvivors();
             }
             if (kind == "undecided")
             {
@@ -275,6 +276,7 @@ namespace rwe
                 {"startingMetal", saveMetal(p.startingMetal)},
                 {"startingEnergy", saveEnergy(p.startingEnergy)},
                 {"hasBaseStorage", p.hasBaseStorage},
+                {"hasCreatedUnits", p.hasCreatedUnits},
                 {"metalStalled", p.metalStalled},
                 {"energyStalled", p.energyStalled},
                 // The original does not save these (TOTALA-EXE-COMMANDS.md
@@ -324,6 +326,8 @@ namespace rwe
                 j.contains("teamId") ? loadOptional(j.at("teamId"), [](const json& v) { return v.get<int>(); }) : std::optional<int>()};
             // Added with missions (#293); every earlier save is a skirmish.
             p.hasBaseStorage = j.contains("hasBaseStorage") && j.at("hasBaseStorage").get<bool>();
+            // Added with BT-193; an older save's players have all been given units.
+            p.hasCreatedUnits = !j.contains("hasCreatedUnits") || j.at("hasCreatedUnits").get<bool>();
             p.metalStalled = j.at("metalStalled").get<bool>();
             p.energyStalled = j.at("energyStalled").get<bool>();
             // Resource sharing came later; an older save has it off, with no
@@ -679,12 +683,16 @@ namespace rwe
         }
 
         j["gameStatus"] = saveWinStatus(sim.gameStatus);
+        j["endCountdown"] = sim.endCountdown;
+        j["skirmishVictoryRules"] = sim.skirmishVictoryRules;
         j["currentWindGenerationFactor"] = saveSimScalar(sim.currentWindGenerationFactor);
         j["currentWindVector"] = saveSimVector(sim.currentWindVector);
+        j["currentWindDirection"] = saveSimAngle(sim.currentWindDirection);
         j["tidalStrength"] = sim.tidalStrength;
         j["killMul"] = sim.killMul;
         j["timeMul"] = sim.timeMul;
         j["noSeaLevelTrigger"] = sim.noSeaLevelTrigger;
+        j["gravity"] = sim.gravity;
         j["waterDamage"] = sim.waterDamage;
         j["nextWindSpeedChange"] = saveGameTime(sim.nextWindSpeedChange);
         j["featureRegrowthCursor"] = sim.featureRegrowthCursor;
@@ -764,6 +772,12 @@ namespace rwe
             j["pathSearch"] = json{
                 {"start", saveDiscreteRect(*searchStart)},
                 {"expansions", sim.pathFindingService.suspendedSearchExpansions()}};
+            // The tick it began on: which recently moved units it took for
+            // walls depends on it (BT-59), so the rebuild needs the same one.
+            if (auto searchTime = sim.pathFindingService.suspendedSearchTime())
+            {
+                j["pathSearch"]["searchTime"] = searchTime->value;
+            }
         }
 
         // Empty between ticks (spawnNewUnits drains it), but carried along so
@@ -774,6 +788,27 @@ namespace rwe
             unitCreationRequests.push_back(saveUnitIdRef(id, ctx));
         }
         j["unitCreationRequests"] = unitCreationRequests;
+
+        // BT-140: each player's list of seen enemies for the cloak fuse. It
+        // is rebuilt every 30 ticks and read between, so it is state.
+        json cloakSeenEnemies = json::array();
+        for (const auto& list : sim.cloakSeenEnemies)
+        {
+            json listJson = json::array();
+            for (const auto& id : list)
+            {
+                // A unit that has gone since the list was built can never
+                // match again, and a saved reference to it would load as a
+                // placeholder id the continuing game does not have.
+                auto ref = saveUnitIdRef(id, ctx);
+                if (!ref.is_string())
+                {
+                    listJson.push_back(std::move(ref));
+                }
+            }
+            cloakSeenEnemies.push_back(std::move(listJson));
+        }
+        j["cloakSeenEnemies"] = cloakSeenEnemies;
 
         return j;
     }
@@ -812,6 +847,9 @@ namespace rwe
             ss >> sim.rng;
         }
         sim.gameStatus = loadWinStatus(j.at("gameStatus"));
+        // Absent from saves made before BT-82; no countdown had started then.
+        sim.endCountdown = j.contains("endCountdown") ? j.at("endCountdown").get<int>() : -1;
+        sim.skirmishVictoryRules = j.contains("skirmishVictoryRules") && j.at("skirmishVictoryRules").get<bool>();
         sim.currentWindGenerationFactor = loadSimScalar(j.at("currentWindGenerationFactor"));
         if (j.contains("currentWindVector"))
         {
@@ -819,6 +857,12 @@ namespace rwe
             // those at zero is harmless -- the next wind change rebuilds it
             // within fourteen seconds.
             sim.currentWindVector = loadSimVector(j.at("currentWindVector"));
+        }
+        if (j.contains("currentWindDirection"))
+        {
+            // Absent from saves made before BT-26; the stale direction then
+            // starts at zero, which only a wind of zero can ever show.
+            sim.currentWindDirection = loadSimAngle(j.at("currentWindDirection"));
         }
         sim.tidalStrength = j.at("tidalStrength").get<int>();
         if (j.contains("killMul"))
@@ -829,6 +873,12 @@ namespace rwe
         if (j.contains("noSeaLevelTrigger"))
         {
             sim.noSeaLevelTrigger = j.at("noSeaLevelTrigger").get<bool>();
+        }
+        // Saves from before the map's gravity was read fell at the 112 every
+        // arc then assumed, which is what the simulation starts with.
+        if (j.contains("gravity"))
+        {
+            sim.gravity = j.at("gravity").get<int>();
         }
         if (j.contains("waterDamage"))
         {
@@ -1026,6 +1076,22 @@ namespace rwe
             sim.unitCreationRequests.push_back(loadUnitIdRef(rj, ctx));
         }
 
+        // An older save has no lists and rebuilds them at the next 30-tick
+        // boundary, as it did before the fuse read a list at all.
+        sim.cloakSeenEnemies.clear();
+        if (j.contains("cloakSeenEnemies"))
+        {
+            for (const auto& listJson : j.at("cloakSeenEnemies"))
+            {
+                std::vector<UnitId> list;
+                for (const auto& idJson : listJson)
+                {
+                    list.push_back(loadUnitIdRef(idJson, ctx));
+                }
+                sim.cloakSeenEnemies.push_back(std::move(list));
+            }
+        }
+
         sim.events.clear();
 
         sim.updateVisibility();
@@ -1057,7 +1123,10 @@ namespace rwe
             sim.pathFindingService.restoreSuspendedSearch(
                 sim,
                 loadDiscreteRect(searchJson.at("start")),
-                searchJson.at("expansions").get<std::size_t>());
+                searchJson.at("expansions").get<std::size_t>(),
+                searchJson.contains("searchTime")
+                    ? std::make_optional(GameTime(searchJson.at("searchTime").get<unsigned int>()))
+                    : std::nullopt);
         }
     }
 

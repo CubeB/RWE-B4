@@ -359,6 +359,7 @@ namespace rwe
         // it gets there.
         gameOver = std::nullopt;
         gameOverTime = GameTime(0);
+        endGameStats = std::nullopt;
         combinedVisibility = std::nullopt;
         replayReachedEnd = false;
         millisecondsBuffer = 0;
@@ -820,7 +821,7 @@ namespace rwe
         // is just exploring the map.
         if (!gameOver && simulation.players.size() >= 2)
         {
-            auto winStatus = simulation.computeWinStatus();
+            auto winStatus = simulation.decidedStatus();
             match(
                 winStatus,
                 [&](const WinStatusWon& w) {
@@ -830,12 +831,15 @@ namespace rwe
                     sendGameEnded("decided", w.winner);
                     LOG_INFO << "Game over: player " << w.winner.value << " won at tick " << simulation.gameTime.value;
                 },
-                [&](const WinStatusDraw&) {
+                [&](const WinStatusNoSurvivors&) {
+                    // Everybody is out: a defeat for every seat (BT-191). The
+                    // report keeps the word "draw" for the launcher, which
+                    // reads it as "nobody won".
                     gameOver = winStatus;
                     gameOverTime = simulation.gameTime;
                     beginEndGameSequence();
                     sendGameEnded("draw", std::nullopt);
-                    LOG_INFO << "Game over: draw at tick " << simulation.gameTime.value;
+                    LOG_INFO << "Game over: everyone eliminated at tick " << simulation.gameTime.value;
                 },
                 [&](const WinStatusUndecided&) {
                     // do nothing, game still in progress

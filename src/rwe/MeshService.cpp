@@ -32,12 +32,16 @@ namespace rwe
 
         rwe::SpanStream s(bytes->data(), bytes->size());
         auto objects = parse3doObjects(s, s.tellg());
-        assert(objects.size() == 1);
+        if (objects.empty())
+        {
+            throw std::runtime_error("Model has no objects: " + name);
+        }
         auto selectionMesh = selectionMeshFrom3do(objects.front());
 
         auto d = createUnitModelDefinition(
             simScalarFromFixed(findHighestVertex(objects.front()).y),
             unitMeshFrom3do(objects.front()));
+        d.vertices = unitVerticesFrom3do(objects.front());
 
         std::vector<std::pair<std::string, UnitPieceMeshInfo>> meshes;
         if (graphics != nullptr)
@@ -58,7 +62,10 @@ namespace rwe
 
         rwe::SpanStream s(bytes->data(), bytes->size());
         auto objects = parse3doObjects(s, s.tellg());
-        assert(objects.size() == 1);
+        if (objects.empty())
+        {
+            throw std::runtime_error("Model has no objects: " + name);
+        }
 
         auto d = createUnitModelDefinition(
             simScalarFromFixed(findHighestVertex(objects.front()).y),

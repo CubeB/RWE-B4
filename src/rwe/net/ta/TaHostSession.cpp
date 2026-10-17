@@ -1,6 +1,9 @@
 #include "TaHostSession.h"
 #include <algorithm>
+#include <cctype>
 #include <cstring>
+#include <rwe/net/ta/TaPacket.h>
+#include <rwe/network_util.h>
 
 namespace rwe
 {
@@ -9,6 +12,19 @@ namespace rwe
         constexpr std::size_t MaxBufferedBytes = 1 << 20;
         constexpr std::size_t MaxOutboundQueueBytes = 4 << 20;
         constexpr std::size_t MaxOutboundConnections = 64;
+
+        /**
+         * Whether two source addresses are the one peer. Never "the same IP":
+         * a carrier's NAT puts one machine's sockets on neighbouring outside
+         * addresses (a joiner's TCP on .167 and its UDP on .165 was seen), so
+         * the rule the lobby and both transports use applies here too -- the
+         * same /16 (sameCarrierBlock), whatever the port. A forger on another
+         * network still fails it.
+         */
+        bool sameSourceHost(const asio::ip::address& a, const asio::ip::address& b)
+        {
+            return sameCarrierBlock(a.to_string(), b.to_string());
+        }
 
         std::string endpointKey(const asio::ip::tcp::endpoint& endpoint)
         {
@@ -77,6 +93,7 @@ namespace rwe
           enumUdpSocket(ioContext),
           gameUdpSocket(ioContext),
           pruneTimer(ioContext),
+          silenceTimer(ioContext),
           nextPlayerId(this->config.firstAssignedPlayerId),
           nextSystemPlayerId(this->config.firstAssignedSystemPlayerId)
     {
@@ -159,6 +176,7 @@ namespace rwe
         listenEnumUdp();
         listenGameUdp();
         prunePending();
+        armSilenceCheck();
     }
 
     void TaHostSession::stop()
@@ -175,6 +193,7 @@ namespace rwe
         enumUdpSocket.close(ignored);
         gameUdpSocket.close(ignored);
         pruneTimer.cancel();
+        silenceTimer.cancel();
         for (auto& [key, link] : outbound)
         {
             (void)key;
@@ -455,7 +474,7 @@ namespace rwe
                 }
                 else
                 {
-                    handleAppData(message.data(), message.size(), true);
+                    handleAppData(message.data(), message.size(), true, sourceIp);
                 }
             }
             catch (const std::exception&)
@@ -478,7 +497,7 @@ namespace rwe
             }
             else
             {
-                handleAppData(data, len, false);
+                handleAppData(data, len, false, source.address());
             }
         }
         catch (const std::exception&)
@@ -509,7 +528,7 @@ namespace rwe
                 handleCreatePlayer(message.payload, reply);
                 break;
             case TaDirectPlayCommand::DeletePlayer:
-                handleDeletePlayer(message.payload);
+                handleDeletePlayer(message.payload, sourceIp);
                 break;
             case TaDirectPlayCommand::Ping:
                 // Pings are issue #423's out-of-scope list.
@@ -519,7 +538,7 @@ namespace rwe
         }
     }
 
-    void TaHostSession::handleAppData(const std::uint8_t* data, std::size_t len, bool tcp)
+    void TaHostSession::handleAppData(const std::uint8_t* data, std::size_t len, bool tcp, const asio::ip::address& sourceIp)
     {
         TaAppData app = tcp ? taDecodeAppDataTcp(data, len) : taDecodeAppDataUdp(data, len);
 
@@ -528,6 +547,17 @@ namespace rwe
         {
             return;
         }
+
+        // The id is whatever the sender wrote; the address it came from is the
+        // one thing it cannot. A message in a joined player's name from any
+        // other machine is not that player's (BT-243, BT-244), and is not
+        // passed up to be stamped as theirs either.
+        if (!sameSourceHost(it->second.sourceIp, sourceIp))
+        {
+            ++forged;
+            return;
+        }
+        it->second.lastHeard = std::chrono::steady_clock::now();
 
         if (appDataHandler)
         {
@@ -559,6 +589,7 @@ namespace rwe
             if (auto* handshake = pendingFor(endpointKey(reply)))
             {
                 handshake->systemPlayerId = id;
+                handshake->sourceIp = reply.address();
             }
         }
 
@@ -577,6 +608,7 @@ namespace rwe
             return;
         }
         handshake->systemPlayerId = request.systemPlayerId;
+        handshake->sourceIp = reply.address();
 
         auto tcpAddress = addressWithSourceIp(request.tcpAddress, reply.address());
         auto udpAddress = addressWithSourceIp(request.udpAddress, reply.address());
@@ -609,19 +641,14 @@ namespace rwe
         auto key = endpointKey(reply);
         auto handshakeIt = pending.find(key);
 
-        // The session advertises maxPlayers, the host counts as one, and the
-        // player is either new or is replacing itself; a full session refuses
-        // the joiner rather than growing past what it advertised.
-        if (peers.find(created.playerId) == peers.end() && peers.size() + 1 >= MaxPlayers)
-        {
-            pending.erase(key);
-            return;
-        }
-
         Peer peer;
         peer.playerId = created.playerId;
-        peer.shortName = created.name;
-        peer.longName = created.name;
+        // The original keeps a name in 17 bytes and copies 16 (BT-209); the
+        // wire's own limit is far larger and is somebody else's to choose.
+        peer.shortName = taCapName(created.name, TaMaxNameLength);
+        peer.longName = peer.shortName;
+        peer.sourceIp = reply.address();
+        peer.lastHeard = std::chrono::steady_clock::now();
 
         if (handshakeIt != pending.end())
         {
@@ -637,8 +664,47 @@ namespace rwe
             peer.udpEndpoint = asio::ip::udp::endpoint(asio::ip::address_v4(udpAddress.ip), udpAddress.port);
         }
 
-        peers[peer.playerId] = peer;
         pending.erase(key);
+
+        // The host's own ids are not for a joiner to take, and neither is a
+        // joined player's: this message is the one place a name is claimed, and
+        // a second machine writing the first one's id would otherwise replace
+        // its record and be believed from then on (BT-243).
+        auto existing = peers.find(created.playerId);
+        auto isHostId = created.playerId == config.hostPlayerId
+            || created.playerId == config.hostSystemPlayerId
+            || created.playerId == config.sessionHostId;
+        if (isHostId || (existing != peers.end() && !sameSourceHost(existing->second.sourceIp, peer.sourceIp)))
+        {
+            ++forged;
+            return;
+        }
+
+        // The original's order (BT-242): closed is reason 3; a player data
+        // block that is not 21 bytes, or whose protocol shorts are not zero and
+        // 0x50, is reason 8; a wrong password, when the host has one, is
+        // reason 4. A launched game takes no one new, and the same answer
+        // goes to a joiner over the limit, a full session being a thing the
+        // original never says anything about (BT-246) -- a joiner left waiting
+        // is the worse outcome, so it is told.
+        auto isNewPeer = existing == peers.end();
+        if (isNewPeer && closed)
+        {
+            rejectJoiner(created.playerId, peer.tcpEndpoint, TaRejectClosed);
+            return;
+        }
+        if (auto reason = joinerRefusal(created); reason != 0)
+        {
+            rejectJoiner(created.playerId, peer.tcpEndpoint, reason);
+            return;
+        }
+        if (isNewPeer && peers.size() >= config.maxJoiners)
+        {
+            rejectJoiner(created.playerId, peer.tcpEndpoint, TaRejectClosed);
+            return;
+        }
+
+        peers[peer.playerId] = peer;
 
         sendSessionDescChanged();
 
@@ -648,13 +714,75 @@ namespace rwe
         }
     }
 
-    void TaHostSession::handleDeletePlayer(std::span<const std::uint8_t> payload)
+    std::uint8_t TaHostSession::joinerRefusal(const TaCreatePlayer& created) const
     {
+        const auto& data = created.playerData;
+        if (created.playerDataSize != TaJoinerPlayerDataSize || data.size() != TaJoinerPlayerDataSize)
+        {
+            return TaRejectVersion;
+        }
+        auto firstShort = static_cast<unsigned>(data[TaJoinerTagOffset]) | (static_cast<unsigned>(data[TaJoinerTagOffset + 1]) << 8);
+        auto secondShort = static_cast<unsigned>(data[TaJoinerTagOffset + 2]) | (static_cast<unsigned>(data[TaJoinerTagOffset + 3]) << 8);
+        if (firstShort != 0 || secondShort != 0x50)
+        {
+            return TaRejectVersion;
+        }
+        if (!config.password.empty())
+        {
+            // The joiner's password is the NUL-terminated text of the first 17
+            // bytes, compared without regard to case.
+            std::string theirs;
+            for (std::size_t i = 0; i < TaJoinerPasswordLength && data[i] != 0; ++i)
+            {
+                theirs.push_back(static_cast<char>(data[i]));
+            }
+            auto lower = [](std::string text) {
+                for (auto& c : text)
+                {
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                }
+                return text;
+            };
+            if (lower(theirs) != lower(config.password))
+            {
+                return TaRejectPassword;
+            }
+        }
+        return 0;
+    }
+
+    void TaHostSession::handleDeletePlayer(std::span<const std::uint8_t> payload, const asio::ip::address& sourceIp)
+    {
+        // In the original a destroy-player message comes from the DirectPlay
+        // layer and not from a peer's data, so this emulation has to decide
+        // for itself who may say it. The ids are handed out in a fixed order
+        // and anyone can guess them; a peer is removed by a message that came
+        // from the address it joined from, and by nobody else (BT-243).
         auto playerId = taDecodeDeletePlayer(payload);
-        auto erased = peers.erase(playerId);
+
+        bool named = false;
+        std::optional<PeerId> leaving;
+        for (const auto& [id, peer] : peers)
+        {
+            if (peer.playerId != playerId && peer.systemPlayerId != playerId)
+            {
+                continue;
+            }
+            named = true;
+            if (sameSourceHost(peer.sourceIp, sourceIp))
+            {
+                leaving = id;
+                break;
+            }
+        }
+        if (named && !leaving)
+        {
+            ++forged;
+        }
+
         for (auto it = pending.begin(); it != pending.end();)
         {
-            if (it->second.systemPlayerId == playerId)
+            if (it->second.systemPlayerId == playerId && sameSourceHost(it->second.sourceIp, sourceIp))
             {
                 it = pending.erase(it);
             }
@@ -664,10 +792,84 @@ namespace rwe
             }
         }
 
-        if (erased != 0 && peerLeftHandler)
+        if (leaving)
         {
-            peerLeftHandler(playerId);
+            auto id = *leaving;
+            peers.erase(id);
+            if (peerLeftHandler)
+            {
+                peerLeftHandler(id);
+            }
         }
+    }
+
+    void TaHostSession::rejectJoiner(
+        std::uint32_t playerId,
+        const asio::ip::tcp::endpoint& tcpEndpoint,
+        std::uint8_t reason)
+    {
+        TaPacket packet;
+        packet.type = TadPacketUncompressed;
+        packet.marker = TaReplyMarker;
+        packet.subpackets.push_back(taBuildReject(playerId, reason));
+        auto bytes = packet.build();
+
+        auto link = linkFor(tcpEndpoint);
+        if (!link)
+        {
+            return;
+        }
+        enqueue(
+            link,
+            taEncodeAppDataTcp(taMakeReplyAddress(ports.gameTcp), config.hostPlayerId, playerId, bytes),
+            endpointKey(tcpEndpoint));
+    }
+
+    void TaHostSession::armSilenceCheck()
+    {
+        silenceTimer.expires_after(config.silenceCheckInterval);
+        silenceTimer.async_wait([this](const asio::error_code& error) {
+            if (error || !started)
+            {
+                return;
+            }
+            dropSilentPeers();
+            armSilenceCheck();
+        });
+    }
+
+    void TaHostSession::dropSilentPeers()
+    {
+        // A peer that has not been heard from since the cutoff is given up on
+        // the way the original's host gives up on one: rejected with reason 6,
+        // then removed as a leaving player is (BT-233, BT-245). Collected
+        // first, because removing one changes the map being walked.
+        auto cutoff = std::chrono::steady_clock::now() - config.silenceTimeout;
+        std::vector<PeerId> silent;
+        for (const auto& [id, peer] : peers)
+        {
+            if (peer.lastHeard < cutoff)
+            {
+                silent.push_back(id);
+            }
+        }
+
+        for (auto id : silent)
+        {
+            auto it = peers.find(id);
+            if (it == peers.end())
+            {
+                continue;
+            }
+            rejectJoiner(it->second.playerId, it->second.tcpEndpoint, TaRejectSilent);
+            ++silentDropped;
+            deletePeer(id);
+        }
+    }
+
+    void TaHostSession::setAdmissionClosed(bool shut)
+    {
+        closed = shut;
     }
 
     std::shared_ptr<TaHostSession::TcpLink> TaHostSession::linkFor(const asio::ip::tcp::endpoint& endpoint)
@@ -867,6 +1069,10 @@ namespace rwe
     {
         TaSessionDescription session;
         session.instanceGuid = config.instanceGuid;
+        if (closed)
+        {
+            session.flags |= TaSessionJoinDisabled;
+        }
         session.applicationGuid = TaApplicationGuid;
         session.maxPlayers = static_cast<std::uint32_t>(MaxPlayers);
         session.currentPlayers = static_cast<std::uint32_t>(1 + peers.size());
@@ -896,7 +1102,10 @@ namespace rwe
         hostSystem.udpAddress.port = ports.gameUdp;
         reply.players.push_back(hostSystem);
 
-        auto hostPlayer = makeNamedPlayer(config.hostPlayerId, config.gameName, config.hostSystemPlayerId);
+        auto hostPlayer = makeNamedPlayer(
+            config.hostPlayerId,
+            taCapName(config.gameName, TaMaxNameLength),
+            config.hostSystemPlayerId);
         // A real host's player carries 21 bytes of TA's own player data; the
         // captures only show this value, so it is sent as they show it.
         hostPlayer.playerData.assign(21, 0);

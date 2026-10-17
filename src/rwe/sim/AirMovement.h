@@ -67,13 +67,16 @@ namespace rwe
          *
          * Mutates `physics.bankAccum`, the lag's memory.
          */
-        static SimScalar bankAngle(const UnitState& unit, const UnitDefinition& unitDefinition, UnitPhysicsInfoAir& physics, const SimVector& deltaVelocity);
+        static SimScalar bankAngle(const UnitState& unit, const UnitDefinition& unitDefinition, UnitPhysicsInfoAir& physics, const SimVector& deltaVelocity, int mapGravity = 112);
 
         /** The original's attitude arithmetic shared by bank and pitch: atan2(-scale * lateral, g / (1 - lag)), wrapped to (-pi, pi]. */
         static SimScalar attitudeAngle(SimScalar scale, SimScalar lateral, SimScalar gravityOverLagGain);
 
+        /** The map's gravity key as the attitude arithmetic's divisor: g per tick squared over (1 - lag). */
+        static SimScalar gravityOverLagGain(int mapGravity);
+
         /** The pitch off the bank accumulator as it stands, scaled by PitchScale; call after bankAngle. */
-        static SimScalar pitchAngle(const UnitState& unit, const UnitDefinition& unitDefinition, const UnitPhysicsInfoAir& physics);
+        static SimScalar pitchAngle(const UnitState& unit, const UnitDefinition& unitDefinition, const UnitPhysicsInfoAir& physics, int mapGravity = 112);
 
         /**
          * The per-tick air step: state plus intent, one tick later.
@@ -93,7 +96,7 @@ namespace rwe
          * is taken from the state's own target, so this is the dispatch
          * `updateUnitSpeed` used to do inline.
          */
-        static void updateVelocity(UnitPhysicsInfoAir& physics, const UnitState& unit, const UnitDefinition& unitDefinition);
+        static void updateVelocity(UnitPhysicsInfoAir& physics, const UnitState& unit, const UnitDefinition& unitDefinition, int mapGravity = 112);
 
         /** True once a climbing aircraft has reached its cruise height. */
         static bool takeoffReachedCruise(const AirMovementStateTakingOff& state, SimScalar unitY, SimScalar targetHeight);

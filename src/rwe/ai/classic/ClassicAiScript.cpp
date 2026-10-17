@@ -63,6 +63,13 @@ namespace rwe
             {
                 return false;
             }
+            // The category registrar (0x488E70) always sets a definition's bit
+            // in the category named ALL, whether or not its FBI listed it, so
+            // every type is in it (BT-78).
+            if (token == "ALL")
+            {
+                return true;
+            }
             std::size_t i = 0;
             while (i < categoryList.size())
             {
@@ -86,9 +93,16 @@ namespace rwe
         bool matchesPlan(const std::vector<std::string>& args, ClassicPlan plan)
         {
             const char* name = plan == ClassicPlan::Easy ? "EASY" : plan == ClassicPlan::Medium ? "MEDIUM" : "HARD";
+            // Difficulty names are compared at every argument, but the `any`
+            // comparison always reads argument 1 (the index pushed at 0x406C90
+            // is constant), so `any` counts only as the first word (BT-128).
+            if (!args.empty() && args.front() == "ANY")
+            {
+                return true;
+            }
             for (const auto& a : args)
             {
-                if (a == name || a == "ANY")
+                if (a == name)
                 {
                     return true;
                 }
@@ -112,9 +126,12 @@ namespace rwe
 
         int limitFrom(double value)
         {
-            if (!(value > -1.0))
+            // The setter (0x409E90) stores the integer unchanged: -1 is
+            // unlimited and any other negative stays negative, which fails
+            // the strictly-below test later and blocks the type (BT-128).
+            if (!(value > -1000000.0))
             {
-                return -1;
+                return -1000000;
             }
             if (value > 1000000.0)
             {
@@ -305,13 +322,16 @@ namespace rwe
                 }
                 continue;
             }
-            if (!enabled || d.args.size() < 2)
+            if (!enabled || d.args.empty())
             {
                 continue;
             }
 
+            // A line with a subject and no number reads the accessor's default,
+            // zero (0x4B7410, 0x4B73E0): `Limit ARMSABO` forbids the type and
+            // a bare weight zeroes it (BT-128).
             const auto& subject = d.args[0];
-            const double number = classicParseNumber(d.args[1]);
+            const double number = d.args.size() >= 2 ? classicParseNumber(d.args[1]) : 0.0;
 
             // A name is a one-type set and locks; a category is a mask and does not.
             std::vector<std::size_t> hit;

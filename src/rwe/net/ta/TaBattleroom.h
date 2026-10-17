@@ -25,6 +25,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -144,8 +145,18 @@ namespace rwe
     /** 0x2a: loading progress, a percentage. */
     TadBytes taBuildLoadingProgress(std::uint8_t percent);
 
-    /** 0x1e: the game starts. Every capture says 1. */
+    /**
+     * 0x1e: the recipient's start-position index, the host being 0 (BT-228). It
+     * is not "the game starts"; every two-player capture says 1 because the
+     * joiner's index is 1.
+     */
     TadBytes taBuildStart(std::uint8_t value);
+
+    /** 0x1f: the recipient's answer to a 0x1e, naming itself by its id (five bytes). */
+    TadBytes taBuildStartAck(std::uint32_t playerId);
+
+    /** The player id in a 0x1f, or nothing for any other record or a short one. */
+    std::optional<std::uint32_t> taParseStartAck(const TadBytes& subpacket);
 
     /** 0x11: a unit's state word, a u16 unit id and a byte whose meaning is not decoded. */
     TadBytes taBuildUnitStateWord(std::uint16_t unitId, std::uint8_t value);
@@ -162,6 +173,20 @@ namespace rwe
 
     /** The unit type id in a 0x1a sub-type 2 record, or nothing for any other record. */
     std::optional<std::uint32_t> taParseUnitSyncId(const TadBytes& subpacket);
+
+    /**
+     * The count a joiner's 0x1a sub-type 1 declares (how many unit types it
+     * has) or its sub-type 4 reports (how many of the host's `1 + 2n` records
+     * it has handled), at bytes 10-13. Nothing for any other record.
+     */
+    std::optional<std::uint32_t> taParseUnitSyncCount(const TadBytes& subpacket, std::uint8_t subType);
+
+    /** 0x1a sub-types 1 and 4, as a joiner sends them: for a test and a probe to play the joiner. */
+    TadBytes taBuildUnitSyncTypes(std::uint32_t count);
+    TadBytes taBuildUnitSyncProgress(std::uint32_t count);
+
+    /** 0x1a sub-type 2: a joiner's unit id and checksum, for the same reason. */
+    TadBytes taBuildUnitSyncKey(std::uint32_t unitTypeId, std::uint32_t checksum);
 
     /**
      * True when two or more of `teams` are the same real team and none is
@@ -208,6 +233,20 @@ namespace rwe
 
         /** What the player's 0x20 named in bytes 1-32, empty until it does. */
         std::string mapName;
+
+        /**
+         * Whether the player's unit sync is done (BT-212): it has declared its
+         * unit types and sent a key for each, and has handled every one of the
+         * `1 + 2n` records this host sent back. Set by `peer()`; also true once
+         * `unitSyncTimeout` has passed since it joined.
+         */
+        bool synced{false};
+
+        /** The unit sync counters `synced` is made of. */
+        std::uint32_t unitTypesDeclared{0};
+        std::uint32_t unitKeysReceived{0};
+        std::uint32_t unitRecordsSent{0};
+        std::uint32_t unitRecordsHandled{0};
     };
 
     struct TaBattleroomConfig
@@ -215,8 +254,13 @@ namespace rwe
         /** The map, which the status record names and a launch compares against. */
         std::string mapName;
 
-        /** Byte 157. The bits are in docs/TA-NETWORK.md, "The battleroom". */
-        std::uint8_t options{0x4F};
+        /**
+         * Byte 157. The bits are in docs/TA-NETWORK.md, "The battleroom".
+         * 0x47 and not a captured host's 0x4f: bit 0x08 is the Game Ends
+         * commander rule, which a joining TA takes from this byte and applies to
+         * its own commander, in a game RWE plays as Continues (BT-234).
+         */
+        std::uint8_t options{0x47};
 
         std::uint8_t hostTeam{TaNoTeam};
 
@@ -254,6 +298,22 @@ namespace rwe
         /** Loading steps to wait for a joiner's 0x15 before launching anyway. */
         unsigned int maxLoadedWaits{10};
 
+        /**
+         * Loading steps between resends of a 0x1e the joiner has not yet
+         * answered with a 0x1f (BT-228). The original resends until it is
+         * acknowledged; the cadence is RWE's own, one second at the default
+         * step, and the resend ends with the wait for the 0x15.
+         */
+        unsigned int startResendSteps{5};
+
+        /**
+         * How long a launch waits for a joiner's unit sync before going ahead
+         * without it. The original has no timeout and shows SYNCHING for as
+         * long as it takes (BT-212); a joiner that never finishes would
+         * otherwise hold the host for ever. Zero turns the wait off.
+         */
+        std::chrono::milliseconds unitSyncTimeout{30000};
+
         /** The ladder the progress walks, as the recorded host walked it. */
         std::vector<std::uint8_t> loadingProgress{0x00, 0x26, 0x36, TaLoadingComplete};
 
@@ -261,11 +321,12 @@ namespace rwe
         std::size_t unitSyncBatchSize{35};
 
         /**
-         * Ids answered out of one message of sub-type 2 records. No data set has
-         * more unit types than this, so a long message cannot make the queue grow
-         * without bound.
+         * Ids answered out of one message of sub-type 2 records. The largest
+         * data set known, Escalation, has 549 unit types; this leaves room above
+         * it and still stops a long message making the queue grow without bound
+         * (BT-211).
          */
-        std::size_t maxUnitSyncIdsPerMessage{512};
+        std::size_t maxUnitSyncIdsPerMessage{600};
     };
 
     /**
@@ -356,6 +417,9 @@ namespace rwe
         /** A host rule has refused a launch, with the reason. */
         void onRefused(std::function<void(const std::string&)> handler);
 
+        /** A joiner's unit sync has just completed (BT-212), so a launch it held back may be tried. */
+        void onSynced(std::function<void(const TaBattleroomPeer&)> handler);
+
         /** Everyone who has finished the handshake. */
         std::vector<PeerId> peerIds() const;
 
@@ -367,6 +431,15 @@ namespace rwe
         /** Ids answered and refused, for a caller logging the exchange. */
         std::uint32_t unitSyncEchoed() const { return unitSyncEchoed_; }
         std::uint32_t unitSyncRefused() const { return unitSyncRefused_; }
+
+        /** Whether a joiner has answered its 0x1e with a 0x1f (BT-228). */
+        bool startAcknowledged(PeerId peer) const { return startAcked_.count(peer) != 0; }
+
+        /** 0x1e records sent again because no 0x1f had arrived. */
+        std::uint32_t startResent() const { return startResent_; }
+
+        /** Packets dropped for a stored checksum that did not match their bytes (#657). */
+        std::uint32_t badChecksumPackets() const { return badChecksum_; }
 
         TaBattleroomState state() const { return state_; }
 
@@ -388,6 +461,11 @@ namespace rwe
         std::map<PeerId, TaBattleroomPeer> peers_;
         std::map<PeerId, bool> readyAnnounced_;
 
+        /** Joiners whose 0x1f has arrived, and the steps since the last 0x1e went out. */
+        std::set<PeerId> startAcked_;
+        unsigned int stepsSinceStart_{0};
+        std::uint32_t startResent_{0};
+
         /** Joiners in the order they joined; the host is number 1 and they follow. */
         std::vector<PeerId> joinOrder_;
         bool numbersSent_{false};
@@ -404,16 +482,26 @@ namespace rwe
         unsigned int loadedWaits_{0};
         std::uint32_t unitSyncEchoed_{0};
         std::uint32_t unitSyncRefused_{0};
+        std::uint32_t badChecksum_{0};
 
         std::function<void(const TaBattleroomPeer&)> readyHandler;
         std::function<void(const JoinerInfo&)> launchedHandler;
         std::function<void(const std::string&)> refusedHandler;
+        std::function<void(const TaBattleroomPeer&)> syncedHandler;
+
+        /** When each joiner arrived, for the unit sync timeout. */
+        std::map<PeerId, std::chrono::steady_clock::time_point> joinedAt_;
+
+        bool isSynced(PeerId peer, const TaBattleroomPeer& state) const;
 
         void armKeepalive();
         void armPings();
         void armLoadingStep();
 
         void sendKeepalive();
+
+        /** The 0x1e for each of `ids`: its own start-position index, host zero. */
+        void sendStartPositions(const std::vector<PeerId>& ids);
         void sendLoadingStep();
         void finishLaunch();
         void moveToUdp();

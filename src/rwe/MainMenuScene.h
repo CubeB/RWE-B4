@@ -21,6 +21,7 @@
 namespace rwe
 {
     struct MultiplayerFlow;
+    struct SetupSeat;
     struct MenuProbe;
 
     class MainMenuScene : public Scene
@@ -370,6 +371,9 @@ namespace rwe
          * it can. Slot n needs the map's StartPos n; see startGame.
          */
         std::optional<std::string> startPositionProblem(const GameParameters& params);
+
+        /** The seats on the setup screen, for the launch checks in MultiplayerSetup.h. */
+        std::vector<SetupSeat> setupSeats() const;
 
         UiPanel& topPanel();
 

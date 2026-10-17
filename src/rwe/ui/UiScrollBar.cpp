@@ -1,5 +1,6 @@
 #include "UiScrollBar.h"
 #include <algorithm>
+#include <rwe/util/SimpleLogger.h>
 
 namespace rwe
 {
@@ -8,8 +9,31 @@ namespace rwe
         graphics.drawSpriteAbs(x, y, sprite);
     }
 
+    bool UiScrollBar::hasUsableArt(const SpriteSeries* series)
+    {
+        if (!series || series->sprites.size() < 10)
+        {
+            return false;
+        }
+        for (std::size_t i = 0; i < 10; ++i)
+        {
+            if (!series->sprites[i])
+            {
+                return false;
+            }
+        }
+        // The middle background (1) and middle box (4) are tiled by loops that
+        // advance by their height.
+        return series->sprites[1]->bounds.height() > 0.0f && series->sprites[4]->bounds.height() > 0.0f;
+    }
+
     void UiScrollBar::render(UiRenderService& context) const
     {
+        if (!artUsable)
+        {
+            return;
+        }
+
         drawScrollBackground(context, posX, posY, sizeY);
 
         auto info = getScrollBoxInfo();
@@ -26,6 +50,12 @@ namespace rwe
         : UiComponent(posX, posY, sizeX, sizeY),
           sprites(std::move(sprites))
     {
+        artUsable = hasUsableArt(this->sprites.get());
+        if (!artUsable)
+        {
+            LOG_WARN << "scroll bar: the SLIDERS art is incomplete; the bar is blank";
+        }
+
         scrollChanged().subscribe([this](float scrollPercent) {
             ScrollPositionMessage m{getScrollBarPercent(), scrollPercent};
             messagesSubject.next(m);
@@ -94,6 +124,11 @@ namespace rwe
 
     void UiScrollBar::mouseDown(MouseButtonEvent event)
     {
+        if (!artUsable)
+        {
+            return;
+        }
+
         const Sprite& upArrow = *sprites->sprites[6];
         if (Rectangle2f::fromTopLeft(posX, posY, upArrow.bounds.width(), upArrow.bounds.height()).contains(event.x, event.y))
         {
@@ -134,6 +169,11 @@ namespace rwe
     void UiScrollBar::mouseMove(MouseMoveEvent event)
     {
         UiComponent::mouseMove(event);
+
+        if (!artUsable)
+        {
+            return;
+        }
 
         if (barGrabbed)
         {
@@ -183,6 +223,11 @@ namespace rwe
 
     void UiScrollBar::update(float dt)
     {
+        if (!artUsable)
+        {
+            return;
+        }
+
         // speed in percent/sec
         float scrollSpeed = 4.0f;
 

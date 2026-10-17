@@ -99,7 +99,10 @@ namespace rwe
             w.randomDecay = GameTime(0);
             w.burst = 1;
             w.velocity = SimScalar(800.0f / 30.0f);
-            w.damageRadius = 96_ss;
+            // The shipped interceptors say areaofeffect=96, so the blast
+            // radius the unit-damage routine uses is half of it; the
+            // interceptor itself catches at the full 96 (BT-111).
+            w.damageRadius = 48_ss;
             w.damage["DEFAULT"] = 500;
             w.tolerance = SimAngle(4000u);
             w.pitchTolerance = SimAngle(4000u);
@@ -399,6 +402,54 @@ namespace rwe
             REQUIRE(gone(sim, nukeId));
         }
 
+        SECTION("the fuse reaches the full areaofeffect, not half of it")
+        {
+            // 80 away: outside the halved radius of 48, inside the 96 the
+            // original squares and compares (0x49B106). BT-111.
+            auto chaser = sim.createProjectileFromWeapon(ProjectileSpawn{
+                .owner = us,
+                .weaponType = "amd_rocket",
+                .position = SimVector(1080_ss, 400_ss, 1000_ss),
+                .direction = SimVector(0_ss, 1_ss, 0_ss),
+                .distanceToTarget = 100_ss,
+                .targetUnit = std::nullopt,
+                .attacker = std::nullopt,
+                .inheritedVelocity = std::nullopt,
+                .targetPosition = std::nullopt,
+                .targetProjectile = nukeId});
+            chaser.velocity = SimVector(0_ss, 0_ss, 0_ss);
+            chaser.speed = 0_ss;
+            auto chaserId = sim.projectiles.emplace(std::move(chaser));
+
+            sim.tick();
+
+            REQUIRE(gone(sim, chaserId));
+            REQUIRE(gone(sim, nukeId));
+        }
+
+        SECTION("at exactly the areaofeffect the fuse does not go off")
+        {
+            auto chaser = sim.createProjectileFromWeapon(ProjectileSpawn{
+                .owner = us,
+                .weaponType = "amd_rocket",
+                .position = SimVector(1096_ss, 400_ss, 1000_ss),
+                .direction = SimVector(0_ss, 1_ss, 0_ss),
+                .distanceToTarget = 100_ss,
+                .targetUnit = std::nullopt,
+                .attacker = std::nullopt,
+                .inheritedVelocity = std::nullopt,
+                .targetPosition = std::nullopt,
+                .targetProjectile = nukeId});
+            chaser.velocity = SimVector(0_ss, 0_ss, 0_ss);
+            chaser.speed = 0_ss;
+            auto chaserId = sim.projectiles.emplace(std::move(chaser));
+
+            sim.tick();
+
+            REQUIRE_FALSE(gone(sim, chaserId));
+            REQUIRE_FALSE(gone(sim, nukeId));
+        }
+
         SECTION("outside it, the round keeps flying")
         {
             auto chaser = sim.createProjectileFromWeapon(ProjectileSpawn{
@@ -447,6 +498,10 @@ namespace rwe
         // And one just outside, which lives.
         auto outside = putMissileInAir(sim, "nuke", them, blastAt + SimVector(200_ss, 0_ss, 0_ss), SimVector(600_ss, 0_ss, 600_ss));
 
+        // Between half of the areaofeffect and all of it: caught, because the
+        // blast that kills projectiles uses the full word (BT-111).
+        auto farButInside = putMissileInAir(sim, "nuke", them, blastAt + SimVector(0_ss, 90_ss, 0_ss), SimVector(600_ss, 0_ss, 600_ss));
+
         // Even one of our own, since the blast does not ask whose it is.
         auto ours = putMissileInAir(sim, "nuke", us, blastAt + SimVector(0_ss, 0_ss, 20_ss), SimVector(600_ss, 0_ss, 600_ss));
 
@@ -469,6 +524,7 @@ namespace rwe
         REQUIRE(sim.projectiles.tryGet(bystander)->get().isDead);
         REQUIRE(sim.projectiles.tryGet(notTargetable)->get().isDead);
         REQUIRE(sim.projectiles.tryGet(ours)->get().isDead);
+        REQUIRE(sim.projectiles.tryGet(farButInside)->get().isDead);
         REQUIRE_FALSE(sim.projectiles.tryGet(outside)->get().isDead);
 
         // And the round that went off is not caught by its own blast.

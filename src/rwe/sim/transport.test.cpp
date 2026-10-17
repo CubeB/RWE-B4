@@ -8,6 +8,7 @@
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
+#include <rwe/sim/PieceController.h>
 #include <rwe/sim/UnitState.h>
 #include <memory>
 #include <rwe/sim/sim_test_util.h>
@@ -655,6 +656,80 @@ namespace rwe
             REQUIRE(kbot.position.y == 100_ss);
             REQUIRE(rweAbs(kbot.position.x - -700_ss) < 32_ss);
             REQUIRE(rweAbs(kbot.position.z - 200_ss) < 32_ss);
+        }
+    }
+
+    TEST_CASE("a script drop onto a cell the passenger cannot occupy changes nothing (BT-75)", "[transport]")
+    {
+        // 0x4813B0 asks the drop-legality test about the passenger's own cell
+        // and, if it says no, returns: no detach, no nearest-cell search, the
+        // unit stays attached for the script to try again.
+        //
+        // Land at height 100 for cells 0 to 39, sea 60 deep beyond, and a
+        // kbot that may stand in no water at all.
+        auto script = makeEmptyCobScript({"base"});
+        Grid<unsigned char> heights(128, 128, static_cast<unsigned char>(0));
+        for (int z = 0; z < 128; ++z)
+        {
+            for (int x = 0; x < 40; ++x)
+            {
+                heights.get(x, z) = 100;
+            }
+        }
+        GameSimulation sim(MapTerrain(std::move(heights), 60_ss), 0u, 0, 0);
+        auto player = addPlayer(sim, "hauler");
+        sim.unitDefinitions["transport"] = makeTransportDef();
+        sim.unitDefinitions["kbot"] = makeMobileDef(2u);
+        registerModel(sim, "model");
+
+        auto transportId = spawnUnit(sim, "transport", player, SimVector(-700_ss, 100_ss, 0_ss), script);
+        auto kbotId = spawnUnit(sim, "kbot", player, SimVector(-700_ss, 100_ss, 100_ss), script);
+        REQUIRE(sim.loadUnitIntoTransport(transportId, kbotId, "base"));
+
+        SECTION("two cells off a shore it stays aboard where it hangs")
+        {
+            // Cell 42: sea, with dry land two cells away that the old ring
+            // search would have found.
+            auto overSea = SimVector(-344_ss, 100_ss, 0_ss);
+            sim.getUnitState(kbotId).position = overSea;
+            PieceController(sim).dropUnitFromTransport(transportId, kbotId);
+
+            const auto& kbot = sim.getUnitState(kbotId);
+            REQUIRE(kbot.carriedBy == std::optional<UnitId>(transportId));
+            REQUIRE(sim.getUnitState(transportId).carriedUnits == std::vector<UnitId>{kbotId});
+            REQUIRE(kbot.position.x == overSea.x);
+            REQUIRE(kbot.position.z == overSea.z);
+            REQUIRE_FALSE(cellHolds(sim, overSea, kbotId));
+        }
+
+        SECTION("over land it lets go exactly where it hangs")
+        {
+            auto overLand = SimVector(-600_ss, 100_ss, 40_ss);
+            sim.getUnitState(kbotId).position = overLand;
+            PieceController(sim).dropUnitFromTransport(transportId, kbotId);
+
+            const auto& kbot = sim.getUnitState(kbotId);
+            REQUIRE_FALSE(kbot.carriedBy.has_value());
+            REQUIRE(sim.getUnitState(transportId).carriedUnits.empty());
+            REQUIRE(kbot.position.x == overLand.x);
+            REQUIRE(kbot.position.z == overLand.z);
+            REQUIRE(cellHolds(sim, overLand, kbotId));
+        }
+
+        SECTION("a unit standing in the cell refuses it, and the drop goes through when it leaves")
+        {
+            auto overLand = SimVector(-600_ss, 100_ss, 40_ss);
+            auto blockerId = spawnUnit(sim, "kbot", player, overLand, script);
+            auto blockerCell = sim.computeFootprintRegion(overLand, sim.unitDefinitions.at("kbot").movementCollisionInfo);
+            sim.occupiedGrid.forEach(*sim.occupiedGrid.tryToRegion(blockerCell), [&](auto& cell) { cell.mobileUnitId = blockerId; });
+            sim.getUnitState(kbotId).position = overLand;
+
+            PieceController(sim).dropUnitFromTransport(transportId, kbotId);
+            REQUIRE(sim.getUnitState(kbotId).carriedBy == std::optional<UnitId>(transportId));
+
+            sim.occupiedGrid.forEach(*sim.occupiedGrid.tryToRegion(blockerCell), [&](auto& cell) { cell.mobileUnitId = std::nullopt; });
+            PieceController(sim).dropUnitFromTransport(transportId, kbotId);
+            REQUIRE_FALSE(sim.getUnitState(kbotId).carriedBy.has_value());
         }
     }
 }

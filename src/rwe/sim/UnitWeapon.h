@@ -97,7 +97,14 @@ namespace rwe
         /** The game time at which the weapon next becomes ready to fire. */
         GameTime readyTime{0};
 
-        /** Offset from aim point to firing point, compensation for ballistics calculations. */
+        /**
+         * The launch muzzle correction (slot +0x10, BT-114): 1.25 times the Z
+         * difference between the slot's Query piece and its AimFrom piece,
+         * truncated to the 16.16 the original keeps it in, written once when
+         * the unit is constructed. The ballistic spawn subtracts
+         * `trunc(this / weaponvelocity)` ticks of gravity from the launch
+         * vertical velocity. The aim solver never reads it.
+         */
         SimScalar ballisticZOffset{0};
 
         /**

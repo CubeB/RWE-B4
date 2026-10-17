@@ -454,56 +454,177 @@ namespace rwe
         REQUIRE(countEvents<UnitCannotComplyEvent>(sim) == 0);
     }
 
-    TEST_CASE("a submarine's frame sits on the sea bed, not at the yard's pad", "[unitnotifications]")
+    namespace
     {
-        // trySpawnUnit settles a unit with a mover onto the terrain, but the
-        // yard then re-places the frame at its build piece every tick, and
-        // took the piece's own height -- so a sub was built floating at the
-        // surface with its shadow, projected from the ground, far beneath it
-        // (play-test 2026-10-10). The original settles every unit with a
-        // mover to the terrain each tick (0x48A870).
-        auto script = makeEmptyCobScript({"base"});
-        Grid<unsigned char> heights(128, 128, 0);
-        GameSimulation sim(MapTerrain(std::move(heights), 60_ss), 0u, 0, 0);
-        auto player = addWellStockedPlayer(sim, "CORE");
-        registerTestModel(sim);
-
-        sim.unitDefinitions["FACT"] = makeFactoryDef();
-        sim.unitScriptDefinitions["FACT"] = *script;
-        // A submarine's own movement class: it needs water, and a good deal
-        // of it. Without that the frame cannot be placed on this terrain at
-        // all and the yard's per-tick placement is refused, which hides the
-        // height it would have been given.
-        auto subDef = makeMobileDef(100u);
-        subDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 10u, 255u};
-        sim.unitDefinitions["SUB"] = subDef;
-        sim.unitScriptDefinitions["SUB"] = *script;
-
-        // The yard's pad is at the water's surface.
-        auto pad = SimVector(600_ss, 60_ss, 600_ss);
-        auto factoryId = addUnitOfType(sim, "FACT", player, pad, script);
-        sim.getUnitState(factoryId).inBuildStance = true;
-        sim.getUnitState(factoryId).buildQueue.emplace_back("SUB", 1);
-
-        std::optional<UnitId> frameId;
-        for (int i = 0; i < 100 && !frameId; ++i)
+        /**
+         * A yard on a flat sea-floor map (sea level 60, floor 0) with its pad
+         * at padHeight, building `product`. The product has no speed so it
+         * stays where the yard puts it. Returns once the frame exists.
+         */
+        struct SubYardFixture
         {
-            sim.tick();
-            for (const auto& entry : sim.units)
+            GameSimulation sim;
+            std::optional<UnitId> frameId;
+            SimVector pad;
+            const SimScalar seaLevel = 60_ss;
+
+            SubYardFixture(const UnitDefinition& productDef, SimScalar padHeight)
+                : sim(MapTerrain(Grid<unsigned char>(128, 128, 0), 60_ss), 0u, 0, 0),
+                  pad(600_ss, padHeight, 600_ss)
             {
-                if (entry.second.unitType == "SUB")
+                auto script = makeEmptyCobScript({"base"});
+                auto player = addWellStockedPlayer(sim, "CORE");
+                registerTestModel(sim);
+
+                sim.unitDefinitions["FACT"] = makeFactoryDef();
+                sim.unitScriptDefinitions["FACT"] = *script;
+                sim.unitDefinitions["PRODUCT"] = productDef;
+                sim.unitScriptDefinitions["PRODUCT"] = *script;
+
+                auto factoryId = addUnitOfType(sim, "FACT", player, pad, script);
+                sim.getUnitState(factoryId).inBuildStance = true;
+                sim.getUnitState(factoryId).buildQueue.emplace_back("PRODUCT", 1);
+
+                for (int i = 0; i < 100 && !frameId; ++i)
                 {
-                    frameId = entry.first;
+                    sim.tick();
+                    findFrame();
                 }
             }
-        }
-        REQUIRE(frameId.has_value());
 
-        // Through the rest of the build the frame stays on the bottom.
-        for (int i = 0; i < 20; ++i)
+            void findFrame()
+            {
+                for (const auto& entry : sim.units)
+                {
+                    if (entry.second.unitType == "PRODUCT")
+                    {
+                        frameId = entry.first;
+                    }
+                }
+            }
+
+            UnitState& frame()
+            {
+                return sim.getUnitState(*frameId);
+            }
+
+            bool frameBeingBuilt()
+            {
+                return frame().isBeingBuilt(sim.unitDefinitions.at("PRODUCT"));
+            }
+        };
+
+        /** ARMSUB/CORSUB as the shipped FBIs have them: Upright=1, WaterLine=20, no Floater, no CanHover. */
+        UnitDefinition makeSubDef()
         {
-            sim.tick();
-            REQUIRE(sim.getUnitState(*frameId).position.y == 0_ss);
+            auto subDef = makeMobileDef(100u);
+            // A submarine's own movement class: it needs water, and a good deal
+            // of it. Without that the frame cannot be placed on this terrain at
+            // all and the yard's per-tick placement is refused, which hides the
+            // height it would have been given.
+            subDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 10u, 255u};
+            subDef.upright = true;
+            subDef.waterLine = 20u;
+            subDef.maxVelocity = 0_ss;
+            return subDef;
+        }
+    }
+
+    TEST_CASE("an unfinished submarine in a yard sits at the build piece's height, not on the sea bed", "[unitnotifications]")
+    {
+        // The owner watched retail TA draw the top of an unfinished sub poking
+        // out of the water above the shipyard
+        // (NAVAL-CONSTRUCTION-DGUN-FINDINGS.md, "submarine under
+        // construction"). d204e072 had put the frame on the sea bed for the
+        // whole build, which that observation refutes. A submarine is no
+        // floater, so the attached product gets no floor either: it is
+        // exactly where the piece is.
+        SubYardFixture f(makeSubDef(), 60_ss);
+        REQUIRE(f.frameId.has_value());
+
+        // From its first appearance, and through the rest of the build.
+        int builtTicks = 0;
+        for (int i = 0; i < 20 && f.frameBeingBuilt(); ++i)
+        {
+            REQUIRE(f.frame().position.y == 60_ss);
+            REQUIRE(f.frame().position.x == f.pad.x);
+            REQUIRE(f.frame().position.z == f.pad.z);
+            f.sim.tick();
+            ++builtTicks;
+        }
+        REQUIRE(builtTicks > 2);
+    }
+
+    TEST_CASE("an unfinished submarine is not pushed up or down to the waterline", "[unitnotifications]")
+    {
+        // A non-floater gets no floor: with the pad below sea level minus the
+        // sub's WaterLine the frame stays at the piece, where a floater would
+        // have been raised.
+        SubYardFixture f(makeSubDef(), 30_ss);
+        REQUIRE(f.frameId.has_value());
+
+        for (int i = 0; i < 5 && f.frameBeingBuilt(); ++i)
+        {
+            REQUIRE(f.frame().position.y == 30_ss);
+            f.sim.tick();
+        }
+    }
+
+    TEST_CASE("a finished submarine drops to the sea bed straight below the pad", "[unitnotifications]")
+    {
+        // On completion the product is released and the ordinary rule puts an
+        // upright non-hover non-floater unit at the terrain height under its
+        // centre. RWE only re-snaps a unit that moves, so the yard does it
+        // when it lets go; this sub has no speed and would otherwise stay up.
+        SubYardFixture f(makeSubDef(), 60_ss);
+        REQUIRE(f.frameId.has_value());
+
+        for (int i = 0; i < 200 && f.frameBeingBuilt(); ++i)
+        {
+            f.sim.tick();
+        }
+        REQUIRE_FALSE(f.frameBeingBuilt());
+
+        for (int i = 0; i < 5; ++i)
+        {
+            f.sim.tick();
+        }
+        REQUIRE(f.frame().position.y == 0_ss);
+        REQUIRE(f.frame().previousPosition.y == 0_ss);
+        REQUIRE(f.frame().position.x == f.pad.x);
+        REQUIRE(f.frame().position.z == f.pad.z);
+    }
+
+    TEST_CASE("an unfinished floater below its floor is raised to sea level minus its waterline", "[unitnotifications]")
+    {
+        // The attached floor is given to a Floater only: sea level minus its
+        // WaterLine, CORSY's 22 here, and the piece is never pushed down.
+        auto shipDef = makeMobileDef(100u);
+        shipDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 10u, 255u};
+        shipDef.floater = true;
+        shipDef.waterLine = 22u;
+        shipDef.maxVelocity = 0_ss;
+
+        SECTION("a piece under the floor is raised to it")
+        {
+            SubYardFixture f(shipDef, 30_ss);
+            REQUIRE(f.frameId.has_value());
+            for (int i = 0; i < 5 && f.frameBeingBuilt(); ++i)
+            {
+                REQUIRE(f.frame().position.y == 38_ss);
+                f.sim.tick();
+            }
+        }
+
+        SECTION("a piece above the floor is left where it is")
+        {
+            SubYardFixture f(shipDef, 70_ss);
+            REQUIRE(f.frameId.has_value());
+            for (int i = 0; i < 5 && f.frameBeingBuilt(); ++i)
+            {
+                REQUIRE(f.frame().position.y == 70_ss);
+                f.sim.tick();
+            }
         }
     }
 }

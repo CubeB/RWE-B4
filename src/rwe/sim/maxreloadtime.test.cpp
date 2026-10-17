@@ -502,4 +502,78 @@ namespace rwe
             REQUIRE(env.readyQueue.empty());
         }
     }
+
+    TEST_CASE("an unknown unit value answers 0, ignores a write, and costs no thread (BT-77)", "[cob]")
+    {
+        // 0x480770 answers zero for every id it does not know; 0x480B20
+        // acts only on ids 1, 5, 6, 18, 19 and 20 and otherwise sets a dirty
+        // bit. The standing-orders ports (2 and 3) are among the ignored.
+        GameSimulation sim(makeFlatTerrain(16, 16), 0u, 0, 0);
+        auto owner = addPlayer(sim, "owner");
+        UnitDefinition d{};
+        sim.unitDefinitions["TESTUNIT"] = d;
+
+        auto script = std::make_shared<CobScript>();
+        script->staticVariableCount = 3;
+        script->pieces.push_back("base");
+
+        // 0: GetsUnknown { static0 = get(21); static1 = get(1000); static2 = 7; }
+        beginFunction(*script, "GetsUnknown");
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 21u);
+        push(*script, OpCode::GET_VALUE);
+        push(*script, OpCode::POP_STATIC);
+        push(*script, 0u);
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 1000u);
+        push(*script, OpCode::GET_VALUE);
+        push(*script, OpCode::POP_STATIC);
+        push(*script, 1u);
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 7u);
+        push(*script, OpCode::POP_STATIC);
+        push(*script, 2u);
+        endFunction(*script, 0u);
+
+        // 1: SetsUnknown { set(2) = 2; set(3) = 2; set(99) = 5; static2 = 7; }
+        beginFunction(*script, "SetsUnknown");
+        for (auto [id, value] : {std::pair{2u, 2u}, std::pair{3u, 2u}, std::pair{99u, 5u}})
+        {
+            push(*script, OpCode::PUSH_CONSTANT);
+            push(*script, id);
+            push(*script, OpCode::PUSH_CONSTANT);
+            push(*script, value);
+            push(*script, OpCode::SET_VALUE);
+        }
+        push(*script, OpCode::PUSH_CONSTANT);
+        push(*script, 7u);
+        push(*script, OpCode::POP_STATIC);
+        push(*script, 2u);
+        endFunction(*script, 0u);
+
+        auto unitId = addUnitOfType(sim, "TESTUNIT", owner, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto& env = *sim.getUnitState(unitId).cobEnvironment;
+
+        SECTION("a get of an id the original does not know is zero and the script goes on")
+        {
+            env.setStatic(0, 42);
+            env.setStatic(1, 42);
+            env.createThread(0u, {});
+            REQUIRE_NOTHROW(runUnitCobScripts(sim, unitId));
+            REQUIRE(env.getStatic(0) == 0);
+            REQUIRE(env.getStatic(1) == 0);
+            REQUIRE(env.getStatic(2) == 7);
+        }
+
+        SECTION("a set of an ignored id changes nothing and the script goes on")
+        {
+            sim.getUnitState(unitId).moveOrders = UnitMovementOrders::HoldPosition;
+            sim.getUnitState(unitId).setFireOrders(UnitFireOrders::HoldFire);
+            env.createThread(1u, {});
+            REQUIRE_NOTHROW(runUnitCobScripts(sim, unitId));
+            REQUIRE(sim.getUnitState(unitId).moveOrders == UnitMovementOrders::HoldPosition);
+            REQUIRE(sim.getUnitState(unitId).fireOrders == UnitFireOrders::HoldFire);
+            REQUIRE(env.getStatic(2) == 7);
+        }
+    }
 }

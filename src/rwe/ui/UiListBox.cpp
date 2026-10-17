@@ -26,6 +26,14 @@ namespace rwe
             float y = 12.0f + (i * 12.0f);
             auto itemIndex = scrollPositionSubject.getValue() + i;
 
+            // The scroll position is kept at or below maxScrollPosition, so
+            // this holds; it is the read that must never leave the items,
+            // whatever put the position where it is.
+            if (itemIndex >= items.size())
+            {
+                break;
+            }
+
             // A row wider than the box is cut at its edge. The multiplayer
             // game list sets nine of these side by side with no gap between,
             // and a long game name would otherwise run over its neighbour.
@@ -210,7 +218,9 @@ namespace rwe
 
         // listboxes defined in TA guis tend to be too long,
         // so shorten our number of lines by 1 to compensate.
-        return lines - 1;
+        // A box under one row tall has no lines; the subtraction used to wrap
+        // to about 4.29 billion (#668).
+        return lines > 0 ? lines - 1 : 0;
     }
 
     std::optional<unsigned int> UiListBox::pixelToLine(int y) const
@@ -245,7 +255,8 @@ namespace rwe
 
     void UiListBox::setScrollPositionLast(unsigned int newPosition)
     {
-        auto linesToSubtract = numberOfLines() - 1;
+        auto lines = numberOfLines();
+        auto linesToSubtract = lines > 0 ? lines - 1 : 0;
         if (newPosition > linesToSubtract)
         {
             setScrollPosition(newPosition - linesToSubtract);
@@ -347,15 +358,12 @@ namespace rwe
 
     void UiListBox::scrollDown()
     {
+        // maxScroll - 3 wrapped for a list that overflows by fewer than three
+        // rows (and for one that fits), sending the position to three, past
+        // the end of the items (#667). Add and compare instead.
         auto maxScroll = maxScrollPosition();
-        if (scrollPositionSubject.getValue() < maxScroll - 3)
-        {
-            scrollPositionSubject.next(scrollPositionSubject.getValue() + 3);
-        }
-        else
-        {
-            scrollPositionSubject.next(maxScroll);
-        }
+        auto position = std::min(scrollPositionSubject.getValue(), maxScroll);
+        scrollPositionSubject.next(maxScroll - position > 3 ? position + 3 : maxScroll);
     }
 
     void UiListBox::selectNextListItem()
@@ -385,7 +393,14 @@ namespace rwe
     void UiListBox::ensureIndexInView(unsigned int newIndex)
     {
         auto firstIndexInView = scrollPositionSubject.getValue();
-        auto lastIndexInView = firstIndexInView + numberOfLines() - 1;
+        auto lines = numberOfLines();
+        if (lines == 0)
+        {
+            // Nothing is in view in a box with no rows; keep the item first.
+            setScrollPosition(newIndex);
+            return;
+        }
+        auto lastIndexInView = firstIndexInView + lines - 1;
 
         if (newIndex < firstIndexInView)
         {

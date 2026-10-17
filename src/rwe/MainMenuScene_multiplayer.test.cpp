@@ -1009,6 +1009,81 @@ namespace rwe
         CHECK(back->chat.size() == lobby.chat.size());
     }
 
+    TEST_CASE("the setup a guest is ready for is the map, the rules and the seat table (#719)", "[multiplayer][battleroom]")
+    {
+        auto model = hostModel();
+        model.players[1].type.next(Type::Network);
+        model.players[1].name.next("Ada");
+        const auto id = identityFor("0123456789abcdef");
+        const auto base = setupFingerprint(lobbyFromModel(model, id, "Coast To Coast", noTokens()));
+
+        SECTION("ready flags, chat, names, tokens and the launching flag are not the setup")
+        {
+            auto changed = id;
+            changed.ready = std::vector<bool>(10, true);
+            changed.chat.push_back(DiscoveredChatLine{1, "Ada", "hello"});
+            changed.launching = true;
+            auto tokens = noTokens();
+            tokens[1] = "deadbeef";
+            model.players[1].name.next("Someone else");
+            CHECK(setupFingerprint(lobbyFromModel(model, changed, "Coast To Coast", tokens)) == base);
+        }
+
+        SECTION("another map is another setup")
+        {
+            CHECK(setupFingerprint(lobbyFromModel(model, id, "Great Divide", noTokens())) != base);
+        }
+
+        SECTION("a seat opening, closing or being taken is another setup")
+        {
+            model.players[2].type.next(Type::Computer);
+            CHECK(setupFingerprint(lobbyFromModel(model, id, "Coast To Coast", noTokens())) != base);
+        }
+
+        SECTION("a colour or a team moving is another setup")
+        {
+            model.players[1].colorIndex.next(PlayerColorIndex(7));
+            const auto recoloured = setupFingerprint(lobbyFromModel(model, id, "Coast To Coast", noTokens()));
+            CHECK(recoloured != base);
+            model.players[1].teamIndex.next(3);
+            CHECK(setupFingerprint(lobbyFromModel(model, id, "Coast To Coast", noTokens())) != recoloured);
+        }
+
+        SECTION("a computer seat's personality is a rule")
+        {
+            model.players[2].type.next(Type::Computer);
+            model.players[2].personality.next("Original TA");
+            const auto first = setupFingerprint(lobbyFromModel(model, id, "Coast To Coast", noTokens()));
+            model.players[2].personality.next("Balanced");
+            CHECK(setupFingerprint(lobbyFromModel(model, id, "Coast To Coast", noTokens())) != first);
+        }
+    }
+
+    TEST_CASE("a claim says which version of the setup its ready is for (#719)", "[multiplayer][battleroom]")
+    {
+        auto model = hostModel();
+        auto id = identityFor("0123456789abcdef");
+        id.setupEpoch = 5;
+        id.mapIdentity = "1f4-2a00-0123456789abcdef";
+        auto lobby = lobbyFromModel(model, id, "Coast To Coast", noTokens());
+        CHECK(lobby.setupEpoch == 5u);
+        CHECK(lobby.mapIdentity == "1f4-2a00-0123456789abcdef");
+
+        GuestChoice choice{Side::Arm, PlayerColorIndex(1), std::optional<int>(), true};
+        auto claim = claimAnnouncement(lobby, 1, "deadbeef", "Guest", 1400, choice);
+        claim.sourceAddress = "192.168.0.9:1338";
+        auto text = LanDiscovery::encode(claim);
+        REQUIRE(text.has_value());
+        auto heard = LanDiscovery::decode(*text);
+        REQUIRE(heard.has_value());
+        heard->sourceAddress = claim.sourceAddress;
+
+        auto claims = claimsOn({lobby, *heard}, lobby.session);
+        REQUIRE(claims.size() == 1);
+        CHECK(claims[0].ready);
+        CHECK(claims[0].setupEpoch == 5u);
+    }
+
     TEST_CASE("a guest's choices and lines ride its claim", "[multiplayer][battleroom]")
     {
         auto host = roomModel();

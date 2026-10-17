@@ -40,5 +40,15 @@ namespace rwe
         std::optional<SimVector> inheritedVelocity{};
         std::optional<SimVector> targetPosition{};
         std::optional<ProjectileId> targetProjectile{};
+        /**
+         * Set on every round of a burst after the first, to the horizontal
+         * distance from the muzzle to the aim point. The first round is the
+         * template and lives out the weapon's range; a child is made by the
+         * per-tick projectile update (0x49B810) and expires at the tick plus
+         * the weapon's timer when it has one, else at (this distance plus 16)
+         * over the child's own speed, so it ends a little past the target
+         * rather than at full range (0x49B87F-0x49B8BC). BT-113.
+         */
+        std::optional<SimScalar> burstChildHorizontalDistance{};
     };
 }

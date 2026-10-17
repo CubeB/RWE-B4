@@ -440,6 +440,17 @@ namespace rwe
     void updateWakeDots(const MapTerrain& terrain, GameTime currentTime, std::vector<WakeDot>& dots);
 
     /**
+     * The window the nano spray lands in, along each axis of the target's
+     * extent, measured from the box's minimum: the nanolathe initialiser
+     * (0x473B50) narrows each axis to run from the minimum plus four elevenths
+     * of the extent to the minimum plus seven elevenths -- the middle three
+     * elevenths, centred (BT-144). RWE used plus or minus three elevenths about
+     * the centre, six elevenths wide, which is twice that.
+     */
+    constexpr float NanoLandingWindowStart = 4.0f / 11.0f;
+    constexpr float NanoLandingWindowEnd = 7.0f / 11.0f;
+
+    /**
      * A thermal vent puffs once every this many ticks, for as long as the map
      * lasts.
      *
@@ -634,6 +645,95 @@ namespace rwe
     UnitActivity unitActivity(const UnitState& unit, bool underConstruction, bool weaponQueued);
 
     /**
+     * How a thermal vent's steam is drawn for the ground it is over (BT-151):
+     * hidden on unexplored ground, dimmed like the rest of the remembered scene
+     * on explored ground that is not in sight, normal in sight.
+     */
+    enum class VentSteamDrawMode
+    {
+        Hidden,
+        Dimmed,
+        Normal,
+    };
+
+    VentSteamDrawMode ventSteamDrawMode(bool explored, bool visible);
+
+    /**
+     * The side of the square the minimap picture is fitted into (BT-152,
+     * 0x466780): the map is fitted into 126 pixels, not 128.
+     */
+    constexpr int MinimapPictureSize = 126;
+
+    /**
+     * Where the minimap picture sits in its box (BT-152): the longer side of
+     * the map is 126 pixels and the shorter is its aspect times that, in
+     * integer arithmetic and truncated, and the shorter side is centred with an
+     * offset of half the difference. A square map is 126 by 126.
+     */
+    Rectangle2f minimapPictureRect(const Rectangle2f& box, float imageWidth, float imageHeight);
+
+    /** What the displayed player knows of one fog cell, for the minimap. */
+    enum class MinimapCellState
+    {
+        /** Never explored: opaque black. */
+        Unexplored,
+        /** Explored but not in sight now: the base pixel through the gray table. */
+        Remembered,
+        /** In sight: the base pixel. */
+        Seen,
+    };
+
+    /**
+     * The minimap picture (BT-152, 0x466C20): each picture pixel samples one
+     * fog cell -- column x cellsWide / pictureWidth, and the same down -- and is
+     * black if the cell was never explored, the base pixel if it is in sight
+     * now, and the base pixel passed through the gray table if it is explored
+     * but not in sight. The gray table makes every channel the truncated mean
+     * of the three and snaps that to the palette (grayRamp, indexed by the
+     * mean): a desaturation that keeps the brightness, where RWE laid 47
+     * percent black over the picture. The base is the map's embedded minimap
+     * averaged down to the picture's size.
+     */
+    std::vector<Color> composeMinimapPicture(
+        int pictureWidth,
+        int pictureHeight,
+        const std::vector<Color>& base,
+        int baseWidth,
+        int baseHeight,
+        const std::vector<unsigned char>& grayRamp,
+        const ColorPalette& palette,
+        int cellsWide,
+        int cellsHigh,
+        const std::function<MinimapCellState(int, int)>& cellState);
+
+    /**
+     * Whether the parts of a unit's model at or below the water line are cut
+     * away rather than tinted blue (BT-142, 0x45972A to 0x459750): the original
+     * tints them for a unit owned by the displayed player or held on sonar, and
+     * cuts them for every other unit, so an enemy ship seen on the surface
+     * loses the part of its hull that is under water.
+     */
+    bool unitWaterPartsAreCut(bool ownedByViewer, bool sonarContact);
+
+    /**
+     * What the footer prints for a hovered unit the viewer cannot identify
+     * (BT-141, 0x46B6F3): the prefix "S: " when the unit is held on sonar and
+     * "R: " otherwise, then "Unidentified object" -- no name, no health bar, no
+     * figures.
+     */
+    std::string unidentifiedObjectText(bool sonarContact);
+
+    /**
+     * Whether the footer says anything about a hovered feature (BT-147). The
+     * feature branch of the footer (0x46B78C) tests the definition's
+     * `nodisplayinfo` bit and skips the whole text when it is set -- the 46
+     * shipped features that set it (ice chunks, vents, lava spires, moon
+     * craters) show no footer. The original lets a developer flag
+     * (+0x3923B bit 1) override that; RWE has no such flag.
+     */
+    bool featureFooterIsShown(const FeatureDefinition& definition);
+
+    /**
      * The kills line under the damage bar (0x46B2B8-0x46B3B2).
      *
      * Empty at zero kills, because the original tests the count against zero
@@ -654,6 +754,26 @@ namespace rwe
      * nanoframe exists, which is what buildOrderUnitId holds.
      */
     std::optional<UnitId> unitOrderTargetUnit(const UnitState& unit);
+
+    /** The unit a given order of `unit` is pointed at, if it names one. */
+    std::optional<UnitId> orderTargetUnit(const UnitOrder& order, const UnitState& unit);
+
+    /** The radius of the target ring when the order has no target unit (BT-185). */
+    constexpr int TargetRingDefaultRadius = 32;
+
+    /**
+     * The target ring's horizontal radius in screen pixels (BT-185): the
+     * target unit's footprint radius -- half the longer side of its footprint
+     * in world units -- or 32 when the order has no target unit.
+     */
+    int targetRingRadius(std::optional<std::pair<unsigned int, unsigned int>> targetFootprint);
+
+    /**
+     * The ring around an order's target as line segments, two points each
+     * (BT-185, 0x4399F0): an ellipse of sixteen segments, R across and
+     * (int)(R x 0.89) up and down -- not a circle of 0.89 R.
+     */
+    std::vector<Vector2f> targetRingSegments(const Vector2f& centre, int radius);
 
     // Declared here rather than kept private to GameScene.cpp because the
     // renderers moved to GameScene_render.cpp still call them; the

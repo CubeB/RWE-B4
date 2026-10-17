@@ -73,6 +73,9 @@ namespace rwe
             unsigned int maxWaterSlope;
             unsigned int minWaterDepth;
             unsigned int maxWaterDepth;
+
+            /** Whether the FBI wrote MinWaterDepth (BT-109); see MovementClassDefinition::minWaterDepthPresent. */
+            bool minWaterDepthPresent{false};
         };
         using MovementCollisionInfo = std::variant<NamedMovementClass, AdHocMovementClass>;
 
@@ -191,6 +194,9 @@ namespace rwe
 
         bool floater;
 
+        /** The FBI's `amphibious` key (BT-13); false when the file does not say. */
+        bool amphibious{false};
+
         /**
          * The FBI's . Six units set it, and the two that matter are
          * the floating dragon's teeth: their wreck is meant to stay on the
@@ -253,6 +259,16 @@ namespace rwe
          * the map props that are not really objects standing on the ground.
          */
         bool noShadow{false};
+
+        /**
+         * The FBI's digger (bit 30 of `def+0x241`; ARMAMB and CORTOAST). The
+         * drawing routine cuts a digger's final picture at the literal
+         * threshold 125 whether or not it is under water, which with the
+         * digger's height bias of 125 removes everything at or below the
+         * model's origin plane, so a pop-up turret never shows its buried
+         * part (BT-143). Presentation only; nothing in the simulation reads it.
+         */
+        bool digger{false};
 
         /**
          * The FBI's ZBuffer. In the original it decides whether a finished

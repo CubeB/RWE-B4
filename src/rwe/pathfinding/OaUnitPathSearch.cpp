@@ -127,6 +127,16 @@ namespace rwe
         return impl->finished;
     }
 
+    GameTime OaUnitPathSearch::searchTime() const
+    {
+        return impl->finder->searchTime();
+    }
+
+    void OaUnitPathSearch::setSearchTime(GameTime time)
+    {
+        impl->finder->setSearchTime(time);
+    }
+
     std::size_t OaUnitPathSearch::expansionsSoFar() const
     {
         return impl->expansions;

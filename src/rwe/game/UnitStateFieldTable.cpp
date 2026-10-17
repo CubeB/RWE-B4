@@ -54,6 +54,13 @@ namespace rwe
             u.*Member = GameTime(j.get<unsigned int>());
         }
 
+        /** A tick that older saves did not carry, which is how the unit read before it existed. */
+        template <auto Member>
+        void loadGameTimeOrZeroUnitStateField(const json& j, UnitState& u, const LoadContext&)
+        {
+            u.*Member = GameTime(j.is_null() ? 0u : j.get<unsigned int>());
+        }
+
         template <auto Member>
         json saveEnergyUnitStateField(const UnitState& u, const SaveContext&)
         {
@@ -135,6 +142,16 @@ namespace rwe
         void loadLegacyBoolUnitStateField(const json& j, UnitState& u, const LoadContext&)
         {
             u.*Member = j.is_null() ? false : j.get<bool>();
+        }
+
+        /**
+         * A number that saves older than the field may omit: absence stands
+         * for the member's creation value, zero.
+         */
+        template <auto Member>
+        void loadPlainOrZeroUnitStateField(const json& j, UnitState& u, const LoadContext&)
+        {
+            u.*Member = j.is_null() ? 0u : j.get<unsigned int>();
         }
 
         json savePiecesUnitStateField(const UnitState& u, const SaveContext&)
@@ -376,6 +393,8 @@ namespace rwe
             {"buggerOffActive", hashedPlain<&UnitState::buggerOffActive>()},
             {"armored", hashedPlain<&UnitState::armored>()},
             {"kills", hashedPlain<&UnitState::kills>()},
+            {"healthPercentSample", hashed<&UnitState::healthPercentSample>(savePlainUnitStateField<&UnitState::healthPercentSample>, loadPlainOrZeroUnitStateField<&UnitState::healthPercentSample>), true},
+            {"previousHealthPercentSample", hashed<&UnitState::previousHealthPercentSample>(savePlainUnitStateField<&UnitState::previousHealthPercentSample>, loadPlainOrZeroUnitStateField<&UnitState::previousHealthPercentSample>), true},
             {"sfxOccupyState", hashedPlain<&UnitState::sfxOccupyState>()},
             {"buildTimeCompleted", hashedPlain<&UnitState::buildTimeCompleted>()},
             {"nanoframeDecayTime", hashed<&UnitState::nanoframeDecayTime>(saveOptionalGameTimeUnitStateField<&UnitState::nanoframeDecayTime>, loadOptionalGameTimeUnitStateField<&UnitState::nanoframeDecayTime>)},
@@ -397,6 +416,16 @@ namespace rwe
             {"airWorkOrbit", hashed<&UnitState::airWorkOrbit>(saveOptionalAirWorkOrbitUnitStateField<&UnitState::airWorkOrbit>, loadOptionalAirWorkOrbitUnitStateField<&UnitState::airWorkOrbit>)},
             {"airLoiter", hashed<&UnitState::airLoiter>(saveOptionalAirLoiterUnitStateField<&UnitState::airLoiter>, loadOptionalAirLoiterUnitStateField<&UnitState::airLoiter>)},
             {"slowFacePoint", hashed<&UnitState::slowFacePoint>(saveOptionalSimVectorUnitStateField<&UnitState::slowFacePoint>, loadOptionalSimVectorUnitStateField<&UnitState::slowFacePoint>)},
+            {"occupancyStamp", hashed<&UnitState::occupancyStamp>(saveGameTimeUnitStateField<&UnitState::occupancyStamp>, loadGameTimeOrZeroUnitStateField<&UnitState::occupancyStamp>), true},
+            {"lastAttacker", hashed<&UnitState::lastAttacker>(saveOptionalUnitIdUnitStateField<&UnitState::lastAttacker>, loadOptionalUnitIdUnitStateField<&UnitState::lastAttacker>), true},
+            {"lastAttackedAt", hashed<&UnitState::lastAttackedAt>(saveGameTimeUnitStateField<&UnitState::lastAttackedAt>, loadGameTimeOrZeroUnitStateField<&UnitState::lastAttackedAt>), true},
+            {"guardSeenAttackAt", hashed<&UnitState::guardSeenAttackAt>(saveGameTimeUnitStateField<&UnitState::guardSeenAttackAt>, loadGameTimeOrZeroUnitStateField<&UnitState::guardSeenAttackAt>), true},
+            {"guardPhase", hashed<&UnitState::guardPhase>(savePlainUnitStateField<&UnitState::guardPhase>, loadPlainOrZeroUnitStateField<&UnitState::guardPhase>), true},
+            {"guardWakeAt", hashed<&UnitState::guardWakeAt>(saveGameTimeUnitStateField<&UnitState::guardWakeAt>, loadGameTimeOrZeroUnitStateField<&UnitState::guardWakeAt>), true},
+            {"guardTarget", hashed<&UnitState::guardTarget>(saveOptionalUnitIdUnitStateField<&UnitState::guardTarget>, loadOptionalUnitIdUnitStateField<&UnitState::guardTarget>), true},
+            {"guardPosition", hashed<&UnitState::guardPosition>(saveOptionalSimVectorUnitStateField<&UnitState::guardPosition>, loadOptionalSimVectorUnitStateField<&UnitState::guardPosition>), true},
+            {"guardLimit", hashed<&UnitState::guardLimit>(savePlainUnitStateField<&UnitState::guardLimit>, loadPlainOrZeroUnitStateField<&UnitState::guardLimit>), true},
+            {"guardCounter", hashed<&UnitState::guardCounter>(savePlainUnitStateField<&UnitState::guardCounter>, loadPlainOrZeroUnitStateField<&UnitState::guardCounter>), true},
             {"activated", hashedPlain<&UnitState::activated>()},
             // Only a mission unit is ever held, and a save from before the
             // flag existed holds none.

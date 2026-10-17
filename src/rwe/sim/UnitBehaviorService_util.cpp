@@ -1,5 +1,6 @@
 #include "UnitBehaviorService_util.h"
 #include <algorithm>
+#include <cmath>
 #include <rwe/sim/FlatRange.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/SimTicksPerSecond.h>
@@ -26,7 +27,7 @@ namespace rwe
         return Matrix4x<SimScalar>::rotationY(sin(angle), cos(angle)) * direction;
     }
 
-    int computeSfxOccupyState(int unitY, int seaLevel, unsigned int waterLine, bool isSurfaceMover, int previousState)
+    int computeSfxOccupyState(int unitY, int seaLevel, unsigned int waterLine, bool isSurfaceMover, int previousState, int modelTop)
     {
         // The original works this out in whole world units, not in the 16.16
         // it keeps positions in, and it tells the script only when the answer
@@ -59,14 +60,33 @@ namespace rwe
             state = 2;
         }
 
-        // The original has a fourth case here, state 3, for a hull completely
-        // under the surface: `unitY + WORD[def+0x170] < seaLevel`, where that
-        // field is the height of the model above its own origin. RWE does not
-        // carry a model height on the unit definition, so the case is left
-        // out rather than guessed at, and a submarine will report 2 where the
-        // original would report 3.
+        // State 3, a hull completely under the surface:
+        // `unitY + WORD[def+0x170] < seaLevel`, strictly, where that word is
+        // the whole-unit top of the model above its own origin (BT-7: the
+        // high half of the 16.16 maximum Y at +0x16E). It is tested last and
+        // so overrides states 1 and 2.
+        if (unitY + modelTop < seaLevel)
+        {
+            state = 3;
+        }
 
         return state;
+    }
+
+    void updateSfxOccupancy(GameSimulation& sim, UnitInfo unitInfo)
+    {
+        // The original asks the unit's own height rather than the ground
+        // under it, in whole units (floor, the high half of the 16.16 y).
+        auto seaLevel = static_cast<int>(std::floor(sim.terrain.getSeaLevel().value));
+        auto unitY = static_cast<int>(std::floor(unitInfo.state->position.y.value));
+        auto modelTop = static_cast<int>(std::floor(sim.modelHeightOf(*unitInfo.definition).value));
+        auto isSurfaceMover = !unitInfo.definition->canFly;
+        auto newState = computeSfxOccupyState(unitY, seaLevel, unitInfo.definition->waterLine, isSurfaceMover, unitInfo.state->sfxOccupyState, modelTop);
+        if (newState != unitInfo.state->sfxOccupyState)
+        {
+            unitInfo.state->sfxOccupyState = newState;
+            unitInfo.state->cobEnvironment->createThread("setSFXoccupy", std::vector<int>{newState});
+        }
     }
 
     SimAngle computeAccuracyCone(SimAngle accuracy, unsigned int health, unsigned int maxHealth, unsigned int kills)
@@ -339,6 +359,125 @@ namespace rwe
         return state.hitPoints < threshold;
     }
 
+    namespace
+    {
+        int wholeUnits(SimScalar s)
+        {
+            return static_cast<int>(std::floor(s.value));
+        }
+
+        /** The target's top: its Y word plus its definition's eye height, each in whole units. */
+        int wholeTopOf(const GameSimulation& sim, const UnitState& unit)
+        {
+            return wholeUnits(unit.position.y) + wholeUnits(sim.modelHeightOf(sim.unitDefinitions.at(unit.unitType)));
+        }
+
+        int wholeSeaLevel(const GameSimulation& sim)
+        {
+            return wholeUnits(sim.terrain.getSeaLevel());
+        }
+    }
+
+    bool attackOrderIsAccepted(const GameSimulation& sim, const UnitDefinition& ordererDefinition, const UnitState& orderer, const UnitState& target)
+    {
+        // A unit with no weapon in either slot reaches the kamikaze arm (or
+        // nothing) and is not judged here.
+        const auto& first = orderer.weapons[0];
+        const auto& second = orderer.weapons[1];
+        if (!first && !second)
+        {
+            return true;
+        }
+
+        // 0x43F154-0x43F3B9. The first weapon being anti-air (bit 17,
+        // toairweapon) gives no order against a place or a friendly or neutral
+        // unit ("no enemy target"), and none against an enemy that is not in
+        // the flying placement mode.
+        auto firstIsAntiAir = first && sim.weaponDefinitions.at(first->weaponType).toAirWeapon;
+
+        // A friendly or neutral target has no water test.
+        if (sim.arePlayersAllied(orderer.owner, target.owner))
+        {
+            return !firstIsAntiAir;
+        }
+
+        if (firstIsAntiAir && !isFlying(target.physics))
+        {
+            return false;
+        }
+
+        auto isWater = [&](const std::optional<UnitWeapon>& slot) {
+            // The second slot counts when it is filled, which is as near to
+            // the original's "enabled" flag (value 2 at unit+0x3B) as RWE has.
+            return slot && sim.weaponDefinitions.at(slot->weaponType).waterWeapon;
+        };
+
+        if (wholeTopOf(sim, target) < wholeSeaLevel(sim))
+        {
+            return isWater(first) || isWater(second);
+        }
+
+        if (ordererDefinition.canHover && (isWater(first) || isWater(second)))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    bool repairWaterReachAllows(const GameSimulation& sim, const UnitDefinition& repairerDefinition, const UnitState& target)
+    {
+        auto top = wholeTopOf(sim, target);
+        auto seaLevel = wholeSeaLevel(sim);
+
+        // A flier without the amphibious bit is rejected for a target whose
+        // top is under the surface; an amphibious one is never rejected by
+        // this test (0x4899B0, BT-13). No shipped aircraft sets the key.
+        if (repairerDefinition.canFly)
+        {
+            return repairerDefinition.amphibious || top >= seaLevel;
+        }
+
+        auto maxWaterDepth = static_cast<int>(sim.getAdHocMovementClass(repairerDefinition.movementCollisionInfo).maxWaterDepth);
+        return top >= seaLevel - maxWaterDepth;
+    }
+
+    bool attackGroundOrderIsAccepted(const GameSimulation& sim, const UnitState& orderer)
+    {
+        // The "no enemy target" arm of the same builder (0x43F154): a ground
+        // point has no water test, but a first weapon that is anti-air gives
+        // no order. A unit with nothing in the first slot is not judged here.
+        const auto& first = orderer.weapons[0];
+        return !(first && sim.weaponDefinitions.at(first->weaponType).toAirWeapon);
+    }
+
+    bool canRepairUnit(const GameSimulation& sim, const UnitDefinition& repairerDefinition, const UnitState& target)
+    {
+        // 0x4899B0. The first test on the orderer is flags2 bit 9, the copy of
+        // canreclamate the loader writes -- not Builder. 27 of the 53 shipped
+        // builders lack it (plants, shipyards, pads, mine layers, carriers).
+        if (!repairerDefinition.canReclamate)
+        {
+            return false;
+        }
+
+        const auto& targetDefinition = sim.unitDefinitions.at(target.unitType);
+
+        // Not equal to the maximum, so an unfinished unit below it qualifies.
+        if (target.hitPoints == targetDefinition.maxHitPoints)
+        {
+            return false;
+        }
+
+        // Placement mode 2 is the flying mode.
+        if (isFlying(target.physics))
+        {
+            return false;
+        }
+
+        return repairWaterReachAllows(sim, repairerDefinition, target);
+    }
+
     bool unitIsAnUsableAirBase(const UnitState& state, const UnitDefinition& definition)
     {
         // The original keeps a list per player and refreshes it in the same
@@ -578,7 +717,26 @@ namespace rwe
         return (static_cast<long long>(ticks) * wholeCost) / static_cast<long long>(totalTicks);
     }
 
-    std::pair<SimAngle, SimAngle> computeHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, SimScalar zOffset, ProjectilePhysicsType projectileType)
+    SimScalar muzzleCorrectionOf(SimScalar queryMinusAimFromZ)
+    {
+        // The double multiply and the truncation toward zero are, on integers,
+        // times five over four.
+        auto difference = static_cast<int64_t>(simScalarToFixed(queryMinusAimFromZ));
+        return simScalarFromFixed(static_cast<int>((difference * 5) / 4));
+    }
+
+    unsigned int launchCorrectionTicks(SimScalar slotCorrection, SimScalar weaponVelocity)
+    {
+        auto slot = simScalarToFixed(slotCorrection);
+        auto velocity = simScalarToFixed(weaponVelocity);
+        if (slot <= 0 || velocity <= 0)
+        {
+            return 0;
+        }
+        return static_cast<unsigned int>(slot / velocity);
+    }
+
+    std::pair<SimAngle, SimAngle> computeHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, ProjectilePhysicsType projectileType)
     {
         return match(
             projectileType,
@@ -596,7 +754,7 @@ namespace rwe
                 return computeLineOfSightHeadingAndPitch(rotation, from, to);
             },
             [&](const ProjectilePhysicsTypeBallistic&) {
-                return computeBallisticHeadingAndPitch(rotation, from, to, speed, gravity, zOffset);
+                return computeBallisticHeadingAndPitch(rotation, from, to, speed, gravity);
             },
             [&](const ProjectilePhysicsTypeBomb&) {
                 // Bombs don't actually use this aim — their release is decided
@@ -624,7 +782,7 @@ namespace rwe
         return {heading, pitch};
     }
 
-    std::pair<SimAngle, SimAngle> computeBallisticHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, SimScalar zOffset)
+    std::pair<SimAngle, SimAngle> computeBallisticHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity)
     {
         auto aimVector = to - from;
         if (aimVector.lengthSquared() == 0_ss)
@@ -637,7 +795,7 @@ namespace rwe
         auto heading = UnitState::toRotation(aimVectorXZ);
         heading = heading - rotation;
 
-        auto pitches = computeFiringAngles(speed, gravity, aimVectorXZ.length() - zOffset, aimVector.y);
+        auto pitches = computeFiringAngles(speed, gravity, aimVectorXZ.length(), aimVector.y);
         if (!pitches)
         {
             return {heading, EighthTurn};
@@ -649,6 +807,15 @@ namespace rwe
 
     std::optional<std::pair<SimAngle, SimAngle>> computeFiringAngles(SimScalar speed, SimScalar gravity, SimScalar targetX, SimScalar targetY)
     {
+        if (gravity <= 0_ss)
+        {
+            // A map with no gravity (the original's default for a missing
+            // key, BT-124): the shell does not fall, so the only arc is the
+            // straight line and dividing by gravity would be nonsense.
+            auto straight = atan2(targetY, targetX);
+            return std::make_pair(straight, straight);
+        }
+
         auto inner = (gravity * targetX * targetX) + (2_ss * speed * speed * targetY);
         auto beforeSquareRoot = (speed * speed * speed * speed) - (gravity * inner);
         if (beforeSquareRoot < 0_ss)
@@ -837,7 +1004,10 @@ namespace rwe
         }
 
         auto effectiveMaxSpeed = unitDefinition.maxVelocity;
-        if (unit.position.y < terrain.getSeaLevel())
+        // Halved when the origin is under the sea, unless the unit is a
+        // floater or a hover craft (the field table's exemption). It matters
+        // now that a floater with a WaterLine sits below sea level by design.
+        if (unit.position.y < terrain.getSeaLevel() && !unitDefinition.floater && !unitDefinition.canHover)
         {
             effectiveMaxSpeed /= 2_ss;
         }
@@ -1150,19 +1320,39 @@ namespace rwe
         return dot > 0_ss;
     }
 
-    SimScalar bombReleaseTrigger(const UnitDefinition& unitDefinition, SimScalar speed)
+    SimScalar bombReleaseTrigger(const UnitDefinition& unitDefinition, SimScalar speed, SimScalar gravityPerTick)
     {
         // AirStrike state 4, 0x4123A8-0x412402: the fall time from cruise
         // altitude, sqrt(2h / g) in seconds with g the map's gravity per
         // second squared, times 30 for ticks (the float at 0x4FCC50), times
         // the aircraft's current speed per tick, truncated to whole world
         // units, plus attackrunlength, plus one. RWE's gravity is the
-        // original's 112 in per-tick units already, which is the same number
-        // once the 30 is folded in.
-        auto gravityPerTick = 112_ss / (30_ss * 30_ss);
-        auto fallTicks = rweSqrt((2_ss * unitDefinition.cruiseAltitude) / gravityPerTick);
+        // original's key in per-tick units already, which is the same number
+        // once the 30 is folded in. The map's own key (BT-124), 112 nearly
+        // everywhere; a map with none has zero, where the fall never ends and
+        // the bomb is released at once.
+        auto fallTicks = gravityPerTick > 0_ss ? rweSqrt((2_ss * unitDefinition.cruiseAltitude) / gravityPerTick) : 0_ss;
         auto lead = SimScalar(static_cast<float>(static_cast<int>(simScalarToFloat(fallTicks * speed))));
         return 1_ss + unitDefinition.attackRunLength + lead;
+    }
+
+    SimScalar computeGroundUnitHeight(const MapTerrain& terrain, const UnitDefinition& unitDefinition, SimScalar x, SimScalar z)
+    {
+        auto sample = terrain.getHeightAt(x, z);
+        auto seaLevel = terrain.getSeaLevel();
+        auto waterlineHeight = seaLevel - intToSimScalar(static_cast<int>(unitDefinition.waterLine));
+
+        if (unitDefinition.upright)
+        {
+            return unitDefinition.canHover ? rweMax(sample, waterlineHeight) : sample;
+        }
+
+        if (unitDefinition.floater)
+        {
+            return waterlineHeight;
+        }
+
+        return unitDefinition.canHover ? rweMax(sample, seaLevel) : sample;
     }
 
     GroundTilt computeGroundTilt(const MapTerrain& terrain, const SimVector& position, SimAngle rotation, SimScalar halfLength, SimScalar halfWidth, bool holdAtSeaLevel)
@@ -1199,6 +1389,60 @@ namespace rwe
             }
         }
         return tilt;
+    }
+
+    std::optional<GroundAlignment> computeSelectionAlignment(const MapTerrain& terrain, const SimVector& position, SimAngle rotation, const std::array<SimVector, 4>& corners, bool holdAtSeaLevel)
+    {
+        auto forward = UnitState::toDirection(rotation);
+        // The unit's right hand: the heading turned a quarter clockwise.
+        SimVector right(forward.z, 0_ss, -forward.x);
+
+        const auto mapWidth = static_cast<int>(terrain.getHeightMap().getWidth());
+        const auto mapHeight = static_cast<int>(terrain.getHeightMap().getHeight());
+
+        std::array<SimScalar, 4> heights;
+        for (std::size_t i = 0; i < 4; ++i)
+        {
+            auto x = position.x + (right.x * corners[i].x) + (forward.x * corners[i].z);
+            auto z = position.z + (right.z * corners[i].x) + (forward.z * corners[i].z);
+
+            auto cell = terrain.worldToHeightmapSpace(SimVector(x, 0_ss, z));
+            if (cell.x.value < 0.0f || cell.z.value < 0.0f
+                || static_cast<int>(std::floor(cell.x.value)) >= mapWidth - 1
+                || static_cast<int>(std::floor(cell.z.value)) >= mapHeight - 1)
+            {
+                return std::nullopt;
+            }
+
+            auto h = terrain.getHeightAt(x, z);
+            heights[i] = holdAtSeaLevel ? rweMax(h, terrain.getSeaLevel()) : h;
+        }
+
+        // The two corners furthest along the nose against the two behind them,
+        // and the two furthest right against the two left of them.
+        auto split = [&](auto key) {
+            std::array<std::size_t, 4> order{0, 1, 2, 3};
+            std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) { return key(corners[a]) < key(corners[b]); });
+            auto high = (heights[order[2]] + heights[order[3]]) / 2_ss;
+            auto low = (heights[order[0]] + heights[order[1]]) / 2_ss;
+            auto span = ((key(corners[order[2]]) + key(corners[order[3]])) / 2_ss) - ((key(corners[order[0]]) + key(corners[order[1]])) / 2_ss);
+            return std::make_pair(high - low, span);
+        };
+        auto [rise, length] = split([](const SimVector& v) { return v.z; });
+        auto [lean, width] = split([](const SimVector& v) { return v.x; });
+
+        GroundAlignment out;
+        out.y = (heights[0] + heights[1] + heights[2] + heights[3]) / 4_ss;
+        out.pitch = length > 0_ss ? SimScalar(toRadians(atan2(rise, length)).value) : 0_ss;
+        out.roll = width > 0_ss ? SimScalar(toRadians(atan2(lean, width)).value) : 0_ss;
+        for (auto* a : {&out.pitch, &out.roll})
+        {
+            if (a->value > Pif)
+            {
+                a->value -= 2.0f * Pif;
+            }
+        }
+        return out;
     }
 
     bool stepAttackRunPhase(
@@ -1415,6 +1659,13 @@ namespace rwe
         return findClosestPointOnPerimeter(targetWorldRect, p);
     }
 
+    bool isOnGoalSquare(const GameSimulation& sim, const UnitState& unit, const UnitDefinition& unitDefinition, const SimVector& goalPoint)
+    {
+        auto unitSquare = sim.computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
+        auto goalSquare = sim.computeFootprintRegion(goalPoint, unitDefinition.movementCollisionInfo);
+        return unitSquare.x == goalSquare.x && unitSquare.y == goalSquare.y;
+    }
+
     bool hasReachedGoal(const GameSimulation& sim, const MapTerrain& terrain, const UnitState& unit, const UnitDefinition& unitDefinition, const NavigationGoal& goal)
     {
         auto destination = match(
@@ -1461,6 +1712,17 @@ namespace rwe
         if (!destination)
         {
             return false;
+        }
+
+        // BT-96: a ground unit's point goal is reached on the goal's map
+        // square (a plain Move asks for radius tolerance + 4, which divides
+        // down to zero squares), not within eight world units of the point.
+        // A square is sixteen units, so the unit can stop up to fifteen from
+        // where the click was. Rectangles keep the closest-point test below,
+        // and an aircraft keeps its own goal handling.
+        if (!unitDefinition.canFly && std::holds_alternative<SimVector>(goal))
+        {
+            return isOnGoalSquare(sim, unit, unitDefinition, *destination);
         }
 
         SimVector xzPosition(unit.position.x, 0_ss, unit.position.z);

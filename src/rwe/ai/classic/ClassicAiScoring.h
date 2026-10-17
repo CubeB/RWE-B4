@@ -63,6 +63,13 @@ namespace rwe
     };
 
     /**
+     * The low-wind test (BT-120, 0x409B7D to 0x409BA5): the map's MAXIMUM wind
+     * strictly below half the generation denominator (5000 / 2 = 2500). Not a
+     * mean; an absent key reads as 0. The minimum plays no part.
+     */
+    bool classicLowWind(int maxWindSpeed);
+
+    /**
      * 1, or 11 for a type that can attack, plus damage / 40 + range / 100 + 5
      * for each weapon given, clamped to [-100, 100].
      */
@@ -144,8 +151,9 @@ namespace rwe
 
     /**
      * The final rating for one candidate (0x40bb00): 0 under 50 stored energy
-     * or 25 stored metal, and when `completedOfType >= limit` for a
-     * non-negative limit; otherwise
+     * or 25 stored metal, and when `completedOfType >= limit` for any limit
+     * other than -1 (unlimited), so a negative limit below -1 blocks the type
+     * (BT-128); otherwise
      * (normalWeight * normal + metalWeight * metal + energyWeight * energy)
      * * multiplier / 10000, in integers.
      */

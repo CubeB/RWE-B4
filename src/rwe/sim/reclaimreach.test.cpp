@@ -204,4 +204,49 @@ namespace rwe
         }
         REQUIRE(reclaimed);
     }
+
+    TEST_CASE("a ground builder's reach to a unit adds a third of the target's two extents (BT-92)", "[reclaimreach][bt92]")
+    {
+        // 0x404730, work check at 0x4048FB: the reach is the build distance
+        // plus the integer part of (X extent + Z extent) / 3 of the target,
+        // which for the 2x2 scrap here is (32 + 32) / 3 = 21.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeReachTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        registerReachModel(sim);
+
+        sim.unitDefinitions["builder"] = makeShortArmedReclaimerDef();
+        sim.unitDefinitions["scrap"] = makeScrapDef();
+        auto scrapId = addUnitOfType(sim, "scrap", player, SimVector(200_ss, 0_ss, 200_ss), script);
+
+        auto reclaimsFrom = [&](float x) {
+            auto builderId = addUnitOfType(sim, "builder", player, SimVector(SimScalar(x), 0_ss, 200_ss), script);
+            sim.getUnitState(builderId).inBuildStance = true;
+            sim.getUnitState(builderId).orders.push_back(ReclaimOrder(scrapId));
+            tick(sim, 10);
+            return isReclaiming(sim, builderId);
+        };
+
+        // 46 from the edge (cells 12 and 13, so x = 224): past 40, inside 40 + 21.
+        CHECK(reclaimsFrom(270.0f));
+    }
+
+    TEST_CASE("a ground builder's reach to a unit still ends at the extent term (BT-92)", "[reclaimreach][bt92]")
+    {
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeReachTerrain(), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        registerReachModel(sim);
+
+        sim.unitDefinitions["builder"] = makeShortArmedReclaimerDef();
+        sim.unitDefinitions["scrap"] = makeScrapDef();
+        auto scrapId = addUnitOfType(sim, "scrap", player, SimVector(200_ss, 0_ss, 200_ss), script);
+
+        // 66 from the edge (cells 12 and 13, so x = 224): past 40 + 21 = 61.
+        auto builderId = addUnitOfType(sim, "builder", player, SimVector(290_ss, 0_ss, 200_ss), script);
+        sim.getUnitState(builderId).inBuildStance = true;
+        sim.getUnitState(builderId).orders.push_back(ReclaimOrder(scrapId));
+        tick(sim, 10);
+        CHECK_FALSE(isReclaiming(sim, builderId));
+    }
 }

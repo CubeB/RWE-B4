@@ -42,9 +42,14 @@ namespace rwe
 
     Point heightmapToVisionCell(SimScalar tileX, SimScalar tileZ, int terrainHeight)
     {
-        // The cabinet skew is half the terrain height in world units; divide
-        // by the tile width to express it in heightmap tiles.
-        auto skewInTiles = intToSimScalar(terrainHeight) / (2_ss * MapTerrain::HeightTileHeightInWorldUnits);
+        return heightmapToVisionCellAtHeight(tileX, tileZ, intToSimScalar(terrainHeight));
+    }
+
+    Point heightmapToVisionCellAtHeight(SimScalar tileX, SimScalar tileZ, SimScalar height)
+    {
+        // The cabinet skew is half the height in world units; divide by the
+        // tile width to express it in heightmap tiles.
+        auto skewInTiles = height / (2_ss * MapTerrain::HeightTileHeightInWorldUnits);
         auto cells = intToSimScalar(PlayerVisibility::VisionCellSizeInTiles);
         return Point(floorToInt(tileX / cells), floorToInt((tileZ - skewInTiles) / cells));
     }

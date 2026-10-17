@@ -539,14 +539,50 @@ namespace rwe
             REQUIRE(sizeOf(chat) == 75);
         }
 
+        SECTION("sizes the codes the original's size table has and the reference lacks (BT-227)")
+        {
+            // Read from the original's start-up initialiser, not from a demo:
+            // 03 is 3 bytes (the reference's 7 is its own marked guess), 13 a
+            // sound, 1c a dropped player, 1d never enabled in any mode, 25 a
+            // lobby-only record and 27 an integrity warning.
+            REQUIRE(sizeOf(TadBytes(3, 0x03)) == 3);
+            REQUIRE(sizeOf(TadBytes(18, 0x13)) == 18);
+            REQUIRE(sizeOf(TadBytes(5, 0x1c)) == 5);
+            REQUIRE(sizeOf(TadBytes(9, 0x1d)) == 9);
+            REQUIRE(sizeOf(TadBytes(5, 0x25)) == 5);
+            REQUIRE(sizeOf(TadBytes(17, 0x27)) == 17);
+
+            // The length is the code's, however much follows it.
+            REQUIRE(sizeOf(TadBytes(40, 0x13)) == 18);
+            REQUIRE(sizeOf(TadBytes(40, 0x27)) == 17);
+        }
+
         SECTION("returns zero for a code it does not know")
         {
-            // 0x13 is named in the reference but carries no size there, so it is
-            // deliberately absent rather than guessed at.
-            REQUIRE(sizeOf(TadBytes{0x13, 0, 0, 0}) == 0);
             REQUIRE(sizeOf(TadBytes{0x77, 0, 0, 0}) == 0);
             REQUIRE(sizeOf(TadBytes{}) == 0);
         }
+    }
+
+    TEST_CASE("a dropped-player record does not swallow the unit state behind it", "[tad]")
+    {
+        // Before the sizes were known, a 1c (or a 27) had no length, so the
+        // splitter handed the rest of the bundle to one unknown subpacket and
+        // lost the 2c that followed -- the two codes a live game can produce.
+        TadBytes payload;
+        payload.insert(payload.end(), {0x1c, 0x04, 0x00, 0x00, 0x00});
+        payload.insert(payload.end(), 17, 0x27);
+        payload.insert(payload.end(), {0x2c, 0x05, 0x00, 0xaa, 0xbb});
+
+        TadWalkStats stats;
+        auto parts = tadSplitSubPackets(payload.data(), payload.size(), stats);
+
+        REQUIRE(stats.unknownCodes == 0);
+        REQUIRE(stats.truncated == 0);
+        REQUIRE(parts.size() == 3);
+        REQUIRE(parts[0].size() == 5);
+        REQUIRE(parts[1].size() == 17);
+        REQUIRE(parts[2] == TadBytes{0x2c, 0x05, 0x00, 0xaa, 0xbb});
     }
 
     TEST_CASE("tadSplitSubPackets", "[tad]")

@@ -1,15 +1,25 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
 #include <deque>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <rwe/ColorPalette.h>
 #include <rwe/LoadingScene_util.h>
+#include <rwe/MovieScene.h>
+#include <rwe/SceneContext.h>
 #include <rwe/io/_3do/_3do.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/io/fbi/io.h>
 #include <rwe/io/gaf/GafArchive.h>
 #include <rwe/io/gaf/gaf_headers.h>
 #include <rwe/io/gaf/gaf_util.h>
+#include <rwe/io/fnt/Fnt.h>
 #include <rwe/io/hpi/HpiArchive.h>
 #include <rwe/io/hpi/hpi_util.h>
+#include <rwe/io/sidedatatdf/SideData.h>
+#include <rwe/io/gui/gui.h>
+#include <rwe/io/io_util.h>
 #include <rwe/io/pcx/pcx.h>
 #include <rwe/io/smk/SmkDecoder.h>
 #include <rwe/io/tad/tad_encoders.h>
@@ -34,6 +44,11 @@
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/sim_test_util.h>
 #include <rwe/sim/util.h>
+#include <rwe/render/Sprite.h>
+#include <rwe/render/SpriteSeries.h>
+#include <rwe/ui/UiListBox.h>
+#include <rwe/ui/UiScrollBar.h>
+#include <rwe/vfs/CompositeVirtualFileSystem.h>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -157,6 +172,81 @@ namespace rwe
         REQUIRE_THROWS_AS(HpiArchive(&in), HpiException);
     }
 
+    TEST_CASE("an HPI shorter than its own header is refused, not read from the stack", "[malformed]")
+    {
+        {
+            std::istringstream in(std::string(5, 'x'));
+            REQUIRE_THROWS_AS(HpiArchive(&in), HpiException);
+        }
+        {
+            // The marker and version are there; the header after them is not.
+            std::string bytes;
+            append(bytes, HpiVersion{HpiMagicNumber, HpiVersionNumber});
+            std::istringstream in(bytes);
+            REQUIRE_THROWS_AS(HpiArchive(&in), HpiException);
+        }
+    }
+
+    namespace
+    {
+        class ThrowingLeafFileSystem final : public LeafVirtualFileSystem
+        {
+        public:
+            std::string name{"throwing"};
+            const std::string& getPath() const override { return name; }
+            std::optional<std::vector<char>> readFile(const std::string&) const override { throw HpiException("damaged chunk"); }
+            std::vector<std::string> getFileNames(const std::string&, const std::string&) override { return {}; }
+            std::vector<std::string> getDirectoryNames(const std::string&) override { return {}; }
+            std::vector<std::string> getFileNamesRecursive(const std::string&, const std::string&) override { return {}; }
+        };
+
+        class OneFileSystem final : public LeafVirtualFileSystem
+        {
+        public:
+            std::string name{"one"};
+            const std::string& getPath() const override { return name; }
+            std::optional<std::vector<char>> readFile(const std::string&) const override { return std::vector<char>{'o', 'k'}; }
+            std::vector<std::string> getFileNames(const std::string&, const std::string&) override { return {}; }
+            std::vector<std::string> getDirectoryNames(const std::string&) override { return {}; }
+            std::vector<std::string> getFileNamesRecursive(const std::string&, const std::string&) override { return {}; }
+        };
+    }
+
+    TEST_CASE("a file that will not extract, or an archive that will not open, costs only itself", "[malformed]")
+    {
+        SECTION("an entry that throws on extraction is missing from that archive, and the search goes on")
+        {
+            CompositeVirtualFileSystem vfs;
+            vfs.emplaceFileSystem<ThrowingLeafFileSystem>();
+            REQUIRE_FALSE(vfs.readFile("units/x.fbi").has_value());
+
+            vfs.emplaceFileSystem<OneFileSystem>();
+            auto file = vfs.readFile("units/x.fbi");
+            REQUIRE(file.has_value());
+            REQUIRE(file->size() == 2);
+        }
+
+        SECTION("an archive in the data folder that is not an archive is skipped")
+        {
+            auto folder = std::filesystem::temp_directory_path() / "rwe-malformed-archive-test";
+            std::filesystem::create_directories(folder);
+            {
+                std::ofstream bad(folder / "broken.hpi", std::ios::binary);
+                bad << "this is not an HPI";
+            }
+            {
+                std::ofstream empty(folder / "empty.ufo", std::ios::binary);
+            }
+
+            CompositeVirtualFileSystem vfs;
+            REQUIRE_NOTHROW(addToVfs(vfs, folder));
+            REQUIRE_FALSE(vfs.readFile("anything").has_value());
+
+            std::error_code ec;
+            std::filesystem::remove_all(folder, ec);
+        }
+    }
+
     TEST_CASE("an HPI directory that contains itself is refused", "[malformed]")
     {
         // Root directory data at 20: one entry, listed at 28. The entry is a
@@ -177,6 +267,76 @@ namespace rwe
         append(bytes, HpiDirectoryEntry{5000, 20, 0});
         std::istringstream in(bytes);
         REQUIRE_THROWS_AS(HpiArchive(&in), HpiException);
+    }
+
+    TEST_CASE("an HPI LZ77 chunk that ends early or reads an unwritten window is not trusted", "[malformed]")
+    {
+        SECTION("an end marker before the declared size is refused, not left as a zero tail")
+        {
+            // Tag 0b10: a literal 'a', then a pointer whose offset is 0, the
+            // end marker. The chunk header promised five bytes.
+            const char stream[] = {'\x02', 'a', '\x00', '\x00'};
+            char out[5] = {};
+            REQUIRE_THROWS_AS(decompressLZ77(stream, sizeof(stream), out, 5), HpiException);
+        }
+
+        SECTION("the same stream is fine when the size is the size")
+        {
+            const char stream[] = {'\x02', 'a', '\x00', '\x00'};
+            char out[1] = {};
+            decompressLZ77(stream, sizeof(stream), out, 1);
+            REQUIRE(out[0] == 'a');
+        }
+
+        SECTION("a copy from a window position nothing has written reads zero")
+        {
+            // Tag 0b111: two pointers to window offset 5 (length 2 each,
+            // four bytes) then the end marker. The ring was the stack's.
+            const char stream[] = {'\x07', '\x50', '\x00', '\x50', '\x00', '\x00', '\x00'};
+            char out[4];
+            std::memset(out, 0x55, sizeof(out));
+            decompressLZ77(stream, sizeof(stream), out, 4);
+            REQUIRE(out[0] == 0);
+            REQUIRE(out[1] == 0);
+            REQUIRE(out[2] == 0);
+            REQUIRE(out[3] == 0);
+        }
+    }
+
+    TEST_CASE("an HPI file whose chunks add up to less than its declared size is refused", "[malformed]")
+    {
+        // One stored chunk of five bytes inside a file that says it is ten.
+        const std::string body = "hello";
+        std::string bytes;
+        append(bytes, uint32_t{5}); // the chunk size table
+        HpiChunk chunk{};
+        chunk.marker = HpiChunkMagicNumber;
+        chunk.version = 2;
+        chunk.compressionScheme = 0;
+        chunk.encrypted = 0;
+        chunk.compressedSize = 5;
+        chunk.decompressedSize = 5;
+        chunk.checksum = computeChecksum(body.data(), body.size());
+        append(bytes, chunk);
+        bytes += body;
+
+        std::vector<char> out(10, 'z');
+        {
+            std::istringstream in(bytes);
+            REQUIRE_THROWS_AS(extractCompressed(in, 0, out.data(), 10), HpiException);
+        }
+        {
+            std::istringstream in(bytes);
+            std::vector<char> exact(5, 'z');
+            extractCompressed(in, 0, exact.data(), 5);
+            REQUIRE(std::string(exact.begin(), exact.end()) == "hello");
+        }
+        {
+            // And a file that ends inside the chunk's body is refused.
+            std::istringstream in(bytes.substr(0, bytes.size() - 2));
+            std::vector<char> exact(5, 'z');
+            REQUIRE_THROWS_AS(extractCompressed(in, 0, exact.data(), 5), HpiException);
+        }
     }
 
     namespace
@@ -314,6 +474,86 @@ namespace rwe
         REQUIRE_THROWS(SmkDecoder(std::move(data)));
     }
 
+    namespace
+    {
+        void put32(std::vector<char>& data, std::size_t at, uint32_t value)
+        {
+            std::memcpy(data.data() + at, &value, 4);
+        }
+
+        /** A Smacker header with no frames, which `put32` then bends. */
+        std::vector<char> smkHeader(std::size_t extra)
+        {
+            std::vector<char> data(104 + extra, 0);
+            std::memcpy(data.data(), "SMK2", 4);
+            put32(data, 4, 64);
+            put32(data, 8, 64);
+            put32(data, 16, 100);
+            return data;
+        }
+    }
+
+    TEST_CASE("a Smacker film whose frame table would be larger than 32 bits is refused", "[malformed]")
+    {
+        SECTION("a count whose five-byte table size wraps to something the file holds")
+        {
+            // 858,993,460 * 5 is 4,294,967,300, which is 4 in 32 bits.
+            auto data = smkHeader(4);
+            put32(data, 12, 858993460u);
+            REQUIRE_THROWS_AS(SmkDecoder(std::move(data)), std::runtime_error);
+        }
+
+        SECTION("the largest count with the ring frame, whose table wrapped to nothing")
+        {
+            auto data = smkHeader(64);
+            put32(data, 12, 0xFFFFFFFFu);
+            put32(data, 20, 1);
+            REQUIRE_THROWS_AS(SmkDecoder(std::move(data)), std::runtime_error);
+        }
+    }
+
+    TEST_CASE("a Smacker Huffman tree block of set bits is refused, not recursed into", "[malformed]")
+    {
+        // A million bytes of ones: every bit opens a node. This recursed
+        // eight million levels deep.
+        constexpr std::size_t treesSize = 1u << 20;
+        auto data = smkHeader(treesSize);
+        put32(data, 52, static_cast<uint32_t>(treesSize));
+        std::fill(data.begin() + 104, data.end(), static_cast<char>(0xFF));
+        REQUIRE_THROWS_AS(SmkDecoder(std::move(data)), std::runtime_error);
+    }
+
+    TEST_CASE("a Smacker audio chunk that unpacks to billions of samples is refused before it is reserved", "[malformed]")
+    {
+        // One frame with one audio track, packed 16-bit mono. The trees are
+        // all empty, so a sample would cost no bits and the loop would run
+        // for as many samples as the chunk says.
+        constexpr std::size_t treesSize = 4;
+        auto data = smkHeader(4 + 1 + treesSize + 12);
+        put32(data, 12, 1);
+        put32(data, 52, static_cast<uint32_t>(treesSize));
+        put32(data, 72, 0x80000000u | 0x40000000u | 0x20000000u | 22050u);
+        std::size_t at = 104;
+        put32(data, at, 12); // the frame's size
+        at += 4;
+        data[at++] = 2; // the frame's type: audio track 0, no palette
+        at += treesSize; // four empty trees
+        put32(data, at, 11); // the chunk: this field, the size, three bytes
+        put32(data, at + 4, 0x7FFFFFF0u);
+        data[at + 8] = 0x05; // present, mono, 16-bit, two empty byte trees
+        SmkDecoder decoder(std::move(data));
+        decoder.setSkipVideo(true);
+        REQUIRE_THROWS_AS(decoder.decodeNextFrame(), std::runtime_error);
+    }
+
+    TEST_CASE("a film that is empty or will not open is skipped, not thrown", "[malformed]")
+    {
+        SceneContext context(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+
+        REQUIRE(tryMakeMovieScene(context, std::vector<char>{}, [] {}) == nullptr);
+        REQUIRE(tryMakeMovieScene(context, std::vector<char>(200, 'x'), [] {}) == nullptr);
+    }
+
     TEST_CASE("a weapon TDF's unitsonly only takes a number", "[malformed]")
     {
         // `unitsonly` tells the simulation to skip the ground and the sea stop
@@ -368,6 +608,251 @@ namespace rwe
         append(bytes, GafHeader{GafVersionNumber, 0xFFFFFFFF, 0});
         std::istringstream in(bytes);
         REQUIRE_THROWS_AS(GafArchive(&in), GafException);
+    }
+
+    namespace
+    {
+        struct NullGafAdapter : GafReaderAdapter
+        {
+            int frames = 0;
+            void beginFrame(const GafFrameEntry&, const GafFrameData&) override {}
+            void frameLayer(const LayerData&) override {}
+            void endFrame() override { ++frames; }
+        };
+
+        GafEntry gafEntryNamed(uint16_t frames, const char* name)
+        {
+            GafEntry e{};
+            e.frames = frames;
+            std::strncpy(reinterpret_cast<char*>(e.name), name, GafMaxNameLength - 1);
+            return e;
+        }
+    }
+
+    TEST_CASE("a GAF that ends inside its own header or tables is refused, not read as garbage", "[malformed]")
+    {
+        SECTION("inside the header")
+        {
+            std::istringstream in(std::string(5, '\x00'));
+            REQUIRE_THROWS_AS(GafArchive(&in), GafException);
+        }
+
+        SECTION("an entry pointer past the end of the file")
+        {
+            std::string bytes;
+            append(bytes, GafHeader{GafVersionNumber, 1, 0});
+            append(bytes, uint32_t{5000});
+            std::istringstream in(bytes);
+            REQUIRE_THROWS_AS(GafArchive(&in), GafException);
+        }
+
+        SECTION("an entry whose frame table runs off the end")
+        {
+            std::string bytes;
+            append(bytes, GafHeader{GafVersionNumber, 1, 0});
+            append(bytes, uint32_t{sizeof(GafHeader) + sizeof(uint32_t)});
+            append(bytes, gafEntryNamed(100, "x"));
+            append(bytes, GafFrameEntry{0, 0});
+            std::istringstream in(bytes);
+            REQUIRE_THROWS_AS(GafArchive(&in), GafException);
+        }
+
+        SECTION("more entries than there are pointers for")
+        {
+            std::string bytes;
+            append(bytes, GafHeader{GafVersionNumber, 60000, 0});
+            std::istringstream in(bytes);
+            REQUIRE_THROWS_AS(GafArchive(&in), GafException);
+        }
+    }
+
+    TEST_CASE("a GAF whose pointers all name one large entry cannot build gigabytes of frame tables", "[malformed]")
+    {
+        // One entry claiming 65535 frames (a 512 KB table, which the file
+        // does hold) and 3000 pointers to it: 3000 copies of the table, 1.5
+        // GB, from a file of about 540 KB. The frames of all the entries
+        // together cannot outnumber the records the file has room for.
+        constexpr uint32_t entries = 3000;
+        auto entryAt = static_cast<uint32_t>(sizeof(GafHeader) + entries * sizeof(uint32_t));
+        std::string bytes;
+        append(bytes, GafHeader{GafVersionNumber, entries, 0});
+        for (uint32_t i = 0; i < entries; ++i)
+        {
+            append(bytes, entryAt);
+        }
+        append(bytes, gafEntryNamed(65535, "x"));
+        bytes.append(65535 * sizeof(GafFrameEntry), '\x00');
+
+        std::istringstream in(bytes);
+        REQUIRE_THROWS_AS(GafArchive(&in), GafException);
+    }
+
+    TEST_CASE("a GAF of version 0, as vismasks.gaf and terrain.gaf are, is read", "[malformed]")
+    {
+        // BT-155, docs/BYTE-TACTICS-SPEC-ROOM-FINDINGS.md on branch
+        // spec-room-findings; static byte-tactics reading at 97d7ac59.
+        std::string bytes;
+        append(bytes, GafHeader{0, 1, 0});
+        append(bytes, uint32_t{sizeof(GafHeader) + sizeof(uint32_t)});
+        append(bytes, gafEntryNamed(0, "mask"));
+        std::istringstream in(bytes);
+        GafArchive gaf(&in);
+        REQUIRE(gaf.entries().size() == 1);
+        REQUIRE(gaf.entries()[0].name == "mask");
+    }
+
+    TEST_CASE("a GAF frame whose pixels are cut off by the end of the file is refused", "[malformed]")
+    {
+        SECTION("uncompressed")
+        {
+            std::string bytes(16, '\x00');
+            GafFrameData frame{};
+            frame.width = 10;
+            frame.height = 10;
+            frame.frameDataOffset = static_cast<uint32_t>(16 + sizeof(GafFrameData));
+            append(bytes, frame);
+            bytes += std::string(5, 'x');
+            std::istringstream in(bytes);
+            NullGafAdapter adapter;
+            REQUIRE_THROWS_AS(extractGafEntry(&in, {GafFrameEntry{16, 0}}, adapter), GafException);
+        }
+
+        SECTION("compressed, in the middle of a row")
+        {
+            std::string bytes(16, '\x00');
+            GafFrameData frame{};
+            frame.width = 8;
+            frame.height = 1;
+            frame.compressed = 1;
+            frame.frameDataOffset = static_cast<uint32_t>(16 + sizeof(GafFrameData));
+            append(bytes, frame);
+            // A row that says it has 5 bytes and a literal of 4, and the file has 2.
+            append(bytes, uint16_t{5});
+            bytes += std::string("\x0c\x01", 2);
+            std::istringstream in(bytes);
+            NullGafAdapter adapter;
+            REQUIRE_THROWS_AS(extractGafEntry(&in, {GafFrameEntry{16, 0}}, adapter), GafException);
+        }
+    }
+
+    TEST_CASE("a compressed GAF row that stops short is transparent from where it stopped, and the next row starts where it should", "[malformed]")
+    {
+        // Row 0, four wide: a prefix of 2 and a repeat of one pixel (mask
+        // 0x02) of value 7; the other three pixels were never written.
+        // Row 1, two wide: a prefix of 4, a repeat of two pixels of value 9
+        // (mask 0x06), then two bytes the row did not use.
+        // Row 2, two wide: a prefix of 2 and a repeat of two of value 3.
+        std::string bytes;
+        append(bytes, uint16_t{2});
+        bytes += std::string("\x02\x07", 2);
+        std::istringstream first(bytes);
+        std::vector<char> row0(4, 0x55);
+        decompressRow(first, row0.data(), 4, static_cast<char>(0xFE));
+        REQUIRE(row0 == std::vector<char>{7, static_cast<char>(0xFE), static_cast<char>(0xFE), static_cast<char>(0xFE)});
+
+        std::string two;
+        append(two, uint16_t{4});
+        two += std::string("\x06\x09\x55\x55", 4);
+        append(two, uint16_t{2});
+        two += std::string("\x06\x03", 2);
+        std::istringstream second(two);
+        std::vector<char> pixels(4, 0);
+        decompressFrame(second, pixels.data(), 2, 2, static_cast<char>(0xFE));
+        REQUIRE(pixels == std::vector<char>{9, 9, 3, 3});
+    }
+
+    TEST_CASE("readRaw refuses a read the stream cannot satisfy instead of returning the stack", "[malformed]")
+    {
+        std::istringstream in(std::string(3, 'x'));
+        REQUIRE_THROWS_AS(readRaw<uint32_t>(in), TruncatedInputError);
+    }
+
+    namespace
+    {
+        std::string fntBytes(uint16_t height, const std::unordered_map<int, uint16_t>& glyphs, const std::string& tail)
+        {
+            std::string bytes;
+            append(bytes, FntHeader{height, 0});
+            for (int i = 0; i < 256; ++i)
+            {
+                auto it = glyphs.find(i);
+                append(bytes, static_cast<uint16_t>(it == glyphs.end() ? 0 : it->second));
+            }
+            return bytes + tail;
+        }
+    }
+
+    TEST_CASE("a bitmap font that cannot describe itself is refused", "[malformed]")
+    {
+        SECTION("cut off inside its header")
+        {
+            std::istringstream in(std::string(3, 'x'));
+            REQUIRE_THROWS(FntArchive(&in));
+        }
+
+        SECTION("cut off inside its offset table")
+        {
+            std::istringstream in(std::string(100, 'x'));
+            REQUIRE_THROWS(FntArchive(&in));
+        }
+
+        SECTION("a height of 65535 rows, which would be 66 MB for each of 256 glyph textures")
+        {
+            std::istringstream in(fntBytes(65535, {}, ""));
+            REQUIRE_THROWS(FntArchive(&in));
+        }
+    }
+
+    TEST_CASE("a bitmap font glyph that is not all there is short, and does not spoil the next one", "[malformed]")
+    {
+        // The table is 4 + 512 bytes. 'B' is a whole glyph (one byte of
+        // length, two of bitmap) at 516; 'A' follows at 519 and says three
+        // pairs but the file ends after one byte of them; 'C' points past
+        // the end of the file.
+        std::string tail;
+        tail += std::string(1, '\x01');
+        tail += std::string("\xff\xff", 2);
+        tail += std::string(1, '\x03');
+        tail += std::string(1, '\xff');
+        std::istringstream in(fntBytes(16, {{'B', 516}, {'A', 519}, {'C', 5000}}, tail));
+        FntArchive font(&in);
+
+        std::vector<char> buffer;
+        REQUIRE(font.extractGlyph('C', buffer).byteCount == 0);
+        REQUIRE(font.extractGlyph('A', buffer).byteCount == 1);
+        REQUIRE(font.extractGlyph('B', buffer).byteCount == 2);
+    }
+
+    TEST_CASE("a bitmap font glyph is ceil(width x height / 8) bytes, so a 17-row font keeps its last row (BT-162)", "[malformed]")
+    {
+        // A glyph of width 2 and 17 rows is 34 bits: five bytes. The old read
+        // of two bytes a column of width (four) cut the bottom rows off.
+        std::string tail;
+        tail += static_cast<char>(2);
+        tail += std::string(4, static_cast<char>(0xff));
+        tail += static_cast<char>(0x80);
+        auto bytes = fntBytes(17, {{'A', 516}}, tail);
+
+        // Byte 2 of the file is the signed vertical offset the blitter
+        // subtracts from Y; byte 3 is the first character.
+        bytes[2] = static_cast<char>(3);
+        std::istringstream in(bytes);
+        FntArchive font(&in);
+        REQUIRE(font.glyphHeight() == 17);
+        REQUIRE(font.verticalOffset() == 3);
+
+        std::vector<char> buffer;
+        auto glyph = font.extractGlyph('A', buffer);
+        REQUIRE(glyph.width == 2);
+        REQUIRE(glyph.byteCount == 5);
+        REQUIRE(buffer.size() == 5);
+        REQUIRE(static_cast<unsigned char>(buffer[4]) == 0x80);
+
+        // A 16-row glyph of the same width is still two bytes a column.
+        std::istringstream in16(fntBytes(16, {{'A', 516}}, tail));
+        FntArchive font16(&in16);
+        REQUIRE(font16.extractGlyph('A', buffer).byteCount == 4);
+        REQUIRE(font16.verticalOffset() == 0);
     }
 
     TEST_CASE("an FBI with no SoundCategory is silent, not refused", "[malformed]")
@@ -990,6 +1475,42 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a TA packet with any one byte damaged says so, and the live paths drop it (#657)", "[malformed]")
+    {
+        // The envelope reports a checksum that does not match and the battleroom
+        // and the in-game path both read it; a packet off a socket is someone
+        // else's input, so damage anywhere in the checksummed body has to show.
+        for (std::uint8_t framing : {TadPacketUncompressed, TadPacketCompressed})
+        {
+            TaPacket packet;
+            packet.type = framing;
+            packet.marker = 0xfffffffe;
+            packet.subpackets.push_back(TadBytes(36, 0x0d));
+            packet.subpackets.push_back(TadBytes(5, 0x12));
+            auto wire = packet.build();
+
+            auto intact = taParsePacket(wire);
+            REQUIRE(intact);
+            REQUIRE(intact->checksumValid);
+
+            // The last four bytes are outside the checksum by design, so
+            // damage is applied up to the byte before them.
+            for (std::size_t i = 3; i + 4 < wire.size(); ++i)
+            {
+                auto damaged = wire;
+                damaged[i] = static_cast<std::uint8_t>(damaged[i] ^ 0x01);
+                auto parsed = taParsePacket(damaged);
+                CAPTURE(framing, i);
+                // A damaged compressed stream may not decompress at all, which
+                // costs the packet just as surely.
+                if (parsed)
+                {
+                    REQUIRE_FALSE(parsed->checksumValid);
+                }
+            }
+        }
+    }
+
     TEST_CASE("a live receiver refuses a serial it cannot make sense of", "[malformed][puppet]")
     {
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
@@ -1132,5 +1653,447 @@ namespace rwe
         {
             REQUIRE_FALSE(taMapChecksum(asBytes(smallTnt), asBytes("[GlobalHeader]\r\n{\r\n")));
         }
+    }
+
+    TEST_CASE("a sidedata HUD colour past the palette is clamped, not thrown on every frame", "[io][malformed]")
+    {
+        // The HUD draws its bars with palette->at(colour) on a 256-entry
+        // palette, so 256 or more used to throw out of every rendered frame.
+        auto sideData = [](const std::string& energy, const std::string& metal) {
+            std::string input = "[SIDE0]\n{\nname=Mod;\nnameprefix=MOD;\ncommander=ARMCOM;\nintgaf=ARMINT;\n"
+                                "font=console;\nfontgui=armbutt;\nenergycolor="
+                + energy + ";\nmetalcolor=" + metal + ";\n";
+            for (const char* rect : {"LOGO", "ENERGYBAR", "ENERGYNUM", "ENERGYMAX", "ENERGY0", "METALBAR", "METALNUM", "METALMAX", "METAL0", "TOTALUNITS", "TOTALTIME", "ENERGYPRODUCED", "ENERGYCONSUMED", "METALPRODUCED", "METALCONSUMED", "LOGO2", "UNITNAME", "DAMAGEBAR", "UNITMETALMAKE", "UNITMETALUSE", "UNITENERGYMAKE", "UNITENERGYUSE", "MISSIONTEXT", "UNITNAME2", "DAMAGEBAR2", "NAME", "DESCRIPTION", "RELOAD1", "RELOAD2", "RELOAD3"})
+            {
+                input += std::string("[") + rect + "]\n{ x1=1; y1=1; x2=2; y2=2; }\n";
+            }
+            input += "}\n";
+            auto tdf = parseTdfFromString(input);
+            auto block = tdf.findBlock("SIDE0");
+            REQUIRE(block);
+            return parseSideData(*block);
+        };
+
+        SECTION("the shipped values are kept")
+        {
+            auto s = sideData("208", "224");
+            REQUIRE(s.energyColor == 208);
+            REQUIRE(s.metalColor == 224);
+        }
+
+        SECTION("the last palette index is kept")
+        {
+            auto s = sideData("255", "255");
+            REQUIRE(s.energyColor == 255);
+            REQUIRE(s.metalColor == 255);
+        }
+
+        SECTION("256 and a huge value are clamped to a valid index")
+        {
+            auto s = sideData("256", "4000000000");
+            REQUIRE(s.energyColor <= 255);
+            REQUIRE(s.metalColor <= 255);
+            ColorPalette palette(256);
+            REQUIRE_NOTHROW(palette.at(s.energyColor));
+            REQUIRE_NOTHROW(palette.at(s.metalColor));
+        }
+    }
+
+    TEST_CASE("a list box that overflows by fewer than three rows scrolls to its end and no further", "[ui][malformed]")
+    {
+        // 48 pixels is four rows, of which three are shown (the box is
+        // shortened by one). The old test compared against maxScroll - 3 in
+        // unsigned arithmetic, which wrapped for a maximum under three and
+        // sent the position to three, past the end of the items (#667).
+        // The scroll position as last announced.
+        auto pos = std::make_shared<unsigned int>(0);
+        auto makeBox = [pos](unsigned int sizeY, int itemCount) {
+            auto box = std::make_unique<UiListBox>(0, 0, 100, sizeY, nullptr);
+            *pos = 0;
+            box->scrollPosition().subscribe([pos](const unsigned int& v) { *pos = v; });
+            for (int i = 0; i < itemCount; ++i)
+            {
+                box->appendItem("item " + std::to_string(i));
+            }
+            return box;
+        };
+
+        SECTION("a list that fits does not scroll")
+        {
+            auto box = makeBox(48, 2);
+            box->mouseWheel(MouseWheelEvent(0, -1));
+            REQUIRE(*pos == 0);
+        }
+
+        SECTION("a list two rows too long stops at two")
+        {
+            auto box = makeBox(48, 5);
+            box->mouseWheel(MouseWheelEvent(0, -1));
+            REQUIRE(*pos == 2);
+            box->mouseWheel(MouseWheelEvent(0, -1));
+            REQUIRE(*pos == 2);
+        }
+
+        SECTION("a long list still moves three rows at a time")
+        {
+            auto box = makeBox(48, 20);
+            box->mouseWheel(MouseWheelEvent(0, -1));
+            REQUIRE(*pos == 3);
+            for (int i = 0; i < 20; ++i)
+            {
+                box->mouseWheel(MouseWheelEvent(0, -1));
+            }
+            REQUIRE(*pos == 17);
+        }
+
+        SECTION("a scroll bar message past the end is clamped")
+        {
+            auto box = makeBox(48, 5);
+            box->uiMessage(GroupMessage("t", 0, "bar", ScrollPositionMessage{0.5f, 7.0f}));
+            REQUIRE(*pos == 2);
+        }
+    }
+
+    TEST_CASE("a list box under one row tall has no visible lines rather than billions", "[ui][malformed]")
+    {
+        // numberOfLines was height / 12 - 1 unsigned, so 11 pixels gave
+        // 4294967295 lines (#668). The viewport share is the observable
+        // sign: it was 1.0 (everything visible) and is 0.0.
+        unsigned int position = 0;
+        UiListBox box(0, 0, 100, 11, nullptr);
+        box.scrollPosition().subscribe([&position](const unsigned int& v) { position = v; });
+        for (int i = 0; i < 3; ++i)
+        {
+            box.appendItem("item");
+        }
+        REQUIRE(box.getViewportPercent() == 0.0f);
+        box.mouseWheel(MouseWheelEvent(0, -1));
+        REQUIRE(position == 3);
+        box.mouseWheel(MouseWheelEvent(0, -1));
+        REQUIRE(position == 3);
+        box.scrollToEnd();
+        REQUIRE(position == 3);
+    }
+
+    TEST_CASE("a .gui that cannot make a panel is refused, never thrown and never indexed", "[io][malformed][gui]")
+    {
+        auto parse = [](const std::string& text) {
+            return parseGuiFromBytes(std::vector<char>(text.begin(), text.end()));
+        };
+
+        const std::string panel = "[GADGET0]\n{\n[COMMON]\n{\nid=0;\nname=PANEL;\nxpos=0;\nypos=0;\nwidth=640;\nheight=480;\n}\n}\n";
+
+        SECTION("an empty file, a file of comments and a binary file have no records (#662)")
+        {
+            REQUIRE_NOTHROW(parse(""));
+            REQUIRE_FALSE(parse(""));
+            REQUIRE_FALSE(parse("// nothing here\n/* nor here */\n"));
+            // The shipped ENDGAME.GUI is a dump beginning with a zero byte and the word HEADER.
+            REQUIRE_FALSE(parse(std::string("\0HEADER\0\0\0\0garbage", 19)));
+        }
+
+        SECTION("a block with no COMMON section is refused rather than thrown (#663)")
+        {
+            REQUIRE_NOTHROW(parse("[GADGET0]\n{\nstatus=1;\n}\n"));
+            REQUIRE_FALSE(parse("[GADGET0]\n{\nstatus=1;\n}\n"));
+        }
+
+        SECTION("an unknown gadget type is refused rather than thrown (#663)")
+        {
+            auto text = panel + "[GADGET1]\n{\n[COMMON]\n{\nid=99;\nname=ODD;\n}\n}\n";
+            REQUIRE_NOTHROW(parse(text));
+            REQUIRE_FALSE(parse(text));
+        }
+
+        SECTION("a missing name and a VERSION block missing its fields take the defaults (#663)")
+        {
+            auto text = "[GADGET0]\n{\n[COMMON]\n{\nid=0;\nwidth=10;\nheight=10;\n}\n[VERSION]\n{\nmajor=3;\n}\n}\n";
+            auto gui = parse(text);
+            REQUIRE(gui);
+            REQUIRE(gui->size() == 1);
+            REQUIRE((*gui)[0].common.name == "");
+            REQUIRE((*gui)[0].version);
+            REQUIRE((*gui)[0].version->majorVersion == 3);
+            REQUIRE((*gui)[0].version->minorVersion == 0);
+            REQUIRE((*gui)[0].version->revision == 0);
+        }
+
+        SECTION("sizes, positions and stages are narrowed into the original's ranges (#664)")
+        {
+            auto text = panel + "[GADGET1]\n{\n[COMMON]\n{\nid=1;\nname=B;\nxpos=-90000;\nypos=2000000000;\nwidth=-5;\nheight=2000000000;\n}\nstages=2000000000;\n}\n"
+                                "[GADGET2]\n{\n[COMMON]\n{\nid=1;\nname=C;\nxpos=-12;\nypos=40;\nwidth=96;\nheight=20;\n}\nstages=-3;\n}\n";
+            auto gui = parse(text);
+            REQUIRE(gui);
+            REQUIRE(gui->size() == 3);
+
+            const auto& b = (*gui)[1];
+            REQUIRE(b.common.width == 0);
+            REQUIRE(b.common.height >= 0);
+            REQUIRE(b.common.height <= 2048);
+            REQUIRE(b.common.xpos >= -32768);
+            REQUIRE(b.common.ypos <= 32767);
+            REQUIRE(b.stages);
+            REQUIRE(*b.stages >= 0);
+            REQUIRE(*b.stages <= 255);
+
+            // In-range values, a negative position among them, are not touched.
+            const auto& c = (*gui)[2];
+            REQUIRE(c.common.xpos == -12);
+            REQUIRE(c.common.ypos == 40);
+            REQUIRE(c.common.width == 96);
+            REQUIRE(c.common.height == 20);
+            REQUIRE(*c.stages == 0);
+        }
+
+        SECTION("the record count is capped at the original's 200 (#666)")
+        {
+            std::string text = panel;
+            for (int i = 0; i < 1000; ++i)
+            {
+                text += "[G" + std::to_string(i) + "]\n{\n[COMMON]\n{\nid=5;\nname=L" + std::to_string(i) + ";\n}\n}\n";
+            }
+            auto gui = parse(text);
+            REQUIRE(gui);
+            REQUIRE(gui->size() == MaxGuiRecords);
+            REQUIRE(gui->front().common.name == "PANEL");
+        }
+    }
+
+    TEST_CASE("a scroll bar whose art is short of frames draws nothing and takes no clicks (#665)", "[ui][malformed][gui]")
+    {
+        auto sprite = [](float height) {
+            return std::make_shared<Sprite>(Rectangle2f::fromTopLeft(0.0f, 0.0f, 10.0f, height), SharedTextureHandle(), nullptr);
+        };
+
+        int messages = 0;
+
+        SECTION("three frames, where the bar indexes ten")
+        {
+            auto series = std::make_shared<SpriteSeries>();
+            for (int i = 0; i < 3; ++i)
+            {
+                series->sprites.push_back(sprite(8.0f));
+            }
+            UiScrollBar bar(0, 0, 16, 100, series);
+            bar.scrollUp().subscribe([&messages](const bool&) { ++messages; });
+            bar.mouseDown(MouseButtonEvent(1, 2, MouseButtonEvent::MouseButton::Left));
+            bar.mouseMove(MouseMoveEvent(2, 40));
+            bar.update(0.5f);
+            bar.mouseUp(MouseButtonEvent(1, 2, MouseButtonEvent::MouseButton::Left));
+            REQUIRE(messages == 0);
+        }
+
+        SECTION("no frames at all")
+        {
+            UiScrollBar bar(0, 0, 16, 100, std::make_shared<SpriteSeries>());
+            bar.mouseDown(MouseButtonEvent(1, 2, MouseButtonEvent::MouseButton::Left));
+            bar.update(0.5f);
+        }
+
+        SECTION("no series at all")
+        {
+            UiScrollBar bar(0, 0, 16, 100, nullptr);
+            bar.mouseDown(MouseButtonEvent(1, 2, MouseButtonEvent::MouseButton::Left));
+            bar.update(0.5f);
+        }
+
+        SECTION("ten frames whose tiling pieces have no height")
+        {
+            auto series = std::make_shared<SpriteSeries>();
+            for (int i = 0; i < 10; ++i)
+            {
+                series->sprites.push_back(sprite(0.0f));
+            }
+            UiScrollBar bar(0, 0, 16, 100, series);
+            bar.mouseDown(MouseButtonEvent(1, 2, MouseButtonEvent::MouseButton::Left));
+            bar.update(0.5f);
+            REQUIRE(messages == 0);
+        }
+    }
+
+    namespace
+    {
+        /** Files by name, found case-insensitively, for the palette lookup. */
+        class NamedFilesFileSystem final : public AbstractVirtualFileSystem
+        {
+        public:
+            std::map<std::string, std::string> files;
+
+            static std::string lowered(std::string s)
+            {
+                for (auto& c : s)
+                {
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                }
+                return s;
+            }
+
+            std::optional<std::vector<char>> readFile(const std::string& filename) const override
+            {
+                auto it = files.find(lowered(filename));
+                if (it == files.end())
+                {
+                    return std::nullopt;
+                }
+                return std::vector<char>(it->second.begin(), it->second.end());
+            }
+            std::vector<std::string> getFileNames(const std::string&, const std::string&) override { return {}; }
+            std::vector<std::string> getDirectoryNames(const std::string&) override { return {}; }
+            std::vector<std::string> getFileNamesRecursive(const std::string&, const std::string&) override { return {}; }
+        };
+
+        std::string palettePcx()
+        {
+            auto bytes = pcxHeader(1, 1, 2);
+            bytes += std::string("\x01\x02", 2);
+            bytes += '\x0c';
+            for (int i = 0; i < 256; ++i)
+            {
+                bytes += static_cast<char>(i);
+                bytes += static_cast<char>(255 - i);
+                bytes += static_cast<char>(7);
+            }
+            return bytes;
+        }
+    }
+
+    TEST_CASE("a palette shipped only as a PCX is read from its trailer instead of ending the launch", "[io][malformed]")
+    {
+        NamedFilesFileSystem vfs;
+
+        SECTION("neither file present")
+        {
+            REQUIRE_FALSE(vfs.readPaletteOrPcx("PALETTE").has_value());
+        }
+
+        SECTION("a PCX alone")
+        {
+            vfs.files["palettes/palette.pcx"] = palettePcx();
+            auto palette = vfs.readPaletteOrPcx("PALETTE");
+            REQUIRE(palette);
+            REQUIRE(palette->size() == 256);
+            REQUIRE((*palette)[10].r == 10);
+            REQUIRE((*palette)[10].g == 245);
+            REQUIRE((*palette)[10].b == 7);
+            REQUIRE((*palette)[10].a == 255);
+        }
+
+        SECTION("a PAL wins over a PCX")
+        {
+            std::string pal(1024, '\x05');
+            vfs.files["palettes/palette.pal"] = pal;
+            vfs.files["palettes/palette.pcx"] = palettePcx();
+            auto palette = vfs.readPaletteOrPcx("PALETTE");
+            REQUIRE(palette);
+            REQUIRE((*palette)[10].r == 5);
+        }
+
+        SECTION("a short PAL falls through to the PCX")
+        {
+            vfs.files["palettes/palette.pal"] = std::string(100, '\x05');
+            vfs.files["palettes/palette.pcx"] = palettePcx();
+            auto palette = vfs.readPaletteOrPcx("PALETTE");
+            REQUIRE(palette);
+            REQUIRE((*palette)[10].r == 10);
+        }
+
+        SECTION("a PCX that is not a palette picture is no palette, and does not throw")
+        {
+            vfs.files["palettes/palette.pcx"] = "not a pcx";
+            REQUIRE_NOTHROW(vfs.readPaletteOrPcx("PALETTE"));
+            REQUIRE_FALSE(vfs.readPaletteOrPcx("PALETTE").has_value());
+
+            vfs.files["palettes/palette.pcx"] = pcxHeader(1, 1, 2) + std::string("\x01\x02", 2);
+            REQUIRE_FALSE(vfs.readPaletteOrPcx("PALETTE").has_value());
+        }
+    }
+
+    TEST_CASE("a name listed twice in one HPI directory resolves to the last entry", "[io][malformed][hpi]")
+    {
+        // BT-169 (#604): the original walks a directory's entries from the end
+        // and takes the first match, so the last duplicate wins. Static
+        // byte-tactics reading at 97d7ac59, not executed against the original.
+        auto extractAll = [](const HpiArchive& hpi, const std::string& path) -> std::optional<std::string> {
+            auto file = hpi.findFile(path);
+            if (!file)
+            {
+                return std::nullopt;
+            }
+            std::string out(file->get().size, '\0');
+            hpi.extract(file->get(), out.data());
+            return out;
+        };
+
+        SECTION("two files of one name")
+        {
+            auto bytes = hpiPrefix(70, 20);
+            append(bytes, HpiDirectoryData{2, 28});
+            append(bytes, HpiDirectoryEntry{46, 52, 0});
+            append(bytes, HpiDirectoryEntry{46, 61, 0});
+            bytes += std::string("a.txt\0", 6);
+            append(bytes, HpiFileData{70, 3, 0});
+            append(bytes, HpiFileData{73, 4, 0});
+            REQUIRE(bytes.size() == 70);
+            bytes += "AAABBBB";
+            std::istringstream in(bytes);
+            HpiArchive hpi(&in);
+            REQUIRE(extractAll(hpi, "a.txt") == std::optional<std::string>("BBBB"));
+            REQUIRE(extractAll(hpi, "A.TXT") == std::optional<std::string>("BBBB"));
+        }
+
+        SECTION("a directory and then a file of one name: a non-final component must be the last entry, and be a directory")
+        {
+            auto bytes = hpiPrefix(85, 20);
+            append(bytes, HpiDirectoryData{2, 28});
+            append(bytes, HpiDirectoryEntry{46, 50, 1});
+            append(bytes, HpiDirectoryEntry{46, 76, 0});
+            bytes += std::string("d\0x\0", 4);
+            REQUIRE(bytes.size() == 50);
+            append(bytes, HpiDirectoryData{1, 58});
+            append(bytes, HpiDirectoryEntry{48, 67, 0});
+            append(bytes, HpiFileData{85, 1, 0});
+            append(bytes, HpiFileData{86, 1, 0});
+            REQUIRE(bytes.size() == 85);
+            bytes += "QR";
+            std::istringstream in(bytes);
+            HpiArchive hpi(&in);
+            // The earlier "d" is a directory holding x, but the later "d" is a file and is the one found.
+            REQUIRE_FALSE(hpi.findFile("d/x").has_value());
+            REQUIRE(extractAll(hpi, "d") == std::optional<std::string>("R"));
+            REQUIRE_FALSE(hpi.findDirectory("d").has_value());
+        }
+    }
+
+    TEST_CASE("an empty file reads as absent and hides the copy behind it", "[io][malformed][vfs]")
+    {
+        // BT-170 (#605): the original's whole-file loader returns nothing
+        // unless the size is above zero, with no fall-through to another
+        // archive. Static byte-tactics reading at 97d7ac59, not executed
+        // against the original.
+        struct EmptyFileSystem final : public LeafVirtualFileSystem
+        {
+            std::string name{"empty"};
+            const std::string& getPath() const override { return name; }
+            std::optional<std::vector<char>> readFile(const std::string&) const override { return std::vector<char>{}; }
+            std::vector<std::string> getFileNames(const std::string&, const std::string&) override { return {}; }
+            std::vector<std::string> getDirectoryNames(const std::string&) override { return {}; }
+            std::vector<std::string> getFileNamesRecursive(const std::string&, const std::string&) override { return {}; }
+        };
+
+        CompositeVirtualFileSystem vfs;
+        vfs.emplaceFileSystem<EmptyFileSystem>();
+        vfs.emplaceFileSystem<OneFileSystem>();
+        REQUIRE_FALSE(vfs.readFile("movies/1.zrb").has_value());
+        REQUIRE_FALSE(vfs.readFileFromSource("empty", "movies/1.zrb").has_value());
+        REQUIRE_THROWS_AS(vfs.readFileOrThrow("movies/1.zrb"), std::runtime_error);
+
+        // The film player treats a missing film as one to skip, so nothing is played and nothing throws.
+        auto film = vfs.readFile("movies/1.zrb");
+        REQUIRE_FALSE(film.has_value());
+
+        // A non-empty file in front of the same copy is read as before.
+        CompositeVirtualFileSystem full;
+        full.emplaceFileSystem<OneFileSystem>();
+        REQUIRE(full.readFile("movies/1.zrb").has_value());
     }
 }

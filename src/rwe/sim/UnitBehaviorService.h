@@ -32,7 +32,20 @@ namespace rwe
 
         void onCreate(UnitId unitId);
 
-        void updateWind(SimScalar windSpeed, SimAngle windDirection);
+        /**
+         * BT-93 (state 6 of 0x404DB0): a resurrector that can repair goes
+         * straight on to mend the unit it raised. Called by spawnNewUnits
+         * once the unit stands where the corpse was.
+         */
+        void mendRaisedUnit(UnitId resurrector, FeatureId corpse, UnitId raised);
+
+        /**
+         * Tells every wind generator the new wind. The script's SetSpeed gets
+         * the map's integer wind speed times sixteen (shl 4 at 0x43797B), an
+         * angular speed for the blades, and not the 0..1 fraction the economy
+         * uses (BT-46).
+         */
+        void updateWind(int windSpeed, SimAngle windDirection);
 
         void update(UnitId unitId);
 
@@ -67,7 +80,7 @@ namespace rwe
         void updateRemoteGroundPosition(UnitInfo unitInfo, UnitPhysicsInfoGround& physics);
 
         /** Returns true if the order has been completed. */
-        bool handleMoveOrder(UnitInfo unitInfo, const MoveOrder& moveOrder);
+        bool handleMoveOrder(UnitInfo unitInfo, MoveOrder& moveOrder);
 
         /** Returns true if the order has been completed. */
         bool handleAttackOrder(UnitInfo unitInfo, AttackOrder& attackOrder);
@@ -203,7 +216,15 @@ namespace rwe
          * The same reach against a footprint that need not belong to a unit,
          * so that a feature -- a wreck, a tree -- is measured the same way.
          */
-        bool withinBuildReachOfRect(UnitInfo unitInfo, const DiscreteRect& rect) const;
+        bool withinBuildReachOfRect(UnitInfo unitInfo, const DiscreteRect& rect, SimScalar extraReach = 0_ss) const;
+
+        /**
+         * BT-97: whether a build site the builder could not path to is still
+         * within its build distance, flat distance less half of each
+         * footprint's diagonal. The original ignores the no-route failure
+         * when it is.
+         */
+        bool siteWithinReachOfUnreachableSite(UnitInfo unitInfo, const UnitDefinition& siteDefinition, const SimVector& site) const;
 
         /** Whether this weapon can hit the unit at all (water weapons only reach units in the water, ordinary ones only reach units out of it). */
         bool weaponCanHitUnit(const WeaponDefinition& weaponDefinition, const UnitState& attacker, const UnitState& target) const;
@@ -249,6 +270,12 @@ namespace rwe
          */
         void pollMine(UnitInfo unitInfo);
 
+        /** BT-91: the Guard_NoMove default mission, and what it needs. */
+        void runGuardNoMove(UnitInfo unitInfo);
+        static void resetGuardNoMove(UnitState& unit);
+        bool guardCanEngage(const UnitState& unit, UnitId target) const;
+        void guardAssignWeapons(UnitState& unit, UnitId target);
+
         bool handleBuild(UnitInfo unitInfo, const std::string& unitType);
 
 
@@ -268,7 +295,7 @@ namespace rwe
         void updateUnitRotation(UnitInfo unitInfo);
         void updateUnitSpeed(UnitInfo unitInfo);
 
-        void updateGroundUnitPosition(UnitInfo unitInfo, const UnitPhysicsInfoGround& physics);
+        void updateGroundUnitPosition(UnitInfo unitInfo, UnitPhysicsInfoGround& physics);
 
         /** The slope tilt under a ground unit, the original's 0x48A490, or none for an upright one. */
         void updateGroundTilt(UnitInfo unitInfo, UnitPhysicsInfoGround& physics);

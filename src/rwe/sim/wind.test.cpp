@@ -1,15 +1,23 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <rwe/cob/CobOpCode.h>
 #include <rwe/grid/Grid.h>
+#include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/ProjectilePhysicsType.h>
 #include <rwe/sim/SimAngle.h>
+#include <rwe/sim/SimRandom.h>
 #include <rwe/sim/SimVector.h>
+#include <rwe/sim/UnitDefinition.h>
+#include <rwe/sim/UnitModelDefinition.h>
+#include <rwe/sim/UnitPieceDefinition.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/WeaponDefinition.h>
 #include <rwe/sim/sim_test_util.h>
 #include <cmath>
+#include <memory>
+#include <set>
 #include <string>
 
 namespace rwe
@@ -168,6 +176,52 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a wind generator's SetSpeed is the integer wind speed times sixteen", "[wind][cob]")
+    {
+        // BT-46: 0x43797B shifts the stored speed left four bits. The shipped
+        // armwin and corwin spin their blades at the argument in 1/65536-turn
+        // units a second, so the old fraction of 65536 was 18% slow at the top
+        // of the range and flat above 5000.
+        auto script = std::make_shared<CobScript>();
+        script->staticVariableCount = 1;
+        script->pieces.push_back("base");
+        script->functions.push_back(CobFunctionInfo{"SetSpeed", 0u});
+        script->instructions = {
+            static_cast<uint32_t>(OpCode::PUSH_LOCAL_VAR), 0u,
+            static_cast<uint32_t>(OpCode::POP_STATIC), 0u,
+            static_cast<uint32_t>(OpCode::PUSH_CONSTANT), 0u,
+            static_cast<uint32_t>(OpCode::RETURN)};
+
+        auto speedGiven = [&](int windSpeed) {
+            GameSimulation sim(makeFlatTerrain(32, 32), 0u, windSpeed, windSpeed);
+            auto player = addPlayer(sim);
+            std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+            sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(pieces));
+            UnitDefinition d{};
+            d.objectName = "model";
+            d.maxHitPoints = 100;
+            d.buildTime = 0u;
+            d.windGenerator = Energy(25.0f);
+            d.yardMap = Grid<YardMapCell>(2u, 2u, YardMapCell::Ground);
+            d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
+            sim.unitDefinitions["ARMWIN"] = d;
+            sim.unitScriptDefinitions["ARMWIN"] = *script;
+            auto id = sim.trySpawnCompletedUnit("ARMWIN", player, SimVector(16_ss, 0_ss, 16_ss), std::nullopt);
+            REQUIRE(id);
+
+            // The first tick draws the wind, as above, and the thread it
+            // starts runs in that tick's script pass or the next.
+            tick(sim, 3);
+            return sim.getUnitState(*id).cobEnvironment->_statics.at(0);
+        };
+
+        REQUIRE(speedGiven(100) == 1600);
+        REQUIRE(speedGiven(2000) == 32000);
+        REQUIRE(speedGiven(5000) == 80000);
+        // Not capped at the economy's 5000.
+        REQUIRE(speedGiven(7000) == 112000);
+    }
+
     TEST_CASE("the wind reaches the rounds that are supposed to feel it", "[wind]")
     {
         // The three cases above can all pass while nothing in
@@ -262,5 +316,118 @@ namespace rwe
             REQUIRE(simScalarToFloat(p.z) == Approx(0.0f).margin(1e-6f));
             REQUIRE(simScalarToFloat(p.y) == Approx(StartHeight));
         }
+    }
+
+    TEST_CASE("the wind speed is the minimum plus a draw below the span", "[wind]")
+    {
+        // BT-130 (0x4B6C30): the draw is a modulo of max - min, so the map's
+        // maximum is never reached unless the bounds are equal, and a span
+        // under two draws nothing from the generator.
+        auto speedsSeen = [](int low, int high, int changes) {
+            GameSimulation sim(makeFlatTerrain(16, 16), 0u, low, high);
+            std::set<int> seen;
+            for (int i = 0; i < changes; ++i)
+            {
+                sim.nextWindSpeedChange = sim.gameTime;
+                sim.updateWind();
+                seen.insert(static_cast<int>(std::lround(simScalarToFloat(sim.currentWindGenerationFactor) * static_cast<float>(MaxUtilizableWindSpeed))));
+            }
+            return seen;
+        };
+
+        SECTION("never the maximum, every value below it")
+        {
+            // 100 to 103 is the Brain Coral shape in miniature: 100, 101 and
+            // 102 come up, 103 does not.
+            auto seen = speedsSeen(100, 103, 400);
+            REQUIRE(seen == std::set<int>{100, 101, 102});
+        }
+
+        SECTION("a span of one is the minimum and nothing else")
+        {
+            REQUIRE(speedsSeen(100, 101, 50) == std::set<int>{100});
+        }
+
+        SECTION("equal bounds are that value")
+        {
+            REQUIRE(speedsSeen(3000, 3000, 50) == std::set<int>{3000});
+        }
+
+        SECTION("a span under two does not advance the generator for the speed")
+        {
+            GameSimulation sim(makeFlatTerrain(16, 16), 0u, 100, 101);
+            auto expected = sim.rng;
+            sim.updateWind();
+
+            // The interval, then the direction; nothing in between.
+            randomBetween(expected, 5, 14);
+            randomBetween(expected, 0, 65535);
+            REQUIRE(sim.rng == expected);
+        }
+    }
+
+    TEST_CASE("a wind of zero draws no direction and keeps the stale one", "[wind]")
+    {
+        // BT-26 (0x490C40): the direction is drawn only when the new speed is
+        // not zero.
+        SECTION("a becalmed map draws the interval and nothing else")
+        {
+            GameSimulation sim(makeFlatTerrain(16, 16), 0u, 0, 0);
+            auto expected = sim.rng;
+            sim.updateWind();
+
+            randomBetween(expected, 5, 14);
+            REQUIRE(sim.rng == expected);
+        }
+
+        SECTION("a wind that blows draws a direction, and a calm after it leaves it alone")
+        {
+            GameSimulation sim(makeFlatTerrain(16, 16), 0u, 500, 500);
+            sim.updateWind();
+            auto blown = sim.currentWindDirection;
+
+            // The bounds are constants, so reach the zero by way of the saved
+            // direction in a calm simulation instead.
+            GameSimulation calm(makeFlatTerrain(16, 16), 0u, 0, 0);
+            calm.currentWindDirection = blown;
+            calm.updateWind();
+            REQUIRE(calm.currentWindDirection == blown);
+        }
+    }
+
+    TEST_CASE("a wind change comes after the settle that second", "[wind][economy]")
+    {
+        // BT-26: the selector runs after the player pass, so on a tick that is
+        // both a settle and a change the settle has used the old fraction.
+        // The wind is full strength from the start, held at nothing by hand,
+        // and its change is put on tick 30, the second settle boundary.
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 5000, 5000);
+        auto player = addPlayer(sim);
+        std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+        sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(pieces));
+        UnitDefinition d{};
+        d.objectName = "model";
+        d.maxHitPoints = 100;
+        d.buildTime = 0u;
+        d.windGenerator = Energy(25.0f);
+        d.yardMap = Grid<YardMapCell>(2u, 2u, YardMapCell::Ground);
+        d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
+        sim.unitDefinitions["ARMWIN"] = d;
+        sim.unitScriptDefinitions["ARMWIN"] = *makeEmptyCobScript();
+        auto windmill = sim.trySpawnCompletedUnit("ARMWIN", player, SimVector(16_ss, 0_ss, 16_ss), std::nullopt);
+        REQUIRE(windmill);
+        sim.getUnitState(*windmill).activated = true;
+
+        sim.tick();
+        sim.currentWindGenerationFactor = 0_ss;
+        sim.nextWindSpeedChange = GameTime(30u);
+
+        tick(sim, 29);
+        REQUIRE(sim.gameTime == GameTime(30u));
+        const auto atThirty = sim.getPlayer(player).energyProduced;
+        REQUIRE(atThirty == Energy(0.0f));
+
+        tick(sim, 30);
+        REQUIRE(sim.getPlayer(player).energyProduced - atThirty == Energy(25.0f));
     }
 }

@@ -163,6 +163,52 @@ namespace rwe
         return result.get_future().get();
     }
 
+    bool GameNetworkService::submitChatMessage(const std::string& text, ChatLabel label, const std::vector<PlayerId>& recipients)
+    {
+        std::promise<bool> result;
+        asio::post(ioContext, [this, text, label, &recipients, &result]() {
+            auto isRecipient = [&](const PeerEndpoint& e) {
+                return std::find(recipients.begin(), recipients.end(), e.playerId) != recipients.end();
+            };
+
+            for (const auto& e : endpoints)
+            {
+                if (isRecipient(e) && e.link->chatBacklogFull())
+                {
+                    result.set_value(false);
+                    return;
+                }
+            }
+
+            for (auto& e : endpoints)
+            {
+                if (isRecipient(e))
+                {
+                    e.link->submitChatMessage(text, label);
+                }
+            }
+
+            result.set_value(true);
+        });
+
+        return result.get_future().get();
+    }
+
+    std::vector<PlayerId> GameNetworkService::remotePlayerIds()
+    {
+        std::promise<std::vector<PlayerId>> result;
+        asio::post(ioContext, [this, &result]() {
+            std::vector<PlayerId> ids;
+            for (const auto& e : endpoints)
+            {
+                ids.push_back(e.playerId);
+            }
+            result.set_value(std::move(ids));
+        });
+
+        return result.get_future().get();
+    }
+
     std::vector<GameNetworkService::ReceivedChatMessage> GameNetworkService::takeChatMessages()
     {
         std::scoped_lock<std::mutex> lock(chatInboxMutex);

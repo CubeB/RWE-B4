@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/net/ta/TaDirectPlay.h>
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -311,6 +312,15 @@ namespace rwe
         REQUIRE(created.name == "unit");
         REQUIRE(created.tcpAddress.port == 2301);
         REQUIRE(created.udpAddress.port == 2351);
+
+        // The 21 bytes of player data a joining TA sends: the protocol shorts
+        // zero and 0x50 sit at bytes 17 and 19 (BT-242).
+        REQUIRE(created.playerDataSize == 21);
+        REQUIRE(created.playerData.size() == 21);
+        REQUIRE(created.playerData[17] == 0);
+        REQUIRE(created.playerData[18] == 0);
+        REQUIRE(created.playerData[19] == 0x50);
+        REQUIRE(created.playerData[20] == 0);
     }
 
     TEST_CASE("SESSIONDESCCHANGED carries the session and its name", "[ta][directplay]")
@@ -370,7 +380,47 @@ namespace rwe
     TEST_CASE("the session name pads the game name to sixteen then appends the map", "[ta][directplay]")
     {
         REQUIRE(taSessionName("test", "Canal Crossing") == "test            Canal Crossing");
-        REQUIRE(taSessionName("a very long game name", "x") == "a very long game namex");
+        // A game name is cut to the 16 the original copies (BT-209).
+        REQUIRE(taSessionName("a very long game name", "x") == "a very long gamex");
+    }
+
+    TEST_CASE("the session name is at most 31 characters: the game name, then 15 of the map", "[ta][directplay]")
+    {
+        auto name = taSessionName(std::string(40, 'g'), std::string(40, 'm'));
+        REQUIRE(name.size() == TaMaxSessionNameLength);
+        REQUIRE(name == std::string(16, 'g') + std::string(15, 'm'));
+
+        // The longest honest map name in a data set still fits whole.
+        REQUIRE(taSessionName("rwe", "Coast To Coast") == "rwe             Coast To Coast");
+    }
+
+    TEST_CASE("a name is cut at a byte count but never inside a UTF-8 sequence", "[ta][directplay]")
+    {
+        REQUIRE(taCapName("short", 16) == "short");
+        REQUIRE(taCapName(std::string(20, 'a'), 16) == std::string(16, 'a'));
+
+        // Fifteen ASCII bytes and then a two-byte character: the cut at 16
+        // would leave half of it, so the whole character goes.
+        std::string name(15, 'a');
+        name += "\xC3\xA9";
+        REQUIRE(taCapName(name, 16) == std::string(15, 'a'));
+        REQUIRE(taCapName(name, 17) == name);
+    }
+
+    TEST_CASE("every session gets a GUID of its own, and it is a version-4 one", "[ta][directplay]")
+    {
+        auto first = taRandomInstanceGuid();
+        auto second = taRandomInstanceGuid();
+        REQUIRE(first != second);
+        REQUIRE((first[7] & 0xF0) == 0x40);
+        REQUIRE((first[8] & 0xC0) == 0x80);
+        REQUIRE(first != std::array<std::uint8_t, 16>{});
+
+        // The captured constant is not what a fresh session says.
+        const std::array<std::uint8_t, 16> captured{
+            0x88, 0xFE, 0xCB, 0xC9, 0xEF, 0xDB, 0x94, 0x43,
+            0xB9, 0x5C, 0x0D, 0x53, 0xCC, 0x2C, 0x18, 0xD4};
+        REQUIRE(first != captured);
     }
 
     TEST_CASE("a player name survives a UTF-16 round trip", "[ta][directplay]")

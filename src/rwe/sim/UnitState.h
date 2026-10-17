@@ -711,6 +711,23 @@ namespace rwe
         unsigned int kills{0};
 
         /**
+         * The unit's health as a whole percentage (0 to 100), sampled on every
+         * tick whose number is a multiple of thirty -- the original's
+         * `unit+0xF6`. Zero at creation.
+         */
+        unsigned int healthPercentSample{0};
+
+        /**
+         * The sample before that one -- the original's `unit+0xF7`, and the
+         * second term of the severity the `Killed` script is given (BT-43).
+         * At each sampling tick this takes the old `healthPercentSample`
+         * before that takes the new reading, so a kill reads a health
+         * percentage from thirty to fifty-nine ticks ago. Zero at creation,
+         * and hashed, so it needs the initialiser.
+         */
+        unsigned int previousHealthPercentSample{0};
+
+        /**
          * The last water state handed to the unit's `setSFXoccupy`. The
          * original keeps the same thing at unit+0x10A and only calls the
          * script when the state changes, and it also feeds the value back in
@@ -912,6 +929,54 @@ namespace rwe
          */
         std::optional<SimVector> slowFacePoint;
 
+        /**
+         * The tick this unit was last put into the occupancy map: when it
+         * was created, and every time it changed square after that.
+         *
+         * A path search reads it. The original's pass map does not treat a
+         * mobile occupant as a wall once its stamp is no older than thirty
+         * ticks behind the search (mover+0x26, written at every map insertion
+         * and read by the cell rule at 0x47DE60; BT-58, BT-59), so a column
+         * of units that is moving does not wall itself in. It is hashed,
+         * because which cells a search may cross decides where a unit walks.
+         * Zero for a unit that was never inserted, as the original's is at
+         * creation.
+         */
+        GameTime occupancyStamp{0};
+
+        /**
+         * The Guard_NoMove mission's state (0x4021F0, BT-91): the armed towers
+         * that name it as their default mission. Phase 0 releases the weapons
+         * and sleeps, 1 adopts weapon slot 0's target for every slot, 2 holds
+         * it until it has gone quiet for the persistence limit, 3 looks for a
+         * replacement within 640 of where the last target stood.
+         *
+         * All of it is hashed: which weapon is aimed at what decides where a
+         * shot lands. The draws that set the limit and pick the way out come
+         * from the simulation's one generator.
+         */
+        unsigned int guardPhase{0};
+        GameTime guardWakeAt{0};
+        std::optional<UnitId> guardTarget;
+        std::optional<SimVector> guardPosition;
+        unsigned int guardLimit{0};
+        unsigned int guardCounter{0};
+
+        /**
+         * The last unit to damage this one and the tick it did (the original's
+         * `unit+0xF0`, which an escort reads when the guarded unit is hit,
+         * BT-98/#643). Hashed: an escort's reaction to it decides its orders.
+         */
+        std::optional<UnitId> lastAttacker;
+        GameTime lastAttackedAt{0};
+
+        /**
+         * On an escort: the `lastAttackedAt` of the guarded unit it has already
+         * reacted to, so one hit is answered once however many ticks the
+         * guard handler runs. Hashed for the same reason.
+         */
+        GameTime guardSeenAttackAt{0};
+
 
         bool activated{false};
         bool isSufficientlyPowered{false};
@@ -1087,9 +1152,10 @@ namespace rwe
 
         bool isSelectableBy(const UnitDefinition& unitDefinition, PlayerId player) const;
 
-        void activate();
+        /** Returns whether the activation state changed; the script runs only if so (BT-66). */
+        bool activate();
 
-        void deactivate();
+        bool deactivate();
 
         Metal getMetalMake() const;
         Energy getEnergyMake() const;

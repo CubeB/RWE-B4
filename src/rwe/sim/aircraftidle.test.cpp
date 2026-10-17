@@ -4,6 +4,7 @@
 #include <memory>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/grid/Grid.h>
+#include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/AirMovement.h>
 #include <rwe/sim/GameSimulation.h>
@@ -163,6 +164,90 @@ namespace rwe
                 return false;
             }
             return std::holds_alternative<AirMovementStateLanding>(air->movementState);
+        }
+    }
+
+    TEST_CASE("an idle aircraft hunts by sight on Fire At Will only, and answers fire on Return Fire (BT-74)", "[aircraftidle]")
+    {
+        // The sight search an idle unit runs (0x43B700) returns nothing
+        // unless the fire mode is exactly Fire At Will; the attack-issue
+        // routine behind it (0x43B1F0) accepts Return Fire too, which is how a
+        // Return Fire unit answers the damage handler's call.
+        auto script = makeIdleScript();
+
+        struct Scene
+        {
+            GameSimulation sim;
+            UnitId targetId;
+            UnitId bomberId;
+            PlayerId us;
+            PlayerId them;
+
+            Scene(const std::shared_ptr<CobScript>& script, UnitFireOrders fireOrders)
+                : sim(makeIdleTerrain(256, 256), 0u, 0, 0)
+            {
+                us = addIdlePlayer(sim, "us");
+                them = addIdlePlayer(sim, "them");
+                sim.unitDefinitions["bomber"] = makeIdleBomberDef();
+                sim.unitDefinitions["target"] = makeIdleTargetDef();
+                registerIdleModel(sim, "model");
+                defineIdleBomb(sim);
+                sim.losTables = generateLosTables(8);
+
+                targetId = spawnIdleUnit(sim, "target", them, SimVector(0_ss, 0_ss, 0_ss), script);
+                bomberId = spawnIdleUnit(sim, "bomber", us, SimVector(-200_ss, 200_ss, 0_ss), script);
+                auto& bomber = sim.getUnitState(bomberId);
+                bomber.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+                UnitWeapon weapon;
+                weapon.weaponType = "bomb";
+                bomber.weapons[0] = weapon;
+                bomber.fireOrders = fireOrders;
+                sim.flyingUnitsSet.insert(bomberId);
+            }
+
+            bool everOrderedToAttack(int ticks)
+            {
+                for (int i = 0; i < ticks; ++i)
+                {
+                    sim.tick();
+                    for (const auto& order : sim.getUnitState(bomberId).orders)
+                    {
+                        if (std::holds_alternative<AttackOrder>(order))
+                        {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+        };
+
+        SECTION("Fire At Will acquires what is in sight")
+        {
+            Scene scene(script, UnitFireOrders::FireAtWill);
+            REQUIRE(scene.everOrderedToAttack(30));
+        }
+
+        SECTION("Return Fire does not go hunting for it")
+        {
+            Scene scene(script, UnitFireOrders::ReturnFire);
+            REQUIRE_FALSE(scene.everOrderedToAttack(30));
+        }
+
+        SECTION("Hold Fire does not either")
+        {
+            Scene scene(script, UnitFireOrders::HoldFire);
+            REQUIRE_FALSE(scene.everOrderedToAttack(30));
+        }
+
+        SECTION("a Return Fire aircraft that is shot answers the shooter")
+        {
+            Scene scene(script, UnitFireOrders::ReturnFire);
+            scene.sim.applyDamage(scene.bomberId, 1u, scene.targetId);
+
+            const auto& weapon = scene.sim.getUnitState(scene.bomberId).weapons[0];
+            REQUIRE(weapon.has_value());
+            REQUIRE(std::holds_alternative<UnitWeaponStateAttacking>(weapon->state));
         }
     }
 
@@ -589,5 +674,159 @@ namespace rwe
         }
         REQUIRE(settled);
         REQUIRE_FALSE(scene.sim.getUnitState(scene.aircraftId).airLoiter.has_value());
+    }
+
+    TEST_CASE("a Shift-queued order drops the engagement an idle aircraft made for itself (BT-79)", "[aircraftidle]")
+    {
+        // The sighting routine (0x43B1F0) copies the 0x4000 mark from the
+        // node it inserts in front of. An idle unit's head is its
+        // default-mission node, which is marked, so the engagement is
+        // automatic and the next primary order, a Shift-queued one included,
+        // removes it. A unit with no default mission has no such head.
+        auto script = makeIdleScript();
+
+        struct Scene
+        {
+            GameSimulation sim;
+            UnitId targetId;
+            UnitId bomberId;
+
+            Scene(const std::shared_ptr<CobScript>& script, DefaultMission mission)
+                : sim(makeIdleTerrain(256, 256), 0u, 0, 0)
+            {
+                auto us = addIdlePlayer(sim, "us");
+                auto them = addIdlePlayer(sim, "them");
+                auto bomberDef = makeIdleBomberDef();
+                bomberDef.defaultMission = mission;
+                sim.unitDefinitions["bomber"] = bomberDef;
+                sim.unitDefinitions["target"] = makeIdleTargetDef();
+                registerIdleModel(sim, "model");
+                defineIdleBomb(sim);
+                sim.losTables = generateLosTables(8);
+
+                targetId = spawnIdleUnit(sim, "target", them, SimVector(0_ss, 0_ss, 0_ss), script);
+                bomberId = spawnIdleUnit(sim, "bomber", us, SimVector(-200_ss, 200_ss, 0_ss), script);
+                auto& bomber = sim.getUnitState(bomberId);
+                bomber.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+                UnitWeapon weapon;
+                weapon.weaponType = "bomb";
+                bomber.weapons[0] = weapon;
+                sim.flyingUnitsSet.insert(bomberId);
+            }
+
+            bool tickUntilEngaged()
+            {
+                for (int i = 0; i < 30; ++i)
+                {
+                    sim.tick();
+                    const auto& orders = sim.getUnitState(bomberId).orders;
+                    if (!orders.empty() && std::holds_alternative<AttackOrder>(orders.front()))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            void queueMove(const SimVector& destination)
+            {
+                REQUIRE(applyUnitCommandToSimulation(
+                    sim,
+                    sim.getUnitState(bomberId).owner,
+                    PlayerUnitCommand(bomberId, PlayerUnitCommand::IssueOrder(MoveOrder(destination), PlayerUnitCommand::IssueOrder::IssueKind::Queued))));
+            }
+        };
+
+        SECTION("with a default mission the engagement is automatic and the queued move replaces it")
+        {
+            Scene scene(script, DefaultMission::VtolStandby);
+            REQUIRE(scene.tickUntilEngaged());
+            for (const auto& order : scene.sim.getUnitState(scene.bomberId).orders)
+            {
+                if (const auto* attack = std::get_if<AttackOrder>(&order))
+                {
+                    REQUIRE(attack->automatic);
+                }
+                else if (const auto* move = std::get_if<MoveOrder>(&order))
+                {
+                    REQUIRE(move->automatic);
+                }
+            }
+
+            auto destination = SimVector(500_ss, 0_ss, 500_ss);
+            scene.queueMove(destination);
+            const auto& orders = scene.sim.getUnitState(scene.bomberId).orders;
+            REQUIRE(orders.size() == 1u);
+            REQUIRE(std::holds_alternative<MoveOrder>(orders.front()));
+            REQUIRE((std::get<MoveOrder>(orders.front()).destination == destination));
+            REQUIRE_FALSE(std::get<MoveOrder>(orders.front()).automatic);
+        }
+
+        SECTION("with no default mission the engagement stays and the queued move waits behind it")
+        {
+            Scene scene(script, DefaultMission::None);
+            REQUIRE(scene.tickUntilEngaged());
+            REQUIRE_FALSE(std::get<AttackOrder>(scene.sim.getUnitState(scene.bomberId).orders.front()).automatic);
+
+            scene.queueMove(SimVector(500_ss, 0_ss, 500_ss));
+            const auto& orders = scene.sim.getUnitState(scene.bomberId).orders;
+            REQUIRE(orders.size() >= 2u);
+            REQUIRE(std::holds_alternative<AttackOrder>(orders.front()));
+            REQUIRE(std::holds_alternative<MoveOrder>(orders.back()));
+        }
+    }
+
+    TEST_CASE("Stop ends an aircraft's search circuit and the airborne flier sets down (BT-99)", "[aircraftidle][bt99]")
+    {
+        // Stop removes every node that lacks the preservation flag, and
+        // SeekAttack carries none; the Stop handler (0x401C20) then builds a
+        // VTOL_LandIfCan at the aircraft's position when it is airborne and
+        // flying. A bomber circling its dead target that is stopped lands.
+        auto script = makeIdleScript();
+        GameSimulation sim(makeIdleTerrain(256, 256), 0u, 0, 0);
+        auto us = addIdlePlayer(sim, "us");
+        auto them = addIdlePlayer(sim, "them");
+        sim.unitDefinitions["bomber"] = makeIdleBomberDef();
+        sim.unitDefinitions["target"] = makeIdleTargetDef();
+        registerIdleModel(sim, "model");
+        defineIdleBomb(sim);
+        sim.losTables = generateLosTables(8);
+
+        auto targetId = spawnIdleUnit(sim, "target", them, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto bomberId = spawnIdleUnit(sim, "bomber", us, SimVector(-900_ss, 200_ss, 0_ss), script);
+        {
+            auto& bomber = sim.getUnitState(bomberId);
+            bomber.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+            UnitWeapon weapon;
+            weapon.weaponType = "bomb";
+            bomber.weapons[0] = weapon;
+            bomber.orders.push_back(createAttackOrder(targetId));
+        }
+        sim.flyingUnitsSet.insert(bomberId);
+
+        for (int tick = 0; tick < 120; ++tick)
+        {
+            sim.tick();
+        }
+        sim.getUnitState(targetId).markAsDeadNoCorpse();
+        for (int tick = 0; tick < 200; ++tick)
+        {
+            sim.tick();
+        }
+        REQUIRE(sim.getUnitState(bomberId).airLoiter.has_value());
+        REQUIRE_FALSE(isLanding(sim.getUnitState(bomberId)));
+
+        REQUIRE(applyUnitCommandToSimulation(sim, us, PlayerUnitCommand(bomberId, PlayerUnitCommand::Stop())));
+        CHECK_FALSE(sim.getUnitState(bomberId).airLoiter.has_value());
+
+        auto settled = false;
+        for (int tick = 0; tick < 900 && !settled; ++tick)
+        {
+            sim.tick();
+            const auto& b = sim.getUnitState(bomberId);
+            settled = isLanding(b) || std::holds_alternative<UnitPhysicsInfoGround>(b.physics);
+        }
+        CHECK(settled);
+        CHECK_FALSE(sim.getUnitState(bomberId).airLoiter.has_value());
     }
 }

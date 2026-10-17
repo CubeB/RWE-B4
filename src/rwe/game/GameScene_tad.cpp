@@ -55,7 +55,10 @@ namespace rwe
 
         for (auto& line : tadPlayback->takeChat())
         {
-            printChatLine(line.player, line.ally ? "(ally) " + line.text : line.text);
+            // A recorded 0xF9 is a directed 0x05 -- allied or listed chat --
+            // and the recording keeps the distinction, so a demo may show it.
+            // The text carries its own `<Name> ` label either way (#656).
+            printTaChatLine(line.player, line.ally ? "(ally) " + line.text : line.text);
         }
     }
 

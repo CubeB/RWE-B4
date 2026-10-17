@@ -104,7 +104,21 @@ namespace rwe
 
     HpiArchive::HpiArchive(std::istream* stream) : stream(stream)
     {
-        auto v = readRaw<HpiVersion>(*stream);
+        // A file shorter than its own header is an HPI error, not the
+        // stack's contents.
+        auto readHeaderPart = [&stream](auto tag) {
+            using T = decltype(tag);
+            try
+            {
+                return readRaw<T>(*stream);
+            }
+            catch (const TruncatedInputError&)
+            {
+                throw HpiException("HPI file is shorter than its header");
+            }
+        };
+
+        auto v = readHeaderPart(HpiVersion{});
         if (v.marker != HpiMagicNumber)
         {
             throw HpiException("Invalid HPI file marker");
@@ -115,7 +129,7 @@ namespace rwe
             throw HpiException("Unsupported HPI version");
         }
 
-        auto h = readRaw<HpiHeader>(*stream);
+        auto h = readHeaderPart(HpiHeader{});
 
         decryptionKey = transformKey(static_cast<unsigned char>(h.headerKey));
 
@@ -165,16 +179,33 @@ namespace rwe
         }
     }
 
+    /**
+     * The last entry of a directory with this name, compared without regard
+     * to case. If a directory lists a name twice the original's component
+     * lookup (0x4BB4E0) walks the entries downwards from the end and answers
+     * with the first match it meets, so the last duplicate wins and an earlier
+     * one is never tried (BT-169, #604; static byte-tactics reading at
+     * 97d7ac59, not executed against the original). No retail archive has a
+     * duplicate.
+     */
+    const HpiArchive::DirectoryEntry* findLastEntry(const HpiArchive::Directory& dir, const std::string& name)
+    {
+        auto upper = toUpper(name);
+        for (auto it = dir.entries.rbegin(); it != dir.entries.rend(); ++it)
+        {
+            if (toUpper(it->name) == upper)
+            {
+                return &*it;
+            }
+        }
+        return nullptr;
+    }
+
     std::optional<std::reference_wrapper<const HpiArchive::File>> findFileInner(const HpiArchive::Directory& dir, const std::string& name)
     {
-        auto it = std::find_if(
-            dir.entries.begin(),
-            dir.entries.end(),
-            [name](const HpiArchive::DirectoryEntry& e) {
-                return toUpper(e.name) == toUpper(name);
-            });
+        auto it = findLastEntry(dir, name);
 
-        if (it == dir.entries.end())
+        if (!it)
         {
             return std::nullopt;
         }
@@ -194,15 +225,8 @@ namespace rwe
         for (auto cIt = components.cbegin(), cEnd = --components.cend(); cIt != cEnd; ++cIt)
         {
             auto& c = *cIt;
-            auto begin = dir->entries.begin();
-            auto end = dir->entries.end();
-            auto it = std::find_if(
-                begin,
-                end,
-                [c](const DirectoryEntry& e) {
-                    return toUpper(e.name) == toUpper(c);
-                });
-            if (it == end)
+            auto it = findLastEntry(*dir, c);
+            if (!it)
             {
                 return std::nullopt;
             }
@@ -227,15 +251,8 @@ namespace rwe
 
         for (const auto& c : components)
         {
-            auto begin = dir->entries.begin();
-            auto end = dir->entries.end();
-            auto it = std::find_if(
-                begin,
-                end,
-                [c](const DirectoryEntry& e) {
-                    return toUpper(e.name) == toUpper(c);
-                });
-            if (it == end)
+            auto it = findLastEntry(*dir, c);
+            if (!it)
             {
                 return std::nullopt;
             }

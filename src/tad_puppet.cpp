@@ -887,14 +887,8 @@ int main(int argc, char* argv[])
         rwe::addToVfs(data.vfs, path.string());
     }
 
-    if (auto paletteBytes = data.vfs.readFile("palettes/PALETTE.PAL"))
-    {
-        data.palette = rwe::readPalette(*paletteBytes);
-    }
-    if (auto guiPaletteBytes = data.vfs.readFile("palettes/GUIPAL.PAL"))
-    {
-        data.guiPalette = rwe::readPalette(*guiPaletteBytes);
-    }
+    data.palette = data.vfs.readPaletteOrPcx("PALETTE");
+    data.guiPalette = data.vfs.readPaletteOrPcx("GUIPAL");
 
     Totals totals;
     json report;

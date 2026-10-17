@@ -38,6 +38,13 @@ namespace rwe
         }
     }
 
+    bool classicLowWind(int maxWindSpeed)
+    {
+        // Half of the 5000 at global +0x37EC8, rounded toward zero.
+        constexpr int HalfGenerationDenominator = 5000 / 2;
+        return maxWindSpeed < HalfGenerationDenominator;
+    }
+
     int classicWeaponScore(bool canAttack, const std::vector<ClassicWeaponFacts>& weapons)
     {
         int score = canAttack ? 11 : 1;
@@ -194,7 +201,7 @@ namespace rwe
         {
             return 0;
         }
-        if (limit >= 0 && completedOfType >= limit)
+        if (limit != -1 && completedOfType >= limit)
         {
             return 0;
         }

@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <rwe/sim/GameSimulation.h>
-#include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/util/Index.h>
 
 namespace rwe
@@ -27,7 +26,11 @@ namespace rwe
         EndGameStats stats;
         stats.maxima = statFloors;
 
-        auto seconds = static_cast<int>(simulation.gameTime.value / static_cast<unsigned int>(SimTicksPerSecond));
+        // The clock term counts the tick total divided by sixty: 0x88888889 and a
+        // shift of five (0x41DC20, BT-195), not the thirty ticks to the second
+        // this used to divide by.
+        constexpr unsigned int ScoreClockDivisor = 60;
+        auto seconds = static_cast<int>(simulation.gameTime.value / ScoreClockDivisor);
 
         for (Index i = 0; i < getSize(simulation.players); ++i)
         {

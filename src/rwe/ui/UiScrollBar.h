@@ -20,6 +20,17 @@ namespace rwe
         std::shared_ptr<SpriteSeries> sprites;
 
         /**
+         * True if the art has the ten frames the bar indexes (SLIDERS: three
+         * background, three box, four arrow) and the two that tile have a
+         * height, so the loops that tile them end. A bar without it draws
+         * nothing and takes no clicks, rather than reading past the series
+         * or looping for ever (#665).
+         */
+        bool artUsable{false};
+
+        static bool hasUsableArt(const SpriteSeries* series);
+
+        /**
          * The percentage of the scrollbar that is occupied by the scroll box,
          * from 0.0 to 1.0.
          */

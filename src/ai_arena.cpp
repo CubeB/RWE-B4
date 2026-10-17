@@ -490,26 +490,16 @@ int main(int argc, char* argv[])
             addToVfs(vfs, path.string());
         }
 
-        auto paletteBytes = vfs.readFile("palettes/PALETTE.PAL");
-        if (!paletteBytes)
-        {
-            throw std::runtime_error("Couldn't find palette");
-        }
-        auto palette = readPalette(*paletteBytes);
+        auto palette = vfs.readPaletteOrPcx("PALETTE");
         if (!palette)
         {
-            throw std::runtime_error("Couldn't read palette");
+            throw std::runtime_error("Couldn't find or read palette (palettes/PALETTE.PAL or PALETTE.PCX)");
         }
 
-        auto guiPaletteBytes = vfs.readFile("palettes/GUIPAL.PAL");
-        if (!guiPaletteBytes)
-        {
-            throw std::runtime_error("Couldn't find GUI palette");
-        }
-        auto guiPalette = readPalette(*guiPaletteBytes);
+        auto guiPalette = vfs.readPaletteOrPcx("GUIPAL");
         if (!guiPalette)
         {
-            throw std::runtime_error("Couldn't read GUI palette");
+            throw std::runtime_error("Couldn't find or read GUI palette (palettes/GUIPAL.PAL or GUIPAL.PCX)");
         }
 
         auto sideData = loadSideData(vfs);
@@ -741,7 +731,7 @@ int main(int argc, char* argv[])
             // previous tick. Match that, or the two stop a tick apart.
             if (!gameOver && loaded.simulation.players.size() >= 2)
             {
-                auto winStatus = loaded.simulation.computeWinStatus();
+                auto winStatus = loaded.simulation.decidedStatus();
                 if (!std::holds_alternative<WinStatusUndecided>(winStatus))
                 {
                     gameOver = winStatus;
