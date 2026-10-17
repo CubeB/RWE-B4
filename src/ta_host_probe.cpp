@@ -340,8 +340,7 @@ int main(int argc, char* argv[])
                 params.commanderTypeIndex = CommanderTypeIndex;
                 params.commanderUnitId = static_cast<std::uint16_t>(commanderUnitId);
                 params.commanderPosition = hostCommander().position;
-                std::cout << "launching: " << (room->launch(params) ? "yes" : "refused") << "
-" << std::flush;
+                std::cout << "launching: " << (room->launch(params) ? "yes" : "refused") << "\n" << std::flush;
             }
         });
         room->onRefused([&](const std::string& reason) {
