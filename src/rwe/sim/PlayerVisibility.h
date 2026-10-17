@@ -96,6 +96,15 @@ namespace rwe
              * touching the other.
              */
             bool sonar{false};
+
+            /**
+             * The contact test is strictly inside the reach rather than
+             * inside-or-on it. The per-contact test (0x467840) is strict; the
+             * sweep that feeds it (0x47E890) is inclusive, so a radar whose
+             * altitude lift binds the sweep reaches the boundary and one the
+             * per-contact test binds does not. Sonar is always strict. BT-6.
+             */
+            bool strict{false};
         };
 
         /** A radar or sonar jammer: anyone else's unit, and the radius it blanks. */

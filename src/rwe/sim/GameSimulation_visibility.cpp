@@ -30,6 +30,42 @@ namespace rwe
          * point, measured in the map plane. Both lists carry their radius
          * already squared.
          */
+        /**
+         * The distance measure of the sensor tests (0x467840, 0x47E890): each
+         * axis difference squared and cut to a whole number before the two
+         * are added, so it can sit up to one under the true squared distance.
+         */
+        SimScalar truncatedSquaredDistance(const SimVector& a, const SimVector& b)
+        {
+            auto dx = a.x - b.x;
+            auto dz = a.z - b.z;
+            return SimScalar(std::floor((dx * dx).value)) + SimScalar(std::floor((dz * dz).value));
+        }
+
+        /** Whether the detector's reach takes in the point: strict or inclusive as it was built (BT-6). */
+        bool detectorReaches(const PlayerVisibility::RadarDetector& detector, const SimVector& position)
+        {
+            auto distance = truncatedSquaredDistance(position, detector.position);
+            return detector.strict ? distance < detector.rangeSquared : distance <= detector.rangeSquared;
+        }
+
+        bool jammerReaches(const PlayerVisibility::RadarJammer& jammer, const SimVector& position)
+        {
+            auto dx = position.x - jammer.position.x;
+            auto dz = position.z - jammer.position.z;
+            return ((dx * dx) + (dz * dz)) <= jammer.rangeSquared;
+        }
+
+        bool reaches(const PlayerVisibility::RadarDetector& source, const SimVector& position)
+        {
+            return detectorReaches(source, position);
+        }
+
+        bool reaches(const PlayerVisibility::RadarJammer& source, const SimVector& position)
+        {
+            return jammerReaches(source, position);
+        }
+
         template <typename T>
         bool isInRangeOfAny(const std::vector<T>& sources, const SimVector& position, bool sonar)
         {
@@ -40,9 +76,7 @@ namespace rwe
                     continue;
                 }
 
-                auto dx = position.x - source.position.x;
-                auto dz = position.z - source.position.z;
-                if (((dx * dx) + (dz * dz)) <= source.rangeSquared)
+                if (reaches(source, position))
                 {
                     return true;
                 }
@@ -226,9 +260,7 @@ namespace rwe
         // active dishes, measured in the map plane.
         for (const auto& detector : playerVisibility.at(player.value).radarDetectors)
         {
-            auto dx = position.x - detector.position.x;
-            auto dz = position.z - detector.position.z;
-            if (((dx * dx) + (dz * dz)) <= detector.rangeSquared)
+            if (detectorReaches(detector, position))
             {
                 return true;
             }
@@ -660,7 +692,6 @@ namespace rwe
             // picture, and has nothing to do with whose detectors work. In
             // particular an ally's sonar must not lift the below-surface veto
             // that canSeeUnit applies to your weapons.
-            auto altitude = rweMax(unit.position.y, 0_ss);
             if (unit.owner.value < playerVisibility.size() && unit.owner.value < players.size())
             {
                 auto& ownVis = playerVisibility[unit.owner.value];
@@ -679,16 +710,28 @@ namespace rwe
                     // its minimap ring draws -- and RWE, having the bonus
                     // without the cap, was detecting half as far again as it
                     // drew.
-                    auto declared = intToSimScalar(static_cast<int>(unitDefinition.radarDistance));
-                    auto lifted = declared + (2_ss * altitude);
-                    auto cap = rweMax(declared, intToSimScalar(static_cast<int>(unitDefinition.sonarDistance)));
-                    auto range = rweMin(lifted, cap);
-                    ownVis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, false});
+                    //
+                    // The two stages differ in sense (BT-6). The sweep takes
+                    // everything inside-or-on the cap; the per-contact test is
+                    // strict against the lifted range, with the lift twice the
+                    // detector's signed whole-unit y. Where the lift exceeds the
+                    // cap -- every shipped radar at height -- the sweep's
+                    // inclusive edge is what limits it; otherwise the
+                    // per-contact test does, and it is strict.
+                    auto declared = static_cast<int>(unitDefinition.radarDistance);
+                    auto liftedRange = declared + (2 * static_cast<int>(std::floor(unit.position.y.value)));
+                    auto cap = std::max(declared, static_cast<int>(unitDefinition.sonarDistance));
+                    auto strictLimit = liftedRange <= cap;
+                    auto range = intToSimScalar(strictLimit ? std::max(liftedRange, 0) : cap);
+                    ownVis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, false, strictLimit});
                 }
                 if (unitDefinition.sonarDistance > 0)
                 {
                     auto range = intToSimScalar(static_cast<int>(unitDefinition.sonarDistance));
-                    ownVis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, true});
+                    // Strictly inside: a target at exactly the sonar distance is
+                    // not a contact (0x467840), and the sweep's inclusive edge
+                    // never admits one the per-contact test refuses.
+                    ownVis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, true, true});
                 }
             }
 

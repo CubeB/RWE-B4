@@ -938,4 +938,63 @@ namespace rwe
             REQUIRE(sim.canSeeUnit(them, bigId));
         }
     }
+
+    TEST_CASE("sonar is strict at its distance and a lifted radar is inclusive at the cap", "[visibility]")
+    {
+        // BT-6. The per-contact test (0x467840) is strict; the sweep that
+        // feeds it (0x47E890) is inclusive against max(radar, sonar). So sonar
+        // stops short of its distance, a radar whose altitude lift exceeds
+        // the cap is limited by the sweep and reaches it, and one at ground
+        // level is limited by the strict per-contact test.
+        auto script = makeEmptyCobScript();
+
+        SECTION("a target at exactly the sonar distance is not a sonar contact")
+        {
+            GameSimulation sea(makeFlatTerrain(64, 64), 0u, 0, 0);
+            auto a = addPlayer(sea, "us");
+            auto b = addPlayer(sea, "them");
+            defineUnit(sea, "sonar", 32u, 0u, false, 0, 300u);
+            defineUnit(sea, "sub", 32u, 0u, false);
+            addUnit(sea, "sonar", a, SimVector(0_ss, 0_ss, 0_ss), script);
+            auto onTheEdge = addUnit(sea, "sub", b, SimVector(300_ss, 0_ss, 0_ss), script);
+            auto justInside = addUnit(sea, "sub", b, SimVector(299_ss, 0_ss, 0_ss), script);
+            sea.tick();
+
+            REQUIRE_FALSE(sea.canDetectUnit(a, onTheEdge));
+            REQUIRE(sea.canDetectUnit(a, justInside));
+        }
+
+        SECTION("a radar at height reaches a target at exactly its declared range")
+        {
+            GameSimulation air(makeFlatTerrain(64, 64), 0u, 0, 0);
+            auto a = addPlayer(air, "us");
+            auto b = addPlayer(air, "them");
+            defineUnit(air, "plane", 32u, 100u, false);
+            defineUnit(air, "tank", 32u, 0u, false);
+            auto planeId = addUnit(air, "plane", a, SimVector(0_ss, 100_ss, 0_ss), script);
+            air.getUnitState(planeId).previousPosition = air.getUnitState(planeId).position;
+            auto onTheEdge = addUnit(air, "tank", b, SimVector(100_ss, 0_ss, 0_ss), script);
+            auto outside = addUnit(air, "tank", b, SimVector(101_ss, 0_ss, 0_ss), script);
+            air.tick();
+
+            REQUIRE(air.canDetectUnit(a, onTheEdge));
+            REQUIRE_FALSE(air.canDetectUnit(a, outside));
+        }
+
+        SECTION("a radar on the ground is limited by the strict per-contact test")
+        {
+            GameSimulation land(makeFlatTerrain(64, 64), 0u, 0, 0);
+            auto a = addPlayer(land, "us");
+            auto b = addPlayer(land, "them");
+            defineUnit(land, "radar", 32u, 100u, false);
+            defineUnit(land, "tank", 32u, 0u, false);
+            addUnit(land, "radar", a, SimVector(0_ss, 0_ss, 0_ss), script);
+            auto onTheEdge = addUnit(land, "tank", b, SimVector(100_ss, 0_ss, 0_ss), script);
+            auto justInside = addUnit(land, "tank", b, SimVector(99_ss, 0_ss, 0_ss), script);
+            land.tick();
+
+            REQUIRE_FALSE(land.canDetectUnit(a, onTheEdge));
+            REQUIRE(land.canDetectUnit(a, justInside));
+        }
+    }
 }
