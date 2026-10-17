@@ -297,7 +297,11 @@ namespace rwe
             case TadSubPacketCode::Ping:
                 return 13;
             case TadSubPacketCode::Unk03:
-                return 7;
+                // 3, not the reference's 7, which the reference itself marks as
+                // a guess. The original's start-up fills its size table with 3
+                // for this code and gives it no case in the dispatch, so it is
+                // ignored (BT-227, static reading at 97d7ac59).
+                return 3;
 
             case TadSubPacketCode::Chat:
             {
@@ -348,9 +352,10 @@ namespace rwe
             case TadSubPacketCode::UnitBuildFinished:
                 return 5;
 
-                // PlaySound (0x13) is deliberately absent: the reference names the
-                // code but has no size for it, so it falls through to 0 and gets
-                // reported as unknown rather than guessed at. See docs/TA-DEMOS.md.
+            case TadSubPacketCode::PlaySound:
+                // The reference names the code and has no size for it. The
+                // original's size table has 18 (BT-227): a sound.
+                return 18;
 
             case TadSubPacketCode::GiveUnit:
                 return 24;
@@ -368,6 +373,18 @@ namespace rwe
                 return 14;
             case TadSubPacketCode::Reject:
                 return 6;
+
+                // The next four have no size in the reference. The original's
+                // size table has them (BT-227): 1c a dropped player, 1d never
+                // enabled in any mode (the walker discards it), 25 a lobby-only
+                // record with no handler, 27 an integrity warning. 1c and 27 are
+                // the two a live game can produce; without a length the walk
+                // handed the rest of the bundle to one unknown subpacket and
+                // lost any 2c behind it.
+            case TadSubPacketCode::PlayerDropped:
+                return 5;
+            case TadSubPacketCode::Unk1d:
+                return 9;
             case TadSubPacketCode::Start1e:
                 return 2;
             case TadSubPacketCode::Unk1f:
@@ -391,6 +408,10 @@ namespace rwe
                 return 14;
             case TadSubPacketCode::Team:
                 return 6;
+            case TadSubPacketCode::Unk25:
+                return 5;
+            case TadSubPacketCode::IntegrityWarning:
+                return 17;
             case TadSubPacketCode::Ident2:
                 return 41;
             case TadSubPacketCode::PlayerResourceInfo:
