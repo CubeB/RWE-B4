@@ -145,6 +145,7 @@ int main(int argc, char* argv[])
                       << "                        playing one: wait in a lobby, then load --map with RWE's\n"
                       << "                        player and the joiner, on the peer's own clock\n"
                       << "  --game-name <name>    The session's name, padded to 16 (default: rwe)\n"
+                      << "  --password <text>     With --ta-host: turn away a joiner with another password\n"
                       << "  --side <arm|core>     RWE's own side, which is the host's in the battleroom\n"
                       << "  --colour <n>          RWE's own colour, 0 to 255 (default: 0)\n"
                       << "  --team <n>            RWE's team in the battleroom, 5 (the default) for none\n"
@@ -374,6 +375,7 @@ int main(int argc, char* argv[])
                     hostConfig.maxUnits = static_cast<std::uint16_t>(std::min(0xffffu, args.getUint("max-units", 250)));
                     hostConfig.colour = static_cast<std::uint8_t>(args.getUint("colour", 0));
                     hostConfig.autoLaunch = args.getBool("auto-launch");
+                    hostConfig.password = args.getString("password", "");
                     hostConfig.ports = rwe::TaHostPorts::atBase(static_cast<int>(args.getUint("port-base", 0)));
 
                     auto side = args.getString("side", "arm");

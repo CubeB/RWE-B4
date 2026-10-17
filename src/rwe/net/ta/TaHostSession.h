@@ -128,6 +128,13 @@ namespace rwe
          */
         std::chrono::milliseconds silenceTimeout{150000};
 
+        /**
+         * The game's password. Empty is no password and nothing is compared; a
+         * password makes a joiner whose own (case-insensitively) differs be
+         * turned away with reason 4 (BT-242).
+         */
+        std::string password;
+
         /** How often the silence is looked at. */
         std::chrono::milliseconds silenceCheckInterval{1000};
 
@@ -395,6 +402,9 @@ namespace rwe
         void handleAddForwardRequest(std::span<const std::uint8_t> payload, const asio::ip::tcp::endpoint& reply);
         void handleCreatePlayer(std::span<const std::uint8_t> payload, const asio::ip::tcp::endpoint& reply);
         void handleDeletePlayer(std::span<const std::uint8_t> payload, const asio::ip::address& sourceIp);
+
+        /** The reject reason for a joiner's player data (8 or 4), or zero to admit it (BT-242). */
+        std::uint8_t joinerRefusal(const TaCreatePlayer& created) const;
 
         /**
          * The outbound connection to a reply address, opened on first use. All

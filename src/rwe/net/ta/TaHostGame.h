@@ -129,6 +129,9 @@ namespace rwe
 
         bool autoLaunch{false};
 
+        /** The game's password; empty for none. A joiner with another is rejected with reason 4 (BT-242). */
+        std::string password;
+
         /**
          * The three listening ports, which are the real ones unless a caller
          * shifts them: `TaHostPorts::atBase` is what --port-base is, and zero

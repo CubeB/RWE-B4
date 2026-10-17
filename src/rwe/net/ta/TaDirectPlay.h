@@ -167,7 +167,21 @@ namespace rwe
         std::string name;
         TaDpAddress tcpAddress;
         TaDpAddress udpAddress;
+
+        /**
+         * The player data the message declares, and the bytes of it that are
+         * there. A host admits only a block of exactly 21 bytes: a 17-byte
+         * NUL-terminated password, then the protocol shorts zero and 0x50
+         * (BT-242).
+         */
+        std::uint32_t playerDataSize{0};
+        std::vector<std::uint8_t> playerData;
     };
+
+    /** The size of the player data a joining TA sends, and where its parts sit. */
+    inline constexpr std::size_t TaJoinerPlayerDataSize = 21;
+    inline constexpr std::size_t TaJoinerPasswordLength = 17;
+    inline constexpr std::size_t TaJoinerTagOffset = 17;
 
     struct TaAppData
     {

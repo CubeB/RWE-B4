@@ -219,6 +219,7 @@ namespace rwe
         hostConfig.options = config.options;
         hostConfig.ports = config.ports;
         hostConfig.maxJoiners = 1;
+        hostConfig.password = config.password;
         hostPlayerId = hostConfig.hostPlayerId;
         hostSystemPlayerId = hostConfig.hostSystemPlayerId;
 

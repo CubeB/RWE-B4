@@ -567,6 +567,25 @@ namespace rwe
         player.name = std::move(name);
         player.tcpAddress = readAddress(data, payload.size(), 88, "the created player's TCP address");
         player.udpAddress = readAddress(data, payload.size(), 104, "the created player's UDP address");
+
+        // The sizes the packed player declares, then its data after the names
+        // and the service provider's block; a block that is not all there is
+        // left short and the caller refuses it (BT-242).
+        constexpr std::size_t FixedPart = 68;
+        if (payload.size() >= 48)
+        {
+            auto shortNameBytes = readU32Le(data, 32);
+            auto longNameBytes = readU32Le(data, 36);
+            auto spDataBytes = readU32Le(data, 40);
+            player.playerDataSize = readU32Le(data, 44);
+            std::uint64_t start = static_cast<std::uint64_t>(FixedPart) + shortNameBytes + longNameBytes + spDataBytes;
+            if (player.playerDataSize <= payload.size() && start + player.playerDataSize <= payload.size())
+            {
+                player.playerData.assign(
+                    data + start,
+                    data + start + player.playerDataSize);
+            }
+        }
         return player;
     }
 

@@ -312,6 +312,15 @@ namespace rwe
         REQUIRE(created.name == "unit");
         REQUIRE(created.tcpAddress.port == 2301);
         REQUIRE(created.udpAddress.port == 2351);
+
+        // The 21 bytes of player data a joining TA sends: the protocol shorts
+        // zero and 0x50 sit at bytes 17 and 19 (BT-242).
+        REQUIRE(created.playerDataSize == 21);
+        REQUIRE(created.playerData.size() == 21);
+        REQUIRE(created.playerData[17] == 0);
+        REQUIRE(created.playerData[18] == 0);
+        REQUIRE(created.playerData[19] == 0x50);
+        REQUIRE(created.playerData[20] == 0);
     }
 
     TEST_CASE("SESSIONDESCCHANGED carries the session and its name", "[ta][directplay]")

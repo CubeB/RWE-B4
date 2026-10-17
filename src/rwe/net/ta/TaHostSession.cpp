@@ -1,5 +1,6 @@
 #include "TaHostSession.h"
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <rwe/net/ta/TaPacket.h>
 #include <rwe/network_util.h>
@@ -679,13 +680,25 @@ namespace rwe
             return;
         }
 
-        // A launched game takes no one new: the original sets the join-disabled
-        // flag and answers a late joiner with reason 3 (BT-242, BT-244). The
-        // same answer goes to a joiner over the limit, a full session being a
-        // thing the original never says anything about (BT-246) -- a joiner
-        // left waiting is the worse outcome, so it is told.
+        // The original's order (BT-242): closed is reason 3; a player data
+        // block that is not 21 bytes, or whose protocol shorts are not zero and
+        // 0x50, is reason 8; a wrong password, when the host has one, is
+        // reason 4. A launched game takes no one new, and the same answer
+        // goes to a joiner over the limit, a full session being a thing the
+        // original never says anything about (BT-246) -- a joiner left waiting
+        // is the worse outcome, so it is told.
         auto isNewPeer = existing == peers.end();
-        if (isNewPeer && (closed || peers.size() >= config.maxJoiners))
+        if (isNewPeer && closed)
+        {
+            rejectJoiner(created.playerId, peer.tcpEndpoint, TaRejectClosed);
+            return;
+        }
+        if (auto reason = joinerRefusal(created); reason != 0)
+        {
+            rejectJoiner(created.playerId, peer.tcpEndpoint, reason);
+            return;
+        }
+        if (isNewPeer && peers.size() >= config.maxJoiners)
         {
             rejectJoiner(created.playerId, peer.tcpEndpoint, TaRejectClosed);
             return;
@@ -699,6 +712,43 @@ namespace rwe
         {
             peerJoinedHandler(peer.playerId);
         }
+    }
+
+    std::uint8_t TaHostSession::joinerRefusal(const TaCreatePlayer& created) const
+    {
+        const auto& data = created.playerData;
+        if (created.playerDataSize != TaJoinerPlayerDataSize || data.size() != TaJoinerPlayerDataSize)
+        {
+            return TaRejectVersion;
+        }
+        auto firstShort = static_cast<unsigned>(data[TaJoinerTagOffset]) | (static_cast<unsigned>(data[TaJoinerTagOffset + 1]) << 8);
+        auto secondShort = static_cast<unsigned>(data[TaJoinerTagOffset + 2]) | (static_cast<unsigned>(data[TaJoinerTagOffset + 3]) << 8);
+        if (firstShort != 0 || secondShort != 0x50)
+        {
+            return TaRejectVersion;
+        }
+        if (!config.password.empty())
+        {
+            // The joiner's password is the NUL-terminated text of the first 17
+            // bytes, compared without regard to case.
+            std::string theirs;
+            for (std::size_t i = 0; i < TaJoinerPasswordLength && data[i] != 0; ++i)
+            {
+                theirs.push_back(static_cast<char>(data[i]));
+            }
+            auto lower = [](std::string text) {
+                for (auto& c : text)
+                {
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                }
+                return text;
+            };
+            if (lower(theirs) != lower(config.password))
+            {
+                return TaRejectPassword;
+            }
+        }
+        return 0;
     }
 
     void TaHostSession::handleDeletePlayer(std::span<const std::uint8_t> payload, const asio::ip::address& sourceIp)

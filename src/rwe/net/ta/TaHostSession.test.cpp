@@ -74,13 +74,38 @@ namespace rwe
             return body;
         }
 
-        std::vector<std::uint8_t> createPlayerPayload(std::uint32_t playerId, const std::string& name, std::uint16_t tcpPort, std::uint16_t udpPort)
+        /**
+         * The 21 bytes of player data a joining TA sends: a 17-byte password,
+         * then the protocol shorts zero and 0x50 (BT-242).
+         */
+        std::vector<std::uint8_t> joinerPlayerData(const std::string& password = "")
+        {
+            std::vector<std::uint8_t> data(21, 0);
+            for (std::size_t i = 0; i < password.size() && i < 16; ++i)
+            {
+                data[i] = static_cast<std::uint8_t>(password[i]);
+            }
+            data[19] = 0x50;
+            return data;
+        }
+
+        std::vector<std::uint8_t> createPlayerPayload(
+            std::uint32_t playerId,
+            const std::string& name,
+            std::uint16_t tcpPort,
+            std::uint16_t udpPort,
+            const std::vector<std::uint8_t>& playerData = joinerPlayerData())
         {
             std::vector<std::uint8_t> body(120, 0);
             putU32(body, 28, playerId);
+            putU32(body, 32, 10); // short name, bytes
+            putU32(body, 36, 10); // long name, bytes
+            putU32(body, 40, 32); // service provider data: the two addresses
+            putU32(body, 44, static_cast<std::uint32_t>(playerData.size()));
             putUtf16(body, 68, name);
             putAddress(body, 88, tcpPort);
             putAddress(body, 104, udpPort);
+            body.insert(body.end(), playerData.begin(), playerData.end());
             return body;
         }
 
@@ -166,12 +191,12 @@ namespace rwe
             }
 
             /** CREATEPLAYER for `playerId`, as the handshake's last step. */
-            void createPlayer(std::uint32_t playerId, const std::string& name)
+            void createPlayer(std::uint32_t playerId, const std::string& name, const std::vector<std::uint8_t>& playerData = joinerPlayerData())
             {
                 sendToHost(taEncodeSystemMessage(
                     TaDirectPlayCommand::CreatePlayer,
                     taMakeReplyAddress(replyPort, {127, 0, 0, 1}),
-                    createPlayerPayload(playerId, name, replyPort, udpPort)));
+                    createPlayerPayload(playerId, name, replyPort, udpPort, playerData)));
             }
 
             /** DELETEPLAYER for `playerId`, which only the player's own address may send. */
@@ -838,6 +863,111 @@ namespace rwe
         runUntil(ioContext, [&] { return left.size() == 1; });
         REQUIRE(host.load().peers == 0);
 
+        host.stop();
+    }
+
+    TEST_CASE("a joiner's player data must be 21 bytes with the protocol shorts zero and 0x50, else reason 8 (BT-242)", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+
+        TestJoiner bad(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.0.0.1");
+
+        auto shortBlock = joinerPlayerData();
+        shortBlock.pop_back();
+        bad.createPlayer(0x08D90E74, "short", shortBlock);
+        runUntil(ioContext, [&] { return bad.rejects().size() == 1; });
+        REQUIRE(bad.rejects()[0] == taBuildReject(0x08D90E74, TaRejectVersion));
+
+        auto wrongTag = joinerPlayerData();
+        wrongTag[19] = 0x51;
+        bad.createPlayer(0x08D90E74, "tag", wrongTag);
+        runUntil(ioContext, [&] { return bad.rejects().size() == 2; });
+        REQUIRE(bad.rejects()[1] == taBuildReject(0x08D90E74, TaRejectVersion));
+
+        auto wrongFirst = joinerPlayerData();
+        wrongFirst[17] = 1;
+        bad.createPlayer(0x08D90E74, "first", wrongFirst);
+        runUntil(ioContext, [&] { return bad.rejects().size() == 3; });
+
+        bad.createPlayer(0x08D90E74, "none", {});
+        runUntil(ioContext, [&] { return bad.rejects().size() == 4; });
+
+        REQUIRE(joined.empty());
+        REQUIRE(host.load().peers == 0);
+
+        // The right block is admitted.
+        bad.createPlayer(0x08D90E74, "fine");
+        runUntil(ioContext, [&] { return joined.size() == 1; });
+        host.stop();
+    }
+
+    TEST_CASE("a host with a password turns away a joiner with another, ignoring case, with reason 4 (BT-242)", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        config.password = "Secret";
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+
+        TestJoiner joiner(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+
+        joiner.createPlayer(0x08D90E74, "none", joinerPlayerData());
+        runUntil(ioContext, [&] { return joiner.rejects().size() == 1; });
+        REQUIRE(joiner.rejects()[0] == taBuildReject(0x08D90E74, TaRejectPassword));
+
+        joiner.createPlayer(0x08D90E74, "wrong", joinerPlayerData("Secrex"));
+        runUntil(ioContext, [&] { return joiner.rejects().size() == 2; });
+        REQUIRE(joined.empty());
+
+        joiner.createPlayer(0x08D90E74, "right", joinerPlayerData("sECRET"));
+        runUntil(ioContext, [&] { return joined.size() == 1; });
+        REQUIRE(joiner.rejects().size() == 2);
+
+        host.stop();
+    }
+
+    TEST_CASE("a host with no password does not look at the one a joiner sends (BT-242)", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+
+        TestJoiner joiner(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+        joiner.createPlayer(0x08D90E74, "pw", joinerPlayerData("whatever"));
+        runUntil(ioContext, [&] { return joined.size() == 1; });
+        REQUIRE(joiner.rejects().empty());
+        host.stop();
+    }
+
+    TEST_CASE("the closed test comes before the player data tests (BT-242)", "[ta][host]")
+    {
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        TaHostSession host(ioContext, config);
+        host.start();
+        host.setAdmissionClosed(true);
+
+        TestJoiner joiner(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
+        joiner.createPlayer(0x08D90E74, "late", {});
+        runUntil(ioContext, [&] { return joiner.rejects().size() == 1; });
+        REQUIRE(joiner.rejects()[0] == taBuildReject(0x08D90E74, TaRejectClosed));
         host.stop();
     }
 

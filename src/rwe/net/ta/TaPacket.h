@@ -21,6 +21,12 @@ namespace rwe
     /** Why a host turns a player away: the byte after the id in a 0x1b. */
     inline constexpr std::uint8_t TaRejectClosed = 3;
 
+    /** The password a joiner sent is not the host's (BT-242). */
+    inline constexpr std::uint8_t TaRejectPassword = 4;
+
+    /** The joiner's player data is not the 21 bytes with the protocol tag TA writes (BT-242). */
+    inline constexpr std::uint8_t TaRejectVersion = 8;
+
     /** A joiner that has been silent for too long (BT-233). */
     inline constexpr std::uint8_t TaRejectSilent = 6;
 

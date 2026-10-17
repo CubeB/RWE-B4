@@ -293,9 +293,11 @@ def dp_add_forward_request(where, sys_id, tcp_port, udp_port, service_id):
 
 
 def dp_create_player(where, player_id, sys_id, tcp_port, udp_port, name):
-    """CREATEPLAYER: the same player info, named this time."""
+    """CREATEPLAYER: the same player info, named this time. Its 21 bytes of player data begin at
+    payload offset 120 (the sizes above, 68 + 10 + 10 + 32) and end in the protocol shorts zero and
+    0x50, which a host checks before it admits a joiner (BT-242): the 0x50 is at 139."""
     body = (_u32s(0, player_id, 0, 0x1C, 0, 0x79, 8, player_id, 0x0A, 0x0A, 0x20, 0x15, 0, sys_id, 0x30, 0x0E, 0)
-            + _name(name) * 2 + _sockaddr(tcp_port) + _sockaddr(udp_port) + b"\0" * 28 + b"\x50" + b"\0" * 4)
+            + _name(name) * 2 + _sockaddr(tcp_port) + _sockaddr(udp_port) + b"\0" * 25 + b"\x50" + b"\0" * 7)
     return dp_header(0x08, len(body), where) + body
 
 
