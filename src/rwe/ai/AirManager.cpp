@@ -1,6 +1,7 @@
 #include "AirManager.h"
 #include <rwe/ai/PerceptionManager.h>
 #include <algorithm>
+#include <set>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -38,6 +39,93 @@ namespace rwe
             }
             auto attacked = std::get_if<UnitId>(&attack->target);
             return attacked != nullptr && *attacked == target;
+        }
+
+        PlayerCommand patrolCommand(UnitId unit, const SimVector& to, PlayerUnitCommand::IssueOrder::IssueKind kind)
+        {
+            return PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(PatrolOrder(to), kind));
+        }
+
+        SimScalar flatDistanceBetween(const SimVector& a, const SimVector& b)
+        {
+            auto dx = a.x - b.x;
+            auto dz = a.z - b.z;
+            return rweSqrt((dx * dx) + (dz * dz));
+        }
+
+        /**
+         * The loop the standing air patrol flies (airPatrolFighters): four
+         * points on a ring round the base anchor, just outside the built-up
+         * edge, on the side the enemy is on.
+         *
+         * The ring's radius is the base's own edge -- the furthest finished
+         * building of ours from the anchor, at least 200 and at most
+         * defendRadius, so a lone outpost does not drag the patrol across
+         * the map -- plus airPatrolMargin. The points sit at -60, -20, +20
+         * and +60 degrees from the direction of the enemy (its base once
+         * seen, the middle of the map until then), a 120 degree arc rather
+         * than the whole circle, because cover on the side nothing comes
+         * from is cover wasted. The angles are fixed, so the rotation is
+         * multiplications and needs no trigonometry. Each point is kept
+         * inside the map.
+         */
+        std::vector<SimVector> airPatrolRoute(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb, SimScalar baseEdge)
+        {
+            std::vector<SimVector> route;
+            if (!bb.baseAnchor)
+            {
+                return route;
+            }
+            auto target = bb.enemyBasePosition ? *bb.enemyBasePosition : SimVector(0_ss, 0_ss, 0_ss);
+            auto towards = target - *bb.baseAnchor;
+            auto direction = SimVector(towards.x, 0_ss, towards.z).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+
+            auto radius = rweMin(rweMax(baseEdge, 200_ss), profile.defendRadius) + profile.airPatrolMargin;
+
+            // cos and sin of 60 and 20 degrees.
+            const SimScalar cos60(0.5f);
+            const SimScalar sin60(0.8660254f);
+            const SimScalar cos20(0.9396926f);
+            const SimScalar sin20(0.3420201f);
+            const SimScalar cosines[4] = {cos60, cos20, cos20, cos60};
+            const SimScalar sines[4] = {-sin60, -sin20, sin20, sin60};
+
+            const auto left = sim.terrain.leftInWorldUnits() + 64_ss;
+            const auto right = sim.terrain.rightCutoffInWorldUnits() - 64_ss;
+            const auto top = sim.terrain.topInWorldUnits() + 64_ss;
+            const auto bottom = sim.terrain.bottomCutoffInWorldUnits() - 64_ss;
+
+            for (int i = 0; i < 4; ++i)
+            {
+                auto x = bb.baseAnchor->x + (((direction.x * cosines[i]) - (direction.z * sines[i])) * radius);
+                auto z = bb.baseAnchor->z + (((direction.x * sines[i]) + (direction.z * cosines[i])) * radius);
+                if (left < right)
+                {
+                    x = rweMin(rweMax(x, left), right);
+                }
+                if (top < bottom)
+                {
+                    z = rweMin(rweMax(z, top), bottom);
+                }
+                auto ground = sim.terrain.tryGetHeightAt(x, z);
+                auto y = ground ? rweMax(*ground, sim.terrain.getSeaLevel()) : sim.terrain.getSeaLevel();
+                route.emplace_back(x, y, z);
+            }
+            return route;
+        }
+
+        /** Idle: give it the loop, once. One already holding an order is flying it, or something that outranks it. */
+        void sendOnPatrol(const UnitState& unit, UnitId unitId, const std::vector<SimVector>& route, std::vector<PlayerCommand>& outCommands)
+        {
+            if (route.empty() || !unit.orders.empty())
+            {
+                return;
+            }
+            for (std::size_t i = 0; i < route.size(); ++i)
+            {
+                auto kind = i == 0 ? PlayerUnitCommand::IssueOrder::IssueKind::Immediate : PlayerUnitCommand::IssueOrder::IssueKind::Queued;
+                outCommands.push_back(patrolCommand(unitId, route[i], kind));
+            }
         }
 
         bool isMovingTo(const UnitState& unit, const SimVector& destination)
@@ -93,6 +181,9 @@ namespace rwe
         // started building them.
         std::optional<SimVector> repairPad;
         std::optional<SimVector> airPlant;
+        // The furthest finished building from the anchor: the edge the
+        // standing patrol flies outside of.
+        SimScalar baseEdge = 0_ss;
         for (const auto& [unitId, unit] : sim.units)
         {
             // A held mission unit is the mission's to fly, not the AI's.
@@ -104,6 +195,10 @@ namespace rwe
             if (defIt == sim.unitDefinitions.end() || unit.isBeingBuilt(defIt->second))
             {
                 continue;
+            }
+            if (bb.baseAnchor && !defIt->second.isMobile)
+            {
+                baseEdge = rweMax(baseEdge, flatDistanceBetween(unit.position, *bb.baseAnchor));
             }
             if (!repairPad && !s.airRepairPad.empty() && unit.unitType == s.airRepairPad)
             {
@@ -130,6 +225,47 @@ namespace rwe
             {
                 bombers.push_back(UnitId(unitId));
             }
+        }
+
+        // The standing patrol (airPatrolFighters, airPatrolBombers): the
+        // first of each, in id order so that the same aircraft keep the job
+        // as others join and die. Land fighters and the level-one bomber
+        // only -- a seaplane is not a base guard. The bomber wing is taken
+        // out of the list the sorties are chosen from; the fighter wing
+        // stays in the fighters' loop, which hands it back to the patrol
+        // when there is nothing in the air to chase.
+        std::vector<UnitId> patrolBombers;
+        std::set<uint32_t> patrolFighterIds;
+        {
+            int fighterSlots = std::max(0, profile.airPatrolFighters);
+            for (auto id : fighters)
+            {
+                if (fighterSlots <= 0)
+                {
+                    break;
+                }
+                if (!s.fighter.empty() && sim.getUnitState(id).unitType == s.fighter)
+                {
+                    patrolFighterIds.insert(id.value);
+                    --fighterSlots;
+                }
+            }
+            auto bomberSlots = static_cast<std::size_t>(std::max(0, profile.airPatrolBombers));
+            if (bomberSlots > 0 && !bombers.empty())
+            {
+                auto keep = std::min(bomberSlots, bombers.size());
+                patrolBombers.assign(bombers.begin(), bombers.begin() + static_cast<std::ptrdiff_t>(keep));
+                bombers.erase(bombers.begin(), bombers.begin() + static_cast<std::ptrdiff_t>(keep));
+            }
+        }
+        std::vector<SimVector> patrolRoute;
+        if (!patrolFighterIds.empty() || !patrolBombers.empty())
+        {
+            patrolRoute = airPatrolRoute(sim, profile, bb, baseEdge);
+        }
+        for (auto unitId : patrolBombers)
+        {
+            sendOnPatrol(sim.getUnitState(unitId), unitId, patrolRoute, outCommands);
         }
 
         // Anything of the three, in that order. Everything else in this file
@@ -547,6 +683,15 @@ namespace rwe
                 {
                     outCommands.push_back(attackCommand(unitId, *target));
                 }
+                continue;
+            }
+
+            // The patrol wing goes back out on its loop. Only when idle: one
+            // already flying it (or landed for repair, or finishing an
+            // attack) holds an order, and is left alone.
+            if (patrolFighterIds.count(unitId.value) != 0 && !patrolRoute.empty())
+            {
+                sendOnPatrol(unit, unitId, patrolRoute, outCommands);
                 continue;
             }
 

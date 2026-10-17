@@ -696,4 +696,61 @@ namespace rwe
         REQUIRE(makeProfileForDifficulty(AiDifficulty::Hard).reactiveAntiAirTowerCount
             > makeProfileForDifficulty(AiDifficulty::Standard).reactiveAntiAirTowerCount);
     }
+
+    TEST_CASE("a finished air plant keeps a standing patrol of fighters and bombers, with no enemy aircraft seen", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        (void)human;
+        defineWorld(sim);
+        auto bomber = makeDef(false, false, true, "LASER", 200u);
+        bomber.canFly = true;
+        sim.unitDefinitions["ARMTHUND"] = bomber;
+        auto fighter = makeDef(false, false, true, "LASER", 200u);
+        fighter.canFly = true;
+        sim.unitDefinitions["ARMFIG"] = fighter;
+
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMAP", ai, SimVector(-200_ss, 0_ss, 200_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.targetScoutPlaneCount = 0;
+        profile.targetAirConstructorCount = 0;
+        profile.targetBomberCount = 0;
+
+        SECTION("an empty hangar asks for fighters first")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE_FALSE(controller.getBlackboard().enemyAirThreat);
+            REQUIRE(countQueueCommands(commands, "ARMFIG") == 1);
+        }
+
+        SECTION("with the fighters standing, it asks for bombers")
+        {
+            addUnit(sim, "ARMFIG", ai, SimVector(-100_ss, 60_ss, 100_ss), script);
+            addUnit(sim, "ARMFIG", ai, SimVector(-140_ss, 60_ss, 100_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMFIG") == 0);
+            REQUIRE(countQueueCommands(commands, "ARMTHUND") == 1);
+        }
+
+        SECTION("both knobs at zero: neither, as before")
+        {
+            profile.airPatrolFighters = 0;
+            profile.airPatrolBombers = 0;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{}, makeBuildTree());
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 31, commands);
+            REQUIRE(countQueueCommands(commands, "ARMFIG") == 0);
+            REQUIRE(countQueueCommands(commands, "ARMTHUND") == 0);
+        }
+    }
 }

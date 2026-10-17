@@ -2133,6 +2133,20 @@ namespace rwe
          */
         bool commanderAnswersHarassment{false};
         /**
+         * Treat a commander whose only threats are on the water as unable to
+         * fight, so the refuge logic walks it off the shore.
+         *
+         * The commander is sent only at enemies standing on land (a ship is
+         * walked after into the seabed, where it cannot fire -- see
+         * commanderAnswersHarassment) and the D-gun skips them too, so with
+         * nothing but ships near it canFight was true and no order was
+         * issued: the commander stood on the beach, under fire, doing
+         * nothing. With this on it retreats from them like any threat it
+         * cannot answer. RWE-original; the original's computer player has no
+         * such rule.
+         */
+        bool commanderShunsShips{true};
+        /**
          * Units built while a wave is out join it once this many have
          * gathered, rather than waiting for the wave to be spent. This keeps
          * what attackInWaves was for -- a lone kbot does not walk to the
@@ -2228,6 +2242,23 @@ namespace rwe
         int targetFighterCount{2};
         int targetBomberCount{4};
         /**
+         * The standing air patrol: this many fighters and this many bombers,
+         * kept alive whenever the side owns a finished air plant, whether or
+         * not any enemy aircraft has been seen, and flown round a loop just
+         * beyond the edge of the base (airPatrolMargin) so that whatever
+         * comes at the base meets something on the way in. A patrol
+         * engages what it meets, ground or air, and the AirManager hands a
+         * fighter that has finished a chase back to it. Zero switches that
+         * half of the patrol off; both zero is the old behaviour.
+         *
+         * The wing is part of the air arm, not on top of it: the bomber
+         * wing does not go on sorties, so a side with exactly this many
+         * bombers has bombers for defence and none for offence. The default
+         * targetBomberCount of four leaves two over.
+         */
+        int airPatrolFighters{2};
+        int airPatrolBombers{2};
+        /**
          * How many armed enemy buildings it takes before the air tier counts
          * as worth its metal (AiBlackboard::airWorthIt), on top of the two
          * cases that need no counting: a map the ground arm cannot cross,
@@ -2261,6 +2292,13 @@ namespace rwe
         int gunshipPackSize{2};
         /** How far a fighter will chase something before it is called home. */
         SimScalar fighterLeash{2400_ss};
+        /**
+         * How far outside the edge of the built-up base the air patrol
+         * flies (airPatrolFighters). The edge is the furthest building of
+         * ours from the base anchor, bounded below by a small floor and
+         * above by defendRadius, as the first towers' perimeter is.
+         */
+        SimScalar airPatrolMargin{400_ss};
         /**
          * What a bomber will fly into. A bombing run is a trade: an aircraft
          * for a building. Sent at the dearest thing the enemy owns, it flies
@@ -2497,6 +2535,23 @@ namespace rwe
          * point would have missed most of them.
          */
         int ferryLandingRefusalCell{192};
+        /**
+         * How long a loaded sea ferry may go without moving or setting
+         * anyone down before its unload is re-aimed (zero switches the
+         * watchdog off).
+         *
+         * ferryTimeoutSeconds is for a pickup that never happened and leaves
+         * a loaded hull alone, so a hull that stopped at the water's edge
+         * more than the crane's 200 units from its drop point -- the landing
+         * search used to accept water up to 384 units away -- held its cargo
+         * for the rest of the game. Twenty seconds is far longer than a hull
+         * takes to swing the crane between heads and shorter than the
+         * cargo's patience. The new landing is searched from the hull's
+         * position, and the stalled one is remembered in
+         * bb.ferryLandingRefusals against the ferry's objective.
+         * RWE-original; the original's computer player has no ferry.
+         */
+        int loadedFerryStallSeconds{20};
         /**
          * Scoring the CROSSING as well as the landing was tried and does not
          * work. Recorded here so it is not tried again without a better idea

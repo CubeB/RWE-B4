@@ -4,7 +4,9 @@
 // aircraft and nothing else, falling back to base cover when the sky is
 // clear.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
 #include <rwe/ai/AiBlackboard.h>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/ai/AirManager.h>
@@ -21,6 +23,20 @@ namespace rwe
 {
     namespace
     {
+        /**
+         * The default profile with the standing air patrol (airPatrolFighters,
+         * airPatrolBombers) switched off, for the cases that are about what
+         * aircraft do when sent: the patrol wing is taken out of the sortie
+         * list and would otherwise swallow the two bombers they fly.
+         */
+        AiTuningProfile makeProfileWithoutPatrol()
+        {
+            auto profile = makeDefaultStandardProfile();
+            profile.airPatrolFighters = 0;
+            profile.airPatrolBombers = 0;
+            return profile;
+        }
+
         /** A stationary enemy building, standing wherever it is put. */
         KnownEnemy makeKnownBuilding(UnitId id, const SimVector& position, const std::string& unitType = "UNIT")
         {
@@ -129,7 +145,7 @@ namespace rwe
         auto bomberId = addUnitOfType(sim, "BOMBER", ai, SimVector(0_ss, 0_ss, 0_ss), script);
         auto secondBomberId = addUnitOfType(sim, "BOMBER", ai, SimVector(20_ss, 0_ss, 0_ss), script);
 
-        auto profile = makeDefaultStandardProfile();
+        auto profile = makeProfileWithoutPatrol();
         profile.tacticalTickInterval = 1;
 
         AiBlackboard bb;
@@ -177,7 +193,7 @@ namespace rwe
 
         sim.unitDefinitions["BOMBER"] = UnitDefinition{};
 
-        auto profile = makeDefaultStandardProfile();
+        auto profile = makeProfileWithoutPatrol();
         profile.tacticalTickInterval = 1;
         // Narrowed, so the door rule is not what answers any of this.
         profile.bomberHomeDefenseRadius = 200_ss;
@@ -343,7 +359,7 @@ namespace rwe
         auto firstId = addUnitOfType(sim, "GUNSHIP", ai, SimVector(-900_ss, 0_ss, -900_ss), script);
         auto secondId = addUnitOfType(sim, "GUNSHIP", ai, SimVector(-880_ss, 0_ss, -900_ss), script);
 
-        auto profile = makeDefaultStandardProfile();
+        auto profile = makeProfileWithoutPatrol();
         profile.tacticalTickInterval = 1;
         // Short, so that every candidate waiting place in this fixture is
         // further off than the leash and the rule fires for all three.
@@ -425,7 +441,7 @@ namespace rwe
         auto firstId = addUnitOfType(sim, "GUNSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
         auto secondId = addUnitOfType(sim, "GUNSHIP", ai, SimVector(20_ss, 0_ss, 0_ss), script);
 
-        auto profile = makeDefaultStandardProfile();
+        auto profile = makeProfileWithoutPatrol();
         profile.tacticalTickInterval = 1;
 
         AiBlackboard bb;
@@ -494,7 +510,7 @@ namespace rwe
         auto dearId = addUnitOfType(sim, "DEARBUILDING", enemy, dearPos, script);
         addUnitOfType(sim, "BOMBER", ai, SimVector(0_ss, 0_ss, 0_ss), script);
 
-        auto profile = makeDefaultStandardProfile();
+        auto profile = makeProfileWithoutPatrol();
         profile.tacticalTickInterval = 1;
 
         AiBlackboard bb;
@@ -531,7 +547,7 @@ namespace rwe
 
         auto fighterId = addUnitOfType(sim, "FIGHTER", ai, SimVector(0_ss, 0_ss, 0_ss), script);
 
-        auto profile = makeDefaultStandardProfile();
+        auto profile = makeProfileWithoutPatrol();
         profile.tacticalTickInterval = 1;
 
         AiBlackboard bb;
@@ -620,7 +636,7 @@ namespace rwe
         auto bomberId = addUnitOfType(sim, "BOMBER", ai, SimVector(0_ss, 0_ss, 0_ss), script);
         [[maybe_unused]] auto secondBomberId = addUnitOfType(sim, "BOMBER", ai, SimVector(20_ss, 0_ss, 0_ss), script);
 
-        auto profile = makeDefaultStandardProfile();
+        auto profile = makeProfileWithoutPatrol();
         profile.tacticalTickInterval = 1;
         // Narrowed, so the door rule is not what answers here: this case is
         // about which of two buildings gets bombed.
@@ -677,7 +693,7 @@ namespace rwe
         auto bomberId = addUnitOfType(sim, "BOMBER", ai, SimVector(0_ss, 0_ss, 0_ss), script);
         [[maybe_unused]] auto secondBomberId = addUnitOfType(sim, "BOMBER", ai, SimVector(20_ss, 0_ss, 0_ss), script);
 
-        auto profile = makeDefaultStandardProfile();
+        auto profile = makeProfileWithoutPatrol();
         profile.tacticalTickInterval = 1;
 
         AiBlackboard bb;
@@ -730,7 +746,7 @@ namespace rwe
             auto bomberId = addUnitOfType(sim, "BOMBER", ai, SimVector(0_ss, 0_ss, 0_ss), script);
             addUnitOfType(sim, "BOMBER", ai, SimVector(20_ss, 0_ss, 0_ss), script);
 
-            auto profile = makeDefaultStandardProfile();
+            auto profile = makeProfileWithoutPatrol();
             profile.tacticalTickInterval = 1;
 
             AiBlackboard bb;
@@ -758,5 +774,104 @@ namespace rwe
 
         REQUIRE(run(1) == 0);
         REQUIRE(run(3) == 1);
+    }
+
+    TEST_CASE("idle aircraft of the standing wing patrol just beyond the edge of the base", "[ai]")
+    {
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai");
+        auto script = makeEmptyCobScript();
+
+        sim.unitDefinitions["FIGHTER"] = UnitDefinition{};
+        sim.unitDefinitions["BOMBER"] = UnitDefinition{};
+        UnitDefinition buildingDef;
+        buildingDef.isMobile = false;
+        sim.unitDefinitions["TOWER"] = buildingDef;
+
+        // The built-up edge is 300 from the anchor, so the ring should sit
+        // at 300 + airPatrolMargin.
+        auto anchor = SimVector(0_ss, 0_ss, 0_ss);
+        addUnitOfType(sim, "TOWER", ai, SimVector(300_ss, 0_ss, 0_ss), script);
+
+        auto fighter1 = addUnitOfType(sim, "FIGHTER", ai, SimVector(10_ss, 0_ss, 0_ss), script);
+        auto fighter2 = addUnitOfType(sim, "FIGHTER", ai, SimVector(20_ss, 0_ss, 0_ss), script);
+        auto fighter3 = addUnitOfType(sim, "FIGHTER", ai, SimVector(30_ss, 0_ss, 0_ss), script);
+        auto bomber1 = addUnitOfType(sim, "BOMBER", ai, SimVector(40_ss, 0_ss, 0_ss), script);
+        auto bomber2 = addUnitOfType(sim, "BOMBER", ai, SimVector(50_ss, 0_ss, 0_ss), script);
+        auto bomber3 = addUnitOfType(sim, "BOMBER", ai, SimVector(60_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.tacticalTickInterval = 1;
+
+        AiBlackboard bb;
+        bb.sideUnitsResolved = true;
+        bb.sideUnits.fighter = "FIGHTER";
+        bb.sideUnits.bomber = "BOMBER";
+        bb.baseAnchor = anchor;
+        bb.enemyBasePosition = SimVector(1800_ss, 0_ss, 0_ss);
+
+        ThreatMap threatMap(128, 128);
+
+        auto run = [&]() {
+            AirManager air;
+            std::vector<PlayerCommand> commands;
+            air.update(sim, ai, profile, threatMap, bb, commands);
+            return commands;
+        };
+
+        SECTION("two fighters and two bombers get a looped route at perimeter plus margin")
+        {
+            auto commands = run();
+            auto expectedRadius = 300.0f + simScalarToFloat(profile.airPatrolMargin);
+            for (auto id : {fighter1, fighter2, bomber1, bomber2})
+            {
+                auto patrols = ordersFor<PatrolOrder>(commands, id);
+                REQUIRE(patrols.size() >= 3);
+                REQUIRE(patrols.size() <= 4);
+                for (const auto& p : patrols)
+                {
+                    auto dx = simScalarToFloat(p.destination.x - anchor.x);
+                    auto dz = simScalarToFloat(p.destination.z - anchor.z);
+                    auto distance = std::sqrt((dx * dx) + (dz * dz));
+                    REQUIRE(distance == Catch::Approx(expectedRadius).margin(10.0f));
+                    // Biased toward the enemy, which is along +x.
+                    REQUIRE(p.destination.x > 0_ss);
+                }
+            }
+            // The extras are not part of the wing.
+            REQUIRE(ordersFor<PatrolOrder>(commands, fighter3).empty());
+            REQUIRE(ordersFor<PatrolOrder>(commands, bomber3).empty());
+        }
+
+        SECTION("one already holding an order is left alone")
+        {
+            sim.getUnitState(fighter1).orders.push_back(PatrolOrder(SimVector(100_ss, 0_ss, 100_ss)));
+            auto commands = run();
+            REQUIRE(ordersFor<PatrolOrder>(commands, fighter1).empty());
+            REQUIRE(!ordersFor<PatrolOrder>(commands, fighter2).empty());
+        }
+
+        SECTION("a fighter that sees an aircraft goes for it instead of patrolling")
+        {
+            auto enemy = addPlayer(sim, "enemy");
+            sim.unitDefinitions["PLANE"] = UnitDefinition{};
+            auto planePos = SimVector(500_ss, 0_ss, 0_ss);
+            auto planeId = addUnitOfType(sim, "PLANE", enemy, planePos, script);
+            bb.knownEnemies[planeId.value] = makeKnownAircraft(planeId, planePos);
+            auto commands = run();
+            REQUIRE(ordersFor<PatrolOrder>(commands, fighter1).empty());
+            REQUIRE(ordersFor<AttackOrder>(commands, fighter1).size() == 1);
+        }
+
+        SECTION("both knobs at zero: no patrol is issued")
+        {
+            profile.airPatrolFighters = 0;
+            profile.airPatrolBombers = 0;
+            auto commands = run();
+            for (auto id : {fighter1, fighter2, fighter3, bomber1, bomber2, bomber3})
+            {
+                REQUIRE(ordersFor<PatrolOrder>(commands, id).empty());
+            }
+        }
     }
 }

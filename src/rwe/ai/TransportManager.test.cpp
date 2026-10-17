@@ -9,6 +9,7 @@
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/ai/MapIntel.h>
 #include <rwe/cob/CobEnvironment.h>
+#include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
@@ -687,10 +688,11 @@ namespace rwe
             REQUIRE(std::find(loaded.begin(), loaded.end(), kbot1) != loaded.end());
             REQUIRE(std::find(loaded.begin(), loaded.end(), kbot2) != loaded.end());
 
-            // One UnloadOrder per passenger (the task 4 fix): two
-            // passengers, two orders, not one order for the whole party.
+            // One UnloadOrder, not one per passenger: queued orders to the
+            // same point toggle each other off (see queueUnload), and the
+            // next is sent as each unit is set down.
             auto unloads = ordersFor<UnloadOrder>(commands, shipId);
-            REQUIRE(unloads.size() == 2);
+            REQUIRE(unloads.size() == 1);
             for (const auto& u : unloads)
             {
                 // Set down on the far bank, past the channel (which ends at
@@ -765,7 +767,6 @@ namespace rwe
             REQUIRE(bb.ferryPassengers.count(kbot.value) == 1);
             REQUIRE(bb.ferryPassengers.count(sub.value) == 0);
 
-            // Exactly the booked passenger's worth of unloads -- one, here.
             auto unloads = ordersFor<UnloadOrder>(commands, shipId);
             REQUIRE(unloads.size() == 1);
         }
@@ -1041,6 +1042,11 @@ namespace rwe
 
         SECTION("a hull ignores anti-air it cannot be hurt by")
         {
+            // The east bank begins at world x 96, and a hull's crane reaches
+            // 200 units, so a drop point more than 150 from the water is
+            // refused (MaxLandingWaterDistance): the walk-back's first step,
+            // 258, is 162 from it and no longer a candidate: the drop is put
+            // between the water and that step, and not on the picket.
             auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
             AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
             std::vector<PlayerCommand> commands;
@@ -1054,9 +1060,11 @@ namespace rwe
 
             auto unloads = ordersFor<UnloadOrder>(commands, shipId);
             REQUIRE(!unloads.empty());
-            // Still the nearest quiet point, 258: for a surface hull the
+            // Still the nearest quiet point: for a surface hull the
             // carrier's field is anti-ground, and this gun cannot touch it.
-            REQUIRE(unloads.front().destination.x > 240_ss);
+            INFO("drop at " << unloads.front().destination.x.value << "," << unloads.front().destination.z.value);
+            REQUIRE(unloads.front().destination.x > 96_ss);
+            REQUIRE(unloads.front().destination.x < 246_ss);
         }
     }
 
@@ -1224,5 +1232,167 @@ namespace rwe
             // one it is quite entitled to name somewhere on our own side.)
             REQUIRE(after.ferryLandingRefusals.count(ferryLandingRefusalCell(*after.attackTarget, profile.ferryLandingRefusalCell)) == 0);
         }
+    }
+
+    TEST_CASE("a sea ferry only lands within a crane's reach of water and re-aims a loaded hull that stalls", "[ai]")
+    {
+        // The simulation's ship unload keeps navigating until the hull is
+        // within 200 units of the drop point (CraneReach). navalLandingNear
+        // used to accept a dry point with navigable water up to 384 units
+        // behind it, so on a wide bank the hull stopped at the water's edge,
+        // out of reach, and the loaded ferry never unloaded; the overdue
+        // timeout excludes a ferry that has loaded, so nothing ever noticed.
+        //
+        // The channel here is the shipped-style wide one but with only its
+        // west half wet: water from world x -192 to 0, and a bank 512 units
+        // wide beyond it. The enemy stands at the far edge, 500 units from
+        // the water, so the first ring of the search (192 units back from it,
+        // at x 308) is 308 from the water and has to be refused.
+        auto script = makeEmptyCobScript();
+        Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(60));
+        for (int y = 0; y < 64; ++y)
+        {
+            for (int x = 20; x < 32; ++x)
+            {
+                heights.set(x, y, static_cast<unsigned char>(0));
+            }
+        }
+        GameSimulation sim(MapTerrain(std::move(heights), 30_ss), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineLandUnits(sim);
+        defineSeaTransport(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(-300_ss, 60_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-320_ss, 60_ss, 40_ss), script);
+        addUnit(sim, "ARMSOLAR", human, SimVector(500_ss, 60_ss, 0_ss), script);
+        auto kbot = addUnit(sim, "ARMPW", ai, SimVector(-250_ss, 60_ss, 0_ss), script);
+        auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(-100_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultBrutalProfile();
+        profile.scoutCount = 0;
+        profile.attackArmySize = 1;
+        profile.loadedFerryStallSeconds = 2;
+        sim.eventLog.setRecording(true);
+
+        AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 90, commands);
+        REQUIRE(controller.getTransportManager().getFerries().count(shipId.value) == 1);
+        const auto& ferry = controller.getTransportManager().getFerries().at(shipId.value);
+
+        // The drop point has water within reach of the crane behind it, not
+        // 308 units away: the east edge of the water is x 0.
+        REQUIRE(ferry.destination.x > 0_ss);
+        REQUIRE(ferry.destination.x <= 150_ss);
+
+        // Loaded by hand (the harness never carries orders out), and then
+        // the hull goes nowhere: it is held at the water's edge.
+        sim.getUnitState(shipId).carriedUnits.push_back(kbot);
+        sim.getUnitState(kbot).carriedBy = shipId;
+        runTicks(sim, controller, profile.tacticalTickInterval, commands);
+        REQUIRE(ferry.loaded);
+        REQUIRE(countTransportEvents(sim, "rwe-ferry-stall-before.jsonl").count("transport_ferry:stalled") == 0);
+
+        commands.clear();
+        runTicks(sim, controller, 4 * static_cast<int>(SimTicksPerSecond), commands);
+
+        // The watchdog fired, re-aimed the unload and remembered the landing
+        // that did not work against the objective.
+        auto counts = countTransportEvents(sim, "rwe-ferry-stall-after.jsonl");
+        REQUIRE(counts["transport_ferry:stalled"] >= 1);
+        REQUIRE(!ordersFor<UnloadOrder>(commands, shipId).empty());
+        REQUIRE(controller.getBlackboard().ferryLandingRefusals.count(ferryLandingRefusalCell(*ferry.objective, profile.ferryLandingRefusalCell)) == 1);
+        REQUIRE(ferry.destination.x <= 150_ss);
+    }
+
+    TEST_CASE("a loaded sea ferry with several aboard keeps an unload in its order queue", "[ai]")
+    {
+        // Measured on Coast To Coast, seed 1: a CORTSHIP with four aboard
+        // stalled from 1037 s to the end of the game, re-aimed every twenty
+        // seconds, and unloaded nobody. The AI sent four UnloadOrders to the
+        // one drop point; a queued order that matches one already queued is
+        // a toggle (TOTALA-EXE-INTERFACE S:136), so they cancelled in pairs
+        // and the hull's order queue was empty -- the orders were issued and
+        // the ship did nothing. This test applies the AI's commands to the
+        // simulation the way a game does, which the ferry tests above, that
+        // only read the commands, cannot see.
+        auto script = makeEmptyCobScript();
+        Grid<unsigned char> heights(64, 64, static_cast<unsigned char>(60));
+        for (int y = 0; y < 64; ++y)
+        {
+            for (int x = 20; x < 32; ++x)
+            {
+                heights.set(x, y, static_cast<unsigned char>(0));
+            }
+        }
+        GameSimulation sim(MapTerrain(std::move(heights), 30_ss), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineLandUnits(sim);
+        defineSeaTransport(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(-300_ss, 60_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-320_ss, 60_ss, 40_ss), script);
+        addUnit(sim, "ARMSOLAR", human, SimVector(500_ss, 60_ss, 0_ss), script);
+        std::vector<UnitId> kbots;
+        for (int i = 0; i < 4; ++i)
+        {
+            kbots.push_back(addUnit(sim, "ARMPW", ai, SimVector(-250_ss, 60_ss, SimScalar(static_cast<float>(i * 30))), script));
+        }
+        auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(-100_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultBrutalProfile();
+        profile.scoutCount = 0;
+        profile.attackArmySize = 1;
+        profile.loadedFerryStallSeconds = 2;
+
+        AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 90, commands);
+        REQUIRE(controller.getTransportManager().getFerries().count(shipId.value) == 1);
+        const auto& ferry = controller.getTransportManager().getFerries().at(shipId.value);
+
+        auto applyAll = [&](const std::vector<PlayerCommand>& cs) {
+            for (const auto& c : cs)
+            {
+                if (auto unitCommand = std::get_if<PlayerUnitCommand>(&c); unitCommand && unitCommand->unit == shipId)
+                {
+                    applyUnitCommandToSimulation(sim, ai, *unitCommand);
+                }
+            }
+        };
+        auto countUnloads = [&]() {
+            const auto& orders = sim.getUnitState(shipId).orders;
+            return std::count_if(orders.begin(), orders.end(), [](const UnitOrder& o) { return std::holds_alternative<UnloadOrder>(o); });
+        };
+
+        // The booking: loads for everyone and then the unload, applied.
+        commands.clear();
+        runTicks(sim, controller, profile.tacticalTickInterval, commands);
+        REQUIRE(ferry.passengers.size() >= 2);
+        applyAll(commands);
+        REQUIRE(countUnloads() == 1);
+
+        // Everybody aboard by hand and the orders dropped, as a hull that
+        // lost its queue; the AI is to send the unload again, and it has to
+        // stay in the queue however many are aboard.
+        sim.getUnitState(shipId).clearOrders();
+        for (auto id : ferry.passengers)
+        {
+            sim.getUnitState(shipId).carriedUnits.push_back(id);
+            sim.getUnitState(id).carriedBy = shipId;
+        }
+        commands.clear();
+        runTicks(sim, controller, profile.tacticalTickInterval, commands);
+        REQUIRE(ferry.loaded);
+        applyAll(commands);
+        REQUIRE(countUnloads() == 1);
+
+        // And the watchdog's re-aim, with the hull going nowhere.
+        sim.getUnitState(shipId).clearOrders();
+        commands.clear();
+        runTicks(sim, controller, 4 * static_cast<int>(SimTicksPerSecond), commands);
+        REQUIRE(!ordersFor<UnloadOrder>(commands, shipId).empty());
+        applyAll(commands);
+        REQUIRE(countUnloads() == 1);
     }
 }

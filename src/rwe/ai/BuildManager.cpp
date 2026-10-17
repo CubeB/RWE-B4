@@ -4064,6 +4064,15 @@ namespace rwe
                 {
                     next = s.airConstructor;
                 }
+                else if (profile.airPatrolFighters > 0 && !s.fighter.empty() && total(s.fighter) < profile.airPatrolFighters)
+                {
+                    // The standing patrol (airPatrolFighters): kept whether
+                    // or not anything of theirs has flown yet. It sits after
+                    // the constructor, and the reserveHolds check below
+                    // still applies to it, so it does not starve the
+                    // tier-two economy.
+                    next = s.fighter;
+                }
                 else if (bb.enemyAirThreat && !s.fighter.empty() && total(s.fighter) < fighterTarget)
                 {
                     // Fighters only once something of theirs is actually
@@ -4071,6 +4080,13 @@ namespace rwe
                     // cover built against nothing is metal not spent on the
                     // army.
                     next = s.fighter;
+                }
+                else if (profile.airPatrolBombers > 0 && !s.bomber.empty() && total(s.bomber) < profile.airPatrolBombers)
+                {
+                    // The bomber half of the standing patrol, ahead of the
+                    // sortie quota so a small targetBomberCount cannot
+                    // starve it.
+                    next = s.bomber;
                 }
                 else
                 {
