@@ -119,7 +119,6 @@ namespace rwe
 
         void popStackOperation();
 
-        CobEnvironment::SetQueryStatus setValue();
 
         // non-commands
         int pop();

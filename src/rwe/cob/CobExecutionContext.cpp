@@ -1,6 +1,7 @@
 #include "CobExecutionContext.h"
 #include <rwe/util/SimpleLogger.h>
 #include <limits>
+#include <optional>
 #include <random>
 #include <rwe/cob/CobConstants.h>
 #include <rwe/cob/CobOpCode.h>
@@ -89,20 +90,19 @@ namespace rwe
             case CobValueId::UnitAllied:
                 return CobEnvironment::QueryStatus::UnitAllied{CobUnitId(arg1)};
             default:
-                throw std::runtime_error("Unknown unit value ID: " + std::to_string(static_cast<unsigned int>(valueId)));
+                // The original answers zero for every id it does not know
+                // (0x480770: zero, anything above twenty, a failed lookup)
+                // and the script carries on (BT-77).
+                return 0;
         }
     }
 
-    CobEnvironment::SetQueryStatus::Query setGetter(CobValueId valueId, int value)
+    std::optional<CobEnvironment::SetQueryStatus::Query> setGetter(CobValueId valueId, int value)
     {
         switch (valueId)
         {
             case CobValueId::Activation:
                 return CobEnvironment::SetQueryStatus::Activation{value != 0};
-            case CobValueId::StandingMoveOrders:
-                return CobEnvironment::SetQueryStatus::StandingMoveOrders{value};
-            case CobValueId::StandingFireOrders:
-                return CobEnvironment::SetQueryStatus::StandingFireOrders{value};
             case CobValueId::InBuildStance:
                 return CobEnvironment::SetQueryStatus::InBuildStance{value != 0};
             case CobValueId::Busy:
@@ -114,7 +114,10 @@ namespace rwe
             case CobValueId::Armored:
                 return CobEnvironment::SetQueryStatus::Armored{value != 0};
             default:
-                throw std::runtime_error("Cannot set unit value with ID: " + std::to_string(static_cast<unsigned int>(valueId)));
+                // 0x480B20 acts only on ids 1, 5, 6, 18, 19 and 20; the standing
+                // orders ports (2 and 3) and every other id just set the dirty
+                // byte, which RWE does not keep. No thread is lost (BT-77).
+                return std::nullopt;
         }
     }
 
@@ -428,7 +431,12 @@ namespace rwe
                 {
                     auto newValue = pop();
                     auto valueId = popValueId();
-                    return CobEnvironment::SetQueryStatus{setGetter(valueId, newValue)};
+                    auto query = setGetter(valueId, newValue);
+                    if (!query)
+                    {
+                        break;
+                    }
+                    return CobEnvironment::SetQueryStatus{*query};
                 }
                 default:
                     throw std::runtime_error("Unsupported opcode " + std::to_string(instruction));
@@ -710,13 +718,6 @@ namespace rwe
     void CobExecutionContext::popStackOperation()
     {
         pop();
-    }
-
-    CobEnvironment::SetQueryStatus CobExecutionContext::setValue()
-    {
-        auto newValue = pop();
-        auto valueId = popValueId();
-        return CobEnvironment::SetQueryStatus{setGetter(valueId, newValue)};
     }
 
     int CobExecutionContext::pop()
