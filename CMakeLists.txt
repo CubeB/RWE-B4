@@ -336,6 +336,8 @@ set(SOURCE_FILES
     src/rwe/game/DownloadMenus.h
     src/rwe/game/DefaultAction.cpp
     src/rwe/game/DefaultAction.h
+    src/rwe/game/InterfaceRules.cpp
+    src/rwe/game/InterfaceRules.h
     src/rwe/game/FeatureMediaInfo.cpp
     src/rwe/game/FeatureMediaInfo.h
     src/rwe/game/EndGameStats.cpp
@@ -1136,6 +1138,7 @@ set(TEST_FILES
     src/rwe/observable/Subject.test.cpp
     src/rwe/collections/VectorMap.test.cpp
     src/rwe/game/DefaultAction.test.cpp
+    src/rwe/game/InterfaceRules.test.cpp
     src/rwe/game/GameScene_audio.test.cpp
     src/rwe/game/GameScene_ownclock.test.cpp
     src/rwe/game/panel_slide.test.cpp

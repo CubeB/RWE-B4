@@ -11,6 +11,7 @@
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/camera_util.h>
 #include <rwe/game/GameScene_util.h>
+#include <rwe/game/InterfaceRules.h>
 #include <rwe/game/OrderButtons.h>
 #include <rwe/game/OrderDispatch.h>
 #include <rwe/game/SaveFile.h>
@@ -714,7 +715,13 @@ namespace rwe
                 [&](const CaptureCursorMode&) {
                     for (const auto& selectedUnit : selectedUnits)
                     {
-                        if (hoveredUnit && isEnemy(*hoveredUnit))
+                        // The armed button asks only that the unit can capture
+                        // and that the target belongs to someone else: an ally's
+                        // unit is accepted (BT-107, 0x43F6D1 and 0x43E797).
+                        auto orderer = simulation.tryGetUnitState(selectedUnit);
+                        auto victim = hoveredUnit ? simulation.tryGetUnitState(*hoveredUnit) : std::nullopt;
+                        if (orderer && victim
+                            && armedCaptureAccepts(simulation.unitDefinitions.at(orderer->get().unitType).canCapture, orderer->get().owner, victim->get().owner))
                         {
                             if (isShiftDown())
                             {
