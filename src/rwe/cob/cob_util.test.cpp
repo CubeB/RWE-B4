@@ -22,15 +22,57 @@ namespace rwe
             {
                 auto a = CobPosition::fromInt(-5); // 0xfffb
                 auto b = CobPosition::fromInt(-3); // 0xfffd
-                REQUIRE(cobPackCoords(a, b) == 0xfffbfffd);
+                // BT-76: packed by addition, so the negative Z (all ones in
+                // the top half) borrows one from X.
+                REQUIRE(cobPackCoords(a, b) == 0xfffafffd);
             }
 
             SECTION("packs very low negative values")
             {
                 auto a = CobPosition::fromInt(-28675); // 0x8ffd
                 auto b = CobPosition::fromInt(-24412); // 0xa0a4
-                REQUIRE(cobPackCoords(a, b) == 0x8ffda0a4);
+                REQUIRE(cobPackCoords(a, b) == 0x8ffca0a4);
             }
+
+            SECTION("a non-negative Z leaves X alone, as an OR would")
+            {
+                REQUIRE(cobPackCoords(CobPosition::fromInt(100), CobPosition::fromInt(50)) == 0x00640032);
+            }
+        }
+
+        SECTION("packed values subtract to the offset between the two points (BT-76)")
+        {
+            // How the four boom transports use it: the script subtracts the
+            // packed position of the boom piece from the packed position of
+            // the cargo and decodes the result. With a negative Z difference
+            // the X half of an OR-packed value comes out one too small.
+            auto offset = [](int cargoX, int cargoZ, int pieceX, int pieceZ) {
+                auto cargo = cobPackCoords(CobPosition::fromInt(cargoX), CobPosition::fromInt(cargoZ));
+                auto piece = cobPackCoords(CobPosition::fromInt(pieceX), CobPosition::fromInt(pieceZ));
+                return cobUnpackCoords(cargo - piece);
+            };
+
+            auto zNegative = offset(90, 30, 100, 50);
+            REQUIRE(zNegative.first == CobPosition::fromInt(-10));
+            REQUIRE(zNegative.second == CobPosition::fromInt(-20));
+
+            auto zPositive = offset(120, 70, 100, 50);
+            REQUIRE(zPositive.first == CobPosition::fromInt(20));
+            REQUIRE(zPositive.second == CobPosition::fromInt(20));
+
+            auto bothNegative = offset(-300, -250, -200, -120);
+            REQUIRE(bothNegative.first == CobPosition::fromInt(-100));
+            REQUIRE(bothNegative.second == CobPosition::fromInt(-130));
+        }
+
+        SECTION("an encoded negative Z is decoded with the borrow given back")
+        {
+            // 0xffff in the low half is Z = -1; the top half holds X - 1.
+            auto packed = cobPackCoords(CobPosition::fromInt(7), CobPosition::fromInt(-1));
+            REQUIRE(packed == 0x0006ffff);
+            auto unpacked = cobUnpackCoords(packed);
+            REQUIRE(unpacked.first == CobPosition::fromInt(7));
+            REQUIRE(unpacked.second == CobPosition::fromInt(-1));
         }
 
         SECTION("cobUnpackCoords")
