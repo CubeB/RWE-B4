@@ -517,6 +517,18 @@ namespace rwe
         CHECK(classicRatings(f, 1, context(3, 0, true)).normal == 0);
     }
 
+    TEST_CASE("low wind is the map's maximum below 2500", "[ai][classic]")
+    {
+        // BT-120: not a mean. A map of 1500 to 2400 has a mean of 1950, which
+        // the old test (mean below 1250) called windy and the original calls
+        // low; 0 is the absent key.
+        CHECK(classicLowWind(0));
+        CHECK(classicLowWind(2400));
+        CHECK(classicLowWind(2499));
+        CHECK_FALSE(classicLowWind(2500));
+        CHECK_FALSE(classicLowWind(3000));
+    }
+
     TEST_CASE("a transport and a feature rate zero", "[ai][classic]")
     {
         ClassicTypeFacts f;

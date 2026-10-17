@@ -296,10 +296,9 @@ namespace rwe
                 LOG_WARN << "Classic AI profile names '" << unknown << "', which is neither a unit type nor a category here";
             }
 
-            // [open] The wind test: the map's mean wind speed under a quarter
-            // of the most a generator can use. The register says only "the
-            // code's low-wind test".
-            lowWind = ((sim.minWindSpeed + sim.maxWindSpeed) / 2) < (MaxUtilizableWindSpeed / 4);
+            // The wind test: the map's maximum wind under half the generation
+            // denominator, not a mean (BT-120, 0x409B7D).
+            lowWind = classicLowWind(sim.maxWindSpeed);
 
             placement.initialise(sim, rng);
 
