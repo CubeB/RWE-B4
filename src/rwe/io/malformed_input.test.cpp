@@ -3,6 +3,7 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <rwe/ColorPalette.h>
 #include <rwe/LoadingScene_util.h>
 #include <rwe/MovieScene.h>
 #include <rwe/SceneContext.h>
@@ -15,6 +16,7 @@
 #include <rwe/io/fnt/Fnt.h>
 #include <rwe/io/hpi/HpiArchive.h>
 #include <rwe/io/hpi/hpi_util.h>
+#include <rwe/io/sidedatatdf/SideData.h>
 #include <rwe/io/io_util.h>
 #include <rwe/io/pcx/pcx.h>
 #include <rwe/io/smk/SmkDecoder.h>
@@ -1576,6 +1578,50 @@ namespace rwe
         SECTION("a GlobalHeader whose brace never closes")
         {
             REQUIRE_FALSE(taMapChecksum(asBytes(smallTnt), asBytes("[GlobalHeader]\r\n{\r\n")));
+        }
+    }
+
+    TEST_CASE("a sidedata HUD colour past the palette is clamped, not thrown on every frame", "[io][malformed]")
+    {
+        // The HUD draws its bars with palette->at(colour) on a 256-entry
+        // palette, so 256 or more used to throw out of every rendered frame.
+        auto sideData = [](const std::string& energy, const std::string& metal) {
+            std::string input = "[SIDE0]\n{\nname=Mod;\nnameprefix=MOD;\ncommander=ARMCOM;\nintgaf=ARMINT;\n"
+                                "font=console;\nfontgui=armbutt;\nenergycolor="
+                + energy + ";\nmetalcolor=" + metal + ";\n";
+            for (const char* rect : {"LOGO", "ENERGYBAR", "ENERGYNUM", "ENERGYMAX", "ENERGY0", "METALBAR", "METALNUM", "METALMAX", "METAL0", "TOTALUNITS", "TOTALTIME", "ENERGYPRODUCED", "ENERGYCONSUMED", "METALPRODUCED", "METALCONSUMED", "LOGO2", "UNITNAME", "DAMAGEBAR", "UNITMETALMAKE", "UNITMETALUSE", "UNITENERGYMAKE", "UNITENERGYUSE", "MISSIONTEXT", "UNITNAME2", "DAMAGEBAR2", "NAME", "DESCRIPTION", "RELOAD1", "RELOAD2", "RELOAD3"})
+            {
+                input += std::string("[") + rect + "]\n{ x1=1; y1=1; x2=2; y2=2; }\n";
+            }
+            input += "}\n";
+            auto tdf = parseTdfFromString(input);
+            auto block = tdf.findBlock("SIDE0");
+            REQUIRE(block);
+            return parseSideData(*block);
+        };
+
+        SECTION("the shipped values are kept")
+        {
+            auto s = sideData("208", "224");
+            REQUIRE(s.energyColor == 208);
+            REQUIRE(s.metalColor == 224);
+        }
+
+        SECTION("the last palette index is kept")
+        {
+            auto s = sideData("255", "255");
+            REQUIRE(s.energyColor == 255);
+            REQUIRE(s.metalColor == 255);
+        }
+
+        SECTION("256 and a huge value are clamped to a valid index")
+        {
+            auto s = sideData("256", "4000000000");
+            REQUIRE(s.energyColor <= 255);
+            REQUIRE(s.metalColor <= 255);
+            ColorPalette palette(256);
+            REQUIRE_NOTHROW(palette.at(s.energyColor));
+            REQUIRE_NOTHROW(palette.at(s.metalColor));
         }
     }
 }
