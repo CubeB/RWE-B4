@@ -57,6 +57,27 @@ namespace rwe
         REQUIRE_FALSE(at.open);
     }
 
+    TEST_CASE("a release is a click inside 25 thirtieths of a second and 32 world units (BT-102)")
+    {
+        // 833 ms is 24 thirtieths (24.99 truncates), 834 ms is 25.
+        REQUIRE(pressIsClick(1000, 1000, 0.0f, 0.0f));
+        REQUIRE(pressIsClick(0, 833, 0.0f, 0.0f));
+        REQUIRE_FALSE(pressIsClick(0, 834, 0.0f, 0.0f));
+
+        // Each axis on its own, strictly under 32 either way.
+        REQUIRE(pressIsClick(0, 0, 31.9f, -31.9f));
+        REQUIRE_FALSE(pressIsClick(0, 0, 32.0f, 0.0f));
+        REQUIRE_FALSE(pressIsClick(0, 0, 0.0f, -32.0f));
+    }
+
+    TEST_CASE("the click clock is the wall clock scaled to thirtieths, truncated before the difference (BT-102)")
+    {
+        // 33 ms and 866 ms read 0 and 25 on the original's clock: one more than
+        // the gap of 833 ms between them would suggest.
+        REQUIRE_FALSE(pressIsClick(33, 866, 0.0f, 0.0f));
+        REQUIRE(pressIsClick(34, 866, 0.0f, 0.0f));
+    }
+
     TEST_CASE("an armed Build click goes to every mobile builder and to nothing else (BT-108)")
     {
         REQUIRE(buildClickTakesUnit(true, true));

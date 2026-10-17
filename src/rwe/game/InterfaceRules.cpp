@@ -1,4 +1,5 @@
 #include "InterfaceRules.h"
+#include <cmath>
 
 namespace rwe
 {
@@ -10,6 +11,15 @@ namespace rwe
     bool buildClickTakesUnit(bool isBuilder, bool isMobile)
     {
         return isBuilder && isMobile;
+    }
+
+    bool pressIsClick(unsigned int pressMillis, unsigned int releaseMillis, float worldDeltaX, float worldDeltaZ)
+    {
+        // Each reading is scaled before the difference is taken, as the
+        // original's clock is.
+        auto pressClock = static_cast<unsigned int>((static_cast<unsigned long long>(pressMillis) * 30ull) / 1000ull);
+        auto releaseClock = static_cast<unsigned int>((static_cast<unsigned long long>(releaseMillis) * 30ull) / 1000ull);
+        return releaseClock - pressClock < 25u && std::fabs(worldDeltaX) < 32.0f && std::fabs(worldDeltaZ) < 32.0f;
     }
 
     BuildMenuPosition stepBuildMenu(BuildMenuPosition position, unsigned int pageCount, bool forward, bool toggle)

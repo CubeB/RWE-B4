@@ -961,7 +961,7 @@ namespace rwe
                     else if (isCursorOverWorld())
                     {
                         auto worldViewportPos = sceneContext.viewport->toOtherViewport(worldViewport, Point(event.x, event.y));
-                        cursorMode.next(NormalCursorMode{NormalCursorMode::SelectingState(sceneTime, worldViewportToCameraPlane(worldViewportPos))});
+                        cursorMode.next(NormalCursorMode{NormalCursorMode::SelectingState(sceneTime, worldViewportToCameraPlane(worldViewportPos), sceneContext.timeService->getTicks())});
                     }
                 });
         }
@@ -1094,7 +1094,13 @@ namespace rwe
                             auto worldViewportPos = sceneContext.viewport->toOtherViewport(worldViewport, Point(event.x, event.y));
                             auto startViewportPos = cameraPlaneToWorldViewport(state.startPosition);
 
-                            if (sceneTime - state.startTime < SceneTime(30) && startViewportPos.maxSingleDimensionDistance(worldViewportPos) < 32)
+                            // A click or a drag is decided on the wall clock and on
+                            // the map, not on simulation ticks and screen pixels:
+                            // fewer than 25 of the clock's thirtieths of a second
+                            // and fewer than 32 world units on each axis
+                            // (BT-102, 0x4995AE).
+                            auto releasePosition = worldViewportToCameraPlane(worldViewportPos);
+                            if (pressIsClick(state.startMillis, sceneContext.timeService->getTicks(), state.startPosition.x - releasePosition.x, state.startPosition.y - releasePosition.y))
                             {
                                 if (hoveredUnit && getUnit(*hoveredUnit).isSelectableBy(simulation.unitDefinitions.at(getUnit(*hoveredUnit).unitType), localPlayerId))
                                 {

@@ -150,10 +150,17 @@ namespace rwe
             SceneTime startTime;
             /** On the camera plane in world units, so it stays put while the camera scrolls or zooms. */
             Vector2f startPosition;
-            explicit SelectingState(SceneTime startTime, const Vector2f& startPosition) : startTime(startTime), startPosition(startPosition) {}
+            /**
+             * The wall clock at the press, in milliseconds. The click-or-drag test
+             * runs on this and not on startTime: the original's clock is the
+             * operating system's, in thirtieths of a second, and goes on while the
+             * game is paused (BT-102).
+             */
+            unsigned int startMillis;
+            explicit SelectingState(SceneTime startTime, const Vector2f& startPosition, unsigned int startMillis = 0) : startTime(startTime), startPosition(startPosition), startMillis(startMillis) {}
             bool operator==(const SelectingState& rhs) const
             {
-                return startTime == rhs.startTime && startPosition == rhs.startPosition;
+                return startTime == rhs.startTime && startPosition == rhs.startPosition && startMillis == rhs.startMillis;
             }
             bool operator!=(const SelectingState& rhs) const
             {

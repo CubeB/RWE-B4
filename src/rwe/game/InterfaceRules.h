@@ -50,5 +50,17 @@ namespace rwe
      * the first page is the mirror of the decoded forward case, not a decoded
      * one. A unit with no pages is left as it was.
      */
+    /**
+     * Whether a left-button release ends a click rather than a drag (BT-102).
+     * The press records the clock and the world point; the release is a click
+     * only if the clock advanced by fewer than 25 units and the X and Z of the
+     * point each moved by fewer than 32 world units (0x4995AE). The clock
+     * (0x4B6340) is the operating system's millisecond tick times 30 over
+     * 1000, so the units are wall-clock thirtieths of a second -- not
+     * simulation ticks, which stop when the game is paused -- and the distance
+     * is on the map, so it shrinks on screen when zoomed out.
+     */
+    bool pressIsClick(unsigned int pressMillis, unsigned int releaseMillis, float worldDeltaX, float worldDeltaZ);
+
     BuildMenuPosition stepBuildMenu(BuildMenuPosition position, unsigned int pageCount, bool forward, bool toggle);
 }
