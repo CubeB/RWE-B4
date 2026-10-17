@@ -1578,7 +1578,13 @@ namespace rwe
 
         void applyDamageInRadius(const SimVector& position, SimScalar radius, const Projectile& projectile);
 
-        void doProjectileImpact(const Projectile& projectile, ImpactType impactType, std::optional<ProjectileId> projectileId = std::nullopt);
+        /**
+         * `struckUnit` is the unit the round ran into, when it was a unit
+         * (0x499EB0's optional unit argument). With one, a blast of
+         * areaofeffect 16 or less hurts that unit alone; without, it is an
+         * ordinary area blast. BT-112.
+         */
+        void doProjectileImpact(const Projectile& projectile, ImpactType impactType, std::optional<ProjectileId> projectileId = std::nullopt, std::optional<UnitId> struckUnit = std::nullopt);
 
         std::optional<SimVector> getSelfPropelledAimPoint(const Projectile& projectile, const ProjectilePhysicsTypeSelfPropelled& p);
 

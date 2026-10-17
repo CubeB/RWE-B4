@@ -100,7 +100,12 @@ namespace rwe
             w.burst = 1;
             w.turret = true;
             w.velocity = 300_ss / 30_ss;
-            w.damageRadius = 0_ss;
+            // AreaOfEffect 8, the commonest shipped value. These rounds fly
+            // at ground level and go off on the terrain beside the target
+            // rather than on the unit, so with no unit struck the blast has
+            // to reach it through the area routine: a radius of zero would
+            // hurt nothing (BT-112).
+            w.damageRadius = 4_ss;
             w.damage["DEFAULT"] = 5;
             sim.weaponDefinitions["attackergun"] = w;
         }

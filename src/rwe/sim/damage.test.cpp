@@ -166,14 +166,15 @@ namespace rwe
         }
     }
 
-    TEST_CASE("a blast too small to spread pays out in full", "[damage]")
+    TEST_CASE("a small blast hurts a struck unit alone and spreads like any other blast when it strikes nothing", "[damage]")
     {
-        // The original stops bothering with falloff below an AreaOfEffect of
-        // sixteen (0x49A049) and pays a flat 1.0 (0x49A05B). Our radius is
-        // half the AreaOfEffect, so the line is at eight. Forty-three of the
-        // hundred and thirty-six shipped weapons sit under it, including the
-        // twenty-eight at AreaOfEffect eight, so getting this wrong would take
-        // most of the bite out of ordinary small-arms fire.
+        // 0x49A049 sends a blast of AreaOfEffect 16 or less down the
+        // single-target path only when it is also handed a unit (0x49A053): one
+        // hit at scale 1.0 on that unit and nothing else. With no unit it goes
+        // to the area routine at radius AreaOfEffect/2, falloff and all
+        // (0x49A0A7). Forty-three of the hundred and thirty-six shipped
+        // weapons sit under the line, the twenty-eight at AreaOfEffect eight
+        // among them. BT-112.
         auto script = makeDamageScript();
         GameSimulation sim(makeDamageTerrain(64, 64), 0u, 0, 0);
         auto us = addDamagePlayer(sim, "us");
@@ -188,38 +189,107 @@ namespace rwe
         sim.quietlyKillUnit(probeId);
         sim.deleteDeadUnits();
 
-        struct Case
-        {
-            SimScalar radius;
-            SimScalar distance;
-            unsigned int expected;
-        };
-
-        const Case cases[] = {
-            // AreaOfEffect 8, the commonest value in the game: full damage
-            // even three quarters of the way out, where the curve would have
-            // paid a sixteenth.
-            {4_ss, 0_ss, 100},
-            {4_ss, 3_ss, 100},
-            // AreaOfEffect 16 is still inside the rule.
-            {8_ss, 6_ss, 100},
-            // One unit wider and the curve takes over again.
-            {9_ss, 6_ss, 11},
-        };
-
-        for (const auto& c : cases)
+        SECTION("with a struck unit, that unit takes the full damage whatever the falloff would say")
         {
             auto targetId = spawnDamageUnit(sim, "target", them, targetPosition, script);
-            auto blastPosition = SimVector(boxEdge + c.distance, 0_ss, 0_ss);
-            REQUIRE(rweSqrt(sim.createBoundingBox(sim.getUnitState(targetId)).distanceSquared(blastPosition)) == c.distance);
-            auto projectile = makeBlast(us, blastPosition, 100, c.radius, 0_ss);
-            sim.applyDamageInRadius(blastPosition, projectile.damageRadius, projectile);
-            CAPTURE(simScalarToFloat(c.radius));
-            CAPTURE(simScalarToFloat(c.distance));
-            REQUIRE(damageTaken(sim, targetId) == c.expected);
-            sim.quietlyKillUnit(targetId);
-            sim.deleteDeadUnits();
+            auto blastPosition = SimVector(boxEdge + 3_ss, 0_ss, 0_ss);
+            auto projectile = makeBlast(us, blastPosition, 100, 4_ss, 0_ss);
+            sim.doProjectileImpact(projectile, ImpactType::Normal, std::nullopt, targetId);
+            REQUIRE(damageTaken(sim, targetId) == 100);
         }
+
+        SECTION("with a struck unit, a neighbour inside the radius is left alone")
+        {
+            auto targetId = spawnDamageUnit(sim, "target", them, targetPosition, script);
+            auto neighbourId = spawnDamageUnit(sim, "target", them, SimVector(16_ss, 0_ss, 0_ss), script);
+            auto blastPosition = SimVector(boxEdge, 0_ss, 0_ss);
+            auto projectile = makeBlast(us, blastPosition, 100, 8_ss, 0_ss);
+            sim.doProjectileImpact(projectile, ImpactType::Normal, std::nullopt, targetId);
+            REQUIRE(damageTaken(sim, targetId) == 100);
+            REQUIRE(damageTaken(sim, neighbourId) == 0);
+        }
+
+        SECTION("a blast bigger than AreaOfEffect 16 ignores the struck unit and spreads")
+        {
+            auto targetId = spawnDamageUnit(sim, "target", them, targetPosition, script);
+            auto blastPosition = SimVector(boxEdge + 50_ss, 0_ss, 0_ss);
+            auto projectile = makeBlast(us, blastPosition, 1000, 100_ss, 0_ss);
+            sim.doProjectileImpact(projectile, ImpactType::Normal, std::nullopt, targetId);
+            REQUIRE(damageTaken(sim, targetId) == 250);
+        }
+
+        SECTION("with no struck unit, a small blast falls off like any other")
+        {
+            struct Case
+            {
+                SimScalar radius;
+                SimScalar distance;
+                unsigned int expected;
+            };
+
+            const Case cases[] = {
+                {4_ss, 0_ss, 100},
+                // AreaOfEffect 8, three units off: a quarter of the way in
+                // from the rim, so a sixteenth of the damage.
+                {4_ss, 3_ss, 6},
+                // AreaOfEffect 16, six units off.
+                {8_ss, 6_ss, 6},
+                // At the radius itself, nothing (strictly inside only).
+                {4_ss, 4_ss, 0},
+            };
+
+            for (const auto& c : cases)
+            {
+                auto targetId = spawnDamageUnit(sim, "target", them, targetPosition, script);
+                auto blastPosition = SimVector(boxEdge + c.distance, 0_ss, 0_ss);
+                REQUIRE(rweSqrt(sim.createBoundingBox(sim.getUnitState(targetId)).distanceSquared(blastPosition)) == c.distance);
+                auto projectile = makeBlast(us, blastPosition, 100, c.radius, 0_ss);
+                sim.doProjectileImpact(projectile, ImpactType::Normal);
+                CAPTURE(simScalarToFloat(c.radius));
+                CAPTURE(simScalarToFloat(c.distance));
+                REQUIRE(damageTaken(sim, targetId) == c.expected);
+                sim.quietlyKillUnit(targetId);
+                sim.deleteDeadUnits();
+            }
+        }
+    }
+
+    TEST_CASE("the area routine stops listing at twenty units but keeps hitting a big unit once per square", "[damage]")
+    {
+        // The unit list holds twenty (0x49A28F). One met after it is full is
+        // not recorded and is still processed, so it takes the hit again for
+        // every further square it covers inside the blast. BT-112.
+        auto script = makeDamageScript();
+        GameSimulation sim(makeDamageTerrain(64, 64), 0u, 0, 0);
+        auto us = addDamagePlayer(sim, "us");
+        auto them = addDamagePlayer(sim, "them");
+        sim.unitDefinitions["small"] = makeTargetDef(100000);
+        auto big = makeTargetDef(100000);
+        big.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
+        sim.unitDefinitions["big"] = big;
+        registerDamageModel(sim, "model");
+
+        // Twenty-one small units in the first row of squares, then the big one
+        // two rows down, so the walk meets it after the list has filled.
+        std::vector<UnitId> smalls;
+        for (int i = 0; i < 20; ++i)
+        {
+            smalls.push_back(spawnDamageUnit(sim, "small", them, SimVector(SimScalar(static_cast<float>(i * 16 + 8)), 0_ss, 8_ss), script));
+        }
+        auto bigId = spawnDamageUnit(sim, "big", them, SimVector(160_ss, 0_ss, 64_ss), script);
+        auto bigFootprint = sim.computeFootprintRegion(sim.getUnitState(bigId).position, sim.unitDefinitions.at("big").movementCollisionInfo);
+        REQUIRE(bigFootprint.width * bigFootprint.height == 4);
+
+        // Edge effectiveness 1 pays the full damage at every distance inside the radius.
+        auto blastPosition = SimVector(160_ss, 0_ss, 64_ss);
+        auto projectile = makeBlast(us, blastPosition, 100, 400_ss, 1_ss);
+        sim.applyDamageInRadius(blastPosition, projectile.damageRadius, projectile);
+
+        for (auto id : smalls)
+        {
+            REQUIRE(damageTaken(sim, id) == 100);
+        }
+        REQUIRE(damageTaken(sim, bigId) == 400);
     }
 
     TEST_CASE("armour halves what an armoured unit takes until the hit is big enough to ignore it", "[damage]")

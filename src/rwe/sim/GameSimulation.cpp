@@ -3171,7 +3171,7 @@ namespace rwe
         return Matrix4x<SimScalar>::rotationAxisAngle(cross, angle) * v;
     }
 
-    bool projectileCollides(const GameSimulation& sim, const Projectile& projectile, const OccupiedCell& cellValue, bool unitsOnly)
+    bool projectileCollides(const GameSimulation& sim, const Projectile& projectile, const OccupiedCell& cellValue, bool unitsOnly, std::optional<UnitId>& struckUnit)
     {
         if (cellValue.mobileUnitId)
         {
@@ -3190,6 +3190,7 @@ namespace rwe
                 return false;
             }
 
+            struckUnit = *cellValue.mobileUnitId;
             return true;
         }
 
@@ -3210,6 +3211,7 @@ namespace rwe
                 return false;
             }
 
+            struckUnit = cellValue.buildingInfo->unit;
             return true;
         }
 
@@ -3274,6 +3276,13 @@ namespace rwe
     };
     struct ProjectileCollisionInfoUnitOrFeatureOrBuilding
     {
+        /**
+         * The unit that was struck, when it was one. The detonation routine
+         * is handed it for the two unit-slot hits and nothing for a feature
+         * (0x49B090), and it decides both the single-target damage path
+         * (BT-112) and whether the water art is used (BT-9).
+         */
+        std::optional<UnitId> struckUnit;
     };
     using ProjectileCollisionInfo = std::variant<
         ProjectileCollisionInfoOutOfBounds,
@@ -3302,16 +3311,17 @@ namespace rwe
 
         auto heightMapPos = simulation.terrain.worldToHeightmapCoordinate(projectile.position);
         auto cellValue = simulation.occupiedGrid.tryGet(heightMapPos);
-        if (cellValue && projectileCollides(simulation, projectile, cellValue->get(), unitsOnly))
+        std::optional<UnitId> struckUnit;
+        if (cellValue && projectileCollides(simulation, projectile, cellValue->get(), unitsOnly, struckUnit))
         {
-            return ProjectileCollisionInfoUnitOrFeatureOrBuilding();
+            return ProjectileCollisionInfoUnitOrFeatureOrBuilding{struckUnit};
         }
 
         for (auto unitId : simulation.flyingUnitsSet)
         {
             if (projectileCollidesWithUnit(simulation, projectile, unitId))
             {
-                return ProjectileCollisionInfoUnitOrFeatureOrBuilding();
+                return ProjectileCollisionInfoUnitOrFeatureOrBuilding{unitId};
             }
         }
 
@@ -3891,19 +3901,45 @@ namespace rwe
     namespace
     {
         /**
-         * A blast too small to be worth spreading. The original checks
-         * AreaOfEffect against sixteen (0x49A049) and, under that, skips the
-         * falloff entirely for a flat 1.0 (0x49A05B). Our radius is already
-         * half the AreaOfEffect, so the same test is eight.
+         * The largest blast that takes the single-target path. The original
+         * checks AreaOfEffect against sixteen (0x49A049) and, at or under it
+         * AND with a unit that was struck (0x49A053), hurts that unit alone
+         * at scale 1.0. Our radius is already half the AreaOfEffect, so the
+         * same test is eight.
          *
-         * This is not a rounding detail. Forty-three of the hundred and
-         * thirty-six shipped weapons are inside it, including the twenty-eight
-         * at AreaOfEffect eight -- the machine guns and light lasers that do
-         * most of the shooting in a game -- and under the quadratic curve a
-         * hit landing six units off centre would otherwise come out at a
-         * sixteenth strength.
+         * Forty-three of the hundred and thirty-six shipped weapons are
+         * inside it, including the twenty-eight at AreaOfEffect eight -- the
+         * machine guns and light lasers that do most of the shooting. A round
+         * of one of them that strikes nothing (a miss into the ground, a
+         * death blast) is NOT exempt from the falloff: it goes to the area
+         * routine with this radius like any other blast (0x49A0A7, BT-112).
          */
         const SimScalar SmallestSpreadingBlastRadius = 8_ss;
+
+        /**
+         * How many units and features the area routine remembers (the
+         * compares at 0x49A28F and 0x49A5FA). An object already in its list
+         * is skipped. One met once the list is full is not recorded but is
+         * still processed, so it is hit again for every further map square it
+         * covers inside the blast (BT-112).
+         */
+        constexpr std::size_t BlastUnitListCapacity = 20;
+        constexpr std::size_t BlastFeatureListCapacity = 64;
+
+        /** True when the id is already listed; otherwise lists it if there is room and says false. */
+        template <typename Id>
+        bool alreadyListedOrRecord(std::vector<Id>& list, const Id& id, std::size_t capacity)
+        {
+            if (std::find(list.begin(), list.end(), id) != list.end())
+            {
+                return true;
+            }
+            if (list.size() < capacity)
+            {
+                list.push_back(id);
+            }
+            return false;
+        }
 
         /**
          * The original's blast falloff (TotalA.exe 0x49A3B6). The curve is
@@ -3914,11 +3950,6 @@ namespace rwe
          */
         SimScalar blastDamageScale(SimScalar distance, SimScalar radius, SimScalar edgeEffectiveness)
         {
-            if (radius <= SmallestSpreadingBlastRadius)
-            {
-                return 1_ss;
-            }
-
             auto t = std::clamp(1_ss - (distance / radius), 0_ss, 1_ss);
             return (t * t * (1_ss - edgeEffectiveness)) + edgeEffectiveness;
         }
@@ -3935,14 +3966,6 @@ namespace rwe
          */
         std::optional<SimScalar> blastDamageScaleForUnit(SimScalar distanceSquared, SimScalar radius, SimScalar edgeEffectiveness)
         {
-            // A blast this small is not the area routine at all but the
-            // single-target path at full strength (0x49A049), so the area
-            // routine's rim rule does not apply to it.
-            if (radius <= SmallestSpreadingBlastRadius)
-            {
-                return 1_ss;
-            }
-
             auto wholeDistance = SimScalar(std::floor(rweSqrt(distanceSquared).value));
             if (wholeDistance >= radius)
             {
@@ -3995,8 +4018,8 @@ namespace rwe
         // something at arm's length can still be hurt by what it killed.
         auto firer = projectile.attacker;
 
-        std::unordered_set<UnitId> seenUnits;
-        std::unordered_set<FeatureId> seenFeatures;
+        std::vector<UnitId> seenUnits;
+        std::vector<FeatureId> seenFeatures;
 
         // Blasts hurt features too: force-attacking a wreck field to clear a
         // lane is a standing part of play, and controlling one is an economy
@@ -4027,9 +4050,8 @@ namespace rwe
           if (damagesFeatures && !paralyzer && !remoteSource)
           {
               const auto& cell = occupiedGrid.get(coords);
-              if (cell.featureId && seenFeatures.find(*cell.featureId) == seenFeatures.end())
+              if (cell.featureId && !alreadyListedOrRecord(seenFeatures, *cell.featureId, BlastFeatureListCapacity))
               {
-                  seenFeatures.insert(*cell.featureId);
                   if (auto featureRef = tryGetFeature(*cell.featureId))
                   {
                       auto& feature = featureRef->get();
@@ -4056,7 +4078,7 @@ namespace rwe
                               // would go in the same shell that made it.
                               if (auto replacement = replaceFeature(*cell.featureId, featureDefinition.featureDead))
                               {
-                                  seenFeatures.insert(*replacement);
+                                  alreadyListedOrRecord(seenFeatures, *replacement, BlastFeatureListCapacity);
                               }
                           }
                           else
@@ -4080,8 +4102,7 @@ namespace rwe
               return;
           }
 
-          auto pair = seenUnits.insert(*u);
-          if (!pair.second)
+          if (alreadyListedOrRecord(seenUnits, *u, BlastUnitListCapacity))
           {
               return;
           }
@@ -4146,14 +4167,31 @@ namespace rwe
         }
     }
 
-    void GameSimulation::doProjectileImpact(const Projectile& projectile, ImpactType /*impactType*/, std::optional<ProjectileId> projectileId)
+    void GameSimulation::doProjectileImpact(const Projectile& projectile, ImpactType /*impactType*/, std::optional<ProjectileId> projectileId, std::optional<UnitId> struckUnit)
     {
         // A Remote player's round sets nothing off here: not our units, which
         // its owner's 0x0b accounts for, and not a feature, which is the fire
         // starter's to ignite.
         if (!isRemoteRound(*this, projectile))
         {
-            applyDamageInRadius(projectile.position, projectile.damageRadius, projectile);
+            if (struckUnit && projectile.damageRadius <= SmallestSpreadingBlastRadius)
+            {
+                // areaofeffect 16 or less AND a unit that was struck (0x49A049,
+                // 0x49A053): one hit at scale 1.0 on that unit and nothing
+                // else, neighbours and features included. A round with no
+                // unit, or a bigger blast, goes through the area routine.
+                // BT-112.
+                auto weaponIt = weaponDefinitions.find(projectile.weaponType);
+                auto paralyzer = weaponIt != weaponDefinitions.end() && weaponIt->second.paralyzer;
+                if (auto struck = tryGetUnitState(*struckUnit); struck && !struck->get().isDead())
+                {
+                    applyDamage(*struckUnit, projectile.getDamage(struck->get().unitType), projectile.attacker, paralyzer, projectile.owner, "weapon", false, projectile.position);
+                }
+            }
+            else
+            {
+                applyDamageInRadius(projectile.position, projectile.damageRadius, projectile);
+            }
 
             if (auto it = weaponDefinitions.find(projectile.weaponType); it != weaponDefinitions.end() && it->second.fireStarter > 0)
             {
@@ -4431,8 +4469,8 @@ namespace rwe
                             events.push_back(ProjectileDiedEvent{id, projectile.weaponType, projectile.position, impactDeath});
                         }
                     },
-                    [&](const ProjectileCollisionInfoUnitOrFeatureOrBuilding&) {
-                        doProjectileImpact(projectile, impactType);
+                    [&](const ProjectileCollisionInfoUnitOrFeatureOrBuilding& hit) {
+                        doProjectileImpact(projectile, impactType, std::nullopt, hit.struckUnit);
                         if (noExplode)
                         {
                             events.push_back(ProjectileDetonatedEvent{projectile.weaponType, projectile.position, inWater});
