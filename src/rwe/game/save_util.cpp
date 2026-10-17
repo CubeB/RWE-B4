@@ -83,7 +83,7 @@ namespace rwe
             return match(
                 s,
                 [](const WinStatusWon& w) { return json{{"kind", "won"}, {"winner", w.winner.value}}; },
-                [](const WinStatusDraw&) { return json{{"kind", "draw"}}; },
+                [](const WinStatusNoSurvivors&) { return json{{"kind", "nosurvivors"}}; },
                 [](const WinStatusUndecided&) { return json{{"kind", "undecided"}}; });
         }
 
@@ -94,9 +94,10 @@ namespace rwe
             {
                 return WinStatusWon{PlayerId(j.at("winner").get<unsigned int>())};
             }
-            if (kind == "draw")
+            // "draw" is what saves written before BT-191 call it.
+            if (kind == "nosurvivors" || kind == "draw")
             {
-                return WinStatusDraw();
+                return WinStatusNoSurvivors();
             }
             if (kind == "undecided")
             {

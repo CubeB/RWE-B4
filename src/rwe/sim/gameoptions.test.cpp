@@ -504,6 +504,93 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a simultaneous wipe is a defeat, not a draw (BT-191)", "[gameoptions]")
+    {
+        auto script = makeOptionsScript();
+        GameSimulation sim(makeOptionsTerrain(), 0u, 0, 0);
+        auto a = addOptionsPlayer(sim, "a");
+        auto b = addOptionsPlayer(sim, "b");
+        defineOptionsUnit(sim, "tank", 100u);
+        addOptionsUnit(sim, "tank", a, SimVector(0_ss, 0_ss, 0_ss), script);
+        addOptionsUnit(sim, "tank", b, SimVector(64_ss, 0_ss, 0_ss), script);
+
+        sim.killPlayer(a);
+        sim.killPlayer(b);
+        sim.tick();
+
+        // Nobody is left to be credited with anything.
+        REQUIRE(std::holds_alternative<WinStatusNoSurvivors>(sim.computeWinStatus()));
+
+        // And neither seat shares a victory that nobody has.
+        REQUIRE_FALSE(sim.sharesVictory(a, b));
+        REQUIRE_FALSE(sim.sharesVictory(b, a));
+    }
+
+    TEST_CASE("every surviving teammate shares the win (BT-192)", "[gameoptions]")
+    {
+        auto script = makeOptionsScript();
+        GameSimulation sim(makeOptionsTerrain(), 0u, 0, 0);
+        std::vector<PlayerId> ids;
+        for (int i = 0; i < 4; ++i)
+        {
+            auto id = addOptionsPlayer(sim, "p" + std::to_string(i));
+            // 0 and 1 against 2 and 3.
+            sim.getPlayer(id).teamId = i < 2 ? 1 : 2;
+            ids.push_back(id);
+        }
+        defineOptionsUnit(sim, "tank", 100u);
+        for (int i = 0; i < 4; ++i)
+        {
+            addOptionsUnit(sim, "tank", ids[i], SimVector(SimScalar(i * 64.0f), 0_ss, 0_ss), script);
+        }
+
+        sim.killPlayer(ids[2]);
+        sim.killPlayer(ids[3]);
+        sim.tick();
+
+        auto status = sim.computeWinStatus();
+        REQUIRE(std::holds_alternative<WinStatusWon>(status));
+        auto winner = std::get<WinStatusWon>(status).winner;
+        REQUIRE(winner == ids[0]);
+
+        // The status names the lowest id, but the higher-numbered teammate
+        // wins too.
+        CHECK(sim.sharesVictory(ids[0], winner));
+        CHECK(sim.sharesVictory(ids[1], winner));
+
+        // The losers do not.
+        CHECK_FALSE(sim.sharesVictory(ids[2], winner));
+        CHECK_FALSE(sim.sharesVictory(ids[3], winner));
+    }
+
+    TEST_CASE("a dead teammate has taken the defeat (BT-192)", "[gameoptions]")
+    {
+        auto script = makeOptionsScript();
+        GameSimulation sim(makeOptionsTerrain(), 0u, 0, 0);
+        std::vector<PlayerId> ids;
+        for (int i = 0; i < 3; ++i)
+        {
+            auto id = addOptionsPlayer(sim, "p" + std::to_string(i));
+            sim.getPlayer(id).teamId = i < 2 ? 1 : 2;
+            ids.push_back(id);
+        }
+        defineOptionsUnit(sim, "tank", 100u);
+        for (int i = 0; i < 3; ++i)
+        {
+            addOptionsUnit(sim, "tank", ids[i], SimVector(SimScalar(i * 64.0f), 0_ss, 0_ss), script);
+        }
+
+        sim.killPlayer(ids[1]);
+        sim.killPlayer(ids[2]);
+        sim.tick();
+
+        auto status = sim.computeWinStatus();
+        REQUIRE(std::holds_alternative<WinStatusWon>(status));
+        auto winner = std::get<WinStatusWon>(status).winner;
+        CHECK(sim.sharesVictory(ids[0], winner));
+        CHECK_FALSE(sim.sharesVictory(ids[1], winner));
+    }
+
     TEST_CASE("what losing the commander costs", "[gameoptions]")
     {
         auto script = makeOptionsScript();

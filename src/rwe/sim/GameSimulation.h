@@ -153,13 +153,18 @@ namespace rwe
     {
         PlayerId winner;
     };
-    struct WinStatusDraw
+    /**
+     * Every player is out. There is no draw in the original (BT-191): the
+     * defeat test counts the local player's own units and runs before the
+     * victory test, so a simultaneous wipe is a defeat for every machine.
+     */
+    struct WinStatusNoSurvivors
     {
     };
     struct WinStatusUndecided
     {
     };
-    using WinStatus = std::variant<WinStatusWon, WinStatusDraw, WinStatusUndecided>;
+    using WinStatus = std::variant<WinStatusWon, WinStatusNoSurvivors, WinStatusUndecided>;
 
     struct FireWeaponEvent
     {
@@ -1000,6 +1005,15 @@ namespace rwe
          * same player. A player with no team has no allies but itself.
          */
         bool arePlayersAllied(PlayerId a, PlayerId b) const;
+
+        /**
+         * Whether `player` shares the victory that `winner` is credited with
+         * (BT-192). Victory is evaluated for each local player: a teammate
+         * still in the game wins with the team, a teammate already out has
+         * taken the defeat. Only the sides decide this; a mission names its
+         * own winner, who alone wins.
+         */
+        bool sharesVictory(PlayerId player, PlayerId winner) const;
 
         /**
          * Forgets every player and the visibility that belongs to them. The

@@ -546,8 +546,10 @@ namespace rwe
 
         return match(
             *gameOver,
-            [&](const WinStatusWon& w) { return w.winner == localPlayerId; },
-            [&](const WinStatusDraw&) { return false; },
+            // Every surviving member of the winning side wins, not only the one
+            // the status names (BT-192).
+            [&](const WinStatusWon& w) { return simulation.sharesVictory(localPlayerId, w.winner); },
+            [&](const WinStatusNoSurvivors&) { return false; },
             [&](const WinStatusUndecided&) { return false; });
     }
 

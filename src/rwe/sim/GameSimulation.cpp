@@ -2625,7 +2625,7 @@ namespace rwe
             const auto& winner = *missionRules->outcome == MissionOutcome::Victory ? missionRules->human : missionRules->computer;
             if (!winner)
             {
-                return WinStatusDraw();
+                return WinStatusNoSurvivors();
             }
             return WinStatusWon{*winner};
         }
@@ -2675,7 +2675,7 @@ namespace rwe
             return WinStatusWon{*livingPlayer};
         }
 
-        return WinStatusDraw();
+        return WinStatusNoSurvivors();
     }
 
     bool GameSimulation::addResourceDelta(const UnitId& unitId, const Energy& energy, const Metal& metal, ResourceDebtGate gate)

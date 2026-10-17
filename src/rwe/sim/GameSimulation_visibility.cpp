@@ -199,6 +199,22 @@ namespace rwe
         return first.has_value() && second.has_value() && *first == *second;
     }
 
+    bool GameSimulation::sharesVictory(PlayerId player, PlayerId winner) const
+    {
+        if (player == winner)
+        {
+            return true;
+        }
+
+        // A mission names its own winner, who alone wins.
+        if (missionRules)
+        {
+            return false;
+        }
+
+        return players.at(player.value).status == GamePlayerStatus::Alive && arePlayersAllied(player, winner);
+    }
+
     bool GameSimulation::isVisibleTo(PlayerId player, const SimVector& position) const
     {
         return playerVisibility.at(player.value).isVisible(visionCellAt(position));
