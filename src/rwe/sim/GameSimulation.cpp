@@ -4758,9 +4758,27 @@ namespace rwe
         // run resource updates once per second
         if (gameTime % GameTime(SimTicksPerSecond) == GameTime(0))
         {
+            // Which players settle (BT-28, the gate in 0x464F80): one this
+            // machine simulates, that has units or has never had any. A player
+            // that has created units and now has none is out of the game, and
+            // its economy stops where it stood.
+            std::vector<bool> hasLivingUnit(players.size(), false);
+            for (const auto& entry : units)
+            {
+                if (!entry.second.isDead() && entry.second.owner.value < players.size())
+                {
+                    hasLivingUnit[entry.second.owner.value] = true;
+                }
+            }
+            std::vector<bool> settles(players.size(), false);
             for (Index i = 0; i < getSize(players); ++i)
             {
-                if (!simulatesLocally(*this, PlayerId(i)))
+                settles[i] = simulatesLocally(*this, PlayerId(i)) && (hasLivingUnit[i] || !players[i].hasCreatedUnits);
+            }
+
+            for (Index i = 0; i < getSize(players); ++i)
+            {
+                if (!settles[i])
                 {
                     continue;
                 }
@@ -4773,7 +4791,7 @@ namespace rwe
             for (auto& entry : units)
             {
                 auto& unit = entry.second;
-                if (!simulatesLocally(*this, unit.owner))
+                if (unit.owner.value >= players.size() || !settles[unit.owner.value])
                 {
                     continue;
                 }
@@ -4805,7 +4823,7 @@ namespace rwe
             {
                 const auto& unitId = entry.first;
                 auto& unit = entry.second;
-                if (!simulatesLocally(*this, unit.owner))
+                if (unit.owner.value >= players.size() || !settles[unit.owner.value])
                 {
                     continue;
                 }
@@ -4899,7 +4917,7 @@ namespace rwe
             // is paid before anything new.
             for (Index i = 0; i < getSize(players); ++i)
             {
-                if (!simulatesLocally(*this, PlayerId(i)))
+                if (!settles[i])
                 {
                     continue;
                 }

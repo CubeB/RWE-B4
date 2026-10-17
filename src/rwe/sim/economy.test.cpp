@@ -199,6 +199,42 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a player that has created units and has none stops settling", "[economy]")
+    {
+        // BT-28 (the gate in 0x464F80): the settle runs for a slot with units
+        // or one that has never had any. One that had some and lost them all
+        // is out of the game and its stockpile stays where it stood, where it
+        // used to be clamped to the (now empty) storage every second.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);
+        auto player = addPlayerWithResources(sim, 500.0f, 500.0f, 0.0f);
+
+        SECTION("a player that never had a unit still settles")
+        {
+            tickOneSecond(sim);
+            REQUIRE(sim.getPlayer(player).maxMetal == Metal(0.0f));
+            REQUIRE(sim.getPlayer(player).metal == Metal(0.0f));
+        }
+
+        SECTION("one that had units and has none keeps its stockpile")
+        {
+            sim.getPlayer(player).hasCreatedUnits = true;
+            tickOneSecond(sim);
+            REQUIRE(sim.getPlayer(player).metal == Metal(500.0f));
+            REQUIRE(sim.getPlayer(player).energy == Energy(500.0f));
+        }
+
+        SECTION("one that has a unit settles")
+        {
+            sim.getPlayer(player).hasCreatedUnits = true;
+            sim.unitDefinitions["inert"] = makeInertDef(50.0f);
+            addUnitOfType(sim, "inert", player, SimVector(100_ss, 0_ss, 100_ss), script);
+            tickOneSecond(sim);
+            REQUIRE(sim.getPlayer(player).maxMetal == Metal(50.0f));
+            REQUIRE(sim.getPlayer(player).metal == Metal(50.0f));
+        }
+    }
+
     TEST_CASE("a consumer is refused while it owes for earlier work", "[economy]")
     {
         auto script = makeEmptyCobScript();
