@@ -499,6 +499,14 @@ namespace rwe
         auto script = makeDgunScript();
 
         auto runShot = [&script](bool noExplode, std::vector<UnitId>& victims, GameSimulation& sim) {
+            // The shooter picks its own target, and which of the four it picks
+            // is a draw from the simulation's generator weighted by squared
+            // range. The distances below are measured for the pick the
+            // nearest makes, so the case pins a seed that makes it rather than
+            // leaving it to whatever the draws before the shot happen to be:
+            // changing the wind's draws (BT-26, BT-130) moved them, and one
+            // seed in three or so picks another victim first.
+            sim.rng.seed(2u);
             auto us = addDgunPlayer(sim, "us", 100000.0f, 100000.0f);
             auto them = addDgunPlayer(sim, "them", 1000.0f, 1000.0f);
             registerDgunModel(sim);
