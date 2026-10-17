@@ -33,4 +33,22 @@ namespace rwe
      * site, and a placement order on one would only sit in its queue.
      */
     bool buildClickTakesUnit(bool isBuilder, bool isMobile);
+
+    /** A builder's menu as the panel shows it: whether the build menu is up, and which page of it. */
+    struct BuildMenuPosition
+    {
+        bool open;
+        unsigned int page;
+    };
+
+    /**
+     * One step of the build menu's paging (BT-104). `toggle` is the original's
+     * argument of the same name: the NEXT and PREV buttons pass it clear, so
+     * the page wraps and the menu stays open; the period and comma keys pass it
+     * set, so stepping off either end closes the menu and a step from closed
+     * opens page one (forward) or the last page (backward). Backward closing at
+     * the first page is the mirror of the decoded forward case, not a decoded
+     * one. A unit with no pages is left as it was.
+     */
+    BuildMenuPosition stepBuildMenu(BuildMenuPosition position, unsigned int pageCount, bool forward, bool toggle);
 }

@@ -180,18 +180,35 @@ namespace rwe
         else if (keysym.key == SDLK_COMMA || keysym.key == SDLK_PERIOD)
         {
             // ',' and '.' page the selected builder's build menu, the
-            // original's default paging keys.
+            // original's default paging keys. They page with the toggle
+            // argument set (BT-104, 0x41BDE0 and 0x41BF10): stepping past
+            // the last page closes the menu, and stepping from closed opens
+            // the first page going forward or the last going back. The
+            // panel's NEXT and PREV buttons pass it clear and wrap. The
+            // sound plays whether or not there is a unit to page.
+            if (sounds.nextBuildMenu)
+            {
+                sceneContext.audioService->playSound(*sounds.nextBuildMenu);
+            }
             if (auto selectedUnit = getSingleSelectedUnit())
             {
-                auto pages = getBuildPageCount(builderGuisDatabase, getUnit(*selectedUnit).unitType);
-                if (pages > 1)
+                const auto& unit = getUnit(*selectedUnit);
+                auto pages = getBuildPageCount(builderGuisDatabase, unit.unitType);
+                if (pages > 0)
                 {
                     auto& guiInfo = getGuiInfo(*selectedUnit);
-                    auto step = keysym.key == SDLK_PERIOD ? 1u : pages - 1u;
-                    guiInfo.currentBuildPage = (guiInfo.currentBuildPage + step) % pages;
-                    guiInfo.section = UnitGuiInfo::Section::Build;
-                    const auto& unit = getUnit(*selectedUnit);
-                    if (auto buildPanelDefinition = getBuilderGui(builderGuisDatabase, unit.unitType, guiInfo.currentBuildPage))
+                    auto next = stepBuildMenu(
+                        BuildMenuPosition{guiInfo.section == UnitGuiInfo::Section::Build, guiInfo.currentBuildPage},
+                        pages,
+                        keysym.key == SDLK_PERIOD,
+                        true);
+                    guiInfo.currentBuildPage = next.page;
+                    guiInfo.section = next.open ? UnitGuiInfo::Section::Build : UnitGuiInfo::Section::Orders;
+                    if (!next.open)
+                    {
+                        setNextPanel(createOrdersPanel());
+                    }
+                    else if (auto buildPanelDefinition = getBuilderGui(builderGuisDatabase, unit.unitType, guiInfo.currentBuildPage))
                     {
                         setNextPanel(createBuildPanel(unit.unitType + std::to_string(guiInfo.currentBuildPage + 1), *buildPanelDefinition, unit.getBuildQueueTotals()));
                     }
