@@ -108,8 +108,9 @@ What is written faithfully:
 - **The `0x28` cadence** is the corpus's 120 ticks, landing on a settle; the
   six cumulative floats are RWE's produced and excess figures, since which
   corpus slot is which is not settled (see the `0x28` section).
-- **One `0x19` per sender** at game start, value 256 -- normal speed -- which
-  is what the corpus's first record carries (demo 14724 tick 0). RWE has no
+- **One `0x19` per sender** at game start, the two bytes after the type being `00 01`:
+  subtype 0, value 1, a pause-on, and not "256, normal speed" (BT-178). Subtype 1
+  is the speed, with the level as the value. RWE has no
   pause and no speed setting, so there is nothing later to say.
 
 What is a recorded divergence (ADR-0001):
@@ -377,7 +378,7 @@ the code did not appear; those lengths are the reference's and are unverified.
 |---|---|---|---|
 | `0x00` | run of zeros | | padding |
 | `0x02` | 13 | | ping |
-| `0x03` | 7 | | ? |
+| `0x03` | 3 | | ? (no case in the dispatch; ignored) |
 | `0x05` | 65 | 3,906 | chat (see below) |
 | `0x06` | 1 | 20,511 | encryption pad |
 | `0x07` | 1 | 30,577 | ? |
@@ -392,7 +393,7 @@ the code did not appear; those lengths are the reference's and are unverified.
 | `0x10` | 22 | 1,729,546 | unit script call |
 | `0x11` | 4 | 265,734 | unit state |
 | `0x12` | 5 | 105,617 | build finished |
-| `0x13` | **unknown** | | play sound |
+| `0x13` | 18 | | play sound (mask 7) |
 | `0x14` | 24 | 548 | give unit |
 | `0x15` | 1 | 17,311 | start |
 | `0x16` | 17 | 56,442 | share resources |
@@ -401,6 +402,8 @@ the code did not appear; those lengths are the reference's and are unverified.
 | `0x19` | 3 | 710 | game speed / pause / unpause |
 | `0x1a` | 14 | | unit type data |
 | `0x1b` | 6 | 222 | reject / take command |
+| `0x1c` | 5 | | player dropped (mask 7) |
+| `0x1d` | 9 | | a case exists, but its mode mask is never written, so the walker's mode test discards it in every mode |
 | `0x1e` | 2 | 48 | start |
 | `0x1f` | 5 | 74 | ? |
 | `0x20` | **186** | 1,123 | player info (see below) |
@@ -408,7 +411,9 @@ the code did not appear; those lengths are the reference's and are unverified.
 | `0x22` | 6 | | ident |
 | `0x23` | 14 | 5,638 | alliance |
 | `0x24` | 6 | 1,123 | team |
+| `0x25` | 5 | | lobby only; no case, ignored |
 | `0x26` | 41 | | ident |
+| `0x27` | 17 | | integrity warning (mask 7) |
 | `0x28` | 58 | 469,842 | resource statistics |
 | `0x29` | 3 | 726 | ? |
 | `0x2a` | 2 | 19,728 | loading progress |
@@ -416,7 +421,7 @@ the code did not appear; those lengths are the reference's and are unverified.
 | `0x2e` | 9 | | ? |
 | `0x42` | `s[1] \| s[2]<<8` + 3 | | Thaldren extension |
 | `0xf6` | 1 | | ? |
-| `0xf9` | 73 | 2,873 | ally chat |
+| `0xf9` | 73 | 2,873 | the recorder's rendering of a **directed** chat: a `0x05` addressed to one recipient, with the code byte, two DirectPlay ids and the 64-byte body. Never a wire code (the receive dispatcher handles codes 2 to 44 only); on a live connection allied chat is a plain `0x05` sent only to the allies, and the label is inside the text |
 | `0xfa` | 1 | | replay server |
 | `0xfb` | `s[1]` + 3 | 5,343 | recorder-to-recorder data |
 | `0xfc` | 5 | 170,520 | map position |
@@ -442,11 +447,15 @@ measured 192 in the corpus. So the reference has the long form's length in the
 table used to walk the short form. Both numbers are real; they belong to
 different places.
 
-**`0x13` has no length.** The reference names `PLAY_SOUND_13` in its enum and
-then omits it from the size switch, so it falls through to zero. That hole is
-left open here rather than guessed at -- `tad_probe` reports an unsized code
-loudly, and `0x13` did not appear once in 12.2 million subpackets, so there is
-nothing yet to calibrate a guess against.
+**`0x13` is 18 bytes.** The reference names `PLAY_SOUND_13` in its enum and omits it
+from the size switch, so it falls through to zero; the live size table, filled by the
+start-up initialiser, gives 18 (mask 7, the sound). It did not appear once in the
+corpus. The reference's `0x03` of 7 was its own marked guess; the table gives 3
+(BT-227). Every other size in the table above matches the initialiser's stores.
+`tad_probe` over the four local demos reads byte-identically before and after the
+`0x03` change (commit b5ee83ee), so the corpus neither confirms nor refutes it. The
+mode masks (lobby 1, loading 2, battle 4) are tested against the game-state word at
+`0x391F1`.
 
 **`0x05` is not simply 65.** If byte 64 is not a NUL, an older recorder has
 emitted more text than it should -- as a single packet, so the whole remaining
@@ -1962,8 +1971,19 @@ reading, and the corpus agrees with it.
 
 ### `0x28`, resource statistics -- 58 bytes, 40 of them read
 
-Seventeen bytes, then ten IEEE-754 floats, emitted about every 120 ticks per
-player. The first four are settled by watching them move over whole games:
+The type byte, then seventeen bytes (one **share flag** and four counters, each a
+16-bit value the sender widens to 32 bits, taken from offsets `0xFC`, `0xFE`,
+`0x104` and `0x106` of the player record), then ten IEEE-754 values, emitted about
+every 120 ticks per player: four 32-bit values (metal stock, energy stock, and the
+two storage figures) and six floats. 1 + 1 + 16 + 16 + 24 = 58. The receiver
+stores all of it into the sender's record and, when the flag byte is non-zero,
+answers with the three-byte `0x29`, which sets the view-handshake flags
+(BT-231). The flag is "prefix byte 0" below; the four counters are the values
+the reference calls kills and losses, though which statistic each counts was not
+traced to its increment sites. RWE fills the first two from a player's kills and
+losses, saturating at 16 bits, and leaves the other two and the flag at zero
+(commit ea097dc6).
+ The first four are settled by watching them move over whole games:
 
 | Slot | Field | Why |
 |---|---|---|
@@ -2009,7 +2029,7 @@ include the sender's). 255 match nothing, which is what a build whose `0x09`
 preceded the recording looks like. So the sender's record tracks the sender's
 own buildings.
 
-The one field that ever varies within a burst is **prefix byte 0**, in 19 bursts
+The one field that ever varies within a burst is **prefix byte 0** -- the share flag, set on a flagged reply -- in 19 bursts
 of the 60,445. It reads 1 rather than 0 only in a game's closing seconds, and
 there the records arrive every five ticks instead of every 120 -- so those are
 two successive samples landing on one tick, not a per-recipient field. The
@@ -3599,8 +3619,6 @@ They catch different things and should not share machinery.
   `maxUnits` ticks, so the kinematic corpus hoped for below is not in the stream.
 - What `0x07` (30,577) and `0x0a` (94,445) are. Both are common enough to be
   something ordinary and both are `UNK_` in the reference.
-- The length of `0x13`, which the reference never had, and which nothing in the
-  corpus exercises.
 - **What computes a `0x1a` id.** ~~The id itself is content-derived and resists
   every name hash tried against it.~~ **Answered**: `taChecksum` (`0x4B6BA0`)
   over the raw FBI bytes, docs/TOTALA-EXE-DATA.md §117, all 278 of the GOG

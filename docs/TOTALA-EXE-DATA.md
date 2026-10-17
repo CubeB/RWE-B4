@@ -132,8 +132,11 @@ part of this section) and calls `0x472C50` at `0x423FE3` with **particle layer
 4**.
 
 `0x472C50` allocates a 52-byte emitter, constructs it at `0x4750B0` (vtable
-`0x4FD638`) and files it in the layer. Each of the ten layers of §5 holds at
-most 400 entries and drops its oldest to make room (`0x472CD9`).
+`0x4FD638`) and files it in the layer. Each of the ten layers of §5 drops its
+oldest system only when it already holds more than 400, so a layer settles at
+401 after an append (`0x472CD9`; the other nineteen creation sites between
+`0x471183` and there carry the same compare). At that scale nothing is
+observable, and RWE has no cap.
 
 The class is laid out exactly like the smoke emitter of §4, and the two share
 the puff record and most of the behaviour:
@@ -242,12 +245,18 @@ the game, the emitter is not part of unit or feature state, and the trigger is
 a plain tick count rather than a script or a random roll. Nothing was added to
 `GameHash_util.cpp` or `dump_util.cpp` for the same reason.
 
+The vent's steam is made and drawn wherever the ground is *explored*, dimmed
+like remembered ground when out of sight, because the vent emitter's own draw
+routine (`0x475700`) has no visibility test (BT-151).
+
 Not ported:
 
-- **The layer.** RWE depth-tests particles against world Y rather than placing
-  them in ten hand-ordered buckets (§5), so the vent's layer 4 has no
-  equivalent. In practice this puts the steam behind a geothermal plant built
-  over it either way.
+- **The layer.** RWE has no ten hand-ordered buckets to place the vent's layer 4
+  in (§5). Every sprite particle is drawn over the finished frame with the
+  depth test off, so the vent's steam is in front of everything in the world,
+  a geothermal plant built over it included. Where layer 4 falls against the
+  world list in the original was not traced here, so whether the original's
+  steam shows in front of a plant built over the vent is not settled.
 - **The `blocking`/`indestructible` guard on the geo grid.** RWE only stamps
   `geoGrid` for a feature that is non-blocking *and* indestructible as well as
   geothermal; `0x47D708` tests the geothermal bit alone. Every vent in the

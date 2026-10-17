@@ -156,12 +156,17 @@ of a player's ids, is how a player leaves.
 `tadSplitSubPackets`. Uncompressed packets (type `0x03`) were accepted for unit sync and status,
 where TA itself sends compressed ones.
 
-**The `u32` is a per-sender count, and a reply is the one value it is not.** It is `0xffffffff` on
-every reply. On everything a sender starts itself it falls by one per packet: a joining TA's own
-traffic runs `0xfffffffe`, `0xfffffffd`, `0xfffffffc` and on, and in all three recordings both
-peers begin one below `0xffffffff`, so a sender's own status, its pings, the launch exchange and
-the in-game `0x2c` all carry a count, while the unit sync that answers someone else's request
-carries `0xffffffff` and does not consume one. It is not a clock and nothing seen depends on it --
+**The `u32` is a per-channel count, and the channel depends on how the send is made.** The packet
+manager keeps a channel for everyone and one per other player. A send on the **everyone**
+channel -- the broadcast send, which every sender's status, pings, launch exchange and in-game
+bundles use, even when it names a single destination -- writes the channel's counter and lowers
+it by one; a send on a **per-player** channel -- the directed send, used for replies, the unit
+sync and directed chat -- writes minus one, `0xffffffff` (BT-207, `0x462600`-`0x462698`).
+So a sender's own traffic runs `0xfffffffe`, `0xfffffffd`, `0xfffffffc` and on, both peers
+beginning one below `0xffffffff` in all three recordings, while the unit sync that answers
+someone else's request carries `0xffffffff` and does not consume one. This is not "request
+versus reply" but broadcast versus directed. A broadcast takes **one** value for the whole
+bundle: RWE numbers it once and sends the same bundle to each peer (commit 30f91c72). It is not a clock and nothing seen depends on it --
 a replay writes `0xfffffead`, and a real host's first own packet in a recording can already be
 seventy packets down -- so `0xffffffff` is a safe value to send anywhere.
 
@@ -222,15 +227,26 @@ time:
 |---|---|
 | `0x06` | LOS: True `0x06`, Circular `0x02`, Permanent `0x00` |
 | `0x01` | set for Unmapped |
-| `0x08`, `0x10` | Game Ends and Deathmatch; neither is Continues |
-| `0x20` | cheats allowed (from gpgnet4ta; TA shows it, but `+los` did nothing with it set) |
-| `0x40` | always set; not identified |
+| `0x08`, `0x10` | The commander rule: `0x08` Game Ends, `0x10` Deathmatch (a respawn), neither is Continues |
+| `0x20` | Cheat Codes (the bit the talk dialog reads for the console's cheat mask; TA shows it, but `+los` did nothing with it set) |
+| `0x40` | fixed start positions: set means consecutive, clear means shuffled |
+| `0x80` | closed (the host's GAMEOPEN button toggles it); a closed room refuses a joiner with reason 3 |
 
-The default is `0x4f`. A mapped game with permanent LOS, `0x48`, shows the other player's units
+The byte is the high byte of a 16-bit word in the host's colour record, so these are word bits 8
+to 15 (BT-234, BT-242). The default RWE sends is `0x47`: LOS True, Unmapped, fixed start
+positions, and **neither** commander bit, because RWE plays Continues. A captured host's `0x4f`
+has `0x08` set, which a joining TA takes from the host and applies to its own commander
+(commit c77799d9). A mapped game with permanent LOS, `0x48`, shows the other player's units
 without an alliance or cheats.
 
-**A silent host is offered for rejection.** A real host sends a `0x07` and a
-`06 26 20 24` status about every two seconds and answers every ping. When the fake host stopped
+**A silent host is offered for rejection.** A real host sends the `02` ping, a `06` probe and
+then the `26`, `20` and `24` republications about every two seconds, and answers every `06`
+with a one-byte `07` and every ping with a ping (BT-241). The `07` handler only sets a
+keepalive flag on the sender's record; the silence judgement is the last-heard time over any
+message. The `02` is the one message that goes **non-guaranteed**, as a datagram on the
+TCP/IP provider; everything else, the `06` included, goes guaranteed on the stream (BT-240,
+pinned by commit d8c61e2d). RWE's host still sends its `07` unsolicited with every keepalive,
+which the captures cannot tell from the original's output. When the fake host stopped
 sending, the joiner put up "*player* will be rejected in *N* seconds" with a Reject Now button;
 with the keepalive and live pings it waited in the battleroom indefinitely. **Pings must be
 answered live**: replayed ones carry another game's clock and show as an absurd ping.
@@ -253,7 +269,7 @@ soon as someone has joined.
 **A joiner is given its colour.** It arrives with colour `0xff` and asks with
 `17 <colour>`; the host grants with `18 <colour>`, the one asked for if free,
 otherwise the next free one, as a reply. After the first grant the host numbers
-every player once with `22 <id> <n>`, joiners from 2 and itself as 1. A TA
+every player once with `22 <id> <n>`, joiners from 2 and itself as 1. The `n` is a machine-group number, not a player number (BT-229). A TA
 never answered loads the game as colour `0xff` and crashes just after the
 loading screen.
 
@@ -267,11 +283,17 @@ are not the game TA's host refuses.
 The `0x1a` exchange that TA-DEMOS reads as a table is a conversation:
 
 1. The host sends one sub-type 0 record, then each of its unit ids as a sub-type 3 record with
-   status `0x0001` and limit `0xffff`, sorted.
+   status `0x0001` and limit `0xffff`, sorted. The status is a permission byte and an
+   availability byte, and the limit a signed 16-bit number (so `0xffff` is minus one, "no
+   limit"): `0x0001` is permission one with availability **zero**, the recheck sent before the
+   joiner has reported its key (BT-211).
 2. The joiner sends sub-type 1 with its count of unit types (278 in the GOG install), then
    sub-type 2 for each: its id and its CRC.
 3. The host answers each batch of the joiner's ids, in the joiner's order, with sub-type 3
-   records of status `0x0101`: in use.
+   records of status `0x0101`: availability one, which is to say reported and, for a joiner
+   that announces version 2 or later (or 1.2 or later), checksum-matched. It is not "in use".
+   An availability of zero after the report would be a mismatch, which is how a TA host tells
+   a joiner a unit is unavailable (BT-211).
 4. The joiner sends sub-type 4 records counting what it has received, until the count reaches
    `1 + 2n` (557), and repeats that until launch.
 
@@ -286,8 +308,15 @@ and not for the last batch.
 0 record at CREATEPLAYER, and answers each batch of the joiner's sub-type 2 records with a
 `0x0001` and a `0x0101` record per id. The joiner counted to 557 and launched as it does with a
 real host. The ids are content-derived and the fake host never computes one: it only echoes. A
-TA host checks a joiner's CRCs against its own, so **an RWE that joins still needs them**,
-computed or harvested from demos for the data sets that matter.
+TA host checks a joiner's CRCs against its own, and "CRCs" means two checks: the unit's key
+(`TaChecksums`'s checksum), always, and the script checksum (`0x42A610`, the exclusive-or of
+the four-byte checksums of the unit's script, its gui files and its download description,
+and a stored term at `+0x146`), only when the joiner's announced version is major 2 or later,
+or 1 with a minor of 2 or later (`0x46DA40`-`0x46DA67`). The version is two bytes in the
+joiner's `0x20` status, bytes 166 and 167, where the template's `0x0103` is major 3 then minor
+1. A retail 3.1 joiner therefore triggers both, **so an RWE that joins and copies 3.1 still
+needs both**, computed or harvested from demos for the data sets that matter; announcing a
+lower version would skip the second but may change other host behaviour (BT-210).
 
 ## Launch
 
@@ -302,6 +331,19 @@ and SESSIONDESCCHANGED goes out twice: the captures have it once as the `0x1e` i
 after the move to UDP. `TaBattleroom::LaunchParams` takes the commander's type index, unit id,
 position and rotation, because they are the game's to decide and not the wire's; the `0x11` byte
 after the unit id is `1` in every capture and is passed through unchanged.
+
+**`0x1e` is the recipient's start-position index, not "the game starts".** The host walks the ten
+slots during the launch (`0x456B20`-`0x456CC6`) and sends each remote human a two-byte `0x1e`
+carrying that slot's index; the receiver stores it in its player record (offset `0x147`) and
+answers with a five-byte `0x1f` carrying its own id, which marks the slot acknowledged. The
+host keeps resending `0x1e` to any slot not yet acknowledged and then broadcasts `0x15`. The
+index is consumed when the commander is placed. The captured `1` is the joiner's index with
+the host at zero. RWE resends the `0x1e` until the `0x1f` arrives and holds Start until the
+joiner's unit-sync count has reached `1 + 2n` (commit b1df89f9, BT-228, BT-212). `0x21` is a
+request naming one or two player ids, answered with a six-byte `0x22` (the type, the player's
+id and one byte) whose byte is the **machine group**, separate from the team byte; `0x26` is the
+host's table of ten ids, forty-one bytes with the type (BT-229). RWE sends `22 <id> <n>`
+unprompted once and does not answer a `0x21`, which is harmless for one joiner.
 
 **A host is a player in the game from the first `0x2c` it sends**, and each `0x2c` ends with the
 full state of one slot, so a host that owns one unit has to describe it once every `maxUnits`
@@ -341,11 +383,19 @@ them, both senders, byte for byte. Its type field is 9 bits for the GOG install'
 Decoded from `TotalA.exe` on 2026-09-28; the addresses and the receive case are in
 `TOTALA-EXE-MOVEMENT.md` §118.
 
-- **A record is applied the moment it arrives.** The `0x2c` case of the subpacket dispatch
-  (`0x4553EE` → `0x48B920`) reads the tick, walks the waypoint entries into the sender's units,
-  moves every one of the sender's units through `Mover::Update` (`0x43DD20`), and reads the
-  full-state record into slot `tick % maxUnits`. Nothing is queued and no clock is compared: a
-  record is never held for a tick to come round.
+- **The case applies a record the moment it is handed one.** The `0x2c` case of the subpacket
+  dispatch (`0x4553EE` → `0x48B920`) reads the tick, walks the waypoint entries into the
+  sender's units, moves every one of the sender's units through `Mover::Update` (`0x43DD20`),
+  and reads the full-state record into slot `tick % maxUnits`. Nothing in the case queues
+  anything or compares a clock. **Delivery to the case is another matter:** the dispatcher
+  (`0x453D40`, every frame) asks the packet manager (`0x462F30`) for the next command, and the
+  manager hands a sender's oldest queued command over only when its due tick is not later than
+  the game tick (or the game tick is zero, or the due tick is more than thirty ticks ahead).
+  The manager is on in the shipped game at its default pacing, and the splitter (`0x463790`)
+  gives a normal bundle smoothed due ticks: the spacing from the previous bundle in ticks,
+  clamped to 1 to 30, divided into the command count. On that reading a six-record bundle every
+  six ticks is released a record a tick, which is smoother than the measurement below; **the
+  six-tick jump measurement is not explained by it** (BT-204).
 - **A remote unit moves as its owner's records are applied, not on the receiver's clock.** This
   is measured rather than read: RWE hosting at six ticks to a message, as a real TA sends them,
   showed its commander to a real TA advancing in single-frame jumps every 0.40 s and standing
@@ -364,6 +414,13 @@ Decoded from `TotalA.exe` on 2026-09-28; the addresses and the receive case are 
 
 ### Why a TA flushes a packet early
 
+- **Six ticks is the packet manager's default pacing.** The default send interval is 200
+  milliseconds, which at thirty ticks a second is exactly six ticks; a configured frame rate
+  selects 1000 divided by the rate, clamped to 2 to 30 sends a second, and a negative
+  configured value turns the manager off. So the six-tick message is a property of the
+  manager and not of the `0x2c` stream, and the early flush on a ping request is its "forced"
+  send. RWE's one tick a message is thirty bundles a second, the clamp's own upper limit
+  (`BT-NETWORK-PACKETS-PARITY.md`, rule 3).
 - **A received ping request flushes the queued `0x2c`.** The `0x02` case (`0x454B2A` → `0x4565A0`)
   answers a request and at the same moment the queued unit-state subpackets are flushed, as a
   packet of their own. Measured over
@@ -431,7 +488,7 @@ joiner's own `0x2c`, `0x09`, `0x12`, `0x0d`, `0x0b` and `0x0c`.
 
 ```
 rwe --ta-host --map "Canal Crossing" --data-path ~/.ta
-    [--game-name rwe] [--side arm|core] [--colour 0] [--team 5] [--options 0x4f]
+    [--game-name rwe] [--side arm|core] [--colour 0] [--team 5] [--options 0x47]
     [--max-units 250] [--auto-launch] [--port-base 0] [--port 1337]
 ```
 
@@ -493,14 +550,20 @@ game carried on, but whether a real TA then resends, fights the peer, or drifts 
 known; the hook is one-way and affects nothing but the clock, so a later issue can try the other
 half from the wire without changing this one.
 
-**The scale of the `0x19` payload is inferred, and this is the one to check against a real TA.**
-Every sender puts 256 on the wire at game start and the corpus calls that normal speed, and the
-same code is what the Pause key broadcasts (TOTALA-EXE-INTERFACE.md §70) — so RWE reads the two
-bytes as 256ths of normal, 0 being the pause and 256 being 1x, which puts normal at level 10 and
-leaves RWE's own clock alone for the record every game opens with. The alternative reading, that
-the high byte is the level and 256 is therefore level 1, would put a game that had just started at
-the slowest step; nothing in the corpus settles it, and the level is not read out of a capture
-because no capture of the four contains a `0x19` at all.
+**The `0x19` payload is three bytes: the type, a subtype and a value (BT-178).** Subtype 0 is the
+pause: the value is the new pause bit, absolute (the sender toggles locally and sends the
+result), and the receiver stores its low bit. Subtype 1 is the game speed: the value is the new
+level, clamped to 1 to 20 by the speed setter on receipt as well as on send, normal being 10.
+The setter prints "Game Speed Normal" or "Game Speed  +N" / "Game Speed  -N" (N from 10) only
+when the level really changed, and the key handler broadcasts while the receiver does not. The
+earlier reading here, one 16-bit number in 256ths of normal with 0 the pause and 256 normal,
+was wrong: the record every sender puts out at game start, `00 01` after the type, is subtype 0,
+value 1, **a pause-on**, and a speed change to level 12 is `01 0C`, which as one little-endian
+number is 3073. RWE's host reads it as subtype and value, prints the speed line for a peer's
+change, and refuses to obey a pause-on before the first tick or before it has seen an unpause
+(commits 67000b11 and 4af294ca, #610). The consequence to watch: if a joiner never sends the
+unpause, an own-clock host sits paused. That start-up reading rests on the corpus's bytes and
+the executable, and has not been seen with a real TA joining.
 
 ## TA Forever
 
@@ -519,15 +582,18 @@ be with that project's agreement and identifying itself as RWE.
   scripted joiner, patched for its own player id, name and state byte. `TaBattleroom` builds one
   from fields over that same template, writing the six fields it knows and copying the rest; the
   fields a real host would fill in are not all identified.
-- **The DirectPlay player-info blob** in ADDFORWARDREQUEST and CREATEPLAYER: the ids, the two ports
-  and the name are read out of the recording, and the name field is four characters wide because
-  both captures have a four-character name. Nothing says whether DirectPlay would take a longer one.
+- **The DirectPlay player-info blob** in ADDFORWARDREQUEST and CREATEPLAYER: a 21-byte block, the
+  name field **16 characters plus a zero**, then the pair `(0, 0x50)` as two 16-bit values. A host
+  accepts a joiner only if the block is exactly 21 bytes and the first short is zero and the
+  second `0x50`; anything else is refused with reason 8 (`0x454362`, `0x454367`). The two are a
+  fixed tag, not a version. RWE caps a player's name at 16 characters, a game's at 16 and a
+  session's at 31, the session record's name field being 32 bytes (commit c77799d9, BT-209,
+  BT-210).
 - **Game speed**: a player's `0x19` reached a host that ignored it; what TA does when a peer
   does not follow a speed change was not tried. RWE follows it, through the own-clock mode
-  above; the other half is still open, to be tried once a peer exists. The scale RWE reads the
-  payload on is inferred from the corpus's one value and the pause broadcast, and is the first
-  thing to watch for in a real game: a `0x19` that puts RWE at the wrong speed, or a pause it
-  does not follow.
+  above; the other half is still open, to be tried once a peer exists. The payload is read as
+  subtype and value (BT-178), and the first thing to watch for in a real game is the start-up
+  `00 01`: a real TA joining should be seen to unpause, or RWE's host stays paused.
 - **The `0x0f` burst of a quit**: a quitting player's commander dies with cause 8 and a burst of
   `0x0f` records follows it. RWE sends the `0x0c` -- read out of the recorded host's own quit at
   ta-baseline.pcap 92.91 -- and the DELETEPLAYER, and leaves out the `0x0f`, whose payload TA-DEMOS
@@ -535,7 +601,7 @@ be with that project's agreement and identifying itself as RWE.
   a peer that sees a quieter exit.
 - **Resource statistics**: the host sent no `0x28` after the replay and nothing complained, but
   what the joiner then showed for the host's economy was not looked at.
-- **`0x40` in the options byte**, and why `+los` did nothing with cheats allowed.
+- **Why `+los` did nothing with cheats allowed.** (`0x40` is settled: fixed start positions, BT-234.)
 - **Byte 152.** 1 in a host's `0x20` and 0 in a joiner's, in all four captures,
   which is what bit 0 of the state byte also does; it is unidentified, and it was
   briefly the pair the side and the colour were thought to be in. Bytes 149 and

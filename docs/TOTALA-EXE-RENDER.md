@@ -1369,8 +1369,8 @@ display object by named stubs (names in `.data`: `ALPHA TABLE`,
 |---|---|---|---|---|
 | `PALETTE.PAL` | 1,024 | — | 256 x RGBA | the palette itself |
 | `PALETTE.ALP` | 65,536 | `+0xC0` (`0x4BA5C0`) | 256 x 256 | alpha blend: `out = mix(dst, src)` remap |
-| `PALETTE.SHD` | 8,192 | `+0xC4` (`0x4BA610`) | **32 rows x 256** | brightness ramp, row 0 = black, row 16 ~ identity, row 31 ~ 1.55x |
-| `PALETTE.LHT` | 8,192 | `+0xC8` (`0x4BA660`) | 32 rows x 256 | additive light ramp, row 0 = identity, row 31 ~ 1.5x |
+| `PALETTE.SHD` | 8,192 | `+0xC4` (`0x4BA610`) | **32 rows x 256** | brightness ramp, row 0 = black, rows 14 and 15 identity, row 31 averages 1.807x (SHADING §09) |
+| `PALETTE.LHT` | 8,192 | `+0xC8` (`0x4BA660`) | 32 rows x 256 | lighten-only ramp, row 0 = identity, row 31 averages 1.77x (§100) |
 | (computed) | 256 | `+0xCC`/`+0xD0` | 1 row | grey / blue remaps |
 
 Consumers pass `table + (level << 8)` — one 256-entry remap row per light

@@ -68,7 +68,13 @@ So `0x486360(unit, corpseLevel, mayBurn)`. **VERIFIED.**
 
 The severity the script is handed, and so the level it picks, is
 `clamp(1, 100, (100*overkill/maxdamage + unit[0xF7]) / 2)` — §22's formula,
-unchanged. A shipped `Killed` is a three-band ladder; `ARMAH.COB` is typical
+unchanged. `unit+0xF7` is the unit's health as a percentage at the second most
+recent once-a-second sample: on every tick whose number is a multiple of 30 the
+unit pass moves `unit+0xF6` into `unit+0xF7` and stores the new sample
+(`100 * health / maxhealth`, clamped to 0..100) in `unit+0xF6`
+(`0x48AE71`-`0x48AEAF`), so a kill reads the health the unit had 30 to 59 ticks
+earlier, and a unit at full health felled by one blow cannot come out below 50
+(BT-43). A shipped `Killed` is a three-band ladder; `ARMAH.COB` is typical
 (disassembled with the scratchpad's `cobdis.py`):
 
 ```
@@ -783,8 +789,9 @@ was changed; `src/rwe/sim/wreckcollision.test.cpp` pins it.
 ### The corpse level, done separately
 
 Since September 2026 this is ported too, and it was the bigger visible
-difference of the two. The severity is §22's formula — with `unit+0xF7` taken
-as zero, since that term has no known writer anywhere in the binary — and the
+difference of the two. The severity is §22's formula — with `unit+0xF7` the health
+sampled every 30 ticks (BT-43, ported 2026-10-17, commit 404f3c4d; until then
+RWE took it as zero) — and the
 level the script writes into its second parameter is read back and walked
 along the `featuredead` chain (`0x486379`–`0x4863AC`), so a unit blown apart
 hard leaves rubble or nothing where a gently killed one leaves the intact
@@ -889,9 +896,10 @@ mechanism §22 describes is the one running in the recordings.
   same corpse as one it blows apart. Since September 2026 RWE derives the
   severity properly (see the section above) -- these numbers are the check on
   that port, and the thresholds table is the shape any test of it should assert.
-- **`unit+0xF7` is still unidentified**, and this cannot identify it: the term
-  is additive inside the same clamp as the overkill, so no amount of counting
-  deaths separates them without `maxdamage`. What can be said is that the
+- **`unit+0xF7` is identified** (BT-43): the health percentage at the second
+  most recent 30-tick sample. This corpus still cannot separate it from the
+  overkill term, which is why the counting below could not name it; the reading
+  comes from the unit pass. What can be said is that the
   distribution does not *require* a large `F7` -- 88% of the deaths with no
   recorded prior damage are pinned at 100, and a single blow bigger than twice a
   unit's health does that on its own.
@@ -962,9 +970,19 @@ with a respawn, written at `0x449DF1`. So under "game ends" **the defeated
 player's whole army and base are destroyed** the moment the commander dies,
 every unit a cause-3 death with no killer. The four other callers
 (`0x4164DF`, `0x416A00`, `0x416A58`, `0x452E17`) are the resign and
-player-left paths, which run the same wipe.
+player-left paths, which run the same wipe. The player-left one, `0x452E17`, is
+inside the player-removal routine `0x452CC0`, which clears the player's alliance
+bytes, wipes the slot's units and then clears the record; it is reached from the
+`1c` message (`0x454EC4`, which prints "Player %s has disconnected", calls the
+removal on a remote record and re-broadcasts the `1c`) and from the disconnect
+path, so every surviving peer wipes the same units. A dropped peer is a
+**remote** record on every survivor, so the non-player branch applies: the
+explosion is set off and the unit removed with cause 3 directly (BT-232).
+RWE's lockstep drop does not yet do this (#706, decided 2026-10-17); its
+TA-host removal does.
 
-**RWE matches it.** `GameSimulation::killPlayer`, reached from
+**RWE matches it for the game-end rule.** The drop path is separate and is
+pending. `GameSimulation::killPlayer`, reached from
 `processVictoryCondition` under `CommanderDeathMode::GameEnds`, kills every
 unit the player owns through `killUnit` and records the cause as
 `self_destruct`, which is cause 3. So a burst of economy buildings dying on
@@ -1131,11 +1149,10 @@ The BITMAP1-5 flags (bits 8-13 of the flags word as the handler tests them,
 
 ## NN. Loose ends
 
-- **`unit+0xF7`**, the second term in the `Killed` severity, is still
-  unidentified (§22 already flagged it). It matters here only because it feeds
-  the corpse level, which decides whether a naval unit leaves anything at all.
-  The demo corpus cannot separate it from the overkill term -- see the section
-  above for why -- so this still wants a writer found in the binary.
+- ~~**`unit+0xF7`**, the second term in the `Killed` severity, is still
+  unidentified.~~ **Identified, BT-43:** the health percentage as sampled every
+  30 ticks, one sample behind (`TOTALA-EXE-MOVEMENT.md` §132 stage 4 rolls
+  `+0xF6` and `+0xF7`); ported in commit 404f3c4d.
 - ~~**Death causes 4, 5, 7 and 9** are still decoded as a set and not named
   individually.~~ **All four named 2026-09-15**; see "What each death cause is"
   above, which names 3, 6 and 8 on the way past and closes this document's

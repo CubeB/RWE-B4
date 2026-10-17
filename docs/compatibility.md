@@ -119,7 +119,10 @@ enemy list every 30 ticks, so a target can be up to a second stale — visible f
 a second after going dark, invisible for up to a second after being lit. RWE asks
 at the moment it matters. The staleness is an artefact of a 1997 budget, and
 copying it would mean carrying a 30-tick-old candidate list in hashed simulation
-state.
+state. The one exception is the cloak's proximity fuse (`mincloakdistance`): it
+reads each owner's list of seen enemies, rebuilt every 30 ticks, as the original
+does (BT-140). That list (`cloakSeenEnemies`) is simulation state: saved, hashed
+and dumped. Targeting still asks live.
 
 **A goal something is standing on is relaxed to the nearest cell the unit could
 stand on.** Nine path requests in ten aim at an occupied cell — that is what an
@@ -190,6 +193,17 @@ first lathe a tick after that. RWE cannot create a unit during the behaviour pas
 — it is walking the unit map — so every builder defers to the end of the tick.
 This shifts a job a tick or two later against the order; it does not change the
 job's length, which is what the demo corpus measures.
+
+**Teams are fixed at the lobby.** In the original you can ally with someone, or
+stop, in the middle of a game, one direction at a time. In RWE the lobby's team
+decides, symmetrically, for the whole game: a relation edited mid-game would have
+to be a command that every peer applies on the same tick and that goes into the
+game hash.
+
+**A peer that stops answering is dropped for you.** The original pops a box after
+thirty seconds asking whether to drop them, and gives up on its own after two and
+a half minutes. RWE counts down ten seconds (configurable, `drop-timeout`) and
+drops them for everyone together, because lockstep needs every peer to agree.
 
 ---
 
@@ -292,7 +306,6 @@ original in every case.
   its textured ones; the difference is nine faces of CORFAV and one of CORTRUCK.
 - **Nanolathe spray lands on the roof**, not inside the model, because RWE's
   spray is depth-tested so a construction aircraft cannot cover its own beam.
-- **Exhaust occlusion is depth-tested** rather than hand-layered.
 - **Off-map fog cells read as the nearest on-map cell**; reading them as clear
   leaves a strip of map showing at the border.
 - **Only the heading half of the `turret=0` firing check is enforced**, the
@@ -358,6 +371,8 @@ original in every case.
   demo carries state and effects and not orders. Units move, fire, die and
   leave wrecks, but the recorded `0x0f` feature actions and pauses are not
   applied, and a unit the recording never showed is shown nowhere.
+- **A network failure is a message, not a crash.** The original exits when a join
+  or the network layer fails badly. RWE says so and goes back to the menu.
 
 ---
 

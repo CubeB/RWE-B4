@@ -723,7 +723,7 @@ constant:
 4594fe  add eax,0x32                ; 50 or 125
 ```
 
-**It is not a terrain flag.** All ten of its read sites are in that one pass.
+**It is not a terrain flag.** Nine of its ten read sites are in that one pass; the tenth is the cut of the finished picture in the main draw (`0x459755`-`0x459771`, BT-143).
 
 ### `upright` and `norestrict`
 
@@ -775,12 +775,7 @@ too.
 
 ### Not ported
 
-- **`digger`.** RWE has both shadow passes now (§100), but the constant the
-  flag swaps is not a projection constant at all: 50 and 125 are the height
-  buffer's bias, `height = modelY + (digger ? 125 : 50)`, which
-  `TOTALA-EXE-SHADING.md` §22 reads out of the span filler. RWE has no
-  per-drawable height buffer — it has a real depth buffer — so there is still
-  nothing for the flag to select.
+- **`digger`.** Ported for what it does on the screen: the shadow cut is in (§100) and, since BT-143, the final picture is cut at the model's origin plane (`cutBelowY`). RWE still has no per-drawable height buffer, so the constants 50 and 125 are not reproduced as such.
 - **`upright`.** RWE does not conform anything to the ground: `UnitState`
   carries a `roll` for the aircraft bank and no pitch at all. The flag chooses
   between two ground-placement routines neither of which RWE has, so honouring
@@ -1972,8 +1967,8 @@ which is why such a unit's position comes only from applying its owner's records
 ### Where the strategic work sits
 
 A whole tick (`0x4954BD`) is: increment the tick, **this pass**, the projectile
-pass `0x49B720`, the feature pass `0x420F30`, and only then the per-player pass
-`0x464F80`. That last one holds the controller: the squad manager's tick
+pass `0x49B720`, the debris pass `0x420F30`, the per-player pass `0x464F80`, and
+only then the feature pass `0x424050` (the full order is in §111). That last one holds the controller: the squad manager's tick
 (`0x408C40`), which for **every** player runs the weapon re-targeting sweep
 `0x4089A0` (WEAPONS "The scan"; COMPUTER-PLAYER §119 and §122), then the
 strategy table. So whatever the computer player decides is decided after every

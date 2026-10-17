@@ -276,7 +276,11 @@ quirks of the original that RWE reproduces although they look like defects.
   up to a second after it has been lit. RWE calls `canSeeUnit` at the moment it
   matters. The staleness is an artefact of the original's budget, not a
   behaviour worth reproducing, and copying it would mean carrying a
-  30-tick-old candidate list in hashed simulation state.
+  30-tick-old candidate list in hashed simulation state. The one exception is
+  the cloak's proximity fuse (`mincloakdistance`): it reads each owner's list of
+  seen enemies, rebuilt every 30 ticks, as the original does (BT-140). That list
+  (`cloakSeenEnemies`) is simulation state: saved, hashed and dumped. Targeting
+  still asks live.
 - **No bit-8 fallback list, and no Targeting Facility.** The original's second
   candidate list (§17a) is appended *outside* the can-see gate, on `unit+0x110`
   bit 8 — "on my radar picture at all" — walked only when the first list is
@@ -343,7 +347,13 @@ quirks of the original that RWE reproduces although they look like defects.
   its spray is composited in a late layer. RWE's is depth-tested so a
   construction aircraft can cover its own beam, so a landing point inside the
   geometry would be swallowed.
-- **Exhaust occlusion is depth-tested**, not hand-layered — see §5.
+- ~~**Exhaust occlusion is depth-tested**, not hand-layered.~~ **Retracted
+  2026-10-17 -- never a divergence** (`TOTALA-EXE-RENDER.md` §5). RWE does not
+  depth-test its particles: every sprite particle, exhaust included, is drawn
+  over the finished frame with the depth test off, as the original's effects
+  are not obscured at all. The one effect that goes under something, the Atlas
+  exhaust beneath its aircraft, is the original's explicit layering and not
+  depth.
 - **A cloaked unit is half-blended with alpha**, not through the original's
   256×256 ALPHA TABLE, and a depth prepass stands in for the private bitmap the
   original composites into. Same 50%, different mechanism — see §17.
@@ -639,6 +649,38 @@ quirks of the original that RWE reproduces although they look like defects.
   test is flat now, with each square floored separately. Only the ballistic
   arc check keeps three axes. Do not put the 3D test back on the strength of
   that reasoning.
+- **The cheat and debug console commands are absent.** The original registers
+  commands under three permission masks: ordinary (1), cheat (2: `Radar`, `ATM`,
+  `View`, `LOS`, `Mapping`, `DoubleShot`, `HalfShot`, `NowISee`, `Meteor`,
+  `MakePoster`) and debug (4), and the talk dialog's mask comes from the game
+  type and the lobby's Cheat Codes option (`TOTALA-EXE-COMMANDS.md` §124). RWE
+  registers none of the mask-two or mask-four commands, and the chat bar's `+`
+  lines reach only the sharing commands: every other word answers "Unknown
+  command". They are absent by choice, not by omission. Several mask-one
+  commands that the original has also write simulation state locally
+  (`NoMetal`, `NoEnergy`, `Selectable`, `Logo`, `Give`); matching any of them in a
+  lockstep game would mean a replicated `PlayerCommand`, hashed and saved
+  (BT-215), which nothing asks for.
+- **Lobby teams are symmetric and fixed.** RWE takes a team from the lobby and
+  keeps it for the game: two players on a team are allied with each other, both
+  ways, and nothing changes it. The original keeps relations as per-player byte
+  arrays at offsets `0x108` and `0x113` of the player record (each player starts
+  allied with itself), **directional** and editable in play through the ALLIES
+  dialog, with the numbered team in a separate byte (`0x146`) and a
+  directional-alliance message `0x23` and a team message `0x24` on the wire
+  (BT-236, #710). What each array means (allied versus shared vision versus
+  victory) is only medium-confidence.
+- **A silent peer is dropped automatically, after `drop-timeout` seconds (10 by
+  default), with a countdown and no decision.** The original asks a person: the
+  drop prompt opens after the "player timeout" setting (30 seconds by default,
+  accepted from 30 to 300), naming the player if all the timed-out peers share a
+  machine group, and the host gives up on its own at the setting plus 120 seconds
+  with reject reason 6. Lockstep needs every peer to agree on the drop, so RWE
+  keeps its shorter agreed policy; its TA host drops a silent joiner after 150
+  seconds (the original's figure, commit c77799d9) (BT-233, #707).
+- **A fatal join or network error does not end the process.** In the original it
+  does, with exit code 3. RWE reports a drop or puts up a message box and returns
+  to the menu (BT-251).
 
 
 ## 91. Still unknown or unported
@@ -648,21 +690,36 @@ quirks of the original that RWE reproduces although they look like defects.
   nothing a player would call better, and they move every replay and every
   tick-counting fixture. The decision, the acceptance check and the order to
   do it in are in `ROADMAP.md`, "Deferred on purpose".
-- **The campaign's win and lose rules** (§113) are decoded and not ported:
-  all eighteen `[GlobalHeader]` conditions, checked once a second, all
-  victory rules in order and any defeat rule, victory first, then a
-  five-second countdown. Waiting on campaign piece 4 (B4 #38); the mission
-  loader it builds on is B4 #293.
-- **A mission unit's scripted orders** (§114) are decoded and not run: the
+- **The campaign's win and lose rules** (§113) are ported: `MissionRules` is
+  installed by the loader and ticked by the simulation, all eighteen
+  `[GlobalHeader]` conditions, checked once a second, all victory rules in
+  order and any defeat rule, victory first, then a five-second countdown. The
+  same countdown now ends a game outside a campaign: 150 ticks after the win
+  test first answers, with the economy frozen from that first answer (BT-82,
+  commit dc4a5115). The end-of-game findings are ported too: a simultaneous
+  wipe is a defeat and every surviving teammate wins (BT-191, BT-192, 61ad91a7),
+  a seat that never held a unit blocks victory in multiplayer only (BT-193,
+  d4386fc8), a skirmish will not start without a human and a computer, or with
+  every seat on one team (BT-194, 2d9f674d), the score's clock term divides by 60
+  (BT-195, 1fd85ff5), the statistics are taken at the decision (BT-196,
+  d870b720), the fade steps every second tick (BT-197, 12bc70d0), and a key or
+  either mouse button dismisses the glamour picture (BT-199, 8f061792). What is
+  not ported is BT-198: the original has no hold under the banner (the banner is
+  visible for the twenty-tick fade only, outside multiplayer), where RWE holds
+  the world 90 ticks under it and then fades for 10.
+- ~~**A mission unit's scripted orders** (§114) are decoded and not run~~
+  **Ported.** `GameSimulation::tick` calls `missionScripts->update`: the
   InitialMission list's WAIT, WAITFORATTACK, ATTACKUTYPE, guard, transport
-  start and MAKESELECTABLE, and the selectable bit that holds a scripted
-  unit out of the player's hands and out of the computer AI's.
+  start and MAKESELECTABLE run, and the selectable bit holds a scripted unit
+  out of the player's hands and out of the computer AI's
+  (`src/rwe/game/missionscripts.test.cpp`). Where RWE departs from the decode,
+  `compatibility.md` lists it under §114.
 - **One small piece of the campaign flow** (§115) is not ported: a campaign
   mission restarted from the game menu counting as lost, which the teardown's
   `L` would do [inferred]. The rest of §115 is ported.
-- TA's **Permanent** LOS mode has not been looked at.
-- **Circular** LOS mode (the `vismasks.gaf` stamp) is understood but not
-  implemented; RWE always uses True.
+- **Circular** LOS mode is implemented: RWE stamps a computed disc rather than
+  the `vismasks.gaf` frames, keeping the ceiling of fourteen cells and dropping
+  the floor of five (§88).
 - RWE's explored grid is **per-player** rather than the original's one shared
   bitmask with a bit per LOS group. Equivalent until allied vision groups exist.
 - `hitDensity` (100 for solid things, 5–10 for foliage, 0 for smudges) is no
@@ -768,7 +825,7 @@ quirks of the original that RWE reproduces although they look like defects.
   ticks for nine hundred (`0x48644B`). The sim says which wrecks may burn
   through `WreckSpawnedEvent::mayBurn`, the original's flag: cleared by the
   wet branch and by death cause 7, so a sea wreck and an `isfeature` unit's
-  never smoke. RWE's own: each puff is gated on the fog like the vents' steam,
+  never smoke. RWE's own: each puff is gated on the fog, as the burning-feature smoke is; the vents' steam is the exception (BT-151),
   and the original's quirk of smoking over a refused placement is kept only in
   that the event fires whether or not the wreck was placed.
 - ~~**`BadSlope` and `BadWaterSlope` are not parsed.**~~ **Ported, 2026-09-24**
@@ -793,9 +850,8 @@ quirks of the original that RWE reproduces although they look like defects.
   that already existed, which now carries the captor so slot 16 is the
   captor's sound. Slot 16 stays silent on the shipped data, no category
   setting it.
-- **`Resurrect` is decoded and not implemented** -- S:98. No shipped FBI sets
-  `canresurrect`, so it would be a mod-only capability, and a new `UnitOrder`
-  alternative cannot be added from inside `src/rwe/sim` alone.
+- **`Resurrect` is ported** (2026-09-06, §98), with one departure recorded in
+  §88. Only one add-on unit uses it: `CORNECRO` in `CorNecro.ufo` (BT-94).
 - **`beamweapon`'s tail point** (`0x49BBA3`) is decoded and deliberately *not*
   ported — §92. It gives a round a second, trailing point that starts moving
   `duration + 1` ticks after the shot, and it is drawn only by `rendertype 0`.
@@ -818,4 +874,15 @@ quirks of the original that RWE reproduces although they look like defects.
   no corpse (`GameSimulation::selfDestructUnit`). Both are hashed behaviour;
   decoded under issue #29, not ported there because that issue was the
   presentation.
+- **The multiplayer lobby has none of the original's rule fields and controls
+  beyond the ones RWE built.** Maximum units, watch permission, cheat permission,
+  closed admission, the restrictions editor, the Deathmatch stage, screen
+  resolution, the memory and CD columns, the Synching overlay, blocked seats,
+  observers, the provider list, the serial and modem dialogs, the game list's VER
+  and Lock statuses and `ENDMULTI` are absent; until now they existed only as
+  code comments (`MainMenuScene_multiplayer.cpp`, about lines 1455-1480). In the
+  original the admission, watching, cheat and closed switches are all bits of the
+  host record (BT-234, BT-242), and a host rejects a joiner by that record before
+  it looks at anything else. RWE's TA host honours the closed bit and the options
+  byte it advertises (commits c77799d9, 08f4eb7a).
 

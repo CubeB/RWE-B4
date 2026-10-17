@@ -149,7 +149,11 @@ shadow is taken from. The shadow pass tests, in order:
 - the master shadow option, bit 2 of the options word `[globals+0x37F06]`;
 - `noshadow`, bit 25 of `def+0x241`;
 - `digger`, bit 30: a copied shadow cut at height 125 (`0x4BA1B0`), for
-  ARMAMB and CORTOAST only;
+  ARMAMB and CORTOAST only. The flag acts a second time in the same routine, on
+  the unit's own picture rather than its shadow: after the water step,
+  `0x459755`-`0x459771` cuts a digger's finished image at the literal 125
+  whether or not it is in the water, which removes the part of the model at or
+  below its origin plane (BT-143);
 - **`unit+0x110` bit 29, which is `bmcode == 0`** — set at unit creation,
   `0x485A8B`-`0x485A9E`, from `def+0x22F`, and on the "Feature Unit" that
   draws map features (`0x421FD3`) — so it is "is a building or a feature".
@@ -169,7 +173,12 @@ shadow is taken from. The shadow pass tests, in order:
   `sea - unitY + 0x32` against the height plane) is in the `0x45949D` block
   only, the one taken when the bitmap carries a height plane; a finished
   unit's bitmap has none (`0x437B50`, B4 #40), so a finished unit driving
-  through the shallows keeps its whole silhouette.
+  through the shallows keeps its whole silhouette. This is the shadow's cut. The
+  same routine, `0x4BA1B0`, is also what the unit draw uses on the picture
+  itself for another player's unit that is partly under water (it cuts the
+  submerged part away where the owner's own and sonar-contact units get the
+  blue tint instead, BT-142), so the name "water cut" belongs to the routine and
+  not to the shadow pass.
 
 **There is no build-progress test anywhere in it.** A nanoframe's cached
 bitmap is the whole model — the display's erasing happens on the copy — and
@@ -218,7 +227,9 @@ draw the shadow.** They are the same sequence of gates -- option bit 2,
 the copied shadow under option bit 3 and the hover/floater exclusion -- and
 differ only in `digger`: with a plane a digger's copy is cut at height
 `0x32 + 0x4B` (`0x4594D8`-`0x459503`), without one it takes the plain copy.
-So the plane is not a gate either; it only changes how a digger is cut.
+So the plane is not a gate either; it only changes how a digger is cut. (This
+is the shadow. A digger's final picture is cut at 125 in the main pass as
+well, BT-143.)
 
 **The blit is not it either (B4 #40, 2026-09-24).** `0x4B8500` was
 followed to its span blitters. Both, `0x4CBF2C` and `0x4CC057`, remap every
@@ -633,8 +644,18 @@ The generation block at `0x4013AC` reads, for a unit that is finished and alive
 A computer player is handicapped on every one of these: `0x40144E` multiplies
 its production by 0.7 or 0.5 depending on `global+0x37EEE` (0 gives 0.5, 1 gives
 0.7, anything else full), and the same pair of constants appears at each
-production site including the starting stockpile at `0x465451` and reclaim at
-`0x4026B9`.
+credit site. The handicap scales a computer player's **credits to unit
+production figures**, not its stockpile and not its spending, and it applies
+only when the credited unit's owner is active and of controller type 2. The
+sites: the four producer arms of the settle `0x401360` (negative energy use, the
+make fields, extraction or metal maker, wind or tidal); the unit-reclaim,
+feature-reclaim and factory-cancellation refunds (`0x4026B9`, `0x423710`,
+`0x4237D0`, `0x402640`); the D-gun kill credit (`0x486CAD`); the two
+resource-gift routines, which scale the amount credited to a **recipient** of
+type 2; and the two credits in the Deathmatch commander replacement inside
+`0x464F80` (this is what `0x465451` is). **It does not apply to the game-start
+stockpile** (`0x465E30`), to spending or to storage; an earlier version of this
+paragraph listed `0x465451` as the starting stockpile, which was wrong (BT-2).
 
 ### Storage and overflow
 
@@ -704,27 +725,28 @@ What did not, and now does:
 
 ### Not ported, and why
 
-- **The AI production handicap.** RWE has its own `resourceBonusFor`, which
-  scales a computer player's income up for Brutal rather than down for easy and
-  medium. Replacing one tuning knob with another is not a compatibility
-  question, and RWE's AI is not the original's.
-- **The per-player base storage.** The original's comes from
-  `PlayerEnergyStorage` and `PlayerMetalStorage` on the player, gated by a flag
-  read out of a save or scenario file; where a skirmish gets its own values from
-  has not been found. RWE keeps giving the commander the side's starting
-  stockpile as storage instead. **The demo corpus says that route reaches the
-  right number**, which is as close to an answer as the binary has given: every
-  one of the 86 players in the thirteen demos opens on a capacity of exactly
-  1000 metal and 1000 energy, with a stockpile that started at 1000 as well, and
-  neither data set's commander declares any `MetalStorage` or `EnergyStorage` of
-  its own. So in a skirmish the base is the starting stockpile, whichever field
-  the original reads it out of. See `docs/TA-DEMOS.md`. **A mission now uses
-  the flag itself** (#293, `GamePlayerInfo::hasBaseStorage`): its players
-  usually have no commander, so each gets its starting stockpile as a base
-  of its own, commander or not. A skirmish still leaves the flag clear. Moving
-  skirmish onto it too would change one thing, the storage a player keeps once
-  its commander has died, and that is a gameplay question rather than this
-  finding's.
+- **The AI production handicap is ported for the default engine** (ADR-0005).
+  `ClassicAiController` sets `resourceCheatMultiplier` to 0.5 at difficulty 0,
+  0.7 at difficulty 1 and 1.0 otherwise, and `GameSimulation::resourceBonusFor`
+  multiplies the whole production buffer by it at the settle, which reproduces
+  every credit site above (RWE routes a gift, a reclaim and a cancellation
+  refund through the same buffer; whether each corresponds one for one to the
+  original's site was not compared). The game-start stockpile is never scaled,
+  in the original or here. RWE's own engine keeps its separate knob, which
+  scales income *up* for Brutal (`AiTuningProfile`, 1.25) and has no original
+  counterpart; it stays a documented option.
+- **The per-player base storage is ported** (BT-165, commit 163e98e6). Three
+  writers set the base, each flooring the value at 200 and setting the flag at
+  `player+0x149` bit 0: the mission loader (`0x496E90` via `0x465F42`), the
+  skirmish commander spawn (`0x496EE0`, called once per active slot by the start
+  routine at `0x497963` or `0x497ACD`, storing that player's **own** lobby-slot
+  amounts) and the multiplayer start (the host's two words times 100). The
+  routine with a running maximum across slots (`0x497080`) has no caller and no
+  pointer to it anywhere in the image, so it is dead and is not ported. The flag
+  is set from the first frame and the base is added in the settle for the whole
+  game, so it survives the commander's death. RWE's `applySkirmishBaseStorage`
+  floors the base and sets the flag for every non-mission player at load; the
+  opening stockpile is untouched; missions keep the schema values as before.
 - **Reclaiming a unit** is instantaneous in the original, metal only, and
   RWE's is gradual and pays energy too. Changing it would be a gameplay
   decision rather than a correction, and `0x402640` is reached from one caller
@@ -1778,10 +1800,16 @@ caption is never seen. The sites, by caption:
 > here. Same outcome, opposite order. The order carries the countdown, as the
 > mission record does and as capture does since §96.
 
-The original has a `Resurrect` mission. Nothing in the shipped data can issue
-it — §19's shipped-data check found `canresurrect` (`def+0x245` bit 11, key
-string `0x503A64`, parsed at `0x42CA2E`) named by not one of the 189 FBIs — but
-the mission is complete, and this is what it does.
+The original has a `Resurrect` mission. Almost nothing in the shipped data can
+issue it — §19's shipped-data check found `canresurrect` (`def+0x245` bit 11, key
+string `0x503A64`, parsed at `0x42CA2E`) named by not one of the 189 FBIs of the
+base archives — but **one add-on archive does**: `CorNecro.ufo`, in the retail
+install folder, carries `units/Cornecro.fbi` (`CORNECRO`, "Resurrection Kbot",
+WorkerTime 160, `canresurrect=1`, `resurrect=1`, `canreclamate=1`), its model,
+script, sounds, corpse feature and a download file that puts it on the Core Kbot
+Lab (CORALAB, menu 4, button 2). The check searched the base archives and missed
+the add-on, and RWE's file system loads `.ufo` archives (BT-94). The mission is
+complete, and this is what it does.
 
 Row 42 of the ground mission table (`0x4FC8AA`): handler **`0x404DB0`**,
 display `"Resurrecting"` (`0x5013A0`), seven states through `0x4052D8`. It
@@ -1850,9 +1878,12 @@ it. Nothing is charged for it beyond the time.
 
 Two reasons, neither of them the arithmetic:
 
-1. **Nothing in the shipped data can order it.** No FBI sets `CanResurrect`,
-   and there is no RESURRECT button among the fifteen the order panel offers
-   (§19). Implementing it would add a mod-only capability.
+1. **Almost nothing in the shipped data can order it.** No base-archive FBI sets
+   `CanResurrect`, and there is no RESURRECT button among the fifteen the order
+   panel offers (§19); the right-click ladder offers it over a resurrectable
+   feature (`0x43FF38`). The only user is the add-on unit `CORNECRO`
+   (BT-94), so read this reason and the next with that in mind: they argue
+   against a capability that exactly one unit uses.
 2. **It cannot be done inside `src/rwe/sim` alone.** A `ResurrectOrder` is a
    new alternative in the `UnitOrder` variant, and `GameScene.cpp` matches
    exhaustively over that variant in six places, so the order type cannot be
@@ -2178,11 +2209,19 @@ samples, from all 86 senders in the twelve Escalation demos, are stamped within
 6 ticks of a multiple of 30 of the demo clock, and the least aligned sender still
 has 208 of 211 there.
 
-**Inside a tick**, the step at `0x4954BD` increments the game tick, then runs
-`0x48AD30` -- the unit pass, which reaches the mission service loop `0x43B7C0`
-at `0x48AF98` -- and only after the projectile (`0x49B720`) and feature
-(`0x420F30`) passes calls the per-player pass `0x464F80`. So a tick's lathe is
-counted into that same tick's settle. The corpus puts a stalled factory's first
+**Inside a tick**, the step routine (`0x495490`, whose tick increment is at
+`0x4954BD`) runs, for each pending tick: the tick increment; the incoming packets
+(networked games only); `0x48AD30`, the unit pass, which reaches the mission
+service loop `0x43B7C0` at `0x48AF98`; the projectile pass `0x49B720`; the
+**debris pass** `0x420F30` (the 100-slot table of exploded pieces, then the
+debris pool, as `TOTALA-EXE-WRECKS.md` describes); the per-player pass
+`0x464F80`; the **feature pass** `0x424050` (regrowth, burning, falling); and
+then the global animations, the wind update `0x490C40`, the meteor update and
+the camera-follow update. So a tick's lathe is counted into that same tick's
+settle, and on a tick that is both a settle and a wind change the settle sees
+the old wind fraction. (An earlier version of this section called `0x420F30`
+"the feature pass" and put it before the player pass; it is the debris pass, and
+the feature pass comes after the players, BT-1.) The corpus puts a stalled factory's first
 accepted increment on demo ticks that are multiples of 30, which with that order
 means either the settle runs at internal ticks one short of a multiple of 30 or
 the demo clock is stamped a tick behind the internal one. **It is the second.**
@@ -2202,7 +2241,7 @@ Checked against `GameSimulation::updateResources`, `settleResourcePool`,
 | # | Difference | Documented before? | Effect |
 |---|---|---|---|
 | 1 | RWE settles every player when `gameTime % 30 == 0`. | §88, as a deliberate divergence from a stagger. | **None in a normal game** -- the original does the same, above. §88 is updated. |
-| 2 | RWE settles before the behaviour pass in a tick; the original after the unit pass. | No. | None: both count a tick's lathe into the same second (RWE's settle at 30 closes ticks 0-29). The stall episodes replay RWE's order and land on the corpus. |
+| 2 | RWE settles before the behaviour pass in a tick; the original after the unit, projectile and debris passes. | No. | None: both count a tick's lathe into the same second (RWE's settle at 30 closes ticks 0-29). The stall episodes replay RWE's order and land on the corpus. |
 | 3 | RWE's `EnergyUse` request went through `UnitState::addResourceDelta`, which refuses a unit owing **metal** as well; the original's settle sweep checks energy owed only. | No. | **Fixed 2026-09-20.** `ResourceDebtGate` names the two gates apart: the settle sweep's `EnergyUse` request passes `EnergyOnly` and reads the unit's energy owed alone (`0x4013F9`, `0x40164F`), while every other caller keeps `EnergyOrMetal`, which is what the request routine a builder goes through does (`0x4011C0`). A unit that owes metal but has the energy now stays powered. Pinned by "a unit that owes metal but has the energy stays powered" in `economy.test.cpp`. |
 | 4 | RWE treats a negative `EnergyUse` as production **and** reports the unit powered, so it still extracts or makes metal; the original leaves it unpowered. | No. | None on Escalation's data: no unit has both a negative `EnergyUse` and an extractor or metal maker. |
 | 5 | RWE runs the make-and-use pass for any `activated` unit; the original runs the extraction/maker/wind/tidal chain only on the bit-29 path and charges a no-switch unit's `EnergyUse` while it is on **or moving**. | No. | Open while bit 29 is unconfirmed; see the four Escalation metal makers above. **Decided 2026-09-17: not chased.** It moves four units in one mod and nothing depends on it; the bit stays an open question. |
@@ -2210,7 +2249,7 @@ Checked against `GameSimulation::updateResources`, `settleResourcePool`,
 | 7 | ~~**Weapons** (`energypershot`, `metalpershot`): RWE checks the stockpile, then *requests* the cost through `addResourceDelta`~~ **Fixed 2026-09-24** (#143): the fire path calls `chargeStockpile`, which takes the price from the stockpile on the spot or refuses the shot (`0x401220`, `0x401260`, `0x4012A0`). Several shots in one second each see the stock the last one left, and a shooter that owes for earlier work pays rather than firing for free. Pinned in `economy.test.cpp`. | Yes. | Hashed state moves: every energy weapon's cost lands on the fire tick instead of the settle, and never throttles the builders. |
 | 8 | Debt carried as `owed * (1 - f)` in float against the original's `owed - owed * f` at 80 bits. | No. | Sub-ulp. A fully paid debt is exactly zero in both. |
 | 9 | RWE clamps a negative supply to zero before settling. | In the code. | None: the original's stockpile cannot go negative. |
-| 10 | The computer player's production handicap. | §23, not ported. | Tuning, not compatibility. |
+| 10 | The computer player's production handicap. | §23, ported for the default engine. | None. |
 
 Nothing in the table was changed. Row 7 is the one worth a decision.
 

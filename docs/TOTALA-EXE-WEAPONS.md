@@ -312,7 +312,7 @@ against a victim with the episode's own footprint.
 
 **The tick it is fired.** The order in one sim step (§111, `0x4954BD`) is: game
 tick incremented, unit pass `0x48AD30`, projectile pass `0x49B720`
-(`0x495513`), feature pass, per-player settle. The fire routine runs inside the
+(`0x495513`), debris pass `0x420F30`, per-player pass, feature pass. The fire routine runs inside the
 unit pass, reached from the per-tick weapon update `0x49E1A0`, and at
 `0x49D77E` it calls `0x49C9C0`, which appends the round to the flat projectile
 array -- count at `globals+0x141F3`, base at `+0x141F7`, stride 107 -- and
@@ -2222,7 +2222,7 @@ Every part of what it does comes out of that.
   `0x4B0BC0` at `0x4865C3`) and takes the corpse level from what the script
   writes back into the local it is handed, 0 meaning none. The severity handed
   to the script is `clamp(1, 100, (100 * overkill / maxdamage + unit[0xF7]) / 2)`
-  (`0x48655E`–`0x4865A4`), and a 30000-point hit on a 3000-point commander pins
+  (`0x48655E`–`0x4865A4`; `unit[0xF7]` is the 30-tick health sample, BT-43), and a 30000-point hit on a 3000-point commander pins
   it at 100. So a disintegrated unit leaves nothing because its own script says
   so at that severity, not because the weapon asked.
 - **The render type.** `rendertype=3` is the ordinary model type, which RWE
@@ -2233,10 +2233,11 @@ Every part of what it does comes out of that.
 
 ### Decoded but not ported
 
-- **The `Killed` severity formula** above. RWE runs `Killed` but does not feed it
-  the original's overkill-derived severity, so what a script chooses to leave
-  behind may differ.
-- **`unit+0xF7`**, the second term in that severity, is unidentified.
+- ~~**The `Killed` severity formula** above.~~ **Ported** (September 2026,
+  `computeKilledSeverity`); the second term followed in commit 404f3c4d.
+- ~~**`unit+0xF7`**, the second term in that severity, is unidentified.~~
+  **Identified (BT-43):** the health percentage at the second most recent 30-tick
+  sample.
 - **The damage-type death causes** 4, 5 and 7 are decoded as a set but not
   individually named; nothing was traced far enough to say which weapon or
   event produces each. **Cause 9 is settled**: the `GetBuilt` mission fires

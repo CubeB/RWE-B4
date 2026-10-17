@@ -17,7 +17,15 @@ lists the commands as not implemented; the strings are present in the binary
 **Entry.** The talk dialog skips leading spaces; if the first remaining
 character is `+`, the rest is handed to the command interpreter locally, with a
 permission mask. Ordinary commands carry mask 1; the mask gains bit 2 (cheats)
-in non-campaign play and further bits through a UI option. The interpreter
+by game type, read when the dialog opens from a global set once at setup
+(`0x5091CC`, set at `0x4971D2` onward): **never in a campaign, always in a
+skirmish, and in a multiplayer game only when the lobby's "Cheat Codes" option
+is on** (bit 13 of the word at offset `0x9B` of the local player's colour
+record, the options byte's `0x20`). So in a network game without the option no
+player can type a cheat, and with it every player can. A separate user-interface
+option bit (bit 1 of the word at offset `0x37F2F` of the game block) forces the
+full mask, seven, whatever the game type (BT-217). The mask bit also decides
+a `+` line's send mode: a result with the cheat bit set forces "everybody". The interpreter
 tokenises on whitespace and stops at `#`; it has no quoting; it keeps at most 20
 tokens in a buffer of about 128 bytes. The command word is looked up
 case-insensitively in a sorted table and runs only if its registration mask
@@ -78,15 +86,19 @@ room. A computer player is never a recipient of this pass (`0x457D30`).
 type-`0x16` packet, subtype 3, amount 0, and the receiver merges the sender's
 explored map. It moves no resource. Line-of-sight, vision and radar sharing is
 a *separate* mechanism, in eleven-entry per-player arrays used by the network
-view-state handshake, and the radar bit changes which contacts the radar
-presentation accepts; none of it is a flag that makes allied cells permanently
+view-state handshake, and the radar bit makes the owner's units contacts on an ally's picture and nothing else (BT-139); none of it is a flag that makes allied cells permanently
 visible. **[open]** what a default alliance shares without any toggle is not
-settled by this account, and RWE's teams share sight and radar unconditionally.
+settled by this account, and RWE's teams share sight unconditionally; radar and sonar detectors are the owner's alone (BT-139), and the share-radar bit, which in the original only makes an owner's units show as contacts on an ally's picture, is not built.
 
 **Manual gift.** `+Give player amount metal|energy` requires an active player
 in slot 0..9 of type 1, 2 or 3 and **does not require that the recipient be an
-ally**. The amount is an integer converted to float; negative amounts are not
-clamped. The transfer is capped at what the donor stores, recorded as a spend
+ally**. The player argument is a **slot counted from zero** and the local
+player is not excluded, so `+Give 0 100 metal` can give to oneself. The word
+names the account it moves: "metal" runs `0x464C60` and moves the metal
+account (offset `0x98`), "energy" runs `0x464B30` and moves the energy account
+(`0x8C`); the helpers' names in the source are the other way round, which is
+a naming accident that does not reverse the behaviour (BT-218). The amount is
+an integer converted to float; negative amounts are not clamped. The transfer is capped at what the donor stores, recorded as a spend
 for the donor, and credited to the recipient's income account (which settles
 into its stock at the next economy second). When the recipient is a local
 computer player the credit is scaled by the handicap, 0.5 easy and 0.7 medium
@@ -98,10 +110,11 @@ bytes, the subtype (1 energy, 2 metal, 3 mapping request); 5, four bytes, the
 sender's network id; 9, four bytes, the recipient's; 13, four bytes, the amount
 as a float's bit pattern (0 for a mapping request). The receiver resolves the
 ids to players and applies the same transfer with the sending side switched
-off, so there is no second debit and no echo. **The two resource subtypes are
-the reverse of their names in the source**: the routine called "metal" moves
-energy accounts and the one called "energy" moves metal; the field offsets and
-callers settle it, and a new implementation should name them by what they
+off, so there is no second debit and no echo. **The two resource subtypes name the account
+they move**; it is the source's helper names that are swapped (BT-218): the
+routine called "metal" moves energy accounts and the one called "energy" moves
+metal, a naming accident that does not reverse the behaviour. The field offsets
+and callers settle it, and a new implementation should name them by what they
 move.
 
 **What a save keeps.** The player block saves resources, statistics, storage
@@ -116,23 +129,41 @@ the original, which does not save them, because lockstep resume needs them. The
 differences, all hardenings or consequences of lockstep: a **negative gift is
 ignored** (the original does not clamp it, so a packet could take stock from
 the recipient); a reserve below zero makes the offer capped at the donor's own
-stock; a gift to or from a player simulated on another machine (a TA peer) is
+stock; `runAutomaticSharingFor` caps the offer at the recipient's free capacity
+and returns unless the result is positive, where the original does not
+lower-clamp the gap (harmless); a gift to or from a player simulated on another machine (a TA peer) is
 not applied, since RWE does not speak the `0x16` packet; a gift's credit goes
 through the recipient's production buffer, so a computer player's handicap is
-applied once, by the settle, not a second time. `+Give` names the recipient by
-the name they joined with or as `Player n` counted from one; that choice is
-RWE's, the account does not say how the original reads its argument. Mapping,
-radar and line-of-sight carry no state (RWE's teams share sight and radar
-unconditionally, the **[open]** above), and none of the other registered
+applied once, by the settle, not a second time. The automatic pass is the last
+thing in the tick and takes the gift from the donor's stockpile at once, so it
+reaches the receiver at the next settle (BT-27, commit d428d2f5). `+Give` names the recipient by the name they joined with or as `Player n` counted from one and refuses oneself; the original counts the slot from zero and allows oneself (BT-218). The negative amount stays ignored, a deliberate hardening. Mapping,
+radar and line-of-sight carry no state (RWE's teams share sight unconditionally; radar and sonar detectors are the owner's alone, BT-139, and the share-radar bit is not built; the **[open]** above), and none of the other registered
 commands is built: each answers "Unknown command".
 
-**Other registered commands** (mask 1, effects are options and display and
-none touches the simulation): `NoShake`, `Contour`, `ScrollSpeed`, `IFace`,
-`CDPlay`, `CDStop`, `Sound3D`, `Shading`, `AntiAlias`, `Shadow`, `Dither`,
-`SwitchAlt`, `TShadow`, `FShadow`, `LOSType`, `Light`, `RCache`, `Selectable`
-(sets selectable on **every** live unit), `MusicMode`, `Logo`, `ScreenChat`,
-`Gamma`, `Clock`, `NetStats`, `Sing`, `NoMetal`, `NoEnergy`, `BigBrother`,
-`Now`, `Drop`, `ShootAll`, `ShowRanges`, `Compression`, `BPS`, `SFX`. The
+**Other registered commands** (mask 1). Most are options and display:
+`NoShake`, `Contour`, `ScrollSpeed`, `IFace`, `CDPlay`, `CDStop`, `Sound3D`,
+`Shading`, `AntiAlias`, `Shadow`, `Dither`, `SwitchAlt`, `TShadow`, `FShadow`,
+`LOSType`, `Light`, `RCache`, `MusicMode`, `ScreenChat`, `Gamma`, `Clock`,
+`NetStats`, `Sing`, `Now`, `Drop`, `ShootAll`, `ShowRanges`, `Compression`,
+`BPS`, `SFX`. **Five are not, and an earlier version of this paragraph was wrong
+to say that none touches the simulation** (BT-215, BT-216): `NoMetal` (`0x417150`)
+and `NoEnergy` (`0x4171F0`) **assign** a player's metal (offset `0x98` of the
+player record) or energy (`0x8C`) stockpile, the player from argument one
+(the local player when absent) and the amount from argument two (zero when
+absent), so `+NoMetal 3` empties player 3's metal and the commands are not
+limited to the local player; `Selectable` (`0x416460`) sets the selectable bit
+(`unit+0x110` bit 5) on every unit record carrying the alive-and-finished bit
+(bit 28), **of every owner**; `Logo` (`0x4168D0`) writes the player's logo byte
+(offset `0x96` of the colour record) and flushes the cached unit graphics; and
+`Give` transfers an account and sends a `0x16` packet, the one command with
+network traffic. All of them run on the local machine only and **nothing
+replicates them**: the line is never sent as a command, a peer sees chat and not
+an instruction, and under the original's owner-authority a peer's view of your
+own units and accounts is overwritten by your own state records (BT-215). Only
+`BigBrother` (`0x4174E0`, which toggles bit 1 of the option word at offset
+`0x14373` of the game block) is a pure option toggle. `Mem`, `Assert`, `DPrint`
+and `ZBuffer` have empty bodies and do nothing, and `MemDump` writes an empty
+file; they are registered and inert, so nobody need hunt for their effects. The
 cheat table (mask 2: `Radar`, `ATM`, `View`, `LOS`, `Mapping`, `DoubleShot`,
-`HalfShot`, `NowISee`, `Meteor`, `MakePoster`) and the debug table (mask 4)
-are not specified here.
+`HalfShot`, `NowISee`, `Meteor`, `MakePoster`) and the debug table (mask 4) are
+not specified here.

@@ -241,7 +241,7 @@ It now builds the list of selected definitions and applies
 ### Deliberately not ported
 
 - **The cloak accumulator's disagreement bug** at `0x41B485`.
-- **`canresurrect` and `wacky`.** No shipped unit names either and RWE has no
+- **`canresurrect` and `wacky`.** No shipped unit names either, bar the `CorNecro.ufo` add-on's CORNECRO (BT-94), and RWE has no
   resurrect order. `selfdestructcountdown` was on this line too, on the same
   grounds, and the grounds were wrong: the base game names it nowhere, but
   Core Contingency's twelve mines say 1 and 2. It is parsed now (#108).
@@ -290,8 +290,8 @@ The cases that matter here:
   deselects all units (`0x48bd00`) and closes floating panels
   (`0x491d70(1)`).
 - **Pause (`0xF8`), case at `0x496099`**: toggle `[game+0x38a51] & 1` -- the
-  pause flag -- and broadcast the new state to the other players (a message
-  built with leading byte `0x19`, formatted through `0x44fdb0(3, ...)` and
+  pause flag -- and broadcast the new state to the other players (a three-byte
+  `0x19`, subtype 0 and the pause bit, BT-178, formatted through `0x44fdb0(3, ...)` and
   sent via `0x451df0`). No game-type check; the pause key is the same in
   single and multiplayer.
 - **`+`/`=` and `-`/`_`** (`0x496570` / `0x496512`): game speed up/down by
@@ -695,7 +695,7 @@ GUI animation, chat -- runs normally; while paused the world renderer
 draws the `igpaused` banner (117x29, from `IGTITLES.GAF`, alongside
 `igvictory` and `igdefeat`) over the view (`0x46a107`).
 
-Set by: the Pause key (toggle, broadcast in MP as message type `0x19`);
+Set by: the Pause key (toggle, broadcast in MP as message type `0x19`, a three-byte message: subtype 0 and the pause bit, BT-178);
 opening GAME OPTIONS / Save / Load / the options screens in a
 single-player or skirmish game (never when game type is 3). Cleared by the
 matching close paths. Bits 1 and 2 of the same word are unrelated (net-lag
@@ -829,8 +829,10 @@ because it is the complete set of things the footer can show:
 | `+0x2C` | the build button under the cursor |
 | `+0x30`, `+0x34` | `cfg+0x37E90`, `cfg+0x37E94` |
 
-The three weapon reload counters are collected (`0x46AC4B`, skipping any
-weapon whose `reloadtime` is under thirty ticks) and then never drawn — the
+The three weapon reload counters are collected (`0x46AC4B`-`0x46AC85`, skipping
+any slot whose weapon's `reloadtime`, already in ticks, is thirty ticks or less,
+so a reload of exactly 30 is skipped and a skipped slot stores minus one) and
+then never drawn — the
 same dead end as the RELOAD1/2/3 rectangles in §29. They are in the key, so a
 reloading weapon forces a redraw of a panel that does not show it.
 

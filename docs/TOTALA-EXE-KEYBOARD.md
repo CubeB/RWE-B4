@@ -115,14 +115,14 @@ Every non-default entry, with what the handler was found to do:
 |---|---|---|
 | Esc | `0x495ed4` | menu open: close it. Else first press: press the main panel's `STOP` gadget (resets the order mode); further press: deselect all (`0x48bd00`) and close floating panels (`0x491d70(1)`) |
 | Tab | `0x496133` | multiplayer: toggle the TABMENU bar (`0x495010`); otherwise fall into the F2 case -- GAME OPTIONS |
-| Enter | `0x4964fd` | "SmallButton" UI sound, then `0x494050`: open the message bar -- `TALK.GUI` single player, `TALK2.GUI` multiplayer; refused for watchers |
+| Enter | `0x4964fd` | "SmallButton" UI sound, then `0x494050`: open the message bar -- `TALK.GUI` single player, `TALK2.GUI` multiplayer; refused for watchers. The dialog's submit (`0x493BF0`) takes the typed line through the recipient modes and one-message prefixes (BT-176), and a leading `+` runs the command locally **and then falls through to the ordinary send**, so the `+` line is sent as chat as well, in the current mode (BT-177) |
 | `!` `#` `*` backquote `~` | `0x496058` | toggle bit 0 of `[game+0x37f06]` and re-derive (`0x430f00`) -- **damage bars** (HELP.TDF line 27; registry value `damagebars`) |
-| `+` `=` | `0x496570` | game speed +1, clamped to 20, refused for watchers and while the F11 mode is up; applied via `0x490df0(speed,1)` |
-| `-` `_` | `0x496512` | game speed -1, clamped to 1, same guards |
+| `+` `=` | `0x496570` | game speed +1, clamped to 20, refused for watchers and while the F11 mode is up; applied via `0x490df0(speed,1)`, which broadcasts. There is no host test: any non-watcher changes everyone's speed (BT-179). The setter prints "Game Speed Normal" or "Game Speed  +N" / "Game Speed  -N" (N from level 10) when the level really changes (BT-178) |
+| `-` `_` | `0x496512` | game speed -1, clamped to 1, same guards (BT-179) |
 | `,` | `0x496081` | `0x41bf10(1)` -- previous build-menu page for the selected builder, "nextbuildmenu" sound |
 | `.` | `0x49608d` | `0x41bde0(1)` -- next build-menu page |
 | `1`-`9` | `0x495fb9` | build page or squad select, swapped by Alt and the `SwitchAlt` registry value -- own section below |
-| Ctrl+`1`-`9` | `0x495f9d` | `0x48d920(n)`: assign squad n -- every selected unit gets `[unit+0xac] = n`, every unselected member of squad n is removed. "CreateSquad" sound |
+| Ctrl+`1`-`9` | `0x495f9d` | `0x48d920(n)`: assign squad n -- every selected unit gets `[unit+0xac] = n`, every unselected member of squad n is removed. Plays the "CreateSquad" sound. A recall (`0x48d9a0`) plays "SelectSquad" (both are `beep4` in `allsound.tdf`), and its second argument is the Shift state, so Shift on a recall adds the squad to the selection (BT-182) |
 | `T` (uppercase) | `0x4964f1` | `0x41c2e0(1)` -- track selected unit |
 | `t` | `0x4964e6` | `0x41c2e0(0)` -- track selected unit (the flag's effect inside `0x48c190` not decoded further) |
 | `h` | `0x4964ae` | multiplayer only: open `SHARE.GUI` -- resource sharing (`0x4936f0`) |
@@ -131,16 +131,16 @@ Every non-default entry, with what the handler was found to do:
 | F1 | `0x4960ea` | plain: `0x4942e0` -- unit info display for the selected (or pointed-at) unit. With Shift: latch the hovered unit into `0x391b3/0x391b7` -- a **debug text overlay** (`0x467e50` prints unit id, health, flag words as text) |
 | F2 | `0x496165` | plain: open GAME OPTIONS (`0x460cc0`) if no menu is up. With Shift: latch hovered unit into `0x391b9/0x391bd` -- second debug overlay (`0x4685a0`) |
 | F3 | `0x4961cd` | `0x464000` -- clear the "seen" bit on the message backlog and jump to the unit that last reported (HELP.TDF line 35) |
-| F4 | `0x49639d` | toggle bit `0x80` of `[game+0x37f06]` -- the side-panel slide-away, own section below |
-| F5-F8 | `0x49603c` | recall camera bookmark 1-4 (`0x41d3f0`): stop tracking, load saved position, snap |
-| Ctrl+F5-F8 | `0x496020` | save camera bookmark 1-4 (`0x41d3b0`): current `[game+0x1431f]`/`[+0x14323]` into slot, mark valid |
+| F4 | `0x49639d` | toggle bit `0x80` of `[game+0x37f06]` -- the latch on the score panel's player list (`0x4948e0`), not the side panel, own section below (BT-183) |
+| F5-F8 | `0x49603c` | recall camera bookmark 1-4 (`0x41d3f0`): stop tracking, load saved position, snap; plays the "SelectSquad" sound |
+| Ctrl+F5-F8 | `0x496020` | save camera bookmark 1-4 (`0x41d3b0`): current `[game+0x1431f]`/`[+0x14323]` into slot, mark valid; plays the "SelectSquad" sound |
 | Ctrl+F10 | `0x4961d7` | registry-gated: movie-frame recording -- scans `%s\MOVIE*`, starts writing `MOVIE%03i` "FRAM" frames at the "Movie Output Rate" registry rate |
 | F11 | `0x4962f2` | registry-gated: toggle bit 1 of `[game+0x3923b]` -- a debug panel with its own sub-keymap (developer section) |
 | F12 | `0x4963c4` | `0x463c80` -- zero the chat-message indices at `[game+0x2a3e]`/`[+0x2a40]`: "Clear all chat messages" |
-| Pause | `0x496099` | toggle `[game+0x38a51]&1` and broadcast (message lead byte `0x19`) |
-| Ctrl+A | `0x4963ce` | `0x48bd50` -- select **all** own units, the whole array, alive and owned, everywhere on the map |
+| Pause | `0x496099` | toggle `[game+0x38a51]&1` and broadcast a three-byte `0x19`: subtype 0, then the new pause bit (absolute, not a toggle). The speed setter's packet is subtype 1 and the clamped level, 1 to 20, normal 10 (BT-178, BT-179) |
+| Ctrl+A | `0x4963ce` | `0x48bd50` -- select every own unit that is selectable (`unit+0x110` bit 5), finished (`unit+0x104` zero), not under the 150-tick owner-transfer lock and either uncarried or carried by a unit with bit 30, buildings and factories included, everywhere on the map; it also clears the camera follow. The squad recall uses the same test (BT-180) |
 | Ctrl+C | `0x4963fe` | select category `CTRL_C` (the Commander), then `0x41c310`: set the tracked-unit id to it -- select and center |
-| Ctrl+D | `0x49641d` | self-destruct: for each selected unit look up its `SELFDESTRUCT` weapon; units without one get the generic path `0x48cf30` |
+| Ctrl+D | `0x49641d` | self-destruct, a toggle by orders: for each selected unit search its order list for an existing `SELFDESTRUCT` order (`0x439e30`) and delete it (`0x439f80`), remembering whether any existed. Only when **none** existed does it issue the order to the whole selection (`0x48cf30`), so a mixed selection cancels the counting units and arms none of the others (BT-181) |
 | Ctrl+S | `0x4964dc` | `0x48c030` -- clear selection, then select every unit in the on-screen list `[game+0x1435f]` |
 | Ctrl+Z | `0x496413` | `0x48be00` -- select all units of the same type(s) as the selection |
 | Ctrl+B..Y (rest) | `0x4963d8` | the generic category select, next section |
@@ -244,14 +244,18 @@ updater at `0x4948e0`:
 side panel width), with "Panel" and "Options" UI sounds at the endpoints.
 With the F4 bit set the position runs to `0x7d`; with it clear it runs to 0,
 except while Space is held (and the cursor is not on the panel's own gadget),
-which drives it to `0x7d` again. Reading: **F4 latches the side panel out of
-the way; holding Space slides it away temporarily** to see the map under it
-(inference on which endpoint is "hidden" -- the arithmetic and sounds are as
-stated, the direction is inferred from the Space semantics). A second updater
-at `0x4689c0` runs the same Space logic for another sliding element.
+which drives it to `0x7d` again. The only thing that slide places is the score
+panel's **player list**: `0x4948e0` draws the list at the screen width less the
+slide, and nothing in the routine moves the left side panel or the minimap
+(§108 already says the Space strip is separate). **F4 latches the player list
+out; holding Space brings it out temporarily**, together with the bottom strip
+of §108. (The earlier reading here, that this slide moved the side panel, was an
+inference from the Space semantics and is withdrawn, BT-183.) A second updater
+at `0x4689c0` is the bottom strip.
 
-RWE has no equivalent; its Space is the UI's "press the focused button" key
-(`UiStagedButton.cpp:198`).
+RWE does both: F4 latches the list (`panelHiddenLatch`, commit a8af4e57) and held
+Space brings out the strip and the list (§108). Space no longer reaches the
+side panel's gadgets.
 
 ---
 
@@ -351,112 +355,179 @@ the buttons render (OrderButtons.cpp knows both for visibility only).
 
 ## 79. What RWE binds today
 
-From `src/rwe/game/GameScene.cpp` `onKeyDown`/`onKeyUp` (branch `revival`):
+From `src/rwe/game/GameScene_input.cpp` (`onKeyDown`, `onKeyUp`), regenerated
+against the tree of 2026-10-17; the previous text described the tree of
+2026-09-03, before the keyboard commit `a0de1761` and the camera-bookmark,
+paging-key, `n`, F3 and F4 work.
 
-- Tab / F2 toggle the game menu; Esc closes it, else cancels the cursor mode,
-  else deselects (no STOP-gadget press, but equivalent in effect).
-- Arrows scroll; Shift/Ctrl tracked; `+`/`=`/`-` (and keypad) speed;
-  Pause pauses -- all matching.
-- F10 debug window, F9 network overlay (RWE-original: TA binds nothing to
-  plain F9), F1 help overlay, backquote (scancode) health bars,
-  `t` track, Ctrl+C select-and-track commander.
-- Ctrl+A select all **on screen**, Ctrl+S **stop**, Ctrl+D self-destruct,
-  Ctrl+Z **attack-ground mode**, Ctrl+W **guard mode**, Ctrl+F **attack
-  mode**, Ctrl+P **move mode**.
-- Digits: Ctrl+digit bind group, Shift+digit add selection to group, digit
-  recall, `0` = a tenth group, Ctrl+Shift+digit = add.
-- `SceneManager` binds F11 to the ImGui debug window globally.
+**Who sees a key first.** Pause, always, even with the message bar or the game
+menu up (a held key does not repeat). Then the message bar, which takes every
+key. Then Tab and F2, which toggle the game menu (not once the game has given
+way to the end-of-game picture or chart). Then the open menu, which takes every
+key and closes on Escape: a menu being up silences every battle key and the
+arrow keys and the edge scroll with them, as the original's interface gate does
+(BT-175). Then the end-of-game screens: any key dismisses the glamour picture
+after its one-second lock and fills the chart's bars (BT-199), and Enter is
+Start between campaign missions. Then Enter, which opens the message bar
+(refused to a replay or a demo). Then the side panel's own quick keys, unless
+Ctrl is down or the key is Space. Then the battle keys in one chain.
+
+**Camera and display.** Arrows scroll. Space held brings out the bottom strip and
+the player list (§108); `spaceDown` is cleared on release. F4 latches the score
+panel's player list (BT-183). F5 to F8 recall camera bookmarks 1 to 4 and
+Ctrl+F5 to F8 store them; a bookmark holds the position only, and both play the
+`SelectSquad` sound. F3 jumps the camera to where an own unit last took a hit.
+`n` walks every own unit in id order, selecting and centring each in turn. `t`
+and `T` start tracking the selection. F12 clears the console. Backquote (by
+scancode) toggles the health bars. F1 toggles RWE's own help overlay. F9 toggles
+the network overlay and F10 the debug window (both RWE-original: TA binds
+neither plain). F11 is bound to the ImGui debug window by `SceneManager`, and
+Ctrl+F9 saves a screenshot (`SHOTnnnn`, numbered from the highest existing plus
+one, BT-161), also in `SceneManager`.
+
+**Game speed and pause.** `+`, `=`, keypad plus, `-`, `_` and keypad minus send
+`PlayerSetGameSpeedCommand`; the simulation drops one that does not come from
+player 0 (host-authoritative, where the original lets any non-watcher change
+it, BT-179), and a local press prints no speed line. Pause toggles through the
+network service or the command stream. In an own-clock TA game a peer's `0x19`
+is read as a subtype and a value (BT-178) and a peer's speed change prints the
+original's "Game Speed" line.
+
+**Selection.** Ctrl+A selects every own unit that is finished, uncarried and not
+held by a mission, buildings included, anywhere on the map, and lets go of the
+camera (BT-180). Ctrl+S selects own units inside the camera rectangle (the
+original tests its on-screen list; a unit whose model reaches into the view
+but whose centre is outside is on the original's list and not here). Ctrl+Z
+selects every own unit of the types already selected. Ctrl+C selects the
+commander(s) and tracks the last; Ctrl+Shift+C adds. Ctrl+W, F, P, V, B and R
+select by the FBI category token `CTRL_<letter>`, the six the shipped data
+defines; every other Ctrl+letter does nothing, and all of these need Shift up,
+so the original's "Shift adds" form exists for Ctrl+C alone. Ctrl+D is the
+self-destruct toggle with the original's rule for a mixed selection: if any
+selected unit is counting down, the key cancels those and arms none of the others
+(BT-181). The command sent per unit is the same toggle as before.
+
+**Digits.** The plain digits recall control groups, the original's swapped
+(`SwitchAlt`) arrangement, not its default of build-menu pages, and there is
+no preference and no Alt: Alt+digit does nothing. Ctrl+digit binds the
+selection to the group and plays `CreateSquad`; a recall plays `SelectSquad`,
+and Shift on a recall adds the group to the selection (BT-182). `0` is a tenth
+group and Ctrl+Shift+digit adds the selection to a group; both are RWE's own.
+Groups are sets held by the scene, not a number on the unit, so a unit can sit
+in two and a factory does not stamp its products. A recall drops dead,
+foreign, mission-held, unfinished and carried units.
+
+**Orders and panels.** `,` and `.` step the selected builder's build-menu page
+with the original's toggle argument (past the last page closes the menu, from
+closed they open the first or the last page, BT-104) and play the sound whether
+or not a unit is selected. The panel's quick keys (`o b m s p a g c e r l u x k f`
+and the rest the GUI declares) activate the panel buttons, including `d`
+(BLAST, the D-gun cursor) and `v` (MOVEORD, which cycles the move order).
+Escape closes the debug window, then the help overlay, then leaves a finished
+game for the main menu, and otherwise returns a non-normal cursor mode to
+normal or, in normal mode, clears the selection; there is no STOP-gadget press
+and no floating layer to pop.
+
+**Chat.** Enter opens a one-line bar of RWE's own in place of `TALK.GUI`.
+Tab cycles the recipient mode (everybody, allies, non-allies, a custom list),
+Ctrl+digit toggles a slot in the custom list, and the one-message prefixes
+`A,` `E,` and `3:` are read (BT-176). A `+` line is run locally and is not also
+sent as chat (the original sends it too, BT-177). No `SmallButton` click plays on
+opening.
 
 ---
 
 ## 80. The gap table
 
-Key -> what the original does -> RWE status.
+Key -> what the original does -> RWE status, regenerated against the tree of
+2026-10-17. Status words: **works**, **different** (RWE does something else),
+**partly** (the same intent, a named difference) and **missing**.
 
 | Key / combo | Original action | RWE |
 |---|---|---|
-| Esc | close menu / press STOP gadget / deselect all + close floating panels | **works** (cancels cursor mode rather than pressing STOP; same effect) |
-| Tab | MP: TABMENU bar; SP: GAME OPTIONS | **different** -- always the game menu; no TABMENU bar |
-| Enter | message bar (TALK.GUI / TALK2.GUI) | **different** -- opens a message bar and sends what is typed to the other players, but draws its own one-line bar rather than building TALK.GUI / TALK2.GUI |
-| `+` `=` / `-` `_` | speed 1..20 | **works** |
-| Pause | pause toggle, broadcast | **works** |
-| Arrows | scroll map | **works** |
-| backquote `~` `!` `#` `*` | toggle damage bars | **works** (backquote only; the alias keys absent -- harmless) |
-| `,` / `.` | previous / next build-menu page | **missing** (PREV/NEXT handlers exist, keys not wired) |
-| `1`-`9` | build-menu page 1-9 (default; `SwitchAlt` swaps with Alt) | **different** -- control-group recall |
+| Esc | close menu / press STOP gadget / deselect all + close floating panels | **works** (cancels cursor mode rather than pressing STOP; same effect; also closes RWE's debug window and help overlay first) |
+| Tab | MP: TABMENU bar; SP: GAME OPTIONS | **different** -- toggles the game menu in every game type; no TABMENU bar |
+| Enter | message bar (TALK.GUI / TALK2.GUI), `SmallButton` click; the line goes through recipient modes and prefixes, and a `+` line is sent as chat as well | **partly** -- RWE's own one-line bar with the original's modes and prefixes (BT-176); no `SmallButton` click; a `+` line is run locally and not sent (BT-177) |
+| `+` `=` / `-` `_` | speed 1..20, broadcast, any non-watcher, prints "Game Speed ..." on a change | **partly** -- the keys and keypad work; only player 0's change is honoured (BT-179); no speed line on a local press |
+| Pause | pause toggle; `0x19` subtype 0 and the pause bit | **works** -- also honoured while the menu or the chat bar owns the keyboard; an own-clock TA host reads the peer's `0x19` as subtype and value (BT-178) |
+| Arrows | scroll map | **works**; ignored while a menu is open (BT-175) |
+| backquote `~` `!` `#` `*` | toggle damage bars | **works** (backquote only; the alias keys absent -- harmless); the setting is not saved |
+| `,` / `.` | previous / next build-menu page, toggle argument one | **works** (BT-104) |
+| `1`-`9` | build-menu page 1-9 (default; `SwitchAlt` swaps with Alt) | **different** -- control-group recall; no Alt, no preference |
 | Alt+`1`-`9` | select squad (Shift adds to selection) | **missing** -- Alt unused |
-| Ctrl+`1`-`9` | assign squad (exclusive membership; factories stamp their products) | **works** in spirit (RWE groups are sets; no exclusivity, no factory inheritance, extra group 0) |
+| Shift+`1`-`9` | (swapped arrangement) add the squad to the selection | **works** as a recall that adds (BT-182) |
+| Ctrl+`1`-`9` | assign squad (exclusive membership; factories stamp their products); `CreateSquad` | **partly** -- groups are sets (no exclusivity, no factory inheritance); `CreateSquad` plays; `SelectSquad` plays on recall |
 | `t` / `T` | track selected unit | **works** |
-| `n` | scroll to next unit off screen | **missing** |
+| `n` | scroll to next unit off screen | **partly** -- walks every own unit in id order, on screen or not |
 | `h` | MP: SHARE.GUI resource sharing | **missing** |
 | F1 | unit info display for selected unit | **different** -- RWE help overlay |
-| F2 | GAME OPTIONS | **works** |
-| F3 | jump to the unit that last reported | **missing** |
-| F4 | latch the side panel away | **missing** |
-| Space (held) | slide the side panel away temporarily | **different** -- activates focused UI button |
-| F5-F8 | recall camera bookmark 1-4 | **missing** |
-| Ctrl+F5-F8 | save camera bookmark 1-4 | **missing** |
-| Ctrl+F9 | screenshot `screenshots\SHOTnnnn.pcx` | **missing** |
+| F2 | GAME OPTIONS (opens only) | **partly** -- toggles |
+| F3 | jump to the unit that last reported | **partly** -- jumps the camera to where an own unit last took a hit; selects nothing, walks no list |
+| F4 | latch the score panel's player list (BT-183) | **works** |
+| Space (held) | slide out the bottom strip and the player list (§108) | **works** |
+| F5-F8 | recall camera bookmark 1-4, `SelectSquad` | **works** (position only) |
+| Ctrl+F5-F8 | save camera bookmark 1-4, `SelectSquad` | **works** |
+| Ctrl+F9 | screenshot `screenshots\SHOTnnnn.pcx` | **works** -- numbered from the highest existing plus one (BT-161); RWE writes 24-bit |
 | F12 | clear all chat messages | **works** -- clears the console, which is where chat lands |
-| Ctrl+A | select **all** units | **different** -- selects on-screen only (the original's Ctrl+S) |
-| Ctrl+S | select all units **on screen** | **different** -- stops selected units (the original's `s` quickkey) |
-| Ctrl+D | self-destruct selection | **works** |
-| Ctrl+C | select Commander and center | **works** |
-| Ctrl+Z | select all of same type | **different** -- attack-ground cursor mode |
-| Ctrl+W | select armed mobiles (`CTRL_W`) | **different** -- guard cursor mode |
-| Ctrl+F | select factories (`CTRL_F`) | **different** -- attack cursor mode |
-| Ctrl+P | select armed aircraft (`CTRL_P`) | **different** -- move cursor mode |
-| Ctrl+B | select builders (`CTRL_B`) | **missing** |
-| Ctrl+R | select radar/jammer/sonar (`CTRL_R`) | **missing** |
-| Ctrl+V | select all aircraft (`CTRL_V`) | **missing** |
+| Ctrl+A | select every own selectable, finished, uncarried unit, buildings included (BT-180) | **works** |
+| Ctrl+S | select all units on screen | **works** (world position against the camera rectangle; differs at the edge) |
+| Ctrl+D | self-destruct toggle: cancel the counting units, arm none if any was counting (BT-181) | **works** |
+| Ctrl+C | select Commander and centre | **works** |
+| Ctrl+Z | select all of same type | **works** |
+| Ctrl+W | select armed mobiles (`CTRL_W`) | **works** (Shift up only) |
+| Ctrl+F | select factories (`CTRL_F`) | **works** (Shift up only) |
+| Ctrl+P | select armed aircraft (`CTRL_P`) | **works** (Shift up only) |
+| Ctrl+B / Ctrl+R / Ctrl+V | builders / radar-jammer-sonar / all aircraft (`CTRL_B`, `CTRL_R`, `CTRL_V`) | **works** (Shift up only) |
+| Ctrl+Shift+letter | the category selection with Shift: add to the selection | **missing** except Ctrl+Shift+C |
 | Ctrl+other letters | category lookup, no-op with stock data | **missing** (moot until modded categories) |
 | quickkeys `o b m s p a g c e r l u x k f` | panel buttons | **work** |
-| quickkey `v` (MOVEORD) | cycle move orders | **dead key** -- no activation handler |
-| quickkey `d` (BLAST) | the D-gun | **dead key** -- no activation handler |
+| quickkey `v` (MOVEORD) | cycle move orders | **works** |
+| quickkey `d` (BLAST) | the D-gun | **works** |
 | Shift (held) | queue orders; build-square + cloak-radius ghosts; x5 factory clicks | **works** for queueing and x5; hover ghosts out of scope here |
 | Ins/Del/Home/End/PgUp/PgDn | nothing found in-game | n/a |
 | Ctrl+F10, F11, `\`, Shift+F1/F2 | registry-gated developer keys | n/a (RWE's F10/F11 debug windows are its own equivalent) |
 
-RWE-only extras, all benign: F10/F11 debug windows, group `0`,
-Ctrl+Shift+digit, keypad speed keys.
+RWE-only extras, all benign: F9 network overlay, F10/F11 debug windows, group
+`0`, Ctrl+Shift+digit, keypad speed keys, Tab cycling the chat recipient mode.
 
 ---
 
 ## 81. Implementation list for RWE, in priority order
 
-1. **Re-point the Ctrl+letter family at selection, where the original has
-   it.** Ctrl+A = select all everywhere; Ctrl+S = select on screen; Ctrl+Z =
+1. ~~**Re-point the Ctrl+letter family at selection, where the original has
+   it.**~~ **Done** (`a0de1761`; Ctrl+A made to select finished uncarried units
+   including buildings in `56f1f2ff`). Ctrl+A = select all everywhere; Ctrl+S = select on screen; Ctrl+Z =
    same type; Ctrl+B/F/P/R/V/W = category token match against the FBI
    `Category` word list, generic `CTRL_%c` style, Shift adding to the
    selection. The current cursor-mode bindings on Ctrl+S/W/F/P/Z are
    inventions that shadow the original meanings; the orders they duplicate
    already have their true keys (`s`, `g`, `a`, `p` quickkeys). This is the
    loudest muscle-memory break in the list.
-2. **Wire the two dead quickkeys**: `d` -> BLAST (D-gun -- an activation
+2. ~~**Wire the two dead quickkeys**:~~ **Done** (`a0de1761`). `d` -> BLAST (D-gun -- an activation
    handler that enters a manual-fire attack mode for the dgun weapon) and
    `v` -> MOVEORD (cycle move orders). The buttons already render and gate
    correctly; only activation is missing.
-3. **`,` and `.`** -> the existing PREV/NEXT build-page logic. Trivial.
-4. **Digit semantics.** Default digits to build-menu page switching, move
-   squad selection to Alt+digit, keep Ctrl+digit assignment, and offer the
-   `SwitchAlt` preference to swap -- or consciously keep the modern scheme
-   and record it in the "deliberately differs" section of TOTALA-EXE.md.
-   If squads are kept TA-true: exclusive membership and the factory
-   inheritance rule come with them.
-5. **Camera bookmarks** Ctrl+F5..F8 / F5..F8 -- small, self-contained,
-   pure scene state.
-6. **`n`** next-unit-off-screen scroll -- small.
+3. ~~**`,` and `.`** -> the existing PREV/NEXT build-page logic. Trivial.~~ **Done**
+   (`a0de1761`; the toggle at the ends in `a433ce19`, BT-104).
+4. **Digit semantics.** Unchanged and now recorded: the squad sounds and the
+   Shift-adds recall are in (BT-182); exclusivity, factory inheritance, Alt and
+   the preference are not.
+5. ~~**Camera bookmarks** Ctrl+F5..F8 / F5..F8 -- small, self-contained,
+   pure scene state.~~ **Done.**
+6. ~~**`n`** next-unit-off-screen scroll -- small.~~ **Done.**
 7. **F1 unit info** display (UNITINFO.GUI); move RWE's help overlay to an
    unused key if kept.
 8. **The message bar** as the original draws it: Enter opens a bar and sends
-   chat now, and F12 clears it, but the bar is RWE's own line of text rather
-   than TALK.GUI / TALK2.GUI, and F3 still jumps to the last unit that took a
-   hit rather than walking a message backlog -- there is no backlog, only the
-   five-second console. `h` sharing (SHARE.GUI) hangs off the same UI and is
-   not done.
-9. **F4 / held-Space panel slide** -- cosmetic, needs the panel to be a
-   sliding element first.
-10. **Ctrl+F9 screenshot** to `screenshots\SHOTnnnn.pcx` -- nice-to-have.
+   chat, with the original's recipient modes and prefixes; the bar is RWE's own
+   line of text rather than TALK.GUI / TALK2.GUI, no `SmallButton` click plays,
+   and F3 jumps to where an own unit last took a hit rather than walking a
+   message backlog. `h` sharing (SHARE.GUI) hangs off the same UI and is not
+   done.
+9. ~~**F4 / held-Space panel slide** -- cosmetic, needs the panel to be a
+   sliding element first.~~ **Done** (`a8af4e57`, BT-183; the slide places the
+   score panel's player list).
+10. ~~**Ctrl+F9 screenshot** to `screenshots\SHOTnnnn.pcx` -- nice-to-have.~~
+    **Done** (numbering as the original's, `21940722`, BT-161).
 
 Not worth porting: the `Games`-registry developer keys (Ctrl+F10 movie mode,
 F11 debug panel, `\`, Shift+F1/F2 overlays) -- RWE's ImGui windows already

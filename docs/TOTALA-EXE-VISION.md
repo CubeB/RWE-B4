@@ -208,9 +208,14 @@ Runs per tick, and computes flags for **one** viewing player — the index it re
 from `ds:0x511DE8 + 0x2A43` at `0x46745B`. Four loops over the unit list.
 
 **Loop 0, `0x467499`.** For every live unit: clear `unit+0x110` bit 12. Then, if
-the unit is the viewer's own or an ally sharing vision, set bits 8 and 9;
-otherwise clear bits 8, 9 and 10. So the radar picture is rebuilt from nothing
-every tick, and a unit you own is never off it.
+the unit is the viewer's own, or its owner has the viewer in its alliance table
+**and** has the share-radar bit set (bit 6 of the owner record byte `+0x97`,
+the one `+ShareRadar` flips, `0x418FD0`), set bits 8 and 9; otherwise clear bits
+8, 9 and 10. So the radar picture is rebuilt from nothing every tick, and a unit
+you own is never off it. **The share bit therefore gates only the owner's own
+icons:** it makes an owner's units appear as contacts on an ally's picture. It
+has nothing to do with whose detectors work, because loop 1 walks only the
+viewer's own units and an ally's dish or sonar set is never visited.
 
 **Loop 1, `0x467521`.** Each of the viewer's live units that is **switched on**
 (`unit+0x10E` bit 0) and names a `radardistance` or a `sonardistance` becomes a
@@ -281,8 +286,17 @@ bit 9. So:
 
 **Loop 3, `0x467690` — `mincloakdistance`.** For every live **cloakable** unit
 whose owner is of type 1 or 2, `0x40B0D0(owner, &position, mincloakdistance)` asks
-whether any live enemy of that owner is within that distance in the map plane. If
-one is, `unit+0xB0` is set to the current tick **+ 0x5A (90 ticks, three seconds)**
+whether any enemy on **the owner's own list of seen enemies** is within that
+distance in the map plane. The routine does not scan the unit array: it walks
+the first vector of the per-player object at `[0x5119C0 + player * 4]`, which
+`0x40AA40` rebuilds **every 30 ticks**. A unit enters that list only if it is
+live, not flagged dying (bit 14), not allied to the owner (so allies and the
+owner's own units never count), clear of the further flag bit 15, and passes
+the can-see gate `0x465AC0` (so an **enemy cloaked unit never counts**, and
+neither does one in fog). Nothing in the chain tests construction state, so an
+unfinished enemy counts. A unit that walks into range can therefore take up to
+30 ticks to be noticed. If the walk finds one, `unit+0xB0` is set to the current
+tick **+ 0x5A (90 ticks, three seconds)**
 and `unit+0x110` bit 12 is set. Bit 12 is cleared again at the top of the next
 tick's loop 0, so it is the timestamp that does the work: an enemy walking past a
 cloaked Commander decloaks it, and it stays decloaked for three seconds after the
@@ -430,8 +444,8 @@ Bit 2 of `unit+0x10E` reaches the screen in one place, and it does not touch the
 model at all: it changes the routine that lays the finished unit down.
 
 A unit is drawn by `0x459200`. Everything about it — every piece, the weapons
-hanging off it, the brightness passes at `0x4BA1B0` and `0x4B96E0` — goes into a
-bitmap of its own at `[this+0x10]`, in the GAF frame layout (`+0` width, `+2`
+hanging off it, the water cut at `0x4BA1B0` and the water tint at `0x4B96E0` —
+goes into a bitmap of its own at `[this+0x10]`, in the GAF frame layout (`+0` width, `+2`
 height, `+4`/`+6` offsets, `+8` the transparent index, `+0x10` the pixels). The
 last thing the routine does is blit that bitmap to the screen, and it picks
 between two blitters on the cloak flag:
@@ -544,6 +558,23 @@ to do with drawing.
 unit's `mincloakdistance` is non-zero **and the unit is actually cloaked**, the
 range display draws a circle of that radius around it in colour
 `[0x511DE8+0xDDA]` — the distance at which an enemy will break the cloak.
+
+**The two passes named above are not brightness passes.** `0x459200` works out
+how deep the unit's origin sits (the sea-level byte at `global+0x1427F` less the
+origin's height); when that is positive, every pixel of the unit's bitmap whose
+height byte is at or below the water line is handled in one of two ways, chosen
+at `0x45972A`-`0x459750`. If the unit's owner is the displayed player, or its
+flag word has the sonar-contact bit (`unit+0x110` bit 9), the pixel goes
+through the BLUE TABLE (`gfx+0xD0`; red halved, green halved, blue halved plus
+50, snapped to a palette index by the band-limited matcher `0x4BA9D0`) by
+`0x4B96E0`. For every other unit it is overwritten with the transparent index
+by `0x4BA1B0`, so an enemy ship seen on the surface loses the hull under the
+water. A `digger` unit's final picture is cut once more, at `0x459755`-`0x459771`,
+with the literal threshold 125 whether or not it is in the water; with the
+digger's height bias of 125 that removes everything at or below the model's
+origin plane, so a pop-up turret never shows its buried half. RWE has all of
+it: the blue remap from the palette, the cut for other players' units, and the
+digger's cut (`unitWaterPartsAreCut`, `cutBelowY`).
 
 ### What RWE does with this
 
