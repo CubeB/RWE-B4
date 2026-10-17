@@ -104,6 +104,11 @@ namespace rwe
     /** A finished unit of the given type, put straight into the world. */
     inline UnitId addUnitOfType(GameSimulation& sim, const std::string& unitType, PlayerId owner, const SimVector& pos, const std::shared_ptr<CobScript>& script)
     {
+        // A unit's CobEnvironment keeps only a raw pointer to its script, and
+        // callers often pass a temporary; keep every script alive for the rest
+        // of the test run so no unit outlives the script it points at.
+        static std::vector<std::shared_ptr<CobScript>> keepAlive;
+        keepAlive.push_back(script);
         auto env = std::make_unique<CobEnvironment>(script.get());
         std::vector<UnitMesh> pieces;
         const UnitId unitId(sim.units.emplace(pieces, std::move(env)));
