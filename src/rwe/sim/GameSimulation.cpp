@@ -3853,6 +3853,12 @@ namespace rwe
 
         if (attacker)
         {
+            // Who hit it last, and when: an escort of this unit reacts to it
+            // (unit+0xF0, BT-98).
+            auto& hit = getUnitState(unitId);
+            hit.lastAttacker = *attacker;
+            hit.lastAttackedAt = gameTime;
+
             // The original shoots back from inside the damage message
             // handler, before the hit points come off, which is the only
             // thing that makes return fire a firing mode rather than a

@@ -962,6 +962,21 @@ namespace rwe
         unsigned int guardLimit{0};
         unsigned int guardCounter{0};
 
+        /**
+         * The last unit to damage this one and the tick it did (the original's
+         * `unit+0xF0`, which an escort reads when the guarded unit is hit,
+         * BT-98/#643). Hashed: an escort's reaction to it decides its orders.
+         */
+        std::optional<UnitId> lastAttacker;
+        GameTime lastAttackedAt{0};
+
+        /**
+         * On an escort: the `lastAttackedAt` of the guarded unit it has already
+         * reacted to, so one hit is answered once however many ticks the
+         * guard handler runs. Hashed for the same reason.
+         */
+        GameTime guardSeenAttackAt{0};
+
 
         bool activated{false};
         bool isSufficientlyPowered{false};

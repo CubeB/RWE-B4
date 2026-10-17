@@ -4635,6 +4635,39 @@ namespace rwe
         }
         auto& targetUnit = target->get();
 
+        // An escort reacts to whoever hit the guarded unit, unless the attacker
+        // is an ally of the escort's owner or the escort's NoChaseCategory
+        // names it (the retaliation step of 0x406300 and 0x40FBE0, the only
+        // place either reads the alliance table, which is why the guarded unit
+        // may be a teammate's; BT-98, #643). An attack order first; failing
+        // that the weapon slots are retargeted onto it. Once per hit: the
+        // escort remembers the hit it has answered. A hit counts for a second;
+        // the original delivers it as an event on the tick it lands, which
+        // RWE's unit pass would otherwise see a tick late or twice.
+        if (targetUnit.lastAttacker
+            && targetUnit.lastAttackedAt > unitInfo.state->guardSeenAttackAt
+            && targetUnit.lastAttackedAt + GameTime(SimTicksPerSecond) >= sim->gameTime)
+        {
+            unitInfo.state->guardSeenAttackAt = targetUnit.lastAttackedAt;
+            auto attackerId = *targetUnit.lastAttacker;
+            auto attackerRef = sim->tryGetUnitState(attackerId);
+            if (attackerRef && !attackerRef->get().isDead() && attackerId != unitInfo.id
+                && !sim->arePlayersAllied(unitInfo.state->owner, attackerRef->get().owner)
+                && !categoryListContains(sim->unitDefinitions.at(attackerRef->get().unitType).category, unitInfo.definition->noChaseCategory)
+                && unitInfo.state->fireOrders != UnitFireOrders::HoldFire)
+            {
+                if (unitInfo.definition->canAttack && sim->canSeeUnit(unitInfo.state->owner, attackerId)
+                    && attackOrderIsAccepted(*sim, *unitInfo.definition, *unitInfo.state, attackerRef->get()))
+                {
+                    auto attack = createAttackOrder(attackerId);
+                    std::get<AttackOrder>(attack).automatic = unitInfo.definition->defaultMission != DefaultMission::None;
+                    unitInfo.state->orders.push_front(std::move(attack));
+                    return false;
+                }
+
+                sim->returnFire(unitInfo.id, attackerId);
+            }
+        }
 
         if (auto bs = std::get_if<UnitBehaviorStateBuilding>(&targetUnit.behaviourState); unitInfo.definition->builder && bs)
         {

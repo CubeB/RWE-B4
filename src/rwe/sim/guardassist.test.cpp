@@ -617,4 +617,103 @@ namespace rwe
             REQUIRE(sim.getUnitState(escort).orders.empty());
         }
     }
+
+    TEST_CASE("an escort answers whoever hits the guarded unit, unless that unit is an ally", "[guardassist][retaliation]")
+    {
+        // BT-98 and #643. The ground escort (0x406300) and the air escort
+        // (0x40FBE0) react to the guarded unit's attacker, and the alliance
+        // byte they read is the attacker's: an ally is not answered. The
+        // reaction is an attack order first and, failing that, the weapon
+        // slots are pointed at the attacker.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        sim.lineOfSightMode = LineOfSightMode::Circular;
+        auto mine = addPlayer(sim, "mine");
+        auto friendly = addPlayer(sim, "friend");
+        auto foe = addPlayer(sim, "foe");
+        sim.getPlayer(mine).teamId = 1;
+        sim.getPlayer(friendly).teamId = 1;
+        sim.getPlayer(foe).teamId = 2;
+        registerModel(sim);
+
+        auto gunner = makeEscortDef(false);
+        gunner.canAttack = true;
+        gunner.sightDistance = 600u;
+        sim.unitDefinitions["gunner"] = gunner;
+        auto unarmed = makeEscortDef(false);
+        unarmed.sightDistance = 600u;
+        sim.unitDefinitions["escort"] = unarmed;
+        auto marker = makeMarkerDef();
+        marker.sightDistance = 600u;
+        sim.unitDefinitions["marker"] = marker;
+        auto raider = makeMarkerDef();
+        raider.canAttack = true;
+        sim.unitDefinitions["raider"] = raider;
+
+        auto guarded = addUnitOfType(sim, "marker", mine, SimVector(300_ss, 0_ss, 300_ss), script);
+        auto escort = addUnitOfType(sim, "gunner", mine, SimVector(260_ss, 0_ss, 300_ss), script);
+        sim.getUnitState(escort).orders.push_back(GuardOrder(guarded));
+        auto enemy = addUnitOfType(sim, "raider", foe, SimVector(340_ss, 0_ss, 300_ss), script);
+        auto teammate = addUnitOfType(sim, "raider", friendly, SimVector(340_ss, 0_ss, 340_ss), script);
+
+        tick(sim, 40);
+        REQUIRE(std::holds_alternative<GuardOrder>(sim.getUnitState(escort).orders.front()));
+        REQUIRE(sim.canSeeUnit(mine, enemy));
+
+        SECTION("an enemy that hits the guarded unit is attacked")
+        {
+            sim.applyDamage(guarded, 5, enemy);
+            tick(sim, 1);
+
+            const auto& orders = sim.getUnitState(escort).orders;
+            REQUIRE(orders.size() == 2);
+            const auto* attack = std::get_if<AttackOrder>(&orders.front());
+            REQUIRE(attack != nullptr);
+            REQUIRE(std::get<UnitId>(attack->target) == enemy);
+            REQUIRE(std::holds_alternative<GuardOrder>(orders.back()));
+        }
+
+        SECTION("a teammate that hits it is not answered")
+        {
+            sim.applyDamage(guarded, 5, teammate);
+            tick(sim, 3);
+
+            const auto& orders = sim.getUnitState(escort).orders;
+            REQUIRE(orders.size() == 1);
+            REQUIRE(std::holds_alternative<GuardOrder>(orders.front()));
+        }
+
+        SECTION("one hit is answered once")
+        {
+            sim.applyDamage(guarded, 5, enemy);
+            tick(sim, 1);
+            REQUIRE(sim.getUnitState(escort).orders.size() == 2);
+            // The attack ends at once (the enemy dies); the guard resumes and
+            // the same hit is not answered again.
+            sim.quietlyKillUnit(enemy);
+            sim.deleteDeadUnits();
+            tick(sim, 5);
+            const auto& orders = sim.getUnitState(escort).orders;
+            REQUIRE(orders.size() == 1);
+            REQUIRE(std::holds_alternative<GuardOrder>(orders.front()));
+        }
+
+        SECTION("an escort with no weapon of its own makes no attack order")
+        {
+            auto bare = addUnitOfType(sim, "escort", mine, SimVector(260_ss, 0_ss, 340_ss), script);
+            sim.getUnitState(bare).orders.push_back(GuardOrder(guarded));
+            tick(sim, 3);
+            sim.applyDamage(guarded, 5, enemy);
+            tick(sim, 1);
+            REQUIRE(std::holds_alternative<GuardOrder>(sim.getUnitState(bare).orders.front()));
+        }
+
+        SECTION("an escort on hold fire does not answer")
+        {
+            sim.getUnitState(escort).setFireOrders(UnitFireOrders::HoldFire);
+            sim.applyDamage(guarded, 5, enemy);
+            tick(sim, 3);
+            REQUIRE(std::holds_alternative<GuardOrder>(sim.getUnitState(escort).orders.front()));
+        }
+    }
 }
