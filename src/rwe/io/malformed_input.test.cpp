@@ -42,6 +42,7 @@
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/sim_test_util.h>
 #include <rwe/sim/util.h>
+#include <rwe/ui/UiListBox.h>
 #include <rwe/vfs/CompositeVirtualFileSystem.h>
 #include <sstream>
 #include <string>
@@ -1623,5 +1624,81 @@ namespace rwe
             REQUIRE_NOTHROW(palette.at(s.energyColor));
             REQUIRE_NOTHROW(palette.at(s.metalColor));
         }
+    }
+
+    TEST_CASE("a list box that overflows by fewer than three rows scrolls to its end and no further", "[ui][malformed]")
+    {
+        // 48 pixels is four rows, of which three are shown (the box is
+        // shortened by one). The old test compared against maxScroll - 3 in
+        // unsigned arithmetic, which wrapped for a maximum under three and
+        // sent the position to three, past the end of the items (#667).
+        // The scroll position as last announced.
+        auto pos = std::make_shared<unsigned int>(0);
+        auto makeBox = [pos](unsigned int sizeY, int itemCount) {
+            auto box = std::make_unique<UiListBox>(0, 0, 100, sizeY, nullptr);
+            *pos = 0;
+            box->scrollPosition().subscribe([pos](const unsigned int& v) { *pos = v; });
+            for (int i = 0; i < itemCount; ++i)
+            {
+                box->appendItem("item " + std::to_string(i));
+            }
+            return box;
+        };
+
+        SECTION("a list that fits does not scroll")
+        {
+            auto box = makeBox(48, 2);
+            box->mouseWheel(MouseWheelEvent(0, -1));
+            REQUIRE(*pos == 0);
+        }
+
+        SECTION("a list two rows too long stops at two")
+        {
+            auto box = makeBox(48, 5);
+            box->mouseWheel(MouseWheelEvent(0, -1));
+            REQUIRE(*pos == 2);
+            box->mouseWheel(MouseWheelEvent(0, -1));
+            REQUIRE(*pos == 2);
+        }
+
+        SECTION("a long list still moves three rows at a time")
+        {
+            auto box = makeBox(48, 20);
+            box->mouseWheel(MouseWheelEvent(0, -1));
+            REQUIRE(*pos == 3);
+            for (int i = 0; i < 20; ++i)
+            {
+                box->mouseWheel(MouseWheelEvent(0, -1));
+            }
+            REQUIRE(*pos == 17);
+        }
+
+        SECTION("a scroll bar message past the end is clamped")
+        {
+            auto box = makeBox(48, 5);
+            box->uiMessage(GroupMessage("t", 0, "bar", ScrollPositionMessage{0.5f, 7.0f}));
+            REQUIRE(*pos == 2);
+        }
+    }
+
+    TEST_CASE("a list box under one row tall has no visible lines rather than billions", "[ui][malformed]")
+    {
+        // numberOfLines was height / 12 - 1 unsigned, so 11 pixels gave
+        // 4294967295 lines (#668). The viewport share is the observable
+        // sign: it was 1.0 (everything visible) and is 0.0.
+        unsigned int position = 0;
+        UiListBox box(0, 0, 100, 11, nullptr);
+        box.scrollPosition().subscribe([&position](const unsigned int& v) { position = v; });
+        for (int i = 0; i < 3; ++i)
+        {
+            box.appendItem("item");
+        }
+        REQUIRE(box.getViewportPercent() == 0.0f);
+        box.mouseWheel(MouseWheelEvent(0, -1));
+        REQUIRE(position == 3);
+        box.mouseWheel(MouseWheelEvent(0, -1));
+        REQUIRE(position == 3);
+        box.scrollToEnd();
+        REQUIRE(position == 3);
     }
 }
