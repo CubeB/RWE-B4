@@ -638,11 +638,17 @@ namespace rwe
         auto cameraConstraint = computeCameraConstraint(simulation.terrain, worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()));
 
         // update camera position from keyboard arrows
+        //
+        // Not while a menu is up. The original runs its key handler and its
+        // edge-scroll update only when the interface word's menu bit is clear
+        // (0x496969), so the camera does not move behind an open menu (BT-175).
+        // A key held down as the menu opened is still recorded, and resumes
+        // when the menu closes.
         {
             int directionX = (right ? 1 : 0) - (left ? 1 : 0);
             int directionZ = (down ? 1 : 0) - (up ? 1 : 0);
 
-            if (directionX || directionZ)
+            if ((directionX || directionZ) && !isGameMenuOpen())
             {
                 nudgeCamera(millisecondsElapsed, cameraConstraint, directionX, directionZ);
             }
@@ -667,7 +673,9 @@ namespace rwe
         // The position is clamped into the viewport for the same reason: once
         // the pointer is outside, its coordinates are past the edge rather
         // than on it, and the tests below want the edge itself.
-        if (sceneContext.sdl->getKeyboardFocus() != nullptr)
+        //
+        // And not while a menu is open, for the reason given above.
+        if (sceneContext.sdl->getKeyboardFocus() != nullptr && !isGameMenuOpen())
         {
             auto mousePosition = getMousePosition();
             auto clampedX = std::clamp(mousePosition.x, sceneContext.viewport->left(), sceneContext.viewport->right() - 1);
