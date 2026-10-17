@@ -15,6 +15,13 @@ namespace rwe
         REQUIRE(unidentifiedObjectText(true) == "S: Unidentified object");
     }
 
+    TEST_CASE("vent steam is drawn wherever the ground is explored and dimmed where it is not in sight (BT-151)", "[presentation]")
+    {
+        REQUIRE(ventSteamDrawMode(true, true) == VentSteamDrawMode::Normal);
+        REQUIRE(ventSteamDrawMode(true, false) == VentSteamDrawMode::Dimmed);
+        REQUIRE(ventSteamDrawMode(false, false) == VentSteamDrawMode::Hidden);
+    }
+
     TEST_CASE("a feature marked nodisplayinfo shows no footer text (BT-147)", "[presentation]")
     {
         FeatureDefinition ordinary{};

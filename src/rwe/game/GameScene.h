@@ -2379,7 +2379,7 @@ namespace rwe
          * smoke and a thermal vent's steam share this emitter class in the
          * original and differ only in that.
          */
-        void spawnSmokePuff(const Vector3f& position, const std::string& anim, float riseRate);
+        void spawnSmokePuff(const Vector3f& position, const std::string& anim, float riseRate, bool dimmedInRememberedGround = false);
 
         /** This tick's steam from every thermal vent on the map. */
         void spawnGeoVentSteam();

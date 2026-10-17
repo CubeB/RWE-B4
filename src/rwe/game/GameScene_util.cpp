@@ -1987,6 +1987,15 @@ namespace rwe
             [](const LandOnAirBaseOrder& o) { return std::optional<UnitId>(o.target); });
     }
 
+    VentSteamDrawMode ventSteamDrawMode(bool explored, bool visible)
+    {
+        if (visible)
+        {
+            return VentSteamDrawMode::Normal;
+        }
+        return explored ? VentSteamDrawMode::Dimmed : VentSteamDrawMode::Hidden;
+    }
+
     std::string unidentifiedObjectText(bool sonarContact)
     {
         return std::string(sonarContact ? "S: " : "R: ") + "Unidentified object";

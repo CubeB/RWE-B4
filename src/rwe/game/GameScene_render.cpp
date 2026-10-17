@@ -2130,6 +2130,25 @@ namespace rwe
                 {
                     continue;
                 }
+                if (particle.dimmedInRememberedGround)
+                {
+                    // Thermal vent steam: drawn over explored ground and
+                    // greyed like remembered ground where it is not in sight
+                    // (BT-151).
+                    auto at = floatToSimVector(particle.position);
+                    auto mode = ventSteamDrawMode(positionIsExploredByLocalPlayer(at), positionIsVisibleToLocalPlayer(at));
+                    if (mode == VentSteamDrawMode::Hidden)
+                    {
+                        continue;
+                    }
+                    auto drawnBefore = spriteParticlesBatch.sprites.size();
+                    drawSpriteParticle(gameMediaDatabase, renderTime(), viewProjectionMatrix, particle, spriteParticlesBatch);
+                    if (mode == VentSteamDrawMode::Dimmed && spriteParticlesBatch.sprites.size() > drawnBefore)
+                    {
+                        spriteParticlesBatch.sprites.back().fogged = true;
+                    }
+                    continue;
+                }
                 drawSpriteParticle(gameMediaDatabase, renderTime(), viewProjectionMatrix, particle, spriteParticlesBatch);
             }
             worldRenderService.drawSpriteBatch(spriteParticlesBatch);

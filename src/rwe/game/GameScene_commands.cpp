@@ -3276,7 +3276,7 @@ namespace rwe
         particles.push_back(particle);
     }
 
-    void GameScene::spawnSmokePuff(const Vector3f& position, const std::string& anim, float riseRate)
+    void GameScene::spawnSmokePuff(const Vector3f& position, const std::string& anim, float riseRate, bool dimmedInRememberedGround)
     {
         auto numberOfFrames = static_cast<int>(gameMediaDatabase.getSpriteSeries("FX", anim).value()->sprites.size());
 
@@ -3304,6 +3304,7 @@ namespace rwe
             makeSmokePuffFrameSchedule(numberOfFrames, [](int n) { return std::rand() % n; }),
         };
         particle.startTime = simulation.gameTime;
+        particle.dimmedInRememberedGround = dimmedInRememberedGround;
 
         particles.push_back(particle);
     }
@@ -3320,12 +3321,15 @@ namespace rwe
 
         for (const auto& point : findGeoVentSteamPoints(simulation))
         {
-            // A vent under the fog of war keeps its steam to itself.
-            if (!positionIsVisibleToLocalPlayer(SimVector(SimScalar(point.x), SimScalar(point.y), SimScalar(point.z))))
+            // The vent's emitter has no sight test (BT-151): its steam is made
+            // and drawn wherever the ground is explored, and dimmed like the
+            // rest of the remembered scene where it is not in sight. Only
+            // unexplored ground, which the fog fill hides, keeps it back.
+            if (!positionIsExploredByLocalPlayer(SimVector(SimScalar(point.x), SimScalar(point.y), SimScalar(point.z))))
             {
                 continue;
             }
-            spawnSmokePuff(point, "smoke 1", geoVentSteamRiseRate);
+            spawnSmokePuff(point, "smoke 1", geoVentSteamRiseRate, true);
         }
     }
 

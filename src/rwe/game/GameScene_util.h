@@ -645,6 +645,20 @@ namespace rwe
     UnitActivity unitActivity(const UnitState& unit, bool underConstruction, bool weaponQueued);
 
     /**
+     * How a thermal vent's steam is drawn for the ground it is over (BT-151):
+     * hidden on unexplored ground, dimmed like the rest of the remembered scene
+     * on explored ground that is not in sight, normal in sight.
+     */
+    enum class VentSteamDrawMode
+    {
+        Hidden,
+        Dimmed,
+        Normal,
+    };
+
+    VentSteamDrawMode ventSteamDrawMode(bool explored, bool visible);
+
+    /**
      * What the footer prints for a hovered unit the viewer cannot identify
      * (BT-141, 0x46B6F3): the prefix "S: " when the unit is held on sonar and
      * "R: " otherwise, then "Unidentified object" -- no name, no health bar, no
