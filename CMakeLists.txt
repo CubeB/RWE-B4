@@ -1324,6 +1324,7 @@ set(TEST_FILES
     src/rwe/sim/fogattack.test.cpp
     src/rwe/sim/ballisticair.test.cpp
     src/rwe/sim/mapgravity.test.cpp
+    src/rwe/sim/nanoframedeath.test.cpp
     src/rwe/sim/hitbyweapon.test.cpp
     src/rwe/sim/wind.test.cpp
     src/rwe/pathfinding/pathing.test.cpp

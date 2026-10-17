@@ -3392,7 +3392,14 @@ namespace rwe
             }
         }
 
-        auto deathType = unit.position.y < terrain.getSeaLevel() ? UnitDiedEvent::DeathType::WaterExploded : UnitDiedEvent::DeathType::NormalExploded;
+        // An unfinished unit sets off nothing: the death weapon is skipped
+        // while the build-left fraction is non-zero (0x486D2F-0x486D40,
+        // BT-45), and the scene's blast and screen shake hang off the event
+        // type, so it reports a plain deletion. Its pieces still fly (below).
+        const bool unfinished = unit.isBeingBuilt(unitDefinition);
+        auto deathType = unfinished
+            ? UnitDiedEvent::DeathType::Deleted
+            : (unit.position.y < terrain.getSeaLevel() ? UnitDiedEvent::DeathType::WaterExploded : UnitDiedEvent::DeathType::NormalExploded);
         events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, deathType, unit.owner, killerOwner});
 
         // The severity is `clamp(1, 100, (100*overkill/maxdamage + X) / 2)`,
@@ -3471,7 +3478,7 @@ namespace rwe
             }
         }
 
-        if (!unitDefinition.explodeAs.empty())
+        if (!unitDefinition.explodeAs.empty() && !unfinished)
         {
             auto impactType = unit.position.y < terrain.getSeaLevel() ? ImpactType::Water : ImpactType::Normal;
             // The explodeAs projectile is environmental: deaths it causes
@@ -3720,32 +3727,18 @@ namespace rwe
         if (unit.hitPoints <= damagePoints)
         {
             recordUnitDeath(*this, unitId, deathCause, attacker);
-            if (unit.isBeingBuilt(unitDefinition))
-            {
-                // Units that are still under construction
-                // die quietly without a corpse.
-                // FIXME: units in TA that are not actively receiving build input
-                // die with an explosion, even though they leave no corpse.
-                //
-                // This is still death cause 1, an ordinary weapon kill, so the
-                // owner takes the loss -- and the attacker is credited nothing,
-                // which used to be an accident of the code path and is now the
-                // rule: both the veterancy counter and the player's Kills sit
-                // behind the build-progress test at 0x4869A7. See §5.
-                quietlyKillUnit(unitId);
-                // A nanoframe runs no Killed script, so it leaves no corpse
-                // and has no severity: cause 1 with both nibbles empty,
-                // which is what the corpus's cause-9 and cause-5 deaths
-                // read too.
-                notifyUnitDied(*this, unitId, attacker, 0, 1, 0);
-            }
-            else
-            {
-                // What the blow had left over once the unit's remaining hit
-                // points were paid for. The original works the severity out
-                // of exactly this.
-                killUnit(unitId, attacker, damagePoints - unit.hitPoints);
-            }
+
+            // What the blow had left over once the unit's remaining hit
+            // points were paid for. The original works the severity out of
+            // exactly this.
+            //
+            // A unit still under construction goes the same way (BT-45): it
+            // is death cause 1, an ordinary weapon kill, so the owner takes
+            // the loss and the Killed script runs, its pieces flying off as
+            // debris. What the unfinished state withholds is the corpse, the
+            // death weapon's blast and the attacker's credit, and
+            // killUnitWithSeverity says where each of those three goes.
+            killUnit(unitId, attacker, damagePoints - unit.hitPoints);
         }
         else
         {
