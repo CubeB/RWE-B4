@@ -838,6 +838,8 @@ namespace rwe
         sim.getPlayer(arm).energyProduced = Energy(5000.0f);
         sim.getPlayer(arm).metalExcess = Metal(100.0f);
         sim.getPlayer(arm).energyExcess = Energy(500.0f);
+        sim.getPlayer(arm).unitsKilled = 70000; // widened to 16 bits, so it saturates (BT-231)
+        sim.getPlayer(arm).unitsLost = 0x0102;
 
         sim.getPlayer(core).metal = Metal(11.5f);
         sim.getPlayer(core).energy = Energy(22.25f);
@@ -893,6 +895,22 @@ namespace rwe
         REQUIRE(armStats->metalCounters[0] == 1000.0f);
         REQUIRE(armStats->metalCounters[1] == 100.0f);
         REQUIRE(armStats->metalCounters[2] == 900.0f);
+
+        // The prefix: no share flag, then the player's kills and losses as
+        // 32-bit values holding a 16-bit count, and the two untraced
+        // counters at zero (BT-231).
+        REQUIRE(armStats->prefix[0] == 0);
+        REQUIRE(armStats->prefix[1] == 0xFF);
+        REQUIRE(armStats->prefix[2] == 0xFF);
+        REQUIRE(armStats->prefix[3] == 0);
+        REQUIRE(armStats->prefix[4] == 0);
+        REQUIRE(armStats->prefix[5] == 0x02);
+        REQUIRE(armStats->prefix[6] == 0x01);
+        REQUIRE(armStats->prefix[7] == 0);
+        for (std::size_t i = 9; i < 17; ++i)
+        {
+            REQUIRE(armStats->prefix[i] == 0);
+        }
 
         auto coreStats = tadDecodeResourceStats(*firstSubPacketOf(handler.subPackets[3], static_cast<uint8_t>(TadSubPacketCode::PlayerResourceInfo)));
         REQUIRE(coreStats);
