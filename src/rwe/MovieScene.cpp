@@ -47,6 +47,16 @@ namespace rwe
         }
     }
 
+    MoviePlacement moviePlacement(unsigned int filmWidth, unsigned int filmHeight, unsigned int headerFlags)
+    {
+        constexpr int ScreenHeight = 480;
+        // Bits 1 and 2 are the library's Y-scale and Y-interlace modes, which
+        // both put two rows on the screen for each stored one.
+        auto doubled = (headerFlags & 0x6u) != 0;
+        auto drawnHeight = static_cast<int>(filmHeight) * (doubled ? 2 : 1);
+        return MoviePlacement{0, (ScreenHeight - drawnHeight) >> 1, static_cast<int>(filmWidth), drawnHeight};
+    }
+
     MovieScene::MovieScene(const SceneContext& sceneContext, std::vector<char>&& movieData, std::function<void()>&& onFinish)
         : sceneContext(sceneContext),
           uiRenderService(sceneContext.graphics, sceneContext.shaders, sceneContext.viewport),
@@ -174,23 +184,34 @@ namespace rwe
             return;
         }
 
-        // The movies are stored anamorphic -- 640x240 shown on a 640x480
-        // screen -- so the frame is presented as the largest 4:3 rectangle
+        // The original draws into its 640 by 480 screen: the film at x 0,
+        // y = (480 - height) / 2 and in its own pixels (BT-157), a 640 by 304
+        // film with bars above and below it. The films stored at 640x240 are
+        // drawn height-doubled by the library, so they fill the screen. That
+        // 640 by 480 screen is itself presented as the largest 4:3 rectangle
         // the window will hold, whatever its own pixel shape.
         auto viewWidth = static_cast<float>(sceneContext.viewport->width());
         auto viewHeight = static_cast<float>(sceneContext.viewport->height());
 
-        auto width = viewWidth;
-        auto height = width * 3.0f / 4.0f;
-        if (height > viewHeight)
+        auto screenWidth = viewWidth;
+        auto screenHeight = screenWidth * 3.0f / 4.0f;
+        if (screenHeight > viewHeight)
         {
-            height = viewHeight;
-            width = height * 4.0f / 3.0f;
+            screenHeight = viewHeight;
+            screenWidth = screenHeight * 4.0f / 3.0f;
         }
 
-        auto x = std::floor((viewWidth - width) / 2.0f);
-        auto y = std::floor((viewHeight - height) / 2.0f);
-        uiRenderService.drawSpriteAbs(x, y, width, height, *frameSprite);
+        auto screenX = std::floor((viewWidth - screenWidth) / 2.0f);
+        auto screenY = std::floor((viewHeight - screenHeight) / 2.0f);
+        auto scale = screenWidth / 640.0f;
+
+        auto placement = moviePlacement(decoder.getWidth(), decoder.getHeight(), decoder.getHeaderFlags());
+        uiRenderService.drawSpriteAbs(
+            screenX + (static_cast<float>(placement.x) * scale),
+            screenY + (static_cast<float>(placement.y) * scale),
+            static_cast<float>(placement.width) * scale,
+            static_cast<float>(placement.height) * scale,
+            *frameSprite);
     }
 
     void MovieScene::onKeyDown(const SDL_KeyboardEvent& /*key*/)

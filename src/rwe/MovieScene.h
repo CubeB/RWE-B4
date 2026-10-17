@@ -13,7 +13,7 @@
 namespace rwe
 {
     /**
-     * Plays a Smacker movie over a black screen, scaled to fit, and hands
+     * Plays a Smacker movie over a black screen, placed as the original places it, and hands
      * control back when it ends or the player presses anything. The audio is
      * decoded in one pass up front and plays as a single stream; the video
      * decodes as it goes, paced against the wall clock.
@@ -45,6 +45,27 @@ namespace rwe
         void uploadFrame();
         void finish();
     };
+
+    /**
+     * Where a film is drawn on the 640 by 480 screen (BT-157, 0x47C441): left
+     * at 0, top at (480 - the film's height) shifted right by one, destination
+     * height the film's own and no stretching requested. A film that the
+     * library draws height-doubled (its Y-scale or Y-interlace flag, which is
+     * films 1 to 4 at 640 by 240) counts as twice its stored height, so it
+     * fills the screen from the top; film 5 (640 by 304, no flag) sits in its
+     * own pixels at y = 88 with bars above and below instead of being
+     * stretched to 4:3. Whether the library reports the doubled or the stored
+     * height for films 1 to 4 is the ruling's medium-confidence part.
+     */
+    struct MoviePlacement
+    {
+        int x;
+        int y;
+        int width;
+        int height;
+    };
+
+    MoviePlacement moviePlacement(unsigned int filmWidth, unsigned int filmHeight, unsigned int headerFlags);
 
     /**
      * A film scene over the given file, or nothing if the file is empty or

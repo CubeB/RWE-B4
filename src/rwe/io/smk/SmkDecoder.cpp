@@ -107,6 +107,7 @@ namespace rwe
         frameCount = readU32(p + 12);
         auto frameRate = static_cast<int32_t>(readU32(p + 16));
         auto flags = readU32(p + 20);
+        headerFlags = flags;
 
         // frameRate > 0: milliseconds per frame; < 0: hundredths of a
         // millisecond per frame; 0: ten frames a second.

@@ -74,6 +74,13 @@ namespace rwe
         unsigned int getWidth() const { return width; }
         unsigned int getHeight() const { return height; }
         unsigned int getFrameCount() const { return frameCount; }
+        /**
+         * The header's flag word: bit 0 a ring frame, bit 1 the library's
+         * Y-scale/Y-interlace mode, which doubles the height on screen, and
+         * bit 2 its Y-interlace twin. Films 1 to 4 are 640x240 with bit 1 set;
+         * film 5 is 640x304 with none.
+         */
+        unsigned int getHeaderFlags() const { return headerFlags; }
         /** Duration of one frame, in microseconds. */
         unsigned int getMicrosecondsPerFrame() const { return microsecondsPerFrame; }
         std::optional<AudioInfo> getAudioInfo() const { return audioInfo; }
@@ -113,6 +120,7 @@ namespace rwe
         unsigned int width{0};
         unsigned int height{0};
         unsigned int frameCount{0};
+        unsigned int headerFlags{0};
         unsigned int microsecondsPerFrame{0};
         std::optional<AudioInfo> audioInfo;
         uint32_t audioTrackFlags[7] = {};

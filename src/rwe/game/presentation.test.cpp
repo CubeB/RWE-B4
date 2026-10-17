@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <rwe/MovieScene.h>
 #include <rwe/game/GameScene_util.h>
 
 /**
@@ -63,6 +64,30 @@ namespace rwe
         REQUIRE(targetRingRadius(std::nullopt) == 32);
         REQUIRE(targetRingRadius(std::pair<unsigned int, unsigned int>{2, 2}) == 16);
         REQUIRE(targetRingRadius(std::pair<unsigned int, unsigned int>{3, 5}) == 40);
+    }
+
+    TEST_CASE("a film is drawn at x 0, y = (480 - height) / 2, unscaled (BT-157)", "[presentation]")
+    {
+        // Film 5 is 640 by 304 with no flag: in its own pixels at y 88, bars
+        // above and below, not stretched to 4:3.
+        auto film5 = moviePlacement(640, 304, 0);
+        REQUIRE(film5.x == 0);
+        REQUIRE(film5.y == 88);
+        REQUIRE(film5.width == 640);
+        REQUIRE(film5.height == 304);
+
+        // Films 1 to 4 are 640 by 240 with the height-doubling flag: they
+        // fill the screen from the top.
+        auto film1 = moviePlacement(640, 240, 2);
+        REQUIRE(film1.x == 0);
+        REQUIRE(film1.y == 0);
+        REQUIRE(film1.width == 640);
+        REQUIRE(film1.height == 480);
+
+        // A full-height film needs no bars.
+        auto full = moviePlacement(640, 480, 0);
+        REQUIRE(full.y == 0);
+        REQUIRE(full.height == 480);
     }
 
     TEST_CASE("a feature marked nodisplayinfo shows no footer text (BT-147)", "[presentation]")
