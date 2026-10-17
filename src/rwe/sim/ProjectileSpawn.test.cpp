@@ -3,6 +3,7 @@
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/Projectile.h>
+#include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/UnitWeapon.h>
 #include <rwe/sim/WeaponDefinition.h>
 #include <rwe/sim/sim_test_util.h>
@@ -131,6 +132,79 @@ namespace rwe
             auto child = spawn(200_ss);
             REQUIRE(child.dieOnFrame.has_value());
             REQUIRE(*child.dieOnFrame == sim.gameTime + GameTime(30));
+        }
+    }
+
+    TEST_CASE("the launch muzzle correction is 1.25 times the Query-over-AimFrom Z, truncated", "[projectile][spawn][ballistic]")
+    {
+        // BT-114. 0x49E0FB-0x49E11B: the double 1.25 at 0x4FDA98, then a
+        // truncation into the 16.16 the slot keeps.
+        REQUIRE(muzzleCorrectionOf(8_ss) == 10_ss);
+        REQUIRE(muzzleCorrectionOf(0_ss) == 0_ss);
+        // One 16.16 unit times 1.25 is 1.25 units truncated: 65536 * 5 / 4 is exact,
+        // 3 * 5 / 4 = 3.75 truncates to 3.
+        REQUIRE(simScalarToFixed(muzzleCorrectionOf(simScalarFromFixed(3))) == 3);
+        REQUIRE(simScalarToFixed(muzzleCorrectionOf(simScalarFromFixed(-3))) == -3);
+    }
+
+    TEST_CASE("the ballistic spawn takes whole ticks of gravity off the launch vertical velocity", "[projectile][spawn][ballistic]")
+    {
+        MapTerrain terrain(Grid<unsigned char>(64, 64, static_cast<unsigned char>(0)), 0_ss);
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        addPlayer(sim);
+
+        WeaponDefinition w{};
+        w.physicsType = ProjectilePhysicsTypeBallistic();
+        w.maxRange = 600_ss;
+        w.burst = 1;
+        w.velocity = 8_ss;
+        w.damage["DEFAULT"] = 5;
+        sim.weaponDefinitions["shell"] = w;
+
+        auto launch = [&](SimScalar slot) {
+            UnitWeapon weapon;
+            weapon.weaponType = "shell";
+            weapon.ballisticZOffset = slot;
+            return sim.createProjectileFromWeapon(ProjectileSpawn{
+                .owner = PlayerId(1),
+                .weapon = &weapon,
+                .position = SimVector(0_ss, 20_ss, 0_ss),
+                .direction = SimVector(0_ss, 0_ss, 1_ss),
+                .distanceToTarget = 200_ss});
+        };
+
+        SECTION("no correction leaves the launch velocity alone")
+        {
+            REQUIRE(launch(0_ss).velocity.y == 0_ss);
+        }
+
+        SECTION("a slot worth less than one tick of flight at the weapon's speed takes nothing")
+        {
+            // 7 over 8 truncates to zero ticks.
+            REQUIRE(launch(7_ss).velocity.y == 0_ss);
+        }
+
+        SECTION("a slot worth two ticks takes two ticks of gravity")
+        {
+            // 17 over 8 is two whole ticks.
+            auto expected = 0_ss - (sim.gravityPerTick() * 2_ss);
+            REQUIRE(launch(17_ss).velocity.y == expected);
+        }
+
+        SECTION("a negative slot is taken as none")
+        {
+            REQUIRE(launch(-10_ss).velocity.y == 0_ss);
+        }
+
+        SECTION("a weapon given by type alone has no slot and so no correction")
+        {
+            auto bare = sim.createProjectileFromWeapon(ProjectileSpawn{
+                .owner = PlayerId(1),
+                .weaponType = "shell",
+                .position = SimVector(0_ss, 20_ss, 0_ss),
+                .direction = SimVector(0_ss, 0_ss, 1_ss),
+                .distanceToTarget = 200_ss});
+            REQUIRE(bare.velocity.y == 0_ss);
         }
     }
 }

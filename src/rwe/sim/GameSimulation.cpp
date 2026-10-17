@@ -2532,6 +2532,18 @@ namespace rwe
             projectile.velocity = projectile.velocity + *inheritedVelocity;
         }
 
+        // The ballistic spawn's launch correction (0x49CE62-0x49CE8A, BT-114):
+        // sin(pitch) times the speed MINUS trunc(slot / weaponvelocity) whole
+        // ticks of gravity, the slot being the 1.25 x Z difference between the
+        // weapon's Query and AimFrom pieces written when the unit was built.
+        // The solver that chose the pitch never sees it, so the shell leaves
+        // flatter than the angle it solved.
+        if (spawn.weapon && std::holds_alternative<ProjectilePhysicsTypeBallistic>(weaponDefinition.physicsType))
+        {
+            auto ticks = launchCorrectionTicks(spawn.weapon->ballisticZOffset, weaponDefinition.velocity);
+            projectile.velocity.y -= gravityPerTick() * intToSimScalar(static_cast<int>(ticks));
+        }
+
         projectile.lastSmoke = gameTime;
 
         projectile.damage = weaponDefinition.damage;

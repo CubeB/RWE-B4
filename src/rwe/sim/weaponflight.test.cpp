@@ -260,13 +260,15 @@ namespace rwe
             // `ballisticZOffset`, neither of which a demo records and neither of
             // which can change the angle: the heading has the rotation taken off
             // and added straight back on, and the offset is a muzzle position on
-            // a model this test does not build.
+            // a model this test does not build (and since BT-114 it never enters
+            // the solver at all: the launch correction is applied at the spawn,
+            // and this weapon's slot has none).
             auto direction = toTarget.normalized();
             if (episode.ballistic)
             {
                 auto headingAndPitch = computeHeadingAndPitch(
                     SimAngle(0), from, at, sim.weaponDefinitions.at("corpus").velocity,
-                    (112_ss / (30_ss * 30_ss)), 0_ss, sim.weaponDefinitions.at("corpus").physicsType);
+                    (112_ss / (30_ss * 30_ss)), sim.weaponDefinitions.at("corpus").physicsType);
                 direction = toDirection(headingAndPitch.first, -headingAndPitch.second);
             }
 

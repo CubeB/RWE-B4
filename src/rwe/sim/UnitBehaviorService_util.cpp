@@ -672,7 +672,26 @@ namespace rwe
         return (static_cast<long long>(ticks) * wholeCost) / static_cast<long long>(totalTicks);
     }
 
-    std::pair<SimAngle, SimAngle> computeHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, SimScalar zOffset, ProjectilePhysicsType projectileType)
+    SimScalar muzzleCorrectionOf(SimScalar queryMinusAimFromZ)
+    {
+        // The double multiply and the truncation toward zero are, on integers,
+        // times five over four.
+        auto difference = static_cast<int64_t>(simScalarToFixed(queryMinusAimFromZ));
+        return simScalarFromFixed(static_cast<int>((difference * 5) / 4));
+    }
+
+    unsigned int launchCorrectionTicks(SimScalar slotCorrection, SimScalar weaponVelocity)
+    {
+        auto slot = simScalarToFixed(slotCorrection);
+        auto velocity = simScalarToFixed(weaponVelocity);
+        if (slot <= 0 || velocity <= 0)
+        {
+            return 0;
+        }
+        return static_cast<unsigned int>(slot / velocity);
+    }
+
+    std::pair<SimAngle, SimAngle> computeHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, ProjectilePhysicsType projectileType)
     {
         return match(
             projectileType,
@@ -690,7 +709,7 @@ namespace rwe
                 return computeLineOfSightHeadingAndPitch(rotation, from, to);
             },
             [&](const ProjectilePhysicsTypeBallistic&) {
-                return computeBallisticHeadingAndPitch(rotation, from, to, speed, gravity, zOffset);
+                return computeBallisticHeadingAndPitch(rotation, from, to, speed, gravity);
             },
             [&](const ProjectilePhysicsTypeBomb&) {
                 // Bombs don't actually use this aim — their release is decided
@@ -718,7 +737,7 @@ namespace rwe
         return {heading, pitch};
     }
 
-    std::pair<SimAngle, SimAngle> computeBallisticHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, SimScalar zOffset)
+    std::pair<SimAngle, SimAngle> computeBallisticHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity)
     {
         auto aimVector = to - from;
         if (aimVector.lengthSquared() == 0_ss)
@@ -731,7 +750,7 @@ namespace rwe
         auto heading = UnitState::toRotation(aimVectorXZ);
         heading = heading - rotation;
 
-        auto pitches = computeFiringAngles(speed, gravity, aimVectorXZ.length() - zOffset, aimVector.y);
+        auto pitches = computeFiringAngles(speed, gravity, aimVectorXZ.length(), aimVector.y);
         if (!pitches)
         {
             return {heading, EighthTurn};

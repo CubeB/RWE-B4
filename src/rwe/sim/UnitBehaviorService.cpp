@@ -193,7 +193,13 @@ namespace rwe
             }
             auto localAimingPoint = getLocalAimingPoint(unitId, i);
             auto localFiringPoint = getLocalFiringPoint(unitId, i);
-            weapon->ballisticZOffset = localFiringPoint.z - localAimingPoint.z;
+            // 0x49E070 (0x49E0FB-0x49E11B): the Z difference of the Query piece
+            // over the AimFrom piece, times the double 1.25 at 0x4FDA98,
+            // truncated, kept in 16.16 and never rewritten. Taken in the
+            // unit's own frame, which is the frame the original sees when the
+            // unit is built facing 0 -- the heading it has at that moment is
+            // not established for a factory's product.
+            weapon->ballisticZOffset = muzzleCorrectionOf(localFiringPoint.z - localAimingPoint.z);
         }
     }
 
@@ -1340,7 +1346,7 @@ namespace rwe
             {
                 auto aimFromPosition = getAimingPoint(id, weaponIndex);
 
-                auto headingAndPitch = computeHeadingAndPitch(unit.rotation, aimFromPosition, *targetPosition, weaponDefinition.velocity, sim->gravityPerTick(), weapon->ballisticZOffset, weaponDefinition.physicsType);
+                auto headingAndPitch = computeHeadingAndPitch(unit.rotation, aimFromPosition, *targetPosition, weaponDefinition.velocity, sim->gravityPerTick(), weaponDefinition.physicsType);
                 auto heading = headingAndPitch.first;
                 auto pitch = headingAndPitch.second;
 
@@ -1436,7 +1442,7 @@ namespace rwe
                     // against the angles the script was sent.
                     auto aimFromPosition = getAimingPoint(id, weaponIndex);
 
-                    auto headingAndPitch = computeHeadingAndPitch(unit.rotation, aimFromPosition, *targetPosition, weaponDefinition.velocity, sim->gravityPerTick(), weapon->ballisticZOffset, weaponDefinition.physicsType);
+                    auto headingAndPitch = computeHeadingAndPitch(unit.rotation, aimFromPosition, *targetPosition, weaponDefinition.velocity, sim->gravityPerTick(), weaponDefinition.physicsType);
                     auto heading = headingAndPitch.first;
                     auto pitch = headingAndPitch.second;
 

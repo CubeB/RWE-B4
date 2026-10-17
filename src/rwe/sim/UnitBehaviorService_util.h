@@ -234,11 +234,11 @@ namespace rwe
      */
     long long stockpileRampTotal(int ticks, int totalTicks, float cost);
 
-    std::pair<SimAngle, SimAngle> computeHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, SimScalar zOffset, ProjectilePhysicsType projectileType);
+    std::pair<SimAngle, SimAngle> computeHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, ProjectilePhysicsType projectileType);
 
     std::pair<SimAngle, SimAngle> computeLineOfSightHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to);
 
-    std::pair<SimAngle, SimAngle> computeBallisticHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity, SimScalar zOffset);
+    std::pair<SimAngle, SimAngle> computeBallisticHeadingAndPitch(SimAngle rotation, const SimVector& from, const SimVector& to, SimScalar speed, SimScalar gravity);
 
     std::optional<std::pair<SimAngle, SimAngle>> computeFiringAngles(SimScalar speed, SimScalar gravity, SimScalar targetX, SimScalar targetY);
 
@@ -529,6 +529,23 @@ namespace rwe
     bool isOnGoalSquare(const GameSimulation& sim, const UnitState& unit, const UnitDefinition& unitDefinition, const SimVector& goalPoint);
 
     bool hasReachedGoal(const GameSimulation& sim, const MapTerrain& terrain, const UnitState& unit, const UnitDefinition& unitDefinition, const NavigationGoal& goal);
+
+    /**
+     * The launch muzzle correction a weapon slot keeps (0x49E0FB-0x49E11B,
+     * BT-114): the Z difference of the Query piece over the AimFrom piece
+     * times 1.25, truncated in the 16.16 the original holds it in.
+     */
+    SimScalar muzzleCorrectionOf(SimScalar queryMinusAimFromZ);
+
+    /**
+     * How many whole ticks of gravity the ballistic spawn takes off the launch
+     * vertical velocity (0x49CE62-0x49CE8A): the slot's correction over the
+     * weapon's velocity, an unsigned integer division of two 16.16 numbers.
+     * A negative correction would be an enormous unsigned count in the
+     * original; here it is taken as none, the retail data being built so that
+     * it is not seen.
+     */
+    unsigned int launchCorrectionTicks(SimScalar slotCorrection, SimScalar weaponVelocity);
 
     std::string getAimScriptName(unsigned int weaponIndex);
     std::string getAimFromScriptName(unsigned int weaponIndex);
