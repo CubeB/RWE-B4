@@ -113,14 +113,37 @@ namespace rwe
 
                 if (modelDefinitions.find(normalizedObjectName) == modelDefinitions.end())
                 {
-                    auto meshInfo = services.meshService->loadProjectileMesh(normalizedObjectName);
-                    modelDefinitions.insert({normalizedObjectName, std::move(meshInfo.modelDefinition)});
-                    for (const auto& m : meshInfo.pieceMeshes)
+                    try
                     {
-                        gameMediaDatabase.addUnitPieceMesh(normalizedObjectName, m.first, m.second);
+                        auto meshInfo = services.meshService->loadProjectileMesh(normalizedObjectName);
+                        modelDefinitions.insert({normalizedObjectName, std::move(meshInfo.modelDefinition)});
+                        for (const auto& m : meshInfo.pieceMeshes)
+                        {
+                            gameMediaDatabase.addUnitPieceMesh(normalizedObjectName, m.first, m.second);
+                        }
+                    }
+                    catch (const std::exception& e)
+                    {
+                        // A model that will not parse costs this one feature
+                        // its picture, not the load.
+                        LOG_WARN << "Feature " << tdf.object << " has an unreadable model, drawing it as nothing: " << e.what();
                     }
                 }
-                f.renderInfo = FeatureObjectInfo{normalizedObjectName};
+                if (modelDefinitions.find(normalizedObjectName) != modelDefinitions.end())
+                {
+                    f.renderInfo = FeatureObjectInfo{normalizedObjectName};
+                }
+                else
+                {
+                    FeatureSpriteInfo spriteInfo;
+                    spriteInfo.transparentAnimation = tdf.animTrans;
+                    spriteInfo.transparentShadow = tdf.shadTrans;
+                    if (services.textureService != nullptr)
+                    {
+                        spriteInfo.animation = services.textureService->getDefaultSpriteSeries();
+                    }
+                    f.renderInfo = std::move(spriteInfo);
+                }
             }
             else
             {
@@ -131,7 +154,12 @@ namespace rwe
                 {
                     if (!tdf.fileName.empty() && !tdf.seqName.empty())
                     {
-                        spriteInfo.animation = services.textureService->getGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqName);
+                        // A sequence that is absent or whose GAF will not read
+                        // draws as the default series just below.
+                        if (auto animation = services.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqName))
+                        {
+                            spriteInfo.animation = *animation;
+                        }
                     }
                     if (!spriteInfo.animation)
                     {
@@ -405,11 +433,21 @@ namespace rwe
 
                         if (auto modelRenderType = std::get_if<ProjectileRenderTypeModel>(&weaponMediaInfo.renderType); modelRenderType != nullptr)
                         {
-                            auto meshInfo = services.meshService->loadProjectileMesh(modelRenderType->objectName);
-                            dataMaps.modelDefinitions.insert({modelRenderType->objectName, std::move(meshInfo.modelDefinition)});
-                            for (const auto& m : meshInfo.pieceMeshes)
+                            try
                             {
-                                dataMaps.gameMediaDatabase.addUnitPieceMesh(modelRenderType->objectName, m.first, m.second);
+                                auto meshInfo = services.meshService->loadProjectileMesh(modelRenderType->objectName);
+                                dataMaps.modelDefinitions.insert({modelRenderType->objectName, std::move(meshInfo.modelDefinition)});
+                                for (const auto& m : meshInfo.pieceMeshes)
+                                {
+                                    dataMaps.gameMediaDatabase.addUnitPieceMesh(modelRenderType->objectName, m.first, m.second);
+                                }
+                            }
+                            catch (const std::exception& e)
+                            {
+                                // A round whose model will not parse is not drawn;
+                                // the weapon still fires and hits.
+                                LOG_WARN << "Weapon " << pair.first << " has an unreadable projectile model, drawing it as nothing: " << e.what();
+                                weaponMediaInfo.renderType = ProjectileRenderTypeNone{};
                             }
                         }
 
@@ -417,12 +455,12 @@ namespace rwe
                         {
                             if (weaponMediaInfo.explosionAnim)
                             {
-                                auto anim = services.textureService->getGafEntry("anims/" + weaponMediaInfo.explosionAnim->gafName + ".gaf", weaponMediaInfo.explosionAnim->animName);
+                                auto anim = services.textureService->tryGetGafEntry("anims/" + weaponMediaInfo.explosionAnim->gafName + ".gaf", weaponMediaInfo.explosionAnim->animName).value_or(services.textureService->getDefaultSpriteSeries());
                                 dataMaps.gameMediaDatabase.addSpriteSeries(weaponMediaInfo.explosionAnim->gafName, weaponMediaInfo.explosionAnim->animName, anim);
                             }
                             if (weaponMediaInfo.waterExplosionAnim)
                             {
-                                auto anim = services.textureService->getGafEntry("anims/" + weaponMediaInfo.waterExplosionAnim->gafName + ".gaf", weaponMediaInfo.waterExplosionAnim->animName);
+                                auto anim = services.textureService->tryGetGafEntry("anims/" + weaponMediaInfo.waterExplosionAnim->gafName + ".gaf", weaponMediaInfo.waterExplosionAnim->animName).value_or(services.textureService->getDefaultSpriteSeries());
                                 dataMaps.gameMediaDatabase.addSpriteSeries(weaponMediaInfo.waterExplosionAnim->gafName, weaponMediaInfo.waterExplosionAnim->animName, anim);
                             }
                         }
@@ -469,6 +507,20 @@ namespace rwe
                     std::string fbiString(bytes->data(), bytes->size());
                     auto fbi = parseUnitFbi(parseTdfFromString(fbiString));
 
+                    // The model first: a unit whose model will not parse is
+                    // left out whole, with a line in the log, rather than
+                    // ending the launch -- and nothing of it is half-registered.
+                    std::optional<MeshService::UnitMeshInfo> loadedMesh;
+                    try
+                    {
+                        loadedMesh = services.meshService->loadUnitMesh(fbi.objectName);
+                    }
+                    catch (const std::exception& e)
+                    {
+                        LOG_WARN << "Skipping unit " << fbi.unitName << ": its model " << fbi.objectName << " could not be read: " << e.what();
+                        continue;
+                    }
+
                     if (auto warning = transportCapacityWarning(fbi))
                     {
                         LOG_WARN << *warning;
@@ -496,7 +548,7 @@ namespace rwe
                         dataMaps.builderGuisDatabase.addBuilderGui(fbi.unitName, std::move(*guiPages));
                     }
 
-                    auto meshInfo = services.meshService->loadUnitMesh(fbi.objectName);
+                    auto& meshInfo = *loadedMesh;
                     dataMaps.modelDefinitions.insert({toUpper(fbi.objectName), std::move(meshInfo.modelDefinition)});
                     for (const auto& m : meshInfo.pieceMeshes)
                     {

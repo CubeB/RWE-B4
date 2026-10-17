@@ -32,7 +32,10 @@ namespace rwe
 
         rwe::SpanStream s(bytes->data(), bytes->size());
         auto objects = parse3doObjects(s, s.tellg());
-        assert(objects.size() == 1);
+        if (objects.empty())
+        {
+            throw std::runtime_error("Model has no objects: " + name);
+        }
         auto selectionMesh = selectionMeshFrom3do(objects.front());
 
         auto d = createUnitModelDefinition(
@@ -59,7 +62,10 @@ namespace rwe
 
         rwe::SpanStream s(bytes->data(), bytes->size());
         auto objects = parse3doObjects(s, s.tellg());
-        assert(objects.size() == 1);
+        if (objects.empty())
+        {
+            throw std::runtime_error("Model has no objects: " + name);
+        }
 
         auto d = createUnitModelDefinition(
             simScalarFromFixed(findHighestVertex(objects.front()).y),

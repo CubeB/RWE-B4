@@ -10,6 +10,7 @@
 #include <rwe/io/gaf/gaf_util.h>
 #include <rwe/io/hpi/HpiArchive.h>
 #include <rwe/io/hpi/hpi_util.h>
+#include <rwe/io/io_util.h>
 #include <rwe/io/pcx/pcx.h>
 #include <rwe/io/smk/SmkDecoder.h>
 #include <rwe/io/tad/tad_encoders.h>
@@ -368,6 +369,163 @@ namespace rwe
         append(bytes, GafHeader{GafVersionNumber, 0xFFFFFFFF, 0});
         std::istringstream in(bytes);
         REQUIRE_THROWS_AS(GafArchive(&in), GafException);
+    }
+
+    namespace
+    {
+        struct NullGafAdapter : GafReaderAdapter
+        {
+            int frames = 0;
+            void beginFrame(const GafFrameEntry&, const GafFrameData&) override {}
+            void frameLayer(const LayerData&) override {}
+            void endFrame() override { ++frames; }
+        };
+
+        GafEntry gafEntryNamed(uint16_t frames, const char* name)
+        {
+            GafEntry e{};
+            e.frames = frames;
+            std::strncpy(reinterpret_cast<char*>(e.name), name, GafMaxNameLength - 1);
+            return e;
+        }
+    }
+
+    TEST_CASE("a GAF that ends inside its own header or tables is refused, not read as garbage", "[malformed]")
+    {
+        SECTION("inside the header")
+        {
+            std::istringstream in(std::string(5, '\x00'));
+            REQUIRE_THROWS_AS(GafArchive(&in), GafException);
+        }
+
+        SECTION("an entry pointer past the end of the file")
+        {
+            std::string bytes;
+            append(bytes, GafHeader{GafVersionNumber, 1, 0});
+            append(bytes, uint32_t{5000});
+            std::istringstream in(bytes);
+            REQUIRE_THROWS_AS(GafArchive(&in), GafException);
+        }
+
+        SECTION("an entry whose frame table runs off the end")
+        {
+            std::string bytes;
+            append(bytes, GafHeader{GafVersionNumber, 1, 0});
+            append(bytes, uint32_t{sizeof(GafHeader) + sizeof(uint32_t)});
+            append(bytes, gafEntryNamed(100, "x"));
+            append(bytes, GafFrameEntry{0, 0});
+            std::istringstream in(bytes);
+            REQUIRE_THROWS_AS(GafArchive(&in), GafException);
+        }
+
+        SECTION("more entries than there are pointers for")
+        {
+            std::string bytes;
+            append(bytes, GafHeader{GafVersionNumber, 60000, 0});
+            std::istringstream in(bytes);
+            REQUIRE_THROWS_AS(GafArchive(&in), GafException);
+        }
+    }
+
+    TEST_CASE("a GAF whose pointers all name one large entry cannot build gigabytes of frame tables", "[malformed]")
+    {
+        // One entry claiming 65535 frames (a 512 KB table, which the file
+        // does hold) and 3000 pointers to it: 3000 copies of the table, 1.5
+        // GB, from a file of about 540 KB. The frames of all the entries
+        // together cannot outnumber the records the file has room for.
+        constexpr uint32_t entries = 3000;
+        auto entryAt = static_cast<uint32_t>(sizeof(GafHeader) + entries * sizeof(uint32_t));
+        std::string bytes;
+        append(bytes, GafHeader{GafVersionNumber, entries, 0});
+        for (uint32_t i = 0; i < entries; ++i)
+        {
+            append(bytes, entryAt);
+        }
+        append(bytes, gafEntryNamed(65535, "x"));
+        bytes.append(65535 * sizeof(GafFrameEntry), '\x00');
+
+        std::istringstream in(bytes);
+        REQUIRE_THROWS_AS(GafArchive(&in), GafException);
+    }
+
+    TEST_CASE("a GAF of version 0, as vismasks.gaf and terrain.gaf are, is read", "[malformed]")
+    {
+        // BT-155, docs/BYTE-TACTICS-SPEC-ROOM-FINDINGS.md on branch
+        // spec-room-findings; static byte-tactics reading at 97d7ac59.
+        std::string bytes;
+        append(bytes, GafHeader{0, 1, 0});
+        append(bytes, uint32_t{sizeof(GafHeader) + sizeof(uint32_t)});
+        append(bytes, gafEntryNamed(0, "mask"));
+        std::istringstream in(bytes);
+        GafArchive gaf(&in);
+        REQUIRE(gaf.entries().size() == 1);
+        REQUIRE(gaf.entries()[0].name == "mask");
+    }
+
+    TEST_CASE("a GAF frame whose pixels are cut off by the end of the file is refused", "[malformed]")
+    {
+        SECTION("uncompressed")
+        {
+            std::string bytes(16, '\x00');
+            GafFrameData frame{};
+            frame.width = 10;
+            frame.height = 10;
+            frame.frameDataOffset = static_cast<uint32_t>(16 + sizeof(GafFrameData));
+            append(bytes, frame);
+            bytes += std::string(5, 'x');
+            std::istringstream in(bytes);
+            NullGafAdapter adapter;
+            REQUIRE_THROWS_AS(extractGafEntry(&in, {GafFrameEntry{16, 0}}, adapter), GafException);
+        }
+
+        SECTION("compressed, in the middle of a row")
+        {
+            std::string bytes(16, '\x00');
+            GafFrameData frame{};
+            frame.width = 8;
+            frame.height = 1;
+            frame.compressed = 1;
+            frame.frameDataOffset = static_cast<uint32_t>(16 + sizeof(GafFrameData));
+            append(bytes, frame);
+            // A row that says it has 5 bytes and a literal of 4, and the file has 2.
+            append(bytes, uint16_t{5});
+            bytes += std::string("\x0c\x01", 2);
+            std::istringstream in(bytes);
+            NullGafAdapter adapter;
+            REQUIRE_THROWS_AS(extractGafEntry(&in, {GafFrameEntry{16, 0}}, adapter), GafException);
+        }
+    }
+
+    TEST_CASE("a compressed GAF row that stops short is transparent from where it stopped, and the next row starts where it should", "[malformed]")
+    {
+        // Row 0, four wide: a prefix of 2 and a repeat of one pixel (mask
+        // 0x02) of value 7; the other three pixels were never written.
+        // Row 1, two wide: a prefix of 4, a repeat of two pixels of value 9
+        // (mask 0x06), then two bytes the row did not use.
+        // Row 2, two wide: a prefix of 2 and a repeat of two of value 3.
+        std::string bytes;
+        append(bytes, uint16_t{2});
+        bytes += std::string("\x02\x07", 2);
+        std::istringstream first(bytes);
+        std::vector<char> row0(4, 0x55);
+        decompressRow(first, row0.data(), 4, static_cast<char>(0xFE));
+        REQUIRE(row0 == std::vector<char>{7, static_cast<char>(0xFE), static_cast<char>(0xFE), static_cast<char>(0xFE)});
+
+        std::string two;
+        append(two, uint16_t{4});
+        two += std::string("\x06\x09\x55\x55", 4);
+        append(two, uint16_t{2});
+        two += std::string("\x06\x03", 2);
+        std::istringstream second(two);
+        std::vector<char> pixels(4, 0);
+        decompressFrame(second, pixels.data(), 2, 2, static_cast<char>(0xFE));
+        REQUIRE(pixels == std::vector<char>{9, 9, 3, 3});
+    }
+
+    TEST_CASE("readRaw refuses a read the stream cannot satisfy instead of returning the stack", "[malformed]")
+    {
+        std::istringstream in(std::string(3, 'x'));
+        REQUIRE_THROWS_AS(readRaw<uint32_t>(in), TruncatedInputError);
     }
 
     TEST_CASE("an FBI with no SoundCategory is silent, not refused", "[malformed]")

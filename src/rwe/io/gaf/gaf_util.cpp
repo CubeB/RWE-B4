@@ -9,14 +9,14 @@ namespace rwe
 
     void decompressRow(std::istream& stream, char* buffer, std::size_t rowLength, char transparencyIndex)
     {
-        auto compressedRowLength = readRaw<uint16_t>(stream);
+        auto compressedRowLength = readGafRaw<uint16_t>(stream);
 
         std::size_t readPos = 0;
         std::size_t writePos = 0;
 
         while (readPos < compressedRowLength && writePos < rowLength)
         {
-            auto mask = readRaw<uint8_t>(stream);
+            auto mask = readGafRaw<uint8_t>(stream);
             ++readPos;
 
             if ((mask & 1) == 1)
@@ -39,7 +39,7 @@ namespace rwe
                 {
                     throw GafException("malformed row");
                 }
-                auto val = readRaw<uint8_t>(stream);
+                auto val = readGafRaw<uint8_t>(stream);
                 ++readPos;
 
                 if (writePos + count > rowLength)
@@ -63,12 +63,28 @@ namespace rwe
                     throw GafException("malformed row");
                 }
                 stream.read(buffer + writePos, count);
+                if (static_cast<std::size_t>(stream.gcount()) != count)
+                {
+                    throw GafException("truncated GAF");
+                }
                 readPos += count;
                 writePos += count;
             }
         }
 
-        std::fill_n(buffer, rowLength - writePos, transparencyIndex);
+        // A row that stops short is transparent from the first pixel it did
+        // not write (this filled from the row's first pixel, over what it had
+        // just decoded), and bytes the prefix claims beyond what a full row
+        // used are skipped, so the next row's length is read from where it is.
+        std::fill_n(buffer + writePos, rowLength - writePos, transparencyIndex);
+        if (readPos < compressedRowLength)
+        {
+            stream.ignore(static_cast<std::streamsize>(compressedRowLength - readPos));
+            if (stream.fail())
+            {
+                throw GafException("truncated GAF");
+            }
+        }
     }
 
     void decompressFrame(std::istream& stream, char* buffer, std::size_t width, std::size_t height, char transparencyIndex)
@@ -95,6 +111,19 @@ namespace rwe
          * Frames are allocated at their declared size before a pixel is read.
          * TA's largest are screens, 640x480; this is far past any. Issue #75.
          */
+        /**
+         * An uncompressed frame is its pixels and nothing else; a file that
+         * ends first is refused rather than left with an unwritten tail.
+         */
+        void readRawFrame(std::istream& stream, char* buffer, std::size_t bytes)
+        {
+            stream.read(buffer, static_cast<std::streamsize>(bytes));
+            if (static_cast<std::size_t>(stream.gcount()) != bytes)
+            {
+                throw GafException("truncated GAF");
+            }
+        }
+
         void checkFrameSize(const GafFrameData& frame)
         {
             constexpr uint16_t MaxDimension = 8192;
@@ -110,7 +139,7 @@ namespace rwe
         for (auto entry : frameEntries)
         {
             _stream->seekg(entry.frameDataOffset);
-            auto frameHeader = readRaw<GafFrameData>(*_stream);
+            auto frameHeader = readGafRaw<GafFrameData>(*_stream);
             checkFrameSize(frameHeader);
             adapter.beginFrame(entry, frameHeader);
 
@@ -120,7 +149,7 @@ namespace rwe
                 auto buffer = std::make_unique<char[]>(frameBytes(frameHeader));
                 if (frameHeader.compressed == 0)
                 {
-                    _stream->read(buffer.get(), static_cast<std::streamsize>(frameBytes(frameHeader)));
+                    readRawFrame(*_stream, buffer.get(), frameBytes(frameHeader));
                 }
                 else
                 {
@@ -142,17 +171,17 @@ namespace rwe
             {
                 for (std::size_t i = 0; i < frameHeader.subframesCount; ++i)
                 {
-                    auto subframeOffset = readRaw<uint32_t>(*_stream);
+                    auto subframeOffset = readGafRaw<uint32_t>(*_stream);
                     auto pos = _stream->tellg();
                     _stream->seekg(subframeOffset);
-                    auto subframeHeader = readRaw<GafFrameData>(*_stream);
+                    auto subframeHeader = readGafRaw<GafFrameData>(*_stream);
                     checkFrameSize(subframeHeader);
                     auto buffer = std::make_unique<char[]>(frameBytes(subframeHeader));
 
                     _stream->seekg(subframeHeader.frameDataOffset);
                     if (subframeHeader.compressed == 0)
                     {
-                        _stream->read(buffer.get(), static_cast<std::streamsize>(frameBytes(subframeHeader)));
+                        readRawFrame(*_stream, buffer.get(), frameBytes(subframeHeader));
                     }
                     else
                     {
