@@ -6,4 +6,9 @@ namespace rwe
     {
         return ordererCanCapture && ordererOwner != targetOwner;
     }
+
+    bool buildClickTakesUnit(bool isBuilder, bool isMobile)
+    {
+        return isBuilder && isMobile;
+    }
 }

@@ -16,4 +16,13 @@ namespace rwe
         REQUIRE_FALSE(armedCaptureAccepts(true, PlayerId(2), PlayerId(2)));
         REQUIRE_FALSE(armedCaptureAccepts(false, PlayerId(0), PlayerId(1)));
     }
+
+    TEST_CASE("an armed Build click goes to every mobile builder and to nothing else (BT-108)")
+    {
+        REQUIRE(buildClickTakesUnit(true, true));
+        // A factory, a warehouse, a scout: not given a site to walk to.
+        REQUIRE_FALSE(buildClickTakesUnit(true, false));
+        REQUIRE_FALSE(buildClickTakesUnit(false, true));
+        REQUIRE_FALSE(buildClickTakesUnit(false, false));
+    }
 }

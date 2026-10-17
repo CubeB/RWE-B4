@@ -21,4 +21,16 @@ namespace rwe
      * test.
      */
     bool armedCaptureAccepts(bool ordererCanCapture, PlayerId ordererOwner, PlayerId targetOwner);
+
+    /**
+     * Whether a selected unit receives the order when an armed Build cursor is
+     * clicked on a site (BT-108). The original's issuing routine (0x419670)
+     * walks every selected unit and skips those without the builder flag; it
+     * has no lead-builder rule, so ten selected constructors all get the site.
+     *
+     * RWE also asks for a mobile unit, which is its reading and not a decoded
+     * test: a factory selected alongside the constructors cannot walk to a
+     * site, and a placement order on one would only sit in its queue.
+     */
+    bool buildClickTakesUnit(bool isBuilder, bool isMobile);
 }

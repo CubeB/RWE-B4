@@ -844,54 +844,84 @@ namespace rwe
                     }
                 },
                 [&](const BuildCursorMode& buildCursor) {
-                    if (auto selectedUnit = getSingleSelectedUnit(); selectedUnit)
+                    // Every selected builder gets the site (BT-108, 0x419670):
+                    // the original walks the whole selection and gives each
+                    // builder its own order, with no lead-builder rule and no
+                    // limit of one. The armed cursor is not disarmed by a
+                    // change of selection, so it follows whoever is selected
+                    // when the click lands.
+                    std::vector<UnitId> builders;
+                    for (const auto& selectedUnit : selectedUnits)
                     {
-                        if (hoverBuildInfo)
+                        if (auto unit = simulation.tryGetUnitState(selectedUnit); unit && !unit->get().isDead())
                         {
-                            if (hoverBuildInfo->isValid)
+                            const auto& definition = simulation.unitDefinitions.at(unit->get().unitType);
+                            if (buildClickTakesUnit(definition.builder, definition.isMobile))
                             {
-                                auto topLeftWorld = simulation.terrain.heightmapIndexToWorldCorner(hoverBuildInfo->rect.x,
-                                    hoverBuildInfo->rect.y);
-                                auto x = topLeftWorld.x + ((SimScalar(hoverBuildInfo->rect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss);
-                                auto z = topLeftWorld.z + ((SimScalar(hoverBuildInfo->rect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss);
-                                auto y = simulation.terrain.getHeightAt(x, z);
-                                SimVector buildPos(x, y, z);
-                                if (isShiftDown())
+                                builders.push_back(selectedUnit);
+                            }
+                        }
+                    }
+                    // The set has no order of its own; the commands should not
+                    // depend on how it happens to hash.
+                    std::sort(builders.begin(), builders.end());
+
+                    if (!builders.empty() && hoverBuildInfo)
+                    {
+                        if (hoverBuildInfo->isValid)
+                        {
+                            auto topLeftWorld = simulation.terrain.heightmapIndexToWorldCorner(hoverBuildInfo->rect.x,
+                                hoverBuildInfo->rect.y);
+                            auto x = topLeftWorld.x + ((SimScalar(hoverBuildInfo->rect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss);
+                            auto z = topLeftWorld.z + ((SimScalar(hoverBuildInfo->rect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss);
+                            auto y = simulation.terrain.getHeightAt(x, z);
+                            SimVector buildPos(x, y, z);
+                            if (isShiftDown())
+                            {
+                                for (const auto& builder : builders)
                                 {
                                     // Shift-clicking a building already in the plan takes it out again.
-                                    if (auto planned = plannedBuildOrderAt(*selectedUnit, buildPos))
+                                    if (auto planned = plannedBuildOrderAt(builder, buildPos))
                                     {
-                                        localPlayerCancelBuildOrder(*selectedUnit, *planned);
+                                        localPlayerCancelBuildOrder(builder, *planned);
                                     }
                                     else
                                     {
-                                        localPlayerEnqueueUnitOrder(*selectedUnit, BuildOrder(buildCursor.unitType, buildPos));
+                                        localPlayerEnqueueUnitOrder(builder, BuildOrder(buildCursor.unitType, buildPos));
                                     }
-                                }
-                                else
-                                {
-                                    localPlayerIssueUnitOrder(*selectedUnit, BuildOrder(buildCursor.unitType, buildPos));
-                                    cursorMode.next(NormalCursorMode());
-                                }
-                            }
-                            else if (isShiftDown() && getMouseTerrainCoordinate())
-                            {
-                                // The spot is blocked by our own plan: shift-click removes that plan.
-                                if (auto planned = plannedBuildOrderAt(*selectedUnit, *getMouseTerrainCoordinate()))
-                                {
-                                    localPlayerCancelBuildOrder(*selectedUnit, *planned);
-                                }
-                                else if (sounds.notOkToBuild)
-                                {
-                                    playUiSound(*sounds.notOkToBuild);
                                 }
                             }
                             else
                             {
-                                if (sounds.notOkToBuild)
+                                for (const auto& builder : builders)
                                 {
-                                    playUiSound(*sounds.notOkToBuild);
+                                    localPlayerIssueUnitOrder(builder, BuildOrder(buildCursor.unitType, buildPos));
                                 }
+                                cursorMode.next(NormalCursorMode());
+                            }
+                        }
+                        else if (isShiftDown() && getMouseTerrainCoordinate())
+                        {
+                            // The spot is blocked by our own plan: shift-click removes that plan.
+                            auto cancelled = false;
+                            for (const auto& builder : builders)
+                            {
+                                if (auto planned = plannedBuildOrderAt(builder, *getMouseTerrainCoordinate()))
+                                {
+                                    localPlayerCancelBuildOrder(builder, *planned);
+                                    cancelled = true;
+                                }
+                            }
+                            if (!cancelled && sounds.notOkToBuild)
+                            {
+                                playUiSound(*sounds.notOkToBuild);
+                            }
+                        }
+                        else
+                        {
+                            if (sounds.notOkToBuild)
+                            {
+                                playUiSound(*sounds.notOkToBuild);
                             }
                         }
                     }
