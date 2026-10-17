@@ -307,6 +307,8 @@ namespace rwe
         sounds.okToBuild = lookUpSound("OKTOBUILD");
         sounds.notOkToBuild = lookUpSound("NOTOKTOBUILD");
         sounds.selectMultipleUnits = lookUpSound("SelectMultipleUnits");
+        sounds.createSquad = lookUpSound("CreateSquad");
+        sounds.selectSquad = lookUpSound("SelectSquad");
         sounds.panel = lookUpSound("PANEL");
         sounds.options = lookUpSound("OPTIONS");
         sounds.smallButton = lookUpSound("SMALLBUTTON");

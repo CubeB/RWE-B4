@@ -225,10 +225,18 @@ namespace rwe
             if (isCtrlDown())
             {
                 cameraBookmarks[slot] = worldCameraState.position;
+                if (sounds.selectSquad)
+                {
+                    playUiSound(*sounds.selectSquad);
+                }
             }
             else if (cameraBookmarks[slot])
             {
                 setCameraPosition(*cameraBookmarks[slot]);
+                if (sounds.selectSquad)
+                {
+                    playUiSound(*sounds.selectSquad);
+                }
             }
         }
         else if (keysym.key == SDLK_F3)
@@ -408,9 +416,13 @@ namespace rwe
         {
             // Control groups: keys 1-0 map to groups 0-9.
             // Ctrl+digit  → bind current selection to group (replace).
-            // Shift+digit → add current selection to group.
+            // Shift+digit → recall group, adding it to the current selection
+            //               (the squad recall's second argument is the Shift
+            //               state, BT-182: 0x48D9A0).
             // Digit alone → recall group (replace current selection).
-            // Ctrl+Shift+digit is treated the same as Shift+digit (add).
+            // Ctrl+Shift+digit adds the current selection to the group; it is
+            // RWE's own, the original having no such binding.
+            // Assigning plays CreateSquad and recalling SelectSquad.
             std::optional<int> groupIndex;
             if (keysym.key >= SDLK_1 && keysym.key <= SDLK_9)
             {
@@ -424,25 +436,24 @@ namespace rwe
             if (groupIndex)
             {
                 auto idx = *groupIndex;
-                if (isCtrlDown() && isShiftDown())
+                if (isCtrlDown())
                 {
-                    // Ctrl+Shift+digit: add selection to control group.
-                    for (const auto& unitId : selectedUnits)
+                    if (isShiftDown())
                     {
-                        controlGroups[idx].insert(unitId);
+                        // Ctrl+Shift+digit: add selection to control group.
+                        for (const auto& unitId : selectedUnits)
+                        {
+                            controlGroups[idx].insert(unitId);
+                        }
                     }
-                }
-                else if (isCtrlDown())
-                {
-                    // Ctrl+digit: bind (replace) control group with current selection.
-                    controlGroups[idx] = selectedUnits;
-                }
-                else if (isShiftDown())
-                {
-                    // Shift+digit: add current selection to control group.
-                    for (const auto& unitId : selectedUnits)
+                    else
                     {
-                        controlGroups[idx].insert(unitId);
+                        // Ctrl+digit: bind (replace) control group with current selection.
+                        controlGroups[idx] = selectedUnits;
+                    }
+                    if (sounds.createSquad)
+                    {
+                        playUiSound(*sounds.createSquad);
                     }
                 }
                 else
@@ -450,18 +461,34 @@ namespace rwe
                     // Digit alone: recall control group.
                     // Filter out any units that are now dead or no longer owned
                     // by the local player so stale IDs do not pollute the set.
+                    // The test is the select-everything sweep's (BT-180).
                     std::unordered_set<UnitId> liveUnits;
                     for (const auto& unitId : controlGroups[idx])
                     {
                         auto unitRef = tryGetUnit(unitId);
-                        if (unitRef && unitRef->get().isAlive() && unitRef->get().isOwnedBy(localPlayerId) && !unitRef->get().heldByMission)
+                        if (unitRef && unitRef->get().isAlive() && unitRef->get().isOwnedBy(localPlayerId) && !unitRef->get().heldByMission
+                            && sweepSelectsUnit(unitRef->get().isBeingBuilt(simulation.unitDefinitions.at(unitRef->get().unitType)), unitRef->get().carriedBy.has_value()))
                         {
                             liveUnits.insert(unitId);
                         }
                     }
                     // Prune the stored group to remove dead entries.
                     controlGroups[idx] = liveUnits;
-                    replaceUnitSelection(liveUnits);
+                    if (sounds.selectSquad)
+                    {
+                        playUiSound(*sounds.selectSquad);
+                    }
+                    if (isShiftDown())
+                    {
+                        // Shift adds the squad to what is selected already.
+                        auto combined = selectedUnits;
+                        combined.insert(liveUnits.begin(), liveUnits.end());
+                        replaceUnitSelection(combined);
+                    }
+                    else
+                    {
+                        replaceUnitSelection(liveUnits);
+                    }
                 }
             }
         }
