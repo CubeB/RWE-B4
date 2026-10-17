@@ -2,7 +2,12 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/MovieScene.h>
+#include <rwe/LoadingScene_util.h>
 #include <rwe/game/GameScene_util.h>
+#include <rwe/io/fbi/io.h>
+#include <rwe/io/tdf/tdf.h>
+#include <rwe/sim/MovementClassDatabase.h>
+#include <rwe/sim/UnitDefinition.h>
 #include <rwe/resource_io.h>
 
 /**
@@ -148,6 +153,25 @@ namespace rwe
         REQUIRE_FALSE(unitWaterPartsAreCut(true, true));
         REQUIRE_FALSE(unitWaterPartsAreCut(false, true));
         REQUIRE(unitWaterPartsAreCut(false, false));
+    }
+
+    TEST_CASE("an FBI that says digger=1 makes a digger definition (BT-143)", "[presentation]")
+    {
+        MovementClassDatabase movementClasses;
+        auto definitionFrom = [&](const std::string& keys) {
+            auto fbi = parseUnitFbi(parseTdfFromString("[UNITINFO]
+{
+UnitName=ARMAMB;
+Objectname=model;
+SoundCategory=NOSOUND;
+" + keys + "
+}
+"));
+            return parseUnitDefinition(fbi, movementClasses);
+        };
+
+        REQUIRE(definitionFrom("digger=1;").digger);
+        REQUIRE_FALSE(definitionFrom("").digger);
     }
 
     TEST_CASE("a feature marked nodisplayinfo shows no footer text (BT-147)", "[presentation]")

@@ -124,6 +124,7 @@ namespace rwe
         tdf.readOrDefault("CantBeTransported", u.cantBeTransported);
         tdf.readOrDefault("IsAirBase", u.isAirBase);
         tdf.readOrDefault("NoShadow", u.noShadow);
+        tdf.readOrDefault("Digger", u.digger);
         tdf.readOrDefault("ZBuffer", u.zBuffer, true);
 
         tdf.readOrDefault("CruiseAlt", u.cruiseAlt);

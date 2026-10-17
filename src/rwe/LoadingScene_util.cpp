@@ -550,6 +550,7 @@ namespace rwe
         u.cantBeTransported = fbi.cantBeTransported;
         u.isAirBase = fbi.isAirBase;
         u.noShadow = fbi.noShadow;
+        u.digger = fbi.digger;
         u.zBuffer = fbi.zBuffer;
 
         u.cruiseAltitude = SimScalar(fbi.cruiseAlt);

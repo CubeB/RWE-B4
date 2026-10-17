@@ -261,6 +261,16 @@ namespace rwe
         bool noShadow{false};
 
         /**
+         * The FBI's digger (bit 30 of `def+0x241`; ARMAMB and CORTOAST). The
+         * drawing routine cuts a digger's final picture at the literal
+         * threshold 125 whether or not it is under water, which with the
+         * digger's height bias of 125 removes everything at or below the
+         * model's origin plane, so a pop-up turret never shows its buried
+         * part (BT-143). Presentation only; nothing in the simulation reads it.
+         */
+        bool digger{false};
+
+        /**
          * The FBI's ZBuffer. In the original it decides whether a finished
          * unit's cached bitmap gets a height plane, and the textured span
          * filler only shades when there is one (TOTALA-EXE-SHADING.md S:23):

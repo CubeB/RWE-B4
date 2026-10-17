@@ -237,6 +237,7 @@ namespace rwe
                 graphics->setUniformFloat(textureShader.maskValue, m.maskValue);
                 graphics->setUniformFloat(textureShader.fogged, m.fogged);
                 graphics->setUniformFloat(textureShader.waterCut, m.waterCut);
+                graphics->setUniformFloat(textureShader.cutBelowY, m.cutBelowY);
                 graphics->setActiveTextureSlot1();
                 graphics->bindTexture(m.paletteIndexTexture);
                 graphics->setActiveTextureSlot0();
@@ -263,6 +264,7 @@ namespace rwe
                 graphics->setUniformFloat(buildShader.shadeStrength, m.shadeStrength);
                 graphics->setUniformFloat(buildShader.buildRatio, m.buildRatio);
                 graphics->setUniformFloat(buildShader.waterCut, m.waterCut);
+                graphics->setUniformFloat(buildShader.cutBelowY, m.cutBelowY);
                 graphics->setUniformInt(buildShader.aboveMode, static_cast<int>(m.aboveMode));
                 graphics->setUniformInt(buildShader.bandMode, static_cast<int>(m.bandMode));
                 graphics->setUniformInt(buildShader.belowMode, static_cast<int>(m.belowMode));
@@ -308,6 +310,7 @@ namespace rwe
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
                 graphics->setUniformFloat(textureShader.shadeStrength, m.shadeStrength);
                 graphics->setUniformFloat(textureShader.maskValue, m.maskValue);
+                graphics->setUniformFloat(textureShader.cutBelowY, m.cutBelowY);
                 graphics->setActiveTextureSlot1();
                 graphics->bindTexture(m.paletteIndexTexture);
                 graphics->setActiveTextureSlot0();
@@ -325,6 +328,7 @@ namespace rwe
                 graphics->setUniformMatrix(textureShader.modelMatrix, m.modelMatrix);
                 graphics->setUniformFloat(textureShader.shadeStrength, m.shadeStrength);
                 graphics->setUniformFloat(textureShader.maskValue, m.maskValue);
+                graphics->setUniformFloat(textureShader.cutBelowY, m.cutBelowY);
                 graphics->setActiveTextureSlot1();
                 graphics->bindTexture(m.paletteIndexTexture);
                 graphics->setActiveTextureSlot0();
@@ -388,6 +392,7 @@ namespace rwe
             graphics->setUniformFloat(outlineShader.maskValue, 0.0f);
             graphics->setUniformFloat(outlineShader.fogged, 0.0f);
             graphics->setUniformFloat(outlineShader.waterCut, 0.0f);
+            graphics->setUniformFloat(outlineShader.cutBelowY, NoCutBelowY);
             graphics->setUniformInt(outlineShader.paletteIndexSampler, 1);
             graphics->setUniformInt(outlineShader.shadeTableSampler, 2);
             for (const auto& m : meshes)

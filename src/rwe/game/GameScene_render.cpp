@@ -1938,7 +1938,27 @@ namespace rwe
                 const auto& unitModelDefinition = simulation.unitModelDefinitions.at(unitDefinition.objectName);
                 auto firstMesh = unitMeshBatch.meshes.size();
                 auto firstBuildingMesh = unitMeshBatch.buildingMeshes.size();
+                auto firstCloakedMesh = unitMeshBatch.cloakedMeshes.size();
                 drawUnit(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, unitModelDefinition, getPlayer(unit.owner).color, unitId.value, renderTime().value, interpolationFraction, shadeStrengthFor(!unitDefinition.isMobile), unitAtlases, unitMeshBatch);
+
+                // A digger (the pop-up turrets) shows nothing at or below its
+                // origin plane, wet or dry (BT-143).
+                if (unitDefinition.digger)
+                {
+                    auto originY = lerp(simVectorToFloat(unit.previousPosition), simVectorToFloat(unit.position), interpolationFraction).y;
+                    for (auto i = firstMesh; i < unitMeshBatch.meshes.size(); ++i)
+                    {
+                        unitMeshBatch.meshes[i].cutBelowY = originY;
+                    }
+                    for (auto i = firstBuildingMesh; i < unitMeshBatch.buildingMeshes.size(); ++i)
+                    {
+                        unitMeshBatch.buildingMeshes[i].cutBelowY = originY;
+                    }
+                    for (auto i = firstCloakedMesh; i < unitMeshBatch.cloakedMeshes.size(); ++i)
+                    {
+                        unitMeshBatch.cloakedMeshes[i].cutBelowY = originY;
+                    }
+                }
 
                 // The part of the model under water is tinted blue for the
                 // viewer's own units and for sonar contacts, and cut away for

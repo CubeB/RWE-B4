@@ -35,6 +35,10 @@ uniform sampler2D shadeTableSampler;
 // model at or below the water line are cut away (0x4BA1B0) rather than tinted
 // blue (BT-142). 0 tints them, as the viewer's own units and sonar contacts are.
 uniform float waterCut;
+// World height at or below which a fragment is cut away whatever the water is
+// doing: a digger's origin plane (BT-143). Far below the world for everything
+// that is not a digger.
+uniform float cutBelowY;
 uniform float seaLevel;
 uniform float shadeStrength;
 // How much of its own colour the model keeps where it covers the screen. 1 for
@@ -141,6 +145,13 @@ void main(void)
 {
     vec4 baseColor = texture(textureSampler, fragTexCoord);
     if (baseColor.a < 0.5)
+    {
+        discard;
+    }
+
+    // A digger's final picture is cut at the model's origin plane, wet or
+    // dry (BT-143, 0x459755).
+    if (height <= cutBelowY)
     {
         discard;
     }

@@ -16,6 +16,10 @@ uniform sampler2D shadeTableSampler;
 // model at or below the water line are cut away (0x4BA1B0) rather than tinted
 // blue (BT-142). 0 tints them, as the viewer's own units and sonar contacts are.
 uniform float waterCut;
+// World height at or below which a fragment is cut away whatever the water is
+// doing: a digger's origin plane (BT-143). Far below the world for everything
+// that is not a digger.
+uniform float cutBelowY;
 uniform float unitY;
 uniform float seaLevel;
 uniform float shadeStrength;
@@ -96,6 +100,10 @@ void main(void)
     // The cut applies to the whole finished picture, whichever way the build
     // display would draw this fragment.
     if (!(height > seaLevel) && waterCut > 0.5)
+    {
+        discard;
+    }
+    if (height <= cutBelowY)
     {
         discard;
     }

@@ -228,6 +228,12 @@ namespace rwe
         bool noShadow;
 
         /**
+         * The pop-up defences (ARMAMB, CORTOAST) say digger=1: the part of the
+         * model at or below the origin plane is never drawn (BT-143).
+         */
+        bool digger;
+
+        /**
          * Whether the unit's cached bitmap carries a height plane. Every
          * shipped unit says 1 except CORFAV and CORTRUCK, and the original
          * draws a finished unit without one unsorted and unshaded.
