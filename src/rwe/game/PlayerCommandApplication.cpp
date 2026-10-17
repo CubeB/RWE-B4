@@ -5,6 +5,7 @@
 #include <rwe/game/ReplayFile.h>
 #include <rwe/sim/MissionScripts.h>
 #include <rwe/sim/UnitBehaviorService.h>
+#include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
@@ -322,6 +323,22 @@ namespace rwe
                 if (const auto* build = std::get_if<BuildOrder>(&issue->order); build != nullptr && isExcludedByMission(simulation, build->unitType))
                 {
                     return "the mission does not offer that unit";
+                }
+
+                // A repair or help-build is accepted where the order is chosen
+                // (0x43F0E0), and the water reach test is part of that choice:
+                // a flier that is not amphibious cannot be sent to a unit whose
+                // top is under the surface, and a ground or sea repairer not to
+                // one deeper than it can wade (BT-13). A refusal leaves the
+                // queue alone.
+                if (const auto* repair = std::get_if<RepairOrder>(&issue->order); repair != nullptr)
+                {
+                    auto target = simulation.tryGetUnitState(repair->target);
+                    const auto& repairer = simulation.getUnitState(unitCommand.unit);
+                    if (target && !repairWaterReachAllows(simulation, simulation.unitDefinitions.at(repairer.unitType), target->get()))
+                    {
+                        return "the target is under the water beyond that repairer's reach";
+                    }
                 }
             }
             if (const auto* queue = std::get_if<PlayerUnitCommand::ModifyBuildQueue>(&unitCommand.command))

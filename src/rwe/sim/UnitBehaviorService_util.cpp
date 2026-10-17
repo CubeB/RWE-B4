@@ -414,6 +414,23 @@ namespace rwe
         return true;
     }
 
+    bool repairWaterReachAllows(const GameSimulation& sim, const UnitDefinition& repairerDefinition, const UnitState& target)
+    {
+        auto top = wholeTopOf(sim, target);
+        auto seaLevel = wholeSeaLevel(sim);
+
+        // A flier without the amphibious bit is rejected for a target whose
+        // top is under the surface; an amphibious one is never rejected by
+        // this test (0x4899B0, BT-13). No shipped aircraft sets the key.
+        if (repairerDefinition.canFly)
+        {
+            return repairerDefinition.amphibious || top >= seaLevel;
+        }
+
+        auto maxWaterDepth = static_cast<int>(sim.getAdHocMovementClass(repairerDefinition.movementCollisionInfo).maxWaterDepth);
+        return top >= seaLevel - maxWaterDepth;
+    }
+
     bool canRepairUnit(const GameSimulation& sim, const UnitDefinition& repairerDefinition, const UnitState& target)
     {
         // 0x4899B0. The first test on the orderer is flags2 bit 9, the copy of
@@ -438,19 +455,7 @@ namespace rwe
             return false;
         }
 
-        auto top = wholeTopOf(sim, target);
-        auto seaLevel = wholeSeaLevel(sim);
-
-        // A flier without the amphibious bit is rejected for a target whose
-        // top is under the surface; an amphibious one is never rejected by
-        // this test (0x4899B0, BT-13). No shipped aircraft sets the key.
-        if (repairerDefinition.canFly)
-        {
-            return repairerDefinition.amphibious || top >= seaLevel;
-        }
-
-        auto maxWaterDepth = static_cast<int>(sim.getAdHocMovementClass(repairerDefinition.movementCollisionInfo).maxWaterDepth);
-        return top >= seaLevel - maxWaterDepth;
+        return repairWaterReachAllows(sim, repairerDefinition, target);
     }
 
     bool unitIsAnUsableAirBase(const UnitState& state, const UnitDefinition& definition)

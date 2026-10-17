@@ -132,6 +132,16 @@ namespace rwe
     bool canRepairUnit(const GameSimulation& sim, const UnitDefinition& repairerDefinition, const UnitState& target);
 
     /**
+     * The water half of that predicate alone (its last test, in whole units):
+     * a repairer that can fly and is not amphibious is refused a target whose
+     * top is under the surface; any other is refused one whose top is deeper
+     * than its own maximum water depth below it. The order dispatcher
+     * (0x43F0E0) applies it where a repair or help-build is chosen, and the
+     * ownership and health tests are separate steps there. BT-13.
+     */
+    bool repairWaterReachAllows(const GameSimulation& sim, const UnitDefinition& repairerDefinition, const UnitState& target);
+
+    /**
      * Whether the original's attack-order builder (command 3, 0x43F154) would
      * make an order of an attack click on this unit, or answer "no order" and
      * leave the queue alone. BT-63, the water half of it.

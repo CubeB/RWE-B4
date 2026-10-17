@@ -3,7 +3,9 @@
 #include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/sim/FeatureDefinition.h>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
+#include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
 #include <rwe/sim/sim_test_util.h>
@@ -172,6 +174,110 @@ namespace rwe
         REQUIRE((formationDestination(positions, SimVector(1000_ss, 0_ss, 0_ss), click) == click));
         positions = {SimVector(-1.5_ssf, 0_ss, 0_ss), SimVector(0.5_ssf, 0_ss, 0_ss)};
         REQUIRE((formationDestination(positions, positions[0], click) == SimVector(499.5_ssf, 23_ss, 500_ss)));
+    }
+
+    namespace
+    {
+        MapTerrain makeFloodedTerrain(int size)
+        {
+            Grid<unsigned char> heights(size, size, static_cast<unsigned char>(0));
+            return MapTerrain(std::move(heights), 20_ss);
+        }
+
+        /** A repairer: builder with the canreclamate mirror, at the given depth, flying or not. */
+        UnitDefinition makeRepairerDef(bool flies, unsigned int maxWaterDepth, bool amphibious = false)
+        {
+            UnitDefinition d{};
+            d.isMobile = true;
+            d.canMove = true;
+            d.builder = true;
+            d.canReclamate = true;
+            d.canFly = flies;
+            d.amphibious = amphibious;
+            d.maxHitPoints = 100;
+            d.buildTime = 0u;
+            d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, maxWaterDepth};
+            return d;
+        }
+
+        /** A damaged hull whose top is `top` above its origin. */
+        UnitId addHull(GameSimulation& sim, PlayerId owner, int top, SimScalar y)
+        {
+            UnitDefinition d{};
+            d.objectName = "HULL";
+            d.isMobile = true;
+            d.maxHitPoints = 100;
+            d.buildTime = 0u;
+            d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
+            sim.unitDefinitions["HULL"] = d;
+            sim.unitModelDefinitions["HULL"] = createUnitModelDefinition(intToSimScalar(top), {UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}});
+            auto id = addUnitOfType(sim, "HULL", owner, SimVector(300_ss, y, 300_ss), makeEmptyCobScript());
+            sim.getUnitState(id).hitPoints = 50;
+            return id;
+        }
+    }
+
+    TEST_CASE("a repair order is refused across the water as the original's dispatcher does (BT-13)", "[game][repair][water]")
+    {
+        // 0x4899B0's last test, in whole units, applied where the order is
+        // chosen: a flier that is not amphibious cannot be sent to a unit
+        // whose top is under the surface; a ground or sea repairer is limited
+        // by its own maximum water depth below it. The sea is at 20.
+        GameSimulation sim(makeFloodedTerrain(64), 0u, 0, 0);
+        auto player = addPlayer(sim, "player");
+        sim.unitDefinitions["conaircraft"] = makeRepairerDef(true, 0u);
+        sim.unitDefinitions["amphibiousaircraft"] = makeRepairerDef(true, 0u, true);
+        sim.unitDefinitions["wader"] = makeRepairerDef(false, 12u);
+        sim.unitDefinitions["conship"] = makeRepairerDef(false, 10000u);
+
+        auto spawn = [&](const std::string& type) { return addUnitOfType(sim, type, player, SimVector(0_ss, 0_ss, 0_ss), makeEmptyCobScript()); };
+        auto tryRepair = [&](UnitId repairer, UnitId target) {
+            return applyUnitCommandToSimulation(sim, player, PlayerUnitCommand(repairer, PlayerUnitCommand::IssueOrder(RepairOrder(target), Kind::Immediate)));
+        };
+
+        // A submarine with its whole hull under the surface: origin at 0, top at 10.
+        auto submerged = addHull(sim, player, 10, 0_ss);
+
+        SECTION("a construction aircraft cannot be sent to a submerged hull")
+        {
+            auto aircraft = spawn("conaircraft");
+            REQUIRE_FALSE(tryRepair(aircraft, submerged));
+            REQUIRE(sim.getUnitState(aircraft).orders.empty());
+        }
+
+        SECTION("an amphibious one can")
+        {
+            auto aircraft = spawn("amphibiousaircraft");
+            REQUIRE(tryRepair(aircraft, submerged));
+            REQUIRE(sim.getUnitState(aircraft).orders.size() == 1);
+        }
+
+        SECTION("a ship with the default depth can, at any depth")
+        {
+            auto ship = spawn("conship");
+            REQUIRE(tryRepair(ship, submerged));
+            REQUIRE(sim.getUnitState(ship).orders.size() == 1);
+        }
+
+        SECTION("a land builder wades twelve below the surface and no more")
+        {
+            auto wader = spawn("wader");
+            // Top at 10 against 20 - 12 = 8: within reach.
+            REQUIRE(tryRepair(wader, submerged));
+
+            // A hull whose top is at 5: out of reach, and the queue it
+            // already has is left alone.
+            auto deep = addHull(sim, player, 5, 0_ss);
+            REQUIRE_FALSE(tryRepair(wader, deep));
+            REQUIRE(sim.getUnitState(wader).orders.size() == 1);
+        }
+
+        SECTION("a hull that has surfaced is reachable by anything")
+        {
+            auto surfaced = addHull(sim, player, 30, 0_ss);
+            auto aircraft = spawn("conaircraft");
+            REQUIRE(tryRepair(aircraft, surfaced));
+        }
     }
 
 }
