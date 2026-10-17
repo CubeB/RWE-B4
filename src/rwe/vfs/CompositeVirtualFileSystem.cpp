@@ -24,6 +24,17 @@ namespace rwe
                 auto file = fs->readFile(filename);
                 if (file)
                 {
+                    // The whole-file loader (0x4BBE50) hands back nothing
+                    // unless the size is above zero, and does not go on to
+                    // another archive: an empty file here hides any copy
+                    // further down and then reads as missing (BT-170, #605;
+                    // static byte-tactics reading at 97d7ac59, not executed
+                    // against the original). Callers already treat nullopt
+                    // as no such file; the film player skips it.
+                    if (file->empty())
+                    {
+                        return std::nullopt;
+                    }
                     return file;
                 }
             }
@@ -46,7 +57,7 @@ namespace rwe
             }
 
             auto file = fs->readFile(filename);
-            if (file)
+            if (file && !file->empty())
             {
                 return file;
             }

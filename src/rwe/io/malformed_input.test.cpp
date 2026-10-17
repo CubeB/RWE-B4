@@ -1995,4 +1995,37 @@ namespace rwe
             REQUIRE_FALSE(hpi.findDirectory("d").has_value());
         }
     }
+
+    TEST_CASE("an empty file reads as absent and hides the copy behind it", "[io][malformed][vfs]")
+    {
+        // BT-170 (#605): the original's whole-file loader returns nothing
+        // unless the size is above zero, with no fall-through to another
+        // archive. Static byte-tactics reading at 97d7ac59, not executed
+        // against the original.
+        struct EmptyFileSystem final : public LeafVirtualFileSystem
+        {
+            std::string name{"empty"};
+            const std::string& getPath() const override { return name; }
+            std::optional<std::vector<char>> readFile(const std::string&) const override { return std::vector<char>{}; }
+            std::vector<std::string> getFileNames(const std::string&, const std::string&) override { return {}; }
+            std::vector<std::string> getDirectoryNames(const std::string&) override { return {}; }
+            std::vector<std::string> getFileNamesRecursive(const std::string&, const std::string&) override { return {}; }
+        };
+
+        CompositeVirtualFileSystem vfs;
+        vfs.emplaceFileSystem<EmptyFileSystem>();
+        vfs.emplaceFileSystem<OneFileSystem>();
+        REQUIRE_FALSE(vfs.readFile("movies/1.zrb").has_value());
+        REQUIRE_FALSE(vfs.readFileFromSource("empty", "movies/1.zrb").has_value());
+        REQUIRE_THROWS_AS(vfs.readFileOrThrow("movies/1.zrb"), std::runtime_error);
+
+        // The film player treats a missing film as one to skip, so nothing is played and nothing throws.
+        auto film = vfs.readFile("movies/1.zrb");
+        REQUIRE_FALSE(film.has_value());
+
+        // A non-empty file in front of the same copy is read as before.
+        CompositeVirtualFileSystem full;
+        full.emplaceFileSystem<OneFileSystem>();
+        REQUIRE(full.readFile("movies/1.zrb").has_value());
+    }
 }
