@@ -159,14 +159,9 @@ namespace rwe
     {
         MovementClassDatabase movementClasses;
         auto definitionFrom = [&](const std::string& keys) {
-            auto fbi = parseUnitFbi(parseTdfFromString("[UNITINFO]
-{
-UnitName=ARMAMB;
-Objectname=model;
-SoundCategory=NOSOUND;
-" + keys + "
-}
-"));
+            const std::string nl(1, static_cast<char>(10));
+            std::string text = "[UNITINFO]" + nl + "{" + nl + "UnitName=ARMAMB;" + nl + "Objectname=model;" + nl + "SoundCategory=NOSOUND;" + nl + keys + nl + "}" + nl;
+            auto fbi = parseUnitFbi(parseTdfFromString(text));
             return parseUnitDefinition(fbi, movementClasses);
         };
 

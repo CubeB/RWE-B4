@@ -828,13 +828,14 @@ namespace rwe
         // A glyph of width 2 and 17 rows is 34 bits: five bytes. The old read
         // of two bytes a column of width (four) cut the bottom rows off.
         std::string tail;
-        tail += std::string(1, '');
-        tail += std::string("ÿÿÿÿ", 5);
+        tail += static_cast<char>(2);
+        tail += std::string(4, static_cast<char>(0xff));
+        tail += static_cast<char>(0x80);
         auto bytes = fntBytes(17, {{'A', 516}}, tail);
 
         // Byte 2 of the file is the signed vertical offset the blitter
         // subtracts from Y; byte 3 is the first character.
-        bytes[2] = '';
+        bytes[2] = static_cast<char>(3);
         std::istringstream in(bytes);
         FntArchive font(&in);
         REQUIRE(font.glyphHeight() == 17);
