@@ -4422,11 +4422,17 @@ namespace rwe
             auto collisionInfo = checkProjectileCollision(*this, projectile);
             if (collisionInfo)
             {
-                // Spray or earth by the square the round went off in, whatever
-                // it struck (0x499ECF): a hit on a wading unit in a wet square
-                // splashes, and a round into the shallows of a square with a
-                // dry corner throws up earth.
-                auto inWater = terrain.isSquareUnderSea(projectile.position.x, projectile.position.z);
+                // Spray or earth by the square the round went off in -- but
+                // only when no unit was struck (0x499EB0, BT-9). The routine
+                // plays the water sound and requests the splash when the
+                // square is wet AND it was handed no unit; a hull hit over a
+                // wet square takes the ordinary hit sound and explosion, and
+                // so does anything that is not given a unit's name. A round
+                // into the shallows of a square with a dry corner throws up
+                // earth.
+                const auto* unitHit = std::get_if<ProjectileCollisionInfoUnitOrFeatureOrBuilding>(&*collisionInfo);
+                const auto struckAUnit = unitHit != nullptr && unitHit->struckUnit.has_value();
+                auto inWater = !struckAUnit && terrain.isSquareUnderSea(projectile.position.x, projectile.position.z);
                 auto impactType = inWater ? ImpactType::Water : ImpactType::Normal;
                 auto impactDeath = inWater ? ProjectileDiedEvent::DeathType::WaterImpact : ProjectileDiedEvent::DeathType::NormalImpact;
                 match(

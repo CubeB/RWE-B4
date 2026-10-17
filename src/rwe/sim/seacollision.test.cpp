@@ -150,10 +150,12 @@ namespace rwe
         // Eight units up and eight out, the missile's first step takes it past
         // the edge and below the surface at once. The original tests the
         // square's units before the water (0x49B090), so the Storm takes it --
-        // and throws up spray, the square being under the sea (0x499ECF).
+        // and, having been handed a unit, the detonation routine plays the
+        // ordinary hit art rather than the splash, the square being wet or not
+        // (0x499EB0, BT-9).
         auto shot = fireAtStorm(8_ss, 8_ss, false);
         CHECK(shot.stormDamaged);
-        CHECK(shot.deathType == ProjectileDiedEvent::DeathType::WaterImpact);
+        CHECK(shot.deathType == ProjectileDiedEvent::DeathType::NormalImpact);
     }
 
     TEST_CASE("a missile that reaches sea level short of a wading unit hits the water", "[weapon][water]")
@@ -167,11 +169,12 @@ namespace rwe
 
     TEST_CASE("on a map with nosealeveltrigger a missile goes through the water to its target", "[weapon][water]")
     {
-        // Still spray when it gets there: the art is the square's, and
-        // nosealeveltrigger switches off the sea test and nothing else.
+        // The hit is a direct one, so it takes the ordinary art even though
+        // the square is wet (BT-9); nosealeveltrigger switches off the sea
+        // test and nothing else.
         auto shot = fireAtStorm(80_ss, 10_ss, true);
         CHECK(shot.stormDamaged);
-        CHECK(shot.deathType == ProjectileDiedEvent::DeathType::WaterImpact);
+        CHECK(shot.deathType == ProjectileDiedEvent::DeathType::NormalImpact);
     }
 
     namespace
