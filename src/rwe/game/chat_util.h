@@ -148,4 +148,28 @@ namespace rwe
 
     /** How a restricted line reads on screen: `name->Allies: text`. */
     std::string formatChatLine(const std::string& senderName, ChatLabel label, const std::string& text);
+
+    /**
+     * How long a HUD message stays and how many show at once (BT-206). The
+     * original keeps a line for (textscroll + 1) * 30 game ticks, textscroll
+     * being ten when the profile does not say, and holds textlines - 1 = nine
+     * of them (a ten-slot ring that drops the oldest as the write position
+     * meets the read position). Time is the game tick, so a paused game does
+     * not age its lines and a faster one ages them faster in wall time.
+     */
+    constexpr std::uint32_t HudMessageLifetimeTicks = (10u + 1u) * 30u;
+    constexpr std::size_t HudMessageLines = 9;
+
+    /**
+     * Whether a line that expires at `expiresAt` is gone at game tick `now`.
+     * The original retires a line when its tick plus the delay plus one, times
+     * thirty, is strictly below the tick, so a line is still there on the tick
+     * it expires. A stamp further ahead than a lifetime can reach means the
+     * game's clock went back (a restore), and the line goes rather than sit
+     * for a game's length.
+     */
+    constexpr bool hudMessageExpired(std::uint32_t expiresAt, std::uint32_t now)
+    {
+        return expiresAt < now || expiresAt > now + HudMessageLifetimeTicks;
+    }
 }

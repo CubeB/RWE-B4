@@ -966,7 +966,8 @@ namespace rwe
             std::string text;
             /** Nothing draws the glyphs in their own colours, as the original does. */
             std::optional<Color> color;
-            SceneTime expires;
+            /** The game tick it is retired after, not scene time: a paused game keeps its lines (BT-206). */
+            std::uint32_t expiresAtGameTick;
         };
         std::deque<ConsoleMessage> consoleMessages;
 

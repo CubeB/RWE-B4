@@ -3,6 +3,23 @@
 
 namespace rwe
 {
+    TEST_CASE("a HUD message lasts 330 game ticks and nine show at once (BT-206)")
+    {
+        REQUIRE(HudMessageLifetimeTicks == 330);
+        REQUIRE(HudMessageLines == 9);
+
+        // Stamped at tick 1000 it expires at 1330 and is still up on that tick.
+        const std::uint32_t expires = 1000 + HudMessageLifetimeTicks;
+        REQUIRE_FALSE(hudMessageExpired(expires, 1000));
+        REQUIRE_FALSE(hudMessageExpired(expires, 1329));
+        REQUIRE_FALSE(hudMessageExpired(expires, 1330));
+        REQUIRE(hudMessageExpired(expires, 1331));
+
+        // The game's clock going back past a lifetime does not strand a line.
+        REQUIRE(hudMessageExpired(expires, 500));
+        REQUIRE_FALSE(hudMessageExpired(expires, 1000));
+    }
+
     TEST_CASE("sanitizeChatText")
     {
         SECTION("leaves an ordinary line alone")

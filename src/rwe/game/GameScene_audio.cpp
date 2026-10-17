@@ -151,9 +151,12 @@ namespace rwe
 
     void GameScene::printConsole(const std::string& text, const std::optional<Color>& color)
     {
-        // Five seconds a line, and never more than eight on screen.
-        consoleMessages.push_back(ConsoleMessage{text, color, sceneTime + SceneTime(5u * 30u)});
-        while (consoleMessages.size() > 8)
+        // Eleven seconds of game time a line and nine on screen (BT-206).
+        consoleMessages.push_back(ConsoleMessage{
+            text,
+            color,
+            static_cast<std::uint32_t>(simulation.gameTime.value) + HudMessageLifetimeTicks});
+        while (consoleMessages.size() > HudMessageLines)
         {
             consoleMessages.pop_front();
         }
@@ -161,7 +164,8 @@ namespace rwe
 
     void GameScene::renderConsole()
     {
-        while (!consoleMessages.empty() && consoleMessages.front().expires <= sceneTime)
+        while (!consoleMessages.empty()
+               && hudMessageExpired(consoleMessages.front().expiresAtGameTick, static_cast<std::uint32_t>(simulation.gameTime.value)))
         {
             consoleMessages.pop_front();
         }
