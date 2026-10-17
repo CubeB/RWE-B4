@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <imgui.h>
 #include <optional>
+#include <rwe/game/GameScene_ownclock.h>
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/game/chat_util.h>
 #include <rwe/net/ta/TaPacket.h>
@@ -375,24 +376,27 @@ namespace rwe
 
         if (auto change = link.driver->takeSpeedChange())
         {
-            // 256 is what every sender puts on the wire at game start and the
-            // corpus calls it normal speed, so the two bytes are read here as
-            // 256ths of normal: 0 is the pause TOTALA-EXE-INTERFACE.md 70
-            // broadcasts, and 256 is 1x. That puts normal at level 10, which is
-            // where the original's own 1..20 numbering has it, so the
-            // game-start record leaves RWE's clock exactly as the player has it.
-            if (*change == 0)
+            // The two bytes after the code are a subtype and a value, not one
+            // number (BT-178): subtype 0 sets the pause to the value's low bit,
+            // subtype 1 sets the speed level (1..20, normal 10). The start-up
+            // record every sender puts out, `00 01` after the code, is
+            // therefore a pause-on and no longer read as "normal speed". A
+            // speed change leaves the pause alone, and the speed line is
+            // printed only when the level really changed, as the original's
+            // setter does.
+            auto packet = decodePeerSpeedPacket(*change);
+            if (packet.kind == PeerSpeedPacket::Kind::Pause)
             {
-                link.peerPaused = true;
-                setPeerPaused(true);
+                link.peerPaused = packet.paused;
+                setPeerPaused(packet.paused);
             }
-            else
+            else if (packet.kind == PeerSpeedPacket::Kind::Speed)
             {
-                setPeerGameSpeedLevel(std::clamp(static_cast<int>((*change * 10 + 128) / 256), 1, 20));
-                if (link.peerPaused)
+                auto before = gameSpeed.index();
+                setPeerGameSpeedLevel(packet.level);
+                if (gameSpeed.index() != before)
                 {
-                    link.peerPaused = false;
-                    setPeerPaused(false);
+                    printConsole(gameSpeedMessage(packet.level));
                 }
             }
         }

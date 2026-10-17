@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <rwe/game/GameSpeed.h>
+#include <string>
 
 namespace rwe
 {
@@ -33,4 +35,58 @@ namespace rwe
 
     /** The clock after a TA peer's `0x19` pause or unpause. */
     GameClock applyPeerPause(GameClock clock, bool paused);
+
+    /**
+     * What a TA peer's `0x19` says (BT-178). The record is the code, a subtype
+     * byte and a value byte, not one 16-bit number: subtype 0 sets the pause
+     * to the value's low bit (absolute, not a toggle) and subtype 1 sets the
+     * game speed level to the value, 1 to 20 with 10 normal. The wire word the
+     * puppet driver hands back is the two bytes little-endian, subtype in the
+     * low one. Anything else says nothing RWE acts on.
+     */
+    struct PeerSpeedPacket
+    {
+        enum class Kind
+        {
+            Pause,
+            Speed,
+            Ignored,
+        };
+
+        Kind kind{Kind::Ignored};
+
+        /** For Pause: the new pause state. */
+        bool paused{false};
+
+        /** For Speed: the new level, clamped to 1..20 as the original's setter clamps it. */
+        int level{10};
+    };
+
+    PeerSpeedPacket decodePeerSpeedPacket(std::uint16_t wire);
+
+    /**
+     * What the in-game exit menu and the save and load dialogs may offer
+     * (#658). Restart and load rebuild the scene, and in a network game that
+     * drops one player out of the lockstep (or out of the peer's clock) and
+     * leaves the rest playing; save would write a state no peer could be
+     * brought back to. All three are refused in a game with a remote peer, of
+     * either kind. The own-clock and lockstep reasons stay two tests (ADR-0003)
+     * because the message that says which applies is the useful one.
+     */
+    struct GameMenuGate
+    {
+        bool restart{true};
+        bool load{true};
+        bool save{true};
+    };
+
+    GameMenuGate gameMenuGate(bool ownClock, bool lockstepNetwork);
+
+    /**
+     * The line the original's speed setter prints when the level really
+     * changed: "Game Speed Normal" at level 10, otherwise "Game Speed  +N" or
+     * "Game Speed  -N" (two spaces, N the difference from 10, a plus sign only
+     * when positive).
+     */
+    std::string gameSpeedMessage(int level);
 }

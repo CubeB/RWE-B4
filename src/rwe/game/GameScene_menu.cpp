@@ -9,6 +9,7 @@
 // cut made a commit earlier. Menu code is the densest kind for this purpose:
 // every gadget lookup is a template instantiation and every caption a string.
 #include "GameScene.h"
+#include "GameScene_ownclock.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -148,6 +149,11 @@ namespace rwe
             printConsole("Saving is not available in this game");
             return;
         }
+        if (!gameMenuGate(isOwnClock(), isLockstepNetworkGame()).save)
+        {
+            printConsole("Saving is not available in a network game");
+            return;
+        }
 
         // LOADGAME.GUI is the save/load dialog both ways in the original --
         // list, name field, metadata labels, radar frame -- and only the
@@ -176,6 +182,11 @@ namespace rwe
 
     void GameScene::openLoadDialog()
     {
+        if (!gameMenuGate(isOwnClock(), isLockstepNetworkGame()).load)
+        {
+            printConsole("Loading is not available in a network game");
+            return;
+        }
         auto panel = uiFactory.panelFromGuiFile("LOADGAME");
         wireSaveList(*panel);
         setGameMenuPanel(std::move(panel));
@@ -198,6 +209,11 @@ namespace rwe
             printConsole("Saving is not available in this game");
             return;
         }
+        if (!gameMenuGate(isOwnClock(), isLockstepNetworkGame()).save)
+        {
+            printConsole("Saving is not available in a network game");
+            return;
+        }
 
         if (endGameChartVisible() && gameParameters.campaign)
         {
@@ -218,6 +234,14 @@ namespace rwe
 
     void GameScene::loadSavedGame(const std::string& name)
     {
+        // Leaving the scene for a saved game drops this player out of a
+        // network game and leaves the others playing (#658).
+        if (!gameMenuGate(isOwnClock(), isLockstepNetworkGame()).load)
+        {
+            printConsole("Loading is not available in a network game");
+            return;
+        }
+
         auto path = savePathForName(name);
         auto save = readSaveFile(path);
         if (!save)
@@ -356,10 +380,10 @@ namespace rwe
         {
             // TOTALA-EXE.md S:63: campaign/skirmish gets this enabled with
             // the fixed text "Restart"; only multiplayer keeps it blank and
-            // dead, and RWE has no multiplayer game in progress to gate it
-            // on here yet.
-            button->get().setEnabled(true);
-            button->get().setLabel("Restart");
+            // dead, which is a network game of either kind here (#658).
+            auto networkGame = !gameMenuGate(isOwnClock(), isLockstepNetworkGame()).restart;
+            button->get().setEnabled(!networkGame);
+            button->get().setLabel(networkGame ? "" : "Restart");
         }
         setGameMenuPanel(std::move(panel));
     }
@@ -373,6 +397,12 @@ namespace rwe
 
     void GameScene::restartGame()
     {
+        if (!gameMenuGate(isOwnClock(), isLockstepNetworkGame()).restart)
+        {
+            printConsole("Restarting is not available in a network game");
+            return;
+        }
+
         // Same pipeline loadSavedGame hands a save to, minus the save: a
         // fresh LoadingScene over the game's own parameters spawns the
         // starting commanders exactly as the first load did.

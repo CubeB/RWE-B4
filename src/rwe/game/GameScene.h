@@ -1489,6 +1489,14 @@ namespace rwe
         /** Whether this game may be saved. An own-clock game may not; see GameScene_ownclock.cpp. */
         bool canSave() const;
 
+        /**
+         * A lockstep game with a remote peer, and a network game of either
+         * kind: restart, load and (with a peer) save are not offered in one,
+         * because each leaves or forks the scene for this player alone (#658).
+         */
+        bool isLockstepNetworkGame() const;
+        bool isNetworkGame() const { return isOwnClock() || isLockstepNetworkGame(); }
+
         /** Whose resources the top bar reads out; the local player unless a replay says otherwise. */
         PlayerId hudPlayerId() const { return hudPlayerOverride.value_or(localPlayerId); }
 
