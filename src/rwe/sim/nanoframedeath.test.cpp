@@ -105,9 +105,12 @@ namespace rwe
             boom.damage["DEFAULT"] = 300;
             sim.weaponDefinitions["boom"] = boom;
 
-            auto attacker = spawn(sim, "bystander", us, SimVector(300_ss, 0_ss, 300_ss), makeKilledScript());
+            // A unit holds a raw pointer to its script, so these must outlive the call.
+            auto attackerScript = makeKilledScript();
+            auto bystanderScript = makeKilledScript();
+            auto attacker = spawn(sim, "bystander", us, SimVector(300_ss, 0_ss, 300_ss), attackerScript);
             auto victim = spawn(sim, "victim", them, SimVector(100_ss, 0_ss, 100_ss), script);
-            auto bystander = spawn(sim, "bystander", them, SimVector(132_ss, 0_ss, 100_ss), makeKilledScript());
+            auto bystander = spawn(sim, "bystander", them, SimVector(132_ss, 0_ss, 100_ss), bystanderScript);
             tick(sim, 1);
             sim.events.clear();
 

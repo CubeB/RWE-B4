@@ -460,7 +460,7 @@ namespace rwe
             auto kbot = makeDef(false, false, true, "", 100u);
             kbot.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
             sim.unitDefinitions["KBOT"] = kbot;
-            auto script = makeEmptyCobScript();
+            static const auto script = makeEmptyCobScript();
             auto kbotId = addUnit(sim, "KBOT", PlayerId(0), sim.terrain.heightmapIndexToWorldCorner(anchorHm.x + 9, anchorHm.y + 2), script);
             // The fixture's addUnit leaves the occupancy grid alone, so the
             // kbot's cells are stamped by hand, as the simulation's own

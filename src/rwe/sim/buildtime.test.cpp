@@ -95,7 +95,7 @@ namespace rwe
         unsigned int incrementsToFinish(const TadBuildEpisode& episode)
         {
             auto def = productOf(episode);
-            auto script = makeEmptyCobScript();
+            static const auto script = makeEmptyCobScript();
             auto unit = makeNanoframe(script);
 
             auto contribution = workerTimePerTick(episode);
@@ -122,7 +122,7 @@ namespace rwe
         int durationTicks(const TadBuildEpisode& episode)
         {
             auto def = productOf(episode);
-            auto script = makeEmptyCobScript();
+            static const auto script = makeEmptyCobScript();
             auto unit = makeNanoframe(script);
 
             auto contribution = workerTimePerTick(episode);

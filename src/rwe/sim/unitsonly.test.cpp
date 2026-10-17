@@ -84,7 +84,9 @@ namespace rwe
             model.height = 32_ss;
             sim.unitModelDefinitions["ARMADV"] = model;
 
-            auto script = makeEmptyCobScript();
+            // The environment keeps a raw pointer to its script, and a hit now
+            // runs HitByWeapon through it, so the script must outlive this call.
+            static const auto script = makeEmptyCobScript();
             auto env = std::make_unique<CobEnvironment>(script.get());
             std::vector<UnitMesh> pieces;
             UnitState unit(pieces, std::move(env));

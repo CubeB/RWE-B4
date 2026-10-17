@@ -79,7 +79,7 @@ namespace rwe
          */
         float worstCrabThroughTurn(const UnitDefinition& def)
         {
-            auto script = makeEmptyCobScript();
+            static const auto script = makeEmptyCobScript();
             std::vector<UnitMesh> pieces;
             UnitState unit(pieces, std::make_unique<CobEnvironment>(script.get()));
             // A bare UnitState leaves its position uninitialised; the spawn

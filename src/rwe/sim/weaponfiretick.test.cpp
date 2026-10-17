@@ -188,7 +188,7 @@ namespace rwe
             defineShooter(sim);
             defineVictim(sim);
 
-            auto script = makeEmptyCobScript({"base"});
+            static const auto script = makeEmptyCobScript({"base"});
             sim.unitScriptDefinitions["ARMHLT"] = *script;
             sim.unitScriptDefinitions["CORMEX"] = *script;
 

@@ -167,8 +167,11 @@ namespace rwe
         registerModel(sim, "bare", false);
         registerModel(sim, "tank", true);
         auto player = addPlayer(sim);
-        auto bare = spawn(sim, "bare", player, SimVector(100_ss, 20_ss, 50_ss), SimAngle(0), makeScript(std::nullopt));
-        auto beyond = spawn(sim, "tank", player, SimVector(300_ss, 20_ss, 50_ss), SimAngle(0), makeScript(7u));
+        // A unit holds a raw pointer to its script, so these must outlive the call.
+        auto bareScript = makeScript(std::nullopt);
+        auto beyondScript = makeScript(7u);
+        auto bare = spawn(sim, "bare", player, SimVector(100_ss, 20_ss, 50_ss), SimAngle(0), bareScript);
+        auto beyond = spawn(sim, "tank", player, SimVector(300_ss, 20_ss, 50_ss), SimAngle(0), beyondScript);
 
         UnitBehaviorService service(&sim);
         auto aimBare = service.getSweetSpot(bare);

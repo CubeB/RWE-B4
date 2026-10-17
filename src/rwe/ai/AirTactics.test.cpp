@@ -720,7 +720,7 @@ namespace rwe
             GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
             auto ai = addPlayer(sim, "ai");
             auto enemy = addPlayer(sim, "enemy");
-            auto script = makeEmptyCobScript();
+            static const auto script = makeEmptyCobScript();
 
             UnitDefinition kbotDef;
             kbotDef.buildCostMetal = Metal(60.0f);

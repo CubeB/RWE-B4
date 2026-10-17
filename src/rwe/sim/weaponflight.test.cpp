@@ -214,7 +214,7 @@ namespace rwe
             model.height = 100000_ss;
             sim.unitModelDefinitions["corpus_victim"] = model;
 
-            auto script = makeEmptyCobScript();
+            static const auto script = makeEmptyCobScript();
             auto env = std::make_unique<CobEnvironment>(script.get());
             std::vector<UnitMesh> pieces;
             UnitState unit(pieces, std::move(env));

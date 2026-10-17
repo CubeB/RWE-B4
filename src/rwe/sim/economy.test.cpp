@@ -464,7 +464,7 @@ namespace rwe
             commander.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 0u};
             sim.unitDefinitions["commander"] = commander;
 
-            auto script = makeEmptyCobScript();
+            static const auto script = makeEmptyCobScript();
             auto next = 0;
             auto place = [&]() {
                 auto x = SimScalar(static_cast<float>(64 + 16 * (next % 8)));
@@ -688,7 +688,7 @@ namespace rwe
             auto factoryDef = makeInertDef(1.0e9f);
             factoryDef.workerTimePerTick = p;
             sim.unitDefinitions["factory"] = factoryDef;
-            auto script = makeEmptyCobScript();
+            static const auto script = makeEmptyCobScript();
             auto factory = addUnitOfType(sim, "factory", owner, SimVector(64_ss, 0_ss, 64_ss), script);
 
             // The job it was finishing: one tick of it is left, on
