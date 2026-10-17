@@ -837,6 +837,35 @@ namespace rwe
         REQUIRE(ping->requesterPlayerId == JoinerId);
     }
 
+    TEST_CASE("the lobby's own 0x02 goes as a datagram and never on the stream (BT-240)", "[net][ta]")
+    {
+        // The original clears the guaranteed flag around the ping send: the 02
+        // echo is a datagram while the 06, the 26 and the republished 20 and
+        // 24 go guaranteed.
+        Harness h{std::chrono::milliseconds(5)};
+        h.room->peerJoined(JoinerId);
+        h.sent.clear();
+        for (int i = 0; i < 10; ++i)
+        {
+            h.ioContext.run_for(std::chrono::milliseconds(5));
+        }
+
+        auto requestsOn = [&](TaTransport transport) {
+            int count = 0;
+            for (const auto& subpacket : h.codesTo(JoinerId, transport))
+            {
+                auto ping = TaPinger::parsePing(subpacket);
+                if (ping && ping->responderTick == 0)
+                {
+                    ++count;
+                }
+            }
+            return count;
+        };
+        REQUIRE(requestsOn(TaTransport::Udp) > 0);
+        REQUIRE(requestsOn(TaTransport::Tcp) == 0);
+    }
+
     TEST_CASE("the battleroom stops pinging once the game launches", "[net][ta]")
     {
         Harness h{std::chrono::milliseconds(5)};
