@@ -4916,6 +4916,35 @@ namespace rwe
         return repairExistingUnit(unitInfo, repairOrder.target);
     }
 
+    void UnitBehaviorService::mendRaisedUnit(UnitId resurrectorId, FeatureId corpse, UnitId raisedId)
+    {
+        auto& resurrector = sim->getUnitState(resurrectorId);
+        const auto& raised = sim->getUnitState(raisedId);
+
+        // The order builder's command 8 needs the orderer's repair capability
+        // (canreclamate, 0x4899B0) and a target whose health differs from its
+        // maximum; for a finished unit it yields REPAIRUNIT, which goes in at
+        // the head of the list as the mission ends. The mission's own order is
+        // dropped with it rather than left to find no corpse and complain.
+        if (!sim->unitDefinitions.at(resurrector.unitType).canReclamate
+            || raised.hitPoints >= sim->unitDefinitions.at(raised.unitType).maxHitPoints)
+        {
+            return;
+        }
+
+        auto& orders = resurrector.orders;
+        for (auto it = orders.begin(); it != orders.end(); ++it)
+        {
+            if (const auto* resurrect = std::get_if<ResurrectOrder>(&*it); resurrect != nullptr && resurrect->target == corpse)
+            {
+                orders.erase(it);
+                break;
+            }
+        }
+        orders.push_front(RepairOrder(raisedId));
+        interruptCurrentTask(resurrectorId);
+    }
+
     void UnitBehaviorService::resetGuardNoMove(UnitState& unit)
     {
         unit.guardPhase = 0;

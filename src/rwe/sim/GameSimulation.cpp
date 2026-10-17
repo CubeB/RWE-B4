@@ -5258,21 +5258,10 @@ namespace rwe
                 // of the list and the resurrect mission ends, so its order is
                 // dropped here as well rather than left to find no corpse and
                 // complain.
-                const auto& resurrectorDefinition = unitDefinitions.at(unit->get().unitType);
-                if (resurrectorDefinition.canReclamate && newUnit.hitPoints < newUnitDefinition.maxHitPoints)
-                {
-                    auto& orders = unit->get().orders;
-                    for (auto it = orders.begin(); it != orders.end(); ++it)
-                    {
-                        if (const auto* resurrect = std::get_if<ResurrectOrder>(&*it); resurrect != nullptr && resurrect->target == s->target)
-                        {
-                            orders.erase(it);
-                            break;
-                        }
-                    }
-                    orders.push_front(RepairOrder(*newUnitId));
-                    UnitBehaviorService(this).interruptCurrentTask(unitId);
-                }
+                // The order work sits in UnitBehaviorService, not here: a deque
+                // of the order variant instantiated in this file costs most of
+                // its section budget (CLAUDE.md, the COFF ceiling).
+                UnitBehaviorService(this).mendRaisedUnit(unitId, s->target, *newUnitId);
             }
         }
 

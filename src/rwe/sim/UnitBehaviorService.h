@@ -33,6 +33,13 @@ namespace rwe
         void onCreate(UnitId unitId);
 
         /**
+         * BT-93 (state 6 of 0x404DB0): a resurrector that can repair goes
+         * straight on to mend the unit it raised. Called by spawnNewUnits
+         * once the unit stands where the corpse was.
+         */
+        void mendRaisedUnit(UnitId resurrector, FeatureId corpse, UnitId raised);
+
+        /**
          * Tells every wind generator the new wind. The script's SetSpeed gets
          * the map's integer wind speed times sixteen (shl 4 at 0x43797B), an
          * angular speed for the blades, and not the 0..1 fraction the economy
