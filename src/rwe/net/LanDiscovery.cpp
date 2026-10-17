@@ -1,5 +1,6 @@
 #include "LanDiscovery.h"
 #include <rwe/BuildIdentity.h>
+#include <rwe/net/MapIdentity.h>
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -600,6 +601,15 @@ namespace rwe
             if (!isPlausibleBuildIdentity(game.build)) return std::nullopt;
             out += "\nbuild=" + game.build;
         }
+        if (!game.mapIdentity.empty())
+        {
+            if (!isPlausibleMapIdentity(game.mapIdentity)) return std::nullopt;
+            out += "\nmapid=" + game.mapIdentity;
+        }
+        if (game.setupEpoch != 0)
+        {
+            out += "\nepoch=" + std::to_string(game.setupEpoch);
+        }
         if (!game.gameAddress.empty())
         {
             if (game.gameAddress.size() > maxGameAddressLength) return std::nullopt;
@@ -786,6 +796,24 @@ namespace rwe
                 // that is not read, like any other bad field.
                 if (!isPlausibleBuildIdentity(value)) return std::nullopt;
                 game.build = value;
+            }
+            else if (key == "mapid")
+            {
+                if (!isPlausibleMapIdentity(value)) return std::nullopt;
+                game.mapIdentity = value;
+            }
+            else if (key == "epoch")
+            {
+                // Digits only and short enough to fit: anything else is a
+                // lobby that is not read, like any other bad field.
+                if (value.empty() || value.size() > 9) return std::nullopt;
+                unsigned int epoch = 0;
+                for (char c : value)
+                {
+                    if (c < '0' || c > '9') return std::nullopt;
+                    epoch = epoch * 10 + static_cast<unsigned int>(c - '0');
+                }
+                game.setupEpoch = epoch;
             }
             else if (key == "gaddr")
             {

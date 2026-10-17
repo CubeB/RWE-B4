@@ -107,6 +107,25 @@ namespace rwe
         std::string build{};
 
         /**
+         * The identity of the map the lobby is on (MapIdentity.h): the sizes
+         * of its OTA and TNT and a hash over both, or empty from a build that
+         * predates the field or a host that could not read the map. A guest
+         * with a same-named map that differs would start a different game and
+         * desync, so it is told before it joins (#720). Wire key `mapid`.
+         */
+        std::string mapIdentity{};
+
+        /**
+         * Which version of the lobby's setup this is: the host raises it
+         * whenever the map, a rule or the seat table changes, and a guest
+         * says which one it was ready under. A ready flag at an older number
+         * is not believed, so a host that changes the game under a readied
+         * guest cannot start on its word (#719). Zero is "absent", from a
+         * build that predates the field. Wire key `epoch`.
+         */
+        unsigned int setupEpoch{0};
+
+        /**
          * Where the announcing machine's game port is as the internet sees
          * it, `a.b.c.d:port`. Empty unless that machine has gone to the
          * trouble of finding out, which it does only to be reached from

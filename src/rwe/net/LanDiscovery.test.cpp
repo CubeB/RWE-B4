@@ -588,6 +588,55 @@ namespace rwe
         }
     }
 
+    TEST_CASE("LanDiscovery carries the map's identity and the setup version (#719, #720)")
+    {
+        const auto& base = minimalAnnouncement;
+
+        SECTION("they survive a round trip")
+        {
+            auto game = sampleGame();
+            game.mapIdentity = "1f4-2a00-0123456789abcdef";
+            game.setupEpoch = 7;
+            auto text = LanDiscovery::encode(game);
+            REQUIRE(text);
+            auto back = LanDiscovery::decode(*text);
+            REQUIRE(back);
+            CHECK(back->mapIdentity == game.mapIdentity);
+            CHECK(back->setupEpoch == 7u);
+        }
+
+        SECTION("an announcement that does not say has neither")
+        {
+            auto back = LanDiscovery::decode(base);
+            REQUIRE(back);
+            CHECK(back->mapIdentity.empty());
+            CHECK(back->setupEpoch == 0u);
+        }
+
+        SECTION("a map identity that is not hex and dashes, or is too long, is not read")
+        {
+            CHECK_FALSE(LanDiscovery::decode(base + "\nmapid=ABC"));
+            CHECK_FALSE(LanDiscovery::decode(base + "\nmapid=12 34"));
+            CHECK_FALSE(LanDiscovery::decode(base + "\nmapid=" + std::string(49, 'a')));
+            CHECK(LanDiscovery::decode(base + "\nmapid=1f-2a-00ff"));
+
+            auto game = sampleGame();
+            game.mapIdentity = "NOT-HEX";
+            CHECK_FALSE(LanDiscovery::encode(game));
+        }
+
+        SECTION("a setup version that is not a short number is not read")
+        {
+            CHECK_FALSE(LanDiscovery::decode(base + "\nepoch="));
+            CHECK_FALSE(LanDiscovery::decode(base + "\nepoch=-1"));
+            CHECK_FALSE(LanDiscovery::decode(base + "\nepoch=12x"));
+            CHECK_FALSE(LanDiscovery::decode(base + "\nepoch=1234567890"));
+            auto ok = LanDiscovery::decode(base + "\nepoch=42");
+            REQUIRE(ok);
+            CHECK(ok->setupEpoch == 42u);
+        }
+    }
+
     TEST_CASE("LanDiscovery refuses a new field it cannot trust")
     {
         const auto& base = minimalAnnouncement;

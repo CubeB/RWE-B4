@@ -552,6 +552,8 @@ set(SOURCE_FILES
     src/rwe/net/InviteCode.h
     src/rwe/net/LanDiscovery.cpp
     src/rwe/net/LanDiscovery.h
+    src/rwe/net/MapIdentity.cpp
+    src/rwe/net/MapIdentity.h
     src/rwe/net/NatTraversal.cpp
     src/rwe/net/NatTraversal.h
     src/rwe/net/Stun.cpp
@@ -1222,6 +1224,7 @@ set(TEST_FILES
     src/rwe/BuildIdentity.test.cpp
     src/rwe/net/InviteCode.test.cpp
     src/rwe/net/LanDiscovery.test.cpp
+    src/rwe/net/MapIdentity.test.cpp
     src/rwe/net/NatTraversal.test.cpp
     src/rwe/net/Stun.test.cpp
     src/rwe/math/Matrix4f.test.cpp
