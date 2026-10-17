@@ -619,13 +619,14 @@ namespace rwe
 
     void MainMenuScene::goToPreviousMenu()
     {
-        if (!dialogStack.empty())
+        auto action = previousMenuAction(!dialogStack.empty(), panelStack.size());
+        if (action == PreviousMenuAction::CloseDialog)
         {
             dialogStack.pop_back();
             return;
         }
 
-        if (panelStack.size() > 1)
+        if (action == PreviousMenuAction::PopPanel)
         {
             // The multiplayer screens know where Previous Menu goes: the list
             // back to the address dialog, the setup screen back to the list.
@@ -638,7 +639,9 @@ namespace rwe
             return;
         }
 
-        exit();
+        // Only the main menu is left. The original's main menu does not quit
+        // on a cancel (BT-201): it acts on SINGLE, MULTI, INTRO and EXIT alone.
+        // Leaving is the Exit button, its quick key or the window close.
     }
 
     void MainMenuScene::goToMenu(std::unique_ptr<UiPanel>&& panel)

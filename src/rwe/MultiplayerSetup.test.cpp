@@ -160,4 +160,16 @@ namespace rwe
             REQUIRE(problem->find("same team") != std::string::npos);
         }
     }
+
+    TEST_CASE("Previous Menu at the root main menu does nothing (BT-201)")
+    {
+        // A cancel closes a dialog first, then steps back a panel, and with
+        // only the main menu left there is nowhere to go and it must not quit.
+        REQUIRE(previousMenuAction(true, 1) == PreviousMenuAction::CloseDialog);
+        REQUIRE(previousMenuAction(true, 3) == PreviousMenuAction::CloseDialog);
+        REQUIRE(previousMenuAction(false, 3) == PreviousMenuAction::PopPanel);
+        REQUIRE(previousMenuAction(false, 2) == PreviousMenuAction::PopPanel);
+        REQUIRE(previousMenuAction(false, 1) == PreviousMenuAction::Nothing);
+        REQUIRE(previousMenuAction(false, 0) == PreviousMenuAction::Nothing);
+    }
 }

@@ -121,4 +121,14 @@ namespace rwe
 
         return allOnOneTeamProblem(seats);
     }
+
+    PreviousMenuAction previousMenuAction(bool dialogOpen, std::size_t panelCount)
+    {
+        if (dialogOpen)
+        {
+            return PreviousMenuAction::CloseDialog;
+        }
+
+        return panelCount > 1 ? PreviousMenuAction::PopPanel : PreviousMenuAction::Nothing;
+    }
 }

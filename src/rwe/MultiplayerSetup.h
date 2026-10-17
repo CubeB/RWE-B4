@@ -83,4 +83,14 @@ namespace rwe
      * the scene.
      */
     std::optional<std::string> skirmishSetupProblem(const std::vector<SetupSeat>& seats);
+
+    /** What Previous Menu (or Escape) does, given what the front end is showing (BT-201). */
+    enum class PreviousMenuAction
+    {
+        CloseDialog,
+        PopPanel, // the multiplayer screens may route this somewhere else first
+        Nothing, // already at the root main menu: the original does not quit on a cancel
+    };
+
+    PreviousMenuAction previousMenuAction(bool dialogOpen, std::size_t panelCount);
 }
