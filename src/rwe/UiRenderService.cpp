@@ -312,6 +312,53 @@ namespace rwe
         return Color(83, 223, 79);
     }
 
+    Color healthBarColor(int health, int maximum)
+    {
+        auto third = maximum / 3;
+        if (health > third * 2)
+        {
+            return Color(83, 223, 79);
+        }
+
+        if (health > third)
+        {
+            return Color(247, 227, 103);
+        }
+
+        return Color(255, 71, 0);
+    }
+
+    int healthBarFill(int health, int maximum)
+    {
+        if (health <= 0 || maximum <= 0)
+        {
+            return 1;
+        }
+        auto scaled = static_cast<int>((static_cast<long long>(health) * 32) / maximum);
+        return 1 + std::min(scaled, 32);
+    }
+
+    void UiRenderService::drawHealthBar(float x, float y, int health, int maximum)
+    {
+        if (health <= 0 || maximum <= 0)
+        {
+            return;
+        }
+
+        x = std::floor(x);
+        y = std::floor(y);
+
+        // offset the healthbar from the unit centre
+        x -= 17.0f;
+        y += 8.0f;
+
+        // The fill primitive is inclusive on all four edges: a frame 17 either
+        // side of the centre and 2 above and below it is 35 by 5, and the
+        // interior one pixel in from it is 33 by 3 at most.
+        fillColor(x, y, 35.0f, 5.0f, Color::Black);
+        fillColor(x + 1.0f, y + 1.0f, static_cast<float>(healthBarFill(health, maximum)), 3.0f, healthBarColor(health, maximum));
+    }
+
     void UiRenderService::drawHealthBar(float x, float y, float percentFull)
     {
         x = std::floor(x);

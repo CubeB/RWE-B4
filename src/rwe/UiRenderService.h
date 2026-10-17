@@ -58,6 +58,23 @@ namespace rwe
      */
     std::optional<TextCharacterSpan> findCharacterInText(const std::string& text, int character, const SpriteSeries& font);
 
+    /**
+     * The in-world health bar's colour (BT-146). The original compares the
+     * health with the truncated integer third of the maximum, not with a
+     * floating-point 1/3 and 2/3 of it: green when health is strictly above
+     * twice that third, yellow when strictly above one third, otherwise red.
+     * A maximum divisible by three with health exactly at a third is therefore
+     * red, where a fraction compare would call it yellow.
+     */
+    Color healthBarColor(int health, int maximum);
+
+    /**
+     * The interior fill width in pixels: 1 + floor(32 x health / maximum),
+     * unsigned integer arithmetic, so a full bar is 33 and the frame is 35
+     * by 5. A health above the maximum is held to a full bar.
+     */
+    int healthBarFill(int health, int maximum);
+
     class UiRenderService
     {
     private:
@@ -164,6 +181,14 @@ namespace rwe
         void fillColor(float x, float y, float width, float height, Color color);
 
         void drawHealthBar(float x, float y, float percentFull);
+
+        /**
+         * The in-world health bar from the unit's whole hit points, as the
+         * original draws it (0x46A430, BT-146): nothing at all for health that
+         * is not above zero, a colour chosen by healthBarColor and a fill of
+         * healthBarFill pixels.
+         */
+        void drawHealthBar(float x, float y, int health, int maximum);
 
         void drawHealthBar2(float x, float y, float width, float height, float percentFull);
 

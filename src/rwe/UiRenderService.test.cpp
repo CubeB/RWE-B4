@@ -62,6 +62,40 @@ namespace rwe
         REQUIRE_NOTHROW(findCharacterInText(accented, 'c', font));
     }
 
+    TEST_CASE("the health bar's colour compares with the integer thirds (BT-146)", "[ui]")
+    {
+        const Color green(83, 223, 79);
+        const Color yellow(247, 227, 103);
+        const Color red(255, 71, 0);
+        auto sameColor = [](const Color& a, const Color& b) { return a.r == b.r && a.g == b.g && a.b == b.b; };
+
+        // A maximum divisible by three: the third is exactly 100, and health
+        // exactly at a third is red, exactly at two thirds yellow.
+        CHECK(sameColor(healthBarColor(300, 300), green));
+        CHECK(sameColor(healthBarColor(201, 300), green));
+        CHECK(sameColor(healthBarColor(200, 300), yellow));
+        CHECK(sameColor(healthBarColor(101, 300), yellow));
+        CHECK(sameColor(healthBarColor(100, 300), red));
+        CHECK(sameColor(healthBarColor(1, 300), red));
+
+        // Not divisible: the third is truncated (100 of 301), so health 100 is
+        // red and 101 yellow, 200 yellow and 201 green.
+        CHECK(sameColor(healthBarColor(100, 301), red));
+        CHECK(sameColor(healthBarColor(101, 301), yellow));
+        CHECK(sameColor(healthBarColor(200, 301), yellow));
+        CHECK(sameColor(healthBarColor(201, 301), green));
+    }
+
+    TEST_CASE("the health bar fills one pixel plus 32 times health over maximum (BT-146)", "[ui]")
+    {
+        CHECK(healthBarFill(100, 100) == 33);
+        CHECK(healthBarFill(1, 100) == 1);
+        CHECK(healthBarFill(50, 100) == 17);
+        CHECK(healthBarFill(99, 100) == 32);
+        // Above the maximum the bar stays full rather than running past its frame.
+        CHECK(healthBarFill(150, 100) == 33);
+    }
+
     TEST_CASE("findCharacterInText locates the quick key in a caption", "[ui]")
     {
         // What the quick-key underline is measured with (S:99, 0x4A5B2C):

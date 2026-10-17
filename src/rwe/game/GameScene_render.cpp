@@ -2185,7 +2185,7 @@ namespace rwe
                 auto uiPos = worldUiRenderService.getInverseViewProjectionMatrix()
                     * viewProjectionMatrix
                     * simVectorToFloat(unit.position);
-                worldUiRenderService.drawHealthBar(uiPos.x, uiPos.y, static_cast<float>(unit.hitPoints) / static_cast<float>(unitDefinition.maxHitPoints));
+                worldUiRenderService.drawHealthBar(uiPos.x, uiPos.y, static_cast<int>(unit.hitPoints), static_cast<int>(unitDefinition.maxHitPoints));
             }
         }
 
