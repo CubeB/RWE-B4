@@ -1953,6 +1953,13 @@ namespace rwe
                 openMessageBox(*problem);
                 return std::nullopt;
             }
+
+            // The battle room refuses a start with everyone on one team (BT-194).
+            if (auto problem = allOnOneTeamProblem(setupSeats()))
+            {
+                openMessageBox(*problem);
+                return std::nullopt;
+            }
         }
 
         GameParameters params{model.selectedMap.getValue()->name, 0};
@@ -2006,7 +2013,46 @@ namespace rwe
             return std::nullopt;
         }
 
+        // The skirmish Start button's other two checks (BT-194): somebody to
+        // play and somebody to play against, and not all on one team.
+        if (!multiplayerSetup)
+        {
+            if (auto problem = skirmishSetupProblem(setupSeats()))
+            {
+                openMessageBox(*problem);
+                return std::nullopt;
+            }
+        }
+
         return params;
+    }
+
+    std::vector<SetupSeat> MainMenuScene::setupSeats() const
+    {
+        std::vector<SetupSeat> seats;
+        seats.reserve(model.players.size());
+        for (const auto& player : model.players)
+        {
+            SetupSeat seat;
+            switch (player.type.getValue())
+            {
+                case MainMenuModel::PlayerSettings::Type::Human:
+                    seat.kind = SetupSeat::Kind::Human;
+                    break;
+                case MainMenuModel::PlayerSettings::Type::Computer:
+                    seat.kind = SetupSeat::Kind::Computer;
+                    break;
+                case MainMenuModel::PlayerSettings::Type::Network:
+                    seat.kind = SetupSeat::Kind::Network;
+                    break;
+                default:
+                    seat.kind = SetupSeat::Kind::Open;
+                    break;
+            }
+            seat.team = player.teamIndex.getValue();
+            seats.push_back(seat);
+        }
+        return seats;
     }
 
     std::optional<std::string> MainMenuScene::startPositionProblem(const GameParameters& params)

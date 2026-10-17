@@ -89,4 +89,75 @@ namespace rwe
         // refused before it is converted rather than after it has overflowed.
         REQUIRE(!isUsablePort("999999999999"));
     }
+
+    namespace
+    {
+        SetupSeat seat(SetupSeat::Kind kind, std::optional<int> team)
+        {
+            return SetupSeat{kind, team};
+        }
+
+        const auto Human = SetupSeat::Kind::Human;
+        const auto Computer = SetupSeat::Kind::Computer;
+        const auto Open = SetupSeat::Kind::Open;
+    }
+
+    TEST_CASE("allOnOneTeamProblem refuses a start with every seat on one team (BT-194)")
+    {
+        SECTION("two seats on the same team")
+        {
+            REQUIRE(allOnOneTeamProblem({seat(Human, 1), seat(Computer, 1)}));
+        }
+
+        SECTION("open seats do not count towards the group")
+        {
+            REQUIRE(allOnOneTeamProblem({seat(Human, 2), seat(Open, 4), seat(Computer, 2), seat(Open, std::nullopt)}));
+        }
+
+        SECTION("two different teams are fine")
+        {
+            REQUIRE_FALSE(allOnOneTeamProblem({seat(Human, 1), seat(Computer, 2)}));
+        }
+
+        SECTION("a seat on no team is its own group")
+        {
+            REQUIRE_FALSE(allOnOneTeamProblem({seat(Human, std::nullopt), seat(Computer, std::nullopt)}));
+            REQUIRE_FALSE(allOnOneTeamProblem({seat(Human, 1), seat(Computer, 1), seat(Computer, std::nullopt)}));
+        }
+
+        SECTION("a lone seat is not a team game")
+        {
+            REQUIRE_FALSE(allOnOneTeamProblem({seat(Human, 1)}));
+        }
+    }
+
+    TEST_CASE("skirmishSetupProblem wants a human and a computer, and not one team (BT-194)")
+    {
+        SECTION("a human and a computer on different teams start")
+        {
+            REQUIRE_FALSE(skirmishSetupProblem({seat(Human, 1), seat(Computer, 2)}));
+        }
+
+        SECTION("only humans is refused")
+        {
+            REQUIRE(skirmishSetupProblem({seat(Human, 1), seat(Human, 2)}));
+        }
+
+        SECTION("only computers is refused")
+        {
+            REQUIRE(skirmishSetupProblem({seat(Computer, 1), seat(Computer, 2)}));
+        }
+
+        SECTION("a human alone is refused")
+        {
+            REQUIRE(skirmishSetupProblem({seat(Human, std::nullopt), seat(Open, std::nullopt)}));
+        }
+
+        SECTION("a human and a computer on one team is refused for that")
+        {
+            auto problem = skirmishSetupProblem({seat(Human, 3), seat(Computer, 3)});
+            REQUIRE(problem);
+            REQUIRE(problem->find("same team") != std::string::npos);
+        }
+    }
 }
