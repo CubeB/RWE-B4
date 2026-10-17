@@ -100,19 +100,25 @@ namespace rwe
              * `sourceAddress` is the loopback address this joiner's packets come
              * from. Everything in 127.0.0.0/8 is this machine, so a second
              * joiner on 127.0.0.2 is a second source to the host, which is what
-             * a forgery test needs.
+             * a forgery test needs. The 127.x.0.0/16 blocks are the "other
+             * networks" (the host's rule for one peer is the same /16, as the
+             * lobby's is); `udpSourceAddress` puts the UDP socket on another
+             * address than the TCP one.
              */
             TestJoiner(
                 asio::io_context& ioContext,
                 std::uint16_t hostGameTcp,
                 std::uint16_t hostGameUdp,
-                const std::string& sourceAddress = "127.0.0.1")
+                const std::string& sourceAddress = "127.0.0.1",
+                const std::string& udpSourceAddress = "")
                 : ioContext(ioContext),
                   tcpListener(ioContext),
                   udpSocket(ioContext),
                   toHost(ioContext)
             {
                 auto source = asio::ip::make_address_v4(sourceAddress);
+                // A joiner's UDP can leave from another address than its TCP.
+                auto udpSource = asio::ip::make_address_v4(udpSourceAddress.empty() ? sourceAddress : udpSourceAddress);
 
                 // Listens on every address so the host's connection back to
                 // whichever source it saw reaches it.
@@ -123,7 +129,7 @@ namespace rwe
                 replyPort = tcpListener.local_endpoint().port();
 
                 udpSocket.open(asio::ip::udp::v4());
-                udpSocket.bind(asio::ip::udp::endpoint(source, 0));
+                udpSocket.bind(asio::ip::udp::endpoint(udpSource, 0));
                 udpPort = udpSocket.local_endpoint().port();
 
                 toHost.open(asio::ip::tcp::v4());
@@ -636,7 +642,7 @@ namespace rwe
         host.onPeerLeft([&](TaHostSession::PeerId id) { left.push_back(id); });
 
         TestJoiner player(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
-        TestJoiner stranger(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.0.0.2");
+        TestJoiner stranger(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.2.0.2");
 
         const std::uint32_t playerId = 0x08D90E74;
         player.createPlayer(playerId, "player");
@@ -672,7 +678,7 @@ namespace rwe
         host.onPeerLeft([&](TaHostSession::PeerId id) { left.push_back(id); });
 
         TestJoiner player(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
-        TestJoiner stranger(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.0.0.2");
+        TestJoiner stranger(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.2.0.2");
 
         // The system player's id comes from the host, as a real joiner's does.
         player.sendToHost(taEncodeSystemMessage(
@@ -721,7 +727,7 @@ namespace rwe
         host.onAppData([&](TaHostSession::PeerId, const std::vector<std::uint8_t>& bytes, TaTransport) { heard.push_back(bytes); });
 
         TestJoiner player(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
-        TestJoiner stranger(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.0.0.2");
+        TestJoiner stranger(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.2.0.2");
 
         const std::uint32_t playerId = 0x08D90E74;
         player.createPlayer(playerId, "player");
@@ -754,7 +760,7 @@ namespace rwe
         host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
 
         TestJoiner player(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp);
-        TestJoiner stranger(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.0.0.2");
+        TestJoiner stranger(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.2.0.2");
 
         const std::uint32_t playerId = 0x08D90E74;
         player.createPlayer(playerId, "player");
@@ -781,6 +787,56 @@ namespace rwe
         player.createPlayer(playerId, "again");
         runUntil(ioContext, [&] { return host.peerName(playerId) == "again"; });
         REQUIRE(host.load().peers == 1);
+
+        host.stop();
+    }
+
+    TEST_CASE("a joiner whose UDP and TCP leave from neighbouring addresses is still one peer, a forger in another /16 is not (#715)", "[ta][host]")
+    {
+        // One machine behind a carrier's NAT was seen with its UDP on .165 and
+        // its TCP on .167. "The same IP" is never the test: the same /16 is.
+        asio::io_context ioContext;
+        TaHostConfig config;
+        config.ports = TaHostPorts{0, 0, 0};
+        TaHostSession host(ioContext, config);
+        host.start();
+
+        std::vector<TaHostSession::PeerId> joined;
+        std::vector<TaHostSession::PeerId> left;
+        host.onPeerJoined([&](TaHostSession::PeerId id) { joined.push_back(id); });
+        host.onPeerLeft([&](TaHostSession::PeerId id) { left.push_back(id); });
+        std::vector<std::vector<std::uint8_t>> heard;
+        host.onAppData([&](TaHostSession::PeerId, const std::vector<std::uint8_t>& bytes, TaTransport) { heard.push_back(bytes); });
+
+        // TCP from 127.0.0.9, UDP from 127.0.0.7: same /16, different hosts.
+        TestJoiner player(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.0.0.9", "127.0.0.7");
+        TestJoiner forger(ioContext, host.localPorts().gameTcp, host.localPorts().gameUdp, "127.2.0.2");
+
+        const std::uint32_t playerId = 0x08D90E74;
+        player.createPlayer(playerId, "player");
+        runUntil(ioContext, [&] { return joined.size() == 1; });
+
+        // Its UDP, from the neighbouring address, is the joiner's.
+        player.sendAppDataUdp(config.hostPlayerId, {0x01}, playerId);
+        runUntil(ioContext, [&] { return heard.size() == 1; });
+        player.sendAppDataTcp(config.hostPlayerId, {0x02}, playerId);
+        runUntil(ioContext, [&] { return heard.size() == 2; });
+        REQUIRE(host.forgedMessages() == 0);
+
+        // A machine in another /16 naming the same id is not.
+        forger.sendAppDataUdp(config.hostPlayerId, {0xDE}, playerId);
+        forger.sendAppDataTcp(config.hostPlayerId, {0xAD}, playerId);
+        forger.deletePlayer(playerId);
+        forger.createPlayer(playerId, "impostor");
+        runUntil(ioContext, [&] { return host.forgedMessages() == 4; });
+        REQUIRE(heard.size() == 2);
+        REQUIRE(left.empty());
+        REQUIRE(host.peerName(playerId) == "player");
+
+        // And the joiner's own delete is believed.
+        player.deletePlayer(playerId);
+        runUntil(ioContext, [&] { return left.size() == 1; });
+        REQUIRE(host.load().peers == 0);
 
         host.stop();
     }

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstring>
 #include <rwe/net/ta/TaPacket.h>
+#include <rwe/network_util.h>
 
 namespace rwe
 {
@@ -10,6 +11,19 @@ namespace rwe
         constexpr std::size_t MaxBufferedBytes = 1 << 20;
         constexpr std::size_t MaxOutboundQueueBytes = 4 << 20;
         constexpr std::size_t MaxOutboundConnections = 64;
+
+        /**
+         * Whether two source addresses are the one peer. Never "the same IP":
+         * a carrier's NAT puts one machine's sockets on neighbouring outside
+         * addresses (a joiner's TCP on .167 and its UDP on .165 was seen), so
+         * the rule the lobby and both transports use applies here too -- the
+         * same /16 (sameCarrierBlock), whatever the port. A forger on another
+         * network still fails it.
+         */
+        bool sameSourceHost(const asio::ip::address& a, const asio::ip::address& b)
+        {
+            return sameCarrierBlock(a.to_string(), b.to_string());
+        }
 
         std::string endpointKey(const asio::ip::tcp::endpoint& endpoint)
         {
@@ -537,7 +551,7 @@ namespace rwe
         // one thing it cannot. A message in a joined player's name from any
         // other machine is not that player's (BT-243, BT-244), and is not
         // passed up to be stamped as theirs either.
-        if (it->second.sourceIp != sourceIp)
+        if (!sameSourceHost(it->second.sourceIp, sourceIp))
         {
             ++forged;
             return;
@@ -659,7 +673,7 @@ namespace rwe
         auto isHostId = created.playerId == config.hostPlayerId
             || created.playerId == config.hostSystemPlayerId
             || created.playerId == config.sessionHostId;
-        if (isHostId || (existing != peers.end() && existing->second.sourceIp != peer.sourceIp))
+        if (isHostId || (existing != peers.end() && !sameSourceHost(existing->second.sourceIp, peer.sourceIp)))
         {
             ++forged;
             return;
@@ -705,7 +719,7 @@ namespace rwe
                 continue;
             }
             named = true;
-            if (peer.sourceIp == sourceIp)
+            if (sameSourceHost(peer.sourceIp, sourceIp))
             {
                 leaving = id;
                 break;
@@ -718,7 +732,7 @@ namespace rwe
 
         for (auto it = pending.begin(); it != pending.end();)
         {
-            if (it->second.systemPlayerId == playerId && it->second.sourceIp == sourceIp)
+            if (it->second.systemPlayerId == playerId && sameSourceHost(it->second.sourceIp, sourceIp))
             {
                 it = pending.erase(it);
             }
