@@ -988,6 +988,7 @@ namespace rwe
         }
 
         occupiedGrid.forEach(*region, [unitId](auto& cell) { cell.mobileUnitId = unitId; });
+        unit.occupancyStamp = gameTime;
 
         unit.position.y = computeGroundUnitHeight(terrain, unitDefinition, unit.position.x, unit.position.z);
         unit.previousPosition = unit.position;
@@ -1020,6 +1021,7 @@ namespace rwe
         {
             occupiedGrid.forEach(*region, [unitId](auto& cell) { cell.mobileUnitId = unitId; });
         }
+        unit.occupancyStamp = gameTime;
 
         unit.position = spot->position;
         unit.previousPosition = spot->position;
@@ -1848,6 +1850,8 @@ namespace rwe
         if (unitDefinition.isMobile)
         {
             occupiedGrid.forEach(*footprintRegion, [unitId](auto& cell) { cell.mobileUnitId = unitId; });
+            // A map insertion, so the occupancy stamp is now (BT-58).
+            units.tryGet(unitId)->get().occupancyStamp = gameTime;
         }
         else
         {
@@ -2158,9 +2162,42 @@ namespace rwe
         });
     }
 
-    bool GameSimulation::cellBlocksUnit(const OccupiedCell& cell, UnitId self) const
+    bool GameSimulation::isCollisionAtForSearch(const DiscreteRect& rect, UnitId self, const DiscreteRect& passableRegion, GameTime searchTime) const
     {
-        if (cell.mobileUnitId && *cell.mobileUnitId != self)
+        auto region = occupiedGrid.tryToRegion(rect);
+        if (!region)
+        {
+            return true;
+        }
+
+        // The class stamp: this search's tick less the thirty-tick window,
+        // read as zero until the game is that old.
+        constexpr unsigned int recentlyMovedWindow = 30;
+        const auto classStamp = searchTime.value < recentlyMovedWindow ? 0u : searchTime.value - recentlyMovedWindow;
+
+        return region->any([&](const GridCoordinates& c) {
+            if (passableRegion.contains(Point(c.x, c.y)))
+            {
+                return false;
+            }
+            const auto& cell = occupiedGrid.get(c);
+            if (cell.mobileUnitId && *cell.mobileUnitId != self)
+            {
+                auto occupant = tryGetUnitState(*cell.mobileUnitId);
+                if (!occupant || occupant->get().occupancyStamp.value < classStamp)
+                {
+                    return true;
+                }
+            }
+            // The mobile occupant has been excused; the building and the
+            // feature are judged as ever.
+            return cellBlocksUnit(cell, self, true);
+        });
+    }
+
+    bool GameSimulation::cellBlocksUnit(const OccupiedCell& cell, UnitId self, bool excuseMobile) const
+    {
+        if (!excuseMobile && cell.mobileUnitId && *cell.mobileUnitId != self)
         {
             return true;
         }
@@ -2352,6 +2389,17 @@ namespace rwe
 
         occupiedGrid.forEach(*oldRegion, [](auto& cell) { cell.mobileUnitId = std::nullopt; });
         occupiedGrid.forEach(*newRegion, [unitId](auto& cell) { cell.mobileUnitId = unitId; });
+
+        // Changing square is a map insertion in the original, and a map
+        // insertion writes the occupancy stamp (mover+0x26, BT-58). A step
+        // that stays inside the same footprint does not.
+        if (!(oldRect == newRect))
+        {
+            if (auto unit = tryGetUnitState(unitId))
+            {
+                unit->get().occupancyStamp = gameTime;
+            }
+        }
     }
 
     void GameSimulation::requestPath(UnitId unitId)

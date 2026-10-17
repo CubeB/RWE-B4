@@ -6818,6 +6818,7 @@ namespace rwe
             cell.mobileUnitId = unitInfo.id;
         });
         sim->flyingUnitsSet.erase(unitInfo.id);
+        unitInfo.state->occupancyStamp = sim->gameTime;
 
         unitInfo.state->physics = UnitPhysicsInfoGround();
 

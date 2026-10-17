@@ -366,6 +366,7 @@ namespace rwe
 
         REQUIRE(simB.pathFindingService.suspendedSearchStart() == simA.pathFindingService.suspendedSearchStart());
         REQUIRE(simB.pathFindingService.suspendedSearchExpansions() == simA.pathFindingService.suspendedSearchExpansions());
+        REQUIRE(simB.pathFindingService.suspendedSearchTime() == simA.pathFindingService.suspendedSearchTime());
         REQUIRE(computeHashOf(simA) == computeHashOf(simB));
         REQUIRE(saveSimulationToJson(simB) == saved);
 

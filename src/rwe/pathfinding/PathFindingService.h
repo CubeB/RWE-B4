@@ -8,6 +8,7 @@
 #include <rwe/pathfinding/PathCost.h>
 #include <rwe/pathfinding/PathfindingBackend.h>
 #include <rwe/pathfinding/UnitPath.h>
+#include <rwe/sim/GameTime.h>
 #include <rwe/sim/MovementClassCollisionService.h>
 #include <rwe/sim/SimVector.h>
 #include <rwe/sim/UnitId.h>
@@ -220,11 +221,19 @@ namespace rwe
         std::size_t suspendedSearchExpansions() const;
 
         /**
+         * The tick the suspended search began on, which decides which
+         * recently moved units it treated as walls (BT-59). A rebuild at a
+         * later tick would read a different thirty-tick window and so a
+         * different search.
+         */
+        std::optional<GameTime> suspendedSearchTime() const;
+
+        /**
          * Rebuilds a search suspended at save time. The request it belongs to
          * is the one at the head of the queue, as it was when the search
          * began, so it is not named here.
          */
-        void restoreSuspendedSearch(const GameSimulation& simulation, const DiscreteRect& start, std::size_t expansions);
+        void restoreSuspendedSearch(const GameSimulation& simulation, const DiscreteRect& start, std::size_t expansions, std::optional<GameTime> searchTime = std::nullopt);
 
     private:
         /**
@@ -256,7 +265,7 @@ namespace rwe
          * the search back at the footprint it began from rather than the one
          * the unit has walked to since.
          */
-        void beginSearch(const GameSimulation& simulation, UnitId unitId, const std::variant<SimVector, DiscreteRect>& destination, const std::optional<DiscreteRect>& startOverride = std::nullopt);
+        void beginSearch(const GameSimulation& simulation, UnitId unitId, const std::variant<SimVector, DiscreteRect>& destination, const std::optional<DiscreteRect>& startOverride = std::nullopt, const std::optional<GameTime>& searchTimeOverride = std::nullopt);
 
         /** Turns a finished search into waypoints. Leaves the finder idle. */
         UnitPath finishSearch(const GameSimulation& simulation);

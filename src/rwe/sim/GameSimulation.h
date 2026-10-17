@@ -1236,6 +1236,21 @@ namespace rwe
          */
         bool isCollisionAt(const DiscreteRect& rect, UnitId self, const DiscreteRect& passableRegion) const;
 
+        /**
+         * As isCollisionAt(rect, self, passableRegion), the way a path search
+         * asks: a mobile occupant that was put into the occupancy map within
+         * the thirty ticks before `searchTime` is not an obstacle.
+         *
+         * The original's pass map reads the occupant's stamp (mover+0x26)
+         * against the movement class's stamp, which a search start sets to the
+         * current tick minus thirty (floored, so the first thirty ticks read
+         * zero); an occupant with no mover, a building, always blocks, and one
+         * whose stamp is older than that blocks too (BT-58, BT-59). The
+         * movement code does not use this: a unit that walks into another
+         * is still stopped by it.
+         */
+        bool isCollisionAtForSearch(const DiscreteRect& rect, UnitId self, const DiscreteRect& passableRegion, GameTime searchTime) const;
+
         bool isYardmapBlocked(unsigned int x, unsigned int y, const Grid<YardMapCell>& yardMap, bool open, UnitId self) const;
 
         bool isAdjacentToObstacle(const DiscreteRect& rect) const;
@@ -1486,7 +1501,7 @@ namespace rwe
         std::pair<unsigned int, unsigned int> getFootprintXZ(const UnitDefinition::MovementCollisionInfo& info) const;
 
         /** Whether a cell blocks a unit other than `self`. */
-        bool cellBlocksUnit(const OccupiedCell& cell, UnitId self) const;
+        bool cellBlocksUnit(const OccupiedCell& cell, UnitId self, bool excuseMobile = false) const;
 
         BoundingBox3x<SimScalar> createBoundingBox(const UnitState& unit) const;
 

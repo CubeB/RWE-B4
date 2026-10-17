@@ -54,6 +54,13 @@ namespace rwe
             u.*Member = GameTime(j.get<unsigned int>());
         }
 
+        /** A tick that older saves did not carry, which is how the unit read before it existed. */
+        template <auto Member>
+        void loadGameTimeOrZeroUnitStateField(const json& j, UnitState& u, const LoadContext&)
+        {
+            u.*Member = GameTime(j.is_null() ? 0u : j.get<unsigned int>());
+        }
+
         template <auto Member>
         json saveEnergyUnitStateField(const UnitState& u, const SaveContext&)
         {
@@ -409,6 +416,7 @@ namespace rwe
             {"airWorkOrbit", hashed<&UnitState::airWorkOrbit>(saveOptionalAirWorkOrbitUnitStateField<&UnitState::airWorkOrbit>, loadOptionalAirWorkOrbitUnitStateField<&UnitState::airWorkOrbit>)},
             {"airLoiter", hashed<&UnitState::airLoiter>(saveOptionalAirLoiterUnitStateField<&UnitState::airLoiter>, loadOptionalAirLoiterUnitStateField<&UnitState::airLoiter>)},
             {"slowFacePoint", hashed<&UnitState::slowFacePoint>(saveOptionalSimVectorUnitStateField<&UnitState::slowFacePoint>, loadOptionalSimVectorUnitStateField<&UnitState::slowFacePoint>)},
+            {"occupancyStamp", hashed<&UnitState::occupancyStamp>(saveGameTimeUnitStateField<&UnitState::occupancyStamp>, loadGameTimeOrZeroUnitStateField<&UnitState::occupancyStamp>), true},
             {"activated", hashedPlain<&UnitState::activated>()},
             // Only a mission unit is ever held, and a save from before the
             // flag existed holds none.

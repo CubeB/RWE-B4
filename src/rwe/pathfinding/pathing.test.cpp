@@ -919,4 +919,96 @@ namespace rwe
         auto start = cellCenter(sim, 2, 2);
         REQUIRE(sim.getUnitState(first).position.distanceSquared(start) > 0_ss);
     }
+
+    TEST_CASE("a unit that moved in the last thirty ticks is not a wall to a path search", "[pathing][bt58]")
+    {
+        // BT-58, BT-59: the original's pass map excuses a mobile occupant
+        // whose occupancy stamp is no older than the search tick less thirty.
+        // A column of units that is moving does not wall itself in; one that
+        // has stood still for thirty ticks does.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto wall = addWallDef(sim);
+
+        // A wall across the map with one gap, at row 32, and a unit in it.
+        for (int y = 0; y < 64; ++y)
+        {
+            if (y != 32)
+            {
+                // The last rows of the map cannot hold a feature, and cannot
+                // hold a unit's footprint to walk through either.
+                sim.addFeature(wall, 20, y);
+            }
+        }
+        auto searcher = addTank(sim, player, 2, 32, script);
+        auto plug = addTank(sim, player, 20, 32, script);
+
+        auto routeThroughTheGap = [&]() {
+            UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, searcher, std::nullopt, 1u, 1u, Point(40, 32));
+            return pathFinder.findPath(Point(2, 32)).type == AStarPathType::Complete;
+        };
+
+        SECTION("freshly inserted, the plug is transparent")
+        {
+            sim.gameTime = GameTime(10);
+            sim.getUnitState(plug).occupancyStamp = GameTime(10);
+            REQUIRE(routeThroughTheGap());
+        }
+
+        SECTION("exactly thirty ticks old it still is, and a tick older it is a wall")
+        {
+            sim.gameTime = GameTime(100);
+            sim.getUnitState(plug).occupancyStamp = GameTime(70);
+            REQUIRE(routeThroughTheGap());
+            sim.getUnitState(plug).occupancyStamp = GameTime(69);
+            REQUIRE_FALSE(routeThroughTheGap());
+        }
+
+        SECTION("in the first thirty ticks the class stamp reads zero, so nothing is old yet")
+        {
+            sim.gameTime = GameTime(25);
+            sim.getUnitState(plug).occupancyStamp = GameTime(0);
+            REQUIRE(routeThroughTheGap());
+            sim.gameTime = GameTime(31);
+            REQUIRE_FALSE(routeThroughTheGap());
+        }
+
+        SECTION("a building is a wall however recently it was put down")
+        {
+            sim.gameTime = GameTime(10);
+            sim.getUnitState(plug).occupancyStamp = GameTime(10);
+            sim.occupiedGrid.get(20, 32).buildingInfo = OccupiedCellBuildingInfo{plug, false};
+            REQUIRE_FALSE(routeThroughTheGap());
+        }
+
+        SECTION("the search remembers the tick it began on")
+        {
+            sim.gameTime = GameTime(100);
+            sim.getUnitState(plug).occupancyStamp = GameTime(70);
+            UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, searcher, std::nullopt, 1u, 1u, Point(40, 32));
+            REQUIRE(pathFinder.searchTime() == GameTime(100));
+            // The game moves on; the search keeps the window it began with.
+            sim.gameTime = GameTime(500);
+            REQUIRE(pathFinder.findPath(Point(2, 32)).type == AStarPathType::Complete);
+        }
+    }
+
+    TEST_CASE("a mobile unit's occupancy stamp is written when it is inserted and when it changes square", "[pathing][bt58]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(16, 16), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        sim.gameTime = GameTime(40);
+        auto tank = addTank(sim, player, 2, 2, script);
+        REQUIRE(sim.getUnitState(tank).occupancyStamp == GameTime(40));
+
+        // Same square: no insertion, no stamp.
+        sim.gameTime = GameTime(50);
+        sim.moveUnitOccupiedArea(DiscreteRect(2, 2, 1, 1), DiscreteRect(2, 2, 1, 1), tank);
+        REQUIRE(sim.getUnitState(tank).occupancyStamp == GameTime(40));
+
+        sim.moveUnitOccupiedArea(DiscreteRect(2, 2, 1, 1), DiscreteRect(3, 2, 1, 1), tank);
+        REQUIRE(sim.getUnitState(tank).occupancyStamp == GameTime(50));
+    }
 }

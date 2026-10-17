@@ -6,6 +6,7 @@
 #include <optional>
 #include <rwe/grid/Point.h>
 #include <rwe/pathfinding/UnitPath.h>
+#include <rwe/sim/GameTime.h>
 #include <rwe/sim/MovementClassId.h>
 #include <rwe/sim/UnitId.h>
 
@@ -58,6 +59,10 @@ namespace rwe
         unsigned int stepSearch(unsigned int maxExpansions);
 
         bool isSearchFinished() const;
+
+        /** The tick the search began on (BT-59), and a way to put it back. */
+        GameTime searchTime() const;
+        void setSearchTime(GameTime time);
 
         /** Nodes expanded so far, which is what a save writes down. */
         std::size_t expansionsSoFar() const;

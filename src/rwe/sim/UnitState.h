@@ -929,6 +929,21 @@ namespace rwe
          */
         std::optional<SimVector> slowFacePoint;
 
+        /**
+         * The tick this unit was last put into the occupancy map: when it
+         * was created, and every time it changed square after that.
+         *
+         * A path search reads it. The original's pass map does not treat a
+         * mobile occupant as a wall once its stamp is no older than thirty
+         * ticks behind the search (mover+0x26, written at every map insertion
+         * and read by the cell rule at 0x47DE60; BT-58, BT-59), so a column
+         * of units that is moving does not wall itself in. It is hashed,
+         * because which cells a search may cross decides where a unit walks.
+         * Zero for a unit that was never inserted, as the original's is at
+         * creation.
+         */
+        GameTime occupancyStamp{0};
+
 
         bool activated{false};
         bool isSufficientlyPowered{false};

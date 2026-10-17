@@ -766,6 +766,12 @@ namespace rwe
             j["pathSearch"] = json{
                 {"start", saveDiscreteRect(*searchStart)},
                 {"expansions", sim.pathFindingService.suspendedSearchExpansions()}};
+            // The tick it began on: which recently moved units it took for
+            // walls depends on it (BT-59), so the rebuild needs the same one.
+            if (auto searchTime = sim.pathFindingService.suspendedSearchTime())
+            {
+                j["pathSearch"]["searchTime"] = searchTime->value;
+            }
         }
 
         // Empty between ticks (spawnNewUnits drains it), but carried along so
@@ -1102,7 +1108,10 @@ namespace rwe
             sim.pathFindingService.restoreSuspendedSearch(
                 sim,
                 loadDiscreteRect(searchJson.at("start")),
-                searchJson.at("expansions").get<std::size_t>());
+                searchJson.at("expansions").get<std::size_t>(),
+                searchJson.contains("searchTime")
+                    ? std::make_optional(GameTime(searchJson.at("searchTime").get<unsigned int>()))
+                    : std::nullopt);
         }
     }
 

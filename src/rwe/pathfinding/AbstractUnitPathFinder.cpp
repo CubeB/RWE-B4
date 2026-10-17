@@ -102,7 +102,8 @@ namespace rwe
           selfRegion(simulation->computeFootprintRegion(simulation->getUnitState(self).position, footprintX, footprintZ)),
           roughSlopeDry(movementClassOf(*simulation, self).badSlope),
           roughSlopeWet(movementClassOf(*simulation, self).badWaterSlope),
-          waterIsSlow(computeWaterIsSlow(*simulation, self))
+          waterIsSlow(computeWaterIsSlow(*simulation, self)),
+          searchTimeValue(simulation->gameTime)
     {
         // The scratch is indexed by occupied-grid position, which is the only
         // region a walkable cell can lie in: a footprint that does not fit on
@@ -255,7 +256,7 @@ namespace rwe
     {
         DiscreteRect rect(p.x, p.y, footprintX, footprintZ);
         return (walkableGrid == nullptr || walkableGrid->tryGetValue(p).value_or(false))
-            && !simulation->isCollisionAt(rect, self, selfRegion);
+            && !simulation->isCollisionAtForSearch(rect, self, selfRegion, searchTimeValue);
     }
 
     bool AbstractUnitPathFinder::computeRoughTerrain(const Point& p) const
