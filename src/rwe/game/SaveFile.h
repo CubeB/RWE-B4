@@ -46,9 +46,23 @@ namespace rwe
     /** The names (no extension) of every save on disk, newest first. */
     std::vector<std::string> listSaveGames();
 
+    /**
+     * The file name a save called `name` is kept under, without its extension.
+     * The name is what the player typed, so a path separator, a drive colon or
+     * a control character in it is replaced; otherwise "../x" saved outside
+     * the saves folder, and deleting such a save deleted outside it too.
+     */
+    std::string saveFileStem(const std::string& name);
+
     std::filesystem::path savePathForName(const std::string& name);
 
-    void writeSaveFile(const std::filesystem::path& path, const SaveFile& save);
+    /**
+     * Writes the save to a temporary file beside `path` and moves it into
+     * place, so a write that fails part way (a full disk) never replaces a
+     * good save with half of one. Returns false, and logs why, if it could not
+     * be written; nothing about the save is changed on disk in that case.
+     */
+    bool writeSaveFile(const std::filesystem::path& path, const SaveFile& save);
 
     std::optional<SaveFile> readSaveFile(const std::filesystem::path& path);
 

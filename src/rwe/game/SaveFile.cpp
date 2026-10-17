@@ -6,6 +6,7 @@
 #include <fstream>
 #include <rwe/pathfinding/PathfindingBackend.h>
 #include <rwe/util.h>
+#include <rwe/util/SimpleLogger.h>
 #include <rwe/util/match.h>
 #include <utility>
 
@@ -227,12 +228,25 @@ namespace rwe
         return names;
     }
 
-    fs::path savePathForName(const std::string& name)
+    std::string saveFileStem(const std::string& name)
     {
-        return getSaveDirectory() / (name + ".rwesave");
+        std::string stem = name;
+        for (auto& c : stem)
+        {
+            if (c == '/' || c == 0x5c || c == ':' || static_cast<unsigned char>(c) < 0x20)
+            {
+                c = '_';
+            }
+        }
+        return stem;
     }
 
-    void writeSaveFile(const fs::path& path, const SaveFile& save)
+    fs::path savePathForName(const std::string& name)
+    {
+        return getSaveDirectory() / (saveFileStem(name) + ".rwesave");
+    }
+
+    bool writeSaveFile(const fs::path& path, const SaveFile& save)
     {
         nlohmann::json j;
         auto& header = j["header"];
@@ -278,8 +292,41 @@ namespace rwe
         j["camera"] = {{"x", save.cameraPosition.x}, {"y", save.cameraPosition.y}, {"z", save.cameraPosition.z}};
         j["sim"] = save.simulation;
 
-        std::ofstream out(path, std::ios::binary | std::ios::trunc);
-        out << j.dump();
+        auto text = j.dump();
+
+        auto temporary = path;
+        temporary += ".tmp";
+        {
+            std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+            out.write(text.data(), static_cast<std::streamsize>(text.size()));
+            out.flush();
+            if (!out)
+            {
+                LOG_ERROR << "Could not write the save " << path.string();
+                out.close();
+                std::error_code ignored;
+                fs::remove(temporary, ignored);
+                return false;
+            }
+        }
+
+        std::error_code ec;
+        fs::rename(temporary, path, ec);
+        if (ec)
+        {
+            // Some platforms will not rename over a file that exists.
+            fs::remove(path, ec);
+            ec.clear();
+            fs::rename(temporary, path, ec);
+        }
+        if (ec)
+        {
+            LOG_ERROR << "Could not move the save into place at " << path.string() << ": " << ec.message();
+            std::error_code ignored;
+            fs::remove(temporary, ignored);
+            return false;
+        }
+        return true;
     }
 
     static std::optional<SaveFile> readSaveFileOrThrow(const fs::path& path);
