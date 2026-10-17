@@ -49,14 +49,17 @@ namespace rwe
      * consumption statistics. A computer-player receiver's handicap is
      * applied by the settle itself, which multiplies the whole production
      * buffer by `resourceBonusFor`, so the credit is not scaled a second time
-     * here.
+     * here. (The automatic pass is different, per BT-27: it takes the amount
+     * out of the donor's stockpile at once.)
      */
     bool applyPlayerShareCommand(GameSimulation& sim, PlayerId issuer, const PlayerShareCommand& command);
 
     /**
-     * The automatic sharing pass. Called from GameSimulation::tick immediately
-     * before the economy settle; does nothing unless the tick is a multiple of
-     * sixty (every two seconds) and the economy is not frozen by a mission.
+     * The automatic sharing pass. Called from GameSimulation::tick as the last
+     * thing in the tick (BT-27), so sizes are taken on the balances the tick
+     * leaves and the gift is paid out by the next settle; does nothing unless
+     * the tick is a multiple of sixty (every two seconds) and the economy is
+     * not frozen by a mission.
      *
      * For each player in index order that this machine simulates, that is
      * alive, human and has a sharing flag set, and for metal and then energy

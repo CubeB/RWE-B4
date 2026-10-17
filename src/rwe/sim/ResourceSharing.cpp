@@ -61,6 +61,29 @@ namespace rwe
             }
         }
 
+        /**
+         * The automatic pass's transfer (0x464B30, 0x464C60; BT-27): limited to
+         * what the donor actually has, taken out of its stockpile at once, and
+         * added to the receiver's production figure, so it reaches the
+         * receiver's stockpile at the next settle. A manual gift keeps going
+         * through `transfer`, whose donor side is booked as a spend.
+         */
+        void transferFromStockpile(GamePlayerInfo& donor, GamePlayerInfo& receiver, Resource r, float amount)
+        {
+            if (r == Resource::Metal)
+            {
+                amount = std::min(amount, donor.metal.value);
+                donor.metal -= Metal(amount);
+                receiver.acceptResource(Metal(amount));
+            }
+            else
+            {
+                amount = std::min(amount, donor.energy.value);
+                donor.energy -= Energy(amount);
+                receiver.acceptResource(Energy(amount));
+            }
+        }
+
         bool isPlayerOf(const GameSimulation& sim, PlayerId id)
         {
             return id.value < sim.players.size();
@@ -123,7 +146,7 @@ namespace rwe
                 return;
             }
 
-            transfer(donor, recipient, r, offer);
+            transferFromStockpile(donor, recipient, r, offer);
         }
     }
 

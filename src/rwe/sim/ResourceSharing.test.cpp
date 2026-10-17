@@ -162,19 +162,24 @@ namespace rwe
         REQUIRE(metalOf(sim, donor) == 900.0f);
         REQUIRE(metalOf(sim, ally) == 100.0f);
 
-        // A third of (900 - 0), and it settles in the same tick.
+        // A third of (900 - 0), taken from the donor at the end of tick 60
+        // (BT-27: the pass is the last thing in the tick) and credited to the
+        // ally's production figure, so the ally has it a settle later.
         tick(sim, 1);
         REQUIRE(sim.gameTime.value == 60u);
         REQUIRE(metalOf(sim, donor) == 600.0f);
-        REQUIRE(metalOf(sim, ally) == 400.0f);
+        REQUIRE(metalOf(sim, ally) == 100.0f);
 
-        tick(sim, 59);
+        tick(sim, 30);
         REQUIRE(metalOf(sim, donor) == 600.0f);
         REQUIRE(metalOf(sim, ally) == 400.0f);
 
         // And again at 120: a third of (600 - 0) is 200.
-        tick(sim, 1);
+        tick(sim, 30);
+        REQUIRE(sim.gameTime.value == 120u);
         REQUIRE(metalOf(sim, donor) == 400.0f);
+        REQUIRE(metalOf(sim, ally) == 400.0f);
+        tick(sim, 30);
         REQUIRE(metalOf(sim, ally) == 600.0f);
 
         // Energy was never switched on.
@@ -191,6 +196,8 @@ namespace rwe
 
         tick(sim, 60);
         REQUIRE(energyOf(sim, donor) == 400.0f);
+        REQUIRE(energyOf(sim, ally) == 0.0f);
+        tick(sim, 30);
         REQUIRE(energyOf(sim, ally) == 400.0f);
         REQUIRE(metalOf(sim, donor) == 100.0f);
     }
@@ -214,7 +221,7 @@ namespace rwe
         {
             // A third of (900 - 600) is 100.
             applyPlayerShareCommand(sim, donor, setReserve(true, 600.0f));
-            tick(sim, 60);
+            tick(sim, 90);
             REQUIRE(metalOf(sim, donor) == 800.0f);
             REQUIRE(metalOf(sim, ally) == 200.0f);
         }
@@ -228,7 +235,7 @@ namespace rwe
         applyPlayerShareCommand(sim, donor, toggleMetal());
 
         // A third of 1000 would be 333; there is room for 100.
-        tick(sim, 60);
+        tick(sim, 90);
         REQUIRE(metalOf(sim, donor) == 900.0f);
         REQUIRE(metalOf(sim, ally) == 1000.0f);
     }
@@ -257,7 +264,7 @@ namespace rwe
         auto lessPoor = addSharer(sim, 600.0f, 100.0f, 0);
         applyPlayerShareCommand(sim, donor, toggleMetal());
 
-        tick(sim, 60);
+        tick(sim, 90);
 
         // The earlier, poorer ally is passed over: there is no comparison
         // between candidates.
@@ -274,7 +281,7 @@ namespace rwe
         auto richer = addSharer(sim, 800.0f, 100.0f, 0);
         applyPlayerShareCommand(sim, donor, toggleMetal());
 
-        tick(sim, 60);
+        tick(sim, 90);
 
         REQUIRE(metalOf(sim, poorer) == 100.0f + 500.0f / 3.0f);
         REQUIRE(metalOf(sim, richer) == 800.0f);
@@ -359,7 +366,7 @@ namespace rwe
         applyPlayerShareCommand(sim, first, toggleMetal());
         applyPlayerShareCommand(sim, second, toggleMetal());
 
-        tick(sim, 60);
+        tick(sim, 90);
 
         // Each donor's last qualifying ally is the slot after it that is
         // poorer: for the first that is `poor`, for the second also `poor`.

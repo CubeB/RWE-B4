@@ -5597,10 +5597,6 @@ namespace rwe
             updateEndCountdown();
         }
 
-        // Allies' automatic sharing goes in just before the settle, so what it
-        // moves is paid out in the same second (ResourceSharing.h).
-        runAutomaticSharing(*this);
-
         updateResources();
 
         // After the player pass, as the original does it (0x490C40 follows
@@ -5723,6 +5719,13 @@ namespace rwe
             RWE_SIMPROF("visibility");
             updateVisibility();
         }
+
+        // Allies' automatic sharing is the last thing in the original's tick
+        // (0x457D30; BT-27): the donor's stockpile falls at the end of tick T
+        // and the gift reaches the receiver at the next settle, a second
+        // later when T is a multiple of sixty. Sizes are taken on the
+        // balances as the tick leaves them (ResourceSharing.h).
+        runAutomaticSharing(*this);
 
         // Last, once every phase has left its mark on the tick: the recorder
         // reads the end-of-tick state, which is the state TA's sender would
