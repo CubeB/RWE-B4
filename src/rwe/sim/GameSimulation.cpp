@@ -4300,6 +4300,20 @@ namespace rwe
             }
         }
 
+        // With nothing live to follow, a cruise weapon steers at its stored
+        // destination with the height set to the higher of the ground there
+        // and sea level (0x49B3E0, ground read at 0x485070), so the final
+        // approach comes down to the surface and not to wherever the point
+        // was stored. A weapon that does not cruise gets the point as it is
+        // (BT-115).
+        if (p.cruise && projectile.targetPosition)
+        {
+            auto point = *projectile.targetPosition;
+            auto ground = terrain.tryGetHeightAt(point.x, point.z).value_or(terrain.getSeaLevel());
+            point.y = rweMax(ground, terrain.getSeaLevel());
+            return point;
+        }
+
         return projectile.targetPosition;
     }
 
