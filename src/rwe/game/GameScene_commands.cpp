@@ -3372,8 +3372,9 @@ namespace rwe
 
             // Where the spray lands. The original samples a uniform point in
             // the target's bounding box, shrunk first to the middle three
-            // elevenths of each axis, so the stream fans across the middle of
-            // what is being worked on rather than converging on a point.
+            // elevenths of each axis (4/11 to 7/11 of the extent, BT-144), so
+            // the stream fans across the middle of what is being worked on
+            // rather than converging on a point.
             //
             // The one place we depart from it is the height: the original
             // samples inside the model too, which it can afford because its
@@ -3423,7 +3424,9 @@ namespace rwe
             }
 
             auto nozzle = simVectorToFloat(std::get<1>(*nanolatheTarget));
-            std::uniform_real_distribution<float> centralThird(-3.0f / 11.0f, 3.0f / 11.0f);
+            // The window about the centre of each axis: 4/11 to 7/11 of the
+            // extent from the minimum is -1.5/11 to +1.5/11 from the middle.
+            std::uniform_real_distribution<float> centralThird(NanoLandingWindowStart - 0.5f, NanoLandingWindowEnd - 0.5f);
 
             // The original emits a burst of five every tick, and each emitter
             // fires again on the following tick, so ten particles a tick are in

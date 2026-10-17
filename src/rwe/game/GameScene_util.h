@@ -440,6 +440,17 @@ namespace rwe
     void updateWakeDots(const MapTerrain& terrain, GameTime currentTime, std::vector<WakeDot>& dots);
 
     /**
+     * The window the nano spray lands in, along each axis of the target's
+     * extent, measured from the box's minimum: the nanolathe initialiser
+     * (0x473B50) narrows each axis to run from the minimum plus four elevenths
+     * of the extent to the minimum plus seven elevenths -- the middle three
+     * elevenths, centred (BT-144). RWE used plus or minus three elevenths about
+     * the centre, six elevenths wide, which is twice that.
+     */
+    constexpr float NanoLandingWindowStart = 4.0f / 11.0f;
+    constexpr float NanoLandingWindowEnd = 7.0f / 11.0f;
+
+    /**
      * A thermal vent puffs once every this many ticks, for as long as the map
      * lasts.
      *

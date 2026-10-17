@@ -1179,6 +1179,7 @@ set(TEST_FILES
     src/rwe/game/LockstepStats.test.cpp
     src/rwe/game/SimDiagnostics.test.cpp
     src/rwe/game/playerrejoin.test.cpp
+    src/rwe/game/presentation.test.cpp
     src/rwe/game/chat_util.test.cpp
     src/rwe/game/OrderMarkerMemory.test.cpp
     src/rwe/game/PeerLink.test.cpp
