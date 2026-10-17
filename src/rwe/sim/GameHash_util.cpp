@@ -64,6 +64,7 @@ namespace rwe
             p.energy,
             p.maxEnergy,
             p.hasBaseStorage,
+            p.hasCreatedUnits,
             p.metalStalled,
             p.energyStalled,
             p.unitsKilled,
@@ -510,6 +511,7 @@ namespace rwe
             // BT-82: the end countdown freezes the economy from its first
             // step, and the latched result decides how the game ends.
             simulation.endCountdown,
+            simulation.skirmishVictoryRules,
             computeHashOfWinStatus(simulation.gameStatus),
             simulation.featureRegrowthCursor,
             // The explored grid is per line-of-sight group and feeds canSeeUnit

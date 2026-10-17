@@ -867,6 +867,21 @@ namespace rwe
 
         std::array<std::optional<PlayerId>, 10> gamePlayers;
 
+        // A game with no peer in it follows the skirmish's rule about a seat
+        // that never held a unit; one with a network seat, or a TA peer on its
+        // own clock, follows the multiplayer's (BT-193).
+        {
+            auto anyNetworkSeat = false;
+            for (const auto& params : gameParameters.players)
+            {
+                if (params && std::holds_alternative<PlayerControllerTypeNetwork>(params->controller))
+                {
+                    anyNetworkSeat = true;
+                }
+            }
+            simulation.skirmishVictoryRules = !anyNetworkSeat && gameParameters.netMode == NetMode::Lockstep;
+        }
+
         for (Index i = 0; i < getSize(gameParameters.players); ++i)
         {
             const auto& params = gameParameters.players[i];

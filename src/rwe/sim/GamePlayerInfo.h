@@ -78,6 +78,15 @@ namespace rwe
          */
         bool hasBaseStorage{false};
 
+        /**
+         * Whether the player has ever had a unit made for it (the dword at
+         * record offset 0x140 in the original, BT-193). A seat that never
+         * fielded anything blocks victory in a multiplayer game until it does,
+         * and counts for nothing in a skirmish. Set by the first unit added
+         * for the player; saved and hashed because the win test reads it.
+         */
+        bool hasCreatedUnits{false};
+
         bool metalStalled{false};
         bool energyStalled{false};
 

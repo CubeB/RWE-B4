@@ -512,6 +512,16 @@ namespace rwe
         int endCountdown{-1};
 
         /**
+         * Whether the win test follows the skirmish's rule about a seat that
+         * never held a unit (BT-193): it contributes nothing, where in a
+         * multiplayer game it blocks everybody's victory until it fields
+         * something (0x490080 against 0x49027B). Off by default, which is the
+         * multiplayer rule; the loader turns it on for a game with no network
+         * seat. Fixed for the life of a game, saved, hashed and dumped.
+         */
+        bool skirmishVictoryRules{false};
+
+        /**
          * The skirmish screen's rules, copied out of GameParameters before the
          * first player is added. They are fixed for the life of a game and
          * identical on every peer, which is what lets them change simulation

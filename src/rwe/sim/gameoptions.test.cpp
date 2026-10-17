@@ -788,4 +788,57 @@ namespace rwe
             CHECK(sim.endCountdown == 4);
         }
     }
+
+    TEST_CASE("a seat that never held a unit blocks victory in multiplayer and counts for nothing in a skirmish", "[gameoptions][endgame]")
+    {
+        // BT-193: the multiplayer win test (0x490080) returns "not won" at once
+        // for an occupied seat whose has-created-units dword is zero; the
+        // skirmish one (0x49027B) just counts the units that are not allied.
+        GameSimulation sim(makeOptionsTerrain(), 0u, 0, 0);
+        auto us = addOptionsPlayer(sim, "us");
+        auto them = addOptionsPlayer(sim, "them");
+        auto late = addOptionsPlayer(sim, "late");
+        sim.getPlayer(us).hasCreatedUnits = true;
+        sim.getPlayer(them).hasCreatedUnits = true;
+        sim.killPlayer(them);
+
+        SECTION("in multiplayer, the empty seat holds the game open until it fields something")
+        {
+            REQUIRE_FALSE(sim.skirmishVictoryRules);
+            CHECK(std::holds_alternative<WinStatusUndecided>(sim.computeWinStatus()));
+
+            sim.getPlayer(late).hasCreatedUnits = true;
+            sim.killPlayer(late);
+            auto status = sim.computeWinStatus();
+            REQUIRE(std::holds_alternative<WinStatusWon>(status));
+            CHECK(std::get<WinStatusWon>(status).winner == us);
+        }
+
+        SECTION("in a skirmish, it contributes nothing")
+        {
+            sim.skirmishVictoryRules = true;
+            auto status = sim.computeWinStatus();
+            REQUIRE(std::holds_alternative<WinStatusWon>(status));
+            CHECK(std::get<WinStatusWon>(status).winner == us);
+        }
+
+        SECTION("in a skirmish, a game nobody has fielded anything in is not decided")
+        {
+            // The first seconds of a game whose units are still being placed.
+            sim.skirmishVictoryRules = true;
+            sim.getPlayer(us).hasCreatedUnits = false;
+            sim.getPlayer(them).hasCreatedUnits = false;
+            CHECK(std::holds_alternative<WinStatusUndecided>(sim.computeWinStatus()));
+        }
+
+        SECTION("a unit added for a seat is what marks it")
+        {
+            REQUIRE_FALSE(sim.getPlayer(late).hasCreatedUnits);
+            defineOptionsUnit(sim, "TANK", 100u);
+            sim.unitDefinitions.at("TANK").isMobile = true;
+            sim.unitScriptDefinitions["TANK"] = *makeOptionsScript();
+            REQUIRE(sim.trySpawnCompletedUnit("TANK", late, SimVector(64_ss, 0_ss, 64_ss), std::nullopt));
+            CHECK(sim.getPlayer(late).hasCreatedUnits);
+        }
+    }
 }

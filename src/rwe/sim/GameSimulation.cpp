@@ -1837,6 +1837,13 @@ namespace rwe
             return std::nullopt;
         }
 
+        // The win test reads this (BT-193); the first unit made for a player
+        // is what sets it in the original.
+        if (unit.owner.value < players.size())
+        {
+            players[unit.owner.value].hasCreatedUnits = true;
+        }
+
         auto unitId = units.emplace(std::move(unit));
         const auto& insertedUnit = units.tryGet(unitId)->get();
 
@@ -2745,6 +2752,14 @@ namespace rwe
         // A player on no team is nobody's ally, including of another player
         // on no team, which is what makes a free-for-all behave exactly as
         // it did.
+        //
+        // A seat that never held a unit (BT-193): in a multiplayer game it
+        // blocks victory, being alive, until it has; in a skirmish it
+        // contributes nothing. The skirmish rule needs somebody to have
+        // fielded something first, so that the first seconds of a game whose
+        // units are still being placed are not read as everyone being out.
+        const auto skipsNeverFielded = skirmishVictoryRules
+            && std::any_of(players.begin(), players.end(), [](const GamePlayerInfo& q) { return q.hasCreatedUnits; });
         std::optional<PlayerId> livingPlayer;
         std::optional<int> livingTeam;
         for (Index i = 0; i < getSize(players); ++i)
@@ -2752,6 +2767,11 @@ namespace rwe
             const auto& p = players[i];
 
             if (p.status != GamePlayerStatus::Alive)
+            {
+                continue;
+            }
+
+            if (skipsNeverFielded && !p.hasCreatedUnits)
             {
                 continue;
             }

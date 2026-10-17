@@ -276,6 +276,7 @@ namespace rwe
                 {"startingMetal", saveMetal(p.startingMetal)},
                 {"startingEnergy", saveEnergy(p.startingEnergy)},
                 {"hasBaseStorage", p.hasBaseStorage},
+                {"hasCreatedUnits", p.hasCreatedUnits},
                 {"metalStalled", p.metalStalled},
                 {"energyStalled", p.energyStalled},
                 // The original does not save these (TOTALA-EXE-COMMANDS.md
@@ -325,6 +326,8 @@ namespace rwe
                 j.contains("teamId") ? loadOptional(j.at("teamId"), [](const json& v) { return v.get<int>(); }) : std::optional<int>()};
             // Added with missions (#293); every earlier save is a skirmish.
             p.hasBaseStorage = j.contains("hasBaseStorage") && j.at("hasBaseStorage").get<bool>();
+            // Added with BT-193; an older save's players have all been given units.
+            p.hasCreatedUnits = !j.contains("hasCreatedUnits") || j.at("hasCreatedUnits").get<bool>();
             p.metalStalled = j.at("metalStalled").get<bool>();
             p.energyStalled = j.at("energyStalled").get<bool>();
             // Resource sharing came later; an older save has it off, with no
@@ -681,6 +684,7 @@ namespace rwe
 
         j["gameStatus"] = saveWinStatus(sim.gameStatus);
         j["endCountdown"] = sim.endCountdown;
+        j["skirmishVictoryRules"] = sim.skirmishVictoryRules;
         j["currentWindGenerationFactor"] = saveSimScalar(sim.currentWindGenerationFactor);
         j["currentWindVector"] = saveSimVector(sim.currentWindVector);
         j["currentWindDirection"] = saveSimAngle(sim.currentWindDirection);
@@ -845,6 +849,7 @@ namespace rwe
         sim.gameStatus = loadWinStatus(j.at("gameStatus"));
         // Absent from saves made before BT-82; no countdown had started then.
         sim.endCountdown = j.contains("endCountdown") ? j.at("endCountdown").get<int>() : -1;
+        sim.skirmishVictoryRules = j.contains("skirmishVictoryRules") && j.at("skirmishVictoryRules").get<bool>();
         sim.currentWindGenerationFactor = loadSimScalar(j.at("currentWindGenerationFactor"));
         if (j.contains("currentWindVector"))
         {
