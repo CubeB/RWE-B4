@@ -622,6 +622,10 @@ namespace rwe
 
             updateMoveRateBand(unitInfo);
 
+            // The last step of the mover (0x43DD20): tell the script its water
+            // state if it has changed, whether or not the unit moved (BT-11).
+            updateSfxOccupancy(*sim, unitInfo);
+
             match(
                 unitInfo.state->physics,
                 [&](const UnitPhysicsInfoGround& p) {
@@ -800,6 +804,9 @@ namespace rwe
         // The owner sends no walk animation: each machine starts it from the
         // unit's own movement, as TA does, so a puppet walks rather than slides.
         updateMoveRateBand(unitInfo);
+
+        // And the same occupancy step runs again for a puppet (BT-11).
+        updateSfxOccupancy(*sim, unitInfo);
     }
 
     void UnitBehaviorService::updateRemoteGroundPosition(UnitInfo unitInfo, UnitPhysicsInfoGround& physics)
@@ -2146,22 +2153,10 @@ namespace rwe
 
         unitInfo.state->position = newPosition;
 
-        // Tell the script how the unit is now sitting in the water, if that
-        // has changed. The original asks the unit's own height rather than the
-        // height of the ground under it, which is what lets a ship at its
-        // waterline be told apart from one merely standing over deep water,
-        // and it is state 2 that a ship's script waits for before it lays a
-        // wake (0x43DB50).
-        auto seaLevel = static_cast<int>(sim->terrain.getSeaLevel().value);
-        auto unitY = static_cast<int>(unitInfo.state->position.y.value);
-        auto isSurfaceMover = !unitInfo.definition->canFly;
-        auto newState = computeSfxOccupyState(unitY, seaLevel, unitInfo.definition->waterLine, isSurfaceMover, unitInfo.state->sfxOccupyState);
-        if (newState != unitInfo.state->sfxOccupyState)
-        {
-            unitInfo.state->sfxOccupyState = newState;
-            unitInfo.state->cobEnvironment->createThread("setSFXoccupy", std::vector<int>{newState});
-        }
-
+        // The script is told how the unit sits in the water from
+        // updateSfxOccupancy, once a tick at the end of the mover's update
+        // (0x43DD20) and not from here: the original asks every mobile unit
+        // every tick, moving or not (BT-11).
         return true;
     }
 

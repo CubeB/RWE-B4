@@ -27,7 +27,7 @@ namespace rwe
         return Matrix4x<SimScalar>::rotationY(sin(angle), cos(angle)) * direction;
     }
 
-    int computeSfxOccupyState(int unitY, int seaLevel, unsigned int waterLine, bool isSurfaceMover, int previousState)
+    int computeSfxOccupyState(int unitY, int seaLevel, unsigned int waterLine, bool isSurfaceMover, int previousState, int modelTop)
     {
         // The original works this out in whole world units, not in the 16.16
         // it keeps positions in, and it tells the script only when the answer
@@ -60,14 +60,33 @@ namespace rwe
             state = 2;
         }
 
-        // The original has a fourth case here, state 3, for a hull completely
-        // under the surface: `unitY + WORD[def+0x170] < seaLevel`, where that
-        // field is the height of the model above its own origin. RWE does not
-        // carry a model height on the unit definition, so the case is left
-        // out rather than guessed at, and a submarine will report 2 where the
-        // original would report 3.
+        // State 3, a hull completely under the surface:
+        // `unitY + WORD[def+0x170] < seaLevel`, strictly, where that word is
+        // the whole-unit top of the model above its own origin (BT-7: the
+        // high half of the 16.16 maximum Y at +0x16E). It is tested last and
+        // so overrides states 1 and 2.
+        if (unitY + modelTop < seaLevel)
+        {
+            state = 3;
+        }
 
         return state;
+    }
+
+    void updateSfxOccupancy(GameSimulation& sim, UnitInfo unitInfo)
+    {
+        // The original asks the unit's own height rather than the ground
+        // under it, in whole units (floor, the high half of the 16.16 y).
+        auto seaLevel = static_cast<int>(std::floor(sim.terrain.getSeaLevel().value));
+        auto unitY = static_cast<int>(std::floor(unitInfo.state->position.y.value));
+        auto modelTop = static_cast<int>(std::floor(sim.modelHeightOf(*unitInfo.definition).value));
+        auto isSurfaceMover = !unitInfo.definition->canFly;
+        auto newState = computeSfxOccupyState(unitY, seaLevel, unitInfo.definition->waterLine, isSurfaceMover, unitInfo.state->sfxOccupyState, modelTop);
+        if (newState != unitInfo.state->sfxOccupyState)
+        {
+            unitInfo.state->sfxOccupyState = newState;
+            unitInfo.state->cobEnvironment->createThread("setSFXoccupy", std::vector<int>{newState});
+        }
     }
 
     SimAngle computeAccuracyCone(SimAngle accuracy, unsigned int health, unsigned int maxHealth, unsigned int kills)

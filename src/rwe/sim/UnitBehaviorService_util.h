@@ -27,7 +27,16 @@ namespace rwe
      * `setSFXoccupy` tells a script and what a ship waits on before it starts
      * laying a wake. Heights are in whole world units.
      */
-    int computeSfxOccupyState(int unitY, int seaLevel, unsigned int waterLine, bool isSurfaceMover, int previousState);
+    int computeSfxOccupyState(int unitY, int seaLevel, unsigned int waterLine, bool isSurfaceMover, int previousState, int modelTop);
+
+    /**
+     * The mover's last step each tick (0x43DB50 at the end of 0x43DD20, BT-11):
+     * work out the unit's water state and start `setSFXoccupy` with it when it
+     * differs from the stored one. Unconditional for every mobile unit --
+     * moving or not -- so a ship that was built and never ordered anywhere is
+     * told its state on its first tick, not after its first step.
+     */
+    void updateSfxOccupancy(GameSimulation& sim, UnitInfo unitInfo);
 
     /**
      * How wide the shot may stray, once the shooter's own damage and kill
