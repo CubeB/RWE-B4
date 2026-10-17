@@ -4690,7 +4690,13 @@ namespace rwe
             // the wind speed will last between 5 and 14 seconds before changing
             nextWindSpeedChange = gameTime + GameTime(randomBetween(rng, 5, 14) * SimTicksPerSecond);
 
-            auto currentWindSpeed = randomBetween(rng, minWindSpeed, std::max(minWindSpeed, maxWindSpeed));
+            // The minimum plus a draw below the span (BT-130, 0x4B6C30). The
+            // draw is a modulo of the span, so the map's maximum is never
+            // reached unless the two bounds are equal, and a span under two
+            // draws nothing at all: the routine returns zero without
+            // advancing the seed. randomBelow would draw for a span of one.
+            const int windSpan = maxWindSpeed - minWindSpeed;
+            const int currentWindSpeed = minWindSpeed + (windSpan < 2 ? 0 : static_cast<int>(randomBelow(rng, static_cast<unsigned int>(windSpan))));
 
             auto currentWindDirection = SimAngle(static_cast<uint16_t>(randomBetween(rng, MinAngle.value, MaxAngle.value)));
 

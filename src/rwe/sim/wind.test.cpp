@@ -7,6 +7,7 @@
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/ProjectilePhysicsType.h>
 #include <rwe/sim/SimAngle.h>
+#include <rwe/sim/SimRandom.h>
 #include <rwe/sim/SimVector.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitModelDefinition.h>
@@ -16,6 +17,7 @@
 #include <rwe/sim/sim_test_util.h>
 #include <cmath>
 #include <memory>
+#include <set>
 #include <string>
 
 namespace rwe
@@ -313,6 +315,54 @@ namespace rwe
             REQUIRE(simScalarToFloat(p.x) == Approx(Ticks * MuzzleVelocity));
             REQUIRE(simScalarToFloat(p.z) == Approx(0.0f).margin(1e-6f));
             REQUIRE(simScalarToFloat(p.y) == Approx(StartHeight));
+        }
+    }
+
+    TEST_CASE("the wind speed is the minimum plus a draw below the span", "[wind]")
+    {
+        // BT-130 (0x4B6C30): the draw is a modulo of max - min, so the map's
+        // maximum is never reached unless the bounds are equal, and a span
+        // under two draws nothing from the generator.
+        auto speedsSeen = [](int low, int high, int changes) {
+            GameSimulation sim(makeFlatTerrain(16, 16), 0u, low, high);
+            std::set<int> seen;
+            for (int i = 0; i < changes; ++i)
+            {
+                sim.nextWindSpeedChange = sim.gameTime;
+                sim.updateWind();
+                seen.insert(static_cast<int>(std::lround(simScalarToFloat(sim.currentWindGenerationFactor) * static_cast<float>(MaxUtilizableWindSpeed))));
+            }
+            return seen;
+        };
+
+        SECTION("never the maximum, every value below it")
+        {
+            // 100 to 103 is the Brain Coral shape in miniature: 100, 101 and
+            // 102 come up, 103 does not.
+            auto seen = speedsSeen(100, 103, 400);
+            REQUIRE(seen == std::set<int>{100, 101, 102});
+        }
+
+        SECTION("a span of one is the minimum and nothing else")
+        {
+            REQUIRE(speedsSeen(100, 101, 50) == std::set<int>{100});
+        }
+
+        SECTION("equal bounds are that value")
+        {
+            REQUIRE(speedsSeen(3000, 3000, 50) == std::set<int>{3000});
+        }
+
+        SECTION("a span under two does not advance the generator for the speed")
+        {
+            GameSimulation sim(makeFlatTerrain(16, 16), 0u, 100, 101);
+            auto expected = sim.rng;
+            sim.updateWind();
+
+            // The interval, then the direction; nothing in between.
+            randomBetween(expected, 5, 14);
+            randomBetween(expected, 0, 65535);
+            REQUIRE(sim.rng == expected);
         }
     }
 }
