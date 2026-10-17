@@ -8,6 +8,7 @@
 #include <rwe/io/gaf/GafArchive.h>
 #include <rwe/io/gaf/gaf_headers.h>
 #include <rwe/io/gaf/gaf_util.h>
+#include <rwe/io/fnt/Fnt.h>
 #include <rwe/io/hpi/HpiArchive.h>
 #include <rwe/io/hpi/hpi_util.h>
 #include <rwe/io/io_util.h>
@@ -526,6 +527,62 @@ namespace rwe
     {
         std::istringstream in(std::string(3, 'x'));
         REQUIRE_THROWS_AS(readRaw<uint32_t>(in), TruncatedInputError);
+    }
+
+    namespace
+    {
+        std::string fntBytes(uint16_t height, const std::unordered_map<int, uint16_t>& glyphs, const std::string& tail)
+        {
+            std::string bytes;
+            append(bytes, FntHeader{height, 0});
+            for (int i = 0; i < 256; ++i)
+            {
+                auto it = glyphs.find(i);
+                append(bytes, static_cast<uint16_t>(it == glyphs.end() ? 0 : it->second));
+            }
+            return bytes + tail;
+        }
+    }
+
+    TEST_CASE("a bitmap font that cannot describe itself is refused", "[malformed]")
+    {
+        SECTION("cut off inside its header")
+        {
+            std::istringstream in(std::string(3, 'x'));
+            REQUIRE_THROWS(FntArchive(&in));
+        }
+
+        SECTION("cut off inside its offset table")
+        {
+            std::istringstream in(std::string(100, 'x'));
+            REQUIRE_THROWS(FntArchive(&in));
+        }
+
+        SECTION("a height of 65535 rows, which would be 66 MB for each of 256 glyph textures")
+        {
+            std::istringstream in(fntBytes(65535, {}, ""));
+            REQUIRE_THROWS(FntArchive(&in));
+        }
+    }
+
+    TEST_CASE("a bitmap font glyph that is not all there is short, and does not spoil the next one", "[malformed]")
+    {
+        // The table is 4 + 512 bytes. 'B' is a whole glyph (one byte of
+        // length, two of bitmap) at 516; 'A' follows at 519 and says three
+        // pairs but the file ends after one byte of them; 'C' points past
+        // the end of the file.
+        std::string tail;
+        tail += std::string(1, '\x01');
+        tail += std::string("\xff\xff", 2);
+        tail += std::string(1, '\x03');
+        tail += std::string(1, '\xff');
+        std::istringstream in(fntBytes(16, {{'B', 516}, {'A', 519}, {'C', 5000}}, tail));
+        FntArchive font(&in);
+
+        std::vector<char> buffer(512);
+        REQUIRE(font.extract('C', buffer.data()) == 0);
+        REQUIRE(font.extract('A', buffer.data()) == 1);
+        REQUIRE(font.extract('B', buffer.data()) == 2);
     }
 
     TEST_CASE("an FBI with no SoundCategory is silent, not refused", "[malformed]")

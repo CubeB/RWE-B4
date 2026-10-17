@@ -44,6 +44,24 @@ namespace rwe
         }
     }
 
+    TEST_CASE("text with a byte that is not valid UTF-8 is measured, not thrown out of the frame", "[ui][malformed]")
+    {
+        // 0xE9 is "e acute" in Windows-1252, which is how 309 of the 435
+        // shipped FBIs carry their accented words. The checked UTF-8 iterator
+        // throws on it, from inside the render call.
+        auto font = makeFont();
+        UiRenderService service(nullptr, nullptr, nullptr);
+
+        std::string accented = "caf";
+        accented.push_back(static_cast<char>(0xE9));
+
+        // c, a, f at 7 each, then the Latin-1 character, which this 128-glyph
+        // font does not have and so draws as glyph 0 (7 wide).
+        REQUIRE_NOTHROW(service.getTextWidth(accented, font));
+        REQUIRE(service.getTextWidth(accented, font) == Catch::Approx(28.0f));
+        REQUIRE_NOTHROW(findCharacterInText(accented, 'c', font));
+    }
+
     TEST_CASE("findCharacterInText locates the quick key in a caption", "[ui]")
     {
         // What the quick-key underline is measured with (S:99, 0x4A5B2C):

@@ -5,8 +5,34 @@
 
 namespace rwe
 {
-    std::optional<TextCharacterSpan> findCharacterInText(const std::string& text, int character, const SpriteSeries& font)
+    namespace
     {
+        /**
+         * The text itself when it is valid UTF-8, and otherwise a Latin-1
+         * reading of it held in `scratch`. The iterators below are the checked
+         * kind and throw on a byte that is not valid UTF-8 -- from inside the
+         * render call -- and 309 of the 435 shipped FBIs carry such bytes
+         * (Windows-1252 accents), so a third-party unit with one in an
+         * English description would have ended the frame, and the process.
+         * Valid text is returned as it is, with no copy.
+         */
+        const std::string& drawable(const std::string& text, std::string& scratch)
+        {
+            if (utf8::is_valid(text.begin(), text.end()))
+            {
+                return text;
+            }
+
+            scratch = latin1ToUtf8(text);
+            return scratch;
+        }
+    }
+
+    std::optional<TextCharacterSpan> findCharacterInText(const std::string& rawText, int character, const SpriteSeries& font)
+    {
+        std::string scratch;
+        const auto& text = drawable(rawText, scratch);
+
         if (font.sprites.empty() || character <= 0 || character > 0x7F)
         {
             return std::nullopt;
@@ -103,8 +129,10 @@ namespace rwe
         drawText(x, y, text, font, Color(255, 255, 255));
     }
 
-    void UiRenderService::drawText(float x, float y, const std::string& text, const SpriteSeries& font, const Color& tint)
+    void UiRenderService::drawText(float x, float y, const std::string& rawText, const SpriteSeries& font, const Color& tint)
     {
+        std::string scratch;
+        const auto& text = drawable(rawText, scratch);
         auto it = utf8Begin(text);
         auto end = utf8End(text);
         for (; it != end; ++it)
@@ -129,8 +157,10 @@ namespace rwe
         }
     }
 
-    float UiRenderService::getTextWidth(const std::string& text, const SpriteSeries& font)
+    float UiRenderService::getTextWidth(const std::string& rawText, const SpriteSeries& font)
     {
+        std::string scratch;
+        const auto& text = drawable(rawText, scratch);
         float width = 0;
         auto it = utf8Begin(text);
         auto end = utf8End(text);
@@ -181,8 +211,10 @@ namespace rwe
         drawText(x - width, y, text, font, tint);
     }
 
-    void UiRenderService::drawTextWrapped(Rectangle2f area, const std::string& text, const SpriteSeries& font)
+    void UiRenderService::drawTextWrapped(Rectangle2f area, const std::string& rawText, const SpriteSeries& font)
     {
+        std::string scratch;
+        const auto& text = drawable(rawText, scratch);
         float x = 0.0f;
         float y = 0.0f;
 
