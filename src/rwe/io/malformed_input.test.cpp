@@ -3,6 +3,7 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <rwe/ColorPalette.h>
 #include <rwe/LoadingScene_util.h>
 #include <rwe/MovieScene.h>
@@ -1839,6 +1840,103 @@ namespace rwe
             bar.mouseDown(MouseButtonEvent(1, 2, MouseButtonEvent::MouseButton::Left));
             bar.update(0.5f);
             REQUIRE(messages == 0);
+        }
+    }
+
+    namespace
+    {
+        /** Files by name, found case-insensitively, for the palette lookup. */
+        class NamedFilesFileSystem final : public AbstractVirtualFileSystem
+        {
+        public:
+            std::map<std::string, std::string> files;
+
+            static std::string lowered(std::string s)
+            {
+                for (auto& c : s)
+                {
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                }
+                return s;
+            }
+
+            std::optional<std::vector<char>> readFile(const std::string& filename) const override
+            {
+                auto it = files.find(lowered(filename));
+                if (it == files.end())
+                {
+                    return std::nullopt;
+                }
+                return std::vector<char>(it->second.begin(), it->second.end());
+            }
+            std::vector<std::string> getFileNames(const std::string&, const std::string&) override { return {}; }
+            std::vector<std::string> getDirectoryNames(const std::string&) override { return {}; }
+            std::vector<std::string> getFileNamesRecursive(const std::string&, const std::string&) override { return {}; }
+        };
+
+        std::string palettePcx()
+        {
+            auto bytes = pcxHeader(1, 1, 2);
+            bytes += std::string("\x01\x02", 2);
+            bytes += '\x0c';
+            for (int i = 0; i < 256; ++i)
+            {
+                bytes += static_cast<char>(i);
+                bytes += static_cast<char>(255 - i);
+                bytes += static_cast<char>(7);
+            }
+            return bytes;
+        }
+    }
+
+    TEST_CASE("a palette shipped only as a PCX is read from its trailer instead of ending the launch", "[io][malformed]")
+    {
+        NamedFilesFileSystem vfs;
+
+        SECTION("neither file present")
+        {
+            REQUIRE_FALSE(vfs.readPaletteOrPcx("PALETTE").has_value());
+        }
+
+        SECTION("a PCX alone")
+        {
+            vfs.files["palettes/palette.pcx"] = palettePcx();
+            auto palette = vfs.readPaletteOrPcx("PALETTE");
+            REQUIRE(palette);
+            REQUIRE(palette->size() == 256);
+            REQUIRE((*palette)[10].r == 10);
+            REQUIRE((*palette)[10].g == 245);
+            REQUIRE((*palette)[10].b == 7);
+            REQUIRE((*palette)[10].a == 255);
+        }
+
+        SECTION("a PAL wins over a PCX")
+        {
+            std::string pal(1024, '\x05');
+            vfs.files["palettes/palette.pal"] = pal;
+            vfs.files["palettes/palette.pcx"] = palettePcx();
+            auto palette = vfs.readPaletteOrPcx("PALETTE");
+            REQUIRE(palette);
+            REQUIRE((*palette)[10].r == 5);
+        }
+
+        SECTION("a short PAL falls through to the PCX")
+        {
+            vfs.files["palettes/palette.pal"] = std::string(100, '\x05');
+            vfs.files["palettes/palette.pcx"] = palettePcx();
+            auto palette = vfs.readPaletteOrPcx("PALETTE");
+            REQUIRE(palette);
+            REQUIRE((*palette)[10].r == 10);
+        }
+
+        SECTION("a PCX that is not a palette picture is no palette, and does not throw")
+        {
+            vfs.files["palettes/palette.pcx"] = "not a pcx";
+            REQUIRE_NOTHROW(vfs.readPaletteOrPcx("PALETTE"));
+            REQUIRE_FALSE(vfs.readPaletteOrPcx("PALETTE").has_value());
+
+            vfs.files["palettes/palette.pcx"] = pcxHeader(1, 1, 2) + std::string("\x01\x02", 2);
+            REQUIRE_FALSE(vfs.readPaletteOrPcx("PALETTE").has_value());
         }
     }
 }

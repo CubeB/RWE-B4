@@ -283,29 +283,17 @@ namespace rwe
         }
 
         LOG_INFO << "Loading palette";
-        auto paletteBytes = vfs.readFile("palettes/PALETTE.PAL");
-        if (!paletteBytes)
-        {
-            throw std::runtime_error("Couldn't find palette");
-        }
-
-        auto palette = readPalette(*paletteBytes);
+        auto palette = vfs.readPaletteOrPcx("PALETTE");
         if (!palette)
         {
-            throw std::runtime_error("Couldn't read palette");
+            throw std::runtime_error("Couldn't find or read palette (palettes/PALETTE.PAL or PALETTE.PCX)");
         }
 
         LOG_INFO << "Loading GUI palette";
-        auto guiPaletteBytes = vfs.readFile("palettes/GUIPAL.PAL");
-        if (!guiPaletteBytes)
-        {
-            throw std::runtime_error("Couldn't find palette");
-        }
-
-        auto guiPalette = readPalette(*guiPaletteBytes);
+        auto guiPalette = vfs.readPaletteOrPcx("GUIPAL");
         if (!guiPalette)
         {
-            throw std::runtime_error("Couldn't read GUI palette");
+            throw std::runtime_error("Couldn't find or read GUI palette (palettes/GUIPAL.PAL or GUIPAL.PCX)");
         }
 
         LOG_INFO << "Initializing services";
