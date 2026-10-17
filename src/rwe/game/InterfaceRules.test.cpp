@@ -98,6 +98,17 @@ namespace rwe
         REQUIRE(selfDestructRecipients({}).empty());
     }
 
+    TEST_CASE("the end-of-game fade steps every second tick and takes twenty ticks (BT-197)")
+    {
+        REQUIRE(endGameFadeStep(0) == 0);
+        REQUIRE(endGameFadeStep(1) == 0);
+        REQUIRE(endGameFadeStep(2) == 1);
+        REQUIRE(endGameFadeStep(19) == 9);
+        REQUIRE(endGameFadeStep(20) == 10);
+        REQUIRE(endGameFadeStep(500) == 10);
+        REQUIRE(EndGameFadeSteps * EndGameFadeTicksPerStep == 20);
+    }
+
     TEST_CASE("an armed Build click goes to every mobile builder and to nothing else (BT-108)")
     {
         REQUIRE(buildClickTakesUnit(true, true));

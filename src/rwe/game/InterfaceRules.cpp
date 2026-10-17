@@ -48,6 +48,12 @@ namespace rwe
         return result;
     }
 
+    unsigned int endGameFadeStep(unsigned int elapsedTicks)
+    {
+        auto taken = elapsedTicks / EndGameFadeTicksPerStep;
+        return taken < EndGameFadeSteps ? taken : EndGameFadeSteps;
+    }
+
     BuildMenuPosition stepBuildMenu(BuildMenuPosition position, unsigned int pageCount, bool forward, bool toggle)
     {
         if (pageCount == 0)

@@ -7,6 +7,7 @@
 #include <rwe/game/ControlChannel.h>
 #include <nlohmann/json.hpp>
 #include <rwe/game/GameEndedReport.h>
+#include <rwe/game/InterfaceRules.h>
 #include <rwe/io/campaign/campaign.h>
 #include <rwe/io/gui/gui.h>
 #include <rwe/sim/SimTicksPerSecond.h>
@@ -80,8 +81,14 @@ namespace rwe
         /** The empty band the artwork leaves above its column headings. */
         constexpr float EndGameTitleY = 14.0f;
 
-        /** Ten steps of the fade table, one a tick (0x41FA3D sets the count). */
-        constexpr unsigned int EndGameFadeTicks = 10;
+        /**
+         * The fade runs ten steps, one every second tick (BT-197): state 2
+         * (0x41FA3D) arms a counter of ten and sets the next deadline to now
+         * plus one, and state 3 (0x41FA8F) steps only when the deadline is
+         * strictly below the clock, then reschedules to now plus one. So the
+         * first step is two ticks after arming and the tenth twenty.
+         */
+        constexpr unsigned int EndGameFadeTicks = EndGameFadeSteps * EndGameFadeTicksPerStep;
 
         /**
          * How long the banner stays over the last frame of the game before the
@@ -605,8 +612,8 @@ namespace rwe
             }
             case EndGamePhase::Fade:
             {
-                auto step = std::min(EndGameFadeTicks, (sceneTime - endGamePhaseStart).value + 1);
-                auto alpha = static_cast<int>((255.0f * static_cast<float>(step)) / static_cast<float>(EndGameFadeTicks));
+                auto step = endGameFadeStep((sceneTime - endGamePhaseStart).value);
+                auto alpha = static_cast<int>((255.0f * static_cast<float>(step)) / static_cast<float>(EndGameFadeSteps));
                 auto uiScale = static_cast<float>(effectiveUiScale());
                 chromeUiRenderService.fillColor(
                     0.0f,

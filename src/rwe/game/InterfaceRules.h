@@ -87,5 +87,17 @@ namespace rwe
      */
     std::vector<std::size_t> selfDestructRecipients(const std::vector<bool>& counting);
 
+    /** Steps in the end-of-game screen fade, and the ticks between one and the next (BT-197). */
+    constexpr unsigned int EndGameFadeSteps = 10;
+    constexpr unsigned int EndGameFadeTicksPerStep = 2;
+
+    /**
+     * How many of the fade's steps have been taken `elapsedTicks` after it was
+     * armed. The original steps once every second tick (0x41FA8F compares the
+     * deadline strictly), the first two ticks after arming, so ten steps take
+     * twenty ticks.
+     */
+    unsigned int endGameFadeStep(unsigned int elapsedTicks);
+
     BuildMenuPosition stepBuildMenu(BuildMenuPosition position, unsigned int pageCount, bool forward, bool toggle);
 }
