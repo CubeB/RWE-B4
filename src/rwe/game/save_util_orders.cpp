@@ -73,7 +73,7 @@ namespace rwe
     {
         return match(
             o,
-            [](const MoveOrder& m) { return json{{"kind", "move"}, {"destination", saveSimVector(m.destination)}, {"unreachableRetryTicks", m.unreachableRetryTicks}}; },
+            [](const MoveOrder& m) { return json{{"kind", "move"}, {"destination", saveSimVector(m.destination)}, {"unreachableRetryTicks", m.unreachableRetryTicks}, {"automatic", m.automatic}}; },
             [&](const AttackOrder& a) {
                 auto j = json{{"kind", "attack"}, {"target", saveAttackTarget(a.target, ctx)}};
                 if (a.leash)
@@ -85,6 +85,7 @@ namespace rwe
                 {
                     j["lastSeenPosition"] = saveSimVector(*a.lastSeenPosition);
                 }
+                j["automatic"] = a.automatic;
                 return j;
             },
             [](const BuildOrder& b) { return json{{"kind", "build"}, {"unitType", b.unitType}, {"position", saveSimVector(b.position)}}; },
@@ -136,6 +137,7 @@ namespace rwe
         {
             MoveOrder move(loadSimVector(j.at("destination")));
             move.unreachableRetryTicks = j.value("unreachableRetryTicks", 0u);
+            move.automatic = j.value("automatic", false);
             return move;
         }
         if (kind == "attack")
@@ -152,6 +154,7 @@ namespace rwe
             {
                 order.lastSeenPosition = loadSimVector(j.at("lastSeenPosition"));
             }
+            order.automatic = j.value("automatic", false);
             return order;
         }
         if (kind == "build")

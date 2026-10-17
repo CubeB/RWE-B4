@@ -445,13 +445,25 @@ namespace rwe
                     // own sight, so a unit that re-decided every tick would
                     // reach its station, lose the target it was already
                     // shooting at, and go looking for somewhere to land.
-                    unitInfo.state->orders.push_back(createAttackOrder(*freeTarget));
+                    //
+                    // BT-79: the unit is idle, so what the original has at
+                    // the head is its default-mission node, marked 0x4000,
+                    // and the sighting routine copies that mark onto what it
+                    // inserts in front of it. The nodes are automatic, and a
+                    // Shift-queued order drops them. (A unit with no default
+                    // mission has no such head, and its nodes stay.)
+                    const bool automatic = unitInfo.definition->defaultMission != DefaultMission::None;
+                    auto attack = createAttackOrder(*freeTarget);
+                    std::get<AttackOrder>(attack).automatic = automatic;
+                    unitInfo.state->orders.push_back(std::move(attack));
                     if (unitInfo.state->moveOrders == UnitMovementOrders::Maneuver)
                     {
                         // Maneuver comes back to where it was when it saw
                         // the target (0x43B25D-0x43B2B1): the same return
                         // move the patrol break-off plants, behind the attack.
-                        unitInfo.state->orders.push_back(MoveOrder(unitInfo.state->position));
+                        MoveOrder back(unitInfo.state->position);
+                        back.automatic = automatic;
+                        unitInfo.state->orders.push_back(std::move(back));
                     }
                 }
                 else if (unitInfo.state->airLoiter && unitInfo.state->airLoiter->reason == UnitState::AirLoiterState::Reason::AttackEnded)

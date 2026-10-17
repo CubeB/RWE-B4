@@ -4,6 +4,7 @@
 #include <memory>
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/grid/Grid.h>
+#include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/AirMovement.h>
 #include <rwe/sim/GameSimulation.h>
@@ -673,5 +674,105 @@ namespace rwe
         }
         REQUIRE(settled);
         REQUIRE_FALSE(scene.sim.getUnitState(scene.aircraftId).airLoiter.has_value());
+    }
+
+    TEST_CASE("a Shift-queued order drops the engagement an idle aircraft made for itself (BT-79)", "[aircraftidle]")
+    {
+        // The sighting routine (0x43B1F0) copies the 0x4000 mark from the
+        // node it inserts in front of. An idle unit's head is its
+        // default-mission node, which is marked, so the engagement is
+        // automatic and the next primary order, a Shift-queued one included,
+        // removes it. A unit with no default mission has no such head.
+        auto script = makeIdleScript();
+
+        struct Scene
+        {
+            GameSimulation sim;
+            UnitId targetId;
+            UnitId bomberId;
+
+            Scene(const std::shared_ptr<CobScript>& script, DefaultMission mission)
+                : sim(makeIdleTerrain(256, 256), 0u, 0, 0)
+            {
+                auto us = addIdlePlayer(sim, "us");
+                auto them = addIdlePlayer(sim, "them");
+                auto bomberDef = makeIdleBomberDef();
+                bomberDef.defaultMission = mission;
+                sim.unitDefinitions["bomber"] = bomberDef;
+                sim.unitDefinitions["target"] = makeIdleTargetDef();
+                registerIdleModel(sim, "model");
+                defineIdleBomb(sim);
+                sim.losTables = generateLosTables(8);
+
+                targetId = spawnIdleUnit(sim, "target", them, SimVector(0_ss, 0_ss, 0_ss), script);
+                bomberId = spawnIdleUnit(sim, "bomber", us, SimVector(-200_ss, 200_ss, 0_ss), script);
+                auto& bomber = sim.getUnitState(bomberId);
+                bomber.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+                UnitWeapon weapon;
+                weapon.weaponType = "bomb";
+                bomber.weapons[0] = weapon;
+                sim.flyingUnitsSet.insert(bomberId);
+            }
+
+            bool tickUntilEngaged()
+            {
+                for (int i = 0; i < 30; ++i)
+                {
+                    sim.tick();
+                    const auto& orders = sim.getUnitState(bomberId).orders;
+                    if (!orders.empty() && std::holds_alternative<AttackOrder>(orders.front()))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            void queueMove(const SimVector& destination)
+            {
+                REQUIRE(applyUnitCommandToSimulation(
+                    sim,
+                    sim.getUnitState(bomberId).owner,
+                    PlayerUnitCommand(bomberId, PlayerUnitCommand::IssueOrder(MoveOrder(destination), PlayerUnitCommand::IssueOrder::IssueKind::Queued))));
+            }
+        };
+
+        SECTION("with a default mission the engagement is automatic and the queued move replaces it")
+        {
+            Scene scene(script, DefaultMission::VtolStandby);
+            REQUIRE(scene.tickUntilEngaged());
+            for (const auto& order : scene.sim.getUnitState(scene.bomberId).orders)
+            {
+                if (const auto* attack = std::get_if<AttackOrder>(&order))
+                {
+                    REQUIRE(attack->automatic);
+                }
+                else if (const auto* move = std::get_if<MoveOrder>(&order))
+                {
+                    REQUIRE(move->automatic);
+                }
+            }
+
+            auto destination = SimVector(500_ss, 0_ss, 500_ss);
+            scene.queueMove(destination);
+            const auto& orders = scene.sim.getUnitState(scene.bomberId).orders;
+            REQUIRE(orders.size() == 1u);
+            REQUIRE(std::holds_alternative<MoveOrder>(orders.front()));
+            REQUIRE((std::get<MoveOrder>(orders.front()).destination == destination));
+            REQUIRE_FALSE(std::get<MoveOrder>(orders.front()).automatic);
+        }
+
+        SECTION("with no default mission the engagement stays and the queued move waits behind it")
+        {
+            Scene scene(script, DefaultMission::None);
+            REQUIRE(scene.tickUntilEngaged());
+            REQUIRE_FALSE(std::get<AttackOrder>(scene.sim.getUnitState(scene.bomberId).orders.front()).automatic);
+
+            scene.queueMove(SimVector(500_ss, 0_ss, 500_ss));
+            const auto& orders = scene.sim.getUnitState(scene.bomberId).orders;
+            REQUIRE(orders.size() >= 2u);
+            REQUIRE(std::holds_alternative<AttackOrder>(orders.front()));
+            REQUIRE(std::holds_alternative<MoveOrder>(orders.back()));
+        }
     }
 }

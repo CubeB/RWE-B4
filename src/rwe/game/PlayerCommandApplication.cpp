@@ -162,6 +162,31 @@ namespace rwe
                 return;
             }
 
+            // BT-79: a new primary order, a Shift-queued one included, removes
+            // the leading run of nodes the unit made for itself from idle
+            // (the loop at 0x43AE7C in AddOrder). Engagements made in front
+            // of a real order are unmarked and stay.
+            auto isAutomatic = [](const UnitOrder& o) {
+                if (const auto* attack = std::get_if<AttackOrder>(&o))
+                {
+                    return attack->automatic;
+                }
+                if (const auto* move = std::get_if<MoveOrder>(&o))
+                {
+                    return move->automatic;
+                }
+                return false;
+            };
+            if (!orders.empty() && isAutomatic(orders.front()))
+            {
+                UnitBehaviorService(&simulation).interruptCurrentTask(unitId);
+                unit->get().buildOrderUnitId.reset();
+                while (!orders.empty() && isAutomatic(orders.front()))
+                {
+                    orders.pop_front();
+                }
+            }
+
             // An idle unit has nothing to queue behind, so this order starts
             // straight away -- which means an aircraft part-way through setting
             // down has to break off and get back in the air for it.
