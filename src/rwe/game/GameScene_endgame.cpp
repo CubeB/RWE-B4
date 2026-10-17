@@ -48,6 +48,15 @@ namespace rwe
         constexpr float EndGameRowStride = 20.0f;
         constexpr int EndGameMaxRows = 10;
 
+        /** The original's table is ten records wide and so is the artwork. */
+        void trimEndGameStats(EndGameStats& stats)
+        {
+            if (getSize(stats.rows) > EndGameMaxRows)
+            {
+                stats.rows.erase(stats.rows.begin() + EndGameMaxRows, stats.rows.end());
+            }
+        }
+
         /** The name cell: x 16 to 105 in the artwork, the PlayerColor gadget's rect. */
         constexpr float EndGameNameX = 16.0f;
         constexpr float EndGameNameWidth = 90.0f;
@@ -178,6 +187,14 @@ namespace rwe
         endGamePhase = EndGamePhase::Banner;
         endGamePhaseStart = sceneTime;
 
+        // The figures are the ones at the decision (BT-196): the original
+        // gathers them at the shutdown in the same loop iteration that sees
+        // the latch (0x491B60 via 0x491B8B), with no tick between, where the
+        // chart used to read them when it opened, seconds later, with the
+        // simulation still running.
+        endGameStats = computeEndGameStats(simulation);
+        trimEndGameStats(*endGameStats);
+
         // The mission's letter in the campaign's run, written as the game is
         // torn down (0x41DC81).
         if (gameParameters.campaign)
@@ -290,11 +307,12 @@ namespace rwe
     {
         // 0x41DC20 fills the score table and 0x41E420 lays the chart out, both
         // once, on the way in.
-        endGameStats = computeEndGameStats(simulation);
-        if (getSize(endGameStats->rows) > EndGameMaxRows)
+        // Taken when the game was decided (beginEndGameSequence); only a path
+        // that reaches the chart without a decision reads them here.
+        if (!endGameStats)
         {
-            // The original's table is ten records wide and so is the artwork.
-            endGameStats->rows.erase(endGameStats->rows.begin() + EndGameMaxRows, endGameStats->rows.end());
+            endGameStats = computeEndGameStats(simulation);
+            trimEndGameStats(*endGameStats);
         }
         endGameBarFill.assign(endGameStats->rows.size(), std::array<float, EndGameStatCount>{});
         endGameColumnsStarted = 0;

@@ -359,6 +359,7 @@ namespace rwe
         // it gets there.
         gameOver = std::nullopt;
         gameOverTime = GameTime(0);
+        endGameStats = std::nullopt;
         combinedVisibility = std::nullopt;
         replayReachedEnd = false;
         millisecondsBuffer = 0;
