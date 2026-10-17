@@ -441,11 +441,12 @@ namespace rwe
         auto top = wholeTopOf(sim, target);
         auto seaLevel = wholeSeaLevel(sim);
 
-        // The FBI's `amphibious` key is not parsed, so every flier takes the
-        // first branch; no shipped aircraft sets it.
+        // A flier without the amphibious bit is rejected for a target whose
+        // top is under the surface; an amphibious one is never rejected by
+        // this test (0x4899B0, BT-13). No shipped aircraft sets the key.
         if (repairerDefinition.canFly)
         {
-            return top >= seaLevel;
+            return repairerDefinition.amphibious || top >= seaLevel;
         }
 
         auto maxWaterDepth = static_cast<int>(sim.getAdHocMovementClass(repairerDefinition.movementCollisionInfo).maxWaterDepth);

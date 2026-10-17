@@ -538,6 +538,7 @@ namespace rwe
         u.isMobile = fbi.bmCode;
 
         u.floater = fbi.floater;
+        u.amphibious = fbi.amphibious;
         u.isFeature = fbi.isFeature;
         u.canHover = fbi.canHover;
         u.waterLine = fbi.waterLine;

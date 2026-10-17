@@ -143,4 +143,13 @@ namespace rwe
             REQUIRE(movementClasses.getMovementClass(named->movementClassId).signedMinWaterDepth() == 3);
         }
     }
+
+    TEST_CASE("an FBI's amphibious key is read, and absent means false", "[fbi]")
+    {
+        // BT-13. Bit 21 of the first flag word, beside upright and floater.
+        MovementClassDatabase movementClasses;
+        REQUIRE(parseUnitDefinition(fbiFrom("amphibious=1;"), movementClasses).amphibious);
+        REQUIRE_FALSE(parseUnitDefinition(fbiFrom("Floater=1;"), movementClasses).amphibious);
+        REQUIRE_FALSE(parseUnitDefinition(fbiFrom("amphibious=0;"), movementClasses).amphibious);
+    }
 }

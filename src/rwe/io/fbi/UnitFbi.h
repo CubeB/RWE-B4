@@ -170,6 +170,14 @@ namespace rwe
         bool bmCode;
 
         bool floater;
+
+        /**
+         * `amphibious`, bit 21 of the first flag word (0x42BF40, beside
+         * `upright` and `floater`). The FBI key and nothing derived from the
+         * movement class. It exempts a flying repairer from the water reach
+         * test (BT-13).
+         */
+        bool amphibious;
         bool canHover;
 
         /**

@@ -194,6 +194,9 @@ namespace rwe
 
         bool floater;
 
+        /** The FBI's `amphibious` key (BT-13); false when the file does not say. */
+        bool amphibious{false};
+
         /**
          * The FBI's . Six units set it, and the two that matter are
          * the floating dragon's teeth: their wreck is meant to stay on the
