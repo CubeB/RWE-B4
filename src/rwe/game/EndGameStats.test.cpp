@@ -115,14 +115,15 @@ namespace rwe
             REQUIRE(valueOf(stats, 1, EndGameStat::Score) == 150);
         }
 
-        SECTION("a timemul puts the clock in it as well")
+        SECTION("a timemul puts the clock in it as well, a tick total over sixty")
         {
             sim.killMul = 10;
             sim.timeMul = 2;
-            sim.gameTime = GameTime(90u * static_cast<unsigned int>(SimTicksPerSecond));
+            // 2700 ticks, which the original reads as 45 (a divisor of 60).
+            sim.gameTime = GameTime(2700u);
 
             auto stats = computeEndGameStats(sim);
-            REQUIRE(valueOf(stats, 0, EndGameStat::Score) == (12 * 10) + (90 * 2));
+            REQUIRE(valueOf(stats, 0, EndGameStat::Score) == (12 * 10) + (45 * 2));
         }
 
         SECTION("a negative timemul cannot take a score below nothing")
