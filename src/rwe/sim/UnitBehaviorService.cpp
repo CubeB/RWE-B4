@@ -1690,6 +1690,9 @@ namespace rwe
             .inheritedVelocity = inheritedVelocity,
             .targetPosition = fireInfo->targetPosition,
             .targetProjectile = targetProjectileOption,
+            .burstChildHorizontalDistance = fireInfo->burstsFired > 0
+                ? std::make_optional(SimVector(fireInfo->targetPosition.x - firingPoint.x, 0_ss, fireInfo->targetPosition.z - firingPoint.z).length())
+                : std::nullopt,
         });
 
         // The demo's 0x0d, and the only place the ids exist: the event carries
@@ -1731,6 +1734,11 @@ namespace rwe
             --weapon->stockedRounds;
         }
 
+        // The Fire script and RockUnit are started inside the spawn routines,
+        // which run once for the first round of a burst; the later rounds are
+        // made by the per-tick projectile update and start no script at all
+        // (BT-113, 0x49C9C0/0x49CC20/0x49CDE0 against 0x49B810-0x49BE5C). A
+        // bomb handler starts neither.
         if (fireInfo->burstsFired == 0)
         {
             unit.cobEnvironment->createThread(getFireScriptName(weaponIndex));
@@ -1763,7 +1771,7 @@ namespace rwe
         // variant; for the other hundred and eighty-three the original's
         // script lookup comes back empty and starts nothing, which is what
         // createThread does here too.
-        if (!isBomb)
+        if (!isBomb && fireInfo->burstsFired == 0)
         {
             // Which way it heels is worked out in the unit's own frame, so a
             // tank broadside on to its target rolls rather than pitches.

@@ -1,5 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
 #include <optional>
+#include <rwe/cob/CobOpCode.h>
+#include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitModelDefinition.h>
@@ -273,5 +276,67 @@ namespace rwe
             auto r = fireAt(344);
             REQUIRE(r.damageTick == r.fireTick + 9u);
         }
+    }
+
+    TEST_CASE("a burst starts the Fire script and RockUnit once, not once per round", "[weapon][burst]")
+    {
+        // BT-113. Both are started inside the spawn routines, which run for
+        // the first round of a burst (0x49C9C0, 0x49CC20, 0x49CDE0); the later
+        // rounds come from the per-tick projectile update (0x49B810) and start
+        // no script. Sleeping bodies keep every thread that is started alive
+        // to be counted.
+        GameSimulation sim(makeFlatTerrain(MapSquares, MapSquares), 0u, 0, 0);
+        sim.lineOfSightMode = LineOfSightMode::Circular;
+
+        auto us = addPlayer(sim, "us");
+        auto them = addPlayer(sim, "them");
+        registerModels(sim);
+        defineLaser(sim);
+        sim.weaponDefinitions.at("LASER_HEAVY").burst = 3;
+        defineShooter(sim);
+        defineVictim(sim);
+
+        auto sleeper = std::make_shared<CobScript>();
+        sleeper->staticVariableCount = 0;
+        sleeper->pieces = {"base"};
+        sleeper->functions = {CobFunctionInfo{"FirePrimary", 0}, CobFunctionInfo{"RockUnit", 4}};
+        const auto sleepForever = std::vector<uint32_t>{
+            static_cast<uint32_t>(OpCode::PUSH_CONSTANT), 1000000u, static_cast<uint32_t>(OpCode::SLEEP), static_cast<uint32_t>(OpCode::RETURN)};
+        sleeper->instructions = sleepForever;
+        sleeper->instructions.insert(sleeper->instructions.end(), sleepForever.begin(), sleepForever.end());
+        sim.unitScriptDefinitions["ARMHLT"] = *sleeper;
+        static const auto empty = makeEmptyCobScript({"base"});
+        sim.unitScriptDefinitions["CORMEX"] = *empty;
+
+        auto shooterId = sim.trySpawnUnit("ARMHLT", us, SimVector(0_ss, 0_ss, 0_ss), std::nullopt);
+        REQUIRE(shooterId);
+        auto victimId = sim.trySpawnUnit("CORMEX", them, SimVector(0_ss, 0_ss, 152_ss), std::nullopt);
+        REQUIRE(victimId);
+        sim.getUnitState(*shooterId).hitPoints = sim.unitDefinitions.at("ARMHLT").maxHitPoints;
+        sim.getUnitState(*victimId).hitPoints = sim.unitDefinitions.at("CORMEX").maxHitPoints;
+        sim.getUnitState(*victimId).position.y = SimScalar(BarrelHeight);
+        sim.getUnitState(*victimId).previousPosition = sim.getUnitState(*victimId).position;
+
+        int rounds = 0;
+        for (unsigned int t = 1; t <= 600u && rounds < 3; ++t)
+        {
+            sim.events.clear();
+            sim.tick();
+            for (const auto& e : sim.events)
+            {
+                if (std::get_if<FireWeaponEvent>(&e) != nullptr)
+                {
+                    ++rounds;
+                }
+            }
+        }
+        REQUIRE(rounds == 3);
+
+        const auto& threads = sim.getUnitState(*shooterId).cobEnvironment->threads;
+        auto countNamed = [&](const std::string& name) {
+            return std::count_if(threads.begin(), threads.end(), [&](const auto& t) { return t->name == name; });
+        };
+        REQUIRE(countNamed("FirePrimary") == 1);
+        REQUIRE(countNamed("RockUnit") == 1);
     }
 }

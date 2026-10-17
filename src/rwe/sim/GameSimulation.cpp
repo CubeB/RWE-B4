@@ -2576,6 +2576,7 @@ namespace rwe
 
         projectile.createdAt = gameTime;
         projectile.groundBounce = weaponDefinition.groundBounce;
+        const bool isBurstChild = spawn.burstChildHorizontalDistance.has_value();
 
         projectile.targetUnit = targetUnit;
         projectile.targetPosition = targetPosition;
@@ -2628,6 +2629,49 @@ namespace rwe
             }
             projectile.motorOutFrame = gameTime + burn;
             projectile.dieOnFrame = std::nullopt;
+        }
+
+        if (isBurstChild)
+        {
+            // A child of a burst has a life of its own (0x49B87F-0x49B8BC): the
+            // tick plus the weapon's timer when the weapon names one, else the
+            // stored horizontal distance plus 16 world units over the child's
+            // own scalar speed, with randomdecay moving it about half its
+            // interval either way (0x49B8BF-0x49B8EB). A missile's expiry is
+            // the end of its burn, as the first round's is.
+            GameTime expiry;
+            if (weaponDefinition.weaponTimer)
+            {
+                expiry = gameTime + *weaponDefinition.weaponTimer;
+            }
+            else
+            {
+                auto childSpeed = projectile.velocity.length();
+                if (std::holds_alternative<ProjectilePhysicsTypeSelfPropelled>(weaponDefinition.physicsType))
+                {
+                    childSpeed = projectile.speed > 0_ss ? projectile.speed : std::get<ProjectilePhysicsTypeSelfPropelled>(weaponDefinition.physicsType).maxVelocity;
+                }
+                if (childSpeed <= 0_ss)
+                {
+                    childSpeed = weaponDefinition.velocity;
+                }
+                auto distanceFixed = static_cast<int64_t>(simScalarToFixed(*spawn.burstChildHorizontalDistance + 16_ss));
+                auto speedFixed = static_cast<int64_t>(simScalarToFixed(childSpeed));
+                auto lifeTicks = speedFixed > 0 ? std::max<int64_t>(distanceFixed / speedFixed, 1) : int64_t(1);
+                expiry = gameTime + GameTime(static_cast<unsigned int>(lifeTicks));
+            }
+            auto randomDecay = weaponDefinition.randomDecay.value_or(GameTime(0)).value;
+            auto randomVal = randomBelow(rng, randomDecay + 1u);
+            expiry = expiry - GameTime(randomDecay / 2) + GameTime(randomVal);
+
+            if (std::holds_alternative<ProjectilePhysicsTypeSelfPropelled>(weaponDefinition.physicsType))
+            {
+                projectile.motorOutFrame = expiry;
+            }
+            else
+            {
+                projectile.dieOnFrame = expiry;
+            }
         }
 
         return projectile;

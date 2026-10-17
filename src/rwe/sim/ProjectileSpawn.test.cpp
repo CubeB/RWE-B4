@@ -77,4 +77,60 @@ namespace rwe
             REQUIRE(p.damage.at("DEFAULT") == 42u);
         }
     }
+
+    TEST_CASE("a burst child lives to a little past the aim point, not to full range", "[projectile][spawn][burst]")
+    {
+        // BT-113. The first round of a burst is the template and lives out the
+        // range over the speed cap. A child is made later by the projectile
+        // pass and expires at the tick plus the weapon's timer when it has
+        // one, else at (the stored horizontal distance + 16) / its own speed
+        // (0x49B87F-0x49B8BC).
+        MapTerrain terrain(Grid<unsigned char>(64, 64, static_cast<unsigned char>(0)), 0_ss);
+        GameSimulation sim(std::move(terrain), 0u, 0, 0);
+        addPlayer(sim);
+
+        // The shipped EMG shape: lineofsight at 300 a second (10 a tick),
+        // burst 3, no weapontimer here so the distance rule is what is read.
+        WeaponDefinition w{};
+        w.physicsType = ProjectilePhysicsTypeLineOfSight();
+        w.maxRange = 600_ss;
+        w.burst = 3;
+        w.velocity = 300_ss / 30_ss;
+        w.damage["DEFAULT"] = 5;
+        sim.weaponDefinitions["emg"] = w;
+
+        auto spawn = [&](std::optional<SimScalar> childDistance) {
+            return sim.createProjectileFromWeapon(ProjectileSpawn{
+                .owner = PlayerId(1),
+                .weaponType = "emg",
+                .position = SimVector(0_ss, 20_ss, 0_ss),
+                .direction = SimVector(1_ss, 0_ss, 0_ss),
+                .distanceToTarget = 200_ss,
+                .burstChildHorizontalDistance = childDistance});
+        };
+
+        SECTION("the first round flies the whole range")
+        {
+            auto first = spawn(std::nullopt);
+            REQUIRE(first.dieOnFrame.has_value());
+            REQUIRE(*first.dieOnFrame == sim.gameTime + GameTime(60));
+        }
+
+        SECTION("a child lives for (distance + 16) over its own speed")
+        {
+            auto child = spawn(200_ss);
+            REQUIRE(child.dieOnFrame.has_value());
+            // 216 / 10, truncated to whole ticks.
+            REQUIRE(*child.dieOnFrame == sim.gameTime + GameTime(21));
+        }
+
+        SECTION("a weapon that names a timer gives the child that timer instead")
+        {
+            sim.weaponDefinitions["emg"].weaponTimer = GameTime(30);
+            sim.weaponDefinitions["emg"].randomDecay = GameTime(0);
+            auto child = spawn(200_ss);
+            REQUIRE(child.dieOnFrame.has_value());
+            REQUIRE(*child.dieOnFrame == sim.gameTime + GameTime(30));
+        }
+    }
 }
