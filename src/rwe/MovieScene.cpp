@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <rwe/util/CrashHandler.h>
+#include <rwe/util/SimpleLogger.h>
 
 namespace rwe
 {
@@ -60,32 +61,50 @@ namespace rwe
         // First pass: pull all the audio out. The audio chunks sit before the
         // video data in every frame and decode independently of it, so the
         // pass can skip the expensive half entirely.
-        if (auto audioInfo = decoder.getAudioInfo())
+        //
+        // A film that will not decode ends there, as if it had finished: it
+        // costs the film and never the process.
+        try
         {
-            std::vector<int16_t> samples;
-            decoder.setSkipVideo(true);
-            while (decoder.decodeNextFrame())
+            if (auto audioInfo = decoder.getAudioInfo())
             {
-                const auto& frameAudio = decoder.getFrameAudio();
-                samples.insert(samples.end(), frameAudio.begin(), frameAudio.end());
-            }
-            decoder.rewind();
-            decoder.setSkipVideo(false);
+                // About half an hour of 22 kHz stereo, for a ceiling on what
+                // a hostile file can have the pass accumulate.
+                constexpr std::size_t MaxSamples = 64u * 1024u * 1024u;
+                std::vector<int16_t> samples;
+                decoder.setSkipVideo(true);
+                while (decoder.decodeNextFrame())
+                {
+                    const auto& frameAudio = decoder.getFrameAudio();
+                    if (samples.size() + frameAudio.size() > MaxSamples)
+                    {
+                        throw std::runtime_error("SMK soundtrack is too long");
+                    }
+                    samples.insert(samples.end(), frameAudio.begin(), frameAudio.end());
+                }
+                decoder.rewind();
+                decoder.setSkipVideo(false);
 
-            if (!samples.empty())
+                if (!samples.empty())
+                {
+                    sceneContext.audioService->playMusicFromMemory(
+                        buildWav(samples, audioInfo->sampleRate, audioInfo->stereo ? 2 : 1), false);
+                }
+            }
+
+            if (decoder.decodeNextFrame())
             {
-                sceneContext.audioService->playMusicFromMemory(
-                    buildWav(samples, audioInfo->sampleRate, audioInfo->stereo ? 2 : 1), false);
+                framesPresented = 1;
+                uploadFrame();
+            }
+            else
+            {
+                finish();
             }
         }
-
-        if (decoder.decodeNextFrame())
+        catch (const std::exception& e)
         {
-            framesPresented = 1;
-            uploadFrame();
-        }
-        else
-        {
+            LOG_WARN << "Ending a film that could not be decoded: " << e.what();
             finish();
         }
     }
@@ -101,15 +120,24 @@ namespace rwe
         auto targetFrames = (elapsedMicroseconds / decoder.getMicrosecondsPerFrame()) + 1;
 
         bool decodedAny = false;
-        while (framesPresented < targetFrames)
+        try
         {
-            if (!decoder.decodeNextFrame())
+            while (framesPresented < targetFrames)
             {
-                finish();
-                return;
+                if (!decoder.decodeNextFrame())
+                {
+                    finish();
+                    return;
+                }
+                ++framesPresented;
+                decodedAny = true;
             }
-            ++framesPresented;
-            decodedAny = true;
+        }
+        catch (const std::exception& e)
+        {
+            LOG_WARN << "Ending a film that could not be decoded: " << e.what();
+            finish();
+            return;
         }
         if (decodedAny)
         {
@@ -186,6 +214,25 @@ namespace rwe
         onFinish();
     }
 
+    std::shared_ptr<MovieScene> tryMakeMovieScene(const SceneContext& sceneContext, std::vector<char>&& movieData, std::function<void()>&& onFinish)
+    {
+        // The original skips a zero-length film like a missing one.
+        if (movieData.empty())
+        {
+            return nullptr;
+        }
+
+        try
+        {
+            return std::make_shared<MovieScene>(sceneContext, std::move(movieData), std::move(onFinish));
+        }
+        catch (const std::exception& e)
+        {
+            LOG_WARN << "Skipping a film that could not be opened: " << e.what();
+            return nullptr;
+        }
+    }
+
     std::shared_ptr<Scene> filmsThen(const SceneContext& sceneContext, std::vector<std::string> vfsPaths, std::function<std::shared_ptr<Scene>()> then)
     {
         for (std::size_t i = 0; i < vfsPaths.size(); ++i)
@@ -197,12 +244,16 @@ namespace rwe
             }
             std::vector<std::string> rest(vfsPaths.begin() + static_cast<std::ptrdiff_t>(i) + 1, vfsPaths.end());
             auto context = sceneContext;
-            return std::make_shared<MovieScene>(
+            auto film = tryMakeMovieScene(
                 sceneContext,
                 std::move(*bytes),
-                [context, rest = std::move(rest), then = std::move(then)]() {
+                [context, rest, then]() {
                     context.sceneManager->setNextScene(filmsThen(context, rest, then));
                 });
+            if (film)
+            {
+                return film;
+            }
         }
         return then();
     }

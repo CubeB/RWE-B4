@@ -2,6 +2,8 @@
 #include <cstring>
 #include <deque>
 #include <rwe/LoadingScene_util.h>
+#include <rwe/MovieScene.h>
+#include <rwe/SceneContext.h>
 #include <rwe/io/_3do/_3do.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/io/fbi/io.h>
@@ -314,6 +316,86 @@ namespace rwe
         std::memcpy(data.data() + 4, &side, 4);
         std::memcpy(data.data() + 8, &side, 4);
         REQUIRE_THROWS(SmkDecoder(std::move(data)));
+    }
+
+    namespace
+    {
+        void put32(std::vector<char>& data, std::size_t at, uint32_t value)
+        {
+            std::memcpy(data.data() + at, &value, 4);
+        }
+
+        /** A Smacker header with no frames, which `put32` then bends. */
+        std::vector<char> smkHeader(std::size_t extra)
+        {
+            std::vector<char> data(104 + extra, 0);
+            std::memcpy(data.data(), "SMK2", 4);
+            put32(data, 4, 64);
+            put32(data, 8, 64);
+            put32(data, 16, 100);
+            return data;
+        }
+    }
+
+    TEST_CASE("a Smacker film whose frame table would be larger than 32 bits is refused", "[malformed]")
+    {
+        SECTION("a count whose five-byte table size wraps to something the file holds")
+        {
+            // 858,993,460 * 5 is 4,294,967,300, which is 4 in 32 bits.
+            auto data = smkHeader(4);
+            put32(data, 12, 858993460u);
+            REQUIRE_THROWS_AS(SmkDecoder(std::move(data)), std::runtime_error);
+        }
+
+        SECTION("the largest count with the ring frame, whose table wrapped to nothing")
+        {
+            auto data = smkHeader(64);
+            put32(data, 12, 0xFFFFFFFFu);
+            put32(data, 20, 1);
+            REQUIRE_THROWS_AS(SmkDecoder(std::move(data)), std::runtime_error);
+        }
+    }
+
+    TEST_CASE("a Smacker Huffman tree block of set bits is refused, not recursed into", "[malformed]")
+    {
+        // A million bytes of ones: every bit opens a node. This recursed
+        // eight million levels deep.
+        constexpr std::size_t treesSize = 1u << 20;
+        auto data = smkHeader(treesSize);
+        put32(data, 52, static_cast<uint32_t>(treesSize));
+        std::fill(data.begin() + 104, data.end(), static_cast<char>(0xFF));
+        REQUIRE_THROWS_AS(SmkDecoder(std::move(data)), std::runtime_error);
+    }
+
+    TEST_CASE("a Smacker audio chunk that unpacks to billions of samples is refused before it is reserved", "[malformed]")
+    {
+        // One frame with one audio track, packed 16-bit mono. The trees are
+        // all empty, so a sample would cost no bits and the loop would run
+        // for as many samples as the chunk says.
+        constexpr std::size_t treesSize = 4;
+        auto data = smkHeader(4 + 1 + treesSize + 12);
+        put32(data, 12, 1);
+        put32(data, 52, static_cast<uint32_t>(treesSize));
+        put32(data, 72, 0x80000000u | 0x40000000u | 0x20000000u | 22050u);
+        std::size_t at = 104;
+        put32(data, at, 12); // the frame's size
+        at += 4;
+        data[at++] = 2; // the frame's type: audio track 0, no palette
+        at += treesSize; // four empty trees
+        put32(data, at, 11); // the chunk: this field, the size, three bytes
+        put32(data, at + 4, 0x7FFFFFF0u);
+        data[at + 8] = 0x05; // present, mono, 16-bit, two empty byte trees
+        SmkDecoder decoder(std::move(data));
+        decoder.setSkipVideo(true);
+        REQUIRE_THROWS_AS(decoder.decodeNextFrame(), std::runtime_error);
+    }
+
+    TEST_CASE("a film that is empty or will not open is skipped, not thrown", "[malformed]")
+    {
+        SceneContext context(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+
+        REQUIRE(tryMakeMovieScene(context, std::vector<char>{}, [] {}) == nullptr);
+        REQUIRE(tryMakeMovieScene(context, std::vector<char>(200, 'x'), [] {}) == nullptr);
     }
 
     TEST_CASE("a weapon TDF's unitsonly only takes a number", "[malformed]")

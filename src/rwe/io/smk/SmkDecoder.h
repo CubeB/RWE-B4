@@ -136,9 +136,9 @@ namespace rwe
 
         void parseHeader();
         HuffTree buildTree8(BitReader& reader);
-        int buildTree8Recursive(BitReader& reader, HuffTree& tree);
+        int buildTree8Recursive(BitReader& reader, HuffTree& tree, unsigned int depth);
         HuffTree buildTree16(BitReader& reader);
-        int buildTree16Recursive(BitReader& reader, HuffTree& tree, HuffTree& low, HuffTree& high);
+        int buildTree16Recursive(BitReader& reader, HuffTree& tree, HuffTree& low, HuffTree& high, unsigned int depth);
         static uint16_t decodeTree(BitReader& reader, HuffTree& tree);
 
         void decodePalette(const uint8_t* data, std::size_t size);

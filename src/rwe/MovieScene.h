@@ -47,6 +47,14 @@ namespace rwe
     };
 
     /**
+     * A film scene over the given file, or nothing if the file is empty or
+     * is not a film the decoder can open. The original skips a zero-length
+     * film like a missing one; a damaged one is skipped here too, with a line
+     * in the log, where the constructor would have thrown out of a click.
+     */
+    std::shared_ptr<MovieScene> tryMakeMovieScene(const SceneContext& sceneContext, std::vector<char>&& movieData, std::function<void()>&& onFinish);
+
+    /**
      * The films at `vfsPaths` one after another, passing over any that is
      * missing as the original's player does (0x4267B3), and then the scene
      * `then` makes.

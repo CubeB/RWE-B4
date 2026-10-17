@@ -435,12 +435,13 @@ namespace rwe
             // and neither does quitting a game back to the menu, which builds
             // its MainMenuScene itself.
             auto logoBytes = vfs.readFile("movies/1.zrb");
+            std::shared_ptr<MovieScene> logo;
             if (logoBytes)
             {
                 auto context = sceneContext;
                 auto* soundTdf = &allSoundTdf;
                 auto* viewportPtr = &viewport;
-                auto logo = std::make_shared<MovieScene>(
+                logo = tryMakeMovieScene(
                     sceneContext,
                     std::move(*logoBytes),
                     [context, soundTdf, viewportPtr]() {
@@ -451,6 +452,9 @@ namespace rwe
                             viewportPtr->height());
                         context.sceneManager->setNextScene(menu);
                     });
+            }
+            if (logo)
+            {
                 sceneManager.setNextScene(logo);
             }
             else

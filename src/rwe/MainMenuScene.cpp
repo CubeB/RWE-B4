@@ -491,14 +491,9 @@ namespace rwe
             return;
         }
 
-        // The menu's own music has to stop -- the movie's soundtrack plays
-        // through the same track.
-        sceneContext.audioService->stopMusic();
-        bgm = AudioService::LoopToken();
-
         auto context = sceneContext;
         auto lookup = soundLookup;
-        auto scene = std::make_shared<MovieScene>(
+        auto scene = tryMakeMovieScene(
             sceneContext,
             std::move(*movieBytes),
             [context, lookup]() {
@@ -509,6 +504,16 @@ namespace rwe
                     context.viewport->height());
                 context.sceneManager->setNextScene(menu);
             });
+        if (!scene)
+        {
+            // Empty or undecodable: the menu stays, with its music.
+            return;
+        }
+
+        // The menu's own music has to stop -- the movie's soundtrack plays
+        // through the same track.
+        sceneContext.audioService->stopMusic();
+        bgm = AudioService::LoopToken();
         sceneContext.sceneManager->setNextScene(scene);
     }
 
