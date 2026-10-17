@@ -9,6 +9,17 @@
  */
 namespace rwe
 {
+    TEST_CASE("a feature marked nodisplayinfo shows no footer text (BT-147)", "[presentation]")
+    {
+        FeatureDefinition ordinary{};
+        ordinary.noDisplayInfo = false;
+        REQUIRE(featureFooterIsShown(ordinary));
+
+        FeatureDefinition iceChunk{};
+        iceChunk.noDisplayInfo = true;
+        REQUIRE_FALSE(featureFooterIsShown(iceChunk));
+    }
+
     TEST_CASE("the nano spray lands in 4/11 to 7/11 of the target's extent (BT-144)", "[presentation]")
     {
         // The window is the middle three elevenths, centred: from -1.5/11 to

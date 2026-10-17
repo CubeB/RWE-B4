@@ -645,6 +645,16 @@ namespace rwe
     UnitActivity unitActivity(const UnitState& unit, bool underConstruction, bool weaponQueued);
 
     /**
+     * Whether the footer says anything about a hovered feature (BT-147). The
+     * feature branch of the footer (0x46B78C) tests the definition's
+     * `nodisplayinfo` bit and skips the whole text when it is set -- the 46
+     * shipped features that set it (ice chunks, vents, lava spires, moon
+     * craters) show no footer. The original lets a developer flag
+     * (+0x3923B bit 1) override that; RWE has no such flag.
+     */
+    bool featureFooterIsShown(const FeatureDefinition& definition);
+
+    /**
      * The kills line under the damage bar (0x46B2B8-0x46B3B2).
      *
      * Empty at zero kills, because the original tests the count against zero

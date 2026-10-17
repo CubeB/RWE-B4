@@ -471,6 +471,9 @@ namespace rwe
             const auto& featureDefinition = simulation.getFeatureDefinition(feature.featureName);
             const auto& featureMediaInfo = gameMediaDatabase.getFeature(feature.featureName);
 
+            // A feature marked `nodisplayinfo` says nothing in the footer
+            // (BT-147), as the footer's feature branch tests that bit first.
+            if (featureFooterIsShown(featureDefinition))
             {
                 const auto& rect = localSideData._name;
                 auto text = featureMediaInfo.description;

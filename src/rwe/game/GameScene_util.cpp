@@ -1987,6 +1987,11 @@ namespace rwe
             [](const LandOnAirBaseOrder& o) { return std::optional<UnitId>(o.target); });
     }
 
+    bool featureFooterIsShown(const FeatureDefinition& definition)
+    {
+        return !definition.noDisplayInfo;
+    }
+
     std::string killsCaption(unsigned int kills)
     {
         if (kills == 0)
