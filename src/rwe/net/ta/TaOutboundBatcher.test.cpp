@@ -152,6 +152,42 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a broadcast takes one count, the same in every peer's packet (BT-207)", "[net][ta]")
+    {
+        std::vector<Sent> sent;
+        TaOutboundBatcher batcher(
+            [&](TaOutboundBatcher::PeerId peer, std::span<const std::uint8_t> bytes, TaTransport transport) {
+                sent.push_back(Sent{peer, transport, TadBytes(bytes.begin(), bytes.end())});
+            },
+            TadPacketUncompressed);
+
+        // With two joiners the sequence used to fall by two per broadcast, and a
+        // receiver that sees a gap holds the bundle back.
+        const TaOutboundBatcher::PeerId peers[] = {3, 5};
+        batcher.queueForAll(peers, subpacket(0x07, 1), TaTransport::Tcp);
+        batcher.flush();
+        batcher.queueForAll(peers, subpacket(0x07, 1), TaTransport::Tcp);
+        batcher.flush();
+
+        REQUIRE(sent.size() == 4);
+        std::vector<std::uint32_t> markers;
+        for (const Sent& one : sent)
+        {
+            auto parsed = taParsePacket(one.bytes);
+            REQUIRE(parsed);
+            markers.push_back(parsed->packet.marker);
+        }
+        REQUIRE(markers == std::vector<std::uint32_t>{0xfffffffe, 0xfffffffe, 0xfffffffd, 0xfffffffd});
+
+        // Nobody to send to is not a send, and takes no count.
+        batcher.queueForAll(std::span<const TaOutboundBatcher::PeerId>(), subpacket(0x07, 1), TaTransport::Tcp);
+        batcher.queue(3, subpacket(0x07, 1), TaTransport::Tcp);
+        batcher.flush();
+        auto last = taParsePacket(sent.back().bytes);
+        REQUIRE(last);
+        REQUIRE(last->packet.marker == 0xfffffffc);
+    }
+
     TEST_CASE("a batcher frames one way", "[net][ta]")
     {
         std::vector<Sent> sent;
