@@ -467,6 +467,19 @@ namespace rwe
     int computeKilledSeverity(unsigned int overkill, unsigned int maxHitPoints, unsigned int previousHealthPercent);
 
     /**
+     * What the COB `HitByWeapon` script is told about where a hit came from
+     * (BT-54, TotalA.exe 0x489CE0): the cosine and then the sine of the hit
+     * direction, each times 400. The direction is the angle from the victim
+     * to where the round burst, minus the victim's heading, and only its high
+     * byte survives (256 steps, 0x499CD0); the sine table at 0x509F00 holds
+     * 8192 for 1.0, and the products are rounded to nearest.
+     */
+    std::pair<int, int> computeHitByWeaponArguments(SimAngle direction);
+
+    /** What `TakeDamage` is told: `100 * health / maxHealth`, clamped to 0 to 100. */
+    int computeTakeDamagePercent(unsigned int hitPoints, unsigned int maxHitPoints);
+
+    /**
      * The corpse level a `Killed` script wrote into its second parameter, if
      * it wrote one. Masked to four bits as the original masks it.
      */
@@ -1473,6 +1486,12 @@ namespace rwe
          * A hit a Remote player ran is the victim's owner's to report and
          * reaches us as an incoming 0x0b, so `reportedByOwner` marks that call
          * and is the only way such a hit is applied here.
+         *
+         * `burstPosition` is where the round burst, and it is what makes a hit
+         * the original's damage kind 1 (ordinary weapon damage): only a hit
+         * that names it and leaves the unit standing starts the unit's
+         * `HitByWeapon(cos * 400, sin * 400)` and then `TakeDamage(percent)`
+         * scripts (BT-54). Water, a wipe and the rest never do.
          */
         void applyDamage(
             UnitId unitId,
@@ -1481,7 +1500,8 @@ namespace rwe
             bool paralyzer,
             std::optional<PlayerId> sourceOwner = std::nullopt,
             const char* deathCause = "weapon",
-            bool reportedByOwner = false);
+            bool reportedByOwner = false,
+            std::optional<SimVector> burstPosition = std::nullopt);
 
         /**
          * The acid in the sea, once a second (0x48AED3-0x48AF32): every unit

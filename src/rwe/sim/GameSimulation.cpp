@@ -3569,7 +3569,33 @@ namespace rwe
         applyDamage(unitId, damagePoints, attacker, false);
     }
 
-    void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer, std::optional<PlayerId> sourceOwner, const char* deathCause, bool reportedByOwner)
+    std::pair<int, int> computeHitByWeaponArguments(SimAngle direction)
+    {
+        // Only the high byte of the angle is kept (0x499CD0), so the direction
+        // has 256 steps, and the sine table holds 8192 for 1.0 (0x509F00).
+        // The cosine is the sine a quarter turn on.
+        auto step = SimAngle(static_cast<std::uint16_t>(direction.value & 0xFF00u));
+        auto tableValue = [](SimAngle a) {
+            return static_cast<std::int64_t>(std::lround(sin(a).value * 8192.0f));
+        };
+        auto scaled = [](std::int64_t t) {
+            // Times 400 over 8192, rounded to nearest; the shift is a floor,
+            // so half a unit is added first.
+            return static_cast<int>((t * 400 + 4096) >> 13);
+        };
+        return {scaled(tableValue(step + QuarterTurn)), scaled(tableValue(step))};
+    }
+
+    int computeTakeDamagePercent(unsigned int hitPoints, unsigned int maxHitPoints)
+    {
+        if (maxHitPoints == 0)
+        {
+            return 0;
+        }
+        return static_cast<int>(std::min<std::uint64_t>(100u, (std::uint64_t(100) * hitPoints) / maxHitPoints));
+    }
+
+    void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer, std::optional<PlayerId> sourceOwner, const char* deathCause, bool reportedByOwner, std::optional<SimVector> burstPosition)
     {
         // Damage to a Remote player's unit is the owner's to report. When this
         // machine ran the hit, its attacker side shows the damage and records a
@@ -3724,6 +3750,21 @@ namespace rwe
         else
         {
             unit.hitPoints -= damagePoints;
+
+            // A hit that leaves the unit standing tells its script (0x489CE0,
+            // BT-54), for ordinary weapon damage only: HitByWeapon with the
+            // direction the burst came from, then TakeDamage with the health
+            // left. A solar collector's and a radar tower's HitByWeapon
+            // switch the unit off for eight seconds, so this is economy as
+            // well as animation. A script without the function costs nothing.
+            if (burstPosition && unit.cobEnvironment)
+            {
+                auto toBurst = *burstPosition - unit.position;
+                auto bearing = UnitState::toRotation(SimVector(toBurst.x, 0_ss, toBurst.z)) - unit.rotation;
+                auto [cosine, sine] = computeHitByWeaponArguments(bearing);
+                unit.cobEnvironment->createThread("HitByWeapon", {cosine, sine});
+                unit.cobEnvironment->createThread("TakeDamage", {computeTakeDamagePercent(unit.hitPoints, unitDefinition.maxHitPoints)});
+            }
         }
     }
 
@@ -3951,7 +3992,7 @@ namespace rwe
           }
           auto rawDamage = projectile.getDamage(unit.unitType);
           auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * *damageScale);
-          applyDamage(*u, scaledDamage, projectile.attacker, paralyzer, projectile.owner); });
+          applyDamage(*u, scaledDamage, projectile.attacker, paralyzer, projectile.owner, "weapon", false, projectile.position); });
 
         for (const auto& flyingUnitId : flyingUnitsSet)
         {
@@ -3981,7 +4022,7 @@ namespace rwe
             }
             auto rawDamage = projectile.getDamage(unit.unitType);
             auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * *damageScale);
-            applyDamage(flyingUnitId, scaledDamage, projectile.attacker, paralyzer, projectile.owner);
+            applyDamage(flyingUnitId, scaledDamage, projectile.attacker, paralyzer, projectile.owner, "weapon", false, projectile.position);
         }
     }
 
