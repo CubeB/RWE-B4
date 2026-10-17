@@ -365,4 +365,69 @@ namespace rwe
             REQUIRE(sim.rng == expected);
         }
     }
+
+    TEST_CASE("a wind of zero draws no direction and keeps the stale one", "[wind]")
+    {
+        // BT-26 (0x490C40): the direction is drawn only when the new speed is
+        // not zero.
+        SECTION("a becalmed map draws the interval and nothing else")
+        {
+            GameSimulation sim(makeFlatTerrain(16, 16), 0u, 0, 0);
+            auto expected = sim.rng;
+            sim.updateWind();
+
+            randomBetween(expected, 5, 14);
+            REQUIRE(sim.rng == expected);
+        }
+
+        SECTION("a wind that blows draws a direction, and a calm after it leaves it alone")
+        {
+            GameSimulation sim(makeFlatTerrain(16, 16), 0u, 500, 500);
+            sim.updateWind();
+            auto blown = sim.currentWindDirection;
+
+            // The bounds are constants, so reach the zero by way of the saved
+            // direction in a calm simulation instead.
+            GameSimulation calm(makeFlatTerrain(16, 16), 0u, 0, 0);
+            calm.currentWindDirection = blown;
+            calm.updateWind();
+            REQUIRE(calm.currentWindDirection == blown);
+        }
+    }
+
+    TEST_CASE("a wind change comes after the settle that second", "[wind][economy]")
+    {
+        // BT-26: the selector runs after the player pass, so on a tick that is
+        // both a settle and a change the settle has used the old fraction.
+        // The wind is full strength from the start, held at nothing by hand,
+        // and its change is put on tick 30, the second settle boundary.
+        GameSimulation sim(makeFlatTerrain(32, 32), 0u, 5000, 5000);
+        auto player = addPlayer(sim);
+        std::vector<UnitPieceDefinition> pieces{UnitPieceDefinition{"base", SimVector(0_ss, 0_ss, 0_ss), std::nullopt}};
+        sim.unitModelDefinitions["model"] = createUnitModelDefinition(10_ss, std::move(pieces));
+        UnitDefinition d{};
+        d.objectName = "model";
+        d.maxHitPoints = 100;
+        d.buildTime = 0u;
+        d.windGenerator = Energy(25.0f);
+        d.yardMap = Grid<YardMapCell>(2u, 2u, YardMapCell::Ground);
+        d.movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
+        sim.unitDefinitions["ARMWIN"] = d;
+        sim.unitScriptDefinitions["ARMWIN"] = *makeEmptyCobScript();
+        auto windmill = sim.trySpawnCompletedUnit("ARMWIN", player, SimVector(16_ss, 0_ss, 16_ss), std::nullopt);
+        REQUIRE(windmill);
+        sim.getUnitState(*windmill).activated = true;
+
+        sim.tick();
+        sim.currentWindGenerationFactor = 0_ss;
+        sim.nextWindSpeedChange = GameTime(30u);
+
+        tick(sim, 29);
+        REQUIRE(sim.gameTime == GameTime(30u));
+        const auto atThirty = sim.getPlayer(player).energyProduced;
+        REQUIRE(atThirty == Energy(0.0f));
+
+        tick(sim, 30);
+        REQUIRE(sim.getPlayer(player).energyProduced - atThirty == Energy(25.0f));
+    }
 }

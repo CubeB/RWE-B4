@@ -623,6 +623,14 @@ namespace rwe
          */
         SimVector currentWindVector{0_ss, 0_ss, 0_ss};
 
+        /**
+         * The direction the wind last blew in. Kept because a change to a
+         * wind of zero draws no new direction (BT-26, 0x490C40) and the wind
+         * generators' SetDirection is told the stale one; saved and hashed
+         * for that reason. Zero until the first change that has a speed.
+         */
+        SimAngle currentWindDirection = SimAngle(0);
+
         const int minWindSpeed;
 
         const int maxWindSpeed;

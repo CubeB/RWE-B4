@@ -610,6 +610,7 @@ namespace rwe
             {"projectiles", dumpJson(simulation.projectiles)},
             {"features", dumpJson(simulation.features)},
             {"currentWindVector", dumpJson(simulation.currentWindVector)},
+            {"currentWindDirection", simulation.currentWindDirection.value},
             {"featureRegrowthCursor", simulation.featureRegrowthCursor},
             {"explored", dumpJson(simulation.explored)},
             {"cloakSeenEnemies", dumpJson(simulation.cloakSeenEnemies)},

@@ -492,6 +492,7 @@ namespace rwe
             simulation.projectiles,
             featuresHash,
             simulation.currentWindVector,
+            static_cast<uint32_t>(simulation.currentWindDirection.value),
             simulation.featureRegrowthCursor,
             // The explored grid is per line-of-sight group and feeds canSeeUnit
             // in Permanent mode, where it decides targets. A peer that disagrees

@@ -682,6 +682,7 @@ namespace rwe
         j["gameStatus"] = saveWinStatus(sim.gameStatus);
         j["currentWindGenerationFactor"] = saveSimScalar(sim.currentWindGenerationFactor);
         j["currentWindVector"] = saveSimVector(sim.currentWindVector);
+        j["currentWindDirection"] = saveSimAngle(sim.currentWindDirection);
         j["tidalStrength"] = sim.tidalStrength;
         j["killMul"] = sim.killMul;
         j["timeMul"] = sim.timeMul;
@@ -848,6 +849,12 @@ namespace rwe
             // those at zero is harmless -- the next wind change rebuilds it
             // within fourteen seconds.
             sim.currentWindVector = loadSimVector(j.at("currentWindVector"));
+        }
+        if (j.contains("currentWindDirection"))
+        {
+            // Absent from saves made before BT-26; the stale direction then
+            // starts at zero, which only a wind of zero can ever show.
+            sim.currentWindDirection = loadSimAngle(j.at("currentWindDirection"));
         }
         sim.tidalStrength = j.at("tidalStrength").get<int>();
         if (j.contains("killMul"))

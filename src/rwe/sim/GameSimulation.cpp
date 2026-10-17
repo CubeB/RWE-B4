@@ -4698,16 +4698,20 @@ namespace rwe
             const int windSpan = maxWindSpeed - minWindSpeed;
             const int currentWindSpeed = minWindSpeed + (windSpan < 2 ? 0 : static_cast<int>(randomBelow(rng, static_cast<unsigned int>(windSpan))));
 
-            auto currentWindDirection = SimAngle(static_cast<uint16_t>(randomBetween(rng, MinAngle.value, MaxAngle.value)));
+            // Only a wind that blows is given a direction (BT-26, 0x490C40):
+            // at speed zero no draw is made and the stale direction stays,
+            // which the wind generators' SetDirection is still told.
+            if (currentWindSpeed != 0)
+            {
+                currentWindDirection = SimAngle(static_cast<uint16_t>(randomBetween(rng, MinAngle.value, MaxAngle.value)));
+            }
 
             // A generator gets the wind as a fraction of the speed the game
             // considers a full gale, and no more than all of it however hard
             // the map says the wind blows (TotalA.exe 0x490D5E).
             currentWindGenerationFactor = rweMin(1_ss, SimScalar(currentWindSpeed) / SimScalar(MaxUtilizableWindSpeed));
 
-            // The same draw also aims the wind that pushes shells about. The
-            // speed and direction above are locals, so this vector is the only
-            // thing that outlives the change.
+            // The same draw also aims the wind that pushes shells about.
             currentWindVector = computeWindVector(currentWindDirection, currentWindSpeed);
 
             UnitBehaviorService(this).updateWind(currentWindSpeed, currentWindDirection);
@@ -5548,8 +5552,6 @@ namespace rwe
             runAiControllers();
         }
 
-        updateWind();
-
         // Where the original's unit pass takes it, ahead of any kill a unit
         // suffers later in the tick.
         sampleUnitHealth(*this);
@@ -5566,6 +5568,12 @@ namespace rwe
         runAutomaticSharing(*this);
 
         updateResources();
+
+        // After the player pass, as the original does it (0x490C40 follows
+        // 0x464F80; BT-26): on a tick that is both a settle and a change the
+        // settle has used the old fraction. Still ahead of the unit passes,
+        // so the scripts it starts run this tick.
+        updateWind();
 
         {
             RWE_SIMPROF("path");
