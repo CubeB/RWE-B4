@@ -4060,7 +4060,7 @@ namespace rwe
             // TA takes one tick of gravity on the changeover without rebuilding
             // the velocity from the attitude, so a vertical launch is still
             // climbing on the tick it turns over.
-            projectile.velocity.y -= 112_ss / (30_ss * 30_ss);
+            projectile.velocity.y -= gravityPerTick();
 
             if (p.twoPhase && !projectile.secondPhase)
             {
@@ -4140,7 +4140,7 @@ namespace rwe
                     // displacement the shell never accumulates, so a long
                     // flight drifts linearly rather than curving away.
                     projectile.position += currentWindVector;
-                    projectile.velocity.y -= 112_ss / (30_ss * 30_ss);
+                    projectile.velocity.y -= gravityPerTick();
                 },
                 [&](const ProjectilePhysicsTypeBomb&) {
                     // Bombs follow the same gravity model as ballistic
@@ -4151,7 +4151,7 @@ namespace rwe
                     // -- the release trigger (bombReleaseTrigger) does not
                     // model the wind, and neither does the original's.
                     projectile.position += currentWindVector;
-                    projectile.velocity.y -= 112_ss / (30_ss * 30_ss);
+                    projectile.velocity.y -= gravityPerTick();
                 },
                 [&](const ProjectilePhysicsTypeLineOfSight&) {
 
@@ -4746,7 +4746,7 @@ namespace rwe
             {
                 // Still in the air above the water: the map's gravity.
                 // 0x4242A5.
-                feature.velocity.y -= 112_ss / (30_ss * 30_ss);
+                feature.velocity.y -= gravityPerTick();
             }
         }
     }

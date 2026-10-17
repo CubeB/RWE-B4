@@ -743,6 +743,15 @@ namespace rwe
 
     std::optional<std::pair<SimAngle, SimAngle>> computeFiringAngles(SimScalar speed, SimScalar gravity, SimScalar targetX, SimScalar targetY)
     {
+        if (gravity <= 0_ss)
+        {
+            // A map with no gravity (the original's default for a missing
+            // key, BT-124): the shell does not fall, so the only arc is the
+            // straight line and dividing by gravity would be nonsense.
+            auto straight = atan2(targetY, targetX);
+            return std::make_pair(straight, straight);
+        }
+
         auto inner = (gravity * targetX * targetX) + (2_ss * speed * speed * targetY);
         auto beforeSquareRoot = (speed * speed * speed * speed) - (gravity * inner);
         if (beforeSquareRoot < 0_ss)
@@ -1247,17 +1256,18 @@ namespace rwe
         return dot > 0_ss;
     }
 
-    SimScalar bombReleaseTrigger(const UnitDefinition& unitDefinition, SimScalar speed)
+    SimScalar bombReleaseTrigger(const UnitDefinition& unitDefinition, SimScalar speed, SimScalar gravityPerTick)
     {
         // AirStrike state 4, 0x4123A8-0x412402: the fall time from cruise
         // altitude, sqrt(2h / g) in seconds with g the map's gravity per
         // second squared, times 30 for ticks (the float at 0x4FCC50), times
         // the aircraft's current speed per tick, truncated to whole world
         // units, plus attackrunlength, plus one. RWE's gravity is the
-        // original's 112 in per-tick units already, which is the same number
-        // once the 30 is folded in.
-        auto gravityPerTick = 112_ss / (30_ss * 30_ss);
-        auto fallTicks = rweSqrt((2_ss * unitDefinition.cruiseAltitude) / gravityPerTick);
+        // original's key in per-tick units already, which is the same number
+        // once the 30 is folded in. The map's own key (BT-124), 112 nearly
+        // everywhere; a map with none has zero, where the fall never ends and
+        // the bomb is released at once.
+        auto fallTicks = gravityPerTick > 0_ss ? rweSqrt((2_ss * unitDefinition.cruiseAltitude) / gravityPerTick) : 0_ss;
         auto lead = SimScalar(static_cast<float>(static_cast<int>(simScalarToFloat(fallTicks * speed))));
         return 1_ss + unitDefinition.attackRunLength + lead;
     }

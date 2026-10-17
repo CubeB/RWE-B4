@@ -48,7 +48,7 @@ namespace rwe
         tdf.readOrDefault("timemul", r.timeMul);
         tdf.readOrDefault("minwindspeed", r.minWindSpeed);
         tdf.readOrDefault("maxwindspeed", r.maxWindSpeed);
-        tdf.readOrDefault("gravity", r.gravity, 112);
+        tdf.readOrDefault("gravity", r.gravity, 0);
         tdf.readOrDefault("numplayers", r.numPlayers);
         tdf.readOrDefault("size", r.size);
         tdf.readOrDefault("memory", r.memory);

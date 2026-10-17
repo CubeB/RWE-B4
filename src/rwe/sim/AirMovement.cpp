@@ -18,7 +18,7 @@ namespace rwe
             [](const AirMovementStateLanding&) { return SimVector(0_ss, 0_ss, 0_ss); });
     }
 
-    SimScalar AirMovement::bankAngle(const UnitState& unit, const UnitDefinition& unitDefinition, UnitPhysicsInfoAir& physics, const SimVector& deltaVelocity)
+    SimScalar AirMovement::bankAngle(const UnitState& unit, const UnitDefinition& unitDefinition, UnitPhysicsInfoAir& physics, const SimVector& deltaVelocity, int mapGravity)
     {
         // 62259/65536 in the original's fixed point.
         const SimScalar lag(0.9499817f);
@@ -28,14 +28,23 @@ namespace rwe
         auto heading = unit.rotation;
         auto lateral = (physics.bankAccum.x * cos(heading)) - (physics.bankAccum.z * sin(heading));
 
-        // Gravity is 112 world units per second squared on nearly every map the
-        // game ships, which is 112/900 per tick squared; dividing by (1 - lag)
-        // undoes the lag's gain.
-        const SimScalar gravityOverLagGain((112.0f / 900.0f) / (1.0f - 0.9499817f));
-
         // Accelerating to the right drops the right wing, so the model rolls
         // the other way about its nose.
-        return attitudeAngle(unitDefinition.bankScale, lateral, gravityOverLagGain);
+        return attitudeAngle(unitDefinition.bankScale, lateral, gravityOverLagGain(mapGravity));
+    }
+
+    SimScalar AirMovement::gravityOverLagGain(int mapGravity)
+    {
+        // Gravity is the map's key, 112 world units per second squared on
+        // nearly every map the game ships, which is 112/900 per tick squared
+        // (BT-124); dividing by (1 - lag) undoes the lag's gain. The 112
+        // case keeps the float expression it always had, so it is bit for bit
+        // what the aircraft computed before the key was read.
+        if (mapGravity == 112)
+        {
+            return SimScalar((112.0f / 900.0f) / (1.0f - 0.9499817f));
+        }
+        return SimScalar((static_cast<float>(mapGravity) / 900.0f) / (1.0f - 0.9499817f));
     }
 
     SimScalar AirMovement::attitudeAngle(SimScalar scale, SimScalar lateral, SimScalar gravityOverLagGain)
@@ -49,7 +58,7 @@ namespace rwe
         return SimScalar(radians);
     }
 
-    SimScalar AirMovement::pitchAngle(const UnitState& unit, const UnitDefinition& unitDefinition, const UnitPhysicsInfoAir& physics)
+    SimScalar AirMovement::pitchAngle(const UnitState& unit, const UnitDefinition& unitDefinition, const UnitPhysicsInfoAir& physics, int mapGravity)
     {
         // 0x43D1CE pushes edi and 0x43D1D5 reads [esp+0xc], which after that
         // push is the slot 0x43D1A0 read as [esp+0x8]: the SAME lateral
@@ -63,8 +72,7 @@ namespace rwe
         }
         auto heading = unit.rotation;
         auto lateral = (physics.bankAccum.x * cos(heading)) - (physics.bankAccum.z * sin(heading));
-        const SimScalar gravityOverLagGain((112.0f / 900.0f) / (1.0f - 0.9499817f));
-        return attitudeAngle(unitDefinition.pitchScale, lateral, gravityOverLagGain);
+        return attitudeAngle(unitDefinition.pitchScale, lateral, gravityOverLagGain(mapGravity));
     }
 
     AirMovementState AirMovement::step(const AirMovementState& state, const AirFrameCommand& command, const UnitState& unit, const UnitDefinition& unitDefinition)
@@ -126,16 +134,16 @@ namespace rwe
             });
     }
 
-    void AirMovement::updateVelocity(UnitPhysicsInfoAir& physics, const UnitState& unit, const UnitDefinition& unitDefinition)
+    void AirMovement::updateVelocity(UnitPhysicsInfoAir& physics, const UnitState& unit, const UnitDefinition& unitDefinition, int mapGravity)
     {
         physics.previousRoll = physics.roll;
         auto velocityBefore = airVelocity(physics.movementState);
 
         physics.movementState = step(physics.movementState, AirFrameCommand{}, unit, unitDefinition);
 
-        physics.roll = bankAngle(unit, unitDefinition, physics, airVelocity(physics.movementState) - velocityBefore);
+        physics.roll = bankAngle(unit, unitDefinition, physics, airVelocity(physics.movementState) - velocityBefore, mapGravity);
         physics.previousPitch = physics.pitch;
-        physics.pitch = pitchAngle(unit, unitDefinition, physics);
+        physics.pitch = pitchAngle(unit, unitDefinition, physics, mapGravity);
     }
 
     bool AirMovement::takeoffReachedCruise(const AirMovementStateTakingOff& /*state*/, SimScalar unitY, SimScalar targetHeight)

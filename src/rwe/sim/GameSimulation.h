@@ -627,6 +627,24 @@ namespace rwe
         bool noSeaLevelTrigger{false};
 
         /**
+         * The map's `gravity` key, whole world units per second squared: 112
+         * on the great majority of shipped maps and something else on 83 of
+         * 272. The original reads it at 0x436542 (default zero) and the
+         * ballistic solver, the projectile fall, wreck sinking, the bomber's
+         * release timing and an aircraft's bank all take their acceleration
+         * from it (BT-124). Map data like the tide: saved, not hashed, and
+         * spent through `gravityPerTick`. A simulation built without a map
+         * keeps the usual 112.
+         */
+        int gravity{112};
+
+        /** The per-tick acceleration `gravity` stands for: units per second squared over 30 squared. */
+        SimScalar gravityPerTick() const
+        {
+            return intToSimScalar(gravity) / (30_ss * 30_ss);
+        }
+
+        /**
          * What the sea takes off a unit in it once a second: the map's
          * `waterdamage` when it sets `waterdoesdamage`, the acid of the Core
          * Contingency's acid worlds, and 0 on any other map (0x48AEDF).

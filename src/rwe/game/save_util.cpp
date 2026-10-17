@@ -685,6 +685,7 @@ namespace rwe
         j["killMul"] = sim.killMul;
         j["timeMul"] = sim.timeMul;
         j["noSeaLevelTrigger"] = sim.noSeaLevelTrigger;
+        j["gravity"] = sim.gravity;
         j["waterDamage"] = sim.waterDamage;
         j["nextWindSpeedChange"] = saveGameTime(sim.nextWindSpeedChange);
         j["featureRegrowthCursor"] = sim.featureRegrowthCursor;
@@ -829,6 +830,12 @@ namespace rwe
         if (j.contains("noSeaLevelTrigger"))
         {
             sim.noSeaLevelTrigger = j.at("noSeaLevelTrigger").get<bool>();
+        }
+        // Saves from before the map's gravity was read fell at the 112 every
+        // arc then assumed, which is what the simulation starts with.
+        if (j.contains("gravity"))
+        {
+            sim.gravity = j.at("gravity").get<int>();
         }
         if (j.contains("waterDamage"))
         {

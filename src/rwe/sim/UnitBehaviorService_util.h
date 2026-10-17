@@ -417,7 +417,7 @@ namespace rwe
      * cruise altitude, not the aircraft's actual height, and the speed is
      * the current one, so the trigger is recomputed every tick.
      */
-    SimScalar bombReleaseTrigger(const UnitDefinition& unitDefinition, SimScalar speed);
+    SimScalar bombReleaseTrigger(const UnitDefinition& unitDefinition, SimScalar speed, SimScalar gravityPerTick);
 
     /**
      * The tilt of the ground under a footprint, the way the original's

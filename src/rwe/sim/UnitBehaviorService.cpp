@@ -1278,7 +1278,7 @@ namespace rwe
                     const auto& bomberDefinition = sim->unitDefinitions.at(unit.unitType);
                     SimVector flatToTarget(targetPosition->x - unit.position.x, 0_ss, targetPosition->z - unit.position.z);
                     SimVector flatVelocity(bomberVelocity.x, 0_ss, bomberVelocity.z);
-                    auto trigger = bombReleaseTrigger(bomberDefinition, flatVelocity.length());
+                    auto trigger = bombReleaseTrigger(bomberDefinition, flatVelocity.length(), sim->gravityPerTick());
 
                     bool releasing = false;
                     if (runState && runState->releasePoint)
@@ -1315,7 +1315,7 @@ namespace rwe
             {
                 auto aimFromPosition = getAimingPoint(id, weaponIndex);
 
-                auto headingAndPitch = computeHeadingAndPitch(unit.rotation, aimFromPosition, *targetPosition, weaponDefinition.velocity, (112_ss / (30_ss * 30_ss)), weapon->ballisticZOffset, weaponDefinition.physicsType);
+                auto headingAndPitch = computeHeadingAndPitch(unit.rotation, aimFromPosition, *targetPosition, weaponDefinition.velocity, sim->gravityPerTick(), weapon->ballisticZOffset, weaponDefinition.physicsType);
                 auto heading = headingAndPitch.first;
                 auto pitch = headingAndPitch.second;
 
@@ -1411,7 +1411,7 @@ namespace rwe
                     // against the angles the script was sent.
                     auto aimFromPosition = getAimingPoint(id, weaponIndex);
 
-                    auto headingAndPitch = computeHeadingAndPitch(unit.rotation, aimFromPosition, *targetPosition, weaponDefinition.velocity, (112_ss / (30_ss * 30_ss)), weapon->ballisticZOffset, weaponDefinition.physicsType);
+                    auto headingAndPitch = computeHeadingAndPitch(unit.rotation, aimFromPosition, *targetPosition, weaponDefinition.velocity, sim->gravityPerTick(), weapon->ballisticZOffset, weaponDefinition.physicsType);
                     auto heading = headingAndPitch.first;
                     auto pitch = headingAndPitch.second;
 
@@ -1893,7 +1893,7 @@ namespace rwe
                 p.currentSpeed = computeNewGroundUnitSpeed(sim->terrain, *unitInfo.state, *unitInfo.definition, p, sim->getAdHocMovementClass(unitInfo.definition->movementCollisionInfo).maxSlope);
             },
             [&](UnitPhysicsInfoAir& p) {
-                AirMovement::updateVelocity(p, *unitInfo.state, *unitInfo.definition);
+                AirMovement::updateVelocity(p, *unitInfo.state, *unitInfo.definition, sim->gravity);
             });
     }
 

@@ -331,7 +331,9 @@ namespace rwe
             ota.timeMul = 0;
             ota.minWindSpeed = 0;
             ota.maxWindSpeed = 0;
-            ota.gravity = 112;
+            // The original's reader defaults a missing gravity to zero
+            // (0x436542, BT-124); no shipped map omits it.
+            ota.gravity = 0;
             ota.numPlayers = "";
             ota.size = "";
             ota.memory = "";

@@ -418,7 +418,7 @@ namespace rwe
         {
             auto aim = target.position - attacker.position;
             SimVector aimXZ(aim.x, 0_ss, aim.z);
-            auto gravity = 112_ss / (30_ss * 30_ss);
+            auto gravity = gravityPerTick();
             if (!computeFiringAngles(weaponDefinition.velocity, gravity, aimXZ.length(), aim.y))
             {
                 return false;

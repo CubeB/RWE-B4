@@ -1142,7 +1142,7 @@ namespace rwe
 
         auto heading = toRadians(e.rotation).value;
         auto turn = Matrix4f::rotationY(heading);
-        auto gravity = 112.0f / 900.0f;
+        auto gravity = static_cast<float>(simulation.gravity) / 900.0f;
         auto draw = [this](unsigned int n) { return n < 2 ? 0u : static_cast<unsigned int>(effectsRng() % n); };
 
         auto shards = static_cast<std::size_t>(std::count_if(debris.begin(), debris.end(), [](const Debris& d) { return d.shard; }));
@@ -1192,11 +1192,11 @@ namespace rwe
             if (d.shard && d.fragmentMesh)
             {
                 // The original's effects-pool step (0x420F30), gravity the
-                // 112 nearly every map uses.
+                // map's own key (BT-124).
                 ShatterFragmentMotion m{d.position, d.velocity, d.rotation, d.angularVelocity};
                 bool onMap = m.position.x > corner.x + tile && m.position.x < corner.x + mapWidth - tile
                     && m.position.z > corner.z + tile && m.position.z < corner.z + mapHeight - tile;
-                auto fate = onMap ? stepShatterFragment(m, 112.0f / 900.0f, seaLevel, groundAt) : ShatterFragmentFate::Stopped;
+                auto fate = onMap ? stepShatterFragment(m, static_cast<float>(simulation.gravity) / 900.0f, seaLevel, groundAt) : ShatterFragmentFate::Stopped;
                 d.position = m.position;
                 d.velocity = m.velocity;
                 d.rotation = m.rotation;
@@ -3272,9 +3272,8 @@ namespace rwe
         // every tick -- four for a damaged unit, sixteen for a thermal vent.
         // On the 112 that nearly every shipped map uses four works out at
         // 0.498 world units, so the callers here pass half a unit and two,
-        // which is the right answer for all but a handful of maps and saves
-        // threading the map's gravity through to reach.
-        particle.velocity = Vector3f(0.0f, riseRate, 0.0f);
+        // and the rate is scaled by the map's own key over 112 (BT-124).
+        particle.velocity = Vector3f(0.0f, riseRate * (static_cast<float>(simulation.gravity) / 112.0f), 0.0f);
 
         // And sideways with the wind, damage smoke and vent steam alike
         // (0x475380 and 0x475640 differ only in the lift).
