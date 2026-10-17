@@ -62,5 +62,17 @@ namespace rwe
      */
     bool pressIsClick(unsigned int pressMillis, unsigned int releaseMillis, float worldDeltaX, float worldDeltaZ);
 
+    /**
+     * What the select-everything sweep asks of a unit beyond being the local
+     * player's, alive and not held by a mission script (BT-180). The service
+     * (0x48BD50) marks each own unit that is selectable, finished (its build
+     * fraction is zero, so no nanoframes) and not under the owner-transfer
+     * lock, and either not carried or carried by an air base. The squad recall
+     * (0x48D9A0) uses the same test. RWE has no transfer lock to ask about, and
+     * a unit riding in a transport is the only carried unit it models, so
+     * carried is simply refused.
+     */
+    bool sweepSelectsUnit(bool underConstruction, bool carried);
+
     BuildMenuPosition stepBuildMenu(BuildMenuPosition position, unsigned int pageCount, bool forward, bool toggle);
 }

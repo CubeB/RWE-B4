@@ -22,6 +22,11 @@ namespace rwe
         return releaseClock - pressClock < 25u && std::fabs(worldDeltaX) < 32.0f && std::fabs(worldDeltaZ) < 32.0f;
     }
 
+    bool sweepSelectsUnit(bool underConstruction, bool carried)
+    {
+        return !underConstruction && !carried;
+    }
+
     BuildMenuPosition stepBuildMenu(BuildMenuPosition position, unsigned int pageCount, bool forward, bool toggle)
     {
         if (pageCount == 0)

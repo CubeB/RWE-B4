@@ -78,6 +78,14 @@ namespace rwe
         REQUIRE(pressIsClick(34, 866, 0.0f, 0.0f));
     }
 
+    TEST_CASE("the select-everything sweep takes finished, uncarried units of any kind (BT-180)")
+    {
+        REQUIRE(sweepSelectsUnit(false, false));
+        // A nanoframe and a unit riding in a transport are left out.
+        REQUIRE_FALSE(sweepSelectsUnit(true, false));
+        REQUIRE_FALSE(sweepSelectsUnit(false, true));
+    }
+
     TEST_CASE("an armed Build click goes to every mobile builder and to nothing else (BT-108)")
     {
         REQUIRE(buildClickTakesUnit(true, true));

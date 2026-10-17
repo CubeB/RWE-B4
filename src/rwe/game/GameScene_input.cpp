@@ -330,7 +330,12 @@ namespace rwe
         {
             // Ctrl+A selects every unit the player owns, anywhere on the map
             // -- the original's special case, not merely what is on screen.
-            selectAllWhere([](const UnitState&, const UnitDefinition& d) { return d.canMove; });
+            // Every selectable, finished, uncarried one, buildings and
+            // factories included: "idle" and "movers" are not what the
+            // service (0x48BD50) tests (BT-180). It also lets go of the
+            // camera if it was following a unit.
+            selectAllWhere([](const UnitState& u, const UnitDefinition& d) { return sweepSelectsUnit(u.isBeingBuilt(d), u.carriedBy.has_value()); });
+            startTrackInternal({});
         }
         else if (keysym.key == SDLK_S && isCtrlDown() && !isShiftDown())
         {
