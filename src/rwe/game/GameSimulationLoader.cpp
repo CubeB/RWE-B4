@@ -300,10 +300,23 @@ namespace rwe
             std::vector<std::vector<GuiEntry>> entries;
             for (int i = 1; auto rawGui = services.vfs->readFile(services.pathMapping->guis + "/" + unitName + std::to_string(i) + ".GUI"); ++i)
             {
-                auto parsedGui = parseGuiFromBytes(*rawGui);
+                // A builder page comes with the unit, so a bad one in one mod
+                // must cost that unit its pages and not stop every peer's game
+                // from loading. The pages are numbered, so the first bad one
+                // ends the list (#663).
+                std::optional<std::vector<GuiEntry>> parsedGui;
+                try
+                {
+                    parsedGui = parseGuiFromBytes(*rawGui);
+                }
+                catch (const std::exception& e)
+                {
+                    LOG_WARN << "unit builder GUI " << unitName << i << " is unreadable (" << e.what() << ")";
+                }
                 if (!parsedGui)
                 {
-                    throw std::runtime_error("Failed to parse unit builder GUI: " + unitName + std::to_string(i));
+                    LOG_WARN << "unit builder GUI " << unitName << i << " could not be parsed; " << unitName << " keeps only the pages before it";
+                    break;
                 }
                 entries.push_back(std::move(*parsedGui));
             }

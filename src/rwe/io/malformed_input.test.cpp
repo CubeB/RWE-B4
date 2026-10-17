@@ -17,6 +17,7 @@
 #include <rwe/io/hpi/HpiArchive.h>
 #include <rwe/io/hpi/hpi_util.h>
 #include <rwe/io/sidedatatdf/SideData.h>
+#include <rwe/io/gui/gui.h>
 #include <rwe/io/io_util.h>
 #include <rwe/io/pcx/pcx.h>
 #include <rwe/io/smk/SmkDecoder.h>
@@ -42,7 +43,10 @@
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/sim_test_util.h>
 #include <rwe/sim/util.h>
+#include <rwe/render/Sprite.h>
+#include <rwe/render/SpriteSeries.h>
 #include <rwe/ui/UiListBox.h>
+#include <rwe/ui/UiScrollBar.h>
 #include <rwe/vfs/CompositeVirtualFileSystem.h>
 #include <sstream>
 #include <string>
@@ -1700,5 +1704,141 @@ namespace rwe
         REQUIRE(position == 3);
         box.scrollToEnd();
         REQUIRE(position == 3);
+    }
+
+    TEST_CASE("a .gui that cannot make a panel is refused, never thrown and never indexed", "[io][malformed][gui]")
+    {
+        auto parse = [](const std::string& text) {
+            return parseGuiFromBytes(std::vector<char>(text.begin(), text.end()));
+        };
+
+        const std::string panel = "[GADGET0]\n{\n[COMMON]\n{\nid=0;\nname=PANEL;\nxpos=0;\nypos=0;\nwidth=640;\nheight=480;\n}\n}\n";
+
+        SECTION("an empty file, a file of comments and a binary file have no records (#662)")
+        {
+            REQUIRE_NOTHROW(parse(""));
+            REQUIRE_FALSE(parse(""));
+            REQUIRE_FALSE(parse("// nothing here\n/* nor here */\n"));
+            // The shipped ENDGAME.GUI is a dump beginning with a zero byte and the word HEADER.
+            REQUIRE_FALSE(parse(std::string("\0HEADER\0\0\0\0garbage", 19)));
+        }
+
+        SECTION("a block with no COMMON section is refused rather than thrown (#663)")
+        {
+            REQUIRE_NOTHROW(parse("[GADGET0]\n{\nstatus=1;\n}\n"));
+            REQUIRE_FALSE(parse("[GADGET0]\n{\nstatus=1;\n}\n"));
+        }
+
+        SECTION("an unknown gadget type is refused rather than thrown (#663)")
+        {
+            auto text = panel + "[GADGET1]\n{\n[COMMON]\n{\nid=99;\nname=ODD;\n}\n}\n";
+            REQUIRE_NOTHROW(parse(text));
+            REQUIRE_FALSE(parse(text));
+        }
+
+        SECTION("a missing name and a VERSION block missing its fields take the defaults (#663)")
+        {
+            auto text = "[GADGET0]\n{\n[COMMON]\n{\nid=0;\nwidth=10;\nheight=10;\n}\n[VERSION]\n{\nmajor=3;\n}\n}\n";
+            auto gui = parse(text);
+            REQUIRE(gui);
+            REQUIRE(gui->size() == 1);
+            REQUIRE((*gui)[0].common.name == "");
+            REQUIRE((*gui)[0].version);
+            REQUIRE((*gui)[0].version->majorVersion == 3);
+            REQUIRE((*gui)[0].version->minorVersion == 0);
+            REQUIRE((*gui)[0].version->revision == 0);
+        }
+
+        SECTION("sizes, positions and stages are narrowed into the original's ranges (#664)")
+        {
+            auto text = panel + "[GADGET1]\n{\n[COMMON]\n{\nid=1;\nname=B;\nxpos=-90000;\nypos=2000000000;\nwidth=-5;\nheight=2000000000;\n}\nstages=2000000000;\n}\n"
+                                "[GADGET2]\n{\n[COMMON]\n{\nid=1;\nname=C;\nxpos=-12;\nypos=40;\nwidth=96;\nheight=20;\n}\nstages=-3;\n}\n";
+            auto gui = parse(text);
+            REQUIRE(gui);
+            REQUIRE(gui->size() == 3);
+
+            const auto& b = (*gui)[1];
+            REQUIRE(b.common.width == 0);
+            REQUIRE(b.common.height >= 0);
+            REQUIRE(b.common.height <= 2048);
+            REQUIRE(b.common.xpos >= -32768);
+            REQUIRE(b.common.ypos <= 32767);
+            REQUIRE(b.stages);
+            REQUIRE(*b.stages >= 0);
+            REQUIRE(*b.stages <= 255);
+
+            // In-range values, a negative position among them, are not touched.
+            const auto& c = (*gui)[2];
+            REQUIRE(c.common.xpos == -12);
+            REQUIRE(c.common.ypos == 40);
+            REQUIRE(c.common.width == 96);
+            REQUIRE(c.common.height == 20);
+            REQUIRE(*c.stages == 0);
+        }
+
+        SECTION("the record count is capped at the original's 200 (#666)")
+        {
+            std::string text = panel;
+            for (int i = 0; i < 1000; ++i)
+            {
+                text += "[G" + std::to_string(i) + "]\n{\n[COMMON]\n{\nid=5;\nname=L" + std::to_string(i) + ";\n}\n}\n";
+            }
+            auto gui = parse(text);
+            REQUIRE(gui);
+            REQUIRE(gui->size() == MaxGuiRecords);
+            REQUIRE(gui->front().common.name == "PANEL");
+        }
+    }
+
+    TEST_CASE("a scroll bar whose art is short of frames draws nothing and takes no clicks (#665)", "[ui][malformed][gui]")
+    {
+        auto sprite = [](float height) {
+            return std::make_shared<Sprite>(Rectangle2f::fromTopLeft(0.0f, 0.0f, 10.0f, height), SharedTextureHandle(), nullptr);
+        };
+
+        int messages = 0;
+
+        SECTION("three frames, where the bar indexes ten")
+        {
+            auto series = std::make_shared<SpriteSeries>();
+            for (int i = 0; i < 3; ++i)
+            {
+                series->sprites.push_back(sprite(8.0f));
+            }
+            UiScrollBar bar(0, 0, 16, 100, series);
+            bar.scrollUp().subscribe([&messages](const bool&) { ++messages; });
+            bar.mouseDown(MouseButtonEvent(1, 2, MouseButtonEvent::MouseButton::Left));
+            bar.mouseMove(MouseMoveEvent(2, 40));
+            bar.update(0.5f);
+            bar.mouseUp(MouseButtonEvent(1, 2, MouseButtonEvent::MouseButton::Left));
+            REQUIRE(messages == 0);
+        }
+
+        SECTION("no frames at all")
+        {
+            UiScrollBar bar(0, 0, 16, 100, std::make_shared<SpriteSeries>());
+            bar.mouseDown(MouseButtonEvent(1, 2, MouseButtonEvent::MouseButton::Left));
+            bar.update(0.5f);
+        }
+
+        SECTION("no series at all")
+        {
+            UiScrollBar bar(0, 0, 16, 100, nullptr);
+            bar.mouseDown(MouseButtonEvent(1, 2, MouseButtonEvent::MouseButton::Left));
+            bar.update(0.5f);
+        }
+
+        SECTION("ten frames whose tiling pieces have no height")
+        {
+            auto series = std::make_shared<SpriteSeries>();
+            for (int i = 0; i < 10; ++i)
+            {
+                series->sprites.push_back(sprite(0.0f));
+            }
+            UiScrollBar bar(0, 0, 16, 100, series);
+            bar.mouseDown(MouseButtonEvent(1, 2, MouseButtonEvent::MouseButton::Left));
+            bar.update(0.5f);
+            REQUIRE(messages == 0);
+        }
     }
 }
