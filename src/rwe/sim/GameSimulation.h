@@ -1282,6 +1282,14 @@ namespace rwe
          */
         bool unloadUnitFromTransport(UnitId transportId, UnitId unitId, const SimVector& position);
 
+        /**
+         * A transport script's drop-unit (0x4813B0): the drop-legality test at
+         * the passenger's own cell, and if it passes the unit lets go where it
+         * hangs. If it fails nothing happens and the unit stays attached; there
+         * is no search for a nearby cell (BT-75).
+         */
+        bool dropCarriedUnitInPlace(UnitId transportId, UnitId unitId);
+
         /** Moves carried units along with their transports; run after unit behaviour each tick. */
         void updateCarriedUnits();
 

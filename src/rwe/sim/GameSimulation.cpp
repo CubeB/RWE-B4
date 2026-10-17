@@ -963,6 +963,42 @@ namespace rwe
         return UnloadSpot{*spot, newPosition};
     }
 
+    bool GameSimulation::dropCarriedUnitInPlace(UnitId transportId, UnitId unitId)
+    {
+        auto transportRef = tryGetUnitState(transportId);
+        auto unitRef = tryGetUnitState(unitId);
+        if (!transportRef || !unitRef || unitRef->get().carriedBy != transportId || !unitRef->get().isAlive())
+        {
+            return false;
+        }
+        auto& transport = transportRef->get();
+        auto& unit = unitRef->get();
+
+        // The drop-legality test (0x47DB70, mode 1) at the passenger's own
+        // cell: occupancy, then water depth and slope for its movement
+        // class. No ring search and no nearest-fit; a refusal changes
+        // nothing and the script tries again (BT-75).
+        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
+        auto mc = getAdHocMovementClass(unitDefinition.movementCollisionInfo);
+        auto footprint = computeFootprintRegion(unit.position, unitDefinition.movementCollisionInfo);
+        auto region = occupiedGrid.tryToRegion(footprint);
+        if (!region || isCollisionAt(*region) || !isGridPointWalkable(terrain, mc, static_cast<unsigned int>(footprint.x), static_cast<unsigned int>(footprint.y)))
+        {
+            return false;
+        }
+
+        occupiedGrid.forEach(*region, [unitId](auto& cell) { cell.mobileUnitId = unitId; });
+
+        unit.position.y = computeGroundUnitHeight(terrain, unitDefinition, unit.position.x, unit.position.z);
+        unit.previousPosition = unit.position;
+        unit.rotation = transport.rotation;
+        unit.previousRotation = transport.rotation;
+        unit.carriedBy = std::nullopt;
+        unit.carriedPiece.clear();
+        transport.carriedUnits.erase(std::remove(transport.carriedUnits.begin(), transport.carriedUnits.end(), unitId), transport.carriedUnits.end());
+        return true;
+    }
+
     bool GameSimulation::unloadUnitFromTransport(UnitId transportId, UnitId unitId, const SimVector& position)
     {
         auto transportRef = tryGetUnitState(transportId);

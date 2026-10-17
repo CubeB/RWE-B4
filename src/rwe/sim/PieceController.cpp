@@ -31,7 +31,10 @@ namespace rwe
         {
             return;
         }
-        simulation.unloadUnitFromTransport(transportId, unitId, unitRef->get().position);
+        // 0x4813B0: the drop-legality test at the passenger's own cell, and
+        // nothing else. Refused, the unit stays attached and the script asks
+        // again on a later call; there is no search for a nearby cell (BT-75).
+        simulation.dropCarriedUnitInPlace(transportId, unitId);
     }
 
     void PieceController::showObject(UnitId unitId, const std::string& name)
