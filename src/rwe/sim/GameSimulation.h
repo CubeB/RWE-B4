@@ -951,8 +951,20 @@ namespace rwe
          *
          * Everything that samples the vision grids - the fog renderer
          * included - must apply this identical transform.
+         *
+         * That is the cell of a piece of *ground*. A unit is not ground: its
+         * sight is centred, and it is seen, at the height it is drawn at
+         * (BT-110, BT-81), so those go through visionCellAtHeight instead.
          */
         Point visionCellAt(const SimVector& position) const;
+
+        /**
+         * The vision cell of a point at the given height above the map's
+         * zero, skewed by that height and not by the terrain under it. The
+         * height is the unit's eye for its sight origin, and the sample's own
+         * y for the fog lookup of the can-see predicate.
+         */
+        Point visionCellAtHeight(const SimVector& position, SimScalar height) const;
 
         /** The heightmap sample under a world position; 0 off the map. */
         int terrainSampleHeightAt(const SimVector& position) const;

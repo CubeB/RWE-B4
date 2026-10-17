@@ -503,16 +503,20 @@ namespace rwe
 
         SECTION("an enemy the owner cannot see does not count, however close")
         {
-            // 39 units east is inside the forty but in the next 32 unit
-            // vision cell, which the commander's zero sight does not light.
-            auto scoutId = spawn(sim, "scout", them, SimVector(39_ss, 0_ss, 0_ss), script);
+            // 39 units east of a commander standing mid-cell is inside the
+            // forty, but the scout's whole bounding box is in the next 32
+            // unit vision cell, which the commander's zero sight does not
+            // light.
+            sim.getUnitState(unitId).position = SimVector(16_ss, 0_ss, 16_ss);
+            sim.getUnitState(unitId).previousPosition = SimVector(16_ss, 0_ss, 16_ss);
+            auto scoutId = spawn(sim, "scout", them, SimVector(55_ss, 0_ss, 16_ss), script);
             tickTo(sim, 3 * FirstEconomyTick);
             REQUIRE_FALSE(sim.canSeeUnit(us, scoutId));
             REQUIRE(sim.getUnitState(unitId).cloaked);
 
             // Give the owner an eye on that ground and it is noticed at the
             // next rebuild of the list.
-            spawn(sim, "eye", us, SimVector(100_ss, 0_ss, 0_ss), script);
+            spawn(sim, "eye", us, SimVector(120_ss, 0_ss, 16_ss), script);
             tickTo(sim, 5 * FirstEconomyTick);
             REQUIRE(sim.canSeeUnit(us, scoutId));
             REQUIRE_FALSE(sim.getUnitState(unitId).cloaked);

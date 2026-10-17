@@ -254,6 +254,14 @@ namespace rwe
     Point heightmapToVisionCell(SimScalar tileX, SimScalar tileZ, int terrainHeight);
 
     /**
+     * The same transform for a point at an arbitrary height, with the skew
+     * taken at full precision. The original's fog lookup (0x465AC0's `lit`)
+     * and a unit's sight origin (0x4825B0) both skew by a height of their
+     * own: the sample's, or the unit's eye. Neither is the terrain's.
+     */
+    Point heightmapToVisionCellAtHeight(SimScalar tileX, SimScalar tileZ, SimScalar height);
+
+    /**
      * Builds the two-height vision grid from the heightmap.
      *
      * Cells are placed in projected space, so a sample's row is skewed up the

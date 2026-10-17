@@ -104,6 +104,16 @@ namespace rwe
             auto cell = sim.visionCellAt(origin);
             return Point(cell.x + cells, cell.y);
         }
+
+        /**
+         * The cell a unit standing at `origin` looks out from (BT-110): skewed
+         * by its own eye, which for a unit on sea level with no model is the
+         * sea plus one, and not by the terrain under it.
+         */
+        Point eyeCellOf(const GameSimulation& sim, const SimVector& origin, int eye = 1)
+        {
+            return sim.visionCellAtHeight(origin, intToSimScalar(eye));
+        }
     }
 
     TEST_CASE("line of sight", "[visibility]")
@@ -307,15 +317,17 @@ namespace rwe
 
         const auto& vis = sim.playerVisibility.at(us.value);
 
+        auto origin = eyeCellOf(sim, here);
+
         SECTION("the eighth cell out is still seen")
         {
-            REQUIRE(vis.isVisible(eastOf(sim, here, 8)));
+            REQUIRE(vis.isVisible(Point(origin.x + 8, origin.y)));
         }
 
         SECTION("nothing beyond it is")
         {
-            REQUIRE_FALSE(vis.isVisible(eastOf(sim, here, 9)));
-            REQUIRE_FALSE(vis.isVisible(eastOf(sim, here, 20)));
+            REQUIRE_FALSE(vis.isVisible(Point(origin.x + 9, origin.y)));
+            REQUIRE_FALSE(vis.isVisible(Point(origin.x + 20, origin.y)));
             // 8 cells is 256 world units, whatever SightDistance says.
             REQUIRE_FALSE(sim.isVisibleTo(us, SimVector(300_ss, 0_ss, 0_ss)));
         }
@@ -324,7 +336,7 @@ namespace rwe
         {
             // The authored rays cover one quadrant and are replicated by the
             // four ninety degree rotations, so the disc comes out symmetric.
-            auto cell = sim.visionCellAt(here);
+            auto cell = origin;
             REQUIRE(vis.isVisible(Point(cell.x + 8, cell.y)));
             REQUIRE(vis.isVisible(Point(cell.x - 8, cell.y)));
             REQUIRE(vis.isVisible(Point(cell.x, cell.y + 8)));
@@ -759,6 +771,171 @@ namespace rwe
 
             REQUIRE_FALSE(sim.canDetectUnit(us, enemyId));
             REQUIRE_FALSE(sim.canSeeUnit(us, enemyId));
+        }
+    }
+
+    TEST_CASE("a unit's sight is centred at its eye, never at the terrain under it", "[visibility]")
+    {
+        // BT-110 (0x4827B0, 0x4825B0). The origin cell is skewed by half the
+        // unit's own eye -- its whole-unit height, floored at the sea plus
+        // one, plus the model top -- and terrain height is not consulted
+        // anywhere on the path. An aircraft's sight patch is where it is
+        // drawn, not under its shadow.
+        auto script = makeEmptyCobScript();
+
+        SECTION("an aircraft sees from half its altitude up the screen")
+        {
+            GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+            auto us = addPlayer(sim, "us");
+            defineUnit(sim, "plane", /*sight*/ 32u, /*radar*/ 0u, false);
+            auto where = SimVector(16_ss, 128_ss, 16_ss);
+            addUnit(sim, "plane", us, where, script);
+            sim.tick();
+
+            const auto& vis = sim.playerVisibility.at(us.value);
+            auto ground = sim.visionCellAt(where);
+            auto eyeCell = sim.visionCellAtHeight(where, 128_ss);
+
+            // 128 units of altitude is 64 up the screen, which is two cells.
+            REQUIRE(eyeCell.x == ground.x);
+            REQUIRE(eyeCell.y == ground.y - 2);
+            REQUIRE(vis.isVisible(eyeCell));
+            REQUIRE_FALSE(vis.isVisible(ground));
+        }
+
+        SECTION("the model's top is part of the eye")
+        {
+            GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+            auto us = addPlayer(sim, "us");
+            defineUnit(sim, "tower", 32u, 0u, false, /*modelHeight*/ 96);
+            auto where = SimVector(16_ss, 32_ss, 16_ss);
+            addUnit(sim, "tower", us, where, script);
+            sim.tick();
+
+            const auto& vis = sim.playerVisibility.at(us.value);
+            // 32 + 96 = 128: two cells up, though the unit's own y is one.
+            auto eyeCell = sim.visionCellAtHeight(where, 128_ss);
+            REQUIRE(eyeCell.y == sim.visionCellAt(where).y - 2);
+            REQUIRE(vis.isVisible(eyeCell));
+            REQUIRE_FALSE(vis.isVisible(sim.visionCellAt(where)));
+        }
+
+        SECTION("the eye is clamped to a byte")
+        {
+            GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+            auto us = addPlayer(sim, "us");
+            defineUnit(sim, "plane", 32u, 0u, false);
+            auto where = SimVector(16_ss, 900_ss, 16_ss);
+            addUnit(sim, "plane", us, where, script);
+            sim.tick();
+
+            const auto& vis = sim.playerVisibility.at(us.value);
+            REQUIRE(vis.isVisible(sim.visionCellAtHeight(where, 255_ss)));
+        }
+
+        SECTION("high ground under a unit does not move its origin")
+        {
+            // Every column at 250. Terrain-skewed, the cell would be 125
+            // world units up the map; the unit's eye is one.
+            GameSimulation sim(MapTerrain(makeBandedHeightmap({{0, 63, 250}}), 0_ss), 0u, 0, 0);
+            auto us = addPlayer(sim, "us");
+            defineUnit(sim, "walker", 0u, 0u, false);
+            auto where = SimVector(16_ss, 0_ss, 16_ss);
+            addUnit(sim, "walker", us, where, script);
+            sim.tick();
+
+            const auto& vis = sim.playerVisibility.at(us.value);
+            auto eyeCell = sim.visionCellAtHeight(where, 1_ss);
+            REQUIRE(vis.isVisible(eyeCell));
+            REQUIRE(sim.visionCellAt(where).y != eyeCell.y);
+            REQUIRE_FALSE(vis.isVisible(sim.visionCellAt(where)));
+        }
+
+        SECTION("the circular mask is shifted by the floored height shifted right six")
+        {
+            // The mask path takes the floored Y without the model top, and
+            // moves the whole-unit Z cell up by Y >> 6: 190 >> 6 is 2.
+            GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+            sim.lineOfSightMode = LineOfSightMode::Circular;
+            auto us = addPlayer(sim, "us");
+            defineUnit(sim, "plane", 32u, 0u, false, /*modelHeight*/ 100);
+            auto where = SimVector(16_ss, 190_ss, 16_ss);
+            addUnit(sim, "plane", us, where, script);
+            sim.tick();
+
+            const auto& vis = sim.playerVisibility.at(us.value);
+            auto ground = sim.visionCellAt(where);
+            REQUIRE(vis.isVisible(Point(ground.x, ground.y - 2)));
+            REQUIRE_FALSE(vis.isVisible(ground));
+        }
+    }
+
+    TEST_CASE("a unit is seen if any of four corners of its bounding box is lit", "[visibility]")
+    {
+        // BT-81 (0x465AC0). Four samples in a fixed order, corners of the
+        // model's box: the corner (x + minX, y + top, z + minZ), that moved
+        // by the X extent, that lowered by the Y extent and moved by the Z
+        // extent, and the first lowered and Z-moved with X taken back. Each
+        // reads the fog at (X >> 5, (Z - Y / 2) >> 5) with its own Y.
+        //
+        // A watcher with no sight lights the one cell it stands in: x in
+        // 0..32 and z in 0..32, less its own half-unit eye skew.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto us = addPlayer(sim, "us");
+        auto them = addPlayer(sim, "them");
+        defineUnit(sim, "watcher", 0u, 0u, false);
+        // Footprint two: a box 32 units square, 16 either side of the unit,
+        // and 64 high.
+        defineUnit(sim, "big", 0u, 0u, false, /*modelHeight*/ 64);
+        sim.unitDefinitions.at("big").movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 255u};
+        addUnit(sim, "watcher", us, SimVector(16_ss, 0_ss, 16_ss), script);
+
+        SECTION("the first corner")
+        {
+            // x - 16 = 24 is lit, the centre (40) is not. The top corner's
+            // row is 32 units up the screen from z - 16 = 32, so z = 48
+            // puts it back in the watcher's row.
+            auto bigId = addUnit(sim, "big", them, SimVector(40_ss, 0_ss, 48_ss), script);
+            sim.tick();
+            REQUIRE_FALSE(sim.isVisibleTo(us, sim.getUnitState(bigId).position));
+            REQUIRE(sim.canSeeUnit(us, bigId));
+        }
+
+        SECTION("only the fourth corner is lit")
+        {
+            // At x = 47 the corner is at x = 31, in the watcher's column,
+            // and the corner moved by the X extent is a column east. The top
+            // corners (samples 1 and 2) sit 32 units up the screen from
+            // z - 16 = -24, two rows above the watcher's; the base corner of
+            // sample 3 is east; sample 4 is the base corner at x = 31 and
+            // z + 16 = 8, which is the watcher's cell.
+            auto bigId = addUnit(sim, "big", them, SimVector(47_ss, 0_ss, -8_ss), script);
+            sim.tick();
+            REQUIRE(sim.canSeeUnit(us, bigId));
+
+            // One unit further east and none of the four is.
+            sim.getUnitState(bigId).position = SimVector(48_ss, 0_ss, -8_ss);
+            sim.getUnitState(bigId).previousPosition = SimVector(48_ss, 0_ss, -8_ss);
+            REQUIRE_FALSE(sim.canSeeUnit(us, bigId));
+        }
+
+        SECTION("a unit with every corner in the dark is not seen")
+        {
+            auto bigId = addUnit(sim, "big", them, SimVector(200_ss, 0_ss, 200_ss), script);
+            sim.tick();
+            REQUIRE_FALSE(sim.canSeeUnit(us, bigId));
+        }
+
+        SECTION("an own unit and a cloaked foreign unit are decided before any sample")
+        {
+            auto bigId = addUnit(sim, "big", them, SimVector(16_ss, 0_ss, 48_ss), script);
+            sim.tick();
+            REQUIRE(sim.canSeeUnit(us, bigId));
+            REQUIRE(sim.canSeeUnit(them, bigId));
+            sim.getUnitState(bigId).cloaked = true;
+            REQUIRE_FALSE(sim.canSeeUnit(us, bigId));
+            REQUIRE(sim.canSeeUnit(them, bigId));
         }
     }
 }

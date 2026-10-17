@@ -8,6 +8,7 @@
 #include <rwe/util/match.h>
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace rwe
@@ -148,6 +149,12 @@ namespace rwe
         return heightmapToVisionCell(tile.x, tile.z, heightMapSampleAt(terrain.getHeightMap(), tile));
     }
 
+    Point GameSimulation::visionCellAtHeight(const SimVector& position, SimScalar height) const
+    {
+        auto tile = terrain.worldToHeightmapSpace(position);
+        return heightmapToVisionCellAtHeight(tile.x, tile.z, height);
+    }
+
     bool GameSimulation::isExploredBy(PlayerId player, const SimVector& position) const
     {
         auto cell = visionCellAt(position);
@@ -257,9 +264,38 @@ namespace rwe
             }
         }
 
-        // 0x465B6A onwards: the fog grid, asked of each corner of the unit's
-        // footprint in turn. RWE asks it once, of the unit's position.
-        return isVisibleTo(viewer, unit.position);
+        // 0x465B6A onwards (BT-81): the fog grid, asked in a fixed order of
+        // up to four corners of the unit's model bounding box, stopping at
+        // the first lit one. The corner is the unit's position plus the
+        // definition's minimum X and Z (+0x15E, +0x166: minus half the
+        // footprint in world units) and its top height (+0x16E). The extents
+        // (+0x176, +0x17A, +0x17E) are the footprint in world units and the
+        // model's height. Each sample reads the fog at its own height, not at
+        // the terrain's: (X >> 5, (Z - Y / 2) >> 5), with X and Z taken as
+        // whole units and the half of Y at full precision.
+        //
+        // The bounding box is taken from the footprint and the model height,
+        // the decoded loader (TOTALA-EXE-RENDER.md, 0x42D079); the box is
+        // assumed to start at the model's origin height.
+        const auto& visibility = playerVisibility.at(viewer.value);
+        auto [footprintX, footprintZ] = getFootprintXZ(unitDefinition.movementCollisionInfo);
+        auto extentX = intToSimScalar(static_cast<int>(footprintX) * 16);
+        auto extentZ = intToSimScalar(static_cast<int>(footprintZ) * 16);
+        auto extentY = modelHeightOf(unitDefinition);
+
+        auto whole = [](SimScalar s) { return SimScalar(std::floor(s.value)); };
+        auto lit = [&](SimScalar x, SimScalar y, SimScalar z) {
+            return visibility.isVisible(visionCellAtHeight(SimVector(whole(x), 0_ss, whole(z)), y));
+        };
+
+        auto a = unit.position.x - (extentX / 2_ss);
+        auto b = unit.position.y + extentY;
+        auto c = unit.position.z - (extentZ / 2_ss);
+
+        return lit(a, b, c)
+            || lit(a + extentX, b, c)
+            || lit(a + extentX, b - extentY, c + extentZ)
+            || lit(a, b - extentY, c + extentZ);
     }
 
     bool GameSimulation::canDetectUnit(PlayerId viewer, UnitId unitId) const
@@ -537,7 +573,27 @@ namespace rwe
                 static_cast<int>(unitDefinition.sightDistance) / cellWorldUnits,
                 circular ? MaxCircularSightRadiusInCells : losTables.maxRadius());
 
-            auto cell = visionCellAt(unit.position);
+            // Where the unit's sight is centred (BT-110, 0x4825B0). Terrain
+            // height is not consulted: the origin is skewed by the unit's own
+            // height, so an aircraft's patch of sight is where it is drawn
+            // and not under its shadow. A ray-traced origin skews by half the
+            // eye (the whole Y plus the model top, clamped to a byte). The
+            // circular mask has no model top in it: it shifts the whole-unit
+            // Z cell up by the floored Y shifted right six, which is the same
+            // half-altitude in cells.
+            Point cell;
+            if (circular)
+            {
+                auto tile = terrain.worldToHeightmapSpace(unit.position);
+                auto cells = intToSimScalar(PlayerVisibility::VisionCellSizeInTiles);
+                cell = Point(
+                    static_cast<int>(std::floor((tile.x / cells).value)),
+                    static_cast<int>(std::floor((tile.z / cells).value)) - (groundLevel >> 6));
+            }
+            else
+            {
+                cell = visionCellAtHeight(unit.position, intToSimScalar(eyeHeight));
+            }
 
             // The unit's bit in the one shared explored grid. Every player in
             // the owner's line-of-sight group owns that same bit, so revealing
