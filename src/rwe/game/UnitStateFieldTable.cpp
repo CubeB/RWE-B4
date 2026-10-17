@@ -417,6 +417,12 @@ namespace rwe
             {"airLoiter", hashed<&UnitState::airLoiter>(saveOptionalAirLoiterUnitStateField<&UnitState::airLoiter>, loadOptionalAirLoiterUnitStateField<&UnitState::airLoiter>)},
             {"slowFacePoint", hashed<&UnitState::slowFacePoint>(saveOptionalSimVectorUnitStateField<&UnitState::slowFacePoint>, loadOptionalSimVectorUnitStateField<&UnitState::slowFacePoint>)},
             {"occupancyStamp", hashed<&UnitState::occupancyStamp>(saveGameTimeUnitStateField<&UnitState::occupancyStamp>, loadGameTimeOrZeroUnitStateField<&UnitState::occupancyStamp>), true},
+            {"guardPhase", hashed<&UnitState::guardPhase>(savePlainUnitStateField<&UnitState::guardPhase>, loadPlainOrZeroUnitStateField<&UnitState::guardPhase>), true},
+            {"guardWakeAt", hashed<&UnitState::guardWakeAt>(saveGameTimeUnitStateField<&UnitState::guardWakeAt>, loadGameTimeOrZeroUnitStateField<&UnitState::guardWakeAt>), true},
+            {"guardTarget", hashed<&UnitState::guardTarget>(saveOptionalUnitIdUnitStateField<&UnitState::guardTarget>, loadOptionalUnitIdUnitStateField<&UnitState::guardTarget>), true},
+            {"guardPosition", hashed<&UnitState::guardPosition>(saveOptionalSimVectorUnitStateField<&UnitState::guardPosition>, loadOptionalSimVectorUnitStateField<&UnitState::guardPosition>), true},
+            {"guardLimit", hashed<&UnitState::guardLimit>(savePlainUnitStateField<&UnitState::guardLimit>, loadPlainOrZeroUnitStateField<&UnitState::guardLimit>), true},
+            {"guardCounter", hashed<&UnitState::guardCounter>(savePlainUnitStateField<&UnitState::guardCounter>, loadPlainOrZeroUnitStateField<&UnitState::guardCounter>), true},
             {"activated", hashedPlain<&UnitState::activated>()},
             // Only a mission unit is ever held, and a save from before the
             // flag existed holds none.

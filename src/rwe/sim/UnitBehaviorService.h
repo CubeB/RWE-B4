@@ -263,6 +263,12 @@ namespace rwe
          */
         void pollMine(UnitInfo unitInfo);
 
+        /** BT-91: the Guard_NoMove default mission, and what it needs. */
+        void runGuardNoMove(UnitInfo unitInfo);
+        static void resetGuardNoMove(UnitState& unit);
+        bool guardCanEngage(const UnitState& unit, UnitId target) const;
+        void guardAssignWeapons(UnitState& unit, UnitId target);
+
         bool handleBuild(UnitInfo unitInfo, const std::string& unitType);
 
 

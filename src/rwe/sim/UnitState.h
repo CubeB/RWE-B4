@@ -944,6 +944,24 @@ namespace rwe
          */
         GameTime occupancyStamp{0};
 
+        /**
+         * The Guard_NoMove mission's state (0x4021F0, BT-91): the armed towers
+         * that name it as their default mission. Phase 0 releases the weapons
+         * and sleeps, 1 adopts weapon slot 0's target for every slot, 2 holds
+         * it until it has gone quiet for the persistence limit, 3 looks for a
+         * replacement within 640 of where the last target stood.
+         *
+         * All of it is hashed: which weapon is aimed at what decides where a
+         * shot lands. The draws that set the limit and pick the way out come
+         * from the simulation's one generator.
+         */
+        unsigned int guardPhase{0};
+        GameTime guardWakeAt{0};
+        std::optional<UnitId> guardTarget;
+        std::optional<SimVector> guardPosition;
+        unsigned int guardLimit{0};
+        unsigned int guardCounter{0};
+
 
         bool activated{false};
         bool isSufficientlyPowered{false};

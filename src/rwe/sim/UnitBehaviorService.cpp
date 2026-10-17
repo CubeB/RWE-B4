@@ -371,6 +371,11 @@ namespace rwe
 
             if (!unitInfo.state->orders.empty())
             {
+                // An order of its own takes the weapons off the guard mission.
+                if (unitInfo.state->guardPhase != 0 || unitInfo.state->guardTarget)
+                {
+                    resetGuardNoMove(*unitInfo.state);
+                }
                 RWE_SIMPROF("b.orders");
                 // Non-const: a capture order counts its own progress, so it
                 // is written back through this reference. Taking a
@@ -554,6 +559,10 @@ namespace rwe
                 if (unitInfo.definition->defaultMission == DefaultMission::StandbyMine)
                 {
                     pollMine(unitInfo);
+                }
+                else if (unitInfo.definition->defaultMission == DefaultMission::GuardNoMove)
+                {
+                    runGuardNoMove(unitInfo);
                 }
             }
 
@@ -1184,6 +1193,10 @@ namespace rwe
                             orderedAtIt = orderTarget != nullptr && *orderTarget == *targetUnit;
                         }
                     }
+
+                    // A target the guard mission handed the weapons is theirs
+                    // to keep, as an ordered one is (BT-91).
+                    orderedAtIt = orderedAtIt || (unit.guardTarget && *unit.guardTarget == *targetUnit);
 
                     if (!orderedAtIt)
                     {
@@ -4874,6 +4887,249 @@ namespace rwe
         }
 
         return repairExistingUnit(unitInfo, repairOrder.target);
+    }
+
+    void UnitBehaviorService::resetGuardNoMove(UnitState& unit)
+    {
+        unit.guardPhase = 0;
+        unit.guardWakeAt = GameTime(0);
+        unit.guardTarget = std::nullopt;
+        unit.guardPosition = std::nullopt;
+        unit.guardLimit = 0;
+        unit.guardCounter = 0;
+    }
+
+    bool UnitBehaviorService::guardCanEngage(const UnitState& unit, UnitId target) const
+    {
+        // 0x49ABB0 for the mission's target: it is there, the owner can see it,
+        // and some weapon of the tower's can reach and hit it.
+        auto targetRef = sim->tryGetUnitState(target);
+        if (!targetRef || targetRef->get().isDead() || !sim->canSeeUnit(unit.owner, target))
+        {
+            return false;
+        }
+        const auto& other = targetRef->get();
+        for (const auto& weapon : unit.weapons)
+        {
+            if (!weapon)
+            {
+                continue;
+            }
+            const auto& definition = sim->weaponDefinitions.at(weapon->weaponType);
+            if (withinFlatRange(unit.position, other.position, definition.maxRange) && weaponCanHitUnit(definition, unit, other))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void UnitBehaviorService::guardAssignWeapons(UnitState& unit, UnitId target)
+    {
+        // 0x48A060: every slot that can take a target is aimed at it. The ones
+        // that never acquire a target of their own -- interceptors, bombs, a
+        // hand-fired weapon -- are left to whatever fires them.
+        for (auto& weapon : unit.weapons)
+        {
+            if (!weapon)
+            {
+                continue;
+            }
+            const auto& definition = sim->weaponDefinitions.at(weapon->weaponType);
+            if (definition.interceptor || definition.commandFire || std::holds_alternative<ProjectilePhysicsTypeBomb>(definition.physicsType))
+            {
+                continue;
+            }
+            if (const auto* attacking = std::get_if<UnitWeaponStateAttacking>(&weapon->state))
+            {
+                if (const auto* current = std::get_if<UnitId>(&attacking->target); current != nullptr && *current == target)
+                {
+                    continue;
+                }
+            }
+            weapon->state = UnitWeaponStateAttacking(target);
+        }
+    }
+
+    /**
+     * BT-91 (0x4021F0): what Guard_NoMove does, which is not only to free the
+     * weapons. It is a four-state machine over weapon slot 0's own pick:
+     *
+     *   0  release the weapons, sleep 30, go to 1.
+     *   1  adopt slot 0's target. Live: remember where it stands, aim every
+     *      weapon at it, set the persistence limit to 3 plus 0 to 2 and the
+     *      counter to 0, go to 2. None: sleep 30 and look again.
+     *   2  hold. Each pass clears the counter when a weapon has fired and
+     *      adds one when none has. Within the limit and still engageable, wait.
+     *      Otherwise a draw below 100: 80 or more starts again from 0; below
+     *      80 clears the counter and adopts again.
+     *   3  the target died or the weapons were cleared: pick one of the
+     *      visible enemies within 640 of where it stood and aim at it (go to
+     *      1); none starts again from 0.
+     *
+     * RWE's own weapon scan lets each slot choose and keep its own target
+     * with nothing to make them agree and nothing to make a tower give up,
+     * which is what this replaces for the 26 armed towers that name it.
+     *
+     * What the finding leaves open, and what stands in for it: the node's
+     * wake bits are unnamed, so a pass is every 30 ticks and "the wake carried
+     * 0x4000", which clears the counter, is taken to mean a weapon fired
+     * within the pass (a reload still running).
+     */
+    void UnitBehaviorService::runGuardNoMove(UnitInfo unitInfo)
+    {
+        auto& unit = *unitInfo.state;
+        constexpr unsigned int PassTicks = 30;
+        constexpr float RecoveryRadius = 640.0f;
+
+        // An unarmed tower has nothing to hand out, and a tower told to hold
+        // fire has nothing taking a target.
+        if (!unit.weapons[0] || unit.fireOrders == UnitFireOrders::HoldFire)
+        {
+            if (unit.guardPhase != 0 || unit.guardTarget)
+            {
+                resetGuardNoMove(unit);
+            }
+            return;
+        }
+
+        const auto now = sim->gameTime;
+
+        // The entry guard (wake 0x10008): the target died or the weapons were
+        // cleared. It does not wait out a sleep.
+        if (unit.guardPhase == 2)
+        {
+            auto stillThere = unit.guardTarget && sim->tryGetUnitState(*unit.guardTarget)
+                && !sim->getUnitState(*unit.guardTarget).isDead();
+            if (!stillThere || std::holds_alternative<UnitWeaponStateIdle>(unit.weapons[0]->state))
+            {
+                if (stillThere && unit.guardTarget)
+                {
+                    unit.guardPosition = sim->getUnitState(*unit.guardTarget).position;
+                }
+                unit.guardTarget = std::nullopt;
+                unit.guardPhase = 3;
+                unit.guardWakeAt = now;
+            }
+        }
+
+        if (now < unit.guardWakeAt)
+        {
+            return;
+        }
+
+        switch (unit.guardPhase)
+        {
+            case 0:
+            {
+                for (unsigned int i = 0; i < unit.weapons.size(); ++i)
+                {
+                    if (unit.weapons[i])
+                    {
+                        unit.clearWeaponTarget(i);
+                    }
+                }
+                unit.guardTarget = std::nullopt;
+                unit.guardWakeAt = now + GameTime(PassTicks);
+                unit.guardPhase = 1;
+                return;
+            }
+            case 1:
+            {
+                std::optional<UnitId> picked;
+                if (const auto* attacking = std::get_if<UnitWeaponStateAttacking>(&unit.weapons[0]->state))
+                {
+                    if (const auto* targetUnit = std::get_if<UnitId>(&attacking->target))
+                    {
+                        auto targetRef = sim->tryGetUnitState(*targetUnit);
+                        if (targetRef && !targetRef->get().isDead())
+                        {
+                            picked = *targetUnit;
+                            unit.guardPosition = targetRef->get().position;
+                        }
+                    }
+                }
+                if (!picked)
+                {
+                    unit.guardWakeAt = now + GameTime(PassTicks);
+                    return;
+                }
+                unit.guardTarget = picked;
+                guardAssignWeapons(unit, *picked);
+                // Drawn from the one stream, never uniform_int_distribution.
+                unit.guardLimit = 3u + randomBelow(sim->rng, 3u);
+                unit.guardCounter = 0;
+                unit.guardPhase = 2;
+                unit.guardWakeAt = now + GameTime(PassTicks);
+                return;
+            }
+            case 2:
+            {
+                bool fired = false;
+                for (const auto& weapon : unit.weapons)
+                {
+                    fired = fired || (weapon && weapon->readyTime > now);
+                }
+                unit.guardCounter = fired ? 0u : unit.guardCounter + 1u;
+
+                if (unit.guardCounter <= unit.guardLimit && unit.guardTarget && guardCanEngage(unit, *unit.guardTarget))
+                {
+                    unit.guardWakeAt = now + GameTime(PassTicks);
+                    return;
+                }
+
+                if (randomBelow(sim->rng, 100u) >= 80u)
+                {
+                    unit.guardPhase = 0;
+                }
+                else
+                {
+                    unit.guardCounter = 0;
+                    unit.guardPhase = 1;
+                }
+                unit.guardWakeAt = now;
+                return;
+            }
+            default:
+            {
+                // 3: look round the place the target stood.
+                std::vector<UnitId> candidates;
+                if (unit.guardPosition)
+                {
+                    auto found = sim->getUnitSpatialIndex().collectEnemiesNear(
+                        simScalarToFloat(unit.guardPosition->x),
+                        simScalarToFloat(unit.guardPosition->z),
+                        RecoveryRadius,
+                        unit.owner);
+                    for (auto candidateId : found)
+                    {
+                        auto candidate = sim->tryGetUnitState(candidateId);
+                        if (!candidate || candidate->get().isDead() || sim->arePlayersAllied(unit.owner, candidate->get().owner)
+                            || !sim->canSeeUnit(unit.owner, candidateId))
+                        {
+                            continue;
+                        }
+                        if (!withinFlatRange(*unit.guardPosition, candidate->get().position, SimScalar(RecoveryRadius)))
+                        {
+                            continue;
+                        }
+                        candidates.push_back(candidateId);
+                    }
+                }
+                if (candidates.empty())
+                {
+                    unit.guardPhase = 0;
+                    unit.guardWakeAt = now;
+                    return;
+                }
+                auto chosen = candidates[randomBelow(sim->rng, static_cast<unsigned int>(candidates.size()))];
+                unit.guardTarget = chosen;
+                guardAssignWeapons(unit, chosen);
+                unit.guardPhase = 1;
+                unit.guardWakeAt = now;
+                return;
+            }
+        }
     }
 
     void UnitBehaviorService::pollMine(UnitInfo unitInfo)
