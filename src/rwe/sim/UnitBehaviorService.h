@@ -209,7 +209,7 @@ namespace rwe
          * The same reach against a footprint that need not belong to a unit,
          * so that a feature -- a wreck, a tree -- is measured the same way.
          */
-        bool withinBuildReachOfRect(UnitInfo unitInfo, const DiscreteRect& rect) const;
+        bool withinBuildReachOfRect(UnitInfo unitInfo, const DiscreteRect& rect, SimScalar extraReach = 0_ss) const;
 
         /**
          * BT-97: whether a build site the builder could not path to is still

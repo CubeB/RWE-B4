@@ -2598,7 +2598,7 @@ namespace rwe
         return withinBuildReachOfRect(unitInfo, sim->computeFootprintRegion(target.position, targetDefinition.movementCollisionInfo));
     }
 
-    bool UnitBehaviorService::withinBuildReachOfRect(UnitInfo unitInfo, const DiscreteRect& rect) const
+    bool UnitBehaviorService::withinBuildReachOfRect(UnitInfo unitInfo, const DiscreteRect& rect, SimScalar extraReach) const
     {
         auto corner = sim->terrain.heightmapIndexToWorldCorner(rect.x, rect.y);
         auto minX = corner.x;
@@ -2611,7 +2611,7 @@ namespace rwe
         auto nearestZ = rweMax(minZ, rweMin(maxZ, position.z));
         auto dx = position.x - nearestX;
         auto dz = position.z - nearestZ;
-        auto reach = unitInfo.definition->buildDistance;
+        auto reach = unitInfo.definition->buildDistance + extraReach;
         return (dx * dx) + (dz * dz) <= reach * reach;
     }
 
@@ -6153,7 +6153,22 @@ namespace rwe
                 return sim->computeFootprintRegion(f.position, static_cast<unsigned int>(d.footprintX), static_cast<unsigned int>(d.footprintZ));
             });
 
-        if (!withinBuildReachOfRect(unitInfo, rect))
+        // BT-92 (0x404730, work check at 0x4048FB): the ground handler's reach
+        // is the build distance plus a term of the target's own, the integer
+        // part of (X extent + Z extent) / 3 in world units. The aircraft
+        // handler adds nothing. The extents are the definition's +0x176 and
+        // +0x17E, which the loader writes at the 0x42D10A block as the
+        // footprint in world units, 16 a cell; that reading is the corpus's
+        // (TOTALA-EXE-DATA.md) and matches the finding's "roughly 10 to 40".
+        SimScalar extraReach = 0_ss;
+        if (const auto* targetUnitId = std::get_if<UnitId>(&target); targetUnitId != nullptr && !unitInfo.definition->canFly)
+        {
+            const auto& targetUnit = sim->getUnitState(*targetUnitId);
+            const auto [fx, fz] = sim->getFootprintXZ(sim->unitDefinitions.at(targetUnit.unitType).movementCollisionInfo);
+            extraReach = intToSimScalar(static_cast<int>((fx * 16u + fz * 16u) / 3u));
+        }
+
+        if (!withinBuildReachOfRect(unitInfo, rect, extraReach))
         {
             // Walk at the thing itself, not at a ring drawn one build
             // distance around it. hasReachedGoal reports success as soon as
