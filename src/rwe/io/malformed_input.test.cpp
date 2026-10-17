@@ -1939,4 +1939,60 @@ namespace rwe
             REQUIRE_FALSE(vfs.readPaletteOrPcx("PALETTE").has_value());
         }
     }
+
+    TEST_CASE("a name listed twice in one HPI directory resolves to the last entry", "[io][malformed][hpi]")
+    {
+        // BT-169 (#604): the original walks a directory's entries from the end
+        // and takes the first match, so the last duplicate wins. Static
+        // byte-tactics reading at 97d7ac59, not executed against the original.
+        auto extractAll = [](const HpiArchive& hpi, const std::string& path) -> std::optional<std::string> {
+            auto file = hpi.findFile(path);
+            if (!file)
+            {
+                return std::nullopt;
+            }
+            std::string out(file->get().size, '\0');
+            hpi.extract(file->get(), out.data());
+            return out;
+        };
+
+        SECTION("two files of one name")
+        {
+            auto bytes = hpiPrefix(70, 20);
+            append(bytes, HpiDirectoryData{2, 28});
+            append(bytes, HpiDirectoryEntry{46, 52, 0});
+            append(bytes, HpiDirectoryEntry{46, 61, 0});
+            bytes += std::string("a.txt\0", 6);
+            append(bytes, HpiFileData{70, 3, 0});
+            append(bytes, HpiFileData{73, 4, 0});
+            REQUIRE(bytes.size() == 70);
+            bytes += "AAABBBB";
+            std::istringstream in(bytes);
+            HpiArchive hpi(&in);
+            REQUIRE(extractAll(hpi, "a.txt") == std::optional<std::string>("BBBB"));
+            REQUIRE(extractAll(hpi, "A.TXT") == std::optional<std::string>("BBBB"));
+        }
+
+        SECTION("a directory and then a file of one name: a non-final component must be the last entry, and be a directory")
+        {
+            auto bytes = hpiPrefix(85, 20);
+            append(bytes, HpiDirectoryData{2, 28});
+            append(bytes, HpiDirectoryEntry{46, 50, 1});
+            append(bytes, HpiDirectoryEntry{46, 76, 0});
+            bytes += std::string("d\0x\0", 4);
+            REQUIRE(bytes.size() == 50);
+            append(bytes, HpiDirectoryData{1, 58});
+            append(bytes, HpiDirectoryEntry{48, 67, 0});
+            append(bytes, HpiFileData{85, 1, 0});
+            append(bytes, HpiFileData{86, 1, 0});
+            REQUIRE(bytes.size() == 85);
+            bytes += "QR";
+            std::istringstream in(bytes);
+            HpiArchive hpi(&in);
+            // The earlier "d" is a directory holding x, but the later "d" is a file and is the one found.
+            REQUIRE_FALSE(hpi.findFile("d/x").has_value());
+            REQUIRE(extractAll(hpi, "d") == std::optional<std::string>("R"));
+            REQUIRE_FALSE(hpi.findDirectory("d").has_value());
+        }
+    }
 }
