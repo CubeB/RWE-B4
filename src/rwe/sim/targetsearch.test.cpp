@@ -630,4 +630,63 @@ namespace rwe
             REQUIRE_FALSE(weaponTargetOf(sim, launcherId).has_value());
         }
     }
+
+    TEST_CASE("an ally's sonar does not lift the below-surface veto for your weapons", "[targetsearch]")
+    {
+        // BT-139: the sensor pass (0x467440) is run for the displayed player
+        // alone and its emission loop walks only that player's own units, so
+        // an ally's sonar set never puts a submarine on your sonar set. Sight
+        // is shared; detectors are not.
+        auto script = makeBattleScript();
+        GameSimulation sim(makeDetectionTerrain(40_ss), 0u, 0, 0);
+        auto us = addBattlePlayer(sim, "us");
+        auto friend_ = addBattlePlayer(sim, "friend");
+        auto them = addBattlePlayer(sim, "them");
+        sim.getPlayer(us).teamId = 1;
+        sim.getPlayer(friend_).teamId = 1;
+
+        WeaponDefinition torpedo{};
+        torpedo.maxRange = 400_ss;
+        torpedo.reloadTime = 78_ss;
+        torpedo.burst = 1;
+        torpedo.velocity = 100_ss / 30_ss;
+        torpedo.damageRadius = 16_ss;
+        torpedo.waterWeapon = true;
+        torpedo.damage["DEFAULT"] = 10;
+        sim.weaponDefinitions["COAX_TORPEDO"] = torpedo;
+
+        defineDetectionUnit(sim, "CORTL", DetectionUnitSpec{150u, 0u, 440u, "COAX_TORPEDO"});
+        defineDetectionUnit(sim, "CORTL_DEAF", DetectionUnitSpec{150u, 0u, 0u, "COAX_TORPEDO"});
+        defineDetectionUnit(sim, "SONAR_STATION", DetectionUnitSpec{50u, 0u, 1180u, ""});
+        defineDetectionUnit(sim, "ARMSUB", DetectionUnitSpec{112u, 0u, 405u, ""});
+
+        auto subPosition = SimVector(100_ss, 0_ss, 0_ss);
+
+        SECTION("a deaf launcher with an allied sonar station beside it still cannot engage")
+        {
+            auto launcherId = spawnDetectionUnit(sim, "CORTL_DEAF", us, SimVector(0_ss, 0_ss, 0_ss), script);
+            spawnDetectionUnit(sim, "SONAR_STATION", friend_, SimVector(0_ss, 0_ss, 60_ss), script);
+            auto subId = spawnDetectionUnit(sim, "ARMSUB", them, subPosition, script);
+            sim.tick();
+            sim.tick();
+
+            REQUIRE(sim.isVisibleTo(us, subPosition));
+            REQUIRE_FALSE(sim.isOnRadarOf(us, subPosition));
+            REQUIRE(sim.isOnRadarOf(friend_, subPosition));
+            REQUIRE_FALSE(sim.canSeeUnit(us, subId));
+            REQUIRE_FALSE(weaponTargetOf(sim, launcherId).has_value());
+        }
+
+        SECTION("the same station on the launcher's own side does lift it")
+        {
+            auto launcherId = spawnDetectionUnit(sim, "CORTL_DEAF", us, SimVector(0_ss, 0_ss, 0_ss), script);
+            spawnDetectionUnit(sim, "SONAR_STATION", us, SimVector(0_ss, 0_ss, 60_ss), script);
+            auto subId = spawnDetectionUnit(sim, "ARMSUB", them, subPosition, script);
+            sim.tick();
+            sim.tick();
+
+            REQUIRE(sim.canSeeUnit(us, subId));
+            REQUIRE(weaponTargetOf(sim, launcherId) == std::optional<UnitId>(subId));
+        }
+    }
 }

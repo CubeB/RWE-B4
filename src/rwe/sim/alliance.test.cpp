@@ -87,11 +87,13 @@ namespace rwe
 
     TEST_CASE("teams share what they can see", "[alliance]")
     {
-        // An ally's scouts light your map and an ally's dishes fill your radar.
-        // Without a team, the same two players see only their own ground.
+        // An ally's scouts light your map, but an ally's dishes do not fill
+        // your radar (BT-139: the sensor pass walks the displayed player's own
+        // units only). Without a team, the same two players see only their
+        // own ground.
         auto script = makeAllianceScript();
 
-        SECTION("an ally's eyes and dishes are yours too")
+        SECTION("an ally's eyes are yours too, but its dishes are not")
         {
             GameSimulation sim(makeAllianceTerrain(), 0u, 0, 0);
             registerAllianceModel(sim);
@@ -108,7 +110,8 @@ namespace rwe
             REQUIRE(sim.arePlayersAllied(us, them));
             REQUIRE(sim.isVisibleTo(them, watchPost));
             REQUIRE(sim.isVisibleTo(us, watchPost));
-            REQUIRE(sim.isOnRadarOf(us, watchPost));
+            REQUIRE(sim.isOnRadarOf(them, watchPost));
+            REQUIRE_FALSE(sim.isOnRadarOf(us, watchPost));
         }
 
         SECTION("without a shared team nothing is shared")

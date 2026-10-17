@@ -576,14 +576,18 @@ namespace rwe
                 continue;
             }
 
+            // BT-139 (0x467440): the sensor pass works for the displayed
+            // player alone and its emission loop walks only that player's
+            // own units, so an ally's dish or sonar set is never visited.
+            // Sight is shared between allies (above); detectors are not. The
+            // share-radar bit only shows your units as contacts on an ally's
+            // picture, and has nothing to do with whose detectors work. In
+            // particular an ally's sonar must not lift the below-surface veto
+            // that canSeeUnit applies to your weapons.
             auto altitude = rweMax(unit.position.y, 0_ss);
-            for (std::size_t i = 0; i < playerVisibility.size() && i < players.size(); ++i)
+            if (unit.owner.value < playerVisibility.size() && unit.owner.value < players.size())
             {
-                if (!arePlayersAllied(unit.owner, PlayerId(static_cast<unsigned int>(i))))
-                {
-                    continue;
-                }
-                auto& alliedVis = playerVisibility[i];
+                auto& ownVis = playerVisibility[unit.owner.value];
                 if (unitDefinition.radarDistance > 0)
                 {
                     // Altitude extends radar, and then an outer cap takes it
@@ -603,12 +607,12 @@ namespace rwe
                     auto lifted = declared + (2_ss * altitude);
                     auto cap = rweMax(declared, intToSimScalar(static_cast<int>(unitDefinition.sonarDistance)));
                     auto range = rweMin(lifted, cap);
-                    alliedVis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, false});
+                    ownVis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, false});
                 }
                 if (unitDefinition.sonarDistance > 0)
                 {
                     auto range = intToSimScalar(static_cast<int>(unitDefinition.sonarDistance));
-                    alliedVis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, true});
+                    ownVis.radarDetectors.push_back(PlayerVisibility::RadarDetector{unit.position, range * range, true});
                 }
             }
 
