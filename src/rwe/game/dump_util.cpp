@@ -611,6 +611,7 @@ namespace rwe
             {"currentWindVector", dumpJson(simulation.currentWindVector)},
             {"featureRegrowthCursor", simulation.featureRegrowthCursor},
             {"explored", dumpJson(simulation.explored)},
+            {"cloakSeenEnemies", dumpJson(simulation.cloakSeenEnemies)},
         };
 
         // What each "featureName" above stands for. The number is a table

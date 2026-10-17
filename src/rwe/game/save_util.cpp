@@ -776,6 +776,27 @@ namespace rwe
         }
         j["unitCreationRequests"] = unitCreationRequests;
 
+        // BT-140: each player's list of seen enemies for the cloak fuse. It
+        // is rebuilt every 30 ticks and read between, so it is state.
+        json cloakSeenEnemies = json::array();
+        for (const auto& list : sim.cloakSeenEnemies)
+        {
+            json listJson = json::array();
+            for (const auto& id : list)
+            {
+                // A unit that has gone since the list was built can never
+                // match again, and a saved reference to it would load as a
+                // placeholder id the continuing game does not have.
+                auto ref = saveUnitIdRef(id, ctx);
+                if (!ref.is_string())
+                {
+                    listJson.push_back(std::move(ref));
+                }
+            }
+            cloakSeenEnemies.push_back(std::move(listJson));
+        }
+        j["cloakSeenEnemies"] = cloakSeenEnemies;
+
         return j;
     }
 
@@ -1031,6 +1052,22 @@ namespace rwe
         for (const auto& rj : j.at("unitCreationRequests"))
         {
             sim.unitCreationRequests.push_back(loadUnitIdRef(rj, ctx));
+        }
+
+        // An older save has no lists and rebuilds them at the next 30-tick
+        // boundary, as it did before the fuse read a list at all.
+        sim.cloakSeenEnemies.clear();
+        if (j.contains("cloakSeenEnemies"))
+        {
+            for (const auto& listJson : j.at("cloakSeenEnemies"))
+            {
+                std::vector<UnitId> list;
+                for (const auto& idJson : listJson)
+                {
+                    list.push_back(loadUnitIdRef(idJson, ctx));
+                }
+                sim.cloakSeenEnemies.push_back(std::move(list));
+            }
         }
 
         sim.events.clear();

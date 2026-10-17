@@ -21,6 +21,9 @@ namespace rwe
          */
         constexpr unsigned int CloakSuppressionTicks = 90;
 
+        /** How often the cloak fuse's list of seen enemies is rebuilt (BT-140). */
+        constexpr unsigned int CloakSeenEnemiesPeriodTicks = 30;
+
         /**
          * Whether any of the dishes or jammers of the given kind reaches the
          * point, measured in the map plane. Both lists carry their radius
@@ -170,6 +173,7 @@ namespace rwe
         players.clear();
         playerVisibility.clear();
         playerLosGroupBits.clear();
+        cloakSeenEnemies.clear();
 
         // The explored grid belongs to the players whose groups own its bits,
         // so it goes with them. Leaving it set would hand a fresh game the
@@ -720,6 +724,51 @@ namespace rwe
         }
     }
 
+    void GameSimulation::refreshCloakSeenEnemies()
+    {
+        // BT-140: the per-player list of seen enemies that the cloak fuse
+        // reads (0x40AA40, enemy branch 0x40AAEF to 0x40AB65). A unit enters
+        // it only if it is live, not dying, not allied to the player (the
+        // player's own units are allied to it) and passes the can-see gate
+        // 0x465AC0 for that player, which rejects a cloaked enemy before it
+        // looks at the fog. Nothing tests construction state, so an
+        // unfinished enemy counts. Only players that own a cloakable unit
+        // read the list, so only those are rebuilt.
+        cloakSeenEnemies.resize(players.size());
+
+        std::vector<bool> hasCloaker(players.size(), false);
+        for (const auto& [unitId, unit] : units)
+        {
+            if (!unit.isDead() && unit.owner.value < hasCloaker.size() && unitDefinitions.at(unit.unitType).cloakable)
+            {
+                hasCloaker[unit.owner.value] = true;
+            }
+        }
+
+        for (std::size_t i = 0; i < players.size(); ++i)
+        {
+            auto& seen = cloakSeenEnemies[i];
+            seen.clear();
+            if (!hasCloaker[i])
+            {
+                continue;
+            }
+
+            PlayerId viewer(static_cast<unsigned int>(i));
+            for (const auto& [unitId, other] : units)
+            {
+                if (other.isDead() || arePlayersAllied(viewer, other.owner))
+                {
+                    continue;
+                }
+                if (canSeeUnit(viewer, unitId))
+                {
+                    seen.push_back(unitId);
+                }
+            }
+        }
+    }
+
     void GameSimulation::updateCloakSuppression()
     {
         // The original runs this in the same per-tick pass as the radar
@@ -728,6 +777,15 @@ namespace rwe
         // for the next ninety ticks. The flag is a timestamp rather than a
         // latch, so the unit stays visible for three seconds after the enemy
         // walks away instead of blinking back the moment it is out of range.
+        //
+        // "A live enemy" is the owner's list of seen enemies (BT-140), which
+        // is rebuilt every 30 ticks and not walked live: allies, enemies the
+        // owner cannot see and cloaked enemies do not count.
+        if (gameTime.value % CloakSeenEnemiesPeriodTicks == 0)
+        {
+            refreshCloakSeenEnemies();
+        }
+
         for (auto& entry : units)
         {
             auto& unit = entry.second;
@@ -742,17 +800,23 @@ namespace rwe
                 continue;
             }
 
+            if (unit.owner.value >= cloakSeenEnemies.size())
+            {
+                continue;
+            }
+
             auto minDistance = intToSimScalar(static_cast<int>(unitDefinition.minCloakDistance));
             auto minDistanceSquared = minDistance * minDistance;
 
-            for (const auto& otherEntry : units)
+            for (const auto& otherId : cloakSeenEnemies[unit.owner.value])
             {
-                const auto& otherUnit = otherEntry.second;
-                if (otherUnit.isDead() || otherUnit.isOwnedBy(unit.owner))
+                auto other = tryGetUnitState(otherId);
+                if (!other || other->get().isDead())
                 {
                     continue;
                 }
 
+                const auto& otherUnit = other->get();
                 auto dx = otherUnit.position.x - unit.position.x;
                 auto dz = otherUnit.position.z - unit.position.z;
                 if (((dx * dx) + (dz * dz)) <= minDistanceSquared)

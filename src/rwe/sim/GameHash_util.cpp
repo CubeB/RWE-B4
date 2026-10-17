@@ -447,6 +447,32 @@ namespace rwe
         return GameHash(accumulator);
     }
 
+    namespace
+    {
+        /**
+         * Only entries naming a unit that still exists: a unit gone since the
+         * list was built can never match again, and a save does not carry it,
+         * so the hash must not either.
+         */
+        GameHash computeHashOfCloakSeenEnemies(const GameSimulation& simulation)
+        {
+            std::uint32_t sum = 0;
+            const auto& lists = simulation.cloakSeenEnemies;
+            for (std::size_t player = 0; player < lists.size(); ++player)
+            {
+                auto weight = (static_cast<std::uint32_t>(player) * 2u) + 3u;
+                for (const auto& id : lists[player])
+                {
+                    if (simulation.tryGetUnitState(id))
+                    {
+                        sum += (id.value + 1u) * weight;
+                    }
+                }
+            }
+            return GameHash(sum);
+        }
+    }
+
     GameHash computeHashOf(const GameSimulation& simulation)
     {
         // Folded the way the container helper folds a VectorMap -- the id
@@ -472,6 +498,11 @@ namespace rwe
             // about what it has seen is a desync to catch, not player-facing
             // state to leave out.
             simulation.explored,
+            // BT-140: the cloak fuse's lists of seen enemies persist across
+            // ticks and decide the cloak flag. A sum of ids would let one
+            // player's list stand in for another's, so each id is mixed with
+            // the index of the player whose list holds it.
+            computeHashOfCloakSeenEnemies(simulation),
             // Absent in a skirmish, and then it adds nothing, so a skirmish's
             // hashes are what they were.
             simulation.missionRules ? computeHashOf(*simulation.missionRules) : GameHash(0),

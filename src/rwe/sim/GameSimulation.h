@@ -674,6 +674,20 @@ namespace rwe
          */
         int featureRegrowthCursor{0};
 
+        /**
+         * Per player, the enemy units that player's cloakers' proximity fuse
+         * reads (BT-140, 0x40AA40 and 0x40B0D0): live, not dying, not allied
+         * to the player, and passing the can-see gate for that player when
+         * the list was last rebuilt. The original rebuilds it every 30 ticks,
+         * so a unit that walks into a cloaker's range can take up to that long
+         * to be noticed, and a cloaked enemy never enters it. Indexed by
+         * player, kept in unit order; empty for a player with no cloakers.
+         *
+         * Saved, hashed and dumped, because it persists across ticks and
+         * decides the cloak flag, which decides targeting.
+         */
+        std::vector<std::vector<UnitId>> cloakSeenEnemies;
+
         // Computer-player controllers, owned by the simulation per the
         // locked decision in docs/ai-architecture-proposal.md §12-Q4.
         // Pointed-to via unique_ptr so the AI subsystem header is not
@@ -1572,6 +1586,9 @@ namespace rwe
          * tick one was that close.
          */
         void updateCloakSuppression();
+
+        /** Rebuilds cloakSeenEnemies; run on the 30-tick cadence of the original. */
+        void refreshCloakSeenEnemies();
 
         /** The height of a definition's model, or zero if it has none loaded. */
         SimScalar modelHeightOf(const UnitDefinition& unitDefinition) const;
