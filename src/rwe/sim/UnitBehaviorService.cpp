@@ -1940,6 +1940,33 @@ namespace rwe
             physics.roll = 0_ss;
             return;
         }
+        // BT-41 (0x48A490): the four points are vertices of the root model's
+        // selection primitive, not the footprint's corners, and the unit's
+        // height is the mean of the four samples. A model that was read from a
+        // 3DO but has no selection primitive is left exactly as it is, as the
+        // original leaves it; a model with no vertex data at all (a fixture
+        // built by hand) keeps the footprint's corners.
+        //
+        // Not for an aircraft sitting on the ground or a unit hanging from a
+        // transport: their height is somebody else's (a pad's, a hook's), and
+        // this routine would drop them to the ground under them.
+        auto modelIt = sim->unitModelDefinitions.find(unitInfo.definition->objectName);
+        if (!unitInfo.definition->canFly && !unitInfo.state->carriedBy
+            && modelIt != sim->unitModelDefinitions.end() && modelIt->second.vertices)
+        {
+            const auto& rectangle = modelIt->second.vertices->selectionRectangle;
+            if (!rectangle)
+            {
+                return;
+            }
+            if (auto aligned = computeSelectionAlignment(sim->terrain, unitInfo.state->position, unitInfo.state->rotation, *rectangle, unitInfo.definition->canHover))
+            {
+                physics.pitch = aligned->pitch;
+                physics.roll = aligned->roll;
+                unitInfo.state->position.y = aligned->y;
+            }
+            return;
+        }
         auto [footprintX, footprintZ] = sim->getFootprintXZ(unitInfo.definition->movementCollisionInfo);
         auto halfWidth = SimScalar(static_cast<float>(footprintX) * 8.0f);
         auto halfLength = SimScalar(static_cast<float>(footprintZ) * 8.0f);

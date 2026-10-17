@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <optional>
 #include <rwe/sim/SimVector.h>
 #include <vector>
 
@@ -16,5 +18,15 @@ namespace rwe
     struct UnitModelVertices
     {
         std::vector<std::vector<SimVector>> perPiece;
+
+        /**
+         * The first four vertices of the root object's selection primitive,
+         * in the root's local space and the same right-handed convention, in
+         * the primitive's own order (BT-41, 0x48A490). A ground unit is
+         * aligned to the ground under these four points and not under its
+         * footprint's corners. Empty for a model whose root has no selection
+         * primitive, which the original leaves unaligned.
+         */
+        std::optional<std::array<SimVector, 4>> selectionRectangle;
     };
 }

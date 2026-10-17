@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <optional>
 #include <rwe/math/Vector2x.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/SimAngle.h>
@@ -437,6 +439,37 @@ namespace rwe
         SimScalar roll;
     };
     GroundTilt computeGroundTilt(const MapTerrain& terrain, const SimVector& position, SimAngle rotation, SimScalar halfLength, SimScalar halfWidth, bool holdAtSeaLevel);
+
+    /**
+     * Where a ground unit sits and how it tilts, from the four corners of its
+     * model's selection rectangle rather than its footprint (BT-41, 0x48A490).
+     *
+     * `corners` are model-space offsets (x across, z along the nose) as
+     * UnitModelVertices keeps them. Each is turned by the heading and sampled;
+     * the height is the mean of the four, pitch is the front pair against the
+     * back pair over the rectangle's length, and roll the right pair against
+     * the left over its width. `holdAtSeaLevel` clamps each sample at sea level
+     * before the tilt is taken, as a hover craft's are.
+     *
+     * Nothing when a sample falls on the last column or row of the map or off
+     * its north or west edge: the original returns at once there and leaves the
+     * unit's height, pitch and bank as they were.
+     *
+     * Two simplifications, both deliberate. The original pairs the corners by
+     * their index in the primitive (0 and 1 against 2 and 3), which for the
+     * usual corner order is the same pairing as this one by position but for an
+     * unusual order tilts the hull about the wrong axis; pairing by position
+     * is what the model's drawn outline asks for. And the height is the mean of
+     * RWE's own terrain sampler, not the original's tile-corner bilinear
+     * truncated to whole units.
+     */
+    struct GroundAlignment
+    {
+        SimScalar y;
+        SimScalar pitch;
+        SimScalar roll;
+    };
+    std::optional<GroundAlignment> computeSelectionAlignment(const MapTerrain& terrain, const SimVector& position, SimAngle rotation, const std::array<SimVector, 4>& corners, bool holdAtSeaLevel);
 
     /**
      * The height the original's per-tick placement (0x48A870) gives a ground

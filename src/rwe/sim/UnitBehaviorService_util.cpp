@@ -1327,6 +1327,60 @@ namespace rwe
         return tilt;
     }
 
+    std::optional<GroundAlignment> computeSelectionAlignment(const MapTerrain& terrain, const SimVector& position, SimAngle rotation, const std::array<SimVector, 4>& corners, bool holdAtSeaLevel)
+    {
+        auto forward = UnitState::toDirection(rotation);
+        // The unit's right hand: the heading turned a quarter clockwise.
+        SimVector right(forward.z, 0_ss, -forward.x);
+
+        const auto mapWidth = static_cast<int>(terrain.getHeightMap().getWidth());
+        const auto mapHeight = static_cast<int>(terrain.getHeightMap().getHeight());
+
+        std::array<SimScalar, 4> heights;
+        for (std::size_t i = 0; i < 4; ++i)
+        {
+            auto x = position.x + (right.x * corners[i].x) + (forward.x * corners[i].z);
+            auto z = position.z + (right.z * corners[i].x) + (forward.z * corners[i].z);
+
+            auto cell = terrain.worldToHeightmapSpace(SimVector(x, 0_ss, z));
+            if (cell.x.value < 0.0f || cell.z.value < 0.0f
+                || static_cast<int>(std::floor(cell.x.value)) >= mapWidth - 1
+                || static_cast<int>(std::floor(cell.z.value)) >= mapHeight - 1)
+            {
+                return std::nullopt;
+            }
+
+            auto h = terrain.getHeightAt(x, z);
+            heights[i] = holdAtSeaLevel ? rweMax(h, terrain.getSeaLevel()) : h;
+        }
+
+        // The two corners furthest along the nose against the two behind them,
+        // and the two furthest right against the two left of them.
+        auto split = [&](auto key) {
+            std::array<std::size_t, 4> order{0, 1, 2, 3};
+            std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) { return key(corners[a]) < key(corners[b]); });
+            auto high = (heights[order[2]] + heights[order[3]]) / 2_ss;
+            auto low = (heights[order[0]] + heights[order[1]]) / 2_ss;
+            auto span = ((key(corners[order[2]]) + key(corners[order[3]])) / 2_ss) - ((key(corners[order[0]]) + key(corners[order[1]])) / 2_ss);
+            return std::make_pair(high - low, span);
+        };
+        auto [rise, length] = split([](const SimVector& v) { return v.z; });
+        auto [lean, width] = split([](const SimVector& v) { return v.x; });
+
+        GroundAlignment out;
+        out.y = (heights[0] + heights[1] + heights[2] + heights[3]) / 4_ss;
+        out.pitch = length > 0_ss ? SimScalar(toRadians(atan2(rise, length)).value) : 0_ss;
+        out.roll = width > 0_ss ? SimScalar(toRadians(atan2(lean, width)).value) : 0_ss;
+        for (auto* a : {&out.pitch, &out.roll})
+        {
+            if (a->value > Pif)
+            {
+                a->value -= 2.0f * Pif;
+            }
+        }
+        return out;
+    }
+
     bool stepAttackRunPhase(
         const SimVector& unitPosition,
         const SimVector& unitHeading,

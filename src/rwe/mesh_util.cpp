@@ -473,6 +473,33 @@ namespace rwe
     {
         auto table = std::make_shared<UnitModelVertices>();
         collectPieceVertices(o, table->perPiece);
+
+        // BT-41: the root object's selection primitive and its first four
+        // vertex indices. A primitive that names fewer than four, or an index
+        // outside the object's vertices, is no rectangle at all.
+        if (o.selectionPrimitiveIndex && *o.selectionPrimitiveIndex < o.primitives.size())
+        {
+            const auto& indices = o.primitives[*o.selectionPrimitiveIndex].vertices;
+            if (indices.size() >= 4)
+            {
+                std::array<SimVector, 4> corners;
+                bool valid = true;
+                for (std::size_t i = 0; i < 4; ++i)
+                {
+                    if (indices[i] >= o.vertices.size())
+                    {
+                        valid = false;
+                        break;
+                    }
+                    const auto& v = o.vertices[indices[i]];
+                    corners[i] = SimVector(simScalarFromFixed(v.x), simScalarFromFixed(v.y), -simScalarFromFixed(v.z));
+                }
+                if (valid)
+                {
+                    table->selectionRectangle = corners;
+                }
+            }
+        }
         return table;
     }
 
