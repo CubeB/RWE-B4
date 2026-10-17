@@ -77,6 +77,7 @@ namespace rwe
         tdf.readOrDefault("MaxSlope", u.maxSlope, 255u);
         tdf.readOrDefault("MaxWaterSlope", u.maxWaterSlope, u.maxSlope);
         tdf.readOrDefault("MinWaterDepth", u.minWaterDepth);
+        u.hasMinWaterDepth = tdf.findValue("MinWaterDepth").has_value();
         tdf.readOrDefault("MaxWaterDepth", u.maxWaterDepth);
         if (u.maxWaterDepth < u.minWaterDepth)
         {

@@ -146,6 +146,7 @@ namespace rwe
         mc.footprintX = tdf.footprintX;
         mc.footprintZ = tdf.footprintZ;
         mc.minWaterDepth = tdf.minWaterDepth;
+        mc.minWaterDepthPresent = tdf.hasMinWaterDepth;
         mc.maxWaterDepth = tdf.maxWaterDepth;
         mc.maxSlope = tdf.maxSlope;
         mc.maxWaterSlope = tdf.maxWaterSlope;
@@ -644,6 +645,7 @@ namespace rwe
                 fbi.maxWaterSlope,
                 fbi.minWaterDepth,
                 fbi.maxWaterDepth,
+                fbi.hasMinWaterDepth,
             };
 
             u.yardMap = parseYardMap(fbi.footprintX, fbi.footprintZ, fbi.yardMap);

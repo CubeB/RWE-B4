@@ -10,6 +10,7 @@ namespace rwe
         m.footprintX = block.expectUint("FootprintX");
         m.footprintZ = block.expectUint("FootprintZ");
         m.minWaterDepth = block.extractUint("MinWaterDepth").value_or(0);
+        m.hasMinWaterDepth = block.findValue("MinWaterDepth").has_value();
         m.maxWaterDepth = block.extractUint("MaxWaterDepth").value_or(255);
         m.maxSlope = block.extractUint("MaxSlope").value_or(255);
         m.maxWaterSlope = block.extractUint("MaxWaterSlope").value_or(m.maxSlope);

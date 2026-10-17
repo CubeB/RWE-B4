@@ -87,4 +87,28 @@ namespace rwe
             REQUIRE(c.badWaterSlope == 8u);
         }
     }
+
+    TEST_CASE("a class records whether it wrote MinWaterDepth at all (BT-109)", "[moveinfotdf]")
+    {
+        auto tdf = parseTdfFromString(R"(
+[CLASS1]
+{
+    Name=BOATS4;
+    FootprintX=4;
+    FootprintZ=4;
+    MinWaterDepth=3;
+}
+[CLASS2]
+{
+    Name=TANKHOVER4;
+    FootprintX=4;
+    FootprintZ=4;
+}
+)");
+        auto classes = parseMoveInfoTdf(tdf);
+        REQUIRE(classes.size() == 2);
+        REQUIRE(classes[0].second.hasMinWaterDepth);
+        REQUIRE(classes[0].second.minWaterDepth == 3u);
+        REQUIRE_FALSE(classes[1].second.hasMinWaterDepth);
+    }
 }

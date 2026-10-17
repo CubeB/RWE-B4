@@ -132,17 +132,17 @@ namespace rwe
         // scout ship and destroyer are ordinary armed hulls with their
         // own, much shallower draughts.
         auto armsy = makeDef(false, true, false, "", 200u);
-        armsy.movementCollisionInfo = UnitDefinition::AdHocMovementClass{8u, 8u, 255u, 255u, 30u, 255u};
+        armsy.movementCollisionInfo = UnitDefinition::AdHocMovementClass{8u, 8u, 255u, 255u, 30u, 255u, true};
         armsy.buildCostMetal = Metal(615.0f);
         sim.unitDefinitions["ARMSY"] = armsy;
 
         auto armpt = makeDef(false, false, true, "LASER", 300u);
-        armpt.movementCollisionInfo = UnitDefinition::AdHocMovementClass{4u, 4u, 255u, 255u, 6u, 255u};
+        armpt.movementCollisionInfo = UnitDefinition::AdHocMovementClass{4u, 4u, 255u, 255u, 6u, 255u, true};
         armpt.buildCostMetal = Metal(100.0f);
         sim.unitDefinitions["ARMPT"] = armpt;
 
         auto armroy = makeDef(false, false, true, "LASER", 300u);
-        armroy.movementCollisionInfo = UnitDefinition::AdHocMovementClass{4u, 4u, 255u, 255u, 12u, 255u};
+        armroy.movementCollisionInfo = UnitDefinition::AdHocMovementClass{4u, 4u, 255u, 255u, 12u, 255u, true};
         armroy.buildCostMetal = Metal(898.0f);
         sim.unitDefinitions["ARMROY"] = armroy;
     }

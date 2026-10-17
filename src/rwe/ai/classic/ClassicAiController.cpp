@@ -206,7 +206,7 @@ namespace rwe
                 f.sonar = def.sonarDistance > 0;
                 f.radar = def.radarDistance > 0;
                 f.windGenerator = def.windGenerator != Energy(0.0f);
-                f.waterDepthWord = static_cast<int>(mc.minWaterDepth) >= 0;
+                f.waterDepthWord = mc.signedMinWaterDepth() >= 0;
                 f.metalCost = static_cast<double>(def.buildCostMetal.value);
                 f.energyCost = static_cast<double>(def.buildCostEnergy.value);
                 f.energyMake = static_cast<double>(def.energyMake.value);
@@ -218,7 +218,7 @@ namespace rwe
                 c.armed = isArmed(def);
                 c.builder = def.builder;
                 c.canFly = def.canFly;
-                c.waterDepthPositive = mc.minWaterDepth > 0;
+                c.waterDepthPositive = mc.signedMinWaterDepth() > 0;
                 classifyFacts.push_back(c);
 
                 std::vector<ClassicWeaponFacts> weapons;

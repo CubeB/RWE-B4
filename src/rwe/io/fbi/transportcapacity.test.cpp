@@ -79,4 +79,68 @@ namespace rwe
         REQUIRE(capacityOf(fbi) == 0);
         REQUIRE_FALSE(transportCapacityWarning(fbi).has_value());
     }
+
+    TEST_CASE("an absent MinWaterDepth is the signed word -10000, and a class's own key wins (BT-109)", "[fbi][movement]")
+    {
+        // The field is the signed word at definition +0x1C0, filled at load
+        // from the movement class if the FBI names one (the FBI's own key is
+        // never read), otherwise from a fresh record whose default is -10000
+        // and then the FBI's keys (0x42CD3B, 0x4402E0, 0x440340).
+        MovementClassDatabase movementClasses;
+
+        MovementClassDefinition tankClass{};
+        tankClass.name = "TANKSH2";
+        tankClass.footprintX = 2;
+        tankClass.footprintZ = 2;
+        tankClass.maxWaterDepth = 12;
+        auto tankId = movementClasses.registerMovementClass(tankClass);
+
+        MovementClassDefinition boatClass{};
+        boatClass.name = "BOATS4";
+        boatClass.footprintX = 4;
+        boatClass.footprintZ = 4;
+        boatClass.minWaterDepth = 3;
+        boatClass.minWaterDepthPresent = true;
+        auto boatId = movementClasses.registerMovementClass(boatClass);
+
+        auto defOf = [&](const std::string& keys) {
+            return parseUnitDefinition(parseUnitFbi(parseTdfFromString("[UNITINFO]\n{\nUnitName=X;\nObjectname=model;\nSoundCategory=NOSOUND;\n" + keys + "\n}\n")), movementClasses);
+        };
+
+        SECTION("an FBI that writes no key reads as negative")
+        {
+            auto def = defOf("FootprintX=2;\nFootprintZ=2;");
+            const auto& mc = std::get<UnitDefinition::AdHocMovementClass>(def.movementCollisionInfo);
+            REQUIRE_FALSE(mc.minWaterDepthPresent);
+        }
+
+        SECTION("an FBI that writes the key, even as 0, reads as nonnegative")
+        {
+            auto def = defOf("FootprintX=2;\nFootprintZ=2;\nMinWaterDepth=0;");
+            REQUIRE(std::get<UnitDefinition::AdHocMovementClass>(def.movementCollisionInfo).minWaterDepthPresent);
+            auto shipyard = defOf("FootprintX=8;\nFootprintZ=8;\nMinWaterDepth=30;");
+            const auto& mc = std::get<UnitDefinition::AdHocMovementClass>(shipyard.movementCollisionInfo);
+            REQUIRE(mc.minWaterDepthPresent);
+            REQUIRE(mc.minWaterDepth == 30u);
+        }
+
+        SECTION("a class that names no key is negative whatever the FBI says")
+        {
+            // The two hover tanks say 12 and belong to TANKHOVER4, which has no key.
+            auto def = defOf("MovementClass=TANKSH2;\nMinWaterDepth=12;");
+            const auto* named = std::get_if<UnitDefinition::NamedMovementClass>(&def.movementCollisionInfo);
+            REQUIRE(named != nullptr);
+            REQUIRE(named->movementClassId == tankId);
+            REQUIRE(movementClasses.getMovementClass(named->movementClassId).signedMinWaterDepth() < 0);
+        }
+
+        SECTION("a class that names a key wins over a larger FBI key")
+        {
+            auto def = defOf("MovementClass=BOATS4;\nMinWaterDepth=30;");
+            const auto* named = std::get_if<UnitDefinition::NamedMovementClass>(&def.movementCollisionInfo);
+            REQUIRE(named != nullptr);
+            REQUIRE(named->movementClassId == boatId);
+            REQUIRE(movementClasses.getMovementClass(named->movementClassId).signedMinWaterDepth() == 3);
+        }
+    }
 }

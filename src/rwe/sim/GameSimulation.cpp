@@ -3071,7 +3071,8 @@ namespace rwe
                     mc.maxSlope,
                     mc.maxWaterSlope,
                     mc.maxSlope / 2,
-                    mc.maxWaterSlope / 2};
+                    mc.maxWaterSlope / 2,
+                    mc.minWaterDepthPresent};
             },
             [&](const UnitDefinition::NamedMovementClass& mc) {
                 return movementClassDatabase.getMovementClass(mc.movementClassId);

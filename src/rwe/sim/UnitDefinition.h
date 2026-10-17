@@ -73,6 +73,9 @@ namespace rwe
             unsigned int maxWaterSlope;
             unsigned int minWaterDepth;
             unsigned int maxWaterDepth;
+
+            /** Whether the FBI wrote MinWaterDepth (BT-109); see MovementClassDefinition::minWaterDepthPresent. */
+            bool minWaterDepthPresent{false};
         };
         using MovementCollisionInfo = std::variant<NamedMovementClass, AdHocMovementClass>;
 

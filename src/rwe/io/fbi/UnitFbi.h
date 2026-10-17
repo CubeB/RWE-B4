@@ -124,6 +124,9 @@ namespace rwe
         unsigned int minWaterDepth;
         unsigned int maxWaterDepth;
 
+        /** Whether the FBI wrote MinWaterDepth at all (BT-109): an absent key is the signed word -10000. */
+        bool hasMinWaterDepth{false};
+
         bool canAttack;
         bool canMove;
         bool canGuard;
