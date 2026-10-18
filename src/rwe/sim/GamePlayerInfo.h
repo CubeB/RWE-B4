@@ -87,6 +87,9 @@ namespace rwe
          */
         bool hasCreatedUnits{false};
 
+        /** BT-232: the agreed drop's unit wipe, in simulation time. Saved for replay keyframes. */
+        std::optional<GameTime> removeUnitsAt{std::nullopt};
+
         bool metalStalled{false};
         bool energyStalled{false};
 

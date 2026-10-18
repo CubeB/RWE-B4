@@ -5605,6 +5605,7 @@ namespace rwe
     void GameSimulation::tick()
     {
         gameTime += GameTime(1);
+        updateDroppedPlayers();
 
         // AI runs first so any commands it emits this tick can be drained
         // by GameScene before unit behaviour runs next tick. This mirrors

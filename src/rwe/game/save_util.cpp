@@ -277,6 +277,7 @@ namespace rwe
                 {"startingEnergy", saveEnergy(p.startingEnergy)},
                 {"hasBaseStorage", p.hasBaseStorage},
                 {"hasCreatedUnits", p.hasCreatedUnits},
+                {"removeUnitsAt", saveOptional(p.removeUnitsAt, [](GameTime v) { return saveGameTime(v); })},
                 {"metalStalled", p.metalStalled},
                 {"energyStalled", p.energyStalled},
                 // The original does not save these (TOTALA-EXE-COMMANDS.md
@@ -328,6 +329,10 @@ namespace rwe
             p.hasBaseStorage = j.contains("hasBaseStorage") && j.at("hasBaseStorage").get<bool>();
             // Added with BT-193; an older save's players have all been given units.
             p.hasCreatedUnits = !j.contains("hasCreatedUnits") || j.at("hasCreatedUnits").get<bool>();
+            if (j.contains("removeUnitsAt"))
+            {
+                p.removeUnitsAt = loadOptional(j.at("removeUnitsAt"), [](const json& v) { return loadGameTime(v); });
+            }
             p.metalStalled = j.at("metalStalled").get<bool>();
             p.energyStalled = j.at("energyStalled").get<bool>();
             // Resource sharing came later; an older save has it off, with no

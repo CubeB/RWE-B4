@@ -1666,6 +1666,9 @@ namespace rwe
 
         void killPlayer(PlayerId playerId);
 
+        /** BT-232: remove a dropped player's units on the agreed simulation tick. */
+        void updateDroppedPlayers();
+
         void processVictoryCondition();
 
         void updateWind();

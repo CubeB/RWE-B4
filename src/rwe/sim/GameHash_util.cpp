@@ -65,6 +65,7 @@ namespace rwe
             p.maxEnergy,
             p.hasBaseStorage,
             p.hasCreatedUnits,
+            p.removeUnitsAt,
             p.metalStalled,
             p.energyStalled,
             p.unitsKilled,

@@ -457,14 +457,15 @@ Built to `docs/ai-architecture-proposal.md`, which is now an architecture note r
       a lockstep tick cannot run without every player's commands for it. Now
       the pause banner comes up naming who is being waited for and counting
       down, and after `drop-timeout` seconds (rwe.cfg, 10 by default, 0 to
-      wait for ever) the rest carry on without them. Their units stay exactly
-      as they were, with the orders and the fire mode they had. **That is not what
-      the original does** (BT-232): its player-removal routine (`0x452CC0`)
+      wait for ever) the rest carry on without them. Their units are removed
+      on the agreed drop tick, on every peer, as required by the owner decision
+      of 2026-10-17 (#706). The original's player-removal routine (BT-232, `0x452CC0`)
       calls the unit wipe `0x486F10` for the dropped slot (at `0x452E17`),
       which removes every unit of that player, with cause 3, on every
       surviving peer, because the `1c` message that announces the drop is
-      re-broadcast. Owner decision of 2026-10-17 (#706): RWE will match it, on
-      the agreed drop tick, on every peer; **until that lands, the units stay.**
+      re-broadcast. The stream closes on arrival; the simulation schedules the
+      unit wipe for the named tick, independently of packet arrival time.
+      The pending wipe is hashed and saved, including in replay keyframes.
       RWE's own TA-host removal already kills the leaving player's units.
 
       **The drop is a command, and it is applied when it arrives rather than

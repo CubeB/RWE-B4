@@ -45,6 +45,7 @@ namespace rwe
             {"maxEnergy", dumpJson(p.maxEnergy)},
             {"hasBaseStorage", dumpJson(p.hasBaseStorage)},
             {"hasCreatedUnits", dumpJson(p.hasCreatedUnits)},
+            {"removeUnitsAt", dumpJson(p.removeUnitsAt)},
             {"metalStalled", dumpJson(p.metalStalled)},
             {"energyStalled", dumpJson(p.energyStalled)},
             {"unitsKilled", dumpJson(p.unitsKilled)},

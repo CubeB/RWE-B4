@@ -3094,24 +3094,10 @@ namespace rwe
                 }
             },
             [&](const PlayerDroppedCommand& c) {
-                // The drop took effect when this command arrived, which is what
-                // let the tick carrying it run at all, and whether the peer who
-                // issued it was entitled to was settled there. So the question
-                // left here is only whether it was honoured: a drop refused on
-                // arrival leaves nothing to announce.
-                if (!playerCommandService->isDropped(c.player))
-                {
-                    return;
-                }
-
-                // And whether it was this player's to issue. A duplicate
-                // from anyone else, of a drop that did happen, is not a
-                // second announcement. Issue #75.
-                if (playerCommandService->droppingPlayerFor(c.player) != issuingPlayer)
-                {
-                    return;
-                }
-
+                // The stream closed when this command arrived, which is what
+                // let the tick carrying it run at all. Only an honoured drop
+                // may schedule BT-232's unit wipe or announce the departure.
+                applyPlayerDropToSimulation(simulation, c, sceneTime.value);
                 onPlayerDropped(c.player, c.fromTick);
             },
             [&](const PlayerRejoinedCommand& c) {

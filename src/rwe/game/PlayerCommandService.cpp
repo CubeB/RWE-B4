@@ -35,8 +35,8 @@ namespace rwe
             if (p.second.empty())
             {
                 // A dropped player, past the tick their stream was cut at.
-                // They issue nothing for the rest of the game, and their units
-                // are left standing where they are with the orders they had.
+                // They issue nothing until a rejoin reopens their stream.
+                // BT-232's unit wipe runs in the simulation at the agreed tick.
                 out.emplace_back(p.first, std::vector<PlayerCommand>());
                 continue;
             }
@@ -86,30 +86,38 @@ namespace rwe
         // advance while the lost peer's buffer is empty, and a command waiting
         // to be popped is waiting behind that same wall. Applying it early is
         // safe because the cut it describes is a tick and not a moment.
-        for (const auto& command : commands)
-        {
+        auto& queuedCommands = commandBuffers.at(player).back();
+        queuedCommands.erase(std::remove_if(queuedCommands.begin(), queuedCommands.end(), [&](const PlayerCommand& command) {
             const auto* dropped = std::get_if<PlayerDroppedCommand>(&command);
             if (dropped == nullptr)
             {
-                continue;
+                return false;
             }
 
             if (droppingPlayerForLocked(dropped->player) != player)
             {
                 LOG_WARN << "Ignoring a drop of player " << dropped->player.value
                          << " issued by player " << player.value << ", who is not the one to issue it";
-                continue;
+                return true;
             }
 
             if (dropped->fromTick > poppedRounds + MaxDropLeadTicks)
             {
                 LOG_WARN << "Ignoring a drop of player " << dropped->player.value << " from tick " << dropped->fromTick
                          << ", which is further ahead of the game (tick " << poppedRounds << ") than any drop is chosen";
-                continue;
+                return true;
             }
 
+            // BT-232: only an accepted drop may reach the simulation. Keep
+            // that decision in the queued set: a later rejoin can arrive
+            // before this set is popped and change the service's live state.
+            if (isDroppedLocked(dropped->player))
+            {
+                return true;
+            }
             dropPlayerLocked(dropped->player, dropped->fromTick);
-        }
+            return !isDroppedLocked(dropped->player);
+        }), queuedCommands.end());
 
         for (const auto& command : commands)
         {

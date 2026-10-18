@@ -13,6 +13,18 @@
 
 namespace rwe
 {
+    void applyPlayerDropToSimulation(GameSimulation& simulation, const PlayerDroppedCommand& command, unsigned int sceneTick)
+    {
+        auto& player = simulation.getPlayer(command.player);
+        if (player.status == GamePlayerStatus::Alive && !player.removeUnitsAt)
+        {
+            // sceneTick names the tick about to run; gameTime still names the
+            // completed tick. A loaded game's two clocks have different bases.
+            auto delay = command.fromTick > sceneTick ? command.fromTick - sceneTick : 0u;
+            player.removeUnitsAt = simulation.gameTime + GameTime(delay + 1u);
+        }
+    }
+
     void feedReplayCommands(GameSimulation& simulation, PlayerCommandService& playerCommandService,
         const Replay& replay, unsigned int tick, bool rejoining)
     {

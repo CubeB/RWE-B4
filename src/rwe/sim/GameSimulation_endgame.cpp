@@ -5,6 +5,37 @@
 
 namespace rwe
 {
+    void GameSimulation::updateDroppedPlayers()
+    {
+        // BT-232, static byte-tactics reading at 97d7ac59: the remote-player
+        // removal wipes every live unit with cause 3. The agreed tick is RWE's
+        // lockstep mechanism; packet arrival must never decide when units die.
+        for (unsigned int i = 0; i < players.size(); ++i)
+        {
+            auto& player = players[i];
+            if (!player.removeUnitsAt || gameTime < *player.removeUnitsAt)
+            {
+                continue;
+            }
+            player.removeUnitsAt.reset();
+            player.status = GamePlayerStatus::Dead;
+            // Snapshot the ids: an explosion can affect other units while the
+            // wipe is in progress. selfDestructUnit already ignores dead ones.
+            std::vector<UnitId> owned;
+            for (const auto& [id, unit] : units)
+            {
+                if (unit.owner == PlayerId(i) && !unit.isDead())
+                {
+                    owned.push_back(id);
+                }
+            }
+            for (auto id : owned)
+            {
+                selfDestructUnit(id);
+            }
+        }
+    }
+
     namespace
     {
         /**

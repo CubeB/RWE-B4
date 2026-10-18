@@ -64,7 +64,10 @@ namespace rwe
         // otherwise have simulated commands from the lost player that the cut
         // is about to throw away, and that is a desync already in the past by
         // the time anyone could notice it.
-        auto tick = sceneTime.value;
+        // The command declaring the drop must also be consumed before its
+        // wipe is due. With a deep latency buffer, submitted sets can already
+        // extend beyond the margin from the current scene tick (BT-232, #706).
+        auto tick = std::max(sceneTime.value, localSetsSubmitted);
         for (const auto& peer : peers)
         {
             if (peer.lastKnownSceneTime)
@@ -295,17 +298,13 @@ namespace rwe
 
     void GameScene::onPlayerDropped(PlayerId player, unsigned int fromTick)
     {
-        // A no-op: the service applied this the moment the command arrived,
-        // because that is what let the tick carrying it run at all. Repeated
-        // because a caller ought not to have to know that, and because it costs
-        // one lookup.
-        playerCommandService->dropPlayer(player, fromTick);
+        // The service closed the stream on arrival. Do not close it again:
+        // a later rejoin may already have arrived ahead of this announcement.
 
         if (dropAnnounced.insert(player.value).second)
         {
-            // Their units are left exactly as they are, with the orders and the
-            // fire mode they had: that is what "their units stay on the map"
-            // means in the original, and it is the least new behaviour.
+            // BT-232: the simulation removes their units on fromTick; this
+            // announcement may precede it and must not change the simulation.
             printConsole(playerDisplayName(player) + " has left the game", Color(252, 252, 0));
             LOG_INFO << "Player " << player.value << " left the game at tick " << fromTick;
 
