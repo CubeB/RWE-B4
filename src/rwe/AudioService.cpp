@@ -479,6 +479,20 @@ namespace rwe
 
     AudioService::LoopToken& AudioService::LoopToken::operator=(AudioService::LoopToken&& other) noexcept
     {
+        if (this == &other)
+        {
+            return *this;
+        }
+
+        // Whatever this token was looping stops when it is replaced, as it
+        // does when the token is destroyed. Taking the other's channel without
+        // letting go of our own left the old loop running with nobody holding
+        // it, which is how the menu's hum played on under the intro film.
+        if (channel != -1 && audioService != nullptr)
+        {
+            audioService->haltChannel(channel);
+        }
+
         audioService = other.audioService;
         channel = other.channel;
         sound = std::move(other.sound);
