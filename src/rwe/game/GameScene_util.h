@@ -739,6 +739,20 @@ namespace rwe
     std::string unidentifiedObjectText(bool sonarContact);
 
     /**
+     * Whether the footer reads the unit the cursor is on.
+     *
+     * Over the world it always does. Over the minimap it does only for a unit
+     * the viewer cannot see -- a radar or sonar contact -- because the
+     * minimap is the only place a contact can be pointed at (the world pick
+     * skips what is not visible), and BT-141's "Unidentified object" line is
+     * what the bar says for one. A unit the viewer can see is still not
+     * named from a minimap dot (BT-141). The line carries no name, health or
+     * figures, so nothing is learned from it that the dot did not already
+     * give.
+     */
+    bool footerReadsHoveredUnit(bool cursorOverMinimap, bool unitVisibleToViewer);
+
+    /**
      * Whether the footer says anything about a hovered feature (BT-147). The
      * feature branch of the footer (0x46B78C) tests the definition's
      * `nodisplayinfo` bit and skips the whole text when it is set -- the 46

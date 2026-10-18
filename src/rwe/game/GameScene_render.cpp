@@ -346,10 +346,13 @@ namespace rwe
         // fraction of a UI pixel.
         auto extraBottom = static_cast<float>(worldViewport.bottom()) / uiScale + static_cast<float>(GuiSizeBottom) - 480.0f;
 
-        // The minimap is not a footer source (BT-141): the original writes its
-        // hover id only from the world pick, and the minimap reads it back
-        // just to highlight a dot. Pointing at a dot names nothing.
-        const auto footerUnit = isCursorOverMinimap() ? std::nullopt : hoveredUnit;
+        // The minimap is not a footer source for a unit that can be seen
+        // (BT-141): the original writes its hover id only from the world pick,
+        // and the minimap reads it back just to highlight a dot. A contact
+        // is another matter -- it can only be pointed at on the minimap, and
+        // the bar says "Unidentified object" for it -- see
+        // footerReadsHoveredUnit.
+        const auto footerUnit = (hoveredUnit && footerReadsHoveredUnit(isCursorOverMinimap(), unitIsVisibleToLocalPlayer(*hoveredUnit, getUnit(*hoveredUnit)))) ? hoveredUnit : std::nullopt;
         if (footerUnit && !unitIsVisibleToLocalPlayer(*footerUnit, getUnit(*footerUnit)))
         {
             // Hovered but not visible (a contact): the can-see gate fails and

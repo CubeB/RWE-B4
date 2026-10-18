@@ -25,6 +25,21 @@ namespace rwe
         REQUIRE(unidentifiedObjectText(true) == "S: Unidentified object");
     }
 
+    TEST_CASE("pointing at a radar or sonar contact on the minimap reads it in the footer, a visible unit's dot does not (BT-141)", "[presentation]")
+    {
+        // In the world a unit is read whatever it is (the pick only finds what
+        // can be seen anyway).
+        REQUIRE(footerReadsHoveredUnit(false, true));
+        REQUIRE(footerReadsHoveredUnit(false, false));
+
+        // On the minimap a contact is read -- it can be pointed at nowhere
+        // else -- and its line names nothing...
+        REQUIRE(footerReadsHoveredUnit(true, false));
+
+        // ...but a unit that can be seen is not named from its dot.
+        REQUIRE_FALSE(footerReadsHoveredUnit(true, true));
+    }
+
     TEST_CASE("vent steam is drawn wherever the ground is explored and dimmed where it is not in sight (BT-151)", "[presentation]")
     {
         REQUIRE(ventSteamDrawMode(true, true) == VentSteamDrawMode::Normal);

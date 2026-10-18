@@ -2183,6 +2183,11 @@ namespace rwe
         return std::string(sonarContact ? "S: " : "R: ") + "Unidentified object";
     }
 
+    bool footerReadsHoveredUnit(bool cursorOverMinimap, bool unitVisibleToViewer)
+    {
+        return !cursorOverMinimap || !unitVisibleToViewer;
+    }
+
     bool featureFooterIsShown(const FeatureDefinition& definition)
     {
         return !definition.noDisplayInfo;
