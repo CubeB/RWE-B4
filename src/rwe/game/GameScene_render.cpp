@@ -1525,30 +1525,6 @@ namespace rwe
 
                 auto uiDest = worldToUi * simVectorToFloat(nextPos);
                 worldUiRenderService.drawSprite(uiDest.x, uiDest.y, *(frames[frameIndex]), Color(255, 255, 255, 100));
-
-                // The ring around the order's target while Shift is held
-                // (BT-185): an ellipse of sixteen segments in interface slot
-                // 12, R across and 0.89 R up and down, raised by half the
-                // target's height. It sits on the marker's position, so a
-                // target the player cannot see is ringed where it was last
-                // seen -- the original rings its live position, which gives a
-                // hidden target away, and that is not copied.
-                //
-                // Only an order that has a target unit is ringed. A move, a
-                // patrol point, an unload spot or a build site is a place and
-                // not a target, and ringing every icon the Shift display draws
-                // was wrong in play.
-                if (auto ringTargetId = orderTargetUnit(order, unit); ringTargetId)
-                {
-                    if (auto ringTarget = tryGetUnit(*ringTargetId))
-                    {
-                        const auto& ringDefinition = simulation.unitDefinitions.at(ringTarget->get().unitType);
-                        auto ringCentre = simVectorToFloat(nextPos);
-                        ringCentre.y += simScalarToFloat(simulation.unitModelDefinitions.at(ringDefinition.objectName).height) / 2.0f;
-                        auto ringUi = worldToUi * ringCentre;
-                        worldUiRenderService.drawLines(targetRingSegments(Vector2f(ringUi.x, ringUi.y), targetRingRadius(simulation.getFootprintXZ(ringDefinition.movementCollisionInfo))), Color(255, 71, 0));
-                    }
-                }
             }
 
             if (drawLines)

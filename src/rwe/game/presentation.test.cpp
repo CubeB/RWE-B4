@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/MovieScene.h>
@@ -45,66 +44,6 @@ namespace rwe
         REQUIRE(ventSteamDrawMode(true, true) == VentSteamDrawMode::Normal);
         REQUIRE(ventSteamDrawMode(true, false) == VentSteamDrawMode::Dimmed);
         REQUIRE(ventSteamDrawMode(false, false) == VentSteamDrawMode::Hidden);
-    }
-
-    TEST_CASE("the target ring is an ellipse, R across and 0.89 R up and down (BT-185)", "[presentation]")
-    {
-        auto segments = targetRingSegments(Vector2f(100.0f, 50.0f), 32);
-
-        // Sixteen segments of two points each.
-        REQUIRE(segments.size() == 32);
-
-        float minX = 1e9f;
-        float maxX = -1e9f;
-        float minY = 1e9f;
-        float maxY = -1e9f;
-        for (const auto& p : segments)
-        {
-            minX = std::min(minX, p.x);
-            maxX = std::max(maxX, p.x);
-            minY = std::min(minY, p.y);
-            maxY = std::max(maxY, p.y);
-        }
-
-        // Horizontal radius 32, vertical (int)(32 x 0.89) = 28.
-        REQUIRE(maxX == Catch::Approx(132.0f));
-        REQUIRE(minX == Catch::Approx(68.0f));
-        REQUIRE(maxY == Catch::Approx(78.0f));
-        REQUIRE(minY == Catch::Approx(22.0f));
-
-        // The segments run on from one another and close.
-        for (std::size_t i = 1; i < segments.size() - 1; i += 2)
-        {
-            REQUIRE(segments[i].x == Catch::Approx(segments[i + 1].x));
-            REQUIRE(segments[i].y == Catch::Approx(segments[i + 1].y));
-        }
-        REQUIRE(segments.back().x == Catch::Approx(segments.front().x));
-        REQUIRE(segments.back().y == Catch::Approx(segments.front().y));
-    }
-
-    TEST_CASE("the target ring's radius is the target's footprint radius, or 32 with no target unit (BT-185)", "[presentation]")
-    {
-        REQUIRE(targetRingRadius(std::nullopt) == 32);
-        REQUIRE(targetRingRadius(std::pair<unsigned int, unsigned int>{2, 2}) == 16);
-        REQUIRE(targetRingRadius(std::pair<unsigned int, unsigned int>{3, 5}) == 40);
-    }
-
-    TEST_CASE("only an order with a target unit is ringed while Shift is held, not a move or a patrol point (BT-185)", "[presentation]")
-    {
-        UnitState unit(std::vector<UnitMesh>{}, nullptr);
-
-        // A place is not a target: the ring is drawn only where the order
-        // names a unit, so none of these gets one.
-        REQUIRE_FALSE(orderTargetUnit(UnitOrder(MoveOrder(SimVector(10_ss, 0_ss, 10_ss))), unit).has_value());
-        REQUIRE_FALSE(orderTargetUnit(UnitOrder(PatrolOrder(SimVector(10_ss, 0_ss, 10_ss))), unit).has_value());
-        REQUIRE_FALSE(orderTargetUnit(UnitOrder(UnloadOrder(SimVector(10_ss, 0_ss, 10_ss))), unit).has_value());
-
-        // A unit target is.
-        UnitId target(7);
-        auto attack = orderTargetUnit(createAttackOrder(target), unit);
-        REQUIRE(attack.has_value());
-        REQUIRE(*attack == target);
-        REQUIRE(*orderTargetUnit(UnitOrder(GuardOrder(target)), unit) == target);
     }
 
     TEST_CASE("an enemy structure is drawn only when the ground under it is in sight, not when one cell at its centre is", "[presentation]")

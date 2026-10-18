@@ -784,26 +784,6 @@ namespace rwe
      */
     std::optional<UnitId> unitOrderTargetUnit(const UnitState& unit);
 
-    /** The unit a given order of `unit` is pointed at, if it names one. */
-    std::optional<UnitId> orderTargetUnit(const UnitOrder& order, const UnitState& unit);
-
-    /** The radius of the target ring when the order has no target unit (BT-185). */
-    constexpr int TargetRingDefaultRadius = 32;
-
-    /**
-     * The target ring's horizontal radius in screen pixels (BT-185): the
-     * target unit's footprint radius -- half the longer side of its footprint
-     * in world units -- or 32 when the order has no target unit.
-     */
-    int targetRingRadius(std::optional<std::pair<unsigned int, unsigned int>> targetFootprint);
-
-    /**
-     * The ring around an order's target as line segments, two points each
-     * (BT-185, 0x4399F0): an ellipse of sixteen segments, R across and
-     * (int)(R x 0.89) up and down -- not a circle of 0.89 R.
-     */
-    std::vector<Vector2f> targetRingSegments(const Vector2f& centre, int radius);
-
     // Declared here rather than kept private to GameScene.cpp because the
     // renderers moved to GameScene_render.cpp still call them; the
     // definitions stay where they were. See the head of that file for why it
