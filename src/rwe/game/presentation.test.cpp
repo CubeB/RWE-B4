@@ -74,6 +74,24 @@ namespace rwe
         REQUIRE(targetRingRadius(std::pair<unsigned int, unsigned int>{3, 5}) == 40);
     }
 
+    TEST_CASE("only an order with a target unit is ringed while Shift is held, not a move or a patrol point (BT-185)", "[presentation]")
+    {
+        UnitState unit(std::vector<UnitMesh>{}, nullptr);
+
+        // A place is not a target: the ring is drawn only where the order
+        // names a unit, so none of these gets one.
+        REQUIRE_FALSE(orderTargetUnit(UnitOrder(MoveOrder(SimVector(10_ss, 0_ss, 10_ss))), unit).has_value());
+        REQUIRE_FALSE(orderTargetUnit(UnitOrder(PatrolOrder(SimVector(10_ss, 0_ss, 10_ss))), unit).has_value());
+        REQUIRE_FALSE(orderTargetUnit(UnitOrder(UnloadOrder(SimVector(10_ss, 0_ss, 10_ss))), unit).has_value());
+
+        // A unit target is.
+        UnitId target(7);
+        auto attack = orderTargetUnit(createAttackOrder(target), unit);
+        REQUIRE(attack.has_value());
+        REQUIRE(*attack == target);
+        REQUIRE(*orderTargetUnit(UnitOrder(GuardOrder(target)), unit) == target);
+    }
+
     TEST_CASE("an enemy structure is drawn only when the ground under it is in sight, not when one cell at its centre is", "[presentation]")
     {
         GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
