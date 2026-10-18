@@ -46,6 +46,36 @@ namespace rwe
         constexpr SimAngle WorkFacingTolerance = SimAngle(1u << 12u);
 
         /**
+         * How square on to the job a ground builder has to be before it puts
+         * its arm out. StartBuilding is handed the heading from the builder's
+         * nozzle to the job as the builder stands when it is sent, and the
+         * script turns the torso to that and holds it. The body is still
+         * coming round to the job after that (it is only held to
+         * WorkFacingTolerance, a sixteenth of a turn, to start), so the torso
+         * was left turned by whatever the body had still to go: a commander
+         * built with its upper half twisted off the building and the spray
+         * leaving the arm at a slant. Wait the few ticks it takes to come
+         * square instead; the facing is asserted every tick, so it gets
+         * there.
+         */
+        constexpr SimAngle WorkDeployFacingTolerance = SimAngle(1u << 8u);
+
+        bool builderIsSquareOnTo(const UnitState& builder, const UnitDefinition& definition, const SimVector& work)
+        {
+            if (definition.canFly || definition.turnRate <= 0_ss)
+            {
+                return true;
+            }
+            auto direction = work - builder.position;
+            direction.y = 0_ss;
+            if (direction.lengthSquared() == 0_ss)
+            {
+                return true;
+            }
+            return angleBetweenIsLessOrEqual(builder.rotation, UnitState::toRotation(direction), WorkDeployFacingTolerance);
+        }
+
+        /**
          * How near a gunship has to get to its station before it counts as
          * arrived and picks the next one. The original uses sixteen units,
          * which is close enough that it really does fly to each point.
@@ -5765,6 +5795,12 @@ namespace rwe
                     return false;
                 }
 
+                // Square on to the job before the arm goes out (WorkDeployFacingTolerance).
+                if (!builderIsSquareOnTo(*unitInfo.state, *unitInfo.definition, targetUnit.position))
+                {
+                    return false;
+                }
+
                 auto nanoFromPosition = getNanoPoint(unitInfo.id);
                 auto headingAndPitch = computeLineOfSightHeadingAndPitch(unitInfo.state->rotation, nanoFromPosition, targetUnit.position);
                 auto heading = headingAndPitch.first;
@@ -6760,6 +6796,12 @@ namespace rwe
                     return false;
                 }
 
+                // Square on to the job before the arm goes out (WorkDeployFacingTolerance).
+                if (!builderIsSquareOnTo(*unitInfo.state, *unitInfo.definition, targetUnit.position))
+                {
+                    return false;
+                }
+
                 auto nanoFromPosition = getNanoPoint(unitInfo.id);
                 auto headingAndPitch = computeLineOfSightHeadingAndPitch(unitInfo.state->rotation, nanoFromPosition, targetUnit.position);
                 auto heading = headingAndPitch.first;
@@ -6916,6 +6958,12 @@ namespace rwe
                         const auto& targetFeature = sim->getFeature(targetFeatureId);
                         return targetFeature.position;
                     });
+                // Square on to the job before the arm goes out (WorkDeployFacingTolerance).
+                if (!builderIsSquareOnTo(*unitInfo.state, *unitInfo.definition, targetPosition))
+                {
+                    return false;
+                }
+
                 auto headingAndPitch = computeLineOfSightHeadingAndPitch(unitInfo.state->rotation, nanoFromPosition, targetPosition);
                 auto heading = headingAndPitch.first;
                 auto pitch = headingAndPitch.second;
@@ -7039,6 +7087,12 @@ namespace rwe
                 // StartBuilding has set it the builder ends up with its arm
                 // raised and nothing else happening. Let the stow finish.
                 if (unitInfo.state->cobEnvironment->isThreadRunning("StopBuilding"))
+                {
+                    return false;
+                }
+
+                // Square on to the job before the arm goes out (WorkDeployFacingTolerance).
+                if (!builderIsSquareOnTo(*unitInfo.state, *unitInfo.definition, targetUnit.position))
                 {
                     return false;
                 }

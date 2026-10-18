@@ -103,9 +103,17 @@ namespace rwe
         REQUIRE(sim.getUnitState(builderId).rotation != facingAway);
 
         // Half a turn at five hundred a tick wants about sixty-five of them.
-        tick(sim, 90);
+        // The arm goes out the moment the builder is square on to the job, not
+        // a sixteenth of a turn short of it: StartBuilding is sent the heading
+        // as the builder stands then, and the torso keeps it, so a builder
+        // that was still coming round would be left with its torso twisted off
+        // the job.
+        for (int i = 0; i < 90 && std::get_if<UnitBehaviorStateBuilding>(&sim.getUnitState(builderId).behaviourState) == nullptr; ++i)
+        {
+            tick(sim, 1);
+        }
 
-        REQUIRE(angleBetweenIsLessOrEqual(sim.getUnitState(builderId).rotation, facingJob, SimAngle(1u << 12u)));
         REQUIRE(std::get_if<UnitBehaviorStateBuilding>(&sim.getUnitState(builderId).behaviourState) != nullptr);
+        REQUIRE(angleBetweenIsLessOrEqual(sim.getUnitState(builderId).rotation, facingJob, SimAngle(1u << 8u)));
     }
 }

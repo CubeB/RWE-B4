@@ -257,15 +257,12 @@ namespace rwe
         REQUIRE_FALSE(featureFooterIsShown(iceChunk));
     }
 
-    TEST_CASE("the nano spray lands in 4/11 to 7/11 of the target's extent (BT-144)", "[presentation]")
+    TEST_CASE("the nano spray lands within plus or minus 3/11 of the target's extent about its centre", "[presentation]")
     {
-        // The window is the middle three elevenths, centred: from -1.5/11 to
-        // +1.5/11 about the middle, three elevenths wide, not the six
-        // elevenths RWE used to sample.
-        REQUIRE(NanoLandingWindowStart == 4.0f / 11.0f);
-        REQUIRE(NanoLandingWindowEnd == 7.0f / 11.0f);
-        REQUIRE((NanoLandingWindowEnd - NanoLandingWindowStart) == Catch::Approx(3.0f / 11.0f));
-        REQUIRE((NanoLandingWindowStart - 0.5f) == Catch::Approx(-1.5f / 11.0f));
-        REQUIRE((NanoLandingWindowEnd - 0.5f) == Catch::Approx(1.5f / 11.0f));
+        // The look the owner prefers, kept over BT-144's 4/11 to 7/11 window
+        // (half as wide, which drew the stream as a tight bundle through the
+        // middle of the building). Six elevenths wide.
+        REQUIRE(NanoLandingHalfWidth == Catch::Approx(3.0f / 11.0f));
+        REQUIRE((NanoLandingHalfWidth * 2.0f) == Catch::Approx(6.0f / 11.0f));
     }
 }
