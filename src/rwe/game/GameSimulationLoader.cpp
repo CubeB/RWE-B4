@@ -1479,19 +1479,21 @@ namespace rwe
             kept += definition.excludedByMission ? 0 : 1;
         }
 
-        // A build menu's button is named after the unit it builds; the other
-        // gadgets on a page -- the page flips, the order buttons -- name no
-        // unit and stay.
+        // BT-103 (static byte-tactics reading at 97d7ac59): an excluded
+        // unit's build button stays in its slot with a grey, inert face.
+        // UiFactory already honours grayedOut, including input suppression.
         for (auto& [builderName, pages] : builderGuis.builderGuisMap)
         {
             for (auto& page : pages)
             {
-                page.erase(
-                    std::remove_if(page.begin(), page.end(), [&](const GuiEntry& entry) {
-                        auto it = unitDefinitions.find(toUpper(entry.common.name));
-                        return it != unitDefinitions.end() && it->second.excludedByMission;
-                    }),
-                    page.end());
+                for (auto& entry : page)
+                {
+                    auto it = unitDefinitions.find(toUpper(entry.common.name));
+                    if (it != unitDefinitions.end() && it->second.excludedByMission)
+                    {
+                        entry.grayedOut = true;
+                    }
+                }
             }
         }
         return kept;

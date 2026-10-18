@@ -178,8 +178,8 @@ namespace rwe
 
     /**
      * Applies a mission's unit list (issue #381): every definition not on it
-     * is marked excludedByMission, and its buttons are taken off every build
-     * menu. Answers how many definitions stay.
+     * is marked excludedByMission, and its buttons are greyed in place on every
+     * build menu (BT-103, #701). Answers how many definitions stay.
      */
     std::size_t applyMissionUnitList(std::unordered_map<std::string, UnitDefinition>& unitDefinitions, BuilderGuisDatabase& builderGuis, const std::set<std::string>& allowed);
 

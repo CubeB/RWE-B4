@@ -263,6 +263,42 @@ namespace rwe
         CHECK(missionUnitListFromTdf(tdf) == std::set<std::string>{"ARMCOM", "ARMPW"});
     }
 
+    TEST_CASE("BT-103 preserves the shipped commander page under AC02 restrictions", "[mission]")
+    {
+        // totala1.hpi guis/ARMCOM1.GUI: adjacent 64x64 buttons at (0,27)
+        // and (64,27), and the 44x16 page flip at (72,222). totala4.hpi
+        // camps/useonly/AC02.TDF includes ARMSOLAR and excludes ARMWIN.
+        std::unordered_map<std::string, UnitDefinition> definitions;
+        definitions["ARMSOLAR"] = UnitDefinition{};
+        definitions["ARMWIN"] = UnitDefinition{};
+        std::vector<GuiEntry> page(3);
+        const char* names[] = {"ARMSOLAR", "ARMWIN", "ARMNEXT"};
+        for (std::size_t i = 0; i < page.size(); ++i)
+        {
+            auto& common = page[i].common;
+            common.id = GuiElementType::Button;
+            common.name = names[i];
+            common.active = true;
+            common.xpos = i == 0 ? 0 : (i == 1 ? 64 : 72);
+            common.ypos = i == 2 ? 222 : 27;
+            common.width = i == 2 ? 44 : 64;
+            common.height = i == 2 ? 16 : 64;
+            common.attribs = i == 2 ? 2 : GuiButtonAttrib::BehaviorBuildButton;
+        }
+        BuilderGuisDatabase guis;
+        guis.addBuilderGui("ARMCOM", {page});
+        REQUIRE(applyMissionUnitList(definitions, guis, {"ARMSOLAR"}) == 1);
+        const auto& filtered = guis.tryGetBuilderGui("ARMCOM")->get().front();
+        REQUIRE(filtered.size() == page.size());
+        for (std::size_t i = 0; i < page.size(); ++i)
+        {
+            CHECK(filtered[i].common == page[i].common);
+        }
+        CHECK_FALSE(filtered[0].grayedOut.value_or(false));
+        CHECK(filtered[1].grayedOut.value_or(false));
+        CHECK_FALSE(filtered[2].grayedOut.value_or(false));
+    }
+
     TEST_CASE("a unit off the mission's list cannot be built or placed", "[mission]")
     {
         // Issue #381. The original removes it from the game (0x431740,
@@ -281,12 +317,16 @@ namespace rwe
         CHECK(world.sim.unitDefinitions.at("KBOT").excludedByMission);
         CHECK_FALSE(world.sim.unitDefinitions.at("BLDG").excludedByMission);
 
-        SECTION("its button leaves the build menus, and nothing else does")
+        SECTION("its button stays greyed in place, and other gadgets stay unchanged (BT-103)")
         {
             const auto& menu = guis.tryGetBuilderGui("BLDG")->get().front();
-            REQUIRE(menu.size() == 2u);
+            REQUIRE(menu.size() == 3u);
             CHECK(menu[0].common.name == "BLDG");
-            CHECK(menu[1].common.name == "NEXT");
+            CHECK_FALSE(menu[0].grayedOut.value_or(false));
+            CHECK(menu[1].common.name == "kbot");
+            CHECK(menu[1].grayedOut.value_or(false));
+            CHECK(menu[2].common.name == "NEXT");
+            CHECK_FALSE(menu[2].grayedOut.value_or(false));
         }
 
         SECTION("the mission does not place one")
