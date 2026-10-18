@@ -753,6 +753,16 @@ namespace rwe
         }
 
         auto style = computeUnitDrawStyle(unit.isOwnedBy(localPlayerId), unit.cloaked, positionIsVisibleToLocalPlayer(unit.position));
+        if (style == UnitDrawStyle::Solid && fogOfWarEnabled && !unit.isOwnedBy(localPlayerId))
+        {
+            // An enemy structure appears when the ground under it does, not
+            // when the one cell at its centre is lit.
+            const auto& definition = simulation.unitDefinitions.at(unit.unitType);
+            if (!definition.isMobile && !structureGroundIsInSight(simulation, localPlayerVisibility(), unit.position, definition))
+            {
+                return false;
+            }
+        }
         return style != UnitDrawStyle::Hidden;
     }
 

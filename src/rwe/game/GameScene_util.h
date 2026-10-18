@@ -160,6 +160,22 @@ namespace rwe
      */
     bool effectIsVisibleToPlayer(const GameSimulation& sim, const PlayerVisibility& visibility, const SimVector& position);
 
+    /**
+     * Whether the ground a standing enemy structure is built on has come into
+     * the viewer's sight: the cell of its centre and of each corner of its
+     * footprint must all be lit.
+     *
+     * A unit is drawn when the cell of its position is lit, which for a big
+     * building is one cell in the middle of a footprint several cells across,
+     * so a plant could be drawn while most of the ground under it was still
+     * black fog. A structure is drawn only once the ground under it is
+     * uncovered. A corner that falls off the map's grid is ignored, so a
+     * building at the edge is not hidden for ever by ground that does not
+     * exist. The footprint is read from the definition in cells of sixteen
+     * world units, as the sight test does.
+     */
+    bool structureGroundIsInSight(const GameSimulation& sim, const PlayerVisibility& visibility, const SimVector& position, const UnitDefinition& definition);
+
     /** What a weapon impact puts on the screen. */
     struct WeaponImpactEffects
     {

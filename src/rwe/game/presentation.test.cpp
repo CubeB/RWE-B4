@@ -6,9 +6,11 @@
 #include <rwe/game/GameScene_util.h>
 #include <rwe/io/fbi/io.h>
 #include <rwe/io/tdf/tdf.h>
+#include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MovementClassDatabase.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/resource_io.h>
+#include <rwe/sim/sim_test_util.h>
 
 /**
  * Small pure rules of how the game is drawn, each pinned to a byte-tactics
@@ -70,6 +72,43 @@ namespace rwe
         REQUIRE(targetRingRadius(std::nullopt) == 32);
         REQUIRE(targetRingRadius(std::pair<unsigned int, unsigned int>{2, 2}) == 16);
         REQUIRE(targetRingRadius(std::pair<unsigned int, unsigned int>{3, 5}) == 40);
+    }
+
+    TEST_CASE("an enemy structure is drawn only when the ground under it is in sight, not when one cell at its centre is", "[presentation]")
+    {
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        auto& visibility = sim.playerVisibility.at(player.value);
+
+        UnitDefinition plant{};
+        plant.isMobile = false;
+        // Six cells across, as a vehicle plant is: three vision cells wide.
+        plant.movementCollisionInfo = UnitDefinition::AdHocMovementClass{6u, 6u, 255u, 255u, 0u, 0u};
+
+        auto centre = SimVector(512_ss, 0_ss, 512_ss);
+        auto light = [&](const SimVector& at) {
+            auto cell = sim.visionCellAt(at);
+            REQUIRE(visibility.contains(cell));
+            visibility.visible.set(cell.x, cell.y, static_cast<unsigned char>(1));
+        };
+
+        // Nothing lit: not drawn.
+        REQUIRE_FALSE(structureGroundIsInSight(sim, visibility, centre, plant));
+
+        // Only the cell at its centre, which is all the position test asks.
+        light(centre);
+        REQUIRE(visibility.isVisible(sim.visionCellAt(centre)));
+        REQUIRE_FALSE(structureGroundIsInSight(sim, visibility, centre, plant));
+
+        // Three corners and the centre: still ground in the dark.
+        light(SimVector(centre.x - 48_ss, 0_ss, centre.z - 48_ss));
+        light(SimVector(centre.x + 48_ss, 0_ss, centre.z - 48_ss));
+        light(SimVector(centre.x - 48_ss, 0_ss, centre.z + 48_ss));
+        REQUIRE_FALSE(structureGroundIsInSight(sim, visibility, centre, plant));
+
+        // The fourth corner: the whole footprint is uncovered.
+        light(SimVector(centre.x + 48_ss, 0_ss, centre.z + 48_ss));
+        REQUIRE(structureGroundIsInSight(sim, visibility, centre, plant));
     }
 
     TEST_CASE("a film is drawn at x 0, y = (480 - height) / 2, unscaled (BT-157)", "[presentation]")
