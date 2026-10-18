@@ -3264,21 +3264,27 @@ namespace rwe
         {
             const auto& unit = sim.getUnitState(*cellValue.mobileUnitId);
 
-            if (unit.isOwnedBy(projectile.owner))
+            // BT-253: a unit of the projectile's own side in the cell does not
+            // end the test. The building and feature slots of the same cell
+            // are still asked, so a round fired over friendly ground units
+            // still strikes the building or wreck beneath them.
+            if (!unit.isOwnedBy(projectile.owner))
             {
-                return false;
+                const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
+                const auto& modelDefinition = sim.unitModelDefinitions.at(unitDefinition.objectName);
+
+                // BT-253: only the top is tested. A round below the unit's
+                // origin (a shot into a pit, or past a unit standing high on a
+                // slope) is still inside it. The flying-unit test keeps both
+                // bounds.
+                if (projectile.position.y > unit.position.y + modelDefinition.height)
+                {
+                    return false;
+                }
+
+                struckUnit = *cellValue.mobileUnitId;
+                return true;
             }
-
-            const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
-            const auto& modelDefinition = sim.unitModelDefinitions.at(unitDefinition.objectName);
-
-            if (projectile.position.y < unit.position.y || projectile.position.y > unit.position.y + modelDefinition.height)
-            {
-                return false;
-            }
-
-            struckUnit = *cellValue.mobileUnitId;
-            return true;
         }
 
         if (cellValue.buildingInfo && !cellValue.buildingInfo->passable)
@@ -3293,7 +3299,8 @@ namespace rwe
             const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
             const auto& modelDefinition = sim.unitModelDefinitions.at(unitDefinition.objectName);
 
-            if (projectile.position.y < unit.position.y || projectile.position.y > unit.position.y + modelDefinition.height)
+            // BT-253: the top only, as for a mobile unit above.
+            if (projectile.position.y > unit.position.y + modelDefinition.height)
             {
                 return false;
             }

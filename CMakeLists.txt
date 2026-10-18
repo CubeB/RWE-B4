@@ -1320,6 +1320,7 @@ set(TEST_FILES
     src/rwe/game/noshadow.test.cpp
     src/rwe/sim/missile.test.cpp
     src/rwe/sim/seacollision.test.cpp
+    src/rwe/sim/projectilecell.test.cpp
     src/rwe/sim/unitsonly.test.cpp
     src/rwe/sim/acidwater.test.cpp
     src/rwe/sim/aircraft.test.cpp

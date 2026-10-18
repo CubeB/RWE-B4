@@ -79,6 +79,17 @@ namespace rwe
             weapon.weaponType = "airmissile";
             fighter.weapons[0] = weapon;
             sim.flyingUnitsSet.insert(id);
+
+            // As transitionFromGroundToAir does when a real aircraft takes
+            // off: a flying unit stands in no cell. tryAddUnit stamped the
+            // spawn point for a mobile unit, and left there it would sit in
+            // the grid for ever as a ghost that rounds fly into (BT-253 asks
+            // the cell's units against their tops only).
+            auto footprint = sim.occupiedGrid.tryToRegion(sim.computeFootprintRegion(pos, sim.unitDefinitions.at("fighter").movementCollisionInfo));
+            if (footprint)
+            {
+                sim.occupiedGrid.forEach(*footprint, [](auto& cell) { cell.mobileUnitId = std::nullopt; });
+            }
             return id;
         }
 
