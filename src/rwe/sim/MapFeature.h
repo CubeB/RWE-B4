@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <rwe/sim/FeatureDefinitionId.h>
+#include <rwe/sim/FeatureAnimation.h>
 #include <rwe/sim/GameTime.h>
 #include <rwe/sim/SimAngle.h>
 #include <rwe/sim/SimVector.h>
@@ -49,7 +50,16 @@ namespace rwe
         /** Set while the feature is on fire: the tick it burns out and is replaced by its burnt form. */
         std::optional<GameTime> burningUntil{};
 
-        /** While burning, the next tick the fire tries to spread to its neighbours. */
+        /** Predicted spread tick, or zero once spent/disabled; countdown is authoritative. */
         GameTime nextSpark{0};
+
+        FeatureAnimation animation{FeatureAnimation::None};
+
+        /** BT-255/261: counted by feature updates, not presentation frames. */
+        unsigned int animationTicksRemaining{0};
+        unsigned int burnSparkTicksRemaining{0};
+
+        /** Relative allocation order among active sprites; newest first. */
+        unsigned int animationOrder{0};
     };
 }

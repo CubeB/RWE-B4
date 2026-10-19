@@ -4,9 +4,13 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <limits>
+#include <string_view>
 #include <random>
 #include <rwe/ai/AiController.h>
 #include <rwe/sim/DemoRecorder.h>
+#include <rwe/sim/FeatureBlast.h>
+#include <rwe/sim/FactoryConstruction.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
@@ -338,7 +342,36 @@ namespace rwe
 
         auto footprintRegion = computeFootprintRegion(newFeature.position, featureDefinition.footprintX, featureDefinition.footprintZ);
 
-        if (anyFeatureOccupies(footprintRegion))
+        // BT-261/262: clear first, without force or rollback. Removing an
+        // occupant may free the slot the incoming model needs.
+        if (footprintRegion.right() > occupiedGrid.getWidth() || footprintRegion.bottom() > occupiedGrid.getHeight())
+        {
+            return std::nullopt;
+        }
+        for (int y = footprintRegion.top(); y < footprintRegion.bottom(); ++y)
+        {
+            for (int x = footprintRegion.left(); x < footprintRegion.right(); ++x)
+            {
+                if (x < 0 || y < 0)
+                {
+                    continue;
+                }
+                // BT-265: refuse during clearing, without rolling back earlier cells.
+                if (terrain.hasLavaExclusion(DiscreteRect(x, y, 1, 1)))
+                {
+                    return std::nullopt;
+                }
+                if (auto occupant = occupiedGrid.get(x, y).featureId)
+                {
+                    if (getFeatureDefinition(getFeature(*occupant).featureName).indestructible)
+                    {
+                        return std::nullopt;
+                    }
+                    deleteFeature(*occupant);
+                }
+            }
+        }
+        if ((featureDefinition.hasModel || newFeature.animation != FeatureAnimation::None) && countStatefulFeatures() >= 2048)
         {
             return std::nullopt;
         }
@@ -533,18 +566,19 @@ namespace rwe
             return false;
         }
 
-        auto position = feature.position;
-        auto rotation = feature.rotation;
-        auto reclamate = featureDefinition.featureReclamate;
-        auto featureType = feature.featureName;
-
-        deleteFeature(featureId);
-
-        events.push_back(FeatureReclaimedEvent{featureType, position});
-
-        if (reclamate)
+        // BT-261: credit above precedes even a refused transition. Existing
+        // work/payout arithmetic is unchanged by this capacity correction.
+        if (!featureDefinition.hasModel && feature.animation != FeatureAnimation::None)
         {
-            addFeature(MapFeature{*reclamate, position, rotation});
+            return true;
+        }
+        if (!featureDefinition.hasModel && !featureDefinition.reclaimFrameTicks.empty())
+        {
+            startFeatureAnimation(featureId, FeatureAnimation::Reclaim);
+        }
+        else
+        {
+            replaceFeature(featureId, featureDefinition.featureReclamate);
         }
 
         return true;
@@ -554,6 +588,12 @@ namespace rwe
     {
         auto featureRef = tryGetFeature(id);
         if (!featureRef)
+        {
+            return std::nullopt;
+        }
+
+        // Normal lifecycle replacement never gains force-removal semantics.
+        if (getFeatureDefinition(featureRef->get().featureName).indestructible)
         {
             return std::nullopt;
         }
@@ -568,121 +608,6 @@ namespace rwe
             return std::nullopt;
         }
         return addFeature(MapFeature{*replacement, position, rotation});
-    }
-
-    void GameSimulation::igniteFeature(FeatureId id)
-    {
-        auto featureRef = tryGetFeature(id);
-        if (!featureRef)
-        {
-            return;
-        }
-        auto& feature = featureRef->get();
-        const auto& featureDefinition = getFeatureDefinition(feature.featureName);
-        if (!featureDefinition.flamable || feature.burningUntil)
-        {
-            return;
-        }
-
-        const auto ticksPerSecond = static_cast<unsigned int>(SimTicksPerSecond);
-        auto minTicks = featureDefinition.burnMin * ticksPerSecond;
-        auto maxTicks = std::max(featureDefinition.burnMax, featureDefinition.burnMin) * ticksPerSecond;
-        feature.burningUntil = gameTime + GameTime(std::max(1u, randomBetween(rng, minTicks, maxTicks)));
-        feature.nextSpark = gameTime + GameTime(std::max(1u, featureDefinition.sparkTime) * ticksPerSecond);
-    }
-
-    void GameSimulation::tryIgniteFeaturesInRadius(const SimVector& position, SimScalar radius, unsigned int chancePercent)
-    {
-        if (chancePercent == 0 || radius <= 0_ss)
-        {
-            return;
-        }
-
-        auto minPoint = terrain.worldToHeightmapCoordinate(SimVector(position.x - radius, position.y, position.z - radius));
-        auto maxPoint = terrain.worldToHeightmapCoordinate(SimVector(position.x + radius, position.y, position.z + radius));
-        auto minCell = occupiedGrid.clampToCoords(minPoint);
-        auto maxCell = occupiedGrid.clampToCoords(maxPoint);
-        auto region = GridRegion::fromCoordinates(minCell, maxCell);
-
-        // Collect in grid order so the rolls below happen in the same order on every machine.
-        std::vector<FeatureId> candidates;
-        region.forEach([&](const auto& coords) {
-            auto featureId = occupiedGrid.get(coords).featureId;
-            if (!featureId || std::find(candidates.begin(), candidates.end(), *featureId) != candidates.end())
-            {
-                return;
-            }
-            candidates.push_back(*featureId);
-        });
-
-        auto radiusSquared = radius * radius;
-        for (auto id : candidates)
-        {
-            auto featureRef = tryGetFeature(id);
-            if (!featureRef)
-            {
-                continue;
-            }
-            const auto& feature = featureRef->get();
-            const auto& featureDefinition = getFeatureDefinition(feature.featureName);
-            if (!featureDefinition.flamable || feature.burningUntil)
-            {
-                continue;
-            }
-            auto dx = feature.position.x - position.x;
-            auto dz = feature.position.z - position.z;
-            if ((dx * dx) + (dz * dz) > radiusSquared)
-            {
-                continue;
-            }
-            if (randomBetween(rng, 1u, 100u) <= chancePercent)
-            {
-                igniteFeature(id);
-            }
-        }
-    }
-
-    void GameSimulation::updateBurningFeatures()
-    {
-        std::vector<FeatureId> burning;
-        for (const auto& [id, feature] : features)
-        {
-            if (feature.burningUntil)
-            {
-                burning.push_back(id);
-            }
-        }
-
-        const auto ticksPerSecond = static_cast<unsigned int>(SimTicksPerSecond);
-        for (auto id : burning)
-        {
-            auto featureRef = tryGetFeature(id);
-            if (!featureRef)
-            {
-                continue;
-            }
-            auto& feature = featureRef->get();
-            const auto& featureDefinition = getFeatureDefinition(feature.featureName);
-
-            if (gameTime >= *feature.burningUntil)
-            {
-                replaceFeature(id, featureDefinition.featureBurnt);
-                continue;
-            }
-
-            if (gameTime >= feature.nextSpark)
-            {
-                feature.nextSpark = gameTime + GameTime(std::max(1u, featureDefinition.sparkTime) * ticksPerSecond);
-
-                // The burn weapon's blast radius says how far the fire reaches.
-                auto radius = 32_ss;
-                if (auto it = weaponDefinitions.find(toUpper(featureDefinition.burnWeapon)); it != weaponDefinitions.end() && it->second.damageRadius > 0_ss)
-                {
-                    radius = it->second.damageRadius;
-                }
-                tryIgniteFeaturesInRadius(feature.position, radius, featureDefinition.spreadChance);
-            }
-        }
     }
 
     void GameSimulation::updateFeatureRegrowth()
@@ -1174,6 +1099,7 @@ namespace rwe
             missionRules->unitDying(*this, targetId, unit.owner);
         }
         unit.markAsDeadNoCorpse();
+        cancelFactoryProductOnDeath(*this, targetId);
         recordUnitDeath(*this, targetId, "reclaimed", std::nullopt);
 
         // Death cause 5, and the one place the original checks who is doing it
@@ -1379,6 +1305,7 @@ namespace rwe
 
         // Self-destruction leaves nothing to reclaim.
         unit.markAsDeadNoCorpse();
+        cancelFactoryProductOnDeath(*this, unitId);
         unit.selfDestructTime = std::nullopt;
         getPlayer(unit.owner).unitsLost += 1;
 
@@ -2091,6 +2018,11 @@ namespace rwe
 
     bool GameSimulation::isCollisionAt(const GridRegion& region) const
     {
+        // BT-264: ground exclusion also applies to direct traversal.
+        if (terrain.hasLavaExclusion(DiscreteRect(region.x, region.y, region.width, region.height)))
+        {
+            return true;
+        }
         return occupiedGrid.any(region, [&](const auto& cell) {
             if (cell.mobileUnitId)
             {
@@ -2116,6 +2048,11 @@ namespace rwe
 
     bool GameSimulation::isCollisionAtIgnoringBuilding(const GridRegion& region, UnitId building) const
     {
+        // BT-264: ground exclusion also applies to direct traversal.
+        if (terrain.hasLavaExclusion(DiscreteRect(region.x, region.y, region.width, region.height)))
+        {
+            return true;
+        }
         return occupiedGrid.any(region, [&](const auto& cell) {
             if (cell.mobileUnitId)
             {
@@ -2141,6 +2078,11 @@ namespace rwe
 
     bool GameSimulation::isCollisionAt(const DiscreteRect& rect, UnitId self) const
     {
+        // BT-264: ground exclusion also applies to direct traversal.
+        if (terrain.hasLavaExclusion(rect))
+        {
+            return true;
+        }
         auto region = occupiedGrid.tryToRegion(rect);
         if (!region)
         {
@@ -2152,6 +2094,11 @@ namespace rwe
 
     bool GameSimulation::isCollisionAt(const DiscreteRect& rect, UnitId self, const DiscreteRect& passableRegion) const
     {
+        // BT-264: ground exclusion also applies to direct traversal.
+        if (terrain.hasLavaExclusion(rect))
+        {
+            return true;
+        }
         auto region = occupiedGrid.tryToRegion(rect);
         if (!region)
         {
@@ -2171,6 +2118,11 @@ namespace rwe
 
     bool GameSimulation::isCollisionAtForSearch(const DiscreteRect& rect, UnitId self, const DiscreteRect& passableRegion, GameTime searchTime) const
     {
+        // BT-264: ground exclusion also applies to direct traversal.
+        if (terrain.hasLavaExclusion(rect))
+        {
+            return true;
+        }
         auto region = occupiedGrid.tryToRegion(rect);
         if (!region)
         {
@@ -3163,6 +3115,7 @@ namespace rwe
             missionRules->unitDying(*this, unitId, unit.owner);
         }
         unit.markAsDeadNoCorpse();
+        cancelFactoryProductOnDeath(*this, unitId);
         if (countAsLoss)
         {
             getPlayer(unit.owner).unitsLost += 1;
@@ -3577,6 +3530,7 @@ namespace rwe
             missionRules->unitDying(*this, unitId, unit.owner);
         }
         unit.markAsDead();
+        cancelFactoryProductOnDeath(*this, unitId);
         getPlayer(unit.owner).unitsLost += 1;
         releaseTransportLinks(unitId, attacker);
 
@@ -3963,7 +3917,14 @@ namespace rwe
 
         if (unit.hitPoints <= damagePoints)
         {
-            recordUnitDeath(*this, unitId, deathCause, attacker);
+            // BT-49: a lethal burn credits the previous attacker without
+            // treating that unit as this hit's source or applying its bonus.
+            auto creditedAttacker = attacker;
+            if (!creditedAttacker && std::string_view(deathCause) == "feature_burn")
+            {
+                creditedAttacker = unit.lastAttacker;
+            }
+            recordUnitDeath(*this, unitId, deathCause, creditedAttacker);
 
             // What the blow had left over once the unit's remaining hit
             // points were paid for. The original works the severity out of
@@ -3975,7 +3936,7 @@ namespace rwe
             // debris. What the unfinished state withholds is the corpse, the
             // death weapon's blast and the attacker's credit, and
             // killUnitWithSeverity says where each of those three goes.
-            killUnit(unitId, attacker, damagePoints - unit.hitPoints);
+            killUnit(unitId, creditedAttacker, damagePoints - unit.hitPoints);
         }
         else
         {
@@ -4024,7 +3985,6 @@ namespace rwe
          * covers inside the blast (BT-112).
          */
         constexpr std::size_t BlastUnitListCapacity = 20;
-        constexpr std::size_t BlastFeatureListCapacity = 64;
 
         /** True when the id is already listed; otherwise lists it if there is room and says false. */
         template <typename Id>
@@ -4076,7 +4036,7 @@ namespace rwe
         }
     }
 
-    void GameSimulation::applyDamageInRadius(const SimVector& position, SimScalar radius, const Projectile& projectile)
+    void GameSimulation::applyDamageInRadius(const SimVector& position, SimScalar radius, const Projectile& projectile, const char* deathCause)
     {
         auto minX = position.x - radius;
         auto maxX = position.x + radius;
@@ -4134,60 +4094,34 @@ namespace rwe
         // corrected by the records that owner sends.
         auto remoteSource = isRemoteRound(*this, projectile);
 
-        auto region = GridRegion::fromCoordinates(minCell, maxCell);
+        const auto featureWindow = featureBlastWindow(terrain, position, radius, occupiedGrid.getWidth(), occupiedGrid.getHeight());
+        const auto left = std::min(minCell.x, featureWindow.left());
+        const auto top = std::min(minCell.y, featureWindow.top());
+        const auto right = std::max(maxCell.x + 1, featureWindow.right());
+        const auto bottom = std::max(maxCell.y + 1, featureWindow.bottom());
+        const auto region = GridRegion(left, top, right - left, bottom - top);
 
         region.forEach([&](const auto& coords) {
-          auto cellCenter = terrain.heightmapIndexToWorldCenter(coords.x, coords.y);
-          Rectangle2x<SimScalar> cellRectangle(
-              Vector2x<SimScalar>(cellCenter.x, cellCenter.z),
-              Vector2x<SimScalar>(MapTerrain::HeightTileWidthInWorldUnits / 2_ss, MapTerrain::HeightTileHeightInWorldUnits / 2_ss));
-          auto cellDistanceSquared = cellRectangle.distanceSquared(Vector2x<SimScalar>(position.x, position.z));
-          if (cellDistanceSquared > radiusSquared)
+          // BT-256/257: feature reach has its own window and no cell-rectangle
+          // rejection. Preserve existing feature-before-unit ordering (BT-260
+          // records the adjacent, still-unported original ordering difference).
+          if (damagesFeatures && !paralyzer && !remoteSource && featureWindow.contains(Point(coords.x, coords.y)))
+          {
+              applyFeatureBlastCell(*this, Point(coords.x, coords.y), position, radius, projectile, seenFeatures);
+          }
+
+          // The union must not widen the existing unit sweep or its eligibility.
+          if (coords.x < minCell.x || coords.x > maxCell.x || coords.y < minCell.y || coords.y > maxCell.y)
           {
               return;
           }
-
-          if (damagesFeatures && !paralyzer && !remoteSource)
+          const auto cellCenter = terrain.heightmapIndexToWorldCenter(coords.x, coords.y);
+          const Rectangle2x<SimScalar> cellRectangle(
+              Vector2x<SimScalar>(cellCenter.x, cellCenter.z),
+              Vector2x<SimScalar>(MapTerrain::HeightTileWidthInWorldUnits / 2_ss, MapTerrain::HeightTileHeightInWorldUnits / 2_ss));
+          if (cellRectangle.distanceSquared(Vector2x<SimScalar>(position.x, position.z)) > radiusSquared)
           {
-              const auto& cell = occupiedGrid.get(coords);
-              if (cell.featureId && !alreadyListedOrRecord(seenFeatures, *cell.featureId, BlastFeatureListCapacity))
-              {
-                  if (auto featureRef = tryGetFeature(*cell.featureId))
-                  {
-                      auto& feature = featureRef->get();
-                      const auto& featureDefinition = getFeatureDefinition(feature.featureName);
-                      // The original's blast-on-feature routine (0x4244B0,
-                      // TOTALA-EXE.md §24) asks one thing of the feature:
-                      // that it is not `indestructible`. Blocking, reclaimable
-                      // and the rest never enter into it, so a scar decal or
-                      // a bush takes the hit like a wreck does. It adds the
-                      // weapon's default damage, unscaled by distance, to what
-                      // the feature has already taken, and breaks the feature
-                      // to its featuredead form the moment that reaches the
-                      // definition's `damage` -- which for a feature that
-                      // omits the key is zero, so the first hit takes it.
-                      if (!featureDefinition.indestructible)
-                      {
-                          auto damage = projectile.getDamage(std::string());
-                          if (damage >= feature.hitPoints)
-                          {
-                              // What stands in its place lands on the cell
-                              // just walked and is not met again by this
-                              // blast, as in the original's per-cell walk;
-                              // without that a heap that names no damage
-                              // would go in the same shell that made it.
-                              if (auto replacement = replaceFeature(*cell.featureId, featureDefinition.featureDead))
-                              {
-                                  alreadyListedOrRecord(seenFeatures, *replacement, BlastFeatureListCapacity);
-                              }
-                          }
-                          else
-                          {
-                              feature.hitPoints -= damage;
-                          }
-                      }
-                  }
-              }
+              return;
           }
 
           auto occupiedType = occupiedGrid.get(coords);
@@ -4233,7 +4167,7 @@ namespace rwe
           }
           auto rawDamage = projectile.getDamage(unit.unitType);
           auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * *damageScale);
-          applyDamage(*u, scaledDamage, projectile.attacker, paralyzer, projectile.owner, "weapon", false, projectile.position); });
+          applyDamage(*u, scaledDamage, projectile.attacker, paralyzer, projectile.owner, deathCause, false, projectile.position); });
 
         for (const auto& flyingUnitId : flyingUnitsSet)
         {
@@ -4263,7 +4197,7 @@ namespace rwe
             }
             auto rawDamage = projectile.getDamage(unit.unitType);
             auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * *damageScale);
-            applyDamage(flyingUnitId, scaledDamage, projectile.attacker, paralyzer, projectile.owner, "weapon", false, projectile.position);
+            applyDamage(flyingUnitId, scaledDamage, projectile.attacker, paralyzer, projectile.owner, deathCause, false, projectile.position);
         }
     }
 
@@ -4293,10 +4227,6 @@ namespace rwe
                 applyDamageInRadius(projectile.position, projectile.damageRadius, projectile);
             }
 
-            if (auto it = weaponDefinitions.find(projectile.weaponType); it != weaponDefinitions.end() && it->second.fireStarter > 0)
-            {
-                tryIgniteFeaturesInRadius(projectile.position, std::max(projectile.damageRadius, 16_ss), it->second.fireStarter);
-            }
         }
 
         // The piece that actually kills a nuke. An interceptor's warhead is not
@@ -5605,6 +5535,8 @@ namespace rwe
     void GameSimulation::tick()
     {
         gameTime += GameTime(1);
+        const auto fireWind = currentWindVector;
+        updateDroppedPlayers();
 
         // AI runs first so any commands it emits this tick can be drained
         // by GameScene before unit behaviour runs next tick. This mirrors
@@ -5726,7 +5658,7 @@ namespace rwe
             updateProjectiles();
         }
 
-        updateBurningFeatures();
+        updateFeatureAnimations(fireWind);
 
         // Before the dead are cleared, so a wreck spawned this tick first
         // moves on the next one, as the original does.

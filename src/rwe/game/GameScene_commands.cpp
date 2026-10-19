@@ -1515,22 +1515,13 @@ namespace rwe
                         startSmokeEmitter(simVectorToFloat(e.position), wreckPlumeIntervalTicks, wreckPlumeLifetimeTicks);
                     }
                 },
-                [&](const FeatureReclaimedEvent& e) {
-                    // The feature's reclaim sequence (TA's golden swirl) plays once where it stood.
-                    if (!positionIsVisibleToLocalPlayer(e.position))
+                [&](const FeatureIgnitedEvent& e) {
+                    // BT-262: a successful ignition requests TREEBURN once.
+                    // Positional/fog limitations of the existing path are #583.
+                    if (sounds.treeBurn)
                     {
-                        return;
+                        playSoundAt(simVectorToFloat(e.position), *sounds.treeBurn);
                     }
-                    const auto& featureMediaInfo = gameMediaDatabase.getFeature(e.featureType);
-                    if (featureMediaInfo.fileName.empty() || featureMediaInfo.seqNameReclamate.empty())
-                    {
-                        return;
-                    }
-                    if (!gameMediaDatabase.getSpriteSeries(featureMediaInfo.fileName, featureMediaInfo.seqNameReclamate))
-                    {
-                        return;
-                    }
-                    spawnExplosion(simVectorToFloat(e.position), AnimLocation{featureMediaInfo.fileName, featureMediaInfo.seqNameReclamate});
                 },
                 [&](const PieceExplodedEvent& e) {
                     spawnDebris(e);
@@ -3094,24 +3085,10 @@ namespace rwe
                 }
             },
             [&](const PlayerDroppedCommand& c) {
-                // The drop took effect when this command arrived, which is what
-                // let the tick carrying it run at all, and whether the peer who
-                // issued it was entitled to was settled there. So the question
-                // left here is only whether it was honoured: a drop refused on
-                // arrival leaves nothing to announce.
-                if (!playerCommandService->isDropped(c.player))
-                {
-                    return;
-                }
-
-                // And whether it was this player's to issue. A duplicate
-                // from anyone else, of a drop that did happen, is not a
-                // second announcement. Issue #75.
-                if (playerCommandService->droppingPlayerFor(c.player) != issuingPlayer)
-                {
-                    return;
-                }
-
+                // The stream closed when this command arrived, which is what
+                // let the tick carrying it run at all. Only an honoured drop
+                // may schedule BT-232's unit wipe or announce the departure.
+                applyPlayerDropToSimulation(simulation, c, sceneTime.value);
                 onPlayerDropped(c.player, c.fromTick);
             },
             [&](const PlayerRejoinedCommand& c) {

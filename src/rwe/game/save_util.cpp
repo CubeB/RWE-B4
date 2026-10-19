@@ -2,6 +2,7 @@
 
 #include "SaveJson.h"
 #include "UnitStateFieldTable.h"
+#include <rwe/LoadingScene_util.h>
 
 // This one uses GameSimulation itself rather than only naming it, and
 // save_util.h no longer drags the header in, so it says so here.
@@ -277,6 +278,7 @@ namespace rwe
                 {"startingEnergy", saveEnergy(p.startingEnergy)},
                 {"hasBaseStorage", p.hasBaseStorage},
                 {"hasCreatedUnits", p.hasCreatedUnits},
+                {"removeUnitsAt", saveOptional(p.removeUnitsAt, [](GameTime v) { return saveGameTime(v); })},
                 {"metalStalled", p.metalStalled},
                 {"energyStalled", p.energyStalled},
                 // The original does not save these (TOTALA-EXE-COMMANDS.md
@@ -328,6 +330,10 @@ namespace rwe
             p.hasBaseStorage = j.contains("hasBaseStorage") && j.at("hasBaseStorage").get<bool>();
             // Added with BT-193; an older save's players have all been given units.
             p.hasCreatedUnits = !j.contains("hasCreatedUnits") || j.at("hasCreatedUnits").get<bool>();
+            if (j.contains("removeUnitsAt"))
+            {
+                p.removeUnitsAt = loadOptional(j.at("removeUnitsAt"), [](const json& v) { return loadGameTime(v); });
+            }
             p.metalStalled = j.at("metalStalled").get<bool>();
             p.energyStalled = j.at("energyStalled").get<bool>();
             // Resource sharing came later; an older save has it off, with no
@@ -392,7 +398,11 @@ namespace rwe
                 {"reclaimProgress", f.reclaimProgress},
                 {"hitPoints", f.hitPoints},
                 {"burningUntil", saveOptional(f.burningUntil, [](GameTime t) { return saveGameTime(t); })},
-                {"nextSpark", saveGameTime(f.nextSpark)}};
+                {"nextSpark", saveGameTime(f.nextSpark)},
+                {"animation", static_cast<unsigned int>(f.animation)},
+                {"animationTicksRemaining", f.animationTicksRemaining},
+                {"burnSparkTicksRemaining", f.burnSparkTicksRemaining},
+                {"animationOrder", f.animationOrder}};
         }
     }
 
@@ -667,7 +677,8 @@ namespace rwe
         // 2 since 2026-09-11. The layout did not change; what changed is
         // that a version 1 save may hold units made before mobile units were
         // shaded, which loadSimulationFromJson has to put right.
-        j["version"] = 2;
+        // Version 3 adds counted, ordered fire state (BT-255).
+        j["version"] = 3;
 
         // The wind range is a construction-time constant; it travels with the
         // save only so the load can check it was given the right map.
@@ -694,6 +705,7 @@ namespace rwe
         j["noSeaLevelTrigger"] = sim.noSeaLevelTrigger;
         j["gravity"] = sim.gravity;
         j["waterDamage"] = sim.waterDamage;
+        j["lavaExclusions"] = sim.terrain.lavaExclusionIndices();
         j["nextWindSpeedChange"] = saveGameTime(sim.nextWindSpeedChange);
         j["featureRegrowthCursor"] = sim.featureRegrowthCursor;
         if (sim.missionRules)
@@ -816,7 +828,7 @@ namespace rwe
     void loadSimulationFromJson(const nlohmann::json& j, GameSimulation& sim)
     {
         auto version = j.at("version").get<int>();
-        if (version != 1 && version != 2)
+        if (version != 1 && version != 2 && version != 3)
         {
             throw std::runtime_error("unsupported save version");
         }
@@ -883,6 +895,11 @@ namespace rwe
         if (j.contains("waterDamage"))
         {
             sim.waterDamage = j.at("waterDamage").get<int>();
+        }
+        if (j.contains("lavaExclusions"))
+        {
+            sim.terrain.setLavaExclusions(j.at("lavaExclusions").get<std::vector<unsigned int>>());
+            sim.movementClassCollisionService = createMovementClassCollisionService(sim.terrain, sim.movementClassDatabase);
         }
         sim.nextWindSpeedChange = loadGameTime(j.at("nextWindSpeedChange"));
         sim.featureRegrowthCursor = j.at("featureRegrowthCursor").get<int>();
@@ -972,6 +989,27 @@ namespace rwe
             placed.hitPoints = fj.at("hitPoints").get<unsigned int>();
             placed.burningUntil = loadOptional(fj.at("burningUntil"), loadGameTime);
             placed.nextSpark = loadGameTime(fj.at("nextSpark"));
+            const auto animation = fj.value("animation", placed.burningUntil ? 1u : 0u);
+            if (animation > static_cast<unsigned int>(FeatureAnimation::Reclaim))
+            {
+                throw std::runtime_error("invalid feature animation state");
+            }
+            placed.animation = static_cast<FeatureAnimation>(animation);
+            placed.animationTicksRemaining = fj.value("animationTicksRemaining", 0u);
+            placed.burnSparkTicksRemaining = fj.value("burnSparkTicksRemaining", 0u);
+            placed.animationOrder = fj.value("animationOrder", 0u);
+            if (placed.burnSparkTicksRemaining > 255)
+            {
+                throw std::runtime_error("invalid burning-feature spark byte");
+            }
+            if (placed.burningUntil && !fj.contains("animationTicksRemaining"))
+            {
+                throw std::runtime_error("save contains legacy burning-feature state");
+            }
+            if ((placed.animation == FeatureAnimation::Burn) != placed.burningUntil.has_value())
+            {
+                throw std::runtime_error("inconsistent feature burn state");
+            }
             ctx.features.push_back(*id);
         }
 

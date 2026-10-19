@@ -578,6 +578,12 @@ int main(int argc, char* argv[])
             if (playerId)
             {
                 playerCommandService->registerPlayer(*playerId);
+                if (replay && loaded.simulation.getPlayer(*playerId).type == GamePlayerType::Human)
+                {
+                    // Replay drop/rejoin entitlement uses the same peer roster
+                    // as the viewer, even though this run compares no hashes.
+                    playerCommandService->registerHashSource(*playerId);
+                }
             }
         }
 
@@ -703,6 +709,10 @@ int main(int argc, char* argv[])
                         // A recorded game's toggles and gifts, applied by the
                         // same function the windowed scene calls.
                         applyPlayerShareCommand(loaded.simulation, issuingPlayer, *shareCommand);
+                    }
+                    else if (const auto* drop = std::get_if<PlayerDroppedCommand>(&command))
+                    {
+                        applyPlayerDropToSimulation(loaded.simulation, *drop, sceneTime);
                     }
                 }
             }

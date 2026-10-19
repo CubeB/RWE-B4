@@ -65,6 +65,7 @@ namespace rwe
             p.maxEnergy,
             p.hasBaseStorage,
             p.hasCreatedUnits,
+            p.removeUnitsAt,
             p.metalStalled,
             p.energyStalled,
             p.unitsKilled,
@@ -385,7 +386,11 @@ namespace rwe
             f.reclaimProgress,
             f.hitPoints,
             f.burningUntil,
-            f.nextSpark);
+            f.nextSpark,
+            static_cast<unsigned int>(f.animation),
+            f.animationTicksRemaining,
+            f.burnSparkTicksRemaining,
+            f.animationOrder);
     }
 
     GameHash computeHashOf(const MissionRules& m)
@@ -498,9 +503,18 @@ namespace rwe
         {
             featuresHash += computeHashOf(entry.first)
                 + computeHashOf(entry.second, simulation.getFeatureDefinition(entry.second.featureName).name);
+            // Associate order with identity: merely summing orders would miss
+            // two fires swapping places in the newest-first traversal.
+            featuresHash += GameHash((entry.first.value + 1u) * entry.second.animationOrder);
         }
 
+        uint32_t lavaHash = 0;
+        for (auto cell : simulation.terrain.getLavaExclusions().getVector())
+        {
+            lavaHash = lavaHash * 31u + cell;
+        }
         return combineHashes(
+            GameHash(lavaHash),
             simulation.gameTime,
             simulation.players,
             simulation.units,

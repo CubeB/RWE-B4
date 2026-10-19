@@ -300,6 +300,9 @@ namespace rwe
             service.pushCommands(PlayerId(1), {PlayerDroppedCommand{PlayerId(2), 1}});
 
             REQUIRE(!service.isDropped(PlayerId(2)));
+            pushEmpty(service, PlayerId(0), 1);
+            pushEmpty(service, PlayerId(2), 1);
+            REQUIRE(popFor(service, PlayerId(1))->empty());
         }
 
         SECTION("is ignored when it names a tick further ahead than any drop is chosen")
@@ -318,6 +321,10 @@ namespace rwe
 
             service.pushCommands(PlayerId(0), {PlayerDroppedCommand{PlayerId(2), PlayerCommandService::MaxDropLeadTicks}});
             REQUIRE(service.isDropped(PlayerId(2)));
+            pushEmpty(service, PlayerId(1), 3);
+            REQUIRE(popFor(service, PlayerId(0))->empty());
+            REQUIRE(popFor(service, PlayerId(0))->empty());
+            REQUIRE(popFor(service, PlayerId(0))->size() == 1);
         }
 
         SECTION("survives a round trip through the wire format")

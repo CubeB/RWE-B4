@@ -100,8 +100,49 @@ namespace rwe
         : heights(std::move(heights)),
           slopeCache(buildSlopeMap(this->heights)),
           waterDepthCache(buildWaterDepthMap(this->heights, simScalarToUInt(seaLevel))),
+          lavaExclusions(std::max(0, this->heights.getWidth() - 1), std::max(0, this->heights.getHeight() - 1), 0),
           seaLevel(seaLevel)
     {
+    }
+
+    const Grid<unsigned char>& MapTerrain::getLavaExclusions() const
+    {
+        return lavaExclusions;
+    }
+
+    void MapTerrain::setLavaExclusions(const std::vector<unsigned int>& indices)
+    {
+        Grid<unsigned char> replacement(lavaExclusions.getWidth(), lavaExclusions.getHeight(), 0);
+        const auto size = replacement.getVector().size();
+        for (auto index : indices)
+        {
+            if (index >= size)
+            {
+                throw std::runtime_error("lava exclusion outside map");
+            }
+            replacement.set(index % replacement.getWidth(), index / replacement.getWidth(), 1);
+        }
+        lavaExclusions = std::move(replacement);
+    }
+
+    std::vector<unsigned int> MapTerrain::lavaExclusionIndices() const
+    {
+        std::vector<unsigned int> indices;
+        const auto& cells = lavaExclusions.getVector();
+        for (unsigned int i = 0; i < cells.size(); ++i)
+        {
+            if (cells[i])
+            {
+                indices.push_back(i);
+            }
+        }
+        return indices;
+    }
+
+    bool MapTerrain::hasLavaExclusion(const DiscreteRect& rect) const
+    {
+        const auto region = lavaExclusions.clipRegion(rect);
+        return lavaExclusions.any(region, [](auto cell) { return cell != 0; });
     }
 
     Point MapTerrain::worldToHeightmapCoordinate(const SimVector& position) const

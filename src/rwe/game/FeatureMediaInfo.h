@@ -14,8 +14,13 @@ namespace rwe
         bool transparentAnimation;
         std::optional<std::shared_ptr<SpriteSeries>> shadowAnimation;
         bool transparentShadow;
-        /** Looping frames shown in place of the animation while the feature burns. */
+        /** Play-once frames selected by the simulation's burn countdown. */
         std::optional<std::shared_ptr<SpriteSeries>> burnAnimation;
+        std::optional<std::shared_ptr<SpriteSeries>> deathAnimation;
+        std::optional<std::shared_ptr<SpriteSeries>> reclaimAnimation;
+        std::optional<std::shared_ptr<SpriteSeries>> burnShadowAnimation;
+        std::optional<std::shared_ptr<SpriteSeries>> deathShadowAnimation;
+        std::optional<std::shared_ptr<SpriteSeries>> reclaimShadowAnimation;
     };
 
     struct FeatureObjectInfo

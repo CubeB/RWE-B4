@@ -18,6 +18,9 @@ namespace rwe
             uint16_t unknown1;
             uint32_t unknown2;
             std::vector<GafFrameEntry> frameOffsets;
+
+            /** BT-255: per-frame update counts from the unsigned low timing word. */
+            std::vector<unsigned int> frameDurationTicks() const;
         };
 
     private:

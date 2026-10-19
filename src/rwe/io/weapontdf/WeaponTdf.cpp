@@ -47,7 +47,8 @@ namespace rwe
         tdf.readOrDefault("edgeEffectiveness", w.edgeEffectiveness);
 
         tdf.readOrDefault("turret", w.turret);
-        tdf.readOrDefault("fireStarter", w.fireStarter);
+        // BT-259: decimal leading integer, narrowed to a byte; not a percentage.
+        w.fireStarter = static_cast<unsigned int>(tdf.extractInt("fireStarter").value_or(0)) & 0xffu;
         tdf.readOrDefault("unitsOnly", w.unitsOnly);
 
         tdf.readOrDefault("burst", w.burst);

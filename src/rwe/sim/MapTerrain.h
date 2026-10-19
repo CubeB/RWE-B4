@@ -53,12 +53,20 @@ namespace rwe
          */
         Grid<unsigned char> waterDepthCache;
 
+        Grid<unsigned char> lavaExclusions;
+
         SimScalar seaLevel;
 
     public:
         MapTerrain(
             Grid<unsigned char>&& heights,
             SimScalar seaLevel);
+
+        // BT-264/265; see docs/agents/lava-movement.md. Persistent map state.
+        const Grid<unsigned char>& getLavaExclusions() const;
+        void setLavaExclusions(const std::vector<unsigned int>& indices);
+        std::vector<unsigned int> lavaExclusionIndices() const;
+        bool hasLavaExclusion(const DiscreteRect& rect) const;
 
         Point worldToHeightmapCoordinate(const SimVector& position) const;
 

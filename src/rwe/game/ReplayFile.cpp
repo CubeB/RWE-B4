@@ -24,7 +24,10 @@ namespace rwe
         constexpr std::size_t MagicSize = sizeof(Magic);
         // Simulation semantics changed in TOTALA-EXE sections 125-137. Old command
         // recordings cannot reproduce their games under these rules.
-        constexpr char Version = 2;
+        // BT-44/49/255: the new fire rules change recorded command outcomes.
+        // BT-264/265: lava exclusion changes ground command outcomes.
+        // BT-266: factory destruction now cancels its retained product.
+        constexpr char Version = 5;
 
         constexpr const char* ReplayExtension = ".rwereplay";
 

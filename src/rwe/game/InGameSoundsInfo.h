@@ -45,5 +45,7 @@ namespace rwe
 
         /** ALLSOUND's "Victory Condition" (VICTORY2), once for each mission objective met. */
         std::optional<AudioService::SoundHandle> victoryCondition;
+        /** BT-262: once after successful feature ignition. */
+        std::optional<AudioService::SoundHandle> treeBurn;
     };
 }

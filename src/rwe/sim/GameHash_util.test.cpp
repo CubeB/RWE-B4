@@ -346,10 +346,14 @@ namespace rwe
         f.reclaimProgress = 42;
         f.hitPoints = 99;
         f.burningUntil = GameTime(900);
+        f.animation = FeatureAnimation::Burn;
         f.nextSpark = GameTime(30);
+        f.animationTicksRemaining = 171;
+        f.burnSparkTicksRemaining = 75;
+        f.animationOrder = 3;
 
         auto dumped = dumpJson(f);
-        for (const auto& key : {"featureName", "position", "rotation", "velocity", "reclaimProgress", "hitPoints", "burningUntil", "nextSpark"})
+        for (const auto& key : {"featureName", "position", "rotation", "velocity", "reclaimProgress", "hitPoints", "burningUntil", "nextSpark", "animation", "animationTicksRemaining", "burnSparkTicksRemaining", "animationOrder"})
         {
             CAPTURE(key);
             REQUIRE(dumped.contains(key));

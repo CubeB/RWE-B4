@@ -214,8 +214,10 @@ name takes the first row; **Lunar on the Core side becomes Lunar2**. The initial
 random value between the mission's minimum and maximum, and a per-call countdown redraws it by
 a random step of `-2..+2`, clamped to the limits, with a countdown of 0 to 62. The SOLARSYSTEM
 gadget prints the translated **Wind Speed** and **Gravity** (gravity scaled by 1/112). The
-panorama scrolls: all frames are laid in a ring, the offset moves by one **every two game
-ticks** and wraps at the total width, with one extra tile and a **side mask** over it. The planet
+panorama scrolls: all frames are laid in a ring, with one extra first tile and a **side
+mask** over it. BT-267 refines the timing: one pixel when the 30Hz wall-clock counter is
+strictly past its deadline, then a new deadline at current tick plus two, without catch-up.
+Offset and deadline persist across briefing entry; wrapping uses the sum of frame widths. The planet
 advances a frame when the millisecond deadline (25 ms) has passed and the tick differs from the
 last (the last-tick field is never updated, so the second test is always true).
 
@@ -231,8 +233,11 @@ last (the last-tick field is never updated, so the second test is always true).
   original's and does not draw them. A mission's `minwindspeed`, `maxwindspeed` and `gravity`
   are not shown. The register's section 115 describes them; the chapter gives the numbers
   (the `-2..+2` step, the 0 to 62 countdown, the 1/112 scale).
-- **The panorama: DIVERGENCE (documented in the code).** RWE draws the first strip fitted to the
-  window (`UiAnimation(..., 0.0f, true)`) instead of scrolling the ring and overlaying the mask.
+- **The panorama: implemented from BT-267 (2026-10-19).** RWE scrolls every native-width
+  strip and one extra first strip beneath the side mask. The refined finding establishes
+  strict wall-clock deadlines, single-step updates and persistent offset, superseding the
+  earlier two-game-tick shorthand. See `agents/factory-death-and-briefing.md` for evidence
+  and validation; no original runtime screen comparison has been run.
 - **The planet's speed: UNCLEAR.** `UiAnimation` runs the rotation at **15 frames a second**
   (about 380). The original advances at most every 25 ms and, because its last-tick latch is
   never written, once per call after the deadline — roughly 40 a second if the callback runs
@@ -280,7 +285,7 @@ Ranked by what a player would notice. All presentation; none touches the simulat
 
 | Rank | Gap | Kind | Who settles it |
 | --- | --- | --- | --- |
-| 1 | **No wind and gravity readout and no scrolling panorama on the briefing**; the first strip is stretched over its window. The chapter gives the numbers for the readout (random start in the mission's range, a step of -2..+2, countdown 0 to 62, gravity over 112). | MISSING | code: a label pair and a scroll offset in `goToCampaignBriefing`; presentation-side randomness (`effectsRng`) |
+| 1 | **No wind and gravity readout on the briefing**; panorama scrolling is implemented from BT-267. The chapter gives the numbers for the readout (random start in the mission's range, a step of -2..+2, countdown 0 to 62, gravity over 112). | MISSING | code: a label pair and a scroll offset in `goToCampaignBriefing`; presentation-side randomness (`effectsRng`) |
 | 2 | **Pagination and the MORE bar**: fixed 15-pixel lines against font height plus 2, no `MORE...` / `BACK TO START` text, no More sound. | DIFFERS / MISSING | measure the two faces' heights; then wire the bar |
 | 3 | **Colour spans don't blink and are not the side's colours.** | MISSING / DIFFERS | the side colour table is in the GUI/palette data; a blink is a presentation timer |
 | 4 | **A loose `camps/EXAMPLE.TDF` in the retail install appears in RWE's Arm list.** Whether the original lists it is the loose-file rule. | UNCLEAR | original check: open the new-campaign screen with the loose file present |

@@ -503,6 +503,8 @@ set(SOURCE_FILES
     src/rwe/ui/UiSlider.h
     src/rwe/ui/UiTextBox.cpp
     src/rwe/ui/UiTextRegion.cpp
+    src/rwe/ui/UiPanorama.cpp
+    src/rwe/ui/UiPanorama.h
     src/rwe/ui/UiTextRegion.h
     src/rwe/ui/UiTextBox.h
     src/rwe/game/SaveFile.cpp
@@ -700,8 +702,13 @@ src/rwe/net/EndpointFamily.h
     src/rwe/sim/GameHash_util.cpp
     src/rwe/sim/GameHash_util.h
     src/rwe/sim/GameSimulation.cpp
+    src/rwe/sim/GameSimulation_lava.cpp
     src/rwe/sim/GameSimulation_visibility.cpp
     src/rwe/sim/GameSimulation_endgame.cpp
+    src/rwe/sim/GameSimulation_fire.cpp
+    src/rwe/sim/FeatureBlast.cpp
+    src/rwe/sim/FactoryConstruction.cpp
+    src/rwe/sim/FactoryConstruction.h
     src/rwe/sim/GameSimulation.h
     src/rwe/sim/GameTime.cpp
     src/rwe/sim/GameTime.h
@@ -1177,6 +1184,7 @@ set(TEST_FILES
     src/rwe/game/AiSeat.test.cpp
     src/rwe/game/commandorder.test.cpp
     src/rwe/game/playerdrop.test.cpp
+    src/rwe/game/playerdrop_sim.test.cpp
     src/rwe/game/LockstepStats.test.cpp
     src/rwe/game/SimDiagnostics.test.cpp
     src/rwe/game/playerrejoin.test.cpp
@@ -1215,6 +1223,8 @@ set(TEST_FILES
     src/rwe/scene/Screenshot.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp
     src/rwe/io/fbi/transportcapacity.test.cpp
+    src/rwe/io/fbi/floater.test.cpp
+    src/rwe/io/gaf/GafTiming.test.cpp
     src/rwe/io/tdf/ListTdfAdapter.test.cpp
     src/rwe/io/tdf/NetSchemaTdfAdapter.test.cpp
     src/rwe/io/tdf/SimpleTdfAdapter.test.cpp
@@ -1283,6 +1293,9 @@ set(TEST_FILES
     src/rwe/sim/worksounds.test.cpp
     src/rwe/sim/unitnotifications.test.cpp
     src/rwe/sim/burning.test.cpp
+    src/rwe/sim/lava.test.cpp
+    src/rwe/sim/FactoryConstruction.test.cpp
+    src/rwe/sim/FeatureBlast.test.cpp
     src/rwe/sim/waterbuilding.test.cpp
     src/rwe/sim/weaponflight.test.cpp
     src/rwe/sim/weaponfiretick.test.cpp
@@ -1384,6 +1397,7 @@ set(TEST_FILES
     src/rwe/ui/UiComponent.test.cpp
     src/rwe/ui/UiTextBox.test.cpp
     src/rwe/ui/UiTextRegion.test.cpp
+    src/rwe/ui/UiPanorama.test.cpp
     src/rwe/ui/UiPanelFocus.test.cpp
     src/rwe/UiRenderService.test.cpp
     )

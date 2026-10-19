@@ -313,6 +313,7 @@ namespace rwe
         sounds.options = lookUpSound("OPTIONS");
         sounds.smallButton = lookUpSound("SMALLBUTTON");
         sounds.victoryCondition = lookUpSound("Victory Condition");
+        sounds.treeBurn = lookUpSound("TREEBURN");
 
         auto consoleFont = sceneContext.textureService->getFont("fonts/CONSOLE.FNT");
         // COMIX is selected for the message queue (0x497FBE), but the text

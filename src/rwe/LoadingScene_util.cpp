@@ -277,7 +277,7 @@ namespace rwe
         weaponDefinition.noExplode = tdf.noExplode;
         weaponDefinition.unitsOnly = tdf.unitsOnly;
 
-        weaponDefinition.fireStarter = static_cast<unsigned int>(std::clamp(tdf.fireStarter, 0.0f, 100.0f));
+        weaponDefinition.fireStarter = tdf.fireStarter & 0xffu;
 
         weaponDefinition.waterWeapon = tdf.waterWeapon;
         weaponDefinition.paralyzer = tdf.paralyzer;
@@ -651,10 +651,7 @@ namespace rwe
             };
 
             u.yardMap = parseYardMap(fbi.footprintX, fbi.footprintZ, fbi.yardMap);
-            if (u.yardMap->any(isWater))
-            {
-                u.floater = true;
-            }
+            // BT-64 / #687: water yard letters never imply the FBI Floater bit.
             if (u.yardMap->any(isGeo))
             {
                 u.yardMapContainsGeo = true;

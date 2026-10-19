@@ -22,6 +22,7 @@
 #include <rwe/io/fbi/io.h>
 #include <rwe/io/featuretdf/io.h>
 #include <rwe/io/gui/gui.h>
+#include <rwe/io/gaf/GafArchive.h>
 #include <rwe/io/lostdf/io.h>
 #include <rwe/io/moveinfotdf/io.h>
 #include <rwe/io/soundtdf/SoundClass.h>
@@ -31,6 +32,7 @@
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
+#include <rwe/util/SpanStream.h>
 
 namespace rwe
 {
@@ -172,24 +174,23 @@ namespace rwe
                         // ignore them if they don't exist.
                         spriteInfo.shadowAnimation = services.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqNameShad);
                     }
-                    if (!tdf.fileName.empty() && !tdf.seqNameBurn.empty())
+                    if (!tdf.fileName.empty())
                     {
-                        spriteInfo.burnAnimation = services.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqNameBurn);
+                        auto animation = [&](const std::string& name) -> std::optional<std::shared_ptr<SpriteSeries>> {
+                            return name.empty() ? std::nullopt : services.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", name);
+                        };
+                        spriteInfo.burnAnimation = animation(tdf.seqNameBurn);
+                        spriteInfo.deathAnimation = animation(tdf.seqNameDie);
+                        spriteInfo.reclaimAnimation = animation(tdf.seqNameReclamate);
+                        spriteInfo.burnShadowAnimation = animation(tdf.seqNameBurnShad);
+                        spriteInfo.deathShadowAnimation = animation(tdf.seqNameDieShad);
+                        spriteInfo.reclaimShadowAnimation = animation(tdf.seqNameReclamateShad);
                     }
                 }
                 f.renderInfo = std::move(spriteInfo);
             }
 
             f.fileName = tdf.fileName;
-
-            // The reclaim sequence plays as a one-off particle where the feature stood.
-            if (services.textureService != nullptr && !tdf.fileName.empty() && !tdf.seqNameReclamate.empty())
-            {
-                if (auto anim = services.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqNameReclamate))
-                {
-                    gameMediaDatabase.addSpriteSeries(tdf.fileName, tdf.seqNameReclamate, *anim);
-                }
-            }
 
             f.seqNameReclamate = tdf.seqNameReclamate;
 
@@ -268,6 +269,41 @@ namespace rwe
                 f.sparkTime = tdf.sparkTime;
                 f.spreadChance = tdf.spreadChance;
                 f.burnWeapon = tdf.burnWeapon;
+                f.hasModel = !tdf.object.empty();
+
+                // BT-255/261/263: all primary/shadow durations are metadata,
+                // independent of textures. Models never acquire sprite state.
+                if (tdf.object.empty() && !tdf.fileName.empty())
+                {
+                    try
+                    {
+                        if (auto bytes = services.vfs->readFile("anims/" + tdf.fileName + ".GAF"))
+                        {
+                            SpanStream stream(bytes->data(), bytes->size());
+                            GafArchive gaf(&stream);
+                            auto durations = [&](const std::string& name) {
+                                if (!name.empty())
+                                {
+                                    if (auto entry = gaf.findEntry(name))
+                                    {
+                                        return entry->get().frameDurationTicks();
+                                    }
+                                }
+                                return std::vector<unsigned int>{};
+                            };
+                            f.burnFrameTicks = durations(tdf.seqNameBurn);
+                            f.deathFrameTicks = durations(tdf.seqNameDie);
+                            f.reclaimFrameTicks = durations(tdf.seqNameReclamate);
+                            f.burnShadowFrameTicks = durations(tdf.seqNameBurnShad);
+                            f.deathShadowFrameTicks = durations(tdf.seqNameDieShad);
+                            f.reclaimShadowFrameTicks = durations(tdf.seqNameReclamateShad);
+                        }
+                    }
+                    catch (const std::exception& e)
+                    {
+                        LOG_WARN << "Feature " << featureName << " has unreadable animation timing: " << e.what();
+                    }
+                }
 
                 f.geothermal = tdf.geothermal;
 
@@ -749,8 +785,6 @@ namespace rwe
 
         auto dataMaps = loadGameData(services, requiredFeatureNames);
 
-        auto movementClassCollisionService = createMovementClassCollisionService(mapData.terrain, dataMaps.movementClassDatabase);
-
         // The wind speed range goes through as the map wrote it. The original
         // caps what a generator can make out of it by clamping the ratio, not
         // the speed, so clamping the speed here as well would have left a map
@@ -813,7 +847,6 @@ namespace rwe
             }
         }
         simulation.movementClassDatabase = std::move(dataMaps.movementClassDatabase);
-        simulation.movementClassCollisionService = std::move(movementClassCollisionService);
         simulation.unitModelDefinitions = dataMaps.modelDefinitions;
         simulation.unitScriptDefinitions = loadCobScripts(*services.vfs);
         simulation.featureDefinitions = std::move(dataMaps.featureDefinitions);
@@ -859,6 +892,9 @@ namespace rwe
                 LOG_WARN << "Map feature " << featureName << " at " << pos.x << "," << pos.y << " could not be placed";
             }
         }
+
+        simulation.initializeLavaExclusions(ota.lavaWorld);
+        simulation.movementClassCollisionService = createMovementClassCollisionService(simulation.terrain, simulation.movementClassDatabase);
 
         auto seedSeq = seedFromGameParameters(gameParameters);
         simulation.rng.seed(seedSeq);
@@ -1479,19 +1515,21 @@ namespace rwe
             kept += definition.excludedByMission ? 0 : 1;
         }
 
-        // A build menu's button is named after the unit it builds; the other
-        // gadgets on a page -- the page flips, the order buttons -- name no
-        // unit and stay.
+        // BT-103 (static byte-tactics reading at 97d7ac59): an excluded
+        // unit's build button stays in its slot with a grey, inert face.
+        // UiFactory already honours grayedOut, including input suppression.
         for (auto& [builderName, pages] : builderGuis.builderGuisMap)
         {
             for (auto& page : pages)
             {
-                page.erase(
-                    std::remove_if(page.begin(), page.end(), [&](const GuiEntry& entry) {
-                        auto it = unitDefinitions.find(toUpper(entry.common.name));
-                        return it != unitDefinitions.end() && it->second.excludedByMission;
-                    }),
-                    page.end());
+                for (auto& entry : page)
+                {
+                    auto it = unitDefinitions.find(toUpper(entry.common.name));
+                    if (it != unitDefinitions.end() && it->second.excludedByMission)
+                    {
+                        entry.grayedOut = true;
+                    }
+                }
             }
         }
         return kept;

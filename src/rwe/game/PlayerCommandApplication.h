@@ -8,6 +8,9 @@ namespace rwe
 {
     struct Replay;
 
+    /** BT-232: schedule a drop popped from PlayerCommandService, which filters rejected drops. */
+    void applyPlayerDropToSimulation(GameSimulation& simulation, const PlayerDroppedCommand& command, unsigned int sceneTick);
+
     /**
      * Feed one recorded tick. Rejoining also rebuilds the computer players'
      * live delay queues from their deterministic controllers, so the first

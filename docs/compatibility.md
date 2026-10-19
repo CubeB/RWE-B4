@@ -26,6 +26,21 @@ Three rules decided what belongs in each list.
 
 ---
 
+**The example campaign is hidden.** RWE omits `camps/EXAMPLE.TDF` from the
+campaign choices at the owner's request (#655, 2026-10-17). The original accepts
+this loose campaign file; this is a deliberate menu policy, not conformance.
+BT-254 records the static reference comparison and the section 88 entry in the
+spec-room register.
+
+**Active sprite blast bookkeeping is deterministic.** Burning, dying and
+reclaiming sprites remain immune to blast damage. RWE omits their original
+address-dependent entries in the blast's 64-feature history. This can change
+overflow behaviour in blasts covering more than 64 features. The owner approved
+this policy on 2026-10-19 (#682, BT-257); ordinary feature reach and the history
+cap remain. The implementation covers burn, death and reclaim animation states.
+The section 88 entry is in the spec-room
+register (documentation commit `9d39950e`).
+
 ## Kept: the original's quirks, reproduced on purpose
 
 **Buildings have a purple halo.** Jon Mavor, who wrote the graphics engine,
@@ -347,10 +362,10 @@ original in every case.
 - **MoveUnitToRadius compares in floating point**, where the original floors
   each squared distance to whole units first; they differ only within a unit of
   the edge.
-- **The campaign briefing's panorama stands still**, its first strip fitted to
-  the window, where the original scrolls the strips across it and prints the
-  wind and gravity over them. The `*` the briefings put round a heading is
-  left out, its effect not decoded; the colour codes are drawn. §115.
+- **The campaign briefing omits the wind and gravity readouts.** Its panorama
+  now scrolls the native strip ring under the side mask (BT-267). The `*` the
+  briefings put round a heading is left out, its effect not decoded; the colour
+  codes are drawn. �115.
 - **Back from a briefing reached between missions goes to the single-player
   menu**, where the original goes back to the chart it came from: the game,
   and its chart with it, is gone by the time the briefing is up. §115.

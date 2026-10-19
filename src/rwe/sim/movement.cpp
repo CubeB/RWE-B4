@@ -5,6 +5,11 @@ namespace rwe
     bool
     isGridPointWalkable(const MapTerrain& terrain, const MovementClassDefinition& movementClass, unsigned int x, unsigned int y)
     {
+        // BT-264: exclusion precedes depth/slope, including amphibious classes.
+        if (terrain.hasLavaExclusion(DiscreteRect(x, y, movementClass.footprintX, movementClass.footprintZ)))
+        {
+            return false;
+        }
         if (isMaxSlopeGreaterThan(terrain, x, y, movementClass.footprintX, movementClass.footprintZ, movementClass.maxSlope, movementClass.maxWaterSlope))
         {
             return false;

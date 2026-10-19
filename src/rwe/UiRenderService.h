@@ -143,6 +143,9 @@ namespace rwe
 
         void drawSpriteAbs(const Rectangle2f& rect, const Sprite& sprite);
 
+        /** Native sprite blit clipped to a UI surface, including parent transforms. */
+        void drawSpriteAbsClipped(float x, float y, const Sprite& sprite, const Rectangle2f& surface);
+
         void drawText(float x, float y, const std::string& text, const SpriteSeries& font);
         void drawText(float x, float y, const std::string& text, const SpriteSeries& font, const Color& tint);
 

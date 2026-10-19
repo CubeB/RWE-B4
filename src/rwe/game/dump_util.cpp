@@ -45,6 +45,7 @@ namespace rwe
             {"maxEnergy", dumpJson(p.maxEnergy)},
             {"hasBaseStorage", dumpJson(p.hasBaseStorage)},
             {"hasCreatedUnits", dumpJson(p.hasCreatedUnits)},
+            {"removeUnitsAt", dumpJson(p.removeUnitsAt)},
             {"metalStalled", dumpJson(p.metalStalled)},
             {"energyStalled", dumpJson(p.energyStalled)},
             {"unitsKilled", dumpJson(p.unitsKilled)},
@@ -387,6 +388,10 @@ namespace rwe
             {"hitPoints", f.hitPoints},
             {"burningUntil", dumpJson(f.burningUntil)},
             {"nextSpark", dumpJson(f.nextSpark)},
+            {"animation", static_cast<unsigned int>(f.animation)},
+            {"animationTicksRemaining", f.animationTicksRemaining},
+            {"burnSparkTicksRemaining", f.burnSparkTicksRemaining},
+            {"animationOrder", f.animationOrder},
         };
     }
 
@@ -616,6 +621,7 @@ namespace rwe
             {"skirmishVictoryRules", simulation.skirmishVictoryRules},
             {"gameStatus", simulation.gameStatus.index()},
             {"featureRegrowthCursor", simulation.featureRegrowthCursor},
+            {"lavaExclusions", simulation.terrain.lavaExclusionIndices()},
             {"explored", dumpJson(simulation.explored)},
             {"cloakSeenEnemies", dumpJson(simulation.cloakSeenEnemies)},
         };
