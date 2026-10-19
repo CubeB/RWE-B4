@@ -9,6 +9,7 @@
 #include <random>
 #include <rwe/ai/AiController.h>
 #include <rwe/sim/DemoRecorder.h>
+#include <rwe/sim/FeatureBlast.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
@@ -3918,7 +3919,6 @@ namespace rwe
          * covers inside the blast (BT-112).
          */
         constexpr std::size_t BlastUnitListCapacity = 20;
-        constexpr std::size_t BlastFeatureListCapacity = 64;
 
         /** True when the id is already listed; otherwise lists it if there is room and says false. */
         template <typename Id>
@@ -4028,69 +4028,34 @@ namespace rwe
         // corrected by the records that owner sends.
         auto remoteSource = isRemoteRound(*this, projectile);
 
-        auto region = GridRegion::fromCoordinates(minCell, maxCell);
+        const auto featureWindow = featureBlastWindow(terrain, position, radius, occupiedGrid.getWidth(), occupiedGrid.getHeight());
+        const auto left = std::min(minCell.x, featureWindow.left());
+        const auto top = std::min(minCell.y, featureWindow.top());
+        const auto right = std::max(maxCell.x + 1, featureWindow.right());
+        const auto bottom = std::max(maxCell.y + 1, featureWindow.bottom());
+        const auto region = GridRegion(left, top, right - left, bottom - top);
 
         region.forEach([&](const auto& coords) {
-          auto cellCenter = terrain.heightmapIndexToWorldCenter(coords.x, coords.y);
-          Rectangle2x<SimScalar> cellRectangle(
-              Vector2x<SimScalar>(cellCenter.x, cellCenter.z),
-              Vector2x<SimScalar>(MapTerrain::HeightTileWidthInWorldUnits / 2_ss, MapTerrain::HeightTileHeightInWorldUnits / 2_ss));
-          auto cellDistanceSquared = cellRectangle.distanceSquared(Vector2x<SimScalar>(position.x, position.z));
-          if (cellDistanceSquared > radiusSquared)
+          // BT-256/257: feature reach has its own window and no cell-rectangle
+          // rejection. Preserve existing feature-before-unit ordering (BT-260
+          // records the adjacent, still-unported original ordering difference).
+          if (damagesFeatures && !paralyzer && !remoteSource && featureWindow.contains(Point(coords.x, coords.y)))
+          {
+              applyFeatureBlastCell(*this, Point(coords.x, coords.y), position, radius, projectile, seenFeatures);
+          }
+
+          // The union must not widen the existing unit sweep or its eligibility.
+          if (coords.x < minCell.x || coords.x > maxCell.x || coords.y < minCell.y || coords.y > maxCell.y)
           {
               return;
           }
-
-          if (damagesFeatures && !paralyzer && !remoteSource)
+          const auto cellCenter = terrain.heightmapIndexToWorldCenter(coords.x, coords.y);
+          const Rectangle2x<SimScalar> cellRectangle(
+              Vector2x<SimScalar>(cellCenter.x, cellCenter.z),
+              Vector2x<SimScalar>(MapTerrain::HeightTileWidthInWorldUnits / 2_ss, MapTerrain::HeightTileHeightInWorldUnits / 2_ss));
+          if (cellRectangle.distanceSquared(Vector2x<SimScalar>(position.x, position.z)) > radiusSquared)
           {
-              const auto& cell = occupiedGrid.get(coords);
-              if (cell.featureId && !alreadyListedOrRecord(seenFeatures, *cell.featureId, BlastFeatureListCapacity))
-              {
-                  if (auto featureRef = tryGetFeature(*cell.featureId))
-                  {
-                      auto& feature = featureRef->get();
-                      const auto& featureDefinition = getFeatureDefinition(feature.featureName);
-                      // The original's blast-on-feature routine (0x4244B0,
-                      // TOTALA-EXE.md §24) asks one thing of the feature:
-                      // that it is not `indestructible`. Blocking, reclaimable
-                      // and the rest never enter into it, so a scar decal or
-                      // a bush takes the hit like a wreck does. It adds the
-                      // weapon's default damage, unscaled by distance, to what
-                      // the feature has already taken, and breaks the feature
-                      // to its featuredead form the moment that reaches the
-                      // definition's `damage` -- which for a feature that
-                      // omits the key is zero, so the first hit takes it.
-                      if (!featureDefinition.indestructible && !feature.burningUntil)
-                      {
-                          if (weaponIt != weaponDefinitions.end() && weaponIt->second.fireStarter != 0
-                              && featureDefinition.flamable && !featureDefinition.hasModel)
-                          {
-                              // BT-259: even failed ignition replaces ordinary damage.
-                              igniteFeature(*cell.featureId);
-                          }
-                          else
-                          {
-                              auto damage = projectile.getDamage(std::string());
-                              if (damage >= feature.hitPoints)
-                              {
-                                  // What stands in its place lands on the cell
-                                  // just walked and is not met again by this
-                                  // blast, as in the original's per-cell walk;
-                                  // without that a heap that names no damage
-                                  // would go in the same shell that made it.
-                                  if (auto replacement = replaceFeature(*cell.featureId, featureDefinition.featureDead))
-                                  {
-                                      alreadyListedOrRecord(seenFeatures, *replacement, BlastFeatureListCapacity);
-                                  }
-                              }
-                              else
-                              {
-                                  feature.hitPoints -= damage;
-                              }
-                          }
-                      }
-                  }
-              }
+              return;
           }
 
           auto occupiedType = occupiedGrid.get(coords);

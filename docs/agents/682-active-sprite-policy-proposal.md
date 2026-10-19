@@ -1,6 +1,13 @@
-# #682: proposed deterministic treatment of active sprite blasts
+# #682: approved deterministic treatment of active sprite blasts
 
-Status: proposal only. No implementation of this policy.
+Status: owner approved on 2026-10-19 with the explicit reply "Use the
+deterministic policy (recommended)". Implementation is in the working copy,
+with focused validation passed (65 cases / 4503 assertions for the combined
+blast, burning, GAF, save/load and replay selection). The
+dedicated spec room recorded this decision in the existing section 88
+register before the #682 code change, commit `9d39950e`. The same commit updates
+BT-257, its discrepancy row and the spec-room compatibility summary. It has not
+been cherry-picked into this checkout because it touches the protected register.
 
 BT-257 (spec-room commit `68bf7709`) establishes that the original uses active
 sprite animation bytes as a reach point, including a loaded GAF address as Y.
@@ -14,7 +21,7 @@ again through other cells. Active sprites' contribution can therefore affect
 repeat damage in blasts containing more than 64 qualifying features. Their
 contribution depends on process addresses and recycled animation bytes.
 
-Recommended policy: skip burning/dying/reclaiming sprites before reach and
+Approved policy: skip burning/dying/reclaiming sprites before reach and
 hit-list accounting. Preserve their original immunity and reproduce the
 documented ordinary-sprite and model reach rules from BT-47 / BT-256. Do not
 emulate heap addresses or invent arbitrary coordinates in the lockstep sim.
@@ -38,7 +45,6 @@ Proposed compatibility entry:
 > avoiding a memory-address-dependent quirk that can change repeat damage in
 > exceptionally crowded explosions.
 
-The alternative is to defer the #682 implementation pending a different policy
-or a runtime study. Deterministic reproduction of actual process addresses is
-not a viable lockstep implementation. This proposal does not change the
+Deterministic reproduction of actual process addresses is not a viable lockstep
+implementation. The approved policy does not change the
 existing 64-feature cap or authorize unrelated behavior changes.

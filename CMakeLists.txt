@@ -703,6 +703,7 @@ src/rwe/net/EndpointFamily.h
     src/rwe/sim/GameSimulation_visibility.cpp
     src/rwe/sim/GameSimulation_endgame.cpp
     src/rwe/sim/GameSimulation_fire.cpp
+    src/rwe/sim/FeatureBlast.cpp
     src/rwe/sim/GameSimulation.h
     src/rwe/sim/GameTime.cpp
     src/rwe/sim/GameTime.h
@@ -1287,6 +1288,7 @@ set(TEST_FILES
     src/rwe/sim/worksounds.test.cpp
     src/rwe/sim/unitnotifications.test.cpp
     src/rwe/sim/burning.test.cpp
+    src/rwe/sim/FeatureBlast.test.cpp
     src/rwe/sim/waterbuilding.test.cpp
     src/rwe/sim/weaponflight.test.cpp
     src/rwe/sim/weaponfiretick.test.cpp
