@@ -26,6 +26,12 @@ Three rules decided what belongs in each list.
 
 ---
 
+**The example campaign is hidden.** RWE omits `camps/EXAMPLE.TDF` from the
+campaign choices at the owner's request (#655, 2026-10-17). The original accepts
+this loose campaign file; this is a deliberate menu policy, not conformance.
+BT-254 records the static reference comparison and the section 88 entry in the
+spec-room register.
+
 ## Kept: the original's quirks, reproduced on purpose
 
 **Buildings have a purple halo.** Jon Mavor, who wrote the graphics engine,

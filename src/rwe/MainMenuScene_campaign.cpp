@@ -82,6 +82,12 @@ namespace rwe
         std::vector<std::string> names;
         for (auto file : sceneContext.vfs->getFileNames("camps", ".tdf"))
         {
+            // BT-254 / #655: the original accepts this example campaign;
+            // the owner explicitly chose to hide it from RWE's choices.
+            if (toUpper(file) == "EXAMPLE.TDF")
+            {
+                continue;
+            }
             auto raw = sceneContext.vfs->readFile("camps/" + file);
             if (!raw)
             {
