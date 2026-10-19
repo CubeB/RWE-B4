@@ -621,6 +621,7 @@ namespace rwe
             {"skirmishVictoryRules", simulation.skirmishVictoryRules},
             {"gameStatus", simulation.gameStatus.index()},
             {"featureRegrowthCursor", simulation.featureRegrowthCursor},
+            {"lavaExclusions", simulation.terrain.lavaExclusionIndices()},
             {"explored", dumpJson(simulation.explored)},
             {"cloakSeenEnemies", dumpJson(simulation.cloakSeenEnemies)},
         };

@@ -785,8 +785,6 @@ namespace rwe
 
         auto dataMaps = loadGameData(services, requiredFeatureNames);
 
-        auto movementClassCollisionService = createMovementClassCollisionService(mapData.terrain, dataMaps.movementClassDatabase);
-
         // The wind speed range goes through as the map wrote it. The original
         // caps what a generator can make out of it by clamping the ratio, not
         // the speed, so clamping the speed here as well would have left a map
@@ -849,7 +847,6 @@ namespace rwe
             }
         }
         simulation.movementClassDatabase = std::move(dataMaps.movementClassDatabase);
-        simulation.movementClassCollisionService = std::move(movementClassCollisionService);
         simulation.unitModelDefinitions = dataMaps.modelDefinitions;
         simulation.unitScriptDefinitions = loadCobScripts(*services.vfs);
         simulation.featureDefinitions = std::move(dataMaps.featureDefinitions);
@@ -895,6 +892,9 @@ namespace rwe
                 LOG_WARN << "Map feature " << featureName << " at " << pos.x << "," << pos.y << " could not be placed";
             }
         }
+
+        simulation.initializeLavaExclusions(ota.lavaWorld);
+        simulation.movementClassCollisionService = createMovementClassCollisionService(simulation.terrain, simulation.movementClassDatabase);
 
         auto seedSeq = seedFromGameParameters(gameParameters);
         simulation.rng.seed(seedSeq);

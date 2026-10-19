@@ -25,7 +25,8 @@ namespace rwe
         // Simulation semantics changed in TOTALA-EXE sections 125-137. Old command
         // recordings cannot reproduce their games under these rules.
         // BT-44/49/255: the new fire rules change recorded command outcomes.
-        constexpr char Version = 3;
+        // BT-264/265: lava exclusion changes ground command outcomes.
+        constexpr char Version = 4;
 
         constexpr const char* ReplayExtension = ".rwereplay";
 

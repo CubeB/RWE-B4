@@ -508,7 +508,13 @@ namespace rwe
             featuresHash += GameHash((entry.first.value + 1u) * entry.second.animationOrder);
         }
 
+        uint32_t lavaHash = 0;
+        for (auto cell : simulation.terrain.getLavaExclusions().getVector())
+        {
+            lavaHash = lavaHash * 31u + cell;
+        }
         return combineHashes(
+            GameHash(lavaHash),
             simulation.gameTime,
             simulation.players,
             simulation.units,

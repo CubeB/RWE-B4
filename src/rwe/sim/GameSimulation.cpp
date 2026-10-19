@@ -355,6 +355,11 @@ namespace rwe
                 {
                     continue;
                 }
+                // BT-265: refuse during clearing, without rolling back earlier cells.
+                if (terrain.hasLavaExclusion(DiscreteRect(x, y, 1, 1)))
+                {
+                    return std::nullopt;
+                }
                 if (auto occupant = occupiedGrid.get(x, y).featureId)
                 {
                     if (getFeatureDefinition(getFeature(*occupant).featureName).indestructible)
@@ -2010,6 +2015,11 @@ namespace rwe
 
     bool GameSimulation::isCollisionAt(const GridRegion& region) const
     {
+        // BT-264: ground exclusion also applies to direct traversal.
+        if (terrain.hasLavaExclusion(DiscreteRect(region.x, region.y, region.width, region.height)))
+        {
+            return true;
+        }
         return occupiedGrid.any(region, [&](const auto& cell) {
             if (cell.mobileUnitId)
             {
@@ -2035,6 +2045,11 @@ namespace rwe
 
     bool GameSimulation::isCollisionAtIgnoringBuilding(const GridRegion& region, UnitId building) const
     {
+        // BT-264: ground exclusion also applies to direct traversal.
+        if (terrain.hasLavaExclusion(DiscreteRect(region.x, region.y, region.width, region.height)))
+        {
+            return true;
+        }
         return occupiedGrid.any(region, [&](const auto& cell) {
             if (cell.mobileUnitId)
             {
@@ -2060,6 +2075,11 @@ namespace rwe
 
     bool GameSimulation::isCollisionAt(const DiscreteRect& rect, UnitId self) const
     {
+        // BT-264: ground exclusion also applies to direct traversal.
+        if (terrain.hasLavaExclusion(rect))
+        {
+            return true;
+        }
         auto region = occupiedGrid.tryToRegion(rect);
         if (!region)
         {
@@ -2071,6 +2091,11 @@ namespace rwe
 
     bool GameSimulation::isCollisionAt(const DiscreteRect& rect, UnitId self, const DiscreteRect& passableRegion) const
     {
+        // BT-264: ground exclusion also applies to direct traversal.
+        if (terrain.hasLavaExclusion(rect))
+        {
+            return true;
+        }
         auto region = occupiedGrid.tryToRegion(rect);
         if (!region)
         {
@@ -2090,6 +2115,11 @@ namespace rwe
 
     bool GameSimulation::isCollisionAtForSearch(const DiscreteRect& rect, UnitId self, const DiscreteRect& passableRegion, GameTime searchTime) const
     {
+        // BT-264: ground exclusion also applies to direct traversal.
+        if (terrain.hasLavaExclusion(rect))
+        {
+            return true;
+        }
         auto region = occupiedGrid.tryToRegion(rect);
         if (!region)
         {

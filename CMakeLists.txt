@@ -700,6 +700,7 @@ src/rwe/net/EndpointFamily.h
     src/rwe/sim/GameHash_util.cpp
     src/rwe/sim/GameHash_util.h
     src/rwe/sim/GameSimulation.cpp
+    src/rwe/sim/GameSimulation_lava.cpp
     src/rwe/sim/GameSimulation_visibility.cpp
     src/rwe/sim/GameSimulation_endgame.cpp
     src/rwe/sim/GameSimulation_fire.cpp
@@ -1288,6 +1289,7 @@ set(TEST_FILES
     src/rwe/sim/worksounds.test.cpp
     src/rwe/sim/unitnotifications.test.cpp
     src/rwe/sim/burning.test.cpp
+    src/rwe/sim/lava.test.cpp
     src/rwe/sim/FeatureBlast.test.cpp
     src/rwe/sim/waterbuilding.test.cpp
     src/rwe/sim/weaponflight.test.cpp

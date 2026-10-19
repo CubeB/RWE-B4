@@ -839,6 +839,8 @@ namespace rwe
         GameSimulation(const GameSimulation&) = delete;
         GameSimulation& operator=(const GameSimulation&) = delete;
 
+        void initializeLavaExclusions(bool lavaWorld);
+
         std::optional<FeatureId> addFeature(MapFeature&& newFeature);
 
         std::optional<FeatureId> addFeature(FeatureDefinitionId featureType, int heightmapX, int heightmapZ);

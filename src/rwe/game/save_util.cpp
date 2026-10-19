@@ -2,6 +2,7 @@
 
 #include "SaveJson.h"
 #include "UnitStateFieldTable.h"
+#include <rwe/LoadingScene_util.h>
 
 // This one uses GameSimulation itself rather than only naming it, and
 // save_util.h no longer drags the header in, so it says so here.
@@ -704,6 +705,7 @@ namespace rwe
         j["noSeaLevelTrigger"] = sim.noSeaLevelTrigger;
         j["gravity"] = sim.gravity;
         j["waterDamage"] = sim.waterDamage;
+        j["lavaExclusions"] = sim.terrain.lavaExclusionIndices();
         j["nextWindSpeedChange"] = saveGameTime(sim.nextWindSpeedChange);
         j["featureRegrowthCursor"] = sim.featureRegrowthCursor;
         if (sim.missionRules)
@@ -893,6 +895,11 @@ namespace rwe
         if (j.contains("waterDamage"))
         {
             sim.waterDamage = j.at("waterDamage").get<int>();
+        }
+        if (j.contains("lavaExclusions"))
+        {
+            sim.terrain.setLavaExclusions(j.at("lavaExclusions").get<std::vector<unsigned int>>());
+            sim.movementClassCollisionService = createMovementClassCollisionService(sim.terrain, sim.movementClassDatabase);
         }
         sim.nextWindSpeedChange = loadGameTime(j.at("nextWindSpeedChange"));
         sim.featureRegrowthCursor = j.at("featureRegrowthCursor").get<int>();
