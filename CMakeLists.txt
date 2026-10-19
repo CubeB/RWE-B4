@@ -503,6 +503,8 @@ set(SOURCE_FILES
     src/rwe/ui/UiSlider.h
     src/rwe/ui/UiTextBox.cpp
     src/rwe/ui/UiTextRegion.cpp
+    src/rwe/ui/UiPanorama.cpp
+    src/rwe/ui/UiPanorama.h
     src/rwe/ui/UiTextRegion.h
     src/rwe/ui/UiTextBox.h
     src/rwe/game/SaveFile.cpp
@@ -705,6 +707,8 @@ src/rwe/net/EndpointFamily.h
     src/rwe/sim/GameSimulation_endgame.cpp
     src/rwe/sim/GameSimulation_fire.cpp
     src/rwe/sim/FeatureBlast.cpp
+    src/rwe/sim/FactoryConstruction.cpp
+    src/rwe/sim/FactoryConstruction.h
     src/rwe/sim/GameSimulation.h
     src/rwe/sim/GameTime.cpp
     src/rwe/sim/GameTime.h
@@ -1290,6 +1294,7 @@ set(TEST_FILES
     src/rwe/sim/unitnotifications.test.cpp
     src/rwe/sim/burning.test.cpp
     src/rwe/sim/lava.test.cpp
+    src/rwe/sim/FactoryConstruction.test.cpp
     src/rwe/sim/FeatureBlast.test.cpp
     src/rwe/sim/waterbuilding.test.cpp
     src/rwe/sim/weaponflight.test.cpp
@@ -1392,6 +1397,7 @@ set(TEST_FILES
     src/rwe/ui/UiComponent.test.cpp
     src/rwe/ui/UiTextBox.test.cpp
     src/rwe/ui/UiTextRegion.test.cpp
+    src/rwe/ui/UiPanorama.test.cpp
     src/rwe/ui/UiPanelFocus.test.cpp
     src/rwe/UiRenderService.test.cpp
     )

@@ -1,5 +1,6 @@
 #include "UiRenderService.h"
 #include <cctype>
+#include <cmath>
 #include <rwe/ShaderService.h>
 #include <rwe/util/rwe_string.h>
 
@@ -122,6 +123,22 @@ namespace rwe
     void UiRenderService::drawSpriteAbs(const Rectangle2f& rect, const Sprite& sprite)
     {
         drawSpriteAbs(rect.left(), rect.top(), rect.width(), rect.height(), sprite);
+    }
+
+    void UiRenderService::drawSpriteAbsClipped(float x, float y, const Sprite& sprite, const Rectangle2f& surface)
+    {
+        // BT-267's native surface clip, mapped through RWE's fitted UI projection.
+        const auto matrix = getViewProjectionMatrix() * matrixStack.top();
+        const auto tl = matrix * Vector3f(surface.left(), surface.top(), 0);
+        const auto br = matrix * Vector3f(surface.right(), surface.bottom(), 0);
+        const auto& output = aspectViewport ? *aspectViewport : *viewport;
+        const int left = static_cast<int>(std::floor(output.x() + (tl.x + 1) * output.width() / 2));
+        const int bottom = static_cast<int>(std::floor(output.y() + (br.y + 1) * output.height() / 2));
+        const int right = static_cast<int>(std::ceil(output.x() + (br.x + 1) * output.width() / 2));
+        const int top = static_cast<int>(std::ceil(output.y() + (tl.y + 1) * output.height() / 2));
+        graphics->enableScissor(left, bottom, std::max(0, right - left), std::max(0, top - bottom));
+        drawSpriteAbs(x, y, sprite);
+        graphics->disableScissor();
     }
 
     void UiRenderService::drawText(float x, float y, const std::string& text, const SpriteSeries& font)

@@ -26,7 +26,8 @@ namespace rwe
         // recordings cannot reproduce their games under these rules.
         // BT-44/49/255: the new fire rules change recorded command outcomes.
         // BT-264/265: lava exclusion changes ground command outcomes.
-        constexpr char Version = 4;
+        // BT-266: factory destruction now cancels its retained product.
+        constexpr char Version = 5;
 
         constexpr const char* ReplayExtension = ".rwereplay";
 

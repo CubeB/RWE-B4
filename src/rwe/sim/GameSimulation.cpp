@@ -10,6 +10,7 @@
 #include <rwe/ai/AiController.h>
 #include <rwe/sim/DemoRecorder.h>
 #include <rwe/sim/FeatureBlast.h>
+#include <rwe/sim/FactoryConstruction.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
@@ -1098,6 +1099,7 @@ namespace rwe
             missionRules->unitDying(*this, targetId, unit.owner);
         }
         unit.markAsDeadNoCorpse();
+        cancelFactoryProductOnDeath(*this, targetId);
         recordUnitDeath(*this, targetId, "reclaimed", std::nullopt);
 
         // Death cause 5, and the one place the original checks who is doing it
@@ -1303,6 +1305,7 @@ namespace rwe
 
         // Self-destruction leaves nothing to reclaim.
         unit.markAsDeadNoCorpse();
+        cancelFactoryProductOnDeath(*this, unitId);
         unit.selfDestructTime = std::nullopt;
         getPlayer(unit.owner).unitsLost += 1;
 
@@ -3112,6 +3115,7 @@ namespace rwe
             missionRules->unitDying(*this, unitId, unit.owner);
         }
         unit.markAsDeadNoCorpse();
+        cancelFactoryProductOnDeath(*this, unitId);
         if (countAsLoss)
         {
             getPlayer(unit.owner).unitsLost += 1;
@@ -3526,6 +3530,7 @@ namespace rwe
             missionRules->unitDying(*this, unitId, unit.owner);
         }
         unit.markAsDead();
+        cancelFactoryProductOnDeath(*this, unitId);
         getPlayer(unit.owner).unitsLost += 1;
         releaseTransportLinks(unitId, attacker);
 

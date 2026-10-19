@@ -9,6 +9,7 @@
 #include <rwe/ui/UiListBox.h>
 #include <rwe/ui/UiStagedButton.h>
 #include <rwe/ui/UiTextRegion.h>
+#include <rwe/ui/UiPanorama.h>
 #include <rwe/util/SimpleLogger.h>
 #include <rwe/util/rwe_string.h>
 
@@ -382,9 +383,8 @@ namespace rwe
             }
             else if (c.name == "PLANET")
             {
-                // The globe turns. The panorama is its first strip fitted to
-                // the window, where the original scrolls the strips across it
-                // (0x478790) and prints the wind and gravity over them.
+                // BT-267: spatial panorama strips scroll beneath the side mask.
+                // The globe has its own independent animation.
                 auto art = briefingPlanet(ota.planet, sideIndex == 1);
                 auto gaf = std::string("anims/") + art.gaf + ".GAF";
                 // The art is decoration: a mod's planet with no GAF shows none.
@@ -410,7 +410,11 @@ namespace rwe
                         if (auto pan = sequence(art.panorama))
                         {
                             const auto& p = other.common;
-                            panel->appendChild(std::make_unique<UiAnimation>(p.xpos, p.ypos, static_cast<unsigned int>(p.width), static_cast<unsigned int>(p.height), pan, 0.0f, true));
+                            // The original does not reset these globals on briefing entry.
+                            static auto scroll = std::make_shared<PanoramaScrollState>();
+                            panel->appendChild(std::make_unique<UiPanorama>(p.xpos, p.ypos,
+                                static_cast<unsigned int>(p.width), static_cast<unsigned int>(p.height),
+                                pan, sequence("Panmask"), sideIndex, sceneContext.timeService, scroll));
                         }
                     }
                 }

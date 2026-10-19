@@ -362,10 +362,10 @@ original in every case.
 - **MoveUnitToRadius compares in floating point**, where the original floors
   each squared distance to whole units first; they differ only within a unit of
   the edge.
-- **The campaign briefing's panorama stands still**, its first strip fitted to
-  the window, where the original scrolls the strips across it and prints the
-  wind and gravity over them. The `*` the briefings put round a heading is
-  left out, its effect not decoded; the colour codes are drawn. §115.
+- **The campaign briefing omits the wind and gravity readouts.** Its panorama
+  now scrolls the native strip ring under the side mask (BT-267). The `*` the
+  briefings put round a heading is left out, its effect not decoded; the colour
+  codes are drawn. �115.
 - **Back from a briefing reached between missions goes to the single-player
   menu**, where the original goes back to the chart it came from: the game,
   and its chart with it, is gone by the time the briefing is up. §115.
