@@ -56,6 +56,19 @@ namespace rwe
         return _entries;
     }
 
+    std::vector<unsigned int> GafArchive::Entry::frameDurationTicks() const
+    {
+        // BT-255, static reference 97d7ac59: each frame spends at least one
+        // feature update, including recorded countdowns of zero and one.
+        std::vector<unsigned int> durations;
+        durations.reserve(frameOffsets.size());
+        for (const auto& frame : frameOffsets)
+        {
+            durations.push_back(std::max(1u, frame.unknown1 & 0xffffu));
+        }
+        return durations;
+    }
+
     GafArchive::GafArchive(std::istream* stream)
     {
         auto fileSize = streamSize(*stream);

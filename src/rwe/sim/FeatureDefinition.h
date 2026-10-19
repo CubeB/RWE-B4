@@ -4,6 +4,7 @@
 #include <rwe/sim/FeatureDefinitionId.h>
 #include <rwe/sim/SimScalar.h>
 #include <string>
+#include <vector>
 
 namespace rwe
 {
@@ -28,6 +29,9 @@ namespace rwe
         unsigned int sparkTime;
         unsigned int spreadChance;
         std::string burnWeapon;
+
+        /** BT-44/255: play-once burn timings, loaded identically without graphics. */
+        std::vector<unsigned int> burnFrameTicks{};
 
         bool geothermal;
 

@@ -22,6 +22,7 @@
 #include <rwe/io/fbi/io.h>
 #include <rwe/io/featuretdf/io.h>
 #include <rwe/io/gui/gui.h>
+#include <rwe/io/gaf/GafArchive.h>
 #include <rwe/io/lostdf/io.h>
 #include <rwe/io/moveinfotdf/io.h>
 #include <rwe/io/soundtdf/SoundClass.h>
@@ -31,6 +32,7 @@
 #include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
+#include <rwe/util/SpanStream.h>
 
 namespace rwe
 {
@@ -268,6 +270,29 @@ namespace rwe
                 f.sparkTime = tdf.sparkTime;
                 f.spreadChance = tdf.spreadChance;
                 f.burnWeapon = tdf.burnWeapon;
+
+                // BT-44/255: animation duration is simulation data. Read only
+                // GAF metadata here, including for headless loads; textures
+                // and their upload timing must never decide a fire's lifetime.
+                if (tdf.object.empty() && !tdf.fileName.empty() && !tdf.seqNameBurn.empty())
+                {
+                    try
+                    {
+                        if (auto bytes = services.vfs->readFile("anims/" + tdf.fileName + ".GAF"))
+                        {
+                            SpanStream stream(bytes->data(), bytes->size());
+                            GafArchive gaf(&stream);
+                            if (auto entry = gaf.findEntry(tdf.seqNameBurn))
+                            {
+                                f.burnFrameTicks = entry->get().frameDurationTicks();
+                            }
+                        }
+                    }
+                    catch (const std::exception& e)
+                    {
+                        LOG_WARN << "Feature " << featureName << " has unreadable burn timing: " << e.what();
+                    }
+                }
 
                 f.geothermal = tdf.geothermal;
 

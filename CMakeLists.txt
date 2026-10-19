@@ -1217,6 +1217,7 @@ set(TEST_FILES
     src/rwe/io/sidedatatdf/SideData.test.cpp
     src/rwe/io/fbi/transportcapacity.test.cpp
     src/rwe/io/fbi/floater.test.cpp
+    src/rwe/io/gaf/GafTiming.test.cpp
     src/rwe/io/tdf/ListTdfAdapter.test.cpp
     src/rwe/io/tdf/NetSchemaTdfAdapter.test.cpp
     src/rwe/io/tdf/SimpleTdfAdapter.test.cpp

@@ -1,7 +1,9 @@
 # #681: burning-feature implementation preparation
 
-Status: reference research and shipped-data inspection complete; implementation
-has not started. Owner-approved scheduling is recorded in the continuation brief.
+Status: reference research and shipped-data inspection complete; the first
+implementation step loads burn-frame metadata independently of graphics. The
+existing duration/spread/damage behavior has not yet been replaced, and #681
+is not complete. Owner-approved scheduling is in the continuation brief.
 
 Authority: BT-44, BT-49 and BT-255 in the documentation checkout
 `D:\RWE-spec-room`. BT-255 was committed as `b4b094fe`. All are static readings
@@ -27,6 +29,13 @@ Required behavior:
   may be retried by wind; a successful ignition cannot.
 - Apply the named burn weapon's area damage exactly once, at spread, without an
   attacker and with the nobody owner. Shipped burn weapons are unitsonly.
+- BT-259 (`db7bba8d`) clarifies blast ignition: parse firestarter as a decimal
+  leading integer narrowed to a byte, not a clamped floating percentage. A
+  nonzero byte makes an eligible ignition attempt without an extra chance roll.
+  Failed ignition for a missing sequence or full pool still replaces ordinary
+  feature damage and consumes no timer draw. The blast's continuation redirect
+  can supply a normalized origin even when that origin cell itself was not in
+  reach. Spread's direct candidate walk still accepts origin cells only.
 - Reject model features and other per-instance animation state; a normal shared
   animated sprite alone does not prevent ignition. The 2048-slot allocation
   dependency is covered by BT-48 / #683.
@@ -41,6 +50,41 @@ Shipped data inspected with tools/hpi.py from totala1.hpi:
   have 96 frames of two ticks. shruburn has 42 frames of two ticks (84 total).
 - TREES.GAF SHA-256:
   `93c7955d24af8c18ca07d0c519061d1cc115e86fec1b4d2a68da30451b2e37b4`.
+
+A further read-only metadata census used the installed totala1.hpi, worlds.hpi,
+ccdata.ccx, btdata.ccx and rev31.gp3, retaining feature section names from the
+resolved file set. All 79 flammable definitions naming a burn sequence resolved
+to GAF timing; their lengths span 46..282 updates and all declare sparktime 5.
+This is a separate content snapshot and simple section-name census, not a claim
+that it is identical to BT-44's 78-definition population or to the game's exact
+duplicate-definition resolution. Scratch report:
+`D:\tmp\rwe-681-timing-census.json`.
+
+Resolved by BT-258, spec-room commit `90a729bd`: an independent census matches
+all 79 names. A comment between Tree7's header and opening brace causes a strict
+whitespace-only header census to omit Tree7 alone and return 78. The original
+accepts this valid commented record. BT-44/49 now carry correction notices; use
+79 named definitions for this archive population. The discarded old census
+script was not retained, so attributing its exact defect remains inference.
+Tree7 shares Tree6's 192-update timing; duration ranges and spark conclusions
+are unchanged. No original runtime population was measured.
+
+Metadata implementation step (in progress): GafArchive::Entry exposes unsigned
+per-frame update counts; FeatureDefinition retains burnFrameTicks; the loader
+reads the named sprite sequence directly through the VFS/GAF metadata reader
+without using TextureService. Model definitions do not acquire sprite burn
+timings. No mutable sim state or RNG draw changes in this step. Tests cover the
+shipped Tree1 burn/death/reclaim frame counts and low-word/minimum-one boundaries.
+The Debug game and focused [gaf],[burning] build/run script is
+`D:\tmp\rwe-681-timing-build.sh`; logs share the rwe-681-timing prefix.
+This step alone does not correct the fire behavior or complete the issue.
+
+Metadata-step validation: Debug game build and focused [gaf],[burning] tests
+passed (3 cases, 21 assertions), including after moving the VFS read inside
+the malformed/unreadable-animation exception boundary. GameScene.cpp remains
+24276 sections. Full-suite/all-target/Release validation will follow the actual
+fire-rule change; the Release executable still contains the completed #687
+behavior. No original-game execution was performed.
 
 Implementation considerations still to resolve in code review:
 
@@ -64,6 +108,13 @@ Implementation considerations still to resolve in code review:
 - The current feature-damage sweep does not distinguish ignition from damage;
   verify the weapon ignition path as part of the change, rather than relying
   solely on direct igniteFeature tests.
+- Verify kill credit separately from damage source. BT-49 requires a burn hit
+  to leave last-attacker fields unchanged and apply no attacker bonus, while a
+  lethal burn credits the previously recorded attacker, if any. Reusing a
+  no-source blast alone is insufficient if the existing kill path credits only
+  the current damage call's attacker. Keep this burn-specific correction scoped
+  to the documented case, with a regression for both no-prior-attacker and
+  prior-attacker outcomes.
 
 Validation must cover shipped frame lengths, zero/equal/short timers, one spread,
 candidate-specific rolls, square reach, continuation refusal, deferred cascades,
