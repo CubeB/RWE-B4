@@ -651,10 +651,7 @@ namespace rwe
             };
 
             u.yardMap = parseYardMap(fbi.footprintX, fbi.footprintZ, fbi.yardMap);
-            if (u.yardMap->any(isWater))
-            {
-                u.floater = true;
-            }
+            // BT-64 / #687: water yard letters never imply the FBI Floater bit.
             if (u.yardMap->any(isGeo))
             {
                 u.yardMapContainsGeo = true;
