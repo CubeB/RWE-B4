@@ -1325,16 +1325,15 @@ namespace rwe
         const MapFeature& getFeature(FeatureId id) const;
 
         /**
-         * Sets a flammable feature alight. It burns for burnMin..burnMax
-         * seconds, tries to spread every sparkTime seconds, and is replaced by
-         * its burnt form (or removed) when it burns out.
+         * BT-44/255: play the burn sequence once, with one byte-countdown
+         * spread before burnout, then replace by the burnt form.
          */
         void igniteFeature(FeatureId id);
 
-        /** Gives every flammable feature within radius a chancePercent chance to catch fire. */
-        void tryIgniteFeaturesInRadius(const SimVector& position, SimScalar radius, unsigned int chancePercent);
+        /** BT-44/49: try the square and wind candidates, then apply burn damage once. */
+        void spreadFeatureFire(FeatureId id, const SimVector& wind);
 
-        void updateBurningFeatures();
+        void updateBurningFeatures(const SimVector& wind);
 
         /**
          * Lifts a unit off the ground into a transport: it leaves the occupancy
@@ -1647,7 +1646,7 @@ namespace rwe
          */
         void updateWaterDamage();
 
-        void applyDamageInRadius(const SimVector& position, SimScalar radius, const Projectile& projectile);
+        void applyDamageInRadius(const SimVector& position, SimScalar radius, const Projectile& projectile, const char* deathCause = "weapon");
 
         /**
          * `struckUnit` is the unit the round ran into, when it was a unit

@@ -32,6 +32,7 @@ namespace rwe
 
         /** BT-44/255: play-once burn timings, loaded identically without graphics. */
         std::vector<unsigned int> burnFrameTicks{};
+        bool hasModel{false};
 
         bool geothermal;
 

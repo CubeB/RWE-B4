@@ -388,6 +388,9 @@ namespace rwe
             {"hitPoints", f.hitPoints},
             {"burningUntil", dumpJson(f.burningUntil)},
             {"nextSpark", dumpJson(f.nextSpark)},
+            {"burnTicksRemaining", f.burnTicksRemaining},
+            {"burnSparkTicksRemaining", f.burnSparkTicksRemaining},
+            {"burnOrder", f.burnOrder},
         };
     }
 

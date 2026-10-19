@@ -756,7 +756,7 @@ namespace rwe
         }
 
         auto saved = saveSimulationToJson(simA);
-        REQUIRE(saved.at("version").get<int>() == 2);
+        REQUIRE(saved.at("version").get<int>() == 3);
 
         auto simB = makeBaseSim();
         addPad(simB);
@@ -776,6 +776,13 @@ namespace rwe
         }
 
         SECTION("and a version 2 save is loaded as written")
+        {
+            saved["version"] = 2;
+            loadSimulationFromJson(saved, simB);
+            REQUIRE(!simB.getUnitState(tankId).pieces.front().shaded);
+        }
+
+        SECTION("and a version 3 save is loaded as written")
         {
             loadSimulationFromJson(saved, simB);
             REQUIRE(!simB.getUnitState(tankId).pieces.front().shaded);

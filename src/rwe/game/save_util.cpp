@@ -397,7 +397,10 @@ namespace rwe
                 {"reclaimProgress", f.reclaimProgress},
                 {"hitPoints", f.hitPoints},
                 {"burningUntil", saveOptional(f.burningUntil, [](GameTime t) { return saveGameTime(t); })},
-                {"nextSpark", saveGameTime(f.nextSpark)}};
+                {"nextSpark", saveGameTime(f.nextSpark)},
+                {"burnTicksRemaining", f.burnTicksRemaining},
+                {"burnSparkTicksRemaining", f.burnSparkTicksRemaining},
+                {"burnOrder", f.burnOrder}};
         }
     }
 
@@ -672,7 +675,8 @@ namespace rwe
         // 2 since 2026-09-11. The layout did not change; what changed is
         // that a version 1 save may hold units made before mobile units were
         // shaded, which loadSimulationFromJson has to put right.
-        j["version"] = 2;
+        // Version 3 adds counted, ordered fire state (BT-255).
+        j["version"] = 3;
 
         // The wind range is a construction-time constant; it travels with the
         // save only so the load can check it was given the right map.
@@ -821,7 +825,7 @@ namespace rwe
     void loadSimulationFromJson(const nlohmann::json& j, GameSimulation& sim)
     {
         auto version = j.at("version").get<int>();
-        if (version != 1 && version != 2)
+        if (version != 1 && version != 2 && version != 3)
         {
             throw std::runtime_error("unsupported save version");
         }
@@ -977,6 +981,17 @@ namespace rwe
             placed.hitPoints = fj.at("hitPoints").get<unsigned int>();
             placed.burningUntil = loadOptional(fj.at("burningUntil"), loadGameTime);
             placed.nextSpark = loadGameTime(fj.at("nextSpark"));
+            placed.burnTicksRemaining = fj.value("burnTicksRemaining", 0u);
+            placed.burnSparkTicksRemaining = fj.value("burnSparkTicksRemaining", 0u);
+            placed.burnOrder = fj.value("burnOrder", 0u);
+            if (placed.burnSparkTicksRemaining > 255)
+            {
+                throw std::runtime_error("invalid burning-feature spark byte");
+            }
+            if (placed.burningUntil && !fj.contains("burnTicksRemaining"))
+            {
+                throw std::runtime_error("save contains legacy burning-feature state");
+            }
             ctx.features.push_back(*id);
         }
 

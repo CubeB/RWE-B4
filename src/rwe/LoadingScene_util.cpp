@@ -277,7 +277,7 @@ namespace rwe
         weaponDefinition.noExplode = tdf.noExplode;
         weaponDefinition.unitsOnly = tdf.unitsOnly;
 
-        weaponDefinition.fireStarter = static_cast<unsigned int>(std::clamp(tdf.fireStarter, 0.0f, 100.0f));
+        weaponDefinition.fireStarter = tdf.fireStarter & 0xffu;
 
         weaponDefinition.waterWeapon = tdf.waterWeapon;
         weaponDefinition.paralyzer = tdf.paralyzer;

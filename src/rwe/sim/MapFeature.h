@@ -49,7 +49,14 @@ namespace rwe
         /** Set while the feature is on fire: the tick it burns out and is replaced by its burnt form. */
         std::optional<GameTime> burningUntil{};
 
-        /** While burning, the next tick the fire tries to spread to its neighbours. */
+        /** Predicted spread tick, or zero once spent/disabled; countdown is authoritative. */
         GameTime nextSpark{0};
+
+        /** BT-255: counted by feature updates, not wall time or presentation frames. */
+        unsigned int burnTicksRemaining{0};
+        unsigned int burnSparkTicksRemaining{0};
+
+        /** Relative ignition order among active fires; newest is processed first. */
+        unsigned int burnOrder{0};
     };
 }

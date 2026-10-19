@@ -270,6 +270,7 @@ namespace rwe
                 f.sparkTime = tdf.sparkTime;
                 f.spreadChance = tdf.spreadChance;
                 f.burnWeapon = tdf.burnWeapon;
+                f.hasModel = !tdf.object.empty();
 
                 // BT-44/255: animation duration is simulation data. Read only
                 // GAF metadata here, including for headless loads; textures

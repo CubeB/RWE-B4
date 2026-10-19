@@ -386,7 +386,10 @@ namespace rwe
             f.reclaimProgress,
             f.hitPoints,
             f.burningUntil,
-            f.nextSpark);
+            f.nextSpark,
+            f.burnTicksRemaining,
+            f.burnSparkTicksRemaining,
+            f.burnOrder);
     }
 
     GameHash computeHashOf(const MissionRules& m)
@@ -499,6 +502,9 @@ namespace rwe
         {
             featuresHash += computeHashOf(entry.first)
                 + computeHashOf(entry.second, simulation.getFeatureDefinition(entry.second.featureName).name);
+            // Associate order with identity: merely summing orders would miss
+            // two fires swapping places in the newest-first traversal.
+            featuresHash += GameHash((entry.first.value + 1u) * entry.second.burnOrder);
         }
 
         return combineHashes(

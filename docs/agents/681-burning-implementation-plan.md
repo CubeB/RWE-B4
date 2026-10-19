@@ -1,9 +1,9 @@
 # #681: burning-feature implementation preparation
 
-Status: reference research and shipped-data inspection complete; the first
-implementation step loads burn-frame metadata independently of graphics. The
-existing duration/spread/damage behavior has not yet been replaced, and #681
-is not complete. Owner-approved scheduling is in the continuation brief.
+Status: metadata step committed as af43acd6. The working copy now implements
+the core duration/spread/damage correction and is building for focused tests;
+the core has passed focused validation, and #681 is not complete.
+Owner-approved scheduling is in the continuation brief.
 
 Authority: BT-44, BT-49 and BT-255 in the documentation checkout
 `D:\RWE-spec-room`. BT-255 was committed as `b4b094fe`. All are static readings
@@ -122,3 +122,36 @@ newest-first order, wind retry/direction, no-source damage and unchanged credit,
 headless loading, save continuation, deterministic repeat hashes, and pool
 exhaustion once #683 is integrated. Changes are hash-visible and break old replay
 outcomes; account for the replay/version policy before claiming completion.
+
+Core implementation in the working copy:
+
+- The three fire methods moved to GameSimulation_fire.cpp to protect the dense
+  GameSimulation.cpp section budget. Model presence is retained in definitions;
+  ignition counts existing models and burns against the 2048-state limit. Model
+  placement exhaustion and temporary death/reclaim states remain #683 work.
+- MapFeature carries remaining animation updates, remaining spark updates and
+  relative ignition order. Save/hash/dump include them. The simulation hash also
+  associates ignition order with feature identity, detecting a swapped order.
+- The renderer selects the play-once frame from sim age rather than global time.
+  Spread uses the previous wind vector on a wind-change tick while preserving
+  RWE's already-documented broader phase/RNG-order divergence (BT-1).
+- Burn damage has no firing unit or attacker bonus; lethal burn damage uses the
+  previous attacker for credit without updating last-hit fields.
+- RWE-only format policy: save JSON version 3 carries the new counters. Older
+  nonburning saves remain accepted; legacy active-fire state without counters is
+  refused explicitly. RWE command replay version 3 rejects older command replays
+  whose outcomes depended on the former fire rules. These formats have no
+  original-game counterpart and are not original-parity claims.
+- Blast reach and active-sprite hit-list accounting still use the pre-#682
+  implementation; #682 now has owner approval for its deterministic policy.
+
+First core build found an obsolete currentTime parameter name unused after
+switching the renderer to sim age (-Werror). Its name was removed only after
+make and all workers exited. The first focused run passed 55 of 57 cases. Two
+fixture assumptions were corrected: grid placement puts the solar box 24 units
+from the fire (53 damage), and byte-conversion input needs a named TDF block.
+The second focused run passed: 57 cases, 4348 assertions, including GAF,
+burning, save/load and replay cases. Debug game also built. Full permitted suite,
+all targets, section budget, Release game and repeated headless hashes remain
+pending for the combined feature batch. Ignition sound and the remaining
+stateful sprite lifecycle are not yet implemented, so this is not a closing fix.

@@ -32,7 +32,7 @@ namespace rwe
         float edgeEffectiveness;
 
         bool turret;
-        float fireStarter;
+        unsigned int fireStarter;
         bool unitsOnly;
 
         unsigned int burst;

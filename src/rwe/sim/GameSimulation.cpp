@@ -4,6 +4,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <limits>
+#include <string_view>
 #include <random>
 #include <rwe/ai/AiController.h>
 #include <rwe/sim/DemoRecorder.h>
@@ -568,121 +570,6 @@ namespace rwe
             return std::nullopt;
         }
         return addFeature(MapFeature{*replacement, position, rotation});
-    }
-
-    void GameSimulation::igniteFeature(FeatureId id)
-    {
-        auto featureRef = tryGetFeature(id);
-        if (!featureRef)
-        {
-            return;
-        }
-        auto& feature = featureRef->get();
-        const auto& featureDefinition = getFeatureDefinition(feature.featureName);
-        if (!featureDefinition.flamable || feature.burningUntil)
-        {
-            return;
-        }
-
-        const auto ticksPerSecond = static_cast<unsigned int>(SimTicksPerSecond);
-        auto minTicks = featureDefinition.burnMin * ticksPerSecond;
-        auto maxTicks = std::max(featureDefinition.burnMax, featureDefinition.burnMin) * ticksPerSecond;
-        feature.burningUntil = gameTime + GameTime(std::max(1u, randomBetween(rng, minTicks, maxTicks)));
-        feature.nextSpark = gameTime + GameTime(std::max(1u, featureDefinition.sparkTime) * ticksPerSecond);
-    }
-
-    void GameSimulation::tryIgniteFeaturesInRadius(const SimVector& position, SimScalar radius, unsigned int chancePercent)
-    {
-        if (chancePercent == 0 || radius <= 0_ss)
-        {
-            return;
-        }
-
-        auto minPoint = terrain.worldToHeightmapCoordinate(SimVector(position.x - radius, position.y, position.z - radius));
-        auto maxPoint = terrain.worldToHeightmapCoordinate(SimVector(position.x + radius, position.y, position.z + radius));
-        auto minCell = occupiedGrid.clampToCoords(minPoint);
-        auto maxCell = occupiedGrid.clampToCoords(maxPoint);
-        auto region = GridRegion::fromCoordinates(minCell, maxCell);
-
-        // Collect in grid order so the rolls below happen in the same order on every machine.
-        std::vector<FeatureId> candidates;
-        region.forEach([&](const auto& coords) {
-            auto featureId = occupiedGrid.get(coords).featureId;
-            if (!featureId || std::find(candidates.begin(), candidates.end(), *featureId) != candidates.end())
-            {
-                return;
-            }
-            candidates.push_back(*featureId);
-        });
-
-        auto radiusSquared = radius * radius;
-        for (auto id : candidates)
-        {
-            auto featureRef = tryGetFeature(id);
-            if (!featureRef)
-            {
-                continue;
-            }
-            const auto& feature = featureRef->get();
-            const auto& featureDefinition = getFeatureDefinition(feature.featureName);
-            if (!featureDefinition.flamable || feature.burningUntil)
-            {
-                continue;
-            }
-            auto dx = feature.position.x - position.x;
-            auto dz = feature.position.z - position.z;
-            if ((dx * dx) + (dz * dz) > radiusSquared)
-            {
-                continue;
-            }
-            if (randomBetween(rng, 1u, 100u) <= chancePercent)
-            {
-                igniteFeature(id);
-            }
-        }
-    }
-
-    void GameSimulation::updateBurningFeatures()
-    {
-        std::vector<FeatureId> burning;
-        for (const auto& [id, feature] : features)
-        {
-            if (feature.burningUntil)
-            {
-                burning.push_back(id);
-            }
-        }
-
-        const auto ticksPerSecond = static_cast<unsigned int>(SimTicksPerSecond);
-        for (auto id : burning)
-        {
-            auto featureRef = tryGetFeature(id);
-            if (!featureRef)
-            {
-                continue;
-            }
-            auto& feature = featureRef->get();
-            const auto& featureDefinition = getFeatureDefinition(feature.featureName);
-
-            if (gameTime >= *feature.burningUntil)
-            {
-                replaceFeature(id, featureDefinition.featureBurnt);
-                continue;
-            }
-
-            if (gameTime >= feature.nextSpark)
-            {
-                feature.nextSpark = gameTime + GameTime(std::max(1u, featureDefinition.sparkTime) * ticksPerSecond);
-
-                // The burn weapon's blast radius says how far the fire reaches.
-                auto radius = 32_ss;
-                if (auto it = weaponDefinitions.find(toUpper(featureDefinition.burnWeapon)); it != weaponDefinitions.end() && it->second.damageRadius > 0_ss)
-                {
-                    radius = it->second.damageRadius;
-                }
-                tryIgniteFeaturesInRadius(feature.position, radius, featureDefinition.spreadChance);
-            }
-        }
     }
 
     void GameSimulation::updateFeatureRegrowth()
@@ -3963,7 +3850,14 @@ namespace rwe
 
         if (unit.hitPoints <= damagePoints)
         {
-            recordUnitDeath(*this, unitId, deathCause, attacker);
+            // BT-49: a lethal burn credits the previous attacker without
+            // treating that unit as this hit's source or applying its bonus.
+            auto creditedAttacker = attacker;
+            if (!creditedAttacker && std::string_view(deathCause) == "feature_burn")
+            {
+                creditedAttacker = unit.lastAttacker;
+            }
+            recordUnitDeath(*this, unitId, deathCause, creditedAttacker);
 
             // What the blow had left over once the unit's remaining hit
             // points were paid for. The original works the severity out of
@@ -3975,7 +3869,7 @@ namespace rwe
             // debris. What the unfinished state withholds is the corpse, the
             // death weapon's blast and the attacker's credit, and
             // killUnitWithSeverity says where each of those three goes.
-            killUnit(unitId, attacker, damagePoints - unit.hitPoints);
+            killUnit(unitId, creditedAttacker, damagePoints - unit.hitPoints);
         }
         else
         {
@@ -4076,7 +3970,7 @@ namespace rwe
         }
     }
 
-    void GameSimulation::applyDamageInRadius(const SimVector& position, SimScalar radius, const Projectile& projectile)
+    void GameSimulation::applyDamageInRadius(const SimVector& position, SimScalar radius, const Projectile& projectile, const char* deathCause)
     {
         auto minX = position.x - radius;
         auto maxX = position.x + radius;
@@ -4166,24 +4060,33 @@ namespace rwe
                       // to its featuredead form the moment that reaches the
                       // definition's `damage` -- which for a feature that
                       // omits the key is zero, so the first hit takes it.
-                      if (!featureDefinition.indestructible)
+                      if (!featureDefinition.indestructible && !feature.burningUntil)
                       {
-                          auto damage = projectile.getDamage(std::string());
-                          if (damage >= feature.hitPoints)
+                          if (weaponIt != weaponDefinitions.end() && weaponIt->second.fireStarter != 0
+                              && featureDefinition.flamable && !featureDefinition.hasModel)
                           {
-                              // What stands in its place lands on the cell
-                              // just walked and is not met again by this
-                              // blast, as in the original's per-cell walk;
-                              // without that a heap that names no damage
-                              // would go in the same shell that made it.
-                              if (auto replacement = replaceFeature(*cell.featureId, featureDefinition.featureDead))
-                              {
-                                  alreadyListedOrRecord(seenFeatures, *replacement, BlastFeatureListCapacity);
-                              }
+                              // BT-259: even failed ignition replaces ordinary damage.
+                              igniteFeature(*cell.featureId);
                           }
                           else
                           {
-                              feature.hitPoints -= damage;
+                              auto damage = projectile.getDamage(std::string());
+                              if (damage >= feature.hitPoints)
+                              {
+                                  // What stands in its place lands on the cell
+                                  // just walked and is not met again by this
+                                  // blast, as in the original's per-cell walk;
+                                  // without that a heap that names no damage
+                                  // would go in the same shell that made it.
+                                  if (auto replacement = replaceFeature(*cell.featureId, featureDefinition.featureDead))
+                                  {
+                                      alreadyListedOrRecord(seenFeatures, *replacement, BlastFeatureListCapacity);
+                                  }
+                              }
+                              else
+                              {
+                                  feature.hitPoints -= damage;
+                              }
                           }
                       }
                   }
@@ -4233,7 +4136,7 @@ namespace rwe
           }
           auto rawDamage = projectile.getDamage(unit.unitType);
           auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * *damageScale);
-          applyDamage(*u, scaledDamage, projectile.attacker, paralyzer, projectile.owner, "weapon", false, projectile.position); });
+          applyDamage(*u, scaledDamage, projectile.attacker, paralyzer, projectile.owner, deathCause, false, projectile.position); });
 
         for (const auto& flyingUnitId : flyingUnitsSet)
         {
@@ -4263,7 +4166,7 @@ namespace rwe
             }
             auto rawDamage = projectile.getDamage(unit.unitType);
             auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * *damageScale);
-            applyDamage(flyingUnitId, scaledDamage, projectile.attacker, paralyzer, projectile.owner, "weapon", false, projectile.position);
+            applyDamage(flyingUnitId, scaledDamage, projectile.attacker, paralyzer, projectile.owner, deathCause, false, projectile.position);
         }
     }
 
@@ -4293,10 +4196,6 @@ namespace rwe
                 applyDamageInRadius(projectile.position, projectile.damageRadius, projectile);
             }
 
-            if (auto it = weaponDefinitions.find(projectile.weaponType); it != weaponDefinitions.end() && it->second.fireStarter > 0)
-            {
-                tryIgniteFeaturesInRadius(projectile.position, std::max(projectile.damageRadius, 16_ss), it->second.fireStarter);
-            }
         }
 
         // The piece that actually kills a nuke. An interceptor's warhead is not
@@ -5605,6 +5504,7 @@ namespace rwe
     void GameSimulation::tick()
     {
         gameTime += GameTime(1);
+        const auto fireWind = currentWindVector;
         updateDroppedPlayers();
 
         // AI runs first so any commands it emits this tick can be drained
@@ -5727,7 +5627,7 @@ namespace rwe
             updateProjectiles();
         }
 
-        updateBurningFeatures();
+        updateBurningFeatures(fireWind);
 
         // Before the dead are cleared, so a wreck spawned this tick first
         // moves on the next one, as the original does.

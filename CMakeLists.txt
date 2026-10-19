@@ -702,6 +702,7 @@ src/rwe/net/EndpointFamily.h
     src/rwe/sim/GameSimulation.cpp
     src/rwe/sim/GameSimulation_visibility.cpp
     src/rwe/sim/GameSimulation_endgame.cpp
+    src/rwe/sim/GameSimulation_fire.cpp
     src/rwe/sim/GameSimulation.h
     src/rwe/sim/GameTime.cpp
     src/rwe/sim/GameTime.h

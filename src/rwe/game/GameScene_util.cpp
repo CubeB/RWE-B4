@@ -839,7 +839,7 @@ namespace rwe
         const MapFeature& feature,
         const FeatureDefinition& featureDefinition,
         const Matrix4f& viewProjectionMatrix,
-        GameTime currentTime,
+        GameTime,
         bool fogged,
         SpriteBatch& batch)
     {
@@ -853,13 +853,28 @@ namespace rwe
 
         auto position = simVectorToFloat(feature.position);
 
-        // A burning feature shows its burn sequence on a loop instead of its usual frame.
+        // BT-255: draw the play-once frame reached by the feature pass.
         const SpriteSeries* series = spriteInfo->animation.get();
         std::size_t frameIndex = 0;
         if (feature.burningUntil && spriteInfo->burnAnimation && !(*spriteInfo->burnAnimation)->sprites.empty())
         {
             series = spriteInfo->burnAnimation->get();
-            frameIndex = (currentTime.value / 2) % series->sprites.size();
+            unsigned int total = 0;
+            for (auto duration : featureDefinition.burnFrameTicks)
+            {
+                total += duration;
+            }
+            auto elapsed = total - std::min(total, feature.burnTicksRemaining);
+            for (auto duration : featureDefinition.burnFrameTicks)
+            {
+                if (elapsed < duration)
+                {
+                    break;
+                }
+                elapsed -= duration;
+                ++frameIndex;
+            }
+            frameIndex = std::min(frameIndex, series->sprites.size() - 1);
         }
         const auto& sprite = *series->sprites[frameIndex];
 

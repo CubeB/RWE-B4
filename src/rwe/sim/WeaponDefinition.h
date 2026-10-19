@@ -123,7 +123,7 @@ namespace rwe
          */
         bool stockpile{false};
 
-        /** Percent chance that an impact sets flammable features in the blast alight. */
+        /** BT-259: integer byte; nonzero enables an ignition attempt instead of feature damage. */
         unsigned int fireStarter{0};
 
         /** TA waterweapon: torpedoes and depth charges, which travel in the water and can only hit what is in it. */
