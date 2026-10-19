@@ -37,8 +37,8 @@ reclaiming sprites remain immune to blast damage. RWE omits their original
 address-dependent entries in the blast's 64-feature history. This can change
 overflow behaviour in blasts covering more than 64 features. The owner approved
 this policy on 2026-10-19 (#682, BT-257); ordinary feature reach and the history
-cap remain. The current implementation covers burning sprites; death and reclaim
-animation states are pending #683. The section 88 entry is in the spec-room
+cap remain. The implementation covers burn, death and reclaim animation states.
+The section 88 entry is in the spec-room
 register (documentation commit `9d39950e`).
 
 ## Kept: the original's quirks, reproduced on purpose

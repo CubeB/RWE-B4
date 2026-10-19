@@ -421,10 +421,9 @@ namespace rwe
         std::optional<UnitId> captorUnitId;
     };
 
-    /** A feature has just been fully reclaimed and removed. */
-    struct FeatureReclaimedEvent
+    /** Successful ignition; presentation only, never hashed. */
+    struct FeatureIgnitedEvent
     {
-        FeatureDefinitionId featureType;
         SimVector position;
     };
 
@@ -457,7 +456,7 @@ namespace rwe
     };
 
     using GameEvent = std::variant<
-        FeatureReclaimedEvent,
+        FeatureIgnitedEvent,
         WreckSpawnedEvent,
         PieceExplodedEvent,
         FireWeaponEvent,
@@ -1330,10 +1329,15 @@ namespace rwe
          */
         void igniteFeature(FeatureId id);
 
+        /** BT-48/261: occupancy is derived from models and active sprites. */
+        unsigned int countStatefulFeatures() const;
+        bool startFeatureAnimation(FeatureId id, FeatureAnimation animation);
+        std::optional<FeatureId> damageFeature(FeatureId id, unsigned int damage);
+
         /** BT-44/49: try the square and wind candidates, then apply burn damage once. */
         void spreadFeatureFire(FeatureId id, const SimVector& wind);
 
-        void updateBurningFeatures(const SimVector& wind);
+        void updateFeatureAnimations(const SimVector& wind);
 
         /**
          * Lifts a unit off the ground into a transport: it leaves the occupancy

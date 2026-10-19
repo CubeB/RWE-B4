@@ -81,7 +81,7 @@ namespace rwe
         const auto& definition = sim.getFeatureDefinition(feature.featureName);
         // BT-257, owner-approved deterministic policy (2026-10-19): active
         // sprites are immune and consume no address-dependent bookkeeping.
-        if (!definition.hasModel && feature.burningUntil)
+        if (!definition.hasModel && feature.animation != FeatureAnimation::None)
         {
             return;
         }
@@ -113,17 +113,9 @@ namespace rwe
             sim.igniteFeature(*id);
             return;
         }
-        const auto damage = projectile.getDamage(std::string());
-        if (damage >= feature.hitPoints)
+        if (auto replacement = sim.damageFeature(*id, projectile.getDamage(std::string())))
         {
-            if (auto replacement = sim.replaceFeature(*id, definition.featureDead))
-            {
-                listedOrRecord(seen, *replacement);
-            }
-        }
-        else
-        {
-            feature.hitPoints -= damage;
+            listedOrRecord(seen, *replacement);
         }
     }
 }

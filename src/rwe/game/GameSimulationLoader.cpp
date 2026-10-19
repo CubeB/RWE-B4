@@ -174,24 +174,23 @@ namespace rwe
                         // ignore them if they don't exist.
                         spriteInfo.shadowAnimation = services.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqNameShad);
                     }
-                    if (!tdf.fileName.empty() && !tdf.seqNameBurn.empty())
+                    if (!tdf.fileName.empty())
                     {
-                        spriteInfo.burnAnimation = services.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqNameBurn);
+                        auto animation = [&](const std::string& name) -> std::optional<std::shared_ptr<SpriteSeries>> {
+                            return name.empty() ? std::nullopt : services.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", name);
+                        };
+                        spriteInfo.burnAnimation = animation(tdf.seqNameBurn);
+                        spriteInfo.deathAnimation = animation(tdf.seqNameDie);
+                        spriteInfo.reclaimAnimation = animation(tdf.seqNameReclamate);
+                        spriteInfo.burnShadowAnimation = animation(tdf.seqNameBurnShad);
+                        spriteInfo.deathShadowAnimation = animation(tdf.seqNameDieShad);
+                        spriteInfo.reclaimShadowAnimation = animation(tdf.seqNameReclamateShad);
                     }
                 }
                 f.renderInfo = std::move(spriteInfo);
             }
 
             f.fileName = tdf.fileName;
-
-            // The reclaim sequence plays as a one-off particle where the feature stood.
-            if (services.textureService != nullptr && !tdf.fileName.empty() && !tdf.seqNameReclamate.empty())
-            {
-                if (auto anim = services.textureService->tryGetGafEntry("anims/" + tdf.fileName + ".GAF", tdf.seqNameReclamate))
-                {
-                    gameMediaDatabase.addSpriteSeries(tdf.fileName, tdf.seqNameReclamate, *anim);
-                }
-            }
 
             f.seqNameReclamate = tdf.seqNameReclamate;
 
@@ -272,10 +271,9 @@ namespace rwe
                 f.burnWeapon = tdf.burnWeapon;
                 f.hasModel = !tdf.object.empty();
 
-                // BT-44/255: animation duration is simulation data. Read only
-                // GAF metadata here, including for headless loads; textures
-                // and their upload timing must never decide a fire's lifetime.
-                if (tdf.object.empty() && !tdf.fileName.empty() && !tdf.seqNameBurn.empty())
+                // BT-255/261/263: all primary/shadow durations are metadata,
+                // independent of textures. Models never acquire sprite state.
+                if (tdf.object.empty() && !tdf.fileName.empty())
                 {
                     try
                     {
@@ -283,15 +281,27 @@ namespace rwe
                         {
                             SpanStream stream(bytes->data(), bytes->size());
                             GafArchive gaf(&stream);
-                            if (auto entry = gaf.findEntry(tdf.seqNameBurn))
-                            {
-                                f.burnFrameTicks = entry->get().frameDurationTicks();
-                            }
+                            auto durations = [&](const std::string& name) {
+                                if (!name.empty())
+                                {
+                                    if (auto entry = gaf.findEntry(name))
+                                    {
+                                        return entry->get().frameDurationTicks();
+                                    }
+                                }
+                                return std::vector<unsigned int>{};
+                            };
+                            f.burnFrameTicks = durations(tdf.seqNameBurn);
+                            f.deathFrameTicks = durations(tdf.seqNameDie);
+                            f.reclaimFrameTicks = durations(tdf.seqNameReclamate);
+                            f.burnShadowFrameTicks = durations(tdf.seqNameBurnShad);
+                            f.deathShadowFrameTicks = durations(tdf.seqNameDieShad);
+                            f.reclaimShadowFrameTicks = durations(tdf.seqNameReclamateShad);
                         }
                     }
                     catch (const std::exception& e)
                     {
-                        LOG_WARN << "Feature " << featureName << " has unreadable burn timing: " << e.what();
+                        LOG_WARN << "Feature " << featureName << " has unreadable animation timing: " << e.what();
                     }
                 }
 

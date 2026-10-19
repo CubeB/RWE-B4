@@ -7,6 +7,75 @@
 
 namespace rwe
 {
+    unsigned int GameSimulation::countStatefulFeatures() const
+    {
+        unsigned int count = 0;
+        for (const auto& [id, feature] : features)
+        {
+            if (getFeatureDefinition(feature.featureName).hasModel || feature.animation != FeatureAnimation::None)
+            {
+                ++count;
+            }
+        }
+        return count;
+    }
+
+    bool GameSimulation::startFeatureAnimation(FeatureId id, FeatureAnimation animation)
+    {
+        auto featureRef = tryGetFeature(id);
+        if (!featureRef || animation == FeatureAnimation::None)
+        {
+            return false;
+        }
+        auto& feature = featureRef->get();
+        const auto& definition = getFeatureDefinition(feature.featureName);
+        if (definition.hasModel || feature.animation != FeatureAnimation::None || countStatefulFeatures() >= 2048)
+        {
+            return false;
+        }
+        unsigned int duration = 0;
+        for (auto ticks : definition.animationFrames(animation))
+        {
+            if (ticks > std::numeric_limits<unsigned int>::max() - duration)
+            {
+                return false;
+            }
+            duration += ticks;
+        }
+        if (duration == 0)
+        {
+            return false;
+        }
+        std::vector<FeatureId> active;
+        unsigned int newest = 0;
+        for (const auto& [otherId, other] : features)
+        {
+            if (other.animation != FeatureAnimation::None)
+            {
+                active.push_back(otherId);
+                newest = std::max(newest, other.animationOrder);
+            }
+        }
+        if (newest == std::numeric_limits<unsigned int>::max())
+        {
+            std::sort(active.begin(), active.end(), [&](FeatureId a, FeatureId b) {
+                const auto orderA = getFeature(a).animationOrder;
+                const auto orderB = getFeature(b).animationOrder;
+                return orderA != orderB ? orderA < orderB : a.value < b.value;
+            });
+            newest = 0;
+            for (auto otherId : active)
+            {
+                getFeature(otherId).animationOrder = ++newest;
+            }
+        }
+        // BT-261/263: animation starts without changing footprint or blocking.
+        feature.animation = animation;
+        feature.animationTicksRemaining = duration;
+        feature.animationOrder = newest + 1;
+        return true;
+    }
+
     void GameSimulation::igniteFeature(FeatureId id)
     {
         auto featureRef = tryGetFeature(id);
@@ -16,67 +85,51 @@ namespace rwe
         }
         auto& feature = featureRef->get();
         const auto& definition = getFeatureDefinition(feature.featureName);
-        if (!definition.flamable || definition.hasModel || feature.burningUntil || definition.burnFrameTicks.empty())
+        if (!definition.flamable || !startFeatureAnimation(id, FeatureAnimation::Burn))
         {
             return;
         }
-
-        // BT-44/48/255: refusal precedes the timer draw. Model placement and
-        // the other temporary sprite states are the remaining #683 work.
-        std::vector<FeatureId> active;
-        unsigned int stateful = 0;
-        unsigned int newest = 0;
-        for (const auto& [otherId, other] : features)
-        {
-            if (getFeatureDefinition(other.featureName).hasModel || other.burningUntil)
-            {
-                ++stateful;
-            }
-            if (other.burningUntil)
-            {
-                active.push_back(otherId);
-                newest = std::max(newest, other.burnOrder);
-            }
-        }
-        if (stateful >= 2048)
-        {
-            return;
-        }
-        if (newest == std::numeric_limits<unsigned int>::max())
-        {
-            // Only relative active order matters; preserve it on wrap.
-            std::sort(active.begin(), active.end(), [&](FeatureId a, FeatureId b) {
-                const auto orderA = getFeature(a).burnOrder;
-                const auto orderB = getFeature(b).burnOrder;
-                return orderA != orderB ? orderA < orderB : a.value < b.value;
-            });
-            newest = 0;
-            for (auto otherId : active)
-            {
-                getFeature(otherId).burnOrder = ++newest;
-            }
-        }
-        unsigned int duration = 0;
-        for (auto ticks : definition.burnFrameTicks)
-        {
-            if (ticks > std::numeric_limits<unsigned int>::max() - duration)
-            {
-                return;
-            }
-            duration += ticks;
-        }
-        if (duration == 0)
-        {
-            return;
-        }
+        // BT-255/259: refusal precedes the timer draw.
         const auto sparkTicks = static_cast<std::uint16_t>(static_cast<std::uint64_t>(definition.sparkTime) * 30u);
         const auto half = static_cast<unsigned int>(sparkTicks / 2u);
         const auto timer = static_cast<std::uint8_t>(half + (half < 2 ? 0u : randomBelow(rng, half)));
-        feature.burnTicksRemaining = duration;
         feature.burnSparkTicksRemaining = timer;
-        feature.burnOrder = newest + 1;
-        feature.burningUntil = gameTime + GameTime(duration);
+        feature.burningUntil = gameTime + GameTime(feature.animationTicksRemaining);
         feature.nextSpark = timer == 0 ? GameTime(0) : gameTime + GameTime(timer);
+        const auto origin = computeFootprintRegion(feature.position, definition.footprintX, definition.footprintZ);
+        // BT-262: known X/Z is the origin corner. Existing audio limitations
+        // remain #583; no original uninitialized-Y audibility is claimed.
+        events.push_back(FeatureIgnitedEvent{terrain.heightmapIndexToWorldCorner(origin.x, origin.y)});
+    }
+
+    std::optional<FeatureId> GameSimulation::damageFeature(FeatureId id, unsigned int damage)
+    {
+        auto featureRef = tryGetFeature(id);
+        if (!featureRef)
+        {
+            return std::nullopt;
+        }
+        auto& feature = featureRef->get();
+        const auto& definition = getFeatureDefinition(feature.featureName);
+        if (definition.indestructible || (!definition.hasModel && feature.animation != FeatureAnimation::None))
+        {
+            return std::nullopt;
+        }
+        if (damage < feature.hitPoints)
+        {
+            feature.hitPoints -= damage;
+            return std::nullopt;
+        }
+        if (!definition.hasModel && !definition.deathFrameTicks.empty())
+        {
+            // Failed allocation keeps the pre-hit health (BT-261).
+            startFeatureAnimation(id, FeatureAnimation::Death);
+        }
+        else
+        {
+            return replaceFeature(id, definition.featureDead);
+        }
+        return std::nullopt;
     }
 
     void GameSimulation::spreadFeatureFire(FeatureId id, const SimVector& wind)
@@ -102,7 +155,7 @@ namespace rwe
             }
             const auto& other = getFeature(*candidate);
             const auto& otherDefinition = getFeatureDefinition(other.featureName);
-            if (!otherDefinition.flamable || otherDefinition.hasModel || other.burningUntil)
+            if (!otherDefinition.flamable || otherDefinition.hasModel || other.animation != FeatureAnimation::None)
             {
                 return;
             }
@@ -169,19 +222,19 @@ namespace rwe
         }
     }
 
-    void GameSimulation::updateBurningFeatures(const SimVector& wind)
+    void GameSimulation::updateFeatureAnimations(const SimVector& wind)
     {
         std::vector<FeatureId> burning;
         for (const auto& [id, feature] : features)
         {
-            if (feature.burningUntil)
+            if (feature.animation != FeatureAnimation::None)
             {
                 burning.push_back(id);
             }
         }
         std::sort(burning.begin(), burning.end(), [&](FeatureId a, FeatureId b) {
-            const auto orderA = getFeature(a).burnOrder;
-            const auto orderB = getFeature(b).burnOrder;
+            const auto orderA = getFeature(a).animationOrder;
+            const auto orderB = getFeature(b).animationOrder;
             return orderA != orderB ? orderA > orderB : a.value > b.value;
         });
         for (auto id : burning)
@@ -192,16 +245,23 @@ namespace rwe
                 continue;
             }
             auto& feature = featureRef->get();
-            if (!feature.burningUntil)
+            if (feature.animation == FeatureAnimation::None)
             {
                 continue;
             }
-            if (feature.burnTicksRemaining == 0 || --feature.burnTicksRemaining == 0)
+            if (feature.animationTicksRemaining == 0 || --feature.animationTicksRemaining == 0)
             {
-                replaceFeature(id, getFeatureDefinition(feature.featureName).featureBurnt);
+                const auto& definition = getFeatureDefinition(feature.featureName);
+                const auto successor = feature.animation == FeatureAnimation::Burn ? definition.featureBurnt
+                    : feature.animation == FeatureAnimation::Reclaim ? definition.featureReclamate : definition.featureDead;
+                replaceFeature(id, successor);
                 continue;
             }
-            feature.burningUntil = gameTime + GameTime(feature.burnTicksRemaining);
+            if (feature.animation != FeatureAnimation::Burn)
+            {
+                continue;
+            }
+            feature.burningUntil = gameTime + GameTime(feature.animationTicksRemaining);
             if (feature.burnSparkTicksRemaining != 0)
             {
                 --feature.burnSparkTicksRemaining;

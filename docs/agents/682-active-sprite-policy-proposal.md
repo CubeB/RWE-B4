@@ -1,9 +1,10 @@
 # #682: approved deterministic treatment of active sprite blasts
 
 Status: owner approved on 2026-10-19 with the explicit reply "Use the
-deterministic policy (recommended)". Implementation is in the working copy,
-with focused validation passed (65 cases / 4503 assertions for the combined
-blast, burning, GAF, save/load and replay selection). The
+deterministic policy (recommended)". Implementation is complete locally for
+burn, death and reclaim sprites. Final validation passed 1,831 permitted cases,
+all Debug targets, the section scan, Release build and repeated shipped-data
+hashes; see feature-batch-local-build.md. The
 dedicated spec room recorded this decision in the existing section 88
 register before the #682 code change, commit `9d39950e`. The same commit updates
 BT-257, its discrepancy row and the spec-room compatibility summary. It has not

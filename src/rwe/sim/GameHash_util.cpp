@@ -387,9 +387,10 @@ namespace rwe
             f.hitPoints,
             f.burningUntil,
             f.nextSpark,
-            f.burnTicksRemaining,
+            static_cast<unsigned int>(f.animation),
+            f.animationTicksRemaining,
             f.burnSparkTicksRemaining,
-            f.burnOrder);
+            f.animationOrder);
     }
 
     GameHash computeHashOf(const MissionRules& m)
@@ -504,7 +505,7 @@ namespace rwe
                 + computeHashOf(entry.second, simulation.getFeatureDefinition(entry.second.featureName).name);
             // Associate order with identity: merely summing orders would miss
             // two fires swapping places in the newest-first traversal.
-            featuresHash += GameHash((entry.first.value + 1u) * entry.second.burnOrder);
+            featuresHash += GameHash((entry.first.value + 1u) * entry.second.animationOrder);
         }
 
         return combineHashes(

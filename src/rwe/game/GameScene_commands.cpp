@@ -1515,22 +1515,13 @@ namespace rwe
                         startSmokeEmitter(simVectorToFloat(e.position), wreckPlumeIntervalTicks, wreckPlumeLifetimeTicks);
                     }
                 },
-                [&](const FeatureReclaimedEvent& e) {
-                    // The feature's reclaim sequence (TA's golden swirl) plays once where it stood.
-                    if (!positionIsVisibleToLocalPlayer(e.position))
+                [&](const FeatureIgnitedEvent& e) {
+                    // BT-262: a successful ignition requests TREEBURN once.
+                    // Positional/fog limitations of the existing path are #583.
+                    if (sounds.treeBurn)
                     {
-                        return;
+                        playSoundAt(simVectorToFloat(e.position), *sounds.treeBurn);
                     }
-                    const auto& featureMediaInfo = gameMediaDatabase.getFeature(e.featureType);
-                    if (featureMediaInfo.fileName.empty() || featureMediaInfo.seqNameReclamate.empty())
-                    {
-                        return;
-                    }
-                    if (!gameMediaDatabase.getSpriteSeries(featureMediaInfo.fileName, featureMediaInfo.seqNameReclamate))
-                    {
-                        return;
-                    }
-                    spawnExplosion(simVectorToFloat(e.position), AnimLocation{featureMediaInfo.fileName, featureMediaInfo.seqNameReclamate});
                 },
                 [&](const PieceExplodedEvent& e) {
                     spawnDebris(e);

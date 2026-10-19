@@ -834,6 +834,51 @@ namespace rwe
         drawUnitShadowMeshNoPieces(gameMediaDatabase, viewProjectionMatrix, objectInfo->objectName, modelDefinition, matrix, ShadowProjection{groundHeight, true, 0.0f}, atlases, batch);
     }
 
+    namespace
+    {
+        struct FeatureDrawFrame
+        {
+            const SpriteSeries* series;
+            std::size_t index;
+        };
+
+        std::optional<FeatureDrawFrame> selectFeatureFrame(const FeatureSpriteInfo& sprites,
+            const MapFeature& feature, const FeatureDefinition& definition, bool shadow)
+        {
+            if (feature.animation == FeatureAnimation::None)
+            {
+                const auto* series = shadow ? (sprites.shadowAnimation ? sprites.shadowAnimation->get() : nullptr) : sprites.animation.get();
+                return series && !series->sprites.empty() ? std::optional<FeatureDrawFrame>(FeatureDrawFrame{series, 0}) : std::nullopt;
+            }
+            const std::optional<std::shared_ptr<SpriteSeries>>* selected = nullptr;
+            switch (feature.animation)
+            {
+                case FeatureAnimation::Burn: selected = shadow ? &sprites.burnShadowAnimation : &sprites.burnAnimation; break;
+                case FeatureAnimation::Death: selected = shadow ? &sprites.deathShadowAnimation : &sprites.deathAnimation; break;
+                case FeatureAnimation::Reclaim: selected = shadow ? &sprites.reclaimShadowAnimation : &sprites.reclaimAnimation; break;
+                case FeatureAnimation::None: break;
+            }
+            if (!selected || !*selected)
+            {
+                return std::nullopt;
+            }
+            unsigned int total = 0;
+            for (auto duration : definition.animationFrames(feature.animation))
+            {
+                total += duration;
+            }
+            const auto elapsed = total - std::min(total, feature.animationTicksRemaining);
+            const auto index = featureAnimationFrame(definition.animationFrames(feature.animation, shadow), elapsed);
+            const auto* series = selected->value().get();
+            // BT-263: no normal-shadow fallback and no held final shadow frame.
+            if (!index || *index >= series->sprites.size())
+            {
+                return std::nullopt;
+            }
+            return FeatureDrawFrame{series, *index};
+        }
+    }
+
     void drawFeature(
         const GameMediaDatabase& gameMediaDatabase,
         const MapFeature& feature,
@@ -853,30 +898,13 @@ namespace rwe
 
         auto position = simVectorToFloat(feature.position);
 
-        // BT-255: draw the play-once frame reached by the feature pass.
-        const SpriteSeries* series = spriteInfo->animation.get();
-        std::size_t frameIndex = 0;
-        if (feature.burningUntil && spriteInfo->burnAnimation && !(*spriteInfo->burnAnimation)->sprites.empty())
+        // BT-255/261/263: presentation reads sim age without stepping it.
+        const auto frame = selectFeatureFrame(*spriteInfo, feature, featureDefinition, false);
+        if (!frame)
         {
-            series = spriteInfo->burnAnimation->get();
-            unsigned int total = 0;
-            for (auto duration : featureDefinition.burnFrameTicks)
-            {
-                total += duration;
-            }
-            auto elapsed = total - std::min(total, feature.burnTicksRemaining);
-            for (auto duration : featureDefinition.burnFrameTicks)
-            {
-                if (elapsed < duration)
-                {
-                    break;
-                }
-                elapsed -= duration;
-                ++frameIndex;
-            }
-            frameIndex = std::min(frameIndex, series->sprites.size() - 1);
+            return;
         }
-        const auto& sprite = *series->sprites[frameIndex];
+        const auto& sprite = *frame->series->sprites[frame->index];
 
         Vector3f snappedPosition(std::round(position.x), truncateToInterval(position.y, 2.0f), std::round(position.z));
 
@@ -926,12 +954,13 @@ namespace rwe
             return;
         }
 
-        if (!spriteInfo->shadowAnimation)
+        const auto frame = selectFeatureFrame(*spriteInfo, feature, featureDefinition, true);
+        if (!frame)
         {
             return;
         }
         auto position = simVectorToFloat(feature.position);
-        const auto& sprite = *(*spriteInfo->shadowAnimation)->sprites[0];
+        const auto& sprite = *frame->series->sprites[frame->index];
 
         Vector3f snappedPosition(std::round(position.x), truncateToInterval(position.y, 2.0f), std::round(position.z));
 

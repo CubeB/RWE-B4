@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <rwe/sim/FeatureDefinitionId.h>
+#include <rwe/sim/FeatureAnimation.h>
 #include <rwe/sim/GameTime.h>
 #include <rwe/sim/SimAngle.h>
 #include <rwe/sim/SimVector.h>
@@ -52,11 +53,13 @@ namespace rwe
         /** Predicted spread tick, or zero once spent/disabled; countdown is authoritative. */
         GameTime nextSpark{0};
 
-        /** BT-255: counted by feature updates, not wall time or presentation frames. */
-        unsigned int burnTicksRemaining{0};
+        FeatureAnimation animation{FeatureAnimation::None};
+
+        /** BT-255/261: counted by feature updates, not presentation frames. */
+        unsigned int animationTicksRemaining{0};
         unsigned int burnSparkTicksRemaining{0};
 
-        /** Relative ignition order among active fires; newest is processed first. */
-        unsigned int burnOrder{0};
+        /** Relative allocation order among active sprites; newest first. */
+        unsigned int animationOrder{0};
     };
 }

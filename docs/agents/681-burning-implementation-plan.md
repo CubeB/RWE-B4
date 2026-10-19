@@ -1,8 +1,8 @@
 # #681: burning-feature implementation preparation
 
-Status: metadata step committed as af43acd6. The working copy now implements
-the core duration/spread/damage correction and is building for focused tests;
-the core has passed focused validation, and #681 is not complete.
+Status: implemented and validated locally in the #681/#682/#683 feature batch.
+The Release executable is D:\RWE\build-release\rwe.exe. Full results and
+compatibility notes are in feature-batch-local-build.md.
 Owner-approved scheduling is in the continuation brief.
 
 Authority: BT-44, BT-49 and BT-255 in the documentation checkout
@@ -69,7 +69,7 @@ script was not retained, so attributing its exact defect remains inference.
 Tree7 shares Tree6's 192-update timing; duration ranges and spark conclusions
 are unchanged. No original runtime population was measured.
 
-Metadata implementation step (in progress): GafArchive::Entry exposes unsigned
+Metadata implementation step (af43acd6): GafArchive::Entry exposes unsigned
 per-frame update counts; FeatureDefinition retains burnFrameTicks; the loader
 reads the named sprite sequence directly through the VFS/GAF metadata reader
 without using TextureService. Model definitions do not acquire sprite burn
@@ -86,7 +86,7 @@ the malformed/unreadable-animation exception boundary. GameScene.cpp remains
 fire-rule change; the Release executable still contains the completed #687
 behavior. No original-game execution was performed.
 
-Implementation considerations still to resolve in code review:
+Design constraints applied during implementation:
 
 - Load timings from GAF metadata even with no texture service, so graphical and
   headless simulations receive identical definitions. Do not derive sim timing
@@ -155,3 +155,23 @@ burning, save/load and replay cases. Debug game also built. Full permitted suite
 all targets, section budget, Release game and repeated headless hashes remain
 pending for the combined feature batch. Ignition sound and the remaining
 stateful sprite lifecycle are not yet implemented, so this is not a closing fix.
+
+Finishing batch update: death/reclaim lifecycle, shared capacity, explicit
+lifecycle shadows and successful-ignition TREEBURN routing are now implemented.
+The final focused selection passed74 cases /12911 assertions. See
+683-feature-lifecycle.md for BT-261/262/263 evidence and the retained #583 audio
+limitations. Full batch validation and the playable Release build are pending.
+
+Final runtime evidence is in683-feature-lifecycle.md: two seed7 shipped-map
+games have identical5399-tick hashes, and a scripted real-data Palm02 ignition
+matches its200-update GAF sequence, one139-update timer, and documented
+same-tick first processing. Full permitted1831-case suite, all Debug targets
+and1053-object section scan passed. Release linking remains pending. No original
+game was executed.
+
+Final result: all 1,831 permitted cases / 193,660 assertions passed. Debug game,
+all Debug targets, full section scan and Release game built successfully. The
+shared lifecycle work completes the previously pending capacity, animation and
+sound dependencies. Release SHA-256:
+FD63E2201B8D05B88A71859A9AC21C75EC0D8A8930BBD5F9EDE6EC78D020B155.
+No original-game execution or owner visual check was performed.

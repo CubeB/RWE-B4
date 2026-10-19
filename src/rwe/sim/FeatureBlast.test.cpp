@@ -41,6 +41,8 @@ namespace rwe
                 d.sparkTime = 5;
                 d.spreadChance = 90;
                 d.burnFrameTicks.assign(96, 2);
+                d.deathFrameTicks.assign(20, 3);
+                d.reclaimFrameTicks.assign(15, 2);
                 tree = sim.featureDefinitions.insert(d);
 
                 // weapons/UNITS.TDF SMALL_BUILDINGEX: AoE205, default40.
@@ -147,28 +149,38 @@ namespace rwe
 
     TEST_CASE("active sprite consumes no blast-history slot before the 64th ordinary feature", "[feature-blast]")
     {
-        BlastWorld w;
-        const auto active = w.plant(w.tree, 60, 60);
-        w.sim.igniteFeature(active);
-        REQUIRE(w.sim.getFeature(active).burningUntil);
-        const auto target = w.plant(w.model, 67, 67);
-        unsigned int ordinary = 0;
-        for (int y = 60; y <= 68 && ordinary < 63; ++y)
+        for (auto state : {FeatureAnimation::Burn, FeatureAnimation::Death, FeatureAnimation::Reclaim})
         {
-            for (int x = 60; x <= 68 && ordinary < 63; ++x)
+            BlastWorld w;
+            const auto active = w.plant(w.tree, 60, 60);
+            if (state == FeatureAnimation::Burn)
             {
-                if (w.sim.occupiedGrid.get(x, y).featureId)
-                {
-                    continue;
-                }
-                w.plant(w.tree, x, y);
-                ++ordinary;
+                w.sim.igniteFeature(active);
             }
+            else
+            {
+                REQUIRE(w.sim.startFeatureAnimation(active, state));
+            }
+            REQUIRE(w.sim.getFeature(active).animation == state);
+            const auto target = w.plant(w.model, 67, 67);
+            unsigned int ordinary = 0;
+            for (int y = 60; y <= 68 && ordinary < 63; ++y)
+            {
+                for (int x = 60; x <= 68 && ordinary < 63; ++x)
+                {
+                    if (w.sim.occupiedGrid.get(x, y).featureId)
+                    {
+                        continue;
+                    }
+                    w.plant(w.tree, x, y);
+                    ++ordinary;
+                }
+            }
+            REQUIRE(ordinary == 63);
+            w.blast(w.sim.terrain.heightmapIndexToWorldCenter(64, 64));
+            REQUIRE(w.sim.getFeature(active).animation == state);
+            REQUIRE(w.sim.getFeature(target).hitPoints == 3960);
         }
-        REQUIRE(ordinary == 63);
-        w.blast(w.sim.terrain.heightmapIndexToWorldCenter(64, 64));
-        REQUIRE(w.sim.getFeature(active).burningUntil);
-        REQUIRE(w.sim.getFeature(target).hitPoints == 3960);
     }
 
     TEST_CASE("full feature history still permits repeated continuation damage", "[feature-blast]")

@@ -388,9 +388,10 @@ namespace rwe
             {"hitPoints", f.hitPoints},
             {"burningUntil", dumpJson(f.burningUntil)},
             {"nextSpark", dumpJson(f.nextSpark)},
-            {"burnTicksRemaining", f.burnTicksRemaining},
+            {"animation", static_cast<unsigned int>(f.animation)},
+            {"animationTicksRemaining", f.animationTicksRemaining},
             {"burnSparkTicksRemaining", f.burnSparkTicksRemaining},
-            {"burnOrder", f.burnOrder},
+            {"animationOrder", f.animationOrder},
         };
     }
 

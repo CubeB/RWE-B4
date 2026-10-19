@@ -28,6 +28,7 @@ namespace rwe
         bool reclaimable;
         bool autoreclaimable;
         std::string seqNameReclamate;
+        std::string seqNameReclamateShad;
         std::string featureReclamate;
         unsigned int metal;
         unsigned int energy;
@@ -57,6 +58,7 @@ namespace rwe
         bool indestructible;
         unsigned int damage;
         std::string seqNameDie;
+        std::string seqNameDieShad;
         std::string featureDead;
     };
 }

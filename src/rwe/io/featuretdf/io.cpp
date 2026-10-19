@@ -28,6 +28,7 @@ namespace rwe
         f.reclaimable = tdf.extractBool("reclaimable").value_or(false);
         f.autoreclaimable = tdf.extractBool("autoreclaimable").value_or(true);
         f.seqNameReclamate = tdf.findValue("seqnamereclamate").value_or(emptyString);
+        f.seqNameReclamateShad = tdf.findValue("seqnamereclamateshad").value_or(emptyString);
         f.featureReclamate = tdf.findValue("featurereclamate").value_or(emptyString);
         f.metal = tdf.extractUint("metal").value_or(0);
         f.energy = tdf.extractUint("energy").value_or(0);
@@ -62,6 +63,7 @@ namespace rwe
         // §24, "What a blast does to a feature".
         f.damage = tdf.extractUint("damage").value_or(0);
         f.seqNameDie = tdf.findValue("seqnamedie").value_or(emptyString);
+        f.seqNameDieShad = tdf.findValue("seqnamedieshad").value_or(emptyString);
         f.featureDead = tdf.findValue("featuredead").value_or(emptyString);
 
         return f;

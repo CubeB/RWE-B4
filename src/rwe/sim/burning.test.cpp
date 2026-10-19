@@ -17,6 +17,7 @@ namespace rwe
             FeatureDefinitionId tree;
             FeatureDefinitionId burnt;
             FeatureDefinitionId model;
+            FeatureDefinitionId smudge;
 
             FireWorld()
             {
@@ -29,6 +30,13 @@ namespace rwe
                 d.blocking = d.reclaimable = true;
                 d.energy = 50;
                 burnt = sim.featureDefinitions.insert(d);
+                // green/SMUDGES.TDF Smudge01: slotless, nonblocking, zero HP.
+                d = FeatureDefinition{};
+                d.name = "Smudge01";
+                d.footprintX = d.footprintZ = 1;
+                smudge = sim.featureDefinitions.insert(d);
+                sim.featureDefinitions.get(smudge).featureDead = smudge;
+                d = sim.featureDefinitions.get(burnt);
                 d.name = "Tree1";
                 d.flamable = true;
                 d.energy = 250;
@@ -39,6 +47,9 @@ namespace rwe
                 d.spreadChance = 90;
                 d.burnWeapon = "TreeBurn";
                 d.burnFrameTicks.assign(96, 2);
+                d.deathFrameTicks.assign(20, 3);
+                d.reclaimFrameTicks.assign(15, 2);
+                d.featureDead = d.featureReclamate = smudge;
                 tree = sim.featureDefinitions.insert(d);
                 // Shipped dragon's-teeth model footprint; other media is inert.
                 d = FeatureDefinition{};
@@ -89,8 +100,23 @@ namespace rwe
                 for (unsigned int i = 0; i < updates; ++i)
                 {
                     sim.gameTime += GameTime(1);
-                    sim.updateBurningFeatures(wind);
+                    sim.updateFeatureAnimations(wind);
                 }
+            }
+
+            FeatureId fillModels(unsigned int count)
+            {
+                FeatureId first{};
+                for (unsigned int i = 0; i < count; ++i)
+                {
+                    const auto id = sim.addFeature(model, static_cast<int>(i % 32) * 2, static_cast<int>(i / 32) * 2);
+                    REQUIRE(id);
+                    if (i == 0)
+                    {
+                        first = *id;
+                    }
+                }
+                return first;
             }
         };
     }
@@ -102,7 +128,7 @@ namespace rwe
         auto corner = w.plant(67, 67);
         auto beyond = w.plant(68, 64);
         w.sim.igniteFeature(source);
-        REQUIRE(w.sim.getFeature(source).burnTicksRemaining == 192);
+        REQUIRE(w.sim.getFeature(source).animationTicksRemaining == 192);
         REQUIRE(w.sim.getFeature(source).burnSparkTicksRemaining == 97); // seed7: 75 + 337897%75.
         auto rngAfterIgnition = w.sim.rng;
         w.sim.igniteFeature(source);
@@ -112,7 +138,7 @@ namespace rwe
         w.step(1);
         // Second seed7 draw is 58%100: succeeds against the candidate's 90.
         REQUIRE(w.sim.getFeature(corner).burningUntil);
-        REQUIRE(w.sim.getFeature(corner).burnTicksRemaining == 192); // no same-pass cascade.
+        REQUIRE(w.sim.getFeature(corner).animationTicksRemaining == 192); // no same-pass cascade.
         REQUIRE_FALSE(w.sim.getFeature(beyond).burningUntil);
         REQUIRE(w.sim.getFeature(source).burnSparkTicksRemaining == 0);
         REQUIRE(w.sim.getFeature(source).nextSpark == GameTime(0));
@@ -152,8 +178,8 @@ namespace rwe
         w.step(1);
         REQUIRE(w.sim.getFeature(nearFirst).burningUntil);
         REQUIRE(w.sim.getFeature(nearSecond).burningUntil);
-        REQUIRE(w.sim.getFeature(nearSecond).burnOrder < w.sim.getFeature(nearFirst).burnOrder);
-        REQUIRE(w.sim.getFeature(nearFirst).burnTicksRemaining == 192);
+        REQUIRE(w.sim.getFeature(nearSecond).animationOrder < w.sim.getFeature(nearFirst).animationOrder);
+        REQUIRE(w.sim.getFeature(nearFirst).animationTicksRemaining == 192);
     }
 
     TEST_CASE("burn damage hurts every owner once without an attacker bonus", "[burning]")
@@ -216,7 +242,7 @@ namespace rwe
         REQUIRE(w.sim.rng == before);
         w.step(191);
         REQUIRE_FALSE(w.sim.getFeature(neighbour).burningUntil);
-        REQUIRE(w.sim.getFeature(source).burnTicksRemaining == 1);
+        REQUIRE(w.sim.getFeature(source).animationTicksRemaining == 1);
     }
 
     TEST_CASE("ignition refuses a full stateful pool without drawing and deletion releases capacity", "[burning]")
@@ -280,9 +306,9 @@ namespace rwe
         w.sim.igniteFeature(second);
         w.step(46);
         auto before = computeHashOf(w.sim);
-        std::swap(w.sim.getFeature(first).burnOrder, w.sim.getFeature(second).burnOrder);
+        std::swap(w.sim.getFeature(first).animationOrder, w.sim.getFeature(second).animationOrder);
         REQUIRE(computeHashOf(w.sim) != before);
-        std::swap(w.sim.getFeature(first).burnOrder, w.sim.getFeature(second).burnOrder);
+        std::swap(w.sim.getFeature(first).animationOrder, w.sim.getFeature(second).animationOrder);
         auto saved = saveSimulationToJson(w.sim);
         FireWorld restored;
         loadSimulationFromJson(saved, restored.sim);
@@ -295,7 +321,7 @@ namespace rwe
         saved["version"] = 2;
         for (auto& feature : saved["features"])
         {
-            feature.erase("burnTicksRemaining");
+            feature.erase("animationTicksRemaining");
         }
         FireWorld legacy;
         REQUIRE_THROWS_AS(loadSimulationFromJson(saved, legacy.sim), std::runtime_error);
@@ -313,24 +339,180 @@ namespace rwe
         }
     }
 
+    TEST_CASE("death animation retains blocking and health until its primary expires", "[burning][feature-cap]")
+    {
+        FireWorld w;
+        const auto id = w.plant(64, 64);
+        const auto before = w.sim.rng;
+        w.sim.damageFeature(id, 40); // SMALL_BUILDINGEX default damage.
+        REQUIRE(w.sim.getFeature(id).animation == FeatureAnimation::Death);
+        REQUIRE(w.sim.getFeature(id).animationTicksRemaining == 60);
+        REQUIRE(w.sim.countStatefulFeatures() == 1);
+        REQUIRE(w.sim.occupiedGrid.get(64, 64).featureId == id);
+        REQUIRE(w.sim.getFeatureDefinition(w.sim.getFeature(id).featureName).blocking);
+        w.sim.damageFeature(id, 40);
+        w.sim.igniteFeature(id);
+        REQUIRE(w.sim.getFeature(id).animationTicksRemaining == 60);
+        REQUIRE(w.sim.rng == before);
+        REQUIRE(w.sim.events.empty()); // Death has no allocation sound.
+        w.step(59);
+        REQUIRE(w.sim.getFeature(id).animationTicksRemaining == 1);
+        w.step(1);
+        REQUIRE(w.sim.countStatefulFeatures() == 0);
+        const auto successor = w.sim.occupiedGrid.get(64, 64).featureId;
+        REQUIRE(successor);
+        REQUIRE(w.sim.getFeature(*successor).featureName == w.smudge);
+    }
+
+    TEST_CASE("reclaim retains its animation for30 updates with credit before transition", "[burning][feature-cap]")
+    {
+        FireWorld w;
+        const auto id = w.plant(64, 64);
+        const auto owner = addPlayer(w.sim);
+        REQUIRE(w.sim.reclaimFeature(id, owner, 250)); // Tree1's full work/value.
+        REQUIRE(w.sim.getPlayer(owner).energyProductionBuffer.value == 250.0f);
+        REQUIRE(w.sim.getFeature(id).animation == FeatureAnimation::Reclaim);
+        REQUIRE(w.sim.getFeature(id).animationTicksRemaining == 30);
+        REQUIRE(w.sim.events.empty());
+        w.step(29);
+        REQUIRE(w.sim.occupiedGrid.get(64, 64).featureId == id);
+        w.step(1);
+        REQUIRE(w.sim.countStatefulFeatures() == 0);
+        REQUIRE(w.sim.getFeature(*w.sim.occupiedGrid.get(64, 64).featureId).featureName == w.smudge);
+    }
+
+    TEST_CASE("full model pool refuses sprite death and reclaim animations without rollback of credit", "[burning][feature-cap]")
+    {
+        FireWorld w;
+        const auto id = w.plant(240, 240);
+        w.fillModels(2048);
+        REQUIRE(w.sim.countStatefulFeatures() == 2048);
+        REQUIRE_FALSE(w.sim.addFeature(w.model, 242, 240));
+        const auto before = w.sim.rng;
+        w.sim.damageFeature(id, 40);
+        REQUIRE(w.sim.getFeature(id).hitPoints == 0);
+        REQUIRE(w.sim.getFeature(id).animation == FeatureAnimation::None);
+        const auto owner = addPlayer(w.sim);
+        REQUIRE(w.sim.reclaimFeature(id, owner, 250));
+        REQUIRE(w.sim.getPlayer(owner).energyProductionBuffer.value == 250.0f);
+        REQUIRE(w.sim.getFeature(id).animation == FeatureAnimation::None);
+        REQUIRE(w.sim.rng == before);
+    }
+
+    TEST_CASE("model placement clears before allocation and can reuse a removed fire slot", "[burning][feature-cap]")
+    {
+        for (bool removeFire : {false, true})
+        {
+            FireWorld w;
+            const auto id = w.plant(240, 240);
+            w.fillModels(removeFire ? 2047 : 2048);
+            if (removeFire)
+            {
+                w.sim.igniteFeature(id);
+            }
+            REQUIRE(w.sim.countStatefulFeatures() == 2048);
+            const auto placed = w.sim.addFeature(w.model, 240, 240);
+            REQUIRE(placed.has_value() == removeFire);
+            if (placed)
+            {
+                REQUIRE(w.sim.getFeature(*placed).featureName == w.model);
+            }
+            else
+            {
+                REQUIRE_FALSE(w.sim.occupiedGrid.get(240, 240).featureId);
+            }
+            REQUIRE(w.sim.countStatefulFeatures() == 2048);
+        }
+    }
+
+    TEST_CASE("normal placement preserves protected occupants without restoring earlier removals", "[burning][feature-cap]")
+    {
+        FireWorld w;
+        w.plant(240, 240);
+        // totala1.hpi green/STEAMVENTS.TDF Geothermal.
+        FeatureDefinition d{};
+        d.name = "Geothermal";
+        d.footprintX = d.footprintZ = 1;
+        d.geothermal = d.indestructible = true;
+        const auto protectedId = w.sim.addFeature(w.sim.featureDefinitions.insert(d), 241, 240);
+        REQUIRE(protectedId);
+        REQUIRE_FALSE(w.sim.addFeature(w.model, 240, 240));
+        REQUIRE_FALSE(w.sim.occupiedGrid.get(240, 240).featureId);
+        REQUIRE(w.sim.occupiedGrid.get(241, 240).featureId == protectedId);
+    }
+
+    TEST_CASE("replacement releases its model slot before requesting another at capacity", "[burning][feature-cap]")
+    {
+        FireWorld w;
+        const auto first = w.fillModels(2048);
+        const auto replacement = w.sim.replaceFeature(first, w.model);
+        REQUIRE(replacement);
+        REQUIRE(w.sim.countStatefulFeatures() == 2048);
+        REQUIRE(w.sim.getFeature(*replacement).featureName == w.model);
+        const auto sprite = w.plant(240, 240);
+        REQUIRE_FALSE(w.sim.replaceFeature(sprite, w.model));
+        REQUIRE_FALSE(w.sim.occupiedGrid.get(240, 240).featureId);
+    }
+
+    TEST_CASE("death and reclaim state survives save load and its kind changes the hash", "[burning][feature-cap][saveload]")
+    {
+        for (auto state : {FeatureAnimation::Death, FeatureAnimation::Reclaim})
+        {
+            FireWorld w;
+            const auto id = w.plant(64, 64);
+            REQUIRE(w.sim.startFeatureAnimation(id, state));
+            w.step(7);
+            const auto before = computeHashOf(w.sim);
+            w.sim.getFeature(id).animation = state == FeatureAnimation::Death ? FeatureAnimation::Reclaim : FeatureAnimation::Death;
+            REQUIRE(computeHashOf(w.sim) != before);
+            w.sim.getFeature(id).animation = state;
+            const auto saved = saveSimulationToJson(w.sim);
+            FireWorld restored;
+            loadSimulationFromJson(saved, restored.sim);
+            REQUIRE(saveSimulationToJson(restored.sim) == saved);
+            REQUIRE(computeHashOf(restored.sim) == before);
+            const auto remaining = w.sim.getFeature(id).animationTicksRemaining;
+            w.step(remaining);
+            restored.step(remaining);
+            REQUIRE(computeHashOf(w.sim) == computeHashOf(restored.sim));
+            REQUIRE(dumpJson(w.sim) == dumpJson(restored.sim));
+        }
+    }
+
+    TEST_CASE("successful ignition alone requests treeburn at the origin corner", "[burning][feature-cap]")
+    {
+        FireWorld w;
+        const auto id = w.plant(64, 64);
+        w.sim.igniteFeature(id);
+        w.sim.igniteFeature(id);
+        REQUIRE(w.sim.events.size() == 1);
+        const auto event = std::get_if<FeatureIgnitedEvent>(&w.sim.events.front());
+        REQUIRE(event);
+        REQUIRE((event->position == w.sim.terrain.heightmapIndexToWorldCorner(64, 64)));
+        w.step(97);
+        REQUIRE(w.sim.events.size() == 1); // Source spread requests no new sound.
+    }
+
     TEST_CASE("failed firestarter ignition replaces ordinary feature damage", "[burning]")
     {
         FireWorld w;
         auto source = w.plant(64, 64);
         w.sim.featureDefinitions.get(w.tree).burnFrameTicks.clear();
         const auto position = w.sim.getFeature(source).position;
+        // rev31 WEAPONS.TDF ARM_DISINTEGRATOR's relevant fields.
         WeaponDefinition weapon{};
-        weapon.fireStarter = 70; // shipped D-gun value: nonzero, not a roll.
+        weapon.fireStarter = 70;
         weapon.damagesFeatures = true;
-        w.sim.weaponDefinitions["IGNITION"] = weapon;
+        weapon.damageRadius = 24_ss;
+        weapon.damage["DEFAULT"] = 30000;
+        w.sim.weaponDefinitions["ARM_DISINTEGRATOR"] = weapon;
         Projectile p{};
-        p.weaponType = "IGNITION";
+        p.weaponType = "ARM_DISINTEGRATOR";
         p.owner = PlayerId(10);
         p.position = position;
-        p.damage["DEFAULT"] = 100;
-        p.edgeEffectiveness = SimScalar(0.5f);
+        p.damage = weapon.damage;
         auto before = w.sim.rng;
-        w.sim.applyDamageInRadius(position, 32_ss, p);
+        w.sim.applyDamageInRadius(position, weapon.damageRadius, p);
         REQUIRE(w.sim.tryGetFeature(source));
         REQUIRE_FALSE(w.sim.getFeature(source).burningUntil);
         REQUIRE(w.sim.rng == before);

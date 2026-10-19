@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <rwe/sim/FeatureDefinitionId.h>
+#include <rwe/sim/FeatureAnimation.h>
 #include <rwe/sim/SimScalar.h>
 #include <string>
 #include <vector>
@@ -32,7 +33,25 @@ namespace rwe
 
         /** BT-44/255: play-once burn timings, loaded identically without graphics. */
         std::vector<unsigned int> burnFrameTicks{};
+        std::vector<unsigned int> deathFrameTicks{};
+        std::vector<unsigned int> reclaimFrameTicks{};
+        std::vector<unsigned int> burnShadowFrameTicks{};
+        std::vector<unsigned int> deathShadowFrameTicks{};
+        std::vector<unsigned int> reclaimShadowFrameTicks{};
         bool hasModel{false};
+
+        const std::vector<unsigned int>& animationFrames(FeatureAnimation state, bool shadow = false) const
+        {
+            switch (state)
+            {
+                case FeatureAnimation::Burn: return shadow ? burnShadowFrameTicks : burnFrameTicks;
+                case FeatureAnimation::Death: return shadow ? deathShadowFrameTicks : deathFrameTicks;
+                case FeatureAnimation::Reclaim: return shadow ? reclaimShadowFrameTicks : reclaimFrameTicks;
+                case FeatureAnimation::None: break;
+            }
+            static const std::vector<unsigned int> empty;
+            return empty;
+        }
 
         bool geothermal;
 

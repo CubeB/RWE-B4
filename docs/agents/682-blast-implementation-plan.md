@@ -1,8 +1,8 @@
 # #682: blast reach on multi-cell features
 
-Status: implemented; Debug game and focused validation passed (65 cases,
-4503 assertions, including eight blast cases). Full batch validation pending. The #681
-prerequisite passed 57 focused cases / 4348 assertions before these source edits.
+Status: implemented and validated locally. The final feature batch passed
+1,831 permitted cases / 193,660 assertions, all Debug targets, the complete
+section scan and Release game build. See feature-batch-local-build.md.
 Authority: owner-approved scheduling in the continuation brief and explicit
 2026-10-19 approval of the deterministic active-sprite policy. That approval is
 recorded in spec-room section 88, documentation commit `9d39950e`.
@@ -53,8 +53,7 @@ Implementation constraints:
 - Keep new geometry in a separate translation unit. Source must stay unchanged
   while any make is running in either build tree.
 - Save/hash need no additional mutable state for geometric reach. hasModel from
-  #681 supplies static model identity. Future #683 temporary sprite states must
-  join the active-sprite predicate when those states exist.
+  #681 supplies static model identity. #683 death/reclaim states now join burning in the active-sprite predicate.
 
 Planned regressions: low-side near-edge rejection; high-side continuation reach;
 failed first cell followed by a qualifying continuation; exactly-once damage;

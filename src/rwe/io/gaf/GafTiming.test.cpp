@@ -2,9 +2,23 @@
 #include <catch2/catch_test_macros.hpp>
 #include <numeric>
 #include <rwe/io/gaf/GafArchive.h>
+#include <rwe/sim/FeatureAnimation.h>
 
 namespace rwe
 {
+    TEST_CASE("MarsPlant01 burn shadow ends at10 updates while its primary lasts92", "[gaf][burning]")
+    {
+        // BT-263; installed MARSPLANTS.GAF plant01flame46x2, plant01shad1x10.
+        const std::vector<unsigned int> primary(46, 2);
+        const std::vector<unsigned int> shadow(1, 10);
+        REQUIRE(featureAnimationFrame(primary, 0) == 0);
+        REQUIRE(featureAnimationFrame(shadow, 9) == 0);
+        REQUIRE_FALSE(featureAnimationFrame(shadow, 10));
+        REQUIRE(featureAnimationFrame(primary, 10) == 5);
+        REQUIRE(featureAnimationFrame(primary, 91) == 45);
+        REQUIRE_FALSE(featureAnimationFrame(primary, 92));
+    }
+
     TEST_CASE("shipped Tree1 burn death and reclaim metadata yield their update lengths", "[gaf][burning]")
     {
         // totala1.hpi anims/TREES.GAF: BT-255/257 and the independent shipped

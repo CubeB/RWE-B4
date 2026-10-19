@@ -398,9 +398,10 @@ namespace rwe
                 {"hitPoints", f.hitPoints},
                 {"burningUntil", saveOptional(f.burningUntil, [](GameTime t) { return saveGameTime(t); })},
                 {"nextSpark", saveGameTime(f.nextSpark)},
-                {"burnTicksRemaining", f.burnTicksRemaining},
+                {"animation", static_cast<unsigned int>(f.animation)},
+                {"animationTicksRemaining", f.animationTicksRemaining},
                 {"burnSparkTicksRemaining", f.burnSparkTicksRemaining},
-                {"burnOrder", f.burnOrder}};
+                {"animationOrder", f.animationOrder}};
         }
     }
 
@@ -981,16 +982,26 @@ namespace rwe
             placed.hitPoints = fj.at("hitPoints").get<unsigned int>();
             placed.burningUntil = loadOptional(fj.at("burningUntil"), loadGameTime);
             placed.nextSpark = loadGameTime(fj.at("nextSpark"));
-            placed.burnTicksRemaining = fj.value("burnTicksRemaining", 0u);
+            const auto animation = fj.value("animation", placed.burningUntil ? 1u : 0u);
+            if (animation > static_cast<unsigned int>(FeatureAnimation::Reclaim))
+            {
+                throw std::runtime_error("invalid feature animation state");
+            }
+            placed.animation = static_cast<FeatureAnimation>(animation);
+            placed.animationTicksRemaining = fj.value("animationTicksRemaining", 0u);
             placed.burnSparkTicksRemaining = fj.value("burnSparkTicksRemaining", 0u);
-            placed.burnOrder = fj.value("burnOrder", 0u);
+            placed.animationOrder = fj.value("animationOrder", 0u);
             if (placed.burnSparkTicksRemaining > 255)
             {
                 throw std::runtime_error("invalid burning-feature spark byte");
             }
-            if (placed.burningUntil && !fj.contains("burnTicksRemaining"))
+            if (placed.burningUntil && !fj.contains("animationTicksRemaining"))
             {
                 throw std::runtime_error("save contains legacy burning-feature state");
+            }
+            if ((placed.animation == FeatureAnimation::Burn) != placed.burningUntil.has_value())
+            {
+                throw std::runtime_error("inconsistent feature burn state");
             }
             ctx.features.push_back(*id);
         }

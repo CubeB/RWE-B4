@@ -341,7 +341,31 @@ namespace rwe
 
         auto footprintRegion = computeFootprintRegion(newFeature.position, featureDefinition.footprintX, featureDefinition.footprintZ);
 
-        if (anyFeatureOccupies(footprintRegion))
+        // BT-261/262: clear first, without force or rollback. Removing an
+        // occupant may free the slot the incoming model needs.
+        if (footprintRegion.right() > occupiedGrid.getWidth() || footprintRegion.bottom() > occupiedGrid.getHeight())
+        {
+            return std::nullopt;
+        }
+        for (int y = footprintRegion.top(); y < footprintRegion.bottom(); ++y)
+        {
+            for (int x = footprintRegion.left(); x < footprintRegion.right(); ++x)
+            {
+                if (x < 0 || y < 0)
+                {
+                    continue;
+                }
+                if (auto occupant = occupiedGrid.get(x, y).featureId)
+                {
+                    if (getFeatureDefinition(getFeature(*occupant).featureName).indestructible)
+                    {
+                        return std::nullopt;
+                    }
+                    deleteFeature(*occupant);
+                }
+            }
+        }
+        if ((featureDefinition.hasModel || newFeature.animation != FeatureAnimation::None) && countStatefulFeatures() >= 2048)
         {
             return std::nullopt;
         }
@@ -536,18 +560,19 @@ namespace rwe
             return false;
         }
 
-        auto position = feature.position;
-        auto rotation = feature.rotation;
-        auto reclamate = featureDefinition.featureReclamate;
-        auto featureType = feature.featureName;
-
-        deleteFeature(featureId);
-
-        events.push_back(FeatureReclaimedEvent{featureType, position});
-
-        if (reclamate)
+        // BT-261: credit above precedes even a refused transition. Existing
+        // work/payout arithmetic is unchanged by this capacity correction.
+        if (!featureDefinition.hasModel && feature.animation != FeatureAnimation::None)
         {
-            addFeature(MapFeature{*reclamate, position, rotation});
+            return true;
+        }
+        if (!featureDefinition.hasModel && !featureDefinition.reclaimFrameTicks.empty())
+        {
+            startFeatureAnimation(featureId, FeatureAnimation::Reclaim);
+        }
+        else
+        {
+            replaceFeature(featureId, featureDefinition.featureReclamate);
         }
 
         return true;
@@ -557,6 +582,12 @@ namespace rwe
     {
         auto featureRef = tryGetFeature(id);
         if (!featureRef)
+        {
+            return std::nullopt;
+        }
+
+        // Normal lifecycle replacement never gains force-removal semantics.
+        if (getFeatureDefinition(featureRef->get().featureName).indestructible)
         {
             return std::nullopt;
         }
@@ -5592,7 +5623,7 @@ namespace rwe
             updateProjectiles();
         }
 
-        updateBurningFeatures(fireWind);
+        updateFeatureAnimations(fireWind);
 
         // Before the dead are cleared, so a wreck spawned this tick first
         // moves on the next one, as the original does.
