@@ -4,6 +4,70 @@
 
 namespace rwe
 {
+    TEST_CASE("a fresh install is windowed and shades buildings only")
+    {
+        // No rwe.cfg at all is the common first launch, and it must come up
+        // as an ordinary bordered window rather than taking over the display.
+        // Both options screens stage from these same defaults, and so does
+        // the in-game VISUALS page's VIDMODE button.
+        REQUIRE(GlobalConfig{}.windowMode == "windowed");
+        REQUIRE(GameOptions{}.windowMode == "windowed");
+
+        // The original's VISUALS switch is Off|On and its On shades only a
+        // building or a feature, because it has two rasterizer chains
+        // (TOTALA-EXE-SHADING.md S:11). BuildingsOnly is that On.
+        REQUIRE(GlobalConfig{}.shadingMode == static_cast<unsigned int>(ShadingMode::BuildingsOnly));
+        REQUIRE(GameOptions{}.shading == ShadingMode::BuildingsOnly);
+    }
+
+    TEST_CASE("window mode button stages")
+    {
+        SECTION("the three stages are windowed, borderless and fullscreen")
+        {
+            auto stages = windowModeStages();
+            REQUIRE(stages.size() == 3);
+            REQUIRE(stages[0] == "windowed");
+            REQUIRE(stages[1] == "borderless");
+            REQUIRE(stages[2] == "fullscreen");
+        }
+
+        SECTION("the old name bordered reads as windowed")
+        {
+            // rwe.cfg held "bordered" before the mode was renamed, and
+            // main.cpp still accepts it; the button must not show a fourth,
+            // dead stage for it.
+            REQUIRE(windowModeStageIndex("bordered") == windowModeStageIndex("windowed"));
+            REQUIRE(windowModeStageIndex("bordered") == 0u);
+            REQUIRE(windowModeStageIndex("windowed") == 0u);
+            REQUIRE(windowModeStageIndex("borderless") == 1u);
+            REQUIRE(windowModeStageIndex("fullscreen") == 2u);
+            REQUIRE(windowModeStageIndex("") == 0u);
+        }
+
+        SECTION("next cycles through every stage and wraps")
+        {
+            REQUIRE(nextWindowMode("windowed") == "borderless");
+            REQUIRE(nextWindowMode("bordered") == "borderless");
+            REQUIRE(nextWindowMode("borderless") == "fullscreen");
+            REQUIRE(nextWindowMode("fullscreen") == "windowed");
+            REQUIRE(nextWindowMode("") == "borderless");
+        }
+
+        SECTION("labels are in stage order")
+        {
+            auto labels = windowModeLabels();
+            auto stages = windowModeStages();
+            REQUIRE(labels.size() == stages.size());
+            for (unsigned int i = 0; i < stages.size(); ++i)
+            {
+                REQUIRE(labels[i] == windowModeDisplayName(stages[i]));
+            }
+            REQUIRE(labels[0] == "Windowed");
+            REQUIRE(labels[1] == "Borderless");
+            REQUIRE(labels[2] == "Fullscreen");
+        }
+    }
+
     TEST_CASE("options pages name the four pages of both options screens (BT-213)")
     {
         REQUIRE(optionsPageFromName("SOUNDS") == OptionsPage::Sound);

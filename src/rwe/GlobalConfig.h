@@ -152,8 +152,16 @@ namespace rwe
     public:
         bool leftClickInterfaceMode{true};
 
-        /** bordered, borderless or fullscreen; changing it takes effect on restart. */
-        std::string windowMode{"bordered"};
+        /**
+         * windowed, borderless or fullscreen. A fresh install is windowed --
+         * an ordinary 800x600 window with its border -- so a new player can
+         * find the title bar before anything else. "bordered" is what the
+         * key held before the mode was called windowed, and main.cpp still
+         * accepts it as the same thing; see windowModeStageIndex. Changing
+         * it applies live from the options screens and at the next launch
+         * otherwise.
+         */
+        std::string windowMode{"windowed"};
 
         /** 0 to 100, as the options screen and rwe.cfg deal in. */
         unsigned int soundVolume{100};
@@ -255,9 +263,12 @@ namespace rwe
 
         /**
          * Model lighting, the VISUALS page's Shading switch: 0 off, 1 units
-         * only, 2 buildings only, 3 both. 2 is the original's On.
+         * only, 2 buildings only, 3 both. BuildingsOnly is the original's
+         * On -- it has two rasterizer chains and sends only a building or a
+         * feature to the shaded one (TOTALA-EXE-SHADING.md S:11) -- so that
+         * is the default a fresh install gets.
          */
-        unsigned int shadingMode{2};
+        unsigned int shadingMode{static_cast<unsigned int>(ShadingMode::BuildingsOnly)};
 
         /**
          * How much of the measured PALETTE.SHD ramp each kind of model gets,
@@ -474,6 +485,29 @@ namespace rwe
 
     /** The label the window mode button shows for a config value. */
     const char* windowModeDisplayName(const std::string& mode);
+
+    /**
+     * The window mode stages in click order: windowed, borderless and
+     * fullscreen. The original's in-game video page is not available to RWE:
+     * VISUALRT drops VIDSLDR and VIDVAL (TOTALA-EXE-INTERFACE.md S:65), so
+     * the in-game VISUALS page gets a button built in code instead. That
+     * button is RWE-original, like the front end's three-stage slider it
+     * matches (BT-FRONTEND-OPTIONS-PARITY.md S:7).
+     */
+    std::vector<std::string> windowModeStages();
+
+    /**
+     * The stage index of a window mode for the button. "bordered" is the old
+     * spelling of windowed and reads as the first stage; so does anything
+     * unrecognised, which is what a fresh or hand-edited rwe.cfg should get.
+     */
+    unsigned int windowModeStageIndex(const std::string& mode);
+
+    /** The next window mode in click order, wrapping from fullscreen to windowed. */
+    std::string nextWindowMode(const std::string& mode);
+
+    /** All three stage labels in order, for building the button. */
+    std::vector<std::string> windowModeLabels();
 
     /** Writes the eleven settings to rwe.cfg, leaving every other key in it alone. */
     void writeGameOptions(const std::filesystem::path& configPath, const GameOptions& options);

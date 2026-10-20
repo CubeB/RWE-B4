@@ -57,10 +57,23 @@ export function readConfigFromFile(filename: string): Promise<RweConfig> {
 
 export function readConfig(lines: string): RweConfig {
   const m = readConfigMap(lines);
+  const windowMode = m.get("window-mode");
+  // RWE's own options screens write `window-mode`, the launcher's checkbox
+  // writes `fullscreen`. Read both so the checkbox reflects a mode chosen in
+  // game, and default to the legacy key when both are present.
+  let fullscreen = parseConfigBoolean(m.get("fullscreen"));
+  if (fullscreen === undefined) {
+    if (windowMode === "fullscreen") {
+      fullscreen = true;
+    } else if (windowMode === "windowed" || windowMode === "bordered") {
+      // "bordered" is the old name for windowed, still accepted by rwe.
+      fullscreen = false;
+    }
+  }
   return {
     width: parseConfigInt(m.get("width")),
     height: parseConfigInt(m.get("height")),
-    fullscreen: parseConfigBoolean(m.get("fullscreen")),
+    fullscreen,
     interfaceMode: parseConfigInterfaceMode(m.get("interface-mode")),
   };
 }
@@ -90,8 +103,13 @@ export function writeConfig(config: RweConfig): string {
   if (config.height) {
     arr.push(["height", config.height.toString()]);
   }
-  if (config.fullscreen) {
-    arr.push(["fullscreen", "true"]);
+  if (config.fullscreen !== undefined) {
+    // Write both spellings. `window-mode` is what RWE's options screens read
+    // and write; `fullscreen` is the older key. Writing the pair means that
+    // unchecking the box overrides a stale `window-mode = fullscreen` left by
+    // an in-game choice, instead of silently doing nothing.
+    arr.push(["fullscreen", config.fullscreen ? "true" : "false"]);
+    arr.push(["window-mode", config.fullscreen ? "fullscreen" : "windowed"]);
   }
   if (config.interfaceMode) {
     arr.push(["interface-mode", config.interfaceMode]);

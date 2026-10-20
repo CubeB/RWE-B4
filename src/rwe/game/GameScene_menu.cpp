@@ -466,6 +466,14 @@ namespace rwe
         gameMenuPanels.clear();
         inGameOptionsPage = page;
 
+        // The window mode is the one field the panels do not get rebuilt from
+        // on open, so seed it if the PREFS handler has not: the VIDMODE
+        // button has to show the mode that is actually live.
+        if (pendingWindowMode.empty() && sceneContext.globalConfig != nullptr)
+        {
+            pendingWindowMode = sceneContext.globalConfig->windowMode;
+        }
+
         addGameMenuPanel(uiFactory.panelFromGuiFile("PREFS"));
         if (!page.empty())
         {
@@ -536,6 +544,7 @@ namespace rwe
             }
             addAntiAliasUnitsButton(*panel);
             addCameraZoomSlider(*panel);
+            addWindowModeButton(*panel);
         }
     }
 
@@ -615,6 +624,55 @@ namespace rwe
         // goes between LEFTCLICK and RESTORE, and those four rows are spread
         // evenly between LEFTCLICK and UNDO: 219, 247, 276, 304.
         uiFactory.insertStagedButtonBetween(panel, "SPEEDSRT", "SHADINGMODE", "UISCALE", "LEFTCLICK", "RESTORE", "UNDO", uiScaleLabels(), uiScaleStageIndex(uiScaleSetting));
+    }
+
+    void GameScene::addWindowModeButton(UiPanel& panel)
+    {
+        // The in-game half of the window mode choice. The front end has the
+        // VIDSLDR slider and its VIDVAL readout, but VISUALRT has neither --
+        // the original drops the resolution control from the in-game pages
+        // and cannot change video mode in a battle (TOTALA-EXE-INTERFACE.md
+        // S:65) -- so this is a three-stage button in their place, cycling
+        // windowed, borderless and fullscreen. It is RWE-original, like the
+        // front end's slider (BT-FRONTEND-OPTIONS-PARITY.md S:7).
+        //
+        // BSHADOWS is the page's own marker: every RT page has RESTORE and
+        // UNDO, which are what the button hangs from, so requiring it is what
+        // keeps VIDMODE off SOUNDSRT, MUSICRT and SPEEDSRT. The position is
+        // derived: one row below UNDO, with the step taken from RESTORE above
+        // it, which is the free row at the bottom of the 150x352 page. The
+        // add is idempotent, for when the panel is rebuilt.
+        if (!panel.find<UiStagedButton>("BSHADOWS"))
+        {
+            return;
+        }
+        if (panel.find<UiStagedButton>("VIDMODE"))
+        {
+            return;
+        }
+
+        auto undo = panel.find<UiStagedButton>("UNDO");
+        if (!undo)
+        {
+            return;
+        }
+
+        // UNDO sits at y=304 in the 352-tall page. One row's step from
+        // RESTORE (269) would put the new button at 339 and its 20-pixel face
+        // over the bottom edge, so place it at explicit y = 328..348 instead.
+        auto& undoButton = undo->get();
+        auto button = uiFactory.createStagedButton(
+            undoButton.getX(),
+            undoButton.getY() + static_cast<int>(undoButton.getHeight()) + 4,
+            static_cast<int>(undoButton.getWidth()),
+            static_cast<int>(undoButton.getHeight()),
+            "VISUALRT",
+            "SHADINGMODE",
+            windowModeLabels(),
+            3);
+        button->setName("VIDMODE");
+        button->setStage(windowModeStageIndex(pendingWindowMode));
+        panel.appendChild(std::move(button));
     }
 
     void GameScene::wireInGameOptionControls()
@@ -1188,6 +1246,13 @@ namespace rwe
                 uiScaleSetting = nextUiScale(uiScaleSetting);
                 reportUiScaleFit();
             }
+            else if (control == "VIDMODE")
+            {
+                // Windowed | Borderless | Fullscreen, cycled by the button
+                // itself. Applied on OK with every other changed setting, by
+                // SceneManager::setWindowMode.
+                pendingWindowMode = nextWindowMode(pendingWindowMode);
+            }
             else if (control == "MODE")
             {
                 // Off | Mono | 3D, cycled by the button itself.
@@ -1329,6 +1394,10 @@ namespace rwe
         if (auto toggle = findInGameMenu<UiStagedButton>("UISCALE"))
         {
             toggle->setStage(uiScaleStageIndex(uiScaleSetting));
+        }
+        if (auto toggle = findInGameMenu<UiStagedButton>("VIDMODE"))
+        {
+            toggle->setStage(windowModeStageIndex(pendingWindowMode));
         }
         if (auto bar = findInGameMenu<UiScrollBar>("FXVOL"))
         {

@@ -135,7 +135,8 @@ int main(int argc, char* argv[])
                       << "  --width <pixels>      Window width (default: 800)\n"
                       << "  --height <pixels>     Window height (default: 600)\n"
                       << "  --fullscreen          Start in fullscreen mode (same as --window-mode fullscreen)\n"
-                      << "  --window-mode <m>     bordered | borderless | fullscreen (default: bordered)\n"
+                      << "  --window-mode <m>     windowed | borderless | fullscreen (default: windowed);\n"
+                      << "                        bordered is accepted as the old name for windowed\n"
                       << "  --interface-mode <m>  left-click or right-click (default: left-click)\n"
                       << "  --data-path <path>    Game data search path (repeatable)\n"
                       << "  --map <name>          Launch directly into a game on this map\n"
@@ -205,9 +206,15 @@ int main(int argc, char* argv[])
             // "shading" was a plain bool before the switch grew four states. An
             // existing rwe.cfg still carries it, so it decides the default that
             // "shading-mode" then overrides -- otherwise upgrading would silently
-            // turn shading back on for someone who had switched it off.
+            // turn shading back on for someone who had switched it off. With
+            // neither key present, the default is buildings only, the original's
+            // own On (TOTALA-EXE-SHADING.md S:11).
             auto shadingWasOn = args.getString("shading", "true") != "false";
-            config.shadingMode = std::min(3u, args.getUint("shading-mode", shadingWasOn ? 2u : 0u));
+            config.shadingMode = std::min(3u, args.getUint(
+                "shading-mode",
+                shadingWasOn
+                    ? static_cast<unsigned int>(rwe::ShadingMode::BuildingsOnly)
+                    : static_cast<unsigned int>(rwe::ShadingMode::Off)));
             config.shadingStrengthUnits = std::min(100u, args.getUint("shading-strength-units", 40));
             config.shadingStrengthBuildings = std::min(100u, args.getUint("shading-strength-buildings", 40));
             config.antiAlias = args.getString("anti-alias", "true") != "false";
@@ -514,9 +521,22 @@ int main(int argc, char* argv[])
 
             auto screenWidth = args.getUint("width", 800);
             auto screenHeight = args.getUint("height", 600);
+            // A fresh install has no rwe.cfg, so no window mode: it launches
+            // as an ordinary 800x600 bordered window, which is what "windowed"
+            // means. Borderless and fullscreen are opt-in from here, the
+            // launcher or the options screens.
             auto windowMode = rwe::WindowMode::Bordered;
             auto windowModeString = args.getString("window-mode", "");
-            if (windowModeString == "borderless")
+            // An explicit fullscreen request outranks a saved window mode.
+            // The launcher's older checkbox writes `fullscreen = true`, and a
+            // config that also carries `window-mode = windowed` must not make
+            // that checkbox a no-op.
+            if (args.getBool("fullscreen"))
+            {
+                windowMode = rwe::WindowMode::Fullscreen;
+                windowModeString = "fullscreen";
+            }
+            else if (windowModeString == "borderless")
             {
                 windowMode = rwe::WindowMode::Borderless;
             }
@@ -525,7 +545,7 @@ int main(int argc, char* argv[])
                 windowMode = rwe::WindowMode::Bordered;
                 windowModeString = "windowed";
             }
-            else if (windowModeString == "fullscreen" || args.getBool("fullscreen"))
+            else if (windowModeString == "fullscreen")
             {
                 windowMode = rwe::WindowMode::Fullscreen;
                 windowModeString = "fullscreen";
