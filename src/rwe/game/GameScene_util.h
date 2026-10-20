@@ -32,6 +32,7 @@
 #include <rwe/sim/UnitModelDefinition.h>
 #include <rwe/sim/UnitPieceDefinition.h>
 #include <rwe/sim/UnitState.h>
+#include <unordered_set>
 #include <vector>
 
 namespace rwe
@@ -242,6 +243,8 @@ namespace rwe
         bool projected;
         /** For the offset kind, the unit's base: its height above groundHeight is how far the shadow drops. */
         float originY;
+        /** World height below which the silhouette's fragments are cut, or NoCutBelowY. */
+        float cutBelowY{NoCutBelowY};
     };
 
     void drawUnit(
@@ -279,6 +282,40 @@ namespace rwe
     bool unitCastsShadow(const UnitDefinition& unitDefinition);
 
     /**
+     * The unfinished units still attached to the factory building them.
+     *
+     * A factory product is attached to its script's build piece and drawn as
+     * part of the factory's composite image until the final successful build
+     * step, when the product is released and becomes independently drawable.
+     * That composite path does not invoke the child's own shadow calculation,
+     * so an attached product has no independent shadow to draw
+     * (SUBMARINE-CONSTRUCTION-SHADOW-FINDINGS.md section 1). A standalone
+     * nanoframe was never attached and keeps the shadow it has always had.
+     *
+     * Attachment is read from the factory's own building state, which also
+     * tells the renderer that the product still follows the build piece. The
+     * product's own completion is tested as well, because the factory keeps
+     * the released product's id until its next update: release happens on the
+     * final successful build step, not at that later bookkeeping stage.
+     *
+     * Presentation only: this reads simulation state and never writes it.
+     */
+    std::unordered_set<UnitId> attachedFactoryProducts(const GameSimulation& simulation);
+
+    /**
+     * Whether a mobile unit's copied silhouette is cut at the sea surface.
+     *
+     * Only when the unit's origin is strictly below sea level. The copied
+     * silhouette is then cut below the water line, so a normally fully
+     * submerged unit need not show a full black silhouette at all
+     * (SUBMARINE-CONSTRUCTION-SHADOW-FINDINGS.md section 2). The original's
+     * encoded threshold is `sea level - H + 50` against the height buffer's
+     * bias of 50, which is this comparison on the fragment's world height;
+     * the exact byte semantics at the boundary are not stated by the finding.
+     */
+    bool unitShadowIsWaterCut(float originY, float seaLevel);
+
+    /**
      * Whether a map feature drawn as a model gets a shadow.
      *
      * The one water test in the original's shadow pass is on the Feature
@@ -286,10 +323,11 @@ namespace rwe
      * 0x4592D5-0x4592F1 a unit whose type index is zero and whose ground,
      * 0x485070 at its position, lies below the sea level byte casts
      * nothing. A real building skips that test, and a finished unit's copied
-     * shadow is not cut at the water line either -- the cut at 0x4BA1B0 needs
-     * the height plane a finished bitmap does not carry. So a wreck on the
+     * shadow takes the water cut described at unitShadowIsWaterCut instead --
+     * the projected pass a feature takes has no such cut. So a wreck on the
      * sea bed or a rock in the shallows has no shadow, and everything else is
-     * as it is on land. TOTALA-EXE.md §3 and §100.
+     * as it is on land. TOTALA-EXE.md §3 and §100, and
+     * SUBMARINE-CONSTRUCTION-SHADOW-FINDINGS.md section 2.
      */
     bool featureCastsShadow(SimScalar groundHeight, SimScalar seaLevel);
 
@@ -315,6 +353,7 @@ namespace rwe
         const UnitModelDefinition& modelDefinition,
         float frac,
         float groundHeight,
+        float seaLevel,
         const UnitTextureAtlases& atlases,
         UnitShadowMeshBatch& batch);
 
@@ -381,6 +420,14 @@ namespace rwe
         BuildFillMode belowMode{BuildFillMode::Erase};
         Vector3f colorA;
         Vector3f colorB;
+        /**
+         * The palette entries colorA/colorB are drawn with, 160..175. The
+         * original's fill writes a palette index and the water pass remaps
+         * the finished picture through the blue table (BT-142), so the shader
+         * needs the index and not just the colour.
+         */
+        int colorAIndex{0};
+        int colorBIndex{0};
     };
 
     BuildPhase computeBuildPhase(float percentComplete, unsigned int unitIndex, unsigned int gameTime);
@@ -534,6 +581,29 @@ namespace rwe
      * the puff unchanged -- so the plume leaves from one spot.
      */
     std::vector<Vector3f> findGeoVentSteamPoints(const GameSimulation& simulation);
+
+    /**
+     * Appends the two one-pixel screen-space lines of a render-type 0 shot.
+     *
+     * The original paints a one-pixel line along the projected head-to-tail
+     * segment in the first colour, plus a second one-pixel line in the second
+     * colour: one screen scanline above for a beam that is more horizontal
+     * than vertical, otherwise from one pixel left of the top end to one pixel
+     * right of the bottom end, crossing the core. A zero second colour
+     * suppresses the companion entirely. Both are built here as one-world-unit
+     * ribbons, which is one original output pixel at the fixed 1:1 projection
+     * and scales with the camera's pixels-per-world-unit.
+     *
+     * LASER-WEAPON-FINDINGS.md sections 1-4. The core is appended first so a
+     * shared pixel keeps the core colour, as the original's second call does.
+     */
+    void appendLaserBeam(
+        const Vector3f& head,
+        const Vector3f& tail,
+        const Vector3f& color,
+        const Vector3f& color2,
+        bool hasCompanion,
+        std::vector<GlColoredVertex>& out);
 
     /**
      * Draws every round in the air that the viewer is allowed to see.

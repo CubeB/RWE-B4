@@ -16,6 +16,14 @@ namespace rwe
 
         /** Duration in ticks */
         SimScalar duration;
+
+        /**
+         * Whether the second colour is drawn at all.
+         *
+         * A raw `color2` of zero in the weapon file suppresses the companion
+         * line; it does not mean "black". LASER-WEAPON-FINDINGS.md section 4.
+         */
+        bool hasCompanion{true};
     };
 
     struct ProjectileRenderTypeModel

@@ -101,6 +101,25 @@ namespace rwe
         REQUIRE(gameSpeedMessage(99) == "Game Speed  +10");
     }
 
+    TEST_CASE("the local command's step index is shown at the original's 1..20 level", "[ownclock]")
+    {
+        // The setter reports the level the original keeps, which is RWE's
+        // zero-based step index plus one. Pin both ends and the default so a
+        // change to either convention cannot quietly shift the wording.
+        // TOTALA-EXE-KEYBOARD.md:120-121, BT-GAME-GAME-STATE-PARITY.md:136-147.
+        REQUIRE(gameSpeedMessage(GameSpeed::DefaultIndex + 1) == "Game Speed Normal");
+        REQUIRE(gameSpeedMessage(GameSpeed::MinIndex + 1) == "Game Speed  -9");
+        REQUIRE(gameSpeedMessage(GameSpeed::MaxIndex + 1) == "Game Speed  +10");
+
+        // Two spaces before the signed offset, not one and not a tab.
+        REQUIRE(gameSpeedMessage(GameSpeed::DefaultIndex + 2) == "Game Speed  +1");
+    }
+
+    // The "print only when the level really changed, and only on the issuing
+    // machine, and not during playback" gate lives inside
+    // GameScene::processPlayerCommand, which needs a whole scene and has no
+    // cheap test harness here. It is left untested at this level.
+
     TEST_CASE("restart, load and save are refused in a network game of either kind (#658)", "[ownclock]")
     {
         auto alone = gameMenuGate(false, false);

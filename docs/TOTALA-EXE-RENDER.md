@@ -1723,12 +1723,17 @@ darkening.
 
 Upstream #25 asked for shadows to be cast on the water surface rather than the
 sea floor. That is not what the original does: a building's projection is
-drawn flat at the ground under it wherever that ground is, a finished unit's
-copy is not cut at the water line (above), and the only water test in either
-pass is the one on map features in §3, which casts nothing for a feature whose
-ground is below the sea level. RWE follows all three, as of B4 #9, and the
-request is declined rather than recorded in §88 or `compatibility.md`, since
-nothing here departs from the original.
+drawn flat at the ground under it wherever that ground is, and the only water
+test in either pass is the one on map features in §3, which casts nothing for a
+feature whose ground is below the sea level. A finished mobile unit's copied
+silhouette is **not** projected onto the surface either; when the unit's own
+origin is below sea level the copy is instead cut off below the waterline, so
+a fully submerged unit can cast no shadow at all
+(`SUBMARINE-CONSTRUCTION-SHADOW-FINDINGS.md` section 2, 2026-10-20, which
+supersedes the sentence that used to stand here claiming the copy was never
+water-cut). RWE follows this, as of the 2026-10-20 change, and the request is
+declined rather than recorded in §88 or `compatibility.md`, since nothing here
+departs from the original.
 
 One thing did depart, in RWE's code rather than in this reading: a **floating
 building's** shadow was lifted to the water surface with

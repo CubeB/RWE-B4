@@ -10,7 +10,8 @@ out vec4 outMask;
 uniform sampler2D textureSampler;
 // The same atlas again, one byte a texel: that texel's raw palette index.
 uniform sampler2D paletteIndexSampler;
-// palettes/PALETTE.SHD as a 256x32 image; see unitTexture.frag.
+// The shade table followed by its blue remap, 256x65; see unitTexture.frag
+// and shadeAndBlueTablesToImage.
 uniform sampler2D shadeTableSampler;
 // 1 for a unit that is not the viewer's and not held on sonar: the parts of its
 // model at or below the water line are cut away (0x4BA1B0) rather than tinted
@@ -27,8 +28,9 @@ uniform float shadeStrength;
 uniform float unitHeight;
 
 // The construction display, as the original draws it. It keeps an 8-bit
-// height per pixel — the model-space Y of the topmost surface there, plus 50 —
-// and remaps every pixel by comparing that against a moving threshold. Above
+// height per pixel -- the model-space Y of the topmost surface there, plus the
+// per-unit bias below -- and remaps every pixel by comparing that against a
+// moving threshold. Above
 // the line, in a four-unit band on it, and below it are each drawn one of
 // four ways, and which three ways depends on how far the build has got.
 uniform float buildRatio;
@@ -39,11 +41,20 @@ uniform int belowMode;
 // Two triangle waves over palette entries 160..175 at different rates.
 uniform vec3 buildColorA;
 uniform vec3 buildColorB;
+// The palette index each fill colour is drawn with. The original recolours
+// the nanoframe by writing one of those entries, then runs the water blue
+// remap over the finished picture, so an underwater fill has to be looked up
+// through the blue table rather than tinted from its RGB (BT-142).
+uniform int buildColorAIndex;
+uniform int buildColorBIndex;
 
 // The band on the line is four of the original's height units tall.
 const float bandThickness = 4.0;
-// The original's height buffer is the model-space Y biased by 50.
-const float heightBias = 50.0;
+// How far the original's height buffer lifts a vertex above the model origin:
+// 50, or 125 for a digger, whose model reaches below that origin. The larger
+// value keeps the height byte from wrapping (TOTALA-EXE-SHADING.md S:04,
+// S:11, S:22; model-render parity rule 8).
+uniform float heightBias;
 
 // The shaded chain's lighting; see unitTexture.frag, which this must match.
 // The level is computed once per vertex and interpolated, and the row it
@@ -95,6 +106,22 @@ vec3 shadeNormal()
     return min(height > seaLevel ? shadeTexel(baseColor) : blueTexel(), vec3(1.0));
 }
 
+// A flat build fill is a palette entry, not a texture sample. The original
+// recolours the picture to that index and only then applies the water pass to
+// the whole finished picture, so below the sea line the entry goes through the
+// blue table just as a texel does (BT-142; model-render parity rule 8). Row 64
+// of the combined table is the blue table alone -- the same row blueTexel()
+// reads for an unshaded texel -- so a fill pixel becomes the entry the
+// original's blitter would produce.
+vec3 buildFillColor(vec3 aboveWater, int paletteIndex)
+{
+    if (height > seaLevel)
+    {
+        return aboveWater;
+    }
+    return texelFetch(shadeTableSampler, ivec2(paletteIndex, 64), 0).rgb;
+}
+
 void main(void)
 {
     // The cut applies to the whole finished picture, whichever way the build
@@ -130,22 +157,24 @@ void main(void)
 
     if (mode == 0)
     {
-        // Erased: this part of the model has not been laid down yet.
-        outColor = vec4(0.0, 0.0, 0.0, 0.0);
-        // ...so it is not coverage either. Writing an occluder here would let
-        // a nanoframe's unbuilt half block the halo of a finished building
-        // standing behind it.
-        outMask = vec4(0.0, 0.0, 0.0, 0.0);
+        // Erased: this part of the model has not been laid down yet. The
+        // original writes the transparent key and the blitter skips those
+        // pixels, so nothing of them reaches the frame -- not even depth.
+        // Writing alpha 0 instead would still leave an occluder behind the
+        // see-through parts (and would clear the halo mask of a finished
+        // building already drawn behind them); a discard writes neither
+        // colour, depth nor mask.
+        discard;
     }
     else
     {
         if (mode == 1)
         {
-            outColor = vec4(buildColorA, 1.0);
+            outColor = vec4(buildFillColor(buildColorA, buildColorAIndex), 1.0);
         }
         else if (mode == 2)
         {
-            outColor = vec4(buildColorB, 1.0);
+            outColor = vec4(buildFillColor(buildColorB, buildColorBIndex), 1.0);
         }
         else
         {

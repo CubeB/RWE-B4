@@ -205,9 +205,11 @@ namespace rwe
 
     void RenderService::drawUnitMeshBatch(const UnitMeshBatch& batch, float seaLevel, TextureIdentifier shadeTableTexture)
     {
-        // Finished models first: a nanoframe's see-through parts still write
-        // depth, so drawing it after the lab it sits in leaves the lab's bay
-        // visible through it instead of the ground.
+        // Finished models first. A nanoframe's unbuilt parts are discarded
+        // outright, writing neither colour nor depth, so the lab it sits in
+        // has already painted its bay by the time the frame goes down and
+        // none of the frame's holes can cover it. Solid frame parts still
+        // depth-test against the lab and win where they are in front of it.
         if (!batch.meshes.empty())
         {
             const auto& textureShader = shaders->unitTexture;
@@ -270,6 +272,9 @@ namespace rwe
                 graphics->setUniformInt(buildShader.belowMode, static_cast<int>(m.belowMode));
                 graphics->setUniformVec3(buildShader.buildColorA, m.buildColorA.x, m.buildColorA.y, m.buildColorA.z);
                 graphics->setUniformVec3(buildShader.buildColorB, m.buildColorB.x, m.buildColorB.y, m.buildColorB.z);
+                graphics->setUniformInt(buildShader.buildColorAIndex, m.buildColorAIndex);
+                graphics->setUniformInt(buildShader.buildColorBIndex, m.buildColorBIndex);
+                graphics->setUniformFloat(buildShader.heightBias, m.heightBias);
 
                 graphics->setActiveTextureSlot1();
                 graphics->bindTexture(m.paletteIndexTexture);
@@ -362,6 +367,7 @@ namespace rwe
                 graphics->setUniformFloat(shader.groundHeight, m.groundHeight);
                 graphics->setUniformBool(shader.projected, m.projected);
                 graphics->setUniformFloat(shader.shadowOriginY, m.shadowOriginY);
+                graphics->setUniformFloat(shader.cutBelowY, m.cutBelowY);
                 graphics->setUniformMatrix(shader.vpMatrix, m.vpMatrix);
                 graphics->setUniformMatrix(shader.modelMatrix, m.modelMatrix);
 

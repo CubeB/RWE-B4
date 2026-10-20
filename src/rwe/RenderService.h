@@ -101,6 +101,23 @@ namespace rwe
         BuildFillMode belowMode;
         Vector3f buildColorA;
         Vector3f buildColorB;
+        /**
+         * How far the original's height buffer lifts a vertex above the model
+         * origin: 50, or 125 for a digger, whose model reaches below that
+         * origin. The larger value keeps the height byte from wrapping
+         * (TOTALA-EXE-SHADING.md S:04, S:11, S:22; model-render parity
+         * rule 8).
+         */
+        float heightBias{50.0f};
+        /**
+         * The palette index of each animated fill colour, 160..175. The
+         * original recolours the nanoframe to a palette index and applies the
+         * water blue remap to the finished picture afterwards, so an
+         * underwater fill has to be looked up through the blue table rather
+         * than tinted from its RGB (BT-142).
+         */
+        int buildColorAIndex{0};
+        int buildColorBIndex{0};
         /** As UnitTextureMeshRenderInfo::waterCut. */
         float waterCut{0.0f};
         /** As UnitTextureMeshRenderInfo::cutBelowY. */
@@ -132,6 +149,15 @@ namespace rwe
         bool projected;
         /** The one height an offset shadow takes its displacement from; unused when projected. */
         float shadowOriginY;
+        /**
+         * World height below which the fragment is cut, or NoCutBelowY.
+         *
+         * A mobile unit whose origin is below the sea has its copied silhouette
+         * cut at the water line, so a submerged unit can cast no shadow at all
+         * (SUBMARINE-CONSTRUCTION-SHADOW-FINDINGS.md section 2). A projected
+         * building shadow has no such cut.
+         */
+        float cutBelowY{NoCutBelowY};
     };
 
     struct UnitMeshBatch

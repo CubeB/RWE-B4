@@ -72,6 +72,8 @@ namespace rwe
         UniformLocation groundHeight;
         UniformLocation projected;
         UniformLocation shadowOriginY;
+        /** World height below which the fragment is cut, or a value far below any world. */
+        UniformLocation cutBelowY;
     };
 
     struct UnitBuildShader
@@ -91,6 +93,11 @@ namespace rwe
         UniformLocation belowMode;
         UniformLocation buildColorA;
         UniformLocation buildColorB;
+        /** Palette indices of buildColorA/B, for the underwater blue lookup. */
+        UniformLocation buildColorAIndex;
+        UniformLocation buildColorBIndex;
+        /** 50, or 125 for a digger: the original's height-buffer bias. */
+        UniformLocation heightBias;
         UniformLocation paletteIndexSampler;
         UniformLocation shadeTableSampler;
     };
