@@ -121,6 +121,7 @@ namespace rwe
         Observable<bool>& onHover();
 
         void setStage(unsigned int newStage);
+        void appendStage(const StageInfo& stage) { stages.push_back(stage); }
 
         unsigned int getStage() const { return currentStage; }
 

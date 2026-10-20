@@ -27,7 +27,8 @@ namespace rwe
         // BT-44/49/255: the new fire rules change recorded command outcomes.
         // BT-264/265: lava exclusion changes ground command outcomes.
         // BT-266: factory destruction now cancels its retained product.
-        constexpr char Version = 5;
+        // #383/#699/#700 change command outcomes and elimination state.
+        constexpr char Version = 6;
 
         constexpr const char* ReplayExtension = ".rwereplay";
 
@@ -135,9 +136,10 @@ namespace rwe
             {StartLocationMode::Random, "random"},
         }};
 
-        constexpr std::array<std::pair<CommanderDeathMode, const char*>, 2> CommanderDeathNames{{
+        constexpr std::array<std::pair<CommanderDeathMode, const char*>, 3> CommanderDeathNames{{
             {CommanderDeathMode::GameEnds, "gameends"},
             {CommanderDeathMode::GameContinues, "gamecontinues"},
+            {CommanderDeathMode::Deathmatch, "deathmatch"},
         }};
 
         constexpr std::array<std::pair<PathfindingBackend, const char*>, 2> PathfindingBackendNames{{

@@ -127,6 +127,8 @@ namespace rwe
         GameEnds = 0,
         /** The commander is just another unit; the game runs on. */
         GameContinues = 1,
+        /** Wipe the army, then replace the commander after the countdown. */
+        Deathmatch = 2,
     };
 
     /**

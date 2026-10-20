@@ -688,9 +688,9 @@ namespace rwe
 
         SECTION("a label with no meaning here maps to nothing, and is not offered")
         {
-            CHECK_FALSE(optionStageOfButtonStage("commander", commander, 2).has_value());
-            CHECK_FALSE(optionStageForLabel("commander", "Deathmatch").has_value());
-            CHECK(usableOptionLabels("commander", commander) == std::vector<std::string>{"Continues", "Game ends"});
+            CHECK(optionStageOfButtonStage("commander", commander, 2) == 2u);
+            CHECK(optionStageForLabel("commander", "Deathmatch") == 2u);
+            CHECK(usableOptionLabels("commander", commander) == std::vector<std::string>{"Continues", "Game ends", "Deathmatch"});
             // An option the model does not have, and a stage past the buttons.
             CHECK_FALSE(optionStageForLabel("cheating", "Allowed").has_value());
             CHECK_FALSE(optionStageOfButtonStage("mapping", mapping, 9).has_value());
@@ -699,17 +699,18 @@ namespace rwe
         SECTION("a click on the usable labels flips the commander the right way")
         {
             const auto usable = usableOptionLabels("commander", commander);
-            // Game ends (0) -> Continues (1) -> Game ends (0).
-            CHECK(nextOptionStage("commander", usable, 0) == 1u);
+            // The caption order is Continues, Game ends, Deathmatch.
+            CHECK(nextOptionStage("commander", usable, 0) == 2u);
             CHECK(nextOptionStage("commander", usable, 1) == 0u);
+            CHECK(nextOptionStage("commander", usable, 2) == 1u);
         }
 
-        SECTION("a click with the full list skips the label with no meaning")
+        SECTION("a click with the full list includes Deathmatch")
         {
             // Continues (model 1) is the first label, so the next is Game
-            // ends; from Game ends the next is Deathmatch, which is skipped.
+            // ends; from Game ends the next is Deathmatch.
             CHECK(nextOptionStage("commander", commander, 1) == 0u);
-            CHECK(nextOptionStage("commander", commander, 0) == 1u);
+            CHECK(nextOptionStage("commander", commander, 0) == 2u);
         }
     }
 

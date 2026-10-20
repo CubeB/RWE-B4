@@ -1328,6 +1328,10 @@ namespace rwe
         // SKIRMISH.GUI hangs on the button itself, so that is what it gets.
         if (optionName == "CommanderDeath")
         {
+            if (stage == 2)
+            {
+                return "Replace the commander after defeat; the game continues.";
+            }
             return stage == 0
                 ? "Game ends when commander is destroyed."
                 : "Game continues after Commander is destroyed.";
@@ -1382,6 +1386,10 @@ namespace rwe
                 return;
             }
 
+            if (name == "CommanderDeath" && button->get().getStageCount() == 2)
+            {
+                button->get().appendStage(UiStagedButton::StageInfo(button->get().getStageSprite(0), "Deathmatch"));
+            }
             auto sub = option.subscribe([this, b = &button->get(), helpLabel, name](unsigned int stage) {
                 b->setStage(stage);
                 // Cycling an option under the pointer should re-read: the
@@ -1453,7 +1461,7 @@ namespace rwe
 
         if (optionName == "CommanderDeath")
         {
-            cycle(model.skirmishOptions.commanderDeath, 2);
+            cycle(model.skirmishOptions.commanderDeath, 3);
         }
         else if (optionName == "StartLocation")
         {
@@ -1896,7 +1904,8 @@ namespace rwe
     /** SKIRMISH.GUI: text=Game ends|Continues. */
     CommanderDeathMode skirmishStageToCommanderDeathMode(unsigned int stage)
     {
-        return stage == 0 ? CommanderDeathMode::GameEnds : CommanderDeathMode::GameContinues;
+        return stage == 2 ? CommanderDeathMode::Deathmatch
+            : stage == 0 ? CommanderDeathMode::GameEnds : CommanderDeathMode::GameContinues;
     }
 
     void MainMenuScene::readNetworkAddressesFromPanel()

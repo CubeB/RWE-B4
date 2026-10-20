@@ -27,7 +27,29 @@ Shipped profile fixture: extracted `rev31/ai/MISSIONS.TXT`, SHA-256
 The test retains its directive sequence at easy/medium/hard. The parser's
 separate tests cover name/category locks and overlapping directives.
 
-## Verification status
+## Commander modes
+
+The existing GameEnds/Continues enum and save names are retained; Deathmatch
+is a third value. Both setup screens advertise it. Command recordings move
+to version 6 because mission policy and elimination outcomes have changed.
+`--commander-death gameends|continues|deathmatch` is available to the game
+and headless arena. Missions continue to use their own rules.
+
+Each defeated seat has its own six-observation countdown. Deathmatch suppresses
+ordinary victory for both skirmish and multiplayer, respawns human and computer
+seats, and uses the initial side-resolved commander type. Candidates use the
+documented bounds, order, 9999-attempt limit and widely spaced nine probes,
+with RWE's established deterministic RNG. Removed peers never respawn.
+Successful replacement preserves the bank/statistics, credits starting resources
+through the new unit, and enables unscaled base storage of at least 200 plus
+normal unit storage. The local human's camera follows a replacement.
+
+The wipe uses direct 30000 damage with the documented victim-veterancy reduction
+and the existing cause-3 death path. The existing missing Killed-script ladder
+for cause 3 remains tracked separately by #409; this work does not claim it
+reproduces that ladder. Safe failed creation is retried on later polls.
+
+## Verification status (work in progress)
 
 The initial mission-profile build linked the game and passed 13 focused cases
 (109 assertions). Further verification is required after the final changes.

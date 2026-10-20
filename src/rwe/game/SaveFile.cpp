@@ -183,9 +183,10 @@ namespace rwe
             {StartLocationMode::Random, "random"},
         }};
 
-        constexpr std::array<std::pair<CommanderDeathMode, const char*>, 2> CommanderDeathNames{{
+        constexpr std::array<std::pair<CommanderDeathMode, const char*>, 3> CommanderDeathNames{{
             {CommanderDeathMode::GameEnds, "gameends"},
             {CommanderDeathMode::GameContinues, "gamecontinues"},
+            {CommanderDeathMode::Deathmatch, "deathmatch"},
         }};
 
         constexpr std::array<std::pair<PathfindingBackend, const char*>, 2> PathfindingBackendNames{{

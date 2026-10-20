@@ -18,6 +18,26 @@
 
 namespace rwe
 {
+    void GameScene::updateRespawnCamera()
+    {
+        const auto count = simulation.getPlayer(localPlayerId).respawnCount;
+        const auto previous = lastSeenRespawnCount.value_or(count);
+        lastSeenRespawnCount = count;
+        if (count == previous || isPlayback())
+        {
+            return;
+        }
+        clearUnitSelection();
+        for (const auto& [id, unit] : simulation.units)
+        {
+            if (unit.owner == localPlayerId && unit.isAlive() && simulation.unitDefinitions.at(unit.unitType).commander)
+            {
+                selectAdditionalUnit(id);
+                setCameraPosition(Vector3f(unit.position.x.value, 0.0f, unit.position.z.value));
+                break;
+            }
+        }
+    }
     namespace
     {
         /**

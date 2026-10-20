@@ -5,6 +5,7 @@ namespace rwe
 {
     void GameSimulation::initializeLavaExclusions(bool lavaWorld)
     {
+        this->lavaWorld = lavaWorld;
         // BT-264/265: prepare once after map features, before pass maps.
         // See docs/agents/lava-movement.md for reference and lifetime evidence.
         std::vector<unsigned int> indices;

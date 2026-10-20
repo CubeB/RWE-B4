@@ -348,8 +348,7 @@ namespace rwe
      *
      * `optionName` is the name optionsFromModel uses (commander, startloc,
      * mapping, los). `labels` are the button's own captions, left to right.
-     * A label this build has no meaning for -- the battleroom's `Deathmatch`
-     * -- maps to nothing, and the screen builds the button without it.
+     * Unknown labels map to nothing. Deathmatch is the third commander mode.
      */
     std::optional<unsigned int> optionStageForLabel(const std::string& optionName, const std::string& label);
     std::optional<unsigned int> optionStageOfButtonStage(const std::string& optionName, const std::vector<std::string>& labels, unsigned int buttonStage);

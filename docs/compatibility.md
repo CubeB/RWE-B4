@@ -41,6 +41,17 @@ cap remain. The implementation covers burn, death and reclaim animation states.
 The section 88 entry is in the spec-room
 register (documentation commit `9d39950e`).
 
+**Mission profiles also constrain RWE's AI.** The selected profile's limits
+and weights influence its own planner. Reserved production counts toward
+limits, and weights rank structures and scale combat mixes. Classic AI
+retains its own rules.
+
+**Deathmatch uses shared per-seat countdowns.** Human and computer seats
+respawn, and skirmish uses the same endless mode as multiplayer. This
+replaces the original's machine-local countdown with deterministic shared
+state. Other seats keep playing while one waits. Candidate draws use RWE's
+existing RNG. See the [mission/elimination divergence appendix](agents/383-699-700-divergences.md).
+
 ## Kept: the original's quirks, reproduced on purpose
 
 **Buildings have a purple halo.** Jon Mavor, who wrote the graphics engine,

@@ -395,6 +395,8 @@ namespace rwe
         /** Set when the game has been decided; the result is shown until the player leaves. */
         std::optional<WinStatus> gameOver;
         GameTime gameOverTime{0};
+        std::optional<unsigned int> lastSeenRespawnCount;
+        void updateRespawnCamera();
 
         /**
          * Set once the game-ended event has gone out, so the three endings --
