@@ -697,6 +697,7 @@ namespace rwe
                     getLaserColorUtil(palette, guiPalette, tdf.color),
                     getLaserColorUtil(palette, guiPalette, tdf.color2),
                     SimScalar(tdf.duration * 30.0f * 2.0f), // duration seems to match better if doubled
+                    tdf.color2 != 0,
                 };
                 break;
             }

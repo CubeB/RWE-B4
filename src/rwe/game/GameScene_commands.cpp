@@ -11,6 +11,7 @@
 #include <rwe/Mesh.h>
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/camera_util.h>
+#include <rwe/game/GameScene_ownclock.h>
 #include <rwe/game/GameScene_util.h>
 #include <rwe/game/OrderButtons.h>
 #include <rwe/game/PlayerCommandApplication.h>
@@ -3081,7 +3082,23 @@ namespace rwe
                 // player changes speed as in a skirmish.
                 if (issuingPlayer == PlayerId(0) || (isOwnClock() && issuingPlayer == localPlayerId))
                 {
-                    gameSpeed = GameSpeed(c.speedIndex);
+                    auto nextSpeed = GameSpeed(c.speedIndex);
+
+                    // The original's speed setter prints its transient line
+                    // only when the level really changes, and only the
+                    // machine that issued the change sees it: it goes to the
+                    // local message list, not to chat and not over the wire.
+                    // Level 10 (RWE's default index) reads "Game Speed
+                    // Normal"; every other level is the signed offset from
+                    // ten after two spaces, e.g. "Game Speed  +2".
+                    // TOTALA-EXE-KEYBOARD.md:120-121,
+                    // BT-GAME-GAME-STATE-PARITY.md:136-147.
+                    if (!isPlayback() && issuingPlayer == localPlayerId && nextSpeed.index() != gameSpeed.index())
+                    {
+                        printConsole(gameSpeedMessage(nextSpeed.index() + 1));
+                    }
+
+                    gameSpeed = nextSpeed;
                 }
             },
             [&](const PlayerDroppedCommand& c) {

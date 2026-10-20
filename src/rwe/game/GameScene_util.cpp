@@ -494,11 +494,11 @@ namespace rwe
     {
         if (mesh.vertices)
         {
-            batch.push_back(UnitTextureShadowMeshRenderInfo{&*mesh.vertices, matrix, viewProjectionMatrix, atlases.atlas, shadow.groundHeight, shadow.projected, shadow.originY});
+            batch.push_back(UnitTextureShadowMeshRenderInfo{&*mesh.vertices, matrix, viewProjectionMatrix, atlases.atlas, shadow.groundHeight, shadow.projected, shadow.originY, shadow.cutBelowY});
         }
         if (mesh.teamVertices)
         {
-            batch.push_back(UnitTextureShadowMeshRenderInfo{&*mesh.teamVertices, matrix, viewProjectionMatrix, atlases.teamAtlases->at(0).get(), shadow.groundHeight, shadow.projected, shadow.originY});
+            batch.push_back(UnitTextureShadowMeshRenderInfo{&*mesh.teamVertices, matrix, viewProjectionMatrix, atlases.teamAtlases->at(0).get(), shadow.groundHeight, shadow.projected, shadow.originY, shadow.cutBelowY});
         }
     }
 
@@ -561,6 +561,40 @@ namespace rwe
         return !unitDefinition.noShadow;
     }
 
+    std::unordered_set<UnitId> attachedFactoryProducts(const GameSimulation& simulation)
+    {
+        std::unordered_set<UnitId> attached;
+
+        for (const auto& [_, factory] : simulation.units)
+        {
+            const auto* building = std::get_if<FactoryBehaviorStateBuilding>(&factory.factoryState);
+            if (building == nullptr || !building->targetUnit)
+            {
+                continue;
+            }
+
+            auto productId = building->targetUnit->first;
+            auto product = simulation.units.find(productId);
+            if (product == simulation.units.end())
+            {
+                continue;
+            }
+
+            const auto& productDefinition = simulation.unitDefinitions.at(product->second.unitType);
+            if (product->second.isBeingBuilt(productDefinition))
+            {
+                attached.insert(productId);
+            }
+        }
+
+        return attached;
+    }
+
+    bool unitShadowIsWaterCut(float originY, float seaLevel)
+    {
+        return originY < seaLevel;
+    }
+
     bool featureCastsShadow(SimScalar groundHeight, SimScalar seaLevel)
     {
         // `jl 0x45935C`: strictly below the sea level casts none; at it, it does.
@@ -618,6 +652,7 @@ namespace rwe
         const Matrix4f& matrix,
         float shadeStrength,
         const BuildPhase& buildPhase,
+        float heightBias,
         float unitY,
         float unitHeight,
         PlayerColorIndex playerColorIndex,
@@ -627,11 +662,11 @@ namespace rwe
         auto mvpMatrix = viewProjectionMatrix * matrix;
         if (mesh.vertices)
         {
-            batch.push_back(UnitBuildingMeshRenderInfo{&*mesh.vertices, matrix, mvpMatrix, shadeStrength, atlases.atlas, atlases.paletteIndexAtlas, unitY, unitHeight, buildPhase.ratio, buildPhase.aboveMode, buildPhase.bandMode, buildPhase.belowMode, buildPhase.colorA, buildPhase.colorB});
+            batch.push_back(UnitBuildingMeshRenderInfo{&*mesh.vertices, matrix, mvpMatrix, shadeStrength, atlases.atlas, atlases.paletteIndexAtlas, unitY, unitHeight, buildPhase.ratio, buildPhase.aboveMode, buildPhase.bandMode, buildPhase.belowMode, buildPhase.colorA, buildPhase.colorB, heightBias, buildPhase.colorAIndex, buildPhase.colorBIndex});
         }
         if (mesh.teamVertices)
         {
-            batch.push_back(UnitBuildingMeshRenderInfo{&*mesh.teamVertices, matrix, mvpMatrix, shadeStrength, atlases.teamAtlases->at(playerColorIndex.value).get(), atlases.teamPaletteIndexAtlases->at(playerColorIndex.value).get(), unitY, unitHeight, buildPhase.ratio, buildPhase.aboveMode, buildPhase.bandMode, buildPhase.belowMode, buildPhase.colorA, buildPhase.colorB});
+            batch.push_back(UnitBuildingMeshRenderInfo{&*mesh.teamVertices, matrix, mvpMatrix, shadeStrength, atlases.teamAtlases->at(playerColorIndex.value).get(), atlases.teamPaletteIndexAtlases->at(playerColorIndex.value).get(), unitY, unitHeight, buildPhase.ratio, buildPhase.aboveMode, buildPhase.bandMode, buildPhase.belowMode, buildPhase.colorA, buildPhase.colorB, heightBias, buildPhase.colorAIndex, buildPhase.colorBIndex});
         }
     }
 
@@ -640,6 +675,7 @@ namespace rwe
         const Matrix4f& viewProjectionMatrix,
         const std::string& objectName,
         const UnitModelDefinition& modelDefinition,
+        bool digger,
         const std::vector<UnitMesh>& meshes,
         const Matrix4f& modelMatrix,
         const BuildPhase& buildPhase,
@@ -653,6 +689,13 @@ namespace rwe
         const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(objectName, modelDefinition);
         const auto& transforms = computePieceTransformsForRender(modelDefinition, renderInfo, meshes, frac);
 
+        // The original's height buffer is modelY + K, with K = 125 for a
+        // digger and 50 for everything else (TOTALA-EXE-SHADING.md S:04,
+        // S:11, S:22; model-render parity rule 8). A digger's parts hang below
+        // its origin, and the larger bias is what keeps the height byte from
+        // wrapping around there.
+        const float heightBias = digger ? 125.0f : 50.0f;
+
         for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
             const auto& mesh = meshes[i];
@@ -661,7 +704,7 @@ namespace rwe
                 continue;
             }
 
-            drawBuildingShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], mesh.shaded ? shadeStrength : 0.0f, buildPhase, unitY, simScalarToFloat(modelDefinition.height), playerColorIndex, atlases, batch.buildingMeshes);
+            drawBuildingShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, modelMatrix * transforms[i], mesh.shaded ? shadeStrength : 0.0f, buildPhase, heightBias, unitY, simScalarToFloat(modelDefinition.height), playerColorIndex, atlases, batch.buildingMeshes);
         }
     }
 
@@ -704,7 +747,7 @@ namespace rwe
         if (unit.isBeingBuilt(unitDefinition))
         {
             auto buildPhase = computeBuildPhase(unit.getPreciseCompletePercent(unitDefinition), unitIndex, gameTime);
-            drawBuildingUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, buildPhase, position.y, playerColorIndex, frac, shadeStrength, atlases, batch);
+            drawBuildingUnitMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unitDefinition.digger, unit.pieces, transform, buildPhase, position.y, playerColorIndex, frac, shadeStrength, atlases, batch);
         }
         else
         {
@@ -780,6 +823,7 @@ namespace rwe
         const UnitModelDefinition& modelDefinition,
         float frac,
         float groundHeight,
+        float seaLevel,
         const UnitTextureAtlases& atlases,
         UnitShadowMeshBatch& batch)
     {
@@ -801,8 +845,16 @@ namespace rwe
         // anything that drives. The height it is taken from is the unit's
         // base. RWE used to take it from the top of the model, which is what
         // made a commander look as if it were floating over its own shadow.
+        //
+        // A mobile unit below the sea has that copy cut at the water line, so
+        // a submerged one can cast no shadow at all
+        // (SUBMARINE-CONSTRUCTION-SHADOW-FINDINGS.md section 2). A projected
+        // building shadow is left alone.
+        auto cutBelowY = (unitDefinition.isMobile && unitShadowIsWaterCut(position.y, seaLevel))
+            ? seaLevel
+            : NoCutBelowY;
         auto shadow = unitDefinition.isMobile
-            ? ShadowProjection{groundHeight, false, position.y}
+            ? ShadowProjection{groundHeight, false, position.y, cutBelowY}
             : ShadowProjection{groundHeight, true, 0.0f};
 
         drawUnitShadowMesh(gameMediaDatabase, viewProjectionMatrix, unitDefinition.objectName, modelDefinition, unit.pieces, transform, frac, shadow, atlases, batch);
@@ -1174,6 +1226,9 @@ namespace rwe
         Vector3f(47 / 255.0f, 119 / 255.0f, 27 / 255.0f),
     };
 
+    /** First of the sixteen palette entries the build fill cycles through. */
+    static constexpr unsigned int BuildCycleFirstPaletteIndex = 160;
+
     /**
      * Palette entries 160..175: the sixteen greens, palest to near black, that
      * the original's construction display cycles through.
@@ -1197,7 +1252,7 @@ namespace rwe
         Vector3f(7 / 255.0f, 15 / 255.0f, 0 / 255.0f),
     };
 
-    Vector3f buildCycleColor(unsigned int unitIndex, unsigned int gameTime, unsigned int xorKey, unsigned int rate)
+    unsigned int buildCycleColorIndex(unsigned int unitIndex, unsigned int gameTime, unsigned int xorKey, unsigned int rate)
     {
         // A counter that advances rate/30 places a tick, offset per unit so
         // that two things being built side by side are not in step, then
@@ -1205,7 +1260,12 @@ namespace rwe
         // down the greens and back up again.
         auto n = (unitIndex ^ xorKey) + ((rate * gameTime) / 30);
         auto low = n & 0x0Fu;
-        return BuildCycleColors[(n & 0x10u) ? (15u - low) : low];
+        return (n & 0x10u) ? (15u - low) : low;
+    }
+
+    Vector3f buildCycleColor(unsigned int unitIndex, unsigned int gameTime, unsigned int xorKey, unsigned int rate)
+    {
+        return BuildCycleColors[buildCycleColorIndex(unitIndex, gameTime, xorKey, rate)];
     }
 
     Vector3f buildCycleColorA(unsigned int unitIndex, unsigned int gameTime)
@@ -1227,6 +1287,12 @@ namespace rwe
         BuildPhase phase;
         phase.colorA = buildCycleColorA(unitIndex, gameTime);
         phase.colorB = buildCycleColorB(unitIndex, gameTime);
+        // The colours are palette entries 160..175. Keep the index alongside
+        // each RGB so the shader can apply the water blue table to the
+        // finished fill, which is what the original does to the whole picture
+        // after recolouring it (BT-142).
+        phase.colorAIndex = static_cast<int>(BuildCycleFirstPaletteIndex + buildCycleColorIndex(unitIndex, gameTime, 5, 33));
+        phase.colorBIndex = static_cast<int>(BuildCycleFirstPaletteIndex + buildCycleColorIndex(unitIndex, gameTime, 9, 57));
 
         int ratio;
         if (v >= 236)
@@ -1650,6 +1716,112 @@ namespace rwe
         return (currentTime.value / 2) % numFrames;
     }
 
+    namespace
+    {
+        /**
+         * A one-original-pixel-wide ribbon along a screen-space segment.
+         *
+         * The projection maps world X to screen X and `z - y/2` to screen Y,
+         * one world unit each at the fixed 1:1 scale, so a ribbon one unit
+         * across is the original's one-pixel line and grows with the camera's
+         * pixels-per-world-unit. Corners are ordered by their clip-space
+         * winding so the renderer's back-face culling keeps them.
+         */
+        void pushBeamRibbon(
+            const Vector3f& a,
+            const Vector3f& b,
+            const Vector3f& color,
+            std::vector<GlColoredVertex>& out)
+        {
+            auto screenDelta = Vector2f(b.x - a.x, (b.z - a.z) - 0.5f * (b.y - a.y));
+            auto length = std::sqrt(screenDelta.x * screenDelta.x + screenDelta.y * screenDelta.y);
+
+            if (length <= 0.0f)
+            {
+                // A zero-length shot is still a one-pixel dot.
+                auto halfX = Vector3f(0.5f, 0.0f, 0.0f);
+                auto halfZ = Vector3f(0.0f, 0.0f, 0.5f);
+                auto a0 = a - halfX - halfZ;
+                auto a1 = a + halfX - halfZ;
+                auto a2 = a + halfX + halfZ;
+                auto a3 = a - halfX + halfZ;
+                // Anticlockwise in clip space, which is what culling keeps.
+                pushTriangle(out, a0, a2, a1, color);
+                pushTriangle(out, a0, a3, a2, color);
+                return;
+            }
+
+            auto perpX = -screenDelta.y / length;
+            auto perpY = screenDelta.x / length;
+            auto halfOffset = Vector3f(perpX * 0.5f, 0.0f, perpY * 0.5f);
+
+            auto a0 = a - halfOffset;
+            auto a1 = a + halfOffset;
+            auto b0 = b - halfOffset;
+            auto b1 = b + halfOffset;
+
+            // Winding in clip space: x is world x, y is -(z - y/2).
+            auto clip = [](const Vector3f& p) {
+                return Vector2f(p.x, -(p.z - 0.5f * p.y));
+            };
+            auto cross = [](const Vector2f& u, const Vector2f& v) {
+                return u.x * v.y - u.y * v.x;
+            };
+            auto c0 = clip(a0);
+            auto c1 = clip(b0);
+            auto c2 = clip(b1);
+            auto edge1 = Vector2f(c1.x - c0.x, c1.y - c0.y);
+            auto edge2 = Vector2f(c2.x - c0.x, c2.y - c0.y);
+            if (cross(edge1, edge2) >= 0.0f)
+            {
+                pushTriangle(out, a0, b0, b1, color);
+                pushTriangle(out, a0, b1, a1, color);
+            }
+            else
+            {
+                pushTriangle(out, a0, b1, b0, color);
+                pushTriangle(out, a0, a1, b1, color);
+            }
+        }
+    }
+
+    void appendLaserBeam(
+        const Vector3f& head,
+        const Vector3f& tail,
+        const Vector3f& color,
+        const Vector3f& color2,
+        bool hasCompanion,
+        std::vector<GlColoredVertex>& out)
+    {
+        auto screenDelta = Vector2f(tail.x - head.x, (tail.z - head.z) - 0.5f * (tail.y - head.y));
+
+        // The core goes down first. Where the two lines meet, the later write
+        // wins in the original and the core is its second call; with the depth
+        // test's GL_LESS the first equal-depth write is the one that stays.
+        pushBeamRibbon(head, tail, color, out);
+
+        if (!hasCompanion)
+        {
+            return;
+        }
+
+        if (std::abs(screenDelta.x) > std::abs(screenDelta.y))
+        {
+            // More horizontal than vertical: the companion is one scanline up.
+            auto up = Vector3f(0.0f, 0.0f, -1.0f);
+            pushBeamRibbon(head + up, tail + up, color2, out);
+        }
+        else
+        {
+            // Otherwise it runs from one pixel left of the top end to one
+            // pixel right of the bottom end, crossing the core.
+            auto headIsTop = (head.z - 0.5f * head.y) <= (tail.z - 0.5f * tail.y);
+            const auto& top = headIsTop ? head : tail;
+            const auto& bottom = headIsTop ? tail : head;
+            pushBeamRibbon(top + Vector3f(-1.0f, 0.0f, 0.0f), bottom + Vector3f(1.0f, 0.0f, 0.0f), color2, out);
+        }
+    }
+
     void drawProjectiles(
         const GameSimulation& sim,
         const PlayerVisibility& visibility,
@@ -1682,16 +1854,9 @@ namespace rwe
             match(
                 weaponMediaInfo.renderType,
                 [&](const ProjectileRenderTypeLaser& l) {
-                    Vector3f pixelOffset(0.0f, 0.0f, -1.0f);
-
-                    std::vector<GlColoredVertex> laserVertices;
                     auto backPosition = lerp(simVectorToFloat(projectile.getPreviousBackPosition(l.duration)), simVectorToFloat(projectile.getBackPosition(l.duration)), frac);
 
-                    coloredMeshbatch.lines.emplace_back(position, l.color);
-                    coloredMeshbatch.lines.emplace_back(backPosition, l.color);
-
-                    coloredMeshbatch.lines.emplace_back(position + pixelOffset, l.color2);
-                    coloredMeshbatch.lines.emplace_back(backPosition + pixelOffset, l.color2);
+                    appendLaserBeam(position, backPosition, l.color, l.color2, l.hasCompanion, coloredMeshbatch.triangles);
                 },
                 [&](const ProjectileRenderTypeModel& m) {
                     // A missile flies exactly where its nose points (0x49BA74

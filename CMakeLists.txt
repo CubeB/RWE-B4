@@ -1331,6 +1331,7 @@ set(TEST_FILES
     src/rwe/sim/airbase.test.cpp
     src/rwe/sim/repairpatrol.test.cpp
     src/rwe/game/noshadow.test.cpp
+    src/rwe/game/buildphase.test.cpp
     src/rwe/sim/missile.test.cpp
     src/rwe/sim/seacollision.test.cpp
     src/rwe/sim/projectilecell.test.cpp
