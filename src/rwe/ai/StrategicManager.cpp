@@ -1,5 +1,6 @@
 #include "StrategicManager.h"
 #include <rwe/sim/SimTicksPerSecond.h>
+#include <algorithm>
 
 namespace rwe
 {
@@ -10,10 +11,61 @@ namespace rwe
             auto it = bb.ownedCompletedCounts.find(unitType);
             return it == bb.ownedCompletedCounts.end() ? 0 : it->second;
         }
+
+        /**
+         * Whether the value-odds gate is open: our known army metal at least
+         * attackValueRatio times the known enemy ground army's to open it, and
+         * held open until we fall below retreatValueRatio. The two marks are
+         * the hysteresis; a single one would open and shut on consecutive
+         * passes as one unit is remembered or forgotten.
+         *
+         * With nothing of theirs known the gate is shut and the headcount /
+         * patience gate is all there is, so an enemy nobody can find cannot
+         * stall the AI by keeping this one closed. The same is true when the
+         * knob is off, which is the old command stream.
+         *
+         * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:3); the
+         * original's computer player has no value-odds posture, so this is
+         * not classic parity.
+         */
+        bool valueOddsOpen(const AiTuningProfile& profile, AiBlackboard& bb)
+        {
+            if (!profile.attackUsesValueOdds || bb.knownEnemyArmyMetal <= 0.0f)
+            {
+                bb.attackOddsCommitted = false;
+                return false;
+            }
+
+            // The value gate may pull the counted wave forward, but not to a
+            // handful of units. Half the counted wave is the floor: a side
+            // that happens to out-value one remembered scout still has to
+            // have an army, and a profile that has deliberately set
+            // attackArmySize out of reach is not overridden by a skirmish.
+            // retreatArmySize remains the hard "something worth sending".
+            auto halfWave = (profile.attackArmySize + 1) / 2;
+            auto needed = std::max(profile.retreatArmySize, halfWave);
+
+            if (!bb.attackOddsCommitted)
+            {
+                if (bb.armySize >= needed
+                    && bb.armyMetal >= profile.attackValueRatio * bb.knownEnemyArmyMetal)
+                {
+                    bb.attackOddsCommitted = true;
+                }
+            }
+            else if (bb.armyMetal < profile.retreatValueRatio * bb.knownEnemyArmyMetal)
+            {
+                bb.attackOddsCommitted = false;
+            }
+            return bb.attackOddsCommitted && bb.armySize >= needed;
+        }
     }
 
     void StrategicManager::update(const AiTuningProfile& profile, AiBlackboard& bb) const
     {
+        // Re-evaluated every tick so the hysteresis state is current even
+        // during a defend or a wave; only the Boom branch below acts on it.
+        auto oddsReady = valueOddsOpen(profile, bb);
         // Something hostile in the base overrides everything else -- except
         // a wave already on its way. Recalling the whole attack for one
         // scout at the extractors is what the army used to do, and it is
@@ -63,7 +115,7 @@ namespace rwe
                     && bb.now.value >= bb.lastAttackPhase.value + (static_cast<unsigned int>(profile.attackPatienceSeconds) * SimTicksPerSecond)
                     && bb.armySize >= profile.retreatArmySize;
 
-                if ((bb.armySize >= profile.attackArmySize || fleetReady || waited) && haveTarget)
+                if ((bb.armySize >= profile.attackArmySize || fleetReady || waited || oddsReady) && haveTarget)
                 {
                     bb.phase = GamePhase::Attack;
                 }
@@ -78,6 +130,10 @@ namespace rwe
                 if (spent)
                 {
                     bb.phase = GamePhase::Boom;
+                    // The next wave earns its own odds; carrying the last
+                    // wave's open gate forward would skip the ratio test for
+                    // whatever the enemy has rebuilt in the meantime.
+                    bb.attackOddsCommitted = false;
                 }
                 break;
             }

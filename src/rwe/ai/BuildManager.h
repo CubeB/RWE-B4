@@ -27,6 +27,30 @@ namespace rwe
     class UnitState;
 
     /**
+     * The smallest change in a frame's buildTimeCompleted, in build ticks,
+     * that counts as progress for factoryQueueDropStalled. One percent of the
+     * unit's build time, and never less than one tick.
+     */
+    unsigned int factoryQueueProgressFloor(unsigned int buildTime);
+
+    /**
+     * Whether a queue head watched by factoryQueueDropStalled should be
+     * dropped: it has been held for the whole timeout, the frame has moved by
+     * less than factoryQueueProgressFloor, and it cannot be afforded.
+     *
+     * Pure, so the deadline and the progress guard are pinned without a
+     * simulation: `heldTicks` is how long the head has been watched,
+     * `frameProgress` the build ticks the current frame completed in that
+     * window, and `buildTime` the head unit's total.
+     */
+    bool factoryQueueHeadIsStalled(
+        unsigned int heldTicks,
+        unsigned int frameProgress,
+        unsigned int buildTime,
+        int stallSeconds,
+        bool affordable);
+
+    /**
      * Turns the blackboard's picture of the economy into build orders for
      * idle builders and production for factories.
      */
@@ -733,6 +757,24 @@ namespace rwe
             bool seenThisPass{false};
         };
         mutable std::map<unsigned int, FactoryHoldSpell> factoryHoldSpells;
+
+        /**
+         * A queue head watched by factoryQueueDropStalled: when the watch
+         * began, what is at the head, and how far its frame had got then.
+         * `frame` is the frame's raw id, zero when none is known. Mutable
+         * because planFactories is const; unlike FactoryHoldSpell this one
+         * feeds a decision, so it is walked in id order and is not read by
+         * the sync hash or the save.
+         */
+        struct FactoryQueueStall
+        {
+            std::string headType;
+            unsigned int frame{0};
+            unsigned int completedAtStart{0};
+            GameTime since;
+            bool seenThisPass{false};
+        };
+        mutable std::map<unsigned int, FactoryQueueStall> factoryQueueStalls;
 
         /**
          * Whether the commander's current spell below the repair line has

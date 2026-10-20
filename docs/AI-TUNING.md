@@ -249,3 +249,61 @@ The full permitted suite passed: 1861 cases / 194009 assertions. The AI suite
 alone is 270 cases / 9717 assertions. The full governing document is
 `docs/agents/rwe-ai-strength.md`; the raw games are under
 `D:/tmp/rwe-ai-ab/` (not checked in).
+
+## Second and third AI batches: production capacity and adaptability
+
+2026-10-20. RWE-AI only; the classic engine is untouched. Maps are **Great
+Divide** (0% water) and **Dark Side**; Coast To Coast is a ferry test, not a
+general strength map.
+
+### Factory queue depth and AA escort
+
+Four seeds (4301-4304), Great Divide, 1800 s, batch 1 against batch 2, RWE
+against the classic personality, dealt seats. All eight games were RWE wins,
+but batch 2 was slower on three of four (4301 22831 -> 27091; 4302 20071 ->
+25051; 4303 23431 -> 21061; 4304 21871 -> 43861). Isolating the two knobs on
+the same seeds:
+
+| Arm | 4301 | 4302 | 4303 | 4304 |
+| --- | ---: | ---: | ---: | ---: |
+| Both off | 22831 | 20071 | 23431 | 21871 |
+| Queue depth 2 | 22891 | 22261 | 21061 | 44761 |
+| AA escort 1 | 23071 | 20011 | 23431 | 21871 |
+
+"Both off" is byte-for-byte batch 1. **Queue depth 2 is the regression**; the
+AA escort is neutral in these classic-AI games (no air) but is kept for human
+air play. The default is therefore `factoryQueueDepth = 1`; the depth and the
+stalled-head drop remain knobs.
+
+### Composition memory and value odds
+
+Four seeds each on Great Divide (4401-4404) and Dark Side (4501-4504), 1800 s,
+defaults against `enemyCompositionMemory=false` and `attackUsesValueOdds=false`
+for the RWE seat. All sixteen games were decided RWE wins, the same winner in
+each pair. Close-out ticks:
+
+| Map/seed | Defaults | Both off |
+| --- | ---: | ---: |
+| GD 4401 | 27841 | 24811 |
+| GD 4402 | 27631 | 29071 |
+| GD 4403 | 19231 | 19231 |
+| GD 4404 | 20641 | 20641 |
+| DS 4501 | 24901 | 25291 |
+| DS 4502 | 21331 | 20881 |
+| DS 4503 | 18691 | 18691 |
+| DS 4504 | 20281 | 19711 |
+
+The changes are close-out-time neutral in this sample: the features are not
+disproven and not shown as a gain against the classic AI, which changes
+composition little and rarely leaves its base. They are aimed at a human
+opponent, where the enemy histogram and the odds gate have something to react
+to. The AI suite passes (279 cases / 9853 assertions); the full permitted
+suite result is in the session report.
+
+## Fourth direction: roles, reserve and replay-derived openings
+
+The next batch adds a small group record (wave, reserve, raid, feint) and an
+attack-move posture, then the replay-mining work's opening/expansion templates.
+The design and the ranked alternatives from Nanolathe's `aikit`, Open
+Annihilation and the outside-box review are in
+`docs/agents/rwe-ai-adaptability.md`.

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <map>
 #include <optional>
 #include <rwe/ai/AiSideUnits.h>
@@ -110,6 +112,110 @@ namespace rwe
          */
         bool underConstruction;
     };
+
+    /**
+     * What an enemy contact is, for the composition memory and the counters
+     * built from it.
+     *
+     * The split is the one that changes what answers it: raiders close,
+     * rocket and artillery units outrange, tanks hold ground, aircraft skip
+     * the ground fight, static defences are what artillery is for, and a
+     * builder is worth raiding. Commander and everything the other buckets
+     * cannot name share the last one so the counts always sum to the known
+     * army.
+     *
+     * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:1); not
+     * original-game parity.
+     */
+    enum class EnemyRole
+    {
+        Raider,
+        RocketArtillery,
+        Tank,
+        Air,
+        StaticDefence,
+        Builder,
+        CommanderOrOther,
+        Count,
+    };
+
+    constexpr std::size_t EnemyRoleCount = static_cast<std::size_t>(EnemyRole::Count);
+
+    inline std::size_t enemyRoleIndex(EnemyRole role)
+    {
+        return static_cast<std::size_t>(role);
+    }
+
+    /**
+     * How much of the remembered enemy army a role is, as a fraction of the
+     * decayed histogram. Zero when nothing is remembered.
+     */
+    inline float enemyRoleShare(const std::array<int, EnemyRoleCount>& counts, EnemyRole role)
+    {
+        int total = 0;
+        for (auto count : counts)
+        {
+            total += count;
+        }
+        if (total <= 0)
+        {
+            return 0.0f;
+        }
+        return static_cast<float>(counts[enemyRoleIndex(role)]) / static_cast<float>(total);
+    }
+
+    /**
+     * How far the observed composition leans the factory shares, in whole
+     * points added to each slot.
+     *
+     * Bounded by maxLean, and deliberately coarse: a role that holds a
+     * meaningful share of the enemy army buys up to maxLean points of the
+     * thing that answers it, not a continuously varying weight the arena
+     * could not reproduce. `trigger` is the same counterShareTrigger the
+     * older metal-share rule uses; a role below it does not earn a lean.
+     *
+     * Both factory types are leaned because the same enemy army is answered
+     * by either. A raider or an aircraft is outranged by a rocket kbot or a
+     * missile truck; a tower or a tank is broken by artillery or a medium
+     * tank; a rocket line or a builder is closed on by raiders or light
+     * tanks.
+     */
+    struct CompositionLean
+    {
+        int labRaider{0};
+        int labRocketKbot{0};
+        int labArtilleryKbot{0};
+        int vehicleTank{0};
+        int vehicleMissileTruck{0};
+        int vehicleMediumTank{0};
+    };
+
+    inline CompositionLean compositionLeanFor(const std::array<int, EnemyRoleCount>& counts, float trigger, int maxLean)
+    {
+        CompositionLean lean;
+        if (maxLean <= 0)
+        {
+            return lean;
+        }
+        auto atLeast = [&](EnemyRole role) {
+            return counts[enemyRoleIndex(role)] > 0 && enemyRoleShare(counts, role) >= trigger;
+        };
+        auto set = [maxLean](int& slot, bool condition) {
+            if (condition)
+            {
+                slot = maxLean;
+            }
+        };
+
+        set(lean.labRocketKbot, atLeast(EnemyRole::Air) || atLeast(EnemyRole::Raider));
+        set(lean.labArtilleryKbot, atLeast(EnemyRole::StaticDefence) || atLeast(EnemyRole::Tank));
+        set(lean.labRaider, atLeast(EnemyRole::RocketArtillery) || atLeast(EnemyRole::Builder));
+
+        set(lean.vehicleMissileTruck, atLeast(EnemyRole::Air) || atLeast(EnemyRole::Raider));
+        set(lean.vehicleMediumTank, atLeast(EnemyRole::StaticDefence) || atLeast(EnemyRole::Tank));
+        set(lean.vehicleTank, atLeast(EnemyRole::RocketArtillery) || atLeast(EnemyRole::Builder));
+        return lean;
+    }
 
     /**
      * How long the memory of enemy aircraft keeps anti-air worth building,
@@ -501,6 +607,53 @@ namespace rwe
         // --- Enemy ---
         /** Keyed by the enemy unit's raw id so iteration is deterministic. */
         std::map<unsigned int, KnownEnemy> knownEnemies;
+        /**
+         * The enemy army by role, decayed rather than accumulated for the
+         * whole game.
+         *
+         * PerceptionManager raises each bucket to the largest count of that
+         * role it can currently see or remember, and halves every bucket
+         * every compositionDecaySeconds. So the model follows the current
+         * army: a role that has stopped appearing fades out over a couple of
+         * decay windows, and one that has just appeared is in the picture at
+         * once. The counts are AI-side memory and are not hashed; like
+         * knownEnemies they re-learn after a load.
+         *
+         * See AiTuningProfile::enemyCompositionMemory and
+         * BuildManager's composition lean.
+         */
+        std::array<int, EnemyRoleCount> enemyRoleCounts{};
+        /** When the histogram was last halved. */
+        GameTime enemyRoleCountsDecayedAt{0};
+        /**
+         * The lean committed from the histogram, and when. Held for
+         * compositionCommitSeconds so a factory builds a coherent batch
+         * instead of switching shares every planning pass.
+         */
+        CompositionLean compositionLean{};
+        GameTime compositionLeanCommittedAt{0};
+        bool compositionLeanCommitted{false};
+        /**
+         * Metal value of our fighting army, from the unit definitions of
+         * bb.combatUnits, and the same for the enemy's known mobile armed
+         * ground and air arms. Written by PerceptionManager and read by
+         * StrategicManager's value-odds gate.
+         *
+         * Only units the AI is entitled to know are counted, so this is not
+         * an omniscient total: a remembered contact is counted until the AI
+         * looks where it last saw it and finds it gone. Brutal's existing
+         * omniscience therefore still sees everything, as it does elsewhere.
+         */
+        float armyMetal{0.0f};
+        float knownEnemyArmyMetal{0.0f};
+        float knownEnemyAirMetal{0.0f};
+        /**
+         * Whether the value-odds gate is open. Once open it stays open
+         * until our value falls below retreatValueRatio of theirs, which is
+         * the hysteresis that keeps a wave from being called and recalled on
+         * consecutive passes.
+         */
+        bool attackOddsCommitted{false};
         /**
          * Which enemy the war is being fought against.
          *
