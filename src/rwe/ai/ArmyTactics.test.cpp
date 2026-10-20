@@ -438,6 +438,113 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a unit acquires at its own weapon range, and the flat radius is the control", "[ai]")
+    {
+        // The rule behind AiTuningProfile::acquireWeaponRange, asked directly
+        // so the arithmetic is pinned without a simulation: a unit may look as
+        // far as its own longest weapon reaches, less the stand-off the kiting
+        // rule keeps, and never less than the flat engageRadius.
+        auto profile = makeDefaultStandardProfile();
+        REQUIRE(profile.acquireWeaponRange);
+        REQUIRE(profile.engageRadius == 450_ss);
+        REQUIRE(profile.kiteRangeMargin == 40_ss);
+
+        // Reach inside the flat radius changes nothing; a raider still
+        // acquires at the same distance as before.
+        REQUIRE(targetAcquisitionRadius(profile, profile.engageRadius, 300_ss) == profile.engageRadius);
+        REQUIRE(targetAcquisitionRadius(profile, profile.engageRadius, 400_ss) == profile.engageRadius);
+
+        // A long gun acquires at its reach less the margin: 700 - 40 = 660.
+        REQUIRE(targetAcquisitionRadius(profile, profile.engageRadius, 700_ss) == 660_ss);
+
+        // Unarmed units and a reach shorter than the margin fall back to the
+        // flat radius rather than to a negative one.
+        REQUIRE(targetAcquisitionRadius(profile, profile.engageRadius, 0_ss) == profile.engageRadius);
+        REQUIRE(targetAcquisitionRadius(profile, profile.engageRadius, 30_ss) == profile.engageRadius);
+
+        // Off is the flat radius exactly, whatever the weapon reaches. This is
+        // the control arm a paired arena run plays against.
+        profile.acquireWeaponRange = false;
+        REQUIRE(targetAcquisitionRadius(profile, 450_ss, 700_ss) == 450_ss);
+        REQUIRE(targetAcquisitionRadius(profile, 450_ss, 0_ss) == 450_ss);
+    }
+
+    TEST_CASE("a long-ranged unit acquires outside the flat radius", "[ai]")
+    {
+        // A 700-range gun against a target at 600: outside engageRadius (450)
+        // and inside the unit's own reach less kiteRangeMargin (660). With the
+        // knob on it fires without walking in; with it off it behaves exactly
+        // as it did before the rule existed. The kiting, anti-air and mission
+        // paths are not exercised here -- this is the ordinary per-unit
+        // acquisition call only.
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai");
+        auto them = addPlayer(sim, "them");
+        sim.unitDefinitions["UNIT"] = UnitDefinition{};
+        auto script = makeEmptyCobScript();
+
+        WeaponDefinition rocket{};
+        rocket.maxRange = 700_ss;
+        rocket.reloadTime = 1_ss;
+        rocket.burst = 1;
+        rocket.damage["DEFAULT"] = 100u;
+        sim.weaponDefinitions["ROCKET"] = rocket;
+
+        UnitDefinition gunnerDef{};
+        gunnerDef.isMobile = true;
+        gunnerDef.weapon1 = "ROCKET";
+        sim.unitDefinitions["ARTY"] = gunnerDef;
+
+        auto gunner = addUnitOfType(sim, "ARTY", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto quarry = addUnitOfType(sim, "UNIT", them, SimVector(600_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.attackInWaves = false;
+        profile.raidingParties = false;
+        profile.waveMeetEnemyCount = 0;
+        profile.tacticalTickInterval = 1;
+        profile.scoutCount = 0;
+        profile.targetScoutPlaneCount = 0;
+        // Visibility is somebody else's question; this case is only about the
+        // radius the acquisition scan is given.
+        profile.cheatModeOmniscient = true;
+
+        AiBlackboard bb;
+        bb.phase = GamePhase::Attack;
+        bb.combatUnits.push_back(gunner);
+        bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+        bb.now = GameTime(100u);
+
+        KnownEnemy known{};
+        known.unitId = quarry;
+        known.unitType = "UNIT";
+        known.lastKnownPosition = SimVector(600_ss, 0_ss, 0_ss);
+        known.lastSeen = GameTime(100u);
+        known.isArmed = true;
+        bb.knownEnemies[quarry.value] = known;
+
+        ThreatMap threatMap(64, 64);
+        ArmyManager manager;
+
+        SECTION("at its own weapon range, it attacks without closing first")
+        {
+            std::vector<PlayerCommand> commands;
+            manager.update(sim, ai, profile, threatMap, bb, commands);
+
+            REQUIRE_FALSE(ordersFor<AttackOrder>(commands, gunner).empty());
+        }
+
+        SECTION("switched off, 600 is outside the flat 450 and it does not attack")
+        {
+            profile.acquireWeaponRange = false;
+
+            std::vector<PlayerCommand> commands;
+            manager.update(sim, ai, profile, threatMap, bb, commands);
+
+            REQUIRE(ordersFor<AttackOrder>(commands, gunner).empty());
+        }
+    }
+
     TEST_CASE("the fleet trigger does not count a hull that is out scouting", "[ai]")
     {
         // Pinned here rather than through a controller, because a controller

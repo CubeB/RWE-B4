@@ -101,4 +101,17 @@ namespace rwe
         REQUIRE(applyAiTuning(p, "outpostResponseMarginThreshold", "5000"));
         REQUIRE(p.outpostResponseMarginThreshold == 5000.0f);
     }
+
+    // The acquisition-radius comparison for the arena: on by default, and
+    // settable by name so a paired run can play the flat engageRadius as its
+    // own control.
+    TEST_CASE("applyAiTuning sets acquireWeaponRange by name")
+    {
+        AiTuningProfile p;
+        REQUIRE(p.acquireWeaponRange);
+        REQUIRE(applyAiTuning(p, "acquireWeaponRange", "false"));
+        REQUIRE_FALSE(p.acquireWeaponRange);
+        REQUIRE(applyAiTuning(p, "acquireWeaponRange", "true"));
+        REQUIRE(p.acquireWeaponRange);
+    }
 }

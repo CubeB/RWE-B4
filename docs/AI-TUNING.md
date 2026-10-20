@@ -207,3 +207,45 @@ settlement test with a 14-tick command delay as well as threshold, efficiency,
 sample alignment, frame/death and pending-command cases. With the experiment
 disabled, a 900-second control has byte-identical hashes to the previous
 executable; two enabled 1,800-second games also have byte-identical hashes.
+
+## First strength batch: CORE composition, tier aggression, weapon-range acquisition
+
+2026-10-20. This is RWE's own AI (`--ai-engine rwe`); the classic engine is
+untouched. The batch:
+
+- CORE faction defaults adopt the measured composition candidate
+  `7e50bbe4a7` from the section above: lab shares 0/4/2, vehicle shares
+  3/1/2, `counterShareBonus = 2`, `counterShareTrigger = 0.3606`.
+- CORE's flat `attackArmySize = 14` becomes `+6` over the difficulty profile,
+  so Standard stays at the measured 14 while Hard attacks at 13 and Brutal
+  at 12 instead of also being 14.
+- `acquireWeaponRange` (default on) makes ordinary ground acquisition use
+  `max(engageRadius, longestWeaponRange - kiteRangeMargin)`, so a unit that
+  outranges its target acquires at its own reach. With the knob off the
+  radius is exactly the old 450.
+
+A pre-change control binary and the batch binary were built from the same
+uncommitted tree, the only difference being these files. Four seeds
+(4101-4104), Coast To Coast, Standard, 1800 s cap, RWE against the classic
+"Original TA" personality, dealt seats (RWE ARM on odd seeds, CORE on even):
+
+| Seed | Control (pre-batch) | Batch |
+| ---: | --- | --- |
+| 4101 | RWE won, 32101 ticks | RWE won, 32101 ticks |
+| 4102 | timeout, 54000 ticks | RWE won, 40591 ticks |
+| 4103 | RWE won, 41281 ticks | RWE won, 41281 ticks |
+| 4104 | RWE won, 35011 ticks | RWE won, 38701 ticks |
+
+The odd seeds are ARM, whose composition is unchanged, and the acquisition
+knob did not change the T1 short-range armies; they are byte-for-byte the
+same length, which is the expected null. The even seeds are CORE: one timeout
+became a decided win and one win came 3,690 ticks later. This is four games,
+so it does not establish a strength gain; it is consistent with the CORE
+composition record and says nothing yet about the acquisition knob. A
+longer-range fixture and more seeds are needed before either becomes a
+default claim.
+
+The full permitted suite passed: 1861 cases / 194009 assertions. The AI suite
+alone is 270 cases / 9717 assertions. The full governing document is
+`docs/agents/rwe-ai-strength.md`; the raw games are under
+`D:/tmp/rwe-ai-ab/` (not checked in).

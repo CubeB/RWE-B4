@@ -809,6 +809,19 @@ namespace rwe
         }
     }
 
+    SimScalar targetAcquisitionRadius(const AiTuningProfile& profile, SimScalar engageRadius, SimScalar longestWeaponRange)
+    {
+        if (!profile.acquireWeaponRange)
+        {
+            return engageRadius;
+        }
+        // An unarmed unit has no reach of its own; the flat radius still
+        // applies to it. Everything else may look as far as it can shoot,
+        // less the stand-off it would keep once it got there.
+        auto reach = longestWeaponRange > 0_ss ? longestWeaponRange - profile.kiteRangeMargin : 0_ss;
+        return rweMax(engageRadius, reach);
+    }
+
     bool ArmyManager::commanderStaysOnFrame(
         const GameSimulation& sim,
         PlayerId aiOwner,
@@ -2634,7 +2647,19 @@ namespace rwe
             // attack would go on firing for the rest of the game. A move to
             // where it already stands is the cheapest way to say stop.
             // Anything within reach gets shot at, whatever the phase.
-            if (auto enemy = nearestKnownEnemy(sim, aiOwner, profile, bb, unit.position, profile.engageRadius, false, [&](UnitId candidate) { return hasGivenUpOn(unitId, candidate, bb.now); }))
+            //
+            // Reach here is the unit's own: a rocket kbot, an artillery kbot
+            // or anything else that outranges a raider acquires at its weapon's
+            // range rather than walking to the flat engageRadius first
+            // (acquireWeaponRange). The kiting, anti-air and mission rules take
+            // their radii elsewhere in this file and are untouched.
+            SimScalar ownReach = 0_ss;
+            if (auto defIt = sim.unitDefinitions.find(unit.unitType); defIt != sim.unitDefinitions.end())
+            {
+                ownReach = longestWeaponRange(sim, defIt->second);
+            }
+            auto acquireRadius = targetAcquisitionRadius(profile, profile.engageRadius, ownReach);
+            if (auto enemy = nearestKnownEnemy(sim, aiOwner, profile, bb, unit.position, acquireRadius, false, [&](UnitId candidate) { return hasGivenUpOn(unitId, candidate, bb.now); }))
             {
                 // Is it getting hurt? The question is asked of the target we
                 // are about to order this unit at rather than of the order it
