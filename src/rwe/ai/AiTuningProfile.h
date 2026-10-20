@@ -180,6 +180,30 @@ namespace rwe
         bool kiteWithLongerRange{true};
         SimScalar kiteRangeMargin{40_ss};
         /**
+         * Look for something to attack as far out as the unit's own weapon
+         * reaches, not only inside engageRadius.
+         *
+         * The per-unit acquisition call used a flat engageRadius, so a
+         * CORE Storm whose rocket reaches 400, or a Thud whose shell reaches
+         * further still, walked to inside 450 of an enemy before it would
+         * fire. A unit that already outranges what is coming at it should
+         * shoot first rather than close to the same distance as a Peewee.
+         *
+         * The radius is max(engageRadius, the unit's longest weapon range
+         * less kiteRangeMargin). The margin is the same stand-off the kiting
+         * rule keeps, so a unit acquires at the distance it would choose to
+         * fight from rather than at the edge of its reach, where a step by
+         * the target would put it out of range again.
+         *
+         * Ground combat units only, and only the ordinary acquisition path:
+         * the kiting, anti-air and mission rules are untouched. Off restores
+         * the flat engageRadius exactly, which is the control arm for a
+         * paired arena run. Not yet measured in the arena.
+         *
+         * RWE-AI tuning, not classic parity; the classic engine is untouched.
+         */
+        bool acquireWeaponRange{true};
+        /**
          * The same for a hull, and from buildings too (issue #191): a ship
          * that outranges what it is attacking lies off near the outer edge
          * of its own reach, kiteRangeMargin inside it and never inside the

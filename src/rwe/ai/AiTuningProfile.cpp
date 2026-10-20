@@ -196,6 +196,7 @@ namespace rwe
             {"expansionContestsMiddleWhenBoxedIn", &AiTuningProfile::expansionContestsMiddleWhenBoxedIn},
             {"dgunByValue", &AiTuningProfile::dgunByValue},
             {"kiteWithLongerRange", &AiTuningProfile::kiteWithLongerRange},
+            {"acquireWeaponRange", &AiTuningProfile::acquireWeaponRange},
             {"answerStalledAttacks", &AiTuningProfile::answerStalledAttacks},
             {"answerBlockedShots", &AiTuningProfile::answerBlockedShots},
             {"enemyGunRangeFromWeapon", &AiTuningProfile::enemyGunRangeFromWeapon},
@@ -509,17 +510,38 @@ namespace rwe
             // same price and weight the Peewee's EMG does about 60 damage a
             // second to the A.K. laser's 35, and the Flash 60 to the
             // Instigator's 44. So the damage comes from Storms, which outrange
-            // both of ARM's raiders, and Thuds lobbing into the crowd, with one
-            // raider to each Thud as the screen in front of them, and the
-            // waves are big enough to stay together. Measured against the
-            // shared defaults on Great Divide, CORE only, three batches of
-            // eight seeds: CORE finished ahead in 6 of 8 against 2, in 5 of 8
-            // against 1 once PR #82 was in, and in 6 of 8 against 2 on seeds
-            // it was never tuned on (ROADMAP, 2026-09-19).
-            p.labRaiderShare = 1;
-            p.labRocketKbotShare = 2;
-            p.labArtilleryKbotShare = 1;
-            p.attackArmySize = 14;
+            // both of ARM's raiders, and Thuds lobbing into the crowd. The
+            // shares below are the arena auto-tuner's candidate, 7e50bbe4a7
+            // (docs/AI-TUNING.md:68-101), not a guess: no kbot raiders, the
+            // lab split four rocket kbots to two artillery kbots, and the
+            // vehicle plant three tanks to one missile truck to two medium
+            // tanks. Recorded against the shared defaults on Great Divide,
+            // Standard difficulty, seeds 201+: better in 21 games of 32, same
+            // in 6, worse in 5 (sign test p = 0.002), mean margin +40.4
+            // units, and a decided-game rate of 0.47 against the control's
+            // 0.22.
+            //
+            // RWE-AI tuning, not classic parity: this is RWE's own computer
+            // player and the classic engine is untouched. What the record
+            // does not yet cover: the candidate's opponent was the ARM of
+            // before the ARM change above, and it has not been through
+            // --evaluate on fresh seeds. AI-TUNING.md says so at :92-101.
+            p.labRaiderShare = 0;
+            p.labRocketKbotShare = 4;
+            p.labArtilleryKbotShare = 2;
+            p.vehicleTankShare = 3;
+            p.vehicleMissileTruckShare = 1;
+            p.vehicleMediumTankShare = 2;
+            p.counterShareBonus = 2;
+            p.counterShareTrigger = 0.3606f;
+            // Aggression follows the difficulty tier instead of flattening
+            // it. AiSeat applies faction defaults after
+            // makeProfileForDifficulty, so the old flat 14 here overwrote
+            // every tier: Hard and Brutal CORE were exactly as cautious as
+            // Standard. Six more than the tier keeps Standard at the measured
+            // 14 (8 + 6) while Hard attacks at 13 and Brutal at 12; Easy,
+            // which was 14, is now 20.
+            p.attackArmySize += 6;
         }
         else if (upper == "ARM")
         {

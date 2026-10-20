@@ -14,6 +14,17 @@ namespace rwe
     class UnitState;
 
     /**
+     * How far a ground combat unit looks for something to attack: its own
+     * longest weapon reach less kiteRangeMargin, or engageRadius where that
+     * is further. See AiTuningProfile::acquireWeaponRange; with the knob off
+     * this is engageRadius unchanged.
+     *
+     * A free function rather than a member so the rule can be pinned
+     * without a whole simulation behind it.
+     */
+    SimScalar targetAcquisitionRadius(const AiTuningProfile& profile, SimScalar engageRadius, SimScalar longestWeaponRange);
+
+    /**
      * Commands the combat units as one body: gather at the rally point,
      * defend the base when enemies show up, and attack the most valuable
      * known enemy ground when the army is big enough.

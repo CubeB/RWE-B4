@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/ai/PerceptionManager.h>
+#include <rwe/ai/StrategicManager.h>
 #include <rwe/ai/ai_test_util.h>
 
 /**
@@ -398,9 +399,17 @@ namespace rwe
 
         auto core = makeDefaultStandardProfile();
         applyFactionDefaults(core, "Core");
-        REQUIRE(core.labRaiderShare == 1);
-        REQUIRE(core.labRocketKbotShare == 2);
-        REQUIRE(core.labArtilleryKbotShare == 1);
+        // The measured CORE candidate (docs/AI-TUNING.md:76-87): no kbot
+        // raiders, the lab on Storms and Thuds, the vehicle plant on
+        // Instigators and Raiders.
+        REQUIRE(core.labRaiderShare == 0);
+        REQUIRE(core.labRocketKbotShare == 4);
+        REQUIRE(core.labArtilleryKbotShare == 2);
+        REQUIRE(core.vehicleTankShare == 3);
+        REQUIRE(core.vehicleMissileTruckShare == 1);
+        REQUIRE(core.vehicleMediumTankShare == 2);
+        REQUIRE(core.counterShareBonus == 2);
+        REQUIRE(core.counterShareTrigger == 0.3606f);
         REQUIRE(core.attackArmySize == 14);
 
         auto arm = makeDefaultStandardProfile();
@@ -409,11 +418,65 @@ namespace rwe
         REQUIRE(arm.labRocketKbotShare == 0);
         REQUIRE(arm.labArtilleryKbotShare == plain.labArtilleryKbotShare);
         REQUIRE(arm.attackArmySize == plain.attackArmySize);
+        // ARM's measured change is the lab only; its vehicle shares and
+        // counter settings are left where the shared defaults put them.
+        REQUIRE(arm.vehicleTankShare == plain.vehicleTankShare);
+        REQUIRE(arm.vehicleMissileTruckShare == plain.vehicleMissileTruckShare);
+        REQUIRE(arm.vehicleMediumTankShare == plain.vehicleMediumTankShare);
+        REQUIRE(arm.counterShareBonus == plain.counterShareBonus);
+        REQUIRE(arm.counterShareTrigger == plain.counterShareTrigger);
 
         // LoadingScene lays --ai-tune over the faction's defaults, so this
         // is the order a knob set by hand meets them in.
         REQUIRE(applyAiTuning(core, "labRaiderShare", "2"));
         REQUIRE(core.labRaiderShare == 2);
+    }
+
+    TEST_CASE("CORE's aggression follows the difficulty tier", "[ai]")
+    {
+        // applyFactionDefaults runs after makeProfileForDifficulty
+        // (AiSeat.cpp:137-141), so a flat attackArmySize here would overwrite
+        // Hard and Brutal with Standard's number. CORE asks for six more than
+        // its tier instead: Standard keeps the measured 14, while Hard and
+        // Brutal attack earlier rather than at the same point.
+        auto coreFor = [](AiDifficulty difficulty) {
+            auto p = makeProfileForDifficulty(difficulty);
+            applyFactionDefaults(p, "CORE");
+            return p;
+        };
+
+        auto standard = coreFor(AiDifficulty::Standard);
+        auto hard = coreFor(AiDifficulty::Hard);
+        auto brutal = coreFor(AiDifficulty::Brutal);
+        auto easy = coreFor(AiDifficulty::Easy);
+
+        REQUIRE(standard.attackArmySize == 14);
+        REQUIRE(hard.attackArmySize == 13);
+        REQUIRE(brutal.attackArmySize == 12);
+        REQUIRE(easy.attackArmySize == 20);
+        // Lower threshold, earlier attack.
+        REQUIRE(hard.attackArmySize < standard.attackArmySize);
+        REQUIRE(brutal.attackArmySize < hard.attackArmySize);
+
+        // And the gate itself, not just the number: at an army of thirteen
+        // Hard CORE has already called the attack and Standard CORE is still
+        // building up. Both have a target and nothing at home to defend.
+        StrategicManager strategic;
+        auto awaiting = [](GamePhase phase) {
+            AiBlackboard bb;
+            bb.phase = phase;
+            bb.enemyBasePosition = SimVector(2000_ss, 0_ss, 0_ss);
+            bb.armySize = 13;
+            return bb;
+        };
+
+        auto standardState = awaiting(GamePhase::Boom);
+        strategic.update(standard, standardState);
+        REQUIRE(standardState.phase == GamePhase::Boom);
+
+        auto hardState = awaiting(GamePhase::Boom);
+        strategic.update(hard, hardState);
+        REQUIRE(hardState.phase == GamePhase::Attack);
     }
 
     TEST_CASE("an AI knob can be set by name", "[ai]")
