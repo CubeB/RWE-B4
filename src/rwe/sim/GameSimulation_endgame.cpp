@@ -24,6 +24,7 @@ namespace rwe
             player.removeUnitsAt.reset();
             player.status = GamePlayerStatus::Dead;
             player.removedFromGame = true;
+            player.defeatCountdown = -2;
             // Snapshot the ids: an explosion can affect other units while the
             // wipe is in progress. selfDestructUnit already ignores dead ones.
             std::vector<UnitId> owned;
@@ -220,9 +221,7 @@ namespace rwe
         player.hasBaseStorage = true;
         ++player.respawnCount;
         // The normal settle applies the seat's income multiplier once.
-        auto& unit = getUnitState(*created);
-        unit.acceptResource(player.startingMetal);
-        unit.acceptResource(player.startingEnergy);
+        addResourceDelta(*created, player.startingEnergy, player.startingMetal);
         return true;
     }
 

@@ -95,6 +95,19 @@ namespace rwe
         }
     }
 
+    TEST_CASE("SaveFile retains Deathmatch and the host's watching policy", "[saveload][savefile][deathmatch][spectators]")
+    {
+        TempFile file;
+        auto save = makeSaveFile();
+        save.parameters.commanderDeath = CommanderDeathMode::Deathmatch;
+        save.parameters.allowWatching = false;
+        writeSaveFile(file.path, save);
+        auto loaded = readSaveFile(file.path);
+        REQUIRE(loaded.has_value());
+        CHECK(loaded->parameters.commanderDeath == CommanderDeathMode::Deathmatch);
+        CHECK_FALSE(loaded->parameters.allowWatching);
+    }
+
     TEST_CASE("SaveFile's header round-trips gameTimeSeconds", "[saveload][savefile]")
     {
         SECTION("a save written with a game time reads it back")

@@ -397,6 +397,9 @@ namespace rwe
         GameTime gameOverTime{0};
         std::optional<unsigned int> lastSeenRespawnCount;
         void updateRespawnCamera();
+        bool localEliminationHandled{false};
+        bool eliminationWatching{false};
+        void updateLocalElimination();
 
         /**
          * Set once the game-ended event has gone out, so the three endings --

@@ -43,6 +43,8 @@ namespace rwe
             {"maxMetal", dumpJson(p.maxMetal)},
             {"energy", dumpJson(p.energy)},
             {"maxEnergy", dumpJson(p.maxEnergy)},
+            {"startingMetal", dumpJson(p.startingMetal)},
+            {"startingEnergy", dumpJson(p.startingEnergy)},
             {"hasBaseStorage", dumpJson(p.hasBaseStorage)},
             {"hasCreatedUnits", dumpJson(p.hasCreatedUnits)},
             {"defeatCountdown", p.defeatCountdown},

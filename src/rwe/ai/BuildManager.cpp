@@ -4372,7 +4372,7 @@ namespace rwe
                 }
             }
 
-            if (!next.empty() && !bb.buildTree.canBuild(factory.unitType, next))
+            if (!next.empty() && !bb.buildTree.missionAllows(next))
             {
                 next.clear();
             }

@@ -276,6 +276,11 @@ namespace rwe
         for (unsigned int i = 0; i < simulation.players.size(); ++i)
         {
             const auto& player = simulation.players[i];
+            if (player.status == GamePlayerStatus::Alive)
+            {
+                defeatAnnounced.erase(i);
+                continue;
+            }
             if (player.status != GamePlayerStatus::Dead || defeatAnnounced.count(i) != 0)
             {
                 continue;

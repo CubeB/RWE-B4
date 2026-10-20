@@ -217,6 +217,7 @@ namespace rwe
             j["mapping"] = enumToName(header.mapping, MappingNames, "unmapped");
             j["startLocation"] = enumToName(header.startLocation, StartLocationNames, "fixed");
             j["commanderDeath"] = enumToName(header.commanderDeath, CommanderDeathNames, "gameends");
+            j["allowWatching"] = header.allowWatching;
             j["pathfinding"] = enumToName(header.pathfindingBackend, PathfindingBackendNames, "rwe");
             auto& players = j["players"];
             players = nlohmann::json::array();
@@ -246,6 +247,7 @@ namespace rwe
             header.mapping = enumFromName(j.value("mapping", "unmapped"), MappingNames, MappingMode::Unmapped);
             header.startLocation = enumFromName(j.value("startLocation", "fixed"), StartLocationNames, StartLocationMode::Fixed);
             header.commanderDeath = enumFromName(j.value("commanderDeath", "gameends"), CommanderDeathNames, CommanderDeathMode::GameEnds);
+            header.allowWatching = j.value("allowWatching", true);
             header.pathfindingBackend = enumFromName(j.value("pathfinding", "rwe"), PathfindingBackendNames, PathfindingBackend::RweAStar);
             for (const auto& p : j.at("players"))
             {
@@ -266,6 +268,7 @@ namespace rwe
         header.mapping = parameters.mapping;
         header.startLocation = parameters.startLocation;
         header.commanderDeath = parameters.commanderDeath;
+        header.allowWatching = parameters.allowWatching;
         header.pathfindingBackend = parameters.pathfindingBackend;
         for (const auto& p : parameters.players)
         {
@@ -283,6 +286,7 @@ namespace rwe
         parameters.mapping = header.mapping;
         parameters.startLocation = header.startLocation;
         parameters.commanderDeath = header.commanderDeath;
+        parameters.allowWatching = header.allowWatching;
         parameters.pathfindingBackend = header.pathfindingBackend;
         for (std::size_t i = 0; i < parameters.players.size() && i < header.players.size(); ++i)
         {

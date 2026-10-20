@@ -143,17 +143,29 @@ namespace rwe
                 {
                     tree.missionCommitted[type] += std::max(0, count);
                 }
+                std::optional<UnitId> held;
+                if (auto creating = std::get_if<FactoryBehaviorStateCreatingUnit>(&unit.factoryState))
+                {
+                    if (auto done = std::get_if<UnitCreationStatusDone>(&creating->status))
+                    {
+                        held = done->unitId;
+                    }
+                }
                 if (auto building = std::get_if<FactoryBehaviorStateBuilding>(&unit.factoryState))
                 {
                     if (building->targetUnit)
                     {
-                        auto target = sim.tryGetUnitState(building->targetUnit->first);
-                        if (target && std::any_of(unit.buildQueue.begin(), unit.buildQueue.end(), [&](const auto& entry) {
-                                return entry.first == target->get().unitType && entry.second > 0;
-                            }))
-                        {
-                            --tree.missionCommitted[target->get().unitType];
-                        }
+                        held = building->targetUnit->first;
+                    }
+                }
+                if (held)
+                {
+                    auto target = sim.tryGetUnitState(*held);
+                    if (target && std::any_of(unit.buildQueue.begin(), unit.buildQueue.end(), [&](const auto& entry) {
+                            return entry.first == target->get().unitType && entry.second > 0;
+                        }))
+                    {
+                        --tree.missionCommitted[target->get().unitType];
                     }
                 }
             }

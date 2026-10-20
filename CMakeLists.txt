@@ -1133,6 +1133,7 @@ set(TEST_FILES
     src/rwe/ai/ReachabilityMap.test.cpp
     src/rwe/ai/TransportManager.test.cpp
     src/rwe/ai/AiBuildTree.test.cpp
+    src/rwe/ai/AiMissionProfile.test.cpp
     src/rwe/game/DownloadMenus.test.cpp
     src/rwe/ai/ArmyTactics.test.cpp
     src/rwe/ai/AirTactics.test.cpp

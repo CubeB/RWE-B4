@@ -2717,6 +2717,26 @@ namespace rwe
             return WinStatusUndecided();
         }
 
+        // Corrected BT-89 supplement: multiplayer does not remain in an
+        // AI-only match after every participating human is eliminated.
+        if (!skirmishVictoryRules)
+        {
+            bool hadHuman = false;
+            bool livingHuman = false;
+            for (const auto& player : players)
+            {
+                if (player.type == GamePlayerType::Human)
+                {
+                    hadHuman = hadHuman || player.hasCreatedUnits;
+                    livingHuman = livingHuman || player.status == GamePlayerStatus::Alive;
+                }
+            }
+            if (hadHuman && !livingHuman)
+            {
+                return WinStatusNoSurvivors{};
+            }
+        }
+
         // The first player still standing, and whether anybody still
         // standing is on a different side from them. Allies do not fight
         // each other, so a rule that waits for one player to be left waits
@@ -4607,27 +4627,35 @@ namespace rwe
         if (commanderDeathMode != CommanderDeathMode::GameContinues)
         {
             std::set<PlayerId> wiped;
-            for (const auto& p : units)
+            // A wipe's secondary blast can kill another commander. Observe
+            // those deaths before deleteDeadUnits removes their trigger.
+            while (true)
             {
-                const auto& unitDefinition = unitDefinitions.at(p.second.unitType);
-                if (unitDefinition.commander && p.second.isDead())
+                std::set<PlayerId> pending;
+                for (const auto& p : units)
                 {
-                    wiped.insert(p.second.owner);
+                    const auto& unitDefinition = unitDefinitions.at(p.second.unitType);
+                    if (unitDefinition.commander && p.second.isDead() && wiped.count(p.second.owner) == 0)
+                    {
+                        pending.insert(p.second.owner);
+                    }
+                }
+                if (pending.empty())
+                {
+                    break;
+                }
+                for (auto player : pending)
+                {
+                    wiped.insert(player);
+                    wipeCommanderArmy(player);
                 }
             }
-            for (auto player : wiped)
-            {
-                wipeCommanderArmy(player);
-            }
-
-            return;
         }
 
-        // Commander Dies: Game Continues. The commander is an ordinary unit --
-        // it still dies and still explodes, it simply no longer takes the
-        // player with it -- so a player is out only once nothing of theirs is
-        // left standing at all. Buildings are units here, so "no live units"
-        // already means "no units and no buildings".
+        // BT-83: defeat is zero live units in every mode. A very tough unit
+        // can survive the 30000-damage wipe; losing that last survivor later
+        // must still start defeat/respawn. In Continues the commander alone
+        // simply never initiates the wipe above.
         //
         // The test is "had one, has none" rather than plainly "has none",
         // and that is deliberate. This runs before deleteDeadUnits, so a unit

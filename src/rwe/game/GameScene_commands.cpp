@@ -607,7 +607,7 @@ namespace rwe
         const auto& vis = simulation.playerVisibility.at(localPlayerId.value);
         if (fogOfWarEnabled)
         {
-            if (!isPlayback())
+            if (!isPlayback() && !eliminationWatching)
             {
                 return vis;
             }
@@ -633,6 +633,8 @@ namespace rwe
                 std::fill(visible.begin(), visible.end(), static_cast<unsigned char>(0));
                 for (const auto& other : simulation.playerVisibility)
                 {
+                    combined.radarContacts.insert(other.radarContacts.begin(), other.radarContacts.end());
+                    combined.sonarContacts.insert(other.sonarContacts.begin(), other.sonarContacts.end());
                     const auto& otherVisible = other.visible.getVector();
                     for (std::size_t i = 0; i < visible.size() && i < otherVisible.size(); ++i)
                     {
@@ -682,7 +684,7 @@ namespace rwe
         }
 
         const auto& shared = simulation.explored.getVector();
-        if (isPlayback())
+        if (isPlayback() || eliminationWatching)
         {
             // Watching a recording with the fog on shows what both sides could
             // see, so remembered ground is every group's bit and not one
@@ -735,7 +737,8 @@ namespace rwe
             const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
             if (unit.position.y + simulation.modelHeightOf(unitDefinition) < simulation.terrain.getSeaLevel())
             {
-                const auto& heard = simulation.playerVisibility.at(localPlayerId.value).sonarContacts;
+                const auto& heard = (eliminationWatching ? localPlayerVisibility()
+                    : simulation.playerVisibility.at(localPlayerId.value)).sonarContacts;
                 if (heard.find(unitId) == heard.end())
                 {
                     return false;
@@ -778,7 +781,8 @@ namespace rwe
         // that the dot obeys the same stealth, jamming and waterline rules the
         // detection pass applied -- a submarine gets a dot from sonar and not
         // from a radar dish that cannot hear it.
-        const auto& visibility = simulation.playerVisibility.at(localPlayerId.value);
+        const auto& visibility = eliminationWatching ? localPlayerVisibility()
+            : simulation.playerVisibility.at(localPlayerId.value);
         return visibility.radarContacts.find(unitId) != visibility.radarContacts.end()
             || visibility.sonarContacts.find(unitId) != visibility.sonarContacts.end();
     }
@@ -792,7 +796,7 @@ namespace rwe
             return simulation.playerVisibility.at(localPlayerId.value).contains(simulation.visionCellAt(position));
         }
 
-        if (isPlayback())
+        if (isPlayback() || eliminationWatching)
         {
             // Watching a recording with the fog on shows both sides, so
             // remembered ground is every group's bit and not one player's.

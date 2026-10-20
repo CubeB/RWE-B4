@@ -49,6 +49,7 @@ namespace rwe
         // number of faces SKIRMISH.GUI gives each button.
         const OptionSpec optionSpecs[] = {
             {"commander", 3, &MainMenuModel::SkirmishOptions::commanderDeath},
+            {"watching", 2, &MainMenuModel::SkirmishOptions::allowWatching},
             {"startloc", 2, &MainMenuModel::SkirmishOptions::startLocation},
             {"mapping", 2, &MainMenuModel::SkirmishOptions::mapping},
             {"los", 3, &MainMenuModel::SkirmishOptions::lineOfSight},

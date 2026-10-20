@@ -63,6 +63,8 @@ namespace rwe
             p.maxMetal,
             p.energy,
             p.maxEnergy,
+            p.startingMetal,
+            p.startingEnergy,
             p.hasBaseStorage,
             p.hasCreatedUnits,
             p.defeatCountdown,

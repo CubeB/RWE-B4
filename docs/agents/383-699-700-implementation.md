@@ -49,9 +49,53 @@ and the existing cause-3 death path. The existing missing Killed-script ladder
 for cause 3 remains tracked separately by #409; this work does not claim it
 reproduces that ladder. Safe failed creation is retried on later polls.
 
-## Verification status (work in progress)
+## Continued watching
 
-The initial mission-profile build linked the game and passed 13 focused cases
-(109 assertions). Further verification is required after the final changes.
-No original executable was run. Rendering findings and the owner's accepted
-submarine construction height are outside these three implementation issues.
+Ordinary multiplayer elimination uses the per-seat countdown. Eligible humans
+receive the corrected Yes/No prompt while other opponents remain. Watching is
+local presentation: shared visible/explored masks and radar/sonar contacts,
+with cloak and underwater restrictions retained. It neither changes ownership
+nor permits defeated seats to command units. No takes the local end sequence;
+Yes closes the prompt and keeps the peer in lockstep. Ordinary multiplayer
+ends through the match countdown when every participating human is out,
+even if computer units remain. Deathmatch bypasses this fallback.
+
+`allowWatching` defaults true as an explicit RWE policy and is retained in
+save/replay headers and host announcements. Direct launches accept
+`--allow-watching false`; the built-in lobby currently advertises its default
+policy. RWE lockstep has no AI dependent on a particular human host, so it
+does not need the original's forced-watch hosted-computer exception. The
+reference eligibility helper retains that distinction for ownership modes.
+
+## Verification
+
+The final focused Debug run passed 98 cases (3119 assertions). It exercises
+the real AI controller with two idle factories competing for one remaining
+constructor slot, forbids further constructors at zero cap, and verifies that
+a reduced rocket multiplier changes the combat mix. Commander-mode tests cover
+repeated replacement, preserved resources, base storage, removal, surviving
+high-HP veterans, and a wipe blast killing another seat's commander. Watching
+tests cover eligibility, host announcements, save/replay policy and the
+all-humans-eliminated fallback.
+
+The complete permitted Debug suite passed 1846 cases (193885 assertions)
+using `~*checksum*`; the five packet-checksum cases then passed separately
+(33 assertions). The two TaChecksums tests were excluded under the standing
+repository instruction.
+All Debug targets built successfully. A direct COFF-header inventory checked
+1061 CMake objects; the largest was `GameScene.cpp` at 24276 sections against
+the 24575-section budget.
+
+Native RWE command replays on shipped Coast To Coast and Lava Run each ran
+900 ticks with seed 7. At tick 870 the two seats had respectively respawned
+twice and once. The Lava Run replacement positions were above its sea level
+21 (heights 45, 44.375 and 44.6875). Native RWE AC02 schema-0 runs completed
+1800 ticks at each of easy, standard and hard, explicitly selecting the RWE AI;
+all three logs confirmed loading `ai/MISSIONS.txt`. These runs verify loading
+and execution; they do not establish the original AI's build sequence.
+
+Reference comparisons are static, as recorded in the findings. No original
+executable or visual multiplayer watching check was run. Rendering findings
+and the owner's accepted submarine construction height are outside these
+three implementation issues. The divergence register update is preserved in
+spec-room commit `55a834434d6820f1caee6d862652717ae4bc1eb1`.

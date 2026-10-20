@@ -102,6 +102,7 @@ namespace rwe
         {
             MainMenuModel host;
             host.skirmishOptions.commanderDeath.next(1u);
+            host.skirmishOptions.allowWatching.next(0u);
             host.skirmishOptions.startLocation.next(1u);
             host.skirmishOptions.mapping.next(1u);
             host.skirmishOptions.lineOfSight.next(2u);
@@ -111,6 +112,7 @@ namespace rwe
             applyOptionsToModel(guest, optionsFromModel(host));
 
             CHECK(guest.skirmishOptions.commanderDeath.getValue() == 1u);
+            CHECK(guest.skirmishOptions.allowWatching.getValue() == 0u);
             CHECK(guest.skirmishOptions.startLocation.getValue() == 1u);
             CHECK(guest.skirmishOptions.mapping.getValue() == 1u);
             CHECK(guest.skirmishOptions.lineOfSight.getValue() == 2u);
@@ -133,7 +135,7 @@ namespace rwe
                 }
             }
             CHECK(found);
-            CHECK(options.size() == 5);
+            CHECK(options.size() == 6);
         }
 
         SECTION("a name it does not know is ignored, and a value out of range leaves the option alone")
@@ -588,7 +590,7 @@ namespace rwe
 
         unsigned int stagesOf(const std::string& option)
         {
-            return option == "los" ? 3u : 2u;
+            return option == "los" || option == "commander" ? 3u : 2u;
         }
 
         MainMenuModel roomModel()

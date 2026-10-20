@@ -90,7 +90,7 @@ namespace rwe
         // #699/#700 supplement: per-seat lockstep adaptation of the original
         // machine-local countdown. -1 idle, 4..0 pending, -2 processed.
         int defeatCountdown{-1};
-        std::string commanderType;
+        std::string commanderType{};
         unsigned int respawnCount{0};
         bool removedFromGame{false};
 
