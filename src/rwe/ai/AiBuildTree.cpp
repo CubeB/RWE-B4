@@ -11,6 +11,10 @@ namespace rwe
 
     bool AiBuildTree::canBuild(const std::string& builderType, const std::string& unitType) const
     {
+        if (!missionAllows(unitType))
+        {
+            return false;
+        }
         auto it = buildableBy.find(toUpper(builderType));
         if (it == buildableBy.end())
         {
@@ -18,6 +22,24 @@ namespace rwe
             return true;
         }
         return it->second.count(toUpper(unitType)) != 0;
+    }
+
+    bool AiBuildTree::missionAllows(const std::string& type) const
+    {
+        auto rule = missionRules.find(toUpper(type));
+        if (rule == missionRules.end())
+        {
+            return true;
+        }
+        auto count = missionCommitted.find(toUpper(type));
+        const int committed = count == missionCommitted.end() ? 0 : count->second;
+        return rule->second.multiplier > 0 && (rule->second.limit == -1 || committed < rule->second.limit);
+    }
+
+    int AiBuildTree::missionWeight(const std::string& type) const
+    {
+        auto rule = missionRules.find(toUpper(type));
+        return rule == missionRules.end() ? 100 : rule->second.multiplier;
     }
 
     AiBuildTree buildTreeFromBuilderGuis(const BuilderGuisDatabase& guis, const std::set<std::string>& unitTypes)

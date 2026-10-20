@@ -8,6 +8,7 @@
 #include <rwe/vfs/AbstractVirtualFileSystem.h>
 #include <stdexcept>
 #include <utility>
+#include <rwe/util/rwe_string.h>
 
 namespace rwe
 {
@@ -178,6 +179,27 @@ namespace rwe
         // sub-RNG. This keeps AI choices reproducible across clients
         // that share `simulation.rng`'s seed.
         const std::uint64_t aiSeed = static_cast<std::uint64_t>(simulation.rng());
-        return std::make_unique<AiPlayerController>(playerId, std::move(profile), aiSeed, mapIntel, buildTree);
+        auto missionTree = buildTree;
+        if (request.mission && request.vfs)
+        {
+            // #383, BT-128 and the 2026-10-20 supplement: reuse the same
+            // difficulty/category/lock grammar as the classic engine.
+            std::vector<ClassicScriptType> types;
+            for (const auto& [name, definition] : simulation.unitDefinitions)
+            {
+                types.push_back({toUpper(name), toUpper(definition.category)});
+            }
+            std::vector<ClassicTypeEntry> entries(types.size());
+            auto plan = difficulty == AiDifficulty::Easy ? ClassicPlan::Easy
+                : difficulty == AiDifficulty::Standard ? ClassicPlan::Medium : ClassicPlan::Hard;
+            auto file = readClassicAiProfile(*request.vfs, request.aiProfileName);
+            applyClassicScript(parseClassicScript(file.text), plan, types, entries);
+            for (std::size_t n = 0; n < types.size(); ++n)
+            {
+                missionTree.missionRules.emplace(types[n].name, entries[n]);
+            }
+            LOG_INFO << "Player " << i << ": RWE mission limits and preferences from " << file.path;
+        }
+        return std::make_unique<AiPlayerController>(playerId, std::move(profile), aiSeed, mapIntel, std::move(missionTree));
     }
 }

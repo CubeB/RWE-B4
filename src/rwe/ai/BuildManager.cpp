@@ -2973,6 +2973,12 @@ namespace rwe
             }
         };
 
+        auto applyMissionPreferences = [&]() {
+            std::stable_sort(wanted.begin(), wanted.end(), [&](const std::string& a, const std::string& b) {
+                return bb.buildTree.missionWeight(a) > bb.buildTree.missionWeight(b);
+            });
+        };
+
         // Metal, of whichever kind this map's patches will take.
         //
         // Every extractor rule below used to name the dry one alone, and on a
@@ -3095,6 +3101,7 @@ namespace rwe
             wantStorage(true);
             wantMetalExtractor();
             want(s.solar);
+            applyMissionPreferences();
             return wanted;
         }
 
@@ -3775,13 +3782,16 @@ namespace rwe
             wanted.insert(wanted.begin(), urgent.begin(), urgent.end());
         }
 
+        applyMissionPreferences();
         return wanted;
     }
 
     void BuildManager::planFactories(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, const AiBlackboard& bb, std::vector<PlayerCommand>& outCommands) const
     {
         const auto& s = bb.sideUnits;
-        auto total = [&](const std::string& t) { return t.empty() ? 0 : countOf(bb.ownedTotalCounts, t); };
+        auto total = [&](const std::string& t) {
+            return t.empty() ? 0 : !bb.buildTree.missionAllows(t) ? 1000000 : countOf(bb.ownedTotalCounts, t);
+        };
 
         // Every factory that makes land combat units asks this, so it is
         // asked once: it depends on the profile and the blackboard and not
@@ -4016,16 +4026,17 @@ namespace rwe
                 long long bestShare = 0;
                 for (const auto& [type, share] : line)
                 {
-                    if (type->empty() || share <= 0)
+                    auto weightedShare = static_cast<long long>(share) * bb.buildTree.missionWeight(*type);
+                    if (type->empty() || weightedShare <= 0 || !bb.buildTree.missionAllows(*type))
                     {
                         continue;
                     }
                     auto count = static_cast<long long>(countOf(bb.ownedTotalCounts, *type));
-                    if (!best || count * bestShare < bestCount * share)
+                    if (!best || count * bestShare < bestCount * weightedShare)
                     {
                         best = type;
                         bestCount = count;
-                        bestShare = share;
+                        bestShare = weightedShare;
                     }
                 }
                 return best ? *best : std::string();
@@ -4293,7 +4304,7 @@ namespace rwe
             }
             else
             {
-                auto constructors = s.constructor.empty() ? 0 : countOf(bb.ownedTotalCounts, s.constructor);
+                auto constructors = total(s.constructor);
                 // One more while a laser tower is still short of its teeth
                 // (fortifyExtraConstructors): counted from what stands and
                 // what is going up, which is all this needs to know.
@@ -4361,6 +4372,10 @@ namespace rwe
                 }
             }
 
+            if (!next.empty() && !bb.buildTree.canBuild(factory.unitType, next))
+            {
+                next.clear();
+            }
             if (!next.empty() && reserveHolds)
             {
                 // Builders are what the reserve is FOR, so they still come.

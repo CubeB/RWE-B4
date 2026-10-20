@@ -3,6 +3,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <rwe/ai/classic/ClassicAiScript.h>
 
 namespace rwe
 {
@@ -34,6 +35,13 @@ namespace rwe
     {
         /** Buildable unit types by builder type, both as the data names them. */
         std::map<std::string, std::set<std::string>> buildableBy;
+
+        // #383: profile grammar is conformance; mapping it onto this planner
+        // is RWE-original. See docs/agents/383-699-700-findings.md.
+        std::map<std::string, ClassicTypeEntry> missionRules;
+        std::map<std::string, int> missionCommitted;
+        bool missionAllows(const std::string& type) const;
+        int missionWeight(const std::string& type) const;
 
         /**
          * Whether the tree has anything to say about this builder. A builder
