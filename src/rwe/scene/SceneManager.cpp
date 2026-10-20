@@ -404,13 +404,44 @@ namespace rwe
 
     void SceneManager::setWindowMode(const std::string& mode)
     {
+        // Keep the live config in step with the window: the front end and the
+        // in-game options page both read it, and a mode chosen here should not
+        // be forgotten when the next options panel opens.
+        if (globalConfig != nullptr)
+        {
+            globalConfig->windowMode = mode;
+        }
+
         if (mode == "fullscreen" || mode == "borderless")
         {
-            // Borderless is a fullscreen window with no exclusive display
-            // mode; fullscreen keeps whatever mode was set at startup.
             if (mode == "borderless")
             {
+                // Borderless is a fullscreen window with no exclusive display
+                // mode.
                 sdl->setWindowDisplayMode(window, nullptr);
+            }
+            else
+            {
+                // Exclusive fullscreen takes the desktop's own mode, the same
+                // one startup asks for (GameLaunch.cpp). Asking for the
+                // closest mode to the window's 800x600 changed the display to
+                // one of another shape and stretched the whole frame to fill
+                // it; the desktop mode keeps the native aspect.
+                auto displayID = sdl->getWindowDisplayIndex(window);
+                SDL_DisplayMode desktopMode;
+                if (displayID != 0 && sdl->getDesktopDisplayMode(displayID, &desktopMode))
+                {
+                    if (!sdl->setWindowDisplayMode(window, &desktopMode))
+                    {
+                        LOG_WARN << "Could not set the desktop display mode, falling back to desktop fullscreen: " << SDL_GetError();
+                        sdl->setWindowDisplayMode(window, nullptr);
+                    }
+                }
+                else
+                {
+                    LOG_WARN << "Could not read the desktop display mode, falling back to desktop fullscreen: " << SDL_GetError();
+                    sdl->setWindowDisplayMode(window, nullptr);
+                }
             }
             sdl->setWindowFullscreen(window, true);
             sdl->setWindowGrab(window, true);
@@ -424,6 +455,12 @@ namespace rwe
             // to stay reachable.
             sdl->setWindowGrab(window, false);
         }
+
+        // The window is a different size now (or the pixel size may have
+        // changed with the mode), so derive the frame and the cursor scale
+        // here rather than waiting for the next resize event -- some
+        // platforms send none for a fullscreen switch.
+        refreshWindowMetrics();
     }
 
     void SceneManager::requestExit()

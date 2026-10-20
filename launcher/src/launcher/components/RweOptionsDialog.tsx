@@ -48,7 +48,12 @@ function parseVideoMode(m: string): VideoMode | undefined {
 }
 
 export function RweOptionsDialog(props: Props) {
-  const [fullscreen, setFullscreen] = React.useState(!!props.initialFullscreen);
+  // A fresh config has no fullscreen key at all, and the default is a
+  // bordered window: `undefined` must read as unchecked rather than being
+  // coerced from whatever `initialFullscreen` happens to be.
+  const [fullscreen, setFullscreen] = React.useState(
+    props.initialFullscreen ?? false
+  );
   const [videoMode, setVideoMode] = React.useState(props.initiallySelectedMode);
   const [interfaceMode, setInterfaceMode] = React.useState<InterfaceMode>(
     props.initiallySelectedInterfaceMode || "left-click"
