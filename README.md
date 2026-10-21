@@ -142,8 +142,11 @@ The command-line setup is also available from the game directory:
 .\rwe.exe
 ```
 
-The setup tool searches common GOG and Cavedog installation locations. If
-it cannot find your copy, point it at the directory containing `totala1.hpi`:
+The setup tool searches common GOG, Cavedog, and Steam installation locations.
+Steam detection includes `Steam/steamapps/common/Total Annihilation`, additional
+libraries registered in `libraryfolders.vdf`, and the game's app manifest.
+On Linux it also checks the normal Steam, Steam Deck, and Flatpak Steam folders.
+If it cannot find your copy, point it at the directory containing `totala1.hpi`:
 
 ```powershell
 .\rwe_setup.exe --from "C:/GOG Games/Total Annihilation"

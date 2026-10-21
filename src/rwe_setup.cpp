@@ -13,6 +13,7 @@
  */
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -178,8 +179,26 @@ namespace
     std::vector<fs::path> candidateInstallPaths()
     {
         std::vector<fs::path> candidates;
+        std::vector<fs::path> steamRoots;
 
 #ifdef RWE_PLATFORM_WINDOWS
+        if (auto path = readRegistryString(HKEY_CURRENT_USER, "SOFTWARE\\Valve\\Steam", "SteamPath"))
+        {
+            steamRoots.emplace_back(*path);
+        }
+        if (auto path = readRegistryString(HKEY_LOCAL_MACHINE, "SOFTWARE\\Valve\\Steam", "InstallPath"))
+        {
+            steamRoots.emplace_back(*path);
+        }
+        for (const auto* variable : {"ProgramFiles(x86)", "ProgramFiles"})
+        {
+            if (auto path = std::getenv(variable))
+            {
+                steamRoots.emplace_back(fs::path(path) / "Steam");
+            }
+        }
+        steamRoots.emplace_back("C:/Program Files (x86)/Steam");
+        steamRoots.emplace_back("C:/Program Files/Steam");
         // GOG records the install directory against the game's product id.
         // 1207658880 is the Total Annihilation: Commander Pack.
         for (const auto& id : {"1207658880", "1207658879"})
@@ -206,16 +225,23 @@ namespace
         if (auto home = std::getenv("HOME"))
         {
             fs::path h(home);
-            for (const auto& prefix : {".wine/drive_c", ".local/share/Steam/steamapps/compatdata"})
+            for (const auto& prefix : {".local/share/Steam", ".steam/steam", ".steam/root", ".steam/debian-installation",
+                     ".var/app/com.valvesoftware.Steam/.local/share/Steam"})
             {
-                candidates.emplace_back(h / prefix / "GOG Games" / "Total Annihilation");
-                candidates.emplace_back(h / prefix / "Program Files (x86)" / "Total Annihilation");
+                steamRoots.emplace_back(h / prefix);
             }
+            candidates.emplace_back(h / ".wine/drive_c/GOG Games/Total Annihilation");
+            candidates.emplace_back(h / ".wine/drive_c/Program Files (x86)/Total Annihilation");
             candidates.emplace_back(h / "Total Annihilation");
             candidates.emplace_back(h / "Games" / "Total Annihilation");
         }
 #endif
-
+        if (auto dataHome = std::getenv("XDG_DATA_HOME"))
+        {
+            steamRoots.emplace_back(fs::path(dataHome) / "Steam");
+        }
+        const auto steamCandidates = rwe::steamTaInstallPaths(steamRoots);
+        candidates.insert(candidates.end(), steamCandidates.begin(), steamCandidates.end());
         return candidates;
     }
 

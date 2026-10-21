@@ -2,9 +2,65 @@
 #include <rwe/setup/TaInstall.h>
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <fstream>
+#include <iomanip>
 
 namespace rwe
 {
+    TEST_CASE("Steam TA discovery follows configured libraries and manifests", "[setup][steam]")
+    {
+        namespace fs = std::filesystem;
+        const auto temporary = fs::temp_directory_path()
+            / ("rwe-steam-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        struct Cleanup
+        {
+            fs::path path;
+            ~Cleanup()
+            {
+                std::error_code ec;
+                fs::remove_all(path, ec);
+            }
+        } cleanup{temporary};
+        const auto steam = temporary / "Steam";
+        const auto other = temporary / "Other library with spaces";
+        fs::create_directories(steam / "steamapps");
+        fs::create_directories(other / "steamapps");
+
+        SECTION("modern libraries decode escaped Windows paths and ignore app-size records")
+        {
+            std::ofstream file(steam / "steamapps/libraryfolders.vdf");
+            file << "\"libraryfolders\" { // libraries\n\"0\" { \"path\" " << std::quoted(steam.string())
+                 << " } \"1\" { \"path\" " << std::quoted(other.string())
+                 << " \"apps\" { \"298030\" \"123456\" } } }";
+        }
+        SECTION("legacy library list in config is supported too")
+        {
+            fs::create_directories(steam / "config");
+            std::ofstream file(steam / "config/libraryfolders.vdf");
+            file << "\"LibraryFolders\" { \"TimeNextStatsReport\" \"0\" \"1\" " << std::quoted(other.string()) << " }";
+        }
+        std::ofstream(other / "steamapps/appmanifest_298030.acf")
+            << "\"AppState\" { \"appid\" \"298030\" \"installdir\" \"Custom TA folder\" }";
+        const auto paths = steamTaInstallPaths({steam, steam});
+        REQUIRE(std::count(paths.begin(), paths.end(), steam / "steamapps/common/Total Annihilation") == 1);
+        REQUIRE(std::count(paths.begin(), paths.end(), other / "steamapps/common/Total Annihilation") == 1);
+        REQUIRE(std::find(paths.begin(), paths.end(), other / "steamapps/common/Custom TA folder") != paths.end());
+        REQUIRE(paths.size() == 5);
+
+        std::ofstream(other / "steamapps/appmanifest_298030.acf") << "\"AppState\" { \"installdir\" \"../outside\" }";
+        const auto safePaths = steamTaInstallPaths({steam});
+        REQUIRE(safePaths.size() == 4);
+    }
+
+    TEST_CASE("Steam default folders remain discoverable without metadata", "[setup][steam]")
+    {
+        const std::filesystem::path steam("nonexistent-steam-test-root");
+        const auto paths = steamTaInstallPaths({steam});
+        REQUIRE(paths.size() == 2);
+        REQUIRE(paths.front() == steam / "steamapps/common/Total Annihilation");
+    }
+
     namespace
     {
         /**
