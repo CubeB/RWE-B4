@@ -2360,6 +2360,40 @@ namespace rwe
         /** A raid target must be at least this far from the enemy's base. */
         SimScalar raidAvoidBaseRadius{900_ss};
         /**
+         * Send the raiding party at the enemy's fresh expansion frame, or at
+         * the builder standing over it, ahead of a finished building further
+         * out.
+         *
+         * A nanoframe is the cheapest thing in the game to kill and the most
+         * valuable per shot: half its metal is already in it, it has zero
+         * hit points until it finishes, and it cannot shoot back. The old
+         * raid pick was nearest-outlying-building, which walks past the
+         * frame going up on the flank to shell an extractor that has been
+         * there for ten minutes.
+         *
+         * A frame only counts while firstSeen is inside
+         * raidFrameWindowSeconds, so a remembered frame from a raid that has
+         * already passed does not keep pulling parties at ground that is now
+         * either finished or empty. The builder is preferred over the frame
+         * only when it is in sight and within one build site of it: killing
+         * the builder stops the next frame as well as this one.
+         *
+         * Off restores the previous nearest-outlying-building choice exactly
+         * and is the control arm for a paired arena run. RWE-original
+         * policy (docs/agents/rwe-ai-adaptability.md S:5); the original's
+         * computer player has no expansion-frame raid.
+         */
+        bool raidExpansionFrames{true};
+        /**
+         * How recently the AI must have first seen a frame for it to count
+         * as the enemy's current expansion. 30 seconds is about one build
+         * time for a level-one extractor or solar collector. Zero switches
+         * the frame half off while leaving the builder preference to the
+         * knob above -- which, with no frame to stand over, also does
+         * nothing.
+         */
+        int raidFrameWindowSeconds{30};
+        /**
          * The wave's objective is confined to this far from the enemy's base,
          * so that what it attacks is their base. Zero lets the pick range
          * over the whole map, which is what it used to do.
@@ -2674,6 +2708,33 @@ namespace rwe
          * and special orders are untouched.
          */
         bool waveAttackMove{true};
+        /**
+         * Concentrate the wave's fire on one target chosen by role and value
+         * rather than letting every unit take its own nearest enemy.
+         *
+         * A line of raiders each shooting the nearest thing spends its
+         * damage across a front and kills none of it, while the enemy's
+         * artillery and static defences -- the parts that actually punish a
+         * wave -- go on firing. The focus target is an enemy static defence
+         * or long-ranged mobile gun first, a builder or commander out in the
+         * open second, and raiders or tanks after that; a unit that can hit
+         * it prefers it to its own nearest target, and a unit that cannot
+         * keeps the old acquisition. The choice is latched for
+         * focusFireLatchSeconds so it does not change hands every pass.
+         *
+         * Off restores per-unit nearest acquisition exactly, which is the
+         * control arm for a paired arena run. RWE-original policy
+         * (docs/agents/rwe-ai-adaptability.md S:5); the original's computer
+         * player has no focus fire.
+         */
+        bool focusFire{false};
+        /**
+         * How long the wave keeps a chosen focus target before it is
+         * reconsidered, in seconds. A target that dies or leaves sight is
+         * dropped at once whatever the latch says. Zero re-picks every
+         * tactical pass.
+         */
+        int focusFireLatchSeconds{5};
         /** Enemies this close to the base anchor trigger a defence. */
         SimScalar defendRadius{900_ss};
         /** How far from a known enemy an army unit will pick a fight. */

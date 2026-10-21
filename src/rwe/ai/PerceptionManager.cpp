@@ -24,13 +24,6 @@ namespace rwe
          */
         constexpr float EnemyTankMinMetal = 200.0f;
 
-        /**
-         * Where a mobile gun stops being a raider's short-range weapon and
-         * becomes rocket or artillery reach. A Peewee's and a Flash's guns
-         * are around 180-200; a Storm's and a Thud's are well past this.
-         */
-        constexpr float EnemyRocketMinRange = 300.0f;
-
         float longestWeaponRange(const GameSimulation& sim, const UnitDefinition& def)
         {
             float longest = 0.0f;
@@ -232,7 +225,29 @@ namespace rwe
             }
             const auto& def = sim.unitDefinitions.at(unit.unitType);
             auto armed = !def.weapon1.empty() || !def.weapon2.empty() || !def.weapon3.empty();
-            bb.knownEnemies[unitId.value] = KnownEnemy{unitId, unit.unitType, unit.position, bb.now, !def.isMobile, armed, def.canFly, def.commander, unit.owner};
+            KnownEnemy contact{};
+            contact.unitId = unitId;
+            contact.unitType = unit.unitType;
+            contact.lastKnownPosition = unit.position;
+            contact.lastSeen = bb.now;
+            contact.isBuilding = !def.isMobile;
+            contact.isArmed = armed;
+            contact.isAir = def.canFly;
+            contact.isCommander = def.commander;
+            contact.owner = unit.owner;
+            // What it was when we looked at it. Read off the live unit, so a
+            // frame that finishes stops being a frame the first time it is
+            // seen whole; a contact that has gone back into the fog keeps
+            // the last answer instead.
+            contact.underConstruction = unit.isBeingBuilt(def);
+            contact.isBuilder = def.builder || def.commander;
+            // firstSeen is a stamp on the sighting, not on the pass: the
+            // record below is rebuilt from scratch every time the unit is
+            // visible, so the old stamp has to be carried over or every
+            // contact would look freshly discovered on every tick.
+            auto existing = bb.knownEnemies.find(unitId.value);
+            contact.firstSeen = existing != bb.knownEnemies.end() ? existing->second.firstSeen : bb.now;
+            bb.knownEnemies[unitId.value] = contact;
             if (def.canFly)
             {
                 bb.lastEnemyAirSeenAt = bb.now;

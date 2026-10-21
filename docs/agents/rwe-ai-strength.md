@@ -87,9 +87,13 @@ both factory types, value-odds attack posture) are built and measured.
   group. The `humanlikeOpening` arm produced the identical game in every pair
   against the classic AI, so it stays off by default until a human play-test or
   a stronger opponent shows a difference.
+- Batch 5 (expansion-frame/builder raids, role/value focus fire) is built and
+  measured. The raid is close-out neutral; focus fire was slower on the worst
+  seeds (DS 4904 29671 -> 36391), so it defaults off until a human/stronger
+  opponent shows it pays. The raid stays on.
 - Full detail and the tables are in `docs/AI-TUNING.md`. The AI suite passes
-  (287 cases / 9982 assertions); the full permitted suite is 1881 cases /
-  194421 assertions.
+  (292 cases / 10044 assertions); the full permitted suite result is in the
+  session report.
 
 The CORE candidate was measured against the pre-ARM-change ARM and still needs
 `--evaluate` on fresh seeds. No original-game check applies: this is
