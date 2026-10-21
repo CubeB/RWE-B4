@@ -381,6 +381,38 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a construction bot approaches inside working range at a nanoframe corner", "[guardassist][moho]")
+    {
+        // MOHO-ASSIST-VALIDATION MA-01 / RA-03: a rectangular navigation
+        // arrival near a corner must not strand the bot outside work range.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(96, 96), 0u, 0, 0);
+        auto player = addPlayer(sim);
+        registerModel(sim);
+        auto mine = makeBigPlantDef();
+        mine.builder = false;
+        mine.buildTime = 100000;
+        mine.movementCollisionInfo = UnitDefinition::AdHocMovementClass{6u, 6u, 255u, 255u, 0u, 0u};
+        mine.yardMap = Grid<YardMapCell>(6, 6, YardMapCell::Ground);
+        sim.unitDefinitions["MINE"] = mine;
+        sim.unitDefinitions["BUILDER"] = makeShortArmedBuilderDef();
+        sim.unitScriptDefinitions["MINE"] = *script;
+        sim.unitScriptDefinitions["BUILDER"] = *script;
+        auto frame = sim.trySpawnUnit("MINE", player, SimVector(496_ss, 0_ss, 496_ss), std::nullopt).value();
+        // Keep an unattended frame alive while isolating the approach failure.
+        sim.getUnitState(frame).nanoframeDecayTime = GameTime(1000);
+        auto helper = sim.trySpawnCompletedUnit("BUILDER", player, SimVector(700_ss, 0_ss, 700_ss), std::nullopt).value();
+        sim.getUnitState(helper).inBuildStance = true;
+        sim.getUnitState(helper).orders.emplace_back(CompleteBuildOrder(frame));
+        tick(sim, 500);
+        REQUIRE(sim.tryGetUnitState(frame));
+        REQUIRE(sim.getUnitState(frame).buildTimeCompleted > 0);
+        auto building = std::get_if<UnitBehaviorStateBuilding>(&sim.getUnitState(helper).behaviourState);
+        REQUIRE(building != nullptr);
+        REQUIRE(building->targetUnit == frame);
+        REQUIRE(building->nanoParticleOrigin);
+    }
+
     TEST_CASE("a short-armed builder reaches a frame in the middle of a full-sized plant", "[guardassist]")
     {
         auto script = makeEmptyCobScript({"base"});
