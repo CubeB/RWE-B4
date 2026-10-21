@@ -1034,6 +1034,20 @@ namespace rwe
         // still uses threatDirection: a radar's job is watching the enemy's
         // side of the map, which recentLosses says nothing about.
         auto towards = profile.defenceFacesRecentLosses ? defenceFacingDirection(bb) : threatDirection(bb);
+        // Towers lean towards where the attacks have actually been coming
+        // from (threatDirectedDefence), when there is a memory to lean on.
+        // The post moves; everything downstream -- the site search's
+        // reachability, footprint, affordability and spacing tests, and the
+        // build-site guard -- is untouched. Off, or with no memory yet, the
+        // old facing stands exactly.
+        if (profile.threatDirectedDefence && profile.threatMemory)
+        {
+            auto sector = strongestThreatSector(bb);
+            if (sector >= 0)
+            {
+                towards = threatSectorDirection(static_cast<std::size_t>(sector));
+            }
+        }
         // The first few go out on the edge of the built-up base rather than
         // among it (firstDefencesOnPerimeter): a tower beside the solar
         // collectors is already inside whatever it was meant to keep out.
@@ -5162,6 +5176,17 @@ namespace rwe
         {
             // Defences go on the side of the base that faces the enemy.
             auto towards = (*bb.enemyBasePosition - *bb.baseAnchor).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+            // ...unless the threat memory knows where the attacks have
+            // actually been coming from. Same post move as chooseDefenceSite,
+            // for the ordinary-build path reached when spreadDefences is off.
+            if (profile.threatDirectedDefence && profile.threatMemory)
+            {
+                auto sector = strongestThreatSector(bb);
+                if (sector >= 0)
+                {
+                    towards = threatSectorDirection(static_cast<std::size_t>(sector));
+                }
+            }
             auto towerAnchor = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
             result.site = chooseBuildSite(sim, profile, bb, next, towerAnchor, rng, ctx.siteReachable);
         }

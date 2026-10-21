@@ -6,6 +6,7 @@
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/sim/PlayerId.h>
 #include <functional>
+#include <set>
 #include <vector>
 
 namespace rwe
@@ -23,6 +24,40 @@ namespace rwe
      * without a whole simulation behind it.
      */
     SimScalar targetAcquisitionRadius(const AiTuningProfile& profile, SimScalar engageRadius, SimScalar longestWeaponRange);
+
+    /**
+     * One available home-guard unit, as the proportional-defence rule sees
+     * it: who it is, what it is worth, and how far it stands from the
+     * intruder being answered.
+     */
+    struct DefenceResponderCandidate
+    {
+        unsigned int unitId{0};
+        float metal{0.0f};
+        SimScalar distanceSquared{0_ss};
+    };
+
+    /**
+     * Which of the available home guard answers an intruder.
+     *
+     * With proportionalDefence off this is every candidate, which is the old
+     * "send what is at home" response exactly. Otherwise the pool is sorted
+     * by distance and then by raw unit id, and taken from the front until
+     * its metal reaches defenceResponseRatio times the intruders' metal --
+     * with one responder per intruder as a count floor, defenceResponseMinUnits
+     * as a hard minimum, and defenceResponseMaxShare of the pool as an
+     * optional reserve. A single raider therefore draws a pair rather than
+     * the reserve, and a push worth more than the guard draws the guard.
+     *
+     * A free function so the sizing can be pinned without a simulation, and
+     * so the ordering is testable on its own. RWE-original policy
+     * (docs/agents/rwe-ai-adaptability.md S:4); no classic-parity claim.
+     */
+    std::set<unsigned int> chooseDefenceResponders(
+        const AiTuningProfile& profile,
+        const std::vector<DefenceResponderCandidate>& candidates,
+        float intruderMetal,
+        int intruderCount);
 
     /**
      * The single enemy a wave should concentrate on, or nothing when the

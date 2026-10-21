@@ -2,6 +2,7 @@
 #include <rwe/ai/StrategicManager.h>
 #include <rwe/ai/ai_test_util.h>
 #include <rwe/sim/SimTicksPerSecond.h>
+#include <set>
 
 /**
  * What the army does with itself: gathering, attacking, breaking off, and
@@ -31,6 +32,87 @@ namespace rwe
                 }
             }
             return n;
+        }
+
+        /** How many of these units were ordered to attack this target. */
+        int countAttackOrdersOn(const std::vector<PlayerCommand>& commands, const std::vector<UnitId>& units, UnitId target)
+        {
+            int n = 0;
+            for (auto id : units)
+            {
+                for (const auto& attack : ordersFor<AttackOrder>(commands, id))
+                {
+                    auto aimed = std::get_if<UnitId>(&attack.target);
+                    if (aimed && *aimed == target)
+                    {
+                        ++n;
+                        break;
+                    }
+                }
+            }
+            return n;
+        }
+    }
+
+    TEST_CASE("proportional defence sizes the force and orders it deterministically", "[ai]")
+    {
+        auto profile = AiTuningProfile{};
+        std::vector<DefenceResponderCandidate> pool;
+        for (unsigned int i = 0; i < 8; ++i)
+        {
+            pool.push_back(DefenceResponderCandidate{10u + i, 100.0f, 1000_ss});
+        }
+
+        SECTION("one cheap raider draws a pair, not the reserve")
+        {
+            auto chosen = chooseDefenceResponders(profile, pool, 100.0f, 1);
+            // 1.3 * 100 wants 130 metal, and a unit is 100: two of them.
+            CHECK(chosen.size() == 2);
+            // All distances are equal, so the tie-break is the raw unit id.
+            const std::set<unsigned int> expected{10u, 11u};
+            CHECK(chosen == expected);
+        }
+
+        SECTION("a push worth more than the guard draws the guard")
+        {
+            auto chosen = chooseDefenceResponders(profile, pool, 600.0f, 6);
+            // 1.3 * 600 = 780, which needs all eight, and the default share
+            // leaves all eight available.
+            CHECK(chosen.size() == 8);
+            const std::set<unsigned int> expected{10u, 11u, 12u, 13u, 14u, 15u, 16u, 17u};
+            CHECK(chosen == expected);
+        }
+
+        SECTION("the ratio is the sizing knob")
+        {
+            profile.defenceResponseRatio = 0.5f;
+            CHECK(chooseDefenceResponders(profile, pool, 100.0f, 1).size() == 1);
+            profile.defenceResponseRatio = 3.0f;
+            CHECK(chooseDefenceResponders(profile, pool, 100.0f, 1).size() == 3);
+        }
+
+        SECTION("the minimum still sends somebody against a valueless contact")
+        {
+            profile.defenceResponseMinUnits = 3;
+            profile.defenceResponseRatio = 0.1f;
+            CHECK(chooseDefenceResponders(profile, pool, 0.0f, 0).size() == 3);
+        }
+
+        SECTION("the cap never commits the whole guard")
+        {
+            profile.defenceResponseMaxShare = 0.5f;
+            profile.defenceResponseMinUnits = 1;
+            CHECK(chooseDefenceResponders(profile, pool, 100000.0f, 100).size() == 4);
+        }
+
+        SECTION("off sends everyone, and input order does not change the answer")
+        {
+            auto chosen = chooseDefenceResponders(profile, pool, 100.0f, 1);
+            std::vector<DefenceResponderCandidate> reversed(pool.rbegin(), pool.rend());
+            CHECK(chooseDefenceResponders(profile, reversed, 100.0f, 1) == chosen);
+
+            profile.proportionalDefence = false;
+            CHECK(chooseDefenceResponders(profile, pool, 0.0f, 0).size() == pool.size());
         }
     }
 
@@ -716,6 +798,160 @@ namespace rwe
                 REQUIRE(controller.getBlackboard().phase == GamePhase::Defend);
                 REQUIRE(!ordersFor<AttackOrder>(commands, ownId).empty());
             }
+        }
+    }
+
+    TEST_CASE("proportional defence sends a force sized to the intruders", "[ai]")
+    {
+        // One raider used to draw every unit at home, and a real push used
+        // to draw exactly the same. The response now comes from the
+        // intruders' own metal: enough to be worth more than they are, and
+        // one responder per intruder at the least.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+
+        std::vector<UnitId> own;
+        for (int i = 0; i < 8; ++i)
+        {
+            own.push_back(addUnit(sim, "ARMPW", ai, SimVector(SimScalar(-100.0f - i * 40.0f), 0_ss, 0_ss), script));
+        }
+
+        auto profile = makeDefaultStandardProfile();
+        // See the intruders without a scout, and keep everything out of
+        // its own acquisition radius so the only orders are the defence's.
+        profile.cheatModeOmniscient = true;
+        profile.scoutCount = 0;
+        profile.attackArmySize = 50;
+        profile.engageRadius = 50_ss;
+        // Eight units against one would pass the value-odds gate and turn
+        // this into an attack on the enemy's base; the question here is the
+        // defence response, so keep the phase gate on the headcount.
+        profile.attackUsesValueOdds = false;
+
+        SECTION("one raider draws two of the eight, not all of them")
+        {
+            auto raiderId = addUnit(sim, "ARMPW", human, SimVector(600_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            REQUIRE(controller.getBlackboard().phase == GamePhase::Defend);
+            REQUIRE(controller.getBlackboard().enemiesNearBase.size() == 1);
+            CHECK(countAttackOrdersOn(commands, own, raiderId) == 2);
+        }
+
+        SECTION("six raiders draw the whole guard, not a pair")
+        {
+            std::vector<UnitId> raiders;
+            for (int i = 0; i < 6; ++i)
+            {
+                raiders.push_back(addUnit(sim, "ARMPW", human, SimVector(600_ss, 0_ss, SimScalar(i * 30.0f)), script));
+            }
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            REQUIRE(controller.getBlackboard().phase == GamePhase::Defend);
+            REQUIRE(controller.getBlackboard().enemiesNearBase.size() == 6);
+            // The nearest to home is the single target the response is
+            // ordered at, exactly as before; the question here is how many
+            // units were committed. 1.3 * 600 metal is more than the eight
+            // guards are worth, so all eight go.
+            auto nearest = raiders.front();
+            CHECK(countAttackOrdersOn(commands, own, nearest) == 8);
+        }
+
+        SECTION("switched off, the same raider draws all eight")
+        {
+            profile.proportionalDefence = false;
+            auto raiderId = addUnit(sim, "ARMPW", human, SimVector(600_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            REQUIRE(controller.getBlackboard().phase == GamePhase::Defend);
+            CHECK(countAttackOrdersOn(commands, own, raiderId) == 8);
+        }
+    }
+
+    TEST_CASE("an intruder big enough recalls the wave, a raider does not", "[ai]")
+    {
+        auto profile = makeDefaultStandardProfile();
+        profile.attackInWaves = true;
+        profile.reserveAnswersIntruders = true;
+        profile.recallThreatRatio = 1.5f;
+        StrategicManager strategic;
+
+        auto state = [&]() {
+            AiBlackboard bb;
+            bb.phase = GamePhase::Attack;
+            bb.attackGroup = {1u, 2u};
+            bb.waveSpent = false;
+            bb.waveMetal = 1000.0f;
+            bb.enemiesNearBase.push_back(UnitId(77));
+            return bb;
+        };
+
+        SECTION("a raider far below the wave: the reserve answers and the wave stays out")
+        {
+            auto bb = state();
+            bb.threatTotal = 400;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+        }
+
+        SECTION("at exactly the ratio the old wave-out rule stands")
+        {
+            auto bb = state();
+            bb.threatTotal = 1500;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+        }
+
+        SECTION("a push above the ratio turns the wave round")
+        {
+            auto bb = state();
+            bb.threatTotal = 2000;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Defend);
+        }
+
+        SECTION("the ratio is the threshold")
+        {
+            profile.recallThreatRatio = 3.0f;
+            auto bb = state();
+            bb.threatTotal = 2000;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+        }
+
+        SECTION("proportional defence off keeps the old never-recall response")
+        {
+            profile.proportionalDefence = false;
+            auto bb = state();
+            bb.threatTotal = 9000;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+        }
+
+        SECTION("threat memory off keeps the old never-recall response")
+        {
+            profile.threatMemory = false;
+            auto bb = state();
+            bb.threatTotal = 9000;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+        }
+
+        SECTION("no wave out means no recall to make")
+        {
+            auto bb = state();
+            bb.attackGroup.clear();
+            bb.threatTotal = 9000;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Defend);
         }
     }
 

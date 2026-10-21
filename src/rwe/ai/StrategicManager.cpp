@@ -73,8 +73,21 @@ namespace rwe
         // walked home; the units gathering at the rally point for the next
         // wave are the ones that answer an intruder (ArmyManager). Once the
         // wave is spent the intruder gets everyone, as before.
+        //
+        // A big enough push is the exception. The threat memory totals what
+        // has actually come at the base lately, and when that is worth more
+        // than recallThreatRatio times the wave, home is the fight and the
+        // wave comes back. Both halves of the rule need their memories on:
+        // with threatMemory off there is no total and this reduces to the
+        // old wave-out rule exactly, and proportionalDefence off is the
+        // documented control arm for the old response.
         auto waveOut = profile.attackInWaves && profile.reserveAnswersIntruders && bb.phase == GamePhase::Attack && !bb.waveSpent && !bb.attackGroup.empty();
-        if (!bb.enemiesNearBase.empty() && !waveOut)
+        auto recallWave = false;
+        if (waveOut && profile.proportionalDefence && profile.threatMemory && bb.waveMetal > 0.0f && bb.threatTotal > 0)
+        {
+            recallWave = static_cast<float>(bb.threatTotal) > profile.recallThreatRatio * bb.waveMetal;
+        }
+        if (!bb.enemiesNearBase.empty() && (!waveOut || recallWave))
         {
             bb.phase = GamePhase::Defend;
             return;

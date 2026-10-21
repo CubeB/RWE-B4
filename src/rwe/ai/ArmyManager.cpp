@@ -993,6 +993,73 @@ namespace rwe
         return rweMax(engageRadius, reach);
     }
 
+    std::set<unsigned int> chooseDefenceResponders(
+        const AiTuningProfile& profile,
+        const std::vector<DefenceResponderCandidate>& candidates,
+        float intruderMetal,
+        int intruderCount)
+    {
+        std::set<unsigned int> chosen;
+        if (candidates.empty())
+        {
+            return chosen;
+        }
+        if (!profile.proportionalDefence)
+        {
+            // The control arm: everyone available answers, exactly as the
+            // old Defend branch did.
+            for (const auto& candidate : candidates)
+            {
+                chosen.insert(candidate.unitId);
+            }
+            return chosen;
+        }
+
+        // Nearest first, then lowest id: a total order over the pool, so two
+        // peers choose the same responders from the same state. Nearest is
+        // measured to the intruder by the caller.
+        std::vector<DefenceResponderCandidate> order = candidates;
+        std::sort(order.begin(), order.end(), [](const DefenceResponderCandidate& a, const DefenceResponderCandidate& b) {
+            if (a.distanceSquared != b.distanceSquared)
+            {
+                return a.distanceSquared < b.distanceSquared;
+            }
+            return a.unitId < b.unitId;
+        });
+
+        const auto available = static_cast<int>(order.size());
+        const auto minUnits = std::min(std::max(1, profile.defenceResponseMinUnits), available);
+        // The share is a reserve control, not the default limit: at 1.0 the
+        // whole guard is available and the ratio is the only thing sizing
+        // the response. Rounding up so a guard of five at 0.5 still commits
+        // three rather than two and a half.
+        auto maxUnits = static_cast<int>(std::ceil(std::max(0.0f, profile.defenceResponseMaxShare) * static_cast<float>(available)));
+        maxUnits = std::clamp(maxUnits, minUnits, available);
+        // One responder per intruder is the floor even when the intruders
+        // are individually cheaper than ours: a push of six Fleas is still
+        // six things shooting, whatever their metal says. The value target
+        // above it is what stops an expensive push being under-sent.
+        const auto countFloor = std::min(std::max(0, intruderCount), maxUnits);
+        const auto floorUnits = std::max(minUnits, countFloor);
+        const auto target = std::max(0.0f, intruderMetal) * std::max(0.0f, profile.defenceResponseRatio);
+
+        float sent = 0.0f;
+        for (const auto& candidate : order)
+        {
+            if (static_cast<int>(chosen.size()) >= maxUnits)
+            {
+                break;
+            }
+            chosen.insert(candidate.unitId);
+            sent += std::max(0.0f, candidate.metal);
+            if (static_cast<int>(chosen.size()) >= floorUnits && sent >= target)
+            {
+                break;
+            }
+        }
+        return chosen;
+    }
+
     std::optional<UnitId> chooseFocusFireTarget(
         const GameSimulation& sim,
         PlayerId aiOwner,
@@ -2861,6 +2928,9 @@ namespace rwe
         // near the map's middle it was as likely to be their solar
         // collector as the raider at our extractors.
         std::optional<UnitId> intruder;
+        std::optional<SimVector> intruderPosition;
+        float intruderMetal = 0.0f;
+        int intruderCount = 0;
         if (bb.baseAnchor)
         {
             SimScalar nearest = 0_ss;
@@ -2884,14 +2954,69 @@ namespace rwe
                 {
                     continue;
                 }
+                // The whole party's value, not only the nearest one's: the
+                // responding force is sized against what came, and a second
+                // raider behind the first is part of what came.
+                if (auto defIt = sim.unitDefinitions.find(known->second.unitType); defIt != sim.unitDefinitions.end())
+                {
+                    intruderMetal += std::max(0.0f, defIt->second.buildCostMetal.value);
+                }
+                ++intruderCount;
                 auto distance = bb.baseAnchor->distanceSquared(known->second.lastKnownPosition);
                 if (!intruder || distance < nearest)
                 {
                     nearest = distance;
                     intruder = enemyId;
+                    intruderPosition = known->second.lastKnownPosition;
                 }
             }
         }
+
+        // How much of the home guard answers it (proportionalDefence). The
+        // pool is what the unit loop below could actually send: alive,
+        // not the borrowed scout, and not already away with the wave, the
+        // raid or a build-site guard. With the knob off this is every one of
+        // them, and the two branches that use it behave exactly as before.
+        std::set<unsigned int> defenceResponders;
+        if (profile.proportionalDefence && intruder && !outnumbered)
+        {
+            std::vector<DefenceResponderCandidate> pool;
+            pool.reserve(bb.combatUnits.size());
+            for (auto unitId : bb.combatUnits)
+            {
+                if (bb.scoutUnitId && *bb.scoutUnitId == unitId)
+                {
+                    continue;
+                }
+                if (bb.phase == GamePhase::Attack && profile.attackInWaves && bb.attackGroup.count(unitId.value) != 0)
+                {
+                    continue;
+                }
+                if (bb.raidGroup.count(unitId.value) != 0 || bb.guardGroup.count(unitId.value) != 0)
+                {
+                    continue;
+                }
+                auto unitRef = sim.tryGetUnitState(unitId);
+                if (!unitRef || unitRef->get().isDead())
+                {
+                    continue;
+                }
+                DefenceResponderCandidate candidate;
+                candidate.unitId = unitId.value;
+                if (auto defIt = sim.unitDefinitions.find(unitRef->get().unitType); defIt != sim.unitDefinitions.end())
+                {
+                    candidate.metal = std::max(0.0f, defIt->second.buildCostMetal.value);
+                }
+                candidate.distanceSquared = intruderPosition
+                    ? unitRef->get().position.distanceSquared(*intruderPosition)
+                    : bb.baseAnchor->distanceSquared(unitRef->get().position);
+                pool.push_back(candidate);
+            }
+            defenceResponders = chooseDefenceResponders(profile, pool, intruderMetal, intruderCount);
+        }
+        auto answersIntruder = [&](UnitId unitId) {
+            return !profile.proportionalDefence || defenceResponders.count(unitId.value) != 0;
+        };
 
         // Raiders at a building of ours out beyond the base, and the reserve
         // near enough and strong enough to answer them (answerOutpostRaids).
@@ -3597,8 +3722,11 @@ namespace rwe
             {
                 case GamePhase::Defend:
                 {
-                    // Head for the intruder closest to home.
-                    if (intruder && !outnumbered)
+                    // Head for the intruder closest to home, with the part
+                    // of the guard the proportional rule sized for it. The
+                    // rest stay on the rally point below and still shoot
+                    // anything that comes into their own reach.
+                    if (intruder && !outnumbered && answersIntruder(unitId))
                     {
                         if (!isAttackingUnit(unit, *intruder))
                         {
@@ -3698,7 +3826,7 @@ namespace rwe
                     // The reserve: gathering for the next wave, and the ones
                     // who answer an intruder while this wave is out, since
                     // the strategic pass no longer recalls the wave for one.
-                    if (bb.phase == GamePhase::Attack && intruder && !outnumbered)
+                    if (bb.phase == GamePhase::Attack && intruder && !outnumbered && answersIntruder(unitId))
                     {
                         if (!isAttackingUnit(unit, *intruder))
                         {

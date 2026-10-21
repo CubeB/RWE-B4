@@ -1150,4 +1150,142 @@ namespace rwe
             CHECK(kept.lastSeen == GameTime(7u));
         }
     }
+
+    TEST_CASE("attacks are remembered by the sector they came from, and decay", "[ai]")
+    {
+        // The threat memory is fed only by the armed contacts already
+        // inside defendRadius, which is the same list that triggers Defend;
+        // nothing here looks at anything the AI could not see.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        auto base = SimVector(0_ss, 0_ss, 0_ss);
+        auto east = SimVector(150_ss, 0_ss, 0_ss);
+        auto north = SimVector(0_ss, 0_ss, 150_ss);
+        auto eastId = addUnit(sim, "ARMPW", human, east, script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.threatMemoryDecaySeconds = 60;
+        AiBlackboard bb;
+        bb.baseAnchor = base;
+        PerceptionManager perception;
+        sim.tick();
+        perception.refresh(sim, ai, profile, bb);
+
+        // The sector numbering and its inverse agree; if they did not, a
+        // tower would be pointed at a different direction from the one the
+        // raid was remembered from.
+        for (std::size_t sector = 0; sector < ThreatSectorCount; ++sector)
+        {
+            CHECK(threatSectorOf(base, base + threatSectorDirection(sector)) == static_cast<int>(sector));
+        }
+
+        auto eastSector = threatSectorOf(base, east);
+        auto northSector = threatSectorOf(base, north);
+        REQUIRE(eastSector != northSector);
+        CHECK(bb.threatBySector[static_cast<std::size_t>(eastSector)] == 100);
+        CHECK(bb.threatTotal == 100);
+        CHECK(bb.threatPeakSector == eastSector);
+
+        SECTION("a second direction accumulates in its own sector")
+        {
+            addUnit(sim, "ARMPW", human, north, script);
+            sim.tick();
+            perception.refresh(sim, ai, profile, bb);
+            CHECK(bb.threatBySector[static_cast<std::size_t>(eastSector)] == 100);
+            CHECK(bb.threatBySector[static_cast<std::size_t>(northSector)] == 100);
+            CHECK(bb.threatTotal == 200);
+        }
+
+        SECTION("the levels halve on the decay clock")
+        {
+            sim.getUnitState(eastId).markAsDead();
+            bb.knownEnemies.clear();
+            bb.now = GameTime(60u * SimTicksPerSecond);
+            perception.refresh(sim, ai, profile, bb);
+            CHECK(bb.threatBySector[static_cast<std::size_t>(eastSector)] == 50);
+            CHECK(bb.threatTotal == 50);
+
+            bb.now = GameTime(120u * SimTicksPerSecond);
+            perception.refresh(sim, ai, profile, bb);
+            CHECK(bb.threatBySector[static_cast<std::size_t>(eastSector)] == 25);
+        }
+
+        SECTION("a fresh raid adds to what is left rather than replacing it")
+        {
+            sim.getUnitState(eastId).markAsDead();
+            bb.knownEnemies.clear();
+            bb.now = GameTime(60u * SimTicksPerSecond);
+            perception.refresh(sim, ai, profile, bb);
+            REQUIRE(bb.threatBySector[static_cast<std::size_t>(eastSector)] == 50);
+
+            addUnit(sim, "ARMPW", human, east, script);
+            sim.tick();
+            perception.refresh(sim, ai, profile, bb);
+            CHECK(bb.threatBySector[static_cast<std::size_t>(eastSector)] == 150);
+            CHECK(bb.threatTotal == 150);
+        }
+
+        SECTION("switched off, nothing is remembered and the total is zero")
+        {
+            profile.threatMemory = false;
+            perception.refresh(sim, ai, profile, bb);
+            for (auto level : bb.threatBySector)
+            {
+                CHECK(level == 0);
+            }
+            CHECK(bb.threatTotal == 0);
+            CHECK(bb.threatPeakSector == -1);
+            CHECK(bb.threatCountedContacts.empty());
+        }
+
+        SECTION("the peak sector is the highest, ties going to the lowest index")
+        {
+            AiBlackboard seeded;
+            seeded.threatBySector[3] = 100;
+            seeded.threatBySector[9] = 100;
+            seeded.threatBySector[5] = 50;
+            CHECK(strongestThreatSector(seeded) == 3);
+
+            seeded.threatBySector[9] = 101;
+            CHECK(strongestThreatSector(seeded) == 9);
+
+            seeded.threatBySector.fill(0);
+            CHECK(strongestThreatSector(seeded) == -1);
+        }
+    }
+
+    TEST_CASE("the wave's value is exposed for the recall test", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        sim.unitDefinitions["ARMPW"].buildCostMetal = Metal(120.0f);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto first = addUnit(sim, "ARMPW", ai, SimVector(40_ss, 0_ss, 0_ss), script);
+        auto second = addUnit(sim, "ARMPW", ai, SimVector(80_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        AiBlackboard bb;
+        bb.combatUnits = {first, second};
+        bb.attackGroup = {first.value, second.value};
+        PerceptionManager perception;
+        sim.tick();
+        perception.refresh(sim, ai, profile, bb);
+        CHECK(bb.waveMetal == 240.0f);
+
+        // A member that is gone no longer counts towards what the wave is
+        // worth, so a spent wave is easier to recall.
+        sim.getUnitState(first).markAsDead();
+        sim.tick();
+        perception.refresh(sim, ai, profile, bb);
+        CHECK(bb.waveMetal == 120.0f);
+    }
 }
+

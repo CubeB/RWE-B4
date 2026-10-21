@@ -370,3 +370,25 @@ replay-informed economy pressure and showed no close-out cost.
 
 The AI suite passes (292 cases / 10044 assertions). The full permitted suite
 result is in the session report. Raw games are under `D:/tmp/rwe-ai5/`.
+
+## Sixth AI batch: directional threat memory and proportional defence
+
+2026-10-21. RWE-AI only. Adds 16-sector threat memory (decayed metal value of
+armed contacts near the base), proportional responder sizing, a wave-recall
+threshold, and threat-directed defensive tower siting. All are behind knobs
+(`threatMemory`, `proportionalDefence`, `threatDirectedDefence`).
+
+Twenty-four games on Great Divide (5001-5004) and Dark Side (5101-5104),
+1800 s, RWE against the classic personality: batch 5, batch 6 defaults, and
+batch 6 with all three threat knobs off. **Batch 6 and the off arm produced
+the identical game in all eight seeds** — the classic opponent does not raid
+the base often enough for the new response or siting to bind. Batch 5 versus
+batch 6 is not a clean isolation because the saved batch-5 binary predates the
+`focusFire` default change; its differences are the focus-fire arm, not the
+threat features.
+
+Conclusion: the threat features are a no-op against the classic AI on these
+maps, and remain default-on for human play, where base raids are the case they
+exist for. No strength claim is made. The AI suite passes (297 cases / 10202
+assertions); the full permitted suite passes at 1892 cases / 194709
+assertions. Raw games are under `D:/tmp/rwe-ai6/`.

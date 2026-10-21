@@ -91,9 +91,12 @@ both factory types, value-odds attack posture) are built and measured.
   measured. The raid is close-out neutral; focus fire was slower on the worst
   seeds (DS 4904 29671 -> 36391), so it defaults off until a human/stronger
   opponent shows it pays. The raid stays on.
-- Full detail and the tables are in `docs/AI-TUNING.md`. The AI suite passes
-  (292 cases / 10044 assertions); the full permitted suite result is in the
-  session report.
+- Batch 6 (directional threat memory, proportional defence, threat-directed
+  tower siting) is built and measured. It produced the identical game to the
+  threat-off control in all eight seeds against the classic AI, which does not
+  raid the base; the features stay default-on for human play. The full
+  permitted suite passes at 1892 cases / 194709 assertions; the AI suite is
+  297 cases / 10202 assertions.
 
 The CORE candidate was measured against the pre-ARM-change ARM and still needs
 `--evaluate` on fresh seeds. No original-game check applies: this is
