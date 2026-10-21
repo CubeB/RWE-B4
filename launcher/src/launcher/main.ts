@@ -39,6 +39,8 @@ function createWindow() {
   const windowOptions: BrowserWindowConstructorOptions = {
     height: 600,
     width: 800,
+    // INSTALL-UX-002: shared RWE branding, including the live window/taskbar.
+    icon: path.join(__dirname, "b4-icon.png"),
     webPreferences: {
       // Enabling node integration is safe
       // because we only ever run local, trusted code.

@@ -80,3 +80,55 @@ supported for these packaging and presentation choices. The Linux/AppImage check
 progress/error reporting and preservation of the CLI path when arguments are
 supplied. No such RWE package or wrapper validation was performed by this
 spec-room researcher.
+
+
+## INSTALL-UX-002: Brand icons and signed releases are distribution identity
+
+Research extension: 2026-10-21. The reference revision, matching GOG v3.1
+binary/hash and static-only evidence level are the same as INSTALL-UX-001.
+No additional original executable, installer, certificate or signing metadata
+was inspected for this extension, and no implementation or tests were changed.
+
+Using the user's supplied `b4logo.png` as RWE's application identity across
+Windows executable and installer icon resources, taskbar/window icons,
+Electron application icons and Linux/AppImage icons is RWE-original branding
+and distribution presentation. The original reference is a different product's
+game executable. Reproducing its gameplay does not establish a required RWE
+brand image, icon size set, resource identifier or desktop-integration choice.
+The supplied image's selection is a user requirement, not a claim of decoded
+original behaviour. Image-format conversions and platform resource embedding
+needed to use it remain presentation work under that same classification.
+
+Windows Authenticode signing of RWE executables/installers and the release
+publication process likewise establish the identity and delivery of RWE's
+builds. They have no original gameplay counterpart that this reference can
+specify. Certificate ownership, certificate procurement, signing service,
+timestamping and publisher/release choices must be assessed against the RWE
+release contract and available credentials; this finding does not establish
+that any signing credential exists or that a signature is already valid.
+It does not authorize publication or credential acquisition by itself.
+
+No claim is made that the historical Total Annihilation executable or any
+external CD/GOG installer lacked icons, signing or publisher metadata. Those
+external installer packages and signing histories were not investigated.
+The fact that a matching game-executable reference exists is not evidence of
+absence of those distribution features. This finding records RWE-specific
+identity/presentation scope, not a deliberate departure from a decoded
+original signing or installer policy.
+
+Fixing an error in the graphical import wrapper's Browse/folder-selection
+control also remains within INSTALL-UX-001's RWE-original setup presentation
+scope when it restores selection of the source folder and preserves the
+existing importer arguments and import semantics. A graphical control repair
+does not require inventing an original-game counterpart; changing discovery,
+file selection rules or import results would exceed that classification.
+
+Implementation-room verification should inspect the built artifacts' actual
+icons on each affected platform and distinguish embedded executable resources
+from installer branding, live window/taskbar icons and desktop-entry icons.
+Signing investigation should distinguish an unsigned artifact, an embedded
+signature, cryptographic validity and an operating system's trust result;
+none implies the others automatically. Report the actual certificate/publisher
+and validation result only after inspecting the artifact. No icon-rendering,
+Browse-control, signing, trust or release-publication validation was performed
+by this spec-room researcher.
