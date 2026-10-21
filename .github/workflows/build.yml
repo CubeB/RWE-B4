@@ -263,6 +263,9 @@ jobs:
         run: |
           mkdir -p AppDir/usr/bin AppDir/usr/share/rwe
           cp build/rwe build/rwe_bridge build/rwe_setup AppDir/usr/bin/
+          cp cmake/rwe-setup-gui AppDir/usr/bin/
+          chmod +x AppDir/usr/bin/rwe-setup-gui
+          python3 tools/test_installer_appimage.py
           cp -r shaders AppDir/usr/share/rwe/
           cp LICENSE README.md AppDir/usr/share/rwe/
 
@@ -416,6 +419,8 @@ jobs:
         env:
           RWE_TEST_ANNOUNCE: 1
         run: .\rwe_test.exe --durations yes
+      - name: test Windows setup assistant
+        run: powershell -NoProfile -STA -ExecutionPolicy Bypass -File tools/test-installer-setup.ps1 -Importer build/rwe_setup.exe
       # Release only: nothing downloads a Debug installer -- the release job
       # takes the MSVC Release pair and the AppImage -- and building one costs
       # about four minutes a job.

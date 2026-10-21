@@ -1423,28 +1423,7 @@ install(DIRECTORY shaders DESTINATION .)
 
 install(DIRECTORY launcher/rwe-launcher-win32-x64/ DESTINATION launcher)
 
-set(CPACK_GENERATOR "ZIP;NSIS")
-
-set(CPACK_PACKAGE_VERSION ${RWE_GIT_DESCRIPTION})
-
-set(CPACK_PACKAGE_FILE_NAME "RobotWarEngine-${RWE_GIT_DESCRIPTION}-${CMAKE_SYSTEM_NAME}-${CMAKE_BUILD_TYPE}")
-
-set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
-set(CPACK_RESOURCE_FILE_README "${PROJECT_SOURCE_DIR}/README.md")
-
-set(CPACK_PACKAGE_EXECUTABLES
-    "launcher\\\\rwe-launcher;${PROJECT_NAME} Launcher ${RWE_GIT_DESCRIPTION}"
-    )
-
-set(CPACK_PACKAGE_VENDOR "Michael Heasell")
-
-set(CPACK_OUTPUT_FILE_PREFIX "dist")
-
-set(CPACK_NSIS_EXECUTABLES_DIRECTORY ".")
-
-set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
-
-include(CPack)
+include(cmake/Packaging.cmake)
 
 add_executable(ui_probe src/ui_probe.cpp)
 target_link_libraries(ui_probe librwe)
