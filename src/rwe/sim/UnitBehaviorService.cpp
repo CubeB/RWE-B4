@@ -6638,7 +6638,13 @@ namespace rwe
             const auto& reachDefinition = sim->unitDefinitions.at(reachUnit.unitType);
             auto rect = sim->computeFootprintRegion(reachUnit.position, reachDefinition.movementCollisionInfo);
             auto reachTiles = std::max(0, static_cast<int>(simScalarToFloat(unitInfo.definition->buildDistance) / simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits)) - 1);
-            navigateTo(unitInfo, rect.expand(reachTiles));
+            if (navigateTo(unitInfo, rect.expand(reachTiles)))
+            {
+                // MA-01 / RA-03: rectangle arrival can be outside the work
+                // circle near a corner. Keep approaching instead of asking
+                // forever for a goal navigation already considers reached.
+                navigateTo(unitInfo, rect);
+            }
             return false;
         }
 
