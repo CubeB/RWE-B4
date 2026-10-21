@@ -16,7 +16,7 @@ namespace rwe
                 }
                 else
                 {
-                    context.drawTextWrapped(Rectangle2f::fromTopLeft(posX, posY + 12.0f, sizeX, sizeY), text, *font);
+                    context.drawTextWrapped(Rectangle2f::fromTopLeft(posX, posY, sizeX, sizeY), text, *font);
                 }
                 break;
             case Alignment::Center:
