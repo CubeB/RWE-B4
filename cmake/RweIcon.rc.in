@@ -1,0 +1,2 @@
+// INSTALL-UX-002: supplied RWE branding, also used by SDL's default window icon.
+1 ICON "@PROJECT_SOURCE_DIR@/assets/b4.ico"

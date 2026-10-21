@@ -1,7 +1,13 @@
 # INSTALL-UX-001: RWE distribution UX, not original installer conformance.
 if(WIN32)
+    # INSTALL-UX-002: Explorer/shortcuts and SDL use this executable resource.
+    enable_language(RC)
+    configure_file("${CMAKE_CURRENT_LIST_DIR}/RweIcon.rc.in" "${CMAKE_CURRENT_BINARY_DIR}/rwe-icon.rc" @ONLY)
+    target_sources(rwe PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/rwe-icon.rc")
+    target_sources(rwe_setup PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/rwe-icon.rc")
     install(FILES "${CMAKE_CURRENT_LIST_DIR}/../packaging/windows/Import Game Data.cmd" DESTINATION .)
     install(FILES "${CMAKE_CURRENT_LIST_DIR}/../packaging/windows/Import-GameData.ps1" DESTINATION setup)
+    install(FILES "${PROJECT_SOURCE_DIR}/assets/b4.ico" DESTINATION .)
 endif()
 
 set(CPACK_GENERATOR "ZIP;NSIS")
@@ -18,6 +24,9 @@ set(CPACK_OUTPUT_FILE_PREFIX "dist")
 set(CPACK_PACKAGE_EXECUTABLES
     "rwe;Play Robot War Engine;launcher\\rwe-launcher;Multiplayer Lobby")
 set(CPACK_NSIS_DISPLAY_NAME "Robot War Engine")
+set(CPACK_NSIS_MUI_ICON "${PROJECT_SOURCE_DIR}/assets/b4.ico")
+set(CPACK_NSIS_MUI_UNIICON "${PROJECT_SOURCE_DIR}/assets/b4.ico")
+set(CPACK_NSIS_INSTALLED_ICON_NAME "rwe.exe")
 set(CPACK_NSIS_EXECUTABLES_DIRECTORY ".")
 set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
 set(CPACK_NSIS_MODIFY_PATH OFF)
@@ -35,7 +44,7 @@ Function OpenGameSetup
 FunctionEnd
 ]=])
 set(CPACK_NSIS_CREATE_ICONS_EXTRA [=[
-CreateShortCut "$SMPROGRAMS\$STARTMENU_FOLDER\Import Game Data.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" '-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\setup\Import-GameData.ps1"'
+CreateShortCut "$SMPROGRAMS\$STARTMENU_FOLDER\Import Game Data.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" '-NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\setup\Import-GameData.ps1"' "$INSTDIR\b4.ico" 0
 ]=])
 set(CPACK_NSIS_DELETE_ICONS_EXTRA [=[
 Delete "$SMPROGRAMS\$MUI_TEMP\Import Game Data.lnk"

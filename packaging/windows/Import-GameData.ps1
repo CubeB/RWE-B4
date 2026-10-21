@@ -21,6 +21,11 @@ $form.StartPosition = 'CenterScreen'
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 10)
 $form.AutoScaleMode = 'Dpi'
 $form.MaximizeBox = $false
+$iconPath = Join-Path $script:installDirectory 'b4.ico'
+if (Test-Path -LiteralPath $iconPath) {
+    # INSTALL-UX-002: use the same supplied branding as the packaged game.
+    $form.Icon = New-Object System.Drawing.Icon($iconPath)
+}
 
 function Add-Label($text, $x, $y, $width, $height) {
     $label = New-Object System.Windows.Forms.Label
@@ -39,6 +44,7 @@ $source.Name = 'SourceFolder'
 $source.SetBounds(24, 170, 466, 28)
 $form.Controls.Add($source)
 $browse = New-Object System.Windows.Forms.Button
+$browse.Name = 'Browse'
 $browse.Text = 'Browse...'
 $browse.SetBounds(500, 168, 96, 32)
 $form.Controls.Add($browse)
@@ -91,14 +97,38 @@ function Set-DetailsVisible($visible) {
     $close.Top = $buttonY
 }
 
+function New-InstallFolderDialog {
+    return New-Object System.Windows.Forms.FolderBrowserDialog
+}
+
+function Select-InstallFolder($owner, [string]$initialFolder) {
+    # INSTALL-UX-001: Browse must work before the user has typed any path.
+    $dialog = New-InstallFolderDialog
+    try {
+        $dialog.Description = 'Choose your Total Annihilation installation (the folder containing totala1.hpi).'
+        $dialog.ShowNewFolderButton = $false
+        if (-not [string]::IsNullOrWhiteSpace($initialFolder) -and
+            (Test-Path -LiteralPath $initialFolder -PathType Container)) {
+            $dialog.SelectedPath = $initialFolder
+        }
+        if ($dialog.ShowDialog($owner) -eq 'OK') { return $dialog.SelectedPath }
+        return $null
+    } finally {
+        $dialog.Dispose()
+    }
+}
+
 $details.Add_LinkClicked({ Set-DetailsVisible (-not $log.Visible) })
 $browse.Add_Click({
-    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dialog.Description = 'Choose your Total Annihilation installation (the folder containing totala1.hpi).'
-    $dialog.ShowNewFolderButton = $false
-    if (Test-Path -LiteralPath $source.Text -PathType Container) { $dialog.SelectedPath = $source.Text }
-    if ($dialog.ShowDialog($form) -eq 'OK') { $source.Text = $dialog.SelectedPath }
-    $dialog.Dispose()
+    try {
+        $selectedFolder = Select-InstallFolder $form $source.Text
+        if ($null -ne $selectedFolder) { $source.Text = $selectedFolder }
+    } catch {
+        $status.Text = 'Could not open the folder picker. You can type or paste your Total Annihilation folder above.'
+        $status.ForeColor = [System.Drawing.Color]::Firebrick
+        $log.Text = $_.Exception.Message
+        Set-DetailsVisible $true
+    }
 })
 $close.Add_Click({ $form.Close() })
 

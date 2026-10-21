@@ -20,6 +20,38 @@ try {
     $form.Location = New-Object System.Drawing.Point(-2000, -2000)
     $form.Show()
 
+    # Exercise the actual Browse handler without opening a modal desktop dialog.
+    # The factory replaces only the OS picker, keeping path validation/error UI.
+    $script:fakePicker = [pscustomobject]@{
+        Description = ''; ShowNewFolderButton = $true; SelectedPath = ''
+        Result = 'Cancel'; Fail = $false; Disposed = $false; Shown = 0
+    }
+    $script:fakePicker | Add-Member ScriptMethod ShowDialog {
+        param($owner)
+        $this.Shown++
+        if ($this.Fail) { throw 'Simulated folder-picker failure' }
+        return $this.Result
+    }
+    $script:fakePicker | Add-Member ScriptMethod Dispose { $this.Disposed = $true }
+    function New-InstallFolderDialog { return $script:fakePicker }
+    foreach ($initial in @('', '   ', "$testRoot/does-not-exist")) {
+        $source.Text = $initial
+        $browse.PerformClick()
+        if ($source.Text -ne $initial) { throw 'Cancelling Browse changed the source.' }
+    }
+    if ($script:fakePicker.Shown -ne 3 -or -not $script:fakePicker.Disposed) {
+        throw 'Blank-path Browse did not reach and dispose the picker.'
+    }
+    $script:fakePicker.Result = 'OK'
+    $source.Text = $fixture.FullName
+    $browse.PerformClick()
+    if ($source.Text -ne $fixture.FullName) { throw 'Picker selection was not applied.' }
+    $script:fakePicker.Fail = $true
+    $script:fakePicker.Disposed = $false
+    $browse.PerformClick()
+    if ($status.Text -notlike 'Could not open the folder picker*' -or -not $log.Visible -or
+        -not $script:fakePicker.Disposed) { throw 'Picker failures must be handled inside setup.' }
+
     # A real process failure must not be mistaken for successful setup.
     $source.Text = "$testRoot/Invalid Install"
     $import.PerformClick()
@@ -47,7 +79,7 @@ try {
         $copied = [System.IO.File]::ReadAllText("$env:APPDATA/RWE/Data/$name")
         if ($copied -ne 'import fixture') { throw "Wrong copied contents: $name" }
     }
-    Write-Output 'PASS: process failure, details, retry, spaced paths, trailing slash, actual copy, Play now.'
+    Write-Output 'PASS: blank/cancelled/failed Browse, selection, process failure/retry, spaced paths, actual copy, Play now.'
 } finally {
     if ($script:importProcess) {
         if (-not $script:importProcess.HasExited) { $script:importProcess.Kill(); $script:importProcess.WaitForExit() }
