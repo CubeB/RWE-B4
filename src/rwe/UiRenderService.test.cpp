@@ -83,6 +83,7 @@ namespace rwe
         CHECK(lines[0].glyph == 'a');
         CHECK(lines[1].glyph == 'b');
         CHECK(layoutWrappedText(Rectangle2f::fromTopLeft(0, 0, 21, 0), "text", font).empty());
+        CHECK_FALSE(layoutWrappedText(Rectangle2f::fromTopLeft(0, 0, 100, 12), "Loading", font).empty());
     }
 
     TEST_CASE("text with a byte that is not valid UTF-8 is measured, not thrown out of the frame", "[ui][malformed]")

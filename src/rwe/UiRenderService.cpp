@@ -246,11 +246,6 @@ namespace rwe
         const auto glyphIndex = [&](unsigned int ch) { return ch < font.sprites.size() ? ch : 0u; };
         const auto advance = [&](unsigned int ch) { return font.sprites[glyphIndex(ch)]->bounds.right(); };
         const auto whitespace = [](unsigned int ch) { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'; };
-        float fontBottom = 0.0f;
-        for (const auto& sprite : font.sprites)
-        {
-            fontBottom = std::max(fontBottom, sprite->bounds.bottom() - font.verticalOffset);
-        }
         float x = 0.0f;
         float baseline = area.top() + 12.0f;
         for (std::size_t i = 0; i < characters.size();)
@@ -295,7 +290,10 @@ namespace rwe
                     baseline += 15.0f;
                     x = 0.0f;
                 }
-                if (baseline + fontBottom > area.bottom())
+                // Keep rows in the label; the scissor clips glyph descenders
+                // and overhangs at its edges. A 12-pixel loading label must
+                // still draw its first baseline instead of disappearing.
+                if (baseline > area.bottom())
                 {
                     return glyphs;
                 }
