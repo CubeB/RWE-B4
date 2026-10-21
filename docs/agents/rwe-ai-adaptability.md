@@ -134,7 +134,8 @@ omniscience/income cheat as a separate, clearly labelled option.
 | 4 | Reserve slot, attack-move, humanlike opening timings | built and measured; close-out neutral vs batch 3, all decided wins; humanlike opening identical against the classic AI, kept off |
 | 5 | Expansion-frame/builder raids; role/value focus fire | built and measured; raid neutral, focus fire regressed close-out and defaults off |
 | 6 | Directional threat memory, proportional defence, threat-directed siting | built and measured; identical to the off arm against the classic AI (it does not raid the base), default-on for human play |
-| 7 | Two-axis/feint, replay-derived expansion templates beyond the first posture | design ready |
+| 7 | Synchronized second axis; replay expansion count/timing | built and measured; identical to the off arm in 7/8 seeds against the classic AI (sync neutral; expansion posture off) |
+| 8 | Air/ground strike sync, commander exposure, target flipping | design ready |
 
 ## Measurement
 

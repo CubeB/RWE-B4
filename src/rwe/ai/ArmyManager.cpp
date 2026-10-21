@@ -2605,14 +2605,26 @@ namespace rwe
         // then, and it is at home.
         bb.raidTarget.reset();
         bb.raidAttackTarget.reset();
-        if (profile.raidingParties && profile.raidPartySize > 0 && bb.phase == GamePhase::Attack && bb.enemiesNearBase.empty())
+        auto clearRaid = [&]() {
+            bb.raidGroup.clear();
+            bb.raidFormedAt.reset();
+            bb.raidDispatched = false;
+            bb.raidTarget.reset();
+            bb.raidAttackTarget.reset();
+        };
+        if (bb.attackGroup.empty() || bb.waveSpent)
+        {
+            clearRaid();
+        }
+        if (profile.raidingParties && profile.raidPartySize > 0 && bb.phase == GamePhase::Attack && bb.enemiesNearBase.empty() && !bb.attackGroup.empty())
         {
             for (auto it = bb.raidGroup.begin(); it != bb.raidGroup.end();)
             {
                 auto alive = std::binary_search(bb.combatUnits.begin(), bb.combatUnits.end(), UnitId(*it), [](UnitId a, UnitId b) { return a.value < b.value; });
                 it = alive ? std::next(it) : bb.raidGroup.erase(it);
             }
-            if (auto target = chooseRaidTarget(sim, aiOwner, profile, bb, threatMap))
+            auto target = chooseRaidTarget(sim, aiOwner, profile, bb, threatMap);
+            if (target)
             {
                 auto known = bb.knownEnemies.find(target->value);
                 if (known != bb.knownEnemies.end())
@@ -2659,7 +2671,14 @@ namespace rwe
                     if (static_cast<int>(bb.raidGroup.size()) < profile.raidPartySize)
                     {
                         // Not enough to spare. A raid of one is a gift.
-                        bb.raidGroup.clear();
+                        clearRaid();
+                    }
+                    else if (profile.syncRaidWithWave)
+                    {
+                        // The raid exists from this tick, but it is not sent
+                        // until the wave has made the enemy commit.
+                        bb.raidFormedAt = bb.now;
+                        bb.raidDispatched = false;
                     }
                     else if (bb.raidTarget)
                     {
@@ -2675,17 +2694,124 @@ namespace rwe
                             .set("wave", bb.attackGroup.size())
                             .set("why", "raid")
                             .detail("raid sent at an outlying enemy building");
+                        bb.raidDispatched = true;
+                    }
+                }
+
+                // The synchronized second axis. A raid formed behind a wave
+                // waits at the rally until the wave is close enough to be
+                // answered, or until its window runs out, and only then is
+                // the order to move issued (the per-unit pass below sends a
+                // raider that has no target to the rally point like any
+                // other spare unit). "Close enough" is contact recorded on
+                // this wave, an enemy standing within waveMeetEnemyRadius of
+                // the wave's centre, or the wave's centre within the same
+                // radius of the objective it was sent at. A wave that dies
+                // first gives its raiders back to the next wave rather than
+                // leaving them waiting for a centre that no longer exists.
+                if (profile.syncRaidWithWave && !bb.raidGroup.empty())
+                {
+                    if (bb.attackGroup.empty())
+                    {
+                        clearRaid();
+                    }
+                    else
+                    {
+                        // A group that predates this pass without a formation
+                        // tick is treated as formed now: the knob can be
+                        // turned on mid-game, and the raid should start its
+                        // window rather than dispatch as if it were off.
+                        if (!bb.raidFormedAt)
+                        {
+                            bb.raidFormedAt = bb.now;
+                            bb.raidDispatched = false;
+                        }
+                        auto windowTicks = static_cast<unsigned int>(std::max(0, profile.syncWindowSeconds)) * SimTicksPerSecond;
+                        auto withinWindow = bb.now.value < bb.raidFormedAt->value + windowTicks;
+                        auto contact = bb.waveContactAt && bb.waveContactAt->value >= bb.raidFormedAt->value;
+
+                        std::optional<SimVector> waveCentre;
+                        float sumX = 0.0f;
+                        float sumZ = 0.0f;
+                        int counted = 0;
+                        for (auto id : bb.attackGroup)
+                        {
+                            auto unitRef = sim.tryGetUnitState(UnitId(id));
+                            if (!unitRef || unitRef->get().isDead())
+                            {
+                                continue;
+                            }
+                            const auto& p = unitRef->get().position;
+                            sumX += p.x.value;
+                            sumZ += p.z.value;
+                            ++counted;
+                        }
+                        if (counted > 0)
+                        {
+                            auto divisor = static_cast<float>(counted);
+                            waveCentre = SimVector(SimScalar(sumX / divisor), 0_ss, SimScalar(sumZ / divisor));
+                        }
+
+                        auto radiusSquared = profile.waveMeetEnemyRadius * profile.waveMeetEnemyRadius;
+                        if (!contact && waveCentre && profile.waveMeetEnemyRadius > 0_ss)
+                        {
+                            for (const auto& [_, enemy] : bb.knownEnemies)
+                            {
+                                if (enemy.lastKnownPosition.distanceSquared(*waveCentre) >= radiusSquared)
+                                {
+                                    continue;
+                                }
+                                if (contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy))
+                                {
+                                    contact = true;
+                                    break;
+                                }
+                            }
+                        }
+                        auto nearObjective = waveCentre && bb.attackTarget && profile.waveMeetEnemyRadius > 0_ss
+                            && waveCentre->distanceSquared(*bb.attackTarget) < radiusSquared;
+
+                        if (!bb.raidDispatched && withinWindow && !contact && !nearObjective)
+                        {
+                            // At the rally: no errand for this pass, so the
+                            // per-unit pass below treats the raiders as any
+                            // other unit waiting for the next wave.
+                            bb.raidTarget.reset();
+                            bb.raidAttackTarget.reset();
+                            if (!bb.raidDispatched && bb.raidFormedAt && bb.raidFormedAt->value == bb.now.value)
+                            {
+                                LOG_INFO << "AI army: raid of " << bb.raidGroup.size() << " waits for the wave (window "
+                                         << profile.syncWindowSeconds << " s)";
+                            }
+                        }
+                        else if (bb.raidTarget && !bb.raidDispatched)
+                        {
+                            LOG_INFO << "AI army: raid of " << bb.raidGroup.size() << " released at unit " << target->value
+                                     << " at " << static_cast<int>(bb.raidTarget->x.value) << "," << static_cast<int>(bb.raidTarget->z.value)
+                                     << ", wave of " << bb.attackGroup.size()
+                                     << (contact ? " in contact" : (nearObjective ? " at its objective" : " window expired"));
+                            sim.eventLog.event(sim.gameTime.value, "army_dispatch")
+                                .set("player", aiOwner.value)
+                                .set("units", bb.raidGroup.size())
+                                .set("target_id", target->value)
+                                .set("x", static_cast<double>(bb.raidTarget->x.value))
+                                .set("z", static_cast<double>(bb.raidTarget->z.value))
+                                .set("wave", bb.attackGroup.size())
+                                .set("why", "raid")
+                                .detail("raid released beside the wave");
+                            bb.raidDispatched = true;
+                        }
                     }
                 }
             }
             else
             {
-                bb.raidGroup.clear();
+                clearRaid();
             }
         }
         else
         {
-            bb.raidGroup.clear();
+            clearRaid();
         }
 
         // Who is in the wave. Formed when the attack is called, from everyone
@@ -3773,6 +3899,19 @@ namespace rwe
                         if (!isMovingTo(unit, *bb.raidTarget))
                         {
                             outCommands.push_back(moveCommand(unitId, *bb.raidTarget));
+                        }
+                        break;
+                    }
+                    // A synchronized raid that is still waiting has no target
+                    // yet: it holds at the rally rather than drifting off with
+                    // whatever order it had. Off, this branch is not reached,
+                    // which is what keeps the old command stream exactly.
+                    if (profile.syncRaidWithWave && bb.raidGroup.count(unitId.value) != 0)
+                    {
+                        if (bb.rallyPoint && !isMovingTo(unit, *bb.rallyPoint)
+                            && unit.position.distanceSquared(*bb.rallyPoint) > (96_ss * 96_ss))
+                        {
+                            outCommands.push_back(moveCommand(unitId, *bb.rallyPoint));
                         }
                         break;
                     }
