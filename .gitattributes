@@ -10,6 +10,9 @@
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
 
+# The terminal installer must also run from a Windows checkout under sh.
+install.sh text eol=lf
+
 # Binaries, so auto-detection never has to guess at one.
 *.png binary
 *.ttf binary
