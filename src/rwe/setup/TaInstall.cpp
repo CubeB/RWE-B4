@@ -1,7 +1,10 @@
 #include "TaInstall.h"
 
 #include <algorithm>
-#include <rwe/util/rwe_string.h>
+#include <cctype>
+#include <fstream>
+#include <iomanip>
+#include <limits>
 
 namespace fs = std::filesystem;
 
@@ -9,6 +12,69 @@ namespace rwe
 {
     namespace
     {
+        // Steam's text KeyValues files use quoted strings, braces, // comments
+        // and escaped backslashes. Only scalar pairs are needed here; keeping
+        // their depth distinguishes legacy library entries from app-size keys.
+        struct SteamField
+        {
+            std::string key;
+            std::string value;
+            int depth;
+        };
+
+        std::vector<SteamField> readSteamFields(const fs::path& file)
+        {
+            std::ifstream input(file);
+            std::vector<SteamField> fields;
+            std::optional<std::string> key;
+            int depth = 0;
+            while (input >> std::ws && input.peek() != std::char_traits<char>::eof())
+            {
+                const auto next = input.peek();
+                if (next == '"')
+                {
+                    std::string value;
+                    if (!(input >> std::quoted(value)))
+                    {
+                        break;
+                    }
+                    if (key)
+                    {
+                        fields.push_back({*key, std::move(value), depth});
+                        key.reset();
+                    }
+                    else
+                    {
+                        key = std::move(value);
+                    }
+                }
+                else if (next == '{' || next == '}')
+                {
+                    input.get();
+                    depth += next == '{' ? 1 : -1;
+                    key.reset();
+                    if (depth < 0)
+                    {
+                        break;
+                    }
+                }
+                else if (next == '/')
+                {
+                    input.get();
+                    if (input.get() != '/')
+                    {
+                        break;
+                    }
+                    input.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                }
+                else
+                {
+                    break;
+                }
+            }
+            return fields;
+        }
+
         std::string lowerCase(const std::string& s)
         {
             auto out = s;
@@ -27,6 +93,53 @@ namespace rwe
             }
             return lowerCase(fileName.substr(dot));
         }
+    }
+
+    std::vector<fs::path> steamTaInstallPaths(const std::vector<fs::path>& steamRoots)
+    {
+        std::vector<fs::path> libraries;
+        const auto appendUnique = [](std::vector<fs::path>& paths, const fs::path& path) {
+            if (!path.empty() && std::find(paths.begin(), paths.end(), path) == paths.end())
+            {
+                paths.push_back(path);
+            }
+        };
+        for (const auto& root : steamRoots)
+        {
+            appendUnique(libraries, root);
+            for (const auto& file : {root / "steamapps/libraryfolders.vdf", root / "config/libraryfolders.vdf"})
+            {
+                for (const auto& field : readSteamFields(file))
+                {
+                    const bool legacy = field.depth == 1 && !field.key.empty()
+                        && std::all_of(field.key.begin(), field.key.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+                    if ((field.depth == 2 && field.key == "path") || legacy)
+                    {
+                        appendUnique(libraries, fs::path(field.value));
+                    }
+                }
+            }
+        }
+        std::vector<fs::path> candidates;
+        for (const auto& library : libraries)
+        {
+            const auto common = library / "steamapps/common";
+            // Steam app 298030: use its manifest when an install folder differs
+            // from the normal name, and still search defaults without a manifest.
+            for (const auto& field : readSteamFields(library / "steamapps/appmanifest_298030.acf"))
+            {
+                const fs::path directory(field.value);
+                if (field.depth == 1 && field.key == "installdir" && !directory.empty()
+                    && !directory.is_absolute() && !directory.has_root_name()
+                    && std::find(directory.begin(), directory.end(), fs::path("..")) == directory.end())
+                {
+                    appendUnique(candidates, common / directory);
+                }
+            }
+            appendUnique(candidates, common / "Total Annihilation");
+            appendUnique(candidates, common / "Total Annihilation - Commander Pack");
+        }
+        return candidates;
     }
 
     const std::vector<std::string>& taArchiveExtensions()
