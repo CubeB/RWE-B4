@@ -207,6 +207,8 @@ namespace rwe
             {"buildSiteGuardTimeoutSeconds", &AiTuningProfile::buildSiteGuardTimeoutSeconds},
             {"targetMemoryTicks", &AiTuningProfile::targetMemoryTicks},
             {"ferryLandingSearchSteps", &AiTuningProfile::ferryLandingSearchSteps},
+            {"commanderHuntExposureLatchSeconds", &AiTuningProfile::commanderHuntExposureLatchSeconds},
+            {"commanderHuntMaxEscortMetal", &AiTuningProfile::commanderHuntMaxEscortMetal},
         };
 
         constexpr BoolKnob boolKnobs[] = {
@@ -275,6 +277,8 @@ namespace rwe
             {"raidExpansionFrames", &AiTuningProfile::raidExpansionFrames},
             {"focusFire", &AiTuningProfile::focusFire},
             {"huntEnemyCommander", &AiTuningProfile::huntEnemyCommander},
+            {"commanderHuntExposedOnly", &AiTuningProfile::commanderHuntExposedOnly},
+            {"airStrikeSync", &AiTuningProfile::airStrikeSync},
             {"focusOneEnemy", &AiTuningProfile::focusOneEnemy},
             {"spreadDefences", &AiTuningProfile::spreadDefences},
             {"commanderUsesOwnReachability", &AiTuningProfile::commanderUsesOwnReachability},
@@ -353,6 +357,9 @@ namespace rwe
             {"bomberClusterRadius", &AiTuningProfile::bomberClusterRadius},
             {"bomberSortieScale", &AiTuningProfile::bomberSortieScale},
             {"bomberLeaveToArmyRadius", &AiTuningProfile::bomberLeaveToArmyRadius},
+            {"airSyncRadius", &AiTuningProfile::airSyncRadius},
+            {"commanderHuntEscortRadius", &AiTuningProfile::commanderHuntEscortRadius},
+            {"commanderHuntMinDistance", &AiTuningProfile::commanderHuntMinDistance},
             {"battlefieldReclaimRadius", &AiTuningProfile::battlefieldReclaimRadius},
             {"waveCohesionRadius", &AiTuningProfile::waveCohesionRadius},
             {"waveMeetEnemyRadius", &AiTuningProfile::waveMeetEnemyRadius},

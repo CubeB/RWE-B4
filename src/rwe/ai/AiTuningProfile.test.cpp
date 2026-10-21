@@ -336,4 +336,58 @@ namespace rwe
         CHECK(names.count("syncWindowSeconds") == 1);
         CHECK(names.count("openingExpansionSites") == 1);
     }
+
+    // The eighth batch: the air strike waits for the ground wave, and their
+    // commander is hunted only while it is exposed. Both are on by default;
+    // airStrikeSync false restores immediate sorties, and
+    // commanderHuntExposedOnly false restores the unconditional hunt, so
+    // either can be the control arm of a paired run.
+    TEST_CASE("the air strike sync and commander exposure knobs are listed and settable")
+    {
+        AiTuningProfile p;
+        CHECK(p.airStrikeSync);
+        CHECK(p.airSyncRadius == SimScalar(600.0f));
+        CHECK(p.commanderHuntExposedOnly);
+        CHECK(p.commanderHuntMaxEscortMetal == 600);
+        CHECK(p.commanderHuntEscortRadius == SimScalar(450.0f));
+        CHECK(p.commanderHuntMinDistance == SimScalar(600.0f));
+        CHECK(p.commanderHuntExposureLatchSeconds == 10);
+
+        REQUIRE(applyAiTuning(p, "airStrikeSync", "false"));
+        CHECK_FALSE(p.airStrikeSync);
+        REQUIRE(applyAiTuning(p, "airStrikeSync", "true"));
+        CHECK(p.airStrikeSync);
+        REQUIRE(applyAiTuning(p, "airSyncRadius", "0"));
+        CHECK(p.airSyncRadius == SimScalar(0.0f));
+        REQUIRE(applyAiTuning(p, "airSyncRadius", "600"));
+        CHECK(p.airSyncRadius == SimScalar(600.0f));
+
+        REQUIRE(applyAiTuning(p, "commanderHuntExposedOnly", "false"));
+        CHECK_FALSE(p.commanderHuntExposedOnly);
+        REQUIRE(applyAiTuning(p, "commanderHuntExposedOnly", "true"));
+        CHECK(p.commanderHuntExposedOnly);
+        REQUIRE(applyAiTuning(p, "commanderHuntMaxEscortMetal", "0"));
+        CHECK(p.commanderHuntMaxEscortMetal == 0);
+        REQUIRE(applyAiTuning(p, "commanderHuntMaxEscortMetal", "750"));
+        CHECK(p.commanderHuntMaxEscortMetal == 750);
+        REQUIRE(applyAiTuning(p, "commanderHuntEscortRadius", "0"));
+        CHECK(p.commanderHuntEscortRadius == SimScalar(0.0f));
+        REQUIRE(applyAiTuning(p, "commanderHuntMinDistance", "0"));
+        CHECK(p.commanderHuntMinDistance == SimScalar(0.0f));
+        REQUIRE(applyAiTuning(p, "commanderHuntExposureLatchSeconds", "0"));
+        CHECK(p.commanderHuntExposureLatchSeconds == 0);
+
+        std::set<std::string> names;
+        for (const auto& knob : listAiKnobs())
+        {
+            names.insert(knob.name);
+        }
+        CHECK(names.count("airStrikeSync") == 1);
+        CHECK(names.count("airSyncRadius") == 1);
+        CHECK(names.count("commanderHuntExposedOnly") == 1);
+        CHECK(names.count("commanderHuntMaxEscortMetal") == 1);
+        CHECK(names.count("commanderHuntEscortRadius") == 1);
+        CHECK(names.count("commanderHuntMinDistance") == 1);
+        CHECK(names.count("commanderHuntExposureLatchSeconds") == 1);
+    }
 }

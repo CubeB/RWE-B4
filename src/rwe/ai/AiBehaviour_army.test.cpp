@@ -1,7 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
+#include <rwe/ai/AirManager.h>
+#include <rwe/ai/ArmyManager.h>
 #include <rwe/ai/StrategicManager.h>
+#include <rwe/ai/ThreatMap.h>
 #include <rwe/ai/ai_test_util.h>
+#include <rwe/game/PlayerCommand.h>
+#include <rwe/sim/GameTime.h>
 #include <rwe/sim/SimTicksPerSecond.h>
+#include <rwe/sim/UnitDefinition.h>
+#include <rwe/sim/WeaponDefinition.h>
+#include <optional>
 #include <set>
 
 /**
@@ -51,6 +59,27 @@ namespace rwe
                 }
             }
             return n;
+        }
+
+        /** One remembered enemy, for the air and commander fixtures below. */
+        KnownEnemy makeKnownContact(
+            UnitId id,
+            const SimVector& position,
+            const std::string& unitType,
+            bool building,
+            bool armed,
+            bool commander = false)
+        {
+            KnownEnemy enemy{};
+            enemy.unitId = id;
+            enemy.unitType = unitType;
+            enemy.lastKnownPosition = position;
+            enemy.lastSeen = GameTime(0u);
+            enemy.isBuilding = building;
+            enemy.isArmed = armed;
+            enemy.isAir = false;
+            enemy.isCommander = commander;
+            return enemy;
         }
     }
 
@@ -1681,6 +1710,246 @@ namespace rwe
             bb.enemiesNearBase.push_back(UnitId(7));
             strategic.update(profile, bb);
             CHECK(bb.phase == GamePhase::Defend);
+        }
+    }
+
+    TEST_CASE("an air strike waits for the ground wave", "[ai]")
+    {
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        auto enemy = addPlayer(sim, "enemy", GamePlayerType::Human, "CORE");
+        auto script = makeEmptyCobScript();
+
+        sim.unitDefinitions["BOMBER"] = UnitDefinition{};
+        UnitDefinition targetDef{};
+        targetDef.isMobile = false;
+        targetDef.buildCostMetal = Metal(800.0f);
+        sim.unitDefinitions["TARGET"] = targetDef;
+        UnitDefinition groundDef{};
+        groundDef.isMobile = true;
+        sim.unitDefinitions["GROUND"] = groundDef;
+
+        auto targetPos = SimVector(900_ss, 0_ss, 0_ss);
+        auto targetId = addUnitOfType(sim, "TARGET", enemy, targetPos, script);
+        auto bomberA = addUnitOfType(sim, "BOMBER", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        [[maybe_unused]] auto bomberB = addUnitOfType(sim, "BOMBER", ai, SimVector(20_ss, 0_ss, 0_ss), script);
+        auto groundId = addUnitOfType(sim, "GROUND", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.tacticalTickInterval = 1;
+        profile.airPatrolFighters = 0;
+        profile.airPatrolBombers = 0;
+        // The target is an ordinary sortie, not the home-defence case.
+        profile.bomberHomeDefenseRadius = 200_ss;
+
+        AiBlackboard bb;
+        bb.sideUnitsResolved = true;
+        bb.sideUnits.bomber = "BOMBER";
+        bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+        bb.combatUnits = {groundId};
+        bb.attackGroup.insert(groundId.value);
+        bb.phase = GamePhase::Attack;
+        bb.knownEnemies[targetId.value] = makeKnownContact(targetId, targetPos, "TARGET", true, false);
+
+        ThreatMap threatMap(128, 128);
+        auto strikeTarget = [&](const AiTuningProfile& p) -> std::optional<UnitId> {
+            AirManager air;
+            std::vector<PlayerCommand> commands;
+            air.update(sim, ai, p, threatMap, bb, commands);
+            auto attacks = ordersFor<AttackOrder>(commands, bomberA);
+            if (attacks.empty())
+            {
+                return std::nullopt;
+            }
+            auto aimed = std::get_if<UnitId>(&attacks.front().target);
+            if (!aimed)
+            {
+                return std::nullopt;
+            }
+            return *aimed;
+        };
+
+        SECTION("the wave is far from the target: the strike waits")
+        {
+            REQUIRE(profile.airStrikeSync);
+            CHECK_FALSE(strikeTarget(profile).has_value());
+        }
+
+        SECTION("the wave reaches the target: the strike goes in")
+        {
+            sim.getUnitState(groundId).position = SimVector(400_ss, 0_ss, 0_ss);
+            auto target = strikeTarget(profile);
+            REQUIRE(target.has_value());
+            CHECK(*target == targetId);
+        }
+
+        SECTION("or the wave is in contact: the strike goes in")
+        {
+            bb.waveContactAt = GameTime(0u);
+            auto target = strikeTarget(profile);
+            REQUIRE(target.has_value());
+            CHECK(*target == targetId);
+        }
+
+        SECTION("the wave ends: the strike is released")
+        {
+            bb.waveSpent = true;
+            auto target = strikeTarget(profile);
+            REQUIRE(target.has_value());
+            CHECK(*target == targetId);
+        }
+
+        SECTION("with the sync off the strike leaves immediately")
+        {
+            auto immediate = profile;
+            immediate.airStrikeSync = false;
+            auto target = strikeTarget(immediate);
+            REQUIRE(target.has_value());
+            CHECK(*target == targetId);
+        }
+    }
+
+    TEST_CASE("their commander is hunted only while it is exposed", "[ai]")
+    {
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        auto enemy = addPlayer(sim, "enemy", GamePlayerType::Human, "CORE");
+        auto script = makeEmptyCobScript();
+
+        sim.unitDefinitions["KBOT"] = UnitDefinition{};
+        sim.unitDefinitions["KBOT"].isMobile = true;
+
+        WeaponDefinition gun{};
+        gun.maxRange = 300_ss;
+        gun.reloadTime = 1_ss;
+        gun.burst = 1;
+        gun.damage["DEFAULT"] = 100u;
+        sim.weaponDefinitions["GUN"] = gun;
+
+        UnitDefinition plantDef{};
+        plantDef.isMobile = false;
+        plantDef.buildCostMetal = Metal(500.0f);
+        sim.unitDefinitions["PLANT"] = plantDef;
+
+        UnitDefinition towerDef{};
+        towerDef.isMobile = false;
+        towerDef.buildCostMetal = Metal(150.0f);
+        towerDef.weapon1 = "GUN";
+        sim.unitDefinitions["TOWER"] = towerDef;
+
+        UnitDefinition commanderDef{};
+        commanderDef.isMobile = true;
+        commanderDef.commander = true;
+        commanderDef.buildCostMetal = Metal(1000.0f);
+        sim.unitDefinitions["COMMANDER"] = commanderDef;
+
+        UnitDefinition escortDef{};
+        escortDef.isMobile = true;
+        escortDef.buildCostMetal = Metal(700.0f);
+        escortDef.weapon1 = "GUN";
+        sim.unitDefinitions["ESCORT"] = escortDef;
+
+        auto basePos = SimVector(800_ss, 0_ss, 0_ss);
+        auto towerPos = SimVector(860_ss, 0_ss, 0_ss);
+        auto farCommanderPos = SimVector(0_ss, 0_ss, -800_ss);
+        auto plantId = addUnitOfType(sim, "PLANT", enemy, basePos, script);
+        auto towerId = addUnitOfType(sim, "TOWER", enemy, towerPos, script);
+        auto commanderId = addUnitOfType(sim, "COMMANDER", enemy, farCommanderPos, script);
+
+        auto unitA = addUnitOfType(sim, "KBOT", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto unitB = addUnitOfType(sim, "KBOT", ai, SimVector(40_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.tacticalTickInterval = 1;
+        profile.engageRadius = 50_ss;
+        profile.waveMeetEnemyCount = 0;
+        profile.raidingParties = false;
+
+        AiBlackboard bb;
+        bb.phase = GamePhase::Attack;
+        bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+        bb.enemyBasePosition = basePos;
+        bb.combatUnits = {unitA, unitB};
+        bb.attackGroup.insert(unitA.value);
+        bb.attackGroup.insert(unitB.value);
+        bb.knownEnemies[plantId.value] = makeKnownContact(plantId, basePos, "PLANT", true, false);
+        bb.knownEnemies[towerId.value] = makeKnownContact(towerId, towerPos, "TOWER", true, true);
+        bb.knownEnemies[commanderId.value] = makeKnownContact(commanderId, farCommanderPos, "COMMANDER", false, true, true);
+        bb.enemyCommanderPosition = farCommanderPos;
+
+        ThreatMap threatMap(128, 128);
+        threatMap.rebuild(sim, ai, bb, true);
+
+        auto objective = [&](const AiTuningProfile& p) {
+            ArmyManager army;
+            std::vector<PlayerCommand> commands;
+            auto tuned = p;
+            tuned.waveAttackMove = false;
+            army.update(sim, ai, tuned, threatMap, bb, commands);
+            auto moves = ordersFor<MoveOrder>(commands, unitA);
+            REQUIRE(!moves.empty());
+            return moves.front().destination;
+        };
+
+        SECTION("alone and away from its base, it is hunted")
+        {
+            REQUIRE(profile.commanderHuntExposedOnly);
+            auto destination = objective(profile);
+            CHECK(destination.distance(farCommanderPos) < 100_ss);
+        }
+
+        SECTION("a heavy escort makes it a fight at their base instead")
+        {
+            auto escortId = UnitId(9000u);
+            bb.knownEnemies[escortId.value] = makeKnownContact(
+                escortId, farCommanderPos + SimVector(50_ss, 0_ss, 0_ss), "ESCORT", false, true);
+
+            auto destination = objective(profile);
+            CHECK(basePos.distance(destination) < profile.attackBaseRadius);
+            CHECK(destination.distance(farCommanderPos) > profile.commanderHuntMinDistance);
+        }
+
+        SECTION("a commander standing in its base is not the objective")
+        {
+            auto nearBasePos = SimVector(300_ss, 0_ss, 0_ss);
+            bb.enemyCommanderPosition = nearBasePos;
+
+            auto destination = objective(profile);
+            // Their base is the objective, not the commander five hundred
+            // units short of it.
+            CHECK(destination.x > 650_ss);
+        }
+
+        SECTION("with the exposure test off the escorted commander is hunted again")
+        {
+            auto escortId = UnitId(9000u);
+            bb.knownEnemies[escortId.value] = makeKnownContact(
+                escortId, farCommanderPos + SimVector(50_ss, 0_ss, 0_ss), "ESCORT", false, true);
+
+            auto old = profile;
+            old.commanderHuntExposedOnly = false;
+            auto destination = objective(old);
+            CHECK(destination.distance(farCommanderPos) < 100_ss);
+        }
+
+        SECTION("the exposure answer is latched, then asked again")
+        {
+            // Far and alone: hunted, and the answer is latched.
+            auto first = objective(profile);
+            CHECK(first.distance(farCommanderPos) < 100_ss);
+
+            // The escort arrives. Inside the latch window the wave keeps
+            // walking at the commander it already chose.
+            auto escortId = UnitId(9000u);
+            bb.knownEnemies[escortId.value] = makeKnownContact(
+                escortId, farCommanderPos + SimVector(50_ss, 0_ss, 0_ss), "ESCORT", false, true);
+            auto latched = objective(profile);
+            CHECK(latched.distance(farCommanderPos) < 100_ss);
+
+            // The window passes and the same escort now counts.
+            bb.now = GameTime(static_cast<unsigned int>(profile.commanderHuntExposureLatchSeconds) * SimTicksPerSecond);
+            auto afterLatch = objective(profile);
+            CHECK(basePos.distance(afterLatch) < profile.attackBaseRadius);
         }
     }
 }

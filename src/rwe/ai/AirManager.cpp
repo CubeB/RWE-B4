@@ -54,6 +54,65 @@ namespace rwe
         }
 
         /**
+         * Whether a strike on this target waits for the ground wave
+         * (AiTuningProfile::airStrikeSync).
+         *
+         * The strike is held only while all of these hold: there is a target,
+         * there is a ground wave out with a position, that wave has not met
+         * anything yet, the target is not at our own door, and the wave is
+         * still further from the target than airSyncRadius (and from its own
+         * objective, which may be a different point). Every other case
+         * releases it -- no wave, wave spent, wave in contact, target close
+         * to home -- so the one thing this changes is the moment an
+         * otherwise-ordinary strike leaves.
+         */
+        bool strikeWaitsForWave(
+            const AiBlackboard& bb,
+            const AiTuningProfile& profile,
+            const std::optional<SimVector>& waveCentre,
+            const std::optional<UnitId>& target)
+        {
+            if (!profile.airStrikeSync || !target || !waveCentre)
+            {
+                return false;
+            }
+            if (bb.phase != GamePhase::Attack || bb.attackGroup.empty() || bb.waveSpent)
+            {
+                return false;
+            }
+            if (bb.waveContactAt)
+            {
+                return false;
+            }
+            auto enemyIt = bb.knownEnemies.find(target->value);
+            if (enemyIt == bb.knownEnemies.end())
+            {
+                return false;
+            }
+            const auto& targetPosition = enemyIt->second.lastKnownPosition;
+            // Their unit at our door is the home-defence rule's business,
+            // whatever the wave is doing elsewhere on the map.
+            if (bb.baseAnchor
+                && targetPosition.distanceSquared(*bb.baseAnchor)
+                    <= (profile.bomberHomeDefenseRadius * profile.bomberHomeDefenseRadius))
+            {
+                return false;
+            }
+            auto syncRadiusSquared = profile.airSyncRadius * profile.airSyncRadius;
+            // The wave's own objective counts as well as the aircraft's.
+            // Bomber scoring deliberately discounts what the wave is walking
+            // onto (bomberLeaveToArmyRadius), so the two targets are often
+            // different, and waiting only for the wave to reach the
+            // aircraft's one can wait for the whole game.
+            if (bb.attackTarget
+                && waveCentre->distanceSquared(*bb.attackTarget) <= syncRadiusSquared)
+            {
+                return false;
+            }
+            return waveCentre->distanceSquared(targetPosition) > syncRadiusSquared;
+        }
+
+        /**
          * The loop the standing air patrol flies (airPatrolFighters): four
          * points on a ring round the base anchor, just outside the built-up
          * edge, on the side the enemy is on.
@@ -497,11 +556,12 @@ namespace rwe
         // send each new kbot to the front alone. Two is not a formation, but
         // it is the difference between one pass and none.
         auto bombersReady = static_cast<int>(bombers.size()) >= 2;
+        auto bomberStrikeHeld = strikeWaitsForWave(bb, profile, waveCentre, bomberTarget);
 
         for (auto unitId : bombers)
         {
             const auto& unit = sim.getUnitState(unitId);
-            if (bomberTarget && bombersReady)
+            if (bomberTarget && bombersReady && !bomberStrikeHeld)
             {
                 if (!isAttackingUnit(unit, *bomberTarget))
                 {
@@ -509,10 +569,10 @@ namespace rwe
                 }
                 continue;
             }
-            // Nothing worth bombing yet, or not enough of us: wait over the
-            // base rather than wander. A bomber already on its run has an
-            // order and is left alone, so losing one mid-attack does not
-            // recall the other.
+            // Nothing worth bombing yet, not enough of us, or the strike is
+            // waiting for the ground wave: wait over the base rather than
+            // wander. A bomber already on its run has an order and is left
+            // alone, so losing one mid-attack does not recall the other.
             if (waitPoint && unit.orders.empty() && unit.position.distanceSquared(*waitPoint) > (profile.fighterLeash * profile.fighterLeash))
             {
                 outCommands.push_back(moveCommand(unitId, *waitPoint));
@@ -573,10 +633,11 @@ namespace rwe
             }
 
             auto gunshipsReady = static_cast<int>(gunships.size()) >= std::max(1, profile.gunshipPackSize);
+            auto gunshipStrikeHeld = strikeWaitsForWave(bb, profile, waveCentre, gunshipTarget);
             for (auto unitId : gunships)
             {
                 const auto& unit = sim.getUnitState(unitId);
-                if (gunshipTarget && gunshipsReady)
+                if (gunshipTarget && gunshipsReady && !gunshipStrikeHeld)
                 {
                     if (!isAttackingUnit(unit, *gunshipTarget))
                     {
