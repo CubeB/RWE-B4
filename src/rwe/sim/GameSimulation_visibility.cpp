@@ -535,7 +535,9 @@ namespace rwe
         }
 
         auto& victim = getUnitState(victimId);
-        if (victim.isDead() || victim.fireOrders == UnitFireOrders::HoldFire || victim.isOwnedBy(attacker.owner))
+        // ALLIED-RETALIATION-FINDINGS AR-01/02: friendly damage does not
+        // authorize retaliation, including attackers owned by a teammate.
+        if (victim.isDead() || victim.fireOrders == UnitFireOrders::HoldFire || arePlayersAllied(victim.owner, attacker.owner))
         {
             return;
         }

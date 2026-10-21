@@ -478,6 +478,61 @@ namespace rwe
         }
     }
 
+    TEST_CASE("friendly damage never starts retaliation but enemy damage still does", "[targeting][retaliation]")
+    {
+        // ALLIED-RETALIATION-FINDINGS AR-01/02: both ordinary firing modes
+        // reject allied attackers; damage itself is still applied.
+        auto script = makeTargetingScript();
+        GameSimulation sim(makeTargetingTerrain(), 0u, 0, 0);
+        auto us = addTargetingPlayer(sim, "us", GamePlayerType::Human);
+        auto other = addTargetingPlayer(sim, "other", GamePlayerType::Human);
+        registerTargetingModel(sim);
+        defineShooter(sim, "tank", std::string());
+        defineWeapon(sim, "gun", false);
+        auto victim = spawnTargetingUnit(sim, "tank", us, SimVector(100_ss, 0_ss, 100_ss), script);
+        auto attacker = spawnTargetingUnit(sim, "tank", other, SimVector(164_ss, 0_ss, 100_ss), script);
+        armWith(sim, victim, "gun");
+        armWith(sim, attacker, "gun");
+
+        bool enemy = false;
+        SECTION("Return Fire ignores a teammate")
+        {
+            sim.getUnitState(victim).setFireOrders(UnitFireOrders::ReturnFire);
+        }
+        SECTION("Fire At Will ignores a teammate") {}
+        SECTION("another unit of the same owner is ignored")
+        {
+            sim.getUnitState(attacker).owner = us;
+        }
+        SECTION("an enemy is still answered")
+        {
+            enemy = true;
+            sim.getUnitState(victim).setFireOrders(UnitFireOrders::ReturnFire);
+        }
+        SECTION("Hold Fire stays silent even against an enemy")
+        {
+            enemy = true;
+            sim.getUnitState(victim).setFireOrders(UnitFireOrders::HoldFire);
+        }
+        sim.getPlayer(us).teamId = 1;
+        sim.getPlayer(other).teamId = enemy ? 2 : 1;
+        auto hp = sim.getUnitState(victim).hitPoints;
+        sim.applyDamage(victim, 1, attacker);
+        REQUIRE(sim.getUnitState(victim).hitPoints == hp - 1);
+        REQUIRE(sim.getUnitState(victim).lastAttacker == attacker);
+        auto shouldAnswer = enemy && sim.getUnitState(victim).fireOrders != UnitFireOrders::HoldFire;
+        if (shouldAnswer)
+        {
+            REQUIRE(weaponTarget(sim, victim) == attacker);
+        }
+        else
+        {
+            REQUIRE_FALSE(weaponTarget(sim, victim));
+            REQUIRE(sim.getUnitState(victim).orders.empty());
+        }
+        REQUIRE_FALSE(weaponTarget(sim, attacker));
+    }
+
     TEST_CASE("return fire shoots back at whatever hit it, and nothing else", "[targeting]")
     {
         // Return fire is not a quieter fire at will: the unit acquires
