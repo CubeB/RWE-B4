@@ -1,4 +1,4 @@
-﻿# Installer and first-run setup UX comparison
+ï»¿# Installer and first-run setup UX comparison
 
 ## INSTALL-UX-001: RWE packaging and data-import presentation are RWE-original
 
@@ -80,4 +80,3 @@ supported for these packaging and presentation choices. The Linux/AppImage check
 progress/error reporting and preservation of the CLI path when arguments are
 supplied. No such RWE package or wrapper validation was performed by this
 spec-room researcher.
-
