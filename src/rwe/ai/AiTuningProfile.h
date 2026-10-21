@@ -320,6 +320,105 @@ namespace rwe
          * not a replacement.
          */
         int compositionLeanMax{2};
+        /**
+         * Remember where attacks have come from, as a decaying threat level
+         * per fixed compass sector around the base.
+         *
+         * PerceptionManager adds an armed contact's metal value to its
+         * sector the first pass it appears inside defendRadius, halves all
+         * sectors every threatMemoryDecaySeconds, and exposes the total and
+         * the strongest sector on the blackboard. Two consumers: the wave
+         * recall test (StrategicManager) and defensive tower siting
+         * (BuildManager, threatDirectedDefence).
+         *
+         * Off clears the arrays and the total, which restores the old
+         * behaviour of both consumers exactly: the wave-out rule never
+         * recalls for an intruder, and siting falls back to the loss /
+         * enemy-base facing. That is the control arm for a paired run.
+         * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:4).
+         */
+        bool threatMemory{true};
+        /**
+         * How often the sector threat levels are halved, in seconds.
+         *
+         * Integer halving, so a raid that has stopped coming fades over a
+         * few windows instead of disappearing the moment it leaves the
+         * radius. Sixty seconds: a defender's tower goes up in under a
+         * minute, so the side a raid came from is still the side worth
+         * covering while the answer is being built. Zero leaves the levels
+         * undecayed (the whole game's incidents), which is the lifetime
+         * behaviour and is not recommended.
+         */
+        int threatMemoryDecaySeconds{60};
+        /**
+         * Size the force that answers an intruder from the intruder's own
+         * value instead of sending every unit at home at it.
+         *
+         * The home guard committed is the nearest units whose combined metal
+         * reaches defenceResponseRatio times the armed intruders' metal, at
+         * least defenceResponseMinUnits and at most defenceResponseMaxShare
+         * of the guard available. Everything else keeps gathering at the
+         * rally point and still shoots anything that comes within its own
+         * acquisition radius. holdWhenOutnumbered and the commander's own
+         * safety rules are untouched and still run first.
+         *
+         * Off restores the old response exactly: every available unit is
+         * ordered at the nearest intruder. That is the control arm.
+         * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:4).
+         */
+        bool proportionalDefence{true};
+        /**
+         * Metal of responders committed per metal of intruder. 1.3 is the
+         * "respond to them and a little more" rule: one cheap raider draws a
+         * pair rather than the reserve, and a real push still draws a force
+         * that out-values it. Only read with proportionalDefence on.
+         */
+        float defenceResponseRatio{1.3f};
+        /**
+         * The most of the available home guard that one incident may commit,
+         * as a fraction. One by default, so the response is bounded by
+         * defenceResponseRatio alone and a push worth more than the guard
+         * still gets the guard. Below one it keeps a reserve at the rally
+         * point -- that quarter still shoots what comes into its own range
+         * and is the seed of the next wave, but it is also that many fewer
+         * units meeting the push. Values at or below zero fall back to one
+         * unit.
+         */
+        float defenceResponseMaxShare{1.0f};
+        /**
+         * The fewest units sent at an intruder, whatever the ratio says. One
+         * is the floor that keeps a single cheap raider -- or an armed unit
+         * whose definition cost is zero in a mod -- from being ignored.
+         */
+        int defenceResponseMinUnits{1};
+        /**
+         * Recall a wave that is already out only when the remembered threat
+         * at home is worth more than this many times the wave.
+         *
+         * The old rule never recalled at all while a wave was out: one scout
+         * at the extractors used to turn the whole attack round. That was
+         * fixed by letting the reserve answer, but it also means a real push
+         * at the base can be met by whatever is left at home. This is the
+         * other half: the wave comes back only when the threat is at least
+         * recallThreatRatio times the metal that set out with it. 1.5 means
+         * an even fight at home is the reserve's problem and an
+         * overwhelming one is the wave's.
+         *
+         * Only read with proportionalDefence and threatMemory on; either one
+         * off keeps the old wave-out rule exactly.
+         */
+        float recallThreatRatio{1.5f};
+        /**
+         * Lean defensive tower siting towards the sector the most threat has
+         * come from, rather than always facing the enemy base or the last
+         * losses.
+         *
+         * The existing site search, affordability test and build-site guard
+         * are unchanged: this only moves the post the search is centred on.
+         * Off restores the old facing exactly. RWE-original policy
+         * (docs/agents/rwe-ai-adaptability.md S:4).
+         */
+        bool threatDirectedDefence{true};
 
         bool spendSurplusOnCapacity{true};
         float capacityIncomeRatio{1.25f};

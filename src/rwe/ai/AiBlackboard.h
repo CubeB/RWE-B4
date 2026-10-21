@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <map>
@@ -9,6 +10,7 @@
 #include <rwe/ai/AiUnitDefIndex.h>
 #include <rwe/ai/MapIntel.h>
 #include <rwe/grid/Grid.h>
+#include <rwe/math/det_math.h>
 #include <rwe/sim/Energy.h>
 #include <rwe/sim/GameTime.h>
 #include <rwe/sim/Metal.h>
@@ -338,6 +340,68 @@ namespace rwe
      * crowd the base's out of the list.
      */
     constexpr float OwnWreckBaseReach = 1200.0f;
+
+    /**
+     * How many fixed compass sectors the ground around the base is cut into
+     * for the threat memory.
+     *
+     * Sixteen, so each sector is 22.5 degrees. Eight would be coarser than a
+     * base's own footprint at the default defendRadius (a ninth of the
+     * circle, nearly 700 world units of arc at 900), and two raids a few
+     * hundred units apart would land in the same bucket; thirty-two would
+     * split one raiding party across two or three sectors once it is spread
+     * out, which is the opposite failure -- a real push then never looks
+     * like one direction. Sixteen keeps a party together and still tells a
+     * flank from a frontal attack. Fixed, absolute directions rather than
+     * sectors rotated onto the enemy: the base does not turn, and a raid
+     * that comes from the north is a fact about the map.
+     *
+     * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:4); the
+     * original's computer player has no threat memory, so no classic-parity
+     * claim is made.
+     */
+    constexpr std::size_t ThreatSectorCount = 16;
+
+    /**
+     * Which sector a position lies in, as seen from the base anchor.
+     *
+     * Sector 0 starts at -pi and each sector spans 2*pi/16, so the numbering
+     * is a property of the direction alone. The angle comes from detAtan2,
+     * the simulation's own deterministic one: two peers must land a contact
+     * in the same bucket or a tower can be placed on different sides of the
+     * base. A position exactly on the anchor is sector 0.
+     */
+    inline int threatSectorOf(const SimVector& base, const SimVector& at)
+    {
+        constexpr float Pi = 3.14159265358979323846f;
+        constexpr float TwoPi = 6.28318530717958647692f;
+        auto dx = at.x.value - base.x.value;
+        auto dz = at.z.value - base.z.value;
+        if (dx == 0.0f && dz == 0.0f)
+        {
+            return 0;
+        }
+        auto angle = detAtan2(dz, dx);
+        auto turns = (angle + Pi) / TwoPi;
+        auto sector = static_cast<int>(turns * static_cast<float>(ThreatSectorCount));
+        // detAtan2 returns +pi for a point due west (dz == +0, dx < 0),
+        // which lands one past the last sector although it is the same
+        // direction as -pi. The two ends of the circle are one place.
+        if (sector >= static_cast<int>(ThreatSectorCount))
+        {
+            sector = 0;
+        }
+        return std::clamp(sector, 0, static_cast<int>(ThreatSectorCount) - 1);
+    }
+
+    /** The unit direction through the middle of a sector, for siting towards it. */
+    inline SimVector threatSectorDirection(std::size_t sector)
+    {
+        constexpr float Pi = 3.14159265358979323846f;
+        constexpr float TwoPi = 6.28318530717958647692f;
+        auto angle = -Pi + ((static_cast<float>(sector) + 0.5f) * (TwoPi / static_cast<float>(ThreatSectorCount)));
+        return SimVector(SimScalar(detCos(angle)), 0_ss, SimScalar(detSin(angle)));
+    }
 
     /**
      * Shared scratch state between the AI's managers. Rebuilt from the sim
@@ -750,6 +814,49 @@ namespace rwe
         bool enemyAirThreat{false};
         /** Known enemies within the defend radius of our base, in id order. */
         std::vector<UnitId> enemiesNearBase;
+        /**
+         * How much trouble has come from each compass sector around the
+         * base, in threat points (metal value of the attackers), decayed so
+         * the picture follows the current fight rather than the game's
+         * whole history.
+         *
+         * PerceptionManager adds a contact's metal value the first pass it
+         * appears inside defendRadius and halves every sector every
+         * threatMemoryDecaySeconds; a contact that leaves the radius is
+         * forgotten as "already counted" so the next raid from the same
+         * side adds to what is left instead of being absorbed by it.
+         * Deterministic and AI-side memory: not hashed, re-learned after a
+         * load, like knownEnemies. See
+         * AiTuningProfile::threatMemory and threatDirectedDefence.
+         *
+         * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:4); the
+         * original's computer player has no threat memory.
+         */
+        std::array<int, ThreatSectorCount> threatBySector{};
+        /** When the arrays were last halved on the threatMemoryDecaySeconds clock. */
+        GameTime threatDecayedAt{0};
+        /**
+         * Contacts already added to the memory, by raw id. Removed when the
+         * contact leaves enemiesNearBase, so a unit that comes back in is a
+         * new incident. Only read and written by PerceptionManager.
+         */
+        std::set<unsigned int> threatCountedContacts;
+        /** The sum of threatBySector, for the wave-recall test. Zero with the memory off. */
+        int threatTotal{0};
+        /**
+         * The sector with the most remembered threat, or -1 when there is
+         * none. Ties go to the lowest sector index, so build siting is the
+         * same on every peer.
+         */
+        int threatPeakSector{-1};
+        /**
+         * Metal value of the units that set out with the current wave, by
+         * definition of bb.attackGroup. PerceptionManager writes it; the
+         * strategic pass compares the remembered threat against it to decide
+         * whether an intruder is big enough to recall the wave
+         * (AiTuningProfile::recallThreatRatio).
+         */
+        float waveMetal{0.0f};
 
         // --- Army ---
         /** A combat unit pressed into scouting while there is no dedicated scout. */
@@ -1045,6 +1152,28 @@ namespace rwe
          */
         std::map<std::pair<int, int>, GameTime> ferryLandingRefusals;
     };
+
+    /**
+     * The sector with the most remembered threat, or -1 when none has any.
+     * Ties go to the lowest index, and the walk is over the fixed array, so
+     * the answer does not depend on any container's iteration order.
+     */
+    inline int strongestThreatSector(const AiBlackboard& bb)
+    {
+        int best = -1;
+        for (std::size_t i = 0; i < ThreatSectorCount; ++i)
+        {
+            if (bb.threatBySector[i] <= 0)
+            {
+                continue;
+            }
+            if (best < 0 || bb.threatBySector[i] > bb.threatBySector[static_cast<std::size_t>(best)])
+            {
+                best = static_cast<int>(i);
+            }
+        }
+        return best;
+    }
 
     /**
      * Which landing-refusal cell a world position falls in: a floor division

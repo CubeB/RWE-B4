@@ -253,34 +253,51 @@ namespace rwe
         CHECK(names.count("openingAttackBySeconds") == 1);
     }
 
-    // The fifth batch: expansion-frame raids and wave focus fire. Both are on
-    // by default and each has an off value that restores the old target
-    // choice exactly, which is the control arm for a paired arena run.
-    TEST_CASE("the frame raid and focus fire knobs are listed and settable")
+    // The sixth batch: directional threat memory and proportional defence.
+    // The memory, the proportional response and threat-directed siting are
+    // on by default; each off value restores the old single-direction /
+    // send-everyone behaviour, which is the control arm for a paired run.
+    TEST_CASE("the threat memory and proportional defence knobs are listed and settable")
     {
         AiTuningProfile p;
-        CHECK(p.raidExpansionFrames);
-        CHECK(p.raidFrameWindowSeconds == 30);
-        CHECK_FALSE(p.focusFire);
-        CHECK(p.focusFireLatchSeconds == 5);
+        CHECK(p.threatMemory);
+        CHECK(p.threatMemoryDecaySeconds == 60);
+        CHECK(p.proportionalDefence);
+        CHECK(p.defenceResponseRatio == 1.3f);
+        CHECK(p.defenceResponseMaxShare == 1.0f);
+        CHECK(p.defenceResponseMinUnits == 1);
+        CHECK(p.recallThreatRatio == 1.5f);
+        CHECK(p.threatDirectedDefence);
 
-        REQUIRE(applyAiTuning(p, "raidExpansionFrames", "false"));
-        CHECK_FALSE(p.raidExpansionFrames);
-        REQUIRE(applyAiTuning(p, "raidFrameWindowSeconds", "45"));
-        CHECK(p.raidFrameWindowSeconds == 45);
-        REQUIRE(applyAiTuning(p, "focusFire", "false"));
-        CHECK_FALSE(p.focusFire);
-        REQUIRE(applyAiTuning(p, "focusFireLatchSeconds", "0"));
-        CHECK(p.focusFireLatchSeconds == 0);
+        REQUIRE(applyAiTuning(p, "threatMemory", "false"));
+        CHECK_FALSE(p.threatMemory);
+        REQUIRE(applyAiTuning(p, "threatMemoryDecaySeconds", "90"));
+        CHECK(p.threatMemoryDecaySeconds == 90);
+        REQUIRE(applyAiTuning(p, "proportionalDefence", "false"));
+        CHECK_FALSE(p.proportionalDefence);
+        REQUIRE(applyAiTuning(p, "defenceResponseRatio", "2.0"));
+        CHECK(p.defenceResponseRatio == 2.0f);
+        REQUIRE(applyAiTuning(p, "defenceResponseMaxShare", "0.5"));
+        CHECK(p.defenceResponseMaxShare == 0.5f);
+        REQUIRE(applyAiTuning(p, "defenceResponseMinUnits", "2"));
+        CHECK(p.defenceResponseMinUnits == 2);
+        REQUIRE(applyAiTuning(p, "recallThreatRatio", "2.5"));
+        CHECK(p.recallThreatRatio == 2.5f);
+        REQUIRE(applyAiTuning(p, "threatDirectedDefence", "false"));
+        CHECK_FALSE(p.threatDirectedDefence);
 
         std::set<std::string> names;
         for (const auto& knob : listAiKnobs())
         {
             names.insert(knob.name);
         }
-        CHECK(names.count("raidExpansionFrames") == 1);
-        CHECK(names.count("raidFrameWindowSeconds") == 1);
-        CHECK(names.count("focusFire") == 1);
-        CHECK(names.count("focusFireLatchSeconds") == 1);
+        CHECK(names.count("threatMemory") == 1);
+        CHECK(names.count("threatMemoryDecaySeconds") == 1);
+        CHECK(names.count("proportionalDefence") == 1);
+        CHECK(names.count("defenceResponseRatio") == 1);
+        CHECK(names.count("defenceResponseMaxShare") == 1);
+        CHECK(names.count("defenceResponseMinUnits") == 1);
+        CHECK(names.count("recallThreatRatio") == 1);
+        CHECK(names.count("threatDirectedDefence") == 1);
     }
 }

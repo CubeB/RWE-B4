@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <map>
+#include <set>
 
 namespace rwe
 {
@@ -113,6 +114,38 @@ namespace rwe
                 count = static_cast<int>(static_cast<unsigned int>(count) >> steps);
             }
             bb.enemyRoleCountsDecayedAt = GameTime(bb.enemyRoleCountsDecayedAt.value + (steps * interval));
+        }
+
+        /**
+         * Halve the per-sector threat once per threatMemoryDecaySeconds, on
+         * the same integer pattern as the role histogram. The levels are
+         * metal values, so the shift is the whole operation.
+         */
+        void decayThreat(const AiTuningProfile& profile, AiBlackboard& bb)
+        {
+            if (!profile.threatMemory)
+            {
+                bb.threatBySector.fill(0);
+                bb.threatCountedContacts.clear();
+                bb.threatDecayedAt = bb.now;
+                return;
+            }
+            if (profile.threatMemoryDecaySeconds <= 0)
+            {
+                return;
+            }
+            auto interval = static_cast<unsigned int>(profile.threatMemoryDecaySeconds) * SimTicksPerSecond;
+            if (interval == 0 || bb.now.value < bb.threatDecayedAt.value + interval)
+            {
+                return;
+            }
+            auto steps = (bb.now.value - bb.threatDecayedAt.value) / interval;
+            steps = std::min<unsigned int>(steps, 31u);
+            for (auto& level : bb.threatBySector)
+            {
+                level = static_cast<int>(static_cast<unsigned int>(level) >> steps);
+            }
+            bb.threatDecayedAt = GameTime(bb.threatDecayedAt.value + (steps * interval));
         }
     }
 
@@ -322,6 +355,26 @@ namespace rwe
             else
             {
                 bb.knownEnemyArmyMetal += value;
+            }
+        }
+
+        // What the wave that is out is worth, for the recall test. The group
+        // was formed by the army pass on an earlier tick, so this is the
+        // force actually away from home; a member that has died drops out of
+        // the sum. Zero outside an attack, which is what keeps the recall
+        // rule inert whenever there is no wave to recall.
+        bb.waveMetal = 0.0f;
+        for (auto id : bb.attackGroup)
+        {
+            auto unitRef = sim.tryGetUnitState(UnitId(id));
+            if (!unitRef || unitRef->get().isDead())
+            {
+                continue;
+            }
+            auto defIt = sim.unitDefinitions.find(unitRef->get().unitType);
+            if (defIt != sim.unitDefinitions.end())
+            {
+                bb.waveMetal += defIt->second.buildCostMetal.value;
             }
         }
 
@@ -634,5 +687,66 @@ namespace rwe
                 }
             }
         }
+
+        // Where the attacks are coming from, and how much they were worth.
+        //
+        // The list just built is exactly the set of armed contacts the AI is
+        // entitled to treat as at the base, so it is the set the memory is
+        // fed from -- no second look at the simulation, and nothing beyond
+        // the existing sight and radius rules. A contact counts once while
+        // it stays in the radius; a fresh one counts when it arrives, and
+        // one that leaves and comes back is a new raid. The levels decay so
+        // a direction that has gone quiet stops steering towers and stops
+        // pulling the wave home. See AiBlackboard::threatBySector.
+        decayThreat(profile, bb);
+        if (profile.threatMemory)
+        {
+            std::set<unsigned int> nearNow;
+            for (auto enemyId : bb.enemiesNearBase)
+            {
+                nearNow.insert(enemyId.value);
+            }
+            for (auto it = bb.threatCountedContacts.begin(); it != bb.threatCountedContacts.end();)
+            {
+                if (nearNow.count(*it) == 0)
+                {
+                    it = bb.threatCountedContacts.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+            if (bb.baseAnchor)
+            {
+                for (auto enemyId : bb.enemiesNearBase)
+                {
+                    if (bb.threatCountedContacts.count(enemyId.value) != 0)
+                    {
+                        continue;
+                    }
+                    auto known = bb.knownEnemies.find(enemyId.value);
+                    if (known == bb.knownEnemies.end())
+                    {
+                        continue;
+                    }
+                    auto defIt = sim.unitDefinitions.find(known->second.unitType);
+                    if (defIt == sim.unitDefinitions.end())
+                    {
+                        continue;
+                    }
+                    auto value = static_cast<int>(defIt->second.buildCostMetal.value + 0.5f);
+                    auto sector = threatSectorOf(*bb.baseAnchor, known->second.lastKnownPosition);
+                    bb.threatBySector[static_cast<std::size_t>(sector)] += std::max(1, value);
+                    bb.threatCountedContacts.insert(enemyId.value);
+                }
+            }
+        }
+        bb.threatTotal = 0;
+        for (auto level : bb.threatBySector)
+        {
+            bb.threatTotal += level;
+        }
+        bb.threatPeakSector = strongestThreatSector(bb);
     }
 }
