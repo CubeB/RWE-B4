@@ -25,6 +25,34 @@ namespace rwe
     SimScalar targetAcquisitionRadius(const AiTuningProfile& profile, SimScalar engageRadius, SimScalar longestWeaponRange);
 
     /**
+     * The single enemy a wave should concentrate on, or nothing when the
+     * focus-fire knob is off or nothing known is eligible.
+     *
+     * Roles are ranked by what answering them is worth: an enemy static
+     * defence or a rocket/artillery unit first, because it is what punishes
+     * the wave from outside the line's own reach; then a builder or a
+     * commander, when it is not sitting inside the enemy's base radius;
+     * then raiders and tanks. Within a rank the more expensive unit wins,
+     * then the one nearer the wave, then the lower unit id, so the answer
+     * is the same on every peer.
+     *
+     * Only a unit at least one member of `wave` can hit is eligible
+     * (GameSimulation::weaponCanHitUnit), so a wave of ground guns never
+     * fixates on an aircraft it cannot answer. Contacts that are only
+     * remembered are skipped too: their live state is not available to make
+     * that test.
+     *
+     * A free function so the ranking can be pinned without running the
+     * whole tactical pass. RWE-original policy; no classic-parity claim.
+     */
+    std::optional<UnitId> chooseFocusFireTarget(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        const AiTuningProfile& profile,
+        const AiBlackboard& bb,
+        const std::vector<UnitId>& wave);
+
+    /**
      * Commands the combat units as one body: gather at the rally point,
      * defend the base when enemies show up, and attack the most valuable
      * known enemy ground when the army is big enough.

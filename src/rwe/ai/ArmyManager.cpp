@@ -158,6 +158,16 @@ namespace rwe
         }
 
         /**
+         * How near a fresh expansion frame a builder has to stand to be the
+         * raid's target instead of the frame. A build site and the nanolathe
+         * arm reach this far; a builder working the next extractor along the
+         * same ridge is a separate errand. RWE-original, and a guess: nothing
+         * has measured where the line belongs
+         * (AiTuningProfile::raidExpansionFrames).
+         */
+        const SimScalar RaidFrameBuilderRadius = 480_ss;
+
+        /**
          * The frame a builder is putting up at this moment, if any: the one
          * its nanolathe is on, the one its build order has placed, or the one
          * it has been told to finish.
@@ -747,6 +757,49 @@ namespace rwe
         }
 
         /**
+         * What a contact is worth concentrating on, in the order the focus
+         * target is chosen (AiTuningProfile::focusFire). A static defence or
+         * a rocket/artillery unit comes first because it is what hurts the
+         * wave from outside the line's own reach; a builder or commander next,
+         * because it is cheap to kill and expensive to the enemy to lose; the
+         * raiders and tanks of the line last.
+         *
+         * The same reach threshold PerceptionManager uses to call a mobile
+         * gun rocket or artillery (EnemyRocketMinRange), so the two views of
+         * the enemy cannot disagree.
+         */
+        enum class FocusFireTier
+        {
+            DefencesAndArtillery = 0,
+            BuildersAndCommanders = 1,
+            Line = 2,
+            Other = 3,
+        };
+
+        FocusFireTier focusFireTierOf(const GameSimulation& sim, const KnownEnemy& enemy)
+        {
+            if (enemy.isBuilding)
+            {
+                return enemy.isArmed ? FocusFireTier::DefencesAndArtillery : FocusFireTier::Other;
+            }
+            if (enemy.isBuilder || enemy.isCommander)
+            {
+                return FocusFireTier::BuildersAndCommanders;
+            }
+            if (enemy.isAir || !enemy.isArmed)
+            {
+                return FocusFireTier::Other;
+            }
+            auto defIt = sim.unitDefinitions.find(enemy.unitType);
+            if (defIt != sim.unitDefinitions.end()
+                && longestWeaponRange(sim, defIt->second).value >= EnemyRocketMinRange)
+            {
+                return FocusFireTier::DefencesAndArtillery;
+            }
+            return FocusFireTier::Line;
+        }
+
+        /**
          * Where a hull that outranges what it is attacking should lie: near
          * the outer edge of its own reach, straight back from the target,
          * and never inside the target's (issue #191). Nothing when it is
@@ -938,6 +991,139 @@ namespace rwe
         // less the stand-off it would keep once it got there.
         auto reach = longestWeaponRange > 0_ss ? longestWeaponRange - profile.kiteRangeMargin : 0_ss;
         return rweMax(engageRadius, reach);
+    }
+
+    std::optional<UnitId> chooseFocusFireTarget(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        const AiTuningProfile& profile,
+        const AiBlackboard& bb,
+        const std::vector<UnitId>& wave)
+    {
+        if (!profile.focusFire || wave.empty())
+        {
+            return std::nullopt;
+        }
+
+        // The middle of the wave, so "nearer" means nearer to the fight it is
+        // already in. A wave with nothing alive in it has no middle and no
+        // target: the caller prunes the dead, but an id can die between the
+        // two passes in the same tick.
+        float sumX = 0.0f;
+        float sumZ = 0.0f;
+        int counted = 0;
+        for (auto id : wave)
+        {
+            auto unitRef = sim.tryGetUnitState(id);
+            if (!unitRef || unitRef->get().isDead())
+            {
+                continue;
+            }
+            sumX += unitRef->get().position.x.value;
+            sumZ += unitRef->get().position.z.value;
+            ++counted;
+        }
+        if (counted == 0)
+        {
+            return std::nullopt;
+        }
+        auto divisor = static_cast<float>(counted);
+        SimVector centre(SimScalar(sumX / divisor), 0_ss, SimScalar(sumZ / divisor));
+
+        struct Candidate
+        {
+            UnitId unitId;
+            FocusFireTier tier;
+            float value;
+            SimScalar distanceSquared;
+        };
+        auto better = [](const Candidate& a, const Candidate& b) {
+            if (a.tier != b.tier)
+            {
+                return a.tier < b.tier;
+            }
+            if (a.value != b.value)
+            {
+                return a.value > b.value;
+            }
+            if (a.distanceSquared != b.distanceSquared)
+            {
+                return a.distanceSquared < b.distanceSquared;
+            }
+            return a.unitId.value < b.unitId.value;
+        };
+
+        std::optional<Candidate> best;
+        for (const auto& [_, enemy] : bb.knownEnemies)
+        {
+            if (!inSightRecently(bb, profile, enemy))
+            {
+                continue;
+            }
+            auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy);
+            // A remembered contact has no live unit, and eligibility is the
+            // simulation's own weapon test (0x49ABB0): it cannot be asked of
+            // a unit that is not there. The wave keeps its ordinary
+            // acquisition for those, which already handles remembered ids.
+            if (!contact || !contact->unit || contact->unit->isDead())
+            {
+                continue;
+            }
+            if (isNanoframe(sim, *contact->unit))
+            {
+                continue;
+            }
+            auto defIt = sim.unitDefinitions.find(enemy.unitType);
+            if (defIt == sim.unitDefinitions.end())
+            {
+                continue;
+            }
+
+            // Can the wave hit it at all? Any one member is enough: the
+            // units that cannot will keep their own targets.
+            bool hittable = false;
+            for (auto id : wave)
+            {
+                auto unitRef = sim.tryGetUnitState(id);
+                if (!unitRef || unitRef->get().isDead())
+                {
+                    continue;
+                }
+                if (longestRangeAgainst(sim, unitRef->get(), *contact->unit) > 0_ss)
+                {
+                    hittable = true;
+                    break;
+                }
+            }
+            if (!hittable)
+            {
+                continue;
+            }
+
+            auto tier = focusFireTierOf(sim, enemy);
+            // A builder or commander is worth the detour only when it is out
+            // in the open. Inside the enemy's base radius it is either behind
+            // the defences that are already ranked first or standing among
+            // them, and the wave will meet it when it takes the base anyway.
+            if (tier == FocusFireTier::BuildersAndCommanders && bb.enemyBasePosition
+                && bb.enemyBasePosition->distanceSquared(enemy.lastKnownPosition)
+                    <= profile.raidAvoidBaseRadius * profile.raidAvoidBaseRadius)
+            {
+                tier = FocusFireTier::Other;
+            }
+
+            Candidate candidate{enemy.unitId, tier, defIt->second.buildCostMetal.value, centre.distanceSquared(enemy.lastKnownPosition)};
+            if (!best || better(candidate, *best))
+            {
+                best = candidate;
+            }
+        }
+
+        if (!best)
+        {
+            return std::nullopt;
+        }
+        return best->unitId;
     }
 
     bool ArmyManager::commanderStaysOnFrame(
@@ -2024,15 +2210,18 @@ namespace rwe
         std::optional<UnitId> best;
         SimScalar bestDistanceSquared = 0_ss;
         auto avoidSquared = profile.raidAvoidBaseRadius * profile.raidAvoidBaseRadius;
-        for (const auto& [_, enemy] : bb.knownEnemies)
-        {
+
+        // A building of theirs that may be raided at all: not beside their
+        // base, of the enemy we are fighting, and not under a gun the threat
+        // map knows about.
+        auto eligible = [&](const KnownEnemy& enemy) {
             if (!enemy.isBuilding)
             {
-                continue;
+                return false;
             }
             if (!contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy))
             {
-                continue;
+                return false;
             }
             // Of the enemy we are fighting, where there is one. The rule
             // below keeps a raid clear of their base, and with three
@@ -2043,13 +2232,122 @@ namespace rwe
             // is the opposite of concentrating.
             if (bb.focusEnemy && enemy.owner != *bb.focusEnemy)
             {
-                continue;
+                return false;
             }
             if (bb.enemyBasePosition && bb.enemyBasePosition->distanceSquared(enemy.lastKnownPosition) < avoidSquared)
             {
-                continue;
+                return false;
             }
             if (threatMap.antiGroundAt(enemy.lastKnownPosition) > 0.0f)
+            {
+                return false;
+            }
+            return true;
+        };
+
+        // A frame the enemy is putting up right now, or the builder standing
+        // over it, comes before a finished building further out
+        // (AiTuningProfile::raidExpansionFrames). The window is on firstSeen,
+        // not lastSeen, so a frame that has been watched for a while is not
+        // treated as new every pass.
+        if (profile.raidExpansionFrames && profile.raidFrameWindowSeconds > 0)
+        {
+            auto windowTicks = static_cast<unsigned int>(profile.raidFrameWindowSeconds) * SimTicksPerSecond;
+            std::optional<UnitId> bestFrame;
+            SimScalar bestFrameDistanceSquared = 0_ss;
+            for (const auto& [_, enemy] : bb.knownEnemies)
+            {
+                if (!enemy.isBuilding || !enemy.underConstruction)
+                {
+                    continue;
+                }
+                if (bb.now.value > enemy.firstSeen.value + windowTicks)
+                {
+                    continue;
+                }
+                if (!eligible(enemy))
+                {
+                    continue;
+                }
+                // The remembered flag is what was true when it was last seen.
+                // Where the AI can see it now, the live unit is the authority
+                // and a frame that has finished is just a finished building.
+                auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy);
+                if (contact && contact->unit && !isNanoframe(sim, *contact->unit))
+                {
+                    continue;
+                }
+                auto d = bb.baseAnchor->distanceSquared(enemy.lastKnownPosition);
+                if (!bestFrame || d < bestFrameDistanceSquared)
+                {
+                    bestFrameDistanceSquared = d;
+                    bestFrame = enemy.unitId;
+                }
+            }
+
+            if (bestFrame)
+            {
+                // Killing the builder stops the next frame as well as this
+                // one, so a visible builder sharing the site is preferred to
+                // the frame itself. It has to be in sight: a remembered one
+                // may have walked on, and the frame is still there.
+                std::optional<UnitId> bestBuilder;
+                SimScalar bestBuilderDistanceSquared = 0_ss;
+                auto frameIt = bb.knownEnemies.find(bestFrame->value);
+                if (frameIt != bb.knownEnemies.end())
+                {
+                    auto framePosition = frameIt->second.lastKnownPosition;
+                    auto builderRadiusSquared = RaidFrameBuilderRadius * RaidFrameBuilderRadius;
+                    for (const auto& [_, enemy] : bb.knownEnemies)
+                    {
+                        if (!enemy.isBuilder || enemy.isBuilding || enemy.isAir)
+                        {
+                            continue;
+                        }
+                        if (enemy.owner != frameIt->second.owner)
+                        {
+                            continue;
+                        }
+                        if (!inSightRecently(bb, profile, enemy))
+                        {
+                            continue;
+                        }
+                        auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy);
+                        if (!contact || !contact->unit)
+                        {
+                            continue;
+                        }
+                        if (bb.focusEnemy && enemy.owner != *bb.focusEnemy)
+                        {
+                            continue;
+                        }
+                        if (bb.enemyBasePosition && bb.enemyBasePosition->distanceSquared(enemy.lastKnownPosition) < avoidSquared)
+                        {
+                            continue;
+                        }
+                        if (threatMap.antiGroundAt(enemy.lastKnownPosition) > 0.0f)
+                        {
+                            continue;
+                        }
+                        auto d = framePosition.distanceSquared(enemy.lastKnownPosition);
+                        if (d > builderRadiusSquared)
+                        {
+                            continue;
+                        }
+                        if (!bestBuilder || d < bestBuilderDistanceSquared)
+                        {
+                            bestBuilderDistanceSquared = d;
+                            bestBuilder = enemy.unitId;
+                        }
+                    }
+                }
+                return bestBuilder ? bestBuilder : bestFrame;
+            }
+        }
+
+        for (const auto& [_, enemy] : bb.knownEnemies)
+        {
+            if (!eligible(enemy))
             {
                 continue;
             }
@@ -2239,6 +2537,7 @@ namespace rwe
         // Not while the base itself is under attack: the reserve has a job
         // then, and it is at home.
         bb.raidTarget.reset();
+        bb.raidAttackTarget.reset();
         if (profile.raidingParties && profile.raidPartySize > 0 && bb.phase == GamePhase::Attack && bb.enemiesNearBase.empty())
         {
             for (auto it = bb.raidGroup.begin(); it != bb.raidGroup.end();)
@@ -2252,6 +2551,19 @@ namespace rwe
                 if (known != bb.knownEnemies.end())
                 {
                     bb.raidTarget = known->second.lastKnownPosition;
+                    // A frame or the builder over it is the one case where
+                    // the raiders must be told to attack rather than walk:
+                    // ordinary acquisition deliberately skips a nanoframe. A
+                    // finished factory also carries def.builder, and there is
+                    // nothing to bypass for one of those -- acquisition takes
+                    // it like any other building -- so only a mobile builder
+                    // qualifies.
+                    if (profile.raidExpansionFrames
+                        && (known->second.underConstruction
+                            || (known->second.isBuilder && !known->second.isBuilding)))
+                    {
+                        bb.raidAttackTarget = target;
+                    }
                 }
                 // Only once a wave is already out. Formed before that, the
                 // raid comes out of the first attack the AI ever makes and
@@ -2830,6 +3142,97 @@ namespace rwe
             }
         }
 
+        // One target for the wave (AiTuningProfile::focusFire). Chosen from
+        // what the AI knows, by role and value, and kept for a short latch so
+        // the line does not change its mind every tactical pass. The choice
+        // is only of what at least one wave member's own weapons can hit; a
+        // unit that cannot hit it keeps the ordinary acquisition below.
+        if (!profile.focusFire || bb.phase != GamePhase::Attack)
+        {
+            bb.focusFireTarget.reset();
+        }
+        else
+        {
+            std::vector<UnitId> wave;
+            if (profile.attackInWaves)
+            {
+                for (auto id : bb.attackGroup)
+                {
+                    auto unitRef = sim.tryGetUnitState(UnitId(id));
+                    if (unitRef && !unitRef->get().isDead())
+                    {
+                        wave.push_back(UnitId(id));
+                    }
+                }
+            }
+            else
+            {
+                for (auto id : bb.combatUnits)
+                {
+                    if (bb.scoutUnitId && *bb.scoutUnitId == id)
+                    {
+                        continue;
+                    }
+                    wave.push_back(id);
+                }
+            }
+
+            // A target that died, left sight, or is no longer hittable by
+            // anybody in the wave is dropped at once, latch or no latch: a
+            // dead unit is not a target the latch should preserve.
+            if (bb.focusFireTarget)
+            {
+                auto known = bb.knownEnemies.find(bb.focusFireTarget->value);
+                bool valid = known != bb.knownEnemies.end() && inSightRecently(bb, profile, known->second);
+                if (valid)
+                {
+                    auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, known->second);
+                    valid = contact && contact->unit && !contact->unit->isDead()
+                        && !isNanoframe(sim, *contact->unit);
+                    if (valid)
+                    {
+                        bool hittable = false;
+                        for (auto id : wave)
+                        {
+                            auto unitRef = sim.tryGetUnitState(id);
+                            if (!unitRef || unitRef->get().isDead())
+                            {
+                                continue;
+                            }
+                            if (longestRangeAgainst(sim, unitRef->get(), *contact->unit) > 0_ss)
+                            {
+                                hittable = true;
+                                break;
+                            }
+                        }
+                        valid = hittable;
+                    }
+                }
+                if (!valid)
+                {
+                    bb.focusFireTarget.reset();
+                }
+            }
+
+            auto latchTicks = static_cast<unsigned int>(std::max(0, profile.focusFireLatchSeconds)) * SimTicksPerSecond;
+            bool due = !bb.focusFireTarget
+                || profile.focusFireLatchSeconds <= 0
+                || bb.now.value >= bb.focusFireTargetChosenAt.value + latchTicks;
+            if (due)
+            {
+                auto chosen = chooseFocusFireTarget(sim, aiOwner, profile, bb, wave);
+                if (chosen)
+                {
+                    bb.focusFireTarget = chosen;
+                    bb.focusFireTargetChosenAt = bb.now;
+                }
+                else
+                {
+                    bb.focusFireTarget.reset();
+                }
+            }
+        }
+
         for (auto unitId : bb.combatUnits)
         {
             if (bb.scoutUnitId && *bb.scoutUnitId == unitId)
@@ -2932,7 +3335,36 @@ namespace rwe
                 ownReach = longestWeaponRange(sim, defIt->second);
             }
             auto acquireRadius = targetAcquisitionRadius(profile, profile.engageRadius, ownReach);
-            if (auto enemy = nearestKnownEnemy(sim, aiOwner, profile, bb, unit.position, acquireRadius, false, [&](UnitId candidate) { return hasGivenUpOn(unitId, candidate, bb.now); }))
+            // A wave member that can hit the wave's focus target takes it
+            // ahead of its own nearest enemy (AiTuningProfile::focusFire).
+            // Everything else falls through to exactly the old acquisition:
+            // this is a preference, not an order, and eligibility is the
+            // simulation's own weapon test, so a unit is never sent at
+            // something it cannot hurt.
+            std::optional<UnitId> enemy;
+            if (profile.focusFire && bb.focusFireTarget && bb.phase == GamePhase::Attack
+                && (!profile.attackInWaves || bb.attackGroup.count(unitId.value) != 0)
+                && !hasGivenUpOn(unitId, *bb.focusFireTarget, bb.now))
+            {
+                auto known = bb.knownEnemies.find(bb.focusFireTarget->value);
+                if (known != bb.knownEnemies.end()
+                    && inSightRecently(bb, profile, known->second)
+                    && unit.position.distanceSquared(known->second.lastKnownPosition) <= acquireRadius * acquireRadius)
+                {
+                    auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, known->second);
+                    if (contact && contact->unit && !contact->unit->isDead()
+                        && !isNanoframe(sim, *contact->unit)
+                        && longestRangeAgainst(sim, unit, *contact->unit) > 0_ss)
+                    {
+                        enemy = bb.focusFireTarget;
+                    }
+                }
+            }
+            if (!enemy)
+            {
+                enemy = nearestKnownEnemy(sim, aiOwner, profile, bb, unit.position, acquireRadius, false, [&](UnitId candidate) { return hasGivenUpOn(unitId, candidate, bb.now); });
+            }
+            if (enemy)
             {
                 // Is it getting hurt? The question is asked of the target we
                 // are about to order this unit at rather than of the order it
@@ -3183,6 +3615,33 @@ namespace rwe
                     // rule is above the switch and applies to them too.
                     if (bb.raidGroup.count(unitId.value) != 0 && bb.raidTarget)
                     {
+                        // An expansion frame is the one target acquisition
+                        // skips on purpose (a nanoframe has no hit points and
+                        // dies to anything, and the same frame over a factory
+                        // pad is a trap), so a raid sent for one has to say
+                        // so explicitly. A builder standing over the frame is
+                        // attacked the same way; either is only ordered when
+                        // this unit's own weapons can actually hit it.
+                        if (profile.raidExpansionFrames && bb.raidAttackTarget)
+                        {
+                            auto known = bb.knownEnemies.find(bb.raidAttackTarget->value);
+                            if (known != bb.knownEnemies.end()
+                                && (known->second.underConstruction
+                                    || (known->second.isBuilder && !known->second.isBuilding))
+                                && inSightRecently(bb, profile, known->second))
+                            {
+                                auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, known->second);
+                                if (contact && contact->unit && !contact->unit->isDead()
+                                    && longestRangeAgainst(sim, unit, *contact->unit) > 0_ss)
+                                {
+                                    if (!isAttackingUnit(unit, *bb.raidAttackTarget))
+                                    {
+                                        outCommands.push_back(attackCommand(unitId, *bb.raidAttackTarget));
+                                    }
+                                    break;
+                                }
+                            }
+                        }
                         if (!isMovingTo(unit, *bb.raidTarget))
                         {
                             outCommands.push_back(moveCommand(unitId, *bb.raidTarget));

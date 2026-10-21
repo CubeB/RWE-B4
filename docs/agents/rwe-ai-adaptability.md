@@ -132,8 +132,9 @@ omniscience/income cheat as a separate, clearly labelled option.
 | 2 | Factory queue depth, stalled-head drop, mobile AA escort | built and measured; depth default 1 after a regression, escort neutral vs classic, kept for human air |
 | 3 | Decayed composition histogram + lab/vehicle counter weights; attack posture/odds gate with hysteresis | built and measured; neutral close-out vs classic on Great Divide/Dark Side, all decided RWE wins |
 | 4 | Reserve slot, attack-move, humanlike opening timings | built and measured; close-out neutral vs batch 3, all decided wins; humanlike opening identical against the classic AI, kept off |
-| 5 | Expansion-frame raids, threat-direction defence, two-axis/feint | design ready |
-| 6 | Replay-derived opening/expansion templates beyond the first timing posture; map-character branches | replay evidence recorded, templates pending |
+| 5 | Expansion-frame/builder raids; role/value focus fire | built and measured; raid neutral, focus fire regressed close-out and defaults off |
+| 6 | Threat-direction memory and proportional defence; two-axis/feint | design ready |
+| 7 | Replay-derived expansion templates beyond the first timing posture; map-character branches | replay evidence recorded, templates pending |
 
 ## Measurement
 

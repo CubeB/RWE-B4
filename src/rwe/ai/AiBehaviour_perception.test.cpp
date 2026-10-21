@@ -1067,4 +1067,87 @@ namespace rwe
             REQUIRE(countQueueCommands(commands, "ARMTHUND") == 0);
         }
     }
+
+    TEST_CASE("a contact's frame and builder flags are remembered, and not refreshed in the fog", "[ai]")
+    {
+        // The raid target pick needs to know which contact is a nanoframe the
+        // enemy has only just started and which one puts frames up. Both are
+        // properties of the unit when it was last seen, so they belong on the
+        // remembered record; a contact that has gone back out of sight keeps
+        // the answer it was last seen with rather than being re-read from the
+        // simulation.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        // A commander with no builder flag: isBuilder has to come from either
+        // def.builder or def.commander, not only the first.
+        sim.unitDefinitions["ENEMYCOM"] = makeDef(true, false, true, "", 300u);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto frameId = addUnit(sim, "ARMSOLAR", human, SimVector(100_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(frameId).buildTimeCompleted = sim.unitDefinitions.at("ARMSOLAR").buildTime / 2u;
+        auto builderId = addUnit(sim, "ARMCK", human, SimVector(-100_ss, 0_ss, 0_ss), script);
+        auto commanderId = addUnit(sim, "ENEMYCOM", human, SimVector(150_ss, 0_ss, 60_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.targetScoutPlaneCount = 0;
+        AiPlayerController controller(ai, profile, 42u, MapIntel{});
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 2, commands);
+
+        const auto& bb = controller.getBlackboard();
+        REQUIRE(bb.knownEnemies.count(frameId.value) == 1);
+        REQUIRE(bb.knownEnemies.count(builderId.value) == 1);
+        REQUIRE(bb.knownEnemies.count(commanderId.value) == 1);
+
+        const auto& frame = bb.knownEnemies.at(frameId.value);
+        CHECK(frame.underConstruction);
+        CHECK_FALSE(frame.isBuilder);
+        const auto& builder = bb.knownEnemies.at(builderId.value);
+        CHECK_FALSE(builder.underConstruction);
+        CHECK(builder.isBuilder);
+        const auto& commander = bb.knownEnemies.at(commanderId.value);
+        CHECK(commander.isBuilder);
+
+        // firstSeen is when the sighting began, not when the record was last
+        // rebuilt: the record is rebuilt on every visible tick.
+        auto frameFirstSeen = frame.firstSeen;
+        runTicks(sim, controller, 2, commands);
+        REQUIRE(controller.getBlackboard().knownEnemies.count(frameId.value) == 1);
+        CHECK(controller.getBlackboard().knownEnemies.at(frameId.value).firstSeen == frameFirstSeen);
+
+        SECTION("a contact out of sight is left exactly as it was remembered")
+        {
+            // A second enemy, well outside the commander's 300 sight.
+            auto farId = addUnit(sim, "ARMCK", human, SimVector(1200_ss, 0_ss, 1200_ss), script);
+            sim.updateVisibility();
+            REQUIRE_FALSE(sim.isVisibleTo(ai, SimVector(1200_ss, 0_ss, 1200_ss)));
+
+            KnownEnemy remembered{};
+            remembered.unitId = farId;
+            remembered.unitType = "ARMCK";
+            remembered.lastKnownPosition = SimVector(1200_ss, 0_ss, 1200_ss);
+            remembered.lastSeen = GameTime(7u);
+            remembered.isCommander = false;
+            remembered.underConstruction = true;
+            remembered.isBuilder = true;
+            remembered.firstSeen = GameTime(5u);
+
+            AiBlackboard fogged;
+            fogged.now = GameTime(100u);
+            fogged.knownEnemies[farId.value] = remembered;
+            PerceptionManager perception;
+            perception.refresh(sim, ai, profile, fogged);
+
+            REQUIRE(fogged.knownEnemies.count(farId.value) == 1);
+            const auto& kept = fogged.knownEnemies.at(farId.value);
+            CHECK(kept.underConstruction);
+            CHECK(kept.isBuilder);
+            CHECK(kept.firstSeen == GameTime(5u));
+            CHECK(kept.lastSeen == GameTime(7u));
+        }
+    }
 }

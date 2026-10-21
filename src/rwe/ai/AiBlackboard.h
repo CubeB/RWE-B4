@@ -58,6 +58,38 @@ namespace rwe
          * Defaulted for the same reason isCommander is.
          */
         PlayerId owner{};
+        /**
+         * Whether the contact was still a nanoframe when it was last seen
+         * (UnitState::isBeingBuilt). Read by the raid target pick, which
+         * prefers a frame the enemy has only just started over a finished
+         * building further out: a frame is worth what half of it already
+         * cost and cannot shoot back.
+         *
+         * Like every other field here it is what the AI saw, not what is
+         * true now. It is recomputed whenever a contact is in sight and left
+         * alone while it is only remembered.
+         *
+         * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:5);
+         * the original's computer player has no expansion-frame raid, so no
+         * classic-parity claim is made for it.
+         */
+        bool underConstruction{false};
+        /**
+         * Whether the contact builds: a mobile or immobile constructor, a
+         * factory, or a commander. Read by the raid pick, which prefers the
+         * builder standing over a fresh frame to the frame itself.
+         */
+        bool isBuilder{false};
+        /**
+         * When this contact was first recorded. Never moved forward while
+         * the contact stays known, so it answers "how long has the AI known
+         * about this", which is what the raid frame window tests. A contact
+         * that is forgotten and later seen again is a new sighting and gets
+         * a new stamp.
+         *
+         * Defaulted so the aggregate initialisers elsewhere keep compiling.
+         */
+        GameTime firstSeen{0};
     };
 
     /** A completed building of ours, remembered so that losing it can be noticed. */
@@ -140,6 +172,18 @@ namespace rwe
     };
 
     constexpr std::size_t EnemyRoleCount = static_cast<std::size_t>(EnemyRole::Count);
+
+    /**
+     * Where a mobile gun stops being a raider's short-range weapon and
+     * becomes rocket or artillery reach. A Peewee's and a Flash's guns are
+     * around 180-200; a Storm's and a Thud's are well past this.
+     *
+     * Shared by PerceptionManager's role histogram and ArmyManager's focus
+     * target choice so the two cannot disagree about what "long range" is.
+     * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:1); no
+     * classic-parity claim is made for the threshold.
+     */
+    constexpr float EnemyRocketMinRange = 300.0f;
 
     inline std::size_t enemyRoleIndex(EnemyRole role)
     {
@@ -898,6 +942,35 @@ namespace rwe
         std::set<unsigned int> raidGroup;
         /** Where the raid is headed, if one is out. */
         std::optional<SimVector> raidTarget;
+        /**
+         * The unit the raid is aimed at when it is an expansion frame or the
+         * builder putting one up (AiTuningProfile::raidExpansionFrames).
+         *
+         * raidTarget is only a place, and a raider's ordinary acquisition
+         * deliberately skips a nanoframe -- it has no hit points and dies to
+         * anything, so chasing one round a factory pad is how a raid kills
+         * the same cheap hull over and over while the factory stands. That
+         * skip is right everywhere except the errand this field exists for,
+         * so the raid branch issues an explicit attack on this id instead of
+         * relying on acquisition. Unset with the knob off, and unset when
+         * the chosen raid target is an ordinary finished building.
+         */
+        std::optional<UnitId> raidAttackTarget;
+
+        /**
+         * The single enemy the wave's units concentrate on
+         * (AiTuningProfile::focusFire). Chosen by role and value from
+         * knownEnemies, and only where at least one wave member's own
+         * weapons can hit it (GameSimulation::weaponCanHitUnit). Kept for
+         * focusFireLatchSeconds so a target that is briefly less attractive
+         * does not change hands every tactical pass.
+         *
+         * A unit that cannot hit it keeps its ordinary nearest-target
+         * acquisition; the field is a preference, not an order.
+         */
+        std::optional<UnitId> focusFireTarget;
+        /** When focusFireTarget was last chosen, for the latch. */
+        GameTime focusFireTargetChosenAt{0};
 
         /**
          * A build site away from the base that wants protection, and the

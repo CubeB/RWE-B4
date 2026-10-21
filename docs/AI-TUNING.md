@@ -339,3 +339,34 @@ a human play-test or a stronger opponent shows a difference.
 
 The AI suite passes (287 cases / 9982 assertions). The full permitted suite
 result is in the session report. Raw games are under `D:/tmp/rwe-ai4/`.
+
+## Fifth AI batch: expansion-frame raids and focus fire
+
+2026-10-21. RWE-AI only. The batch adds `raidExpansionFrames` (default true,
+30 s window), informed by the replay study's finding that winners hit economy
+and base rather than the middle, and `focusFire` (default **false** after this
+measurement) with a 5 s latch.
+
+Twenty-four games on Great Divide (4801-4804) and Dark Side (4901-4904),
+1800 s, RWE against the classic personality, dealt seats: batch 4, batch 5
+defaults, and batch 5 with both knobs off. The "off" arm is byte-identical to
+batch 4 in all eight seeds, which is the control. Batch 5 defaults were slower
+on five of eight (GD 4801 18991 -> 19141, 4802 22021 -> 23461, 4804 44551 ->
+49171; DS 4904 29671 -> 36391) and faster on three (GD 4803 25141 -> 23281;
+DS 4901-4903 slightly faster). All were RWE wins.
+
+Isolating the two knobs on the three worst seeds (GD 4802, GD 4804, DS 4904):
+
+| Map/seed | Focus fire only | Raid only | Both off |
+| --- | ---: | ---: | ---: |
+| GD 4802 | 23461 | 22021 | 22021 |
+| GD 4804 | 45721 | 44551 | 44551 |
+| DS 4904 | 36391 | 29671 | 29671 |
+
+**Focus fire is the regression**; the frame/builder raid is neutral on these
+seeds. `focusFire` therefore defaults to **false** until a human/stronger
+opponent shows the focusing behaviour pays. The raid remains on: it is the
+replay-informed economy pressure and showed no close-out cost.
+
+The AI suite passes (292 cases / 10044 assertions). The full permitted suite
+result is in the session report. Raw games are under `D:/tmp/rwe-ai5/`.

@@ -252,4 +252,35 @@ namespace rwe
         CHECK(names.count("openingAttackArmySize") == 1);
         CHECK(names.count("openingAttackBySeconds") == 1);
     }
+
+    // The fifth batch: expansion-frame raids and wave focus fire. Both are on
+    // by default and each has an off value that restores the old target
+    // choice exactly, which is the control arm for a paired arena run.
+    TEST_CASE("the frame raid and focus fire knobs are listed and settable")
+    {
+        AiTuningProfile p;
+        CHECK(p.raidExpansionFrames);
+        CHECK(p.raidFrameWindowSeconds == 30);
+        CHECK_FALSE(p.focusFire);
+        CHECK(p.focusFireLatchSeconds == 5);
+
+        REQUIRE(applyAiTuning(p, "raidExpansionFrames", "false"));
+        CHECK_FALSE(p.raidExpansionFrames);
+        REQUIRE(applyAiTuning(p, "raidFrameWindowSeconds", "45"));
+        CHECK(p.raidFrameWindowSeconds == 45);
+        REQUIRE(applyAiTuning(p, "focusFire", "false"));
+        CHECK_FALSE(p.focusFire);
+        REQUIRE(applyAiTuning(p, "focusFireLatchSeconds", "0"));
+        CHECK(p.focusFireLatchSeconds == 0);
+
+        std::set<std::string> names;
+        for (const auto& knob : listAiKnobs())
+        {
+            names.insert(knob.name);
+        }
+        CHECK(names.count("raidExpansionFrames") == 1);
+        CHECK(names.count("raidFrameWindowSeconds") == 1);
+        CHECK(names.count("focusFire") == 1);
+        CHECK(names.count("focusFireLatchSeconds") == 1);
+    }
 }

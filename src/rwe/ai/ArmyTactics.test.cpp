@@ -241,6 +241,480 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a raid prefers a fresh expansion frame, or its builder, to a finished building", "[ai]")
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai");
+        auto enemy = addPlayer(sim, "enemy");
+        sim.unitDefinitions["UNIT"] = UnitDefinition{};
+        auto frameDef = UnitDefinition{};
+        frameDef.buildTime = 100u;
+        sim.unitDefinitions["FRAME"] = frameDef;
+        auto builderDef = UnitDefinition{};
+        builderDef.isMobile = true;
+        builderDef.builder = true;
+        builderDef.buildTime = 100u;
+        sim.unitDefinitions["BUILDER"] = builderDef;
+        auto script = makeEmptyCobScript();
+
+        std::vector<UnitId> units;
+        for (int i = 0; i < 4; ++i)
+        {
+            units.push_back(addUnitOfType(sim, "UNIT", ai, SimVector(SimScalar(i * 40.0f), 0_ss, 0_ss), script));
+        }
+        units = ascendingIds(units);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.raidingParties = true;
+        profile.raidPartySize = 2;
+        profile.raidAvoidBaseRadius = 900_ss;
+        profile.raidExpansionFrames = true;
+        profile.raidFrameWindowSeconds = 30;
+        profile.attackInWaves = true;
+        profile.tacticalTickInterval = 1;
+        // The frame preference is the subject; focus fire and visibility have
+        // their own cases.
+        profile.focusFire = false;
+        profile.cheatModeOmniscient = true;
+
+        ThreatMap threatMap(64, 64);
+        ArmyManager army;
+        std::vector<PlayerCommand> commands;
+
+        AiBlackboard bb;
+        bb.phase = GamePhase::Attack;
+        bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+        bb.enemyBasePosition = SimVector(4000_ss, 0_ss, 0_ss);
+        bb.combatUnits = units;
+        bb.attackGroup.insert(units[0].value);
+        bb.attackGroup.insert(units[1].value);
+
+        // The finished building is nearer to us than the frame: nearest-first
+        // would take it every time, which is the control arm.
+        auto finishedPosition = SimVector(1500_ss, 0_ss, 0_ss);
+        auto framePosition = SimVector(2500_ss, 0_ss, 0_ss);
+        auto finishedId = addUnitOfType(sim, "UNIT", enemy, finishedPosition, script);
+        auto frameId = addUnitOfType(sim, "FRAME", enemy, framePosition, script);
+        sim.getUnitState(frameId).buildTimeCompleted = 50u;
+
+        auto remember = [&](UnitId id, const std::string& type, const SimVector& position, bool building, bool builder, bool underConstruction, GameTime firstSeen) {
+            KnownEnemy known{};
+            known.unitId = id;
+            known.unitType = type;
+            known.lastKnownPosition = position;
+            known.lastSeen = bb.now;
+            known.isBuilding = building;
+            known.isArmed = false;
+            known.isAir = false;
+            known.owner = enemy;
+            known.isBuilder = builder;
+            known.underConstruction = underConstruction;
+            known.firstSeen = firstSeen;
+            bb.knownEnemies[id.value] = known;
+        };
+
+        // Each section runs the body afresh: Catch2 re-enters it per SECTION.
+        bb.knownEnemies.clear();
+        remember(finishedId, "UNIT", finishedPosition, true, false, false, GameTime(0u));
+        remember(frameId, "FRAME", framePosition, true, false, true, GameTime(0u));
+
+        SECTION("the fresh frame wins over the nearer finished building")
+        {
+            army.update(sim, ai, profile, threatMap, bb, commands);
+
+            REQUIRE(bb.raidTarget.has_value());
+            CHECK(bb.raidTarget->distanceSquared(framePosition) == 0_ss);
+            CHECK(bb.raidTarget->distanceSquared(finishedPosition) > 0_ss);
+            REQUIRE(bb.raidAttackTarget.has_value());
+            CHECK(*bb.raidAttackTarget == frameId);
+        }
+
+        SECTION("a visible builder on the frame is taken before the frame")
+        {
+            auto builderPosition = framePosition + SimVector(100_ss, 0_ss, 0_ss);
+            auto builderId = addUnitOfType(sim, "BUILDER", enemy, builderPosition, script);
+            remember(builderId, "BUILDER", builderPosition, false, true, false, GameTime(0u));
+
+            army.update(sim, ai, profile, threatMap, bb, commands);
+
+            REQUIRE(bb.raidTarget.has_value());
+            CHECK(bb.raidTarget->distanceSquared(builderPosition) == 0_ss);
+            REQUIRE(bb.raidAttackTarget.has_value());
+            CHECK(*bb.raidAttackTarget == builderId);
+        }
+
+        SECTION("a frame first seen longer ago than the window is not an expansion")
+        {
+            bb.now = GameTime(static_cast<unsigned int>(profile.raidFrameWindowSeconds + 1) * SimTicksPerSecond);
+            bb.knownEnemies[finishedId.value].lastSeen = bb.now;
+            bb.knownEnemies[frameId.value].lastSeen = bb.now;
+
+            army.update(sim, ai, profile, threatMap, bb, commands);
+
+            REQUIRE(bb.raidTarget.has_value());
+            CHECK(bb.raidTarget->distanceSquared(finishedPosition) == 0_ss);
+            CHECK_FALSE(bb.raidAttackTarget.has_value());
+        }
+
+        SECTION("the knob off restores the nearest finished building")
+        {
+            profile.raidExpansionFrames = false;
+            army.update(sim, ai, profile, threatMap, bb, commands);
+
+            REQUIRE(bb.raidTarget.has_value());
+            CHECK(bb.raidTarget->distanceSquared(finishedPosition) == 0_ss);
+            CHECK_FALSE(bb.raidAttackTarget.has_value());
+        }
+    }
+
+    TEST_CASE("a raid on an expansion frame attacks it explicitly", "[ai]")
+    {
+        // Ordinary acquisition skips a nanoframe on purpose. A raid sent for
+        // one must therefore say "attack this", or the raiders walk to the
+        // frame and stand beside it while their fire-at-will finishes it.
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai");
+        auto enemy = addPlayer(sim, "enemy");
+        WeaponDefinition laser{};
+        laser.maxRange = 200_ss;
+        laser.reloadTime = 1_ss;
+        laser.burst = 1;
+        laser.damage["DEFAULT"] = 10u;
+        sim.weaponDefinitions["LASER"] = laser;
+        auto raiderDef = UnitDefinition{};
+        raiderDef.isMobile = true;
+        raiderDef.weapon1 = "LASER";
+        raiderDef.buildTime = 100u;
+        raiderDef.maxHitPoints = 100u;
+        raiderDef.buildCostMetal = Metal(100.0f);
+        sim.unitDefinitions["RAIDER"] = raiderDef;
+        auto frameDef = UnitDefinition{};
+        frameDef.buildTime = 100u;
+        sim.unitDefinitions["FRAME"] = frameDef;
+        auto script = makeEmptyCobScript();
+
+        // y above the sea: the simulation's eligibility test measures model
+        // tops, and a test unit with no model definition would otherwise be
+        // under the waterline on a flat map.
+        auto waveId = addUnitOfType(sim, "RAIDER", ai, SimVector(0_ss, 10_ss, 0_ss), script);
+        auto raiderId = addUnitOfType(sim, "RAIDER", ai, SimVector(40_ss, 10_ss, 0_ss), script);
+        auto framePosition = SimVector(1200_ss, 10_ss, 0_ss);
+        auto frameId = addUnitOfType(sim, "FRAME", enemy, framePosition, script);
+        sim.getUnitState(frameId).buildTimeCompleted = 50u;
+
+        auto profile = makeDefaultStandardProfile();
+        profile.raidingParties = true;
+        profile.raidPartySize = 1;
+        profile.raidAvoidBaseRadius = 900_ss;
+        profile.raidExpansionFrames = true;
+        profile.raidFrameWindowSeconds = 30;
+        profile.attackInWaves = true;
+        profile.tacticalTickInterval = 1;
+        profile.focusFire = false;
+        profile.cheatModeOmniscient = true;
+
+        ThreatMap threatMap(64, 64);
+        ArmyManager army;
+        std::vector<PlayerCommand> commands;
+
+        AiBlackboard bb;
+        bb.phase = GamePhase::Attack;
+        bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+        bb.enemyBasePosition = SimVector(4000_ss, 0_ss, 0_ss);
+        bb.combatUnits = {waveId, raiderId};
+        bb.attackGroup.insert(waveId.value);
+
+        KnownEnemy known{};
+        known.unitId = frameId;
+        known.unitType = "FRAME";
+        known.lastKnownPosition = framePosition;
+        known.lastSeen = bb.now;
+        known.isBuilding = true;
+        known.owner = enemy;
+        known.underConstruction = true;
+        known.firstSeen = GameTime(0u);
+        bb.knownEnemies[frameId.value] = known;
+
+        army.update(sim, ai, profile, threatMap, bb, commands);
+
+        REQUIRE(bb.raidGroup.count(raiderId.value) == 1);
+        REQUIRE(bb.raidAttackTarget == std::optional<UnitId>(frameId));
+        auto attacks = ordersFor<AttackOrder>(commands, raiderId);
+        REQUIRE_FALSE(attacks.empty());
+        CHECK(*std::get_if<UnitId>(&attacks.front().target) == frameId);
+    }
+
+    namespace
+    {
+        /** The world the focus-fire cases share: a laser soldier and an AA-only one of ours. */
+        struct FocusFireWorld
+        {
+            std::shared_ptr<CobScript> script = makeEmptyCobScript();
+            GameSimulation sim{makeFlatTerrain(64, 64), 0u, 0, 0};
+            PlayerId ai;
+            PlayerId them;
+            UnitId soldier{0};
+            UnitId antiAir{0};
+            AiTuningProfile profile = makeDefaultStandardProfile();
+            AiBlackboard bb;
+            ThreatMap threatMap{64, 64};
+            ArmyManager army;
+            std::vector<PlayerCommand> commands;
+
+            FocusFireWorld()
+            {
+                ai = addPlayer(sim, "ai");
+                them = addPlayer(sim, "them");
+
+                WeaponDefinition laser{};
+                laser.maxRange = 200_ss;
+                laser.reloadTime = 1_ss;
+                laser.burst = 1;
+                laser.damage["DEFAULT"] = 10u;
+                sim.weaponDefinitions["LASER"] = laser;
+
+                WeaponDefinition longGun = laser;
+                longGun.maxRange = 500_ss;
+                sim.weaponDefinitions["LONG"] = longGun;
+
+                WeaponDefinition antiAirGun = laser;
+                antiAirGun.toAirWeapon = true;
+                sim.weaponDefinitions["AAONLY"] = antiAirGun;
+
+                auto soldierDef = UnitDefinition{};
+                soldierDef.isMobile = true;
+                soldierDef.weapon1 = "LASER";
+                soldierDef.buildTime = 100u;
+                soldierDef.maxHitPoints = 100u;
+                soldierDef.buildCostMetal = Metal(100.0f);
+                sim.unitDefinitions["SOLDIER"] = soldierDef;
+
+                auto antiAirDef = soldierDef;
+                antiAirDef.weapon1 = "AAONLY";
+                sim.unitDefinitions["AA"] = antiAirDef;
+
+                auto raiderDef = soldierDef;
+                sim.unitDefinitions["RAIDER"] = raiderDef;
+
+                auto tankDef = soldierDef;
+                tankDef.buildCostMetal = Metal(250.0f);
+                sim.unitDefinitions["TANK"] = tankDef;
+
+                auto artilleryDef = soldierDef;
+                artilleryDef.weapon1 = "LONG";
+                artilleryDef.buildCostMetal = Metal(100.0f);
+                sim.unitDefinitions["ARTY"] = artilleryDef;
+
+                auto defenceDef = soldierDef;
+                defenceDef.isMobile = false;
+                defenceDef.buildCostMetal = Metal(300.0f);
+                sim.unitDefinitions["DEFENCE"] = defenceDef;
+
+                auto bigDefenceDef = defenceDef;
+                bigDefenceDef.buildCostMetal = Metal(400.0f);
+                sim.unitDefinitions["BIGDEF"] = bigDefenceDef;
+
+                auto builderDef = soldierDef;
+                builderDef.builder = true;
+                sim.unitDefinitions["BUILDER"] = builderDef;
+
+                auto commanderDef = soldierDef;
+                commanderDef.builder = true;
+                commanderDef.commander = true;
+                commanderDef.buildCostMetal = Metal(1000.0f);
+                sim.unitDefinitions["COMMAND"] = commanderDef;
+
+                // Above the waterline: the simulation's eligibility test
+                // measures model tops, and a test unit with no model
+                // definition on a flat map would otherwise be submerged.
+                soldier = addUnitOfType(sim, "SOLDIER", ai, SimVector(0_ss, 10_ss, 0_ss), script);
+                antiAir = addUnitOfType(sim, "AA", ai, SimVector(50_ss, 10_ss, 0_ss), script);
+
+                profile.focusFire = true;
+                profile.focusFireLatchSeconds = 5;
+                profile.attackInWaves = false;
+                profile.raidingParties = false;
+                profile.tacticalTickInterval = 1;
+                profile.cheatModeOmniscient = true;
+                profile.waveMeetEnemyCount = 0;
+
+                bb.phase = GamePhase::Attack;
+                bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+                bb.enemyBasePosition = SimVector(4000_ss, 0_ss, 0_ss);
+                bb.combatUnits = {soldier, antiAir};
+                bb.now = GameTime(100u);
+            }
+
+            UnitId addEnemy(const std::string& type, const SimVector& position, bool building = false, bool builder = false, bool commander = false)
+            {
+                auto id = addUnitOfType(sim, type, them, position, script);
+                const auto& def = sim.unitDefinitions.at(type);
+                KnownEnemy known{};
+                known.unitId = id;
+                known.unitType = type;
+                known.lastKnownPosition = position;
+                known.lastSeen = bb.now;
+                known.isBuilding = building;
+                known.isArmed = !def.weapon1.empty() || !def.weapon2.empty() || !def.weapon3.empty();
+                known.isAir = def.canFly;
+                known.isCommander = commander;
+                known.isBuilder = builder;
+                known.owner = them;
+                known.firstSeen = GameTime(0u);
+                bb.knownEnemies[id.value] = known;
+                return id;
+            }
+        };
+    }
+
+    TEST_CASE("the wave's focus target is chosen by role and value", "[ai]")
+    {
+        FocusFireWorld world;
+        std::vector<UnitId> wave{world.soldier};
+
+        SECTION("a long-ranged unit comes before a raider")
+        {
+            auto raider = world.addEnemy("RAIDER", SimVector(100_ss, 10_ss, 0_ss));
+            auto artillery = world.addEnemy("ARTY", SimVector(150_ss, 10_ss, 0_ss));
+
+            auto chosen = chooseFocusFireTarget(world.sim, world.ai, world.profile, world.bb, wave);
+            REQUIRE(chosen.has_value());
+            CHECK(*chosen == artillery);
+            CHECK(*chosen != raider);
+        }
+
+        SECTION("a builder in the open comes before a raider")
+        {
+            auto raider = world.addEnemy("RAIDER", SimVector(100_ss, 10_ss, 0_ss));
+            auto builder = world.addEnemy("BUILDER", SimVector(150_ss, 10_ss, 0_ss), false, true);
+
+            auto chosen = chooseFocusFireTarget(world.sim, world.ai, world.profile, world.bb, wave);
+            REQUIRE(chosen.has_value());
+            CHECK(*chosen == builder);
+            CHECK(*chosen != raider);
+        }
+
+        SECTION("a commander comes before a builder, by value")
+        {
+            auto builder = world.addEnemy("BUILDER", SimVector(100_ss, 10_ss, 0_ss), false, true);
+            auto commander = world.addEnemy("COMMAND", SimVector(150_ss, 10_ss, 0_ss), false, true, true);
+
+            auto chosen = chooseFocusFireTarget(world.sim, world.ai, world.profile, world.bb, wave);
+            REQUIRE(chosen.has_value());
+            CHECK(*chosen == commander);
+            CHECK(*chosen != builder);
+        }
+
+        SECTION("within a rank the dearer unit wins")
+        {
+            auto raider = world.addEnemy("RAIDER", SimVector(100_ss, 10_ss, 0_ss));
+            auto tank = world.addEnemy("TANK", SimVector(150_ss, 10_ss, 0_ss));
+
+            auto chosen = chooseFocusFireTarget(world.sim, world.ai, world.profile, world.bb, wave);
+            REQUIRE(chosen.has_value());
+            CHECK(*chosen == tank);
+            CHECK(*chosen != raider);
+        }
+
+        SECTION("a target nobody in the wave can hit is not chosen")
+        {
+            auto defence = world.addEnemy("DEFENCE", SimVector(200_ss, 10_ss, 0_ss), true);
+
+            // The anti-air gun refuses a ground target, and the soldier is
+            // not in this wave.
+            CHECK_FALSE(chooseFocusFireTarget(world.sim, world.ai, world.profile, world.bb, {world.antiAir}).has_value());
+
+            // Put a ground gun in the wave and the same target is eligible.
+            auto chosen = chooseFocusFireTarget(world.sim, world.ai, world.profile, world.bb, {world.antiAir, world.soldier});
+            REQUIRE(chosen.has_value());
+            CHECK(*chosen == defence);
+        }
+
+        SECTION("the knob off chooses nothing")
+        {
+            world.addEnemy("DEFENCE", SimVector(200_ss, 10_ss, 0_ss), true);
+            world.profile.focusFire = false;
+
+            CHECK_FALSE(chooseFocusFireTarget(world.sim, world.ai, world.profile, world.bb, wave).has_value());
+        }
+    }
+
+    TEST_CASE("the wave latches its focus target, and a unit that cannot hit it keeps its own", "[ai]")
+    {
+        SECTION("the latch holds the first choice until its time is up")
+        {
+            FocusFireWorld world;
+            auto first = world.addEnemy("DEFENCE", SimVector(120_ss, 10_ss, 0_ss), true);
+            // The second is dearer and would win a fresh comparison.
+            auto secondPosition = SimVector(220_ss, 10_ss, 0_ss);
+            auto second = addUnitOfType(world.sim, "BIGDEF", world.them, secondPosition, makeEmptyCobScript());
+
+            world.army.update(world.sim, world.ai, world.profile, world.threatMap, world.bb, world.commands);
+            REQUIRE(world.bb.focusFireTarget == std::optional<UnitId>(first));
+
+            // The better target appears inside the latch window.
+            KnownEnemy known{};
+            known.unitId = second;
+            known.unitType = "BIGDEF";
+            known.lastKnownPosition = secondPosition;
+            known.lastSeen = world.bb.now;
+            known.isBuilding = true;
+            known.isArmed = true;
+            known.owner = world.them;
+            known.firstSeen = GameTime(0u);
+            world.bb.knownEnemies[second.value] = known;
+            world.bb.now = GameTime(world.bb.now.value + 1u);
+
+            world.army.update(world.sim, world.ai, world.profile, world.threatMap, world.bb, world.commands);
+            CHECK(world.bb.focusFireTarget == std::optional<UnitId>(first));
+
+            // Past the latch the dearer target takes over.
+            world.bb.now = GameTime(world.bb.now.value + static_cast<unsigned int>(world.profile.focusFireLatchSeconds) * SimTicksPerSecond);
+            world.bb.knownEnemies[first.value].lastSeen = world.bb.now;
+            world.bb.knownEnemies[second.value].lastSeen = world.bb.now;
+            world.army.update(world.sim, world.ai, world.profile, world.threatMap, world.bb, world.commands);
+            CHECK(world.bb.focusFireTarget == std::optional<UnitId>(second));
+        }
+
+        SECTION("a unit that can hit the focus target takes it; one that cannot keeps its nearest")
+        {
+            FocusFireWorld world;
+            // A static defence is the focus target; the raider is nearer to
+            // the anti-air unit but is not what the wave is concentrating on.
+            auto defence = world.addEnemy("DEFENCE", SimVector(200_ss, 10_ss, 0_ss), true);
+            auto raider = world.addEnemy("RAIDER", SimVector(150_ss, 10_ss, 80_ss));
+
+            world.army.update(world.sim, world.ai, world.profile, world.threatMap, world.bb, world.commands);
+
+            REQUIRE(world.bb.focusFireTarget == std::optional<UnitId>(defence));
+            auto soldierAttacks = ordersFor<AttackOrder>(world.commands, world.soldier);
+            REQUIRE_FALSE(soldierAttacks.empty());
+            CHECK(*std::get_if<UnitId>(&soldierAttacks.front().target) == defence);
+
+            // The anti-air gun cannot hurt a ground building, so it falls
+            // through to its own nearest target.
+            auto antiAirAttacks = ordersFor<AttackOrder>(world.commands, world.antiAir);
+            REQUIRE_FALSE(antiAirAttacks.empty());
+            CHECK(*std::get_if<UnitId>(&antiAirAttacks.front().target) == raider);
+        }
+
+        SECTION("the knob off leaves no target and keeps per-unit acquisition")
+        {
+            FocusFireWorld world;
+            world.addEnemy("DEFENCE", SimVector(200_ss, 10_ss, 0_ss), true);
+            auto raider = world.addEnemy("RAIDER", SimVector(150_ss, 10_ss, 80_ss));
+            world.profile.focusFire = false;
+
+            world.army.update(world.sim, world.ai, world.profile, world.threatMap, world.bb, world.commands);
+
+            CHECK_FALSE(world.bb.focusFireTarget.has_value());
+            auto soldierAttacks = ordersFor<AttackOrder>(world.commands, world.soldier);
+            REQUIRE_FALSE(soldierAttacks.empty());
+            // Nearest wins: the raider at 170 rather than the defence at 200.
+            CHECK(*std::get_if<UnitId>(&soldierAttacks.front().target) == raider);
+        }
+    }
+
     TEST_CASE("a unit that has outrun the wave waits for it", "[ai]")
     {
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
