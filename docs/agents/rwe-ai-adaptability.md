@@ -136,7 +136,8 @@ omniscience/income cheat as a separate, clearly labelled option.
 | 6 | Directional threat memory, proportional defence, threat-directed siting | built and measured; identical to the off arm against the classic AI (it does not raid the base), default-on for human play |
 | 7 | Synchronized second axis; replay expansion count/timing | built and measured; identical to the off arm in 7/8 seeds against the classic AI (sync neutral; expansion posture off) |
 | 8 | Air/ground strike sync; exposed-commander hunting | built and measured; neutral in an 8-seed sample (classic rarely exposes a commander or uses air), default-on for human play |
-| 9 | Target flipping/feints, chokepoint defence, jammer play | design ready |
+| 9 | Ferry close-out: early transport, lost-hull rebuild, army dispatch gate | built and measured; three of four Coast To Coast seeds faster (avg ~3100 ticks), one timeout regression, land unchanged |
+| 10 | Ferry escort/beachhead; target flipping/feints; chokepoint defence | design ready |
 
 ## Measurement
 

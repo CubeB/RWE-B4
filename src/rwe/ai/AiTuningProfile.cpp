@@ -45,6 +45,8 @@ namespace rwe
         constexpr IntKnob intKnobs[] = {
             {"ferryLandingRefusalCooldownSeconds", &AiTuningProfile::ferryLandingRefusalCooldownSeconds},
             {"ferryLandingRefusalCell", &AiTuningProfile::ferryLandingRefusalCell},
+            {"ferryFirstTransportBySeconds", &AiTuningProfile::ferryFirstTransportBySeconds},
+            {"ferryMinArmySize", &AiTuningProfile::ferryMinArmySize},
             {"loadedFerryStallSeconds", &AiTuningProfile::loadedFerryStallSeconds},
             {"openingMetalExtractorCount", &AiTuningProfile::openingMetalExtractorCount},
             {"openingSolarCount", &AiTuningProfile::openingSolarCount},
@@ -288,6 +290,7 @@ namespace rwe
             {"expansionNeedsExploredGround", &AiTuningProfile::expansionNeedsExploredGround},
             {"expansionStaysOnOurSide", &AiTuningProfile::expansionStaysOnOurSide},
             {"armyFerryWantFromMap", &AiTuningProfile::armyFerryWantFromMap},
+            {"ferryUrgency", &AiTuningProfile::ferryUrgency},
             {"navalStandOff", &AiTuningProfile::navalStandOff},
             {"seaFerryMuster", &AiTuningProfile::seaFerryMuster},
             {"ferryLandingFan", &AiTuningProfile::ferryLandingFan},

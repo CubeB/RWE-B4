@@ -105,6 +105,15 @@ namespace rwe
     private:
         int ticksSinceLastUpdate{0};
 
+        /**
+         * Whether the first completed transport has been announced. Observer
+         * only: the event is how a run can be scored on "first transport by
+         * ferryFirstTransportBySeconds" without reading the unit table, and
+         * it changes no order. A transport lost and rebuilt does not fire it
+         * again; the rebuild is the shipyard's business.
+         */
+        bool firstTransportReported{false};
+
         /** Trips under way, keyed by the transport's raw id. */
         std::map<unsigned int, Ferry> ferries;
 
