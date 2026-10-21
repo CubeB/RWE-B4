@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/cob/CobEnvironment.h>
+#include <rwe/game/save_util.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/io/lostdf/io.h>
@@ -113,6 +114,96 @@ namespace rwe
         Point eyeCellOf(const GameSimulation& sim, const SimVector& origin, int eye = 1)
         {
             return sim.visionCellAtHeight(origin, intToSimScalar(eye));
+        }
+    }
+
+    TEST_CASE("nonadjacent teammates preserve saturated sight counts", "[visibility]")
+    {
+        // PERF-VIS-001: preserve RWE's existing team policy and saturation,
+        // including unfinished sources; this is not original sharing parity.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto a = addTeamPlayer(sim, "a", 1);
+        auto enemy = addTeamPlayer(sim, "enemy", 2);
+        auto b = addTeamPlayer(sim, "b", 1);
+        auto singleton = addPlayer(sim, "singleton");
+        auto c = addTeamPlayer(sim, "c", 1);
+        defineUnit(sim, "scout", 100u, 0u, false);
+        defineUnit(sim, "frame", 100u, 0u, false);
+        sim.unitDefinitions.at("frame").buildTime = 100u;
+        auto here = SimVector(0_ss, 0_ss, 0_ss);
+        std::vector<UnitId> sources;
+        for (unsigned int i = 0; i < 370; ++i)
+        {
+            auto owner = i < 300 ? a : (i < 360 ? b : c);
+            sources.push_back(addUnit(sim, "scout", owner, here, script));
+        }
+        auto frame = addUnit(sim, "frame", c, here, script);
+        sim.getUnitState(frame).nanoframeDecayTime = GameTime(1000);
+        SECTION("terrain sight") {}
+        SECTION("circular sight") { sim.lineOfSightMode = LineOfSightMode::Circular; }
+        SECTION("permanent sight") { sim.lineOfSightMode = LineOfSightMode::Permanent; }
+        sim.tick();
+        auto cell = eyeCellOf(sim, here);
+        auto count = [&](PlayerId p) { return sim.playerVisibility.at(p.value).visible.get(cell.x, cell.y); };
+        REQUIRE(count(a) == 255);
+        REQUIRE(count(b) == 255);
+        REQUIRE(count(c) == 255);
+        REQUIRE(count(enemy) == 0);
+        REQUIRE(count(singleton) == 0);
+        REQUIRE(sim.playerVisibility.at(a.value).visible.getVector() == sim.playerVisibility.at(c.value).visible.getVector());
+        for (unsigned int i = 0; i < 340; ++i)
+        {
+            sim.getUnitState(sources[i]).markAsDeadNoCorpse();
+        }
+        sim.tick();
+        REQUIRE(count(a) == 31);
+        REQUIRE(count(b) == 31);
+        REQUIRE(count(c) == 31);
+        for (unsigned int i = 340; i < sources.size(); ++i)
+        {
+            sim.getUnitState(sources[i]).markAsDeadNoCorpse();
+        }
+        sim.tick();
+        REQUIRE(count(a) == 1);
+        REQUIRE(sim.getUnitState(frame).isBeingBuilt(sim.unitDefinitions.at("frame")));
+        sim.getUnitState(frame).markAsDeadNoCorpse();
+        sim.tick();
+        auto remembered = sim.lineOfSightMode == LineOfSightMode::Permanent ? 1 : 0;
+        REQUIRE(count(a) == remembered);
+        REQUIRE(count(b) == remembered);
+        REQUIRE(count(c) == remembered);
+        REQUIRE(sim.isExploredBy(a, here));
+        REQUIRE(sim.isExploredBy(b, here));
+        REQUIRE(sim.isExploredBy(c, here));
+    }
+
+    TEST_CASE("allied sight is reconstructed after loading", "[visibility][saveload]")
+    {
+        // PERF-VIS-001: the optimization must not introduce persistent scratch.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto a = addTeamPlayer(sim, "a", 1);
+        addTeamPlayer(sim, "enemy", 2);
+        auto b = addTeamPlayer(sim, "b", 1);
+        defineUnit(sim, "scout", 100u, 0u, false);
+        sim.unitDefinitions.at("scout").yardMap = Grid<YardMapCell>(1, 1, YardMapCell::Ground);
+        addUnit(sim, "scout", a, SimVector(-100_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "scout", b, SimVector(100_ss, 0_ss, 0_ss), script);
+        sim.tick();
+        auto saved = saveSimulationToJson(sim);
+        GameSimulation loaded(makeFlatTerrain(64, 64), 0u, 0, 0);
+        loaded.unitDefinitions = sim.unitDefinitions;
+        loaded.unitModelDefinitions = sim.unitModelDefinitions;
+        loaded.unitScriptDefinitions["scout"] = *script;
+        loadSimulationFromJson(saved, loaded);
+        sim.tick();
+        loaded.tick();
+        REQUIRE(loaded.explored.getVector() == sim.explored.getVector());
+        REQUIRE(loaded.playerVisibility.size() == sim.playerVisibility.size());
+        for (std::size_t i = 0; i < sim.playerVisibility.size(); ++i)
+        {
+            REQUIRE(loaded.playerVisibility[i].visible.getVector() == sim.playerVisibility[i].visible.getVector());
         }
     }
 

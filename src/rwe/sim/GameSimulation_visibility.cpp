@@ -645,11 +645,8 @@ namespace rwe
                 cell = visionCellAtHeight(unit.position, intToSimScalar(eyeHeight));
             }
 
-            // The unit's bit in the one shared explored grid. Every player in
-            // the owner's line-of-sight group owns that same bit, so revealing
-            // for the owner and each ally writes it more than once for the same
-            // cell -- harmlessly, since setting a bit twice sets it once -- and
-            // the grounds are shared without a rival grid per player.
+            // RWE teammates share this explored bit. Mark it through the owner
+            // once; current sight counts are combined after all sources below.
             auto exploredMark = ExploredMark{&explored, losGroupBitFor(unit.owner)};
 
             auto revealFor = [&](PlayerVisibility& vis) {
@@ -663,20 +660,9 @@ namespace rwe
                 }
             };
 
-            // The owner always sees through its own units; allies see too,
-            // so a teammate's map is lit by your scouts and yours by theirs.
-            // The owner's own reveal is written plainly rather than left to
-            // fall out of the alliance test -- a unit's own player seeing its
-            // own surroundings is not a thing to make conditional.
+            // PERF-VIS-001: trace each source once rather than repeat the
+            // same terrain rays separately for every teammate.
             revealFor(playerVisibility.at(unit.owner.value));
-            for (std::size_t i = 0; i < playerVisibility.size() && i < players.size(); ++i)
-            {
-                if (i == unit.owner.value || !arePlayersAllied(unit.owner, PlayerId(static_cast<unsigned int>(i))))
-                {
-                    continue;
-                }
-                revealFor(playerVisibility[i]);
-            }
 
             // Radar, sonar and jamming all need the unit switched on if it can
             // be switched at all. Altitude extends radar; sonar is flat.
@@ -758,6 +744,51 @@ namespace rwe
                 {
                     auto range = intToSimScalar(static_cast<int>(unitDefinition.sonarDistanceJam));
                     theirVis.radarJammers.push_back(PlayerVisibility::RadarJammer{unit.position, range * range, true});
+                }
+            }
+        }
+
+        // PERFORMANCE-ALLIED-VISIBILITY-FINDINGS PERF-VIS-001: preserve RWE's
+        // existing team sight by summing fresh owner counts with saturation.
+        // Only the first member combines a group, so a combined result never
+        // becomes another source. Detectors and contacts remain per player.
+        auto visibilityPlayers = std::min(playerVisibility.size(), players.size());
+        for (std::size_t i = 0; i < visibilityPlayers; ++i)
+        {
+            auto viewer = PlayerId(static_cast<unsigned int>(i));
+            bool alreadyCombined = false;
+            for (std::size_t earlier = 0; earlier < i; ++earlier)
+            {
+                if (arePlayersAllied(viewer, PlayerId(static_cast<unsigned int>(earlier))))
+                {
+                    alreadyCombined = true;
+                    break;
+                }
+            }
+            if (alreadyCombined)
+            {
+                continue;
+            }
+
+            auto& combined = playerVisibility[i].visible.getVector();
+            for (std::size_t j = i + 1; j < visibilityPlayers; ++j)
+            {
+                if (!arePlayersAllied(viewer, PlayerId(static_cast<unsigned int>(j))))
+                {
+                    continue;
+                }
+                const auto& contribution = playerVisibility[j].visible.getVector();
+                for (std::size_t cell = 0; cell < combined.size(); ++cell)
+                {
+                    combined[cell] = static_cast<unsigned char>(std::min(255u,
+                        static_cast<unsigned int>(combined[cell]) + contribution[cell]));
+                }
+            }
+            for (std::size_t j = i + 1; j < visibilityPlayers; ++j)
+            {
+                if (arePlayersAllied(viewer, PlayerId(static_cast<unsigned int>(j))))
+                {
+                    playerVisibility[j].visible.getVector() = combined;
                 }
             }
         }
