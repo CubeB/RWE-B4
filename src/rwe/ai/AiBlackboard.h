@@ -796,6 +796,27 @@ namespace rwe
          * position has.
          */
         std::optional<SimVector> enemyCommanderPosition;
+        /**
+         * The latched answer to "is their commander exposed enough to hunt",
+         * and when it expires. Written and read by ArmyManager's objective
+         * chain while AiTuningProfile::commanderHuntExposedOnly is on.
+         *
+         * The exposure test reads the remembered base centroid and the
+         * remembered escorts, both of which drift as buildings and units
+         * are seen. Without a latch the wave can alternate between the
+         * commander and the base on consecutive passes and never arrive at
+         * either. The answer stands for commanderHuntExposureLatchSeconds
+         * and is dropped at once when the commander is no longer known, so
+         * a forgotten contact cannot keep the wave pointed at an empty
+         * field.
+         *
+         * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:4/S:5);
+         * not hashed, re-learned after a load, like the rest of the
+         * blackboard memory.
+         */
+        bool commanderHuntExposed{false};
+        bool commanderHuntExposedLatched{false};
+        GameTime commanderHuntExposedUntil{0};
         /** How many aircraft we currently believe the enemy has. */
         int knownEnemyAirCount{0};
         /** The most ARMED enemy aircraft known at once, all game. Aircraft are seen in glimpses, so the count of the moment undersells the raid that is coming back. */

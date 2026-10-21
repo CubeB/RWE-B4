@@ -72,6 +72,76 @@ namespace rwe
             return bb.now.value <= enemy.lastSeen.value + static_cast<unsigned int>(profile.targetMemoryTicks);
         }
 
+        /**
+         * The raw exposure test behind AiTuningProfile::commanderHuntExposedOnly.
+         * Reads only the AI's remembered contacts, never the simulation
+         * directly: a commander we cannot remember cannot be hunted by name,
+         * and an escort we have never seen cannot make it look safe.
+         */
+        bool commanderIsExposedToHunt(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb)
+        {
+            if (!bb.enemyCommanderPosition)
+            {
+                return false;
+            }
+            if (bb.enemyBasePosition)
+            {
+                auto minDistance = profile.commanderHuntMinDistance;
+                if (bb.enemyBasePosition->distanceSquared(*bb.enemyCommanderPosition) < (minDistance * minDistance))
+                {
+                    return false;
+                }
+            }
+
+            float escortMetal = 0.0f;
+            auto escortRadiusSquared = profile.commanderHuntEscortRadius * profile.commanderHuntEscortRadius;
+            for (const auto& [_, enemy] : bb.knownEnemies)
+            {
+                if (!enemy.isArmed || enemy.isCommander)
+                {
+                    continue;
+                }
+                if (enemy.lastKnownPosition.distanceSquared(*bb.enemyCommanderPosition) > escortRadiusSquared)
+                {
+                    continue;
+                }
+                auto defIt = sim.unitDefinitions.find(enemy.unitType);
+                if (defIt != sim.unitDefinitions.end())
+                {
+                    escortMetal += defIt->second.buildCostMetal.value;
+                }
+            }
+            return escortMetal < static_cast<float>(profile.commanderHuntMaxEscortMetal);
+        }
+
+        /**
+         * That answer, held for commanderHuntExposureLatchSeconds so the
+         * objective does not alternate between the commander and the base
+         * every pass. The latch is cleared when the commander is no longer
+         * known; with the knob off this is the old unconditional hunt.
+         */
+        bool commanderHuntAllowed(const GameSimulation& sim, const AiTuningProfile& profile, AiBlackboard& bb)
+        {
+            if (!profile.commanderHuntExposedOnly)
+            {
+                bb.commanderHuntExposedLatched = false;
+                return true;
+            }
+            if (!bb.enemyCommanderPosition)
+            {
+                bb.commanderHuntExposedLatched = false;
+                return false;
+            }
+            if (!bb.commanderHuntExposedLatched || bb.now.value >= bb.commanderHuntExposedUntil.value)
+            {
+                bb.commanderHuntExposed = commanderIsExposedToHunt(sim, profile, bb);
+                bb.commanderHuntExposedLatched = true;
+                auto seconds = static_cast<unsigned int>(std::max(0, profile.commanderHuntExposureLatchSeconds));
+                bb.commanderHuntExposedUntil = GameTime(bb.now.value + (seconds * static_cast<unsigned int>(SimTicksPerSecond)));
+            }
+            return bb.commanderHuntExposed;
+        }
+
         bool isDgunning(const UnitState& unit, UnitId target)
         {
             if (unit.orders.empty())
@@ -2491,7 +2561,7 @@ namespace rwe
                 bb.attackTarget = candidate;
                 return true;
             };
-            if (profile.huntEnemyCommander)
+            if (profile.huntEnemyCommander && commanderHuntAllowed(sim, profile, bb))
             {
                 consider(bb.enemyCommanderPosition);
             }

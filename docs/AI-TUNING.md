@@ -412,3 +412,34 @@ human play, where the second axis has something to time against.
 
 The AI suite passes (299 cases / 10224 assertions); the full permitted suite
 result is in the session report. Raw games are under `D:/tmp/rwe-ai7/`.
+
+## Eighth AI batch: air/ground strike sync and exposed-commander hunting
+
+2026-10-21. RWE-AI only. `airStrikeSync` (default true, 600 radius) holds
+bombers and gunships until the ground wave is near their target or in contact;
+home defence and fighters are unchanged. `commanderHuntExposedOnly` (default
+true) hunts the enemy commander only when it is at least 600 from its base
+centroid and its known escort is under 600 metal, with a 10 s latch.
+
+Twenty-four games on Great Divide (5401-5404) and Dark Side (5501-5504),
+1800 s, RWE against the classic personality: batch 7, batch 8 defaults, and
+batch 8 with both knobs off.
+
+| Map/seed | Batch 7 | Batch 8 | Off |
+| --- | ---: | ---: | ---: |
+| GD 5401 | 20761 | 20671 | 20761 |
+| GD 5402 | 29161 | 29131 | 29161 |
+| GD 5403 | 25411 | 23431 | 25411 |
+| GD 5404 | 22321 | 25531 | 22321 |
+| DS 5501 | 25801 | 24271 | 25801 |
+| DS 5502 | 19771 | 19411 | 19771 |
+| DS 5503 | 20341 | 25111 | 20341 |
+| DS 5504 | 19861 | 19861 | 19861 |
+
+All were RWE wins. Four seeds were faster and three slower; the average is a
+few hundred ticks slower, so this is neutral in the sample. The classic AI
+rarely exposes a commander or uses the air arm, which is why neither feature
+binds. Both stay default-on for human play, where the behaviours are aimed.
+
+The AI suite passes (301 cases / 10250 assertions); the full permitted suite
+result is in the session report. Raw games are under `D:/tmp/rwe-ai8/`.

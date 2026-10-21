@@ -2587,8 +2587,64 @@ namespace rwe
          * finds nothing (PerceptionManager::refresh), so this does not lead
          * the army around after a ghost; and a commander is normally in its
          * own base, so most of the time this and the base agree.
+         *
+         * With commanderHuntExposedOnly on (the default) this is the first
+         * objective only while the commander is exposed; otherwise the wave
+         * keeps the base/expansion objective. Leave this on and turn the
+         * exposure knob off for the old unconditional-hunt control arm.
          */
         bool huntEnemyCommander{true};
+        /**
+         * Hunt their commander only while it is exposed, rather than
+         * whatever its position is.
+         *
+         * `huntEnemyCommander` made the commander the wave's first objective
+         * unconditionally. That is right when it is standing in the open or
+         * walking to an expansion, and wrong when it is sitting in the
+         * middle of its own base behind its towers with an escort round it:
+         * the wave then walks past the base defences to reach the one unit
+         * that the defender has deliberately kept safe, which is a gift.
+         *
+         * A commander counts as exposed when all of these hold:
+         *
+         *  - it is remembered or in sight (bb.enemyCommanderPosition is
+         *    only written from knownEnemies, so a forgotten commander is
+         *    not a candidate at all);
+         *  - it stands at least commanderHuntMinDistance from the known
+         *    enemy base centroid (bb.enemyBasePosition); with no building
+         *    seen, there is no base to be hiding in and the distance test
+         *    passes;
+         *  - the known armed enemies within commanderHuntEscortRadius of it
+         *    are worth less than commanderHuntMaxEscortMetal in total.
+         *
+         * Otherwise the wave keeps the ordinary base/expansion objective.
+         * The answer is latched for commanderHuntExposureLatchSeconds so a
+         * moving escort or a centroid that drifts a cell does not flip the
+         * objective every pass.
+         *
+         * Off restores the unconditional commander hunt exactly and is the
+         * control arm for a paired arena run. RWE-original policy
+         * (docs/agents/rwe-ai-adaptability.md S:4/S:5); the original's
+         * computer player has no exposure test, so no classic-parity claim
+         * is made for it.
+         */
+        bool commanderHuntExposedOnly{true};
+        /**
+         * Armed escort metal that still counts as exposed, and the radius
+         * it is totalled over. The commander itself is not counted.
+         * 600 is a little more than one level-one heavy tank; the default
+         * radius is one engageRadius, the same "nearby" the army uses.
+         */
+        int commanderHuntMaxEscortMetal{600};
+        SimScalar commanderHuntEscortRadius{450_ss};
+        /** How far from their base centroid a commander must stand to be worth hunting. */
+        SimScalar commanderHuntMinDistance{600_ss};
+        /**
+         * How long the exposure answer stands before it is asked again, in
+         * seconds. Zero re-asks every tactical pass, which is the unlatch
+         * control.
+         */
+        int commanderHuntExposureLatchSeconds{10};
         /**
          * Fight one enemy at a time: the nearest, by where we believe it
          * lives. Off, every enemy is treated as one, which is what the AI
@@ -2737,6 +2793,42 @@ namespace rwe
         SimScalar bomberSortieScale{2400_ss};
         SimScalar bomberLeaveToArmyRadius{700_ss};
         float bomberArmyReachDiscount{0.25f};
+        /**
+         * Hold a bomber or gunship strike until the ground wave has arrived,
+         * rather than sending it the moment a target is scored.
+         *
+         * The two arms used to leave independently: the wave formed and
+         * walked, the aircraft left on the same tactical pass and reached
+         * the target first, so the defender answered the air raid and then
+         * met the ground wave with its attention already on it. The recorded
+         * games are the other way round -- the ground body draws the
+         * response and the air arrives on the fight.
+         *
+         * With this on, an aircraft that has a target but is not yet
+         * attacking waits at its usual stand (the repair pad, else the air
+         * plant, else the base anchor) and only receives the attack order
+         * once the ground wave is within airSyncRadius of that target, or of
+         * the wave's own objective, or the wave is in contact
+         * (bb.waveContactAt). A target inside
+         * bomberHomeDefenseRadius of our own base is never held: that is the
+         * home-defence case, where waiting for a wave that is somewhere else
+         * on the map would let the intruder shoot the base.
+         *
+         * The target scoring, the anti-air cover ceiling and penalty, the
+         * repair-pad wait and every fighter rule are unchanged; only the
+         * moment the attack order is issued moves. A wave that ends releases
+         * the strike normally, and an aircraft already on its run is left
+         * alone.
+         *
+         * Off restores the immediate strike exactly and is the control arm
+         * for a paired arena run. Zero airSyncRadius holds until contact
+         * only. RWE-original policy (docs/agents/rwe-ai-adaptability.md
+         * S:5); the original's computer player has no air/ground
+         * synchronization, so no classic-parity claim is made for it.
+         */
+        bool airStrikeSync{true};
+        /** How close the ground wave must be to the air target before the strike is released. */
+        SimScalar airSyncRadius{600_ss};
         /**
          * How far from the army a gunship will go looking for what is
          * holding it up. Beyond this it falls back to the bombers' target
