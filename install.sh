@@ -4,6 +4,11 @@ set -eu
 release=${RWE_RELEASE:-nightly}
 root=${RWE_INSTALL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/rwe/program}
 bin=${RWE_BIN_DIR:-$HOME/.local/bin}
+skip_setup=${RWE_SKIP_SETUP:-0}
+case "$skip_setup" in 0|1) ;; *) echo 'RWE_SKIP_SETUP must be 0 or 1.' >&2; exit 1 ;; esac
+if [ "$skip_setup" = 1 ] && [ -n "${RWE_TA_DIR:-}" ]; then
+    echo 'Choose RWE_TA_DIR or RWE_SKIP_SETUP, not both.' >&2; exit 1
+fi
 case "$(uname -s):$(uname -m)" in
     Linux:x86_64) ;;
     *) echo 'RWE requires x86-64 Linux.' >&2; exit 1 ;;
@@ -73,3 +78,18 @@ done
 printf 'RWE installed in %s\n' "$root"
 printf 'Play: %s/rwe\nImport game data: %s/rwe-setup --from "/path/to/Total Annihilation"\n' "$bin" "$bin"
 case ":$PATH:" in *":$bin:"*) ;; *) printf 'Add %s to PATH to use rwe from any terminal.\n' "$bin" ;; esac
+if [ "$skip_setup" = 1 ]; then
+    echo 'Game setup skipped. Run rwe-setup when ready.'
+else
+    echo 'Setting up your Total Annihilation game data...'
+    if [ -n "${RWE_TA_DIR:-}" ]; then
+        "$root/rwe-setup" --from "$RWE_TA_DIR" || {
+            echo 'Game data import failed. RWE remains installed; run rwe-setup to retry.' >&2; exit 1
+        }
+    else
+        "$root/rwe-setup" || {
+            echo 'Game setup could not finish. RWE remains installed; run rwe-setup --from "/path/to/Total Annihilation" to retry.' >&2
+            exit 1
+        }
+    fi
+fi

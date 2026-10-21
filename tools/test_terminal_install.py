@@ -17,7 +17,7 @@ class LinuxInstall(unittest.TestCase):
             root = Path(tmp)
             mock = root / "mocks"
             mock.mkdir()
-            image = b'#!/bin/sh\nprintf "%s\\n" "$@"\n'
+            image = b'#!/bin/sh\nprintf "%s\\n" "$@"\nexit "${SETUP_EXIT:-0}"\n'
             (root / "image").write_bytes(image)
             digest = hashlib.sha256(image).hexdigest()
             release = {"assets": [{"name": "RWE-x86_64.AppImage", "digest": "sha256:" + digest,
@@ -58,6 +58,24 @@ sh "$installer"
                                     capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(result.stdout.splitlines()[-3:], ["setup", "--from", "/game data"])
+            self.assertEqual(result.stdout.splitlines().count("setup"), 3)
+            explicit = harness.replace('sh "$installer"\nsh "$installer"',
+                                       'RWE_TA_DIR="/my game data" sh "$installer"')
+            result = subprocess.run([bash, "-c", explicit, "test", root.as_posix(), script.as_posix()],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("setup\n--from\n/my game data\n", result.stdout)
+            skipped = harness.replace('sh "$installer"\nsh "$installer"',
+                                      'RWE_SKIP_SETUP=1 sh "$installer"')
+            result = subprocess.run([bash, "-c", skipped, "test", root.as_posix(), script.as_posix()],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(result.stdout.splitlines().count("setup"), 1)
+            setup_failed = subprocess.run([bash, "-c", harness, "test", root.as_posix(), script.as_posix()],
+                                         env={**os.environ, "SETUP_EXIT": "7"},
+                                         capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(setup_failed.returncode, 0)
+            self.assertIn("RWE remains installed", setup_failed.stderr)
             launcher = root / "program with spaces/rwe"
             before = launcher.read_bytes()
             (root / "image").write_bytes(b"corrupt download")
