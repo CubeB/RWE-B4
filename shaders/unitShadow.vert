@@ -53,8 +53,10 @@ void main(void)
     if (projected)
     {
         float shadowOffset = (worldPosition.y - groundHeight) * 0.25;
+        // Both original shadow passes blit five pixels right of the model.
+        // Without this, a low building's projection can hide under its base.
         shadowPosition = vec4(
-            worldPosition.x + shadowOffset,
+            worldPosition.x + ShadowShiftX + shadowOffset,
             groundHeight,
             worldPosition.z - shadowOffset,
             1.0);

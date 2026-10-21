@@ -127,6 +127,13 @@ namespace rwe
 
     void UiRenderService::drawSpriteAbsClipped(float x, float y, const Sprite& sprite, const Rectangle2f& surface)
     {
+        enableSurfaceClip(surface);
+        drawSpriteAbs(x, y, sprite);
+        graphics->disableScissor();
+    }
+
+    void UiRenderService::enableSurfaceClip(const Rectangle2f& surface)
+    {
         // BT-267's native surface clip, mapped through RWE's fitted UI projection.
         const auto matrix = getViewProjectionMatrix() * matrixStack.top();
         const auto tl = matrix * Vector3f(surface.left(), surface.top(), 0);
@@ -137,8 +144,6 @@ namespace rwe
         const int right = static_cast<int>(std::ceil(output.x() + (br.x + 1) * output.width() / 2));
         const int top = static_cast<int>(std::ceil(output.y() + (tl.y + 1) * output.height() / 2));
         graphics->enableScissor(left, bottom, std::max(0, right - left), std::max(0, top - bottom));
-        drawSpriteAbs(x, y, sprite);
-        graphics->disableScissor();
     }
 
     void UiRenderService::drawText(float x, float y, const std::string& text, const SpriteSeries& font)
@@ -228,49 +233,92 @@ namespace rwe
         drawText(x - width, y, text, font, tint);
     }
 
-    void UiRenderService::drawTextWrapped(Rectangle2f area, const std::string& rawText, const SpriteSeries& font)
+    std::vector<WrappedTextGlyph> layoutWrappedText(const Rectangle2f& area, const std::string& rawText, const SpriteSeries& font)
     {
+        std::vector<WrappedTextGlyph> glyphs;
+        if (area.width() <= 0.0f || area.height() <= 0.0f || font.sprites.empty())
+        {
+            return glyphs;
+        }
         std::string scratch;
         const auto& text = drawable(rawText, scratch);
-        float x = 0.0f;
-        float y = 0.0f;
-
-        auto it = utf8Begin(text);
-        auto end = utf8End(text);
-        while (it != end)
+        const std::vector<unsigned int> characters(utf8Begin(text), utf8End(text));
+        const auto glyphIndex = [&](unsigned int ch) { return ch < font.sprites.size() ? ch : 0u; };
+        const auto advance = [&](unsigned int ch) { return font.sprites[glyphIndex(ch)]->bounds.right(); };
+        const auto whitespace = [](unsigned int ch) { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'; };
+        float fontBottom = 0.0f;
+        for (const auto& sprite : font.sprites)
         {
-
-            auto endOfWord = findEndOfWord(it, end);
-            auto width = getTextWidth(it, endOfWord, font);
-
-            if (x + width > area.width())
+            fontBottom = std::max(fontBottom, sprite->bounds.bottom() - font.verticalOffset);
+        }
+        float x = 0.0f;
+        float baseline = area.top() + 12.0f;
+        for (std::size_t i = 0; i < characters.size();)
+        {
+            const auto ch = characters[i];
+            if (ch == '\r' || ch == '\n')
             {
-                y += 15.0f;
-                x = 0;
-            }
-
-            for (; it != endOfWord; ++it)
-            {
-                auto ch = *it;
-                if (ch >= font.sprites.size())
+                if (ch == '\r' && i + 1 < characters.size() && characters[i + 1] == '\n')
                 {
-                    ch = 0;
+                    ++i;
                 }
-
-                const auto& sprite = *font.sprites[ch];
-
-                drawSprite(area.left() + x, area.top() + y - font.verticalOffset, sprite);
-
-                x += sprite.bounds.right();
+                ++i;
+                baseline += 15.0f;
+                x = 0.0f;
+                continue;
             }
-
-            if (endOfWord != end)
+            if (ch == ' ' || ch == '\t')
             {
-                const auto& spaceSprite = *font.sprites[' '];
-                x += spaceSprite.bounds.right();
-                ++it;
+                if (x > 0.0f)
+                {
+                    x += advance(' ') * (ch == '\t' ? 4.0f : 1.0f);
+                }
+                ++i;
+                continue;
+            }
+            auto endOfWord = i;
+            float wordWidth = 0.0f;
+            while (endOfWord < characters.size() && !whitespace(characters[endOfWord]))
+            {
+                wordWidth += advance(characters[endOfWord++]);
+            }
+            if (x > 0.0f && x + wordWidth > area.width())
+            {
+                baseline += 15.0f;
+                x = 0.0f;
+            }
+            for (; i < endOfWord; ++i)
+            {
+                const auto width = advance(characters[i]);
+                if (x > 0.0f && x + width > area.width())
+                {
+                    baseline += 15.0f;
+                    x = 0.0f;
+                }
+                if (baseline + fontBottom > area.bottom())
+                {
+                    return glyphs;
+                }
+                glyphs.push_back({glyphIndex(characters[i]), area.left() + x, baseline - font.verticalOffset});
+                x += width;
             }
         }
+        return glyphs;
+    }
+
+    void UiRenderService::drawTextWrapped(Rectangle2f area, const std::string& text, const SpriteSeries& font)
+    {
+        const auto glyphs = layoutWrappedText(area, text, font);
+        if (glyphs.empty())
+        {
+            return;
+        }
+        enableSurfaceClip(area);
+        for (const auto& glyph : glyphs)
+        {
+            drawSprite(glyph.x, glyph.y, *font.sprites[glyph.glyph]);
+        }
+        graphics->disableScissor();
     }
 
     void UiRenderService::fillColor(float x, float y, float width, float height, Color color)
