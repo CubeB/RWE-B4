@@ -2,9 +2,11 @@
 param(
     [string]$Release = 'nightly',
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'RWE'),
-    [string]$From
+    [string]$From,
+    [switch]$SkipSetup
 )
 $ErrorActionPreference = 'Stop'
+if ($SkipSetup -and $From) { throw 'Choose -From or -SkipSetup, not both.' }
 if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') {
     throw 'RWE requires x86-64 Windows.'
 }
@@ -73,7 +75,22 @@ $shortcut.Save()
 Write-Host "RWE installed in $InstallDir"
 Write-Host 'Play: rwe'
 Write-Host 'Import your Total Annihilation data: rwe-setup --from "C:\GOG Games\Total Annihilation"'
-if ($From) {
+# Complete game setup after installation; updates can opt out explicitly.
+if ($SkipSetup) {
+    Write-Host 'Game setup skipped. Run rwe-setup when ready.'
+} elseif ($From) {
     & (Join-Path $version 'rwe_setup.exe') --from $From
     if ($LASTEXITCODE -ne 0) { throw "Game data import failed (exit code $LASTEXITCODE). RWE remains installed." }
+} else {
+    $assistant = Join-Path $version 'setup/Import-GameData.ps1'
+    if (Test-Path -LiteralPath $assistant) {
+        Write-Host 'Opening game setup: search automatically or browse to your Total Annihilation folder.'
+        $process = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList @(
+            '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $assistant + '"')
+        ) -NoNewWindow -Wait -PassThru
+    } else {
+        # Older releases may only include the command-line importer.
+        $process = Start-Process -FilePath (Join-Path $version 'rwe_setup.exe') -NoNewWindow -Wait -PassThru
+    }
+    if ($process.ExitCode -ne 0) { throw "Game setup failed (exit code $($process.ExitCode)). RWE remains installed; run rwe-setup to retry." }
 }

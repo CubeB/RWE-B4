@@ -67,7 +67,9 @@ Paste this command into PowerShell:
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/CubeB/RWE-B4/revival/install.ps1)))
 ```
 
-Then import your game data and play:
+The installer opens the game setup assistant. Choose automatic detection or
+browse to your Total Annihilation folder, import the files, and play. To retry
+setup later from the terminal:
 
 ```powershell
 rwe-setup --from "C:\GOG Games\Total Annihilation"
@@ -84,6 +86,10 @@ curl -fsSL https://raw.githubusercontent.com/CubeB/RWE-B4/revival/install.sh | s
 ~/.local/bin/rwe-setup --from "/path/to/Total Annihilation"
 ~/.local/bin/rwe
 ```
+
+The Linux installer also runs setup: it opens the folder picker when available,
+or tries automatic detection in the terminal. If detection fails, use the
+`rwe-setup --from` command above.
 
 Uses standard Linux shell tools and `curl` (or download with `wget` and run
 `sh install.sh`). Installs in `${XDG_DATA_HOME:-$HOME/.local/share}/rwe/program`
@@ -110,6 +116,12 @@ curl -fsSL https://raw.githubusercontent.com/CubeB/RWE-B4/revival/install.sh | R
 ```
 
 From a checkout, use `& .\install.ps1` or `sh install.sh`.
+
+To install and import in one step, add `-From "C:\GOG Games\Total Annihilation"`
+to the Windows install command, or set `RWE_TA_DIR="/path/to/Total Annihilation"`
+on the Linux `sh` command. For updates that do not need game setup, use
+`-SkipSetup` on Windows or `RWE_SKIP_SETUP=1` on Linux. Setup always uses your
+own game data; it does not download Total Annihilation.
 
 ### 2. Import your Total Annihilation data
 

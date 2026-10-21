@@ -34,6 +34,34 @@ try {
     if (-not $failed) { throw 'Corrupted download was accepted' }
     if ((Get-Content -LiteralPath (Join-Path $install 'rwe.cmd') -Raw) -ne $before) { throw 'Previous launcher changed on failure' }
     if (@(Get-ChildItem -LiteralPath $install -Filter '.install-*' -Force).Count) { throw 'Staging directories leaked' }
+    $setupBody = [scriptblock]::Create(($source -split '(?m)^# Complete game setup[^\r\n]*', 2)[1])
+    $version = Join-Path $install 'asset-123'
+    $assistantDir = Join-Path $version 'setup'
+    New-Item -ItemType Directory -Path $assistantDir | Out-Null
+    Set-Content -LiteralPath (Join-Path $assistantDir 'Import-GameData.ps1') -Value '# fixture'
+    $script:setupCalls = @()
+    $script:setupExit = 0
+    function Start-Process {
+        param($FilePath, $ArgumentList, [switch]$NoNewWindow, [switch]$Wait, [switch]$PassThru)
+        $script:setupCalls += [pscustomobject]@{ FilePath=$FilePath; Arguments=$ArgumentList }
+        return [pscustomobject]@{ ExitCode=$script:setupExit }
+    }
+    $From = $null
+    $SkipSetup = $true
+    & $setupBody
+    if ($script:setupCalls.Count) { throw 'SkipSetup launched a process' }
+    $SkipSetup = $false
+    & $setupBody
+    if ($script:setupCalls.Count -ne 1 -or $script:setupCalls[0].Arguments[-1] -notlike '*Import-GameData.ps1"') { throw 'Default setup did not open the assistant' }
+    $script:setupExit = 7
+    $setupFailed = $false
+    try { & $setupBody } catch {
+        if ($_.Exception.Message -notmatch 'RWE remains installed') { throw }
+        $setupFailed = $true
+    }
+    if (-not $setupFailed) { throw 'Setup failure was ignored' }
+    if (-not (Test-Path -LiteralPath (Join-Path $version 'rwe.exe'))) { throw 'Setup failure removed the engine' }
+    Write-Host 'PASS: automatic setup, setup opt-out, and setup failure reporting'
     Write-Host 'PASS: Windows install, repeat install, checksum rejection, and failure cleanup'
 } finally {
     $resolved = [IO.Path]::GetFullPath($root)
