@@ -94,8 +94,13 @@ both factory types, value-odds attack posture) are built and measured.
 - Batch 7 (synchronized raid, replay expansion target) is built and measured:
   identical to the off arm in seven of eight seeds against the classic AI,
   with the expansion posture off by default. The sync stays on for human play.
-  The full permitted suite passes at 1895 cases / 194761 assertions; the AI
-  suite is 299 cases / 10224 assertions.
+- Batch 8 (air/ground strike sync, exposed-commander hunting) was neutral in
+  an eight-seed sample; both stay on for human play.
+- Batch 9 (ferry close-out) makes three of four Coast To Coast seeds close out
+  earlier (about 3,100 ticks on average) with land unchanged, at the cost of one
+  timeout regression; recorded in `AI-TUNING.md`.
+- The full permitted suite passes at 1907 cases / 194909 assertions; the AI
+  suite is 309 cases / 10289 assertions.
 
 The CORE candidate was measured against the pre-ARM-change ARM and still needs
 `--evaluate` on fresh seeds. No original-game check applies: this is

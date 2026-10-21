@@ -595,6 +595,11 @@ namespace rwe
         auto profile = makeDefaultBrutalProfile();
         profile.scoutCount = 0;
         profile.attackArmySize = 1;
+        // These fixtures carry one to four passengers. The ninth batch's
+        // six-unit sea-lift minimum is a production default; these cases are
+        // about booking, landing and stalls, so they keep the old
+        // send-whoever-is-ready rule.
+        profile.ferryMinArmySize = 0;
 
         AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
         std::vector<PlayerCommand> commands;
@@ -647,6 +652,11 @@ namespace rwe
         auto profile = makeDefaultBrutalProfile();
         profile.scoutCount = 0;
         profile.attackArmySize = 1;
+        // These fixtures carry one to four passengers. The ninth batch's
+        // six-unit sea-lift minimum is a production default; these cases are
+        // about booking, landing and stalls, so they keep the old
+        // send-whoever-is-ready rule.
+        profile.ferryMinArmySize = 0;
 
         AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
         std::vector<PlayerCommand> commands;
@@ -877,6 +887,11 @@ namespace rwe
         auto profile = makeDefaultBrutalProfile();
         profile.scoutCount = 0;
         profile.attackArmySize = 1;
+        // These fixtures carry one to four passengers. The ninth batch's
+        // six-unit sea-lift minimum is a production default; these cases are
+        // about booking, landing and stalls, so they keep the old
+        // send-whoever-is-ready rule.
+        profile.ferryMinArmySize = 0;
         profile.ferryTimeoutSeconds = 1;
         sim.eventLog.setRecording(true);
 
@@ -941,6 +956,11 @@ namespace rwe
         auto profile = makeDefaultBrutalProfile();
         profile.scoutCount = 0;
         profile.attackArmySize = 1;
+        // These fixtures carry one to four passengers. The ninth batch's
+        // six-unit sea-lift minimum is a production default; these cases are
+        // about booking, landing and stalls, so they keep the old
+        // send-whoever-is-ready rule.
+        profile.ferryMinArmySize = 0;
         profile.seaFerryMuster = false;
 
         AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
@@ -1000,6 +1020,11 @@ namespace rwe
         profile.cheatModeOmniscient = true;
         profile.scoutCount = 0;
         profile.attackArmySize = 1;
+        // These fixtures carry one to four passengers. The ninth batch's
+        // six-unit sea-lift minimum is a production default; these cases are
+        // about booking, landing and stalls, so they keep the old
+        // send-whoever-is-ready rule.
+        profile.ferryMinArmySize = 0;
         profile.tacticalTickInterval = 1;
         profile.attackInWaves = false;
         // See the sea case above for why the phase must stay in Attack and
@@ -1108,6 +1133,11 @@ namespace rwe
         auto profile = makeDefaultBrutalProfile();
         profile.scoutCount = 0;
         profile.attackArmySize = 1;
+        // These fixtures carry one to four passengers. The ninth batch's
+        // six-unit sea-lift minimum is a production default; these cases are
+        // about booking, landing and stalls, so they keep the old
+        // send-whoever-is-ready rule.
+        profile.ferryMinArmySize = 0;
         profile.attackInWaves = false;
         profile.cheatModeOmniscient = true;
         profile.retreatArmySize = 0;
@@ -1271,6 +1301,11 @@ namespace rwe
         auto profile = makeDefaultBrutalProfile();
         profile.scoutCount = 0;
         profile.attackArmySize = 1;
+        // These fixtures carry one to four passengers. The ninth batch's
+        // six-unit sea-lift minimum is a production default; these cases are
+        // about booking, landing and stalls, so they keep the old
+        // send-whoever-is-ready rule.
+        profile.ferryMinArmySize = 0;
         profile.loadedFerryStallSeconds = 2;
         sim.eventLog.setRecording(true);
 
@@ -1343,6 +1378,11 @@ namespace rwe
         auto profile = makeDefaultBrutalProfile();
         profile.scoutCount = 0;
         profile.attackArmySize = 1;
+        // These fixtures carry one to four passengers. The ninth batch's
+        // six-unit sea-lift minimum is a production default; these cases are
+        // about booking, landing and stalls, so they keep the old
+        // send-whoever-is-ready rule.
+        profile.ferryMinArmySize = 0;
         profile.loadedFerryStallSeconds = 2;
 
         AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
@@ -1394,5 +1434,151 @@ namespace rwe
         REQUIRE(!ordersFor<UnloadOrder>(commands, shipId).empty());
         applyAll(commands);
         REQUIRE(countUnloads() == 1);
+    }
+
+    TEST_CASE("a sea lift waits for a landing party unless the minimum is switched off", "[ai]")
+    {
+        // Coast To Coast, the close-out baseline: 65-89 army units were
+        // waiting at the cap with no transport, and the wins all had a hull.
+        // The dispatch half of the ninth batch is a minimum party size so a
+        // 919-metal hull is not spent on a beachhead the enemy commander
+        // deletes on arrival. Zero is the exact off control: send whoever is
+        // ready, as every older ferry case does.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeWideChannelTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineLandUnits(sim);
+        defineSeaTransport(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(-300_ss, 60_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-320_ss, 60_ss, 40_ss), script);
+        addUnit(sim, "ARMSOLAR", human, SimVector(450_ss, 60_ss, 0_ss), script);
+
+        auto addParty = [&](int count) {
+            std::vector<UnitId> ids;
+            for (int i = 0; i < count; ++i)
+            {
+                ids.push_back(addUnit(sim, "ARMPW", ai, SimVector(-250_ss, 60_ss, SimScalar(static_cast<float>(i * 24))), script));
+            }
+            return ids;
+        };
+
+        SECTION("three units are not enough for the shipped six-unit minimum")
+        {
+            addParty(3);
+            auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+            auto profile = makeDefaultBrutalProfile();
+            profile.scoutCount = 0;
+            profile.attackArmySize = 1;
+            profile.cheatModeOmniscient = true;
+            profile.attackInWaves = false;
+            profile.retreatArmySize = 0;
+            profile.defendRadius = 200_ss;
+            profile.ferryMinArmySize = 6;
+
+            AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 90, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.enemyAcrossWater);
+            REQUIRE(bb.combatUnits.size() < 6);
+            REQUIRE(controller.getTransportManager().getFerries().empty());
+            REQUIRE(bb.ferryPassengers.empty());
+            REQUIRE(ordersFor<LoadOrder>(commands, shipId).empty());
+            REQUIRE(ordersFor<UnloadOrder>(commands, shipId).empty());
+        }
+
+        SECTION("six units are dispatched")
+        {
+            addParty(6);
+            auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+            auto profile = makeDefaultBrutalProfile();
+            profile.scoutCount = 0;
+            profile.attackArmySize = 1;
+            profile.cheatModeOmniscient = true;
+            profile.attackInWaves = false;
+            profile.retreatArmySize = 0;
+            profile.defendRadius = 200_ss;
+            profile.ferryMinArmySize = 6;
+
+            AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 90, commands);
+
+            REQUIRE(controller.getTransportManager().getFerries().count(shipId.value) == 1);
+            REQUIRE(!ordersFor<LoadOrder>(commands, shipId).empty());
+            REQUIRE(!ordersFor<UnloadOrder>(commands, shipId).empty());
+        }
+
+        SECTION("ferryMinArmySize=0 restores send-whoever-is-ready")
+        {
+            addParty(3);
+            auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+            auto profile = makeDefaultBrutalProfile();
+            profile.scoutCount = 0;
+            profile.attackArmySize = 1;
+            profile.cheatModeOmniscient = true;
+            profile.attackInWaves = false;
+            profile.retreatArmySize = 0;
+            profile.defendRadius = 200_ss;
+            profile.ferryMinArmySize = 0;
+
+            AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 90, commands);
+
+            REQUIRE(controller.getTransportManager().getFerries().count(shipId.value) == 1);
+            REQUIRE(!ordersFor<LoadOrder>(commands, shipId).empty());
+        }
+    }
+
+    TEST_CASE("the first transport and its departure are observable", "[ai]")
+    {
+        // Measure-ability for the ninth batch: the build decision is in
+        // BuildManager, but a run has to be able to say when the first hull
+        // appeared and when it actually left with its cargo. Neither event
+        // changes an order; they exist so the arena can score "first transport
+        // by ferryFirstTransportBySeconds" without reading unit tables.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeWideChannelTerrain(), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineLandUnits(sim);
+        defineSeaTransport(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(-300_ss, 60_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(-320_ss, 60_ss, 40_ss), script);
+        addUnit(sim, "ARMSOLAR", human, SimVector(450_ss, 60_ss, 0_ss), script);
+        auto kbot = addUnit(sim, "ARMPW", ai, SimVector(-250_ss, 60_ss, 0_ss), script);
+        auto shipId = addUnit(sim, "ARMTSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultBrutalProfile();
+        profile.scoutCount = 0;
+        profile.attackArmySize = 1;
+        profile.cheatModeOmniscient = true;
+        profile.attackInWaves = false;
+        profile.retreatArmySize = 0;
+        profile.defendRadius = 200_ss;
+        profile.ferryMinArmySize = 0;
+        sim.eventLog.setRecording(true);
+
+        AiPlayerController controller(ai, profile, 42u, analyseMap(sim.terrain, {}));
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 90, commands);
+        REQUIRE(controller.getTransportManager().getFerries().count(shipId.value) == 1);
+
+        // The harness never carries orders out, so loading is done by hand and
+        // the departure event follows on the next pass.
+        sim.getUnitState(shipId).carriedUnits.push_back(kbot);
+        sim.getUnitState(kbot).carriedBy = shipId;
+        runTicks(sim, controller, profile.tacticalTickInterval, commands);
+
+        auto counts = countTransportEvents(sim, "rwe-ferry-observable.jsonl");
+        INFO("transport events: " << nlohmann::json(counts).dump());
+        REQUIRE(counts["transport_ready:first_transport"] == 1);
+        REQUIRE(counts["transport_departure:army_ferry"] == 1);
     }
 }

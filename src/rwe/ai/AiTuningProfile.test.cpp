@@ -390,4 +390,38 @@ namespace rwe
         CHECK(names.count("commanderHuntMinDistance") == 1);
         CHECK(names.count("commanderHuntExposureLatchSeconds") == 1);
     }
+
+    // The ninth batch: the early ferry. The urgency is on by default and its
+    // off value is the old factory ordering; the army minimum has an exact
+    // off value of zero (send whoever is ready), which is what the older
+    // transport tests use so their intent is unchanged.
+    TEST_CASE("the early ferry knobs are listed and settable")
+    {
+        AiTuningProfile p;
+        CHECK(p.ferryUrgency);
+        CHECK(p.ferryFirstTransportBySeconds == 480);
+        CHECK(p.ferryMinArmySize == 6);
+
+        REQUIRE(applyAiTuning(p, "ferryUrgency", "false"));
+        CHECK_FALSE(p.ferryUrgency);
+        REQUIRE(applyAiTuning(p, "ferryUrgency", "true"));
+        CHECK(p.ferryUrgency);
+        REQUIRE(applyAiTuning(p, "ferryFirstTransportBySeconds", "0"));
+        CHECK(p.ferryFirstTransportBySeconds == 0);
+        REQUIRE(applyAiTuning(p, "ferryFirstTransportBySeconds", "600"));
+        CHECK(p.ferryFirstTransportBySeconds == 600);
+        REQUIRE(applyAiTuning(p, "ferryMinArmySize", "0"));
+        CHECK(p.ferryMinArmySize == 0);
+        REQUIRE(applyAiTuning(p, "ferryMinArmySize", "4"));
+        CHECK(p.ferryMinArmySize == 4);
+
+        std::set<std::string> names;
+        for (const auto& knob : listAiKnobs())
+        {
+            names.insert(knob.name);
+        }
+        CHECK(names.count("ferryUrgency") == 1);
+        CHECK(names.count("ferryFirstTransportBySeconds") == 1);
+        CHECK(names.count("ferryMinArmySize") == 1);
+    }
 }

@@ -381,7 +381,7 @@ threshold, and threat-directed defensive tower siting. All are behind knobs
 Twenty-four games on Great Divide (5001-5004) and Dark Side (5101-5104),
 1800 s, RWE against the classic personality: batch 5, batch 6 defaults, and
 batch 6 with all three threat knobs off. **Batch 6 and the off arm produced
-the identical game in all eight seeds** — the classic opponent does not raid
+the identical game in all eight seeds** ï¿½ the classic opponent does not raid
 the base often enough for the new response or siting to bind. Batch 5 versus
 batch 6 is not a clean isolation because the saved batch-5 binary predates the
 `focusFire` default change; its differences are the focus-fire arm, not the
@@ -443,3 +443,38 @@ binds. Both stay default-on for human play, where the behaviours are aimed.
 
 The AI suite passes (301 cases / 10250 assertions); the full permitted suite
 result is in the session report. Raw games are under `D:/tmp/rwe-ai8/`.
+
+## Ninth AI batch: ferry close-out
+
+2026-10-21. RWE-AI only. This targets the pre-change baseline's clearest measured
+failure: all three timeouts on Coast To Coast had their first transport at 951 s
+or later (one had none at the cap with 65 army units waiting), while all five
+wins had one by 830 s.
+
+`ferryUrgency` (default true) raises a sea transport above the construction
+ship/warships when the enemy base is across water, escalates above the cheap
+scout at `ferryFirstTransportBySeconds` (480), and rebuilds a lost completed
+hull. `ferryMinArmySize` (6) gates army dispatch; flying transports and hulls
+below the minimum are exempt. Events `transport_ready`/`transport_departure`
+make the timing observable.
+
+Twenty-four games, 1800 s, RWE against the classic personality: Coast To Coast
+(5601-5604, the water case) and Great Divide (5701-5704, land control), with
+batch 8, batch 9 and `ferryUrgency=false`.
+
+| Map/seed | Batch 8 | Batch 9 | Off |
+| --- | ---: | ---: | ---: |
+| C2C 5601 | 40741 | 33811 | 33811 |
+| C2C 5602 | 34471 | 32761 | 34471 |
+| C2C 5603 | 49051 | **timeout 54000** | 49051 |
+| C2C 5604 | 52381 | 43501 | 52381 |
+| GD 5701-5704 | identical | identical | identical |
+
+Three of four water games close out substantially earlier (net about 12,500
+ticks across the four, average ~3,100 ticks faster) and land games are
+unchanged; one water seed regressed from a decided win to a timeout. The
+urgency is therefore a net positive but not a guarantee, and the single
+regression is recorded rather than hidden. Great Divide confirms the land
+behaviour is untouched. The AI suite passes (309 cases / 10289 assertions); the
+full permitted suite passes at 1907 cases / 194909 assertions. Raw games are
+under `D:/tmp/rwe-ai9/`.

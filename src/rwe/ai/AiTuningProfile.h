@@ -3173,6 +3173,58 @@ namespace rwe
          */
         bool armyFerryWantFromMap{true};
         /**
+         * Whether a side with no transport, an enemy known across water and
+         * a shipyard or air plant standing gives the transport priority over
+         * the rest of that factory's line.
+         *
+         * Coast To Coast, the measured case: every timeout in the strength
+         * baseline had its first transport at 951 s or later, or had it sunk
+         * and never replaced, while every win had one by 830 s. The three
+         * timeouts held a 1.7-3.0x unit lead and an 8x army lead at the cap
+         * and still could not finish, because 65-89 units had no way over the
+         * water. The transport was not unaffordable; it was behind a scout
+         * ship, a construction ship and a fleet in the yard's queue.
+         *
+         * The gate is deliberately narrow. It needs hasUnreachableGround, a
+         * known enemy base, no land route to that enemy (the latched
+         * armyNeedsFerry answer, or landRouteToEnemy false), and NO complete
+         * transport. It changes only which unit an existing factory asks for;
+         * it does not bypass target counts, cargo, affordability, the
+         * tier-two reserve or the besieged-factory guard.
+         *
+         * False restores the old ordering exactly, which is the control arm
+         * for a paired arena run. RWE-original: the original's computer
+         * player has no transport policy (ADR-0005), so no parity claim.
+         */
+        bool ferryUrgency{true};
+        /**
+         * The deadline the urgency is measured against, in seconds. A
+         * transport still missing at this point is "overdue" and preempts the
+         * yard's cheap scout as well as its construction ship and warships;
+         * before it the transport is merely moved ahead of the construction
+         * ship and the warships. Zero means "overdue from the first tick".
+         *
+         * 480 s is not arbitrary: the five wins in the baseline had a
+         * transport by 511-830 s, so 480 is the point by which a winning
+         * game's yard is already working and a missing transport is a
+         * problem rather than an opening still being paid for.
+         */
+        int ferryFirstTransportBySeconds{480};
+        /**
+         * How many combat units must be waiting before a SEA transport is
+         * dispatched. The hull holds twenty, but sending it with one or two
+         * units is a beachhead the enemy commander deletes on arrival; six is
+         * the smallest group that can trade with a landing party and still
+         * leave the beach. Zero (or one) restores the old "send whoever is
+         * ready" rule.
+         *
+         * Air transports are exempt: an Atlas carries one, so a six-unit
+         * gate would make the island-map lift impossible. Land behaviour is
+         * untouched when no transport, yard or route exists -- the army still
+         * walks, and wantsTransport still falls back to the old rules.
+         */
+        int ferryMinArmySize{6};
+        /**
          * Gather a sea ferry's passengers at one shore point and load them
          * there, instead of sending the hull round the coast to each in turn
          * (issue #194). The muster is a dry cell on home ground with water
