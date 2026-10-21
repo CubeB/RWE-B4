@@ -195,4 +195,61 @@ namespace rwe
         CHECK(names.count("attackValueRatio") == 1);
         CHECK(names.count("retreatValueRatio") == 1);
     }
+
+    // The fourth batch: the wave reserve and attack-move, and the replay-
+    // derived opening posture. The reserve and attack-move are on by default
+    // and share one off combination (reserveWave false, waveCommitFraction
+    // 1.0, waveAttackMove false). The opening posture is off by default so it
+    // can be A/B'd against the ordinary plan.
+    TEST_CASE("the wave reserve and opening knobs are listed and settable")
+    {
+        AiTuningProfile p;
+        CHECK(p.reserveWave);
+        CHECK(p.waveCommitFraction == 0.7f);
+        CHECK(p.reserveReleaseSeconds == 20);
+        CHECK(p.waveAttackMove);
+        CHECK_FALSE(p.humanlikeOpening);
+        CHECK(p.openingFactoryBySeconds == 60);
+        CHECK(p.openingConstructorBySeconds == 150);
+        CHECK(p.openingExpansionBySeconds == 240);
+        CHECK(p.openingAttackArmySize == 7);
+        CHECK(p.openingAttackBySeconds == 450);
+
+        REQUIRE(applyAiTuning(p, "reserveWave", "false"));
+        CHECK_FALSE(p.reserveWave);
+        REQUIRE(applyAiTuning(p, "waveCommitFraction", "1.0"));
+        CHECK(p.waveCommitFraction == 1.0f);
+        REQUIRE(applyAiTuning(p, "reserveReleaseSeconds", "30"));
+        CHECK(p.reserveReleaseSeconds == 30);
+        REQUIRE(applyAiTuning(p, "waveAttackMove", "false"));
+        CHECK_FALSE(p.waveAttackMove);
+        REQUIRE(applyAiTuning(p, "humanlikeOpening", "true"));
+        CHECK(p.humanlikeOpening);
+        REQUIRE(applyAiTuning(p, "openingFactoryBySeconds", "45"));
+        CHECK(p.openingFactoryBySeconds == 45);
+        REQUIRE(applyAiTuning(p, "openingConstructorBySeconds", "120"));
+        CHECK(p.openingConstructorBySeconds == 120);
+        REQUIRE(applyAiTuning(p, "openingExpansionBySeconds", "210"));
+        CHECK(p.openingExpansionBySeconds == 210);
+        REQUIRE(applyAiTuning(p, "openingAttackArmySize", "6"));
+        CHECK(p.openingAttackArmySize == 6);
+        REQUIRE(applyAiTuning(p, "openingAttackBySeconds", "420"));
+        CHECK(p.openingAttackBySeconds == 420);
+
+        std::set<std::string> names;
+        for (const auto& knob : listAiKnobs())
+        {
+            names.insert(knob.name);
+        }
+        CHECK(names.count("reserveWave") == 1);
+        CHECK(names.count("waveCommitFraction") == 1);
+        CHECK(names.count("reserveReleaseSeconds") == 1);
+        CHECK(names.count("waveAttackMove") == 1);
+        CHECK(names.count("humanlikeOpening") == 1);
+        CHECK(names.count("openingFactoryBySeconds") == 1);
+        CHECK(names.count("openingConstructorBySeconds") == 1);
+        CHECK(names.count("openingExpansionBySeconds") == 1);
+        CHECK(names.count("openingAttackArmySize") == 1);
+        CHECK(names.count("openingAttackBySeconds") == 1);
+    }
 }

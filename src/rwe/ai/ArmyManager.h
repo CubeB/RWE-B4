@@ -51,6 +51,15 @@ namespace rwe
         int ticksSinceLastUpdate{0};
 
         /**
+         * Hit points of the current wave's members on the last tactical pass,
+         * by raw id. A drop is the AI's "the wave has been shot at" signal
+         * (AiTuningProfile::reserveWave): nothing else records first damage,
+         * and a member that dies between passes simply leaves the map.
+         * Cleared when the wave forms or ends.
+         */
+        std::map<unsigned int, unsigned int> waveHitPoints;
+
+        /**
          * A target our hulls are firing at, and whether it is getting hurt.
          * A torpedo runs along the water and stops at whatever seabed rises
          * in front of it, so a ship in the shallows can fire at an

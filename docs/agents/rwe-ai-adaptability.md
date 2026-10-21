@@ -131,8 +131,9 @@ omniscience/income cheat as a separate, clearly labelled option.
 | 1 | CORE composition, tier aggression, weapon-range acquisition | merged (#727) |
 | 2 | Factory queue depth, stalled-head drop, mobile AA escort | built and measured; depth default 1 after a regression, escort neutral vs classic, kept for human air |
 | 3 | Decayed composition histogram + lab/vehicle counter weights; attack posture/odds gate with hysteresis | built and measured; neutral close-out vs classic on Great Divide/Dark Side, all decided RWE wins |
-| 4 | Reserve slot, attack-move, two-axis/feint, expansion-frame raids | design ready |
-| 5 | Replay-derived opening/expansion templates; map-character branches | waiting on the demo mining |
+| 4 | Reserve slot, attack-move, humanlike opening timings | built and measured; close-out neutral vs batch 3, all decided wins; humanlike opening identical against the classic AI, kept off |
+| 5 | Expansion-frame raids, threat-direction defence, two-axis/feint | design ready |
+| 6 | Replay-derived opening/expansion templates beyond the first timing posture; map-character branches | replay evidence recorded, templates pending |
 
 ## Measurement
 
@@ -161,7 +162,7 @@ Observed patterns:
   losers **1207 s with 4**, and five of eleven losers never produced a
   qualifying three-unit attack;
 - winners' first hostile shot lands a median **761 world units** from the
-  enemy base; losers' **3812** — winners raid economy/base, losers fight at
+  enemy base; losers' **3812** ï¿½ winners raid economy/base, losers fight at
   the middle;
 - winners hold **10** economy sites outside the opening base against 6, and
   first expansion at **213 s** against 252 s;

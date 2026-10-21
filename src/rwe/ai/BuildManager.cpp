@@ -131,6 +131,15 @@ namespace rwe
         }
     }
 
+    namespace
+    {
+        /** Whether an opening deadline in seconds has passed at `now`. Zero or less is "already due". */
+        bool openingDeadlineReached(int seconds, GameTime now)
+        {
+            return seconds <= 0 || now.value >= static_cast<unsigned int>(seconds) * SimTicksPerSecond;
+        }
+    }
+
     unsigned int factoryQueueProgressFloor(unsigned int buildTime)
     {
         // One percent, and never less than a tick, so the threshold scales
@@ -3199,6 +3208,30 @@ namespace rwe
         {
             want(s.solar);
         }
+
+        // Humanlike opening timing (docs/agents/rwe-ai-adaptability.md S:6,
+        // D:\tmp\replay-decisions\REPORT.md). A deadline that has passed
+        // unmet pulls that item ahead of the ordinary economy order; before
+        // the deadline the plan is exactly as it was, which is the standard
+        // economy-first opening. It is not a script: the job below is still
+        // sited, mission-filtered and affordability-tested like every other,
+        // and a base under attack keeps its existing priorities.
+        if (profile.humanlikeOpening && bb.enemiesNearBase.empty())
+        {
+            auto hasFactory = total(s.lab) + total(s.vehiclePlant) + total(s.shipyard) >= 1;
+            if (openingDeadlineReached(profile.openingFactoryBySeconds, bb.now) && total(s.lab) < 1 && total(s.shipyard) < 1)
+            {
+                want(s.lab);
+            }
+            // One extractor beyond the opening set, by the recorded first-
+            // expansion time. Not before a factory stands: the expansion is
+            // the constructor's job, and the report's median is 213 s.
+            if (hasFactory && openingDeadlineReached(profile.openingExpansionBySeconds, bb.now)
+                && totalExtractors() <= profile.openingMetalExtractorCount)
+            {
+                wantMetalExtractor();
+            }
+        }
         // The stall flag flickers off for a moment whenever a build finishes,
         // so judge metal by the stockpile as well: under a tenth of storage is short.
         auto metalShort = bb.metalStalled || (bb.metalStorage.value > 0.0f && bb.currentMetal.value < bb.metalStorage.value * 0.1f);
@@ -4513,6 +4546,14 @@ namespace rwe
                 // (fortifyExtraConstructors): counted from what stands and
                 // what is going up, which is all this needs to know.
                 auto constructorTarget = profile.targetConstructorCount;
+                // The humanlike opening's constructor deadline: by the
+                // recorded time a factory should have produced one, so the
+                // first is a floor even if a profile asked for none. The
+                // ordinary target still governs every later one.
+                if (profile.humanlikeOpening && constructors == 0 && openingDeadlineReached(profile.openingConstructorBySeconds, bb.now))
+                {
+                    constructorTarget = std::max(constructorTarget, 1);
+                }
                 // More while the income is going unspent
                 // (spendSurplusOnCapacity).
                 if (spendingCapacityShort)
@@ -6359,8 +6400,16 @@ namespace rwe
         // A construction unit kept beyond targetConstructorCount for the
         // metal left lying about expands first (expansionConstructors):
         // the newest ones, in id order, past the first
-        // targetConstructorCount.
-        if (profile.expansionConstructors > 0 && !builderDef.commander && builder.unitType == sideUnits.constructor && builderAtBase
+        // targetConstructorCount. With humanlikeOpening, once the recorded
+        // first-expansion time has passed and the opening set has still not
+        // grown, the FIRST constructor expands first too: the report's
+        // winners take an outside site by about 213 s and losers by 252 s.
+        auto openingExtractors = countOf(bb.ownedTotalCounts, sideUnits.metalExtractor)
+            + countOf(bb.ownedTotalCounts, sideUnits.underwaterMetalExtractor);
+        auto openingExpansionDue = profile.humanlikeOpening && bb.enemiesNearBase.empty()
+            && openingDeadlineReached(profile.openingExpansionBySeconds, bb.now)
+            && openingExtractors <= profile.openingMetalExtractorCount;
+        if ((profile.expansionConstructors > 0 || openingExpansionDue) && !builderDef.commander && builder.unitType == sideUnits.constructor && builderAtBase
             && bb.buildTree.canBuild(builder.unitType, sideUnits.metalExtractor))
         {
             int older = 0;
@@ -6371,7 +6420,8 @@ namespace rwe
                     ++older;
                 }
             }
-            if (older >= profile.targetConstructorCount && freeDepositsOnOurSide(sim, profile, bb) > 0)
+            auto firstMayExpand = openingExpansionDue ? 0 : profile.targetConstructorCount;
+            if (older >= firstMayExpand && freeDepositsOnOurSide(sim, profile, bb) > 0)
             {
                 priorities.insert(priorities.begin(), sideUnits.metalExtractor);
             }

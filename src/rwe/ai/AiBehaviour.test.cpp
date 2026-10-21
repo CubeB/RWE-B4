@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
 #include <rwe/ai/BuildManager.h>
 #include <rwe/ai/ReachabilityMap.h>
 #include <rwe/ai/ThreatMap.h>
@@ -1767,5 +1768,176 @@ namespace rwe
         const auto& sites = controller.getBlackboard().ownWreckSites;
         REQUIRE(sites.size() == 1);
         REQUIRE(sites.front().position.x == 300_ss);
+    }
+
+    namespace
+    {
+        /**
+         * A base past its opening: the opening extractor and solar counts are
+         * met and a lab stands. One metal patch sits out at about x = 400 so
+         * the commander has somewhere to expand to. Enough to ask what the
+         * opening deadlines change, and nothing else.
+         */
+        struct OpeningFixture
+        {
+            std::shared_ptr<CobScript> script = makeEmptyCobScript();
+            GameSimulation sim{makeFlatTerrain(64, 64), 0u, 0, 0};
+            PlayerId ai;
+            PlayerId enemy;
+            UnitId commanderId;
+
+            OpeningFixture()
+                : ai(addPlayer(sim, "ai", GamePlayerType::Computer, "ARM"))
+            {
+                enemy = addPlayer(sim, "enemy", GamePlayerType::Computer, "CORE");
+                defineWorld(sim);
+                // Cells 24-27 by 0-3, about x = 400 in world units.
+                for (int y = 0; y < 4; ++y)
+                {
+                    for (int x = 24; x < 28; ++x)
+                    {
+                        sim.metalGrid.set(x, y, static_cast<unsigned char>(200));
+                    }
+                }
+                commanderId = addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+                for (int i = 0; i < 4; ++i)
+                {
+                    addUnit(sim, "ARMSOLAR", ai, SimVector(SimScalar(100.0f + i * 40.0f), 0_ss, 0_ss), script);
+                }
+                for (int i = 0; i < 3; ++i)
+                {
+                    addUnit(sim, "ARMMEX", ai, SimVector(0_ss, 0_ss, SimScalar(100.0f + i * 40.0f)), script);
+                }
+                auto& player = sim.getPlayer(ai);
+                player.maxMetal = Metal(20000.0f);
+                player.metal = Metal(1000.0f);
+                player.maxEnergy = Energy(2000.0f);
+                player.energy = Energy(1000.0f);
+            }
+
+            AiTuningProfile profile(bool humanlike) const
+            {
+                auto p = makeDefaultStandardProfile();
+                p.humanlikeOpening = humanlike;
+                p.buildPlannerTickInterval = 1;
+                return p;
+            }
+
+            std::vector<std::string> planAt(int seconds, const AiTuningProfile& p)
+            {
+                sim.gameTime = GameTime(static_cast<unsigned int>(seconds) * SimTicksPerSecond);
+                AiPlayerController controller(ai, p, 42u, MapIntel{});
+                std::vector<PlayerCommand> commands;
+                runTicks(sim, controller, 2, commands);
+                return buildOrderTypes(commands);
+            }
+        };
+    }
+
+    TEST_CASE("the humanlike opening pulls an overdue factory ahead of more economy", "[ai]")
+    {
+        OpeningFixture f;
+
+        SECTION("off, the ordinary metal-short rule asks for another extractor first")
+        {
+            auto types = f.planAt(61, f.profile(false));
+            REQUIRE(!types.empty());
+            CHECK(types.front() == "ARMMEX");
+        }
+
+        SECTION("on, the factory deadline has passed and the lab comes first")
+        {
+            auto types = f.planAt(61, f.profile(true));
+            REQUIRE(!types.empty());
+            CHECK(types.front() == "ARMLAB");
+        }
+
+        SECTION("on, before the deadline the ordinary order still holds")
+        {
+            auto types = f.planAt(30, f.profile(true));
+            REQUIRE(!types.empty());
+            CHECK(types.front() == "ARMMEX");
+        }
+
+        SECTION("on, but the lab is not affordable: nothing is hard-scripted")
+        {
+            f.sim.getPlayer(f.ai).metal = Metal(0.0f);
+            auto types = f.planAt(61, f.profile(true));
+            CHECK(std::find(types.begin(), types.end(), "ARMLAB") == types.end());
+        }
+    }
+
+    TEST_CASE("the humanlike opening makes the first constructor a deadline", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto labId = addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.buildPlannerTickInterval = 1;
+        profile.tierTwoEconomyReserve = false;
+        // A profile that wants no constructor at all: the opening posture's
+        // deadline is the floor, not a rewrite of the ordinary target.
+        profile.targetConstructorCount = 0;
+
+        SECTION("off, the lab makes what the shares ask for")
+        {
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            sim.gameTime = GameTime(151u * SimTicksPerSecond);
+            runTicks(sim, controller, 1, commands);
+            CHECK(countQueueCommands(commands, "ARMCK") == 0);
+        }
+
+        SECTION("on, past the constructor deadline, the constructor is queued")
+        {
+            profile.humanlikeOpening = true;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            sim.gameTime = GameTime(151u * SimTicksPerSecond);
+            runTicks(sim, controller, 1, commands);
+            CHECK(countQueueCommands(commands, "ARMCK") == 1);
+        }
+
+        SECTION("on, before the deadline, the target is still whatever the profile said")
+        {
+            profile.humanlikeOpening = true;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            sim.gameTime = GameTime(149u * SimTicksPerSecond);
+            runTicks(sim, controller, 1, commands);
+            CHECK(countQueueCommands(commands, "ARMCK") == 0);
+        }
+        (void)labId;
+    }
+
+    TEST_CASE("the humanlike opening takes one extractor beyond the opening set", "[ai]")
+    {
+        OpeningFixture f;
+        auto profile = f.profile(true);
+        // The ordinary target is already met, so without the opening
+        // deadline nothing asks for another extractor.
+        profile.targetMetalExtractorCount = profile.openingMetalExtractorCount;
+        // A lab must stand before the expansion window opens.
+        addUnit(f.sim, "ARMLAB", f.ai, SimVector(100_ss, 0_ss, 0_ss), f.script);
+
+        SECTION("on, past the expansion deadline, an extractor is the next job")
+        {
+            auto types = f.planAt(241, profile);
+            REQUIRE(!types.empty());
+            CHECK(types.front() == "ARMMEX");
+        }
+
+        SECTION("off, the ordinary target still governs")
+        {
+            auto off = f.profile(false);
+            off.targetMetalExtractorCount = off.openingMetalExtractorCount;
+            auto types = f.planAt(241, off);
+            REQUIRE(!types.empty());
+            CHECK(types.front() != "ARMMEX");
+        }
     }
 }
