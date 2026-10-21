@@ -1,5 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
+#include <rwe/ai/BuildManager.h>
+#include <rwe/ai/ReachabilityMap.h>
+#include <rwe/ai/ThreatMap.h>
 #include <rwe/ai/ai_test_util.h>
+#include <rwe/sim/SimRandom.h>
+#include <rwe/sim/SimTicksPerSecond.h>
+#include <random>
 
 /**
  * The AI's economy: what it builds first, what it can pay for, when it techs,
@@ -1371,6 +1377,133 @@ namespace rwe
             auto shares = BuildManager::counterShares(sim, profile, bb);
             CHECK(shares.artilleryKbot == profile.labArtilleryKbotShare);
         }
+    }
+
+    TEST_CASE("the decayed composition memory leans both factory lines", "[ai]")
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        defineWorld(sim);
+        auto profile = makeDefaultStandardProfile();
+        profile.counterEnemyComposition = true;
+        profile.enemyCompositionMemory = true;
+        profile.counterShareTrigger = 0.36f;
+        profile.compositionLeanMax = 2;
+        AiBlackboard bb;
+
+        auto commit = [&] {
+            bb.compositionLean = compositionLeanFor(bb.enemyRoleCounts, profile.counterShareTrigger, profile.compositionLeanMax);
+        };
+
+        SECTION("a raider army leans rockets in the lab and missile trucks in the plant")
+        {
+            bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Raider)] = 8;
+            bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Tank)] = 2;
+            commit();
+
+            auto shares = BuildManager::counterShares(sim, profile, bb);
+            CHECK(shares.rocketKbot == profile.labRocketKbotShare + profile.compositionLeanMax);
+            CHECK(shares.artilleryKbot == profile.labArtilleryKbotShare);
+            CHECK(shares.raider == profile.labRaiderShare);
+            CHECK(bb.compositionLean.vehicleMissileTruck == profile.compositionLeanMax);
+            CHECK(bb.compositionLean.vehicleTank == 0);
+            CHECK(bb.compositionLean.vehicleMediumTank == 0);
+        }
+
+        SECTION("a tower line leans artillery in the lab and medium tanks in the plant")
+        {
+            bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::StaticDefence)] = 8;
+            bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Raider)] = 2;
+            commit();
+
+            auto shares = BuildManager::counterShares(sim, profile, bb);
+            CHECK(shares.artilleryKbot == profile.labArtilleryKbotShare + profile.compositionLeanMax);
+            CHECK(shares.rocketKbot == profile.labRocketKbotShare);
+            CHECK(bb.compositionLean.vehicleMediumTank == profile.compositionLeanMax);
+            CHECK(bb.compositionLean.vehicleMissileTruck == 0);
+        }
+
+        SECTION("the lean is bounded by compositionLeanMax")
+        {
+            bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Raider)] = 10;
+            bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::StaticDefence)] = 10;
+            commit();
+
+            CHECK(bb.compositionLean.labRaider == 0);
+            CHECK(bb.compositionLean.labRocketKbot == profile.compositionLeanMax);
+            CHECK(bb.compositionLean.labArtilleryKbot == profile.compositionLeanMax);
+            CHECK(bb.compositionLean.vehicleTank == 0);
+            CHECK(bb.compositionLean.vehicleMissileTruck == profile.compositionLeanMax);
+            CHECK(bb.compositionLean.vehicleMediumTank == profile.compositionLeanMax);
+
+            // Zero max is the off value for the lean itself: every slot stays
+            // at the faction baseline.
+            auto noLean = compositionLeanFor(bb.enemyRoleCounts, profile.counterShareTrigger, 0);
+            CHECK(noLean.labRaider == 0);
+            CHECK(noLean.labRocketKbot == 0);
+            CHECK(noLean.vehicleMissileTruck == 0);
+            CHECK(noLean.vehicleMediumTank == 0);
+        }
+
+        SECTION("switched off restores today's counterShares exactly")
+        {
+            bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Raider)] = 8;
+            bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Tank)] = 2;
+            commit();
+
+            profile.enemyCompositionMemory = false;
+            auto shares = BuildManager::counterShares(sim, profile, bb);
+            CHECK(shares.raider == profile.labRaiderShare);
+            CHECK(shares.rocketKbot == profile.labRocketKbotShare);
+            CHECK(shares.artilleryKbot == profile.labArtilleryKbotShare);
+        }
+    }
+
+    TEST_CASE("the composition lean is held for its commit window", "[ai]")
+    {
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.enemyCompositionMemory = true;
+        profile.counterEnemyComposition = true;
+        profile.compositionCommitSeconds = 60;
+        profile.compositionLeanMax = 2;
+        // The commit sits at the top of BuildManager::update, before any of
+        // the builder-safety work; this keeps the fixture to the clock.
+        profile.builderSafety = false;
+
+        AiBlackboard bb;
+        bb.now = GameTime(0);
+        bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Raider)] = 10;
+
+        BuildManager build;
+        ThreatMap threatMap;
+        ReachabilityMap reachability;
+        std::minstd_rand rng(1);
+        std::vector<PlayerCommand> commands;
+        auto runOne = [&] {
+            build.update(sim, ai, profile, threatMap, bb, reachability, rng, commands);
+        };
+
+        runOne();
+        REQUIRE(bb.compositionLeanCommitted);
+        CHECK(bb.compositionLean.labRocketKbot == profile.compositionLeanMax);
+
+        // A different enemy army inside the window does not change what the
+        // factories have committed to.
+        bb.enemyRoleCounts.fill(0);
+        bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::StaticDefence)] = 10;
+        bb.now = GameTime(30u * SimTicksPerSecond);
+        runOne();
+        CHECK(bb.compositionLean.labRocketKbot == profile.compositionLeanMax);
+        CHECK(bb.compositionLean.labArtilleryKbot == 0);
+
+        // Past the window it recomputes.
+        bb.now = GameTime(60u * SimTicksPerSecond);
+        runOne();
+        CHECK(bb.compositionLean.labRocketKbot == 0);
+        CHECK(bb.compositionLean.labArtilleryKbot == profile.compositionLeanMax);
     }
 
     TEST_CASE("the wreckage a raid leaves in the base is reclaimed, when metal is short and by difficulty", "[ai]")

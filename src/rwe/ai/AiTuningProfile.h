@@ -247,6 +247,42 @@ namespace rwe
         bool counterEnemyComposition{true};
         int counterShareBonus{2};
         float counterShareTrigger{0.3f};
+        /**
+         * Remember what the enemy army is made of, by role, and decay it so
+         * it follows the current army rather than a lifetime total.
+         *
+         * PerceptionManager maintains the histogram
+         * (AiBlackboard::enemyRoleCounts); BuildManager leans BOTH the kbot
+         * lab's and the vehicle plant's shares from its shares, up to
+         * compositionLeanMax points per slot. This generalises
+         * counterEnemyComposition, which only ever leaned the lab and only
+         * ever looked at armed static versus armed mobile metal.
+         *
+         * Off restores today's counterShares exactly -- the old
+         * static/mobile metal rule and nothing else -- which is the control
+         * arm for a paired arena run. RWE-AI tuning, not classic parity.
+         */
+        bool enemyCompositionMemory{true};
+        /**
+         * How often the histogram is halved, in seconds. Integer halving,
+         * so a stale role is gone after a few windows. Zero leaves the
+         * counts undecayed (the whole game's sightings), which is the old
+         * lifetime behaviour and is not recommended.
+         */
+        int compositionDecaySeconds{30};
+        /**
+         * How long a computed share lean is held before it is recomputed.
+         * Without this the shares can flip on every planning pass as one
+         * remembered contact changes role, and a factory never finishes a
+         * coherent batch of what it was asked for.
+         */
+        int compositionCommitSeconds{60};
+        /**
+         * The most points a single observed role can add to a share slot.
+         * The faction defaults stay the baseline; this is a bounded lean,
+         * not a replacement.
+         */
+        int compositionLeanMax{2};
 
         bool spendSurplusOnCapacity{true};
         float capacityIncomeRatio{1.25f};
@@ -316,6 +352,26 @@ namespace rwe
          * not, and they cost a factory slot the army would otherwise use.
          */
         int antiAirMobileCount{2};
+        /**
+         * How many mobile anti-air units leave the base with an attack wave.
+         *
+         * Mobile anti-air was deliberately left out of combatUnits and
+         * leashed to the base, because cover that walks off with the army is
+         * not cover. The cost is the other half: a wave that meets a bomber
+         * over the enemy's base has no answer at all, and the AA kbots stand
+         * at home for the whole attack. With this on, that many anti-air
+         * units guard the slowest member of the wave while the wave is out
+         * and are leashed home again when it ends. At least one is kept at
+         * the base whenever more than one stands, because the base is what
+         * they were built for. The ordinary anti-air target rule is
+         * unchanged: anything airborne within engageRadius is still shot at
+         * first, escort or not.
+         *
+         * Zero restores the old behaviour exactly and is the control arm for
+         * a paired arena run. RWE-AI tuning, not classic parity; the classic
+         * engine is untouched.
+         */
+        int antiAirEscortCount{1};
         int targetRadarCount{1};
         int targetMetalMakerCount{2};
         /**
@@ -1811,6 +1867,31 @@ namespace rwe
         /** Fall back to the rally point when the attacking army drops below this. */
         int retreatArmySize{3};
         /**
+         * Judge the attack on metal value as well as headcount.
+         *
+         * The headcount gate is a floor and a fallback: it still calls the
+         * attack, and it is all there is when nothing of the enemy's army is
+         * known. When their mobile ground army has been seen, the value gate
+         * can call the attack earlier -- our known army metal at least
+         * attackValueRatio times theirs -- and holds it shut until our value
+         * is below retreatValueRatio, which is the hysteresis that stops a
+         * pass-by-pass flip. It may not pull the wave forward to less than
+         * half the counted wave, and retreatArmySize is still the floor under
+         * that: a handful of units that happen to out-value one remembered
+         * scout is not an attack, and a profile that has deliberately set
+         * attackArmySize out of reach is not overridden by a skirmish.
+         * attackPatienceSeconds remains the backstop, so
+         * an enemy nobody can find cannot stall the AI for ever.
+         *
+         * Off restores the old count/patience command stream exactly.
+         * RWE-AI tuning, not classic parity.
+         */
+        bool attackUsesValueOdds{true};
+        /** Our army metal must be this multiple of the known enemy ground army's before the odds gate opens. */
+        float attackValueRatio{1.1f};
+        /** The odds gate closes again below this multiple. */
+        float retreatValueRatio{0.7f};
+        /**
          * What the level-one kbot lab makes, as a ratio: this many raiders to
          * that many rocket kbots. Two integers and not a fraction because the
          * choice is made inside the simulation, where a float comparison is
@@ -2156,6 +2237,57 @@ namespace rwe
          * reach.
          */
         bool commanderAnswersHarassment{false};
+        /**
+         * How many units a factory keeps queued.
+         *
+         * The planner used to wait for a factory's queue to drain and then add
+         * exactly one unit, so every factory stood idle from the tick its
+         * product finished until the next planning pass -- at the shipped
+         * buildPlannerTickInterval of 30 that is up to a second per unit, per
+         * factory, for the whole game. The queue is topped up to this depth
+         * instead, one unit per pass, so the next unit is queued while the one
+         * before it is still building and the factory does not wait for the
+         * planner to come round again.
+         *
+         * The mission reservation still applies: the queue is never filled
+         * past a mission cap, and the final filter still drops a command the
+         * reservation refuses. One restores the old behaviour exactly -- top
+         * up only when empty, with one unit -- and is the control arm for a
+         * paired arena run.
+         *
+         * From the audit in docs/agents/rwe-ai-strength.md, "Not done yet":
+         * production only topped a factory up when its queue was empty.
+         * RWE-AI tuning, not classic parity; the classic engine is untouched.
+         *
+         * Default 1 because depth 2 was measured worse on Great Divide: four
+         * paired seeds against depth 1, same winners, but slower close-outs on
+         * three of four (4304 by 22,890 ticks) as the deeper queue tied up
+         * metal. It remains a knob for a faction/map where the trade differs.
+         */
+        int factoryQueueDepth{1};
+        /**
+         * Drop a unit that has sat at the head of a factory's queue for
+         * factoryQueueStallSeconds while it could not be paid for and the
+         * frame made no meaningful progress.
+         *
+         * A queue that holds something the side cannot afford is a factory
+         * doing nothing: it is not merely saving up, because no income is
+         * being spent on the queue at all. The drop is the same negative
+         * ModifyBuildQueue a besieged factory's queue emptying sends, and it
+         * clears that unit type from the queue so the next entry can be tried
+         * (the command counts back from the end, so clearing the head alone is
+         * not something it can express). A frame that has moved by at least
+         * one percent of its build time in the window is making progress and
+         * is never cancelled, however slowly it goes; the tier-two reserve's
+         * hold is also left alone, since saving for a lab or a moho is exactly
+         * what that hold is for.
+         *
+         * Off restores the old behaviour exactly and is the control arm for a
+         * paired arena run. RWE-AI tuning, not classic parity.
+         */
+        bool factoryQueueDropStalled{true};
+        /** How long a queue head may sit unaffordable and motionless before it is dropped. */
+        int factoryQueueStallSeconds{60};
         /**
          * Treat a commander whose only threats are on the water as unable to
          * fight, so the refuge logic walks it off the shore.

@@ -1,11 +1,128 @@
 #include "PerceptionManager.h"
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitState.h>
+#include <algorithm>
+#include <array>
 #include <map>
 
 namespace rwe
 {
+    namespace
+    {
+        /**
+         * Where a mobile armed unit stops being a raider. A light tank is
+         * cheap enough to be traded; a medium one is a line breaker. This is
+         * read off the shipped metal cost rather than a name, so a mod's own
+         * units are classified by what they cost.
+         *
+         * Both thresholds are first guesses, not measurements. RWE-original
+         * policy (docs/agents/rwe-ai-adaptability.md S:1); the original's
+         * computer player has no role histogram, so no classic-parity claim
+         * is made for them.
+         */
+        constexpr float EnemyTankMinMetal = 200.0f;
+
+        /**
+         * Where a mobile gun stops being a raider's short-range weapon and
+         * becomes rocket or artillery reach. A Peewee's and a Flash's guns
+         * are around 180-200; a Storm's and a Thud's are well past this.
+         */
+        constexpr float EnemyRocketMinRange = 300.0f;
+
+        float longestWeaponRange(const GameSimulation& sim, const UnitDefinition& def)
+        {
+            float longest = 0.0f;
+            for (const auto* weapon : {&def.weapon1, &def.weapon2, &def.weapon3})
+            {
+                if (weapon->empty())
+                {
+                    continue;
+                }
+                auto it = sim.weaponDefinitions.find(*weapon);
+                if (it != sim.weaponDefinitions.end())
+                {
+                    longest = std::max(longest, it->second.maxRange.value);
+                }
+            }
+            return longest;
+        }
+
+        /**
+         * One contact's role. Commanders are folded with everything the other
+         * buckets cannot name, which keeps the counts summing to the known
+         * army. A builder is a builder before it is anything else: it is the
+         * unit a raid is aimed at, not a line unit.
+         */
+        EnemyRole enemyRoleOf(const UnitDefinition& def, const KnownEnemy& enemy, float longestRange)
+        {
+            if (enemy.isCommander)
+            {
+                return EnemyRole::CommanderOrOther;
+            }
+            if (def.builder)
+            {
+                return EnemyRole::Builder;
+            }
+            if (enemy.isAir)
+            {
+                return EnemyRole::Air;
+            }
+            if (enemy.isBuilding)
+            {
+                return enemy.isArmed ? EnemyRole::StaticDefence : EnemyRole::CommanderOrOther;
+            }
+            if (!enemy.isArmed)
+            {
+                return EnemyRole::CommanderOrOther;
+            }
+            if (def.buildCostMetal.value >= EnemyTankMinMetal)
+            {
+                return EnemyRole::Tank;
+            }
+            if (longestRange >= EnemyRocketMinRange)
+            {
+                return EnemyRole::RocketArtillery;
+            }
+            return EnemyRole::Raider;
+        }
+
+        /**
+         * Halve the histogram once per compositionDecaySeconds, as many times
+         * as whole windows have passed. Integer halving, so a role that has
+         * stopped appearing falls to nothing in a few windows and the model
+         * follows the current army rather than a lifetime total.
+         */
+        void decayEnemyRoles(const AiTuningProfile& profile, AiBlackboard& bb)
+        {
+            if (!profile.enemyCompositionMemory)
+            {
+                bb.enemyRoleCounts.fill(0);
+                bb.enemyRoleCountsDecayedAt = bb.now;
+                return;
+            }
+            if (profile.compositionDecaySeconds <= 0)
+            {
+                return;
+            }
+            auto interval = static_cast<unsigned int>(profile.compositionDecaySeconds) * SimTicksPerSecond;
+            if (interval == 0 || bb.now.value < bb.enemyRoleCountsDecayedAt.value + interval)
+            {
+                return;
+            }
+            auto steps = (bb.now.value - bb.enemyRoleCountsDecayedAt.value) / interval;
+            // Counts are small and the shift is the whole operation; a
+            // pathological clock jump must not shift by the word width.
+            steps = std::min<unsigned int>(steps, 31u);
+            for (auto& count : bb.enemyRoleCounts)
+            {
+                count = static_cast<int>(static_cast<unsigned int>(count) >> steps);
+            }
+            bb.enemyRoleCountsDecayedAt = GameTime(bb.enemyRoleCountsDecayedAt.value + (steps * interval));
+        }
+    }
+
     std::optional<StandingContact>
         contactStillStanding(const GameSimulation& sim, PlayerId aiOwner, bool omniscient, const KnownEnemy& enemy)
     {
@@ -119,6 +236,77 @@ namespace rwe
             if (def.canFly)
             {
                 bb.lastEnemyAirSeenAt = bb.now;
+            }
+        }
+
+        // What their army is made of, decayed so it follows the current army.
+        // The histogram is raised to the largest count of each role we can see
+        // or remember now, and halved on the compositionDecaySeconds clock.
+        decayEnemyRoles(profile, bb);
+        if (profile.enemyCompositionMemory)
+        {
+            std::array<int, EnemyRoleCount> observed{};
+            for (const auto& [_, enemy] : bb.knownEnemies)
+            {
+                auto defIt = sim.unitDefinitions.find(enemy.unitType);
+                if (defIt == sim.unitDefinitions.end())
+                {
+                    continue;
+                }
+                auto role = enemyRoleOf(defIt->second, enemy, longestWeaponRange(sim, defIt->second));
+                ++observed[enemyRoleIndex(role)];
+            }
+            for (std::size_t i = 0; i < EnemyRoleCount; ++i)
+            {
+                bb.enemyRoleCounts[i] = std::max(bb.enemyRoleCounts[i], observed[i]);
+            }
+        }
+
+        // What the two armies are worth, for the value-odds gate. Ours is the
+        // combat units the army pass would send; theirs is every mobile armed
+        // ground unit the AI is entitled to know about. Aircraft are kept
+        // apart because they do not stand in the line the gate is judging.
+        bb.armyMetal = 0.0f;
+        for (auto unitId : bb.combatUnits)
+        {
+            // The count gate leaves the borrowed scout out (EconomyManager's
+            // armySize), so the value side leaves it out too.
+            if (bb.scoutUnitId && unitId == *bb.scoutUnitId)
+            {
+                continue;
+            }
+            auto unitRef = sim.tryGetUnitState(unitId);
+            if (!unitRef || unitRef->get().isDead())
+            {
+                continue;
+            }
+            auto defIt = sim.unitDefinitions.find(unitRef->get().unitType);
+            if (defIt != sim.unitDefinitions.end())
+            {
+                bb.armyMetal += defIt->second.buildCostMetal.value;
+            }
+        }
+        bb.knownEnemyArmyMetal = 0.0f;
+        bb.knownEnemyAirMetal = 0.0f;
+        for (const auto& [_, enemy] : bb.knownEnemies)
+        {
+            if (!enemy.isArmed)
+            {
+                continue;
+            }
+            auto defIt = sim.unitDefinitions.find(enemy.unitType);
+            if (defIt == sim.unitDefinitions.end() || !defIt->second.isMobile)
+            {
+                continue;
+            }
+            auto value = defIt->second.buildCostMetal.value;
+            if (enemy.isAir)
+            {
+                bb.knownEnemyAirMetal += value;
+            }
+            else
+            {
+                bb.knownEnemyArmyMetal += value;
             }
         }
 

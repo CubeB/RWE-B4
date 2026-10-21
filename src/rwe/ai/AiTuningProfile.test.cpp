@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/ai/AiTuningProfile.h>
+#include <set>
+#include <string>
 
 namespace rwe
 {
@@ -113,5 +115,84 @@ namespace rwe
         REQUIRE_FALSE(p.acquireWeaponRange);
         REQUIRE(applyAiTuning(p, "acquireWeaponRange", "true"));
         REQUIRE(p.acquireWeaponRange);
+    }
+
+    // The second strength batch: queue depth and the stalled-head drop, and
+    // the anti-air escort. All four are on by default and every one restores
+    // the old behaviour when set to its off value, which is what a paired
+    // arena run uses as its control arm.
+    TEST_CASE("the factory queue and anti-air escort knobs are listed and settable")
+    {
+        AiTuningProfile p;
+        CHECK(p.factoryQueueDepth == 1);
+        CHECK(p.factoryQueueDropStalled);
+        CHECK(p.factoryQueueStallSeconds == 60);
+        CHECK(p.antiAirEscortCount == 1);
+
+        REQUIRE(applyAiTuning(p, "factoryQueueDepth", "1"));
+        CHECK(p.factoryQueueDepth == 1);
+        REQUIRE(applyAiTuning(p, "factoryQueueDropStalled", "false"));
+        CHECK_FALSE(p.factoryQueueDropStalled);
+        REQUIRE(applyAiTuning(p, "factoryQueueStallSeconds", "0"));
+        CHECK(p.factoryQueueStallSeconds == 0);
+        REQUIRE(applyAiTuning(p, "antiAirEscortCount", "0"));
+        CHECK(p.antiAirEscortCount == 0);
+
+        // And they are in the listed set -- the test at the top of this file
+        // would catch a name that applyAiTuning accepted but listAiKnobs did
+        // not, but not one that was never added to either.
+        std::set<std::string> names;
+        for (const auto& knob : listAiKnobs())
+        {
+            names.insert(knob.name);
+        }
+        CHECK(names.count("factoryQueueDepth") == 1);
+        CHECK(names.count("factoryQueueDropStalled") == 1);
+        CHECK(names.count("factoryQueueStallSeconds") == 1);
+        CHECK(names.count("antiAirEscortCount") == 1);
+    }
+
+    // The third strength batch: the decayed composition memory and the
+    // value-odds attack gate. Both are on by default and each has an off
+    // value that restores the old command stream, which is the control arm
+    // for a paired arena run.
+    TEST_CASE("the composition memory and value-odds knobs are listed and settable")
+    {
+        AiTuningProfile p;
+        CHECK(p.enemyCompositionMemory);
+        CHECK(p.compositionDecaySeconds == 30);
+        CHECK(p.compositionCommitSeconds == 60);
+        CHECK(p.compositionLeanMax == 2);
+        CHECK(p.attackUsesValueOdds);
+        CHECK(p.attackValueRatio == 1.1f);
+        CHECK(p.retreatValueRatio == 0.7f);
+
+        REQUIRE(applyAiTuning(p, "enemyCompositionMemory", "false"));
+        CHECK_FALSE(p.enemyCompositionMemory);
+        REQUIRE(applyAiTuning(p, "compositionDecaySeconds", "45"));
+        CHECK(p.compositionDecaySeconds == 45);
+        REQUIRE(applyAiTuning(p, "compositionCommitSeconds", "90"));
+        CHECK(p.compositionCommitSeconds == 90);
+        REQUIRE(applyAiTuning(p, "compositionLeanMax", "3"));
+        CHECK(p.compositionLeanMax == 3);
+        REQUIRE(applyAiTuning(p, "attackUsesValueOdds", "false"));
+        CHECK_FALSE(p.attackUsesValueOdds);
+        REQUIRE(applyAiTuning(p, "attackValueRatio", "1.25"));
+        CHECK(p.attackValueRatio == 1.25f);
+        REQUIRE(applyAiTuning(p, "retreatValueRatio", "0.8"));
+        CHECK(p.retreatValueRatio == 0.8f);
+
+        std::set<std::string> names;
+        for (const auto& knob : listAiKnobs())
+        {
+            names.insert(knob.name);
+        }
+        CHECK(names.count("enemyCompositionMemory") == 1);
+        CHECK(names.count("compositionDecaySeconds") == 1);
+        CHECK(names.count("compositionCommitSeconds") == 1);
+        CHECK(names.count("compositionLeanMax") == 1);
+        CHECK(names.count("attackUsesValueOdds") == 1);
+        CHECK(names.count("attackValueRatio") == 1);
+        CHECK(names.count("retreatValueRatio") == 1);
     }
 }

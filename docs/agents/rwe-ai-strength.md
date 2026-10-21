@@ -70,15 +70,20 @@ fresh seeds.
 
 ## Status
 
-The batch has been built and measured against a pre-change control binary built
-from the same tree. Four seeds on Coast To Coast (RWE against the classic
-personality, dealt seats): the odd (ARM) seeds were identical in both arms, as
-expected because ARM's composition and T1 weapon ranges are unchanged; on the
-even (CORE) seeds one timeout became a decided win and one win took 3,690 ticks
-longer. Details and the table are in `docs/AI-TUNING.md`, "First strength
-batch". Four games do not establish a strength gain, and the acquisition knob
-has not been exercised by a long-range fixture yet. The full permitted suite
-passed (1861 cases / 194009 assertions).
+Batch 1 is merged (#727). Batch 2 (factory queue depth, stalled-head drop,
+mobile AA escort) and batch 3 (decayed enemy composition memory, counters for
+both factory types, value-odds attack posture) are built and measured.
+
+- Queue depth 2 was slower on three of four Great Divide seeds (one by 22,890
+  ticks), so its default is 1; the feature remains a knob. The AA escort was
+  neutral against the classic AI but is kept for human air play.
+- Batch 3 was neutral on close-out time against the classic AI on Great Divide
+  and Dark Side: all sixteen games were decided RWE wins with the same winner
+  in each default/off pair. It is aimed at a human whose composition and
+  army movement the histogram and odds gate can actually react to.
+- Full detail and the tables are in `docs/AI-TUNING.md`, "Second and third AI
+  batches". The AI suite passes (279 cases / 9853 assertions); the full
+  permitted suite result is in the session report.
 
 The CORE candidate was measured against the pre-ARM-change ARM and still needs
 `--evaluate` on fresh seeds. No original-game check applies: this is

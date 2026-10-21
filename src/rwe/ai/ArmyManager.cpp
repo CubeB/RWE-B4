@@ -2,6 +2,7 @@
 #include <rwe/ai/PerceptionManager.h>
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <set>
 #include <rwe/ai/AiMapBounds.h>
 #include <rwe/ai/BuilderSafety.h>
@@ -27,6 +28,21 @@ namespace rwe
         PlayerCommand attackCommand(UnitId unit, UnitId target)
         {
             return PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(AttackOrder(target), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
+        }
+
+        PlayerCommand guardCommand(UnitId unit, UnitId target)
+        {
+            return PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(GuardOrder(target), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
+        }
+
+        bool isGuardingUnit(const UnitState& unit, UnitId target)
+        {
+            if (unit.orders.empty())
+            {
+                return false;
+            }
+            auto guard = std::get_if<GuardOrder>(&unit.orders.front());
+            return guard != nullptr && guard->target == target;
         }
 
         /**
@@ -450,6 +466,52 @@ namespace rwe
         // round every pass; narrow enough that it is still cover.
         const SimScalar AntiAirLeash = 700_ss;
 
+        // Which mobile anti-air leave the base with the wave, and what they
+        // guard: the slowest member, which is the one they have to keep up
+        // with. Empty unless a wave is actually out, so an idle AA kbot keeps
+        // covering the base exactly as before.
+        //
+        // Selection is by unit id, over a sorted copy, so every peer picks the
+        // same escorts. At least one stays home whenever more than one stands;
+        // the base is what they were built for, and an escort that takes the
+        // last one away leaves it open.
+        std::optional<UnitId> escortTarget;
+        std::set<unsigned int> escorts;
+        if (profile.antiAirEscortCount > 0 && !bb.antiAirUnits.empty() && bb.phase == GamePhase::Attack && !bb.attackGroup.empty())
+        {
+            SimScalar slowest = 0_ss;
+            for (auto id : bb.attackGroup)
+            {
+                auto unitRef = sim.tryGetUnitState(UnitId(id));
+                if (!unitRef)
+                {
+                    continue;
+                }
+                auto def = sim.unitDefinitions.find(unitRef->get().unitType);
+                if (def == sim.unitDefinitions.end())
+                {
+                    continue;
+                }
+                // Strictly less, so a tie goes to the lowest id and the order
+                // does not depend on where the definitions were walked from.
+                if (!escortTarget || def->second.maxVelocity < slowest)
+                {
+                    slowest = def->second.maxVelocity;
+                    escortTarget = UnitId(id);
+                }
+            }
+
+            auto candidates = bb.antiAirUnits;
+            std::sort(candidates.begin(), candidates.end(), [](UnitId a, UnitId b) { return a.value < b.value; });
+            auto keepHome = candidates.size() > 1 ? std::size_t{1} : std::size_t{0};
+            auto allowed = candidates.size() > keepHome ? candidates.size() - keepHome : std::size_t{0};
+            auto wanted = std::min(static_cast<std::size_t>(profile.antiAirEscortCount), allowed);
+            for (std::size_t i = 0; i < wanted; ++i)
+            {
+                escorts.insert(candidates[i].value);
+            }
+        }
+
         for (auto unitId : bb.antiAirUnits)
         {
             auto unitRef = sim.tryGetUnitState(unitId);
@@ -475,6 +537,34 @@ namespace rwe
             // the whole reason anti-air is kept out of combatUnits -- left in
             // the army it would walk off with the attack, and the base it was
             // built to cover would be open again.
+            //
+            // Except the escorts: those few travel with the wave while it is
+            // out, guarding its slowest unit. The enemy-air case above still
+            // has priority, so their own target rule is untouched; when the
+            // wave ends the leash below takes them home again.
+            if (escortTarget && escorts.count(unitId.value) != 0)
+            {
+                if (!isGuardingUnit(unit, *escortTarget))
+                {
+                    outCommands.push_back(guardCommand(unitId, *escortTarget));
+                }
+                continue;
+            }
+
+            // An escort whose wave has ended hands the guard back and walks
+            // home, rather than following the unit it was guarding around the
+            // base. Only when the knob is on: with it off no AA unit can be
+            // holding one of our guard orders, and the control arm must see
+            // exactly the old command stream.
+            if (profile.antiAirEscortCount > 0 && !unit.orders.empty() && std::holds_alternative<GuardOrder>(unit.orders.front()))
+            {
+                if (bb.baseAnchor)
+                {
+                    outCommands.push_back(moveCommand(unitId, *bb.baseAnchor));
+                }
+                continue;
+            }
+
             if (!bb.baseAnchor)
             {
                 continue;

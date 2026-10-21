@@ -28,6 +28,35 @@ namespace rwe
             return it == counts.end() ? 0 : it->second;
         }
 
+        /**
+         * Recompute the composition lean if its commit window has expired.
+         *
+         * The histogram itself follows the enemy every pass, but the shares
+         * it leans are held for compositionCommitSeconds: a factory that
+         * switched from tanks to missile trucks and back as one remembered
+         * contact crossed a role boundary would finish neither batch. The
+         * committed value lives on the blackboard, so both factory branches
+         * read the same value for the whole window.
+         */
+        void commitCompositionLean(const AiTuningProfile& profile, AiBlackboard& bb)
+        {
+            if (!profile.enemyCompositionMemory || !profile.counterEnemyComposition)
+            {
+                bb.compositionLean = CompositionLean{};
+                bb.compositionLeanCommitted = false;
+                return;
+            }
+            auto commitTicks = static_cast<unsigned int>(std::max(0, profile.compositionCommitSeconds)) * SimTicksPerSecond;
+            if (bb.compositionLeanCommitted && commitTicks > 0
+                && bb.now.value < bb.compositionLeanCommittedAt.value + commitTicks)
+            {
+                return;
+            }
+            bb.compositionLean = compositionLeanFor(bb.enemyRoleCounts, profile.counterShareTrigger, profile.compositionLeanMax);
+            bb.compositionLeanCommittedAt = bb.now;
+            bb.compositionLeanCommitted = true;
+        }
+
         /** The longest reach of any weapon the definition names; zero for an unarmed one. */
         SimScalar weaponRange(const GameSimulation& sim, const UnitDefinition& def)
         {
@@ -100,6 +129,39 @@ namespace rwe
         {
             return PlayerUnitCommand(builder, PlayerUnitCommand::IssueOrder(BuildOrder(unitType, site), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
         }
+    }
+
+    unsigned int factoryQueueProgressFloor(unsigned int buildTime)
+    {
+        // One percent, and never less than a tick, so the threshold scales
+        // with the job. A single build tick is a fifth of a second's work on
+        // a 100-tick Peewee and a rounding error on a 5,000-tick battleship;
+        // a flat count would call that same tick meaningful for both, or for
+        // neither.
+        return std::max(1u, buildTime / 100u);
+    }
+
+    bool factoryQueueHeadIsStalled(
+        unsigned int heldTicks,
+        unsigned int frameProgress,
+        unsigned int buildTime,
+        int stallSeconds,
+        bool affordable)
+    {
+        if (stallSeconds <= 0)
+        {
+            return false;
+        }
+        auto timeout = static_cast<unsigned long long>(stallSeconds) * static_cast<unsigned long long>(SimTicksPerSecond);
+        if (static_cast<unsigned long long>(heldTicks) < timeout)
+        {
+            return false;
+        }
+        if (frameProgress >= factoryQueueProgressFloor(buildTime))
+        {
+            return false;
+        }
+        return !affordable;
     }
 
     BuildManager::BuildEstimate BuildManager::estimateBuild(const UnitDefinition& target, const UnitDefinition& builder, unsigned int alreadyBuilt)
@@ -2239,17 +2301,27 @@ namespace rwe
             (enemy.isBuilding ? staticMetal : mobileMetal) += defIt->second.buildCostMetal.value;
         }
         auto seen = staticMetal + mobileMetal;
-        if (seen <= 0.0f)
+        if (seen > 0.0f)
         {
-            return shares;
+            if (staticMetal / seen >= profile.counterShareTrigger)
+            {
+                shares.artilleryKbot += profile.counterShareBonus;
+            }
+            if (mobileMetal / seen >= profile.counterShareTrigger)
+            {
+                shares.rocketKbot += profile.counterShareBonus;
+            }
         }
-        if (staticMetal / seen >= profile.counterShareTrigger)
+
+        // The decayed, role-keyed memory's lean, on top of the older
+        // static/mobile metal rule above. Both are bounded by the profile;
+        // the composition lean is held for compositionCommitSeconds by
+        // commitCompositionLean.
+        if (profile.enemyCompositionMemory)
         {
-            shares.artilleryKbot += profile.counterShareBonus;
-        }
-        if (mobileMetal / seen >= profile.counterShareTrigger)
-        {
-            shares.rocketKbot += profile.counterShareBonus;
+            shares.raider += bb.compositionLean.labRaider;
+            shares.rocketKbot += bb.compositionLean.labRocketKbot;
+            shares.artilleryKbot += bb.compositionLean.labArtilleryKbot;
         }
         return shares;
     }
@@ -3781,7 +3853,9 @@ namespace rwe
     void BuildManager::planFactories(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, const AiBlackboard& bb, std::vector<PlayerCommand>& outCommands) const
     {
         const auto& s = bb.sideUnits;
-        auto total = [&](const std::string& t) { return t.empty() ? 0 : countOf(bb.ownedTotalCounts, t); };
+        auto total = [&](const std::string& t) {
+            return t.empty() ? 0 : countOf(bb.ownedTotalCounts, t);
+        };
 
         // Every factory that makes land combat units asks this, so it is
         // asked once: it depends on the profile and the blackboard and not
@@ -3909,6 +3983,15 @@ namespace rwe
             it->second.seenThisPass = true;
         };
 
+        // The stall watch is swept the same way the hold spells are: mark
+        // nothing seen, touch what is still watched below, and forget the
+        // rest after the loop. A factory that regained an empty queue for one
+        // pass must not come back to a watch that started minutes ago.
+        for (auto& entry : factoryQueueStalls)
+        {
+            entry.second.seenThisPass = false;
+        }
+
         for (auto factoryId : bb.factories)
         {
             const auto& factory = sim.getUnitState(factoryId);
@@ -3959,7 +4042,129 @@ namespace rwe
                 continue;
             }
 
-            if (!factory.buildQueue.empty())
+            // A queued unit that has been at the head of the queue for a long
+            // time without moving, and cannot be paid for, is skipped. See
+            // AiTuningProfile::factoryQueueDropStalled: a factory holding an
+            // unaffordable unit is not saving up, it is doing nothing.
+            //
+            // The tier-two reserve is exempt: holding production still while
+            // metal accumulates for a lab or a moho is precisely what that
+            // hold is for, and `canAfford` will say no for the whole of it.
+            if (profile.factoryQueueDropStalled && !reserveHolds && !factory.buildQueue.empty())
+            {
+                const auto& head = factory.buildQueue.front();
+                auto headDef = sim.unitDefinitions.find(head.first);
+                auto factoryDef = sim.unitDefinitions.find(factory.unitType);
+                if (headDef != sim.unitDefinitions.end() && factoryDef != sim.unitDefinitions.end() && head.second > 0)
+                {
+                    // The frame this head is on, if it has started. The same
+                    // pair of states the mission reservation reads above.
+                    std::optional<UnitId> frameId;
+                    if (auto creating = std::get_if<FactoryBehaviorStateCreatingUnit>(&factory.factoryState))
+                    {
+                        if (auto done = std::get_if<UnitCreationStatusDone>(&creating->status))
+                        {
+                            frameId = done->unitId;
+                        }
+                    }
+                    else if (auto building = std::get_if<FactoryBehaviorStateBuilding>(&factory.factoryState))
+                    {
+                        if (building->targetUnit)
+                        {
+                            frameId = building->targetUnit->first;
+                        }
+                    }
+                    unsigned int completed = 0;
+                    if (frameId)
+                    {
+                        auto frame = sim.tryGetUnitState(*frameId);
+                        if (frame && frame->get().unitType == head.first)
+                        {
+                            completed = frame->get().buildTimeCompleted;
+                        }
+                        else
+                        {
+                            // The frame went away under the queue entry, or is
+                            // not this type: not a frame this watch can time.
+                            frameId.reset();
+                        }
+                    }
+
+                    auto it = factoryQueueStalls.find(factoryId.value);
+                    auto sameWatch = it != factoryQueueStalls.end()
+                        && it->second.headType == head.first
+                        && it->second.frame == (frameId ? frameId->value : 0u)
+                        && completed >= it->second.completedAtStart;
+                    if (!sameWatch)
+                    {
+                        factoryQueueStalls[factoryId.value] = FactoryQueueStall{head.first, frameId ? frameId->value : 0u, completed, bb.now, true};
+                    }
+                    else
+                    {
+                        it->second.seenThisPass = true;
+                        auto progress = completed - it->second.completedAtStart;
+                        auto estimate = estimateBuild(headDef->second, factoryDef->second, completed);
+                        // Affordability without canAfford's "the store is
+                        // nearly full, so say yes" override: that rule exists
+                        // to make a hoarding side spend, and it would call a
+                        // unit priced above the store affordable for ever --
+                        // the exact case this drop is for. What is asked here
+                        // is whether the spare income could finish the frame
+                        // in the time the frame itself takes.
+                        auto net = bb.metalIncome.value - bb.metalCommitted.value;
+                        auto affordable = bb.currentMetal.value + (net * estimate.seconds) >= estimate.metal;
+                        if (factoryQueueHeadIsStalled(
+                                bb.now.value - it->second.since.value,
+                                progress,
+                                headDef->second.buildTime,
+                                profile.factoryQueueStallSeconds,
+                                affordable))
+                        {
+                            // All of this type, not just the head entry:
+                            // ModifyBuildQueue counts backwards from the end
+                            // of the queue, so a negative count takes the last
+                            // entries of the type rather than the front one.
+                            // Clearing the type is what actually lets the next
+                            // entry be tried.
+                            auto headTotal = std::max(0, factory.getBuildQueueTotal(head.first));
+                            auto heldFor = bb.now.value - it->second.since.value;
+                            LOG_INFO << "AI factory: " << factory.unitType << " " << factoryId.value
+                                     << " drops " << head.first << " (" << headTotal
+                                     << " queued); it has not been paid for in " << (heldFor / SimTicksPerSecond) << "s";
+                            sim.eventLog.event(sim.gameTime.value, "factory_queue_cleared")
+                                .set("player", aiOwner.value)
+                                .set("unit", factoryId.value)
+                                .set("factory", factory.unitType)
+                                .set("subject", head.first)
+                                .set("count", headTotal)
+                                .set("held_for", heldFor)
+                                .set("why", "unaffordable")
+                                .detail("drops a queue head it cannot pay for");
+                            if (headTotal > 0)
+                            {
+                                outCommands.emplace_back(PlayerUnitCommand(factoryId, PlayerUnitCommand::ModifyBuildQueue{-headTotal, head.first}));
+                            }
+                            factoryQueueStalls.erase(it);
+                            continue;
+                        }
+                        // A frame that moved by a hundredth of its build time
+                        // is making progress, however slowly, and never gets
+                        // cancelled. Restart the clock from here. So does a
+                        // head that can be paid for: the timeout measures one
+                        // continuous spell of "stuck and unaffordable", not
+                        // how long the entry has merely been queued.
+                        if (progress >= factoryQueueProgressFloor(headDef->second.buildTime) || affordable)
+                        {
+                            it->second.since = bb.now;
+                            it->second.completedAtStart = completed;
+                        }
+                    }
+                }
+            }
+
+            // Top up to factoryQueueDepth. One restores the old rule exactly:
+            // ask for nothing while anything is queued.
+            if (static_cast<int>(factory.buildQueue.size()) >= std::max(1, profile.factoryQueueDepth))
             {
                 // A factory is only topped up once its queue drains, so a
                 // plant that queues one unit which never finishes is never
@@ -4016,16 +4221,17 @@ namespace rwe
                 long long bestShare = 0;
                 for (const auto& [type, share] : line)
                 {
-                    if (type->empty() || share <= 0)
+                    auto weightedShare = static_cast<long long>(share);
+                    if (type->empty() || weightedShare <= 0)
                     {
                         continue;
                     }
                     auto count = static_cast<long long>(countOf(bb.ownedTotalCounts, *type));
-                    if (!best || count * bestShare < bestCount * share)
+                    if (!best || count * bestShare < bestCount * weightedShare)
                     {
                         best = type;
                         bestCount = count;
-                        bestShare = share;
+                        bestShare = weightedShare;
                     }
                 }
                 return best ? *best : std::string();
@@ -4130,7 +4336,16 @@ namespace rwe
                     // A tank cannot cross water either. The scout above is
                     // exempt for the same reason the constructor is: eyes
                     // and builders are not the raiding army.
-                    next = pickByShare({{&s.tank, profile.vehicleTankShare}, {&s.missileTruck, profile.vehicleMissileTruckShare}, {&s.mediumTank, profile.vehicleMediumTankShare}});
+                    auto tankShare = profile.vehicleTankShare;
+                    auto missileTruckShare = profile.vehicleMissileTruckShare;
+                    auto mediumTankShare = profile.vehicleMediumTankShare;
+                    if (profile.enemyCompositionMemory && profile.counterEnemyComposition)
+                    {
+                        tankShare += bb.compositionLean.vehicleTank;
+                        missileTruckShare += bb.compositionLean.vehicleMissileTruck;
+                        mediumTankShare += bb.compositionLean.vehicleMediumTank;
+                    }
+                    next = pickByShare({{&s.tank, tankShare}, {&s.missileTruck, missileTruckShare}, {&s.mediumTank, mediumTankShare}});
                 }
             }
             else if (!s.shipyard.empty() && factory.unitType == s.shipyard)
@@ -4293,7 +4508,7 @@ namespace rwe
             }
             else
             {
-                auto constructors = s.constructor.empty() ? 0 : countOf(bb.ownedTotalCounts, s.constructor);
+                auto constructors = total(s.constructor);
                 // One more while a laser tower is still short of its teeth
                 // (fortifyExtraConstructors): counted from what stands and
                 // what is going up, which is all this needs to know.
@@ -4375,10 +4590,11 @@ namespace rwe
 
             if (!next.empty())
             {
-                // One line per unit a factory takes on. A factory is only
-                // topped up when its queue has emptied -- the guard at the
-                // head of the loop -- so this is one line per unit produced
-                // and not per planning pass.
+                // One line per unit a factory takes on. With factoryQueueDepth
+                // at one this is one line per unit produced, because the
+                // guard above only lets the planner in when the queue has
+                // drained; at two it is one line per unit begun while the
+                // queue still holds the one before it.
                 //
                 // Worth having because until it was added there was no record
                 // anywhere of what the factories built. Builder orders are
@@ -4419,6 +4635,13 @@ namespace rwe
                 .set("why", tierTwo ? "tier_two_released" : "queue_drained")
                 .detail("the hold ended");
             it = factoryHoldSpells.erase(it);
+        }
+
+        // Likewise for the stall watch: a head that was not looked at this
+        // pass -- queue emptied, factory lost, reserve took over -- is gone.
+        for (auto it = factoryQueueStalls.begin(); it != factoryQueueStalls.end();)
+        {
+            it = it->second.seenThisPass ? std::next(it) : factoryQueueStalls.erase(it);
         }
     }
 
@@ -5547,6 +5770,7 @@ namespace rwe
         std::minstd_rand& rng,
         std::vector<PlayerCommand>& outCommands)
     {
+        commitCompositionLean(profile, bb);
         updateAirWorthIt(sim, aiOwner, profile, bb);
         keepBuildersOutOfFights(sim, aiOwner, profile, bb, outCommands);
 

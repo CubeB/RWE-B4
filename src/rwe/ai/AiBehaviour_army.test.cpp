@@ -1237,4 +1237,120 @@ namespace rwe
             CHECK(apart);
         }
     }
+
+    TEST_CASE("mobile anti-air escorts the wave and leaves cover at home", "[ai]")
+    {
+        // The audit's third combat weakness: mobile AA is kept out of
+        // combatUnits and leashed to the base, so a wave that meets a bomber
+        // over the enemy's base has no answer. antiAirEscortCount sends a
+        // deterministic few -- by unit id, the slowest wave member's guard --
+        // and keeps one home whenever more than one stands.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+
+        // Omniscient, so the enemy's solar is a known target without a scout.
+        addUnit(sim, "ARMSOLAR", human, SimVector(450_ss, 0_ss, 200_ss), script);
+        for (int i = 0; i < 3; ++i)
+        {
+            addUnit(sim, "ARMPW", ai, SimVector(SimScalar(-100.0f - i * 40.0f), 0_ss, 0_ss), script);
+        }
+        // A slower wave member, so "the slowest unit" is a claim the test can
+        // check rather than an accident of every unit having the same speed.
+        sim.unitDefinitions["ARMFLASH"].maxVelocity = 1_ss;
+        auto slowUnit = addUnit(sim, "ARMFLASH", ai, SimVector(-220_ss, 0_ss, 0_ss), script);
+        auto firstAa = addUnit(sim, "ARMJETH", ai, SimVector(60_ss, 0_ss, 0_ss), script);
+        auto secondAa = addUnit(sim, "ARMJETH", ai, SimVector(80_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultBrutalProfile();
+        profile.attackArmySize = 3;
+        profile.retreatArmySize = 2;
+        profile.scoutCount = 0;
+
+        SECTION("one anti-air unit guards the slowest member of the wave, by id")
+        {
+            profile.antiAirEscortCount = 1;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.phase == GamePhase::Attack);
+            REQUIRE(bb.attackGroup.size() == 4);
+            REQUIRE(bb.antiAirUnits.size() == 2);
+
+            auto guards = ordersFor<GuardOrder>(commands, firstAa);
+            REQUIRE_FALSE(guards.empty());
+            // Guarding the slowest unit of the wave, and the first AA unit
+            // because selection is by id.
+            CHECK(guards.front().target == slowUnit);
+            CHECK(bb.attackGroup.count(slowUnit.value) == 1);
+            CHECK(ordersFor<GuardOrder>(commands, secondAa).empty());
+        }
+
+        SECTION("never all of them: one stays at the base when two stand")
+        {
+            profile.antiAirEscortCount = 5;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.antiAirUnits.size() == 2);
+            CHECK_FALSE(ordersFor<GuardOrder>(commands, firstAa).empty());
+            CHECK(ordersFor<GuardOrder>(commands, secondAa).empty());
+        }
+
+        SECTION("an aircraft in reach is still shot at first, escort or not")
+        {
+            auto planeId = addUnit(sim, "ARMPEEP", human, SimVector(100_ss, 60_ss, 30_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            auto attacks = ordersFor<AttackOrder>(commands, firstAa);
+            REQUIRE_FALSE(attacks.empty());
+            auto target = std::get_if<UnitId>(&attacks.front().target);
+            REQUIRE(target != nullptr);
+            CHECK(*target == planeId);
+        }
+
+        SECTION("an escort whose wave has ended hands the guard back and walks home")
+        {
+            // No wave: a high threshold keeps the AI in Boom. An AA unit left
+            // holding one of our guard orders must not follow the guarded unit
+            // around the base for the rest of the game.
+            profile.attackArmySize = 50;
+            profile.antiAirEscortCount = 1;
+            sim.getUnitState(firstAa).orders.push_back(GuardOrder(secondAa));
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            auto moves = ordersFor<MoveOrder>(commands, firstAa);
+            REQUIRE_FALSE(moves.empty());
+            CHECK((moves.front().destination == SimVector(0_ss, 0_ss, 0_ss)));
+        }
+
+        SECTION("off restores the old behaviour exactly: no escort, both leashed home")
+        {
+            profile.antiAirEscortCount = 0;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.phase == GamePhase::Attack);
+            CHECK(ordersFor<GuardOrder>(commands, firstAa).empty());
+            CHECK(ordersFor<GuardOrder>(commands, secondAa).empty());
+            // Both are within the 700-unit leash of the anchor, so the old
+            // path asks them for nothing at all.
+            CHECK(ordersFor<MoveOrder>(commands, firstAa).empty());
+            CHECK(ordersFor<MoveOrder>(commands, secondAa).empty());
+        }
+    }
 }

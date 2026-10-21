@@ -1,7 +1,10 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/ai/PerceptionManager.h>
 #include <rwe/ai/StrategicManager.h>
 #include <rwe/ai/ai_test_util.h>
+#include <rwe/sim/SimTicksPerSecond.h>
+#include <algorithm>
 
 /**
  * What the AI knows and when: scouting, losing a building, noticing
@@ -477,6 +480,254 @@ namespace rwe
         auto hardState = awaiting(GamePhase::Boom);
         strategic.update(hard, hardState);
         REQUIRE(hardState.phase == GamePhase::Attack);
+    }
+
+    TEST_CASE("the enemy composition memory counts roles and exposes shares", "[ai]")
+    {
+        // One contact of every role. The split is what decides which counter
+        // is worth building, so each has to land in its own bucket: a
+        // builder is a builder even though it can be shot, a tower is a
+        // static defence rather than "other", and a commander is folded with
+        // the units no other bucket names.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        auto longGun = sim.weaponDefinitions.at("LASER");
+        longGun.maxRange = 400_ss;
+        sim.weaponDefinitions["LONGGUN"] = longGun;
+        sim.unitDefinitions["ARMROCK"].weapon1 = "LONGGUN";
+
+        auto tank = makeDef(false, false, true, "LASER", 200u);
+        tank.buildCostMetal = Metal(300.0f);
+        sim.unitDefinitions["ARMTANK"] = tank;
+
+        auto bomber = makeDef(false, false, true, "LASER", 200u);
+        bomber.canFly = true;
+        sim.unitDefinitions["ARMTHUND"] = bomber;
+
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMPW", human, SimVector(100_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMROCK", human, SimVector(120_ss, 0_ss, 20_ss), script);
+        addUnit(sim, "ARMTANK", human, SimVector(80_ss, 0_ss, -40_ss), script);
+        addUnit(sim, "ARMTHUND", human, SimVector(-60_ss, 60_ss, 60_ss), script);
+        addUnit(sim, "ARMLLT", human, SimVector(40_ss, 0_ss, 100_ss), script);
+        addUnit(sim, "ARMCK", human, SimVector(-100_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMCOM", human, SimVector(0_ss, 0_ss, -100_ss), script);
+        // Beyond the AI commander's 300-unit sight: the memory is built from
+        // knownEnemies, so this one must not appear in any bucket.
+        addUnit(sim, "ARMPW", human, SimVector(800_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.compositionDecaySeconds = 0;
+        AiBlackboard bb;
+        PerceptionManager perception;
+        // The visibility grid is filled at the end of a tick, and the
+        // controller normally refreshes perception after one. Do that here so
+        // the fixture sees the contacts it placed.
+        sim.tick();
+        perception.refresh(sim, ai, profile, bb);
+
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Raider)] == 1);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::RocketArtillery)] == 1);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Tank)] == 1);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Air)] == 1);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::StaticDefence)] == 1);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Builder)] == 1);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::CommanderOrOther)] == 1);
+        CHECK(enemyRoleShare(bb.enemyRoleCounts, EnemyRole::Raider) == Catch::Approx(1.0f / 7.0f));
+
+        // And switched off it does not learn anything at all.
+        profile.enemyCompositionMemory = false;
+        AiBlackboard off;
+        perception.refresh(sim, ai, profile, off);
+        for (auto count : off.enemyRoleCounts)
+        {
+            CHECK(count == 0);
+        }
+    }
+
+    TEST_CASE("the composition memory halves on its decay clock", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        std::vector<UnitId> raiders;
+        for (int i = 0; i < 4; ++i)
+        {
+            raiders.push_back(addUnit(sim, "ARMPW", human, SimVector(SimScalar(60.0f + i * 20.0f), 0_ss, 20_ss), script));
+        }
+
+        auto profile = makeDefaultStandardProfile();
+        profile.compositionDecaySeconds = 30;
+        AiBlackboard bb;
+        PerceptionManager perception;
+        sim.tick();
+        perception.refresh(sim, ai, profile, bb);
+        REQUIRE(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Raider)] == 4);
+
+        // The contacts are gone, but the memory is not: it halves on the
+        // clock rather than vanishing with the sighting. Clear the contact
+        // list as well so this section pins the decay rather than the
+        // forget-on-looking rule.
+        for (auto id : raiders)
+        {
+            sim.getUnitState(id).markAsDead();
+        }
+        bb.knownEnemies.clear();
+        bb.now = GameTime(30u * SimTicksPerSecond);
+        perception.refresh(sim, ai, profile, bb);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Raider)] == 2);
+
+        bb.now = GameTime(60u * SimTicksPerSecond);
+        perception.refresh(sim, ai, profile, bb);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Raider)] == 1);
+
+        bb.now = GameTime(90u * SimTicksPerSecond);
+        perception.refresh(sim, ai, profile, bb);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Raider)] == 0);
+    }
+
+    TEST_CASE("both armies' metal value is exposed for the odds gate", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        auto bomber = makeDef(false, false, true, "LASER", 200u);
+        bomber.canFly = true;
+        sim.unitDefinitions["ARMTHUND"] = bomber;
+        sim.unitDefinitions["ARMPW"].buildCostMetal = Metal(120.0f);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto ours = addUnit(sim, "ARMPW", ai, SimVector(40_ss, 0_ss, 40_ss), script);
+        addUnit(sim, "ARMPW", human, SimVector(100_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMTHUND", human, SimVector(120_ss, 60_ss, 60_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        AiBlackboard bb;
+        bb.combatUnits = {ours};
+        PerceptionManager perception;
+        sim.tick();
+        perception.refresh(sim, ai, profile, bb);
+
+        // Ours is the army list the count gate also uses. Theirs is mobile
+        // armed ground value; aircraft are kept apart because they do not
+        // stand in the line the odds gate is judging.
+        CHECK(bb.armyMetal == 120.0f);
+        CHECK(bb.knownEnemyArmyMetal == 120.0f);
+        CHECK(bb.knownEnemyAirMetal == 100.0f);
+    }
+
+    TEST_CASE("the attack posture uses value odds with hysteresis", "[ai]")
+    {
+        auto profile = makeDefaultStandardProfile();
+        REQUIRE(profile.attackUsesValueOdds);
+        REQUIRE(profile.attackArmySize == 8);
+        REQUIRE(profile.retreatArmySize == 3);
+        StrategicManager strategic;
+
+        auto state = [](float ours, float theirs, int count) {
+            AiBlackboard bb;
+            bb.phase = GamePhase::Boom;
+            bb.enemyBasePosition = SimVector(2000_ss, 0_ss, 0_ss);
+            bb.armyMetal = ours;
+            bb.knownEnemyArmyMetal = theirs;
+            bb.armySize = count;
+            return bb;
+        };
+
+        SECTION("ahead in value attacks before the headcount gate")
+        {
+            auto bb = state(120.0f, 100.0f, 5);
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+            CHECK(bb.attackOddsCommitted);
+        }
+
+        SECTION("behind in value holds")
+        {
+            auto bb = state(50.0f, 100.0f, 5);
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+            CHECK_FALSE(bb.attackOddsCommitted);
+        }
+
+        SECTION("between the two ratios the committed gate holds, and only the lower one closes it")
+        {
+            auto bb = state(120.0f, 100.0f, 5);
+            strategic.update(profile, bb);
+            REQUIRE(bb.attackOddsCommitted);
+
+            // 0.8 is below attackValueRatio (1.1) but above
+            // retreatValueRatio (0.7): the gate that was already open stays
+            // open rather than thrashing on a single remembered unit.
+            bb.phase = GamePhase::Boom;
+            bb.armyMetal = 80.0f;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+            CHECK(bb.attackOddsCommitted);
+
+            // 0.6 is below the retreat ratio, so it closes.
+            bb.phase = GamePhase::Boom;
+            bb.armyMetal = 60.0f;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+            CHECK_FALSE(bb.attackOddsCommitted);
+        }
+
+        SECTION("an unknown enemy falls back to the count gate")
+        {
+            auto bb = state(0.0f, 0.0f, profile.attackArmySize);
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+            CHECK_FALSE(bb.attackOddsCommitted);
+        }
+
+        SECTION("and to patience when the count is out of reach")
+        {
+            auto bb = state(0.0f, 0.0f, profile.retreatArmySize);
+            bb.lastAttackPhase = GameTime(1);
+            bb.now = GameTime((static_cast<unsigned int>(profile.attackPatienceSeconds) + 10u) * SimTicksPerSecond);
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+        }
+
+        SECTION("neither count, patience nor value holds")
+        {
+            auto bb = state(0.0f, 0.0f, profile.retreatArmySize);
+            bb.lastAttackPhase = GameTime(1);
+            bb.now = GameTime(2);
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+            CHECK_FALSE(bb.attackOddsCommitted);
+        }
+
+        SECTION("the knob off restores the count gate")
+        {
+            profile.attackUsesValueOdds = false;
+            auto bb = state(1000.0f, 100.0f, 5);
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+            CHECK_FALSE(bb.attackOddsCommitted);
+        }
+
+        SECTION("a value lead with too few units to send still holds")
+        {
+            auto halfWave = (profile.attackArmySize + 1) / 2;
+            auto needed = std::max(profile.retreatArmySize, halfWave);
+            auto bb = state(1000.0f, 100.0f, needed - 1);
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+        }
     }
 
     TEST_CASE("an AI knob can be set by name", "[ai]")
