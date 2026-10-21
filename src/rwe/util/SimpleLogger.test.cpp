@@ -54,12 +54,49 @@ namespace rwe
             setGlobalLogger(nullptr);
 
             auto lines = readLines(path);
+#if RWE_LOG_LEVEL <= RWE_LEVEL_DEBUG
             REQUIRE(lines.size() == 4);
             REQUIRE(stripTimestamp(lines[0]) == "[info] Hello world");
             REQUIRE(stripTimestamp(lines[1]) == "[debug] Value is 42");
             REQUIRE(stripTimestamp(lines[2]) == "[error] Error in module: bad thing");
             REQUIRE(stripTimestamp(lines[3]) == "[warn] No args here");
+#else
+            REQUIRE(lines.size() == 3);
+            REQUIRE(stripTimestamp(lines[0]) == "[info] Hello world");
+            REQUIRE(stripTimestamp(lines[1]) == "[error] Error in module: bad thing");
+            REQUIRE(stripTimestamp(lines[2]) == "[warn] No args here");
+#endif
 
+            std::remove(path.c_str());
+        }
+
+        SECTION("disabled debug logging does not evaluate arguments")
+        {
+            initTestLogger(path);
+            int evaluations = 0;
+            auto diagnostic = [&] {
+                ++evaluations;
+                return "diagnostic";
+            };
+
+            // Also keep the disabled macro safe inside an unbraced if/else.
+            bool elseTaken = false;
+            if (true)
+                LOG_DEBUG << diagnostic();
+            else
+                elseTaken = true;
+
+            LOG_INFO << "still enabled";
+            setGlobalLogger(nullptr);
+
+            REQUIRE_FALSE(elseTaken);
+#if RWE_LOG_LEVEL <= RWE_LEVEL_DEBUG
+            REQUIRE(evaluations == 1);
+            REQUIRE(readLines(path).size() == 2);
+#else
+            REQUIRE(evaluations == 0);
+            REQUIRE(readLines(path).size() == 1);
+#endif
             std::remove(path.c_str());
         }
 
