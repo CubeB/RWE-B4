@@ -53,6 +53,64 @@ The **nightly** release follows development on `revival`. Dated **weekly**
 releases provide snapshots you can return to. Read the release notes for the
 build revision and included changes.
 
+### Install from a terminal
+
+Install the nightly build for your user account. **No Python, package manager,
+compilation, or administrator access is needed.** Published builds support
+x86-64 Windows and Linux.
+
+**Windows (PowerShell):**
+
+Paste this command into PowerShell:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/CubeB/RWE-B4/revival/install.ps1)))
+```
+
+Then import your game data and play:
+
+```powershell
+rwe-setup --from "C:\GOG Games\Total Annihilation"
+rwe
+```
+
+Uses built-in Windows PowerShell 5.1 or newer. Installs in `%LOCALAPPDATA%\RWE`,
+adds that directory to your user PATH, and creates a Start menu shortcut.
+
+**Linux:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CubeB/RWE-B4/revival/install.sh | sh
+~/.local/bin/rwe-setup --from "/path/to/Total Annihilation"
+~/.local/bin/rwe
+```
+
+Uses standard Linux shell tools and `curl` (or download with `wget` and run
+`sh install.sh`). Installs in `${XDG_DATA_HOME:-$HOME/.local/share}/rwe/program`
+and puts launch commands in `~/.local/bin`. Add `~/.local/bin` to PATH if needed.
+AppImages require FUSE; without it, run
+`APPIMAGE_EXTRACT_AND_RUN=1 ~/.local/bin/rwe`. A graphical desktop and OpenGL
+are required to play.
+
+Both installers check release checksums. Run the same command again to update;
+previous versions, imported game data, and saves are retained. Replace the
+game-data folder with your own copy of Total Annihilation.
+
+To choose another release or directory on Windows:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/CubeB/RWE-B4/revival/install.ps1))) -Release weekly-2026-10-19 -InstallDir "$env:LOCALAPPDATA\RWE"
+```
+
+On Linux, set `RWE_RELEASE`, `RWE_INSTALL_DIR`, or `RWE_BIN_DIR` on the `sh`
+command, for example:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CubeB/RWE-B4/revival/install.sh | RWE_RELEASE=weekly-2026-10-19 sh
+```
+
+From a checkout, use `& .\install.ps1` or `sh install.sh`.
+
 ### 2. Import your Total Annihilation data
 
 On Windows, leave **Open game setup** checked at the end of the installer.
