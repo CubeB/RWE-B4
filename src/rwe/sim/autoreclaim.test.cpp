@@ -217,7 +217,8 @@ namespace rwe
         }
 
         REQUIRE_FALSE(sim.tryGetFeature(wreckId).has_value());
-        REQUIRE(sim.getPlayer(player).metal.value > 0.0f);
+        // RA-04 lump payout can precede the next resource settlement.
+        REQUIRE(sim.getPlayer(player).metal.value + sim.getPlayer(player).metalProductionBuffer.value > 0.0f);
         // The route is still there underneath: patrol never finishes.
         REQUIRE_FALSE(sim.getUnitState(kbotId).orders.empty());
     }

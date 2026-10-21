@@ -53,35 +53,6 @@ namespace rwe
         return visibility.isVisible(sim.visionCellAt(position));
     }
 
-    bool structureGroundIsInSight(const GameSimulation& sim, const PlayerVisibility& visibility, const SimVector& position, const UnitDefinition& definition)
-    {
-        if (!visibility.isVisible(sim.visionCellAt(position)))
-        {
-            return false;
-        }
-
-        auto [footprintX, footprintZ] = sim.getFootprintXZ(definition.movementCollisionInfo);
-        auto halfX = intToSimScalar(static_cast<int>(footprintX) * 8);
-        auto halfZ = intToSimScalar(static_cast<int>(footprintZ) * 8);
-        for (auto signX : {-1, 1})
-        {
-            for (auto signZ : {-1, 1})
-            {
-                auto corner = SimVector(
-                    position.x + (signX < 0 ? -halfX : halfX),
-                    position.y,
-                    position.z + (signZ < 0 ? -halfZ : halfZ));
-                auto cell = sim.visionCellAt(corner);
-                if (visibility.contains(cell) && !visibility.isVisible(cell))
-                {
-                    return false;
-                }
-            }
-        }
-
-        return true;
-    }
-
     WeaponImpactEffects computeWeaponImpactEffects(const WeaponMediaInfo& weapon, ImpactType impactType, bool positionVisible)
     {
         if (!positionVisible)

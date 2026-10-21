@@ -496,12 +496,41 @@ namespace rwe
         auto builderId = addBuilderUnit(sim, player, rockPosition + SimVector(40_ss, 0_ss, 0_ss), script);
         sim.getUnitState(builderId).orders.push_back(ReclaimOrder(rockId));
 
-        // 150 work at 30 per tick = 5 ticks of reclaiming, plus one tick to
-        // enter the reclaiming state. Allow some slack.
-        for (int i = 0; i < 20 && sim.tryGetFeature(rockId); ++i)
+        // RA-04: ground T=90, payout 92 ticks after the first decrement.
+        unsigned int duration = 92;
+        SECTION("ground constructor") {}
+        SECTION("aircraft needs no build stance")
+        {
+            sim.unitDefinitions.at("builder").canFly = true;
+            sim.getUnitState(builderId).inBuildStance = false;
+            sim.getUnitState(builderId).physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+            duration = 106; // aircraft T=105, rounded to a two-tick deadline
+        }
+        SECTION("worker speed and wreck damage do not change the timer")
+        {
+            sim.unitDefinitions.at("builder").workerTimePerTick = 1000;
+            sim.getFeature(rockId).hitPoints = 24000;
+        }
+
+        // Locate the first actual work visit, excluding approach/arm delay.
+        bool working = false;
+        for (int i = 0; i < 30 && !working; ++i)
         {
             sim.tick();
+            auto state = std::get_if<UnitBehaviorStateReclaiming>(&sim.getUnitState(builderId).behaviourState);
+            working = state && state->stepCounter == 1;
         }
+        REQUIRE(working);
+        for (unsigned int i = 1; i < duration; ++i)
+        {
+            REQUIRE(sim.tryGetFeature(rockId));
+            REQUIRE(sim.getFeature(rockId).reclaimProgress == 0);
+            REQUIRE(sim.getPlayer(player).metalProductionBuffer.value == 0.0f);
+            REQUIRE(sim.getPlayer(player).metal.value == 0.0f);
+            sim.tick();
+        }
+        REQUIRE(sim.tryGetFeature(rockId));
+        sim.tick();
 
         REQUIRE_FALSE(sim.tryGetFeature(rockId).has_value());
         const auto& builder = sim.getUnitState(builderId);
