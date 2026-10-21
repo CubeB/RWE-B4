@@ -1940,4 +1940,68 @@ namespace rwe
             CHECK(types.front() != "ARMMEX");
         }
     }
+
+    TEST_CASE("the humanlike opening asks for outside economy sites up to the replay target", "[ai]")
+    {
+        // The recorded winners hold ten economy sites outside the opening base
+        // against six for the losers, with the first at 213 s. The push is a
+        // bias on the ordinary extractor growth: this fixture already has a
+        // constructor, a factory, and one extractor past the opening set at
+        // home, so neither the single-extractor deadline nor the ordinary
+        // targetMetalExtractorCount can ask for another on its own.
+        OpeningFixture f;
+        auto profile = f.profile(true);
+        profile.targetMetalExtractorCount = profile.openingMetalExtractorCount;
+        addUnit(f.sim, "ARMLAB", f.ai, SimVector(100_ss, 0_ss, 0_ss), f.script);
+        addUnit(f.sim, "ARMCK", f.ai, SimVector(200_ss, 0_ss, 0_ss), f.script);
+        addUnit(f.sim, "ARMMEX", f.ai, SimVector(0_ss, 0_ss, 300_ss), f.script);
+
+        auto asksForExtractor = [](const std::vector<std::string>& types) {
+            return std::find(types.begin(), types.end(), "ARMMEX") != types.end();
+        };
+
+        SECTION("before the recorded deadline the ordinary target governs")
+        {
+            auto types = f.planAt(200, profile);
+            CHECK_FALSE(asksForExtractor(types));
+        }
+
+        SECTION("on, past the deadline and short of sites, another extractor is the next job")
+        {
+            auto types = f.planAt(214, profile);
+            REQUIRE(!types.empty());
+            CHECK(types.front() == "ARMMEX");
+        }
+
+        SECTION("off, the ordinary target still governs")
+        {
+            auto off = f.profile(false);
+            off.targetMetalExtractorCount = off.openingMetalExtractorCount;
+            auto types = f.planAt(214, off);
+            CHECK_FALSE(asksForExtractor(types));
+        }
+
+        SECTION("ten outside economy sites satisfy the push")
+        {
+            for (int i = 0; i < 10; ++i)
+            {
+                addUnit(f.sim, "ARMMEX", f.ai, SimVector(950_ss, 0_ss, SimScalar(static_cast<float>(i) * 90.0f)), f.script);
+            }
+            auto types = f.planAt(214, profile);
+            CHECK_FALSE(asksForExtractor(types));
+        }
+
+        SECTION("no free deposit: the ordinary site search still refuses the job")
+        {
+            for (int y = 0; y < 4; ++y)
+            {
+                for (int x = 24; x < 28; ++x)
+                {
+                    f.sim.metalGrid.set(x, y, static_cast<unsigned char>(0));
+                }
+            }
+            auto types = f.planAt(214, profile);
+            CHECK_FALSE(asksForExtractor(types));
+        }
+    }
 }

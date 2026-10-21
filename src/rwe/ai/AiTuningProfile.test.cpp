@@ -211,7 +211,8 @@ namespace rwe
         CHECK_FALSE(p.humanlikeOpening);
         CHECK(p.openingFactoryBySeconds == 60);
         CHECK(p.openingConstructorBySeconds == 150);
-        CHECK(p.openingExpansionBySeconds == 240);
+        CHECK(p.openingExpansionBySeconds == 213);
+        CHECK(p.openingExpansionSites == 10);
         CHECK(p.openingAttackArmySize == 7);
         CHECK(p.openingAttackBySeconds == 450);
 
@@ -231,6 +232,8 @@ namespace rwe
         CHECK(p.openingConstructorBySeconds == 120);
         REQUIRE(applyAiTuning(p, "openingExpansionBySeconds", "210"));
         CHECK(p.openingExpansionBySeconds == 210);
+        REQUIRE(applyAiTuning(p, "openingExpansionSites", "12"));
+        CHECK(p.openingExpansionSites == 12);
         REQUIRE(applyAiTuning(p, "openingAttackArmySize", "6"));
         CHECK(p.openingAttackArmySize == 6);
         REQUIRE(applyAiTuning(p, "openingAttackBySeconds", "420"));
@@ -249,6 +252,7 @@ namespace rwe
         CHECK(names.count("openingFactoryBySeconds") == 1);
         CHECK(names.count("openingConstructorBySeconds") == 1);
         CHECK(names.count("openingExpansionBySeconds") == 1);
+        CHECK(names.count("openingExpansionSites") == 1);
         CHECK(names.count("openingAttackArmySize") == 1);
         CHECK(names.count("openingAttackBySeconds") == 1);
     }
@@ -299,5 +303,37 @@ namespace rwe
         CHECK(names.count("defenceResponseMinUnits") == 1);
         CHECK(names.count("recallThreatRatio") == 1);
         CHECK(names.count("threatDirectedDefence") == 1);
+    }
+
+    // The seventh batch: the synchronized second axis and the replay-derived
+    // outside-economy target. The raid sync is on by default and its off value
+    // restores immediate dispatch exactly; the site count is only read with
+    // humanlikeOpening on.
+    TEST_CASE("the synchronized raid and opening expansion-site knobs are listed and settable")
+    {
+        AiTuningProfile p;
+        CHECK(p.syncRaidWithWave);
+        CHECK(p.syncWindowSeconds == 15);
+        CHECK(p.openingExpansionSites == 10);
+
+        REQUIRE(applyAiTuning(p, "syncRaidWithWave", "false"));
+        CHECK_FALSE(p.syncRaidWithWave);
+        REQUIRE(applyAiTuning(p, "syncRaidWithWave", "true"));
+        CHECK(p.syncRaidWithWave);
+        REQUIRE(applyAiTuning(p, "syncWindowSeconds", "0"));
+        CHECK(p.syncWindowSeconds == 0);
+        REQUIRE(applyAiTuning(p, "syncWindowSeconds", "30"));
+        CHECK(p.syncWindowSeconds == 30);
+        REQUIRE(applyAiTuning(p, "openingExpansionSites", "0"));
+        CHECK(p.openingExpansionSites == 0);
+
+        std::set<std::string> names;
+        for (const auto& knob : listAiKnobs())
+        {
+            names.insert(knob.name);
+        }
+        CHECK(names.count("syncRaidWithWave") == 1);
+        CHECK(names.count("syncWindowSeconds") == 1);
+        CHECK(names.count("openingExpansionSites") == 1);
     }
 }

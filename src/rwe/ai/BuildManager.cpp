@@ -3043,7 +3043,7 @@ namespace rwe
         return std::nullopt;
     }
 
-    std::vector<std::string> BuildManager::buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase, const std::optional<OutpostDefencePlan>& outpost, const std::optional<FortificationPlan>& fortify, const std::optional<DefenceRebuildPlan>& rebuild, const std::string& builderType, bool enemyNavalSeen) const
+    std::vector<std::string> BuildManager::buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase, const std::optional<OutpostDefencePlan>& outpost, const std::optional<FortificationPlan>& fortify, const std::optional<DefenceRebuildPlan>& rebuild, const std::string& builderType, bool enemyNavalSeen, int economySitesOutsideBase) const
     {
         const auto& s = bb.sideUnits;
         // Count what exists or is already going up, so we don't double up.
@@ -3242,6 +3242,25 @@ namespace rwe
             // the constructor's job, and the report's median is 213 s.
             if (hasFactory && openingDeadlineReached(profile.openingExpansionBySeconds, bb.now)
                 && totalExtractors() <= profile.openingMetalExtractorCount)
+            {
+                wantMetalExtractor();
+            }
+            // The outside-economy push (openingExpansionSites). The recorded
+            // winners hold ten economy sites beyond their opening base against
+            // six for the losers, so once the factory and its constructor
+            // stand, another extractor is asked for until that many of our
+            // economy buildings stand outside defendRadius or the map runs
+            // out. It is a bias on the ordinary growth, not a script: the
+            // job is sited by the same search, refused on unreachable ground
+            // and unaffordable metal by the same planner, and the base-under-
+            // attack guard above takes precedence. The single-extractor rule
+            // just above stays, so a side with no constructor still gets the
+            // old deadline behaviour.
+            if (profile.openingExpansionSites > 0
+                && hasFactory && total(s.constructor) >= 1
+                && openingDeadlineReached(profile.openingExpansionBySeconds, bb.now)
+                && economySitesOutsideBase < profile.openingExpansionSites
+                && totalExtractors() < profile.openingMetalExtractorCount + profile.openingExpansionSites)
             {
                 wantMetalExtractor();
             }
@@ -5872,6 +5891,38 @@ namespace rwe
         indexGeothermalVents(sim);
         const auto& sideUnits = bb.sideUnits;
 
+        // How much of our economy stands outside the opening base. Read only
+        // by the humanlike opening's expansion push, so it costs nothing when
+        // that knob is off. Counted from the unit list by position rather
+        // than from ownedTotalCounts, which has no positions: an extractor or
+        // generator beyond defendRadius is the AI-side reading of the replay
+        // report's "economy sites outside the opening base". Iteration is the
+        // simulation's id-ordered unit map, so the count is the same on every
+        // peer.
+        int economySitesOutsideBase = 0;
+        if (profile.humanlikeOpening && bb.baseAnchor)
+        {
+            auto baseRadiusSquared = profile.defendRadius * profile.defendRadius;
+            for (const auto& [_, unit] : sim.units)
+            {
+                if (unit.owner != aiOwner || !unit.isAlive())
+                {
+                    continue;
+                }
+                if (unit.unitType != sideUnits.metalExtractor
+                    && unit.unitType != sideUnits.underwaterMetalExtractor
+                    && unit.unitType != sideUnits.solar
+                    && unit.unitType != sideUnits.tidalGenerator)
+                {
+                    continue;
+                }
+                if (unit.position.distanceSquared(*bb.baseAnchor) > baseRadiusSquared)
+                {
+                    ++economySitesOutsideBase;
+                }
+            }
+        }
+
         // Whether the income has outrun what there is to spend it with
         // (spendSurplusOnCapacity). Demand is what the running jobs draw, so
         // a base whose builders and factories are all busy reads near its
@@ -6421,7 +6472,7 @@ namespace rwe
         const auto builderMc = sim.getAdHocMovementClass(builderDef.movementCollisionInfo);
         const bool builderIsShip = builderDef.isMobile && !builderDef.canFly && builderMc.minWaterDepth > 0;
         const bool builderAfloat = profile.navalBuildersPlanForBase && builderIsShip;
-        auto priorities = buildPriorities(profile, bb, builderAtBase || builderAfloat, outpost, fortify, rebuild, builder.unitType, enemyNavalSeen);
+        auto priorities = buildPriorities(profile, bb, builderAtBase || builderAfloat, outpost, fortify, rebuild, builder.unitType, enemyNavalSeen, economySitesOutsideBase);
         // A construction unit kept beyond targetConstructorCount for the
         // metal left lying about expands first (expansionConstructors):
         // the newest ones, in id order, past the first
@@ -6429,11 +6480,17 @@ namespace rwe
         // first-expansion time has passed and the opening set has still not
         // grown, the FIRST constructor expands first too: the report's
         // winners take an outside site by about 213 s and losers by 252 s.
+        // The same exemption lasts while the outside-site push is still
+        // short of openingExpansionSites, so the constructor that is already
+        // out keeps taking ground rather than going back to base jobs the
+        // moment the opening count is met.
         auto openingExtractors = countOf(bb.ownedTotalCounts, sideUnits.metalExtractor)
             + countOf(bb.ownedTotalCounts, sideUnits.underwaterMetalExtractor);
         auto openingExpansionDue = profile.humanlikeOpening && bb.enemiesNearBase.empty()
             && openingDeadlineReached(profile.openingExpansionBySeconds, bb.now)
-            && openingExtractors <= profile.openingMetalExtractorCount;
+            && (openingExtractors <= profile.openingMetalExtractorCount
+                || (profile.openingExpansionSites > 0
+                    && economySitesOutsideBase < profile.openingExpansionSites));
         if ((profile.expansionConstructors > 0 || openingExpansionDue) && !builderDef.commander && builder.unitType == sideUnits.constructor && builderAtBase
             && bb.buildTree.canBuild(builder.unitType, sideUnits.metalExtractor))
         {

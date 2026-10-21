@@ -392,3 +392,23 @@ maps, and remain default-on for human play, where base raids are the case they
 exist for. No strength claim is made. The AI suite passes (297 cases / 10202
 assertions); the full permitted suite passes at 1892 cases / 194709
 assertions. Raw games are under `D:/tmp/rwe-ai6/`.
+
+## Seventh AI batch: synchronized second axis and replay expansion target
+
+2026-10-21. RWE-AI only. `syncRaidWithWave` (default true, 15 s window) holds a
+formed raid at the rally until the wave records contact, reaches its objective,
+or the window expires, then releases it at the outlying target. The
+`humanlikeOpening` posture gains `openingExpansionSites = 10` and moves its
+first-expansion deadline to **213 s**, matching the replay study; it remains
+default-off.
+
+Twenty-four games on Great Divide (5201-5204) and Dark Side (5301-5304),
+1800 s, RWE against the classic personality: batch 6, batch 7 defaults, and
+batch 7 with `syncRaidWithWave=false`. **Batch 7 produced the identical game to
+the off arm in seven of eight seeds** (GD 5204 26071 vs 26341); all RWE wins.
+The synchronized raid does not bind against the classic AI, and the expansion
+posture is off by default, so this batch is neutral here. Keep sync on for
+human play, where the second axis has something to time against.
+
+The AI suite passes (299 cases / 10224 assertions); the full permitted suite
+result is in the session report. Raw games are under `D:/tmp/rwe-ai7/`.

@@ -46,21 +46,26 @@ namespace rwe
          * control. With it on, BuildManager lets a deadline that has passed
          * unmet pull that item ahead of the ordinary economy order -- the
          * first factory by openingFactoryBySeconds, a first constructor out
-         * of the factory by openingConstructorBySeconds, and one extractor
-         * beyond the opening set by openingExpansionBySeconds -- and
+         * of the factory by openingConstructorBySeconds, one extractor
+         * beyond the opening set by openingExpansionBySeconds, and then
+         * outside economy sites up to openingExpansionSites -- and
          * StrategicManager lets the first wave go at openingAttackArmySize
          * once openingAttackBySeconds has passed. Nothing here bypasses the
          * ordinary gates: every job is still sited, mission-filtered and
          * affordability-tested, a base under attack keeps its existing
          * priorities, and a wave still needs a target and something worth
-         * sending.
+         * sending. The expansion target is a bias on the ordinary extractor
+         * growth, not a script: it stops when the sites are there, when the
+         * deposits run out, or when the builder cannot reach them, and the
+         * ordinary targetMetalExtractorCount rule is untouched.
          *
          * The numbers are the medians of twelve OTA-family recordings
          * (D:\tmp\replay-decisions\REPORT.md, 2026-10-20): factory 57.7 s,
          * first constructor 145 s (winners) / 182 s (losers), first
-         * expansion 213 s (winners) / 252 s (losers), first army attack
-         * 452 s with 7 combat units (winners) against 1207 s with 4
-         * (losers). They are hypotheses from a small sample, not
+         * expansion 213 s (winners) / 252 s (losers), ten economy sites
+         * outside the opening base for winners against six for losers, first
+         * army attack 452 s with 7 combat units (winners) against 1207 s
+         * with 4 (losers). They are hypotheses from a small sample, not
          * original-game parity, and they do not alter the measured CORE
          * composition shares.
          */
@@ -69,8 +74,31 @@ namespace rwe
         int openingFactoryBySeconds{60};
         /** Opening deadline for the first constructor out of the factory, in seconds. */
         int openingConstructorBySeconds{150};
-        /** Opening deadline for one extractor beyond the opening set, in seconds. */
-        int openingExpansionBySeconds{240};
+        /**
+         * Opening deadline for the first outside economy, in seconds.
+         *
+         * The recordings put the winners' first expansion at 213 s; this was
+         * 240 s in the first opening batch, which delayed the extractor the
+         * knob exists to ask for. The deadline is when the push starts, not
+         * when it must be complete: a metal extractor cannot be paid for on
+         * the same tick the income arrives.
+         */
+        int openingExpansionBySeconds{213};
+        /**
+         * How many economy sites outside the opening base the opening push
+         * asks for. Winners hold a median of ten against six for losers.
+         *
+         * Only read when humanlikeOpening is on. The push starts once the
+         * opening factory and a constructor stand and openingExpansionBySeconds
+         * has passed, and asks for another extractor (the ordinary
+         * wantMetalExtractor, dry or submerged) while fewer than this many of
+         * our economy buildings stand beyond defendRadius of the base. It is
+         * a bias on the ordinary growth rules: the same site search, mission
+         * filtering, affordability test (with the existing economy exemption)
+         * and base-under-attack guard still decide. Zero disables the push
+         * while leaving the single-extractor deadline above in place.
+         */
+        int openingExpansionSites{10};
         /** The first wave may go at this many combat units once openingAttackBySeconds has passed. */
         int openingAttackArmySize{7};
         /** Earliest time the opening attack window may call the first wave, in seconds. */
@@ -2456,6 +2484,39 @@ namespace rwe
         bool raidingParties{true};
         /** How many units go on a raid. */
         int raidPartySize{3};
+        /**
+         * Hold a newly formed raid at the rally point until the wave it was
+         * formed behind is close to contact or to its objective, then release
+         * it at the outlying target.
+         *
+         * A raid formed the moment the wave leaves is a second army walking
+         * out at the same time, and the defender answers whichever arrives
+         * first. The recorded games are two-axis in this respect: the main
+         * body draws the response and the economy raid arrives while it is
+         * being answered. This is the smallest version of that idea -- the
+         * existing raid party, kept at the rally until the wave has either
+         * met something (waveContactAt, or a known enemy within
+         * waveMeetEnemyRadius of the wave) or come within
+         * waveMeetEnemyRadius of the target it was sent at. syncWindowSeconds
+         * bounds the wait so a wave that stalls far from both still releases
+         * the raid rather than leaving it at home for the whole game.
+         *
+         * If the wave dies or the attack ends first, the raid group is
+         * cleared and its units gather for the next wave, exactly as they did
+         * before this knob existed.
+         *
+         * Off restores immediate dispatch on the formation pass exactly, and
+         * is the control arm for a paired arena run. RWE-original policy
+         * (docs/agents/rwe-ai-adaptability.md S:5); the original's computer
+         * player has no synchronized second axis.
+         */
+        bool syncRaidWithWave{true};
+        /**
+         * The longest a synchronized raid waits at the rally, in seconds.
+         * Zero releases it on the formation pass, which with the knob above
+         * off is the old behaviour. A negative value is clamped to zero.
+         */
+        int syncWindowSeconds{15};
         /** A raid target must be at least this far from the enemy's base. */
         SimScalar raidAvoidBaseRadius{900_ss};
         /**

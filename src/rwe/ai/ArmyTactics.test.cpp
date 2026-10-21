@@ -141,6 +141,10 @@ namespace rwe
         profile.raidAvoidBaseRadius = 900_ss;
         profile.attackInWaves = true;
         profile.tacticalTickInterval = 1;
+        // These cases are about which building is chosen; the synchronized
+        // dispatch has its own tests below and would otherwise hold the
+        // raiders at the rally on the formation pass.
+        profile.syncRaidWithWave = false;
 
         ThreatMap threatMap(64, 64);
         ArmyManager army;
@@ -273,9 +277,11 @@ namespace rwe
         profile.attackInWaves = true;
         profile.tacticalTickInterval = 1;
         // The frame preference is the subject; focus fire and visibility have
-        // their own cases.
+        // their own cases. Synchronized dispatch has its own tests, so this
+        // case keeps the immediate send it has always asserted.
         profile.focusFire = false;
         profile.cheatModeOmniscient = true;
+        profile.syncRaidWithWave = false;
 
         ThreatMap threatMap(64, 64);
         ArmyManager army;
@@ -367,6 +373,143 @@ namespace rwe
         }
     }
 
+    TEST_CASE("a synchronized raid waits for the wave and then goes", "[ai]")
+    {
+        // The raid is still the same party at the same outlying building; what
+        // this case decides is when it leaves. A raid that forms and sets off
+        // with the wave is a second army arriving at the same time, and the
+        // replay study's winners are two-axis: the wave draws the answer and
+        // the economy raid lands while it is being answered.
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai");
+        auto enemy = addPlayer(sim, "enemy");
+        sim.unitDefinitions["UNIT"] = UnitDefinition{};
+        auto script = makeEmptyCobScript();
+
+        std::vector<UnitId> units;
+        for (int i = 0; i < 5; ++i)
+        {
+            units.push_back(addUnitOfType(sim, "UNIT", ai, SimVector(SimScalar(i * 40.0f), 0_ss, 0_ss), script));
+        }
+        units = ascendingIds(units);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.raidingParties = true;
+        profile.raidPartySize = 2;
+        profile.raidAvoidBaseRadius = 900_ss;
+        profile.syncRaidWithWave = true;
+        profile.syncWindowSeconds = 15;
+        profile.attackInWaves = true;
+        profile.retreatArmySize = 1;
+        profile.tacticalTickInterval = 1;
+        profile.waveMeetEnemyRadius = 900_ss;
+        profile.cheatModeOmniscient = true;
+
+        ThreatMap threatMap(64, 64);
+        ArmyManager army;
+        std::vector<PlayerCommand> commands;
+
+        AiBlackboard bb;
+        bb.phase = GamePhase::Attack;
+        bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+        bb.enemyBasePosition = SimVector(4000_ss, 0_ss, 0_ss);
+        bb.combatUnits = units;
+        for (int i = 0; i < 3; ++i)
+        {
+            bb.attackGroup.insert(units[i].value);
+        }
+
+        auto outlyingPosition = SimVector(1500_ss, 0_ss, 0_ss);
+        auto outlyingId = addUnitOfType(sim, "UNIT", enemy, outlyingPosition, script);
+        bb.knownEnemies[outlyingId.value] = makeKnownBuilding(outlyingId, outlyingPosition);
+
+        auto raidMovesAtOutlying = [&]() {
+            std::size_t moves = 0;
+            for (int i = 3; i < 5; ++i)
+            {
+                for (const auto& move : ordersFor<MoveOrder>(commands, units[i]))
+                {
+                    if (move.destination.distanceSquared(outlyingPosition) == 0_ss)
+                    {
+                        ++moves;
+                    }
+                }
+            }
+            return moves;
+        };
+
+        SECTION("the raid waits at home while the wave is far from both contact and its objective")
+        {
+            army.update(sim, ai, profile, threatMap, bb, commands);
+
+            REQUIRE(bb.raidGroup.size() == 2);
+            CHECK_FALSE(bb.raidTarget.has_value());
+            CHECK(raidMovesAtOutlying() == 0);
+        }
+
+        SECTION("contact with the wave releases it at once")
+        {
+            bb.waveContactAt = GameTime(1u);
+            army.update(sim, ai, profile, threatMap, bb, commands);
+
+            REQUIRE(bb.raidTarget.has_value());
+            CHECK(bb.raidTarget->distanceSquared(outlyingPosition) == 0_ss);
+            CHECK(raidMovesAtOutlying() == 2);
+        }
+
+        SECTION("the sync window expires and the raid goes without contact")
+        {
+            army.update(sim, ai, profile, threatMap, bb, commands);
+            REQUIRE_FALSE(bb.raidTarget.has_value());
+
+            bb.now = GameTime(static_cast<unsigned int>(profile.syncWindowSeconds + 1) * SimTicksPerSecond);
+            army.update(sim, ai, profile, threatMap, bb, commands);
+
+            REQUIRE(bb.raidTarget.has_value());
+            CHECK(raidMovesAtOutlying() == 2);
+        }
+
+        SECTION("the wave reaching its objective releases the raid")
+        {
+            for (int i = 0; i < 3; ++i)
+            {
+                sim.getUnitState(units[i]).position = SimVector(3800_ss, 0_ss, 0_ss);
+            }
+            army.update(sim, ai, profile, threatMap, bb, commands);
+
+            REQUIRE(bb.raidTarget.has_value());
+            CHECK(raidMovesAtOutlying() == 2);
+        }
+
+        SECTION("off dispatches on the formation pass exactly as before")
+        {
+            profile.syncRaidWithWave = false;
+            army.update(sim, ai, profile, threatMap, bb, commands);
+
+            REQUIRE(bb.raidTarget.has_value());
+            CHECK(raidMovesAtOutlying() == 2);
+        }
+
+        SECTION("the wave dying first returns the raid to the next wave")
+        {
+            army.update(sim, ai, profile, threatMap, bb, commands);
+            REQUIRE(bb.raidGroup.size() == 2);
+
+            for (int i = 0; i < 3; ++i)
+            {
+                sim.killUnit(units[i]);
+            }
+            bb.combatUnits.assign(units.begin() + 3, units.end());
+            // One pass prunes the dead from the wave, the next notices the
+            // wave is gone and gives the raiders back.
+            army.update(sim, ai, profile, threatMap, bb, commands);
+            army.update(sim, ai, profile, threatMap, bb, commands);
+
+            CHECK(bb.raidGroup.empty());
+            CHECK_FALSE(bb.raidTarget.has_value());
+        }
+    }
+
     TEST_CASE("a raid on an expansion frame attacks it explicitly", "[ai]")
     {
         // Ordinary acquisition skips a nanoframe on purpose. A raid sent for
@@ -412,6 +555,9 @@ namespace rwe
         profile.tacticalTickInterval = 1;
         profile.focusFire = false;
         profile.cheatModeOmniscient = true;
+        // The explicit attack order is the subject; synchronized dispatch
+        // would hold the raider at the rally on the formation pass.
+        profile.syncRaidWithWave = false;
 
         ThreatMap threatMap(64, 64);
         ArmyManager army;

@@ -1047,7 +1047,12 @@ namespace rwe
          * next wave, never from the wave that is already out.
          */
         std::set<unsigned int> raidGroup;
-        /** Where the raid is headed, if one is out. */
+        /**
+         * Where the raid is headed, if one is out. Unset while
+         * AiTuningProfile::syncRaidWithWave holds a newly formed raid at the
+         * rally: the group exists but has no errand yet, which is what sends
+         * its units to the rally point in the per-unit pass.
+         */
         std::optional<SimVector> raidTarget;
         /**
          * The unit the raid is aimed at when it is an expansion frame or the
@@ -1063,6 +1068,23 @@ namespace rwe
          * the chosen raid target is an ordinary finished building.
          */
         std::optional<UnitId> raidAttackTarget;
+        /**
+         * When the raid now out was formed, for AiTuningProfile::
+         * syncRaidWithWave. The raid is held at the rally while this pass
+         * finds the wave still short of contact and short of its objective,
+         * and while now is inside syncWindowSeconds of this tick. Reset with
+         * the group, so a new raid behind the next wave gets its own window.
+         * Unset with the knob off.
+         */
+        std::optional<GameTime> raidFormedAt;
+        /**
+         * Whether the dispatch of the raid above has been logged and
+         * announced. With synchronization on the send happens at release
+         * rather than at formation, and both happen once; with the knob off
+         * it is set on the formation pass, which is where the dispatch has
+         * always been made.
+         */
+        bool raidDispatched{false};
 
         /**
          * The single enemy the wave's units concentrate on
