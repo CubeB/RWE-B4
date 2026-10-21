@@ -586,7 +586,16 @@ int main(int argc, char* argv[])
                 {
                     message += "  " + path.string() + "\n";
                 }
-                message += "\nRun rwe_setup to copy it from your Total Annihilation\n";
+                // INSTALL-UX-001: lead first-run help with the graphical setup.
+#ifdef RWE_PLATFORM_WINDOWS
+                message += "\nOpen Import Game Data from the Start menu, or double-click\n";
+                message += "Import Game Data.cmd in your extracted RWE folder.\n";
+                message += "Choose Import game files, then Play now when it finishes.\n";
+#else
+                message += "\nUsing the AppImage? Open its setup assistant with:\n";
+                message += "    ./Robot_War_Engine-*.AppImage setup\n";
+#endif
+                message += "\nYou can also run rwe_setup to copy it from your Total Annihilation\n";
                 message += "installation. It will find one by itself if it can:\n\n";
                 message += "    rwe_setup\n\n";
                 message += "or point it at one:\n\n";

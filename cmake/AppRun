@@ -17,6 +17,12 @@ HERE="$(dirname "$(readlink -f "$0")")"
 case "$1" in
     setup|rwe_setup)
         shift
+        # INSTALL-UX-001: explicit CLI options retain their existing behavior.
+        # With no options, offer a folder picker on graphical desktops.
+        if [ "$#" -eq 0 ] && command -v zenity >/dev/null 2>&1 &&
+            { [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; }; then
+            exec "$HERE/usr/bin/rwe-setup-gui"
+        fi
         exec "$HERE/usr/bin/rwe_setup" "$@"
         ;;
     *)

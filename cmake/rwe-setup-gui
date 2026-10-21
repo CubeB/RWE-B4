@@ -1,0 +1,40 @@
+#!/bin/sh
+# INSTALL-UX-001: presentation only; the existing CLI still selects/copies data.
+# Invoked by AppRun setup with no arguments when Zenity is available.
+set -u
+HERE="$(dirname "$(readlink -f "$0")")"
+IMPORTER="$HERE/rwe_setup"
+log=$(mktemp) || exit 1
+trap 'rm -f "$log"' EXIT HUP INT TERM
+
+folder=$(zenity --file-selection --directory \
+    --title="Choose the Total Annihilation folder containing totala1.hpi") || exit 0
+[ -n "$folder" ] || exit 0
+zenity --question --title="Import game files into Robot War Engine" \
+    --no-markup \
+    --text="Copy game data, movies and music from:\n$folder\n\nYour original files stay in place. Existing complete files will be kept." \
+    --ok-label="Import game files" --cancel-label="Set up later" || exit 0
+
+# Keep the pipe producer as the importer so progress closes only when copying
+# finishes. Preserve the importer's exit status separately from Zenity's.
+result=$(mktemp) || exit 1
+trap 'rm -f "$log" "$result"' EXIT HUP INT TERM
+(
+    "$IMPORTER" --from "$folder" >"$log" 2>&1
+    echo "$?" >"$result"
+    echo 100
+) | zenity --progress --pulsate --auto-close --no-cancel \
+    --title="Setting up Robot War Engine" \
+    --text="Importing game files. Large installations may take a few minutes..."
+
+if [ "$(cat "$result")" != 0 ]; then
+    zenity --text-info --title="Game files could not be imported" --filename="$log" \
+        --width=650 --height=400
+    exit 1
+fi
+if zenity --question --title="Ready to play" --text="Your game files are installed." \
+    --ok-label="Play now" --cancel-label="Close"; then
+    rm -f "$log" "$result"
+    trap - EXIT HUP INT TERM
+    exec "$HERE/rwe"
+fi

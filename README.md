@@ -55,7 +55,17 @@ build revision and included changes.
 
 ### 2. Import your Total Annihilation data
 
-On Windows, open a terminal in the installed or extracted game directory:
+On Windows, leave **Open game setup** checked at the end of the installer.
+Choose **Import game files** to search automatically, or use **Browse** to
+select your Total Annihilation folder. When setup finishes, choose **Play now**.
+You can reopen **Import Game Data** from the Start menu. With the portable
+ZIP, extract it first and double-click **Import Game Data.cmd**.
+
+Use **Play Robot War Engine** for the game and **Multiplayer Lobby** to arrange
+multiplayer matches. New installers use a stable install folder; imported data and
+saved games remain in your user data directory.
+
+The command-line setup is also available from the game directory:
 
 ```powershell
 .\rwe_setup.exe
@@ -69,15 +79,19 @@ it cannot find your copy, point it at the directory containing `totala1.hpi`:
 .\rwe_setup.exe --from "C:/GOG Games/Total Annihilation"
 ```
 
-On Linux, run setup through the AppImage, then launch it normally:
+On Linux, run setup through the AppImage. With Zenity installed on a graphical
+desktop, running `setup` without extra options opens a folder picker and
+shows import progress. Explicit options continue to use the command-line tool:
 
 ```bash
 chmod +x Robot_War_Engine-*.AppImage
-./Robot_War_Engine-*.AppImage setup --from "/path/to/Total Annihilation"
+./Robot_War_Engine-*.AppImage setup
 ./Robot_War_Engine-*.AppImage
 ```
 
 Keep one matching AppImage in the directory when using these wildcard commands.
+For terminal setup with an explicit source, add
+`setup --from "/path/to/Total Annihilation"` instead.
 Setup imports the archives, movies and soundtrack. Running it again copies
 only files that are missing or incomplete.
 
