@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
+#include <rwe/ai/StrategicManager.h>
 #include <rwe/ai/ai_test_util.h>
+#include <rwe/sim/SimTicksPerSecond.h>
 
 /**
  * What the army does with itself: gathering, attacking, breaking off, and
@@ -73,6 +75,10 @@ namespace rwe
             auto brutal = makeDefaultBrutalProfile();
             brutal.attackArmySize = 3;
             brutal.scoutCount = 0;
+            // This case is about the phase gate, so play the old one-group,
+            // plain-move command stream as its control.
+            brutal.reserveWave = false;
+            brutal.waveAttackMove = false;
             AiPlayerController cheat(ai, brutal, 42u, MapIntel{});
             addUnit(sim, "ARMSOLAR", human, SimVector(450_ss, 0_ss, 200_ss), script);
             for (int i = 0; i < 3; ++i)
@@ -617,6 +623,11 @@ namespace rwe
         profile.attackArmySize = 3;
         profile.retreatArmySize = 2;
         profile.scoutCount = 0;
+        // The wave split and attack-move have their own cases; keep this one
+        // on the old one-group, plain-move stream so its counts mean what
+        // they always meant.
+        profile.reserveWave = false;
+        profile.waveAttackMove = false;
 
         SECTION("a unit built during the attack gathers for the next wave instead of walking to the front")
         {
@@ -1270,6 +1281,10 @@ namespace rwe
         profile.attackArmySize = 3;
         profile.retreatArmySize = 2;
         profile.scoutCount = 0;
+        // One group for the escort case: the wave split is not what it asks
+        // about, and the slowest unit must be in the wave.
+        profile.reserveWave = false;
+        profile.waveAttackMove = false;
 
         SECTION("one anti-air unit guards the slowest member of the wave, by id")
         {
@@ -1351,6 +1366,85 @@ namespace rwe
             // path asks them for nothing at all.
             CHECK(ordersFor<MoveOrder>(commands, firstAa).empty());
             CHECK(ordersFor<MoveOrder>(commands, secondAa).empty());
+        }
+    }
+
+    TEST_CASE("the humanlike opening calls the first wave at its size and time", "[ai]")
+    {
+        // A blackboard in Boom with a target, below the ordinary count gate
+        // but at the opening's size. The opening posture is a bias on the
+        // existing gate: it still needs a target, still needs something
+        // worth sending, and the defence override above runs before it.
+        auto state = [] {
+            AiBlackboard bb;
+            bb.phase = GamePhase::Boom;
+            bb.enemyBasePosition = SimVector(2000_ss, 0_ss, 0_ss);
+            return bb;
+        };
+
+        auto profile = makeDefaultStandardProfile();
+        profile.humanlikeOpening = true;
+        profile.openingAttackArmySize = 7;
+        profile.openingAttackBySeconds = 450;
+        StrategicManager strategic;
+
+        SECTION("off, it waits for the ordinary count")
+        {
+            profile.humanlikeOpening = false;
+            auto bb = state();
+            bb.now = GameTime(600u * SimTicksPerSecond);
+            bb.armySize = profile.openingAttackArmySize;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+        }
+
+        SECTION("on, at the opening size and after the opening time, it attacks")
+        {
+            auto bb = state();
+            bb.now = GameTime(450u * SimTicksPerSecond);
+            bb.armySize = profile.openingAttackArmySize;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+        }
+
+        SECTION("on, before the opening time, it still waits")
+        {
+            auto bb = state();
+            bb.now = GameTime(449u * SimTicksPerSecond);
+            bb.armySize = profile.openingAttackArmySize;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+        }
+
+        SECTION("on, but nothing worth sending: retreatArmySize is still the floor")
+        {
+            profile.openingAttackArmySize = 1;
+            auto bb = state();
+            bb.now = GameTime(600u * SimTicksPerSecond);
+            bb.armySize = profile.retreatArmySize - 1;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+        }
+
+        SECTION("on, but the known enemy army is ahead of ours: the odds gate holds")
+        {
+            auto bb = state();
+            bb.now = GameTime(600u * SimTicksPerSecond);
+            bb.armySize = profile.openingAttackArmySize;
+            bb.armyMetal = 100.0f;
+            bb.knownEnemyArmyMetal = 1000.0f;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+        }
+
+        SECTION("on, but the base is under attack: defence wins")
+        {
+            auto bb = state();
+            bb.now = GameTime(600u * SimTicksPerSecond);
+            bb.armySize = profile.openingAttackArmySize;
+            bb.enemiesNearBase.push_back(UnitId(7));
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Defend);
         }
     }
 }

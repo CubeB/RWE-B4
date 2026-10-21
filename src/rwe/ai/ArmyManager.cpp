@@ -30,6 +30,18 @@ namespace rwe
             return PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(AttackOrder(target), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
         }
 
+        /**
+         * Attack-move: an AttackOrder at a position, so the unit fights
+         * whatever it meets on the way instead of walking past it. The
+         * simulation's order vocabulary already has this shape (AttackTarget
+         * is UnitId or SimVector); until waveAttackMove nothing in the AI
+         * issued the vector form.
+         */
+        PlayerCommand attackMoveCommand(UnitId unit, const SimVector& to)
+        {
+            return PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(AttackOrder(to), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
+        }
+
         PlayerCommand guardCommand(UnitId unit, UnitId target)
         {
             return PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(GuardOrder(target), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
@@ -211,6 +223,22 @@ namespace rwe
             }
             auto move = std::get_if<MoveOrder>(&unit.orders.front());
             return move != nullptr && move->destination.distanceSquared(destination) < (64_ss * 64_ss);
+        }
+
+        /** As isMovingTo, for the attack-move form: an AttackOrder at a place. */
+        bool isAttackMovingTo(const UnitState& unit, const SimVector& destination)
+        {
+            if (unit.orders.empty())
+            {
+                return false;
+            }
+            auto attack = std::get_if<AttackOrder>(&unit.orders.front());
+            if (attack == nullptr)
+            {
+                return false;
+            }
+            auto target = std::get_if<SimVector>(&attack->target);
+            return target != nullptr && target->distanceSquared(destination) < (64_ss * 64_ss);
         }
 
         /** An enemy on the water that the commander cannot answer, and how far it shoots. */
@@ -2196,7 +2224,8 @@ namespace rwe
                     {
                         continue;
                     }
-                    if (bb.attackGroup.count(unitId.value) != 0 || bb.raidGroup.count(unitId.value) != 0 || bb.guardGroup.count(unitId.value) != 0)
+                    if (bb.attackGroup.count(unitId.value) != 0 || bb.raidGroup.count(unitId.value) != 0 || bb.guardGroup.count(unitId.value) != 0
+                        || bb.reserveGroup.count(unitId.value) != 0)
                     {
                         continue;
                     }
@@ -2241,7 +2270,8 @@ namespace rwe
                         {
                             continue;
                         }
-                        if (bb.attackGroup.count(unitId.value) != 0 || bb.guardGroup.count(unitId.value) != 0)
+                        if (bb.attackGroup.count(unitId.value) != 0 || bb.guardGroup.count(unitId.value) != 0
+                            || bb.reserveGroup.count(unitId.value) != 0)
                         {
                             continue;
                         }
@@ -2295,15 +2325,67 @@ namespace rwe
                 auto alive = std::binary_search(bb.combatUnits.begin(), bb.combatUnits.end(), UnitId(*it), [](UnitId a, UnitId b) { return a.value < b.value; });
                 it = alive ? std::next(it) : bb.attackGroup.erase(it);
             }
+            if (!profile.reserveWave)
+            {
+                bb.reserveGroup.clear();
+            }
+            for (auto it = bb.reserveGroup.begin(); it != bb.reserveGroup.end();)
+            {
+                auto alive = std::binary_search(bb.combatUnits.begin(), bb.combatUnits.end(), UnitId(*it), [](UnitId a, UnitId b) { return a.value < b.value; });
+                it = alive ? std::next(it) : bb.reserveGroup.erase(it);
+            }
             if (bb.attackGroup.empty() && !bb.waveSpent)
             {
+                // Sorted by id, because combatUnits is: the split is the
+                // same on every peer and on every replay.
+                std::vector<UnitId> forming;
                 for (auto unitId : bb.combatUnits)
                 {
                     if (!(bb.scoutUnitId && *bb.scoutUnitId == unitId) && bb.raidGroup.count(unitId.value) == 0
-                        && bb.guardGroup.count(unitId.value) == 0)
+                        && bb.guardGroup.count(unitId.value) == 0 && bb.reserveGroup.count(unitId.value) == 0)
                     {
-                        bb.attackGroup.insert(unitId.value);
+                        forming.push_back(unitId);
                     }
+                }
+                // The fraction is rounded to the nearest unit and the wave
+                // keeps at least one. With reserveWave off every unit forms
+                // the wave, which is the old command stream.
+                std::size_t waveCount = forming.size();
+                if (profile.reserveWave && !forming.empty())
+                {
+                    auto fraction = std::clamp(profile.waveCommitFraction, 0.0f, 1.0f);
+                    auto rounded = static_cast<std::size_t>(static_cast<float>(forming.size()) * fraction + 0.5f);
+                    waveCount = std::clamp<std::size_t>(rounded, 1, forming.size());
+                }
+                for (std::size_t i = 0; i < forming.size(); ++i)
+                {
+                    if (i < waveCount)
+                    {
+                        bb.attackGroup.insert(forming[i].value);
+                    }
+                    else
+                    {
+                        bb.reserveGroup.insert(forming[i].value);
+                    }
+                }
+                bb.waveContactAt.reset();
+                waveHitPoints.clear();
+                if (profile.reserveWave)
+                {
+                    for (auto unitId : bb.attackGroup)
+                    {
+                        waveHitPoints[unitId] = sim.getUnitState(UnitId(unitId)).hitPoints;
+                    }
+                }
+                if (!bb.reserveGroup.empty())
+                {
+                    LOG_INFO << "AI army: wave of " << bb.attackGroup.size() << " with " << bb.reserveGroup.size() << " held in reserve";
+                    sim.eventLog.event(sim.gameTime.value, "army_reserve")
+                        .set("player", aiOwner.value)
+                        .set("wave", bb.attackGroup.size())
+                        .set("reserve", bb.reserveGroup.size())
+                        .set("why", "formed")
+                        .detail("part of the wave is held back at the rally point");
                 }
             }
             // Reinforcements, in batches. The wave is only over when it has
@@ -2324,7 +2406,7 @@ namespace rwe
                         continue;
                     }
                     if (bb.attackGroup.count(unitId.value) != 0 || bb.raidGroup.count(unitId.value) != 0
-                        || bb.guardGroup.count(unitId.value) != 0)
+                        || bb.guardGroup.count(unitId.value) != 0 || bb.reserveGroup.count(unitId.value) != 0)
                     {
                         continue;
                     }
@@ -2335,6 +2417,10 @@ namespace rwe
                     for (auto unitId : reserve)
                     {
                         bb.attackGroup.insert(unitId.value);
+                        if (profile.reserveWave)
+                        {
+                            waveHitPoints[unitId.value] = sim.getUnitState(unitId).hitPoints;
+                        }
                     }
                     LOG_INFO << "AI army: " << reserve.size() << " reinforcements join the wave, now " << bb.attackGroup.size();
                     sim.eventLog.event(sim.gameTime.value, "army_reinforce")
@@ -2345,14 +2431,111 @@ namespace rwe
                         .detail("reinforcements join the wave");
                 }
             }
+
+            // Contact and the reserve release. Contact is the first of a hit
+            // point drop on a wave member (since the wave formed) or an
+            // enemy still standing within waveMeetEnemyRadius of the wave's
+            // centre. Once contact has been held for reserveReleaseSeconds
+            // the reserve goes in; a wave that falls to retreatArmySize gets
+            // it at once, because that is the moment the first body is about
+            // to break. Both tests read only what the AI already knows.
+            if (profile.reserveWave && !bb.reserveGroup.empty() && !bb.attackGroup.empty())
+            {
+                bool contact = false;
+                for (auto it = waveHitPoints.begin(); it != waveHitPoints.end();)
+                {
+                    if (bb.attackGroup.count(it->first) == 0)
+                    {
+                        it = waveHitPoints.erase(it);
+                        continue;
+                    }
+                    auto hitPoints = sim.getUnitState(UnitId(it->first)).hitPoints;
+                    if (hitPoints < it->second)
+                    {
+                        contact = true;
+                    }
+                    it->second = hitPoints;
+                    ++it;
+                }
+
+                std::optional<SimVector> waveCentre;
+                {
+                    float sumX = 0.0f;
+                    float sumZ = 0.0f;
+                    int counted = 0;
+                    for (auto id : bb.attackGroup)
+                    {
+                        const auto& p = sim.getUnitState(UnitId(id)).position;
+                        sumX += p.x.value;
+                        sumZ += p.z.value;
+                        ++counted;
+                    }
+                    if (counted > 0)
+                    {
+                        auto divisor = static_cast<float>(counted);
+                        waveCentre = SimVector(SimScalar(sumX / divisor), 0_ss, SimScalar(sumZ / divisor));
+                    }
+                }
+                if (!contact && waveCentre && profile.waveMeetEnemyRadius > 0_ss)
+                {
+                    auto radiusSquared = profile.waveMeetEnemyRadius * profile.waveMeetEnemyRadius;
+                    for (const auto& [_, enemy] : bb.knownEnemies)
+                    {
+                        if (enemy.lastKnownPosition.distanceSquared(*waveCentre) >= radiusSquared)
+                        {
+                            continue;
+                        }
+                        if (contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy))
+                        {
+                            contact = true;
+                            break;
+                        }
+                    }
+                }
+                if (contact && !bb.waveContactAt)
+                {
+                    bb.waveContactAt = bb.now;
+                }
+
+                auto releaseTicks = static_cast<unsigned int>(std::max(0, profile.reserveReleaseSeconds)) * SimTicksPerSecond;
+                auto release = static_cast<int>(bb.attackGroup.size()) <= profile.retreatArmySize;
+                auto contactHeld = bb.waveContactAt && bb.now.value >= bb.waveContactAt->value + releaseTicks;
+                if (release || contactHeld)
+                {
+                    for (auto id : bb.reserveGroup)
+                    {
+                        bb.attackGroup.insert(id);
+                        waveHitPoints[id] = sim.getUnitState(UnitId(id)).hitPoints;
+                    }
+                    LOG_INFO << "AI army: reserve of " << bb.reserveGroup.size() << " released, wave now " << bb.attackGroup.size()
+                             << (release ? " (wave at retreat size)" : " (contact held)");
+                    sim.eventLog.event(sim.gameTime.value, "army_reserve_release")
+                        .set("player", aiOwner.value)
+                        .set("units", bb.reserveGroup.size())
+                        .set("wave", bb.attackGroup.size())
+                        .set("why", release ? "retreat_size" : "contact")
+                        .detail("the reserve joins the wave");
+                    bb.reserveGroup.clear();
+                }
+            }
+
             if (static_cast<int>(bb.attackGroup.size()) < profile.retreatArmySize)
             {
                 bb.waveSpent = true;
+                // The wave is over: the reserve goes back to ordinary
+                // rally/next-wave behaviour rather than being committed to a
+                // fight that has already been lost.
+                bb.reserveGroup.clear();
+                bb.waveContactAt.reset();
+                waveHitPoints.clear();
             }
         }
         else
         {
             bb.attackGroup.clear();
+            bb.reserveGroup.clear();
+            bb.waveContactAt.reset();
+            waveHitPoints.clear();
             bb.waveSpent = false;
         }
 
@@ -2466,7 +2649,7 @@ namespace rwe
                 for (auto id : bb.combatUnits)
                 {
                     if ((bb.scoutUnitId && *bb.scoutUnitId == id) || bb.attackGroup.count(id.value) != 0 || bb.raidGroup.count(id.value) != 0
-                        || bb.guardGroup.count(id.value) != 0)
+                        || bb.guardGroup.count(id.value) != 0 || bb.reserveGroup.count(id.value) != 0)
                     {
                         continue;
                     }
@@ -3024,6 +3207,7 @@ namespace rwe
                         // converge, because then the only thing moving is the
                         // rest of the wave closing the gap.
                         auto destination = *waveObjective;
+                        bool holding = false;
                         if (waveCentre && profile.waveCohesionRadius > 0_ss)
                         {
                             auto unitToObjective = flatDistance(unit.position, *waveObjective);
@@ -3031,9 +3215,22 @@ namespace rwe
                             if (unitToObjective + profile.waveCohesionRadius < centreToObjective)
                             {
                                 destination = unit.position;
+                                holding = true;
                             }
                         }
-                        if (!isMovingTo(unit, destination))
+                        // Attack-move at the objective (waveAttackMove): the
+                        // wave fights what it meets instead of walking past
+                        // it. A unit holding for cohesion still gets the
+                        // plain stand order, and with the knob off every
+                        // order here is the MoveOrder it always was.
+                        if (profile.waveAttackMove && !holding)
+                        {
+                            if (!isAttackMovingTo(unit, destination))
+                            {
+                                outCommands.push_back(attackMoveCommand(unitId, destination));
+                            }
+                        }
+                        else if (!isMovingTo(unit, destination))
                         {
                             outCommands.push_back(moveCommand(unitId, destination));
                         }
@@ -3047,6 +3244,17 @@ namespace rwe
                         if (!isAttackingUnit(unit, *intruder))
                         {
                             outCommands.push_back(attackCommand(unitId, *intruder));
+                        }
+                        break;
+                    }
+                    // Held back for the wave's second body: wait at the
+                    // rally point, not at the front with the first.
+                    if (bb.reserveGroup.count(unitId.value) != 0)
+                    {
+                        if (bb.rallyPoint && !isMovingTo(unit, *bb.rallyPoint)
+                            && unit.position.distanceSquared(*bb.rallyPoint) > (96_ss * 96_ss))
+                        {
+                            outCommands.push_back(moveCommand(unitId, *bb.rallyPoint));
                         }
                         break;
                     }

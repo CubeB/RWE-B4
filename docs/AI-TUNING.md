@@ -307,3 +307,35 @@ attack-move posture, then the replay-mining work's opening/expansion templates.
 The design and the ranked alternatives from Nanolathe's `aikit`, Open
 Annihilation and the outside-box review are in
 `docs/agents/rwe-ai-adaptability.md`.
+
+## Fourth AI batch: reserve, attack-move and a replay-derived opening
+
+2026-10-20. RWE-AI only. The control is the batch-3 binary; the new binary
+adds `reserveWave`, `waveCommitFraction`, `reserveReleaseSeconds`,
+`waveAttackMove` and the `humanlikeOpening` timing posture (default off).
+
+Sixteen games on Great Divide (4601-4604) and Dark Side (4701-4704), 1800 s,
+RWE against the classic personality, dealt seats, plus a third arm with
+`humanlikeOpening=true` for the RWE seat:
+
+| Map/seed | Batch 3 | Batch 4 | Humanlike opening |
+| --- | ---: | ---: | ---: |
+| GD 4601 | 27091 | 25861 | 25861 |
+| GD 4602 | 28651 | 29671 | 29671 |
+| GD 4603 | 24331 | 24331 | 24331 |
+| GD 4604 | 21811 | 23341 | 23341 |
+| DS 4701 | 24841 | 21841 | 21841 |
+| DS 4702 | 18931 | 18931 | 18931 |
+| DS 4703 | 17041 | 17041 | 17041 |
+| DS 4704 | 18301 | 18241 | 18241 |
+
+All 24 games were decided RWE wins, the same winner in every group. The reserve
+and attack-move are close-out neutral in this sample; the humanlike opening
+produced the identical game in every pair, so the timing posture did not bind
+against the classic AI. That is expected: the classic opponent does not punish
+the timings the report found, and the opening knob is a bias with existing
+affordability/defence gates rather than a script. It stays off by default until
+a human play-test or a stronger opponent shows a difference.
+
+The AI suite passes (287 cases / 9982 assertions). The full permitted suite
+result is in the session report. Raw games are under `D:/tmp/rwe-ai4/`.

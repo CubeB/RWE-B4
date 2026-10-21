@@ -38,6 +38,43 @@ namespace rwe
         // --- Opening (commander only) ---
         int openingMetalExtractorCount{3};
         int openingSolarCount{4};
+        /**
+         * Follow the opening shape the recorded human games show, as timing
+         * windows over the existing plan rather than a script.
+         *
+         * Off by default so a paired arena can play the ordinary plan as its
+         * control. With it on, BuildManager lets a deadline that has passed
+         * unmet pull that item ahead of the ordinary economy order -- the
+         * first factory by openingFactoryBySeconds, a first constructor out
+         * of the factory by openingConstructorBySeconds, and one extractor
+         * beyond the opening set by openingExpansionBySeconds -- and
+         * StrategicManager lets the first wave go at openingAttackArmySize
+         * once openingAttackBySeconds has passed. Nothing here bypasses the
+         * ordinary gates: every job is still sited, mission-filtered and
+         * affordability-tested, a base under attack keeps its existing
+         * priorities, and a wave still needs a target and something worth
+         * sending.
+         *
+         * The numbers are the medians of twelve OTA-family recordings
+         * (D:\tmp\replay-decisions\REPORT.md, 2026-10-20): factory 57.7 s,
+         * first constructor 145 s (winners) / 182 s (losers), first
+         * expansion 213 s (winners) / 252 s (losers), first army attack
+         * 452 s with 7 combat units (winners) against 1207 s with 4
+         * (losers). They are hypotheses from a small sample, not
+         * original-game parity, and they do not alter the measured CORE
+         * composition shares.
+         */
+        bool humanlikeOpening{false};
+        /** Opening deadline for the first factory, in seconds. */
+        int openingFactoryBySeconds{60};
+        /** Opening deadline for the first constructor out of the factory, in seconds. */
+        int openingConstructorBySeconds{150};
+        /** Opening deadline for one extractor beyond the opening set, in seconds. */
+        int openingExpansionBySeconds{240};
+        /** The first wave may go at this many combat units once openingAttackBySeconds has passed. */
+        int openingAttackArmySize{7};
+        /** Earliest time the opening attack window may call the first wave, in seconds. */
+        int openingAttackBySeconds{450};
 
         // --- Expansion targets once a factory is up ---
         int targetSolarCount{10};
@@ -2603,6 +2640,40 @@ namespace rwe
         SimScalar waveMeetEnemyRadius{900_ss};
         /** How many standing together count as an army worth turning for. */
         int waveMeetEnemyCount{3};
+
+        /**
+         * Hold part of a committed wave back as a reserve, at the rally
+         * point, and release it once the wave has been in contact for
+         * reserveReleaseSeconds or has fallen to retreatArmySize.
+         *
+         * A human wave is not one blob: the first body finds the enemy and
+         * the rest arrives on the fight rather than walking past it. The
+         * reserve is a separate group (AiBlackboard::reserveGroup), so it is
+         * not counted towards waveSpent and is not drawn on by the raid,
+         * guard or outpost-response rules until it is released.
+         *
+         * Off, together with waveCommitFraction 1.0 and waveAttackMove
+         * false, restores the previous command stream exactly: one group of
+         * every combat unit, moved with MoveOrder.
+         */
+        bool reserveWave{true};
+        /**
+         * The share of the committed combat units that forms the wave, by
+         * sorted UnitId; the rest is the reserve. 1.0 puts everything in the
+         * wave and leaves no reserve, which is the old behaviour. Rounded to
+         * the nearest unit and never less than one in the wave.
+         */
+        float waveCommitFraction{0.7f};
+        /** How long the wave must have been in contact before the reserve is released, in seconds. */
+        int reserveReleaseSeconds{20};
+        /**
+         * Send the wave's objective as an attack-move (AttackOrder at a
+         * position) rather than a plain MoveOrder, so the wave fights what it
+         * meets on the way instead of walking past it. Wave units that are
+         * holding for cohesion still get the plain stand order. Unit-target
+         * and special orders are untouched.
+         */
+        bool waveAttackMove{true};
         /** Enemies this close to the base anchor trigger a defence. */
         SimScalar defendRadius{900_ss};
         /** How far from a known enemy an army unit will pick a fight. */

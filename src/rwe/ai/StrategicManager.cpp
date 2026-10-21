@@ -115,7 +115,19 @@ namespace rwe
                     && bb.now.value >= bb.lastAttackPhase.value + (static_cast<unsigned int>(profile.attackPatienceSeconds) * SimTicksPerSecond)
                     && bb.armySize >= profile.retreatArmySize;
 
-                if ((bb.armySize >= profile.attackArmySize || fleetReady || waited || oddsReady) && haveTarget)
+                // The humanlike opening's first-wave window: at the recorded
+                // opening size, from the recorded time. A bias on the count
+                // gate rather than a script -- it still needs a target, still
+                // needs something worth sending, and holds if the observed
+                // enemy army says we are behind (the value gate above).
+                auto openingAttackSize = std::max(profile.retreatArmySize, profile.openingAttackArmySize);
+                auto openingAttackDue = profile.humanlikeOpening
+                    && profile.openingAttackBySeconds >= 0
+                    && bb.now.value >= static_cast<unsigned int>(profile.openingAttackBySeconds) * SimTicksPerSecond
+                    && bb.armySize >= openingAttackSize
+                    && (!profile.attackUsesValueOdds || bb.attackOddsCommitted || bb.knownEnemyArmyMetal <= 0.0f);
+
+                if ((bb.armySize >= profile.attackArmySize || fleetReady || waited || oddsReady || openingAttackDue) && haveTarget)
                 {
                     bb.phase = GamePhase::Attack;
                 }

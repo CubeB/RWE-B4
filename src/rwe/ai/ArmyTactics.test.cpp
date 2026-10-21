@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <algorithm>
+#include <memory>
 #include <rwe/ai/ArmyManager.h>
 #include <rwe/ai/AiBlackboard.h>
 #include <rwe/ai/AiTuningProfile.h>
@@ -12,6 +13,7 @@
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/GameTime.h>
+#include <rwe/sim/SimTicksPerSecond.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/sim_test_util.h>
@@ -292,9 +294,14 @@ namespace rwe
         REQUIRE(farAheadMoves.front().destination.x < 1300_ss);
 
         // One of the rear units is still walking to the objective itself.
-        auto rearMoves = ordersFor<MoveOrder>(commands, units[0]);
+        // The shipped wave order is an attack-move, so the destination is on
+        // an AttackOrder; the far-ahead unit above still holds with a
+        // MoveOrder at its own feet.
+        auto rearMoves = ordersFor<AttackOrder>(commands, units[0]);
         REQUIRE(!rearMoves.empty());
-        REQUIRE(rearMoves.front().destination.x > 1900_ss);
+        auto rearTarget = std::get_if<SimVector>(&rearMoves.front().target);
+        REQUIRE(rearTarget != nullptr);
+        REQUIRE(rearTarget->x > 1900_ss);
     }
 
     TEST_CASE("the wave turns on an army it meets instead of walking on", "[ai]")
@@ -366,10 +373,15 @@ namespace rwe
         // walking on towards the base at 3000.
         for (auto unitId : units)
         {
-            auto moves = ordersFor<MoveOrder>(commands, unitId);
-            REQUIRE(!moves.empty());
-            REQUIRE(moves.front().destination.x > 250_ss);
-            REQUIRE(moves.front().destination.x < 450_ss);
+            // Attack-move is the shipped order now: the wave fights what it
+            // meets on the way. With the knob off this was a MoveOrder; the
+            // destination is the same either way.
+            auto attacks = ordersFor<AttackOrder>(commands, unitId);
+            REQUIRE(!attacks.empty());
+            auto target = std::get_if<SimVector>(&attacks.front().target);
+            REQUIRE(target != nullptr);
+            REQUIRE(target->x > 250_ss);
+            REQUIRE(target->x < 450_ss);
         }
     }
 
@@ -396,6 +408,9 @@ namespace rwe
         auto profile = makeDefaultStandardProfile();
         profile.attackInWaves = false;
         profile.raidingParties = false;
+        // These cases are about acquisition and contact memory, not the wave
+        // posture; keep the wave's attack-move out of the command stream.
+        profile.waveAttackMove = false;
         // The tactical pass runs on its own cadence; these cases drive it by
         // hand, one call at a time, as the others in this file do.
         profile.tacticalTickInterval = 1;
@@ -501,6 +516,9 @@ namespace rwe
         auto profile = makeDefaultStandardProfile();
         profile.attackInWaves = false;
         profile.raidingParties = false;
+        // This case is about the acquisition radius; keep the wave's
+        // attack-move out of the command stream.
+        profile.waveAttackMove = false;
         profile.waveMeetEnemyCount = 0;
         profile.tacticalTickInterval = 1;
         profile.scoutCount = 0;
@@ -686,7 +704,11 @@ namespace rwe
         auto objective = [&](const AiTuningProfile& p) {
             ArmyManager army;
             std::vector<PlayerCommand> commands;
-            army.update(sim, ai, p, threatMap, bb, commands);
+            // This case is about which objective is chosen, not the order
+            // type; the plain move keeps the destination easy to read.
+            auto tuned = p;
+            tuned.waveAttackMove = false;
+            army.update(sim, ai, tuned, threatMap, bb, commands);
             auto moves = ordersFor<MoveOrder>(commands, units[0]);
             REQUIRE(!moves.empty());
             return moves.front().destination;
@@ -741,6 +763,220 @@ namespace rwe
 
             auto destination = objective(profile);
             CHECK(outlierPos.distance(destination) < 100_ss);
+        }
+    }
+
+    namespace
+    {
+        /**
+         * Ten mobile combat units in a line, an attack under way and nothing
+         * on the map: the smallest fixture that exercises the wave split, the
+         * reserve release and the wave's order type.
+         */
+        struct ReserveWaveFixture
+        {
+            std::shared_ptr<CobScript> script = makeEmptyCobScript();
+            GameSimulation sim{makeFlatTerrain(64, 64), 0u, 0, 0};
+            PlayerId ai;
+            std::vector<UnitId> units;
+            AiTuningProfile profile;
+            AiBlackboard bb;
+            ThreatMap threatMap{64, 64};
+            ArmyManager army;
+            std::vector<PlayerCommand> commands;
+
+            ReserveWaveFixture()
+                : ai(addPlayer(sim, "ai"))
+            {
+                UnitDefinition unit{};
+                unit.isMobile = true;
+                sim.unitDefinitions["UNIT"] = unit;
+                for (int i = 0; i < 10; ++i)
+                {
+                    units.push_back(addUnitOfType(sim, "UNIT", ai, SimVector(SimScalar(i * 40.0f), 0_ss, 0_ss), script));
+                }
+                units = ascendingIds(units);
+
+                profile = makeDefaultStandardProfile();
+                profile.attackInWaves = true;
+                profile.raidingParties = false;
+                profile.tacticalTickInterval = 1;
+                profile.scoutCount = 0;
+                profile.targetScoutPlaneCount = 0;
+                profile.reserveWave = true;
+                profile.waveCommitFraction = 0.7f;
+                profile.reserveReleaseSeconds = 20;
+                profile.retreatArmySize = 3;
+
+                bb.phase = GamePhase::Attack;
+                bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+                bb.enemyBasePosition = SimVector(2000_ss, 0_ss, 0_ss);
+                bb.combatUnits = units;
+                bb.now = GameTime(0);
+            }
+
+            void formWave()
+            {
+                commands.clear();
+                army.update(sim, ai, profile, threatMap, bb, commands);
+            }
+        };
+    }
+
+    TEST_CASE("the wave takes its fraction by sorted id and holds the rest in reserve", "[ai]")
+    {
+        ReserveWaveFixture f;
+        f.formWave();
+
+        REQUIRE(f.bb.attackGroup.size() == 7);
+        REQUIRE(f.bb.reserveGroup.size() == 3);
+
+        // combatUnits is in id order, so the split is the first seven and
+        // then the last three -- the same split on every peer.
+        for (std::size_t i = 0; i < f.units.size(); ++i)
+        {
+            if (i < 7)
+            {
+                CHECK(f.bb.attackGroup.count(f.units[i].value) == 1);
+                CHECK(f.bb.reserveGroup.count(f.units[i].value) == 0);
+            }
+            else
+            {
+                CHECK(f.bb.attackGroup.count(f.units[i].value) == 0);
+                CHECK(f.bb.reserveGroup.count(f.units[i].value) == 1);
+            }
+        }
+    }
+
+    TEST_CASE("the reserve is released on contact or when the wave is down to the retreat size", "[ai]")
+    {
+        ReserveWaveFixture f;
+
+        SECTION("the release window has not run yet: it waits")
+        {
+            f.formWave();
+            f.bb.waveContactAt = GameTime(100u);
+            f.bb.now = GameTime(100u + 10u * SimTicksPerSecond);
+            f.army.update(f.sim, f.ai, f.profile, f.threatMap, f.bb, f.commands);
+
+            CHECK(f.bb.attackGroup.size() == 7);
+            CHECK(f.bb.reserveGroup.size() == 3);
+        }
+
+        SECTION("contact held for the release window: it joins the wave")
+        {
+            f.formWave();
+            f.bb.waveContactAt = GameTime(100u);
+            f.bb.now = GameTime(100u + 20u * SimTicksPerSecond);
+            f.army.update(f.sim, f.ai, f.profile, f.threatMap, f.bb, f.commands);
+
+            CHECK(f.bb.attackGroup.size() == 10);
+            CHECK(f.bb.reserveGroup.empty());
+        }
+
+        SECTION("the wave falls to the retreat size: it joins at once")
+        {
+            f.formWave();
+            // No batch to reinforce with: this section is about the release
+            // at the retreat size, not about the reinforcement rule.
+            f.profile.reinforcementGroupSize = 0;
+            f.bb.attackGroup.clear();
+            f.bb.attackGroup.insert(f.units[0].value);
+            f.bb.attackGroup.insert(f.units[1].value);
+            f.army.update(f.sim, f.ai, f.profile, f.threatMap, f.bb, f.commands);
+
+            CHECK(f.bb.attackGroup.size() == 5);
+            CHECK(f.bb.reserveGroup.empty());
+            CHECK_FALSE(f.bb.waveSpent);
+        }
+
+        SECTION("a hit on a wave member starts the contact clock")
+        {
+            f.formWave();
+            f.sim.getUnitState(f.units[0]).hitPoints = 90;
+            f.bb.now = GameTime(5u);
+            f.army.update(f.sim, f.ai, f.profile, f.threatMap, f.bb, f.commands);
+
+            REQUIRE(f.bb.waveContactAt.has_value());
+            CHECK(f.bb.waveContactAt->value == 5u);
+            CHECK(f.bb.reserveGroup.size() == 3);
+        }
+
+        SECTION("an enemy inside the wave radius starts the contact clock")
+        {
+            f.formWave();
+            auto enemyPlayer = addPlayer(f.sim, "enemy");
+            auto enemyId = addUnitOfType(f.sim, "UNIT", enemyPlayer, SimVector(120_ss, 0_ss, 0_ss), f.script);
+            KnownEnemy known{};
+            known.unitId = enemyId;
+            known.unitType = "UNIT";
+            known.lastKnownPosition = SimVector(120_ss, 0_ss, 0_ss);
+            known.lastSeen = GameTime(0u);
+            known.isArmed = true;
+            f.bb.knownEnemies[enemyId.value] = known;
+            f.profile.cheatModeOmniscient = true;
+            f.bb.now = GameTime(7u);
+            f.army.update(f.sim, f.ai, f.profile, f.threatMap, f.bb, f.commands);
+
+            REQUIRE(f.bb.waveContactAt.has_value());
+            CHECK(f.bb.waveContactAt->value == 7u);
+        }
+
+        SECTION("the wave is gone: the reserve is not counted as it and goes back to ordinary behaviour")
+        {
+            f.formWave();
+            // The wave died: only the reserve is left in the army. A member
+            // that has died out of sight is not in combatUnits either, so the
+            // prune removes it.
+            f.bb.combatUnits.assign(f.units.begin() + 7, f.units.end());
+            f.bb.attackGroup.clear();
+            f.bb.attackGroup.insert(9999u);
+            f.army.update(f.sim, f.ai, f.profile, f.threatMap, f.bb, f.commands);
+
+            CHECK(f.bb.attackGroup.empty());
+            CHECK(f.bb.reserveGroup.empty());
+            CHECK(f.bb.waveSpent);
+        }
+    }
+
+    TEST_CASE("with the reserve and attack-move off the command stream is the old one", "[ai]")
+    {
+        ReserveWaveFixture f;
+        // The documented control combination.
+        f.profile.reserveWave = false;
+        f.profile.waveCommitFraction = 1.0f;
+        f.profile.waveAttackMove = false;
+        f.formWave();
+
+        REQUIRE(f.bb.attackGroup.size() == 10);
+        CHECK(f.bb.reserveGroup.empty());
+
+        for (auto unitId : f.units)
+        {
+            auto moves = ordersFor<MoveOrder>(f.commands, unitId);
+            REQUIRE(!moves.empty());
+            CHECK(moves.front().destination.x > 1900_ss);
+            CHECK(ordersFor<AttackOrder>(f.commands, unitId).empty());
+        }
+    }
+
+    TEST_CASE("the wave's objective is an attack-move when the knob is on", "[ai]")
+    {
+        ReserveWaveFixture f;
+        f.profile.waveAttackMove = true;
+        f.formWave();
+
+        REQUIRE(f.bb.attackGroup.size() == 7);
+        for (auto id : f.bb.attackGroup)
+        {
+            auto attacks = ordersFor<AttackOrder>(f.commands, UnitId(id));
+            REQUIRE(!attacks.empty());
+            auto target = std::get_if<SimVector>(&attacks.front().target);
+            REQUIRE(target != nullptr);
+            CHECK(target->x > 1900_ss);
+            CHECK(target->z == 0_ss);
+            // The wave's objective, not a unit target.
+            CHECK(ordersFor<MoveOrder>(f.commands, UnitId(id)).empty());
         }
     }
 }

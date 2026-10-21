@@ -846,6 +846,22 @@ namespace rwe
          */
         std::set<unsigned int> attackGroup;
         /**
+         * The part of a committed wave held back at the rally point, by raw
+         * id (AiTuningProfile::reserveWave). A separate set so it is not
+         * counted towards waveSpent, is not drawn on by the raid, guard or
+         * outpost-response rules, and is released into attackGroup when the
+         * wave has been in contact for reserveReleaseSeconds or has fallen
+         * to retreatArmySize. Always empty with the knob off.
+         */
+        std::set<unsigned int> reserveGroup;
+        /**
+         * When the wave now under way first saw contact: an enemy still
+         * standing within waveMeetEnemyRadius of its centre, or a hit point
+         * drop on one of its members. Unset while it has met nothing. Reset
+         * when the wave forms and when it ends.
+         */
+        std::optional<GameTime> waveContactAt;
+        /**
          * Set by the army pass when the wave has fallen below the retreat
          * size; the strategic pass then ends the attack. Two flags rather
          * than one test because the strategic pass runs first in the tick,

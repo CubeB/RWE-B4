@@ -81,9 +81,15 @@ both factory types, value-odds attack posture) are built and measured.
   and Dark Side: all sixteen games were decided RWE wins with the same winner
   in each default/off pair. It is aimed at a human whose composition and
   army movement the histogram and odds gate can actually react to.
-- Full detail and the tables are in `docs/AI-TUNING.md`, "Second and third AI
-  batches". The AI suite passes (279 cases / 9853 assertions); the full
-  permitted suite result is in the session report.
+- Batch 4 (reserve behind the wave, attack-move, replay-derived opening
+  timings) was close-out neutral against batch 3 on Great Divide and Dark Side:
+  all 24 games (three arms) were decided RWE wins, the same winner in every
+  group. The `humanlikeOpening` arm produced the identical game in every pair
+  against the classic AI, so it stays off by default until a human play-test or
+  a stronger opponent shows a difference.
+- Full detail and the tables are in `docs/AI-TUNING.md`. The AI suite passes
+  (287 cases / 9982 assertions); the full permitted suite is 1881 cases /
+  194421 assertions.
 
 The CORE candidate was measured against the pre-ARM-change ARM and still needs
 `--evaluate` on fresh seeds. No original-game check applies: this is
