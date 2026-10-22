@@ -313,6 +313,14 @@ namespace rwe
          */
         const char* refusalOf(const GameSimulation& simulation, PlayerId issuingPlayer, const PlayerUnitCommand& unitCommand)
         {
+            if (issuingPlayer.value >= simulation.players.size())
+            {
+                return "the issuing player has no seat";
+            }
+            if (simulation.getPlayer(issuingPlayer).status != GamePlayerStatus::Alive)
+            {
+                return "a defeated player cannot command units";
+            }
             // Only a unit's owner commands it. The issuing player is where the
             // command came from -- the network endpoint, the computer player
             // or the recording -- and never anything the command says of

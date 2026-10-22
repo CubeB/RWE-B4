@@ -817,6 +817,9 @@ namespace rwe
             }
         }
 
+        updateRespawnCamera();
+        updateLocalElimination();
+
         // A game needs an opponent before it can be decided; a lone player
         // is just exploring the map.
         if (!gameOver && simulation.players.size() >= 2)

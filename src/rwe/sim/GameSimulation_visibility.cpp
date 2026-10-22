@@ -1,4 +1,5 @@
 #include "GameSimulation.h"
+#include <rwe/sim/UnitVisibility.h>
 
 #include <rwe/sim/FlatRange.h>
 #include <rwe/sim/SimTicksPerSecond.h>
@@ -271,11 +272,16 @@ namespace rwe
 
     bool GameSimulation::canSeeUnit(PlayerId viewer, UnitId unitId) const
     {
+        return canSeeUnitInVisibility(*this, viewer, unitId, playerVisibility.at(viewer.value));
+    }
+
+    bool canSeeUnitInVisibility(const GameSimulation& sim, PlayerId viewer, UnitId unitId, const PlayerVisibility& visibility)
+    {
         // 0x465AC0 in full, in its own order. It is the original's only
         // "can this player see that unit" question: the world render's draw
         // list is built through it, and so is the enemy list the weapon scan
         // and the computer player both choose their targets out of.
-        const auto& unit = getUnitState(unitId);
+        const auto& unit = sim.getUnitState(unitId);
 
         // 0x465ACE: own units pass before anything else is looked at.
         if (unit.isOwnedBy(viewer))
@@ -302,10 +308,10 @@ namespace rwe
         // y + def+0x16E the detection visitor uses to decide that a unit is a
         // radar contact rather than a sonar one, so the two can never disagree
         // about which side of the waterline a unit is on.
-        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
-        if (unit.position.y + modelHeightOf(unitDefinition) < terrain.getSeaLevel())
+        const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
+        if (unit.position.y + sim.modelHeightOf(unitDefinition) < sim.terrain.getSeaLevel())
         {
-            const auto& heard = playerVisibility.at(viewer.value).sonarContacts;
+            const auto& heard = visibility.sonarContacts;
             if (heard.find(unitId) == heard.end())
             {
                 return false;
@@ -325,15 +331,14 @@ namespace rwe
         // The bounding box is taken from the footprint and the model height,
         // the decoded loader (TOTALA-EXE-RENDER.md, 0x42D079); the box is
         // assumed to start at the model's origin height.
-        const auto& visibility = playerVisibility.at(viewer.value);
-        auto [footprintX, footprintZ] = getFootprintXZ(unitDefinition.movementCollisionInfo);
+        auto [footprintX, footprintZ] = sim.getFootprintXZ(unitDefinition.movementCollisionInfo);
         auto extentX = intToSimScalar(static_cast<int>(footprintX) * 16);
         auto extentZ = intToSimScalar(static_cast<int>(footprintZ) * 16);
-        auto extentY = modelHeightOf(unitDefinition);
+        auto extentY = sim.modelHeightOf(unitDefinition);
 
         auto whole = [](SimScalar s) { return SimScalar(std::floor(s.value)); };
         auto lit = [&](SimScalar x, SimScalar y, SimScalar z) {
-            return visibility.isVisible(visionCellAtHeight(SimVector(whole(x), 0_ss, whole(z)), y));
+            return visibility.isVisible(sim.visionCellAtHeight(SimVector(whole(x), 0_ss, whole(z)), y));
         };
 
         auto a = unit.position.x - (extentX / 2_ss);

@@ -127,6 +127,8 @@ namespace rwe
         GameEnds = 0,
         /** The commander is just another unit; the game runs on. */
         GameContinues = 1,
+        /** Wipe the army, then replace the commander after the countdown. */
+        Deathmatch = 2,
     };
 
     /**
@@ -324,6 +326,8 @@ namespace rwe
         MappingMode mapping{MappingMode::Unmapped};
         StartLocationMode startLocation{StartLocationMode::Fixed};
         CommanderDeathMode commanderDeath{CommanderDeathMode::GameEnds};
+        /** Host policy; true is RWE's explicit default, not an original-game finding. */
+        bool allowWatching{true};
 
         /** Which path search this game runs; a lockstep option like the four above. */
         PathfindingBackend pathfindingBackend{PathfindingBackend::RweAStar};

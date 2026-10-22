@@ -141,7 +141,8 @@ namespace rwe
 
         GameParameters parameters("Great Divide", 2);
         parameters.randomSeed = 7;
-        parameters.commanderDeath = CommanderDeathMode::GameContinues;
+        parameters.commanderDeath = CommanderDeathMode::Deathmatch;
+        parameters.allowWatching = false;
         parameters.pathfindingBackend = PathfindingBackend::OpenAnnihilation;
         parameters.players[0] = makePlayer("Blue", "ARM", 0, 2);
         parameters.players[1] = makePlayer("Red", "CORE", 1, 2);
@@ -155,7 +156,8 @@ namespace rwe
         REQUIRE(restored.mapName == "Great Divide");
         REQUIRE(restored.schemaIndex == 2u);
         REQUIRE(restored.randomSeed == std::optional<unsigned int>(7));
-        REQUIRE(restored.commanderDeath == CommanderDeathMode::GameContinues);
+        REQUIRE(restored.commanderDeath == CommanderDeathMode::Deathmatch);
+        REQUIRE_FALSE(restored.allowWatching);
         REQUIRE(restored.pathfindingBackend == PathfindingBackend::OpenAnnihilation);
         REQUIRE(restored.players[0]->teamId == std::optional<int>(2));
         REQUIRE(restored.players[1]->teamId == std::optional<int>(2));

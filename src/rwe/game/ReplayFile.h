@@ -38,6 +38,7 @@ namespace rwe
         MappingMode mapping{MappingMode::Unmapped};
         StartLocationMode startLocation{StartLocationMode::Fixed};
         CommanderDeathMode commanderDeath{CommanderDeathMode::GameEnds};
+        bool allowWatching{true};
         PathfindingBackend pathfindingBackend{PathfindingBackend::RweAStar};
 
         /**

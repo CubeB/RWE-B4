@@ -27,7 +27,8 @@ namespace rwe
         // BT-44/49/255: the new fire rules change recorded command outcomes.
         // BT-264/265: lava exclusion changes ground command outcomes.
         // BT-266: factory destruction now cancels its retained product.
-        constexpr char Version = 5;
+        // #383/#699/#700 change command outcomes and elimination state.
+        constexpr char Version = 6;
 
         constexpr const char* ReplayExtension = ".rwereplay";
 
@@ -135,9 +136,10 @@ namespace rwe
             {StartLocationMode::Random, "random"},
         }};
 
-        constexpr std::array<std::pair<CommanderDeathMode, const char*>, 2> CommanderDeathNames{{
+        constexpr std::array<std::pair<CommanderDeathMode, const char*>, 3> CommanderDeathNames{{
             {CommanderDeathMode::GameEnds, "gameends"},
             {CommanderDeathMode::GameContinues, "gamecontinues"},
+            {CommanderDeathMode::Deathmatch, "deathmatch"},
         }};
 
         constexpr std::array<std::pair<PathfindingBackend, const char*>, 2> PathfindingBackendNames{{
@@ -215,6 +217,7 @@ namespace rwe
             j["mapping"] = enumToName(header.mapping, MappingNames, "unmapped");
             j["startLocation"] = enumToName(header.startLocation, StartLocationNames, "fixed");
             j["commanderDeath"] = enumToName(header.commanderDeath, CommanderDeathNames, "gameends");
+            j["allowWatching"] = header.allowWatching;
             j["pathfinding"] = enumToName(header.pathfindingBackend, PathfindingBackendNames, "rwe");
             auto& players = j["players"];
             players = nlohmann::json::array();
@@ -244,6 +247,7 @@ namespace rwe
             header.mapping = enumFromName(j.value("mapping", "unmapped"), MappingNames, MappingMode::Unmapped);
             header.startLocation = enumFromName(j.value("startLocation", "fixed"), StartLocationNames, StartLocationMode::Fixed);
             header.commanderDeath = enumFromName(j.value("commanderDeath", "gameends"), CommanderDeathNames, CommanderDeathMode::GameEnds);
+            header.allowWatching = j.value("allowWatching", true);
             header.pathfindingBackend = enumFromName(j.value("pathfinding", "rwe"), PathfindingBackendNames, PathfindingBackend::RweAStar);
             for (const auto& p : j.at("players"))
             {
@@ -264,6 +268,7 @@ namespace rwe
         header.mapping = parameters.mapping;
         header.startLocation = parameters.startLocation;
         header.commanderDeath = parameters.commanderDeath;
+        header.allowWatching = parameters.allowWatching;
         header.pathfindingBackend = parameters.pathfindingBackend;
         for (const auto& p : parameters.players)
         {
@@ -281,6 +286,7 @@ namespace rwe
         parameters.mapping = header.mapping;
         parameters.startLocation = header.startLocation;
         parameters.commanderDeath = header.commanderDeath;
+        parameters.allowWatching = header.allowWatching;
         parameters.pathfindingBackend = header.pathfindingBackend;
         for (std::size_t i = 0; i < parameters.players.size() && i < header.players.size(); ++i)
         {

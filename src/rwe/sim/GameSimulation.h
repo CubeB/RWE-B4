@@ -549,6 +549,7 @@ namespace rwe
         LineOfSightMode lineOfSightMode{LineOfSightMode::True};
         MappingMode mappingMode{MappingMode::Unmapped};
         CommanderDeathMode commanderDeathMode{CommanderDeathMode::GameEnds};
+        bool lavaWorld{false};
 
         MapTerrain terrain;
 
@@ -1439,6 +1440,9 @@ namespace rwe
          * answer neither resets nor advances it.
          */
         void updateEndCountdown();
+        void updatePlayerDefeats();
+        bool respawnDefeatedPlayer(PlayerId player);
+        void wipeCommanderArmy(PlayerId player);
 
         /** Whether the countdown has started or latched, which holds every settle back. */
         bool isEndCountdownFreezingEconomy() const;

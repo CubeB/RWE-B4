@@ -102,6 +102,7 @@ namespace rwe
         {
             MainMenuModel host;
             host.skirmishOptions.commanderDeath.next(1u);
+            host.skirmishOptions.allowWatching.next(0u);
             host.skirmishOptions.startLocation.next(1u);
             host.skirmishOptions.mapping.next(1u);
             host.skirmishOptions.lineOfSight.next(2u);
@@ -111,6 +112,7 @@ namespace rwe
             applyOptionsToModel(guest, optionsFromModel(host));
 
             CHECK(guest.skirmishOptions.commanderDeath.getValue() == 1u);
+            CHECK(guest.skirmishOptions.allowWatching.getValue() == 0u);
             CHECK(guest.skirmishOptions.startLocation.getValue() == 1u);
             CHECK(guest.skirmishOptions.mapping.getValue() == 1u);
             CHECK(guest.skirmishOptions.lineOfSight.getValue() == 2u);
@@ -133,7 +135,7 @@ namespace rwe
                 }
             }
             CHECK(found);
-            CHECK(options.size() == 5);
+            CHECK(options.size() == 6);
         }
 
         SECTION("a name it does not know is ignored, and a value out of range leaves the option alone")
@@ -588,7 +590,7 @@ namespace rwe
 
         unsigned int stagesOf(const std::string& option)
         {
-            return option == "los" ? 3u : 2u;
+            return option == "los" || option == "commander" ? 3u : 2u;
         }
 
         MainMenuModel roomModel()
@@ -688,9 +690,9 @@ namespace rwe
 
         SECTION("a label with no meaning here maps to nothing, and is not offered")
         {
-            CHECK_FALSE(optionStageOfButtonStage("commander", commander, 2).has_value());
-            CHECK_FALSE(optionStageForLabel("commander", "Deathmatch").has_value());
-            CHECK(usableOptionLabels("commander", commander) == std::vector<std::string>{"Continues", "Game ends"});
+            CHECK(optionStageOfButtonStage("commander", commander, 2) == 2u);
+            CHECK(optionStageForLabel("commander", "Deathmatch") == 2u);
+            CHECK(usableOptionLabels("commander", commander) == std::vector<std::string>{"Continues", "Game ends", "Deathmatch"});
             // An option the model does not have, and a stage past the buttons.
             CHECK_FALSE(optionStageForLabel("cheating", "Allowed").has_value());
             CHECK_FALSE(optionStageOfButtonStage("mapping", mapping, 9).has_value());
@@ -699,17 +701,18 @@ namespace rwe
         SECTION("a click on the usable labels flips the commander the right way")
         {
             const auto usable = usableOptionLabels("commander", commander);
-            // Game ends (0) -> Continues (1) -> Game ends (0).
-            CHECK(nextOptionStage("commander", usable, 0) == 1u);
+            // The caption order is Continues, Game ends, Deathmatch.
+            CHECK(nextOptionStage("commander", usable, 0) == 2u);
             CHECK(nextOptionStage("commander", usable, 1) == 0u);
+            CHECK(nextOptionStage("commander", usable, 2) == 1u);
         }
 
-        SECTION("a click with the full list skips the label with no meaning")
+        SECTION("a click with the full list includes Deathmatch")
         {
             // Continues (model 1) is the first label, so the next is Game
-            // ends; from Game ends the next is Deathmatch, which is skipped.
+            // ends; from Game ends the next is Deathmatch.
             CHECK(nextOptionStage("commander", commander, 1) == 0u);
-            CHECK(nextOptionStage("commander", commander, 0) == 1u);
+            CHECK(nextOptionStage("commander", commander, 0) == 2u);
         }
     }
 

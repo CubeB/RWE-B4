@@ -127,6 +127,50 @@ namespace rwe
         // 1. What do we own, and how is the economy doing?
         timed("economy", [&] { economy.refresh(sim, playerId, profile, blackboard); });
 
+        // #383: reserve live frames, queued construction and factory queues.
+        // This is RWE's planner policy, not the classic completed-only gate.
+        auto& tree = blackboard.buildTree;
+        if (!tree.missionRules.empty())
+        {
+            tree.missionCommitted = blackboard.ownedTotalCounts;
+            for (const auto& [id, unit] : sim.units)
+            {
+                if (unit.owner != playerId || unit.isDead())
+                {
+                    continue;
+                }
+                for (const auto& [type, count] : unit.buildQueue)
+                {
+                    tree.missionCommitted[type] += std::max(0, count);
+                }
+                std::optional<UnitId> held;
+                if (auto creating = std::get_if<FactoryBehaviorStateCreatingUnit>(&unit.factoryState))
+                {
+                    if (auto done = std::get_if<UnitCreationStatusDone>(&creating->status))
+                    {
+                        held = done->unitId;
+                    }
+                }
+                if (auto building = std::get_if<FactoryBehaviorStateBuilding>(&unit.factoryState))
+                {
+                    if (building->targetUnit)
+                    {
+                        held = building->targetUnit->first;
+                    }
+                }
+                if (held)
+                {
+                    auto target = sim.tryGetUnitState(*held);
+                    if (target && std::any_of(unit.buildQueue.begin(), unit.buildQueue.end(), [&](const auto& entry) {
+                            return entry.first == target->get().unitType && entry.second > 0;
+                        }))
+                    {
+                        --tree.missionCommitted[target->get().unitType];
+                    }
+                }
+            }
+        }
+
         // 2. What do we know about the enemy?
         timed("perception", [&] { perception.refresh(sim, playerId, profile, blackboard); });
 
@@ -614,6 +658,44 @@ namespace rwe
         timed("transport", [&] { transport.update(sim, playerId, profile, reachability, threatMap, build, blackboard, rng, outCommands); });
         timed("army", [&] { army.update(sim, playerId, profile, threatMap, blackboard, outCommands); });
         timed("air", [&] { air.update(sim, playerId, profile, threatMap, blackboard, outCommands); });
+
+        // Every producing manager passes through this final reservation gate,
+        // including transport/outpost planners. Human commands never do.
+        if (!tree.missionRules.empty())
+        {
+            auto first = outCommands.begin() + static_cast<std::ptrdiff_t>(commandsBeforeBuild);
+            outCommands.erase(std::remove_if(first, outCommands.end(), [&](const PlayerCommand& command) {
+                auto unitCommand = std::get_if<PlayerUnitCommand>(&command);
+                if (!unitCommand)
+                {
+                    return false;
+                }
+                std::string type;
+                int count = 1;
+                if (auto order = std::get_if<PlayerUnitCommand::IssueOrder>(&unitCommand->command))
+                {
+                    if (auto buildOrder = std::get_if<BuildOrder>(&order->order))
+                    {
+                        type = buildOrder->unitType;
+                    }
+                }
+                else if (auto queue = std::get_if<PlayerUnitCommand::ModifyBuildQueue>(&unitCommand->command))
+                {
+                    type = queue->unitType;
+                    count = queue->count;
+                }
+                if (type.empty() || count <= 0)
+                {
+                    return false;
+                }
+                if (!tree.missionAllows(type))
+                {
+                    return true;
+                }
+                tree.missionCommitted[type] += count;
+                return false;
+            }), outCommands.end());
+        }
 
         if (profiling && sim.gameTime.value % AiProfileReportIntervalTicks == 0)
         {

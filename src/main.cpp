@@ -125,6 +125,8 @@ int main(int argc, char* argv[])
                       << "                        Original TA, Balanced, Rush, Turtle, Tech Rush, Easy, Medium, Hard,\n"
                       << "                        or one written in the local data folder's ai directory\n"
                       << "  --record-replay <f>   write every command to a replay file as you play\n"
+                      << "  --commander-death <m> gameends | continues | deathmatch\n"
+                      << "  --allow-watching <b>  allow eliminated multiplayer players to watch (default true)\n"
                       << "  --record-demo <f>     write a TA demo of the game to this file as you play\n"
                       << "  --replay <file>       watch a replay instead of playing\n"
                       << "  --tad <file>          spectate a TA demo (.tad/.ted) instead of playing\n"
@@ -463,6 +465,14 @@ int main(int argc, char* argv[])
                     gameParameters->startLocation = rwe::StartLocationMode::Random;
                 }
                 gameParameters->pathfindingBackend = config.pathfindingBackend;
+                const auto commanderRule = args.getString("commander-death", "gameends");
+                gameParameters->allowWatching = args.getString("allow-watching", "true") != "false";
+                if (commanderRule != "gameends" && commanderRule != "continues" && commanderRule != "deathmatch")
+                {
+                    throw std::runtime_error("--commander-death expects gameends, continues or deathmatch");
+                }
+                gameParameters->commanderDeath = commanderRule == "deathmatch" ? rwe::CommanderDeathMode::Deathmatch
+                    : commanderRule == "continues" ? rwe::CommanderDeathMode::GameContinues : rwe::CommanderDeathMode::GameEnds;
                 for (const auto& tuning : args.getMulti("ai-tune"))
                 {
                     gameParameters->aiTuning.push_back(tuning);

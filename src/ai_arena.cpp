@@ -259,6 +259,7 @@ int main(int argc, char* argv[])
                       << "  --ai-engine <e>         classic | rwe: the computer player a seat with no personality\n"
                       << "                          plays (default classic, the original's; --ai-tune needs rwe)\n"
                       << "  --start-location <m>    fixed | random\n"
+                      << "  --commander-death <m>   gameends | continues | deathmatch\n"
                       << "  --ai-tune <p>:<k>=<v>   override one AI knob for player p (repeatable)\n"
                       << "  --ai-personality <p>:<name>  play player p as a personality (repeatable)\n"
                       << "  --out <dir>             where ai-arena.csv is written (default: local data path)\n"
@@ -401,6 +402,13 @@ int main(int argc, char* argv[])
             }
 
             auto startLocation = args.getString("start-location", "fixed");
+            const auto commanderRule = args.getString("commander-death", "gameends");
+            if (commanderRule != "gameends" && commanderRule != "continues" && commanderRule != "deathmatch")
+            {
+                throw std::runtime_error("--commander-death expects gameends, continues or deathmatch");
+            }
+            gameParameters.commanderDeath = commanderRule == "deathmatch" ? rwe::CommanderDeathMode::Deathmatch
+                : commanderRule == "continues" ? rwe::CommanderDeathMode::GameContinues : rwe::CommanderDeathMode::GameEnds;
             for (auto& c : startLocation)
             {
                 c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));

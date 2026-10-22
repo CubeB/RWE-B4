@@ -66,6 +66,8 @@ namespace rwe
         const AbstractVirtualFileSystem* vfs{nullptr};
         /** The mission's `aiprofile`, "DEFAULT" for a skirmish map. */
         std::string aiProfileName{"DEFAULT"};
+        /** Apply mission limits/preferences to RWE's own engine as well. */
+        bool mission{false};
         /** The map's unit limit (`maxunits`), which the classic engine's ratings read. */
         unsigned int unitLimit{200};
     };

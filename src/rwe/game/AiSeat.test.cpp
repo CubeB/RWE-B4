@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <map>
 #include <rwe/ai/AiPersonality.h>
+#include <rwe/ai/AiPlayerController.h>
 #include <rwe/game/AiSeat.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/sim_test_util.h>
@@ -70,6 +71,41 @@ namespace rwe
         }
     }
 
+    TEST_CASE("RWE mission seats apply mission profile limits and difficulty weights", "[ai][engine][mission-profile]")
+    {
+        // rev31/ai/MISSIONS.TXT, SHA256 a48c3791...dd2619d.
+        // Same directives as the shipped file, with comments/blank lines omitted.
+        FakeVfs vfs;
+        vfs.files["ai/missions.txt"] =
+            "plan easy\nlimit constr 1\nweight level2 0.25\n"
+            "limit corint 0\nlimit armbrtha 0\nlimit armanni 0\nlimit cordoom 0\nlimit cortron 0\nlimit armemp 0\n"
+            "plan medium\nweight level2 0.5\nlimit constr 2\n"
+            "limit corint 0\nlimit armbrtha 0\nlimit armanni 0\nlimit cordoom 0\nlimit cortron 0\nlimit armemp 0\n"
+            "plan hard\nweight level2 2\nlimit constr 8\nlimit cortron 0\nlimit armemp 0\n";
+        for (const auto difficulty : {AiDifficulty::Easy, AiDifficulty::Standard, AiDifficulty::Hard})
+        {
+            GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+            sim.unitDefinitions["ARMCK"].category = "CONSTR LEVEL1";
+            sim.unitDefinitions["ARMZEUS"].category = "LEVEL2";
+            sim.unitDefinitions["ARMBRTHA"].category = "LEVEL2";
+            sim.unitDefinitions["CORTRON"].category = "LEVEL2";
+            AiSeatRequest request;
+            request.defaultEngine = AiEngine::Rwe;
+            request.gameDifficulty = difficulty;
+            request.vfs = &vfs;
+            request.aiProfileName = "MISSIONS";
+            request.mission = true;
+            auto controller = createAiController(sim, request, MapIntel{}, AiBuildTree{});
+            const auto& tree = controller->asRweController()->getBlackboard().buildTree;
+            CHECK(tree.missionRules.at("ARMCK").limit == (difficulty == AiDifficulty::Easy ? 1 : difficulty == AiDifficulty::Standard ? 2 : 8));
+            CHECK(tree.missionWeight("ARMZEUS") == (difficulty == AiDifficulty::Easy ? 25 : difficulty == AiDifficulty::Standard ? 50 : 100));
+            CHECK(tree.missionAllows("ARMBRTHA") == (difficulty == AiDifficulty::Hard));
+            CHECK_FALSE(tree.missionAllows("CORTRON"));
+            request.mission = false;
+            auto skirmish = createAiController(sim, request, MapIntel{}, AiBuildTree{});
+            CHECK(skirmish->asRweController()->getBlackboard().buildTree.missionRules.empty());
+        }
+    }
     TEST_CASE("the engine a seat plays is its personality's, then its saved one, then the game's", "[ai][engine]")
     {
         auto balanced = builtIn("Balanced");

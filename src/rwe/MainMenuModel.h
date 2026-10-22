@@ -110,8 +110,9 @@ namespace rwe
          */
         struct SkirmishOptions
         {
-            /** Game ends | Continues */
+            /** Game ends | Continues | Deathmatch */
             BehaviorSubject<unsigned int> commanderDeath{0u};
+            BehaviorSubject<unsigned int> allowWatching{1u};
             /** Fixed | Random */
             BehaviorSubject<unsigned int> startLocation{0u};
             /** Unmapped | Mapped */

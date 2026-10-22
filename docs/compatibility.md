@@ -26,6 +26,13 @@ Three rules decided what belongs in each list.
 
 ---
 
+**Map descriptions have room to be read.** The map selector uses a wider box
+that grows with the description, keeping the size/player summary and buttons
+separate. It retains the full text without ellipsis; exceptionally long text
+can be scrolled once the box reaches the screen limit. This is the owner's
+requested readability change, not the original's fixed description layout
+(`MAP-DESCRIPTION-LAYOUT-FINDINGS.md`, 2026-10-22; section 88).
+
 **The example campaign is hidden.** RWE omits `camps/EXAMPLE.TDF` from the
 campaign choices at the owner's request (#655, 2026-10-17). The original accepts
 this loose campaign file; this is a deliberate menu policy, not conformance.
@@ -40,6 +47,17 @@ this policy on 2026-10-19 (#682, BT-257); ordinary feature reach and the history
 cap remain. The implementation covers burn, death and reclaim animation states.
 The section 88 entry is in the spec-room
 register (documentation commit `9d39950e`).
+
+**Mission profiles also constrain RWE's AI.** The selected profile's limits
+and weights influence its own planner. Reserved production counts toward
+limits, and weights rank structures and scale combat mixes. Classic AI
+retains its own rules.
+
+**Deathmatch uses shared per-seat countdowns.** Human and computer seats
+respawn, and skirmish uses the same endless mode as multiplayer. This
+replaces the original's machine-local countdown with deterministic shared
+state. Other seats keep playing while one waits. Candidate draws use RWE's
+existing RNG. See the [mission/elimination divergence appendix](agents/383-699-700-divergences.md).
 
 ## Kept: the original's quirks, reproduced on purpose
 

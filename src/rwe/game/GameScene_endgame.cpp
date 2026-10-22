@@ -7,6 +7,7 @@
 #include <rwe/game/ControlChannel.h>
 #include <nlohmann/json.hpp>
 #include <rwe/game/GameEndedReport.h>
+#include <rwe/game/EliminationRules.h>
 #include <rwe/game/InterfaceRules.h>
 #include <rwe/io/campaign/campaign.h>
 #include <rwe/io/gui/gui.h>
@@ -18,6 +19,71 @@
 
 namespace rwe
 {
+    void GameScene::updateLocalElimination()
+    {
+        if (isPlayback() || gameOver || simulation.missionRules)
+        {
+            return;
+        }
+        const auto& player = simulation.getPlayer(localPlayerId);
+        if (simulation.commanderDeathMode == CommanderDeathMode::Deathmatch && !player.removedFromGame)
+        {
+            return;
+        }
+        if (localEliminationHandled || player.type != GamePlayerType::Human
+            || player.status != GamePlayerStatus::Dead || player.defeatCountdown != -2
+            || !std::holds_alternative<WinStatusUndecided>(simulation.decidedStatus()))
+        {
+            return;
+        }
+        localEliminationHandled = true;
+        clearUnitSelection();
+        auto finish = [this]() {
+            closeGameMenu();
+            eliminationWatching = false;
+            gameOver = WinStatusNoSurvivors{};
+            gameOverTime = simulation.gameTime;
+            beginEndGameSequence();
+            sendGameEnded("decided", std::nullopt);
+        };
+        // In RWE lockstep every peer simulates the AI. No AI depends on this
+        // particular human's machine staying open (#700 adaptation).
+        const auto flow = eliminationFlow(!simulation.skirmishVictoryRules && !isOwnClock(),
+            gameParameters.allowWatching, false, player.removedFromGame);
+        if (flow == EliminationFlow::End)
+        {
+            finish();
+            return;
+        }
+        eliminationWatching = true;
+        fogOfWarEnabled = true;
+        combinedVisibility.reset();
+        openConfirmDialog("You're out!  Continue Watching?",
+            [this]() { closeGameMenu(); }, finish);
+    }
+
+    void GameScene::updateRespawnCamera()
+    {
+        const auto count = simulation.getPlayer(localPlayerId).respawnCount;
+        const auto previous = lastSeenRespawnCount.value_or(count);
+        lastSeenRespawnCount = count;
+        if (count == previous || isPlayback())
+        {
+            return;
+        }
+        localEliminationHandled = false;
+        eliminationWatching = false;
+        clearUnitSelection();
+        for (const auto& [id, unit] : simulation.units)
+        {
+            if (unit.owner == localPlayerId && unit.isAlive() && simulation.unitDefinitions.at(unit.unitType).commander)
+            {
+                selectAdditionalUnit(id);
+                setCameraPosition(Vector3f(unit.position.x.value, 0.0f, unit.position.z.value));
+                break;
+            }
+        }
+    }
     namespace
     {
         /**
@@ -191,6 +257,12 @@ namespace rwe
 
     void GameScene::beginEndGameSequence()
     {
+        if (eliminationWatching)
+        {
+            closeGameMenu();
+            pendingConfirmAction = nullptr;
+            pendingConfirmCancel = nullptr;
+        }
         endGamePhase = EndGamePhase::Banner;
         endGamePhaseStart = sceneTime;
 

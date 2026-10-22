@@ -12,6 +12,7 @@
 #include <cmath>
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuModel.h>
+#include <rwe/MapSelectionLayout.h>
 #include <rwe/MultiplayerSetup.h>
 #include <rwe/ip_util.h>
 #include <rwe/camera_util.h>
@@ -1332,6 +1333,10 @@ namespace rwe
         // SKIRMISH.GUI hangs on the button itself, so that is what it gets.
         if (optionName == "CommanderDeath")
         {
+            if (stage == 2)
+            {
+                return "Replace the commander after defeat; the game continues.";
+            }
             return stage == 0
                 ? "Game ends when commander is destroyed."
                 : "Game continues after Commander is destroyed.";
@@ -1386,6 +1391,10 @@ namespace rwe
                 return;
             }
 
+            if (name == "CommanderDeath" && button->get().getStageCount() == 2)
+            {
+                button->get().appendStage(UiStagedButton::StageInfo(button->get().getStageSprite(0), "Deathmatch"));
+            }
             auto sub = option.subscribe([this, b = &button->get(), helpLabel, name](unsigned int stage) {
                 b->setStage(stage);
                 // Cycling an option under the pointer should re-read: the
@@ -1457,7 +1466,7 @@ namespace rwe
 
         if (optionName == "CommanderDeath")
         {
-            cycle(model.skirmishOptions.commanderDeath, 2);
+            cycle(model.skirmishOptions.commanderDeath, 3);
         }
         else if (optionName == "StartLocation")
         {
@@ -1491,11 +1500,25 @@ namespace rwe
             throw std::runtime_error("Failed to parse GUI file");
         }
 
-        auto panel = uiFactory.panelFromGuiFile("SELMAP", "DSelectmap2", *parsedGui);
+        // MAP-LAYOUT-01/02: the original artwork reserves only two description
+        // rows. Use the resizable tiled plate for the larger readable layout.
+        auto& bounds = parsedGui->front().common;
+        bounds.xpos = 20;
+        bounds.ypos = 20;
+        bounds.width = 600;
+        bounds.height = 440;
+        auto panel = uiFactory.panelFromGuiFile("SELMAP", "", *parsedGui);
+        panel->setDefaultButtons("LOAD", "PREVMENU");
+        panel->setFocusByName("MAPNAMES");
+        panel->appendChild(uiFactory.createLabel(24, 12, 552, 20, "Select Map", UiLabel::Alignment::Left));
+        auto caption = uiFactory.createLabel(24, 260, 552, 20, "Description", UiLabel::Alignment::Left);
+        caption->setName("DESCRIPTION_CAPTION");
+        panel->appendChild(std::move(caption));
+        auto* mapPanel = panel.get();
 
         if (auto descriptionLabel = panel->find<UiLabel>("DESCRIPTION"))
         {
-            auto sub = model.candidateSelectedMap.subscribe([&l = descriptionLabel->get()](const auto& selectedMap) {
+            auto sub = model.candidateSelectedMap.subscribe([&l = descriptionLabel->get(), mapPanel](const auto& selectedMap) {
                 if (selectedMap)
                 {
                     l.setText(selectedMap->description);
@@ -1504,13 +1527,13 @@ namespace rwe
                 {
                     l.setText("");
                 }
+                layoutMapSelectionPanel(*mapPanel);
             });
             descriptionLabel->get().addSubscription(std::move(sub));
         }
         if (auto sizeLabel = panel->find<UiLabel>("SIZE"))
         {
-            sizeLabel->get().setSingleLine(true);
-            auto sub = model.candidateSelectedMap.subscribe([&l = sizeLabel->get()](const auto& selectedMap) {
+            auto sub = model.candidateSelectedMap.subscribe([&l = sizeLabel->get(), mapPanel](const auto& selectedMap) {
                 if (selectedMap)
                 {
                     l.setText(selectedMap->size);
@@ -1519,6 +1542,7 @@ namespace rwe
                 {
                     l.setText("");
                 }
+                layoutMapSelectionPanel(*mapPanel);
             });
             sizeLabel->get().addSubscription(std::move(sub));
         }
@@ -1901,7 +1925,8 @@ namespace rwe
     /** SKIRMISH.GUI: text=Game ends|Continues. */
     CommanderDeathMode skirmishStageToCommanderDeathMode(unsigned int stage)
     {
-        return stage == 0 ? CommanderDeathMode::GameEnds : CommanderDeathMode::GameContinues;
+        return stage == 2 ? CommanderDeathMode::Deathmatch
+            : stage == 0 ? CommanderDeathMode::GameEnds : CommanderDeathMode::GameContinues;
     }
 
     void MainMenuScene::readNetworkAddressesFromPanel()
@@ -1995,6 +2020,7 @@ namespace rwe
         params.mapping = skirmishStageToMappingMode(model.skirmishOptions.mapping.getValue());
         params.startLocation = skirmishStageToStartLocationMode(model.skirmishOptions.startLocation.getValue());
         params.commanderDeath = skirmishStageToCommanderDeathMode(model.skirmishOptions.commanderDeath.getValue());
+        params.allowWatching = model.skirmishOptions.allowWatching.getValue() != 0;
         params.pathfindingBackend = sceneContext.globalConfig->pathfindingBackend;
 
         for (Index i = 0; i < getSize(model.players); ++i)

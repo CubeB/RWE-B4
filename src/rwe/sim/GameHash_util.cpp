@@ -63,8 +63,14 @@ namespace rwe
             p.maxMetal,
             p.energy,
             p.maxEnergy,
+            p.startingMetal,
+            p.startingEnergy,
             p.hasBaseStorage,
             p.hasCreatedUnits,
+            p.defeatCountdown,
+            p.commanderType,
+            p.respawnCount,
+            p.removedFromGame,
             p.removeUnitsAt,
             p.metalStalled,
             p.energyStalled,
@@ -525,6 +531,8 @@ namespace rwe
             // BT-82: the end countdown freezes the economy from its first
             // step, and the latched result decides how the game ends.
             simulation.endCountdown,
+            simulation.commanderDeathMode,
+            simulation.lavaWorld,
             simulation.skirmishVictoryRules,
             computeHashOfWinStatus(simulation.gameStatus),
             simulation.featureRegrowthCursor,

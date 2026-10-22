@@ -3144,6 +3144,12 @@ namespace rwe
             }
         };
 
+        auto applyMissionPreferences = [&]() {
+            std::stable_sort(wanted.begin(), wanted.end(), [&](const std::string& a, const std::string& b) {
+                return bb.buildTree.missionWeight(a) > bb.buildTree.missionWeight(b);
+            });
+        };
+
         // Metal, of whichever kind this map's patches will take.
         //
         // Every extractor rule below used to name the dry one alone, and on a
@@ -3266,6 +3272,7 @@ namespace rwe
             wantStorage(true);
             wantMetalExtractor();
             want(s.solar);
+            applyMissionPreferences();
             return wanted;
         }
 
@@ -3989,6 +3996,7 @@ namespace rwe
             wanted.insert(wanted.begin(), urgent.begin(), urgent.end());
         }
 
+        applyMissionPreferences();
         return wanted;
     }
 
@@ -3996,7 +4004,7 @@ namespace rwe
     {
         const auto& s = bb.sideUnits;
         auto total = [&](const std::string& t) {
-            return t.empty() ? 0 : countOf(bb.ownedTotalCounts, t);
+            return t.empty() ? 0 : !bb.buildTree.missionAllows(t) ? 1000000 : countOf(bb.ownedTotalCounts, t);
         };
 
         // Every factory that makes land combat units asks this, so it is
@@ -4363,8 +4371,8 @@ namespace rwe
                 long long bestShare = 0;
                 for (const auto& [type, share] : line)
                 {
-                    auto weightedShare = static_cast<long long>(share);
-                    if (type->empty() || weightedShare <= 0)
+                    auto weightedShare = static_cast<long long>(share) * bb.buildTree.missionWeight(*type);
+                    if (type->empty() || weightedShare <= 0 || !bb.buildTree.missionAllows(*type))
                     {
                         continue;
                     }
@@ -4403,7 +4411,7 @@ namespace rwe
                 // air plant) the air lift remains the path, and an overdue
                 // first transport goes ahead of the scout plane.
                 auto ferryPriority = ferryBuildPriority(profile, bb, enemyBaseAcrossWater);
-                auto seaTransportBuildable = !s.seaTransport.empty();
+                auto seaTransportBuildable = !s.seaTransport.empty() && bb.buildTree.missionAllows(s.seaTransport);
                 auto preferSeaLift = ferryPriority != FerryBuildPriority::None
                     && seaTransportBuildable && total(s.shipyard) >= 1;
                 auto wantAirTransport = !preferSeaLift && !s.airTransport.empty()
@@ -4765,6 +4773,10 @@ namespace rwe
                 }
             }
 
+            if (!next.empty() && !bb.buildTree.missionAllows(next))
+            {
+                next.clear();
+            }
             if (!next.empty() && reserveHolds)
             {
                 // Builders are what the reserve is FOR, so they still come.

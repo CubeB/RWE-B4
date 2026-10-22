@@ -6881,7 +6881,9 @@ namespace rwe
                     return reclaimTarget(unitInfo, target);
                 }
 
-                if (!unitInfo.state->inBuildStance)
+                // RA-04: aircraft feature reclaim has no build-stance gate.
+                if (!unitInfo.state->inBuildStance
+                    && !(unitInfo.definition->canFly && std::holds_alternative<FeatureId>(target)))
                 {
                     return false;
                 }
@@ -6937,7 +6939,23 @@ namespace rwe
                         return finished;
                     },
                     [&](const FeatureId& targetFeatureId) {
-                        auto finished = sim->reclaimFeature(targetFeatureId, unitInfo.state->owner, unitInfo.definition->workerTimePerTick);
+                        // PLAYTEST-RECLAIM-ASSIST-FINDINGS RA-04: a per-order
+                        // countdown, independent of WorkerTime and wreck HP.
+                        // Tick zero is the first decrement; ground jobs have
+                        // one additional two-tick visit before payout.
+                        const auto& feature = sim->getFeature(targetFeatureId);
+                        const auto& definition = sim->getFeatureDefinition(feature.featureName);
+                        auto timer = static_cast<unsigned int>((unitInfo.definition->canFly ? 30.0 : 15.0)
+                            + (static_cast<double>(definition.metal) + definition.energy) / 2.0);
+                        auto elapsed = 2u * ((timer + 1u) / 2u) + (unitInfo.definition->canFly ? 0u : 2u);
+                        if (reclaimingState.stepCounter++ < elapsed)
+                        {
+                            return false;
+                        }
+                        // Complete in one operation. Legacy saved shared work
+                        // is deducted by reclaimFeature to avoid paying twice.
+                        auto finished = sim->reclaimFeature(targetFeatureId, unitInfo.state->owner,
+                            computeFeatureReclaimWork(definition, feature.hitPoints));
                         if (finished)
                         {
                             changeState(*unitInfo.state, UnitBehaviorStateIdle());
@@ -6975,7 +6993,12 @@ namespace rwe
                 auto pitch = headingAndPitch.second;
 
                 changeState(*unitInfo.state, UnitBehaviorStateReclaiming{target, std::nullopt});
-                unitInfo.state->cobEnvironment->createThread("StartBuilding", {toCobAngle(heading).value, toCobAngle(pitch).value});
+                // RA-04: aircraft feature jobs query the nano piece without
+                // invoking StartBuilding. Unit reclaim keeps its existing path.
+                if (!(unitInfo.definition->canFly && std::holds_alternative<FeatureId>(target)))
+                {
+                    unitInfo.state->cobEnvironment->createThread("StartBuilding", {toCobAngle(heading).value, toCobAngle(pitch).value});
+                }
                 return false;
             });
     }

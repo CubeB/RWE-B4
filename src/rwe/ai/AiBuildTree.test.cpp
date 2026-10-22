@@ -4,6 +4,24 @@
 
 namespace rwe
 {
+    TEST_CASE("mission caps constrain even unknown builders and zero weights forbid a type", "[ai][mission-profile]")
+    {
+        AiBuildTree tree;
+        tree.missionRules["ARMCK"] = ClassicTypeEntry{100, 1};
+        tree.missionRules["ARMBRTHA"] = ClassicTypeEntry{100, 0};
+        tree.missionRules["ARMZEUS"] = ClassicTypeEntry{25, -1};
+        CHECK(tree.canBuild("ARMLAB", "armck"));
+        CHECK_FALSE(tree.canBuild("UNKNOWN", "ARMBRTHA"));
+        tree.missionCommitted["ARMCK"] = 1;
+        CHECK_FALSE(tree.canBuild("ARMLAB", "ARMCK"));
+        tree.missionCommitted.clear();
+        CHECK(tree.canBuild("ARMLAB", "ARMCK"));
+        CHECK(tree.missionWeight("ARMZEUS") == 25);
+        tree.missionRules["ARMZEUS"].multiplier = 0;
+        CHECK_FALSE(tree.missionAllows("ARMZEUS"));
+        tree.missionRules["ARMZEUS"] = ClassicTypeEntry{100, -2};
+        CHECK_FALSE(tree.missionAllows("ARMZEUS"));
+    }
     namespace
     {
         /** One page of gadgets, named as the shipped GUI files name them. */

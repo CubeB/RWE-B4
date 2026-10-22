@@ -119,8 +119,8 @@ namespace rwe
         /**
          * Ticks of work towards the next bite out of a unit target, the
          * original's mission+0x3A: a unit is reclaimed as a damage step every
-         * sixteen ticks (0x4048D2), not as a smooth drain. Unused for a
-         * feature target, which is worked a tick at a time.
+         * sixteen ticks (0x4048D2), not as a smooth drain. For a feature,
+         * elapsed working ticks of this order (RA-04); never pooled work.
          */
         unsigned int stepCounter{0};
     };

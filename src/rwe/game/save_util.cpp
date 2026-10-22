@@ -278,6 +278,10 @@ namespace rwe
                 {"startingEnergy", saveEnergy(p.startingEnergy)},
                 {"hasBaseStorage", p.hasBaseStorage},
                 {"hasCreatedUnits", p.hasCreatedUnits},
+                {"defeatCountdown", p.defeatCountdown},
+                {"commanderType", p.commanderType},
+                {"respawnCount", p.respawnCount},
+                {"removedFromGame", p.removedFromGame},
                 {"removeUnitsAt", saveOptional(p.removeUnitsAt, [](GameTime v) { return saveGameTime(v); })},
                 {"metalStalled", p.metalStalled},
                 {"energyStalled", p.energyStalled},
@@ -330,6 +334,10 @@ namespace rwe
             p.hasBaseStorage = j.contains("hasBaseStorage") && j.at("hasBaseStorage").get<bool>();
             // Added with BT-193; an older save's players have all been given units.
             p.hasCreatedUnits = !j.contains("hasCreatedUnits") || j.at("hasCreatedUnits").get<bool>();
+            p.defeatCountdown = j.value("defeatCountdown", -1);
+            p.commanderType = j.value("commanderType", std::string());
+            p.respawnCount = j.value("respawnCount", 0u);
+            p.removedFromGame = j.value("removedFromGame", false);
             if (j.contains("removeUnitsAt"))
             {
                 p.removeUnitsAt = loadOptional(j.at("removeUnitsAt"), [](const json& v) { return loadGameTime(v); });
@@ -695,6 +703,8 @@ namespace rwe
 
         j["gameStatus"] = saveWinStatus(sim.gameStatus);
         j["endCountdown"] = sim.endCountdown;
+        j["commanderDeathMode"] = static_cast<int>(sim.commanderDeathMode);
+        j["lavaWorld"] = sim.lavaWorld;
         j["skirmishVictoryRules"] = sim.skirmishVictoryRules;
         j["currentWindGenerationFactor"] = saveSimScalar(sim.currentWindGenerationFactor);
         j["currentWindVector"] = saveSimVector(sim.currentWindVector);
@@ -861,6 +871,8 @@ namespace rwe
         sim.gameStatus = loadWinStatus(j.at("gameStatus"));
         // Absent from saves made before BT-82; no countdown had started then.
         sim.endCountdown = j.contains("endCountdown") ? j.at("endCountdown").get<int>() : -1;
+        sim.commanderDeathMode = static_cast<CommanderDeathMode>(j.value("commanderDeathMode", static_cast<int>(sim.commanderDeathMode)));
+        sim.lavaWorld = j.value("lavaWorld", sim.lavaWorld);
         sim.skirmishVictoryRules = j.contains("skirmishVictoryRules") && j.at("skirmishVictoryRules").get<bool>();
         sim.currentWindGenerationFactor = loadSimScalar(j.at("currentWindGenerationFactor"));
         if (j.contains("currentWindVector"))

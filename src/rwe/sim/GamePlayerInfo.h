@@ -87,6 +87,13 @@ namespace rwe
          */
         bool hasCreatedUnits{false};
 
+        // #699/#700 supplement: per-seat lockstep adaptation of the original
+        // machine-local countdown. -1 idle, 4..0 pending, -2 processed.
+        int defeatCountdown{-1};
+        std::string commanderType{};
+        unsigned int respawnCount{0};
+        bool removedFromGame{false};
+
         /** BT-232: the agreed drop's unit wipe, in simulation time. Saved for replay keyframes. */
         std::optional<GameTime> removeUnitsAt{std::nullopt};
 

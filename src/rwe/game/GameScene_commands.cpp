@@ -13,6 +13,7 @@
 #include <rwe/camera_util.h>
 #include <rwe/game/GameScene_ownclock.h>
 #include <rwe/game/GameScene_util.h>
+#include <rwe/sim/UnitVisibility.h>
 #include <rwe/game/OrderButtons.h>
 #include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/game/SaveFile.h>
@@ -608,7 +609,7 @@ namespace rwe
         const auto& vis = simulation.playerVisibility.at(localPlayerId.value);
         if (fogOfWarEnabled)
         {
-            if (!isPlayback())
+            if (!isPlayback() && !eliminationWatching)
             {
                 return vis;
             }
@@ -634,6 +635,8 @@ namespace rwe
                 std::fill(visible.begin(), visible.end(), static_cast<unsigned char>(0));
                 for (const auto& other : simulation.playerVisibility)
                 {
+                    combined.radarContacts.insert(other.radarContacts.begin(), other.radarContacts.end());
+                    combined.sonarContacts.insert(other.sonarContacts.begin(), other.sonarContacts.end());
                     const auto& otherVisible = other.visible.getVector();
                     for (std::size_t i = 0; i < visible.size() && i < otherVisible.size(); ++i)
                     {
@@ -683,7 +686,7 @@ namespace rwe
         }
 
         const auto& shared = simulation.explored.getVector();
-        if (isPlayback())
+        if (isPlayback() || eliminationWatching)
         {
             // Watching a recording with the fog on shows what both sides could
             // see, so remembered ground is every group's bit and not one
@@ -719,31 +722,6 @@ namespace rwe
             }
         }
 
-        // The same questions the original's draw predicate asks, in the same
-        // order: whose it is, whether it is cloaked, whether anything of it
-        // breaks the surface, and only then whether the ground under it is
-        // lit. It has to agree with the simulation's canSeeUnit or a unit
-        // would be drawn to an enemy who cannot target it.
-        //
-        // The waterline question is the sonar one. 0x465AC0 refuses a unit
-        // whose model is entirely below sea level unless the viewer holds it
-        // on sonar, so a submarine is drawn to a destroyer and not to a
-        // Peewee standing on the beach beside it.
-        // Skipped with the fog off, which is a fully lit map and not a second
-        // way of drawing one: nothing may stay hidden under it.
-        if (fogOfWarEnabled && !unit.isOwnedBy(localPlayerId))
-        {
-            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
-            if (unit.position.y + simulation.modelHeightOf(unitDefinition) < simulation.terrain.getSeaLevel())
-            {
-                const auto& heard = simulation.playerVisibility.at(localPlayerId.value).sonarContacts;
-                if (heard.find(unitId) == heard.end())
-                {
-                    return false;
-                }
-            }
-        }
-
         if (spectatorMode)
         {
             // A spectator is not a player and there is nobody for a unit to
@@ -753,17 +731,14 @@ namespace rwe
             return true;
         }
 
-        auto style = computeUnitDrawStyle(unit.isOwnedBy(localPlayerId), unit.cloaked, positionIsVisibleToLocalPlayer(unit.position));
-        if (style == UnitDrawStyle::Solid && fogOfWarEnabled && !unit.isOwnedBy(localPlayerId))
-        {
-            // An enemy structure appears when the ground under it does, not
-            // when the one cell at its centre is lit.
-            const auto& definition = simulation.unitDefinitions.at(unit.unitType);
-            if (!definition.isMobile && !structureGroundIsInSight(simulation, localPlayerVisibility(), unit.position, definition))
-            {
-                return false;
-            }
-        }
+        // CV-02/03: the original admits any lit projected corner, for both
+        // buildings and factory products independently. A centre-only check
+        // followed by an all-ground-corners check delayed a factory or mex
+        // after it was already visible to the simulation. Use the same query
+        // with this client's picture, including a watching view's union.
+        auto visible = !fogOfWarEnabled
+            || canSeeUnitInVisibility(simulation, localPlayerId, unitId, localPlayerVisibility());
+        auto style = computeUnitDrawStyle(unit.isOwnedBy(localPlayerId), unit.cloaked, visible);
         return style != UnitDrawStyle::Hidden;
     }
 
@@ -779,7 +754,8 @@ namespace rwe
         // that the dot obeys the same stealth, jamming and waterline rules the
         // detection pass applied -- a submarine gets a dot from sonar and not
         // from a radar dish that cannot hear it.
-        const auto& visibility = simulation.playerVisibility.at(localPlayerId.value);
+        const auto& visibility = eliminationWatching ? localPlayerVisibility()
+            : simulation.playerVisibility.at(localPlayerId.value);
         return visibility.radarContacts.find(unitId) != visibility.radarContacts.end()
             || visibility.sonarContacts.find(unitId) != visibility.sonarContacts.end();
     }
@@ -793,7 +769,7 @@ namespace rwe
             return simulation.playerVisibility.at(localPlayerId.value).contains(simulation.visionCellAt(position));
         }
 
-        if (isPlayback())
+        if (isPlayback() || eliminationWatching)
         {
             // Watching a recording with the fog on shows both sides, so
             // remembered ground is every group's bit and not one player's.

@@ -48,7 +48,8 @@ namespace rwe
         // One table, read in both directions. The stage counts are the
         // number of faces SKIRMISH.GUI gives each button.
         const OptionSpec optionSpecs[] = {
-            {"commander", 2, &MainMenuModel::SkirmishOptions::commanderDeath},
+            {"commander", 3, &MainMenuModel::SkirmishOptions::commanderDeath},
+            {"watching", 2, &MainMenuModel::SkirmishOptions::allowWatching},
             {"startloc", 2, &MainMenuModel::SkirmishOptions::startLocation},
             {"mapping", 2, &MainMenuModel::SkirmishOptions::mapping},
             {"los", 3, &MainMenuModel::SkirmishOptions::lineOfSight},
@@ -715,7 +716,7 @@ namespace rwe
         const std::vector<std::string>* modelStageLabels(const std::string& optionName)
         {
             static const std::vector<std::pair<std::string, std::vector<std::string>>> table{
-                {"commander", {"GAME ENDS", "CONTINUES"}},
+                {"commander", {"GAME ENDS", "CONTINUES", "DEATHMATCH"}},
                 {"startloc", {"FIXED", "RANDOM"}},
                 {"mapping", {"UNMAPPED", "MAPPED"}},
                 {"los", {"PERMANENT", "TRUE", "CIRCULAR"}},
@@ -1104,7 +1105,7 @@ namespace rwe
         // host that did not say leaves its column empty rather than guessed.
         if (const auto* v = findOption(game.options, "commander"))
         {
-            row.commander = (*v == "0") ? "Yes" : "No";
+            row.commander = (*v == "2") ? "Deathmatch" : (*v == "0") ? "Yes" : "No";
         }
         row.ping = "-";
         if (const auto* v = findOption(game.options, "los"))
@@ -1667,9 +1668,7 @@ namespace rwe
         }
 
         // -- the options --
-        // A button may carry stages this build means nothing by (the
-        // commander's third, Deathmatch). It is built again without them, at
-        // the place the file gave it, so that a click can never land on one.
+        // Retain every recognized option, including the Deathmatch stage.
         for (const auto& option : battleroomOptions())
         {
             auto button = panel->find<UiStagedButton>(option.button);

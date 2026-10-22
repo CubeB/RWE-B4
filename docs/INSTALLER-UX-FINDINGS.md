@@ -1,4 +1,4 @@
-ï»¿# Installer and first-run setup UX comparison
+﻿# Installer and first-run setup UX comparison
 
 ## INSTALL-UX-001: RWE packaging and data-import presentation are RWE-original
 

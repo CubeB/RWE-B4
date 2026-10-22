@@ -1769,6 +1769,12 @@ namespace rwe
         if (unit.owner.value < players.size())
         {
             players[unit.owner.value].hasCreatedUnits = true;
+            if (unitDefinition.commander && players[unit.owner.value].commanderType.empty())
+            {
+                // Initial commanders are resolved from the side data by the
+                // shared loader; retain that identity for Deathmatch.
+                players[unit.owner.value].commanderType = unit.unitType;
+            }
         }
 
         auto unitId = units.emplace(std::move(unit));
@@ -2702,6 +2708,33 @@ namespace rwe
                 return WinStatusNoSurvivors();
             }
             return WinStatusWon{*winner};
+        }
+
+        // #699 supplement: no allied victory during a respawn wait. RWE
+        // deliberately offers the same endless mode in skirmish too.
+        if (commanderDeathMode == CommanderDeathMode::Deathmatch)
+        {
+            return WinStatusUndecided();
+        }
+
+        // Corrected BT-89 supplement: multiplayer does not remain in an
+        // AI-only match after every participating human is eliminated.
+        if (!skirmishVictoryRules)
+        {
+            bool hadHuman = false;
+            bool livingHuman = false;
+            for (const auto& player : players)
+            {
+                if (player.type == GamePlayerType::Human)
+                {
+                    hadHuman = hadHuman || player.hasCreatedUnits;
+                    livingHuman = livingHuman || player.status == GamePlayerStatus::Alive;
+                }
+            }
+            if (hadHuman && !livingHuman)
+            {
+                return WinStatusNoSurvivors{};
+            }
         }
 
         // The first player still standing, and whether anybody still
@@ -4591,25 +4624,38 @@ namespace rwe
             return;
         }
 
-        if (commanderDeathMode == CommanderDeathMode::GameEnds)
+        if (commanderDeathMode != CommanderDeathMode::GameContinues)
         {
-            for (const auto& p : units)
+            std::set<PlayerId> wiped;
+            // A wipe's secondary blast can kill another commander. Observe
+            // those deaths before deleteDeadUnits removes their trigger.
+            while (true)
             {
-                const auto& unitDefinition = unitDefinitions.at(p.second.unitType);
-                if (unitDefinition.commander && p.second.isDead())
+                std::set<PlayerId> pending;
+                for (const auto& p : units)
                 {
-                    killPlayer(p.second.owner);
+                    const auto& unitDefinition = unitDefinitions.at(p.second.unitType);
+                    if (unitDefinition.commander && p.second.isDead() && wiped.count(p.second.owner) == 0)
+                    {
+                        pending.insert(p.second.owner);
+                    }
+                }
+                if (pending.empty())
+                {
+                    break;
+                }
+                for (auto player : pending)
+                {
+                    wiped.insert(player);
+                    wipeCommanderArmy(player);
                 }
             }
-
-            return;
         }
 
-        // Commander Dies: Game Continues. The commander is an ordinary unit --
-        // it still dies and still explodes, it simply no longer takes the
-        // player with it -- so a player is out only once nothing of theirs is
-        // left standing at all. Buildings are units here, so "no live units"
-        // already means "no units and no buildings".
+        // BT-83: defeat is zero live units in every mode. A very tough unit
+        // can survive the 30000-damage wipe; losing that last survivor later
+        // must still start defeat/respawn. In Continues the commander alone
+        // simply never initiates the wipe above.
         //
         // The test is "had one, has none" rather than plainly "has none",
         // and that is deliberate. This runs before deleteDeadUnits, so a unit
@@ -4721,7 +4767,8 @@ namespace rwe
             std::vector<bool> settles(players.size(), false);
             for (Index i = 0; i < getSize(players); ++i)
             {
-                settles[i] = simulatesLocally(*this, PlayerId(i)) && (hasLivingUnit[i] || !players[i].hasCreatedUnits);
+                settles[i] = simulatesLocally(*this, PlayerId(i)) && players[i].defeatCountdown < 0
+                    && (hasLivingUnit[i] || !players[i].hasCreatedUnits);
             }
 
             for (Index i = 0; i < getSize(players); ++i)
@@ -4734,6 +4781,13 @@ namespace rwe
                 auto& player = players[i];
                 player.maxEnergy = player.hasBaseStorage ? player.startingEnergy : Energy(0);
                 player.maxMetal = player.hasBaseStorage ? player.startingMetal : Metal(0);
+                if (player.hasBaseStorage && player.respawnCount > 0)
+                {
+                    // 0x496E90: unscaled base storage, at least 200 of each;
+                    // the host's starting amounts remain the credit source.
+                    player.maxEnergy = Energy(std::max(200.0f, player.startingEnergy.value));
+                    player.maxMetal = Metal(std::max(200.0f, player.startingMetal.value));
+                }
             }
 
             for (auto& entry : units)
