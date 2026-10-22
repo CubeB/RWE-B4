@@ -96,7 +96,7 @@ recall.
 The source-level unsaved-slot quirk remains as in the earlier audit: recall's
 guard does not test the selected slot's validity byte, so ordinary initialized
 unsaved coordinates can be recalled as zero. This was not checked in a running
-original. RWE's optional-bookmark policy is separate from the accepted
+original. RWE's optional-bookmark handling is separate from the accepted
 cancellation side effects for a successful stored-bookmark recall.
 
 **Refutation of the prior F3/n claim.** The original does not clear follow or
