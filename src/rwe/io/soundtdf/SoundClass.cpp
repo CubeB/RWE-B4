@@ -1,4 +1,5 @@
 #include "SoundClass.h"
+#include <rwe/io/tdf/SimpleTdfAdapter.h>
 
 namespace rwe
 {
@@ -30,16 +31,59 @@ namespace rwe
         return s;
     }
 
-    std::vector<std::pair<std::string, SoundClass>> parseSoundTdf(const TdfBlock& root)
+    namespace
     {
-        std::vector<std::pair<std::string, SoundClass>> vec;
-        vec.reserve(root.blocks.size());
-
-        for (const auto& e : root.blocks)
+        // BT-133: numeric category bindings use SOUND.TDF's file order.
+        class SoundTdfAdapter : public TdfAdapter<std::vector<std::pair<std::string, SoundClass>>>
         {
-            vec.emplace_back(e.first, parseSoundClass(*e.second));
-        }
+            SimpleTdfAdapter blocks;
+            std::vector<std::string> names;
+            unsigned int depth{0};
 
-        return vec;
+        public:
+            void onStart() override
+            {
+                blocks.onStart();
+            }
+
+            void onProperty(const std::string& name, const std::string& value) override
+            {
+                blocks.onProperty(name, value);
+            }
+
+            void onStartBlock(const std::string& name) override
+            {
+                if (depth++ == 0)
+                {
+                    names.push_back(name);
+                }
+                blocks.onStartBlock(name);
+            }
+
+            void onEndBlock() override
+            {
+                blocks.onEndBlock();
+                --depth;
+            }
+
+            Result onDone() override
+            {
+                auto root = blocks.onDone();
+                Result result;
+                result.reserve(names.size());
+                for (const auto& name : names)
+                {
+                    result.emplace_back(name, parseSoundClass(root.findBlock(name)->get()));
+                }
+                return result;
+            }
+        };
+    }
+
+    std::vector<std::pair<std::string, SoundClass>> parseSoundTdf(const std::string& input)
+    {
+        TdfParser<ConstUtf8UncheckedIterator, std::vector<std::pair<std::string, SoundClass>>> parser(new SoundTdfAdapter);
+        auto text = utf8::is_valid(input.begin(), input.end()) ? input : latin1ToUtf8(input);
+        return parser.parse(cUtf8UncheckedBegin(text), cUtf8UncheckedEnd(text));
     }
 }

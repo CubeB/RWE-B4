@@ -1157,6 +1157,7 @@ set(TEST_FILES
     src/rwe/game/buildghost.test.cpp
     src/rwe/game/cloakdisplay.test.cpp
     src/rwe/game/damagesmoke.test.cpp
+    src/rwe/game/soundcategory.test.cpp
     src/rwe/game/featureplacement.test.cpp
     src/rwe/game/fogeffects.test.cpp
     src/rwe/test_announce.cpp

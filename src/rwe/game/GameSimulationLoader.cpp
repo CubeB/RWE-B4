@@ -379,7 +379,7 @@ namespace rwe
                 }
 
                 std::string soundString(bytes->data(), bytes->size());
-                auto sounds = parseSoundTdf(parseTdfFromString(soundString));
+                auto sounds = parseSoundTdf(soundString);
                 for (auto& s : sounds)
                 {
                     const auto& c = s.second;

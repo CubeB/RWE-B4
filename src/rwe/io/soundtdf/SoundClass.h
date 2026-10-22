@@ -33,5 +33,5 @@ namespace rwe
 
     SoundClass parseSoundClass(const TdfBlock& block);
 
-    std::vector<std::pair<std::string, SoundClass>> parseSoundTdf(const TdfBlock& root);
+    std::vector<std::pair<std::string, SoundClass>> parseSoundTdf(const std::string& input);
 }
