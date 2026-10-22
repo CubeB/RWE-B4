@@ -3,6 +3,28 @@
 
 namespace rwe
 {
+    int modelHeightFrom3do(const _3do::Object& obj)
+    {
+        // BT-MODEL-HEIGHT-SCROLLBAR-FINDINGS: translate vertices before
+        // flooring; floor the child-list before adding the parent's offset.
+        // An empty leaf has no height contribution from its origin alone.
+        int height = 0;
+        for (const auto& vertex : obj.vertices)
+        {
+            height = std::max(height, vertex.y + obj.y);
+        }
+        if (!obj.children.empty())
+        {
+            int childHeight = 0;
+            for (const auto& child : obj.children)
+            {
+                childHeight = std::max(childHeight, modelHeightFrom3do(child));
+            }
+            height = std::max(height, childHeight + obj.y);
+        }
+        return height;
+    }
+
     bool compareVertexHeights(const _3do::Vertex& a, const _3do::Vertex& b)
     {
         return a.y < b.y;

@@ -39,7 +39,7 @@ namespace rwe
         auto selectionMesh = selectionMeshFrom3do(objects.front());
 
         auto d = createUnitModelDefinition(
-            simScalarFromFixed(findHighestVertex(objects.front()).y),
+            simScalarFromFixed(modelHeightFrom3do(objects.front())),
             unitMeshFrom3do(objects.front()));
         d.vertices = unitVerticesFrom3do(objects.front());
 
@@ -68,7 +68,7 @@ namespace rwe
         }
 
         auto d = createUnitModelDefinition(
-            simScalarFromFixed(findHighestVertex(objects.front()).y),
+            simScalarFromFixed(modelHeightFrom3do(objects.front())),
             unitMeshFrom3do(objects.front()));
 
         std::vector<std::pair<std::string, UnitPieceMeshInfo>> meshes;
