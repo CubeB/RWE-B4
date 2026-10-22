@@ -99,6 +99,7 @@ namespace rwe
         std::unordered_map<std::string, WeaponMediaInfo> weaponMap;
 
         std::unordered_map<std::string, SoundClass> soundClassMap;
+        std::vector<std::string> soundClassNames;
 
         std::unordered_map<std::string, AudioService::SoundHandle> soundMap;
 

@@ -855,10 +855,10 @@ namespace rwe
         REQUIRE(font16.verticalOffset() == 0);
     }
 
-    TEST_CASE("an FBI with no SoundCategory is silent, not refused", "[malformed]")
+    TEST_CASE("an FBI with no SoundCategory keeps an empty binding for category zero", "[malformed]")
     {
         // ProTA's MAKENUKE/MAKEANTI pseudo-units name no category; the
-        // original reads the missing key as no sound at all.
+        // BT-133: the missing key binds to category zero at media lookup.
         auto fbi = parseUnitFbi(parseTdfFromString("[UNITINFO]\n{\nUnitName=MAKENUKEARM;\nObjectname=;\n}\n"));
         REQUIRE(fbi.unitName == "MAKENUKEARM");
         REQUIRE(fbi.soundCategory.empty());
