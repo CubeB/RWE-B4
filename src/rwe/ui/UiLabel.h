@@ -21,6 +21,8 @@ namespace rwe
         std::shared_ptr<SpriteSeries> font;
         Alignment alignment{Alignment::Left};
         bool singleLine{false};
+        bool scrollOverflow{false};
+        int scrollOffset{0};
 
     public:
         UiLabel(int posX, int posY, unsigned int sizeX, unsigned int sizeY, const std::string& text, const std::shared_ptr<SpriteSeries>& font);
@@ -40,5 +42,12 @@ namespace rwe
          * off the screen: a message must be clipped, never lost.
          */
         void setSingleLine(bool value);
+
+        /** Full wrapped height in the active font (MAP-LAYOUT-01/02 divergence). */
+        unsigned int getTextHeight() const;
+
+        /** Retain all text when the enlarged map description reaches the screen limit. */
+        void setScrollOverflow(bool value) { scrollOverflow = value; }
+        void mouseWheel(MouseWheelEvent event) override;
     };
 }

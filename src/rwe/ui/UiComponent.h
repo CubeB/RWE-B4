@@ -94,6 +94,8 @@ namespace rwe
          */
         void setWidth(unsigned int width) { sizeX = width; }
 
+        void setHeight(unsigned int height) { sizeY = height; }
+
         virtual void mouseDown(MouseButtonEvent /*event*/) {}
 
         virtual void mouseUp(MouseButtonEvent /*event*/) {}

@@ -12,6 +12,7 @@
 #include <cmath>
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuModel.h>
+#include <rwe/MapSelectionLayout.h>
 #include <rwe/MultiplayerSetup.h>
 #include <rwe/ip_util.h>
 #include <rwe/camera_util.h>
@@ -1499,11 +1500,25 @@ namespace rwe
             throw std::runtime_error("Failed to parse GUI file");
         }
 
-        auto panel = uiFactory.panelFromGuiFile("SELMAP", "DSelectmap2", *parsedGui);
+        // MAP-LAYOUT-01/02: the original artwork reserves only two description
+        // rows. Use the resizable tiled plate for the larger readable layout.
+        auto& bounds = parsedGui->front().common;
+        bounds.xpos = 20;
+        bounds.ypos = 20;
+        bounds.width = 600;
+        bounds.height = 440;
+        auto panel = uiFactory.panelFromGuiFile("SELMAP", "", *parsedGui);
+        panel->setDefaultButtons("LOAD", "PREVMENU");
+        panel->setFocusByName("MAPNAMES");
+        panel->appendChild(uiFactory.createLabel(24, 12, 552, 20, "Select Map", UiLabel::Alignment::Left));
+        auto caption = uiFactory.createLabel(24, 260, 552, 20, "Description", UiLabel::Alignment::Left);
+        caption->setName("DESCRIPTION_CAPTION");
+        panel->appendChild(std::move(caption));
+        auto* mapPanel = panel.get();
 
         if (auto descriptionLabel = panel->find<UiLabel>("DESCRIPTION"))
         {
-            auto sub = model.candidateSelectedMap.subscribe([&l = descriptionLabel->get()](const auto& selectedMap) {
+            auto sub = model.candidateSelectedMap.subscribe([&l = descriptionLabel->get(), mapPanel](const auto& selectedMap) {
                 if (selectedMap)
                 {
                     l.setText(selectedMap->description);
@@ -1512,13 +1527,13 @@ namespace rwe
                 {
                     l.setText("");
                 }
+                layoutMapSelectionPanel(*mapPanel);
             });
             descriptionLabel->get().addSubscription(std::move(sub));
         }
         if (auto sizeLabel = panel->find<UiLabel>("SIZE"))
         {
-            sizeLabel->get().setSingleLine(true);
-            auto sub = model.candidateSelectedMap.subscribe([&l = sizeLabel->get()](const auto& selectedMap) {
+            auto sub = model.candidateSelectedMap.subscribe([&l = sizeLabel->get(), mapPanel](const auto& selectedMap) {
                 if (selectedMap)
                 {
                     l.setText(selectedMap->size);
@@ -1527,6 +1542,7 @@ namespace rwe
                 {
                     l.setText("");
                 }
+                layoutMapSelectionPanel(*mapPanel);
             });
             sizeLabel->get().addSubscription(std::move(sub));
         }

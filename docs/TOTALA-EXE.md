@@ -207,6 +207,15 @@ Everything else lives in a subject file. **The numbers never move**, so a
 
 ## 88. Where RWE deliberately differs
 
+- **Map descriptions get a larger, adaptive layout** (owner instruction,
+  2026-10-22; `MAP-DESCRIPTION-LAYOUT-FINDINGS.md`, MAP-LAYOUT-01/02).
+  RWE preserves the complete description, wraps it using the active font,
+  and reserves space below it for the size summary and buttons. Exceptionally
+  long descriptions remain available by scrolling after the box reaches the
+  screen's usable height. No remainder is replaced with an ellipsis. The
+  original uses fixed GUI rectangles, bounded rendering and a limited text
+  buffer; this change deliberately prioritizes readability over layout parity.
+
 **The default computer player is now the original's (2026-10-14, ADR-0005).**
 RWE's own computer player, which transports, fights with aircraft and guards,
 is the `rwe` engine and an option; sections 119-123 are what the default is
@@ -445,14 +454,15 @@ quirks of the original that RWE reproduces although they look like defects.
   wearing the same name rather than the original's. The heading half is the one
   that stops a unit shooting sideways and backwards, and it is the half that is
   implemented.
-- **A feature's reclaim time counts its hit points, and scales with the
-  builder.** The original is flat: `15 + (metal + energy)/2` ticks, one tick of
-  work a tick, identical for every builder and with no term for the feature's
-  own `damage` (S:97). RWE charges `metal + energy + hitPoints/4` at the
-  builder's `workerTimePerTick`, which came out of a play-test round and is why
-  a boulder takes longer than a bush and a shelled wreck clears quicker.
-  Changing it back would move every reclaim time in the game, so it is recorded
-  rather than corrected.
+- **Feature reclaim timing divergence retired, 2026-10-21.** At the user's
+  request RWE restores the original per-order timer, independent of wreck HP
+  and WorkerTime. See `PLAYTEST-RECLAIM-ASSIST-FINDINGS.md` RA-04 for ground
+  and aircraft bases, two-tick rounding, and the extra ground completion visit.
+  Production now pays once at completion; builders do not pool their work.
+  Older RWE saves restart feature-job timing and retain previously credited
+  shared progress solely to deduct that credit at completion. This migration
+  has no original counterpart. The legacy incremental helper remains for
+  compatibility; it no longer determines production reclaim duration.
 - **Circular sight is a computed disc, and it has no floor.** The original's
   Circular mode blits one of ten hand-drawn masks from `anims/vismasks.gaf`,
   radius 5 to 14 cells, so its effective sight is `clamp(SightDistance/32, 5,

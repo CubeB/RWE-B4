@@ -304,9 +304,10 @@ namespace rwe
         return glyphs;
     }
 
-    void UiRenderService::drawTextWrapped(Rectangle2f area, const std::string& text, const SpriteSeries& font)
+    void UiRenderService::drawTextWrapped(Rectangle2f area, const std::string& text, const SpriteSeries& font, float scrollOffset)
     {
-        const auto glyphs = layoutWrappedText(area, text, font);
+        const auto glyphs = layoutWrappedText(Rectangle2f::fromTopLeft(
+            area.left(), area.top() - scrollOffset, area.width(), area.height() + scrollOffset), text, font);
         if (glyphs.empty())
         {
             return;

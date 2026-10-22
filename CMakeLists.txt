@@ -262,6 +262,7 @@ set(SOURCE_FILES
     src/rwe/MainMenuModel.cpp
     src/rwe/MainMenuModel.h
     src/rwe/MainMenuScene.cpp
+    src/rwe/MapSelectionLayout.cpp
     src/rwe/MainMenuScene_campaign.cpp
     src/rwe/MainMenuScene_multiplayer.cpp
     src/rwe/MainMenuScene_multiplayer.h
@@ -1021,8 +1022,17 @@ target_link_libraries(librwe nlohmann_json::nlohmann_json)
 target_include_directories(librwe PUBLIC ${PROJECT_SOURCE_DIR}/libs/imgui)
 target_include_directories(librwe PUBLIC ${PROJECT_SOURCE_DIR}/libs/imgui/backends)
 
-add_custom_command(TARGET librwe PRE_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/shaders" "$<TARGET_FILE_DIR:librwe>/shaders")
+# RWE-original build asset synchronization; SYNC-2026-10-22-VALIDATION.md.
+# PRE_BUILD only ran when the library relinked, leaving shader-only edits and
+# altered runtime copies in place after an otherwise up-to-date build.
+set(RWE_SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders")
+if(CMAKE_CONFIGURATION_TYPES)
+    set(RWE_SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/shaders")
+endif()
+add_custom_target(rwe_shaders
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/shaders" "${RWE_SHADER_OUTPUT_DIR}"
+    VERBATIM)
+add_dependencies(librwe rwe_shaders)
 
 add_executable(rwe src/main.cpp)
 target_link_libraries(rwe librwe)
@@ -1406,6 +1416,7 @@ set(TEST_FILES
     src/rwe/ui/UiPanorama.test.cpp
     src/rwe/ui/UiPanelFocus.test.cpp
     src/rwe/UiRenderService.test.cpp
+    src/rwe/MapSelectionLayout.test.cpp
     )
 
 add_executable(rwe_test ${TEST_FILES})

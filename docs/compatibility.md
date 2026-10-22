@@ -26,6 +26,13 @@ Three rules decided what belongs in each list.
 
 ---
 
+**Map descriptions have room to be read.** The map selector uses a wider box
+that grows with the description, keeping the size/player summary and buttons
+separate. It retains the full text without ellipsis; exceptionally long text
+can be scrolled once the box reaches the screen limit. This is the owner's
+requested readability change, not the original's fixed description layout
+(`MAP-DESCRIPTION-LAYOUT-FINDINGS.md`, 2026-10-22; section 88).
+
 **The example campaign is hidden.** RWE omits `camps/EXAMPLE.TDF` from the
 campaign choices at the owner's request (#655, 2026-10-17). The original accepts
 this loose campaign file; this is a deliberate menu policy, not conformance.

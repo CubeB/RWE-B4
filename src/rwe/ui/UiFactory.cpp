@@ -96,14 +96,6 @@ namespace rwe
         }
         auto panelEntry = entries[0];
 
-        auto texture = textureService->getBitmapRegion(
-            background,
-            0,
-            0,
-            panelEntry.common.width,
-            panelEntry.common.height);
-
-
         // Adjust x and y pos such that the bottom and right edges of the panel
         // do not go over the edge of the screen.
         auto rightBound = panelEntry.common.xpos + panelEntry.common.width;
@@ -120,12 +112,13 @@ namespace rwe
             yPos -= bottomBound - 480;
         }
 
-        auto panel = std::make_unique<UiPanel>(
-            xPos,
-            yPos,
-            panelEntry.common.width,
-            panelEntry.common.height,
-            texture);
+        // MAP-LAYOUT-01/02: an empty bitmap name requests a tiled plate for
+        // an expanded layout. Build the gadgets in their final parent: moving
+        // them later would retain callbacks to the destroyed original panel.
+        auto panel = background.empty()
+            ? createPanel(xPos, yPos, panelEntry.common.width, panelEntry.common.height, name + "Expanded")
+            : std::make_unique<UiPanel>(xPos, yPos, panelEntry.common.width, panelEntry.common.height,
+                textureService->getBitmapRegion(background, 0, 0, panelEntry.common.width, panelEntry.common.height));
         panel->setName(name);
 
         // load panel components

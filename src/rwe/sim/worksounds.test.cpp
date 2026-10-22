@@ -144,7 +144,9 @@ namespace rwe
         sim.tick();
         REQUIRE(countEvents<UnitStartedReclaimingEvent>(sim) == 1);
 
-        for (int i = 0; i < 60 && sim.tryGetFeature(wreckId); ++i)
+        // RA-04: this fixture's 150 resources take 92 working ticks,
+        // independently of WorkerTime. Allow completion before counting sounds.
+        for (int i = 0; i < 120 && sim.tryGetFeature(wreckId); ++i)
         {
             sim.tick();
         }
@@ -225,7 +227,9 @@ namespace rwe
         builder.orders.push_back(ReclaimOrder(firstId));
         builder.orders.push_back(ReclaimOrder(secondId));
 
-        for (int i = 0; i < 120 && sim.tryGetFeature(secondId); ++i)
+        // PLAYTEST-RECLAIM-ASSIST-FINDINGS RA-04: two independent 92-tick
+        // feature jobs, plus the order/stance transitions between them.
+        for (int i = 0; i < 240 && sim.tryGetFeature(secondId); ++i)
         {
             sim.tick();
         }

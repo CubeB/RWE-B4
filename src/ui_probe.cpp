@@ -67,6 +67,11 @@ namespace rwe
             return scene.model;
         }
 
+        // MAP-LAYOUT-01/02: exercise the real dialog, including subscriptions.
+        static void openMaps(MainMenuScene& scene) { scene.openMapSelectionDialog(); }
+        static void selectMap(MainMenuScene& scene, const std::string& name) { scene.setCandidateSelectedMap(name); }
+        static auto mapNames(MainMenuScene& scene) { return scene.getMapNames(); }
+
         /**
          * Points one scene's network at things of its own, so that two of
          * them in one process can be a host and a guest across "the
@@ -295,9 +300,15 @@ int main(int argc, char* argv[])
         bool multiplayerScreens = false;
         bool multiplayerFlow = false;
         bool renderRequested = false;
+        bool mapLayout = false;
         for (int i = 1; i < argc; ++i)
         {
             std::string arg(argv[i]);
+            if (arg == "--map-layout")
+            {
+                mapLayout = true;
+                continue;
+            }
             if (arg == "--multiplayer")
             {
                 multiplayerScreens = true;
@@ -321,6 +332,7 @@ int main(int argc, char* argv[])
             if (arg == "--help" || arg == "-h")
             {
                 std::cout << "usage: ui_probe [--panel NAME]... <data path>...\n"
+                          << "  --map-layout checks and renders the real expanded map selector.\n"
                           << "  With no --panel, walks the options screens the probe was written for.\n"
                           << "  With one or more, dumps and clicks just those guis and stops.\n"
                           << "  --multiplayer builds the four multiplayer screens (SELPROV, TCP, SELGAME,\n"
@@ -347,6 +359,77 @@ int main(int argc, char* argv[])
         TdfBlock emptySoundLookup;
 
         UiFactory factory(&textureService, &audioService, &emptySoundLookup, &vfs, pathMapping.get(), 640, 480);
+
+        if (mapLayout)
+        {
+            ShaderService shaders = ShaderService::createShaderService(graphics);
+            Viewport viewport(0, 0, 640, 480);
+            GlobalConfig config;
+            TimeService clock(getTimestamp());
+            CursorService cursors(sdlContext, &clock, Cursors{});
+            SceneManager manager(sdlContext, window.get(), &graphics, &clock, nullptr, &cursors,
+                &config, UiRenderService(&graphics, &shaders, &viewport), &viewport);
+            std::unordered_map<std::string, SideData> sides;
+            SceneContext context(sdlContext, &viewport, &graphics, &textureService, &audioService,
+                &cursors, &shaders, &vfs, &*palette, &*palette, &manager, &sides, &clock, pathMapping.get(), &config);
+            MainMenuScene menu(context, &emptySoundLookup, 640, 480);
+            menu.init();
+            MenuProbe::openMaps(menu);
+            auto* panel = MenuProbe::dialog(menu);
+            if (!panel) { throw std::runtime_error("Map selector did not open"); }
+            auto& description = panel->find<UiLabel>("DESCRIPTION")->get();
+            auto& size = panel->find<UiLabel>("SIZE")->get();
+            const auto names = MenuProbe::mapNames(menu);
+            std::string longestName;
+            unsigned int longestHeight = 0;
+            for (const auto& name : names)
+            {
+                MenuProbe::selectMap(menu, name);
+                if (description.getTextHeight() > longestHeight)
+                {
+                    longestHeight = description.getTextHeight();
+                    longestName = name;
+                }
+                if (description.getY() + static_cast<int>(description.getHeight()) >= size.getY()
+                    || size.getY() + static_cast<int>(size.getHeight()) >= panel->find<UiComponent>("LOAD")->get().getY())
+                {
+                    throw std::runtime_error("Overlapping map information: " + name);
+                }
+                if (description.getTextHeight() > description.getHeight())
+                {
+                    throw std::runtime_error("Available real map requires description scrolling: " + name);
+                }
+            }
+            MenuProbe::selectMap(menu, longestName);
+            UiRenderService ui(&graphics, &shaders, &viewport);
+            graphics.setViewport(0, 0, 640, 480);
+            graphics.disableDepthBuffer();
+            graphics.enableBlending();
+            graphics.clearColor();
+            panel->render(ui);
+            glFinish();
+            screenshot("probe_map_layout.ppm");
+            std::cout << "Map layout: " << names.size() << " real maps, full descriptions visible; longest: "
+                      << longestName << " (" << longestHeight << " px)\n";
+            dumpPanel(*panel, "expanded map selector");
+            // Activation exercises the factory's callbacks after construction;
+            // a transferred child can otherwise retain a dead parent callback.
+            bool cancelSent = false;
+            panel->groupMessages().subscribe([&cancelSent](const auto& message) {
+                if (message.controlName == "PREVMENU" && std::holds_alternative<ActivateMessage>(message.message))
+                {
+                    cancelSent = true;
+                }
+            });
+            // Keep the panel alive through dispatch, just as the scene does.
+            auto& cancel = panel->find<UiComponent>("PREVMENU")->get();
+            panel->mouseDown(MouseButtonEvent(panel->getX() + cancel.getX() + 4,
+                panel->getY() + cancel.getY() + 4, MouseButtonEvent::MouseButton::Left));
+            panel->mouseUp(MouseButtonEvent(panel->getX() + cancel.getX() + 4,
+                panel->getY() + cancel.getY() + 4, MouseButtonEvent::MouseButton::Left));
+            if (!cancelSent) { throw std::runtime_error("Expanded map selector Cancel did not activate"); }
+            return 0;
+        }
 
 
 

@@ -1,6 +1,8 @@
 #include "UiLabel.h"
 
 #include <rwe/util/rwe_string.h>
+#include <cmath>
+#include <limits>
 
 namespace rwe
 {
@@ -16,7 +18,7 @@ namespace rwe
                 }
                 else
                 {
-                    context.drawTextWrapped(Rectangle2f::fromTopLeft(posX, posY, sizeX, sizeY), text, *font);
+                    context.drawTextWrapped(Rectangle2f::fromTopLeft(posX, posY, sizeX, sizeY), text, *font, static_cast<float>(scrollOffset));
                 }
                 break;
             case Alignment::Center:
@@ -61,6 +63,7 @@ namespace rwe
         // changes and the renderer is called every frame. See ensureUtf8 for
         // what arrives that is not UTF-8 and why it must not throw.
         text = ensureUtf8(newText);
+        scrollOffset = 0;
     }
 
     void UiLabel::setAlignment(Alignment newAlignment)
@@ -71,5 +74,27 @@ namespace rwe
     void UiLabel::setSingleLine(bool value)
     {
         singleLine = value;
+    }
+
+    unsigned int UiLabel::getTextHeight() const
+    {
+        const auto glyphs = layoutWrappedText(
+            Rectangle2f::fromTopLeft(0.0f, 0.0f, sizeX, std::numeric_limits<float>::max()), text, *font);
+        float bottom = 0.0f;
+        for (const auto& glyph : glyphs)
+        {
+            bottom = std::max(bottom, std::max(glyph.y + font->verticalOffset,
+                glyph.y + font->sprites[glyph.glyph]->bounds.bottom()));
+        }
+        return static_cast<unsigned int>(std::ceil(bottom)) + 3;
+    }
+
+    void UiLabel::mouseWheel(MouseWheelEvent event)
+    {
+        if (scrollOverflow)
+        {
+            const auto maximum = std::max(0, static_cast<int>(getTextHeight()) - static_cast<int>(sizeY));
+            scrollOffset = std::clamp(scrollOffset - event.y * 30, 0, maximum);
+        }
     }
 }
