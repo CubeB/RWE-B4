@@ -445,3 +445,7 @@ Ranked by what a player or a mod author would notice. None touches the simulatio
 | 13 | **Association zero is a group**; a scroll bar and list both at zero would be cross-wired. | latent | none today; make zero mean "none" in `setGroup` |
 
 No source file was changed.
+
+## 2026-10-22 clarification for issue #669
+
+See [Scroll bars with no travel](BT-MODEL-HEIGHT-SCROLLBAR-FINDINGS.md#scroll-bar-original-integer-offsets-rwe-defensive-percentages) for the direct static byte-tactics comparison. The original uses integer thumb displacement and disables ordinary text-list sliders when scrolling is unnecessary. A guard against RWE's percentage division by nonpositive travel is RWE-original defensive handling; no original-runtime check was executed.
