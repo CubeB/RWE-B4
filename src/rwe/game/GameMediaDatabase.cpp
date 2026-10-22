@@ -1,5 +1,6 @@
 #include "GameMediaDatabase.h"
 #include <algorithm>
+#include <cstdlib>
 #include <rwe/sim/SimVector.h>
 #include <rwe/util/Index.h>
 
@@ -159,18 +160,25 @@ namespace rwe
 
     const SoundClass& GameMediaDatabase::getSoundClassOrDefault(const std::string& className) const
     {
-        auto it = soundClassMap.find(className);
-        if (it == soundClassMap.end())
+        // BT-133: names ignore case; an unmatched value is a numeric index,
+        // with missing/non-numeric text selecting category zero.
+        auto it = soundClassMap.find(toUpper(className));
+        if (it != soundClassMap.end())
+        {
+            return it->second;
+        }
+
+        const auto index = std::strtol(className.c_str(), nullptr, 10);
+        if (index < 0 || static_cast<unsigned long>(index) >= soundClassNames.size())
         {
             return defaultSoundClass;
         }
-
-        return it->second;
+        return soundClassMap.at(soundClassNames[index]);
     }
 
     const SoundClass& GameMediaDatabase::getSoundClass(const std::string& className) const
     {
-        auto it = soundClassMap.find(className);
+        auto it = soundClassMap.find(toUpper(className));
         if (it == soundClassMap.end())
         {
             throw std::runtime_error("No sound class found with name " + className);
@@ -181,7 +189,11 @@ namespace rwe
 
     void GameMediaDatabase::addSoundClass(const std::string& className, SoundClass&& soundClass)
     {
-        soundClassMap.insert({className, std::move(soundClass)});
+        auto name = toUpper(className);
+        if (soundClassMap.emplace(name, std::move(soundClass)).second)
+        {
+            soundClassNames.push_back(std::move(name));
+        }
     }
 
     const AudioService::SoundHandle& GameMediaDatabase::getSoundHandle(const std::string& sound) const
