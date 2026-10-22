@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/ai/AiTuningProfile.h>
+#include <set>
+#include <string>
 
 namespace rwe
 {
@@ -100,5 +102,326 @@ namespace rwe
         REQUIRE(p.outpostResponseMarginThreshold == 0.0f);
         REQUIRE(applyAiTuning(p, "outpostResponseMarginThreshold", "5000"));
         REQUIRE(p.outpostResponseMarginThreshold == 5000.0f);
+    }
+
+    // The acquisition-radius comparison for the arena: on by default, and
+    // settable by name so a paired run can play the flat engageRadius as its
+    // own control.
+    TEST_CASE("applyAiTuning sets acquireWeaponRange by name")
+    {
+        AiTuningProfile p;
+        REQUIRE(p.acquireWeaponRange);
+        REQUIRE(applyAiTuning(p, "acquireWeaponRange", "false"));
+        REQUIRE_FALSE(p.acquireWeaponRange);
+        REQUIRE(applyAiTuning(p, "acquireWeaponRange", "true"));
+        REQUIRE(p.acquireWeaponRange);
+    }
+
+    // The second strength batch: queue depth and the stalled-head drop, and
+    // the anti-air escort. All four are on by default and every one restores
+    // the old behaviour when set to its off value, which is what a paired
+    // arena run uses as its control arm.
+    TEST_CASE("the factory queue and anti-air escort knobs are listed and settable")
+    {
+        AiTuningProfile p;
+        CHECK(p.factoryQueueDepth == 1);
+        CHECK(p.factoryQueueDropStalled);
+        CHECK(p.factoryQueueStallSeconds == 60);
+        CHECK(p.antiAirEscortCount == 1);
+
+        REQUIRE(applyAiTuning(p, "factoryQueueDepth", "1"));
+        CHECK(p.factoryQueueDepth == 1);
+        REQUIRE(applyAiTuning(p, "factoryQueueDropStalled", "false"));
+        CHECK_FALSE(p.factoryQueueDropStalled);
+        REQUIRE(applyAiTuning(p, "factoryQueueStallSeconds", "0"));
+        CHECK(p.factoryQueueStallSeconds == 0);
+        REQUIRE(applyAiTuning(p, "antiAirEscortCount", "0"));
+        CHECK(p.antiAirEscortCount == 0);
+
+        // And they are in the listed set -- the test at the top of this file
+        // would catch a name that applyAiTuning accepted but listAiKnobs did
+        // not, but not one that was never added to either.
+        std::set<std::string> names;
+        for (const auto& knob : listAiKnobs())
+        {
+            names.insert(knob.name);
+        }
+        CHECK(names.count("factoryQueueDepth") == 1);
+        CHECK(names.count("factoryQueueDropStalled") == 1);
+        CHECK(names.count("factoryQueueStallSeconds") == 1);
+        CHECK(names.count("antiAirEscortCount") == 1);
+    }
+
+    // The third strength batch: the decayed composition memory and the
+    // value-odds attack gate. Both are on by default and each has an off
+    // value that restores the old command stream, which is the control arm
+    // for a paired arena run.
+    TEST_CASE("the composition memory and value-odds knobs are listed and settable")
+    {
+        AiTuningProfile p;
+        CHECK(p.enemyCompositionMemory);
+        CHECK(p.compositionDecaySeconds == 30);
+        CHECK(p.compositionCommitSeconds == 60);
+        CHECK(p.compositionLeanMax == 2);
+        CHECK(p.attackUsesValueOdds);
+        CHECK(p.attackValueRatio == 1.1f);
+        CHECK(p.retreatValueRatio == 0.7f);
+
+        REQUIRE(applyAiTuning(p, "enemyCompositionMemory", "false"));
+        CHECK_FALSE(p.enemyCompositionMemory);
+        REQUIRE(applyAiTuning(p, "compositionDecaySeconds", "45"));
+        CHECK(p.compositionDecaySeconds == 45);
+        REQUIRE(applyAiTuning(p, "compositionCommitSeconds", "90"));
+        CHECK(p.compositionCommitSeconds == 90);
+        REQUIRE(applyAiTuning(p, "compositionLeanMax", "3"));
+        CHECK(p.compositionLeanMax == 3);
+        REQUIRE(applyAiTuning(p, "attackUsesValueOdds", "false"));
+        CHECK_FALSE(p.attackUsesValueOdds);
+        REQUIRE(applyAiTuning(p, "attackValueRatio", "1.25"));
+        CHECK(p.attackValueRatio == 1.25f);
+        REQUIRE(applyAiTuning(p, "retreatValueRatio", "0.8"));
+        CHECK(p.retreatValueRatio == 0.8f);
+
+        std::set<std::string> names;
+        for (const auto& knob : listAiKnobs())
+        {
+            names.insert(knob.name);
+        }
+        CHECK(names.count("enemyCompositionMemory") == 1);
+        CHECK(names.count("compositionDecaySeconds") == 1);
+        CHECK(names.count("compositionCommitSeconds") == 1);
+        CHECK(names.count("compositionLeanMax") == 1);
+        CHECK(names.count("attackUsesValueOdds") == 1);
+        CHECK(names.count("attackValueRatio") == 1);
+        CHECK(names.count("retreatValueRatio") == 1);
+    }
+
+    // The fourth batch: the wave reserve and attack-move, and the replay-
+    // derived opening posture. The reserve and attack-move are on by default
+    // and share one off combination (reserveWave false, waveCommitFraction
+    // 1.0, waveAttackMove false). The opening posture is off by default so it
+    // can be A/B'd against the ordinary plan.
+    TEST_CASE("the wave reserve and opening knobs are listed and settable")
+    {
+        AiTuningProfile p;
+        CHECK(p.reserveWave);
+        CHECK(p.waveCommitFraction == 0.7f);
+        CHECK(p.reserveReleaseSeconds == 20);
+        CHECK(p.waveAttackMove);
+        CHECK_FALSE(p.humanlikeOpening);
+        CHECK(p.openingFactoryBySeconds == 60);
+        CHECK(p.openingConstructorBySeconds == 150);
+        CHECK(p.openingExpansionBySeconds == 213);
+        CHECK(p.openingExpansionSites == 10);
+        CHECK(p.openingAttackArmySize == 7);
+        CHECK(p.openingAttackBySeconds == 450);
+
+        REQUIRE(applyAiTuning(p, "reserveWave", "false"));
+        CHECK_FALSE(p.reserveWave);
+        REQUIRE(applyAiTuning(p, "waveCommitFraction", "1.0"));
+        CHECK(p.waveCommitFraction == 1.0f);
+        REQUIRE(applyAiTuning(p, "reserveReleaseSeconds", "30"));
+        CHECK(p.reserveReleaseSeconds == 30);
+        REQUIRE(applyAiTuning(p, "waveAttackMove", "false"));
+        CHECK_FALSE(p.waveAttackMove);
+        REQUIRE(applyAiTuning(p, "humanlikeOpening", "true"));
+        CHECK(p.humanlikeOpening);
+        REQUIRE(applyAiTuning(p, "openingFactoryBySeconds", "45"));
+        CHECK(p.openingFactoryBySeconds == 45);
+        REQUIRE(applyAiTuning(p, "openingConstructorBySeconds", "120"));
+        CHECK(p.openingConstructorBySeconds == 120);
+        REQUIRE(applyAiTuning(p, "openingExpansionBySeconds", "210"));
+        CHECK(p.openingExpansionBySeconds == 210);
+        REQUIRE(applyAiTuning(p, "openingExpansionSites", "12"));
+        CHECK(p.openingExpansionSites == 12);
+        REQUIRE(applyAiTuning(p, "openingAttackArmySize", "6"));
+        CHECK(p.openingAttackArmySize == 6);
+        REQUIRE(applyAiTuning(p, "openingAttackBySeconds", "420"));
+        CHECK(p.openingAttackBySeconds == 420);
+
+        std::set<std::string> names;
+        for (const auto& knob : listAiKnobs())
+        {
+            names.insert(knob.name);
+        }
+        CHECK(names.count("reserveWave") == 1);
+        CHECK(names.count("waveCommitFraction") == 1);
+        CHECK(names.count("reserveReleaseSeconds") == 1);
+        CHECK(names.count("waveAttackMove") == 1);
+        CHECK(names.count("humanlikeOpening") == 1);
+        CHECK(names.count("openingFactoryBySeconds") == 1);
+        CHECK(names.count("openingConstructorBySeconds") == 1);
+        CHECK(names.count("openingExpansionBySeconds") == 1);
+        CHECK(names.count("openingExpansionSites") == 1);
+        CHECK(names.count("openingAttackArmySize") == 1);
+        CHECK(names.count("openingAttackBySeconds") == 1);
+    }
+
+    // The sixth batch: directional threat memory and proportional defence.
+    // The memory, the proportional response and threat-directed siting are
+    // on by default; each off value restores the old single-direction /
+    // send-everyone behaviour, which is the control arm for a paired run.
+    TEST_CASE("the threat memory and proportional defence knobs are listed and settable")
+    {
+        AiTuningProfile p;
+        CHECK(p.threatMemory);
+        CHECK(p.threatMemoryDecaySeconds == 60);
+        CHECK(p.proportionalDefence);
+        CHECK(p.defenceResponseRatio == 1.3f);
+        CHECK(p.defenceResponseMaxShare == 1.0f);
+        CHECK(p.defenceResponseMinUnits == 1);
+        CHECK(p.recallThreatRatio == 1.5f);
+        CHECK(p.threatDirectedDefence);
+
+        REQUIRE(applyAiTuning(p, "threatMemory", "false"));
+        CHECK_FALSE(p.threatMemory);
+        REQUIRE(applyAiTuning(p, "threatMemoryDecaySeconds", "90"));
+        CHECK(p.threatMemoryDecaySeconds == 90);
+        REQUIRE(applyAiTuning(p, "proportionalDefence", "false"));
+        CHECK_FALSE(p.proportionalDefence);
+        REQUIRE(applyAiTuning(p, "defenceResponseRatio", "2.0"));
+        CHECK(p.defenceResponseRatio == 2.0f);
+        REQUIRE(applyAiTuning(p, "defenceResponseMaxShare", "0.5"));
+        CHECK(p.defenceResponseMaxShare == 0.5f);
+        REQUIRE(applyAiTuning(p, "defenceResponseMinUnits", "2"));
+        CHECK(p.defenceResponseMinUnits == 2);
+        REQUIRE(applyAiTuning(p, "recallThreatRatio", "2.5"));
+        CHECK(p.recallThreatRatio == 2.5f);
+        REQUIRE(applyAiTuning(p, "threatDirectedDefence", "false"));
+        CHECK_FALSE(p.threatDirectedDefence);
+
+        std::set<std::string> names;
+        for (const auto& knob : listAiKnobs())
+        {
+            names.insert(knob.name);
+        }
+        CHECK(names.count("threatMemory") == 1);
+        CHECK(names.count("threatMemoryDecaySeconds") == 1);
+        CHECK(names.count("proportionalDefence") == 1);
+        CHECK(names.count("defenceResponseRatio") == 1);
+        CHECK(names.count("defenceResponseMaxShare") == 1);
+        CHECK(names.count("defenceResponseMinUnits") == 1);
+        CHECK(names.count("recallThreatRatio") == 1);
+        CHECK(names.count("threatDirectedDefence") == 1);
+    }
+
+    // The seventh batch: the synchronized second axis and the replay-derived
+    // outside-economy target. The raid sync is on by default and its off value
+    // restores immediate dispatch exactly; the site count is only read with
+    // humanlikeOpening on.
+    TEST_CASE("the synchronized raid and opening expansion-site knobs are listed and settable")
+    {
+        AiTuningProfile p;
+        CHECK(p.syncRaidWithWave);
+        CHECK(p.syncWindowSeconds == 15);
+        CHECK(p.openingExpansionSites == 10);
+
+        REQUIRE(applyAiTuning(p, "syncRaidWithWave", "false"));
+        CHECK_FALSE(p.syncRaidWithWave);
+        REQUIRE(applyAiTuning(p, "syncRaidWithWave", "true"));
+        CHECK(p.syncRaidWithWave);
+        REQUIRE(applyAiTuning(p, "syncWindowSeconds", "0"));
+        CHECK(p.syncWindowSeconds == 0);
+        REQUIRE(applyAiTuning(p, "syncWindowSeconds", "30"));
+        CHECK(p.syncWindowSeconds == 30);
+        REQUIRE(applyAiTuning(p, "openingExpansionSites", "0"));
+        CHECK(p.openingExpansionSites == 0);
+
+        std::set<std::string> names;
+        for (const auto& knob : listAiKnobs())
+        {
+            names.insert(knob.name);
+        }
+        CHECK(names.count("syncRaidWithWave") == 1);
+        CHECK(names.count("syncWindowSeconds") == 1);
+        CHECK(names.count("openingExpansionSites") == 1);
+    }
+
+    // The eighth batch: the air strike waits for the ground wave, and their
+    // commander is hunted only while it is exposed. Both are on by default;
+    // airStrikeSync false restores immediate sorties, and
+    // commanderHuntExposedOnly false restores the unconditional hunt, so
+    // either can be the control arm of a paired run.
+    TEST_CASE("the air strike sync and commander exposure knobs are listed and settable")
+    {
+        AiTuningProfile p;
+        CHECK(p.airStrikeSync);
+        CHECK(p.airSyncRadius == SimScalar(600.0f));
+        CHECK(p.commanderHuntExposedOnly);
+        CHECK(p.commanderHuntMaxEscortMetal == 600);
+        CHECK(p.commanderHuntEscortRadius == SimScalar(450.0f));
+        CHECK(p.commanderHuntMinDistance == SimScalar(600.0f));
+        CHECK(p.commanderHuntExposureLatchSeconds == 10);
+
+        REQUIRE(applyAiTuning(p, "airStrikeSync", "false"));
+        CHECK_FALSE(p.airStrikeSync);
+        REQUIRE(applyAiTuning(p, "airStrikeSync", "true"));
+        CHECK(p.airStrikeSync);
+        REQUIRE(applyAiTuning(p, "airSyncRadius", "0"));
+        CHECK(p.airSyncRadius == SimScalar(0.0f));
+        REQUIRE(applyAiTuning(p, "airSyncRadius", "600"));
+        CHECK(p.airSyncRadius == SimScalar(600.0f));
+
+        REQUIRE(applyAiTuning(p, "commanderHuntExposedOnly", "false"));
+        CHECK_FALSE(p.commanderHuntExposedOnly);
+        REQUIRE(applyAiTuning(p, "commanderHuntExposedOnly", "true"));
+        CHECK(p.commanderHuntExposedOnly);
+        REQUIRE(applyAiTuning(p, "commanderHuntMaxEscortMetal", "0"));
+        CHECK(p.commanderHuntMaxEscortMetal == 0);
+        REQUIRE(applyAiTuning(p, "commanderHuntMaxEscortMetal", "750"));
+        CHECK(p.commanderHuntMaxEscortMetal == 750);
+        REQUIRE(applyAiTuning(p, "commanderHuntEscortRadius", "0"));
+        CHECK(p.commanderHuntEscortRadius == SimScalar(0.0f));
+        REQUIRE(applyAiTuning(p, "commanderHuntMinDistance", "0"));
+        CHECK(p.commanderHuntMinDistance == SimScalar(0.0f));
+        REQUIRE(applyAiTuning(p, "commanderHuntExposureLatchSeconds", "0"));
+        CHECK(p.commanderHuntExposureLatchSeconds == 0);
+
+        std::set<std::string> names;
+        for (const auto& knob : listAiKnobs())
+        {
+            names.insert(knob.name);
+        }
+        CHECK(names.count("airStrikeSync") == 1);
+        CHECK(names.count("airSyncRadius") == 1);
+        CHECK(names.count("commanderHuntExposedOnly") == 1);
+        CHECK(names.count("commanderHuntMaxEscortMetal") == 1);
+        CHECK(names.count("commanderHuntEscortRadius") == 1);
+        CHECK(names.count("commanderHuntMinDistance") == 1);
+        CHECK(names.count("commanderHuntExposureLatchSeconds") == 1);
+    }
+
+    // The ninth batch: the early ferry. The urgency is on by default and its
+    // off value is the old factory ordering; the army minimum has an exact
+    // off value of zero (send whoever is ready), which is what the older
+    // transport tests use so their intent is unchanged.
+    TEST_CASE("the early ferry knobs are listed and settable")
+    {
+        AiTuningProfile p;
+        CHECK(p.ferryUrgency);
+        CHECK(p.ferryFirstTransportBySeconds == 480);
+        CHECK(p.ferryMinArmySize == 6);
+
+        REQUIRE(applyAiTuning(p, "ferryUrgency", "false"));
+        CHECK_FALSE(p.ferryUrgency);
+        REQUIRE(applyAiTuning(p, "ferryUrgency", "true"));
+        CHECK(p.ferryUrgency);
+        REQUIRE(applyAiTuning(p, "ferryFirstTransportBySeconds", "0"));
+        CHECK(p.ferryFirstTransportBySeconds == 0);
+        REQUIRE(applyAiTuning(p, "ferryFirstTransportBySeconds", "600"));
+        CHECK(p.ferryFirstTransportBySeconds == 600);
+        REQUIRE(applyAiTuning(p, "ferryMinArmySize", "0"));
+        CHECK(p.ferryMinArmySize == 0);
+        REQUIRE(applyAiTuning(p, "ferryMinArmySize", "4"));
+        CHECK(p.ferryMinArmySize == 4);
+
+        std::set<std::string> names;
+        for (const auto& knob : listAiKnobs())
+        {
+            names.insert(knob.name);
+        }
+        CHECK(names.count("ferryUrgency") == 1);
+        CHECK(names.count("ferryFirstTransportBySeconds") == 1);
+        CHECK(names.count("ferryMinArmySize") == 1);
     }
 }

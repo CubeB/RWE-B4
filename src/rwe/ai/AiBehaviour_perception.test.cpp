@@ -1,6 +1,10 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/ai/PerceptionManager.h>
+#include <rwe/ai/StrategicManager.h>
 #include <rwe/ai/ai_test_util.h>
+#include <rwe/sim/SimTicksPerSecond.h>
+#include <algorithm>
 
 /**
  * What the AI knows and when: scouting, losing a building, noticing
@@ -398,9 +402,17 @@ namespace rwe
 
         auto core = makeDefaultStandardProfile();
         applyFactionDefaults(core, "Core");
-        REQUIRE(core.labRaiderShare == 1);
-        REQUIRE(core.labRocketKbotShare == 2);
-        REQUIRE(core.labArtilleryKbotShare == 1);
+        // The measured CORE candidate (docs/AI-TUNING.md:76-87): no kbot
+        // raiders, the lab on Storms and Thuds, the vehicle plant on
+        // Instigators and Raiders.
+        REQUIRE(core.labRaiderShare == 0);
+        REQUIRE(core.labRocketKbotShare == 4);
+        REQUIRE(core.labArtilleryKbotShare == 2);
+        REQUIRE(core.vehicleTankShare == 3);
+        REQUIRE(core.vehicleMissileTruckShare == 1);
+        REQUIRE(core.vehicleMediumTankShare == 2);
+        REQUIRE(core.counterShareBonus == 2);
+        REQUIRE(core.counterShareTrigger == 0.3606f);
         REQUIRE(core.attackArmySize == 14);
 
         auto arm = makeDefaultStandardProfile();
@@ -409,11 +421,313 @@ namespace rwe
         REQUIRE(arm.labRocketKbotShare == 0);
         REQUIRE(arm.labArtilleryKbotShare == plain.labArtilleryKbotShare);
         REQUIRE(arm.attackArmySize == plain.attackArmySize);
+        // ARM's measured change is the lab only; its vehicle shares and
+        // counter settings are left where the shared defaults put them.
+        REQUIRE(arm.vehicleTankShare == plain.vehicleTankShare);
+        REQUIRE(arm.vehicleMissileTruckShare == plain.vehicleMissileTruckShare);
+        REQUIRE(arm.vehicleMediumTankShare == plain.vehicleMediumTankShare);
+        REQUIRE(arm.counterShareBonus == plain.counterShareBonus);
+        REQUIRE(arm.counterShareTrigger == plain.counterShareTrigger);
 
         // LoadingScene lays --ai-tune over the faction's defaults, so this
         // is the order a knob set by hand meets them in.
         REQUIRE(applyAiTuning(core, "labRaiderShare", "2"));
         REQUIRE(core.labRaiderShare == 2);
+    }
+
+    TEST_CASE("CORE's aggression follows the difficulty tier", "[ai]")
+    {
+        // applyFactionDefaults runs after makeProfileForDifficulty
+        // (AiSeat.cpp:137-141), so a flat attackArmySize here would overwrite
+        // Hard and Brutal with Standard's number. CORE asks for six more than
+        // its tier instead: Standard keeps the measured 14, while Hard and
+        // Brutal attack earlier rather than at the same point.
+        auto coreFor = [](AiDifficulty difficulty) {
+            auto p = makeProfileForDifficulty(difficulty);
+            applyFactionDefaults(p, "CORE");
+            return p;
+        };
+
+        auto standard = coreFor(AiDifficulty::Standard);
+        auto hard = coreFor(AiDifficulty::Hard);
+        auto brutal = coreFor(AiDifficulty::Brutal);
+        auto easy = coreFor(AiDifficulty::Easy);
+
+        REQUIRE(standard.attackArmySize == 14);
+        REQUIRE(hard.attackArmySize == 13);
+        REQUIRE(brutal.attackArmySize == 12);
+        REQUIRE(easy.attackArmySize == 20);
+        // Lower threshold, earlier attack.
+        REQUIRE(hard.attackArmySize < standard.attackArmySize);
+        REQUIRE(brutal.attackArmySize < hard.attackArmySize);
+
+        // And the gate itself, not just the number: at an army of thirteen
+        // Hard CORE has already called the attack and Standard CORE is still
+        // building up. Both have a target and nothing at home to defend.
+        StrategicManager strategic;
+        auto awaiting = [](GamePhase phase) {
+            AiBlackboard bb;
+            bb.phase = phase;
+            bb.enemyBasePosition = SimVector(2000_ss, 0_ss, 0_ss);
+            bb.armySize = 13;
+            return bb;
+        };
+
+        auto standardState = awaiting(GamePhase::Boom);
+        strategic.update(standard, standardState);
+        REQUIRE(standardState.phase == GamePhase::Boom);
+
+        auto hardState = awaiting(GamePhase::Boom);
+        strategic.update(hard, hardState);
+        REQUIRE(hardState.phase == GamePhase::Attack);
+    }
+
+    TEST_CASE("the enemy composition memory counts roles and exposes shares", "[ai]")
+    {
+        // One contact of every role. The split is what decides which counter
+        // is worth building, so each has to land in its own bucket: a
+        // builder is a builder even though it can be shot, a tower is a
+        // static defence rather than "other", and a commander is folded with
+        // the units no other bucket names.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        auto longGun = sim.weaponDefinitions.at("LASER");
+        longGun.maxRange = 400_ss;
+        sim.weaponDefinitions["LONGGUN"] = longGun;
+        sim.unitDefinitions["ARMROCK"].weapon1 = "LONGGUN";
+
+        auto tank = makeDef(false, false, true, "LASER", 200u);
+        tank.buildCostMetal = Metal(300.0f);
+        sim.unitDefinitions["ARMTANK"] = tank;
+
+        auto bomber = makeDef(false, false, true, "LASER", 200u);
+        bomber.canFly = true;
+        sim.unitDefinitions["ARMTHUND"] = bomber;
+
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMPW", human, SimVector(100_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMROCK", human, SimVector(120_ss, 0_ss, 20_ss), script);
+        addUnit(sim, "ARMTANK", human, SimVector(80_ss, 0_ss, -40_ss), script);
+        addUnit(sim, "ARMTHUND", human, SimVector(-60_ss, 60_ss, 60_ss), script);
+        addUnit(sim, "ARMLLT", human, SimVector(40_ss, 0_ss, 100_ss), script);
+        addUnit(sim, "ARMCK", human, SimVector(-100_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMCOM", human, SimVector(0_ss, 0_ss, -100_ss), script);
+        // Beyond the AI commander's 300-unit sight: the memory is built from
+        // knownEnemies, so this one must not appear in any bucket.
+        addUnit(sim, "ARMPW", human, SimVector(800_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.compositionDecaySeconds = 0;
+        AiBlackboard bb;
+        PerceptionManager perception;
+        // The visibility grid is filled at the end of a tick, and the
+        // controller normally refreshes perception after one. Do that here so
+        // the fixture sees the contacts it placed.
+        sim.tick();
+        perception.refresh(sim, ai, profile, bb);
+
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Raider)] == 1);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::RocketArtillery)] == 1);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Tank)] == 1);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Air)] == 1);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::StaticDefence)] == 1);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Builder)] == 1);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::CommanderOrOther)] == 1);
+        CHECK(enemyRoleShare(bb.enemyRoleCounts, EnemyRole::Raider) == Catch::Approx(1.0f / 7.0f));
+
+        // And switched off it does not learn anything at all.
+        profile.enemyCompositionMemory = false;
+        AiBlackboard off;
+        perception.refresh(sim, ai, profile, off);
+        for (auto count : off.enemyRoleCounts)
+        {
+            CHECK(count == 0);
+        }
+    }
+
+    TEST_CASE("the composition memory halves on its decay clock", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        std::vector<UnitId> raiders;
+        for (int i = 0; i < 4; ++i)
+        {
+            raiders.push_back(addUnit(sim, "ARMPW", human, SimVector(SimScalar(60.0f + i * 20.0f), 0_ss, 20_ss), script));
+        }
+
+        auto profile = makeDefaultStandardProfile();
+        profile.compositionDecaySeconds = 30;
+        AiBlackboard bb;
+        PerceptionManager perception;
+        sim.tick();
+        perception.refresh(sim, ai, profile, bb);
+        REQUIRE(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Raider)] == 4);
+
+        // The contacts are gone, but the memory is not: it halves on the
+        // clock rather than vanishing with the sighting. Clear the contact
+        // list as well so this section pins the decay rather than the
+        // forget-on-looking rule.
+        for (auto id : raiders)
+        {
+            sim.getUnitState(id).markAsDead();
+        }
+        bb.knownEnemies.clear();
+        bb.now = GameTime(30u * SimTicksPerSecond);
+        perception.refresh(sim, ai, profile, bb);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Raider)] == 2);
+
+        bb.now = GameTime(60u * SimTicksPerSecond);
+        perception.refresh(sim, ai, profile, bb);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Raider)] == 1);
+
+        bb.now = GameTime(90u * SimTicksPerSecond);
+        perception.refresh(sim, ai, profile, bb);
+        CHECK(bb.enemyRoleCounts[enemyRoleIndex(EnemyRole::Raider)] == 0);
+    }
+
+    TEST_CASE("both armies' metal value is exposed for the odds gate", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+
+        auto bomber = makeDef(false, false, true, "LASER", 200u);
+        bomber.canFly = true;
+        sim.unitDefinitions["ARMTHUND"] = bomber;
+        sim.unitDefinitions["ARMPW"].buildCostMetal = Metal(120.0f);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto ours = addUnit(sim, "ARMPW", ai, SimVector(40_ss, 0_ss, 40_ss), script);
+        addUnit(sim, "ARMPW", human, SimVector(100_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMTHUND", human, SimVector(120_ss, 60_ss, 60_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        AiBlackboard bb;
+        bb.combatUnits = {ours};
+        PerceptionManager perception;
+        sim.tick();
+        perception.refresh(sim, ai, profile, bb);
+
+        // Ours is the army list the count gate also uses. Theirs is mobile
+        // armed ground value; aircraft are kept apart because they do not
+        // stand in the line the odds gate is judging.
+        CHECK(bb.armyMetal == 120.0f);
+        CHECK(bb.knownEnemyArmyMetal == 120.0f);
+        CHECK(bb.knownEnemyAirMetal == 100.0f);
+    }
+
+    TEST_CASE("the attack posture uses value odds with hysteresis", "[ai]")
+    {
+        auto profile = makeDefaultStandardProfile();
+        REQUIRE(profile.attackUsesValueOdds);
+        REQUIRE(profile.attackArmySize == 8);
+        REQUIRE(profile.retreatArmySize == 3);
+        StrategicManager strategic;
+
+        auto state = [](float ours, float theirs, int count) {
+            AiBlackboard bb;
+            bb.phase = GamePhase::Boom;
+            bb.enemyBasePosition = SimVector(2000_ss, 0_ss, 0_ss);
+            bb.armyMetal = ours;
+            bb.knownEnemyArmyMetal = theirs;
+            bb.armySize = count;
+            return bb;
+        };
+
+        SECTION("ahead in value attacks before the headcount gate")
+        {
+            auto bb = state(120.0f, 100.0f, 5);
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+            CHECK(bb.attackOddsCommitted);
+        }
+
+        SECTION("behind in value holds")
+        {
+            auto bb = state(50.0f, 100.0f, 5);
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+            CHECK_FALSE(bb.attackOddsCommitted);
+        }
+
+        SECTION("between the two ratios the committed gate holds, and only the lower one closes it")
+        {
+            auto bb = state(120.0f, 100.0f, 5);
+            strategic.update(profile, bb);
+            REQUIRE(bb.attackOddsCommitted);
+
+            // 0.8 is below attackValueRatio (1.1) but above
+            // retreatValueRatio (0.7): the gate that was already open stays
+            // open rather than thrashing on a single remembered unit.
+            bb.phase = GamePhase::Boom;
+            bb.armyMetal = 80.0f;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+            CHECK(bb.attackOddsCommitted);
+
+            // 0.6 is below the retreat ratio, so it closes.
+            bb.phase = GamePhase::Boom;
+            bb.armyMetal = 60.0f;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+            CHECK_FALSE(bb.attackOddsCommitted);
+        }
+
+        SECTION("an unknown enemy falls back to the count gate")
+        {
+            auto bb = state(0.0f, 0.0f, profile.attackArmySize);
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+            CHECK_FALSE(bb.attackOddsCommitted);
+        }
+
+        SECTION("and to patience when the count is out of reach")
+        {
+            auto bb = state(0.0f, 0.0f, profile.retreatArmySize);
+            bb.lastAttackPhase = GameTime(1);
+            bb.now = GameTime((static_cast<unsigned int>(profile.attackPatienceSeconds) + 10u) * SimTicksPerSecond);
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+        }
+
+        SECTION("neither count, patience nor value holds")
+        {
+            auto bb = state(0.0f, 0.0f, profile.retreatArmySize);
+            bb.lastAttackPhase = GameTime(1);
+            bb.now = GameTime(2);
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+            CHECK_FALSE(bb.attackOddsCommitted);
+        }
+
+        SECTION("the knob off restores the count gate")
+        {
+            profile.attackUsesValueOdds = false;
+            auto bb = state(1000.0f, 100.0f, 5);
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+            CHECK_FALSE(bb.attackOddsCommitted);
+        }
+
+        SECTION("a value lead with too few units to send still holds")
+        {
+            auto halfWave = (profile.attackArmySize + 1) / 2;
+            auto needed = std::max(profile.retreatArmySize, halfWave);
+            auto bb = state(1000.0f, 100.0f, needed - 1);
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+        }
     }
 
     TEST_CASE("an AI knob can be set by name", "[ai]")
@@ -753,4 +1067,225 @@ namespace rwe
             REQUIRE(countQueueCommands(commands, "ARMTHUND") == 0);
         }
     }
+
+    TEST_CASE("a contact's frame and builder flags are remembered, and not refreshed in the fog", "[ai]")
+    {
+        // The raid target pick needs to know which contact is a nanoframe the
+        // enemy has only just started and which one puts frames up. Both are
+        // properties of the unit when it was last seen, so they belong on the
+        // remembered record; a contact that has gone back out of sight keeps
+        // the answer it was last seen with rather than being re-read from the
+        // simulation.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        // A commander with no builder flag: isBuilder has to come from either
+        // def.builder or def.commander, not only the first.
+        sim.unitDefinitions["ENEMYCOM"] = makeDef(true, false, true, "", 300u);
+
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto frameId = addUnit(sim, "ARMSOLAR", human, SimVector(100_ss, 0_ss, 0_ss), script);
+        sim.getUnitState(frameId).buildTimeCompleted = sim.unitDefinitions.at("ARMSOLAR").buildTime / 2u;
+        auto builderId = addUnit(sim, "ARMCK", human, SimVector(-100_ss, 0_ss, 0_ss), script);
+        auto commanderId = addUnit(sim, "ENEMYCOM", human, SimVector(150_ss, 0_ss, 60_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.scoutCount = 0;
+        profile.targetScoutPlaneCount = 0;
+        AiPlayerController controller(ai, profile, 42u, MapIntel{});
+        std::vector<PlayerCommand> commands;
+        runTicks(sim, controller, 2, commands);
+
+        const auto& bb = controller.getBlackboard();
+        REQUIRE(bb.knownEnemies.count(frameId.value) == 1);
+        REQUIRE(bb.knownEnemies.count(builderId.value) == 1);
+        REQUIRE(bb.knownEnemies.count(commanderId.value) == 1);
+
+        const auto& frame = bb.knownEnemies.at(frameId.value);
+        CHECK(frame.underConstruction);
+        CHECK_FALSE(frame.isBuilder);
+        const auto& builder = bb.knownEnemies.at(builderId.value);
+        CHECK_FALSE(builder.underConstruction);
+        CHECK(builder.isBuilder);
+        const auto& commander = bb.knownEnemies.at(commanderId.value);
+        CHECK(commander.isBuilder);
+
+        // firstSeen is when the sighting began, not when the record was last
+        // rebuilt: the record is rebuilt on every visible tick.
+        auto frameFirstSeen = frame.firstSeen;
+        runTicks(sim, controller, 2, commands);
+        REQUIRE(controller.getBlackboard().knownEnemies.count(frameId.value) == 1);
+        CHECK(controller.getBlackboard().knownEnemies.at(frameId.value).firstSeen == frameFirstSeen);
+
+        SECTION("a contact out of sight is left exactly as it was remembered")
+        {
+            // A second enemy, well outside the commander's 300 sight.
+            auto farId = addUnit(sim, "ARMCK", human, SimVector(1200_ss, 0_ss, 1200_ss), script);
+            sim.updateVisibility();
+            REQUIRE_FALSE(sim.isVisibleTo(ai, SimVector(1200_ss, 0_ss, 1200_ss)));
+
+            KnownEnemy remembered{};
+            remembered.unitId = farId;
+            remembered.unitType = "ARMCK";
+            remembered.lastKnownPosition = SimVector(1200_ss, 0_ss, 1200_ss);
+            remembered.lastSeen = GameTime(7u);
+            remembered.isCommander = false;
+            remembered.underConstruction = true;
+            remembered.isBuilder = true;
+            remembered.firstSeen = GameTime(5u);
+
+            AiBlackboard fogged;
+            fogged.now = GameTime(100u);
+            fogged.knownEnemies[farId.value] = remembered;
+            PerceptionManager perception;
+            perception.refresh(sim, ai, profile, fogged);
+
+            REQUIRE(fogged.knownEnemies.count(farId.value) == 1);
+            const auto& kept = fogged.knownEnemies.at(farId.value);
+            CHECK(kept.underConstruction);
+            CHECK(kept.isBuilder);
+            CHECK(kept.firstSeen == GameTime(5u));
+            CHECK(kept.lastSeen == GameTime(7u));
+        }
+    }
+
+    TEST_CASE("attacks are remembered by the sector they came from, and decay", "[ai]")
+    {
+        // The threat memory is fed only by the armed contacts already
+        // inside defendRadius, which is the same list that triggers Defend;
+        // nothing here looks at anything the AI could not see.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        auto base = SimVector(0_ss, 0_ss, 0_ss);
+        auto east = SimVector(150_ss, 0_ss, 0_ss);
+        auto north = SimVector(0_ss, 0_ss, 150_ss);
+        auto eastId = addUnit(sim, "ARMPW", human, east, script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.threatMemoryDecaySeconds = 60;
+        AiBlackboard bb;
+        bb.baseAnchor = base;
+        PerceptionManager perception;
+        sim.tick();
+        perception.refresh(sim, ai, profile, bb);
+
+        // The sector numbering and its inverse agree; if they did not, a
+        // tower would be pointed at a different direction from the one the
+        // raid was remembered from.
+        for (std::size_t sector = 0; sector < ThreatSectorCount; ++sector)
+        {
+            CHECK(threatSectorOf(base, base + threatSectorDirection(sector)) == static_cast<int>(sector));
+        }
+
+        auto eastSector = threatSectorOf(base, east);
+        auto northSector = threatSectorOf(base, north);
+        REQUIRE(eastSector != northSector);
+        CHECK(bb.threatBySector[static_cast<std::size_t>(eastSector)] == 100);
+        CHECK(bb.threatTotal == 100);
+        CHECK(bb.threatPeakSector == eastSector);
+
+        SECTION("a second direction accumulates in its own sector")
+        {
+            addUnit(sim, "ARMPW", human, north, script);
+            sim.tick();
+            perception.refresh(sim, ai, profile, bb);
+            CHECK(bb.threatBySector[static_cast<std::size_t>(eastSector)] == 100);
+            CHECK(bb.threatBySector[static_cast<std::size_t>(northSector)] == 100);
+            CHECK(bb.threatTotal == 200);
+        }
+
+        SECTION("the levels halve on the decay clock")
+        {
+            sim.getUnitState(eastId).markAsDead();
+            bb.knownEnemies.clear();
+            bb.now = GameTime(60u * SimTicksPerSecond);
+            perception.refresh(sim, ai, profile, bb);
+            CHECK(bb.threatBySector[static_cast<std::size_t>(eastSector)] == 50);
+            CHECK(bb.threatTotal == 50);
+
+            bb.now = GameTime(120u * SimTicksPerSecond);
+            perception.refresh(sim, ai, profile, bb);
+            CHECK(bb.threatBySector[static_cast<std::size_t>(eastSector)] == 25);
+        }
+
+        SECTION("a fresh raid adds to what is left rather than replacing it")
+        {
+            sim.getUnitState(eastId).markAsDead();
+            bb.knownEnemies.clear();
+            bb.now = GameTime(60u * SimTicksPerSecond);
+            perception.refresh(sim, ai, profile, bb);
+            REQUIRE(bb.threatBySector[static_cast<std::size_t>(eastSector)] == 50);
+
+            addUnit(sim, "ARMPW", human, east, script);
+            sim.tick();
+            perception.refresh(sim, ai, profile, bb);
+            CHECK(bb.threatBySector[static_cast<std::size_t>(eastSector)] == 150);
+            CHECK(bb.threatTotal == 150);
+        }
+
+        SECTION("switched off, nothing is remembered and the total is zero")
+        {
+            profile.threatMemory = false;
+            perception.refresh(sim, ai, profile, bb);
+            for (auto level : bb.threatBySector)
+            {
+                CHECK(level == 0);
+            }
+            CHECK(bb.threatTotal == 0);
+            CHECK(bb.threatPeakSector == -1);
+            CHECK(bb.threatCountedContacts.empty());
+        }
+
+        SECTION("the peak sector is the highest, ties going to the lowest index")
+        {
+            AiBlackboard seeded;
+            seeded.threatBySector[3] = 100;
+            seeded.threatBySector[9] = 100;
+            seeded.threatBySector[5] = 50;
+            CHECK(strongestThreatSector(seeded) == 3);
+
+            seeded.threatBySector[9] = 101;
+            CHECK(strongestThreatSector(seeded) == 9);
+
+            seeded.threatBySector.fill(0);
+            CHECK(strongestThreatSector(seeded) == -1);
+        }
+    }
+
+    TEST_CASE("the wave's value is exposed for the recall test", "[ai]")
+    {
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        sim.unitDefinitions["ARMPW"].buildCostMetal = Metal(120.0f);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto first = addUnit(sim, "ARMPW", ai, SimVector(40_ss, 0_ss, 0_ss), script);
+        auto second = addUnit(sim, "ARMPW", ai, SimVector(80_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        AiBlackboard bb;
+        bb.combatUnits = {first, second};
+        bb.attackGroup = {first.value, second.value};
+        PerceptionManager perception;
+        sim.tick();
+        perception.refresh(sim, ai, profile, bb);
+        CHECK(bb.waveMetal == 240.0f);
+
+        // A member that is gone no longer counts towards what the wave is
+        // worth, so a spent wave is easier to recall.
+        sim.getUnitState(first).markAsDead();
+        sim.tick();
+        perception.refresh(sim, ai, profile, bb);
+        CHECK(bb.waveMetal == 120.0f);
+    }
 }
+

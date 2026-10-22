@@ -909,8 +909,12 @@ namespace rwe
             }
             else if (message == "PREV")
             {
-                // The button says OK. Keep the settings and leave.
+                // The button says OK. Keep the settings, leave, and apply the
+                // window mode to the live window now, as the in-game options
+                // page does. Without this the front end saved the new mode but
+                // the window only changed at the next launch.
                 saveOptions();
+                sceneContext.sceneManager->setWindowMode(pendingWindowMode);
                 lastPanelWasOptions = false;
                 currentOptionsPage.clear();
                 goToPreviousMenu();

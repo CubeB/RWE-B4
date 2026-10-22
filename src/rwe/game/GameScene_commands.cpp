@@ -11,7 +11,9 @@
 #include <rwe/Mesh.h>
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/camera_util.h>
+#include <rwe/game/GameScene_ownclock.h>
 #include <rwe/game/GameScene_util.h>
+#include <rwe/sim/UnitVisibility.h>
 #include <rwe/game/OrderButtons.h>
 #include <rwe/game/PlayerCommandApplication.h>
 #include <rwe/game/SaveFile.h>
@@ -720,32 +722,6 @@ namespace rwe
             }
         }
 
-        // The same questions the original's draw predicate asks, in the same
-        // order: whose it is, whether it is cloaked, whether anything of it
-        // breaks the surface, and only then whether the ground under it is
-        // lit. It has to agree with the simulation's canSeeUnit or a unit
-        // would be drawn to an enemy who cannot target it.
-        //
-        // The waterline question is the sonar one. 0x465AC0 refuses a unit
-        // whose model is entirely below sea level unless the viewer holds it
-        // on sonar, so a submarine is drawn to a destroyer and not to a
-        // Peewee standing on the beach beside it.
-        // Skipped with the fog off, which is a fully lit map and not a second
-        // way of drawing one: nothing may stay hidden under it.
-        if (fogOfWarEnabled && !unit.isOwnedBy(localPlayerId))
-        {
-            const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
-            if (unit.position.y + simulation.modelHeightOf(unitDefinition) < simulation.terrain.getSeaLevel())
-            {
-                const auto& heard = (eliminationWatching ? localPlayerVisibility()
-                    : simulation.playerVisibility.at(localPlayerId.value)).sonarContacts;
-                if (heard.find(unitId) == heard.end())
-                {
-                    return false;
-                }
-            }
-        }
-
         if (spectatorMode)
         {
             // A spectator is not a player and there is nobody for a unit to
@@ -755,17 +731,14 @@ namespace rwe
             return true;
         }
 
-        auto style = computeUnitDrawStyle(unit.isOwnedBy(localPlayerId), unit.cloaked, positionIsVisibleToLocalPlayer(unit.position));
-        if (style == UnitDrawStyle::Solid && fogOfWarEnabled && !unit.isOwnedBy(localPlayerId))
-        {
-            // An enemy structure appears when the ground under it does, not
-            // when the one cell at its centre is lit.
-            const auto& definition = simulation.unitDefinitions.at(unit.unitType);
-            if (!definition.isMobile && !structureGroundIsInSight(simulation, localPlayerVisibility(), unit.position, definition))
-            {
-                return false;
-            }
-        }
+        // CV-02/03: the original admits any lit projected corner, for both
+        // buildings and factory products independently. A centre-only check
+        // followed by an all-ground-corners check delayed a factory or mex
+        // after it was already visible to the simulation. Use the same query
+        // with this client's picture, including a watching view's union.
+        auto visible = !fogOfWarEnabled
+            || canSeeUnitInVisibility(simulation, localPlayerId, unitId, localPlayerVisibility());
+        auto style = computeUnitDrawStyle(unit.isOwnedBy(localPlayerId), unit.cloaked, visible);
         return style != UnitDrawStyle::Hidden;
     }
 
@@ -3085,7 +3058,23 @@ namespace rwe
                 // player changes speed as in a skirmish.
                 if (issuingPlayer == PlayerId(0) || (isOwnClock() && issuingPlayer == localPlayerId))
                 {
-                    gameSpeed = GameSpeed(c.speedIndex);
+                    auto nextSpeed = GameSpeed(c.speedIndex);
+
+                    // The original's speed setter prints its transient line
+                    // only when the level really changes, and only the
+                    // machine that issued the change sees it: it goes to the
+                    // local message list, not to chat and not over the wire.
+                    // Level 10 (RWE's default index) reads "Game Speed
+                    // Normal"; every other level is the signed offset from
+                    // ten after two spaces, e.g. "Game Speed  +2".
+                    // TOTALA-EXE-KEYBOARD.md:120-121,
+                    // BT-GAME-GAME-STATE-PARITY.md:136-147.
+                    if (!isPlayback() && issuingPlayer == localPlayerId && nextSpeed.index() != gameSpeed.index())
+                    {
+                        printConsole(gameSpeedMessage(nextSpeed.index() + 1));
+                    }
+
+                    gameSpeed = nextSpeed;
                 }
             },
             [&](const PlayerDroppedCommand& c) {

@@ -1,5 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
+#include <rwe/ai/AirManager.h>
+#include <rwe/ai/ArmyManager.h>
+#include <rwe/ai/StrategicManager.h>
+#include <rwe/ai/ThreatMap.h>
 #include <rwe/ai/ai_test_util.h>
+#include <rwe/game/PlayerCommand.h>
+#include <rwe/sim/GameTime.h>
+#include <rwe/sim/SimTicksPerSecond.h>
+#include <rwe/sim/UnitDefinition.h>
+#include <rwe/sim/WeaponDefinition.h>
+#include <optional>
+#include <set>
 
 /**
  * What the army does with itself: gathering, attacking, breaking off, and
@@ -29,6 +40,108 @@ namespace rwe
                 }
             }
             return n;
+        }
+
+        /** How many of these units were ordered to attack this target. */
+        int countAttackOrdersOn(const std::vector<PlayerCommand>& commands, const std::vector<UnitId>& units, UnitId target)
+        {
+            int n = 0;
+            for (auto id : units)
+            {
+                for (const auto& attack : ordersFor<AttackOrder>(commands, id))
+                {
+                    auto aimed = std::get_if<UnitId>(&attack.target);
+                    if (aimed && *aimed == target)
+                    {
+                        ++n;
+                        break;
+                    }
+                }
+            }
+            return n;
+        }
+
+        /** One remembered enemy, for the air and commander fixtures below. */
+        KnownEnemy makeKnownContact(
+            UnitId id,
+            const SimVector& position,
+            const std::string& unitType,
+            bool building,
+            bool armed,
+            bool commander = false)
+        {
+            KnownEnemy enemy{};
+            enemy.unitId = id;
+            enemy.unitType = unitType;
+            enemy.lastKnownPosition = position;
+            enemy.lastSeen = GameTime(0u);
+            enemy.isBuilding = building;
+            enemy.isArmed = armed;
+            enemy.isAir = false;
+            enemy.isCommander = commander;
+            return enemy;
+        }
+    }
+
+    TEST_CASE("proportional defence sizes the force and orders it deterministically", "[ai]")
+    {
+        auto profile = AiTuningProfile{};
+        std::vector<DefenceResponderCandidate> pool;
+        for (unsigned int i = 0; i < 8; ++i)
+        {
+            pool.push_back(DefenceResponderCandidate{10u + i, 100.0f, 1000_ss});
+        }
+
+        SECTION("one cheap raider draws a pair, not the reserve")
+        {
+            auto chosen = chooseDefenceResponders(profile, pool, 100.0f, 1);
+            // 1.3 * 100 wants 130 metal, and a unit is 100: two of them.
+            CHECK(chosen.size() == 2);
+            // All distances are equal, so the tie-break is the raw unit id.
+            const std::set<unsigned int> expected{10u, 11u};
+            CHECK(chosen == expected);
+        }
+
+        SECTION("a push worth more than the guard draws the guard")
+        {
+            auto chosen = chooseDefenceResponders(profile, pool, 600.0f, 6);
+            // 1.3 * 600 = 780, which needs all eight, and the default share
+            // leaves all eight available.
+            CHECK(chosen.size() == 8);
+            const std::set<unsigned int> expected{10u, 11u, 12u, 13u, 14u, 15u, 16u, 17u};
+            CHECK(chosen == expected);
+        }
+
+        SECTION("the ratio is the sizing knob")
+        {
+            profile.defenceResponseRatio = 0.5f;
+            CHECK(chooseDefenceResponders(profile, pool, 100.0f, 1).size() == 1);
+            profile.defenceResponseRatio = 3.0f;
+            CHECK(chooseDefenceResponders(profile, pool, 100.0f, 1).size() == 3);
+        }
+
+        SECTION("the minimum still sends somebody against a valueless contact")
+        {
+            profile.defenceResponseMinUnits = 3;
+            profile.defenceResponseRatio = 0.1f;
+            CHECK(chooseDefenceResponders(profile, pool, 0.0f, 0).size() == 3);
+        }
+
+        SECTION("the cap never commits the whole guard")
+        {
+            profile.defenceResponseMaxShare = 0.5f;
+            profile.defenceResponseMinUnits = 1;
+            CHECK(chooseDefenceResponders(profile, pool, 100000.0f, 100).size() == 4);
+        }
+
+        SECTION("off sends everyone, and input order does not change the answer")
+        {
+            auto chosen = chooseDefenceResponders(profile, pool, 100.0f, 1);
+            std::vector<DefenceResponderCandidate> reversed(pool.rbegin(), pool.rend());
+            CHECK(chooseDefenceResponders(profile, reversed, 100.0f, 1) == chosen);
+
+            profile.proportionalDefence = false;
+            CHECK(chooseDefenceResponders(profile, pool, 0.0f, 0).size() == pool.size());
         }
     }
 
@@ -73,6 +186,10 @@ namespace rwe
             auto brutal = makeDefaultBrutalProfile();
             brutal.attackArmySize = 3;
             brutal.scoutCount = 0;
+            // This case is about the phase gate, so play the old one-group,
+            // plain-move command stream as its control.
+            brutal.reserveWave = false;
+            brutal.waveAttackMove = false;
             AiPlayerController cheat(ai, brutal, 42u, MapIntel{});
             addUnit(sim, "ARMSOLAR", human, SimVector(450_ss, 0_ss, 200_ss), script);
             for (int i = 0; i < 3; ++i)
@@ -617,6 +734,11 @@ namespace rwe
         profile.attackArmySize = 3;
         profile.retreatArmySize = 2;
         profile.scoutCount = 0;
+        // The wave split and attack-move have their own cases; keep this one
+        // on the old one-group, plain-move stream so its counts mean what
+        // they always meant.
+        profile.reserveWave = false;
+        profile.waveAttackMove = false;
 
         SECTION("a unit built during the attack gathers for the next wave instead of walking to the front")
         {
@@ -705,6 +827,160 @@ namespace rwe
                 REQUIRE(controller.getBlackboard().phase == GamePhase::Defend);
                 REQUIRE(!ordersFor<AttackOrder>(commands, ownId).empty());
             }
+        }
+    }
+
+    TEST_CASE("proportional defence sends a force sized to the intruders", "[ai]")
+    {
+        // One raider used to draw every unit at home, and a real push used
+        // to draw exactly the same. The response now comes from the
+        // intruders' own metal: enough to be worth more than they are, and
+        // one responder per intruder at the least.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+
+        std::vector<UnitId> own;
+        for (int i = 0; i < 8; ++i)
+        {
+            own.push_back(addUnit(sim, "ARMPW", ai, SimVector(SimScalar(-100.0f - i * 40.0f), 0_ss, 0_ss), script));
+        }
+
+        auto profile = makeDefaultStandardProfile();
+        // See the intruders without a scout, and keep everything out of
+        // its own acquisition radius so the only orders are the defence's.
+        profile.cheatModeOmniscient = true;
+        profile.scoutCount = 0;
+        profile.attackArmySize = 50;
+        profile.engageRadius = 50_ss;
+        // Eight units against one would pass the value-odds gate and turn
+        // this into an attack on the enemy's base; the question here is the
+        // defence response, so keep the phase gate on the headcount.
+        profile.attackUsesValueOdds = false;
+
+        SECTION("one raider draws two of the eight, not all of them")
+        {
+            auto raiderId = addUnit(sim, "ARMPW", human, SimVector(600_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            REQUIRE(controller.getBlackboard().phase == GamePhase::Defend);
+            REQUIRE(controller.getBlackboard().enemiesNearBase.size() == 1);
+            CHECK(countAttackOrdersOn(commands, own, raiderId) == 2);
+        }
+
+        SECTION("six raiders draw the whole guard, not a pair")
+        {
+            std::vector<UnitId> raiders;
+            for (int i = 0; i < 6; ++i)
+            {
+                raiders.push_back(addUnit(sim, "ARMPW", human, SimVector(600_ss, 0_ss, SimScalar(i * 30.0f)), script));
+            }
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            REQUIRE(controller.getBlackboard().phase == GamePhase::Defend);
+            REQUIRE(controller.getBlackboard().enemiesNearBase.size() == 6);
+            // The nearest to home is the single target the response is
+            // ordered at, exactly as before; the question here is how many
+            // units were committed. 1.3 * 600 metal is more than the eight
+            // guards are worth, so all eight go.
+            auto nearest = raiders.front();
+            CHECK(countAttackOrdersOn(commands, own, nearest) == 8);
+        }
+
+        SECTION("switched off, the same raider draws all eight")
+        {
+            profile.proportionalDefence = false;
+            auto raiderId = addUnit(sim, "ARMPW", human, SimVector(600_ss, 0_ss, 0_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+            REQUIRE(controller.getBlackboard().phase == GamePhase::Defend);
+            CHECK(countAttackOrdersOn(commands, own, raiderId) == 8);
+        }
+    }
+
+    TEST_CASE("an intruder big enough recalls the wave, a raider does not", "[ai]")
+    {
+        auto profile = makeDefaultStandardProfile();
+        profile.attackInWaves = true;
+        profile.reserveAnswersIntruders = true;
+        profile.recallThreatRatio = 1.5f;
+        StrategicManager strategic;
+
+        auto state = [&]() {
+            AiBlackboard bb;
+            bb.phase = GamePhase::Attack;
+            bb.attackGroup = {1u, 2u};
+            bb.waveSpent = false;
+            bb.waveMetal = 1000.0f;
+            bb.enemiesNearBase.push_back(UnitId(77));
+            return bb;
+        };
+
+        SECTION("a raider far below the wave: the reserve answers and the wave stays out")
+        {
+            auto bb = state();
+            bb.threatTotal = 400;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+        }
+
+        SECTION("at exactly the ratio the old wave-out rule stands")
+        {
+            auto bb = state();
+            bb.threatTotal = 1500;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+        }
+
+        SECTION("a push above the ratio turns the wave round")
+        {
+            auto bb = state();
+            bb.threatTotal = 2000;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Defend);
+        }
+
+        SECTION("the ratio is the threshold")
+        {
+            profile.recallThreatRatio = 3.0f;
+            auto bb = state();
+            bb.threatTotal = 2000;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+        }
+
+        SECTION("proportional defence off keeps the old never-recall response")
+        {
+            profile.proportionalDefence = false;
+            auto bb = state();
+            bb.threatTotal = 9000;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+        }
+
+        SECTION("threat memory off keeps the old never-recall response")
+        {
+            profile.threatMemory = false;
+            auto bb = state();
+            bb.threatTotal = 9000;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+        }
+
+        SECTION("no wave out means no recall to make")
+        {
+            auto bb = state();
+            bb.attackGroup.clear();
+            bb.threatTotal = 9000;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Defend);
         }
     }
 
@@ -1235,6 +1511,445 @@ namespace rwe
             bool apart = first.front().destination.x != second.front().destination.x
                 || first.front().destination.z != second.front().destination.z;
             CHECK(apart);
+        }
+    }
+
+    TEST_CASE("mobile anti-air escorts the wave and leaves cover at home", "[ai]")
+    {
+        // The audit's third combat weakness: mobile AA is kept out of
+        // combatUnits and leashed to the base, so a wave that meets a bomber
+        // over the enemy's base has no answer. antiAirEscortCount sends a
+        // deterministic few -- by unit id, the slowest wave member's guard --
+        // and keeps one home whenever more than one stands.
+        auto script = makeEmptyCobScript();
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        defineWorld(sim);
+        addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+
+        // Omniscient, so the enemy's solar is a known target without a scout.
+        addUnit(sim, "ARMSOLAR", human, SimVector(450_ss, 0_ss, 200_ss), script);
+        for (int i = 0; i < 3; ++i)
+        {
+            addUnit(sim, "ARMPW", ai, SimVector(SimScalar(-100.0f - i * 40.0f), 0_ss, 0_ss), script);
+        }
+        // A slower wave member, so "the slowest unit" is a claim the test can
+        // check rather than an accident of every unit having the same speed.
+        sim.unitDefinitions["ARMFLASH"].maxVelocity = 1_ss;
+        auto slowUnit = addUnit(sim, "ARMFLASH", ai, SimVector(-220_ss, 0_ss, 0_ss), script);
+        auto firstAa = addUnit(sim, "ARMJETH", ai, SimVector(60_ss, 0_ss, 0_ss), script);
+        auto secondAa = addUnit(sim, "ARMJETH", ai, SimVector(80_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultBrutalProfile();
+        profile.attackArmySize = 3;
+        profile.retreatArmySize = 2;
+        profile.scoutCount = 0;
+        // One group for the escort case: the wave split is not what it asks
+        // about, and the slowest unit must be in the wave.
+        profile.reserveWave = false;
+        profile.waveAttackMove = false;
+
+        SECTION("one anti-air unit guards the slowest member of the wave, by id")
+        {
+            profile.antiAirEscortCount = 1;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.phase == GamePhase::Attack);
+            REQUIRE(bb.attackGroup.size() == 4);
+            REQUIRE(bb.antiAirUnits.size() == 2);
+
+            auto guards = ordersFor<GuardOrder>(commands, firstAa);
+            REQUIRE_FALSE(guards.empty());
+            // Guarding the slowest unit of the wave, and the first AA unit
+            // because selection is by id.
+            CHECK(guards.front().target == slowUnit);
+            CHECK(bb.attackGroup.count(slowUnit.value) == 1);
+            CHECK(ordersFor<GuardOrder>(commands, secondAa).empty());
+        }
+
+        SECTION("never all of them: one stays at the base when two stand")
+        {
+            profile.antiAirEscortCount = 5;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.antiAirUnits.size() == 2);
+            CHECK_FALSE(ordersFor<GuardOrder>(commands, firstAa).empty());
+            CHECK(ordersFor<GuardOrder>(commands, secondAa).empty());
+        }
+
+        SECTION("an aircraft in reach is still shot at first, escort or not")
+        {
+            auto planeId = addUnit(sim, "ARMPEEP", human, SimVector(100_ss, 60_ss, 30_ss), script);
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            auto attacks = ordersFor<AttackOrder>(commands, firstAa);
+            REQUIRE_FALSE(attacks.empty());
+            auto target = std::get_if<UnitId>(&attacks.front().target);
+            REQUIRE(target != nullptr);
+            CHECK(*target == planeId);
+        }
+
+        SECTION("an escort whose wave has ended hands the guard back and walks home")
+        {
+            // No wave: a high threshold keeps the AI in Boom. An AA unit left
+            // holding one of our guard orders must not follow the guarded unit
+            // around the base for the rest of the game.
+            profile.attackArmySize = 50;
+            profile.antiAirEscortCount = 1;
+            sim.getUnitState(firstAa).orders.push_back(GuardOrder(secondAa));
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            auto moves = ordersFor<MoveOrder>(commands, firstAa);
+            REQUIRE_FALSE(moves.empty());
+            CHECK((moves.front().destination == SimVector(0_ss, 0_ss, 0_ss)));
+        }
+
+        SECTION("off restores the old behaviour exactly: no escort, both leashed home")
+        {
+            profile.antiAirEscortCount = 0;
+            AiPlayerController controller(ai, profile, 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 20, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.phase == GamePhase::Attack);
+            CHECK(ordersFor<GuardOrder>(commands, firstAa).empty());
+            CHECK(ordersFor<GuardOrder>(commands, secondAa).empty());
+            // Both are within the 700-unit leash of the anchor, so the old
+            // path asks them for nothing at all.
+            CHECK(ordersFor<MoveOrder>(commands, firstAa).empty());
+            CHECK(ordersFor<MoveOrder>(commands, secondAa).empty());
+        }
+    }
+
+    TEST_CASE("the humanlike opening calls the first wave at its size and time", "[ai]")
+    {
+        // A blackboard in Boom with a target, below the ordinary count gate
+        // but at the opening's size. The opening posture is a bias on the
+        // existing gate: it still needs a target, still needs something
+        // worth sending, and the defence override above runs before it.
+        auto state = [] {
+            AiBlackboard bb;
+            bb.phase = GamePhase::Boom;
+            bb.enemyBasePosition = SimVector(2000_ss, 0_ss, 0_ss);
+            return bb;
+        };
+
+        auto profile = makeDefaultStandardProfile();
+        profile.humanlikeOpening = true;
+        profile.openingAttackArmySize = 7;
+        profile.openingAttackBySeconds = 450;
+        StrategicManager strategic;
+
+        SECTION("off, it waits for the ordinary count")
+        {
+            profile.humanlikeOpening = false;
+            auto bb = state();
+            bb.now = GameTime(600u * SimTicksPerSecond);
+            bb.armySize = profile.openingAttackArmySize;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+        }
+
+        SECTION("on, at the opening size and after the opening time, it attacks")
+        {
+            auto bb = state();
+            bb.now = GameTime(450u * SimTicksPerSecond);
+            bb.armySize = profile.openingAttackArmySize;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Attack);
+        }
+
+        SECTION("on, before the opening time, it still waits")
+        {
+            auto bb = state();
+            bb.now = GameTime(449u * SimTicksPerSecond);
+            bb.armySize = profile.openingAttackArmySize;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+        }
+
+        SECTION("on, but nothing worth sending: retreatArmySize is still the floor")
+        {
+            profile.openingAttackArmySize = 1;
+            auto bb = state();
+            bb.now = GameTime(600u * SimTicksPerSecond);
+            bb.armySize = profile.retreatArmySize - 1;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+        }
+
+        SECTION("on, but the known enemy army is ahead of ours: the odds gate holds")
+        {
+            auto bb = state();
+            bb.now = GameTime(600u * SimTicksPerSecond);
+            bb.armySize = profile.openingAttackArmySize;
+            bb.armyMetal = 100.0f;
+            bb.knownEnemyArmyMetal = 1000.0f;
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Boom);
+        }
+
+        SECTION("on, but the base is under attack: defence wins")
+        {
+            auto bb = state();
+            bb.now = GameTime(600u * SimTicksPerSecond);
+            bb.armySize = profile.openingAttackArmySize;
+            bb.enemiesNearBase.push_back(UnitId(7));
+            strategic.update(profile, bb);
+            CHECK(bb.phase == GamePhase::Defend);
+        }
+    }
+
+    TEST_CASE("an air strike waits for the ground wave", "[ai]")
+    {
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        auto enemy = addPlayer(sim, "enemy", GamePlayerType::Human, "CORE");
+        auto script = makeEmptyCobScript();
+
+        sim.unitDefinitions["BOMBER"] = UnitDefinition{};
+        UnitDefinition targetDef{};
+        targetDef.isMobile = false;
+        targetDef.buildCostMetal = Metal(800.0f);
+        sim.unitDefinitions["TARGET"] = targetDef;
+        UnitDefinition groundDef{};
+        groundDef.isMobile = true;
+        sim.unitDefinitions["GROUND"] = groundDef;
+
+        auto targetPos = SimVector(900_ss, 0_ss, 0_ss);
+        auto targetId = addUnitOfType(sim, "TARGET", enemy, targetPos, script);
+        auto bomberA = addUnitOfType(sim, "BOMBER", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        [[maybe_unused]] auto bomberB = addUnitOfType(sim, "BOMBER", ai, SimVector(20_ss, 0_ss, 0_ss), script);
+        auto groundId = addUnitOfType(sim, "GROUND", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.tacticalTickInterval = 1;
+        profile.airPatrolFighters = 0;
+        profile.airPatrolBombers = 0;
+        // The target is an ordinary sortie, not the home-defence case.
+        profile.bomberHomeDefenseRadius = 200_ss;
+
+        AiBlackboard bb;
+        bb.sideUnitsResolved = true;
+        bb.sideUnits.bomber = "BOMBER";
+        bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+        bb.combatUnits = {groundId};
+        bb.attackGroup.insert(groundId.value);
+        bb.phase = GamePhase::Attack;
+        bb.knownEnemies[targetId.value] = makeKnownContact(targetId, targetPos, "TARGET", true, false);
+
+        ThreatMap threatMap(128, 128);
+        auto strikeTarget = [&](const AiTuningProfile& p) -> std::optional<UnitId> {
+            AirManager air;
+            std::vector<PlayerCommand> commands;
+            air.update(sim, ai, p, threatMap, bb, commands);
+            auto attacks = ordersFor<AttackOrder>(commands, bomberA);
+            if (attacks.empty())
+            {
+                return std::nullopt;
+            }
+            auto aimed = std::get_if<UnitId>(&attacks.front().target);
+            if (!aimed)
+            {
+                return std::nullopt;
+            }
+            return *aimed;
+        };
+
+        SECTION("the wave is far from the target: the strike waits")
+        {
+            REQUIRE(profile.airStrikeSync);
+            CHECK_FALSE(strikeTarget(profile).has_value());
+        }
+
+        SECTION("the wave reaches the target: the strike goes in")
+        {
+            sim.getUnitState(groundId).position = SimVector(400_ss, 0_ss, 0_ss);
+            auto target = strikeTarget(profile);
+            REQUIRE(target.has_value());
+            CHECK(*target == targetId);
+        }
+
+        SECTION("or the wave is in contact: the strike goes in")
+        {
+            bb.waveContactAt = GameTime(0u);
+            auto target = strikeTarget(profile);
+            REQUIRE(target.has_value());
+            CHECK(*target == targetId);
+        }
+
+        SECTION("the wave ends: the strike is released")
+        {
+            bb.waveSpent = true;
+            auto target = strikeTarget(profile);
+            REQUIRE(target.has_value());
+            CHECK(*target == targetId);
+        }
+
+        SECTION("with the sync off the strike leaves immediately")
+        {
+            auto immediate = profile;
+            immediate.airStrikeSync = false;
+            auto target = strikeTarget(immediate);
+            REQUIRE(target.has_value());
+            CHECK(*target == targetId);
+        }
+    }
+
+    TEST_CASE("their commander is hunted only while it is exposed", "[ai]")
+    {
+        GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
+        auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
+        auto enemy = addPlayer(sim, "enemy", GamePlayerType::Human, "CORE");
+        auto script = makeEmptyCobScript();
+
+        sim.unitDefinitions["KBOT"] = UnitDefinition{};
+        sim.unitDefinitions["KBOT"].isMobile = true;
+
+        WeaponDefinition gun{};
+        gun.maxRange = 300_ss;
+        gun.reloadTime = 1_ss;
+        gun.burst = 1;
+        gun.damage["DEFAULT"] = 100u;
+        sim.weaponDefinitions["GUN"] = gun;
+
+        UnitDefinition plantDef{};
+        plantDef.isMobile = false;
+        plantDef.buildCostMetal = Metal(500.0f);
+        sim.unitDefinitions["PLANT"] = plantDef;
+
+        UnitDefinition towerDef{};
+        towerDef.isMobile = false;
+        towerDef.buildCostMetal = Metal(150.0f);
+        towerDef.weapon1 = "GUN";
+        sim.unitDefinitions["TOWER"] = towerDef;
+
+        UnitDefinition commanderDef{};
+        commanderDef.isMobile = true;
+        commanderDef.commander = true;
+        commanderDef.buildCostMetal = Metal(1000.0f);
+        sim.unitDefinitions["COMMANDER"] = commanderDef;
+
+        UnitDefinition escortDef{};
+        escortDef.isMobile = true;
+        escortDef.buildCostMetal = Metal(700.0f);
+        escortDef.weapon1 = "GUN";
+        sim.unitDefinitions["ESCORT"] = escortDef;
+
+        auto basePos = SimVector(800_ss, 0_ss, 0_ss);
+        auto towerPos = SimVector(860_ss, 0_ss, 0_ss);
+        auto farCommanderPos = SimVector(0_ss, 0_ss, -800_ss);
+        auto plantId = addUnitOfType(sim, "PLANT", enemy, basePos, script);
+        auto towerId = addUnitOfType(sim, "TOWER", enemy, towerPos, script);
+        auto commanderId = addUnitOfType(sim, "COMMANDER", enemy, farCommanderPos, script);
+
+        auto unitA = addUnitOfType(sim, "KBOT", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+        auto unitB = addUnitOfType(sim, "KBOT", ai, SimVector(40_ss, 0_ss, 0_ss), script);
+
+        auto profile = makeDefaultStandardProfile();
+        profile.tacticalTickInterval = 1;
+        profile.engageRadius = 50_ss;
+        profile.waveMeetEnemyCount = 0;
+        profile.raidingParties = false;
+
+        AiBlackboard bb;
+        bb.phase = GamePhase::Attack;
+        bb.baseAnchor = SimVector(0_ss, 0_ss, 0_ss);
+        bb.enemyBasePosition = basePos;
+        bb.combatUnits = {unitA, unitB};
+        bb.attackGroup.insert(unitA.value);
+        bb.attackGroup.insert(unitB.value);
+        bb.knownEnemies[plantId.value] = makeKnownContact(plantId, basePos, "PLANT", true, false);
+        bb.knownEnemies[towerId.value] = makeKnownContact(towerId, towerPos, "TOWER", true, true);
+        bb.knownEnemies[commanderId.value] = makeKnownContact(commanderId, farCommanderPos, "COMMANDER", false, true, true);
+        bb.enemyCommanderPosition = farCommanderPos;
+
+        ThreatMap threatMap(128, 128);
+        threatMap.rebuild(sim, ai, bb, true);
+
+        auto objective = [&](const AiTuningProfile& p) {
+            ArmyManager army;
+            std::vector<PlayerCommand> commands;
+            auto tuned = p;
+            tuned.waveAttackMove = false;
+            army.update(sim, ai, tuned, threatMap, bb, commands);
+            auto moves = ordersFor<MoveOrder>(commands, unitA);
+            REQUIRE(!moves.empty());
+            return moves.front().destination;
+        };
+
+        SECTION("alone and away from its base, it is hunted")
+        {
+            REQUIRE(profile.commanderHuntExposedOnly);
+            auto destination = objective(profile);
+            CHECK(destination.distance(farCommanderPos) < 100_ss);
+        }
+
+        SECTION("a heavy escort makes it a fight at their base instead")
+        {
+            auto escortId = UnitId(9000u);
+            bb.knownEnemies[escortId.value] = makeKnownContact(
+                escortId, farCommanderPos + SimVector(50_ss, 0_ss, 0_ss), "ESCORT", false, true);
+
+            auto destination = objective(profile);
+            CHECK(basePos.distance(destination) < profile.attackBaseRadius);
+            CHECK(destination.distance(farCommanderPos) > profile.commanderHuntMinDistance);
+        }
+
+        SECTION("a commander standing in its base is not the objective")
+        {
+            auto nearBasePos = SimVector(300_ss, 0_ss, 0_ss);
+            bb.enemyCommanderPosition = nearBasePos;
+
+            auto destination = objective(profile);
+            // Their base is the objective, not the commander five hundred
+            // units short of it.
+            CHECK(destination.x > 650_ss);
+        }
+
+        SECTION("with the exposure test off the escorted commander is hunted again")
+        {
+            auto escortId = UnitId(9000u);
+            bb.knownEnemies[escortId.value] = makeKnownContact(
+                escortId, farCommanderPos + SimVector(50_ss, 0_ss, 0_ss), "ESCORT", false, true);
+
+            auto old = profile;
+            old.commanderHuntExposedOnly = false;
+            auto destination = objective(old);
+            CHECK(destination.distance(farCommanderPos) < 100_ss);
+        }
+
+        SECTION("the exposure answer is latched, then asked again")
+        {
+            // Far and alone: hunted, and the answer is latched.
+            auto first = objective(profile);
+            CHECK(first.distance(farCommanderPos) < 100_ss);
+
+            // The escort arrives. Inside the latch window the wave keeps
+            // walking at the commander it already chose.
+            auto escortId = UnitId(9000u);
+            bb.knownEnemies[escortId.value] = makeKnownContact(
+                escortId, farCommanderPos + SimVector(50_ss, 0_ss, 0_ss), "ESCORT", false, true);
+            auto latched = objective(profile);
+            CHECK(latched.distance(farCommanderPos) < 100_ss);
+
+            // The window passes and the same escort now counts.
+            bb.now = GameTime(static_cast<unsigned int>(profile.commanderHuntExposureLatchSeconds) * SimTicksPerSecond);
+            auto afterLatch = objective(profile);
+            CHECK(basePos.distance(afterLatch) < profile.attackBaseRadius);
         }
     }
 }

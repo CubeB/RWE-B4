@@ -719,6 +719,15 @@ namespace rwe
         void addCameraZoomSlider(UiPanel& panel);
         void addUiScaleButton(UiPanel& panel);
 
+        /**
+         * Adds the in-game window mode button, VIDMODE, under UNDO on the
+         * VISUALRT page. VISUALRT has no VIDSLDR or VIDVAL (the original
+         * cannot change video mode in a battle, TOTALA-EXE-INTERFACE.md
+         * S:65), so the choice the front end makes with a slider is made
+         * here with a staged button built in code. RWE-original.
+         */
+        void addWindowModeButton(UiPanel& panel);
+
         /** Applies effectiveUiScale to the chrome projection and to the screen new panels are kept inside. */
         void syncUiScale();
 

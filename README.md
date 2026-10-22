@@ -1,188 +1,191 @@
 # RWE: B4
 
-> **Bot bot boom boom** — four B's, so B4 for short.
+**Total Annihilation, running on an open-source engine.**
 
-A real-time strategy engine that plays Total Annihilation's own data as it
-ships. A fork of [Robot War Engine](https://github.com/MHeasell/rwe) by
-[Michael Heasell](https://github.com/MHeasell), which is a lovely bit of work.
+RWE: B4 is a fork of [Robot War Engine](https://github.com/MHeasell/rwe)
+that runs Total Annihilation's maps, units, scripts, interface and media
+from your own game installation. It brings together documented original
+behaviour, two skirmish AI engines, multiplayer, saves and replays.
+
+*Bot bot boom boom — four B's, so B4 for short.*
 
 [![Build](https://github.com/CubeB/RWE-B4/actions/workflows/build.yml/badge.svg?branch=revival)](https://github.com/CubeB/RWE-B4/actions/workflows/build.yml)
-[![Latest release](https://img.shields.io/github/v/release/CubeB/RWE-B4?include_prereleases&label=download)](https://github.com/CubeB/RWE-B4/releases)
-[![Upstream](https://img.shields.io/badge/upstream-MHeasell%2Frwe-lightgrey)](https://github.com/MHeasell/rwe)
+[![Downloads](https://img.shields.io/badge/download-pre--release-blue)](https://github.com/CubeB/RWE-B4/releases)
+[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 
-**[Download](#download) · [Install](#install) · [Controls](#controls) ·
-[Build](#build) · [Documentation](#documentation)**
+[**Download**](https://github.com/CubeB/RWE-B4/releases) ·
+[Get started](#get-started) · [Playing](#playing) · [Build](#build) ·
+[Documentation](#documentation) · [Report a bug](https://github.com/CubeB/RWE-B4/issues)
 
----
+> **Bring your own game data.** RWE includes no Total Annihilation assets.
+> You need your own copy of the game. This is an actively developed project;
+> builds are pre-releases and compatibility work is ongoing.
 
-## What it is
+## What you can do
 
-The engine reads the original game's files directly — HPI archives, 3DO
-models, GAF sprites, TNT terrain, FBI and TDF definitions, and COB unit
-scripts running in a virtual machine written for them. It runs a deterministic
-lockstep simulation in fixed-point maths so peers stay in step across
-platforms, and it builds its interface out of the game's own GUI files rather
-than by eye.
+| Feature | What to expect |
+| --- | --- |
+| **Play with original game data** | The engine reads TA archives, terrain, models, sprites and definitions directly, and executes the shipped COB unit scripts. |
+| **Choose your opponent** | Use **Original TA**, the default computer player implemented from documented original behaviour, or **RWE AI**, a separately developed opponent with its own tactics and transport planning. |
+| **Play multiplayer** | Deterministic lockstep games, LAN discovery and invite-code connections across routers. Use the same build and game data on every machine. |
+| **Save and return** | Save and load the simulation, including running unit scripts, projectiles and the random generator. Record and play back RWE replays. |
+| **Use the original front end** | Game-data-driven menus, campaign selection, movies, sound effects and situational music. |
+| **Explore the engineering** | Behaviour findings, demo analysis, profiling tools and automated tests are kept alongside the implementation. |
 
-**No game data ships here.** You supply your own copy of Total Annihilation.
+The goal is to reproduce the original's behaviour with evidence. Intentional
+changes are recorded separately from unfinished work. See the
+[compatibility guide](docs/compatibility.md) and
+[roadmap](docs/ROADMAP.md) for the details.
 
-## What is different in this fork
+## Get started
 
-B4 works on the layer above: taking behaviours the engine already reproduces
-and pinning them to what the original executable actually does.
+### 1. Download a build
 
-Most of that work was **read out of `TotalA.exe` rather than guessed at**.
-`docs/TOTALA-EXE.md` indexes over a hundred numbered findings across thirteen
-subject documents — the flight model, fog of war and line of sight, the damage
-pipeline, target selection, the economy, the nanolathe, the interface,
-transports, the music system, and the renderer's own rasteriser — with the
-probe scripts that produced them in `tools/exe/`.
+Open the [releases page](https://github.com/CubeB/RWE-B4/releases) and choose
+a package for your system:
 
-That method earns its keep by being checkable, because several plausible
-readings of that binary turn out to be wrong. Only replaying the arithmetic
-against real unit data catches them: the radar rule had a cap that made the
-altitude bonus dead code on every shipped unit, and the D-gun's trail turned
-out to be `noexplode` letting a round detonate without being consumed, rather
-than anything to do with `beamweapon`.
+| Platform | Package |
+| --- | --- |
+| **Windows** | Installer (`.exe`) or portable archive (`.zip`) |
+| **Linux** | AppImage (`.AppImage`) |
 
-Beyond that:
+The **nightly** release follows development on `revival`. Dated **weekly**
+releases provide snapshots you can return to. Read the release notes for the
+build revision and included changes.
 
-| | |
-|---|---|
-| **Full save and load** | The whole simulation round-trips — units with their COB virtual machines mid-thought, projectiles mid-flight, spreading fires, the economy, the RNG — proven by a hash harness rather than by inspection. |
-| **A skirmish AI** | Runs inside the deterministic tick and emits ordinary player commands, so it is part of the simulation rather than bolted beside it. |
-| **The front end** | The movies (the GOG release ships them as `.ZRB`, which are Smacker files — RWE grew its own decoder), situational music on the original's own thresholds, the in-game menus, options and window modes. |
-| **Performance** | Eight hundred units went from 8 fps to 36 by measuring the simulation rather than the renderer, then from 36 to the 60 Hz vsync cap by profiling the frame. Both passes are documented with the numbers, because in both the obvious suspect was the wrong one. |
+### 2. Import your Total Annihilation data
 
-## Download
+On Windows, leave **Open game setup** checked at the end of the installer.
+Choose **Import game files** to search automatically, or use **Browse** to
+select your Total Annihilation folder. When setup finishes, choose **Play now**.
+You can reopen **Import Game Data** from the Start menu. With the portable
+ZIP, extract it first and double-click **Import Game Data.cmd**.
 
-Pre-release builds are on the [releases
-page](https://github.com/CubeB/RWE-B4/releases). Every tag carries a Windows
-installer, a Windows zip and a Linux AppImage.
+Use **Play Robot War Engine** for the game and **Multiplayer Lobby** to arrange
+multiplayer matches. New installers use a stable install folder; imported data and
+saved games remain in your user data directory.
 
-They are pre-releases in the plain sense: cut from `revival` when a tag goes
-up, rather than off a stable line. Take them as somewhere between the roadmap
-and a finished game.
+The command-line setup is also available from the game directory:
 
-## Install
-
-You need your own copy of Total Annihilation. Then:
-
-```
-rwe_setup
-rwe
+```powershell
+.\rwe_setup.exe
+.\rwe.exe
 ```
 
-`rwe_setup` finds the installation, copies the archives, the films and the
-soundtrack into the data directory the engine reads, and tells you what it
-did. It looks in the GOG and Cavedog registry entries and the usual install
-locations. If it cannot find yours, point it at the directory holding
-`totala1.hpi`:
+The setup tool searches common GOG and Cavedog installation locations. If
+it cannot find your copy, point it at the directory containing `totala1.hpi`:
 
-```
-rwe_setup --from "C:/GOG Games/Total Annihilation"
+```powershell
+.\rwe_setup.exe --from "C:/GOG Games/Total Annihilation"
 ```
 
-The Linux AppImage is a single file with a single entry point, so there
-`rwe_setup` is reached through it — the word `setup` first, then its own
-arguments:
-
-```
-./Robot_War_Engine-*.AppImage setup --from "/path/to/Total Annihilation"
-```
-
-| Flag | What it does |
-|---|---|
-| `--dry-run` | Says what it would do and changes nothing. |
-| `--link` | Hard-links instead of copying — instant, and saves about a gigabyte when the data and the installation share a volume. |
-| `--to <path>` | Writes somewhere other than the default. |
-
-Running it twice is safe: it copies only what is missing or half-written.
-Start the game with `rwe`. If the data is missing it says so and points you
-back here, rather than failing with a filesystem error.
-
-<details>
-<summary><b>What it does, if you would rather do it by hand</b></summary>
-
-<br>
-
-The engine reads one data directory: `%AppData%/RWE/Data` on Windows, and
-`~/.local/share/rwe/Data` elsewhere (`$XDG_DATA_HOME/rwe/Data` when that is
-set; an existing `~/.rwe` from before the move keeps being used until the new
-location exists). It mounts every `.hpi`, `.ufo`, `.ccx`, `.gpf`
-and `.gp3` it finds directly inside it. Two subdirectories are read by name:
-`movies` for the films, which the GOG release ships as `.ZRB` (Smacker) files
-under its own `Data` folder, and `music` for the soundtrack. So:
-
-- every archive from the installation's root, flat in the data directory;
-- `<install>/Data/*.zrb` into `<data>/movies/`;
-- `<install>/music/*.mp3` into `<data>/music/`.
-
-The lookups are case-insensitive, so the mixed casing the GOG release ships
-(`1.ZRB` beside `2.zrb`) needs no renaming.
+On Linux, run setup through the AppImage. With Zenity installed on a graphical
+desktop, running `setup` without extra options opens a folder picker and
+shows import progress. Explicit options continue to use the command-line tool:
 
 ```bash
-RWE="${XDG_DATA_HOME:-$HOME/.local/share}/rwe"
-mkdir -p "$RWE/Data/movies" "$RWE/Data/music"
-cp /path/to/totala/*.hpi /path/to/totala/*.ufo /path/to/totala/*.ccx \
-   /path/to/totala/*.gpf /path/to/totala/*.gp3 "$RWE/Data"
-cp /path/to/totala/Data/*.[zZ][rR][bB] "$RWE/Data/movies"
-cp /path/to/totala/music/*.mp3 "$RWE/Data/music"
+chmod +x Robot_War_Engine-*.AppImage
+./Robot_War_Engine-*.AppImage setup
+./Robot_War_Engine-*.AppImage
 ```
 
-`rwe --data-path <dir>` overrides the location at runtime.
+Keep one matching AppImage in the directory when using these wildcard commands.
+For terminal setup with an explicit source, add
+`setup --from "/path/to/Total Annihilation"` instead.
+Setup imports the archives, movies and soundtrack. Running it again copies
+only files that are missing or incomplete.
+
+| Setup option | Purpose |
+| --- | --- |
+| `--dry-run` | Preview the import without changing files |
+| `--link` | Use hard links where supported, avoiding duplicate data on the same volume |
+| `--to <path>` | Choose a different data directory |
+
+If you import to a different directory, start the engine with
+`rwe --data-path <path>`.
+
+<details>
+<summary><strong>Data locations and manual installation</strong></summary>
+
+The default data directories are:
+
+| System | Directory |
+| --- | --- |
+| Windows | `%APPDATA%/RWE/Data` |
+| Linux | `${XDG_DATA_HOME:-$HOME/.local/share}/rwe/Data` |
+
+An existing legacy `~/.rwe` directory remains in use until the new location
+exists. Put game archives directly in the data directory; the engine mounts
+`.hpi`, `.ufo`, `.ccx`, `.gpf` and `.gp3` files. Put GOG's `Data/*.zrb`
+movies in `Data/movies/` and the soundtrack's `.mp3` files in `Data/music/`.
+Filename lookups are case-insensitive.
 
 </details>
 
-## Controls
+## Playing
 
-**Camera and game**
+### Pick an AI
 
-| Key | Action |
-|---|---|
+Computer seats default to **Original TA**. In game setup, cycle a player slot
+to **RWE AI** to use RWE's Balanced personality instead. You can mix the two
+engines in one match. The selected engine is recorded in saved games.
+
+RWE AI is developed and tuned independently; its improvements are not claims
+about how the original computer player behaved. For the design and tuning
+process, see [AI architecture](docs/ai-architecture-proposal.md),
+[AI tuning](docs/AI-TUNING.md) and the
+[AI engine decision](docs/adr/0005-the-original-computer-player-is-the-default-and-rwes-is-an-option.md).
+
+### Play with friends
+
+Use the in-game multiplayer screens for LAN games. For an internet game,
+the host can create an invite code with `/invite` in the battleroom. Share
+that code with the guest; the host accepts a waiting player with `/accept`.
+Some router configurations need a reply-code exchange. Follow the
+[connection guide](docs/NAT-PUNCH.md) for the complete flow.
+
+The separate [Electron launcher](#the-launcher) provides another lobby path.
+Both players should use the same engine build and matching maps and mods.
+
+### Essential controls
+
+| Input | Action |
+| --- | --- |
+| Left click / drag | Select units |
+| Right click | Give a contextual order |
 | Arrow keys | Scroll the map |
-| `+` / `-` (or keypad) | Game speed |
-| `Pause` | Pause |
-| `Tab` or `F2` | Game menu |
-| `Esc` | Close the menu, else cancel the cursor mode, else deselect |
+| `+` / `-` | Change game speed |
+| `Pause` | Pause or resume |
+| `Tab` / `F2` | Open the game menu |
+| `Esc` | Close a menu, cancel the current order mode or clear selection |
+| `Ctrl`+`A` | Select all your selectable, completed units |
+| `Ctrl`+`S` | Select your units on screen |
+| `Ctrl`+`Z` | Select units matching the selected types |
+| `Ctrl`+`C` | Select and track your commander |
+| `Ctrl`+`D` | Toggle self-destruct for the selection |
+| `Ctrl`+digit | Assign a control group |
+| digit / `Shift`+digit | Recall a group / add it to the selection |
+| `Ctrl`+`Shift`+digit | Add the selection to a control group |
 | `T` | Track the selection |
-| `` ` `` | Health bars |
-
-**Units**
-
-| Key | Action |
-|---|---|
-| Left click | Select. Right click to move. |
-| `Ctrl`+`A` | Select everything on screen |
-| `Ctrl`+`S` | Stop |
-| `Ctrl`+`F` | Attack mode |
-| `Ctrl`+`Z` | Attack-ground mode |
-| `Ctrl`+`W` | Guard mode |
-| `Ctrl`+`P` | Move mode |
-| `Ctrl`+`D` | Self-destruct |
-| `Ctrl`+`C` | Select and track the commander |
-| `Ctrl`+digit | Bind a control group |
-| digit | Recall a group (`0` is the tenth) |
-| `Shift`+digit | Add the selection to a group |
-
-**Debug**
-
-| Key | Action |
-|---|---|
+| Grave accent (`` ` ``) | Toggle health bars |
 | `F1` | Help overlay |
-| `F10` | In-game debug window — spawning units and the like, in a loaded game |
-| `F11` | Global debug window, in or out of a game |
+| `F9` | Network overlay |
+| `F10` / `F11` | In-game / global debug window |
 
-`docs/TOTALA-EXE-KEYBOARD.md` has what the original binds and where RWE still
-differs.
+Order shortcuts come from the loaded game's GUI data. For the shipped TA
+interface, use plain `S` for Stop; `Ctrl`+`S` is a selection shortcut.
+The [keyboard reference](docs/TOTALA-EXE-KEYBOARD.md) documents the bindings
+and remaining differences.
 
 ## Build
 
 ```bash
-git clone https://github.com/CubeB/RWE-B4.git
+git clone --branch revival --recurse-submodules https://github.com/CubeB/RWE-B4.git
 cd RWE-B4
-git submodule update --init --recursive
 ```
+
+Use a **Release** build for playing and measuring performance. Use **Debug**
+when developing with assertions and diagnostics.
 
 SDL3 and its mixer are vendored as submodules and built with the project, so
 there are no SDL packages to install.
@@ -217,12 +220,13 @@ Then the project:
 
 ```bash
 cd /path/to/rwe
-mkdir build && cd build
-cmake .. -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE=Debug
-make -j$(nproc)
+cmake -S . -B build-release -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release -j2
 ```
 
-Run it from the top level: `build/rwe.exe`. Tests: `build/rwe_test`.
+Run `build-release/rwe_setup.exe` once to import your game data, then
+`build-release/rwe.exe`. Run tests with `build-release/rwe_test.exe`.
+Increase `-j2` if your machine has enough memory for more compiler jobs.
 
 </details>
 
@@ -309,74 +313,79 @@ make -j$(nproc)
 
 ## The launcher
 
-The multiplayer lobby is a separate Electron application in TypeScript, with
-React and Redux. It talks to the engine over JSON IPC through `rwe_bridge`.
-
-It is separate on purpose. The lobby is not performance-critical, and the
-long-term goal is to manage installed mods and make sure every player in a
-game has the same ones enabled before the engine launches. That cannot live
-inside RWE, because RWE is driven by the supplied game data — which dictates
-what screens exist at all. An interface that manages mods has to work when no
-particular mod is loaded, and original TA data is itself just one more mod
-that may or may not be present.
+The optional multiplayer launcher is an Electron application built with
+TypeScript, React and Redux. It talks to the engine through `rwe_bridge`.
 
 <details>
-<summary><b>Building and running it</b></summary>
+<summary><strong>Build and run the launcher</strong></summary>
 
-<br>
+Use Node.js 22, as in CI. In the `launcher` directory:
 
 ```bash
-cd launcher
 npm ci
-npm run server      # webpack dev server, serves the app with hot reload
+npm run server
 ```
 
-In a second terminal, point `RWE_HOME` at a directory holding `rwe` and
-`rwe_bridge`, then start the app:
+In a second terminal, set `RWE_HOME` to the directory containing `rwe` and
+`rwe_bridge`, then start the launcher:
 
 ```bash
-export RWE_HOME=/my/installed/rwe/dir
+export RWE_HOME=/path/to/engine/build
 npm start
 ```
 
-The launcher expects a master server managing the list of public games, and in
-development it looks for one on the local machine. In a third terminal:
+For local development, run its master server in a third terminal from the
+same `launcher` directory:
 
 ```bash
 npm run master-server
 ```
 
-Running launchers connect to it automatically.
-
-| Command | |
-|---|---|
-| `npm run tsc` | Type check |
+| Command | Purpose |
+| --- | --- |
+| `npm run tsc` | Type checking |
 | `npm test` | Jest tests |
 | `npm run lint` | ESLint |
-| `npm run package` | Bundle for release, into e.g. `rwe-launcher-win32-x64` |
+| `npm run package` | Package the launcher |
 
 </details>
 
 ## Documentation
 
-| | |
-|---|---|
-| [`docs/index.html`](docs/index.html) | Status page — what has landed, and what has not |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | The plan |
-| [`docs/TOTALA-EXE.md`](docs/TOTALA-EXE.md) | Index to the findings read out of the original binary |
-| [`docs/compatibility.md`](docs/compatibility.md) | Where this engine and the original part company, and where they deliberately do not |
-| [`docs/TA-DEMOS.md`](docs/TA-DEMOS.md) | The `.tad`/`.ted` demo format, and the conformance corpus built from it |
-| [`docs/PROFILING.md`](docs/PROFILING.md) | The per-phase tick and frame timers, and how to read them |
-| `CLAUDE.md` | Working guide to the codebase and its hazards |
+| Start here | What it covers |
+| --- | --- |
+| [Status page](docs/index.html) | Landed work and remaining gaps |
+| [Roadmap](docs/ROADMAP.md) | Development priorities |
+| [Compatibility](docs/compatibility.md) | Preserved quirks and deliberate differences |
+| [Original behaviour findings](docs/TOTALA-EXE.md) | Evidence and references behind the implementation |
+| [Demo recordings](docs/TA-DEMOS.md) | TA demo formats and conformance fixtures |
+| [Multiplayer connections](docs/NAT-PUNCH.md) | LAN and invite-code setup |
+| [Profiling](docs/PROFILING.md) | Measuring simulation and rendering performance |
+| [Architecture decisions](docs/adr/README.md) | Decisions that guide development |
+| [Development guide](CLAUDE.md) | Builds, tests, conventions and repository workflow |
 
-## Credit
+### Contribute or report a bug
 
-Robot War Engine is by [Michael Heasell](https://github.com/MHeasell) and its
-contributors. The engine, the format parsers, the COB virtual machine and the
-deterministic simulation all come from there, and it is worth a look:
-<https://github.com/MHeasell/rwe>
+Report problems in [GitHub Issues](https://github.com/CubeB/RWE-B4/issues).
+Include the build revision, operating system, map, mods and steps to reproduce.
+For an in-match problem, attach a save or replay when possible. For a crash or
+performance problem, include the relevant log and describe when it happened.
 
-Upstream posts progress to a [thread on the TAUniverse
-forums](http://www.tauniverse.com/forum/showthread.php?t=45555).
+Contributions target `revival` through pull requests. Read the
+[development guide](CLAUDE.md) before changing code. Original-behaviour work
+follows the documented [spec-room boundary](docs/adr/0004-a-spec-room-stands-between-the-decompilation-and-the-code.md):
+reference research produces prose findings, and implementation is written
+from those findings. Static analysis, RWE tests and executed original-game
+checks are recorded as different evidence.
 
-Total Annihilation is Cavedog Entertainment's. This fork ships none of it.
+## Credits and license
+
+Robot War Engine was created by [Michael Heasell](https://github.com/MHeasell)
+and its contributors. This fork builds on their engine, parsers, COB virtual
+machine and deterministic simulation. Visit the
+[upstream repository](https://github.com/MHeasell/rwe) and its
+[TAUniverse development thread](https://www.tauniverse.com/forum/showthread.php?t=45555).
+
+The engine is distributed under the [GNU GPL v3](LICENSE). Total Annihilation
+and its game assets belong to their respective rights holders and are not
+included in this repository or its builds.

@@ -207,3 +207,274 @@ settlement test with a 14-tick command delay as well as threshold, efficiency,
 sample alignment, frame/death and pending-command cases. With the experiment
 disabled, a 900-second control has byte-identical hashes to the previous
 executable; two enabled 1,800-second games also have byte-identical hashes.
+
+## First strength batch: CORE composition, tier aggression, weapon-range acquisition
+
+2026-10-20. This is RWE's own AI (`--ai-engine rwe`); the classic engine is
+untouched. The batch:
+
+- CORE faction defaults adopt the measured composition candidate
+  `7e50bbe4a7` from the section above: lab shares 0/4/2, vehicle shares
+  3/1/2, `counterShareBonus = 2`, `counterShareTrigger = 0.3606`.
+- CORE's flat `attackArmySize = 14` becomes `+6` over the difficulty profile,
+  so Standard stays at the measured 14 while Hard attacks at 13 and Brutal
+  at 12 instead of also being 14.
+- `acquireWeaponRange` (default on) makes ordinary ground acquisition use
+  `max(engageRadius, longestWeaponRange - kiteRangeMargin)`, so a unit that
+  outranges its target acquires at its own reach. With the knob off the
+  radius is exactly the old 450.
+
+A pre-change control binary and the batch binary were built from the same
+uncommitted tree, the only difference being these files. Four seeds
+(4101-4104), Coast To Coast, Standard, 1800 s cap, RWE against the classic
+"Original TA" personality, dealt seats (RWE ARM on odd seeds, CORE on even):
+
+| Seed | Control (pre-batch) | Batch |
+| ---: | --- | --- |
+| 4101 | RWE won, 32101 ticks | RWE won, 32101 ticks |
+| 4102 | timeout, 54000 ticks | RWE won, 40591 ticks |
+| 4103 | RWE won, 41281 ticks | RWE won, 41281 ticks |
+| 4104 | RWE won, 35011 ticks | RWE won, 38701 ticks |
+
+The odd seeds are ARM, whose composition is unchanged, and the acquisition
+knob did not change the T1 short-range armies; they are byte-for-byte the
+same length, which is the expected null. The even seeds are CORE: one timeout
+became a decided win and one win came 3,690 ticks later. This is four games,
+so it does not establish a strength gain; it is consistent with the CORE
+composition record and says nothing yet about the acquisition knob. A
+longer-range fixture and more seeds are needed before either becomes a
+default claim.
+
+The full permitted suite passed: 1861 cases / 194009 assertions. The AI suite
+alone is 270 cases / 9717 assertions. The full governing document is
+`docs/agents/rwe-ai-strength.md`; the raw games are under
+`D:/tmp/rwe-ai-ab/` (not checked in).
+
+## Second and third AI batches: production capacity and adaptability
+
+2026-10-20. RWE-AI only; the classic engine is untouched. Maps are **Great
+Divide** (0% water) and **Dark Side**; Coast To Coast is a ferry test, not a
+general strength map.
+
+### Factory queue depth and AA escort
+
+Four seeds (4301-4304), Great Divide, 1800 s, batch 1 against batch 2, RWE
+against the classic personality, dealt seats. All eight games were RWE wins,
+but batch 2 was slower on three of four (4301 22831 -> 27091; 4302 20071 ->
+25051; 4303 23431 -> 21061; 4304 21871 -> 43861). Isolating the two knobs on
+the same seeds:
+
+| Arm | 4301 | 4302 | 4303 | 4304 |
+| --- | ---: | ---: | ---: | ---: |
+| Both off | 22831 | 20071 | 23431 | 21871 |
+| Queue depth 2 | 22891 | 22261 | 21061 | 44761 |
+| AA escort 1 | 23071 | 20011 | 23431 | 21871 |
+
+"Both off" is byte-for-byte batch 1. **Queue depth 2 is the regression**; the
+AA escort is neutral in these classic-AI games (no air) but is kept for human
+air play. The default is therefore `factoryQueueDepth = 1`; the depth and the
+stalled-head drop remain knobs.
+
+### Composition memory and value odds
+
+Four seeds each on Great Divide (4401-4404) and Dark Side (4501-4504), 1800 s,
+defaults against `enemyCompositionMemory=false` and `attackUsesValueOdds=false`
+for the RWE seat. All sixteen games were decided RWE wins, the same winner in
+each pair. Close-out ticks:
+
+| Map/seed | Defaults | Both off |
+| --- | ---: | ---: |
+| GD 4401 | 27841 | 24811 |
+| GD 4402 | 27631 | 29071 |
+| GD 4403 | 19231 | 19231 |
+| GD 4404 | 20641 | 20641 |
+| DS 4501 | 24901 | 25291 |
+| DS 4502 | 21331 | 20881 |
+| DS 4503 | 18691 | 18691 |
+| DS 4504 | 20281 | 19711 |
+
+The changes are close-out-time neutral in this sample: the features are not
+disproven and not shown as a gain against the classic AI, which changes
+composition little and rarely leaves its base. They are aimed at a human
+opponent, where the enemy histogram and the odds gate have something to react
+to. The AI suite passes (279 cases / 9853 assertions); the full permitted
+suite result is in the session report.
+
+## Fourth direction: roles, reserve and replay-derived openings
+
+The next batch adds a small group record (wave, reserve, raid, feint) and an
+attack-move posture, then the replay-mining work's opening/expansion templates.
+The design and the ranked alternatives from Nanolathe's `aikit`, Open
+Annihilation and the outside-box review are in
+`docs/agents/rwe-ai-adaptability.md`.
+
+## Fourth AI batch: reserve, attack-move and a replay-derived opening
+
+2026-10-20. RWE-AI only. The control is the batch-3 binary; the new binary
+adds `reserveWave`, `waveCommitFraction`, `reserveReleaseSeconds`,
+`waveAttackMove` and the `humanlikeOpening` timing posture (default off).
+
+Sixteen games on Great Divide (4601-4604) and Dark Side (4701-4704), 1800 s,
+RWE against the classic personality, dealt seats, plus a third arm with
+`humanlikeOpening=true` for the RWE seat:
+
+| Map/seed | Batch 3 | Batch 4 | Humanlike opening |
+| --- | ---: | ---: | ---: |
+| GD 4601 | 27091 | 25861 | 25861 |
+| GD 4602 | 28651 | 29671 | 29671 |
+| GD 4603 | 24331 | 24331 | 24331 |
+| GD 4604 | 21811 | 23341 | 23341 |
+| DS 4701 | 24841 | 21841 | 21841 |
+| DS 4702 | 18931 | 18931 | 18931 |
+| DS 4703 | 17041 | 17041 | 17041 |
+| DS 4704 | 18301 | 18241 | 18241 |
+
+All 24 games were decided RWE wins, the same winner in every group. The reserve
+and attack-move are close-out neutral in this sample; the humanlike opening
+produced the identical game in every pair, so the timing posture did not bind
+against the classic AI. That is expected: the classic opponent does not punish
+the timings the report found, and the opening knob is a bias with existing
+affordability/defence gates rather than a script. It stays off by default until
+a human play-test or a stronger opponent shows a difference.
+
+The AI suite passes (287 cases / 9982 assertions). The full permitted suite
+result is in the session report. Raw games are under `D:/tmp/rwe-ai4/`.
+
+## Fifth AI batch: expansion-frame raids and focus fire
+
+2026-10-21. RWE-AI only. The batch adds `raidExpansionFrames` (default true,
+30 s window), informed by the replay study's finding that winners hit economy
+and base rather than the middle, and `focusFire` (default **false** after this
+measurement) with a 5 s latch.
+
+Twenty-four games on Great Divide (4801-4804) and Dark Side (4901-4904),
+1800 s, RWE against the classic personality, dealt seats: batch 4, batch 5
+defaults, and batch 5 with both knobs off. The "off" arm is byte-identical to
+batch 4 in all eight seeds, which is the control. Batch 5 defaults were slower
+on five of eight (GD 4801 18991 -> 19141, 4802 22021 -> 23461, 4804 44551 ->
+49171; DS 4904 29671 -> 36391) and faster on three (GD 4803 25141 -> 23281;
+DS 4901-4903 slightly faster). All were RWE wins.
+
+Isolating the two knobs on the three worst seeds (GD 4802, GD 4804, DS 4904):
+
+| Map/seed | Focus fire only | Raid only | Both off |
+| --- | ---: | ---: | ---: |
+| GD 4802 | 23461 | 22021 | 22021 |
+| GD 4804 | 45721 | 44551 | 44551 |
+| DS 4904 | 36391 | 29671 | 29671 |
+
+**Focus fire is the regression**; the frame/builder raid is neutral on these
+seeds. `focusFire` therefore defaults to **false** until a human/stronger
+opponent shows the focusing behaviour pays. The raid remains on: it is the
+replay-informed economy pressure and showed no close-out cost.
+
+The AI suite passes (292 cases / 10044 assertions). The full permitted suite
+result is in the session report. Raw games are under `D:/tmp/rwe-ai5/`.
+
+## Sixth AI batch: directional threat memory and proportional defence
+
+2026-10-21. RWE-AI only. Adds 16-sector threat memory (decayed metal value of
+armed contacts near the base), proportional responder sizing, a wave-recall
+threshold, and threat-directed defensive tower siting. All are behind knobs
+(`threatMemory`, `proportionalDefence`, `threatDirectedDefence`).
+
+Twenty-four games on Great Divide (5001-5004) and Dark Side (5101-5104),
+1800 s, RWE against the classic personality: batch 5, batch 6 defaults, and
+batch 6 with all three threat knobs off. **Batch 6 and the off arm produced
+the identical game in all eight seeds** � the classic opponent does not raid
+the base often enough for the new response or siting to bind. Batch 5 versus
+batch 6 is not a clean isolation because the saved batch-5 binary predates the
+`focusFire` default change; its differences are the focus-fire arm, not the
+threat features.
+
+Conclusion: the threat features are a no-op against the classic AI on these
+maps, and remain default-on for human play, where base raids are the case they
+exist for. No strength claim is made. The AI suite passes (297 cases / 10202
+assertions); the full permitted suite passes at 1892 cases / 194709
+assertions. Raw games are under `D:/tmp/rwe-ai6/`.
+
+## Seventh AI batch: synchronized second axis and replay expansion target
+
+2026-10-21. RWE-AI only. `syncRaidWithWave` (default true, 15 s window) holds a
+formed raid at the rally until the wave records contact, reaches its objective,
+or the window expires, then releases it at the outlying target. The
+`humanlikeOpening` posture gains `openingExpansionSites = 10` and moves its
+first-expansion deadline to **213 s**, matching the replay study; it remains
+default-off.
+
+Twenty-four games on Great Divide (5201-5204) and Dark Side (5301-5304),
+1800 s, RWE against the classic personality: batch 6, batch 7 defaults, and
+batch 7 with `syncRaidWithWave=false`. **Batch 7 produced the identical game to
+the off arm in seven of eight seeds** (GD 5204 26071 vs 26341); all RWE wins.
+The synchronized raid does not bind against the classic AI, and the expansion
+posture is off by default, so this batch is neutral here. Keep sync on for
+human play, where the second axis has something to time against.
+
+The AI suite passes (299 cases / 10224 assertions); the full permitted suite
+result is in the session report. Raw games are under `D:/tmp/rwe-ai7/`.
+
+## Eighth AI batch: air/ground strike sync and exposed-commander hunting
+
+2026-10-21. RWE-AI only. `airStrikeSync` (default true, 600 radius) holds
+bombers and gunships until the ground wave is near their target or in contact;
+home defence and fighters are unchanged. `commanderHuntExposedOnly` (default
+true) hunts the enemy commander only when it is at least 600 from its base
+centroid and its known escort is under 600 metal, with a 10 s latch.
+
+Twenty-four games on Great Divide (5401-5404) and Dark Side (5501-5504),
+1800 s, RWE against the classic personality: batch 7, batch 8 defaults, and
+batch 8 with both knobs off.
+
+| Map/seed | Batch 7 | Batch 8 | Off |
+| --- | ---: | ---: | ---: |
+| GD 5401 | 20761 | 20671 | 20761 |
+| GD 5402 | 29161 | 29131 | 29161 |
+| GD 5403 | 25411 | 23431 | 25411 |
+| GD 5404 | 22321 | 25531 | 22321 |
+| DS 5501 | 25801 | 24271 | 25801 |
+| DS 5502 | 19771 | 19411 | 19771 |
+| DS 5503 | 20341 | 25111 | 20341 |
+| DS 5504 | 19861 | 19861 | 19861 |
+
+All were RWE wins. Four seeds were faster and three slower; the average is a
+few hundred ticks slower, so this is neutral in the sample. The classic AI
+rarely exposes a commander or uses the air arm, which is why neither feature
+binds. Both stay default-on for human play, where the behaviours are aimed.
+
+The AI suite passes (301 cases / 10250 assertions); the full permitted suite
+result is in the session report. Raw games are under `D:/tmp/rwe-ai8/`.
+
+## Ninth AI batch: ferry close-out
+
+2026-10-21. RWE-AI only. This targets the pre-change baseline's clearest measured
+failure: all three timeouts on Coast To Coast had their first transport at 951 s
+or later (one had none at the cap with 65 army units waiting), while all five
+wins had one by 830 s.
+
+`ferryUrgency` (default true) raises a sea transport above the construction
+ship/warships when the enemy base is across water, escalates above the cheap
+scout at `ferryFirstTransportBySeconds` (480), and rebuilds a lost completed
+hull. `ferryMinArmySize` (6) gates army dispatch; flying transports and hulls
+below the minimum are exempt. Events `transport_ready`/`transport_departure`
+make the timing observable.
+
+Twenty-four games, 1800 s, RWE against the classic personality: Coast To Coast
+(5601-5604, the water case) and Great Divide (5701-5704, land control), with
+batch 8, batch 9 and `ferryUrgency=false`.
+
+| Map/seed | Batch 8 | Batch 9 | Off |
+| --- | ---: | ---: | ---: |
+| C2C 5601 | 40741 | 33811 | 33811 |
+| C2C 5602 | 34471 | 32761 | 34471 |
+| C2C 5603 | 49051 | **timeout 54000** | 49051 |
+| C2C 5604 | 52381 | 43501 | 52381 |
+| GD 5701-5704 | identical | identical | identical |
+
+Three of four water games close out substantially earlier (net about 12,500
+ticks across the four, average ~3,100 ticks faster) and land games are
+unchanged; one water seed regressed from a decided win to a timeout. The
+urgency is therefore a net positive but not a guarantee, and the single
+regression is recorded rather than hidden. Great Divide confirms the land
+behaviour is untouched. The AI suite passes (309 cases / 10289 assertions); the
+full permitted suite passes at 1907 cases / 194909 assertions. Raw games are
+under `D:/tmp/rwe-ai9/`.

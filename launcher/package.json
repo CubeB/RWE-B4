@@ -17,7 +17,7 @@
     "master-server": "npm run build:master && node dist/master-server.js",
     "start:master": "node dist/master-server.js",
     "clean": "rm -rf ./dist",
-    "package": "npm run build:all:prod && electron-packager dist --arch=x64 --overwrite --asar",
+    "package": "npm run build:all:prod && electron-packager dist --arch=x64 --overwrite --asar --icon=../assets/b4.ico",
     "lint": "eslint .",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
     "tsc": "tsc --noEmit",

@@ -45,9 +45,17 @@ namespace rwe
         constexpr IntKnob intKnobs[] = {
             {"ferryLandingRefusalCooldownSeconds", &AiTuningProfile::ferryLandingRefusalCooldownSeconds},
             {"ferryLandingRefusalCell", &AiTuningProfile::ferryLandingRefusalCell},
+            {"ferryFirstTransportBySeconds", &AiTuningProfile::ferryFirstTransportBySeconds},
+            {"ferryMinArmySize", &AiTuningProfile::ferryMinArmySize},
             {"loadedFerryStallSeconds", &AiTuningProfile::loadedFerryStallSeconds},
             {"openingMetalExtractorCount", &AiTuningProfile::openingMetalExtractorCount},
             {"openingSolarCount", &AiTuningProfile::openingSolarCount},
+            {"openingFactoryBySeconds", &AiTuningProfile::openingFactoryBySeconds},
+            {"openingConstructorBySeconds", &AiTuningProfile::openingConstructorBySeconds},
+            {"openingExpansionBySeconds", &AiTuningProfile::openingExpansionBySeconds},
+            {"openingExpansionSites", &AiTuningProfile::openingExpansionSites},
+            {"openingAttackArmySize", &AiTuningProfile::openingAttackArmySize},
+            {"openingAttackBySeconds", &AiTuningProfile::openingAttackBySeconds},
             {"targetSolarCount", &AiTuningProfile::targetSolarCount},
             {"targetMetalExtractorCount", &AiTuningProfile::targetMetalExtractorCount},
             {"targetConstructorCount", &AiTuningProfile::targetConstructorCount},
@@ -57,6 +65,11 @@ namespace rwe
             {"stalledAttackForgetSeconds", &AiTuningProfile::stalledAttackForgetSeconds},
             {"stalledAttackRepositionTries", &AiTuningProfile::stalledAttackRepositionTries},
             {"counterShareBonus", &AiTuningProfile::counterShareBonus},
+            {"compositionDecaySeconds", &AiTuningProfile::compositionDecaySeconds},
+            {"compositionCommitSeconds", &AiTuningProfile::compositionCommitSeconds},
+            {"compositionLeanMax", &AiTuningProfile::compositionLeanMax},
+            {"threatMemoryDecaySeconds", &AiTuningProfile::threatMemoryDecaySeconds},
+            {"defenceResponseMinUnits", &AiTuningProfile::defenceResponseMinUnits},
             {"capacitySurplusSeconds", &AiTuningProfile::capacitySurplusSeconds},
             {"surplusConstructors", &AiTuningProfile::surplusConstructors},
             {"surplusFactories", &AiTuningProfile::surplusFactories},
@@ -70,6 +83,7 @@ namespace rwe
             {"baseAntiAirTowerCount", &AiTuningProfile::baseAntiAirTowerCount},
             {"reactiveAntiAirTowerCount", &AiTuningProfile::reactiveAntiAirTowerCount},
             {"antiAirMobileCount", &AiTuningProfile::antiAirMobileCount},
+            {"antiAirEscortCount", &AiTuningProfile::antiAirEscortCount},
             {"targetRadarCount", &AiTuningProfile::targetRadarCount},
             {"targetMetalMakerCount", &AiTuningProfile::targetMetalMakerCount},
             {"starvedMetalMakerCount", &AiTuningProfile::starvedMetalMakerCount},
@@ -157,14 +171,20 @@ namespace rwe
             {"surplusBomberMultiplier", &AiTuningProfile::surplusBomberMultiplier},
             {"extractorUpgradeTimeoutSeconds", &AiTuningProfile::extractorUpgradeTimeoutSeconds},
             {"buildPlannerTickInterval", &AiTuningProfile::buildPlannerTickInterval},
+            {"factoryQueueDepth", &AiTuningProfile::factoryQueueDepth},
+            {"factoryQueueStallSeconds", &AiTuningProfile::factoryQueueStallSeconds},
             {"scoutTickInterval", &AiTuningProfile::scoutTickInterval},
             {"tacticalTickInterval", &AiTuningProfile::tacticalTickInterval},
             {"attackArmySize", &AiTuningProfile::attackArmySize},
             {"retreatArmySize", &AiTuningProfile::retreatArmySize},
+            {"reserveReleaseSeconds", &AiTuningProfile::reserveReleaseSeconds},
             {"attackPatienceSeconds", &AiTuningProfile::attackPatienceSeconds},
             {"commanderDefendsAloneMaxIntruders", &AiTuningProfile::commanderDefendsAloneMaxIntruders},
             {"reinforcementGroupSize", &AiTuningProfile::reinforcementGroupSize},
             {"raidPartySize", &AiTuningProfile::raidPartySize},
+            {"syncWindowSeconds", &AiTuningProfile::syncWindowSeconds},
+            {"raidFrameWindowSeconds", &AiTuningProfile::raidFrameWindowSeconds},
+            {"focusFireLatchSeconds", &AiTuningProfile::focusFireLatchSeconds},
             {"targetFighterCount", &AiTuningProfile::targetFighterCount},
             {"targetBomberCount", &AiTuningProfile::targetBomberCount},
             {"airPatrolFighters", &AiTuningProfile::airPatrolFighters},
@@ -189,6 +209,8 @@ namespace rwe
             {"buildSiteGuardTimeoutSeconds", &AiTuningProfile::buildSiteGuardTimeoutSeconds},
             {"targetMemoryTicks", &AiTuningProfile::targetMemoryTicks},
             {"ferryLandingSearchSteps", &AiTuningProfile::ferryLandingSearchSteps},
+            {"commanderHuntExposureLatchSeconds", &AiTuningProfile::commanderHuntExposureLatchSeconds},
+            {"commanderHuntMaxEscortMetal", &AiTuningProfile::commanderHuntMaxEscortMetal},
         };
 
         constexpr BoolKnob boolKnobs[] = {
@@ -196,10 +218,17 @@ namespace rwe
             {"expansionContestsMiddleWhenBoxedIn", &AiTuningProfile::expansionContestsMiddleWhenBoxedIn},
             {"dgunByValue", &AiTuningProfile::dgunByValue},
             {"kiteWithLongerRange", &AiTuningProfile::kiteWithLongerRange},
+            {"acquireWeaponRange", &AiTuningProfile::acquireWeaponRange},
             {"answerStalledAttacks", &AiTuningProfile::answerStalledAttacks},
             {"answerBlockedShots", &AiTuningProfile::answerBlockedShots},
             {"enemyGunRangeFromWeapon", &AiTuningProfile::enemyGunRangeFromWeapon},
             {"counterEnemyComposition", &AiTuningProfile::counterEnemyComposition},
+            {"enemyCompositionMemory", &AiTuningProfile::enemyCompositionMemory},
+            {"threatMemory", &AiTuningProfile::threatMemory},
+            {"proportionalDefence", &AiTuningProfile::proportionalDefence},
+            {"threatDirectedDefence", &AiTuningProfile::threatDirectedDefence},
+            {"attackUsesValueOdds", &AiTuningProfile::attackUsesValueOdds},
+            {"humanlikeOpening", &AiTuningProfile::humanlikeOpening},
             {"spendSurplusOnCapacity", &AiTuningProfile::spendSurplusOnCapacity},
             {"answerOutpostRaids", &AiTuningProfile::answerOutpostRaids},
             {"outpostResponseUsesPredictor", &AiTuningProfile::outpostResponseUsesPredictor},
@@ -237,13 +266,21 @@ namespace rwe
             {"outpostTowersLeftToConstructors", &AiTuningProfile::outpostTowersLeftToConstructors},
             {"extractorUpgrades", &AiTuningProfile::extractorUpgrades},
             {"attackInWaves", &AiTuningProfile::attackInWaves},
+            {"reserveWave", &AiTuningProfile::reserveWave},
+            {"waveAttackMove", &AiTuningProfile::waveAttackMove},
             {"holdWhenOutnumbered", &AiTuningProfile::holdWhenOutnumbered},
             {"reserveAnswersIntruders", &AiTuningProfile::reserveAnswersIntruders},
             {"noticeProductionHarassment", &AiTuningProfile::noticeProductionHarassment},
+            {"factoryQueueDropStalled", &AiTuningProfile::factoryQueueDropStalled},
             {"commanderAnswersHarassment", &AiTuningProfile::commanderAnswersHarassment},
             {"commanderShunsShips", &AiTuningProfile::commanderShunsShips},
             {"raidingParties", &AiTuningProfile::raidingParties},
+            {"syncRaidWithWave", &AiTuningProfile::syncRaidWithWave},
+            {"raidExpansionFrames", &AiTuningProfile::raidExpansionFrames},
+            {"focusFire", &AiTuningProfile::focusFire},
             {"huntEnemyCommander", &AiTuningProfile::huntEnemyCommander},
+            {"commanderHuntExposedOnly", &AiTuningProfile::commanderHuntExposedOnly},
+            {"airStrikeSync", &AiTuningProfile::airStrikeSync},
             {"focusOneEnemy", &AiTuningProfile::focusOneEnemy},
             {"spreadDefences", &AiTuningProfile::spreadDefences},
             {"commanderUsesOwnReachability", &AiTuningProfile::commanderUsesOwnReachability},
@@ -253,6 +290,7 @@ namespace rwe
             {"expansionNeedsExploredGround", &AiTuningProfile::expansionNeedsExploredGround},
             {"expansionStaysOnOurSide", &AiTuningProfile::expansionStaysOnOurSide},
             {"armyFerryWantFromMap", &AiTuningProfile::armyFerryWantFromMap},
+            {"ferryUrgency", &AiTuningProfile::ferryUrgency},
             {"navalStandOff", &AiTuningProfile::navalStandOff},
             {"seaFerryMuster", &AiTuningProfile::seaFerryMuster},
             {"ferryLandingFan", &AiTuningProfile::ferryLandingFan},
@@ -261,6 +299,12 @@ namespace rwe
 
         constexpr FloatKnob floatKnobs[] = {
             {"counterShareTrigger", &AiTuningProfile::counterShareTrigger},
+            {"waveCommitFraction", &AiTuningProfile::waveCommitFraction},
+            {"attackValueRatio", &AiTuningProfile::attackValueRatio},
+            {"retreatValueRatio", &AiTuningProfile::retreatValueRatio},
+            {"defenceResponseRatio", &AiTuningProfile::defenceResponseRatio},
+            {"defenceResponseMaxShare", &AiTuningProfile::defenceResponseMaxShare},
+            {"recallThreatRatio", &AiTuningProfile::recallThreatRatio},
             {"capacityIncomeRatio", &AiTuningProfile::capacityIncomeRatio},
             {"outpostResponseStrength", &AiTuningProfile::outpostResponseStrength},
             {"outpostResponseMarginThreshold", &AiTuningProfile::outpostResponseMarginThreshold},
@@ -316,6 +360,9 @@ namespace rwe
             {"bomberClusterRadius", &AiTuningProfile::bomberClusterRadius},
             {"bomberSortieScale", &AiTuningProfile::bomberSortieScale},
             {"bomberLeaveToArmyRadius", &AiTuningProfile::bomberLeaveToArmyRadius},
+            {"airSyncRadius", &AiTuningProfile::airSyncRadius},
+            {"commanderHuntEscortRadius", &AiTuningProfile::commanderHuntEscortRadius},
+            {"commanderHuntMinDistance", &AiTuningProfile::commanderHuntMinDistance},
             {"battlefieldReclaimRadius", &AiTuningProfile::battlefieldReclaimRadius},
             {"waveCohesionRadius", &AiTuningProfile::waveCohesionRadius},
             {"waveMeetEnemyRadius", &AiTuningProfile::waveMeetEnemyRadius},
@@ -509,17 +556,38 @@ namespace rwe
             // same price and weight the Peewee's EMG does about 60 damage a
             // second to the A.K. laser's 35, and the Flash 60 to the
             // Instigator's 44. So the damage comes from Storms, which outrange
-            // both of ARM's raiders, and Thuds lobbing into the crowd, with one
-            // raider to each Thud as the screen in front of them, and the
-            // waves are big enough to stay together. Measured against the
-            // shared defaults on Great Divide, CORE only, three batches of
-            // eight seeds: CORE finished ahead in 6 of 8 against 2, in 5 of 8
-            // against 1 once PR #82 was in, and in 6 of 8 against 2 on seeds
-            // it was never tuned on (ROADMAP, 2026-09-19).
-            p.labRaiderShare = 1;
-            p.labRocketKbotShare = 2;
-            p.labArtilleryKbotShare = 1;
-            p.attackArmySize = 14;
+            // both of ARM's raiders, and Thuds lobbing into the crowd. The
+            // shares below are the arena auto-tuner's candidate, 7e50bbe4a7
+            // (docs/AI-TUNING.md:68-101), not a guess: no kbot raiders, the
+            // lab split four rocket kbots to two artillery kbots, and the
+            // vehicle plant three tanks to one missile truck to two medium
+            // tanks. Recorded against the shared defaults on Great Divide,
+            // Standard difficulty, seeds 201+: better in 21 games of 32, same
+            // in 6, worse in 5 (sign test p = 0.002), mean margin +40.4
+            // units, and a decided-game rate of 0.47 against the control's
+            // 0.22.
+            //
+            // RWE-AI tuning, not classic parity: this is RWE's own computer
+            // player and the classic engine is untouched. What the record
+            // does not yet cover: the candidate's opponent was the ARM of
+            // before the ARM change above, and it has not been through
+            // --evaluate on fresh seeds. AI-TUNING.md says so at :92-101.
+            p.labRaiderShare = 0;
+            p.labRocketKbotShare = 4;
+            p.labArtilleryKbotShare = 2;
+            p.vehicleTankShare = 3;
+            p.vehicleMissileTruckShare = 1;
+            p.vehicleMediumTankShare = 2;
+            p.counterShareBonus = 2;
+            p.counterShareTrigger = 0.3606f;
+            // Aggression follows the difficulty tier instead of flattening
+            // it. AiSeat applies faction defaults after
+            // makeProfileForDifficulty, so the old flat 14 here overwrote
+            // every tier: Hard and Brutal CORE were exactly as cautious as
+            // Standard. Six more than the tier keeps Standard at the measured
+            // 14 (8 + 6) while Hard attacks at 13 and Brutal at 12; Easy,
+            // which was 14, is now 20.
+            p.attackArmySize += 6;
         }
         else if (upper == "ARM")
         {

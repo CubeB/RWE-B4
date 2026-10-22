@@ -572,14 +572,11 @@ namespace rwe
         // These overlays must render AFTER renderWorld, otherwise the world
         // pass overwrites the center of the screen where they sit.
 
-        // Speed indicator: TA shows "+N" / "-N" relative to default 1.0x speed.
-        if (!gameSpeed.isDefault())
-        {
-            int offset = gameSpeed.displayOffset();
-            std::string speedText = (offset > 0 ? "+" : "") + std::to_string(offset);
-            float centerX = static_cast<float>(sceneContext.viewport->width()) / (2.0f * static_cast<float>(effectiveUiScale()));
-            chromeUiRenderService.drawTextCenteredX(centerX, GuiSizeTop + 8, speedText, *guiFont);
-        }
+        // No top-centre speed readout: the original shows the speed only as
+        // the transient "Game Speed" line in the message list (printed where
+        // the change is applied) and, while Space is held, in the bottom
+        // strip rendered by renderSpaceTabs below.
+        // TOTALA-EXE-KEYBOARD.md:120-121, BT-GAME-GAME-STATE-PARITY.md:136-147.
 
         renderSpaceTabs();
 
@@ -1805,9 +1802,20 @@ namespace rwe
         UnitShadowMeshBatch unitShadowMeshBatch;
         {
             RWE_RENDERPROF("w.shadow.build");
+            // A product still attached to the factory building it is drawn
+            // inside the factory's composite, and that path never runs the
+            // child's own shadow calculation. So it gets no independent
+            // shadow at all (SUBMARINE-CONSTRUCTION-SHADOW-FINDINGS.md
+            // section 1). A standalone nanoframe is not in this set and
+            // keeps the shadow it has always had.
+            auto attachedProducts = shadowsEnabled ? attachedFactoryProducts(simulation) : std::unordered_set<UnitId>{};
             for (const auto& [unitId, unit] : simulation.units)
             {
                 if (!unitIsVisibleToLocalPlayer(unitId, unit))
+                {
+                    continue;
+                }
+                if (attachedProducts.find(unitId) != attachedProducts.end())
                 {
                     continue;
                 }
@@ -1862,7 +1870,7 @@ namespace rwe
                 if (unit.isBeingBuilt(unitDefinition))
                 {
                     UnitShadowMeshBatch own;
-                    drawUnitShadow(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, simScalarToFloat(groundHeight), unitAtlases, own);
+                    drawUnitShadow(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, simScalarToFloat(groundHeight), simScalarToFloat(seaLevel), unitAtlases, own);
                     UnitCutShadow cut;
                     cut.shadow = std::move(own.meshes);
                     drawUnitOutline(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, unitAtlases, cut.outline);
@@ -1870,7 +1878,7 @@ namespace rwe
                     continue;
                 }
 
-                drawUnitShadow(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, simScalarToFloat(groundHeight), unitAtlases, unitShadowMeshBatch);
+                drawUnitShadow(gameMediaDatabase, viewProjectionMatrix, unit, unitDefinition, modelDefinition, interpolationFraction, simScalarToFloat(groundHeight), simScalarToFloat(seaLevel), unitAtlases, unitShadowMeshBatch);
             }
             for (const auto& [_, feature] : simulation.features)
             {

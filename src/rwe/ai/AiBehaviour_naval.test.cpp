@@ -1472,6 +1472,9 @@ namespace rwe
         profile.cheatModeOmniscient = true;
         profile.tacticalTickInterval = 1;
         profile.attackArmySize = 2;
+        // Four passengers, below the sixth batch's six-unit sea-lift default:
+        // this case is about the landing search, not the dispatch threshold.
+        profile.ferryMinArmySize = 0;
         // Keep the phase in Attack for the length of the test: with waves on
         // it flips back to Boom the moment the wave is spent, and the ferry
         // is only considered in Attack.
@@ -2297,5 +2300,263 @@ namespace rwe
             REQUIRE(countQueueCommands(commands, "ARMANAC") == 1);
             REQUIRE(countQueueCommands(commands, "ARMAH") == 0);
         }
+    }
+
+    namespace
+    {
+        /** The negative or positive queue changes addressed to one factory. */
+        std::vector<PlayerUnitCommand::ModifyBuildQueue> queueChangesFor(const std::vector<PlayerCommand>& commands, UnitId factory)
+        {
+            std::vector<PlayerUnitCommand::ModifyBuildQueue> found;
+            for (const auto& c : commands)
+            {
+                auto unitCommand = std::get_if<PlayerUnitCommand>(&c);
+                if (!unitCommand || unitCommand->unit != factory)
+                {
+                    continue;
+                }
+                if (auto queue = std::get_if<PlayerUnitCommand::ModifyBuildQueue>(&unitCommand->command))
+                {
+                    found.push_back(*queue);
+                }
+            }
+            return found;
+        }
+
+        /**
+         * A base on the west shore, a completed shipyard afloat, and a known
+         * enemy building on the east shore. The AI owns a lab and one Peewee,
+         * so the yard's hasCargo test passes and the only question is what
+         * the yard is asked to build.
+         *
+         * The sea transport is defined here at its shipped shape (6x6,
+         * MinWaterDepth=12, twenty slots, transport size 3) because defineWorld
+         * deliberately leaves it out: resolving it changes the mover the naval
+         * layer is flooded for.
+         */
+        struct FerryPriorityFixture
+        {
+            std::shared_ptr<CobScript> script = makeEmptyCobScript();
+            GameSimulation sim{makeTwoShoresTerrain(), 0u, 0, 0};
+            PlayerId ai;
+            PlayerId human;
+            UnitId shipyardId;
+            MapIntel mapIntel;
+
+            FerryPriorityFixture()
+                : ai(addPlayer(sim, "ai", GamePlayerType::Computer, "ARM")),
+                  human(addPlayer(sim, "human", GamePlayerType::Human, "ARM"))
+            {
+                defineWorld(sim);
+
+                auto tship = makeDef(false, false, true, "", 200u);
+                tship.movementCollisionInfo = UnitDefinition::AdHocMovementClass{6u, 6u, 255u, 255u, 12u, 255u};
+                tship.transportCapacity = 20;
+                tship.transportSize = 3;
+                tship.buildCostMetal = Metal(919.0f);
+                sim.unitDefinitions["ARMTSHIP"] = tship;
+
+                // Kbots stop at depth 20; the channel is 60 deep.
+                for (auto* type : {"ARMCOM", "ARMCK", "ARMPW"})
+                {
+                    sim.unitDefinitions.at(type).movementCollisionInfo = UnitDefinition::AdHocMovementClass{2u, 2u, 255u, 255u, 0u, 20u};
+                }
+
+                auto west = SimVector(-420_ss, 90_ss, 0_ss);
+                auto east = SimVector(420_ss, 90_ss, 0_ss);
+                addUnit(sim, "ARMCOM", ai, west, script);
+                addUnit(sim, "ARMLAB", ai, SimVector(-440_ss, 90_ss, 40_ss), script);
+                addUnit(sim, "ARMPW", ai, SimVector(-420_ss, 90_ss, 60_ss), script);
+                // Water is tiles 10-53; world x 192 is safely afloat.
+                shipyardId = addUnit(sim, "ARMSY", ai, SimVector(192_ss, 0_ss, 0_ss), script);
+                // Unarmed, so it is worth attacking but never triggers Defend.
+                addUnit(sim, "ARMSOLAR", human, east, script);
+
+                mapIntel = analyseMap(makeTwoShoresTerrain(), {west, east});
+            }
+
+            AiTuningProfile profile(bool urgency) const
+            {
+                auto p = makeDefaultStandardProfile();
+                p.cheatModeOmniscient = true;
+                p.buildPlannerTickInterval = 1;
+                p.tacticalTickInterval = 1;
+                p.ferryUrgency = urgency;
+                // Exercise the overdue branch directly: the deadline is a
+                // production clock, and these tests drive the controller tick
+                // by tick rather than through the opening.
+                p.ferryFirstTransportBySeconds = 0;
+                return p;
+            }
+
+            /** The transport (if any) the yard was asked for this pass. */
+            int transportQueueRequests(const std::vector<PlayerCommand>& commands) const
+            {
+                return countQueueCommands(commands, "ARMTSHIP");
+            }
+        };
+
+        void ferryPriorityTick(GameSimulation& sim, AiPlayerController& controller, std::vector<PlayerCommand>& commands)
+        {
+            sim.gameTime = GameTime(sim.gameTime.value + 1);
+            controller.tick(sim, commands);
+        }
+    }
+
+    TEST_CASE("naval: a missing transport goes to the front of the shipyard queue", "[ai]")
+    {
+        // Coast To Coast measurement: every timeout had its first transport at
+        // 951 s or later, or lost it with no replacement, while every win had
+        // one by 830 s. The yard's queue put a scout and a construction ship
+        // ahead of a hull that was the only way the army could arrive.
+        FerryPriorityFixture f;
+        AiPlayerController controller(f.ai, f.profile(true), 42u, f.mapIntel, makeBuildTree());
+        std::vector<PlayerCommand> commands;
+        for (int i = 0; i < 10; ++i)
+        {
+            ferryPriorityTick(f.sim, controller, commands);
+        }
+
+        const auto& bb = controller.getBlackboard();
+        REQUIRE(bb.hasUnreachableGround);
+        REQUIRE(bb.enemyBasePosition.has_value());
+        REQUIRE(bb.transports.empty());
+        // The premise the urgency reads: the enemy base is ground the army
+        // cannot walk to, and there is no complete ferry.
+        REQUIRE_FALSE(controller.getReachabilityMap().isReachable(f.sim, *bb.enemyBasePosition));
+
+        REQUIRE(f.transportQueueRequests(commands) >= 1);
+        auto changes = queueChangesFor(commands, f.shipyardId);
+        REQUIRE(!changes.empty());
+        CHECK(changes.front().unitType == "ARMTSHIP");
+    }
+
+    TEST_CASE("naval: an air transport does not switch off the sea transport urgency", "[ai]")
+    {
+        // Coast To Coast seed 4103 measured exactly this shape: an Atlas
+        // completed at 951 s and the sea transport only at 1278 s.
+        // bb.transports holds both kinds, so "a transport exists" is the wrong
+        // question when a yard can make the twenty-slot hull; the sea hull is
+        // what the army needs.
+        FerryPriorityFixture f;
+        addUnit(f.sim, "ARMATLAS", f.ai, SimVector(-380_ss, 120_ss, 0_ss), f.script);
+        AiPlayerController controller(f.ai, f.profile(true), 42u, f.mapIntel, makeBuildTree());
+        std::vector<PlayerCommand> commands;
+        for (int i = 0; i < 10; ++i)
+        {
+            ferryPriorityTick(f.sim, controller, commands);
+        }
+
+        REQUIRE(!controller.getBlackboard().transports.empty());
+        auto changes = queueChangesFor(commands, f.shipyardId);
+        REQUIRE(!changes.empty());
+        CHECK(changes.front().unitType == "ARMTSHIP");
+    }
+
+    TEST_CASE("naval: with ferryUrgency off the yard keeps its old queue order", "[ai]")
+    {
+        FerryPriorityFixture f;
+        AiPlayerController controller(f.ai, f.profile(false), 42u, f.mapIntel, makeBuildTree());
+        std::vector<PlayerCommand> commands;
+        for (int i = 0; i < 10; ++i)
+        {
+            ferryPriorityTick(f.sim, controller, commands);
+        }
+
+        REQUIRE(controller.getBlackboard().transports.empty());
+        // The old order: a cheap scout hull first, so no transport is asked
+        // for while that is still missing from the record.
+        CHECK(f.transportQueueRequests(commands) == 0);
+        auto changes = queueChangesFor(commands, f.shipyardId);
+        REQUIRE(!changes.empty());
+        CHECK(changes.front().unitType == "ARMPT");
+    }
+
+    TEST_CASE("naval: the ferry deadline escalates the yard queue", "[ai]")
+    {
+        // Before ferryFirstTransportBySeconds the transport goes ahead of the
+        // construction ship and the warships but still behind the yard's
+        // cheap scout. Once the deadline has passed with no hull, it goes
+        // first. Both halves are the same knob, so the control (urgency off)
+        // is the test above.
+        FerryPriorityFixture f;
+        auto profile = f.profile(true);
+        profile.ferryFirstTransportBySeconds = 480;
+        AiPlayerController controller(f.ai, profile, 42u, f.mapIntel, makeBuildTree());
+        std::vector<PlayerCommand> commands;
+        for (int i = 0; i < 10; ++i)
+        {
+            ferryPriorityTick(f.sim, controller, commands);
+        }
+
+        auto changes = queueChangesFor(commands, f.shipyardId);
+        REQUIRE(!changes.empty());
+        CHECK(changes.front().unitType == "ARMPT");
+
+        // The deadline passes with the yard still holding no transport.
+        f.sim.gameTime = GameTime(480u * static_cast<unsigned int>(SimTicksPerSecond));
+        commands.clear();
+        for (int i = 0; i < 10; ++i)
+        {
+            ferryPriorityTick(f.sim, controller, commands);
+        }
+
+        changes = queueChangesFor(commands, f.shipyardId);
+        REQUIRE(!changes.empty());
+        CHECK(changes.front().unitType == "ARMTSHIP");
+    }
+
+    TEST_CASE("naval: a lost transport is rebuilt by the same urgency", "[ai]")
+    {
+        FerryPriorityFixture f;
+        auto transportId = addUnit(f.sim, "ARMTSHIP", f.ai, SimVector(0_ss, 0_ss, 0_ss), f.script);
+        AiPlayerController controller(f.ai, f.profile(true), 42u, f.mapIntel, makeBuildTree());
+        std::vector<PlayerCommand> commands;
+
+        // Warm up with the hull alive: the target count is met, so the yard
+        // is not asked for another one.
+        for (int i = 0; i < 10; ++i)
+        {
+            ferryPriorityTick(f.sim, controller, commands);
+        }
+        REQUIRE(std::find(controller.getBlackboard().transports.begin(), controller.getBlackboard().transports.end(), transportId) != controller.getBlackboard().transports.end());
+        CHECK(f.transportQueueRequests(commands) == 0);
+
+        // Sunk. Complete hulls drop out of ownedCompletedCounts, so the next
+        // pass sees the same state as the opening's first transport.
+        f.sim.getUnitState(transportId).markAsDeadNoCorpse();
+        commands.clear();
+        for (int i = 0; i < 10; ++i)
+        {
+            ferryPriorityTick(f.sim, controller, commands);
+        }
+
+        auto changes = queueChangesFor(commands, f.shipyardId);
+        REQUIRE(!changes.empty());
+        CHECK(changes.front().unitType == "ARMTSHIP");
+    }
+
+    TEST_CASE("naval: with ferryUrgency off a lost transport is not rushed back", "[ai]")
+    {
+        FerryPriorityFixture f;
+        auto transportId = addUnit(f.sim, "ARMTSHIP", f.ai, SimVector(0_ss, 0_ss, 0_ss), f.script);
+        AiPlayerController controller(f.ai, f.profile(false), 42u, f.mapIntel, makeBuildTree());
+        std::vector<PlayerCommand> commands;
+        for (int i = 0; i < 10; ++i)
+        {
+            ferryPriorityTick(f.sim, controller, commands);
+        }
+
+        f.sim.getUnitState(transportId).markAsDeadNoCorpse();
+        commands.clear();
+        for (int i = 0; i < 10; ++i)
+        {
+            ferryPriorityTick(f.sim, controller, commands);
+        }
+
+        CHECK(f.transportQueueRequests(commands) == 0);
+        auto changes = queueChangesFor(commands, f.shipyardId);
+        REQUIRE(!changes.empty());
+        CHECK(changes.front().unitType == "ARMPT");
     }
 }

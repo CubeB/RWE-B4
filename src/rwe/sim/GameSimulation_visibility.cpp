@@ -1,4 +1,5 @@
 #include "GameSimulation.h"
+#include <rwe/sim/UnitVisibility.h>
 
 #include <rwe/sim/FlatRange.h>
 #include <rwe/sim/SimTicksPerSecond.h>
@@ -271,11 +272,16 @@ namespace rwe
 
     bool GameSimulation::canSeeUnit(PlayerId viewer, UnitId unitId) const
     {
+        return canSeeUnitInVisibility(*this, viewer, unitId, playerVisibility.at(viewer.value));
+    }
+
+    bool canSeeUnitInVisibility(const GameSimulation& sim, PlayerId viewer, UnitId unitId, const PlayerVisibility& visibility)
+    {
         // 0x465AC0 in full, in its own order. It is the original's only
         // "can this player see that unit" question: the world render's draw
         // list is built through it, and so is the enemy list the weapon scan
         // and the computer player both choose their targets out of.
-        const auto& unit = getUnitState(unitId);
+        const auto& unit = sim.getUnitState(unitId);
 
         // 0x465ACE: own units pass before anything else is looked at.
         if (unit.isOwnedBy(viewer))
@@ -302,10 +308,10 @@ namespace rwe
         // y + def+0x16E the detection visitor uses to decide that a unit is a
         // radar contact rather than a sonar one, so the two can never disagree
         // about which side of the waterline a unit is on.
-        const auto& unitDefinition = unitDefinitions.at(unit.unitType);
-        if (unit.position.y + modelHeightOf(unitDefinition) < terrain.getSeaLevel())
+        const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
+        if (unit.position.y + sim.modelHeightOf(unitDefinition) < sim.terrain.getSeaLevel())
         {
-            const auto& heard = playerVisibility.at(viewer.value).sonarContacts;
+            const auto& heard = visibility.sonarContacts;
             if (heard.find(unitId) == heard.end())
             {
                 return false;
@@ -325,15 +331,14 @@ namespace rwe
         // The bounding box is taken from the footprint and the model height,
         // the decoded loader (TOTALA-EXE-RENDER.md, 0x42D079); the box is
         // assumed to start at the model's origin height.
-        const auto& visibility = playerVisibility.at(viewer.value);
-        auto [footprintX, footprintZ] = getFootprintXZ(unitDefinition.movementCollisionInfo);
+        auto [footprintX, footprintZ] = sim.getFootprintXZ(unitDefinition.movementCollisionInfo);
         auto extentX = intToSimScalar(static_cast<int>(footprintX) * 16);
         auto extentZ = intToSimScalar(static_cast<int>(footprintZ) * 16);
-        auto extentY = modelHeightOf(unitDefinition);
+        auto extentY = sim.modelHeightOf(unitDefinition);
 
         auto whole = [](SimScalar s) { return SimScalar(std::floor(s.value)); };
         auto lit = [&](SimScalar x, SimScalar y, SimScalar z) {
-            return visibility.isVisible(visionCellAtHeight(SimVector(whole(x), 0_ss, whole(z)), y));
+            return visibility.isVisible(sim.visionCellAtHeight(SimVector(whole(x), 0_ss, whole(z)), y));
         };
 
         auto a = unit.position.x - (extentX / 2_ss);
@@ -535,7 +540,9 @@ namespace rwe
         }
 
         auto& victim = getUnitState(victimId);
-        if (victim.isDead() || victim.fireOrders == UnitFireOrders::HoldFire || victim.isOwnedBy(attacker.owner))
+        // ALLIED-RETALIATION-FINDINGS AR-01/02: friendly damage does not
+        // authorize retaliation, including attackers owned by a teammate.
+        if (victim.isDead() || victim.fireOrders == UnitFireOrders::HoldFire || arePlayersAllied(victim.owner, attacker.owner))
         {
             return;
         }
@@ -643,11 +650,8 @@ namespace rwe
                 cell = visionCellAtHeight(unit.position, intToSimScalar(eyeHeight));
             }
 
-            // The unit's bit in the one shared explored grid. Every player in
-            // the owner's line-of-sight group owns that same bit, so revealing
-            // for the owner and each ally writes it more than once for the same
-            // cell -- harmlessly, since setting a bit twice sets it once -- and
-            // the grounds are shared without a rival grid per player.
+            // RWE teammates share this explored bit. Mark it through the owner
+            // once; current sight counts are combined after all sources below.
             auto exploredMark = ExploredMark{&explored, losGroupBitFor(unit.owner)};
 
             auto revealFor = [&](PlayerVisibility& vis) {
@@ -661,20 +665,9 @@ namespace rwe
                 }
             };
 
-            // The owner always sees through its own units; allies see too,
-            // so a teammate's map is lit by your scouts and yours by theirs.
-            // The owner's own reveal is written plainly rather than left to
-            // fall out of the alliance test -- a unit's own player seeing its
-            // own surroundings is not a thing to make conditional.
+            // PERF-VIS-001: trace each source once rather than repeat the
+            // same terrain rays separately for every teammate.
             revealFor(playerVisibility.at(unit.owner.value));
-            for (std::size_t i = 0; i < playerVisibility.size() && i < players.size(); ++i)
-            {
-                if (i == unit.owner.value || !arePlayersAllied(unit.owner, PlayerId(static_cast<unsigned int>(i))))
-                {
-                    continue;
-                }
-                revealFor(playerVisibility[i]);
-            }
 
             // Radar, sonar and jamming all need the unit switched on if it can
             // be switched at all. Altitude extends radar; sonar is flat.
@@ -756,6 +749,51 @@ namespace rwe
                 {
                     auto range = intToSimScalar(static_cast<int>(unitDefinition.sonarDistanceJam));
                     theirVis.radarJammers.push_back(PlayerVisibility::RadarJammer{unit.position, range * range, true});
+                }
+            }
+        }
+
+        // PERFORMANCE-ALLIED-VISIBILITY-FINDINGS PERF-VIS-001: preserve RWE's
+        // existing team sight by summing fresh owner counts with saturation.
+        // Only the first member combines a group, so a combined result never
+        // becomes another source. Detectors and contacts remain per player.
+        auto visibilityPlayers = std::min(playerVisibility.size(), players.size());
+        for (std::size_t i = 0; i < visibilityPlayers; ++i)
+        {
+            auto viewer = PlayerId(static_cast<unsigned int>(i));
+            bool alreadyCombined = false;
+            for (std::size_t earlier = 0; earlier < i; ++earlier)
+            {
+                if (arePlayersAllied(viewer, PlayerId(static_cast<unsigned int>(earlier))))
+                {
+                    alreadyCombined = true;
+                    break;
+                }
+            }
+            if (alreadyCombined)
+            {
+                continue;
+            }
+
+            auto& combined = playerVisibility[i].visible.getVector();
+            for (std::size_t j = i + 1; j < visibilityPlayers; ++j)
+            {
+                if (!arePlayersAllied(viewer, PlayerId(static_cast<unsigned int>(j))))
+                {
+                    continue;
+                }
+                const auto& contribution = playerVisibility[j].visible.getVector();
+                for (std::size_t cell = 0; cell < combined.size(); ++cell)
+                {
+                    combined[cell] = static_cast<unsigned char>(std::min(255u,
+                        static_cast<unsigned int>(combined[cell]) + contribution[cell]));
+                }
+            }
+            for (std::size_t j = i + 1; j < visibilityPlayers; ++j)
+            {
+                if (arePlayersAllied(viewer, PlayerId(static_cast<unsigned int>(j))))
+                {
+                    playerVisibility[j].visible.getVector() = combined;
                 }
             }
         }

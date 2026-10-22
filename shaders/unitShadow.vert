@@ -53,8 +53,15 @@ void main(void)
     if (projected)
     {
         float shadowOffset = (worldPosition.y - groundHeight) * 0.25;
+        // Both original shadow passes blit five pixels right of the model:
+        // the body goes down at screen x + 0x80 and its shadow at + 0x85
+        // (TOTALA-EXE-RENDER.md S:100). Without the shift a wide, low
+        // building's projection hides under its own base and the building
+        // appears to cast nothing; the shift keeps at least that five-pixel
+        // band visible on the right. This is the same fix as upstream
+        // 822678f6, absent from this branch.
         shadowPosition = vec4(
-            worldPosition.x + shadowOffset,
+            worldPosition.x + ShadowShiftX + shadowOffset,
             groundHeight,
             worldPosition.z - shadowOffset,
             1.0);

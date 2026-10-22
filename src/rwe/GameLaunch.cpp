@@ -193,34 +193,39 @@ namespace rwe
 
         if (windowMode == WindowMode::Fullscreen)
         {
-            SDL_DisplayMode targetMode;
             auto displayID = sdlContext->getWindowDisplayIndex(window.get());
             if (displayID == 0)
             {
                 throw std::runtime_error(SDL_GetError());
             }
 
-            // The desired size is in logical points, but a display mode is
-            // in pixels, so ask for what the window would occupy on this
-            // display at its own density.
-            auto displayScale = sdlContext->getWindowDisplayScale(window.get());
-            if (!(displayScale > 0.0f))
+            // Exclusive fullscreen runs at the desktop's own mode, not at the
+            // closest mode to the window's requested size. Asking for a mode
+            // near 800x600 changed the display to one of another shape and
+            // then stretched the whole frame -- interface included -- to fill
+            // it, which is the stretch that was reported (see
+            // docs/agents/fullscreen-option.md). The desktop mode keeps the
+            // native aspect, so nothing is scaled and no letterboxing is
+            // added. RWE-original: the original has its own mode list.
+            //
+            // Borderless deliberately clears the mode instead, which in SDL3
+            // leaves a fullscreen window over the desktop.
+            SDL_DisplayMode desktopMode;
+            if (sdlContext->getDesktopDisplayMode(displayID, &desktopMode))
             {
-                displayScale = 1.0f;
+                if (!sdlContext->setWindowDisplayMode(window.get(), &desktopMode))
+                {
+                    // No exclusive mode, but the window is already flagged
+                    // fullscreen: clear the mode and let it cover the desktop.
+                    LOG_WARN << "Could not set the desktop display mode, falling back to desktop fullscreen: " << SDL_GetError();
+                    sdlContext->setWindowDisplayMode(window.get(), nullptr);
+                }
             }
-            auto desiredPixelWidth = static_cast<int>(std::lround(desiredWindowWidth * displayScale));
-            auto desiredPixelHeight = static_cast<int>(std::lround(desiredWindowHeight * displayScale));
-
-            if (!sdlContext->getClosestDisplayMode(displayID, desiredPixelWidth, desiredPixelHeight, 0.0f, &targetMode))
+            else
             {
-                throw std::runtime_error(SDL_GetError());
+                LOG_WARN << "Could not read the desktop display mode, falling back to desktop fullscreen: " << SDL_GetError();
+                sdlContext->setWindowDisplayMode(window.get(), nullptr);
             }
-
-            if (!sdlContext->setWindowDisplayMode(window.get(), &targetMode))
-            {
-                throw std::runtime_error(SDL_GetError());
-            }
-            sdlContext->setWindowSize(window.get(), desiredWindowWidth, desiredWindowHeight);
         }
 
         // Prevent the mouse from leaving the window.

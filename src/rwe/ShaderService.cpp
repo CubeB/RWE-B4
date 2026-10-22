@@ -113,6 +113,7 @@ namespace rwe
         s.unitShadow.groundHeight = graphics.getUniformLocation(s.unitShadow.handle.get(), "groundHeight");
         s.unitShadow.projected = graphics.getUniformLocation(s.unitShadow.handle.get(), "projected");
         s.unitShadow.shadowOriginY = graphics.getUniformLocation(s.unitShadow.handle.get(), "shadowOriginY");
+        s.unitShadow.cutBelowY = graphics.getUniformLocation(s.unitShadow.handle.get(), "cutBelowY");
 
         s.unitBuild.handle = loadShader(graphics, "shaders/unitBuild.vert", "shaders/unitBuild.frag", texturedNormalVertexAttribs);
         s.unitBuild.mvpMatrix = graphics.getUniformLocation(s.unitBuild.handle.get(), "mvpMatrix");
@@ -129,6 +130,9 @@ namespace rwe
         s.unitBuild.belowMode = graphics.getUniformLocation(s.unitBuild.handle.get(), "belowMode");
         s.unitBuild.buildColorA = graphics.getUniformLocation(s.unitBuild.handle.get(), "buildColorA");
         s.unitBuild.buildColorB = graphics.getUniformLocation(s.unitBuild.handle.get(), "buildColorB");
+        s.unitBuild.buildColorAIndex = graphics.getUniformLocation(s.unitBuild.handle.get(), "buildColorAIndex");
+        s.unitBuild.buildColorBIndex = graphics.getUniformLocation(s.unitBuild.handle.get(), "buildColorBIndex");
+        s.unitBuild.heightBias = graphics.getUniformLocation(s.unitBuild.handle.get(), "heightBias");
         s.unitBuild.paletteIndexSampler = graphics.getUniformLocation(s.unitBuild.handle.get(), "paletteIndexSampler");
         s.unitBuild.shadeTableSampler = graphics.getUniformLocation(s.unitBuild.handle.get(), "shadeTableSampler");
 

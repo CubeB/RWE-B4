@@ -267,6 +267,20 @@ namespace rwe
                 if (allAboard)
                 {
                     ferry.loaded = true;
+                    // Observer only. transport_dispatch already says a trip
+                    // was BOOKED; this says the hull actually has its cargo
+                    // and can leave, which is the moment the close-out clock
+                    // starts. `why` distinguishes the army lift from a builder
+                    // ferry so a run can count army crossings alone.
+                    sim.eventLog.event(sim.gameTime.value, "transport_departure")
+                        .set("player", transport.owner.value)
+                        .set("unit", transportId.value)
+                        .set("passengers", ferry.passengers.size())
+                        .set("carried", transport.carriedUnits.size())
+                        .set("x", static_cast<double>(ferry.destination.x.value))
+                        .set("z", static_cast<double>(ferry.destination.z.value))
+                        .set("why", ferry.objective ? "army_ferry" : "builder_ferry")
+                        .detail("ferry loaded and departing");
                 }
             }
 
@@ -731,7 +745,6 @@ namespace rwe
         std::minstd_rand& rng,
         std::vector<PlayerCommand>& outCommands)
     {
-        (void)aiOwner;
         ++ticksSinceLastUpdate;
         if (ticksSinceLastUpdate < profile.tacticalTickInterval)
         {
@@ -744,6 +757,26 @@ namespace rwe
             return;
         }
         ticksSinceLastUpdate = 0;
+
+        // First completed transport seen, once. This is the measure-ability
+        // half of ferryUrgency: the build decision itself lives in
+        // BuildManager, but a run has to be able to say WHEN the first hull
+        // appeared to tell an early ferry from a lucky one. bb.transports is
+        // already in id order, and the event is pure observation.
+        if (!firstTransportReported && !bb.transports.empty())
+        {
+            firstTransportReported = true;
+            const auto first = bb.transports.front();
+            const auto& transport = sim.getUnitState(first);
+            sim.eventLog.event(sim.gameTime.value, "transport_ready")
+                .set("player", aiOwner.value)
+                .set("unit", first.value)
+                .set("type", transport.unitType)
+                .set("x", static_cast<double>(transport.position.x.value))
+                .set("z", static_cast<double>(transport.position.z.value))
+                .set("why", "first_transport")
+                .detail("first completed transport seen");
+        }
 
         tendFerries(sim, profile, reachability, threatMap, bb, outCommands);
         refreshExpansionSite(sim, reachability, build, bb, rng);
@@ -923,6 +956,25 @@ namespace rwe
                 // perfectly well for other targets. See
                 // AiBlackboard::groundAnchor.
                 const SimVector& ferryOrigin = bb.groundAnchor ? *bb.groundAnchor : *bb.baseAnchor;
+
+                // A sea lift waits for a landing party worth sending. The
+                // hull holds twenty, but a trip with one or two units is a
+                // beachhead the enemy commander deletes on arrival -- and
+                // the whole point of the close-out measurement is that the
+                // army is not short, only stuck on the wrong shore. Air
+                // lifts are exempt: an Atlas carries one, so a six-unit gate
+                // would make the island-map path impossible. A hull that
+                // cannot physically hold the minimum is exempt too, or it
+                // would wait for ever. Zero restores the old
+                // send-whoever-is-ready rule.
+                auto minParty = static_cast<std::size_t>(std::max(0, profile.ferryMinArmySize));
+                if (!transportDef.canFly && minParty > 1 && capacity >= minParty
+                    && static_cast<std::size_t>(bb.combatUnits.size()) < minParty)
+                {
+                    LOG_DEBUG << "AI transport " << transportId.value << ": army ferry waiting for "
+                              << minParty << " combat units, " << bb.combatUnits.size() << " ready";
+                    continue;
+                }
 
                 // Has this objective already been asked about and found to
                 // have no landing near it? If the answer is still fresh, do not

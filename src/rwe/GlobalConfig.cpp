@@ -261,6 +261,45 @@ namespace rwe
         return "Windowed";
     }
 
+    std::vector<std::string> windowModeStages()
+    {
+        return {"windowed", "borderless", "fullscreen"};
+    }
+
+    unsigned int windowModeStageIndex(const std::string& mode)
+    {
+        auto stages = windowModeStages();
+        // "bordered" is the name the key had before it was called windowed;
+        // main.cpp still accepts it, so the button shows it as stage zero.
+        auto wanted = mode == "bordered" ? std::string("windowed") : mode;
+        for (unsigned int i = 0; i < stages.size(); ++i)
+        {
+            if (stages[i] == wanted)
+            {
+                return i;
+            }
+        }
+        // Anything else is what a fresh or hand-edited rwe.cfg gets, and the
+        // startup path treats it as windowed too.
+        return 0;
+    }
+
+    std::string nextWindowMode(const std::string& mode)
+    {
+        auto stages = windowModeStages();
+        return stages[(windowModeStageIndex(mode) + 1) % stages.size()];
+    }
+
+    std::vector<std::string> windowModeLabels()
+    {
+        std::vector<std::string> labels;
+        for (const auto& stage : windowModeStages())
+        {
+            labels.emplace_back(windowModeDisplayName(stage));
+        }
+        return labels;
+    }
+
     std::optional<OptionsPage> optionsPageFromName(const std::string& name)
     {
         if (name == "SOUNDS" || name == "SOUNDSRT")

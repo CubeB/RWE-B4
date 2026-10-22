@@ -1,5 +1,8 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <map>
 #include <optional>
 #include <rwe/ai/AiSideUnits.h>
@@ -7,6 +10,7 @@
 #include <rwe/ai/AiUnitDefIndex.h>
 #include <rwe/ai/MapIntel.h>
 #include <rwe/grid/Grid.h>
+#include <rwe/math/det_math.h>
 #include <rwe/sim/Energy.h>
 #include <rwe/sim/GameTime.h>
 #include <rwe/sim/Metal.h>
@@ -56,6 +60,38 @@ namespace rwe
          * Defaulted for the same reason isCommander is.
          */
         PlayerId owner{};
+        /**
+         * Whether the contact was still a nanoframe when it was last seen
+         * (UnitState::isBeingBuilt). Read by the raid target pick, which
+         * prefers a frame the enemy has only just started over a finished
+         * building further out: a frame is worth what half of it already
+         * cost and cannot shoot back.
+         *
+         * Like every other field here it is what the AI saw, not what is
+         * true now. It is recomputed whenever a contact is in sight and left
+         * alone while it is only remembered.
+         *
+         * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:5);
+         * the original's computer player has no expansion-frame raid, so no
+         * classic-parity claim is made for it.
+         */
+        bool underConstruction{false};
+        /**
+         * Whether the contact builds: a mobile or immobile constructor, a
+         * factory, or a commander. Read by the raid pick, which prefers the
+         * builder standing over a fresh frame to the frame itself.
+         */
+        bool isBuilder{false};
+        /**
+         * When this contact was first recorded. Never moved forward while
+         * the contact stays known, so it answers "how long has the AI known
+         * about this", which is what the raid frame window tests. A contact
+         * that is forgotten and later seen again is a new sighting and gets
+         * a new stamp.
+         *
+         * Defaulted so the aggregate initialisers elsewhere keep compiling.
+         */
+        GameTime firstSeen{0};
     };
 
     /** A completed building of ours, remembered so that losing it can be noticed. */
@@ -110,6 +146,122 @@ namespace rwe
          */
         bool underConstruction;
     };
+
+    /**
+     * What an enemy contact is, for the composition memory and the counters
+     * built from it.
+     *
+     * The split is the one that changes what answers it: raiders close,
+     * rocket and artillery units outrange, tanks hold ground, aircraft skip
+     * the ground fight, static defences are what artillery is for, and a
+     * builder is worth raiding. Commander and everything the other buckets
+     * cannot name share the last one so the counts always sum to the known
+     * army.
+     *
+     * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:1); not
+     * original-game parity.
+     */
+    enum class EnemyRole
+    {
+        Raider,
+        RocketArtillery,
+        Tank,
+        Air,
+        StaticDefence,
+        Builder,
+        CommanderOrOther,
+        Count,
+    };
+
+    constexpr std::size_t EnemyRoleCount = static_cast<std::size_t>(EnemyRole::Count);
+
+    /**
+     * Where a mobile gun stops being a raider's short-range weapon and
+     * becomes rocket or artillery reach. A Peewee's and a Flash's guns are
+     * around 180-200; a Storm's and a Thud's are well past this.
+     *
+     * Shared by PerceptionManager's role histogram and ArmyManager's focus
+     * target choice so the two cannot disagree about what "long range" is.
+     * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:1); no
+     * classic-parity claim is made for the threshold.
+     */
+    constexpr float EnemyRocketMinRange = 300.0f;
+
+    inline std::size_t enemyRoleIndex(EnemyRole role)
+    {
+        return static_cast<std::size_t>(role);
+    }
+
+    /**
+     * How much of the remembered enemy army a role is, as a fraction of the
+     * decayed histogram. Zero when nothing is remembered.
+     */
+    inline float enemyRoleShare(const std::array<int, EnemyRoleCount>& counts, EnemyRole role)
+    {
+        int total = 0;
+        for (auto count : counts)
+        {
+            total += count;
+        }
+        if (total <= 0)
+        {
+            return 0.0f;
+        }
+        return static_cast<float>(counts[enemyRoleIndex(role)]) / static_cast<float>(total);
+    }
+
+    /**
+     * How far the observed composition leans the factory shares, in whole
+     * points added to each slot.
+     *
+     * Bounded by maxLean, and deliberately coarse: a role that holds a
+     * meaningful share of the enemy army buys up to maxLean points of the
+     * thing that answers it, not a continuously varying weight the arena
+     * could not reproduce. `trigger` is the same counterShareTrigger the
+     * older metal-share rule uses; a role below it does not earn a lean.
+     *
+     * Both factory types are leaned because the same enemy army is answered
+     * by either. A raider or an aircraft is outranged by a rocket kbot or a
+     * missile truck; a tower or a tank is broken by artillery or a medium
+     * tank; a rocket line or a builder is closed on by raiders or light
+     * tanks.
+     */
+    struct CompositionLean
+    {
+        int labRaider{0};
+        int labRocketKbot{0};
+        int labArtilleryKbot{0};
+        int vehicleTank{0};
+        int vehicleMissileTruck{0};
+        int vehicleMediumTank{0};
+    };
+
+    inline CompositionLean compositionLeanFor(const std::array<int, EnemyRoleCount>& counts, float trigger, int maxLean)
+    {
+        CompositionLean lean;
+        if (maxLean <= 0)
+        {
+            return lean;
+        }
+        auto atLeast = [&](EnemyRole role) {
+            return counts[enemyRoleIndex(role)] > 0 && enemyRoleShare(counts, role) >= trigger;
+        };
+        auto set = [maxLean](int& slot, bool condition) {
+            if (condition)
+            {
+                slot = maxLean;
+            }
+        };
+
+        set(lean.labRocketKbot, atLeast(EnemyRole::Air) || atLeast(EnemyRole::Raider));
+        set(lean.labArtilleryKbot, atLeast(EnemyRole::StaticDefence) || atLeast(EnemyRole::Tank));
+        set(lean.labRaider, atLeast(EnemyRole::RocketArtillery) || atLeast(EnemyRole::Builder));
+
+        set(lean.vehicleMissileTruck, atLeast(EnemyRole::Air) || atLeast(EnemyRole::Raider));
+        set(lean.vehicleMediumTank, atLeast(EnemyRole::StaticDefence) || atLeast(EnemyRole::Tank));
+        set(lean.vehicleTank, atLeast(EnemyRole::RocketArtillery) || atLeast(EnemyRole::Builder));
+        return lean;
+    }
 
     /**
      * How long the memory of enemy aircraft keeps anti-air worth building,
@@ -188,6 +340,68 @@ namespace rwe
      * crowd the base's out of the list.
      */
     constexpr float OwnWreckBaseReach = 1200.0f;
+
+    /**
+     * How many fixed compass sectors the ground around the base is cut into
+     * for the threat memory.
+     *
+     * Sixteen, so each sector is 22.5 degrees. Eight would be coarser than a
+     * base's own footprint at the default defendRadius (a ninth of the
+     * circle, nearly 700 world units of arc at 900), and two raids a few
+     * hundred units apart would land in the same bucket; thirty-two would
+     * split one raiding party across two or three sectors once it is spread
+     * out, which is the opposite failure -- a real push then never looks
+     * like one direction. Sixteen keeps a party together and still tells a
+     * flank from a frontal attack. Fixed, absolute directions rather than
+     * sectors rotated onto the enemy: the base does not turn, and a raid
+     * that comes from the north is a fact about the map.
+     *
+     * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:4); the
+     * original's computer player has no threat memory, so no classic-parity
+     * claim is made.
+     */
+    constexpr std::size_t ThreatSectorCount = 16;
+
+    /**
+     * Which sector a position lies in, as seen from the base anchor.
+     *
+     * Sector 0 starts at -pi and each sector spans 2*pi/16, so the numbering
+     * is a property of the direction alone. The angle comes from detAtan2,
+     * the simulation's own deterministic one: two peers must land a contact
+     * in the same bucket or a tower can be placed on different sides of the
+     * base. A position exactly on the anchor is sector 0.
+     */
+    inline int threatSectorOf(const SimVector& base, const SimVector& at)
+    {
+        constexpr float Pi = 3.14159265358979323846f;
+        constexpr float TwoPi = 6.28318530717958647692f;
+        auto dx = at.x.value - base.x.value;
+        auto dz = at.z.value - base.z.value;
+        if (dx == 0.0f && dz == 0.0f)
+        {
+            return 0;
+        }
+        auto angle = detAtan2(dz, dx);
+        auto turns = (angle + Pi) / TwoPi;
+        auto sector = static_cast<int>(turns * static_cast<float>(ThreatSectorCount));
+        // detAtan2 returns +pi for a point due west (dz == +0, dx < 0),
+        // which lands one past the last sector although it is the same
+        // direction as -pi. The two ends of the circle are one place.
+        if (sector >= static_cast<int>(ThreatSectorCount))
+        {
+            sector = 0;
+        }
+        return std::clamp(sector, 0, static_cast<int>(ThreatSectorCount) - 1);
+    }
+
+    /** The unit direction through the middle of a sector, for siting towards it. */
+    inline SimVector threatSectorDirection(std::size_t sector)
+    {
+        constexpr float Pi = 3.14159265358979323846f;
+        constexpr float TwoPi = 6.28318530717958647692f;
+        auto angle = -Pi + ((static_cast<float>(sector) + 0.5f) * (TwoPi / static_cast<float>(ThreatSectorCount)));
+        return SimVector(SimScalar(detCos(angle)), 0_ss, SimScalar(detSin(angle)));
+    }
 
     /**
      * Shared scratch state between the AI's managers. Rebuilt from the sim
@@ -502,6 +716,53 @@ namespace rwe
         /** Keyed by the enemy unit's raw id so iteration is deterministic. */
         std::map<unsigned int, KnownEnemy> knownEnemies;
         /**
+         * The enemy army by role, decayed rather than accumulated for the
+         * whole game.
+         *
+         * PerceptionManager raises each bucket to the largest count of that
+         * role it can currently see or remember, and halves every bucket
+         * every compositionDecaySeconds. So the model follows the current
+         * army: a role that has stopped appearing fades out over a couple of
+         * decay windows, and one that has just appeared is in the picture at
+         * once. The counts are AI-side memory and are not hashed; like
+         * knownEnemies they re-learn after a load.
+         *
+         * See AiTuningProfile::enemyCompositionMemory and
+         * BuildManager's composition lean.
+         */
+        std::array<int, EnemyRoleCount> enemyRoleCounts{};
+        /** When the histogram was last halved. */
+        GameTime enemyRoleCountsDecayedAt{0};
+        /**
+         * The lean committed from the histogram, and when. Held for
+         * compositionCommitSeconds so a factory builds a coherent batch
+         * instead of switching shares every planning pass.
+         */
+        CompositionLean compositionLean{};
+        GameTime compositionLeanCommittedAt{0};
+        bool compositionLeanCommitted{false};
+        /**
+         * Metal value of our fighting army, from the unit definitions of
+         * bb.combatUnits, and the same for the enemy's known mobile armed
+         * ground and air arms. Written by PerceptionManager and read by
+         * StrategicManager's value-odds gate.
+         *
+         * Only units the AI is entitled to know are counted, so this is not
+         * an omniscient total: a remembered contact is counted until the AI
+         * looks where it last saw it and finds it gone. Brutal's existing
+         * omniscience therefore still sees everything, as it does elsewhere.
+         */
+        float armyMetal{0.0f};
+        float knownEnemyArmyMetal{0.0f};
+        float knownEnemyAirMetal{0.0f};
+        /**
+         * Whether the value-odds gate is open. Once open it stays open
+         * until our value falls below retreatValueRatio of theirs, which is
+         * the hysteresis that keeps a wave from being called and recalled on
+         * consecutive passes.
+         */
+        bool attackOddsCommitted{false};
+        /**
          * Which enemy the war is being fought against.
          *
          * With one opponent this is that opponent and nothing here matters.
@@ -535,6 +796,27 @@ namespace rwe
          * position has.
          */
         std::optional<SimVector> enemyCommanderPosition;
+        /**
+         * The latched answer to "is their commander exposed enough to hunt",
+         * and when it expires. Written and read by ArmyManager's objective
+         * chain while AiTuningProfile::commanderHuntExposedOnly is on.
+         *
+         * The exposure test reads the remembered base centroid and the
+         * remembered escorts, both of which drift as buildings and units
+         * are seen. Without a latch the wave can alternate between the
+         * commander and the base on consecutive passes and never arrive at
+         * either. The answer stands for commanderHuntExposureLatchSeconds
+         * and is dropped at once when the commander is no longer known, so
+         * a forgotten contact cannot keep the wave pointed at an empty
+         * field.
+         *
+         * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:4/S:5);
+         * not hashed, re-learned after a load, like the rest of the
+         * blackboard memory.
+         */
+        bool commanderHuntExposed{false};
+        bool commanderHuntExposedLatched{false};
+        GameTime commanderHuntExposedUntil{0};
         /** How many aircraft we currently believe the enemy has. */
         int knownEnemyAirCount{0};
         /** The most ARMED enemy aircraft known at once, all game. Aircraft are seen in glimpses, so the count of the moment undersells the raid that is coming back. */
@@ -553,6 +835,49 @@ namespace rwe
         bool enemyAirThreat{false};
         /** Known enemies within the defend radius of our base, in id order. */
         std::vector<UnitId> enemiesNearBase;
+        /**
+         * How much trouble has come from each compass sector around the
+         * base, in threat points (metal value of the attackers), decayed so
+         * the picture follows the current fight rather than the game's
+         * whole history.
+         *
+         * PerceptionManager adds a contact's metal value the first pass it
+         * appears inside defendRadius and halves every sector every
+         * threatMemoryDecaySeconds; a contact that leaves the radius is
+         * forgotten as "already counted" so the next raid from the same
+         * side adds to what is left instead of being absorbed by it.
+         * Deterministic and AI-side memory: not hashed, re-learned after a
+         * load, like knownEnemies. See
+         * AiTuningProfile::threatMemory and threatDirectedDefence.
+         *
+         * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:4); the
+         * original's computer player has no threat memory.
+         */
+        std::array<int, ThreatSectorCount> threatBySector{};
+        /** When the arrays were last halved on the threatMemoryDecaySeconds clock. */
+        GameTime threatDecayedAt{0};
+        /**
+         * Contacts already added to the memory, by raw id. Removed when the
+         * contact leaves enemiesNearBase, so a unit that comes back in is a
+         * new incident. Only read and written by PerceptionManager.
+         */
+        std::set<unsigned int> threatCountedContacts;
+        /** The sum of threatBySector, for the wave-recall test. Zero with the memory off. */
+        int threatTotal{0};
+        /**
+         * The sector with the most remembered threat, or -1 when there is
+         * none. Ties go to the lowest sector index, so build siting is the
+         * same on every peer.
+         */
+        int threatPeakSector{-1};
+        /**
+         * Metal value of the units that set out with the current wave, by
+         * definition of bb.attackGroup. PerceptionManager writes it; the
+         * strategic pass compares the remembered threat against it to decide
+         * whether an intruder is big enough to recall the wave
+         * (AiTuningProfile::recallThreatRatio).
+         */
+        float waveMetal{0.0f};
 
         // --- Army ---
         /** A combat unit pressed into scouting while there is no dedicated scout. */
@@ -693,6 +1018,22 @@ namespace rwe
          */
         std::set<unsigned int> attackGroup;
         /**
+         * The part of a committed wave held back at the rally point, by raw
+         * id (AiTuningProfile::reserveWave). A separate set so it is not
+         * counted towards waveSpent, is not drawn on by the raid, guard or
+         * outpost-response rules, and is released into attackGroup when the
+         * wave has been in contact for reserveReleaseSeconds or has fallen
+         * to retreatArmySize. Always empty with the knob off.
+         */
+        std::set<unsigned int> reserveGroup;
+        /**
+         * When the wave now under way first saw contact: an enemy still
+         * standing within waveMeetEnemyRadius of its centre, or a hit point
+         * drop on one of its members. Unset while it has met nothing. Reset
+         * when the wave forms and when it ends.
+         */
+        std::optional<GameTime> waveContactAt;
+        /**
          * Set by the army pass when the wave has fallen below the retreat
          * size; the strategic pass then ends the attack. Two flags rather
          * than one test because the strategic pass runs first in the tick,
@@ -727,8 +1068,59 @@ namespace rwe
          * next wave, never from the wave that is already out.
          */
         std::set<unsigned int> raidGroup;
-        /** Where the raid is headed, if one is out. */
+        /**
+         * Where the raid is headed, if one is out. Unset while
+         * AiTuningProfile::syncRaidWithWave holds a newly formed raid at the
+         * rally: the group exists but has no errand yet, which is what sends
+         * its units to the rally point in the per-unit pass.
+         */
         std::optional<SimVector> raidTarget;
+        /**
+         * The unit the raid is aimed at when it is an expansion frame or the
+         * builder putting one up (AiTuningProfile::raidExpansionFrames).
+         *
+         * raidTarget is only a place, and a raider's ordinary acquisition
+         * deliberately skips a nanoframe -- it has no hit points and dies to
+         * anything, so chasing one round a factory pad is how a raid kills
+         * the same cheap hull over and over while the factory stands. That
+         * skip is right everywhere except the errand this field exists for,
+         * so the raid branch issues an explicit attack on this id instead of
+         * relying on acquisition. Unset with the knob off, and unset when
+         * the chosen raid target is an ordinary finished building.
+         */
+        std::optional<UnitId> raidAttackTarget;
+        /**
+         * When the raid now out was formed, for AiTuningProfile::
+         * syncRaidWithWave. The raid is held at the rally while this pass
+         * finds the wave still short of contact and short of its objective,
+         * and while now is inside syncWindowSeconds of this tick. Reset with
+         * the group, so a new raid behind the next wave gets its own window.
+         * Unset with the knob off.
+         */
+        std::optional<GameTime> raidFormedAt;
+        /**
+         * Whether the dispatch of the raid above has been logged and
+         * announced. With synchronization on the send happens at release
+         * rather than at formation, and both happen once; with the knob off
+         * it is set on the formation pass, which is where the dispatch has
+         * always been made.
+         */
+        bool raidDispatched{false};
+
+        /**
+         * The single enemy the wave's units concentrate on
+         * (AiTuningProfile::focusFire). Chosen by role and value from
+         * knownEnemies, and only where at least one wave member's own
+         * weapons can hit it (GameSimulation::weaponCanHitUnit). Kept for
+         * focusFireLatchSeconds so a target that is briefly less attractive
+         * does not change hands every tactical pass.
+         *
+         * A unit that cannot hit it keeps its ordinary nearest-target
+         * acquisition; the field is a preference, not an order.
+         */
+        std::optional<UnitId> focusFireTarget;
+        /** When focusFireTarget was last chosen, for the latch. */
+        GameTime focusFireTargetChosenAt{0};
 
         /**
          * A build site away from the base that wants protection, and the
@@ -803,6 +1195,28 @@ namespace rwe
          */
         std::map<std::pair<int, int>, GameTime> ferryLandingRefusals;
     };
+
+    /**
+     * The sector with the most remembered threat, or -1 when none has any.
+     * Ties go to the lowest index, and the walk is over the fixed array, so
+     * the answer does not depend on any container's iteration order.
+     */
+    inline int strongestThreatSector(const AiBlackboard& bb)
+    {
+        int best = -1;
+        for (std::size_t i = 0; i < ThreatSectorCount; ++i)
+        {
+            if (bb.threatBySector[i] <= 0)
+            {
+                continue;
+            }
+            if (best < 0 || bb.threatBySector[i] > bb.threatBySector[static_cast<std::size_t>(best)])
+            {
+                best = static_cast<int>(i);
+            }
+        }
+        return best;
+    }
 
     /**
      * Which landing-refusal cell a world position falls in: a floor division

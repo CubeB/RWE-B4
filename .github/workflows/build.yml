@@ -263,6 +263,9 @@ jobs:
         run: |
           mkdir -p AppDir/usr/bin AppDir/usr/share/rwe
           cp build/rwe build/rwe_bridge build/rwe_setup AppDir/usr/bin/
+          cp cmake/rwe-setup-gui AppDir/usr/bin/
+          chmod +x AppDir/usr/bin/rwe-setup-gui
+          python3 tools/test_installer_appimage.py
           cp -r shaders AppDir/usr/share/rwe/
           cp LICENSE README.md AppDir/usr/share/rwe/
 
@@ -277,15 +280,9 @@ jobs:
           DESKTOP
           sed -i 's/^          //' AppDir/usr/share/applications/rwe.desktop
 
-          # Placeholder icon (required by linuxdeploy). ImageMagick 7 renamed
-          # `convert` to `magick`, and the ubuntu-24.04 image ships neither by
-          # default, so the package is installed above and both spellings are
-          # accepted here.
+          # INSTALL-UX-002: use the supplied B4 branding rather than a placeholder.
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-          if command -v magick >/dev/null 2>&1; then IM=magick; else IM=convert; fi
-          "$IM" -size 256x256 xc:'#2a4a6b' -fill white -gravity center \
-            -pointsize 72 -annotate 0 'RWE' \
-            AppDir/usr/share/icons/hicolor/256x256/apps/rwe.png
+          cp assets/b4-icon.png AppDir/usr/share/icons/hicolor/256x256/apps/rwe.png
 
           # A tagged release and its checksum, not `continuous`: that build is
           # replaced in place, and the tool runs with the release's files in
@@ -416,6 +413,8 @@ jobs:
         env:
           RWE_TEST_ANNOUNCE: 1
         run: .\rwe_test.exe --durations yes
+      - name: test Windows setup assistant
+        run: powershell -NoProfile -STA -ExecutionPolicy Bypass -File tools/test-installer-setup.ps1 -Importer build/rwe_setup.exe
       # Release only: nothing downloads a Debug installer -- the release job
       # takes the MSVC Release pair and the AppImage -- and building one costs
       # about four minutes a job.

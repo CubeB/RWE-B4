@@ -38,6 +38,71 @@ namespace rwe
         // --- Opening (commander only) ---
         int openingMetalExtractorCount{3};
         int openingSolarCount{4};
+        /**
+         * Follow the opening shape the recorded human games show, as timing
+         * windows over the existing plan rather than a script.
+         *
+         * Off by default so a paired arena can play the ordinary plan as its
+         * control. With it on, BuildManager lets a deadline that has passed
+         * unmet pull that item ahead of the ordinary economy order -- the
+         * first factory by openingFactoryBySeconds, a first constructor out
+         * of the factory by openingConstructorBySeconds, one extractor
+         * beyond the opening set by openingExpansionBySeconds, and then
+         * outside economy sites up to openingExpansionSites -- and
+         * StrategicManager lets the first wave go at openingAttackArmySize
+         * once openingAttackBySeconds has passed. Nothing here bypasses the
+         * ordinary gates: every job is still sited, mission-filtered and
+         * affordability-tested, a base under attack keeps its existing
+         * priorities, and a wave still needs a target and something worth
+         * sending. The expansion target is a bias on the ordinary extractor
+         * growth, not a script: it stops when the sites are there, when the
+         * deposits run out, or when the builder cannot reach them, and the
+         * ordinary targetMetalExtractorCount rule is untouched.
+         *
+         * The numbers are the medians of twelve OTA-family recordings
+         * (D:\tmp\replay-decisions\REPORT.md, 2026-10-20): factory 57.7 s,
+         * first constructor 145 s (winners) / 182 s (losers), first
+         * expansion 213 s (winners) / 252 s (losers), ten economy sites
+         * outside the opening base for winners against six for losers, first
+         * army attack 452 s with 7 combat units (winners) against 1207 s
+         * with 4 (losers). They are hypotheses from a small sample, not
+         * original-game parity, and they do not alter the measured CORE
+         * composition shares.
+         */
+        bool humanlikeOpening{false};
+        /** Opening deadline for the first factory, in seconds. */
+        int openingFactoryBySeconds{60};
+        /** Opening deadline for the first constructor out of the factory, in seconds. */
+        int openingConstructorBySeconds{150};
+        /**
+         * Opening deadline for the first outside economy, in seconds.
+         *
+         * The recordings put the winners' first expansion at 213 s; this was
+         * 240 s in the first opening batch, which delayed the extractor the
+         * knob exists to ask for. The deadline is when the push starts, not
+         * when it must be complete: a metal extractor cannot be paid for on
+         * the same tick the income arrives.
+         */
+        int openingExpansionBySeconds{213};
+        /**
+         * How many economy sites outside the opening base the opening push
+         * asks for. Winners hold a median of ten against six for losers.
+         *
+         * Only read when humanlikeOpening is on. The push starts once the
+         * opening factory and a constructor stand and openingExpansionBySeconds
+         * has passed, and asks for another extractor (the ordinary
+         * wantMetalExtractor, dry or submerged) while fewer than this many of
+         * our economy buildings stand beyond defendRadius of the base. It is
+         * a bias on the ordinary growth rules: the same site search, mission
+         * filtering, affordability test (with the existing economy exemption)
+         * and base-under-attack guard still decide. Zero disables the push
+         * while leaving the single-extractor deadline above in place.
+         */
+        int openingExpansionSites{10};
+        /** The first wave may go at this many combat units once openingAttackBySeconds has passed. */
+        int openingAttackArmySize{7};
+        /** Earliest time the opening attack window may call the first wave, in seconds. */
+        int openingAttackBySeconds{450};
 
         // --- Expansion targets once a factory is up ---
         int targetSolarCount{10};
@@ -180,6 +245,30 @@ namespace rwe
         bool kiteWithLongerRange{true};
         SimScalar kiteRangeMargin{40_ss};
         /**
+         * Look for something to attack as far out as the unit's own weapon
+         * reaches, not only inside engageRadius.
+         *
+         * The per-unit acquisition call used a flat engageRadius, so a
+         * CORE Storm whose rocket reaches 400, or a Thud whose shell reaches
+         * further still, walked to inside 450 of an enemy before it would
+         * fire. A unit that already outranges what is coming at it should
+         * shoot first rather than close to the same distance as a Peewee.
+         *
+         * The radius is max(engageRadius, the unit's longest weapon range
+         * less kiteRangeMargin). The margin is the same stand-off the kiting
+         * rule keeps, so a unit acquires at the distance it would choose to
+         * fight from rather than at the edge of its reach, where a step by
+         * the target would put it out of range again.
+         *
+         * Ground combat units only, and only the ordinary acquisition path:
+         * the kiting, anti-air and mission rules are untouched. Off restores
+         * the flat engageRadius exactly, which is the control arm for a
+         * paired arena run. Not yet measured in the arena.
+         *
+         * RWE-AI tuning, not classic parity; the classic engine is untouched.
+         */
+        bool acquireWeaponRange{true};
+        /**
          * The same for a hull, and from buildings too (issue #191): a ship
          * that outranges what it is attacking lies off near the outer edge
          * of its own reach, kiteRangeMargin inside it and never inside the
@@ -223,6 +312,141 @@ namespace rwe
         bool counterEnemyComposition{true};
         int counterShareBonus{2};
         float counterShareTrigger{0.3f};
+        /**
+         * Remember what the enemy army is made of, by role, and decay it so
+         * it follows the current army rather than a lifetime total.
+         *
+         * PerceptionManager maintains the histogram
+         * (AiBlackboard::enemyRoleCounts); BuildManager leans BOTH the kbot
+         * lab's and the vehicle plant's shares from its shares, up to
+         * compositionLeanMax points per slot. This generalises
+         * counterEnemyComposition, which only ever leaned the lab and only
+         * ever looked at armed static versus armed mobile metal.
+         *
+         * Off restores today's counterShares exactly -- the old
+         * static/mobile metal rule and nothing else -- which is the control
+         * arm for a paired arena run. RWE-AI tuning, not classic parity.
+         */
+        bool enemyCompositionMemory{true};
+        /**
+         * How often the histogram is halved, in seconds. Integer halving,
+         * so a stale role is gone after a few windows. Zero leaves the
+         * counts undecayed (the whole game's sightings), which is the old
+         * lifetime behaviour and is not recommended.
+         */
+        int compositionDecaySeconds{30};
+        /**
+         * How long a computed share lean is held before it is recomputed.
+         * Without this the shares can flip on every planning pass as one
+         * remembered contact changes role, and a factory never finishes a
+         * coherent batch of what it was asked for.
+         */
+        int compositionCommitSeconds{60};
+        /**
+         * The most points a single observed role can add to a share slot.
+         * The faction defaults stay the baseline; this is a bounded lean,
+         * not a replacement.
+         */
+        int compositionLeanMax{2};
+        /**
+         * Remember where attacks have come from, as a decaying threat level
+         * per fixed compass sector around the base.
+         *
+         * PerceptionManager adds an armed contact's metal value to its
+         * sector the first pass it appears inside defendRadius, halves all
+         * sectors every threatMemoryDecaySeconds, and exposes the total and
+         * the strongest sector on the blackboard. Two consumers: the wave
+         * recall test (StrategicManager) and defensive tower siting
+         * (BuildManager, threatDirectedDefence).
+         *
+         * Off clears the arrays and the total, which restores the old
+         * behaviour of both consumers exactly: the wave-out rule never
+         * recalls for an intruder, and siting falls back to the loss /
+         * enemy-base facing. That is the control arm for a paired run.
+         * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:4).
+         */
+        bool threatMemory{true};
+        /**
+         * How often the sector threat levels are halved, in seconds.
+         *
+         * Integer halving, so a raid that has stopped coming fades over a
+         * few windows instead of disappearing the moment it leaves the
+         * radius. Sixty seconds: a defender's tower goes up in under a
+         * minute, so the side a raid came from is still the side worth
+         * covering while the answer is being built. Zero leaves the levels
+         * undecayed (the whole game's incidents), which is the lifetime
+         * behaviour and is not recommended.
+         */
+        int threatMemoryDecaySeconds{60};
+        /**
+         * Size the force that answers an intruder from the intruder's own
+         * value instead of sending every unit at home at it.
+         *
+         * The home guard committed is the nearest units whose combined metal
+         * reaches defenceResponseRatio times the armed intruders' metal, at
+         * least defenceResponseMinUnits and at most defenceResponseMaxShare
+         * of the guard available. Everything else keeps gathering at the
+         * rally point and still shoots anything that comes within its own
+         * acquisition radius. holdWhenOutnumbered and the commander's own
+         * safety rules are untouched and still run first.
+         *
+         * Off restores the old response exactly: every available unit is
+         * ordered at the nearest intruder. That is the control arm.
+         * RWE-original policy (docs/agents/rwe-ai-adaptability.md S:4).
+         */
+        bool proportionalDefence{true};
+        /**
+         * Metal of responders committed per metal of intruder. 1.3 is the
+         * "respond to them and a little more" rule: one cheap raider draws a
+         * pair rather than the reserve, and a real push still draws a force
+         * that out-values it. Only read with proportionalDefence on.
+         */
+        float defenceResponseRatio{1.3f};
+        /**
+         * The most of the available home guard that one incident may commit,
+         * as a fraction. One by default, so the response is bounded by
+         * defenceResponseRatio alone and a push worth more than the guard
+         * still gets the guard. Below one it keeps a reserve at the rally
+         * point -- that quarter still shoots what comes into its own range
+         * and is the seed of the next wave, but it is also that many fewer
+         * units meeting the push. Values at or below zero fall back to one
+         * unit.
+         */
+        float defenceResponseMaxShare{1.0f};
+        /**
+         * The fewest units sent at an intruder, whatever the ratio says. One
+         * is the floor that keeps a single cheap raider -- or an armed unit
+         * whose definition cost is zero in a mod -- from being ignored.
+         */
+        int defenceResponseMinUnits{1};
+        /**
+         * Recall a wave that is already out only when the remembered threat
+         * at home is worth more than this many times the wave.
+         *
+         * The old rule never recalled at all while a wave was out: one scout
+         * at the extractors used to turn the whole attack round. That was
+         * fixed by letting the reserve answer, but it also means a real push
+         * at the base can be met by whatever is left at home. This is the
+         * other half: the wave comes back only when the threat is at least
+         * recallThreatRatio times the metal that set out with it. 1.5 means
+         * an even fight at home is the reserve's problem and an
+         * overwhelming one is the wave's.
+         *
+         * Only read with proportionalDefence and threatMemory on; either one
+         * off keeps the old wave-out rule exactly.
+         */
+        float recallThreatRatio{1.5f};
+        /**
+         * Lean defensive tower siting towards the sector the most threat has
+         * come from, rather than always facing the enemy base or the last
+         * losses.
+         *
+         * The existing site search, affordability test and build-site guard
+         * are unchanged: this only moves the post the search is centred on.
+         * Off restores the old facing exactly. RWE-original policy
+         * (docs/agents/rwe-ai-adaptability.md S:4).
+         */
+        bool threatDirectedDefence{true};
 
         bool spendSurplusOnCapacity{true};
         float capacityIncomeRatio{1.25f};
@@ -292,6 +516,26 @@ namespace rwe
          * not, and they cost a factory slot the army would otherwise use.
          */
         int antiAirMobileCount{2};
+        /**
+         * How many mobile anti-air units leave the base with an attack wave.
+         *
+         * Mobile anti-air was deliberately left out of combatUnits and
+         * leashed to the base, because cover that walks off with the army is
+         * not cover. The cost is the other half: a wave that meets a bomber
+         * over the enemy's base has no answer at all, and the AA kbots stand
+         * at home for the whole attack. With this on, that many anti-air
+         * units guard the slowest member of the wave while the wave is out
+         * and are leashed home again when it ends. At least one is kept at
+         * the base whenever more than one stands, because the base is what
+         * they were built for. The ordinary anti-air target rule is
+         * unchanged: anything airborne within engageRadius is still shot at
+         * first, escort or not.
+         *
+         * Zero restores the old behaviour exactly and is the control arm for
+         * a paired arena run. RWE-AI tuning, not classic parity; the classic
+         * engine is untouched.
+         */
+        int antiAirEscortCount{1};
         int targetRadarCount{1};
         int targetMetalMakerCount{2};
         /**
@@ -1787,6 +2031,31 @@ namespace rwe
         /** Fall back to the rally point when the attacking army drops below this. */
         int retreatArmySize{3};
         /**
+         * Judge the attack on metal value as well as headcount.
+         *
+         * The headcount gate is a floor and a fallback: it still calls the
+         * attack, and it is all there is when nothing of the enemy's army is
+         * known. When their mobile ground army has been seen, the value gate
+         * can call the attack earlier -- our known army metal at least
+         * attackValueRatio times theirs -- and holds it shut until our value
+         * is below retreatValueRatio, which is the hysteresis that stops a
+         * pass-by-pass flip. It may not pull the wave forward to less than
+         * half the counted wave, and retreatArmySize is still the floor under
+         * that: a handful of units that happen to out-value one remembered
+         * scout is not an attack, and a profile that has deliberately set
+         * attackArmySize out of reach is not overridden by a skirmish.
+         * attackPatienceSeconds remains the backstop, so
+         * an enemy nobody can find cannot stall the AI for ever.
+         *
+         * Off restores the old count/patience command stream exactly.
+         * RWE-AI tuning, not classic parity.
+         */
+        bool attackUsesValueOdds{true};
+        /** Our army metal must be this multiple of the known enemy ground army's before the odds gate opens. */
+        float attackValueRatio{1.1f};
+        /** The odds gate closes again below this multiple. */
+        float retreatValueRatio{0.7f};
+        /**
          * What the level-one kbot lab makes, as a ratio: this many raiders to
          * that many rocket kbots. Two integers and not a fraction because the
          * choice is made inside the simulation, where a float comparison is
@@ -2133,6 +2402,57 @@ namespace rwe
          */
         bool commanderAnswersHarassment{false};
         /**
+         * How many units a factory keeps queued.
+         *
+         * The planner used to wait for a factory's queue to drain and then add
+         * exactly one unit, so every factory stood idle from the tick its
+         * product finished until the next planning pass -- at the shipped
+         * buildPlannerTickInterval of 30 that is up to a second per unit, per
+         * factory, for the whole game. The queue is topped up to this depth
+         * instead, one unit per pass, so the next unit is queued while the one
+         * before it is still building and the factory does not wait for the
+         * planner to come round again.
+         *
+         * The mission reservation still applies: the queue is never filled
+         * past a mission cap, and the final filter still drops a command the
+         * reservation refuses. One restores the old behaviour exactly -- top
+         * up only when empty, with one unit -- and is the control arm for a
+         * paired arena run.
+         *
+         * From the audit in docs/agents/rwe-ai-strength.md, "Not done yet":
+         * production only topped a factory up when its queue was empty.
+         * RWE-AI tuning, not classic parity; the classic engine is untouched.
+         *
+         * Default 1 because depth 2 was measured worse on Great Divide: four
+         * paired seeds against depth 1, same winners, but slower close-outs on
+         * three of four (4304 by 22,890 ticks) as the deeper queue tied up
+         * metal. It remains a knob for a faction/map where the trade differs.
+         */
+        int factoryQueueDepth{1};
+        /**
+         * Drop a unit that has sat at the head of a factory's queue for
+         * factoryQueueStallSeconds while it could not be paid for and the
+         * frame made no meaningful progress.
+         *
+         * A queue that holds something the side cannot afford is a factory
+         * doing nothing: it is not merely saving up, because no income is
+         * being spent on the queue at all. The drop is the same negative
+         * ModifyBuildQueue a besieged factory's queue emptying sends, and it
+         * clears that unit type from the queue so the next entry can be tried
+         * (the command counts back from the end, so clearing the head alone is
+         * not something it can express). A frame that has moved by at least
+         * one percent of its build time in the window is making progress and
+         * is never cancelled, however slowly it goes; the tier-two reserve's
+         * hold is also left alone, since saving for a lab or a moho is exactly
+         * what that hold is for.
+         *
+         * Off restores the old behaviour exactly and is the control arm for a
+         * paired arena run. RWE-AI tuning, not classic parity.
+         */
+        bool factoryQueueDropStalled{true};
+        /** How long a queue head may sit unaffordable and motionless before it is dropped. */
+        int factoryQueueStallSeconds{60};
+        /**
          * Treat a commander whose only threats are on the water as unable to
          * fight, so the refuge logic walks it off the shore.
          *
@@ -2164,8 +2484,75 @@ namespace rwe
         bool raidingParties{true};
         /** How many units go on a raid. */
         int raidPartySize{3};
+        /**
+         * Hold a newly formed raid at the rally point until the wave it was
+         * formed behind is close to contact or to its objective, then release
+         * it at the outlying target.
+         *
+         * A raid formed the moment the wave leaves is a second army walking
+         * out at the same time, and the defender answers whichever arrives
+         * first. The recorded games are two-axis in this respect: the main
+         * body draws the response and the economy raid arrives while it is
+         * being answered. This is the smallest version of that idea -- the
+         * existing raid party, kept at the rally until the wave has either
+         * met something (waveContactAt, or a known enemy within
+         * waveMeetEnemyRadius of the wave) or come within
+         * waveMeetEnemyRadius of the target it was sent at. syncWindowSeconds
+         * bounds the wait so a wave that stalls far from both still releases
+         * the raid rather than leaving it at home for the whole game.
+         *
+         * If the wave dies or the attack ends first, the raid group is
+         * cleared and its units gather for the next wave, exactly as they did
+         * before this knob existed.
+         *
+         * Off restores immediate dispatch on the formation pass exactly, and
+         * is the control arm for a paired arena run. RWE-original policy
+         * (docs/agents/rwe-ai-adaptability.md S:5); the original's computer
+         * player has no synchronized second axis.
+         */
+        bool syncRaidWithWave{true};
+        /**
+         * The longest a synchronized raid waits at the rally, in seconds.
+         * Zero releases it on the formation pass, which with the knob above
+         * off is the old behaviour. A negative value is clamped to zero.
+         */
+        int syncWindowSeconds{15};
         /** A raid target must be at least this far from the enemy's base. */
         SimScalar raidAvoidBaseRadius{900_ss};
+        /**
+         * Send the raiding party at the enemy's fresh expansion frame, or at
+         * the builder standing over it, ahead of a finished building further
+         * out.
+         *
+         * A nanoframe is the cheapest thing in the game to kill and the most
+         * valuable per shot: half its metal is already in it, it has zero
+         * hit points until it finishes, and it cannot shoot back. The old
+         * raid pick was nearest-outlying-building, which walks past the
+         * frame going up on the flank to shell an extractor that has been
+         * there for ten minutes.
+         *
+         * A frame only counts while firstSeen is inside
+         * raidFrameWindowSeconds, so a remembered frame from a raid that has
+         * already passed does not keep pulling parties at ground that is now
+         * either finished or empty. The builder is preferred over the frame
+         * only when it is in sight and within one build site of it: killing
+         * the builder stops the next frame as well as this one.
+         *
+         * Off restores the previous nearest-outlying-building choice exactly
+         * and is the control arm for a paired arena run. RWE-original
+         * policy (docs/agents/rwe-ai-adaptability.md S:5); the original's
+         * computer player has no expansion-frame raid.
+         */
+        bool raidExpansionFrames{true};
+        /**
+         * How recently the AI must have first seen a frame for it to count
+         * as the enemy's current expansion. 30 seconds is about one build
+         * time for a level-one extractor or solar collector. Zero switches
+         * the frame half off while leaving the builder preference to the
+         * knob above -- which, with no frame to stand over, also does
+         * nothing.
+         */
+        int raidFrameWindowSeconds{30};
         /**
          * The wave's objective is confined to this far from the enemy's base,
          * so that what it attacks is their base. Zero lets the pick range
@@ -2200,8 +2587,64 @@ namespace rwe
          * finds nothing (PerceptionManager::refresh), so this does not lead
          * the army around after a ghost; and a commander is normally in its
          * own base, so most of the time this and the base agree.
+         *
+         * With commanderHuntExposedOnly on (the default) this is the first
+         * objective only while the commander is exposed; otherwise the wave
+         * keeps the base/expansion objective. Leave this on and turn the
+         * exposure knob off for the old unconditional-hunt control arm.
          */
         bool huntEnemyCommander{true};
+        /**
+         * Hunt their commander only while it is exposed, rather than
+         * whatever its position is.
+         *
+         * `huntEnemyCommander` made the commander the wave's first objective
+         * unconditionally. That is right when it is standing in the open or
+         * walking to an expansion, and wrong when it is sitting in the
+         * middle of its own base behind its towers with an escort round it:
+         * the wave then walks past the base defences to reach the one unit
+         * that the defender has deliberately kept safe, which is a gift.
+         *
+         * A commander counts as exposed when all of these hold:
+         *
+         *  - it is remembered or in sight (bb.enemyCommanderPosition is
+         *    only written from knownEnemies, so a forgotten commander is
+         *    not a candidate at all);
+         *  - it stands at least commanderHuntMinDistance from the known
+         *    enemy base centroid (bb.enemyBasePosition); with no building
+         *    seen, there is no base to be hiding in and the distance test
+         *    passes;
+         *  - the known armed enemies within commanderHuntEscortRadius of it
+         *    are worth less than commanderHuntMaxEscortMetal in total.
+         *
+         * Otherwise the wave keeps the ordinary base/expansion objective.
+         * The answer is latched for commanderHuntExposureLatchSeconds so a
+         * moving escort or a centroid that drifts a cell does not flip the
+         * objective every pass.
+         *
+         * Off restores the unconditional commander hunt exactly and is the
+         * control arm for a paired arena run. RWE-original policy
+         * (docs/agents/rwe-ai-adaptability.md S:4/S:5); the original's
+         * computer player has no exposure test, so no classic-parity claim
+         * is made for it.
+         */
+        bool commanderHuntExposedOnly{true};
+        /**
+         * Armed escort metal that still counts as exposed, and the radius
+         * it is totalled over. The commander itself is not counted.
+         * 600 is a little more than one level-one heavy tank; the default
+         * radius is one engageRadius, the same "nearby" the army uses.
+         */
+        int commanderHuntMaxEscortMetal{600};
+        SimScalar commanderHuntEscortRadius{450_ss};
+        /** How far from their base centroid a commander must stand to be worth hunting. */
+        SimScalar commanderHuntMinDistance{600_ss};
+        /**
+         * How long the exposure answer stands before it is asked again, in
+         * seconds. Zero re-asks every tactical pass, which is the unlatch
+         * control.
+         */
+        int commanderHuntExposureLatchSeconds{10};
         /**
          * Fight one enemy at a time: the nearest, by where we believe it
          * lives. Off, every enemy is treated as one, which is what the AI
@@ -2351,6 +2794,42 @@ namespace rwe
         SimScalar bomberLeaveToArmyRadius{700_ss};
         float bomberArmyReachDiscount{0.25f};
         /**
+         * Hold a bomber or gunship strike until the ground wave has arrived,
+         * rather than sending it the moment a target is scored.
+         *
+         * The two arms used to leave independently: the wave formed and
+         * walked, the aircraft left on the same tactical pass and reached
+         * the target first, so the defender answered the air raid and then
+         * met the ground wave with its attention already on it. The recorded
+         * games are the other way round -- the ground body draws the
+         * response and the air arrives on the fight.
+         *
+         * With this on, an aircraft that has a target but is not yet
+         * attacking waits at its usual stand (the repair pad, else the air
+         * plant, else the base anchor) and only receives the attack order
+         * once the ground wave is within airSyncRadius of that target, or of
+         * the wave's own objective, or the wave is in contact
+         * (bb.waveContactAt). A target inside
+         * bomberHomeDefenseRadius of our own base is never held: that is the
+         * home-defence case, where waiting for a wave that is somewhere else
+         * on the map would let the intruder shoot the base.
+         *
+         * The target scoring, the anti-air cover ceiling and penalty, the
+         * repair-pad wait and every fighter rule are unchanged; only the
+         * moment the attack order is issued moves. A wave that ends releases
+         * the strike normally, and an aircraft already on its run is left
+         * alone.
+         *
+         * Off restores the immediate strike exactly and is the control arm
+         * for a paired arena run. Zero airSyncRadius holds until contact
+         * only. RWE-original policy (docs/agents/rwe-ai-adaptability.md
+         * S:5); the original's computer player has no air/ground
+         * synchronization, so no classic-parity claim is made for it.
+         */
+        bool airStrikeSync{true};
+        /** How close the ground wave must be to the air target before the strike is released. */
+        SimScalar airSyncRadius{600_ss};
+        /**
          * How far from the army a gunship will go looking for what is
          * holding it up. Beyond this it falls back to the bombers' target
          * list, so a gunship with no army to help is not a gunship standing
@@ -2447,6 +2926,67 @@ namespace rwe
         SimScalar waveMeetEnemyRadius{900_ss};
         /** How many standing together count as an army worth turning for. */
         int waveMeetEnemyCount{3};
+
+        /**
+         * Hold part of a committed wave back as a reserve, at the rally
+         * point, and release it once the wave has been in contact for
+         * reserveReleaseSeconds or has fallen to retreatArmySize.
+         *
+         * A human wave is not one blob: the first body finds the enemy and
+         * the rest arrives on the fight rather than walking past it. The
+         * reserve is a separate group (AiBlackboard::reserveGroup), so it is
+         * not counted towards waveSpent and is not drawn on by the raid,
+         * guard or outpost-response rules until it is released.
+         *
+         * Off, together with waveCommitFraction 1.0 and waveAttackMove
+         * false, restores the previous command stream exactly: one group of
+         * every combat unit, moved with MoveOrder.
+         */
+        bool reserveWave{true};
+        /**
+         * The share of the committed combat units that forms the wave, by
+         * sorted UnitId; the rest is the reserve. 1.0 puts everything in the
+         * wave and leaves no reserve, which is the old behaviour. Rounded to
+         * the nearest unit and never less than one in the wave.
+         */
+        float waveCommitFraction{0.7f};
+        /** How long the wave must have been in contact before the reserve is released, in seconds. */
+        int reserveReleaseSeconds{20};
+        /**
+         * Send the wave's objective as an attack-move (AttackOrder at a
+         * position) rather than a plain MoveOrder, so the wave fights what it
+         * meets on the way instead of walking past it. Wave units that are
+         * holding for cohesion still get the plain stand order. Unit-target
+         * and special orders are untouched.
+         */
+        bool waveAttackMove{true};
+        /**
+         * Concentrate the wave's fire on one target chosen by role and value
+         * rather than letting every unit take its own nearest enemy.
+         *
+         * A line of raiders each shooting the nearest thing spends its
+         * damage across a front and kills none of it, while the enemy's
+         * artillery and static defences -- the parts that actually punish a
+         * wave -- go on firing. The focus target is an enemy static defence
+         * or long-ranged mobile gun first, a builder or commander out in the
+         * open second, and raiders or tanks after that; a unit that can hit
+         * it prefers it to its own nearest target, and a unit that cannot
+         * keeps the old acquisition. The choice is latched for
+         * focusFireLatchSeconds so it does not change hands every pass.
+         *
+         * Off restores per-unit nearest acquisition exactly, which is the
+         * control arm for a paired arena run. RWE-original policy
+         * (docs/agents/rwe-ai-adaptability.md S:5); the original's computer
+         * player has no focus fire.
+         */
+        bool focusFire{false};
+        /**
+         * How long the wave keeps a chosen focus target before it is
+         * reconsidered, in seconds. A target that dies or leaves sight is
+         * dropped at once whatever the latch says. Zero re-picks every
+         * tactical pass.
+         */
+        int focusFireLatchSeconds{5};
         /** Enemies this close to the base anchor trigger a defence. */
         SimScalar defendRadius{900_ss};
         /** How far from a known enemy an army unit will pick a fight. */
@@ -2632,6 +3172,58 @@ namespace rwe
          * have somewhere to go. See TransportManager::lastArmyFerryAnswer.
          */
         bool armyFerryWantFromMap{true};
+        /**
+         * Whether a side with no transport, an enemy known across water and
+         * a shipyard or air plant standing gives the transport priority over
+         * the rest of that factory's line.
+         *
+         * Coast To Coast, the measured case: every timeout in the strength
+         * baseline had its first transport at 951 s or later, or had it sunk
+         * and never replaced, while every win had one by 830 s. The three
+         * timeouts held a 1.7-3.0x unit lead and an 8x army lead at the cap
+         * and still could not finish, because 65-89 units had no way over the
+         * water. The transport was not unaffordable; it was behind a scout
+         * ship, a construction ship and a fleet in the yard's queue.
+         *
+         * The gate is deliberately narrow. It needs hasUnreachableGround, a
+         * known enemy base, no land route to that enemy (the latched
+         * armyNeedsFerry answer, or landRouteToEnemy false), and NO complete
+         * transport. It changes only which unit an existing factory asks for;
+         * it does not bypass target counts, cargo, affordability, the
+         * tier-two reserve or the besieged-factory guard.
+         *
+         * False restores the old ordering exactly, which is the control arm
+         * for a paired arena run. RWE-original: the original's computer
+         * player has no transport policy (ADR-0005), so no parity claim.
+         */
+        bool ferryUrgency{true};
+        /**
+         * The deadline the urgency is measured against, in seconds. A
+         * transport still missing at this point is "overdue" and preempts the
+         * yard's cheap scout as well as its construction ship and warships;
+         * before it the transport is merely moved ahead of the construction
+         * ship and the warships. Zero means "overdue from the first tick".
+         *
+         * 480 s is not arbitrary: the five wins in the baseline had a
+         * transport by 511-830 s, so 480 is the point by which a winning
+         * game's yard is already working and a missing transport is a
+         * problem rather than an opening still being paid for.
+         */
+        int ferryFirstTransportBySeconds{480};
+        /**
+         * How many combat units must be waiting before a SEA transport is
+         * dispatched. The hull holds twenty, but sending it with one or two
+         * units is a beachhead the enemy commander deletes on arrival; six is
+         * the smallest group that can trade with a landing party and still
+         * leave the beach. Zero (or one) restores the old "send whoever is
+         * ready" rule.
+         *
+         * Air transports are exempt: an Atlas carries one, so a six-unit
+         * gate would make the island-map lift impossible. Land behaviour is
+         * untouched when no transport, yard or route exists -- the army still
+         * walks, and wantsTransport still falls back to the old rules.
+         */
+        int ferryMinArmySize{6};
         /**
          * Gather a sea ferry's passengers at one shore point and load them
          * there, instead of sending the hull round the coast to each in turn

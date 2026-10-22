@@ -45,6 +45,10 @@ module.exports = {
     new CopyWebpackPlugin({
       patterns: [
         {
+          from: "../assets/b4-icon.png",
+          to: "b4-icon.png",
+        },
+        {
           from: "package.json",
           to: "package.json",
         },

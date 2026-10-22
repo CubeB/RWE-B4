@@ -28,6 +28,35 @@ namespace rwe
             return it == counts.end() ? 0 : it->second;
         }
 
+        /**
+         * Recompute the composition lean if its commit window has expired.
+         *
+         * The histogram itself follows the enemy every pass, but the shares
+         * it leans are held for compositionCommitSeconds: a factory that
+         * switched from tanks to missile trucks and back as one remembered
+         * contact crossed a role boundary would finish neither batch. The
+         * committed value lives on the blackboard, so both factory branches
+         * read the same value for the whole window.
+         */
+        void commitCompositionLean(const AiTuningProfile& profile, AiBlackboard& bb)
+        {
+            if (!profile.enemyCompositionMemory || !profile.counterEnemyComposition)
+            {
+                bb.compositionLean = CompositionLean{};
+                bb.compositionLeanCommitted = false;
+                return;
+            }
+            auto commitTicks = static_cast<unsigned int>(std::max(0, profile.compositionCommitSeconds)) * SimTicksPerSecond;
+            if (bb.compositionLeanCommitted && commitTicks > 0
+                && bb.now.value < bb.compositionLeanCommittedAt.value + commitTicks)
+            {
+                return;
+            }
+            bb.compositionLean = compositionLeanFor(bb.enemyRoleCounts, profile.counterShareTrigger, profile.compositionLeanMax);
+            bb.compositionLeanCommittedAt = bb.now;
+            bb.compositionLeanCommitted = true;
+        }
+
         /** The longest reach of any weapon the definition names; zero for an unarmed one. */
         SimScalar weaponRange(const GameSimulation& sim, const UnitDefinition& def)
         {
@@ -100,6 +129,48 @@ namespace rwe
         {
             return PlayerUnitCommand(builder, PlayerUnitCommand::IssueOrder(BuildOrder(unitType, site), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
         }
+    }
+
+    namespace
+    {
+        /** Whether an opening deadline in seconds has passed at `now`. Zero or less is "already due". */
+        bool openingDeadlineReached(int seconds, GameTime now)
+        {
+            return seconds <= 0 || now.value >= static_cast<unsigned int>(seconds) * SimTicksPerSecond;
+        }
+    }
+
+    unsigned int factoryQueueProgressFloor(unsigned int buildTime)
+    {
+        // One percent, and never less than a tick, so the threshold scales
+        // with the job. A single build tick is a fifth of a second's work on
+        // a 100-tick Peewee and a rounding error on a 5,000-tick battleship;
+        // a flat count would call that same tick meaningful for both, or for
+        // neither.
+        return std::max(1u, buildTime / 100u);
+    }
+
+    bool factoryQueueHeadIsStalled(
+        unsigned int heldTicks,
+        unsigned int frameProgress,
+        unsigned int buildTime,
+        int stallSeconds,
+        bool affordable)
+    {
+        if (stallSeconds <= 0)
+        {
+            return false;
+        }
+        auto timeout = static_cast<unsigned long long>(stallSeconds) * static_cast<unsigned long long>(SimTicksPerSecond);
+        if (static_cast<unsigned long long>(heldTicks) < timeout)
+        {
+            return false;
+        }
+        if (frameProgress >= factoryQueueProgressFloor(buildTime))
+        {
+            return false;
+        }
+        return !affordable;
     }
 
     BuildManager::BuildEstimate BuildManager::estimateBuild(const UnitDefinition& target, const UnitDefinition& builder, unsigned int alreadyBuilt)
@@ -723,6 +794,82 @@ namespace rwe
                 && bb.armyNeedsFerry && bb.hoverRouteToEnemy && *bb.hoverRouteToEnemy
                 && bb.metalIncome.value >= static_cast<float>(profile.techMinMetalIncome);
         }
+
+        /**
+         * How badly a side with no transport needs one, for the factory
+         * queue. None is the old ordering. Raised moves the transport ahead
+         * of the construction ship and the warships; Overdue, at or after the
+         * profile's deadline, also moves it ahead of the cheap scout.
+         *
+         * The enemy test is deliberately the same one TransportManager
+         * publishes rather than a fresh reachability query: armyNeedsFerry is
+         * the latched answer that survives losing sight of the target,
+         * enemyAcrossWater is the live one, and enemyBaseAcrossWater is the
+         * direct one -- the known enemy base is ground the army cannot walk
+         * to. The first two need an attack target, which ArmyManager rebuilds
+         * every tactical pass and leaves unset outside Attack; the direct
+         * answer lets the yard see the need as soon as the base is known.
+         * landRouteToEnemy false is the map-only fallback, exactly as
+         * TransportManager uses it before any target has ever been seen.
+         * Asking for enemyBasePosition as well keeps this from firing on a
+         * map where the army merely has not found anybody yet.
+         *
+         * bb.ownedCompletedCounts only holds COMPLETE hulls, so a lost
+         * transport drops out and the next yard pass sees the same urgency
+         * again. A transport still building is counted by
+         * targetSeaTransportCount in the caller, so this cannot order a
+         * second one.
+         */
+        enum class FerryBuildPriority
+        {
+            None,
+            Raised,
+            Overdue,
+        };
+
+        FerryBuildPriority ferryBuildPriority(const AiTuningProfile& profile, const AiBlackboard& bb, bool enemyBaseAcrossWater)
+        {
+            if (!profile.ferryUrgency)
+            {
+                return FerryBuildPriority::None;
+            }
+            if (!bb.hasUnreachableGround || !bb.enemyBasePosition)
+            {
+                return FerryBuildPriority::None;
+            }
+            bool noLandRouteToEnemy = enemyBaseAcrossWater || bb.armyNeedsFerry || bb.enemyAcrossWater
+                || (bb.landRouteToEnemy && !*bb.landRouteToEnemy);
+            if (!noLandRouteToEnemy)
+            {
+                return FerryBuildPriority::None;
+            }
+
+            // Which hull counts as "we already have a ferry". Where a yard
+            // stands and the side has a sea transport, only that hull
+            // settles the question: an Atlas on the same map was exactly the
+            // shape of the measured 4103 timeout -- an air lift at 951 s, the
+            // sea transport not until 1278 s -- so a complete air transport
+            // must not switch the sea urgency off. Where there is no yard,
+            // any transport is enough and the air plant's old path stands.
+            auto seaYardStands = !bb.sideUnits.shipyard.empty()
+                && countOf(bb.ownedCompletedCounts, bb.sideUnits.shipyard) >= 1;
+            auto hasSeaTransport = !bb.sideUnits.seaTransport.empty()
+                && countOf(bb.ownedCompletedCounts, bb.sideUnits.seaTransport) >= 1;
+            auto hasTransport = seaYardStands && !bb.sideUnits.seaTransport.empty()
+                ? hasSeaTransport
+                : !bb.transports.empty();
+            if (hasTransport)
+            {
+                return FerryBuildPriority::None;
+            }
+
+            if (profile.ferryFirstTransportBySeconds > 0
+                && bb.now.value < static_cast<unsigned int>(profile.ferryFirstTransportBySeconds) * SimTicksPerSecond)
+            {
+                return FerryBuildPriority::Raised;
+            }
+            return FerryBuildPriority::Overdue;
+        }
     }
 
     std::optional<SimVector> BuildManager::chooseBuildSite(
@@ -963,6 +1110,20 @@ namespace rwe
         // still uses threatDirection: a radar's job is watching the enemy's
         // side of the map, which recentLosses says nothing about.
         auto towards = profile.defenceFacesRecentLosses ? defenceFacingDirection(bb) : threatDirection(bb);
+        // Towers lean towards where the attacks have actually been coming
+        // from (threatDirectedDefence), when there is a memory to lean on.
+        // The post moves; everything downstream -- the site search's
+        // reachability, footprint, affordability and spacing tests, and the
+        // build-site guard -- is untouched. Off, or with no memory yet, the
+        // old facing stands exactly.
+        if (profile.threatDirectedDefence && profile.threatMemory)
+        {
+            auto sector = strongestThreatSector(bb);
+            if (sector >= 0)
+            {
+                towards = threatSectorDirection(static_cast<std::size_t>(sector));
+            }
+        }
         // The first few go out on the edge of the built-up base rather than
         // among it (firstDefencesOnPerimeter): a tower beside the solar
         // collectors is already inside whatever it was meant to keep out.
@@ -2239,17 +2400,27 @@ namespace rwe
             (enemy.isBuilding ? staticMetal : mobileMetal) += defIt->second.buildCostMetal.value;
         }
         auto seen = staticMetal + mobileMetal;
-        if (seen <= 0.0f)
+        if (seen > 0.0f)
         {
-            return shares;
+            if (staticMetal / seen >= profile.counterShareTrigger)
+            {
+                shares.artilleryKbot += profile.counterShareBonus;
+            }
+            if (mobileMetal / seen >= profile.counterShareTrigger)
+            {
+                shares.rocketKbot += profile.counterShareBonus;
+            }
         }
-        if (staticMetal / seen >= profile.counterShareTrigger)
+
+        // The decayed, role-keyed memory's lean, on top of the older
+        // static/mobile metal rule above. Both are bounded by the profile;
+        // the composition lean is held for compositionCommitSeconds by
+        // commitCompositionLean.
+        if (profile.enemyCompositionMemory)
         {
-            shares.artilleryKbot += profile.counterShareBonus;
-        }
-        if (mobileMetal / seen >= profile.counterShareTrigger)
-        {
-            shares.rocketKbot += profile.counterShareBonus;
+            shares.raider += bb.compositionLean.labRaider;
+            shares.rocketKbot += bb.compositionLean.labRocketKbot;
+            shares.artilleryKbot += bb.compositionLean.labArtilleryKbot;
         }
         return shares;
     }
@@ -2948,7 +3119,7 @@ namespace rwe
         return std::nullopt;
     }
 
-    std::vector<std::string> BuildManager::buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase, const std::optional<OutpostDefencePlan>& outpost, const std::optional<FortificationPlan>& fortify, const std::optional<DefenceRebuildPlan>& rebuild, const std::string& builderType, bool enemyNavalSeen) const
+    std::vector<std::string> BuildManager::buildPriorities(const AiTuningProfile& profile, const AiBlackboard& bb, bool builderAtBase, const std::optional<OutpostDefencePlan>& outpost, const std::optional<FortificationPlan>& fortify, const std::optional<DefenceRebuildPlan>& rebuild, const std::string& builderType, bool enemyNavalSeen, int economySitesOutsideBase) const
     {
         const auto& s = bb.sideUnits;
         // Count what exists or is already going up, so we don't double up.
@@ -3133,6 +3304,49 @@ namespace rwe
         if (total(s.solar) < profile.openingSolarCount)
         {
             want(s.solar);
+        }
+
+        // Humanlike opening timing (docs/agents/rwe-ai-adaptability.md S:6,
+        // D:\tmp\replay-decisions\REPORT.md). A deadline that has passed
+        // unmet pulls that item ahead of the ordinary economy order; before
+        // the deadline the plan is exactly as it was, which is the standard
+        // economy-first opening. It is not a script: the job below is still
+        // sited, mission-filtered and affordability-tested like every other,
+        // and a base under attack keeps its existing priorities.
+        if (profile.humanlikeOpening && bb.enemiesNearBase.empty())
+        {
+            auto hasFactory = total(s.lab) + total(s.vehiclePlant) + total(s.shipyard) >= 1;
+            if (openingDeadlineReached(profile.openingFactoryBySeconds, bb.now) && total(s.lab) < 1 && total(s.shipyard) < 1)
+            {
+                want(s.lab);
+            }
+            // One extractor beyond the opening set, by the recorded first-
+            // expansion time. Not before a factory stands: the expansion is
+            // the constructor's job, and the report's median is 213 s.
+            if (hasFactory && openingDeadlineReached(profile.openingExpansionBySeconds, bb.now)
+                && totalExtractors() <= profile.openingMetalExtractorCount)
+            {
+                wantMetalExtractor();
+            }
+            // The outside-economy push (openingExpansionSites). The recorded
+            // winners hold ten economy sites beyond their opening base against
+            // six for the losers, so once the factory and its constructor
+            // stand, another extractor is asked for until that many of our
+            // economy buildings stand outside defendRadius or the map runs
+            // out. It is a bias on the ordinary growth, not a script: the
+            // job is sited by the same search, refused on unreachable ground
+            // and unaffordable metal by the same planner, and the base-under-
+            // attack guard above takes precedence. The single-extractor rule
+            // just above stays, so a side with no constructor still gets the
+            // old deadline behaviour.
+            if (profile.openingExpansionSites > 0
+                && hasFactory && total(s.constructor) >= 1
+                && openingDeadlineReached(profile.openingExpansionBySeconds, bb.now)
+                && economySitesOutsideBase < profile.openingExpansionSites
+                && totalExtractors() < profile.openingMetalExtractorCount + profile.openingExpansionSites)
+            {
+                wantMetalExtractor();
+            }
         }
         // The stall flag flickers off for a moment whenever a build finishes,
         // so judge metal by the stockpile as well: under a tenth of storage is short.
@@ -3786,7 +4000,7 @@ namespace rwe
         return wanted;
     }
 
-    void BuildManager::planFactories(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, const AiBlackboard& bb, std::vector<PlayerCommand>& outCommands) const
+    void BuildManager::planFactories(const GameSimulation& sim, PlayerId aiOwner, const AiTuningProfile& profile, const AiBlackboard& bb, bool enemyBaseAcrossWater, std::vector<PlayerCommand>& outCommands) const
     {
         const auto& s = bb.sideUnits;
         auto total = [&](const std::string& t) {
@@ -3919,6 +4133,15 @@ namespace rwe
             it->second.seenThisPass = true;
         };
 
+        // The stall watch is swept the same way the hold spells are: mark
+        // nothing seen, touch what is still watched below, and forget the
+        // rest after the loop. A factory that regained an empty queue for one
+        // pass must not come back to a watch that started minutes ago.
+        for (auto& entry : factoryQueueStalls)
+        {
+            entry.second.seenThisPass = false;
+        }
+
         for (auto factoryId : bb.factories)
         {
             const auto& factory = sim.getUnitState(factoryId);
@@ -3969,7 +4192,129 @@ namespace rwe
                 continue;
             }
 
-            if (!factory.buildQueue.empty())
+            // A queued unit that has been at the head of the queue for a long
+            // time without moving, and cannot be paid for, is skipped. See
+            // AiTuningProfile::factoryQueueDropStalled: a factory holding an
+            // unaffordable unit is not saving up, it is doing nothing.
+            //
+            // The tier-two reserve is exempt: holding production still while
+            // metal accumulates for a lab or a moho is precisely what that
+            // hold is for, and `canAfford` will say no for the whole of it.
+            if (profile.factoryQueueDropStalled && !reserveHolds && !factory.buildQueue.empty())
+            {
+                const auto& head = factory.buildQueue.front();
+                auto headDef = sim.unitDefinitions.find(head.first);
+                auto factoryDef = sim.unitDefinitions.find(factory.unitType);
+                if (headDef != sim.unitDefinitions.end() && factoryDef != sim.unitDefinitions.end() && head.second > 0)
+                {
+                    // The frame this head is on, if it has started. The same
+                    // pair of states the mission reservation reads above.
+                    std::optional<UnitId> frameId;
+                    if (auto creating = std::get_if<FactoryBehaviorStateCreatingUnit>(&factory.factoryState))
+                    {
+                        if (auto done = std::get_if<UnitCreationStatusDone>(&creating->status))
+                        {
+                            frameId = done->unitId;
+                        }
+                    }
+                    else if (auto building = std::get_if<FactoryBehaviorStateBuilding>(&factory.factoryState))
+                    {
+                        if (building->targetUnit)
+                        {
+                            frameId = building->targetUnit->first;
+                        }
+                    }
+                    unsigned int completed = 0;
+                    if (frameId)
+                    {
+                        auto frame = sim.tryGetUnitState(*frameId);
+                        if (frame && frame->get().unitType == head.first)
+                        {
+                            completed = frame->get().buildTimeCompleted;
+                        }
+                        else
+                        {
+                            // The frame went away under the queue entry, or is
+                            // not this type: not a frame this watch can time.
+                            frameId.reset();
+                        }
+                    }
+
+                    auto it = factoryQueueStalls.find(factoryId.value);
+                    auto sameWatch = it != factoryQueueStalls.end()
+                        && it->second.headType == head.first
+                        && it->second.frame == (frameId ? frameId->value : 0u)
+                        && completed >= it->second.completedAtStart;
+                    if (!sameWatch)
+                    {
+                        factoryQueueStalls[factoryId.value] = FactoryQueueStall{head.first, frameId ? frameId->value : 0u, completed, bb.now, true};
+                    }
+                    else
+                    {
+                        it->second.seenThisPass = true;
+                        auto progress = completed - it->second.completedAtStart;
+                        auto estimate = estimateBuild(headDef->second, factoryDef->second, completed);
+                        // Affordability without canAfford's "the store is
+                        // nearly full, so say yes" override: that rule exists
+                        // to make a hoarding side spend, and it would call a
+                        // unit priced above the store affordable for ever --
+                        // the exact case this drop is for. What is asked here
+                        // is whether the spare income could finish the frame
+                        // in the time the frame itself takes.
+                        auto net = bb.metalIncome.value - bb.metalCommitted.value;
+                        auto affordable = bb.currentMetal.value + (net * estimate.seconds) >= estimate.metal;
+                        if (factoryQueueHeadIsStalled(
+                                bb.now.value - it->second.since.value,
+                                progress,
+                                headDef->second.buildTime,
+                                profile.factoryQueueStallSeconds,
+                                affordable))
+                        {
+                            // All of this type, not just the head entry:
+                            // ModifyBuildQueue counts backwards from the end
+                            // of the queue, so a negative count takes the last
+                            // entries of the type rather than the front one.
+                            // Clearing the type is what actually lets the next
+                            // entry be tried.
+                            auto headTotal = std::max(0, factory.getBuildQueueTotal(head.first));
+                            auto heldFor = bb.now.value - it->second.since.value;
+                            LOG_INFO << "AI factory: " << factory.unitType << " " << factoryId.value
+                                     << " drops " << head.first << " (" << headTotal
+                                     << " queued); it has not been paid for in " << (heldFor / SimTicksPerSecond) << "s";
+                            sim.eventLog.event(sim.gameTime.value, "factory_queue_cleared")
+                                .set("player", aiOwner.value)
+                                .set("unit", factoryId.value)
+                                .set("factory", factory.unitType)
+                                .set("subject", head.first)
+                                .set("count", headTotal)
+                                .set("held_for", heldFor)
+                                .set("why", "unaffordable")
+                                .detail("drops a queue head it cannot pay for");
+                            if (headTotal > 0)
+                            {
+                                outCommands.emplace_back(PlayerUnitCommand(factoryId, PlayerUnitCommand::ModifyBuildQueue{-headTotal, head.first}));
+                            }
+                            factoryQueueStalls.erase(it);
+                            continue;
+                        }
+                        // A frame that moved by a hundredth of its build time
+                        // is making progress, however slowly, and never gets
+                        // cancelled. Restart the clock from here. So does a
+                        // head that can be paid for: the timeout measures one
+                        // continuous spell of "stuck and unaffordable", not
+                        // how long the entry has merely been queued.
+                        if (progress >= factoryQueueProgressFloor(headDef->second.buildTime) || affordable)
+                        {
+                            it->second.since = bb.now;
+                            it->second.completedAtStart = completed;
+                        }
+                    }
+                }
+            }
+
+            // Top up to factoryQueueDepth. One restores the old rule exactly:
+            // ask for nothing while anything is queued.
+            if (static_cast<int>(factory.buildQueue.size()) >= std::max(1, profile.factoryQueueDepth))
             {
                 // A factory is only topped up once its queue drains, so a
                 // plant that queues one unit which never finishes is never
@@ -4057,11 +4402,30 @@ namespace rwe
                 // the one builder the ground cannot stop, and the patch a
                 // walking constructor cannot get to is exactly the patch
                 // nobody is contesting.
-                if (!s.scoutPlane.empty() && total(s.scoutPlane) < profile.targetScoutPlaneCount)
+                //
+                // The transport's position is the ferryUrgency knob's other
+                // half. Where a shipyard stands, the sea transport is
+                // preferred and the air plant is not asked for one at all --
+                // the same reason the yard is what the water map's army
+                // depends on. Where there is no yard (an island map with an
+                // air plant) the air lift remains the path, and an overdue
+                // first transport goes ahead of the scout plane.
+                auto ferryPriority = ferryBuildPriority(profile, bb, enemyBaseAcrossWater);
+                auto seaTransportBuildable = !s.seaTransport.empty() && bb.buildTree.missionAllows(s.seaTransport);
+                auto preferSeaLift = ferryPriority != FerryBuildPriority::None
+                    && seaTransportBuildable && total(s.shipyard) >= 1;
+                auto wantAirTransport = !preferSeaLift && !s.airTransport.empty()
+                    && (bb.wantsTransport || ferryPriority != FerryBuildPriority::None)
+                    && hasCargo && total(s.airTransport) < profile.targetTransportCount;
+                if (ferryPriority == FerryBuildPriority::Overdue && wantAirTransport)
+                {
+                    next = s.airTransport;
+                }
+                else if (!s.scoutPlane.empty() && total(s.scoutPlane) < profile.targetScoutPlaneCount)
                 {
                     next = s.scoutPlane;
                 }
-                else if (!s.airTransport.empty() && bb.wantsTransport && hasCargo && total(s.airTransport) < profile.targetTransportCount)
+                else if (wantAirTransport)
                 {
                     next = s.airTransport;
                 }
@@ -4141,7 +4505,16 @@ namespace rwe
                     // A tank cannot cross water either. The scout above is
                     // exempt for the same reason the constructor is: eyes
                     // and builders are not the raiding army.
-                    next = pickByShare({{&s.tank, profile.vehicleTankShare}, {&s.missileTruck, profile.vehicleMissileTruckShare}, {&s.mediumTank, profile.vehicleMediumTankShare}});
+                    auto tankShare = profile.vehicleTankShare;
+                    auto missileTruckShare = profile.vehicleMissileTruckShare;
+                    auto mediumTankShare = profile.vehicleMediumTankShare;
+                    if (profile.enemyCompositionMemory && profile.counterEnemyComposition)
+                    {
+                        tankShare += bb.compositionLean.vehicleTank;
+                        missileTruckShare += bb.compositionLean.vehicleMissileTruck;
+                        mediumTankShare += bb.compositionLean.vehicleMediumTank;
+                    }
+                    next = pickByShare({{&s.tank, tankShare}, {&s.missileTruck, missileTruckShare}, {&s.mediumTank, mediumTankShare}});
                 }
             }
             else if (!s.shipyard.empty() && factory.unitType == s.shipyard)
@@ -4155,6 +4528,14 @@ namespace rwe
                 // fleet can already win a surface fight without them: a
                 // submarine's only weapon is a waterweapon (S:13.2), so it
                 // cannot answer anything that is not afloat.
+                //
+                // ferryUrgency moves the transport up this line and no
+                // further: the hull still has to fit targetSeaTransportCount,
+                // the yard still has to stand, hasCargo still has to be true,
+                // and the queue and reserve guards below are untouched. A
+                // lost transport drops out of ownedCompletedCounts and the
+                // next idle yard pass sees Overdue again, which is the
+                // rebuild.
                 auto fleetTarget = navalFleetTarget(profile, bb);
                 // A full store means the fleet is not what is holding the
                 // metal back, so build more of it; see surplusExpansion.
@@ -4172,19 +4553,31 @@ namespace rwe
                 // even where it is worth no warships.
                 auto wantConstructionShip = !s.constructionShip.empty() && submergedMetalPatches > 0
                     && total(s.constructionShip) < profile.targetConstructionShipCount;
+                auto ferryPriority = ferryBuildPriority(profile, bb, enemyBaseAcrossWater);
+                auto wantSeaTransport = !s.seaTransport.empty()
+                    && (bb.wantsTransport || ferryPriority != FerryBuildPriority::None)
+                    && hasCargo && total(s.seaTransport) < profile.targetSeaTransportCount;
                 if (fleetTarget > 0)
                 {
                     auto submarineTarget = std::min(profile.targetSubmarineCount, fleetTarget);
                     auto destroyerTarget = std::max(0, fleetTarget - submarineTarget);
-                    if (!s.scoutShip.empty() && total(s.scoutShip) < profile.targetScoutShipCount)
+                    if (ferryPriority == FerryBuildPriority::Overdue && wantSeaTransport)
+                    {
+                        next = s.seaTransport;
+                    }
+                    else if (!s.scoutShip.empty() && total(s.scoutShip) < profile.targetScoutShipCount)
                     {
                         next = s.scoutShip;
+                    }
+                    else if (ferryPriority != FerryBuildPriority::None && wantSeaTransport)
+                    {
+                        next = s.seaTransport;
                     }
                     else if (wantConstructionShip)
                     {
                         next = s.constructionShip;
                     }
-                    else if (!s.seaTransport.empty() && bb.wantsTransport && hasCargo && total(s.seaTransport) < profile.targetSeaTransportCount)
+                    else if (wantSeaTransport)
                     {
                         next = s.seaTransport;
                     }
@@ -4309,6 +4702,14 @@ namespace rwe
                 // (fortifyExtraConstructors): counted from what stands and
                 // what is going up, which is all this needs to know.
                 auto constructorTarget = profile.targetConstructorCount;
+                // The humanlike opening's constructor deadline: by the
+                // recorded time a factory should have produced one, so the
+                // first is a floor even if a profile asked for none. The
+                // ordinary target still governs every later one.
+                if (profile.humanlikeOpening && constructors == 0 && openingDeadlineReached(profile.openingConstructorBySeconds, bb.now))
+                {
+                    constructorTarget = std::max(constructorTarget, 1);
+                }
                 // More while the income is going unspent
                 // (spendSurplusOnCapacity).
                 if (spendingCapacityShort)
@@ -4390,10 +4791,11 @@ namespace rwe
 
             if (!next.empty())
             {
-                // One line per unit a factory takes on. A factory is only
-                // topped up when its queue has emptied -- the guard at the
-                // head of the loop -- so this is one line per unit produced
-                // and not per planning pass.
+                // One line per unit a factory takes on. With factoryQueueDepth
+                // at one this is one line per unit produced, because the
+                // guard above only lets the planner in when the queue has
+                // drained; at two it is one line per unit begun while the
+                // queue still holds the one before it.
                 //
                 // Worth having because until it was added there was no record
                 // anywhere of what the factories built. Builder orders are
@@ -4434,6 +4836,13 @@ namespace rwe
                 .set("why", tierTwo ? "tier_two_released" : "queue_drained")
                 .detail("the hold ended");
             it = factoryHoldSpells.erase(it);
+        }
+
+        // Likewise for the stall watch: a head that was not looked at this
+        // pass -- queue emptied, factory lost, reserve took over -- is gone.
+        for (auto it = factoryQueueStalls.begin(); it != factoryQueueStalls.end();)
+        {
+            it = it->second.seenThisPass ? std::next(it) : factoryQueueStalls.erase(it);
         }
     }
 
@@ -4913,6 +5322,17 @@ namespace rwe
         {
             // Defences go on the side of the base that faces the enemy.
             auto towards = (*bb.enemyBasePosition - *bb.baseAnchor).normalizedOr(SimVector(1_ss, 0_ss, 0_ss));
+            // ...unless the threat memory knows where the attacks have
+            // actually been coming from. Same post move as chooseDefenceSite,
+            // for the ordinary-build path reached when spreadDefences is off.
+            if (profile.threatDirectedDefence && profile.threatMemory)
+            {
+                auto sector = strongestThreatSector(bb);
+                if (sector >= 0)
+                {
+                    towards = threatSectorDirection(static_cast<std::size_t>(sector));
+                }
+            }
             auto towerAnchor = *bb.baseAnchor + (towards * profile.defenceDistanceFromBase);
             result.site = chooseBuildSite(sim, profile, bb, next, towerAnchor, rng, ctx.siteReachable);
         }
@@ -5562,6 +5982,7 @@ namespace rwe
         std::minstd_rand& rng,
         std::vector<PlayerCommand>& outCommands)
     {
+        commitCompositionLean(profile, bb);
         updateAirWorthIt(sim, aiOwner, profile, bb);
         keepBuildersOutOfFights(sim, aiOwner, profile, bb, outCommands);
 
@@ -5597,6 +6018,38 @@ namespace rwe
         indexGeothermalVents(sim);
         const auto& sideUnits = bb.sideUnits;
 
+        // How much of our economy stands outside the opening base. Read only
+        // by the humanlike opening's expansion push, so it costs nothing when
+        // that knob is off. Counted from the unit list by position rather
+        // than from ownedTotalCounts, which has no positions: an extractor or
+        // generator beyond defendRadius is the AI-side reading of the replay
+        // report's "economy sites outside the opening base". Iteration is the
+        // simulation's id-ordered unit map, so the count is the same on every
+        // peer.
+        int economySitesOutsideBase = 0;
+        if (profile.humanlikeOpening && bb.baseAnchor)
+        {
+            auto baseRadiusSquared = profile.defendRadius * profile.defendRadius;
+            for (const auto& [_, unit] : sim.units)
+            {
+                if (unit.owner != aiOwner || !unit.isAlive())
+                {
+                    continue;
+                }
+                if (unit.unitType != sideUnits.metalExtractor
+                    && unit.unitType != sideUnits.underwaterMetalExtractor
+                    && unit.unitType != sideUnits.solar
+                    && unit.unitType != sideUnits.tidalGenerator)
+                {
+                    continue;
+                }
+                if (unit.position.distanceSquared(*bb.baseAnchor) > baseRadiusSquared)
+                {
+                    ++economySitesOutsideBase;
+                }
+            }
+        }
+
         // Whether the income has outrun what there is to spend it with
         // (spendSurplusOnCapacity). Demand is what the running jobs draw, so
         // a base whose builders and factories are all busy reads near its
@@ -5611,7 +6064,16 @@ namespace rwe
         }
         spendingCapacityShort = capacityShortTicks >= static_cast<unsigned int>(std::max(0, profile.capacitySurplusSeconds)) * SimTicksPerSecond;
 
-        planFactories(sim, aiOwner, profile, bb, outCommands);
+        // The enemy base itself, not a remembered objective: ArmyManager's
+        // attackTarget is blank outside Attack and flaps with visibility, so
+        // the yard cannot wait for it to answer "is the army going to need a
+        // boat". A known enemy building on ground the ground layer cannot
+        // reach is the direct question, and it is available from the moment
+        // the building is seen.
+        auto enemyBaseAcrossWater = bb.groundReachabilityValid && bb.enemyBasePosition
+            && !reachability.isReachable(sim, *bb.enemyBasePosition);
+
+        planFactories(sim, aiOwner, profile, bb, enemyBaseAcrossWater, outCommands);
 
         // Every pass, whether or not a builder is idle: the defences are
         // watched for where attacks come from, and a damaged commander takes
@@ -6146,12 +6608,26 @@ namespace rwe
         const auto builderMc = sim.getAdHocMovementClass(builderDef.movementCollisionInfo);
         const bool builderIsShip = builderDef.isMobile && !builderDef.canFly && builderMc.minWaterDepth > 0;
         const bool builderAfloat = profile.navalBuildersPlanForBase && builderIsShip;
-        auto priorities = buildPriorities(profile, bb, builderAtBase || builderAfloat, outpost, fortify, rebuild, builder.unitType, enemyNavalSeen);
+        auto priorities = buildPriorities(profile, bb, builderAtBase || builderAfloat, outpost, fortify, rebuild, builder.unitType, enemyNavalSeen, economySitesOutsideBase);
         // A construction unit kept beyond targetConstructorCount for the
         // metal left lying about expands first (expansionConstructors):
         // the newest ones, in id order, past the first
-        // targetConstructorCount.
-        if (profile.expansionConstructors > 0 && !builderDef.commander && builder.unitType == sideUnits.constructor && builderAtBase
+        // targetConstructorCount. With humanlikeOpening, once the recorded
+        // first-expansion time has passed and the opening set has still not
+        // grown, the FIRST constructor expands first too: the report's
+        // winners take an outside site by about 213 s and losers by 252 s.
+        // The same exemption lasts while the outside-site push is still
+        // short of openingExpansionSites, so the constructor that is already
+        // out keeps taking ground rather than going back to base jobs the
+        // moment the opening count is met.
+        auto openingExtractors = countOf(bb.ownedTotalCounts, sideUnits.metalExtractor)
+            + countOf(bb.ownedTotalCounts, sideUnits.underwaterMetalExtractor);
+        auto openingExpansionDue = profile.humanlikeOpening && bb.enemiesNearBase.empty()
+            && openingDeadlineReached(profile.openingExpansionBySeconds, bb.now)
+            && (openingExtractors <= profile.openingMetalExtractorCount
+                || (profile.openingExpansionSites > 0
+                    && economySitesOutsideBase < profile.openingExpansionSites));
+        if ((profile.expansionConstructors > 0 || openingExpansionDue) && !builderDef.commander && builder.unitType == sideUnits.constructor && builderAtBase
             && bb.buildTree.canBuild(builder.unitType, sideUnits.metalExtractor))
         {
             int older = 0;
@@ -6162,7 +6638,8 @@ namespace rwe
                     ++older;
                 }
             }
-            if (older >= profile.targetConstructorCount && freeDepositsOnOurSide(sim, profile, bb) > 0)
+            auto firstMayExpand = openingExpansionDue ? 0 : profile.targetConstructorCount;
+            if (older >= firstMayExpand && freeDepositsOnOurSide(sim, profile, bb) > 0)
             {
                 priorities.insert(priorities.begin(), sideUnits.metalExtractor);
             }

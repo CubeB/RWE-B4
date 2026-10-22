@@ -8,6 +8,7 @@
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MovementClassDatabase.h>
 #include <rwe/sim/UnitDefinition.h>
+#include <rwe/sim/UnitVisibility.h>
 #include <rwe/resource_io.h>
 #include <rwe/sim/sim_test_util.h>
 
@@ -46,41 +47,54 @@ namespace rwe
         REQUIRE(ventSteamDrawMode(false, false) == VentSteamDrawMode::Hidden);
     }
 
-    TEST_CASE("an enemy structure is drawn only when the ground under it is in sight, not when one cell at its centre is", "[presentation]")
+    TEST_CASE("rendering and simulation share the original's any-corner unit visibility", "[presentation][visibility]")
     {
+        // CV-02: shipped ARMMEX has a 3x3 footprint and model height 28.6;
+        // ARMLAB has a 6x6 footprint and height 14.75. The old draw gate
+        // demanded the centre AND every ground corner, contrary to this rule.
+        unsigned int footprint = 3;
+        SimScalar height(28.6f);
+        SECTION("metal extractor") {}
+        SECTION("factory")
+        {
+            footprint = 6;
+            height = SimScalar(14.75f);
+        }
+
         GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
         auto player = addPlayer(sim);
+        auto enemy = addPlayer(sim, "enemy");
         auto& visibility = sim.playerVisibility.at(player.value);
-
         UnitDefinition plant{};
         plant.isMobile = false;
-        // Six cells across, as a vehicle plant is: three vision cells wide.
-        plant.movementCollisionInfo = UnitDefinition::AdHocMovementClass{6u, 6u, 255u, 255u, 0u, 0u};
-
+        plant.objectName = "model";
+        plant.movementCollisionInfo = UnitDefinition::AdHocMovementClass{footprint, footprint, 255u, 255u, 0u, 0u};
+        sim.unitDefinitions["plant"] = plant;
+        sim.unitModelDefinitions["model"] = createUnitModelDefinition(height, {});
         auto centre = SimVector(512_ss, 0_ss, 512_ss);
-        auto light = [&](const SimVector& at) {
-            auto cell = sim.visionCellAt(at);
-            REQUIRE(visibility.contains(cell));
-            visibility.visible.set(cell.x, cell.y, static_cast<unsigned char>(1));
-        };
+        auto unit = addUnitOfType(sim, "plant", enemy, centre, makeEmptyCobScript());
+        REQUIRE_FALSE(canSeeUnitInVisibility(sim, player, unit, visibility));
 
-        // Nothing lit: not drawn.
-        REQUIRE_FALSE(structureGroundIsInSight(sim, visibility, centre, plant));
+        auto half = intToSimScalar(static_cast<int>(footprint) * 8);
+        auto corner = sim.visionCellAtHeight(SimVector(centre.x - half, 0_ss, centre.z - half), height);
+        REQUIRE(visibility.contains(corner));
+        visibility.visible.set(corner.x, corner.y, 1);
+        REQUIRE_FALSE(sim.isVisibleTo(player, centre));
+        REQUIRE(sim.canSeeUnit(player, unit));
+        REQUIRE(canSeeUnitInVisibility(sim, player, unit, visibility));
+        REQUIRE(computeUnitDrawStyle(false, false, canSeeUnitInVisibility(sim, player, unit, visibility)) == UnitDrawStyle::Solid);
 
-        // Only the cell at its centre, which is all the position test asks.
-        light(centre);
-        REQUIRE(visibility.isVisible(sim.visionCellAt(centre)));
-        REQUIRE_FALSE(structureGroundIsInSight(sim, visibility, centre, plant));
+        // Watching/revealed pictures are supplied explicitly; the query must
+        // neither fall back to nor modify the simulation player's picture.
+        auto watching = visibility;
+        visibility.clearCurrent();
+        REQUIRE_FALSE(sim.canSeeUnit(player, unit));
+        REQUIRE(canSeeUnitInVisibility(sim, player, unit, watching));
+        REQUIRE_FALSE(sim.canSeeUnit(player, unit));
 
-        // Three corners and the centre: still ground in the dark.
-        light(SimVector(centre.x - 48_ss, 0_ss, centre.z - 48_ss));
-        light(SimVector(centre.x + 48_ss, 0_ss, centre.z - 48_ss));
-        light(SimVector(centre.x - 48_ss, 0_ss, centre.z + 48_ss));
-        REQUIRE_FALSE(structureGroundIsInSight(sim, visibility, centre, plant));
-
-        // The fourth corner: the whole footprint is uncovered.
-        light(SimVector(centre.x + 48_ss, 0_ss, centre.z + 48_ss));
-        REQUIRE(structureGroundIsInSight(sim, visibility, centre, plant));
+        sim.getUnitState(unit).cloaked = true;
+        REQUIRE_FALSE(canSeeUnitInVisibility(sim, player, unit, watching));
+        REQUIRE(canSeeUnitInVisibility(sim, enemy, unit, watching));
     }
 
     TEST_CASE("a film is drawn at x 0, y = (480 - height) / 2, unscaled (BT-157)", "[presentation]")

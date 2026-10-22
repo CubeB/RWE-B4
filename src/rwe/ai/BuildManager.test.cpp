@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/ai/ai_test_util.h>
+#include <rwe/sim/SimTicksPerSecond.h>
 
 /**
  * What makes a builder placed away from the base worth a guard.
@@ -181,4 +182,186 @@ namespace rwe
         REQUIRE(standard.buildSiteGuardSize == 0);
         REQUIRE(standard.buildSiteGuardThreat == 0.0f);
     }
+
+    namespace
+    {
+        /**
+         * A base with one empty lab, a commander for the anchor, and nothing
+         * else: enough for planFactories to run, and small enough that what
+         * it asks the lab for is unambiguous (the constructor, first).
+         */
+        struct FactoryQueueFixture
+        {
+            std::shared_ptr<CobScript> script = makeEmptyCobScript();
+            GameSimulation sim{makeFlatTerrain(64, 64), 0u, 0, 0};
+            PlayerId ai;
+            UnitId labId;
+
+            FactoryQueueFixture()
+                : ai(addPlayer(sim, "ai", GamePlayerType::Computer, "ARM"))
+            {
+                defineWorld(sim);
+                addUnit(sim, "ARMCOM", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+                labId = addUnit(sim, "ARMLAB", ai, SimVector(100_ss, 0_ss, 0_ss), script);
+            }
+
+            AiTuningProfile profile(int depth, bool dropStalled) const
+            {
+                auto p = makeDefaultStandardProfile();
+                // Every controller tick is a planning pass, so the test does
+                // not depend on the shipped cadence.
+                p.buildPlannerTickInterval = 1;
+                p.factoryQueueDepth = depth;
+                p.factoryQueueDropStalled = dropStalled;
+                p.tierTwoEconomyReserve = false;
+                return p;
+            }
+        };
+
+        /** The negative or positive queue changes addressed to one factory. */
+        std::vector<PlayerUnitCommand::ModifyBuildQueue> queueChangesFor(const std::vector<PlayerCommand>& commands, UnitId factory)
+        {
+            std::vector<PlayerUnitCommand::ModifyBuildQueue> found;
+            for (const auto& c : commands)
+            {
+                auto unitCommand = std::get_if<PlayerUnitCommand>(&c);
+                if (!unitCommand || unitCommand->unit != factory)
+                {
+                    continue;
+                }
+                if (auto queue = std::get_if<PlayerUnitCommand::ModifyBuildQueue>(&unitCommand->command))
+                {
+                    found.push_back(*queue);
+                }
+            }
+            return found;
+        }
+
+        /** One controller pass, with the simulation's clock advanced by a tick. */
+        void controllerTick(GameSimulation& sim, AiPlayerController& controller, std::vector<PlayerCommand>& commands)
+        {
+            sim.gameTime = GameTime(sim.gameTime.value + 1);
+            controller.tick(sim, commands);
+        }
+    }
+
+    TEST_CASE("a factory tops its queue up to the configured depth", "[ai]")
+    {
+        FactoryQueueFixture f;
+
+        SECTION("depth two asks for a second unit while one is still queued")
+        {
+            AiPlayerController controller(f.ai, f.profile(2, false), 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+
+            controllerTick(f.sim, controller, commands);
+            auto first = queueChangesFor(commands, f.labId);
+            REQUIRE(first.size() == 1);
+            CHECK(first.front().count == 1);
+            REQUIRE_FALSE(first.front().unitType.empty());
+
+            // Apply the order by hand: the command stream is not fed back
+            // into the simulation by the harness, and the point is what the
+            // planner does when the queue already holds something.
+            f.sim.getUnitState(f.labId).buildQueue.emplace_back(first.front().unitType, 1);
+            commands.clear();
+            controllerTick(f.sim, controller, commands);
+            auto second = queueChangesFor(commands, f.labId);
+            REQUIRE(second.size() == 1);
+            CHECK(second.front().count == 1);
+        }
+
+        SECTION("depth two stops at two")
+        {
+            AiPlayerController controller(f.ai, f.profile(2, false), 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            controllerTick(f.sim, controller, commands);
+            auto first = queueChangesFor(commands, f.labId);
+            REQUIRE(first.size() == 1);
+            f.sim.getUnitState(f.labId).buildQueue.emplace_back(first.front().unitType, 1);
+            f.sim.getUnitState(f.labId).buildQueue.emplace_back(first.front().unitType, 1);
+
+            commands.clear();
+            controllerTick(f.sim, controller, commands);
+            CHECK(queueChangesFor(commands, f.labId).empty());
+        }
+
+        SECTION("depth one is the old rule: nothing while anything is queued")
+        {
+            AiPlayerController controller(f.ai, f.profile(1, false), 42u, MapIntel{});
+            std::vector<PlayerCommand> commands;
+            controllerTick(f.sim, controller, commands);
+            auto first = queueChangesFor(commands, f.labId);
+            REQUIRE(first.size() == 1);
+            f.sim.getUnitState(f.labId).buildQueue.emplace_back(first.front().unitType, 1);
+
+            commands.clear();
+            controllerTick(f.sim, controller, commands);
+            CHECK(queueChangesFor(commands, f.labId).empty());
+        }
+    }
+
+    TEST_CASE("a stalled factory queue head is dropped only after the timeout", "[ai]")
+    {
+        // Pure deadline/progress guard first: it is the whole safety rule and
+        // needs no simulation to pin.
+        CHECK_FALSE(factoryQueueHeadIsStalled(0, 0, 100, 60, false));
+        CHECK_FALSE(factoryQueueHeadIsStalled((60 * SimTicksPerSecond) - 1, 0, 100, 60, false));
+        CHECK(factoryQueueHeadIsStalled(60 * SimTicksPerSecond, 0, 100, 60, false));
+        // Affordable: not a stall, however long it has waited.
+        CHECK_FALSE(factoryQueueHeadIsStalled(60 * SimTicksPerSecond, 0, 100, 60, true));
+        // A hundredth of the build in the window is progress (100 -> 1).
+        CHECK(factoryQueueProgressFloor(100) == 1);
+        CHECK(factoryQueueProgressFloor(1000) == 10);
+        CHECK_FALSE(factoryQueueHeadIsStalled(60 * SimTicksPerSecond, 1, 100, 60, false));
+        CHECK(factoryQueueHeadIsStalled(60 * SimTicksPerSecond, 9, 1000, 60, false));
+        CHECK_FALSE(factoryQueueHeadIsStalled(60 * SimTicksPerSecond, 10, 1000, 60, false));
+        // Zero seconds disables it rather than dropping on the first pass.
+        CHECK_FALSE(factoryQueueHeadIsStalled(60 * SimTicksPerSecond, 0, 100, 0, false));
+
+        FactoryQueueFixture f;
+        // No metal, no income, so the head cannot be paid for. The harness
+        // drives the controller without ticking the simulation, so the
+        // production buffers stay at zero.
+        f.sim.getPlayer(f.ai).metal = Metal(0.0f);
+        f.sim.getUnitState(f.labId).buildQueue.emplace_back("ARMCK", 1);
+
+        auto profile = f.profile(1, true);
+        profile.factoryQueueStallSeconds = 60;
+        AiPlayerController dropper(f.ai, profile, 42u, MapIntel{});
+        std::vector<PlayerCommand> commands;
+        for (unsigned int i = 0;
+             i < static_cast<unsigned int>(profile.factoryQueueStallSeconds) * static_cast<unsigned int>(SimTicksPerSecond);
+             ++i)
+        {
+            controllerTick(f.sim, dropper, commands);
+        }
+        CHECK(queueChangesFor(commands, f.labId).empty());
+
+        // The pass that reaches the deadline drops the head: the same
+        // negative ModifyBuildQueue the besieged path sends.
+        commands.clear();
+        controllerTick(f.sim, dropper, commands);
+        auto changes = queueChangesFor(commands, f.labId);
+        REQUIRE(changes.size() == 1);
+        CHECK(changes.front().unitType == "ARMCK");
+        CHECK(changes.front().count == -1);
+
+        SECTION("the control arm leaves the queue alone when the knob is off")
+        {
+            FactoryQueueFixture quiet;
+            quiet.sim.getPlayer(quiet.ai).metal = Metal(0.0f);
+            quiet.sim.getUnitState(quiet.labId).buildQueue.emplace_back("ARMCK", 1);
+            auto quietProfile = quiet.profile(1, false);
+            quietProfile.factoryQueueStallSeconds = 60;
+            AiPlayerController controller(quiet.ai, quietProfile, 42u, MapIntel{});
+            std::vector<PlayerCommand> quietCommands;
+            for (unsigned int i = 0; i < (60u * static_cast<unsigned int>(SimTicksPerSecond)) + 5u; ++i)
+            {
+                controllerTick(quiet.sim, controller, quietCommands);
+            }
+            CHECK(queueChangesFor(quietCommands, quiet.labId).empty());
+        }
+    }
+
 }

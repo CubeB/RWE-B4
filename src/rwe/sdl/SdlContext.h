@@ -171,6 +171,23 @@ namespace rwe
             return SDL_GetClosestFullscreenDisplayMode(displayID, w, h, refreshRate, false, closest);
         }
 
+        /**
+         * The display's desktop mode -- the one the desktop is running at --
+         * rather than the closest match to a size RWE asks for. Exclusive
+         * fullscreen uses this so the game is not stretched from 800x600 to
+         * a mode of another shape.
+         */
+        bool getDesktopDisplayMode(SDL_DisplayID displayID, SDL_DisplayMode* mode)
+        {
+            const auto* desktop = SDL_GetDesktopDisplayMode(displayID);
+            if (desktop == nullptr)
+            {
+                return false;
+            }
+            *mode = *desktop;
+            return true;
+        }
+
         bool setWindowDisplayMode(SDL_Window* window, const SDL_DisplayMode* mode)
         {
             return SDL_SetWindowFullscreenMode(window, mode);

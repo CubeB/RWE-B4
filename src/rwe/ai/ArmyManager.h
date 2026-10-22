@@ -6,12 +6,86 @@
 #include <rwe/game/PlayerCommand.h>
 #include <rwe/sim/PlayerId.h>
 #include <functional>
+#include <set>
 #include <vector>
 
 namespace rwe
 {
     struct GameSimulation;
     class UnitState;
+
+    /**
+     * How far a ground combat unit looks for something to attack: its own
+     * longest weapon reach less kiteRangeMargin, or engageRadius where that
+     * is further. See AiTuningProfile::acquireWeaponRange; with the knob off
+     * this is engageRadius unchanged.
+     *
+     * A free function rather than a member so the rule can be pinned
+     * without a whole simulation behind it.
+     */
+    SimScalar targetAcquisitionRadius(const AiTuningProfile& profile, SimScalar engageRadius, SimScalar longestWeaponRange);
+
+    /**
+     * One available home-guard unit, as the proportional-defence rule sees
+     * it: who it is, what it is worth, and how far it stands from the
+     * intruder being answered.
+     */
+    struct DefenceResponderCandidate
+    {
+        unsigned int unitId{0};
+        float metal{0.0f};
+        SimScalar distanceSquared{0_ss};
+    };
+
+    /**
+     * Which of the available home guard answers an intruder.
+     *
+     * With proportionalDefence off this is every candidate, which is the old
+     * "send what is at home" response exactly. Otherwise the pool is sorted
+     * by distance and then by raw unit id, and taken from the front until
+     * its metal reaches defenceResponseRatio times the intruders' metal --
+     * with one responder per intruder as a count floor, defenceResponseMinUnits
+     * as a hard minimum, and defenceResponseMaxShare of the pool as an
+     * optional reserve. A single raider therefore draws a pair rather than
+     * the reserve, and a push worth more than the guard draws the guard.
+     *
+     * A free function so the sizing can be pinned without a simulation, and
+     * so the ordering is testable on its own. RWE-original policy
+     * (docs/agents/rwe-ai-adaptability.md S:4); no classic-parity claim.
+     */
+    std::set<unsigned int> chooseDefenceResponders(
+        const AiTuningProfile& profile,
+        const std::vector<DefenceResponderCandidate>& candidates,
+        float intruderMetal,
+        int intruderCount);
+
+    /**
+     * The single enemy a wave should concentrate on, or nothing when the
+     * focus-fire knob is off or nothing known is eligible.
+     *
+     * Roles are ranked by what answering them is worth: an enemy static
+     * defence or a rocket/artillery unit first, because it is what punishes
+     * the wave from outside the line's own reach; then a builder or a
+     * commander, when it is not sitting inside the enemy's base radius;
+     * then raiders and tanks. Within a rank the more expensive unit wins,
+     * then the one nearer the wave, then the lower unit id, so the answer
+     * is the same on every peer.
+     *
+     * Only a unit at least one member of `wave` can hit is eligible
+     * (GameSimulation::weaponCanHitUnit), so a wave of ground guns never
+     * fixates on an aircraft it cannot answer. Contacts that are only
+     * remembered are skipped too: their live state is not available to make
+     * that test.
+     *
+     * A free function so the ranking can be pinned without running the
+     * whole tactical pass. RWE-original policy; no classic-parity claim.
+     */
+    std::optional<UnitId> chooseFocusFireTarget(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        const AiTuningProfile& profile,
+        const AiBlackboard& bb,
+        const std::vector<UnitId>& wave);
 
     /**
      * Commands the combat units as one body: gather at the rally point,
@@ -38,6 +112,15 @@ namespace rwe
 
     private:
         int ticksSinceLastUpdate{0};
+
+        /**
+         * Hit points of the current wave's members on the last tactical pass,
+         * by raw id. A drop is the AI's "the wave has been shot at" signal
+         * (AiTuningProfile::reserveWave): nothing else records first damage,
+         * and a member that dies between passes simply leaves the map.
+         * Cleared when the wave forms or ends.
+         */
+        std::map<unsigned int, unsigned int> waveHitPoints;
 
         /**
          * A target our hulls are firing at, and whether it is getting hurt.

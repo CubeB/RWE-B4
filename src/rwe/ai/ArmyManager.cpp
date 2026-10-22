@@ -2,6 +2,7 @@
 #include <rwe/ai/PerceptionManager.h>
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <set>
 #include <rwe/ai/AiMapBounds.h>
 #include <rwe/ai/BuilderSafety.h>
@@ -30,6 +31,33 @@ namespace rwe
         }
 
         /**
+         * Attack-move: an AttackOrder at a position, so the unit fights
+         * whatever it meets on the way instead of walking past it. The
+         * simulation's order vocabulary already has this shape (AttackTarget
+         * is UnitId or SimVector); until waveAttackMove nothing in the AI
+         * issued the vector form.
+         */
+        PlayerCommand attackMoveCommand(UnitId unit, const SimVector& to)
+        {
+            return PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(AttackOrder(to), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
+        }
+
+        PlayerCommand guardCommand(UnitId unit, UnitId target)
+        {
+            return PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(GuardOrder(target), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
+        }
+
+        bool isGuardingUnit(const UnitState& unit, UnitId target)
+        {
+            if (unit.orders.empty())
+            {
+                return false;
+            }
+            auto guard = std::get_if<GuardOrder>(&unit.orders.front());
+            return guard != nullptr && guard->target == target;
+        }
+
+        /**
          * Whether a remembered enemy is fresh enough to be shot at.
          *
          * PerceptionManager only stamps `lastSeen` on what the AI can
@@ -42,6 +70,76 @@ namespace rwe
         bool inSightRecently(const AiBlackboard& bb, const AiTuningProfile& profile, const KnownEnemy& enemy)
         {
             return bb.now.value <= enemy.lastSeen.value + static_cast<unsigned int>(profile.targetMemoryTicks);
+        }
+
+        /**
+         * The raw exposure test behind AiTuningProfile::commanderHuntExposedOnly.
+         * Reads only the AI's remembered contacts, never the simulation
+         * directly: a commander we cannot remember cannot be hunted by name,
+         * and an escort we have never seen cannot make it look safe.
+         */
+        bool commanderIsExposedToHunt(const GameSimulation& sim, const AiTuningProfile& profile, const AiBlackboard& bb)
+        {
+            if (!bb.enemyCommanderPosition)
+            {
+                return false;
+            }
+            if (bb.enemyBasePosition)
+            {
+                auto minDistance = profile.commanderHuntMinDistance;
+                if (bb.enemyBasePosition->distanceSquared(*bb.enemyCommanderPosition) < (minDistance * minDistance))
+                {
+                    return false;
+                }
+            }
+
+            float escortMetal = 0.0f;
+            auto escortRadiusSquared = profile.commanderHuntEscortRadius * profile.commanderHuntEscortRadius;
+            for (const auto& [_, enemy] : bb.knownEnemies)
+            {
+                if (!enemy.isArmed || enemy.isCommander)
+                {
+                    continue;
+                }
+                if (enemy.lastKnownPosition.distanceSquared(*bb.enemyCommanderPosition) > escortRadiusSquared)
+                {
+                    continue;
+                }
+                auto defIt = sim.unitDefinitions.find(enemy.unitType);
+                if (defIt != sim.unitDefinitions.end())
+                {
+                    escortMetal += defIt->second.buildCostMetal.value;
+                }
+            }
+            return escortMetal < static_cast<float>(profile.commanderHuntMaxEscortMetal);
+        }
+
+        /**
+         * That answer, held for commanderHuntExposureLatchSeconds so the
+         * objective does not alternate between the commander and the base
+         * every pass. The latch is cleared when the commander is no longer
+         * known; with the knob off this is the old unconditional hunt.
+         */
+        bool commanderHuntAllowed(const GameSimulation& sim, const AiTuningProfile& profile, AiBlackboard& bb)
+        {
+            if (!profile.commanderHuntExposedOnly)
+            {
+                bb.commanderHuntExposedLatched = false;
+                return true;
+            }
+            if (!bb.enemyCommanderPosition)
+            {
+                bb.commanderHuntExposedLatched = false;
+                return false;
+            }
+            if (!bb.commanderHuntExposedLatched || bb.now.value >= bb.commanderHuntExposedUntil.value)
+            {
+                bb.commanderHuntExposed = commanderIsExposedToHunt(sim, profile, bb);
+                bb.commanderHuntExposedLatched = true;
+                auto seconds = static_cast<unsigned int>(std::max(0, profile.commanderHuntExposureLatchSeconds));
+                bb.commanderHuntExposedUntil = GameTime(bb.now.value + (seconds * static_cast<unsigned int>(SimTicksPerSecond)));
+            }
+            return bb.commanderHuntExposed;
         }
 
         bool isDgunning(const UnitState& unit, UnitId target)
@@ -130,6 +228,16 @@ namespace rwe
         }
 
         /**
+         * How near a fresh expansion frame a builder has to stand to be the
+         * raid's target instead of the frame. A build site and the nanolathe
+         * arm reach this far; a builder working the next extractor along the
+         * same ridge is a separate errand. RWE-original, and a guess: nothing
+         * has measured where the line belongs
+         * (AiTuningProfile::raidExpansionFrames).
+         */
+        const SimScalar RaidFrameBuilderRadius = 480_ss;
+
+        /**
          * The frame a builder is putting up at this moment, if any: the one
          * its nanolathe is on, the one its build order has placed, or the one
          * it has been told to finish.
@@ -195,6 +303,22 @@ namespace rwe
             }
             auto move = std::get_if<MoveOrder>(&unit.orders.front());
             return move != nullptr && move->destination.distanceSquared(destination) < (64_ss * 64_ss);
+        }
+
+        /** As isMovingTo, for the attack-move form: an AttackOrder at a place. */
+        bool isAttackMovingTo(const UnitState& unit, const SimVector& destination)
+        {
+            if (unit.orders.empty())
+            {
+                return false;
+            }
+            auto attack = std::get_if<AttackOrder>(&unit.orders.front());
+            if (attack == nullptr)
+            {
+                return false;
+            }
+            auto target = std::get_if<SimVector>(&attack->target);
+            return target != nullptr && target->distanceSquared(destination) < (64_ss * 64_ss);
         }
 
         /** An enemy on the water that the commander cannot answer, and how far it shoots. */
@@ -450,6 +574,52 @@ namespace rwe
         // round every pass; narrow enough that it is still cover.
         const SimScalar AntiAirLeash = 700_ss;
 
+        // Which mobile anti-air leave the base with the wave, and what they
+        // guard: the slowest member, which is the one they have to keep up
+        // with. Empty unless a wave is actually out, so an idle AA kbot keeps
+        // covering the base exactly as before.
+        //
+        // Selection is by unit id, over a sorted copy, so every peer picks the
+        // same escorts. At least one stays home whenever more than one stands;
+        // the base is what they were built for, and an escort that takes the
+        // last one away leaves it open.
+        std::optional<UnitId> escortTarget;
+        std::set<unsigned int> escorts;
+        if (profile.antiAirEscortCount > 0 && !bb.antiAirUnits.empty() && bb.phase == GamePhase::Attack && !bb.attackGroup.empty())
+        {
+            SimScalar slowest = 0_ss;
+            for (auto id : bb.attackGroup)
+            {
+                auto unitRef = sim.tryGetUnitState(UnitId(id));
+                if (!unitRef)
+                {
+                    continue;
+                }
+                auto def = sim.unitDefinitions.find(unitRef->get().unitType);
+                if (def == sim.unitDefinitions.end())
+                {
+                    continue;
+                }
+                // Strictly less, so a tie goes to the lowest id and the order
+                // does not depend on where the definitions were walked from.
+                if (!escortTarget || def->second.maxVelocity < slowest)
+                {
+                    slowest = def->second.maxVelocity;
+                    escortTarget = UnitId(id);
+                }
+            }
+
+            auto candidates = bb.antiAirUnits;
+            std::sort(candidates.begin(), candidates.end(), [](UnitId a, UnitId b) { return a.value < b.value; });
+            auto keepHome = candidates.size() > 1 ? std::size_t{1} : std::size_t{0};
+            auto allowed = candidates.size() > keepHome ? candidates.size() - keepHome : std::size_t{0};
+            auto wanted = std::min(static_cast<std::size_t>(profile.antiAirEscortCount), allowed);
+            for (std::size_t i = 0; i < wanted; ++i)
+            {
+                escorts.insert(candidates[i].value);
+            }
+        }
+
         for (auto unitId : bb.antiAirUnits)
         {
             auto unitRef = sim.tryGetUnitState(unitId);
@@ -475,6 +645,34 @@ namespace rwe
             // the whole reason anti-air is kept out of combatUnits -- left in
             // the army it would walk off with the attack, and the base it was
             // built to cover would be open again.
+            //
+            // Except the escorts: those few travel with the wave while it is
+            // out, guarding its slowest unit. The enemy-air case above still
+            // has priority, so their own target rule is untouched; when the
+            // wave ends the leash below takes them home again.
+            if (escortTarget && escorts.count(unitId.value) != 0)
+            {
+                if (!isGuardingUnit(unit, *escortTarget))
+                {
+                    outCommands.push_back(guardCommand(unitId, *escortTarget));
+                }
+                continue;
+            }
+
+            // An escort whose wave has ended hands the guard back and walks
+            // home, rather than following the unit it was guarding around the
+            // base. Only when the knob is on: with it off no AA unit can be
+            // holding one of our guard orders, and the control arm must see
+            // exactly the old command stream.
+            if (profile.antiAirEscortCount > 0 && !unit.orders.empty() && std::holds_alternative<GuardOrder>(unit.orders.front()))
+            {
+                if (bb.baseAnchor)
+                {
+                    outCommands.push_back(moveCommand(unitId, *bb.baseAnchor));
+                }
+                continue;
+            }
+
             if (!bb.baseAnchor)
             {
                 continue;
@@ -626,6 +824,49 @@ namespace rwe
                 best = rweMax(best, it->second.maxRange);
             }
             return best;
+        }
+
+        /**
+         * What a contact is worth concentrating on, in the order the focus
+         * target is chosen (AiTuningProfile::focusFire). A static defence or
+         * a rocket/artillery unit comes first because it is what hurts the
+         * wave from outside the line's own reach; a builder or commander next,
+         * because it is cheap to kill and expensive to the enemy to lose; the
+         * raiders and tanks of the line last.
+         *
+         * The same reach threshold PerceptionManager uses to call a mobile
+         * gun rocket or artillery (EnemyRocketMinRange), so the two views of
+         * the enemy cannot disagree.
+         */
+        enum class FocusFireTier
+        {
+            DefencesAndArtillery = 0,
+            BuildersAndCommanders = 1,
+            Line = 2,
+            Other = 3,
+        };
+
+        FocusFireTier focusFireTierOf(const GameSimulation& sim, const KnownEnemy& enemy)
+        {
+            if (enemy.isBuilding)
+            {
+                return enemy.isArmed ? FocusFireTier::DefencesAndArtillery : FocusFireTier::Other;
+            }
+            if (enemy.isBuilder || enemy.isCommander)
+            {
+                return FocusFireTier::BuildersAndCommanders;
+            }
+            if (enemy.isAir || !enemy.isArmed)
+            {
+                return FocusFireTier::Other;
+            }
+            auto defIt = sim.unitDefinitions.find(enemy.unitType);
+            if (defIt != sim.unitDefinitions.end()
+                && longestWeaponRange(sim, defIt->second).value >= EnemyRocketMinRange)
+            {
+                return FocusFireTier::DefencesAndArtillery;
+            }
+            return FocusFireTier::Line;
         }
 
         /**
@@ -807,6 +1048,219 @@ namespace rwe
             }
             return best;
         }
+    }
+
+    SimScalar targetAcquisitionRadius(const AiTuningProfile& profile, SimScalar engageRadius, SimScalar longestWeaponRange)
+    {
+        if (!profile.acquireWeaponRange)
+        {
+            return engageRadius;
+        }
+        // An unarmed unit has no reach of its own; the flat radius still
+        // applies to it. Everything else may look as far as it can shoot,
+        // less the stand-off it would keep once it got there.
+        auto reach = longestWeaponRange > 0_ss ? longestWeaponRange - profile.kiteRangeMargin : 0_ss;
+        return rweMax(engageRadius, reach);
+    }
+
+    std::set<unsigned int> chooseDefenceResponders(
+        const AiTuningProfile& profile,
+        const std::vector<DefenceResponderCandidate>& candidates,
+        float intruderMetal,
+        int intruderCount)
+    {
+        std::set<unsigned int> chosen;
+        if (candidates.empty())
+        {
+            return chosen;
+        }
+        if (!profile.proportionalDefence)
+        {
+            // The control arm: everyone available answers, exactly as the
+            // old Defend branch did.
+            for (const auto& candidate : candidates)
+            {
+                chosen.insert(candidate.unitId);
+            }
+            return chosen;
+        }
+
+        // Nearest first, then lowest id: a total order over the pool, so two
+        // peers choose the same responders from the same state. Nearest is
+        // measured to the intruder by the caller.
+        std::vector<DefenceResponderCandidate> order = candidates;
+        std::sort(order.begin(), order.end(), [](const DefenceResponderCandidate& a, const DefenceResponderCandidate& b) {
+            if (a.distanceSquared != b.distanceSquared)
+            {
+                return a.distanceSquared < b.distanceSquared;
+            }
+            return a.unitId < b.unitId;
+        });
+
+        const auto available = static_cast<int>(order.size());
+        const auto minUnits = std::min(std::max(1, profile.defenceResponseMinUnits), available);
+        // The share is a reserve control, not the default limit: at 1.0 the
+        // whole guard is available and the ratio is the only thing sizing
+        // the response. Rounding up so a guard of five at 0.5 still commits
+        // three rather than two and a half.
+        auto maxUnits = static_cast<int>(std::ceil(std::max(0.0f, profile.defenceResponseMaxShare) * static_cast<float>(available)));
+        maxUnits = std::clamp(maxUnits, minUnits, available);
+        // One responder per intruder is the floor even when the intruders
+        // are individually cheaper than ours: a push of six Fleas is still
+        // six things shooting, whatever their metal says. The value target
+        // above it is what stops an expensive push being under-sent.
+        const auto countFloor = std::min(std::max(0, intruderCount), maxUnits);
+        const auto floorUnits = std::max(minUnits, countFloor);
+        const auto target = std::max(0.0f, intruderMetal) * std::max(0.0f, profile.defenceResponseRatio);
+
+        float sent = 0.0f;
+        for (const auto& candidate : order)
+        {
+            if (static_cast<int>(chosen.size()) >= maxUnits)
+            {
+                break;
+            }
+            chosen.insert(candidate.unitId);
+            sent += std::max(0.0f, candidate.metal);
+            if (static_cast<int>(chosen.size()) >= floorUnits && sent >= target)
+            {
+                break;
+            }
+        }
+        return chosen;
+    }
+
+    std::optional<UnitId> chooseFocusFireTarget(
+        const GameSimulation& sim,
+        PlayerId aiOwner,
+        const AiTuningProfile& profile,
+        const AiBlackboard& bb,
+        const std::vector<UnitId>& wave)
+    {
+        if (!profile.focusFire || wave.empty())
+        {
+            return std::nullopt;
+        }
+
+        // The middle of the wave, so "nearer" means nearer to the fight it is
+        // already in. A wave with nothing alive in it has no middle and no
+        // target: the caller prunes the dead, but an id can die between the
+        // two passes in the same tick.
+        float sumX = 0.0f;
+        float sumZ = 0.0f;
+        int counted = 0;
+        for (auto id : wave)
+        {
+            auto unitRef = sim.tryGetUnitState(id);
+            if (!unitRef || unitRef->get().isDead())
+            {
+                continue;
+            }
+            sumX += unitRef->get().position.x.value;
+            sumZ += unitRef->get().position.z.value;
+            ++counted;
+        }
+        if (counted == 0)
+        {
+            return std::nullopt;
+        }
+        auto divisor = static_cast<float>(counted);
+        SimVector centre(SimScalar(sumX / divisor), 0_ss, SimScalar(sumZ / divisor));
+
+        struct Candidate
+        {
+            UnitId unitId;
+            FocusFireTier tier;
+            float value;
+            SimScalar distanceSquared;
+        };
+        auto better = [](const Candidate& a, const Candidate& b) {
+            if (a.tier != b.tier)
+            {
+                return a.tier < b.tier;
+            }
+            if (a.value != b.value)
+            {
+                return a.value > b.value;
+            }
+            if (a.distanceSquared != b.distanceSquared)
+            {
+                return a.distanceSquared < b.distanceSquared;
+            }
+            return a.unitId.value < b.unitId.value;
+        };
+
+        std::optional<Candidate> best;
+        for (const auto& [_, enemy] : bb.knownEnemies)
+        {
+            if (!inSightRecently(bb, profile, enemy))
+            {
+                continue;
+            }
+            auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy);
+            // A remembered contact has no live unit, and eligibility is the
+            // simulation's own weapon test (0x49ABB0): it cannot be asked of
+            // a unit that is not there. The wave keeps its ordinary
+            // acquisition for those, which already handles remembered ids.
+            if (!contact || !contact->unit || contact->unit->isDead())
+            {
+                continue;
+            }
+            if (isNanoframe(sim, *contact->unit))
+            {
+                continue;
+            }
+            auto defIt = sim.unitDefinitions.find(enemy.unitType);
+            if (defIt == sim.unitDefinitions.end())
+            {
+                continue;
+            }
+
+            // Can the wave hit it at all? Any one member is enough: the
+            // units that cannot will keep their own targets.
+            bool hittable = false;
+            for (auto id : wave)
+            {
+                auto unitRef = sim.tryGetUnitState(id);
+                if (!unitRef || unitRef->get().isDead())
+                {
+                    continue;
+                }
+                if (longestRangeAgainst(sim, unitRef->get(), *contact->unit) > 0_ss)
+                {
+                    hittable = true;
+                    break;
+                }
+            }
+            if (!hittable)
+            {
+                continue;
+            }
+
+            auto tier = focusFireTierOf(sim, enemy);
+            // A builder or commander is worth the detour only when it is out
+            // in the open. Inside the enemy's base radius it is either behind
+            // the defences that are already ranked first or standing among
+            // them, and the wave will meet it when it takes the base anyway.
+            if (tier == FocusFireTier::BuildersAndCommanders && bb.enemyBasePosition
+                && bb.enemyBasePosition->distanceSquared(enemy.lastKnownPosition)
+                    <= profile.raidAvoidBaseRadius * profile.raidAvoidBaseRadius)
+            {
+                tier = FocusFireTier::Other;
+            }
+
+            Candidate candidate{enemy.unitId, tier, defIt->second.buildCostMetal.value, centre.distanceSquared(enemy.lastKnownPosition)};
+            if (!best || better(candidate, *best))
+            {
+                best = candidate;
+            }
+        }
+
+        if (!best)
+        {
+            return std::nullopt;
+        }
+        return best->unitId;
     }
 
     bool ArmyManager::commanderStaysOnFrame(
@@ -1893,15 +2347,18 @@ namespace rwe
         std::optional<UnitId> best;
         SimScalar bestDistanceSquared = 0_ss;
         auto avoidSquared = profile.raidAvoidBaseRadius * profile.raidAvoidBaseRadius;
-        for (const auto& [_, enemy] : bb.knownEnemies)
-        {
+
+        // A building of theirs that may be raided at all: not beside their
+        // base, of the enemy we are fighting, and not under a gun the threat
+        // map knows about.
+        auto eligible = [&](const KnownEnemy& enemy) {
             if (!enemy.isBuilding)
             {
-                continue;
+                return false;
             }
             if (!contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy))
             {
-                continue;
+                return false;
             }
             // Of the enemy we are fighting, where there is one. The rule
             // below keeps a raid clear of their base, and with three
@@ -1912,13 +2369,122 @@ namespace rwe
             // is the opposite of concentrating.
             if (bb.focusEnemy && enemy.owner != *bb.focusEnemy)
             {
-                continue;
+                return false;
             }
             if (bb.enemyBasePosition && bb.enemyBasePosition->distanceSquared(enemy.lastKnownPosition) < avoidSquared)
             {
-                continue;
+                return false;
             }
             if (threatMap.antiGroundAt(enemy.lastKnownPosition) > 0.0f)
+            {
+                return false;
+            }
+            return true;
+        };
+
+        // A frame the enemy is putting up right now, or the builder standing
+        // over it, comes before a finished building further out
+        // (AiTuningProfile::raidExpansionFrames). The window is on firstSeen,
+        // not lastSeen, so a frame that has been watched for a while is not
+        // treated as new every pass.
+        if (profile.raidExpansionFrames && profile.raidFrameWindowSeconds > 0)
+        {
+            auto windowTicks = static_cast<unsigned int>(profile.raidFrameWindowSeconds) * SimTicksPerSecond;
+            std::optional<UnitId> bestFrame;
+            SimScalar bestFrameDistanceSquared = 0_ss;
+            for (const auto& [_, enemy] : bb.knownEnemies)
+            {
+                if (!enemy.isBuilding || !enemy.underConstruction)
+                {
+                    continue;
+                }
+                if (bb.now.value > enemy.firstSeen.value + windowTicks)
+                {
+                    continue;
+                }
+                if (!eligible(enemy))
+                {
+                    continue;
+                }
+                // The remembered flag is what was true when it was last seen.
+                // Where the AI can see it now, the live unit is the authority
+                // and a frame that has finished is just a finished building.
+                auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy);
+                if (contact && contact->unit && !isNanoframe(sim, *contact->unit))
+                {
+                    continue;
+                }
+                auto d = bb.baseAnchor->distanceSquared(enemy.lastKnownPosition);
+                if (!bestFrame || d < bestFrameDistanceSquared)
+                {
+                    bestFrameDistanceSquared = d;
+                    bestFrame = enemy.unitId;
+                }
+            }
+
+            if (bestFrame)
+            {
+                // Killing the builder stops the next frame as well as this
+                // one, so a visible builder sharing the site is preferred to
+                // the frame itself. It has to be in sight: a remembered one
+                // may have walked on, and the frame is still there.
+                std::optional<UnitId> bestBuilder;
+                SimScalar bestBuilderDistanceSquared = 0_ss;
+                auto frameIt = bb.knownEnemies.find(bestFrame->value);
+                if (frameIt != bb.knownEnemies.end())
+                {
+                    auto framePosition = frameIt->second.lastKnownPosition;
+                    auto builderRadiusSquared = RaidFrameBuilderRadius * RaidFrameBuilderRadius;
+                    for (const auto& [_, enemy] : bb.knownEnemies)
+                    {
+                        if (!enemy.isBuilder || enemy.isBuilding || enemy.isAir)
+                        {
+                            continue;
+                        }
+                        if (enemy.owner != frameIt->second.owner)
+                        {
+                            continue;
+                        }
+                        if (!inSightRecently(bb, profile, enemy))
+                        {
+                            continue;
+                        }
+                        auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy);
+                        if (!contact || !contact->unit)
+                        {
+                            continue;
+                        }
+                        if (bb.focusEnemy && enemy.owner != *bb.focusEnemy)
+                        {
+                            continue;
+                        }
+                        if (bb.enemyBasePosition && bb.enemyBasePosition->distanceSquared(enemy.lastKnownPosition) < avoidSquared)
+                        {
+                            continue;
+                        }
+                        if (threatMap.antiGroundAt(enemy.lastKnownPosition) > 0.0f)
+                        {
+                            continue;
+                        }
+                        auto d = framePosition.distanceSquared(enemy.lastKnownPosition);
+                        if (d > builderRadiusSquared)
+                        {
+                            continue;
+                        }
+                        if (!bestBuilder || d < bestBuilderDistanceSquared)
+                        {
+                            bestBuilderDistanceSquared = d;
+                            bestBuilder = enemy.unitId;
+                        }
+                    }
+                }
+                return bestBuilder ? bestBuilder : bestFrame;
+            }
+        }
+
+        for (const auto& [_, enemy] : bb.knownEnemies)
+        {
+            if (!eligible(enemy))
             {
                 continue;
             }
@@ -1995,7 +2561,7 @@ namespace rwe
                 bb.attackTarget = candidate;
                 return true;
             };
-            if (profile.huntEnemyCommander)
+            if (profile.huntEnemyCommander && commanderHuntAllowed(sim, profile, bb))
             {
                 consider(bb.enemyCommanderPosition);
             }
@@ -2093,7 +2659,8 @@ namespace rwe
                     {
                         continue;
                     }
-                    if (bb.attackGroup.count(unitId.value) != 0 || bb.raidGroup.count(unitId.value) != 0 || bb.guardGroup.count(unitId.value) != 0)
+                    if (bb.attackGroup.count(unitId.value) != 0 || bb.raidGroup.count(unitId.value) != 0 || bb.guardGroup.count(unitId.value) != 0
+                        || bb.reserveGroup.count(unitId.value) != 0)
                     {
                         continue;
                     }
@@ -2107,19 +2674,45 @@ namespace rwe
         // Not while the base itself is under attack: the reserve has a job
         // then, and it is at home.
         bb.raidTarget.reset();
-        if (profile.raidingParties && profile.raidPartySize > 0 && bb.phase == GamePhase::Attack && bb.enemiesNearBase.empty())
+        bb.raidAttackTarget.reset();
+        auto clearRaid = [&]() {
+            bb.raidGroup.clear();
+            bb.raidFormedAt.reset();
+            bb.raidDispatched = false;
+            bb.raidTarget.reset();
+            bb.raidAttackTarget.reset();
+        };
+        if (bb.attackGroup.empty() || bb.waveSpent)
+        {
+            clearRaid();
+        }
+        if (profile.raidingParties && profile.raidPartySize > 0 && bb.phase == GamePhase::Attack && bb.enemiesNearBase.empty() && !bb.attackGroup.empty())
         {
             for (auto it = bb.raidGroup.begin(); it != bb.raidGroup.end();)
             {
                 auto alive = std::binary_search(bb.combatUnits.begin(), bb.combatUnits.end(), UnitId(*it), [](UnitId a, UnitId b) { return a.value < b.value; });
                 it = alive ? std::next(it) : bb.raidGroup.erase(it);
             }
-            if (auto target = chooseRaidTarget(sim, aiOwner, profile, bb, threatMap))
+            auto target = chooseRaidTarget(sim, aiOwner, profile, bb, threatMap);
+            if (target)
             {
                 auto known = bb.knownEnemies.find(target->value);
                 if (known != bb.knownEnemies.end())
                 {
                     bb.raidTarget = known->second.lastKnownPosition;
+                    // A frame or the builder over it is the one case where
+                    // the raiders must be told to attack rather than walk:
+                    // ordinary acquisition deliberately skips a nanoframe. A
+                    // finished factory also carries def.builder, and there is
+                    // nothing to bypass for one of those -- acquisition takes
+                    // it like any other building -- so only a mobile builder
+                    // qualifies.
+                    if (profile.raidExpansionFrames
+                        && (known->second.underConstruction
+                            || (known->second.isBuilder && !known->second.isBuilding)))
+                    {
+                        bb.raidAttackTarget = target;
+                    }
                 }
                 // Only once a wave is already out. Formed before that, the
                 // raid comes out of the first attack the AI ever makes and
@@ -2138,7 +2731,8 @@ namespace rwe
                         {
                             continue;
                         }
-                        if (bb.attackGroup.count(unitId.value) != 0 || bb.guardGroup.count(unitId.value) != 0)
+                        if (bb.attackGroup.count(unitId.value) != 0 || bb.guardGroup.count(unitId.value) != 0
+                            || bb.reserveGroup.count(unitId.value) != 0)
                         {
                             continue;
                         }
@@ -2147,7 +2741,14 @@ namespace rwe
                     if (static_cast<int>(bb.raidGroup.size()) < profile.raidPartySize)
                     {
                         // Not enough to spare. A raid of one is a gift.
-                        bb.raidGroup.clear();
+                        clearRaid();
+                    }
+                    else if (profile.syncRaidWithWave)
+                    {
+                        // The raid exists from this tick, but it is not sent
+                        // until the wave has made the enemy commit.
+                        bb.raidFormedAt = bb.now;
+                        bb.raidDispatched = false;
                     }
                     else if (bb.raidTarget)
                     {
@@ -2163,17 +2764,124 @@ namespace rwe
                             .set("wave", bb.attackGroup.size())
                             .set("why", "raid")
                             .detail("raid sent at an outlying enemy building");
+                        bb.raidDispatched = true;
+                    }
+                }
+
+                // The synchronized second axis. A raid formed behind a wave
+                // waits at the rally until the wave is close enough to be
+                // answered, or until its window runs out, and only then is
+                // the order to move issued (the per-unit pass below sends a
+                // raider that has no target to the rally point like any
+                // other spare unit). "Close enough" is contact recorded on
+                // this wave, an enemy standing within waveMeetEnemyRadius of
+                // the wave's centre, or the wave's centre within the same
+                // radius of the objective it was sent at. A wave that dies
+                // first gives its raiders back to the next wave rather than
+                // leaving them waiting for a centre that no longer exists.
+                if (profile.syncRaidWithWave && !bb.raidGroup.empty())
+                {
+                    if (bb.attackGroup.empty())
+                    {
+                        clearRaid();
+                    }
+                    else
+                    {
+                        // A group that predates this pass without a formation
+                        // tick is treated as formed now: the knob can be
+                        // turned on mid-game, and the raid should start its
+                        // window rather than dispatch as if it were off.
+                        if (!bb.raidFormedAt)
+                        {
+                            bb.raidFormedAt = bb.now;
+                            bb.raidDispatched = false;
+                        }
+                        auto windowTicks = static_cast<unsigned int>(std::max(0, profile.syncWindowSeconds)) * SimTicksPerSecond;
+                        auto withinWindow = bb.now.value < bb.raidFormedAt->value + windowTicks;
+                        auto contact = bb.waveContactAt && bb.waveContactAt->value >= bb.raidFormedAt->value;
+
+                        std::optional<SimVector> waveCentre;
+                        float sumX = 0.0f;
+                        float sumZ = 0.0f;
+                        int counted = 0;
+                        for (auto id : bb.attackGroup)
+                        {
+                            auto unitRef = sim.tryGetUnitState(UnitId(id));
+                            if (!unitRef || unitRef->get().isDead())
+                            {
+                                continue;
+                            }
+                            const auto& p = unitRef->get().position;
+                            sumX += p.x.value;
+                            sumZ += p.z.value;
+                            ++counted;
+                        }
+                        if (counted > 0)
+                        {
+                            auto divisor = static_cast<float>(counted);
+                            waveCentre = SimVector(SimScalar(sumX / divisor), 0_ss, SimScalar(sumZ / divisor));
+                        }
+
+                        auto radiusSquared = profile.waveMeetEnemyRadius * profile.waveMeetEnemyRadius;
+                        if (!contact && waveCentre && profile.waveMeetEnemyRadius > 0_ss)
+                        {
+                            for (const auto& [_, enemy] : bb.knownEnemies)
+                            {
+                                if (enemy.lastKnownPosition.distanceSquared(*waveCentre) >= radiusSquared)
+                                {
+                                    continue;
+                                }
+                                if (contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy))
+                                {
+                                    contact = true;
+                                    break;
+                                }
+                            }
+                        }
+                        auto nearObjective = waveCentre && bb.attackTarget && profile.waveMeetEnemyRadius > 0_ss
+                            && waveCentre->distanceSquared(*bb.attackTarget) < radiusSquared;
+
+                        if (!bb.raidDispatched && withinWindow && !contact && !nearObjective)
+                        {
+                            // At the rally: no errand for this pass, so the
+                            // per-unit pass below treats the raiders as any
+                            // other unit waiting for the next wave.
+                            bb.raidTarget.reset();
+                            bb.raidAttackTarget.reset();
+                            if (!bb.raidDispatched && bb.raidFormedAt && bb.raidFormedAt->value == bb.now.value)
+                            {
+                                LOG_INFO << "AI army: raid of " << bb.raidGroup.size() << " waits for the wave (window "
+                                         << profile.syncWindowSeconds << " s)";
+                            }
+                        }
+                        else if (bb.raidTarget && !bb.raidDispatched)
+                        {
+                            LOG_INFO << "AI army: raid of " << bb.raidGroup.size() << " released at unit " << target->value
+                                     << " at " << static_cast<int>(bb.raidTarget->x.value) << "," << static_cast<int>(bb.raidTarget->z.value)
+                                     << ", wave of " << bb.attackGroup.size()
+                                     << (contact ? " in contact" : (nearObjective ? " at its objective" : " window expired"));
+                            sim.eventLog.event(sim.gameTime.value, "army_dispatch")
+                                .set("player", aiOwner.value)
+                                .set("units", bb.raidGroup.size())
+                                .set("target_id", target->value)
+                                .set("x", static_cast<double>(bb.raidTarget->x.value))
+                                .set("z", static_cast<double>(bb.raidTarget->z.value))
+                                .set("wave", bb.attackGroup.size())
+                                .set("why", "raid")
+                                .detail("raid released beside the wave");
+                            bb.raidDispatched = true;
+                        }
                     }
                 }
             }
             else
             {
-                bb.raidGroup.clear();
+                clearRaid();
             }
         }
         else
         {
-            bb.raidGroup.clear();
+            clearRaid();
         }
 
         // Who is in the wave. Formed when the attack is called, from everyone
@@ -2192,15 +2900,67 @@ namespace rwe
                 auto alive = std::binary_search(bb.combatUnits.begin(), bb.combatUnits.end(), UnitId(*it), [](UnitId a, UnitId b) { return a.value < b.value; });
                 it = alive ? std::next(it) : bb.attackGroup.erase(it);
             }
+            if (!profile.reserveWave)
+            {
+                bb.reserveGroup.clear();
+            }
+            for (auto it = bb.reserveGroup.begin(); it != bb.reserveGroup.end();)
+            {
+                auto alive = std::binary_search(bb.combatUnits.begin(), bb.combatUnits.end(), UnitId(*it), [](UnitId a, UnitId b) { return a.value < b.value; });
+                it = alive ? std::next(it) : bb.reserveGroup.erase(it);
+            }
             if (bb.attackGroup.empty() && !bb.waveSpent)
             {
+                // Sorted by id, because combatUnits is: the split is the
+                // same on every peer and on every replay.
+                std::vector<UnitId> forming;
                 for (auto unitId : bb.combatUnits)
                 {
                     if (!(bb.scoutUnitId && *bb.scoutUnitId == unitId) && bb.raidGroup.count(unitId.value) == 0
-                        && bb.guardGroup.count(unitId.value) == 0)
+                        && bb.guardGroup.count(unitId.value) == 0 && bb.reserveGroup.count(unitId.value) == 0)
                     {
-                        bb.attackGroup.insert(unitId.value);
+                        forming.push_back(unitId);
                     }
+                }
+                // The fraction is rounded to the nearest unit and the wave
+                // keeps at least one. With reserveWave off every unit forms
+                // the wave, which is the old command stream.
+                std::size_t waveCount = forming.size();
+                if (profile.reserveWave && !forming.empty())
+                {
+                    auto fraction = std::clamp(profile.waveCommitFraction, 0.0f, 1.0f);
+                    auto rounded = static_cast<std::size_t>(static_cast<float>(forming.size()) * fraction + 0.5f);
+                    waveCount = std::clamp<std::size_t>(rounded, 1, forming.size());
+                }
+                for (std::size_t i = 0; i < forming.size(); ++i)
+                {
+                    if (i < waveCount)
+                    {
+                        bb.attackGroup.insert(forming[i].value);
+                    }
+                    else
+                    {
+                        bb.reserveGroup.insert(forming[i].value);
+                    }
+                }
+                bb.waveContactAt.reset();
+                waveHitPoints.clear();
+                if (profile.reserveWave)
+                {
+                    for (auto unitId : bb.attackGroup)
+                    {
+                        waveHitPoints[unitId] = sim.getUnitState(UnitId(unitId)).hitPoints;
+                    }
+                }
+                if (!bb.reserveGroup.empty())
+                {
+                    LOG_INFO << "AI army: wave of " << bb.attackGroup.size() << " with " << bb.reserveGroup.size() << " held in reserve";
+                    sim.eventLog.event(sim.gameTime.value, "army_reserve")
+                        .set("player", aiOwner.value)
+                        .set("wave", bb.attackGroup.size())
+                        .set("reserve", bb.reserveGroup.size())
+                        .set("why", "formed")
+                        .detail("part of the wave is held back at the rally point");
                 }
             }
             // Reinforcements, in batches. The wave is only over when it has
@@ -2221,7 +2981,7 @@ namespace rwe
                         continue;
                     }
                     if (bb.attackGroup.count(unitId.value) != 0 || bb.raidGroup.count(unitId.value) != 0
-                        || bb.guardGroup.count(unitId.value) != 0)
+                        || bb.guardGroup.count(unitId.value) != 0 || bb.reserveGroup.count(unitId.value) != 0)
                     {
                         continue;
                     }
@@ -2232,6 +2992,10 @@ namespace rwe
                     for (auto unitId : reserve)
                     {
                         bb.attackGroup.insert(unitId.value);
+                        if (profile.reserveWave)
+                        {
+                            waveHitPoints[unitId.value] = sim.getUnitState(unitId).hitPoints;
+                        }
                     }
                     LOG_INFO << "AI army: " << reserve.size() << " reinforcements join the wave, now " << bb.attackGroup.size();
                     sim.eventLog.event(sim.gameTime.value, "army_reinforce")
@@ -2242,14 +3006,111 @@ namespace rwe
                         .detail("reinforcements join the wave");
                 }
             }
+
+            // Contact and the reserve release. Contact is the first of a hit
+            // point drop on a wave member (since the wave formed) or an
+            // enemy still standing within waveMeetEnemyRadius of the wave's
+            // centre. Once contact has been held for reserveReleaseSeconds
+            // the reserve goes in; a wave that falls to retreatArmySize gets
+            // it at once, because that is the moment the first body is about
+            // to break. Both tests read only what the AI already knows.
+            if (profile.reserveWave && !bb.reserveGroup.empty() && !bb.attackGroup.empty())
+            {
+                bool contact = false;
+                for (auto it = waveHitPoints.begin(); it != waveHitPoints.end();)
+                {
+                    if (bb.attackGroup.count(it->first) == 0)
+                    {
+                        it = waveHitPoints.erase(it);
+                        continue;
+                    }
+                    auto hitPoints = sim.getUnitState(UnitId(it->first)).hitPoints;
+                    if (hitPoints < it->second)
+                    {
+                        contact = true;
+                    }
+                    it->second = hitPoints;
+                    ++it;
+                }
+
+                std::optional<SimVector> waveCentre;
+                {
+                    float sumX = 0.0f;
+                    float sumZ = 0.0f;
+                    int counted = 0;
+                    for (auto id : bb.attackGroup)
+                    {
+                        const auto& p = sim.getUnitState(UnitId(id)).position;
+                        sumX += p.x.value;
+                        sumZ += p.z.value;
+                        ++counted;
+                    }
+                    if (counted > 0)
+                    {
+                        auto divisor = static_cast<float>(counted);
+                        waveCentre = SimVector(SimScalar(sumX / divisor), 0_ss, SimScalar(sumZ / divisor));
+                    }
+                }
+                if (!contact && waveCentre && profile.waveMeetEnemyRadius > 0_ss)
+                {
+                    auto radiusSquared = profile.waveMeetEnemyRadius * profile.waveMeetEnemyRadius;
+                    for (const auto& [_, enemy] : bb.knownEnemies)
+                    {
+                        if (enemy.lastKnownPosition.distanceSquared(*waveCentre) >= radiusSquared)
+                        {
+                            continue;
+                        }
+                        if (contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, enemy))
+                        {
+                            contact = true;
+                            break;
+                        }
+                    }
+                }
+                if (contact && !bb.waveContactAt)
+                {
+                    bb.waveContactAt = bb.now;
+                }
+
+                auto releaseTicks = static_cast<unsigned int>(std::max(0, profile.reserveReleaseSeconds)) * SimTicksPerSecond;
+                auto release = static_cast<int>(bb.attackGroup.size()) <= profile.retreatArmySize;
+                auto contactHeld = bb.waveContactAt && bb.now.value >= bb.waveContactAt->value + releaseTicks;
+                if (release || contactHeld)
+                {
+                    for (auto id : bb.reserveGroup)
+                    {
+                        bb.attackGroup.insert(id);
+                        waveHitPoints[id] = sim.getUnitState(UnitId(id)).hitPoints;
+                    }
+                    LOG_INFO << "AI army: reserve of " << bb.reserveGroup.size() << " released, wave now " << bb.attackGroup.size()
+                             << (release ? " (wave at retreat size)" : " (contact held)");
+                    sim.eventLog.event(sim.gameTime.value, "army_reserve_release")
+                        .set("player", aiOwner.value)
+                        .set("units", bb.reserveGroup.size())
+                        .set("wave", bb.attackGroup.size())
+                        .set("why", release ? "retreat_size" : "contact")
+                        .detail("the reserve joins the wave");
+                    bb.reserveGroup.clear();
+                }
+            }
+
             if (static_cast<int>(bb.attackGroup.size()) < profile.retreatArmySize)
             {
                 bb.waveSpent = true;
+                // The wave is over: the reserve goes back to ordinary
+                // rally/next-wave behaviour rather than being committed to a
+                // fight that has already been lost.
+                bb.reserveGroup.clear();
+                bb.waveContactAt.reset();
+                waveHitPoints.clear();
             }
         }
         else
         {
             bb.attackGroup.clear();
+            bb.reserveGroup.clear();
+            bb.waveContactAt.reset();
+            waveHitPoints.clear();
             bb.waveSpent = false;
         }
 
@@ -2263,6 +3124,9 @@ namespace rwe
         // near the map's middle it was as likely to be their solar
         // collector as the raider at our extractors.
         std::optional<UnitId> intruder;
+        std::optional<SimVector> intruderPosition;
+        float intruderMetal = 0.0f;
+        int intruderCount = 0;
         if (bb.baseAnchor)
         {
             SimScalar nearest = 0_ss;
@@ -2286,14 +3150,69 @@ namespace rwe
                 {
                     continue;
                 }
+                // The whole party's value, not only the nearest one's: the
+                // responding force is sized against what came, and a second
+                // raider behind the first is part of what came.
+                if (auto defIt = sim.unitDefinitions.find(known->second.unitType); defIt != sim.unitDefinitions.end())
+                {
+                    intruderMetal += std::max(0.0f, defIt->second.buildCostMetal.value);
+                }
+                ++intruderCount;
                 auto distance = bb.baseAnchor->distanceSquared(known->second.lastKnownPosition);
                 if (!intruder || distance < nearest)
                 {
                     nearest = distance;
                     intruder = enemyId;
+                    intruderPosition = known->second.lastKnownPosition;
                 }
             }
         }
+
+        // How much of the home guard answers it (proportionalDefence). The
+        // pool is what the unit loop below could actually send: alive,
+        // not the borrowed scout, and not already away with the wave, the
+        // raid or a build-site guard. With the knob off this is every one of
+        // them, and the two branches that use it behave exactly as before.
+        std::set<unsigned int> defenceResponders;
+        if (profile.proportionalDefence && intruder && !outnumbered)
+        {
+            std::vector<DefenceResponderCandidate> pool;
+            pool.reserve(bb.combatUnits.size());
+            for (auto unitId : bb.combatUnits)
+            {
+                if (bb.scoutUnitId && *bb.scoutUnitId == unitId)
+                {
+                    continue;
+                }
+                if (bb.phase == GamePhase::Attack && profile.attackInWaves && bb.attackGroup.count(unitId.value) != 0)
+                {
+                    continue;
+                }
+                if (bb.raidGroup.count(unitId.value) != 0 || bb.guardGroup.count(unitId.value) != 0)
+                {
+                    continue;
+                }
+                auto unitRef = sim.tryGetUnitState(unitId);
+                if (!unitRef || unitRef->get().isDead())
+                {
+                    continue;
+                }
+                DefenceResponderCandidate candidate;
+                candidate.unitId = unitId.value;
+                if (auto defIt = sim.unitDefinitions.find(unitRef->get().unitType); defIt != sim.unitDefinitions.end())
+                {
+                    candidate.metal = std::max(0.0f, defIt->second.buildCostMetal.value);
+                }
+                candidate.distanceSquared = intruderPosition
+                    ? unitRef->get().position.distanceSquared(*intruderPosition)
+                    : bb.baseAnchor->distanceSquared(unitRef->get().position);
+                pool.push_back(candidate);
+            }
+            defenceResponders = chooseDefenceResponders(profile, pool, intruderMetal, intruderCount);
+        }
+        auto answersIntruder = [&](UnitId unitId) {
+            return !profile.proportionalDefence || defenceResponders.count(unitId.value) != 0;
+        };
 
         // Raiders at a building of ours out beyond the base, and the reserve
         // near enough and strong enough to answer them (answerOutpostRaids).
@@ -2363,7 +3282,7 @@ namespace rwe
                 for (auto id : bb.combatUnits)
                 {
                     if ((bb.scoutUnitId && *bb.scoutUnitId == id) || bb.attackGroup.count(id.value) != 0 || bb.raidGroup.count(id.value) != 0
-                        || bb.guardGroup.count(id.value) != 0)
+                        || bb.guardGroup.count(id.value) != 0 || bb.reserveGroup.count(id.value) != 0)
                     {
                         continue;
                     }
@@ -2544,6 +3463,97 @@ namespace rwe
             }
         }
 
+        // One target for the wave (AiTuningProfile::focusFire). Chosen from
+        // what the AI knows, by role and value, and kept for a short latch so
+        // the line does not change its mind every tactical pass. The choice
+        // is only of what at least one wave member's own weapons can hit; a
+        // unit that cannot hit it keeps the ordinary acquisition below.
+        if (!profile.focusFire || bb.phase != GamePhase::Attack)
+        {
+            bb.focusFireTarget.reset();
+        }
+        else
+        {
+            std::vector<UnitId> wave;
+            if (profile.attackInWaves)
+            {
+                for (auto id : bb.attackGroup)
+                {
+                    auto unitRef = sim.tryGetUnitState(UnitId(id));
+                    if (unitRef && !unitRef->get().isDead())
+                    {
+                        wave.push_back(UnitId(id));
+                    }
+                }
+            }
+            else
+            {
+                for (auto id : bb.combatUnits)
+                {
+                    if (bb.scoutUnitId && *bb.scoutUnitId == id)
+                    {
+                        continue;
+                    }
+                    wave.push_back(id);
+                }
+            }
+
+            // A target that died, left sight, or is no longer hittable by
+            // anybody in the wave is dropped at once, latch or no latch: a
+            // dead unit is not a target the latch should preserve.
+            if (bb.focusFireTarget)
+            {
+                auto known = bb.knownEnemies.find(bb.focusFireTarget->value);
+                bool valid = known != bb.knownEnemies.end() && inSightRecently(bb, profile, known->second);
+                if (valid)
+                {
+                    auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, known->second);
+                    valid = contact && contact->unit && !contact->unit->isDead()
+                        && !isNanoframe(sim, *contact->unit);
+                    if (valid)
+                    {
+                        bool hittable = false;
+                        for (auto id : wave)
+                        {
+                            auto unitRef = sim.tryGetUnitState(id);
+                            if (!unitRef || unitRef->get().isDead())
+                            {
+                                continue;
+                            }
+                            if (longestRangeAgainst(sim, unitRef->get(), *contact->unit) > 0_ss)
+                            {
+                                hittable = true;
+                                break;
+                            }
+                        }
+                        valid = hittable;
+                    }
+                }
+                if (!valid)
+                {
+                    bb.focusFireTarget.reset();
+                }
+            }
+
+            auto latchTicks = static_cast<unsigned int>(std::max(0, profile.focusFireLatchSeconds)) * SimTicksPerSecond;
+            bool due = !bb.focusFireTarget
+                || profile.focusFireLatchSeconds <= 0
+                || bb.now.value >= bb.focusFireTargetChosenAt.value + latchTicks;
+            if (due)
+            {
+                auto chosen = chooseFocusFireTarget(sim, aiOwner, profile, bb, wave);
+                if (chosen)
+                {
+                    bb.focusFireTarget = chosen;
+                    bb.focusFireTargetChosenAt = bb.now;
+                }
+                else
+                {
+                    bb.focusFireTarget.reset();
+                }
+            }
+        }
+
         for (auto unitId : bb.combatUnits)
         {
             if (bb.scoutUnitId && *bb.scoutUnitId == unitId)
@@ -2634,7 +3644,48 @@ namespace rwe
             // attack would go on firing for the rest of the game. A move to
             // where it already stands is the cheapest way to say stop.
             // Anything within reach gets shot at, whatever the phase.
-            if (auto enemy = nearestKnownEnemy(sim, aiOwner, profile, bb, unit.position, profile.engageRadius, false, [&](UnitId candidate) { return hasGivenUpOn(unitId, candidate, bb.now); }))
+            //
+            // Reach here is the unit's own: a rocket kbot, an artillery kbot
+            // or anything else that outranges a raider acquires at its weapon's
+            // range rather than walking to the flat engageRadius first
+            // (acquireWeaponRange). The kiting, anti-air and mission rules take
+            // their radii elsewhere in this file and are untouched.
+            SimScalar ownReach = 0_ss;
+            if (auto defIt = sim.unitDefinitions.find(unit.unitType); defIt != sim.unitDefinitions.end())
+            {
+                ownReach = longestWeaponRange(sim, defIt->second);
+            }
+            auto acquireRadius = targetAcquisitionRadius(profile, profile.engageRadius, ownReach);
+            // A wave member that can hit the wave's focus target takes it
+            // ahead of its own nearest enemy (AiTuningProfile::focusFire).
+            // Everything else falls through to exactly the old acquisition:
+            // this is a preference, not an order, and eligibility is the
+            // simulation's own weapon test, so a unit is never sent at
+            // something it cannot hurt.
+            std::optional<UnitId> enemy;
+            if (profile.focusFire && bb.focusFireTarget && bb.phase == GamePhase::Attack
+                && (!profile.attackInWaves || bb.attackGroup.count(unitId.value) != 0)
+                && !hasGivenUpOn(unitId, *bb.focusFireTarget, bb.now))
+            {
+                auto known = bb.knownEnemies.find(bb.focusFireTarget->value);
+                if (known != bb.knownEnemies.end()
+                    && inSightRecently(bb, profile, known->second)
+                    && unit.position.distanceSquared(known->second.lastKnownPosition) <= acquireRadius * acquireRadius)
+                {
+                    auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, known->second);
+                    if (contact && contact->unit && !contact->unit->isDead()
+                        && !isNanoframe(sim, *contact->unit)
+                        && longestRangeAgainst(sim, unit, *contact->unit) > 0_ss)
+                    {
+                        enemy = bb.focusFireTarget;
+                    }
+                }
+            }
+            if (!enemy)
+            {
+                enemy = nearestKnownEnemy(sim, aiOwner, profile, bb, unit.position, acquireRadius, false, [&](UnitId candidate) { return hasGivenUpOn(unitId, candidate, bb.now); });
+            }
+            if (enemy)
             {
                 // Is it getting hurt? The question is asked of the target we
                 // are about to order this unit at rather than of the order it
@@ -2867,8 +3918,11 @@ namespace rwe
             {
                 case GamePhase::Defend:
                 {
-                    // Head for the intruder closest to home.
-                    if (intruder && !outnumbered)
+                    // Head for the intruder closest to home, with the part
+                    // of the guard the proportional rule sized for it. The
+                    // rest stay on the rally point below and still shoot
+                    // anything that comes into their own reach.
+                    if (intruder && !outnumbered && answersIntruder(unitId))
                     {
                         if (!isAttackingUnit(unit, *intruder))
                         {
@@ -2885,9 +3939,49 @@ namespace rwe
                     // rule is above the switch and applies to them too.
                     if (bb.raidGroup.count(unitId.value) != 0 && bb.raidTarget)
                     {
+                        // An expansion frame is the one target acquisition
+                        // skips on purpose (a nanoframe has no hit points and
+                        // dies to anything, and the same frame over a factory
+                        // pad is a trap), so a raid sent for one has to say
+                        // so explicitly. A builder standing over the frame is
+                        // attacked the same way; either is only ordered when
+                        // this unit's own weapons can actually hit it.
+                        if (profile.raidExpansionFrames && bb.raidAttackTarget)
+                        {
+                            auto known = bb.knownEnemies.find(bb.raidAttackTarget->value);
+                            if (known != bb.knownEnemies.end()
+                                && (known->second.underConstruction
+                                    || (known->second.isBuilder && !known->second.isBuilding))
+                                && inSightRecently(bb, profile, known->second))
+                            {
+                                auto contact = contactStillStanding(sim, aiOwner, profile.cheatModeOmniscient, known->second);
+                                if (contact && contact->unit && !contact->unit->isDead()
+                                    && longestRangeAgainst(sim, unit, *contact->unit) > 0_ss)
+                                {
+                                    if (!isAttackingUnit(unit, *bb.raidAttackTarget))
+                                    {
+                                        outCommands.push_back(attackCommand(unitId, *bb.raidAttackTarget));
+                                    }
+                                    break;
+                                }
+                            }
+                        }
                         if (!isMovingTo(unit, *bb.raidTarget))
                         {
                             outCommands.push_back(moveCommand(unitId, *bb.raidTarget));
+                        }
+                        break;
+                    }
+                    // A synchronized raid that is still waiting has no target
+                    // yet: it holds at the rally rather than drifting off with
+                    // whatever order it had. Off, this branch is not reached,
+                    // which is what keeps the old command stream exactly.
+                    if (profile.syncRaidWithWave && bb.raidGroup.count(unitId.value) != 0)
+                    {
+                        if (bb.rallyPoint && !isMovingTo(unit, *bb.rallyPoint)
+                            && unit.position.distanceSquared(*bb.rallyPoint) > (96_ss * 96_ss))
+                        {
+                            outCommands.push_back(moveCommand(unitId, *bb.rallyPoint));
                         }
                         break;
                     }
@@ -2909,6 +4003,7 @@ namespace rwe
                         // converge, because then the only thing moving is the
                         // rest of the wave closing the gap.
                         auto destination = *waveObjective;
+                        bool holding = false;
                         if (waveCentre && profile.waveCohesionRadius > 0_ss)
                         {
                             auto unitToObjective = flatDistance(unit.position, *waveObjective);
@@ -2916,9 +4011,22 @@ namespace rwe
                             if (unitToObjective + profile.waveCohesionRadius < centreToObjective)
                             {
                                 destination = unit.position;
+                                holding = true;
                             }
                         }
-                        if (!isMovingTo(unit, destination))
+                        // Attack-move at the objective (waveAttackMove): the
+                        // wave fights what it meets instead of walking past
+                        // it. A unit holding for cohesion still gets the
+                        // plain stand order, and with the knob off every
+                        // order here is the MoveOrder it always was.
+                        if (profile.waveAttackMove && !holding)
+                        {
+                            if (!isAttackMovingTo(unit, destination))
+                            {
+                                outCommands.push_back(attackMoveCommand(unitId, destination));
+                            }
+                        }
+                        else if (!isMovingTo(unit, destination))
                         {
                             outCommands.push_back(moveCommand(unitId, destination));
                         }
@@ -2927,11 +4035,22 @@ namespace rwe
                     // The reserve: gathering for the next wave, and the ones
                     // who answer an intruder while this wave is out, since
                     // the strategic pass no longer recalls the wave for one.
-                    if (bb.phase == GamePhase::Attack && intruder && !outnumbered)
+                    if (bb.phase == GamePhase::Attack && intruder && !outnumbered && answersIntruder(unitId))
                     {
                         if (!isAttackingUnit(unit, *intruder))
                         {
                             outCommands.push_back(attackCommand(unitId, *intruder));
+                        }
+                        break;
+                    }
+                    // Held back for the wave's second body: wait at the
+                    // rally point, not at the front with the first.
+                    if (bb.reserveGroup.count(unitId.value) != 0)
+                    {
+                        if (bb.rallyPoint && !isMovingTo(unit, *bb.rallyPoint)
+                            && unit.position.distanceSquared(*bb.rallyPoint) > (96_ss * 96_ss))
+                        {
+                            outCommands.push_back(moveCommand(unitId, *bb.rallyPoint));
                         }
                         break;
                     }

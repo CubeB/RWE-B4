@@ -9,8 +9,9 @@
 //   LOG_ERROR << "Failed to open file: " << filename;
 //
 // Log level is controlled at compile time via RWE_LOG_LEVEL.
-// Set it in CMake (e.g. -DRWE_LOG_LEVEL=1) to strip lower levels
-// from the binary entirely. Default is 0 (everything enabled).
+// Define it through compiler flags (e.g. -DRWE_LOG_LEVEL=0) to override
+// the default: Info in NDEBUG builds, Debug otherwise. Disabled levels
+// are stripped from the binary, including evaluation of their arguments.
 //
 //   0 = Debug   (all messages)
 //   1 = Info
@@ -33,7 +34,13 @@
 // Compile-time log level. Statements below this level are dead code
 // and will be eliminated by the compiler.
 #ifndef RWE_LOG_LEVEL
+// RWE-original diagnostic policy: docs/PERFORMANCE-LOGGING-FINDINGS.md
+// PERF-LOG-001. Avoid per-frame/per-path formatting and disk flushes in play.
+#ifdef NDEBUG
+#define RWE_LOG_LEVEL 1
+#else
 #define RWE_LOG_LEVEL 0
+#endif
 #endif
 
 #define RWE_LEVEL_DEBUG    0
