@@ -44,6 +44,48 @@ namespace rwe
         }
     }
 
+    TEST_CASE("map descriptions stay above the size and player count", "[ui][text]")
+    {
+        // Actual descriptions from ccmaps.ccx, in SELMAP.GUI's 235x31 label.
+        // SIZE begins at y=330, thirty pixels below DESCRIPTION.
+        const std::vector<std::string> descriptions{
+            "19 X 19  Body of water separates two land masses.  Great underwater starts!",
+            "12 X 15  Make your way around the edges or fly across the center.",
+            "20 X 20  Large polar ice cap map. A bleak and forbidding world.",
+        };
+        const auto font = makeFont();
+        const auto area = Rectangle2f::fromTopLeft(60, 300, 235, 30);
+        for (const auto& description : descriptions)
+        {
+            const auto glyphs = layoutWrappedText(area, description, font);
+            REQUIRE_FALSE(glyphs.empty());
+            for (const auto& glyph : glyphs)
+            {
+                const auto& bounds = font.sprites[glyph.glyph]->bounds;
+                CHECK(glyph.x + bounds.left() >= area.left());
+                CHECK(glyph.x + bounds.right() <= area.right());
+                CHECK(glyph.y + bounds.top() >= area.top());
+                CHECK(glyph.y + bounds.bottom() < 330);
+            }
+        }
+    }
+
+    TEST_CASE("wrapped labels split long words and respect explicit line breaks", "[ui][text]")
+    {
+        const auto font = makeFont();
+        const auto area = Rectangle2f::fromTopLeft(0, 0, 21, 30);
+        const auto glyphs = layoutWrappedText(area, "abcdefghij", font);
+        REQUIRE(glyphs.size() == 6);
+        CHECK(glyphs.front().y == 12);
+        CHECK(glyphs[3].y == 27);
+        const auto lines = layoutWrappedText(area, "a\r\nb\nc", font);
+        REQUIRE(lines.size() == 2);
+        CHECK(lines[0].glyph == 'a');
+        CHECK(lines[1].glyph == 'b');
+        CHECK(layoutWrappedText(Rectangle2f::fromTopLeft(0, 0, 21, 0), "text", font).empty());
+        CHECK_FALSE(layoutWrappedText(Rectangle2f::fromTopLeft(0, 0, 100, 12), "Loading", font).empty());
+    }
+
     TEST_CASE("text with a byte that is not valid UTF-8 is measured, not thrown out of the frame", "[ui][malformed]")
     {
         // 0xE9 is "e acute" in Windows-1252, which is how 309 of the 435

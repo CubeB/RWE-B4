@@ -438,6 +438,12 @@ namespace rwe
 
     void ScenarioDriver::key(int keyCode)
     {
+        keyDown(keyCode);
+        keyUp(keyCode);
+    }
+
+    void ScenarioDriver::keyDown(int keyCode)
+    {
         SDL_KeyboardEvent e{};
         e.key = keyCode;
         e.scancode = SDL_GetScancodeFromKey(keyCode, nullptr);
@@ -445,10 +451,21 @@ namespace rwe
         e.type = SDL_EVENT_KEY_DOWN;
         e.down = true;
         scene.onKeyDown(e);
+    }
 
+    void ScenarioDriver::keyUp(int keyCode)
+    {
+        SDL_KeyboardEvent e{};
+        e.key = keyCode;
+        e.scancode = SDL_GetScancodeFromKey(keyCode, nullptr);
         e.type = SDL_EVENT_KEY_UP;
         e.down = false;
         scene.onKeyUp(e);
+    }
+
+    bool ScenarioDriver::isCameraTracking() const
+    {
+        return std::holds_alternative<GameScene::CameraControlStateTrackingUnit>(scene.cameraControlState);
     }
 
     std::optional<UnitId> ScenarioDriver::spawnNearCamera(const std::string& unitType)

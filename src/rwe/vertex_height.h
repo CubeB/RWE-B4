@@ -12,4 +12,7 @@ namespace rwe
     bool compareVertexHeights(const _3do::Vertex& a, const _3do::Vertex& b);
 
     _3do::Vertex findHighestVertex(const _3do::Object& obj);
+
+    /** Scalar model height with the original's recursive zero floors (#646). */
+    int modelHeightFrom3do(const _3do::Object& obj);
 }

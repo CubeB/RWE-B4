@@ -152,6 +152,12 @@ namespace rwe
         /** A keypress and release, through the scene's own handlers. */
         void key(int keyCode);
 
+        /** Separate edges allow a modifier to stay held over another key. */
+        void keyDown(int keyCode);
+        void keyUp(int keyCode);
+
+        bool isCameraTracking() const;
+
         /**
          * Spawns a finished unit of the given type near the camera, as a
          * scenario's setup rather than as anything under test. Nothing about

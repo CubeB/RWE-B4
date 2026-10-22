@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace rwe
@@ -13,7 +14,8 @@ namespace rwe
      * The parts that decide *what* to copy live here and take listings rather
      * than touching the disk, so they can be tested against the real shape of
      * a GOG install without one being present. The parts that walk the
-     * filesystem, read the registry and copy bytes live in `rwe_setup.cpp`.
+     * filesystem for game data, read the registry and copy bytes live in
+     * `rwe_setup.cpp`; Steam library metadata is read here for shared tests.
      */
 
     /** What a file in a TA installation is, as far as RWE cares. */
@@ -97,6 +99,10 @@ namespace rwe
      * directory on a machine has `totala1.hpi` in it by accident.
      */
     bool looksLikeTaInstall(const TaInstallListing& listing);
+
+    /** Steam default libraries, configured libraries, and TA's app manifest. */
+    std::vector<std::filesystem::path> steamTaInstallPaths(
+        const std::vector<std::filesystem::path>& steamRoots);
 
     /** What the setup intends to do, before it does any of it. */
     struct TaSetupPlan

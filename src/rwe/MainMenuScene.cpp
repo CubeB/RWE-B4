@@ -1517,6 +1517,7 @@ namespace rwe
         }
         if (auto sizeLabel = panel->find<UiLabel>("SIZE"))
         {
+            sizeLabel->get().setSingleLine(true);
             auto sub = model.candidateSelectedMap.subscribe([&l = sizeLabel->get()](const auto& selectedMap) {
                 if (selectedMap)
                 {

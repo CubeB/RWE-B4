@@ -7,6 +7,7 @@
 #include <rwe/render/GraphicsContext.h>
 #include <stack>
 #include <string>
+#include <vector>
 
 namespace rwe
 {
@@ -57,6 +58,16 @@ namespace rwe
      * reading that underlines what the authors plainly meant.
      */
     std::optional<TextCharacterSpan> findCharacterInText(const std::string& text, int character, const SpriteSeries& font);
+
+    struct WrappedTextGlyph
+    {
+        unsigned int glyph;
+        float x;
+        float y;
+    };
+
+    /** Wrapped glyph positions within a label's actual bounds, including its height. */
+    std::vector<WrappedTextGlyph> layoutWrappedText(const Rectangle2f& area, const std::string& text, const SpriteSeries& font);
 
     /**
      * The in-world health bar's colour (BT-146). The original compares the
@@ -115,6 +126,8 @@ namespace rwe
         std::stack<Matrix4f> matrixStack{{Matrix4f::identity()}};
 
         float effectiveUiScale() const;
+
+        void enableSurfaceClip(const Rectangle2f& surface);
 
     public:
         UiOrthoBounds getOrthoBounds() const;

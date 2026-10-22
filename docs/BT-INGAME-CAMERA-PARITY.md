@@ -176,3 +176,7 @@ Ranked by what a player would notice. None touches the simulation; the camera is
 | 5 | **A loaded game opens at the default zoom.** | no original counterpart | decision |
 
 No source file was changed.
+
+## 2026-10-22 refutation for issue #653
+
+[Camera-jump side effects](BT-CATEGORY-CAMERA-KEY-FINDINGS.md#camera-jumps-bookmark-cancellation-and-the-f3n-refutation) confirms cancellation for bookmark recall but refutes the above claim that original F3 and n also cancel follow/snap. Those two paths retain tracking and only assign a clamped target. This supersedes section 5's three-path recommendation and the corresponding rank-1 gap; changing F3/n to cancel tracking would require a documented divergence. No original-game execution was performed.

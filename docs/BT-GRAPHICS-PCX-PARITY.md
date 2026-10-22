@@ -241,3 +241,7 @@ Ranked by what a player or a modder would hit.
 | 7 | 24-bit output, painter-order sort, back-buffer capture without cursor. | DIVERGENCE (documented) | none |
 
 No source file was changed.
+
+## 2026-10-22 clarification for issue #646
+
+See [Model-height floors](BT-MODEL-HEIGHT-SCROLLBAR-FINDINGS.md#height-a-floor-at-every-recursively-measured-list) for the direct static byte-tactics check. It supersedes the final-only floor recommendation above and clarifies empty-leaf versus empty-child-list contributions. The retail census above was not rerun.

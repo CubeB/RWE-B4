@@ -94,6 +94,46 @@ namespace
 
     void registerScenarios()
     {
+        rwe::registerScenario("653-bookmark-exits-tracking", [](rwe::Scenario& s) {
+            auto saved = std::make_shared<std::optional<rwe::SimVector>>();
+            s.at(1, [saved](rwe::ScenarioDriver& d) {
+                auto commander = d.commander(0);
+                d.require(commander.has_value(), "a shipped local commander is available");
+                if (!commander)
+                {
+                    return;
+                }
+                d.select(*commander);
+                d.key(SDLK_T);
+                d.require(d.isCameraTracking(), "T starts unit following");
+                *saved = d.cameraPosition();
+                d.keyDown(SDLK_LCTRL);
+                d.key(SDLK_F5);
+                d.keyUp(SDLK_LCTRL);
+                d.require(d.isCameraTracking(), "saving a bookmark retains following");
+            });
+            s.at(2, [](rwe::ScenarioDriver& d) {
+                d.key(SDLK_F5);
+                d.require(!d.isCameraTracking(), "stored bookmark recall stops following");
+            });
+            s.after(3, [saved](rwe::ScenarioDriver& d) {
+                d.require(!d.isCameraTracking(), "following remains stopped after camera updates");
+                d.require(saved->has_value() && d.cameraPosition() == *saved, "the camera retains the stored position");
+            });
+            s.at(4, [](rwe::ScenarioDriver& d) {
+                d.key(SDLK_T);
+                d.require(d.isCameraTracking(), "unit following can be entered again");
+                d.key(SDLK_N);
+                d.require(d.isCameraTracking(), "n retains following, as the reference establishes");
+                d.key(SDLK_F3);
+                d.require(d.isCameraTracking(), "F3 retains following");
+            });
+            s.after(6, [](rwe::ScenarioDriver& d) {
+                d.require(d.isCameraTracking(), "n/F3 do not cancel later following updates");
+            });
+            s.endAt(6);
+        });
+
         // The active BUILD/ORDERS tab has to stay pressed across the panel
         // rebuild a tab switch causes. Clicking ORDERS sets guiInfo.section
         // and asks for a new panel; the old panel, and the toggledOn it held,

@@ -327,3 +327,7 @@ fix changes which command stream a keypress produces (the command kind itself is
 | 10 | **Pause is honoured under the options panel and the chat bar**; the original's pause is an ordinary battle key. | DIFFERS (low) | decision |
 
 No source file was changed.
+
+## 2026-10-22 clarification for issue #654
+
+[Ctrl category selection](BT-CATEGORY-CAMERA-KEY-FINDINGS.md#ctrl-categories-modifiers-names-and-selection-pool) confirms additive Shift, Ctrl precedence with Alt, and category selection beyond the six retail letters. It also limits the earlier arbitrary-letter claim: A/D/S/Z have dedicated commands and C has commander-follow semantics. Replacement changes only eligible local units. This was a static comparison, with no original-game execution.

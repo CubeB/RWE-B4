@@ -251,6 +251,13 @@ namespace rwe
             }
             else if (cameraBookmarks[slot])
             {
+                // BT-CATEGORY-CAMERA-KEY-FINDINGS: stored bookmark recall
+                // cancels following; F3/n and the general setter do not.
+                if (std::holds_alternative<CameraControlStateTrackingUnit>(cameraControlState))
+                {
+                    cameraControlState = CameraControlStateFree();
+                }
+                trackedUnitId.reset();
                 setCameraPosition(*cameraBookmarks[slot]);
                 if (sounds.selectSquad)
                 {
