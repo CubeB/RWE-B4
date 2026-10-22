@@ -181,6 +181,13 @@ namespace rwe
 
             auto boxInfo = getScrollBoxInfo();
 
+            // BT-MODEL-HEIGHT-SCROLLBAR-FINDINGS: no travel means no drag
+            // update. A percentage is undefined here (0/0 when stationary).
+            if (boxInfo.range <= 0.0f)
+            {
+                return;
+            }
+
             float deltaPercent = deltaPixels / boxInfo.range;
             scrollChangedSubject.next(std::clamp(mouseDownScrollPercent + deltaPercent, 0.0f, 1.0f));
         }

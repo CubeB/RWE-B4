@@ -1111,6 +1111,7 @@ endif()
 
 set(TEST_FILES
     src/rwe/vertex_height.test.cpp
+    src/rwe/ui/UiScrollBar.test.cpp
     src/rwe/GameLaunch.test.cpp
     src/rwe/ai/AiPlayerController.test.cpp
     src/rwe/ai/AiTuningProfile.test.cpp
