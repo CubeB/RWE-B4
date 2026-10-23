@@ -277,7 +277,11 @@ used by the primitive-drawing and bitmap-font paths; `texturenumber` is an index
   `fontnumber`** (and one panel record the debug fill) (value 9 on six font records, two buttons and two hotspots; minus 124 on four hotspots; 1 on
   one label). So the builder pages' per-side font is not used (the build pictures carry their own cost text
   elsewhere, `BT-INGAME-CONTROL-PANEL-PARITY.md`), and a label that asks for font 1 gets the default.
-- **Which cut: UNCLEAR.** The chapter has labels draw in glyph slot one and buttons, lists and inputs in slot
+- **Resolved 2026-10-23:** MAP-FONT-01 in `MAP-DESCRIPTION-FONT-FINDINGS.md`
+  establishes slot zero as hattfont12 and slot one as hattfont11; ordinary
+  labels use the latter. The original audit's uncertainty below is retained
+  as history, not the current conclusion.
+- **Which cut: UNCLEAR in this original audit.** The chapter has labels draw in glyph slot one and buttons, lists and inputs in slot
   zero, and the application loads `hattfont12` and `hattfont11` into the two slots (`BT-GUI-GUI-FILE-PARITY.md`
   rule 9) without saying which is which. The register shows the original uses both cuts (the Space strip,
   `TOTALA-EXE-INTERFACE.md` section 108) and a play-test named "the beige outlined font the gui labels use"

@@ -49,10 +49,9 @@ namespace rwe
             auto ch = *it;
             auto glyph = ch >= font.sprites.size() ? 0u : ch;
 
-            // The advance drawText steps by, which is the glyph cell's own
-            // right edge rather than its ink -- so an underline of this width
-            // runs the full cell and meets its neighbours.
-            auto advance = font.sprites[glyph]->bounds.right();
+            // Use the same pen advance as drawing/measurement; MAP-FONT-01
+            // distinguishes GAF frame widths from horizontal ink bearings.
+            auto advance = font.glyphAdvance(glyph);
 
             if (ch <= 0x7F && std::tolower(static_cast<int>(ch)) == target)
             {
@@ -175,7 +174,7 @@ namespace rwe
                 drawSprite(x, y - font.verticalOffset, sprite, tint);
             }
 
-            x += sprite.bounds.right();
+            x += font.glyphAdvance(ch);
         }
     }
 
@@ -197,9 +196,7 @@ namespace rwe
                 ch = 0;
             }
 
-            const auto& sprite = *font.sprites[ch];
-
-            width += sprite.bounds.right();
+            width += font.glyphAdvance(ch);
         }
 
         return width;
@@ -244,10 +241,10 @@ namespace rwe
         const auto& text = drawable(rawText, scratch);
         const std::vector<unsigned int> characters(utf8Begin(text), utf8End(text));
         const auto glyphIndex = [&](unsigned int ch) { return ch < font.sprites.size() ? ch : 0u; };
-        const auto advance = [&](unsigned int ch) { return font.sprites[glyphIndex(ch)]->bounds.right(); };
+        const auto advance = [&](unsigned int ch) { return font.glyphAdvance(glyphIndex(ch)); };
         const auto whitespace = [](unsigned int ch) { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'; };
         float x = 0.0f;
-        float baseline = area.top() + 12.0f;
+        float baseline = area.top() + font.textBaseline;
         for (std::size_t i = 0; i < characters.size();)
         {
             const auto ch = characters[i];
@@ -258,7 +255,7 @@ namespace rwe
                     ++i;
                 }
                 ++i;
-                baseline += 15.0f;
+                baseline += font.textLineAdvance;
                 x = 0.0f;
                 continue;
             }
@@ -279,7 +276,7 @@ namespace rwe
             }
             if (x > 0.0f && x + wordWidth > area.width())
             {
-                baseline += 15.0f;
+                baseline += font.textLineAdvance;
                 x = 0.0f;
             }
             for (; i < endOfWord; ++i)
@@ -287,7 +284,7 @@ namespace rwe
                 const auto width = advance(characters[i]);
                 if (x > 0.0f && x + width > area.width())
                 {
-                    baseline += 15.0f;
+                    baseline += font.textLineAdvance;
                     x = 0.0f;
                 }
                 // Keep rows in the label; the scissor clips glyph descenders
@@ -304,10 +301,9 @@ namespace rwe
         return glyphs;
     }
 
-    void UiRenderService::drawTextWrapped(Rectangle2f area, const std::string& text, const SpriteSeries& font, float scrollOffset)
+    void UiRenderService::drawTextWrapped(Rectangle2f area, const std::string& text, const SpriteSeries& font)
     {
-        const auto glyphs = layoutWrappedText(Rectangle2f::fromTopLeft(
-            area.left(), area.top() - scrollOffset, area.width(), area.height() + scrollOffset), text, font);
+        const auto glyphs = layoutWrappedText(area, text, font);
         if (glyphs.empty())
         {
             return;

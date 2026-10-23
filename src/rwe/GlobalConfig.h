@@ -320,16 +320,16 @@ namespace rwe
         bool buildingHalo{true};
 
         /**
-         * Whether the box filter reaches past the buildings, on by default.
+         * Whether the box filter reaches mobile models, off by default.
          *
          * RWE renders the world into a buffer twice the size and filters each
          * 2x2 block down, which is how it reproduces the original's
          * anti-aliasing. The original only ever did that to a building's
-         * cached bitmap: never the ground, never a mobile unit, because
-         * nothing else had a cached bitmap for it to be done to. So the
+         * cached bitmap (including 3D features' synthetic building renderer):
+         * never the ground, a billboard or a mobile unit (AA-ELIGIBILITY-01). So the
          * filter is restricted the same way, and off is the faithful setting.
          *
-         * On extends it back over units and everything else solid, for anyone
+         * On extends it over mobile models and nanoframes, for anyone
          * who would rather have smooth edges on them than the edges the
          * original drew. It is a preference, not a fidelity fix. It was on by
          * default for part of 2026-09-11, after a play-test found sharp units

@@ -162,7 +162,7 @@ namespace rwe
         void drawText(float x, float y, const std::string& text, const SpriteSeries& font);
         void drawText(float x, float y, const std::string& text, const SpriteSeries& font, const Color& tint);
 
-        void drawTextWrapped(Rectangle2f area, const std::string& text, const SpriteSeries& font, float scrollOffset = 0.0f);
+        void drawTextWrapped(Rectangle2f area, const std::string& text, const SpriteSeries& font);
 
         void drawTextCentered(float x, float y, const std::string& text, const SpriteSeries& font);
 

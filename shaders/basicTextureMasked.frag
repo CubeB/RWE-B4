@@ -6,8 +6,8 @@ out vec4 outColor;
 // basicTexture.frag so that a standing feature -- a tree, a rock, anything
 // tall enough to stand in front of a building -- counts as an occluder. See
 // unitTexture.frag and worldPost.frag for the convention: red unused, alpha
-// 0.5 for "solid, but not a building", which is all a sprite ever writes
-// here. Without this a tree in front of a building left the mask reading
+// 0.5 for "solid, but not a building", blue 1 for "sharp billboard".
+// Without this a tree in front of a building left the mask reading
 // "building" at every pixel the tree had actually overdrawn, and the halo
 // pass painted its purple fringe into the tree's own colour (issue #67).
 out vec4 outMask;
@@ -46,5 +46,7 @@ void main(void)
 
     float grey = dot(color.rgb, vec3(0.299, 0.587, 0.114)) * 0.7;
     outColor = vec4(mix(color.rgb, vec3(grey), desaturate), color.a);
-    outMask = vec4(0.0, 0.0, 0.0, maskValue);
+    // AA-ELIGIBILITY-01: GAF features bypass cached-model filtering. Blue
+    // distinguishes them from models even when Units Smooth is enabled.
+    outMask = vec4(0.0, 0.0, 1.0, maskValue);
 }

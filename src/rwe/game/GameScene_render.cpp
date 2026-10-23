@@ -22,6 +22,7 @@
 #include <rwe/game/dump_util.h>
 #include <rwe/game/matrix_util.h>
 #include <rwe/render/render_prof.h>
+#include <rwe/render/WorldRaster.h>
 #include <rwe/sim/UnitBehaviorService_util.h>
 #include <rwe/resource_io.h>
 #include <rwe/sim/SimTicksPerSecond.h>
@@ -1583,7 +1584,10 @@ namespace rwe
         // pure functions of the camera and the viewport, so computing them
         // here rather than after costs nothing and nothing depends on the
         // order.
-        const auto& viewProjectionMatrix = computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
+        const auto nativeViewProjectionMatrix = computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
+        const auto viewProjectionMatrix = alignWorldRaster(
+            nativeViewProjectionMatrix,
+            worldViewport.width(), worldViewport.height(), worldRenderTextureScale);
         auto viewCull = makeViewCullTest(viewProjectionMatrix);
 
         // Clear with the halo's coverage mask attached, so it starts the frame
@@ -1656,13 +1660,25 @@ namespace rwe
         }
         {
             RWE_RENDERPROF("w.terrain");
-            // The ground is an occluder for the halo: a building standing
-            // behind a cliff must not be fringed along the cliff's edge.
             if (maskWanted)
             {
+                // AA-PHASE-01: selecting one supersample still changes tile
+                // mip selection and boundary coverage. Rasterize the ground
+                // exactly as with AA off, then copy its pixels and labels.
+                sceneContext.graphics->bindFrameBuffer(nativeTerrainFrameBuffer->frameBuffer.get());
+                sceneContext.graphics->setViewport(0, 0, worldViewport.width(), worldViewport.height());
                 sceneContext.graphics->useDualDrawBuffers();
+                sceneContext.graphics->clear();
+                RenderService terrainRenderService(sceneContext.graphics, sceneContext.shaders, &nativeViewProjectionMatrix);
+                terrainRenderService.drawMapTerrain(terrainGraphics, worldCameraState.getRoundedPosition(), worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()), fogOverlay);
+                sceneContext.graphics->blitFrameBufferColorAndMask(nativeTerrainFrameBuffer->frameBuffer.get(), worldFrameBuffer.frameBuffer.get(),
+                    worldViewport.width(), worldViewport.height(), worldViewport.width() * worldRenderTextureScale, worldViewport.height() * worldRenderTextureScale);
+                sceneContext.graphics->setViewport(0, 0, worldViewport.width() * worldRenderTextureScale, worldViewport.height() * worldRenderTextureScale);
             }
-            worldRenderService.drawMapTerrain(terrainGraphics, worldCameraState.getRoundedPosition(), worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()), fogOverlay);
+            else
+            {
+                worldRenderService.drawMapTerrain(terrainGraphics, worldCameraState.getRoundedPosition(), worldCameraState.scaleDimension(worldViewport.width()), worldCameraState.scaleDimension(worldViewport.height()), fogOverlay);
+            }
             sceneContext.graphics->useSingleDrawBuffer();
         }
 
@@ -1681,7 +1697,10 @@ namespace rwe
                 {
                     auto fogged = !positionIsVisibleToLocalPlayer(f.second.position);
                     drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, renderTime(), fogged, flatFeatureBatch);
-                    drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, fogged, flatFeatureShadowBatch);
+                    if (shadowsEnabled) // FEATURE-SHADOW-01: original UI toggles feature shadows too.
+                    {
+                        drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, fogged, flatFeatureShadowBatch);
+                    }
                 }
             }
         }
@@ -1883,6 +1902,10 @@ namespace rwe
             for (const auto& [_, feature] : simulation.features)
             {
                 const auto& position = feature.position;
+                if (!shadowsEnabled) // FEATURE-SHADOW-01: model-feature projected shadows use the master gate.
+                {
+                    continue;
+                }
                 if (!positionIsExploredByLocalPlayer(position))
                 {
                     continue;
@@ -2090,7 +2113,10 @@ namespace rwe
                 {
                     auto fogged = !positionIsVisibleToLocalPlayer(f.second.position);
                     drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, renderTime(), fogged, featureBatch);
-                    drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, fogged, featureShadowBatch);
+                    if (shadowsEnabled) // FEATURE-SHADOW-01: leave the tree visible, suppress only its shadow.
+                    {
+                        drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, fogged, featureShadowBatch);
+                    }
                 }
             }
         }

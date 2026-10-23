@@ -4,6 +4,13 @@ Spec-room findings, 2026-10-22. Documentation-only handoff under
 [ADR-0004](adr/0004-a-spec-room-stands-between-the-decompilation-and-the-code.md).
 No RWE implementation or tests were inspected or changed in this pass.
 
+**2026-10-23 qualification:** MAP-FONT-01/02 in
+`MAP-DESCRIPTION-FONT-FINDINGS.md` resolves the actual label font. The five
+subsequently reported descriptions fit the unchanged original box with
+hattfont11. Their apparent overflow in RWE came from hattfont12; the earlier
+general clipping discussion and enlarged-box workaround did not establish
+that those strings overflowed the original. The adaptive layout is now retired.
+
 ## Finding MAP-LAYOUT-01: the original uses fixed map-description rectangles
 
 The original's skirmish map selector loads its dimensions from shipped GUI

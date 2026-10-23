@@ -207,14 +207,13 @@ Everything else lives in a subject file. **The numbers never move**, so a
 
 ## 88. Where RWE deliberately differs
 
-- **Map descriptions get a larger, adaptive layout** (owner instruction,
-  2026-10-22; `MAP-DESCRIPTION-LAYOUT-FINDINGS.md`, MAP-LAYOUT-01/02).
-  RWE preserves the complete description, wraps it using the active font,
-  and reserves space below it for the size summary and buttons. Exceptionally
-  long descriptions remain available by scrolling after the box reaches the
-  screen's usable height. No remainder is replaced with an ellipsis. The
-  original uses fixed GUI rectangles, bounded rendering and a limited text
-  buffer; this change deliberately prioritizes readability over layout parity.
+- **Retired: enlarged map descriptions** (2026-10-22 to 2026-10-23).
+  The owner-requested adaptive selector was a workaround for apparent text
+  overflow. MAP-FONT-01/02 in `MAP-DESCRIPTION-FONT-FINDINGS.md` establishes
+  that RWE used the wrong, larger label font. The original smaller font fits
+  the reported descriptions in the shipped rectangles. At the owner's request
+  to emulate the original, the enlarged panel, composed artwork and scrolling
+  workaround were removed; SELMAP again uses its unchanged GUI and bitmap.
 
 **The default computer player is now the original's (2026-10-14, ADR-0005).**
 RWE's own computer player, which transports, fights with aircraft and guards,
@@ -337,14 +336,24 @@ quirks of the original that RWE reproduces although they look like defects.
   They never shipped that way; see the comment on `shadingStrengthUnits` in
   `GlobalConfig.h`.)
 - **Units can be anti-aliased, on a switch that is off by default.** The
-  original box-filters a building's cached bitmap and nothing else (§101),
-  and by default so does RWE. A finished building's dont-cache pieces, such
+  original box-filters building-class cached images, including model features
+  (AA-ELIGIBILITY-01 in `ANTIALIASING-ELIGIBILITY-FINDINGS.md`, correcting §101).
+  A finished building's dont-cache pieces, such
   as a metal extractor's top, are drawn sharp as the original drew them, and
   the switch does not reach them. `anti-alias-units` (Units Smooth on the
-  VISUALS page) also filters everything solid that is not the ground. It
+  VISUALS page) additionally filters mobile models and nanoframes. Since the
+  2026-10-23 report, billboard/GAF features stay sharp with either setting;
+  they previously shared the optional smoothing. Terrain stays sharp. It
   was on by default, and the extractor's top smoothed, for part of
   2026-09-11; both went back to the original the same day, when the player
   asked for it exactly.
+  RWE still approximates cached-image filtering with a supersampled world
+  buffer and a final scene mask, rather than constructing and reducing each
+  cached image in isolation. Sharp samples are aligned to native pixel
+  centres; filtered samples still share a screen-space lattice and can mix
+  scene colours at silhouettes. This retained renderer departure is not
+  pixel-perfect original composition (AA-PHASE-01; validation and limits in
+  `ANTIALIASING-MASK-VALIDATION.md`).
 - **A finished `ZBuffer=0` unit's flat-coloured faces are unshaded.** The
   original leaves such a unit's textured quads raw but still shades its
   flat-colour n-gons (TOTALA-EXE-SHADING.md S:23). RWE draws the whole model

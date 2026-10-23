@@ -684,6 +684,25 @@ namespace rwe
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     }
 
+    void GraphicsContext::blitFrameBufferColorAndMask(FrameBufferIdentifier source, FrameBufferIdentifier destination,
+        int sourceWidth, int sourceHeight, int destinationWidth, int destinationHeight)
+    {
+        // AA-PHASE-01; ANTIALIASING-MASK-VALIDATION.md: terrain is rasterized
+        // at native size. Neither its colours nor category labels may blend.
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, source.value);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, destination.value);
+        for (GLenum attachment : {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1})
+        {
+            glReadBuffer(attachment);
+            glDrawBuffer(attachment);
+            glBlitFramebuffer(0, 0, sourceWidth, sourceHeight, 0, 0, destinationWidth, destinationHeight,
+                GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, destination.value);
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        useSingleDrawBuffer();
+    }
+
     void GraphicsContext::disableBlending()
     {
         glDisable(GL_BLEND);
@@ -948,14 +967,9 @@ namespace rwe
             throw GraphicsException("glCheckFrameBufferStatus error attaching mask buffer:" + std::to_string(status));
         }
 
-        // Blending is switched off for this attachment alone, once, and left
-        // that way. It carries palette indices and a coverage level, not
-        // colour, and compositing either of them is meaningless -- half of a
-        // palette index is a different colour rather than a darker one. Doing
-        // it per attachment rather than around each pass is what makes it
-        // impossible to get wrong later: GameLaunch enables blending globally
-        // and nothing in the render path turns it off, so a pass that forgot
-        // would silently write quarter-alpha samples that read as empty.
+        // These are labels, not opacity. useDualDrawBuffers also restores this
+        // state after UI backends restore GL_BLEND globally (AA-ELIGIBILITY-01;
+        // docs/ANTIALIASING-MASK-VALIDATION.md).
         glDisablei(GL_BLEND, 1);
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -971,6 +985,10 @@ namespace rwe
     {
         GLenum buffers[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
         glDrawBuffers(2, buffers);
+        // glEnable(GL_BLEND), including ImGui's state restore, enables every
+        // draw buffer. Reassert this whenever the categorical mask is drawn;
+        // colour target 0 must retain ordinary alpha blending.
+        glDisablei(GL_BLEND, 1);
     }
 
     void GraphicsContext::setActiveTextureSlot0()

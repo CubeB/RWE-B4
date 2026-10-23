@@ -1761,6 +1761,12 @@ were then looked up to give me the final color, so 3 lookups." At the silhouette
 the pairs being averaged are a real colour and whatever stood for transparent,
 and what came back was wrong.
 
+**2026-10-23 qualification:** AA-ELIGIBILITY-01 and AA-PHASE-01 in
+`ANTIALIASING-ELIGIBILITY-FINDINGS.md` refine this section: cached 3D model
+features are also eligible via the synthetic building-class renderer; GAF
+billboard features remain sharp. Reduction starts at each cached image's
+own origin. The older blanket feature exclusion below is superseded.
+
 **And note what it is applied to: a building's cached bitmap, and nothing
 else.** Not the map. The original has no supersampled world buffer at all --
 the double-size buffer is allocated per building, filtered once, and cached,

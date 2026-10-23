@@ -178,6 +178,8 @@ namespace rwe
         std::unique_ptr<UiLabel> createLabel(int x, int y, int width, int height, const std::string& text, UiLabel::Alignment alignment);
 
     private:
+        std::shared_ptr<SpriteSeries> getLabelFont();
+
         std::unique_ptr<UiComponent> componentFromGuiEntry(const std::string& guiName, const GuiEntry& entry);
 
         std::unique_ptr<UiStagedButton> buttonFromGuiEntry(const std::string& guiName, const GuiEntry& entry);

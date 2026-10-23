@@ -4,6 +4,7 @@
 // message comes out. Diagnoses layout/dispatch faults without launching the
 // game.
 #include <cstdio>
+#include "antialias_probe.h"
 #include <glad/gl.h>
 #include <iostream>
 #include <rwe/AudioService.h>
@@ -19,6 +20,7 @@
 #include <rwe/SceneContext.h>
 #include <rwe/scene/SceneManager.h>
 #include <set>
+#include <map>
 #include <thread>
 #include <rwe/PathMapping.h>
 #include <rwe/ShaderService.h>
@@ -301,9 +303,15 @@ int main(int argc, char* argv[])
         bool multiplayerFlow = false;
         bool renderRequested = false;
         bool mapLayout = false;
+        bool antialias = false;
         for (int i = 1; i < argc; ++i)
         {
             std::string arg(argv[i]);
+            if (arg == "--antialias")
+            {
+                antialias = true;
+                continue;
+            }
             if (arg == "--map-layout")
             {
                 mapLayout = true;
@@ -332,7 +340,8 @@ int main(int argc, char* argv[])
             if (arg == "--help" || arg == "-h")
             {
                 std::cout << "usage: ui_probe [--panel NAME]... <data path>...\n"
-                          << "  --map-layout checks and renders the real expanded map selector.\n"
+                          << "  --antialias checks production AA/shading shaders on a hidden GL context.\n"
+                          << "  --map-layout checks the original map selector font, rows and artwork.\n"
                           << "  With no --panel, walks the options screens the probe was written for.\n"
                           << "  With one or more, dumps and clicks just those guis and stops.\n"
                           << "  --multiplayer builds the four multiplayer screens (SELPROV, TCP, SELGAME,\n"
@@ -352,6 +361,7 @@ int main(int argc, char* argv[])
 
         GraphicsContext graphics;
         TextureService textureService(&graphics, &vfs, &*palette);
+        if (antialias) return runAntialiasProbe(graphics, textureService, vfs);
         AudioService audioService(sdlContext, sdlManager.getSdlMixerContext(), &vfs);
         auto pathMapping = std::make_unique<PathMapping>();
         pathMapping->guis = "guis";
@@ -382,6 +392,21 @@ int main(int argc, char* argv[])
             const auto names = MenuProbe::mapNames(menu);
             std::string longestName;
             unsigned int longestHeight = 0;
+            // MAP-FONT-01/02: check the real font and unchanged GUI, not a
+            // larger box that can conceal wrong typography.
+            auto labelFont = textureService.getGafEntry("anims/hattfont11.gaf", "Haettenschweiler (120)");
+            if (panel->getX() != 84 || panel->getY() != 12 || panel->getWidth() != 494 || panel->getHeight() != 420
+                || description.getX() != 60 || description.getY() != 300 || description.getWidth() != 235 || description.getHeight() != 31
+                || size.getX() != 60 || size.getY() != 330 || size.getWidth() != 235 || size.getHeight() != 18
+                || labelFont->textBaseline != 10 || labelFont->textLineAdvance != 14 || !labelFont->advanceByFrameWidth)
+            {
+                throw std::runtime_error("Original map layout/font metrics changed");
+            }
+            const std::map<std::string, std::pair<int,int>> expectedRows{
+                {"Mounds of Mars",{235,133}}, {"Ror Shock",{219,225}}, {"Steel Jungle",{224,160}},
+                {"Temblorian Mist",{207,182}}, {"The Barrier Reef",{222,226}}};
+            unsigned int checkedRows = 0;
+            unsigned int clippedInkOverhangs = 0;
             for (const auto& name : names)
             {
                 MenuProbe::selectMap(menu, name);
@@ -390,16 +415,44 @@ int main(int argc, char* argv[])
                     longestHeight = description.getTextHeight();
                     longestName = name;
                 }
-                if (description.getY() + static_cast<int>(description.getHeight()) >= size.getY()
-                    || size.getY() + static_cast<int>(size.getHeight()) >= panel->find<UiComponent>("LOAD")->get().getY())
+                const auto area = Rectangle2f::fromTopLeft(60,300,235,31);
+                auto glyphs = layoutWrappedText(area,description.getText(),*labelFont);
+                auto full = layoutWrappedText(Rectangle2f::fromTopLeft(60,300,235,100000),description.getText(),*labelFont);
+                if (glyphs.size() != full.size()) throw std::runtime_error("Clipped map description: " + name);
+                for (const auto& glyph : glyphs)
                 {
-                    throw std::runtime_error("Overlapping map information: " + name);
+                    const auto& bounds = labelFont->sprites[glyph.glyph]->bounds;
+                    // MAP-FONT-01: pen width and ink bearing are distinct.
+                    // A final period may overhang by one pixel; the original
+                    // label surface, and RWE's scissor, clip that ink.
+                    if (glyph.x+bounds.right() > 295) ++clippedInkOverhangs;
+                    if (glyph.y+bounds.top() < 300 || glyph.y+bounds.bottom() >= 330 || glyph.x+labelFont->glyphAdvance(glyph.glyph) > 295)
+                        throw std::runtime_error("Map glyph outside original description area: " + name + " glyph "
+                            + std::to_string(glyph.glyph) + " x/y " + std::to_string(glyph.x) + "/" + std::to_string(glyph.y)
+                            + " top/bottom/right " + std::to_string(glyph.y+bounds.top()) + "/" + std::to_string(glyph.y+bounds.bottom())
+                            + "/" + std::to_string(glyph.x+bounds.right()) + ": " + description.getText());
                 }
                 if (description.getTextHeight() > description.getHeight())
                 {
-                    throw std::runtime_error("Available real map requires description scrolling: " + name);
+                    throw std::runtime_error("Map does not fit original description box: " + name);
+                }
+                if (auto expected = expectedRows.find(name); expected != expectedRows.end())
+                {
+                    int first = 0, second = 0;
+                    for (const auto& glyph : glyphs)
+                    {
+                        const auto right = static_cast<int>(glyph.x + labelFont->glyphAdvance(glyph.glyph) - 60);
+                        if (glyph.y == 310) first = std::max(first,right);
+                        else if (glyph.y == 324) second = std::max(second,right);
+                        else throw std::runtime_error("Unexpected description row: " + name);
+                    }
+                    std::cout << "Original rows: " << name << " " << first << '/' << second << " px\n";
+                    if (std::make_pair(first,second) != expected->second) throw std::runtime_error("Original row break differs: " + name);
+                    ++checkedRows;
                 }
             }
+            if (checkedRows != expectedRows.size()) throw std::runtime_error("Missing original map fixtures");
+            std::cout << "Original label-edge ink overhangs clipped: " << clippedInkOverhangs << '\n';
             MenuProbe::selectMap(menu, longestName);
             UiRenderService ui(&graphics, &shaders, &viewport);
             graphics.setViewport(0, 0, 640, 480);
@@ -409,9 +462,19 @@ int main(int argc, char* argv[])
             panel->render(ui);
             glFinish();
             screenshot("probe_map_layout.ppm");
+            for (const auto& fixture : expectedRows)
+            {
+                MenuProbe::selectMap(menu,fixture.first);
+                graphics.clearColor();
+                panel->render(ui);
+                glFinish();
+                auto filename = "probe_map_font_" + fixture.first + ".ppm";
+                std::replace(filename.begin(),filename.end(),' ','_');
+                screenshot(filename.c_str());
+            }
             std::cout << "Map layout: " << names.size() << " real maps, full descriptions visible; longest: "
                       << longestName << " (" << longestHeight << " px)\n";
-            dumpPanel(*panel, "expanded map selector");
+            dumpPanel(*panel, "original map selector");
             // Activation exercises the factory's callbacks after construction;
             // a transferred child can otherwise retain a dead parent callback.
             bool cancelSent = false;
