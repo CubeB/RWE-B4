@@ -176,8 +176,8 @@ bool building(vec4 texel)
     return texel.a > 0.6;
 }
 
-// ...and it was a cached piece of a finished building (1.0): the only thing
-// the original anti-aliased, and the only thing that can carry the halo.
+// ...and it was a cached building-class sample (1.0), including a 3D model
+// feature (AA-ELIGIBILITY-01): eligible for filtering and the halo.
 bool cached(vec4 texel)
 {
     return texel.a > 0.85;
@@ -205,11 +205,18 @@ bool terrain(vec4 texel)
     return texel.g > 0.5;
 }
 
+// AA-ELIGIBILITY-01: billboard/GAF features stay sharp independently of the
+// RWE-only Units Smooth extension. Only basicTextureMasked.frag sets blue.
+bool billboard(vec4 texel)
+{
+    return texel.b > 0.5;
+}
+
 // Solid, and neither the ground nor a building: a unit, a nanoframe or a
-// modelled feature. What the units switch governs.
+// mobile model. What the units switch governs; billboards stay sharp.
 bool unfiltered(vec4 texel)
 {
-    return solid(texel) && !terrain(texel) && !building(texel);
+    return solid(texel) && !terrain(texel) && !building(texel) && !billboard(texel);
 }
 
 void main(void)
@@ -250,11 +257,12 @@ void main(void)
             filterThis = filterThis || unfiltered(s00) || unfiltered(s10) || unfiltered(s01) || unfiltered(s11);
         }
 
-        // Where a dont-cache piece covers the pixel -- the sample a render at
+        // Where a sharp object covers the pixel -- the sample a render at
         // native size would have taken -- it is drawn sharp over whatever is
         // filtered around it, as the original drew it after the cached
-        // bitmap.
-        if (dontCache(s00))
+        // bitmap. Billboards and, with Units Sharp, mobiles must also occlude
+        // neighbouring cached samples without inheriting their filtering.
+        if (dontCache(s00) || billboard(s00) || (antiAliasUnits <= 0.0 && unfiltered(s00)))
         {
             filterThis = false;
         }

@@ -10,8 +10,7 @@ namespace rwe
     namespace
     {
         /**
-         * A font of 128 glyphs whose advances are the character's own width
-         * in the shipped Haettenschweiler: proportional, so a wrong offset
+         * A synthetic proportional font of 128 glyphs, so a wrong offset
          * cannot pass by accident the way it would against a fixed pitch.
          * Nothing here is drawn, so the sprites carry no texture and no mesh.
          */
@@ -44,10 +43,10 @@ namespace rwe
         }
     }
 
-    TEST_CASE("map descriptions stay above the size and player count", "[ui][text]")
+    TEST_CASE("wrapped text clips at its supplied surface", "[ui][text]")
     {
-        // Actual descriptions from ccmaps.ccx, in SELMAP.GUI's 235x31 label.
-        // SIZE begins at y=330, thirty pixels below DESCRIPTION.
+        // This checks clipping with a synthetic font, not original-game text
+        // fit. GuiLabelFont.test.cpp and ui_probe cover the actual label face.
         const std::vector<std::string> descriptions{
             "19 X 19  Body of water separates two land masses.  Great underwater starts!",
             "12 X 15  Make your way around the edges or fly across the center.",

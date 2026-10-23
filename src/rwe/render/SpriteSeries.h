@@ -17,5 +17,18 @@ namespace rwe
          * bounds are left alone so that advances and measures do not change.
          */
         float verticalOffset{0.0f};
+
+        // MAP-FONT-01/02: ordinary GUI labels configure the original GAF
+        // baseline, row spacing and frame-width advances. Defaults retain the
+        // existing layout of other font resources.
+        float textBaseline{12.0f};
+        float textLineAdvance{15.0f};
+        bool advanceByFrameWidth{false};
+
+        float glyphAdvance(unsigned int glyph) const
+        {
+            const auto& bounds = sprites[glyph]->bounds;
+            return advanceByFrameWidth ? bounds.width() : bounds.right();
+        }
     };
 }

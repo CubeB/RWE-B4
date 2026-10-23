@@ -765,7 +765,14 @@ namespace rwe
         {
             const auto& modelDefinition = modelDefinitions.at(objectInfo->objectName);
             auto matrix = Matrix4f::translation(simVectorToFloat(feature.position)) * Matrix4f::rotationY(toRadians(feature.rotation).value);
-            drawProjectileUnitMesh(gameMediaDatabase, viewProjectionMatrix, objectInfo->objectName, modelDefinition, matrix, PlayerColorIndex(0), shadeStrength, atlases, batch);
+            // AA-ELIGIBILITY-01: 3D features use the original's synthetic
+            // building-class cache, unlike GAF billboards and projectiles.
+            const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(objectInfo->objectName, modelDefinition);
+            for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
+            {
+                drawShaderMesh(viewProjectionMatrix, *renderInfo.pieces[i]->mesh, matrix * renderInfo.restTransforms[i],
+                    shadeStrength, PlayerColorIndex(0), atlases, 1.0f, batch.meshes);
+            }
         }
     }
 

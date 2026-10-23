@@ -766,9 +766,21 @@ namespace rwe
         return button;
     }
 
+    std::shared_ptr<SpriteSeries> UiFactory::getLabelFont()
+    {
+        // MAP-FONT-01/02: ordinary labels select slot one (hattfont11).
+        // Its raw GAF bearings are retained; the baseline applies the original
+        // I-height hotspot normalization without altering shared sprites.
+        auto font = textureService->getGafEntry("anims/hattfont11.gaf", "Haettenschweiler (120)");
+        font->textBaseline = font->sprites.at('I')->bounds.height();
+        font->textLineAdvance = font->textBaseline + 4.0f;
+        font->advanceByFrameWidth = true;
+        return font;
+    }
+
     std::unique_ptr<UiLabel> UiFactory::createLabel(int x, int y, int width, int height, const std::string& text, UiLabel::Alignment alignment)
     {
-        auto font = textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+        auto font = getLabelFont();
         auto label = std::make_unique<UiLabel>(x, y, width, height, text, font);
         label->setAlignment(alignment);
         return label;
@@ -776,7 +788,7 @@ namespace rwe
 
     std::unique_ptr<UiLabel> UiFactory::labelFromGuiEntry(const std::string& /*guiName*/, const GuiEntry& entry)
     {
-        auto font = textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
+        auto font = getLabelFont();
 
         auto label = std::make_unique<UiLabel>(
             entry.common.xpos,

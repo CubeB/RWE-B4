@@ -262,7 +262,6 @@ set(SOURCE_FILES
     src/rwe/MainMenuModel.cpp
     src/rwe/MainMenuModel.h
     src/rwe/MainMenuScene.cpp
-    src/rwe/MapSelectionLayout.cpp
     src/rwe/MainMenuScene_campaign.cpp
     src/rwe/MainMenuScene_multiplayer.cpp
     src/rwe/MainMenuScene_multiplayer.h
@@ -1416,7 +1415,7 @@ set(TEST_FILES
     src/rwe/ui/UiPanorama.test.cpp
     src/rwe/ui/UiPanelFocus.test.cpp
     src/rwe/UiRenderService.test.cpp
-    src/rwe/MapSelectionLayout.test.cpp
+    src/rwe/GuiLabelFont.test.cpp
     )
 
 add_executable(rwe_test ${TEST_FILES})
@@ -1441,7 +1440,7 @@ install(DIRECTORY launcher/rwe-launcher-win32-x64/ DESTINATION launcher)
 
 include(cmake/Packaging.cmake)
 
-add_executable(ui_probe src/ui_probe.cpp)
+add_executable(ui_probe src/ui_probe.cpp src/antialias_probe.cpp)
 target_link_libraries(ui_probe librwe)
 
 

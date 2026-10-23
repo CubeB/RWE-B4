@@ -14,11 +14,11 @@ namespace rwe
             case Alignment::Left:
                 if (singleLine)
                 {
-                    context.drawText(static_cast<float>(posX), posY + 12.0f, fittedToWidth(context), *font);
+                    context.drawText(static_cast<float>(posX), posY + font->textBaseline, fittedToWidth(context), *font);
                 }
                 else
                 {
-                    context.drawTextWrapped(Rectangle2f::fromTopLeft(posX, posY, sizeX, sizeY), text, *font, static_cast<float>(scrollOffset));
+                    context.drawTextWrapped(Rectangle2f::fromTopLeft(posX, posY, sizeX, sizeY), text, *font);
                 }
                 break;
             case Alignment::Center:
@@ -63,7 +63,6 @@ namespace rwe
         // changes and the renderer is called every frame. See ensureUtf8 for
         // what arrives that is not UTF-8 and why it must not throw.
         text = ensureUtf8(newText);
-        scrollOffset = 0;
     }
 
     void UiLabel::setAlignment(Alignment newAlignment)
@@ -89,12 +88,4 @@ namespace rwe
         return static_cast<unsigned int>(std::ceil(bottom)) + 3;
     }
 
-    void UiLabel::mouseWheel(MouseWheelEvent event)
-    {
-        if (scrollOverflow)
-        {
-            const auto maximum = std::max(0, static_cast<int>(getTextHeight()) - static_cast<int>(sizeY));
-            scrollOffset = std::clamp(scrollOffset - event.y * 30, 0, maximum);
-        }
-    }
 }

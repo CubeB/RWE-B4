@@ -275,6 +275,10 @@ namespace rwe
          */
         void blitFrameBufferToWindow(FrameBufferIdentifier source, int sourceWidth, int sourceHeight, int windowWidth, int windowHeight);
 
+        /** Nearest-copy colour and category attachments; leaves destination bound with one draw buffer. */
+        void blitFrameBufferColorAndMask(FrameBufferIdentifier source, FrameBufferIdentifier destination,
+            int sourceWidth, int sourceHeight, int destinationWidth, int destinationHeight);
+
         void unbindFrameBuffer();
 
         void enableBlending();

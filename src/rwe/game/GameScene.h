@@ -1387,6 +1387,9 @@ namespace rwe
         float appliedUiScale{0.0f};
 
         FrameBufferInfo worldFrameBuffer;
+        /** AA-PHASE-01: ground uses the same native raster with AA on or off. */
+        std::optional<FrameBufferInfo> nativeTerrainFrameBuffer;
+        TextureHandle nativeTerrainMask;
 
         TextureHandle dodgeMask;
         /** Coverage of the finished buildings, for the purple halo the post pass draws. */

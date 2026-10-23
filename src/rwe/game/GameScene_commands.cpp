@@ -3511,11 +3511,8 @@ namespace rwe
 
     void GameScene::recreateWorldRenderTextures()
     {
-        // Anti-aliasing: the original renders each unit into a double-size
-        // bitmap and box-filters it down through the alpha table. Here the
-        // whole world buffer is doubled and the blit's linear filter does the
-        // averaging, which costs one draw and catches every edge rather than
-        // only unit silhouettes.
+        // AA-ELIGIBILITY-01 / AA-PHASE-01: cached objects use the doubled
+        // world buffer; terrain is rasterized independently at native size.
         worldRenderTextureScale = antiAliasEnabled ? 2u : 1u;
         auto width = worldViewport.width() * worldRenderTextureScale;
         auto height = worldViewport.height() * worldRenderTextureScale;
@@ -3525,6 +3522,17 @@ namespace rwe
         // Attached as a second colour target of the world framebuffer, so the
         // passes that draw the world fill it as they go. See unitTexture.frag.
         sceneContext.graphics->attachFrameBufferMaskBuffer(worldFrameBuffer.frameBuffer.get(), buildingMask.get());
+        if (antiAliasEnabled)
+        {
+            nativeTerrainFrameBuffer = sceneContext.graphics->createFrameBuffer(worldViewport.width(), worldViewport.height());
+            nativeTerrainMask = sceneContext.graphics->createEmptyTexture(worldViewport.width(), worldViewport.height());
+            sceneContext.graphics->attachFrameBufferMaskBuffer(nativeTerrainFrameBuffer->frameBuffer.get(), nativeTerrainMask.get());
+        }
+        else
+        {
+            nativeTerrainFrameBuffer.reset();
+            nativeTerrainMask = TextureHandle{};
+        }
         worldRenderTextureSize = {worldViewport.width(), worldViewport.height()};
     }
 
