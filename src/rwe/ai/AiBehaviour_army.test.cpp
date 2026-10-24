@@ -853,6 +853,9 @@ namespace rwe
         auto profile = makeDefaultStandardProfile();
         // See the intruders without a scout, and keep everything out of
         // its own acquisition radius so the only orders are the defence's.
+        // This measures force sizing, independent of the lower difficulties'
+        // command budget. Hard issues the complete response in one pass.
+        profile.difficulty = AiDifficulty::Hard;
         profile.cheatModeOmniscient = true;
         profile.scoutCount = 0;
         profile.attackArmySize = 50;

@@ -12,6 +12,104 @@
 
 namespace rwe
 {
+    TEST_CASE("AI combat micro shares a paced minute budget across units", "[ai][micro]")
+    {
+        auto orders = [] {
+            std::vector<PlayerCommand> commands;
+            for (unsigned int id = 0; id < 10; ++id)
+            {
+                commands.emplace_back(PlayerUnitCommand(UnitId(id), PlayerUnitCommand::IssueOrder(
+                    MoveOrder(SimVector(100_ss, 0_ss, 100_ss)), PlayerUnitCommand::IssueOrder::Immediate)));
+            }
+            return commands;
+        };
+        for (auto difficulty : {AiDifficulty::Easy, AiDifficulty::Standard})
+        {
+            AiMicroLimiter limiter;
+            std::deque<unsigned int> issued;
+            unsigned int total = 0;
+            for (unsigned int tick = 0; tick < 120u * SimTicksPerSecond; ++tick)
+            {
+                auto commands = orders();
+                limiter.filter(commands, 0, GameTime(tick), difficulty);
+                REQUIRE(commands.size() <= 4);
+                while (!issued.empty() && tick - issued.front() >= 60u * SimTicksPerSecond)
+                {
+                    issued.pop_front();
+                }
+                issued.insert(issued.end(), commands.size(), tick);
+                REQUIRE(issued.size() <= AiMicroLimiter::ordersPerMinute(difficulty));
+                total += static_cast<unsigned int>(commands.size());
+            }
+            REQUIRE(total == 2 * AiMicroLimiter::ordersPerMinute(difficulty));
+        }
+        for (auto difficulty : {AiDifficulty::Hard, AiDifficulty::Brutal})
+        {
+            AiMicroLimiter limiter;
+            for (unsigned int tick = 0; tick < 60; ++tick)
+            {
+                auto commands = orders();
+                limiter.filter(commands, 0, GameTime(tick), difficulty);
+                REQUIRE(commands.size() == 10);
+            }
+        }
+    }
+
+    TEST_CASE("AI micro preserves economy commands and shares turns fairly", "[ai][micro]")
+    {
+        AiMicroLimiter limiter;
+        auto makeCommands = [] {
+            std::vector<PlayerCommand> commands;
+            commands.emplace_back(PlayerUnitCommand(UnitId(100), PlayerUnitCommand::ModifyBuildQueue{1, "UNIT"}));
+            for (unsigned int id = 0; id < 8; ++id)
+            {
+                commands.emplace_back(PlayerUnitCommand(UnitId(id), PlayerUnitCommand::IssueOrder(
+                    AttackOrder(UnitId(99)), PlayerUnitCommand::IssueOrder::Immediate)));
+            }
+            return commands;
+        };
+        auto first = makeCommands();
+        limiter.filter(first, 1, GameTime(0), AiDifficulty::Standard);
+        REQUIRE(first.size() == 5);
+        REQUIRE(std::holds_alternative<PlayerUnitCommand::ModifyBuildQueue>(std::get<PlayerUnitCommand>(first[0]).command));
+        auto next = makeCommands();
+        limiter.filter(next, 1, GameTime(SimTicksPerSecond / 2), AiDifficulty::Standard);
+        REQUIRE(next.size() == 2);
+        REQUIRE(std::get<PlayerUnitCommand>(next[1]).unit == UnitId(4));
+    }
+
+    TEST_CASE("AI micro keeps queued patrol orders together", "[ai][micro]")
+    {
+        AiMicroLimiter limiter;
+        std::vector<PlayerCommand> commands;
+        for (unsigned int id = 0; id < 3; ++id)
+        {
+            for (auto kind : {PlayerUnitCommand::IssueOrder::Immediate, PlayerUnitCommand::IssueOrder::Queued})
+            {
+                commands.emplace_back(PlayerUnitCommand(UnitId(id), PlayerUnitCommand::IssueOrder(
+                    PatrolOrder(SimVector(100_ss, 0_ss, 100_ss)), kind)));
+            }
+        }
+        limiter.filter(commands, 0, GameTime(0), AiDifficulty::Standard);
+        REQUIRE(commands.size() == 4);
+        REQUIRE(std::get<PlayerUnitCommand>(commands[2]).unit == std::get<PlayerUnitCommand>(commands[3]).unit);
+        std::vector<PlayerCommand> pending;
+        for (unsigned int waypoint = 0; waypoint < 4; ++waypoint)
+        {
+            pending.emplace_back(PlayerUnitCommand(UnitId(2), PlayerUnitCommand::IssueOrder(
+                PatrolOrder(SimVector(100_ss, 0_ss, 100_ss)), waypoint == 0
+                    ? PlayerUnitCommand::IssueOrder::Immediate : PlayerUnitCommand::IssueOrder::Queued)));
+        }
+        pending.emplace_back(PlayerUnitCommand(UnitId(3), PlayerUnitCommand::IssueOrder(
+            MoveOrder(SimVector(0_ss, 0_ss, 0_ss)), PlayerUnitCommand::IssueOrder::Immediate)));
+        auto early = pending;
+        limiter.filter(early, 0, GameTime(SimTicksPerSecond / 2), AiDifficulty::Standard);
+        REQUIRE(early.empty()); // Save up for the older patrol, not the cheap move.
+        limiter.filter(pending, 0, GameTime(2 * SimTicksPerSecond), AiDifficulty::Standard);
+        REQUIRE(pending.size() == 4);
+        REQUIRE(std::get<PlayerUnitCommand>(pending.front()).unit == UnitId(2));
+    }
+
     namespace
     {
         // A barebones UnitDefinition for `unitType`, carrying only the

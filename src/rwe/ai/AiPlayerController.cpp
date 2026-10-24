@@ -656,8 +656,10 @@ namespace rwe
         // 6. Eyes, lift and fists.
         timed("scout", [&] { scout.update(sim, profile, threatMap, reachability, blackboard, outCommands); });
         timed("transport", [&] { transport.update(sim, playerId, profile, reachability, threatMap, build, blackboard, rng, outCommands); });
+        const auto commandsBeforeMicro = outCommands.size();
         timed("army", [&] { army.update(sim, playerId, profile, threatMap, blackboard, outCommands); });
         timed("air", [&] { air.update(sim, playerId, profile, threatMap, blackboard, outCommands); });
+        microLimiter.filter(outCommands, commandsBeforeMicro, sim.gameTime, profile.difficulty);
 
         // Every producing manager passes through this final reservation gate,
         // including transport/outpost planners. Human commands never do.

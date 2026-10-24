@@ -6,6 +6,7 @@
 #include <rwe/ai/AiBlackboard.h>
 #include <rwe/ai/AiController.h>
 #include <rwe/ai/AiTuningProfile.h>
+#include <rwe/ai/AiMicroLimiter.h>
 #include <rwe/ai/AirManager.h>
 #include <rwe/ai/ArmyManager.h>
 #include <rwe/ai/BuildManager.h>
@@ -120,6 +121,7 @@ namespace rwe
         TransportManager transport;
         ArmyManager army;
         AirManager air;
+        AiMicroLimiter microLimiter;
 
         AiProfiler profiler;
     };
