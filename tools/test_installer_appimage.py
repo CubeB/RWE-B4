@@ -19,6 +19,9 @@ class SetupRouting(unittest.TestCase):
             shutil.copyfile(self.repository / "cmake" / source, target)
             target.chmod(0o755)
         self.write_executable("rwe_setup", '''#!/bin/sh
+if [ "${1:-}" = --check-existing ]; then
+    exit "${TEST_EXISTING_EXIT:-1}"
+fi
 printf '%s\\n' "$@" > "$TEST_IMPORT_ARGS"
 echo 'import output'
 exit "${TEST_IMPORT_EXIT:-0}"
@@ -69,6 +72,13 @@ esac
         self.env["TEST_PLAY"] = "1"
         self.assertEqual(self.run_setup("setup").returncode, 0)
         self.assertTrue((self.root / "played").exists())
+
+    def test_existing_data_skips_picker_and_import(self):
+        self.env["TEST_EXISTING_EXIT"] = "0"
+        self.assertEqual(self.run_setup("setup").returncode, 0)
+        self.assertFalse((self.root / "dialogs").exists())
+        self.assertFalse((self.root / "import.args").exists())
+        self.assertFalse((self.root / "played").exists())
 
     def test_failure_shows_details_and_preserves_failure(self):
         self.env["TEST_IMPORT_EXIT"] = "7"

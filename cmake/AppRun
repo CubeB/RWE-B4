@@ -17,6 +17,10 @@ HERE="$(dirname "$(readlink -f "$0")")"
 case "$1" in
     setup|rwe_setup)
         shift
+        # Reinstalling must not reopen the folder picker for imported data.
+        if [ "$#" -eq 0 ] && "$HERE/usr/bin/rwe_setup" --check-existing; then
+            exit 0
+        fi
         # INSTALL-UX-001: explicit CLI options retain their existing behavior.
         # With no options, offer a folder picker on graphical desktops.
         if [ "$#" -eq 0 ] && command -v zenity >/dev/null 2>&1 &&

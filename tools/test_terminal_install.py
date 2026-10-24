@@ -30,7 +30,8 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --output) output=$2; shift 2;;
     https://api.github.com/*) source="$FIXTURES/release.json"; shift;;
-    https://github.com/*) source="$FIXTURES/image"; shift;;
+    https://github.com/*) source="$FIXTURES/image"; echo download >> "$FIXTURES/downloads"; shift;;
+    https://raw.githubusercontent.com/*) source="$INSTALLER"; shift;;
     *) shift;;
   esac
 done
@@ -47,6 +48,7 @@ if command -v cygpath >/dev/null 2>&1; then
   installer=$(cygpath -u "$installer")
 fi
 export FIXTURES="$fixture"
+export INSTALLER="$installer"
 export PATH="$fixture/mocks:$PATH"
 export RWE_INSTALL_DIR="$fixture/program with spaces"
 export RWE_BIN_DIR="$fixture/bin with spaces"
@@ -59,6 +61,28 @@ sh "$installer"
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(result.stdout.splitlines()[-3:], ["setup", "--from", "/game data"])
             self.assertEqual(result.stdout.splitlines().count("setup"), 3)
+            self.assertIn("already downloaded and verified", result.stdout)
+            self.assertEqual((root / "downloads").read_text().splitlines(), ["download"])
+            # The generated updater remembers custom paths (including quotes),
+            # never invokes setup, and keeps game data/saves during an update.
+            data = root / "program with spaces" / "saved-game"
+            data.write_text("keep me")
+            update_harness = harness[:harness.index('sh "$installer"')]
+            update_harness += '''unset RWE_INSTALL_DIR RWE_BIN_DIR
+SETUP_EXIT=7 "$fixture/bin with spaces/rwe-update"
+'''
+            updated_image = image + b"# new release\n"
+            (root / "image").write_bytes(updated_image)
+            updated_digest = hashlib.sha256(updated_image).hexdigest()
+            release["assets"][0]["digest"] = "sha256:" + updated_digest
+            (root / "release.json").write_text(json.dumps(release, indent=2))
+            updated = subprocess.run([bash, "-c", update_harness, "test", root.as_posix(), script.as_posix()],
+                                     capture_output=True, text=True, timeout=30)
+            self.assertEqual(updated.returncode, 0, updated.stdout + updated.stderr)
+            self.assertNotIn("setup", updated.stdout.splitlines())
+            self.assertEqual(data.read_text(), "keep me")
+            self.assertEqual((root / "program with spaces" / ("sha256-" + updated_digest)
+                              / "rwe.AppImage").read_bytes(), updated_image)
             explicit = harness.replace('sh "$installer"\nsh "$installer"',
                                        'RWE_TA_DIR="/my game data" sh "$installer"')
             result = subprocess.run([bash, "-c", explicit, "test", root.as_posix(), script.as_posix()],
@@ -78,8 +102,11 @@ sh "$installer"
             self.assertIn("RWE remains installed", setup_failed.stderr)
             launcher = root / "program with spaces/rwe"
             before = launcher.read_bytes()
+            # A damaged cached image must be re-downloaded and checked too.
+            (root / "program with spaces" / ("sha256-" + updated_digest)
+             / "rwe.AppImage").write_bytes(b"damaged cached image")
             (root / "image").write_bytes(b"corrupt download")
-            failed = subprocess.run([bash, "-c", harness, "test", root.as_posix(), script.as_posix()],
+            failed = subprocess.run([bash, "-c", update_harness, "test", root.as_posix(), script.as_posix()],
                                     capture_output=True, text=True, timeout=30)
             self.assertNotEqual(failed.returncode, 0)
             self.assertIn("checksum", failed.stderr)

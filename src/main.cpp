@@ -598,18 +598,22 @@ int main(int argc, char* argv[])
                 }
                 // INSTALL-UX-001: lead first-run help with the graphical setup.
 #ifdef RWE_PLATFORM_WINDOWS
+                const std::string setupCommand = "rwe_setup";
+                const std::string exampleInstallPath = "C:/GOG Games/Total Annihilation";
                 message += "\nOpen Import Game Data from the Start menu, or double-click\n";
                 message += "Import Game Data.cmd in your extracted RWE folder.\n";
                 message += "Choose Import game files, then Play now when it finishes.\n";
 #else
+                const std::string setupCommand = "rwe-setup";
+                const std::string exampleInstallPath = "/path/to/Total Annihilation";
                 message += "\nUsing the AppImage? Open its setup assistant with:\n";
                 message += "    ./Robot_War_Engine-*.AppImage setup\n";
 #endif
-                message += "\nYou can also run rwe_setup to copy it from your Total Annihilation\n";
+                message += "\nYou can also run " + setupCommand + " to copy it from your Total Annihilation\n";
                 message += "installation. It will find one by itself if it can:\n\n";
-                message += "    rwe_setup\n\n";
+                message += "    " + setupCommand + "\n\n";
                 message += "or point it at one:\n\n";
-                message += "    rwe_setup --from \"C:/GOG Games/Total Annihilation\"";
+                message += "    " + setupCommand + " --from \"" + exampleInstallPath + "\"";
 
                 throw std::runtime_error(message);
             }

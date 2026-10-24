@@ -90,6 +90,9 @@ curl -fsSL https://raw.githubusercontent.com/CubeB/RWE-B4/revival/install.sh | s
 The Linux installer also runs setup: it opens the folder picker when available,
 or tries automatic detection in the terminal. If detection fails, use the
 `rwe-setup --from` command above.
+If RWE's data folder already contains both base-game archives, setup uses them
+without needing the original Total Annihilation installation. An explicit
+`rwe-setup --from` still imports additional files and skips matching files.
 
 Uses standard Linux shell tools and `curl` (or download with `wget` and run
 `sh install.sh`). Installs in `${XDG_DATA_HOME:-$HOME/.local/share}/rwe/program`
@@ -101,6 +104,12 @@ are required to play.
 Both installers check release checksums. Run the same command again to update;
 previous versions, imported game data, and saves are retained. Replace the
 game-data folder with your own copy of Total Annihilation.
+
+On Linux, you can also run `~/.local/bin/rwe-update` (or `rwe-update` when it is
+on PATH). It remembers the installation directories and release channel,
+checks for an updated release, and skips game-data setup. Already downloaded
+AppImages are reused after verifying their checksum. To switch releases, run
+`RWE_RELEASE=nightly ~/.local/bin/rwe-update`.
 
 To choose another release or directory on Windows:
 

@@ -32,6 +32,14 @@ namespace fs = std::filesystem;
 
 namespace
 {
+#ifdef RWE_PLATFORM_WINDOWS
+    constexpr const char* setupCommand = "rwe_setup";
+    constexpr const char* exampleInstallPath = "C:/GOG Games/Total Annihilation";
+#else
+    constexpr const char* setupCommand = "rwe-setup";
+    constexpr const char* exampleInstallPath = "/path/to/Total Annihilation";
+#endif
+
     std::string humanBytes(std::uintmax_t bytes)
     {
         const char* units[] = {"B", "KB", "MB", "GB"};
@@ -290,7 +298,7 @@ namespace
     void printUsage()
     {
         std::cout
-            << "Usage: rwe_setup [options]\n"
+            << "Usage: " << setupCommand << " [options]\n"
             << "\n"
             << "Copies a Total Annihilation installation's data into RWE's data\n"
             << "directory: the archives, the films and the soundtrack, each where\n"
@@ -303,6 +311,8 @@ namespace
             << "                   copy across volumes.\n"
             << "  --dry-run        Say what would happen and change nothing.\n"
             << "  --force          Copy files again even if they are already there.\n"
+            << "  --check-existing Exit successfully if the data directory already\n"
+            << "                   contains the base-game archives; do not import.\n"
             << "  --help           Show this message.\n";
     }
 
@@ -355,6 +365,21 @@ int main(int argc, char* argv[])
         dataDirectory = *searchPath;
     }
 
+    // A completed import remains usable even after the original TA install is
+    // moved or removed. Explicit imports and --force still run as requested.
+    auto checkExisting = argFlag(args, "--check-existing");
+    if ((checkExisting || (!argValue(args, "--from") && !force))
+        && rwe::looksLikeTaInstall(readInstallListing(dataDirectory)))
+    {
+        std::cout << "Game data already present in " << dataDirectory.string()
+                  << ". No import needed.\n";
+        return 0;
+    }
+    if (checkExisting)
+    {
+        return 1;
+    }
+
     // Where it comes from.
     std::optional<fs::path> installPath;
     if (auto from = argValue(args, "--from"))
@@ -378,7 +403,7 @@ int main(int argc, char* argv[])
             std::cerr
                 << "Could not find a Total Annihilation installation.\n\n"
                 << "Point me at one:\n"
-                << "  rwe_setup --from \"C:/GOG Games/Total Annihilation\"\n\n"
+                << "  " << setupCommand << " --from \"" << exampleInstallPath << "\"\n\n"
                 << "It is the directory containing " << rwe::requiredArchives()[0] << ".\n";
             return 1;
         }

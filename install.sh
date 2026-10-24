@@ -25,6 +25,7 @@ fetch() {
 }
 mkdir -p "$root" "$bin"
 root=$(cd "$root" && pwd)
+bin=$(cd "$bin" && pwd)
 stage=$(mktemp -d "$root/.install-XXXXXXXX")
 # stage is an absolute, unique directory directly inside the installation root.
 trap 'rm -rf -- "$stage"' EXIT
@@ -47,14 +48,22 @@ url=$(sed -n '1p' "$stage/asset")
 digest=$(sed -n '2p' "$stage/asset")
 case "$url" in https://github.com/CubeB/RWE-B4/releases/download/*) ;;
     *) echo 'Unexpected release download URL.' >&2; exit 1 ;; esac
-fetch "$url" "$stage/rwe.AppImage"
-if [ "${#digest}" -ne 64 ] || [ "$(sha256sum "$stage/rwe.AppImage" | cut -d ' ' -f 1)" != "$digest" ]; then
-    echo 'Missing or mismatched release SHA-256 checksum.' >&2; exit 1
+case "$digest" in *[!a-fA-F0-9]*|'') echo 'Missing or invalid release SHA-256 checksum.' >&2; exit 1 ;; esac
+if [ "${#digest}" -ne 64 ]; then
+    echo 'Missing or invalid release SHA-256 checksum.' >&2; exit 1
 fi
-chmod +x "$stage/rwe.AppImage"
 version="$root/sha256-$digest"
-mkdir -p "$version"
-mv -f "$stage/rwe.AppImage" "$version/rwe.AppImage"
+if [ -f "$version/rwe.AppImage" ] && [ "$(sha256sum "$version/rwe.AppImage" | cut -d ' ' -f 1)" = "$digest" ]; then
+    echo 'Selected RWE release is already downloaded and verified.'
+else
+    fetch "$url" "$stage/rwe.AppImage"
+    if [ "$(sha256sum "$stage/rwe.AppImage" | cut -d ' ' -f 1)" != "$digest" ]; then
+        echo 'Mismatched release SHA-256 checksum.' >&2; exit 1
+    fi
+    mkdir -p "$version"
+    mv -f "$stage/rwe.AppImage" "$version/rwe.AppImage"
+fi
+chmod +x "$version/rwe.AppImage"
 ln -sfn "$version/rwe.AppImage" "$root/current.AppImage"
 # Resolve the image relative to the launcher so paths containing spaces work.
 cat > "$root/rwe" <<'LAUNCH'
@@ -67,9 +76,42 @@ cat > "$root/rwe-setup" <<'LAUNCH'
 directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 exec "$directory/current.AppImage" setup "$@"
 LAUNCH
-chmod +x "$root/rwe" "$root/rwe-setup"
+# Remember this installation's locations and release channel for updates.
+# Quote values as data; paths may contain spaces or single quotes.
+{
+    printf '#!/bin/sh\nset -eu\n'
+    for setting in RWE_INSTALL_DIR RWE_BIN_DIR RWE_RELEASE; do
+        case "$setting" in
+            RWE_INSTALL_DIR) value=$root ;;
+            RWE_BIN_DIR) value=$bin ;;
+            RWE_RELEASE) value=$release ;;
+        esac
+        escaped=$(printf '%s' "$value" | sed "s/'/'\\\\''/g")
+        printf '%s=${%s:-'\''%s'\''}\nexport %s\n' "$setting" "$setting" "$escaped" "$setting"
+    done
+    cat <<'UPDATE'
+if [ "$#" -ne 0 ]; then
+    echo 'Usage: rwe-update (set RWE_RELEASE to choose a release)' >&2; exit 1
+fi
+script=$(mktemp)
+trap 'rm -f -- "$script"' EXIT
+trap 'exit 1' HUP INT TERM
+url=https://raw.githubusercontent.com/CubeB/RWE-B4/revival/install.sh
+if command -v curl >/dev/null 2>&1; then
+    curl --fail --location --retry 3 --connect-timeout 30 --output "$script" "$url"
+elif command -v wget >/dev/null 2>&1; then
+    wget --tries=3 --timeout=30 -O "$script" "$url"
+else
+    echo 'This system needs curl or wget to update RWE.' >&2; exit 1
+fi
+# Updating the engine never requires re-importing game data.
+unset RWE_TA_DIR
+RWE_SKIP_SETUP=1 sh "$script"
+UPDATE
+} > "$root/rwe-update"
+chmod +x "$root/rwe" "$root/rwe-setup" "$root/rwe-update"
 # Use small forwarding scripts rather than symlinks: $0 must remain at root.
-for name in rwe rwe-setup; do
+for name in rwe rwe-setup rwe-update; do
     # Single-quote paths safely in the generated shell command.
     escaped=$(printf '%s' "$root/$name" | sed "s/'/'\\\\''/g")
     printf '#!/bin/sh\nexec '\''%s'\'' "$@"\n' "$escaped" > "$bin/$name"
@@ -77,6 +119,7 @@ for name in rwe rwe-setup; do
 done
 printf 'RWE installed in %s\n' "$root"
 printf 'Play: %s/rwe\nImport game data: %s/rwe-setup --from "/path/to/Total Annihilation"\n' "$bin" "$bin"
+printf 'Update: %s/rwe-update\n' "$bin"
 case ":$PATH:" in *":$bin:"*) ;; *) printf 'Add %s to PATH to use rwe from any terminal.\n' "$bin" ;; esac
 if [ "$skip_setup" = 1 ]; then
     echo 'Game setup skipped. Run rwe-setup when ready.'
