@@ -5,6 +5,7 @@
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/combat_test_util.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitBehaviorService.h>
 #include <rwe/sim/UnitDefinition.h>
@@ -171,6 +172,7 @@ namespace rwe
 
         auto attacker = addKamikazePlayer(sim, "core");
         auto defender = addKamikazePlayer(sim, "arm");
+        revealCombatArena(sim);
 
         defineVictim(sim, "victim");
         defineBlasts(sim);

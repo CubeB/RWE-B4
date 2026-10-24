@@ -6,6 +6,7 @@
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/combat_test_util.h>
 #include <rwe/sim/LosTables.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
@@ -152,6 +153,7 @@ namespace rwe
         GameSimulation sim(makeGunshipTerrain(256, 256), 0u, 0, 0);
         auto us = addGunshipPlayer(sim, "us");
         auto them = addGunshipPlayer(sim, "them");
+        revealCombatArena(sim);
         sim.unitDefinitions["gunship"] = makeGunshipDef();
         sim.unitDefinitions["target"] = makeGunshipTargetDef();
         registerGunshipModel(sim, "model");
@@ -222,6 +224,7 @@ namespace rwe
         GameSimulation sim(makeGunshipTerrain(256, 256), 0u, 0, 0);
         auto us = addGunshipPlayer(sim, "us");
         auto them = addGunshipPlayer(sim, "them");
+        revealCombatArena(sim);
         sim.unitDefinitions["gunship"] = makeGunshipDef();
         sim.unitDefinitions["target"] = makeGunshipTargetDef();
         registerGunshipModel(sim, "model");
@@ -306,6 +309,7 @@ namespace rwe
         GameSimulation sim(makeGunshipTerrain(256, 256), 0u, 0, 0);
         auto us = addGunshipPlayer(sim, "us");
         auto them = addGunshipPlayer(sim, "them");
+        revealCombatArena(sim);
         sim.unitDefinitions["gunship"] = makeGunshipDef();
         sim.unitDefinitions["target"] = makeGunshipTargetDef();
         registerGunshipModel(sim, "model");
@@ -405,6 +409,7 @@ namespace rwe
                 sim.nextWindSpeedChange = GameTime(1000000u);
                 auto us = addGunshipPlayer(sim, "us");
                 auto them = addGunshipPlayer(sim, "them");
+                revealCombatArena(sim);
                 sim.unitDefinitions["gunship"] = makeGunshipDef();
                 sim.unitDefinitions["target"] = makeGunshipTargetDef();
                 registerGunshipModel(sim, "model");

@@ -20,10 +20,10 @@ namespace rwe
             return PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(AttackOrder(target), PlayerUnitCommand::IssueOrder::IssueKind::Immediate));
         }
 
-        /** As ArmyManager's: a contact nobody has seen lately is not a target. See AiTuningProfile::targetMemoryTicks. */
+        /** As ArmyManager's: only a contact refreshed this tick is a tactical target. */
         bool inSightRecently(const AiBlackboard& bb, const AiTuningProfile& profile, const KnownEnemy& enemy)
         {
-            return bb.now.value <= enemy.lastSeen.value + static_cast<unsigned int>(profile.targetMemoryTicks);
+            return profile.cheatModeOmniscient || bb.now == enemy.lastSeen;
         }
 
         bool isAttackingUnit(const UnitState& unit, UnitId target)

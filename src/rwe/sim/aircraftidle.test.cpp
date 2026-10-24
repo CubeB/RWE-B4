@@ -272,6 +272,9 @@ namespace rwe
 
         auto targetPosition = SimVector(0_ss, 0_ss, 0_ss);
         auto targetId = spawnIdleUnit(sim, "target", them, targetPosition, script);
+        sim.unitDefinitions["watcher"] = makeIdleTargetDef();
+        sim.unitDefinitions["watcher"].sightDistance = 300;
+        spawnIdleUnit(sim, "watcher", us, SimVector(0_ss, 0_ss, 64_ss), script);
 
         auto bomberId = spawnIdleUnit(sim, "bomber", us, SimVector(-900_ss, 200_ss, 0_ss), script);
         {
@@ -281,6 +284,8 @@ namespace rwe
             weapon.weaponType = "bomb";
             bomber.weapons[0] = weapon;
             bomber.orders.push_back(createAttackOrder(targetId));
+            // The bombing mission was ordered after observing this spot.
+            std::get<AttackOrder>(bomber.orders.back()).lastSeenPosition = SimVector(0_ss, 0_ss, 0_ss);
         }
         sim.flyingUnitsSet.insert(bomberId);
 
@@ -359,6 +364,7 @@ namespace rwe
             weapon.weaponType = "bomb";
             bomber.weapons[0] = weapon;
             bomber.orders.push_back(createAttackOrder(targetId));
+            std::get<AttackOrder>(bomber.orders.back()).lastSeenPosition = SimVector(0_ss, 0_ss, 0_ss);
         }
         sim.flyingUnitsSet.insert(bomberId);
 
@@ -801,6 +807,7 @@ namespace rwe
             weapon.weaponType = "bomb";
             bomber.weapons[0] = weapon;
             bomber.orders.push_back(createAttackOrder(targetId));
+            std::get<AttackOrder>(bomber.orders.back()).lastSeenPosition = SimVector(0_ss, 0_ss, 0_ss);
         }
         sim.flyingUnitsSet.insert(bomberId);
 

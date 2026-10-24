@@ -3,6 +3,7 @@
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/combat_test_util.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitFireOrders.h>
@@ -184,6 +185,7 @@ namespace rwe
         GameSimulation sim(makeGroupAttackTerrain(), 0u, 0, 0);
         auto attackerOwner = addPlayer(sim, "attackers");
         auto targetOwner = addPlayer(sim, "target");
+        revealCombatArena(sim);
 
         sim.unitDefinitions["attacker"] = makeAttackerDef();
         sim.unitDefinitions["target"] = makeTargetDef();
@@ -261,6 +263,7 @@ namespace rwe
         GameSimulation sim(MapTerrain(Grid<unsigned char>(128, 128, static_cast<unsigned char>(0)), 20_ss), 0u, 0, 0);
         auto owner = addPlayer(sim, "a");
         auto enemy = addPlayer(sim, "b");
+        revealCombatArena(sim);
         registerGroupAttackModel(sim, "attackermodel");
         registerGroupAttackModel(sim, "targetmodel");
         auto script = makeEmptyCobScript({"base"});
@@ -283,6 +286,7 @@ namespace rwe
 
         auto shipDef = makeAttackerDef();
         shipDef.floater = true;
+        shipDef.sonarDistance = 2000;
         shipDef.movementCollisionInfo = UnitDefinition::AdHocMovementClass{1u, 1u, 255u, 255u, 0u, 255u};
         sim.unitDefinitions["ARMROY"] = shipDef;
 

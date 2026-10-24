@@ -1047,14 +1047,10 @@ namespace rwe
         }
     }
 
-    TEST_CASE("a fogged target is kept unless its slot names it a bad target", "[targeting]")
+    TEST_CASE("a held weapon drops a fogged unit target regardless of category", "[targeting][fogattack]")
     {
-        // Visibility plays no part in 0x4089A0's decision to keep a held
-        // target, but a bad-target one sends it to 0x40B7B0, whose candidates
-        // are can-see filtered; an empty pick clears the slot (0x48A0F0). The
-        // Skeeter shows it: its secondary missile carries
-        // wsec_badTargetCategory=NOTAIR and its 604 reach outruns its 280
-        // sight, so the tower it holds can sit in fog it cannot see into.
+        // Range can exceed the shooter's sight, but a lost spotter must not
+        // leave the weapon following the hidden unit's live position.
         auto script = makeTargetingScript();
         GameSimulation sim(makeTargetingTerrain(), 0u, 0, 0);
         auto us = addTargetingPlayer(sim, "us", GamePlayerType::Human);
@@ -1099,10 +1095,10 @@ namespace rwe
             }
         };
 
-        SECTION("a slot that objects to nothing keeps it")
+        SECTION("a slot that objects to nothing still loses sight")
         {
             tickFourScans();
-            REQUIRE(weaponTargetOfSlot(sim, shooterId, 1) == std::optional<UnitId>(lltId));
+            REQUIRE_FALSE(weaponTargetOfSlot(sim, shooterId, 1).has_value());
         }
 
         SECTION("a slot that names it a bad target drops it, with nothing visible to replace it")
@@ -1110,6 +1106,35 @@ namespace rwe
             sim.unitDefinitions["skeeter"].badTargetCategory[1] = "NOTAIR";
             tickFourScans();
             REQUIRE_FALSE(weaponTargetOfSlot(sim, shooterId, 1).has_value());
+        }
+
+        SECTION("an AI's pending burst stops before firing another hidden shot")
+        {
+            sim.getPlayer(us).type = GamePlayerType::Computer;
+            auto& weapon = *sim.getUnitState(shooterId).weapons[1];
+            weapon.state = UnitWeaponStateAttacking(lltId);
+            auto& attack = std::get<UnitWeaponStateAttacking>(weapon.state);
+            attack.attackInfo = UnitWeaponStateAttacking::FireInfo{
+                SimAngle(0), SimAngle(0), SimVector(250_ss, 0_ss, 0_ss), std::nullopt, 1, GameTime(0)};
+            sim.weaponDefinitions["missile"].burst = 3;
+            sim.getUnitState(lltId).position = SimVector(350_ss, 0_ss, 0_ss);
+            sim.events.clear();
+            sim.tick();
+            REQUIRE_FALSE(weaponTargetOfSlot(sim, shooterId, 1).has_value());
+            for (const auto& event : sim.events)
+            {
+                REQUIRE_FALSE(std::holds_alternative<FireWeaponEvent>(event));
+            }
+        }
+
+        SECTION("fresh spotting permits reacquisition")
+        {
+            sim.tick();
+            REQUIRE_FALSE(weaponTargetOfSlot(sim, shooterId, 1).has_value());
+            spawnTargetingUnit(sim, "watcher", us, SimVector(100_ss, 0_ss, 64_ss), script);
+            tickTwice(sim);
+            REQUIRE(sim.canSeeUnit(us, lltId));
+            REQUIRE(weaponTargetOfSlot(sim, shooterId, 1) == std::optional<UnitId>(lltId));
         }
     }
 
@@ -1125,6 +1150,9 @@ namespace rwe
         defineWeapon(sim, "laser", false);
         auto gun = spawnTargetingUnit(sim, "gun", us, SimVector(0_ss, 0_ss, 0_ss), script);
         auto target = spawnTargetingUnit(sim, "target", them, SimVector(450_ss, 0_ss, 0_ss), script);
+        // Isolate range from fog: a friendly spotter sees the distant target.
+        spawnTargetingUnit(sim, "target", us, SimVector(400_ss, 0_ss, 64_ss), script);
+        sim.tick();
         armWith(sim, gun, "laser");
         sim.getUnitState(gun).weapons[0]->state = UnitWeaponStateAttacking(target);
         for (int i = 0; i < 5; ++i)

@@ -211,6 +211,8 @@ namespace rwe
         {
             // Beyond 240, so the order is mostly a move order.
             auto victimId = spawnUnit(sim, "victim", them, SimVector(400_ss, 0_ss, 0_ss), script);
+            // A unit-targeted order needs a spotter beyond our own sight.
+            spawnUnit(sim, "commander", us, SimVector(350_ss, 0_ss, 64_ss), script);
             sim.getUnitState(commanderId).orders.push_back(DgunOrder(victimId));
 
             // Out of range on the first tick, so the weapon is idle and the
@@ -279,6 +281,7 @@ namespace rwe
         auto subDefinition = makeVictimDef();
         subDefinition.objectName = "subModel";
         sim.unitDefinitions["sub"] = subDefinition;
+        sim.unitDefinitions["commander"].sonarDistance = 300;
 
         auto commanderId = spawnCommander(sim, us, SimVector(0_ss, 0_ss, 0_ss), script);
         // Whether a round was ever in the air. The player's energy is no
@@ -292,6 +295,9 @@ namespace rwe
             }
         };
         auto runOrder = [&](UnitId target) {
+            sim.tick();
+            sim.tick();
+            REQUIRE(sim.canSeeUnit(us, target));
             sim.getUnitState(commanderId).orders.push_back(DgunOrder(target));
             runTicks();
         };

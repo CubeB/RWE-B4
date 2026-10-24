@@ -1,9 +1,9 @@
 # Rocket-bot targeting and combat micro
 
-## Targeting review
+## Original targeting review (before the fix)
 
-This is a code review, not confirmation of a particular replay. Targeting has
-not been changed as part of this review.
+This records the pre-fix behavior found during code review, not confirmation
+of a particular replay. The follow-up changes are described below.
 
 - `PerceptionManager::refresh` only records units passing `canSeeUnit`, unless
   `cheatModeOmniscient` is enabled. Brutal enables that option; Hard does not.
@@ -33,10 +33,42 @@ not been changed as part of this review.
 
 These are plausible explanations for the report, beyond legitimate spotting
 by another unit. They do not establish that every out-of-sight rocket shot is
-incorrect. A follow-up visibility fix should retain remembered positions for
-strategic movement while preventing hidden live-unit reads in tactical
-decisions, initializing attack orders without leaking the live position, and
-reviewing persistent weapon tracking separately.
+incorrect. The follow-up addresses tactical acquisition, remembered movement,
+and persistent weapon tracking separately.
+
+## Targeting fix
+
+- Non-omniscient ground and air AI only choose tactical unit targets whose
+  contact was refreshed by perception in the current simulation tick. Losing
+  sight for even one tick prevents a new unit attack or live-state kiting
+  decision. Remembered contacts remain available for strategic searches.
+- An attack order navigates to its own last-seen point while its unit target
+  is hidden, without reading the target's current position or movement type.
+  It finishes that search when it reaches the remembered point. A new order
+  with no remembered position waits for sight instead of revealing a location.
+- Weapon tracking drops a unit target when its owner loses sight, before aim
+  or burst firing can use the hidden unit. Restoring sight permits ordinary
+  reacquisition. The rule applies equally to human and AI weapons.
+- Unit-targeted D-gun orders also require sight before moving or aiming.
+  Ground-targeted fire, interceptor projectile targets, and projectiles already
+  launched retain their ordinary behavior.
+- Brutal still deliberately knows enemy positions for planning. That setting
+  does not bypass the simulation's sight requirement for firing at a unit.
+
+The former five-second `targetMemoryTicks` setting remains relevant to builder
+threat assessment; it no longer authorizes unit-targeted ground/air micro.
+This intentionally tightens the former held-target behavior documented from
+the original executable.
+
+Fog regression tests cover one-tick sight loss, pending unseen orders,
+remembered navigation and reacquisition, and stopping an AI weapon mid-burst.
+Combat-mechanics arenas explicitly reveal the map to isolate flight, range,
+water eligibility and formation mechanics from fog. Fog tests use real sight.
+
+Validation: the Windows Release game and test executables built successfully.
+The full native suite passed 1,930 cases and 211,792 assertions; three cases
+requiring external retail game data were skipped. No Linux runtime or replay
+of the reported match was available for this validation.
 
 ## Micro change
 

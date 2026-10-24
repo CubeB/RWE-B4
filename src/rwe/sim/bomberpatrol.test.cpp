@@ -5,6 +5,7 @@
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/io/cob/Cob.h>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/sim/combat_test_util.h>
 #include <rwe/sim/UnitDefinition.h>
 #include <rwe/sim/UnitOrder.h>
 #include <rwe/sim/UnitState.h>
@@ -112,6 +113,7 @@ namespace rwe
         GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
         auto us = addPlayer(sim, "us");
         auto them = addPlayer(sim, "them");
+        revealCombatArena(sim);
         sim.unitDefinitions["bomber"] = makeBomberDef();
         sim.unitDefinitions["target"] = makeTargetDef();
         registerModel(sim);
@@ -203,6 +205,7 @@ namespace rwe
         GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
         auto us = addPlayer(sim, "us");
         auto them = addPlayer(sim, "them");
+        revealCombatArena(sim);
         sim.unitDefinitions["bomber"] = makeBomberDef();
         auto flyer = makeTargetDef();
         flyer.canFly = true;
@@ -307,6 +310,7 @@ namespace rwe
         GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
         auto us = addPlayer(sim, "us");
         auto them = addPlayer(sim, "them");
+        revealCombatArena(sim);
         sim.unitDefinitions["bomber"] = makeBomberDef();
         auto flyer = makeTargetDef();
         flyer.canFly = true;
@@ -460,6 +464,7 @@ namespace rwe
         GameSimulation sim(makeFlatTerrain(128, 128), 0u, 0, 0);
         auto us = addPlayer(sim, "us");
         auto them = addPlayer(sim, "them");
+        revealCombatArena(sim);
         sim.unitDefinitions["bomber"] = makeBomberDef();
         sim.unitDefinitions["target"] = makeTargetDef();
         registerModel(sim);

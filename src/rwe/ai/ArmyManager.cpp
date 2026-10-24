@@ -58,10 +58,11 @@ namespace rwe
         }
 
         /**
-         * Whether a remembered enemy is fresh enough to be shot at.
+         * Whether perception refreshed this enemy in the current tick.
          *
          * PerceptionManager only stamps `lastSeen` on what the AI can
-         * actually see, so this is "has our side laid eyes on it lately".
+         * actually see. Memory may guide a search, but not a new unit-targeted
+         * attack or kiting decision using the hidden unit's live state.
          * The marker itself is kept longer on purpose -- it is what sends a
          * scout back to look -- but a target nobody can see is not one the
          * original would have offered a weapon. See AiTuningProfile::
@@ -69,7 +70,7 @@ namespace rwe
          */
         bool inSightRecently(const AiBlackboard& bb, const AiTuningProfile& profile, const KnownEnemy& enemy)
         {
-            return bb.now.value <= enemy.lastSeen.value + static_cast<unsigned int>(profile.targetMemoryTicks);
+            return profile.cheatModeOmniscient || bb.now == enemy.lastSeen;
         }
 
         /**

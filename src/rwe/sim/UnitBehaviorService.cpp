@@ -1172,6 +1172,19 @@ namespace rwe
         }
         else if (auto aimingState = std::get_if<UnitWeaponStateAttacking>(&weapon->state); aimingState != nullptr)
         {
+            // Unit targets require current player-wide sight even after
+            // acquisition, including during a burst. Ground fire and missile
+            // interception have no unit visibility requirement. Already
+            // launched projectiles continue under their ordinary physics.
+            if (auto target = std::get_if<UnitId>(&aimingState->target))
+            {
+                auto targetRef = sim->tryGetUnitState(*target);
+                if (!targetRef || targetRef->get().isDead() || !sim->canSeeUnit(unit.owner, *target))
+                {
+                    unit.clearWeaponTarget(weaponIndex);
+                    return;
+                }
+            }
             if (std::holds_alternative<UnitWeaponStateAttacking::FireInfo>(aimingState->attackInfo))
             {
                 tryFireWeapon(id, weaponIndex);
@@ -3799,15 +3812,16 @@ namespace rwe
         // A target that has died ends the order however well we remember where
         // it was: the remembered position is for a unit out of sight, not for
         // one that is gone.
-        auto livePosition = tryGetSweetSpot(*targetUnitId);
-        if (!livePosition)
+        auto targetRef = sim->tryGetUnitState(*targetUnitId);
+        if (!targetRef || targetRef->get().isDead())
         {
             return std::nullopt;
         }
 
         if (sim->canSeeUnit(unitInfo.state->owner, *targetUnitId))
         {
-            lastSeenPosition = *livePosition;
+            auto livePosition = tryGetSweetSpot(*targetUnitId);
+            lastSeenPosition = livePosition;
             return livePosition;
         }
 
@@ -3816,12 +3830,9 @@ namespace rwe
             return lastSeenPosition;
         }
 
-        // Never seen at all: keep the live position rather than losing the
-        // order. In play an attack order is issued by clicking something
-        // visible, so the remembered position is set on the first tick, and
-        // this only arises for an order issued from somewhere with its own
-        // notion of what it knows.
-        return livePosition;
+        // A new order against an unseen unit has no position to act on.
+        // Wait for sight rather than leaking its current location.
+        return std::nullopt;
     }
 
     bool UnitBehaviorService::attackTarget(UnitInfo unitInfo, const AttackTarget& target, std::optional<SimVector>& lastSeenPosition)
@@ -3831,6 +3842,26 @@ namespace rwe
         // else so that every path below -- the crawling bomb, the aircraft,
         // the ground approach -- works from the same answer.
         auto targetPosition = resolveAttackTargetPosition(unitInfo, target, lastSeenPosition);
+
+        if (auto targetId = std::get_if<UnitId>(&target))
+        {
+            auto targetRef = sim->tryGetUnitState(*targetId);
+            if (targetRef && !targetRef->get().isDead() && !sim->canSeeUnit(unitInfo.state->owner, *targetId))
+            {
+                unitInfo.state->clearWeaponTargets();
+                if (targetPosition)
+                {
+                    // Search only the remembered point. Do not consult the
+                    // hidden target's live position, range or movement type.
+                    if (withinFlatRange(unitInfo.state->position, *targetPosition, 32_ss))
+                    {
+                        return true;
+                    }
+                    navigateTo(unitInfo, *targetPosition);
+                }
+                return false;
+            }
+        }
 
         // A crawling bomb has no weapon to aim, so this has to come first. The
         // original turns an attack order on one of these into its own mission,
@@ -5353,6 +5384,19 @@ namespace rwe
 
     bool UnitBehaviorService::handleDgunOrder(UnitInfo unitInfo, const DgunOrder& order)
     {
+        if (auto target = std::get_if<UnitId>(&order.target))
+        {
+            auto targetRef = sim->tryGetUnitState(*target);
+            if (!targetRef || targetRef->get().isDead())
+            {
+                return true;
+            }
+            if (!sim->canSeeUnit(unitInfo.state->owner, *target))
+            {
+                unitInfo.state->clearWeaponTargets();
+                return false;
+            }
+        }
         // Slot 2 -- Weapon3 in the FBI -- by index, because that is what the
         // original does: 0x403190 writes the literal 2 into the mission's
         // weapon-slot word and everything downstream indexes with it. It

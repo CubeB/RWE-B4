@@ -1071,6 +1071,19 @@ namespace rwe
 
             REQUIRE(ordersFor<AttackOrder>(commands, soldier).empty());
         }
+
+        SECTION("sight lost one tick ago is already too old, including on Hard")
+        {
+            bb.now = GameTime(101u);
+            bb.knownEnemies[quarry.value].lastSeen = GameTime(100u);
+            for (auto difficulty : {AiDifficulty::Standard, AiDifficulty::Hard})
+            {
+                profile.difficulty = difficulty;
+                std::vector<PlayerCommand> commands;
+                manager.update(sim, ai, profile, threatMap, bb, commands);
+                REQUIRE(ordersFor<AttackOrder>(commands, soldier).empty());
+            }
+        }
     }
 
     TEST_CASE("a unit acquires at its own weapon range, and the flat radius is the control", "[ai]")

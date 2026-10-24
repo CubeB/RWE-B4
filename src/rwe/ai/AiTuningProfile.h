@@ -2010,17 +2010,12 @@ namespace rwe
         int tacticalTickInterval{15};
 
         /**
-         * How long a contact stays a target after it was last seen, in ticks.
+         * How long a remembered contact informs builder threat assessment.
          *
-         * The original's computer player and its weapons read the same list:
-         * `0x40AA40` rebuilds the enemy list once per player through the
-         * can-see predicate `0x465AC0`, and both the acquisition scan and the
-         * missions walk that (TOTALA-EXE.md S:10). RWE's blackboard instead
-         * remembers a contact until the AI is standing where it last saw it,
-         * which is right for deciding where to go and wrong for deciding what
-         * to shoot: it let an army keep firing at a unit its side had long
-         * lost. Five seconds, so a target that steps behind a hill for a
-         * moment is not dropped mid-burst.
+         * This does not extend tactical sight: ground and air micro only use
+         * contacts refreshed by perception this tick. Weapon tracking also
+         * requires current sight, including during a burst. Remembered enemy
+         * positions remain useful for strategic searches and builder safety.
          */
         int targetMemoryTicks{150};
 

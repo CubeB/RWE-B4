@@ -253,14 +253,10 @@ namespace rwe
         }
     }
 
-    TEST_CASE("a target that was never seen is not lost, and a ground target never hides", "[fogattack]")
+    TEST_CASE("an unseen unit target reveals no position, and a ground target never hides", "[fogattack]")
     {
-        // An attack order is issued in play by clicking something visible, so
-        // the remembered position is set on the first tick and the never-seen
-        // case does not arise. Where it does -- an order from something with
-        // its own notion of what it knows -- the live position is kept rather
-        // than the order being quietly dropped, which is what RWE did before
-        // and is the conservative half of this change.
+        // A synthetic order against an unseen unit must not reveal where it
+        // is. Keep the order pending until sight supplies a position.
         auto script = makeEmptyCobScript({"base"});
         GameSimulation sim(makeFogAttackTerrain(), 0u, 0, 0);
         auto us = addPlayer(sim, "us");
@@ -288,7 +284,7 @@ namespace rwe
         // ... and the order is still being carried out rather than dropped.
         REQUIRE_FALSE(sim.getUnitState(attackerId).orders.empty());
         const auto& goal = sim.getUnitState(attackerId).navigationState.desiredDestination;
-        REQUIRE(goal.has_value());
+        REQUIRE_FALSE(goal.has_value());
 
         SECTION("a place is a place whether or not anyone is looking at it")
         {

@@ -354,7 +354,7 @@ namespace rwe
         }
     }
 
-    TEST_CASE("a dead contact out of sight still draws the commander, unless it cheats", "[ai]")
+    TEST_CASE("a dead contact out of sight stays remembered without becoming a commander attack target", "[ai]")
     {
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
@@ -386,14 +386,13 @@ namespace rwe
         REQUIRE(controller.getBlackboard().knownEnemies.count(enemyId.value) == 1);
 
         // The enemy dies out of sight. The honest AI keeps the marker and
-        // still treats it as the threat near the commander.
+        // may still search its last known location, but cannot target it.
         sim.getUnitState(enemyId).markAsDeadNoCorpse();
         runTicks(sim, controller, 2, commands);
 
         const auto& bb = controller.getBlackboard();
         REQUIRE(bb.knownEnemies.count(enemyId.value) == 1);
-        REQUIRE(bb.commanderThreat.has_value());
-        CHECK(*bb.commanderThreat == enemyId);
+        REQUIRE_FALSE(bb.commanderThreat.has_value());
     }
 
     TEST_CASE("each faction plays its own line of kbots, and a knob set by hand still wins", "[ai]")
