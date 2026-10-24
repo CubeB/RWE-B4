@@ -63,6 +63,12 @@ sh "$installer"
             self.assertEqual(result.stdout.splitlines().count("setup"), 3)
             self.assertIn("already downloaded and verified", result.stdout)
             self.assertEqual((root / "downloads").read_text().splitlines(), ["download"])
+            launcher_harness = harness[:harness.index('sh "$installer"')]
+            launcher_harness += '"$RWE_BIN_DIR/rwe-launcher" --example\n'
+            launched = subprocess.run([bash, "-c", launcher_harness, "test", root.as_posix(), script.as_posix()],
+                                      capture_output=True, text=True, timeout=30)
+            self.assertEqual(launched.returncode, 0, launched.stdout + launched.stderr)
+            self.assertEqual(launched.stdout.splitlines(), ["launcher", "--example"])
             # The generated updater remembers custom paths (including quotes),
             # never invokes setup, and keeps game data/saves during an update.
             data = root / "program with spaces" / "saved-game"

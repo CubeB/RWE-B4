@@ -201,9 +201,25 @@ int main(int /*argc*/, char* /*argv*/[])
 {
     rwe::CompositeVirtualFileSystem vfs;
     json j;
+    std::string line;
 
-    while (std::cin >> j)
+    // The launcher sends one JSON object per line. JSON's stream extractor
+    // throws at EOF, so using it as the loop condition crashed on shutdown.
+    while (std::getline(std::cin, line))
     {
+        if (line.find_first_not_of(" \t\r\n") == std::string::npos)
+        {
+            continue;
+        }
+        try
+        {
+            j = json::parse(line);
+        }
+        catch (const json::parse_error& error)
+        {
+            std::cerr << "Invalid launcher request: " << error.what() << std::endl;
+            return 1;
+        }
         auto cmdIt = j.find("command");
         if (cmdIt == j.end())
         {

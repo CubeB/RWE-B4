@@ -5,6 +5,8 @@ import * as React from "react";
 import { connect } from "react-redux";
 import { Dispatch } from "redux";
 import { hostGameFormCancel, hostGameFormConfirm } from "../actions";
+import { State } from "../state";
+import { normalizePlayerName } from "../preferences";
 
 interface HostGameFormDispatchProps {
   onConfirm: (
@@ -15,7 +17,7 @@ interface HostGameFormDispatchProps {
   onCancel: () => void;
 }
 
-type HostGameFormProps = HostGameFormDispatchProps;
+type HostGameFormProps = HostGameFormDispatchProps & { playerName?: string };
 
 interface HostGameFormState {
   playerName: string;
@@ -29,7 +31,11 @@ class UnconnectedHostGameForm extends React.Component<
 > {
   constructor(props: HostGameFormProps) {
     super(props);
-    this.state = { playerName: "", gameDescription: "", players: 2 };
+    this.state = {
+      playerName: props.playerName || "",
+      gameDescription: "",
+      players: 2,
+    };
 
     this.handlePlayerNameChange = this.handlePlayerNameChange.bind(this);
     this.handleGameDescriptionChange =
@@ -52,7 +58,7 @@ class UnconnectedHostGameForm extends React.Component<
   handleSubmit(event: React.SyntheticEvent<EventTarget>) {
     event.preventDefault();
     this.props.onConfirm(
-      this.state.playerName,
+      normalizePlayerName(this.state.playerName),
       this.state.gameDescription,
       this.state.players
     );
@@ -92,7 +98,12 @@ class UnconnectedHostGameForm extends React.Component<
           </div>
 
           <div className="host-game-form-bottom-panel">
-            <Button type="submit" variant="contained" color="primary">
+            <Button
+              type="submit"
+              variant="contained"
+              color="primary"
+              disabled={!normalizePlayerName(this.state.playerName)}
+            >
               Create Game Room
             </Button>
             <Button
@@ -117,4 +128,7 @@ function mapDispatchToProps(dispatch: Dispatch): HostGameFormDispatchProps {
   };
 }
 
-export default connect(undefined, mapDispatchToProps)(UnconnectedHostGameForm);
+export default connect(
+  (state: State) => ({ playerName: state.playerName }),
+  mapDispatchToProps
+)(UnconnectedHostGameForm);

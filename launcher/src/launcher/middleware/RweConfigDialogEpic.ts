@@ -17,8 +17,15 @@ export const rweConfigDialogEpic = (
       SubmitSettingsDialogAction
     >("SUBMIT_SETTINGS_DIALOG"),
     rxop.concatMap(action => {
-      return rx.from(writeConfigToFile(configFilePath, action.settings));
-    }),
-    rxop.concatMap(() => rx.empty())
+      return rx.from(writeConfigToFile(configFilePath, action.settings)).pipe(
+        rxop.ignoreElements(),
+        rxop.catchError(error =>
+          rx.of<AppAction>({
+            type: "LAUNCHER_ERROR",
+            message: `Could not save game settings: ${error}`,
+          })
+        )
+      );
+    })
   );
 };

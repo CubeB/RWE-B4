@@ -49,7 +49,8 @@ try {
         }
         Move-Item -LiteralPath $source -Destination $version
     }
-    foreach ($entry in @(@('rwe', 'rwe.exe'), @('rwe-setup', 'rwe_setup.exe'))) {
+    foreach ($entry in @(@('rwe', 'rwe.exe'), @('rwe-setup', 'rwe_setup.exe'), @('rwe-launcher', 'launcher\rwe-launcher.exe'))) {
+        if (-not (Test-Path -LiteralPath (Join-Path $version $entry[1]))) { continue }
         $launcher = Join-Path $InstallDir ($entry[0] + '.cmd')
         $body = '@echo off' + "`r`n" + '"%~dp0' + $versionName + '\' + $entry[1] + '" %*' + "`r`n"
         [IO.File]::WriteAllText($launcher, $body, [Console]::OutputEncoding)
@@ -72,8 +73,16 @@ $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
 $shortcut.TargetPath = Join-Path $version 'rwe.exe'
 $shortcut.WorkingDirectory = $version
 $shortcut.Save()
+$launcherExecutable = Join-Path $version 'launcher\rwe-launcher.exe'
+if (Test-Path -LiteralPath $launcherExecutable) {
+    $launcherShortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path ([Environment]::GetFolderPath('Programs')) 'RWE Launcher.lnk'))
+    $launcherShortcut.TargetPath = $launcherExecutable
+    $launcherShortcut.WorkingDirectory = Split-Path -Parent $launcherExecutable
+    $launcherShortcut.Save()
+}
 Write-Host "RWE installed in $InstallDir"
 Write-Host 'Play: rwe'
+if (Test-Path -LiteralPath $launcherExecutable) { Write-Host 'Optional launcher: rwe-launcher' }
 Write-Host 'Import your Total Annihilation data: rwe-setup --from "C:\GOG Games\Total Annihilation"'
 # Complete game setup after installation; updates can opt out explicitly.
 if ($SkipSetup) {

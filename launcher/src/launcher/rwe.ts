@@ -40,6 +40,7 @@ export type RweArgsPlayerSlot =
   RweArgsEmptyPlayerSlot | RweArgsFilledPlayerSlot;
 
 export interface RweArgs {
+  playerName?: string;
   dataPaths?: string[];
   map?: string;
   interface?: string;
@@ -275,7 +276,14 @@ export function execRwe(args?: RweArgs): RunningRwe {
   const proc = spawn(
     path.join(rweHome, "rwe" + (process.platform === "win32" ? ".exe" : "")),
     serializedArgs,
-    { cwd: rweHome, stdio: ["pipe", "pipe", "inherit"] }
+    {
+      cwd: rweHome,
+      stdio: ["pipe", "pipe", "inherit"],
+      env: {
+        ...process.env,
+        ...(args?.playerName ? { RWE_PLAYER_NAME: args.playerName } : {}),
+      },
+    }
   );
 
   if (proc.stdout) {
@@ -287,7 +295,9 @@ export function execRwe(args?: RweArgs): RunningRwe {
       if (event) {
         events.next(event);
       } else if (line.trim().startsWith("{")) {
-        console.log("Ignoring a line from RWE that is not JSON: " + line.trim());
+        console.log(
+          "Ignoring a line from RWE that is not JSON: " + line.trim()
+        );
       }
     });
   }

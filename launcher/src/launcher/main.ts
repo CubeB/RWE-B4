@@ -3,7 +3,10 @@ import {
   BrowserWindow,
   BrowserWindowConstructorOptions,
   Menu,
+  dialog,
+  ipcMain,
 } from "electron";
+import { spawn } from "child_process";
 import * as path from "path";
 import { installExtensions } from "./install-devtools-extensions";
 
@@ -35,10 +38,47 @@ if (!process.env["RWE_HOME"]) {
 
 let mainWindow: Electron.BrowserWindow | null;
 
+ipcMain.handle("rwe:import-data", async () => {
+  const selected = await dialog.showOpenDialog({
+    title: "Select your Total Annihilation installation",
+    properties: ["openDirectory"],
+  });
+  if (selected.canceled || !selected.filePaths[0]) {
+    return false;
+  }
+  const home = process.env["RWE_HOME"]!;
+  await new Promise<void>((resolve, reject) => {
+    const importer = spawn(
+      path.join(
+        home,
+        "rwe_setup" + (process.platform === "win32" ? ".exe" : "")
+      ),
+      ["--from", selected.filePaths[0]],
+      { cwd: home, windowsHide: true }
+    );
+    let output = "";
+    importer.stdout.on("data", chunk => {
+      output = (output + chunk).slice(-8000);
+    });
+    importer.stderr.on("data", chunk => {
+      output = (output + chunk).slice(-8000);
+    });
+    importer.on("error", reject);
+    importer.on("close", code =>
+      code === 0
+        ? resolve()
+        : reject(new Error(output || `Import failed (${code})`))
+    );
+  });
+  return true;
+});
+
 function createWindow() {
   const windowOptions: BrowserWindowConstructorOptions = {
-    height: 600,
-    width: 800,
+    height: 760,
+    width: 1040,
+    minWidth: 800,
+    minHeight: 640,
     // INSTALL-UX-002: shared RWE branding, including the live window/taskbar.
     icon: path.join(__dirname, "b4-icon.png"),
     webPreferences: {
@@ -58,7 +98,7 @@ function createWindow() {
   if (development) {
     mainWindow.loadURL("http://localhost:8080/index.html");
   } else {
-    mainWindow.loadFile("index.html");
+    mainWindow.loadFile(path.join(__dirname, "index.html"));
   }
 
   // Open the DevTools.

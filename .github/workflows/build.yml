@@ -218,7 +218,9 @@ jobs:
       - name: test rwe
         env:
           RWE_TEST_ANNOUNCE: 1
-        run: ./build/rwe_test --durations yes
+        run: |
+          ./build/rwe_test --durations yes
+          RWE_TEST_BRIDGE=./build/rwe_bridge python3 tools/test_launcher_bridge.py
       # The scenarios drive the real GameScene, which needs a GL context even
       # though it draws nothing, so they run under Xvfb. They also need Total
       # Annihilation's game data, which is not redistributable and is not on
@@ -260,10 +262,24 @@ jobs:
           timeout 300 python3 tools/net-test.py --ai --seconds 30 --min-ticks 600 --data-path "$SCENARIO_DATA"
           timeout 300 python3 tools/net-test.py --controls --seconds 20 --min-ticks 500 --data-path "$SCENARIO_DATA"
           timeout 300 python3 tools/net-test.py --peers 3 --kill 2 --seconds 30 --min-ticks 600 --data-path "$SCENARIO_DATA"
+      - name: install node.js for optional Linux launcher
+        if: matrix.cc == 'gcc-14' && matrix.configuration == 'Release'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: launcher/package-lock.json
+      - name: package optional Linux launcher
+        if: matrix.cc == 'gcc-14' && matrix.configuration == 'Release'
+        working-directory: launcher
+        run: |
+          npm ci
+          npm run package -- --platform=linux
       - name: build AppImage
         if: matrix.cc == 'gcc-14' && matrix.configuration == 'Release'
         run: |
           mkdir -p AppDir/usr/bin AppDir/usr/share/rwe
+          cp -r launcher/rwe-launcher-linux-x64 AppDir/usr/share/rwe/launcher
           cp build/rwe build/rwe_bridge build/rwe_setup AppDir/usr/bin/
           cp cmake/rwe-setup-gui AppDir/usr/bin/
           chmod +x AppDir/usr/bin/rwe-setup-gui

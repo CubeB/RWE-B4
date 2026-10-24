@@ -7,7 +7,8 @@ export interface InstalledModResult {
   path: string;
 }
 export function getInstalledMods(
-  baseDir: string
+  baseDir: string,
+  baseGameDataDir?: string
 ): Promise<InstalledModResult[]> {
   return new Promise<fs.Dirent[]>((resolve, reject) => {
     fs.readdir(baseDir, { withFileTypes: true }, (err, files) => {
@@ -23,20 +24,30 @@ export function getInstalledMods(
     });
   }).then(entries => {
     const mappedEntries = entries
+      .sort((a, b) => a.name.localeCompare(b.name))
       .filter(e => e.isDirectory())
       .map<InstalledModResult | undefined>(e => {
         const modPath = path.join(baseDir, e.name);
         const json = readRweModJson(path.join(modPath, "rwe_mod.json"));
-        if (!json) {
+        if (!json && !hasArchives(modPath)) {
           return undefined;
         }
         return {
-          name: json.shortname,
+          name: json?.shortname || e.name,
           path: modPath,
         };
       });
 
-    return choose(mappedEntries, x => x);
+    const mods = choose(mappedEntries, x => x);
+    if (baseGameDataDir && hasArchives(baseGameDataDir)) {
+      return [
+        { name: "ta", path: baseGameDataDir },
+        ...mods.filter(mod => mod.name !== "ta"),
+      ];
+    }
+    return mods.filter(
+      (mod, index) => mods.findIndex(other => other.name === mod.name) === index
+    );
   });
 }
 
@@ -47,11 +58,26 @@ export interface RweModJson {
 }
 
 function readRweModJson(path: string): RweModJson | undefined {
-  let buffer: Buffer;
   try {
-    buffer = fs.readFileSync(path);
-  } catch (err) {
+    const value = JSON.parse(fs.readFileSync(path, "utf8"));
+    return value &&
+      typeof value.shortname === "string" &&
+      value.shortname.trim()
+      ? (value as RweModJson)
+      : undefined;
+  } catch {
     return undefined;
   }
-  return JSON.parse(buffer.toString());
+}
+
+function hasArchives(directory: string): boolean {
+  try {
+    return fs
+      .readdirSync(directory, { withFileTypes: true })
+      .some(
+        entry => entry.isFile() && /\.(hpi|ufo|ccx|gpf|gp3)$/i.test(entry.name)
+      );
+  } catch {
+    return false;
+  }
 }

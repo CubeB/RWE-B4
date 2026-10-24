@@ -84,7 +84,16 @@ export function writeConfigToFile(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     fs.mkdirSync(path.dirname(filename), { recursive: true });
-    fs.writeFile(filename, writeConfig(data), "utf8", err => {
+    let previous = "";
+    try {
+      previous = fs.readFileSync(filename, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        reject(error);
+        return;
+      }
+    }
+    fs.writeFile(filename, mergeConfig(previous, data), "utf8", err => {
       if (err) {
         reject(err);
         return;
@@ -92,6 +101,23 @@ export function writeConfigToFile(
       resolve();
     });
   });
+}
+
+/** The launcher owns only these settings; retain every other engine option. */
+export function mergeConfig(previous: string, config: RweConfig): string {
+  const updates = writeConfig(config);
+  const keys = new Set(
+    updates.split(/\r?\n/).map(line => line.split("=")[0].trim())
+  );
+  const remaining = previous
+    .split(/\r?\n/)
+    .filter(line => {
+      const key = line.match(/^\s*([\w-]+)\s*=/)?.[1];
+      return !key || !keys.has(key);
+    })
+    .join(os.EOL)
+    .replace(/\s+$/, "");
+  return (remaining ? remaining + os.EOL : "") + updates;
 }
 
 export function writeConfig(config: RweConfig): string {

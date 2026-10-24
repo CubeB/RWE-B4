@@ -52,6 +52,9 @@ export interface VideoMode {
 }
 
 export interface State {
+  playerName?: string;
+  preferencesLoaded?: boolean;
+  launcherError?: string;
   installedMods?: InstalledModInfo[];
 
   /**
@@ -100,5 +103,10 @@ export function canHostGame(state: State): boolean {
 }
 
 export function canLaunchRwe(state: State): boolean {
-  return !state.isRweRunning;
+  return (
+    !state.isRweRunning &&
+    state.preferencesLoaded !== false &&
+    (!state.preferencesLoaded ||
+      (state.installedMods !== undefined && state.installedMods.length > 0))
+  );
 }

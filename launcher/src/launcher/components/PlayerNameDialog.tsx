@@ -7,8 +7,10 @@ import {
   TextField,
 } from "@mui/material";
 import * as React from "react";
+import { normalizePlayerName } from "../preferences";
 
 interface PlayerNameDialogProps {
+  initialName?: string;
   open: boolean;
   onClose: () => void;
   onConfirm: (name: string) => void;
@@ -23,7 +25,7 @@ export class PlayerNameDialog extends React.Component<
 > {
   constructor(props: PlayerNameDialogProps) {
     super(props);
-    this.state = { name: "" };
+    this.state = { name: props.initialName || "" };
 
     this.handleConfirm = this.handleConfirm.bind(this);
     this.handleChange = this.handleChange.bind(this);
@@ -35,13 +37,22 @@ export class PlayerNameDialog extends React.Component<
     this.setState({ name: value });
   }
 
+  componentDidUpdate(previous: PlayerNameDialogProps) {
+    if (!previous.open && this.props.open) {
+      this.setState({ name: this.props.initialName || "" });
+    }
+  }
+
   handleConfirm(event: React.SyntheticEvent<EventTarget>) {
     event.preventDefault();
-    this.props.onConfirm(this.state.name);
+    const name = normalizePlayerName(this.state.name);
+    if (name) {
+      this.props.onConfirm(name);
+    }
   }
 
   handleClose() {
-    this.setState({ name: "" });
+    this.setState({ name: this.props.initialName || "" });
     this.props.onClose();
   }
 
@@ -51,10 +62,19 @@ export class PlayerNameDialog extends React.Component<
         <form onSubmit={this.handleConfirm}>
           <DialogContent>
             <DialogContentText>Enter your player name</DialogContentText>
-            <TextField autoFocus label="name" onChange={this.handleChange} />
+            <TextField
+              autoFocus
+              label="Player name"
+              value={this.state.name}
+              onChange={this.handleChange}
+            />
           </DialogContent>
           <DialogActions>
-            <Button color="primary" type="submit">
+            <Button
+              color="primary"
+              type="submit"
+              disabled={!normalizePlayerName(this.state.name)}
+            >
               Join
             </Button>
             <Button onClick={this.handleClose}>Cancel</Button>

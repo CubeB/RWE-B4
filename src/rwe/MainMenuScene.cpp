@@ -10,6 +10,7 @@
 #include <rwe/util/SimpleLogger.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <rwe/LoadingScene.h>
 #include <rwe/MainMenuModel.h>
 #include <rwe/MultiplayerSetup.h>
@@ -55,6 +56,23 @@ namespace rwe
           dialogStack(),
           bgm()
     {
+        // The optional launcher passes its saved profile to this child only.
+        // Direct launches retain the ordinary unnamed-player defaults.
+        if (const auto* configuredName = std::getenv("RWE_PLAYER_NAME"))
+        {
+            std::string name(configuredName);
+            name.erase(std::remove_if(name.begin(), name.end(), [](unsigned char c) {
+                return c < 32 || c == 127 || c == ';';
+            }), name.end());
+            if (name.size() > maxPlayerNameLength)
+            {
+                auto end = maxPlayerNameLength;
+                while (end > 0 && (static_cast<unsigned char>(name[end]) & 0xC0) == 0x80) { --end; }
+                name.resize(end);
+            }
+            rememberedNickname = name;
+            model.players[0].name.next(name);
+        }
     }
 
     void MainMenuScene::init()

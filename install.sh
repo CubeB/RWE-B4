@@ -76,6 +76,11 @@ cat > "$root/rwe-setup" <<'LAUNCH'
 directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 exec "$directory/current.AppImage" setup "$@"
 LAUNCH
+cat > "$root/rwe-launcher" <<'LAUNCH'
+#!/bin/sh
+directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$directory/current.AppImage" launcher "$@"
+LAUNCH
 # Remember this installation's locations and release channel for updates.
 # Quote values as data; paths may contain spaces or single quotes.
 {
@@ -109,9 +114,9 @@ unset RWE_TA_DIR
 RWE_SKIP_SETUP=1 sh "$script"
 UPDATE
 } > "$root/rwe-update"
-chmod +x "$root/rwe" "$root/rwe-setup" "$root/rwe-update"
+chmod +x "$root/rwe" "$root/rwe-setup" "$root/rwe-update" "$root/rwe-launcher"
 # Use small forwarding scripts rather than symlinks: $0 must remain at root.
-for name in rwe rwe-setup rwe-update; do
+for name in rwe rwe-setup rwe-update rwe-launcher; do
     # Single-quote paths safely in the generated shell command.
     escaped=$(printf '%s' "$root/$name" | sed "s/'/'\\\\''/g")
     printf '#!/bin/sh\nexec '\''%s'\'' "$@"\n' "$escaped" > "$bin/$name"
@@ -120,6 +125,7 @@ done
 printf 'RWE installed in %s\n' "$root"
 printf 'Play: %s/rwe\nImport game data: %s/rwe-setup --from "/path/to/Total Annihilation"\n' "$bin" "$bin"
 printf 'Update: %s/rwe-update\n' "$bin"
+printf 'Optional launcher: %s/rwe-launcher\n' "$bin"
 case ":$PATH:" in *":$bin:"*) ;; *) printf 'Add %s to PATH to use rwe from any terminal.\n' "$bin" ;; esac
 if [ "$skip_setup" = 1 ]; then
     echo 'Game setup skipped. Run rwe-setup when ready.'

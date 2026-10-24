@@ -19,6 +19,7 @@ import { currentGameWrapperReducer } from "./gameClient/state";
 import { GameListEntry, MasterClientState } from "./masterClient/state";
 import { reduceReducers, liftState, withSideEffects } from "./sideEffects";
 import { choose } from "../common/util";
+import { normalizePlayerName } from "./preferences";
 
 const initialState: State = {
   masterClient: {
@@ -29,7 +30,9 @@ const initialState: State = {
     screen: "overview",
   },
   isRweRunning: false,
-  activeMods: [],
+  activeMods: ["ta"],
+  playerName: "Player",
+  preferencesLoaded: false,
 };
 
 const initialStateAndSideEffects: StateAndSideEffects = liftState(initialState);
@@ -248,6 +251,7 @@ function globalActionsReducer(
         {
           type: "LAUNCH_RWE",
           args: {
+            playerName: state.playerName,
             dataPaths: choose(state.activeMods, name =>
               (state.installedMods || []).find(x => x.name === name)
             ).map(x => x.path),
@@ -259,14 +263,56 @@ function globalActionsReducer(
     case "GAME_ENDED":
       return liftState({ ...state, isRweRunning: false });
     case "RECEIVE_INSTALLED_MODS":
-      return liftState({ ...state, installedMods: action.mods });
+      return liftState({
+        ...state,
+        installedMods: action.mods,
+        activeMods: state.activeMods.filter(name =>
+          action.mods.some(mod => mod.name === name)
+        ),
+      });
+    case "RECEIVE_LAUNCHER_PREFERENCES":
+      return liftState({
+        ...state,
+        playerName: action.playerName,
+        preferencesLoaded: true,
+        activeMods: state.installedMods
+          ? action.activeMods.filter(name =>
+              state.installedMods!.some(mod => mod.name === name)
+            )
+          : action.activeMods,
+      });
+    case "SET_PLAYER_NAME":
+    case "HOST_GAME_FORM_CONFIRM":
+    case "JOIN_SELECTED_GAME_CONFIRM":
+      return currentScreenWrapperReducer(
+        {
+          ...state,
+          playerName:
+            normalizePlayerName(
+              action.type === "JOIN_SELECTED_GAME_CONFIRM"
+                ? action.name
+                : action.playerName
+            ) || "Player",
+        },
+        action
+      );
+    case "LAUNCHER_ERROR":
+      return liftState({ ...state, launcherError: action.message });
     case "RECEIVE_MOD_FINGERPRINTS":
       return liftState({ ...state, modFingerprints: action.mods });
     case "RECEIVE_VIDEO_MODES":
       return liftState({ ...state, videoModes: action.modes });
     case "CHANGE_SINGLE_PLAYER_MODS":
       return currentScreenWrapperReducer(
-        action.newMods ? { ...state, activeMods: action.newMods } : state,
+        action.newMods
+          ? {
+              ...state,
+              activeMods: [
+                ...action.newMods.filter(name => name !== "ta"),
+                ...action.newMods.filter(name => name === "ta"),
+              ],
+            }
+          : state,
         action
       );
     case "RECEIVE_RWE_CONFIG":

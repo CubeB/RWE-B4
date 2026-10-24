@@ -427,7 +427,18 @@ export function receiveRweConfig(settings: RweConfig): ReceiveRweConfigAction {
   };
 }
 
+export type LauncherAction =
+  | {
+      type: "RECEIVE_LAUNCHER_PREFERENCES";
+      playerName: string;
+      activeMods: string[];
+    }
+  | { type: "SET_PLAYER_NAME"; playerName: string }
+  | { type: "REFRESH_INSTALLED_MODS" }
+  | { type: "LAUNCHER_ERROR"; message?: string };
+
 export type AppAction =
+  | LauncherAction
   | SelectGameAction
   | JoinSelectedGameConfirmAction
   | HostGameAction

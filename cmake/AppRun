@@ -15,6 +15,11 @@
 HERE="$(dirname "$(readlink -f "$0")")"
 
 case "$1" in
+    launcher)
+        shift
+        export RWE_HOME="$HERE/usr/bin"
+        exec "$HERE/usr/share/rwe/launcher/rwe-launcher" "$@"
+        ;;
     setup|rwe_setup)
         shift
         # Reinstalling must not reopen the folder picker for imported data.

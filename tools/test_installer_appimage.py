@@ -104,6 +104,17 @@ esac
         self.assertEqual(self.run_setup("setup").returncode, 0)
         self.assertFalse((self.root / "dialogs").exists())
 
+    def test_launcher_is_an_explicit_separate_route(self):
+        launcher = self.root / "usr/share/rwe/launcher/rwe-launcher"
+        launcher.parent.mkdir(parents=True)
+        launcher.write_text('#!/bin/sh\nprintf "%s\\n" "$RWE_HOME" "$@"\n')
+        launcher.chmod(0o755)
+        result = self.run_setup("launcher", "--example")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-1], "--example")
+        self.assertIn("usr/bin", result.stdout.replace("\\", "/"))
+        self.assertFalse((self.root / "played").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

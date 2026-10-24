@@ -3,7 +3,15 @@ import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { Provider } from "react-redux";
 import { configureStore } from "@reduxjs/toolkit";
-import { Store, StoreEnhancer } from "redux";
+import { Store, StoreEnhancer, Middleware } from "redux";
+import { ThemeProvider, createTheme } from "@mui/material/styles";
+import path from "path";
+import { getRweUserPath } from "./util";
+import {
+  defaultPreferences,
+  loadPreferences,
+  savePreferences,
+} from "./preferences";
 import { createEpicMiddleware } from "redux-observable";
 import { AppAction, gameEnded } from "./actions";
 import App from "./components/App";
@@ -60,7 +68,10 @@ const executeSideEffect = (se: SideEffect) => {
         .from(execRwe(se.args).finished)
         .pipe(
           rxop.mapTo(undefined),
-          rxop.catchError(() => rx.of(undefined)),
+          rxop.catchError(error => {
+            store.dispatch({ type: "LAUNCHER_ERROR", message: String(error) });
+            return rx.of(undefined);
+          }),
           rxop.mapTo(gameEnded())
         )
         .subscribe(store.dispatch);
@@ -72,14 +83,58 @@ const executeSideEffect = (se: SideEffect) => {
 // itself, so the __REDUX_DEVTOOLS_EXTENSION_COMPOSE__ dance this used to do
 // by hand is gone, and it brings the development-only immutability and
 // serializability checks with it.
+const preferencesPath = path.join(getRweUserPath(), "launcher.json");
+const persistPreferences: Middleware<unknown, State> =
+  api => next => action => {
+    const result = next(action);
+    if (
+      [
+        "SET_PLAYER_NAME",
+        "CHANGE_SINGLE_PLAYER_MODS",
+        "HOST_GAME_FORM_CONFIRM",
+        "JOIN_SELECTED_GAME_CONFIRM",
+      ].includes(action.type)
+    ) {
+      const state = api.getState();
+      try {
+        savePreferences(preferencesPath, {
+          playerName: state.playerName || "Player",
+          activeMods: state.activeMods,
+        });
+        api.dispatch({ type: "LAUNCHER_ERROR", message: undefined });
+      } catch (error) {
+        api.dispatch({
+          type: "LAUNCHER_ERROR",
+          message: `Could not save launcher settings: ${error}`,
+        });
+      }
+    }
+    return result;
+  };
+
 store = configureStore({
   reducer: rootReducer as any, // shhhhh
   middleware: getDefaultMiddleware =>
-    getDefaultMiddleware().concat(epicMiddleware),
+    getDefaultMiddleware().concat(persistPreferences, epicMiddleware),
   enhancers: defaultEnhancers =>
     defaultEnhancers.concat(createEnhancer(executeSideEffect) as StoreEnhancer),
 });
 
+try {
+  store.dispatch({
+    type: "RECEIVE_LAUNCHER_PREFERENCES",
+    ...loadPreferences(preferencesPath),
+  });
+} catch (error) {
+  store.dispatch({
+    type: "RECEIVE_LAUNCHER_PREFERENCES",
+    ...defaultPreferences,
+  });
+  store.dispatch({
+    type: "LAUNCHER_ERROR",
+    message: `Could not read launcher settings: ${error}`,
+  });
+}
 epicMiddleware.run(rootEpic);
 
 // React 18: createRoot, not ReactDOM.render. The old call still exists in 18
@@ -89,11 +144,21 @@ if (!container) {
   throw new Error("index.html has no #app to mount the launcher into");
 }
 
+const theme = createTheme({
+  palette: {
+    mode: "dark",
+    primary: { main: "#f0b461" },
+    background: { default: "#0e151c", paper: "#18232d" },
+  },
+  typography: { fontFamily: '"Roboto", sans-serif' },
+  shape: { borderRadius: 10 },
+});
+
 createRoot(container).render(
-  <React.Fragment>
+  <ThemeProvider theme={theme}>
     <CssBaseline />
     <Provider store={store}>
       <App />
     </Provider>
-  </React.Fragment>
+  </ThemeProvider>
 );

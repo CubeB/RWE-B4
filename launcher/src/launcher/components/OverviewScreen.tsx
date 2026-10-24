@@ -1,4 +1,12 @@
-import { Collapse, Divider, Paper, Typography } from "@mui/material";
+import {
+  Alert,
+  Collapse,
+  Divider,
+  Paper,
+  Typography,
+  Tabs,
+  Tab,
+} from "@mui/material";
 import * as React from "react";
 import { connect } from "react-redux";
 import { Dispatch } from "redux";
@@ -25,6 +33,7 @@ import { WizardState } from "../wizard";
 import { SelectModsDialog } from "./SelectModsDialog";
 import { RweOptionsDialog } from "./RweOptionsDialog";
 import { RweConfig } from "../rweConfig";
+import { LauncherHome } from "./LauncherHome";
 
 function MainPanel() {
   return (
@@ -57,6 +66,8 @@ function ConnectionNotice(props: ConnectionNoticeProps) {
 }
 
 interface OverviewScreenDispatchProps {
+  onSaveName: (name: string) => void;
+  onRefreshMods: () => void;
   onDialogConfirm: (name: string) => void;
   onWizardNext: (path?: string) => void;
   onWizardClose: () => void;
@@ -67,6 +78,9 @@ interface OverviewScreenDispatchProps {
 }
 
 interface OverviewScreenStateProps {
+  playerName: string;
+  running: boolean;
+  error?: string;
   installedMods: string[];
   activeMods: string[];
   connected: boolean;
@@ -82,25 +96,58 @@ interface OverviewScreenProps
   extends OverviewScreenDispatchProps, OverviewScreenStateProps {}
 
 function OverviewScreen(props: OverviewScreenProps) {
+  const [tab, setTab] = React.useState("play");
   const [modsDialogOpen, setModsDialogOpen] = React.useState(false);
   const [configDialogOpen, setConfigDialogOpen] = React.useState(false);
   const [playerNameDialogOpen, setPlayerNameDialogOpen] = React.useState(false);
   return (
     <>
       <Paper className="app-container">
-        <ConnectionNotice connected={props.connected} />
-        <MainPanel />
-        <BottomPanel
-          hostEnabled={props.hostEnabled}
-          joinEnabled={props.joinEnabled}
-          launchEnabled={props.launchEnabled}
-          onHostGame={props.onHostGame}
-          onJoinGame={() => setPlayerNameDialogOpen(true)}
-          onLaunchRwe={props.onLaunchRwe}
-          onOpenModsDialog={() => setModsDialogOpen(true)}
-          onOpenConfigDialog={() => setConfigDialogOpen(true)}
-        />
+        <header className="launcher-header">
+          <div className="launcher-brand">
+            <img src="b4-icon.png" alt="" />
+            <span>
+              RWE <small>LAUNCHER</small>
+            </span>
+          </div>
+          <Tabs value={tab} onChange={(_, value) => setTab(value)}>
+            <Tab value="play" label="Play" />
+            <Tab value="online" label="Multiplayer" />
+          </Tabs>
+          <span className="launcher-profile">{props.playerName}</span>
+        </header>
+        {props.error && <Alert severity="error">{props.error}</Alert>}
+        {tab === "play" ? (
+          <LauncherHome
+            playerName={props.playerName}
+            activeMods={props.activeMods}
+            installedMods={props.installedMods}
+            launchEnabled={props.launchEnabled}
+            running={props.running}
+            onLaunch={props.onLaunchRwe}
+            onSaveName={props.onSaveName}
+            onManageMods={() => setModsDialogOpen(true)}
+            onSettings={() => setConfigDialogOpen(true)}
+            onRefreshMods={props.onRefreshMods}
+          />
+        ) : (
+          <>
+            <ConnectionNotice connected={props.connected} />
+            <MainPanel />
+            <BottomPanel
+              hostEnabled={props.hostEnabled}
+              joinEnabled={props.joinEnabled}
+              launchEnabled={props.launchEnabled}
+              onHostGame={props.onHostGame}
+              onJoinGame={() => setPlayerNameDialogOpen(true)}
+              onLaunchRwe={props.onLaunchRwe}
+              onOpenModsDialog={() => setModsDialogOpen(true)}
+              onOpenConfigDialog={() => setConfigDialogOpen(true)}
+            />
+          </>
+        )}
         <PlayerNameDialog
+          initialName={props.playerName}
           open={playerNameDialogOpen}
           onConfirm={name => {
             setPlayerNameDialogOpen(false);
@@ -156,6 +203,9 @@ function OverviewScreen(props: OverviewScreenProps) {
 
 function mapStateToProps(state: State): OverviewScreenStateProps {
   return {
+    playerName: state.playerName || "Player",
+    running: state.isRweRunning,
+    error: state.launcherError,
     connected: state.masterClient.masterServerConnectionStatus === "connected",
     wizardState: state.wizard,
     installedMods: (state.installedMods || []).map(x => x.name),
@@ -170,6 +220,9 @@ function mapStateToProps(state: State): OverviewScreenStateProps {
 
 function mapDispatchToProps(dispatch: Dispatch): OverviewScreenDispatchProps {
   return {
+    onSaveName: (playerName: string) =>
+      dispatch({ type: "SET_PLAYER_NAME", playerName }),
+    onRefreshMods: () => dispatch({ type: "REFRESH_INSTALLED_MODS" }),
     onDialogConfirm: (name: string) => {
       dispatch(joinSelectedGameConfirm(name));
     },

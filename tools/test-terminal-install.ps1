@@ -7,6 +7,8 @@ try {
     New-Item -ItemType Directory -Path $fixture | Out-Null
     Set-Content -LiteralPath (Join-Path $fixture 'rwe.exe') -Value 'engine fixture'
     Set-Content -LiteralPath (Join-Path $fixture 'rwe_setup.exe') -Value 'setup fixture'
+    New-Item -ItemType Directory -Path (Join-Path $fixture 'launcher') | Out-Null
+    Set-Content -LiteralPath (Join-Path $fixture 'launcher/rwe-launcher.exe') -Value 'launcher fixture'
     $zip = Join-Path $root 'fixture.zip'
     Compress-Archive -LiteralPath $fixture -DestinationPath $zip
     $asset = [pscustomobject]@{
@@ -24,6 +26,7 @@ try {
     & $body -InstallDir $install
     if (-not (Test-Path -LiteralPath (Join-Path $install 'asset-123/rwe.exe'))) { throw 'Engine missing' }
     if ((Get-Content -LiteralPath (Join-Path $install 'rwe.cmd') -Raw) -notmatch '%~dp0asset-123\\rwe.exe" %\*') { throw 'Invalid launcher' }
+    if ((Get-Content -LiteralPath (Join-Path $install 'rwe-launcher.cmd') -Raw) -notmatch 'launcher\\rwe-launcher.exe" %\*') { throw 'Optional launcher command missing' }
     $before = Get-Content -LiteralPath (Join-Path $install 'rwe.cmd') -Raw
     $asset.digest = 'sha256:' + ('0' * 64)
     $failed = $false

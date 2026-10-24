@@ -132,6 +132,30 @@ on the Linux `sh` command. For updates that do not need game setup, use
 `-SkipSetup` on Windows or `RWE_SKIP_SETUP=1` on Linux. Setup always uses your
 own game data; it does not download Total Annihilation.
 
+### Optional launcher
+
+The separate **RWE Launcher** offers Play, a saved player name, mod selection
+and load order, game settings, data import, and the multiplayer lobby. Starting
+`rwe` normally still opens the game directly.
+
+- **Windows:** open **RWE Launcher** from the Start menu, use `rwe-launcher`
+  after a terminal installation, or open `launcher/rwe-launcher.exe` in a
+  portable release.
+- **Linux:** run `~/.local/bin/rwe-launcher`, or
+  `./Robot_War_Engine-*.AppImage launcher` from an extracted download.
+
+Use **Open folder** to open the mods directory. Put each mod's archives
+(`.hpi`, `.ufo`, `.ccx`, `.gpf`, `.gp3`) in its own subfolder, then choose
+**Refresh** and **Manage mods**. A `rwe_mod.json` manifest is optional. Imported
+base-game data appears as **ta / Total Annihilation**; keep it selected for
+mods that require the base game. Selected mods override the base-game files,
+and higher mods take priority over lower ones.
+
+The launcher stores the name and selected mods in `launcher.json` beside
+`rwe.cfg`: `%APPDATA%\RWE` on Windows, `${XDG_DATA_HOME:-$HOME/.local/share}/rwe`
+on Linux (or an existing legacy `~/.rwe`). Names entered in the launcher carry
+into native skirmish and LAN screens and prefill online host/join forms.
+
 ### 2. Import your Total Annihilation data
 
 On Windows, leave **Open game setup** checked at the end of the installer.
