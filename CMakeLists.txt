@@ -706,6 +706,9 @@ src/rwe/net/EndpointFamily.h
     src/rwe/sim/GameSimulation_visibility.cpp
     src/rwe/sim/GameSimulation_endgame.cpp
     src/rwe/sim/GameSimulation_fire.cpp
+    src/rwe/sim/GameSimulation_features.cpp
+    src/rwe/sim/GameSimulation_units.cpp
+    src/rwe/sim/GameSimulation_economy.cpp
     src/rwe/sim/FeatureBlast.cpp
     src/rwe/sim/FactoryConstruction.cpp
     src/rwe/sim/FactoryConstruction.h
