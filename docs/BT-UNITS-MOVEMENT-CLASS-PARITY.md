@@ -162,8 +162,9 @@ slope threshold, and **3** preferred. A map is class-dependent.
 `Grid<char>` of walkable origins per class (`MovementClassCollisionService.cpp:100-120`,
 registered once at load), computed from terrain only, and answers "free, tight or
 blocked" on demand: walkable from the grid, "rough" from the class's `badSlope`
-and `badWaterSlope` per cell, "tight" from `isAdjacentToObstacle`
-(`GameSimulation.cpp:2143-2153`). That is the same three-valued answer
+and `badWaterSlope` per cell, and "tight" from `computeRoughTerrain`'s four-strip
+test (`AbstractUnitPathFinder.cpp`, BT-52/#685). That is the same three-valued
+answer
 (`BT-MAP-TERRAIN-PARITY.md` rule 8 records the result scale as MATCHES in effect)
 with no packed table to keep current. The grid is smaller than the map by the
 footprint (`:107-112`), so an origin the footprint would hang off the map from is

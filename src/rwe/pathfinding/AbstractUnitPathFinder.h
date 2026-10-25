@@ -47,13 +47,14 @@ namespace rwe
          */
         const DiscreteRect selfRegion;
         /**
-         * The movement class's free-slope thresholds, BadSlope for a dry cell
-         * and BadWaterSlope for a wet one (TOTALA-EXE-MOVEMENT.md, section
-         * 95). A cell steeper than the one that applies to it is passable but
-         * rough, and costs double to cross.
+         * The movement class this search belongs to: its footprint, water
+         * depth limits and free-slope thresholds.
+         *
+         * A cell steeper than BadSlope (dry) or BadWaterSlope (wet) is
+         * passable but rough and costs double to cross.
+         * TOTALA-EXE-MOVEMENT.md, section 95.
          */
-        const unsigned int roughSlopeDry;
-        const unsigned int roughSlopeWet;
+        const MovementClassDefinition movementClass;
         /**
          * True for land units that can wade: water costs them double,
          * so a dry route is preferred when one exists.
@@ -73,7 +74,7 @@ namespace rwe
             const GameSimulation* simulation,
             const MovementClassCollisionService* collisionService,
             UnitId self,
-            std::optional<MovementClassId> movementClass,
+            std::optional<MovementClassId> movementClassId,
             unsigned int footprintX,
             unsigned int footprintZ,
             AStarScratch* scratch = nullptr);
@@ -128,6 +129,18 @@ namespace rwe
         bool computeWalkable(const Point& p) const;
 
         bool computeRoughTerrain(const Point& p) const;
+
+        /**
+         * BT-52: whether one of the four one-cell clearance strips around a
+         * footprint is not free. A strip is free only when every cell in it
+         * passes the same rectangle test as the footprint: on the map, no
+         * blocking feature or occupant, within the class's water depths, and
+         * no steeper than BadSlope/BadWaterSlope.
+         */
+        bool isClearanceStripFree(const DiscreteRect& rect) const;
+
+        /** The per-cell half of the strip rectangle test. */
+        bool isClearanceCellFree(unsigned int x, unsigned int y) const;
 
         bool computeUnderWater(const Point& p) const;
     };

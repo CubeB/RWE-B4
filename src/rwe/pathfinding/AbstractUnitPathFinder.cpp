@@ -20,6 +20,12 @@ namespace rwe
             return std::min({heights.get(x, y), heights.get(x + 1, y), heights.get(x, y + 1), heights.get(x + 1, y + 1)});
         }
 
+        /** The highest of a cell's four corners, read at square+0x05 for the minimum-depth test. */
+        unsigned int highCorner(const Grid<unsigned char>& heights, unsigned int x, unsigned int y)
+        {
+            return std::max({heights.get(x, y), heights.get(x + 1, y), heights.get(x, y + 1), heights.get(x + 1, y + 1)});
+        }
+
         bool computeWaterIsSlow(const GameSimulation& simulation, UnitId self)
         {
             // Floating units (ships) and units that need water under them
@@ -87,21 +93,20 @@ namespace rwe
         const GameSimulation* simulation,
         const MovementClassCollisionService* collisionService,
         UnitId self,
-        std::optional<MovementClassId> movementClass,
+        std::optional<MovementClassId> movementClassId,
         unsigned int footprintX,
         unsigned int footprintZ,
         AStarScratch* scratch)
         : AStarPathFinder<Point, PathCost>(scratch),
           simulation(simulation),
           self(self),
-          walkableGrid(findWalkableGrid(collisionService, movementClass)),
+          walkableGrid(findWalkableGrid(collisionService, movementClassId)),
           heights(&simulation->terrain.getHeightMap()),
           seaLevel(simScalarToUInt(simulation->terrain.getSeaLevel())),
           footprintX(footprintX),
           footprintZ(footprintZ),
           selfRegion(simulation->computeFootprintRegion(simulation->getUnitState(self).position, footprintX, footprintZ)),
-          roughSlopeDry(movementClassOf(*simulation, self).badSlope),
-          roughSlopeWet(movementClassOf(*simulation, self).badWaterSlope),
+          movementClass(movementClassOf(*simulation, self)),
           waterIsSlow(computeWaterIsSlow(*simulation, self)),
           searchTimeValue(simulation->gameTime)
     {
@@ -262,12 +267,24 @@ namespace rwe
     bool AbstractUnitPathFinder::computeRoughTerrain(const Point& p) const
     {
         DiscreteRect rect(p.x, p.y, footprintX, footprintZ);
-        if (simulation->isAdjacentToObstacle(rect))
+
+        // BT-52: the original's tight class is decided by the ring around the
+        // footprint, not just by the footprint's own slope. Each of the four
+        // one-cell strips is run through the same rectangle test as the
+        // footprint, and any strip that is not completely free (blocked, off
+        // the map, too deep or shallow, or over BadSlope) downgrades the cell
+        // to tight. The pinwheel is exact: each corner belongs to one strip,
+        // and the bottom strip is w+1 wide at y+h, not y+w.
+        const DiscreteRect top(rect.x - 1, rect.y - 1, static_cast<int>(footprintX) + 1, 1);
+        const DiscreteRect right(rect.x + static_cast<int>(footprintX), rect.y - 1, 1, static_cast<int>(footprintZ) + 1);
+        const DiscreteRect bottom(rect.x, rect.y + static_cast<int>(footprintZ), static_cast<int>(footprintX) + 1, 1);
+        const DiscreteRect left(rect.x - 1, rect.y, 1, static_cast<int>(footprintZ) + 1);
+        if (!isClearanceStripFree(top) || !isClearanceStripFree(right) || !isClearanceStripFree(bottom) || !isClearanceStripFree(left))
         {
             return true;
         }
 
-        if ((roughSlopeDry >= 255 && roughSlopeWet >= 255) || p.x < 0 || p.y < 0)
+        if (p.x < 0 || p.y < 0)
         {
             return false;
         }
@@ -289,7 +306,7 @@ namespace rwe
         {
             for (unsigned int dx = 0; dx < footprintX; ++dx)
             {
-                auto threshold = lowCorner(*heights, x + dx, y + dy) >= seaLevel ? roughSlopeDry : roughSlopeWet;
+                auto threshold = lowCorner(*heights, x + dx, y + dy) >= seaLevel ? movementClass.badSlope : movementClass.badWaterSlope;
                 if (getSlope(*heights, x + dx, y + dy) > threshold)
                 {
                     return true;
@@ -298,6 +315,65 @@ namespace rwe
         }
 
         return false;
+    }
+
+    bool AbstractUnitPathFinder::isClearanceStripFree(const DiscreteRect& rect) const
+    {
+        // The rectangle routine refuses a rectangle that is off the map, and
+        // a refused strip is never free. Checking first also keeps the cell
+        // reads below inside the heightmap's 2x2 blocks.
+        if (rect.x < 0 || rect.y < 0
+            || rect.x + rect.width >= static_cast<int>(heights->getWidth())
+            || rect.y + rect.height >= static_cast<int>(heights->getHeight()))
+        {
+            return false;
+        }
+
+        // The same occupant, building, blocking-feature and lava test as the
+        // footprint. The search's stamp rule applies here too (BT-58/BT-59):
+        // a mobile unit that moved within the last thirty ticks is not a
+        // wall, a stationary one is.
+        if (simulation->isCollisionAtForSearch(rect, self, selfRegion, searchTimeValue))
+        {
+            return false;
+        }
+
+        for (int y = rect.y; y < rect.y + rect.height; ++y)
+        {
+            for (int x = rect.x; x < rect.x + rect.width; ++x)
+            {
+                if (!isClearanceCellFree(static_cast<unsigned int>(x), static_cast<unsigned int>(y)))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    bool AbstractUnitPathFinder::isClearanceCellFree(unsigned int x, unsigned int y) const
+    {
+        const auto low = lowCorner(*heights, x, y);
+        const auto high = highCorner(*heights, x, y);
+
+        // The original tests the worst corner for each depth bound:
+        // square+6 >= seaLevel - MaxWaterDepth and
+        // square+5 <= seaLevel - MinWaterDepth. MinWaterDepth is signed and
+        // absent reads as -10000, which is what lets a land unit cross dry
+        // ground even though a boat's written 0 does not.
+        const auto sea = static_cast<int>(seaLevel);
+        if (static_cast<int>(low) < sea - static_cast<int>(movementClass.maxWaterDepth))
+        {
+            return false;
+        }
+        if (static_cast<int>(high) > sea - movementClass.signedMinWaterDepth())
+        {
+            return false;
+        }
+
+        auto threshold = low >= seaLevel ? movementClass.badSlope : movementClass.badWaterSlope;
+        return getSlope(*heights, x, y) <= threshold;
     }
 
     bool AbstractUnitPathFinder::computeUnderWater(const Point& p) const

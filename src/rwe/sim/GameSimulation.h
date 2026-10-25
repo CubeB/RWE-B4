@@ -1304,8 +1304,6 @@ namespace rwe
 
         bool isYardmapBlocked(unsigned int x, unsigned int y, const Grid<YardMapCell>& yardMap, bool open, UnitId self) const;
 
-        bool isAdjacentToObstacle(const DiscreteRect& rect) const;
-
         UnitState& getUnitState(UnitId id);
 
         const UnitState& getUnitState(UnitId id) const;

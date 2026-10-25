@@ -773,19 +773,6 @@ namespace rwe
         });
     }
 
-    bool GameSimulation::isAdjacentToObstacle(const DiscreteRect& rect) const
-    {
-        DiscreteRect top(rect.x - 1, rect.y - 1, rect.width + 2, 1);
-        DiscreteRect bottom(rect.x - 1, rect.y + rect.width, rect.width + 2, 1);
-        DiscreteRect left(rect.x - 1, rect.y, 1, rect.height);
-        DiscreteRect right(rect.x + rect.width, rect.y, 1, rect.height);
-        return isCollisionAt(top)
-            || isCollisionAt(bottom)
-            || isCollisionAt(left)
-            || isCollisionAt(right);
-    }
-
-
     UnitState& GameSimulation::getUnitState(UnitId id)
     {
         auto it = units.find(id);
