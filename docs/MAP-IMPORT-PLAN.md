@@ -5,6 +5,12 @@ this document. Import management is an RWE feature with no original-game UI
 counterpart. Existing map formats and runtime behavior remain subject to
 ADR-0004 and the documented original-data findings.
 
+The expanded user requirement is the shared
+[mod and map manager](MOD-AND-MAP-MANAGEMENT-PLAN.md): launcher folder/archive
+selection, automatic labeling, install/uninstall and general management for
+mods, AI add-ons and maps. That document owns the common library, extraction,
+registry and lifecycle design. The map-specific requirements below still apply.
+
 ## Intended experience
 
 Choose **Import maps**, browse or drop files/a folder, review the maps found, then
@@ -30,10 +36,9 @@ No automatic internet downloads are needed for the first version.
 | Source | Initial handling |
 | --- | --- |
 | `.ufo`, `.hpi`, `.ccx`, `.gpf`, `.gp3` | Inspect with RWE's archive reader; retain original archive bytes. |
-| `.zip` | Inspect its contents; support nested folders and contained TA archives. |
+| `.zip`, `.rar`, `.7z` | Initial support: unpack with a bundled extraction backend; inspect nested folders and contained TA archives. |
 | Loose `.tnt` and `.ota` | Pair by case-insensitive internal basename; selecting either scans its containing folder for the partner. |
 | Folder | Find map pairs, TA archives, ZIP packs and required companion assets. |
-| `.7z` and `.rar` | Later phase, after selecting and packaging a supported extraction library; report unsupported input clearly meanwhile. |
 
 Inspect all map entries in a pack. Do not assume one archive contains one map.
 Treat executable installers as unsupported inputs; importing game data never
@@ -131,7 +136,7 @@ separate feature.
    selection, dependency results, progress and live map-list refresh.
 4. Multiplayer asset verification, with
    duplicate-name and conflicting-dependency integration tests.
-5. Optional additional archive formats, campaign import and peer transfer,
+5. Optional further archive formats, campaign import and peer transfer,
    each with its own requirements and verification.
 
 ## Acceptance evidence
