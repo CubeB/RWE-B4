@@ -3,11 +3,13 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 #include <rwe/ai/classic/ClassicAiScript.h>
 
 namespace rwe
 {
     class BuilderGuisDatabase;
+    struct TdfBlock;
 
     /**
      * What each builder is allowed to build.
@@ -68,4 +70,8 @@ namespace rwe
      * `GameSimulation::unitDefinitions`.
      */
     AiBuildTree buildTreeFromBuilderGuis(const BuilderGuisDatabase& guis, const std::set<std::string>& unitTypes);
+
+    // DOWNLOAD-LINK-01 in DOWNLOAD-MENU-BUILD-LINK-FINDINGS.md: AI build
+    // eligibility does not depend on the optional GUI page/button coordinates.
+    std::size_t addDownloadBuildOptions(AiBuildTree& tree, const std::vector<TdfBlock>& blocks, const std::set<std::string>& unitTypes);
 }

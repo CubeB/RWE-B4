@@ -26,12 +26,18 @@ Three rules decided what belongs in each list.
 
 ---
 
-**Map descriptions have room to be read.** The map selector uses a wider box
-that grows with the description, keeping the size/player summary and buttons
-separate. It retains the full text without ellipsis; exceptionally long text
-can be scrolled once the box reaches the screen limit. This is the owner's
-requested readability change, not the original's fixed description layout
-(`MAP-DESCRIPTION-LAYOUT-FINDINGS.md`, 2026-10-22; section 88).
+**Map descriptions use the original label font.** The enlarged selector was
+retired on 2026-10-23 after the font mismatch was established. The original
+smaller label font and spacing fit the reported descriptions in the shipped
+rectangles; the original artwork and geometry are restored.
+`MAP-DESCRIPTION-FONT-FINDINGS.md` and section 88 record the correction.
+
+**Mod compatibility is checked per feature and version.** Explicit resource
+directories support layouts such as Escalation's AE/UNITSE, and the classic
+engine reads original AI profiles and downloadable-unit command fragments.
+GET75's extension-author locality query is adapted to RWE simulation authority.
+These do not establish universal mod or patched-engine compatibility. See
+`TA-MOD-COMPATIBILITY-VALIDATION.md` for executed checks and remaining gaps.
 
 **The example campaign is hidden.** RWE omits `camps/EXAMPLE.TDF` from the
 campaign choices at the owner's request (#655, 2026-10-17). The original accepts

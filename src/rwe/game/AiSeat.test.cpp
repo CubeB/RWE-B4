@@ -4,6 +4,8 @@
 #include <rwe/ai/AiPersonality.h>
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/game/AiSeat.h>
+#include <rwe/PathMapping.h>
+#include <rwe/util/OpaqueArgs.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/sim_test_util.h>
 #include <rwe/vfs/AbstractVirtualFileSystem.h>
@@ -320,6 +322,41 @@ namespace rwe
         {
             auto file = readClassicAiProfile(vfs, "");
             CHECK(file.text == "default profile");
+        }
+    }
+
+    TEST_CASE("mod profiles and fallback stay within the explicitly selected resource directory", "[ai][engine][mods]")
+    {
+        // MOD-DIRS-01: GOLD10.2.0 ships these profiles under AE, not AI.
+        FakeVfs vfs;
+        vfs.files["ai/default.txt"] = "stock default";
+        vfs.files["ai/seabattle.txt"] = "stock sea";
+        vfs.files["ae/default.txt"] = "Escalation default";
+        vfs.files["ae/seabattle.txt"] = "Escalation sea";
+        OpaqueArgs args;
+        char program[] = "rwe";
+        char option[] = "--dir-ai=ae";
+        char* argv[] = {program, option};
+        args.parse(2, argv);
+        const auto paths = configuredPathMapping(args);
+        CHECK(paths.units == "units");
+
+        SECTION("named profile")
+        {
+            const auto file = readClassicAiProfile(vfs, "SeaBattle", paths.ai);
+            CHECK(file.text == "Escalation sea");
+            CHECK(file.path == "ae/SeaBattle.txt");
+        }
+        SECTION("missing named profile uses the mod default")
+        {
+            const auto file = readClassicAiProfile(vfs, "MISSING", paths.ai);
+            CHECK(file.text == "Escalation default");
+            CHECK(file.path == "ae/default.txt");
+        }
+        SECTION("missing mod default cannot silently load stock policy")
+        {
+            vfs.files.erase("ae/default.txt");
+            CHECK(readClassicAiProfile(vfs, "MISSING", paths.ai).text.empty());
         }
     }
 

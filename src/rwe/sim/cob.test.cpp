@@ -34,6 +34,49 @@ namespace rwe
         }
     }
 
+    TEST_CASE("extended COB GET 75 follows the target's simulation authority", "[cob][mods]")
+    {
+        // EXT-COB-75-01; invalid-ID and Boolean policy is recorded in section 88.
+        GameSimulation sim(makeMinimalTerrain(), 0u, 0, 0);
+        const auto local = addPlayer(sim, "local computer");
+        const auto remote = addPlayer(sim, "remote ally");
+        sim.getPlayer(local).type = GamePlayerType::Computer;
+        sim.getPlayer(local).teamId = 1;
+        sim.getPlayer(remote).teamId = 1;
+        sim.getPlayer(remote).simulation = PlayerSimulation::Remote;
+        auto script = makeEmptyCobScript();
+        script->staticVariableCount = 1;
+        const auto caller = addBareUnit(sim, script);
+        const auto target = addBareUnit(sim, script);
+        sim.getUnitState(caller).owner = local;
+        sim.getUnitState(target).owner = local;
+        const auto op = [](OpCode code) { return static_cast<uint32_t>(code); };
+        script->functions = {{"Create", 0}};
+        script->instructions = {
+            op(OpCode::PUSH_CONSTANT), 75,
+            op(OpCode::PUSH_CONSTANT), target.value,
+            op(OpCode::PUSH_CONSTANT), 0,
+            op(OpCode::PUSH_CONSTANT), 0,
+            op(OpCode::PUSH_CONSTANT), 0,
+            op(OpCode::GET_VALUE_WITH_ARGS),
+            op(OpCode::POP_STATIC), 0,
+            op(OpCode::PUSH_CONSTANT), 0,
+            op(OpCode::RETURN)};
+        auto& env = *sim.getUnitState(caller).cobEnvironment;
+        const auto query = [&] {
+            env.createThread("Create", {});
+            runUnitCobScripts(sim, caller);
+            return env.getStatic(0);
+        };
+        CHECK(query() == 1); // A computer seat qualifies; this is not the human seat.
+        sim.getUnitState(target).owner = remote;
+        CHECK(query() == 0); // Alliance does not imply local authority.
+        sim.getUnitState(target).owner = local;
+        CHECK(query() == 1); // Capture/ownership changes are read on each query.
+        sim.units.remove(target);
+        CHECK(query() == 0);
+    }
+
     TEST_CASE("cob handleQuery / handleSetQuery", "[cob]")
     {
         auto script = makeEmptyCobScript();

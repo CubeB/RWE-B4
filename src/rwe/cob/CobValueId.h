@@ -33,6 +33,7 @@ namespace rwe
         MyId,
         UnitTeam,
         UnitBuildPercentLeft,
-        UnitAllied
+        UnitAllied,
+        UnitIsSimulatedLocally = 75
     };
 }

@@ -84,7 +84,10 @@ namespace rwe
             case CobValueId::MyId:
                 return CobEnvironment::QueryStatus::MyId{};
             case CobValueId::UnitTeam:
-                return CobEnvironment::QueryStatus::UnitTeam{CobUnitId(arg1)};
+                return CobEnvironment::QueryStatus::UnitOwner{CobUnitId(arg1)};
+            case CobValueId::UnitIsSimulatedLocally:
+                // EXT-COB-75-01: locality concerns the referenced owner, not alliance.
+                return CobEnvironment::QueryStatus::UnitOwner{CobUnitId(arg1), CobEnvironment::QueryStatus::UnitOwner::Property::SimulatedLocally};
             case CobValueId::UnitBuildPercentLeft:
                 return CobEnvironment::QueryStatus::UnitBuildPercentLeft{CobUnitId(arg1)};
             case CobValueId::UnitAllied:

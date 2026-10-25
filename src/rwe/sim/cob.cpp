@@ -451,7 +451,7 @@ namespace rwe
             [&](const CobEnvironment::QueryStatus::MyId&) {
                 return static_cast<int>(unitId.value);
             },
-            [&](const CobEnvironment::QueryStatus::UnitTeam& q) {
+            [&](const CobEnvironment::QueryStatus::UnitOwner& q) {
                 auto targetUnitId = q.targetUnitId;
                 auto targetUnitOption = sim.tryGetUnitState(targetUnitId);
                 if (!targetUnitOption)
@@ -459,7 +459,10 @@ namespace rwe
                     // FIXME: unsure if correct return value when unit does not exist
                     return 0;
                 }
-                // TODO: return player's team instead of player ID
+                if (q.property == CobEnvironment::QueryStatus::UnitOwner::Property::SimulatedLocally)
+                {
+                    return sim.getPlayer(targetUnitOption->get().owner).simulation == PlayerSimulation::Local ? 1 : 0;
+                }
                 return static_cast<int>(targetUnitOption->get().owner.value);
             },
             [&](const CobEnvironment::QueryStatus::UnitBuildPercentLeft& q) {

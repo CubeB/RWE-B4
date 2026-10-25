@@ -2,9 +2,46 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <rwe/io/tdf/TdfBlock.h>
+#include <rwe/util/rwe_string.h>
+#include <map>
 
 namespace rwe
 {
+    ClassicDownloadableScript parseClassicDownloadableScript(const TdfBlock& unitInfo)
+    {
+        ClassicDownloadableScript result;
+        result.unitName = toUpper(unitInfo.expectString("UnitName"));
+        if (const auto text = unitInfo.findValue("ai_weight"))
+        {
+            result.text = text->get().substr(0, 63);
+        }
+        result.downloadable = (unitInfo.extractInt("Downloadable").value_or(0) & 1) != 0;
+        return result;
+    }
+
+    void promoteDownloadableAiScript(std::vector<ClassicDownloadableScript>& scripts, const std::vector<TdfBlock>& blocks, const std::set<std::string>& loadedTypes)
+    {
+        // DOWNLOAD-LINK-01: only a valid stored first row can promote a type.
+        if (blocks.empty())
+        {
+            return;
+        }
+        const auto builder = blocks.front().findValue("UNITMENU");
+        const auto product = blocks.front().findValue("UNITNAME");
+        if (!builder || !product || loadedTypes.count(toUpper(builder->get())) == 0 || loadedTypes.count(toUpper(product->get())) == 0)
+        {
+            return;
+        }
+        for (auto& script : scripts)
+        {
+            if (script.unitName == toUpper(product->get()))
+            {
+                script.downloadable = true;
+            }
+        }
+    }
+
     namespace
     {
         char upper(char c)
@@ -305,10 +342,12 @@ namespace rwe
         const std::vector<ClassicScriptDirective>& directives,
         ClassicPlan plan,
         const std::vector<ClassicScriptType>& types,
-        std::vector<ClassicTypeEntry>& entries)
+        std::vector<ClassicTypeEntry>& entries,
+        bool* commandGate)
     {
         ClassicScriptReport report;
-        bool enabled = true;
+        bool localGate = true;
+        bool& enabled = commandGate ? *commandGate : localGate;
 
         for (const auto& d : directives)
         {
@@ -381,6 +420,47 @@ namespace rwe
                     {
                         e.limit = limitFrom(number);
                         e.limitLocked = locks;
+                    }
+                }
+            }
+        }
+        return report;
+    }
+
+    ClassicScriptReport applyClassicDownloadableScripts(
+        const std::vector<ClassicDownloadableScript>& scripts, ClassicPlan plan,
+        const std::vector<ClassicScriptType>& types, std::vector<ClassicTypeEntry>& entries)
+    {
+        std::map<std::string, const ClassicDownloadableScript*> byName;
+        for (const auto& script : scripts)
+        {
+            if (script.downloadable && !script.text.empty())
+            {
+                byName.emplace(toUpper(script.unitName), &script);
+            }
+        }
+        std::map<std::string, std::size_t> owners;
+        for (std::size_t i = 0; i < types.size(); ++i)
+        {
+            owners.emplace(toUpper(types[i].name), i);
+        }
+        ClassicScriptReport report;
+        for (int pass = 0; pass < 2; ++pass)
+        {
+            bool enabled = true;
+            for (const auto& [name, index] : owners)
+            {
+                const auto script = byName.find(name);
+                if (script == byName.end() || (pass == 0 ? entries[index].multiplierLocked : entries[index].limitLocked))
+                {
+                    continue;
+                }
+                auto fragment = applyClassicScript(parseClassicScript(script->second->text), plan, types, entries, &enabled);
+                for (const auto& unknown : fragment.unknownNames)
+                {
+                    if (std::find(report.unknownNames.begin(), report.unknownNames.end(), unknown) == report.unknownNames.end())
+                    {
+                        report.unknownNames.push_back(unknown);
                     }
                 }
             }

@@ -1,9 +1,34 @@
 #include "AiBuildTree.h"
 #include <rwe/game/BuilderGuisDatabase.h>
+#include <rwe/io/tdf/TdfBlock.h>
 #include <rwe/util/rwe_string.h>
 
 namespace rwe
 {
+    std::size_t addDownloadBuildOptions(AiBuildTree& tree, const std::vector<TdfBlock>& blocks, const std::set<std::string>& unitTypes)
+    {
+        std::size_t added = 0;
+        for (const auto& block : blocks)
+        {
+            const auto builder = block.findValue("UNITMENU");
+            const auto product = block.findValue("UNITNAME");
+            if (!builder || !product)
+            {
+                continue;
+            }
+            const auto builderName = toUpper(builder->get());
+            const auto productName = toUpper(product->get());
+            // Existing build storage and a real product are both required.
+            // BLANK/unresolved builders never manufacture a new tree entry.
+            auto target = tree.buildableBy.find(builderName);
+            if (target != tree.buildableBy.end() && unitTypes.count(productName) != 0)
+            {
+                added += target->second.insert(productName).second ? 1 : 0;
+            }
+        }
+        return added;
+    }
+
     bool AiBuildTree::knows(const std::string& builderType) const
     {
         return buildableBy.find(toUpper(builderType)) != buildableBy.end();

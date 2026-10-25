@@ -554,7 +554,8 @@ namespace rwe
                     }
 
                     std::string fbiString(bytes->data(), bytes->size());
-                    auto fbi = parseUnitFbi(parseTdfFromString(fbiString));
+                    const auto fbiTdf = parseTdfFromString(fbiString);
+                    auto fbi = parseUnitFbi(fbiTdf);
 
                     // The model first: a unit whose model will not parse is
                     // left out whole, with a line in the log, rather than
@@ -580,6 +581,13 @@ namespace rwe
                     }
                     auto unitDefinition = parseUnitDefinition(fbi, dataMaps.movementClassDatabase);
                     dataMaps.unitDefinitions.insert({toUpper(fbi.unitName), std::move(unitDefinition)});
+                    // MOD-AI-02/03: preserve the bounded command bytes, not just
+                    // a numeric weight. Effective Downloadable is promoted below.
+                    auto aiScript = parseClassicDownloadableScript(fbiTdf.findBlock("UNITINFO")->get());
+                    if (!aiScript.text.empty())
+                    {
+                        dataMaps.downloadableAiScripts.push_back(std::move(aiScript));
+                    }
 
                     // Read the unit's gui pages if it has any. This used to be
                     // gated on Builder=1, which is wrong: the six launchers that
@@ -1057,14 +1065,37 @@ namespace rwe
         }
 
         std::set<std::string> knownUnitTypes;
+        std::set<std::string> loadedUnitTypes;
         for (const auto& [unitType, unitDefinition] : simulation.unitDefinitions)
         {
+            loadedUnitTypes.insert(unitType);
             if (!unitDefinition.excludedByMission)
             {
                 knownUnitTypes.insert(unitType);
             }
         }
         auto buildTree = buildTreeFromBuilderGuis(dataMaps.builderGuisDatabase, knownUnitTypes);
+        // DOWNLOAD-LINK-01: coordinate-free download records still augment
+        // AI build eligibility. They do not add human GUI buttons.
+        std::size_t downloadOptions = 0;
+        for (const auto& name : services.vfs->getFileNames(services.pathMapping->downloads, ".tdf"))
+        {
+            if (const auto bytes = services.vfs->readFile(services.pathMapping->downloads + "/" + name))
+            {
+                try
+                {
+                    const auto blocks = parseListTdfFromBytes(*bytes);
+                    downloadOptions += addDownloadBuildOptions(buildTree, blocks, knownUnitTypes);
+                    promoteDownloadableAiScript(dataMaps.downloadableAiScripts, blocks, loadedUnitTypes);
+                }
+                catch (const std::exception&)
+                {
+                    // The earlier GUI pass already reported this unreadable file.
+                }
+            }
+        }
+        LOG_INFO << "AI download build options: " << downloadOptions << " added";
+        LOG_INFO << "AI downloadable command fragments: " << dataMaps.downloadableAiScripts.size() << " collected";
         LOG_INFO << "AI build tree: " << buildTree.buildableBy.size() << " builders with a build menu";
 
         // Read once, and only if some seat asks for a personality.
@@ -1134,6 +1165,8 @@ namespace rwe
             request.idle = gameParameters.replayFile && !gameParameters.replayShadowAi;
             request.vfs = services.vfs;
             request.aiProfileName = ota.schemas.at(gameParameters.schemaIndex).aiProfile;
+            request.aiDirectory = services.pathMapping->ai;
+            request.downloadableScripts = &dataMaps.downloadableAiScripts;
             request.mission = gameParameters.mission;
             request.unitLimit = static_cast<unsigned int>(std::max(1, ota.maxUnits));
 
