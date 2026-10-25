@@ -2,9 +2,22 @@
 
 #include <string>
 #include <vector>
+#include <set>
 
 namespace rwe
 {
+    struct TdfBlock;
+
+    struct ClassicDownloadableScript
+    {
+        std::string unitName;
+        std::string text;
+        bool downloadable{false};
+    };
+
+    // MOD-AI-02: low-bit Downloadable flag and a maximum 63-byte command string.
+    ClassicDownloadableScript parseClassicDownloadableScript(const TdfBlock& unitInfo);
+    void promoteDownloadableAiScript(std::vector<ClassicDownloadableScript>& scripts, const std::vector<TdfBlock>& blocks, const std::set<std::string>& loadedTypes);
     /**
      * The original computer player's profile file (`ai/default.txt`, or the
      * mission's `aiprofile`): three directives, `plan`, `weight` and `limit`.
@@ -103,5 +116,12 @@ namespace rwe
         const std::vector<ClassicScriptDirective>& directives,
         ClassicPlan plan,
         const std::vector<ClassicScriptType>& types,
-        std::vector<ClassicTypeEntry>& entries);
+        std::vector<ClassicTypeEntry>& entries,
+        bool* commandGate = nullptr);
+
+    // MOD-AI-02: distinct owner-weight-lock and owner-limit-lock passes,
+    // each enabling the command gate once, in case-insensitive unit-name order.
+    ClassicScriptReport applyClassicDownloadableScripts(
+        const std::vector<ClassicDownloadableScript>& scripts, ClassicPlan plan,
+        const std::vector<ClassicScriptType>& types, std::vector<ClassicTypeEntry>& entries);
 }

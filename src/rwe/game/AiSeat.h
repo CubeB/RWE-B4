@@ -37,12 +37,13 @@ namespace rwe
 
     /**
      * The profile text the original's computer player reads: the mission's
-     * `aiprofile` as `ai/<name>.txt`, otherwise `ai/default.txt`. Names are
+     * `aiprofile` as `<directory>/<name>.txt`, otherwise `<directory>/default.txt`.
+     * The original directory is `ai`; explicit remapping is MOD-DIRS-01. Names are
      * the virtual file system's to compare, which it does case-insensitively.
      * Empty when neither exists, which the original plays with every
      * multiplier at 100 and no limits.
      */
-    ClassicAiProfileFile readClassicAiProfile(const AbstractVirtualFileSystem& vfs, const std::string& profileName);
+    ClassicAiProfileFile readClassicAiProfile(const AbstractVirtualFileSystem& vfs, const std::string& profileName, const std::string& directory = "ai");
 
     /** Everything one computer seat's controller is built from. */
     struct AiSeatRequest
@@ -66,6 +67,9 @@ namespace rwe
         const AbstractVirtualFileSystem* vfs{nullptr};
         /** The mission's `aiprofile`, "DEFAULT" for a skirmish map. */
         std::string aiProfileName{"DEFAULT"};
+        /** Explicit mod namespace, including the default-profile fallback (MOD-DIRS-01). */
+        std::string aiDirectory{"ai"};
+        const std::vector<ClassicDownloadableScript>* downloadableScripts{nullptr};
         /** Apply mission limits/preferences to RWE's own engine as well. */
         bool mission{false};
         /** The map's unit limit (`maxunits`), which the classic engine's ratings read. */

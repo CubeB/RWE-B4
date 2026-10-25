@@ -64,6 +64,7 @@ namespace rwe
      */
     struct GameDataMaps
     {
+        std::vector<ClassicDownloadableScript> downloadableAiScripts;
         BuilderGuisDatabase builderGuisDatabase;
         GameMediaDatabase gameMediaDatabase;
         MovementClassDatabase movementClassDatabase;

@@ -3,9 +3,72 @@
 #include <rwe/ai/classic/ClassicAiScoring.h>
 #include <rwe/ai/classic/ClassicAiScript.h>
 #include <rwe/ai/classic/ClassicRandom.h>
+#include <rwe/io/tdf/tdf.h>
 
 namespace rwe
 {
+    TEST_CASE("downloadable AI metadata follows the original FBI and first-row rules", "[ai][classic][mods]")
+    {
+        // MOD-AI-02/03 and DOWNLOAD-LINK-01, including the shipped BLANK pattern.
+        for (const auto flag : {-2, -1, 0, 1, 2, 3})
+        {
+            const auto info = parseTdfFromString("[UNITINFO]{UnitName=ARMAAA;Downloadable=" + std::to_string(flag) + ";ai_weight=weight ARMAAA 0;}");
+            const auto script = parseClassicDownloadableScript(info.findBlock("UNITINFO")->get());
+            CHECK(script.downloadable == ((flag & 1) != 0));
+            CHECK(script.text == "weight ARMAAA 0");
+        }
+        auto info = parseTdfFromString("[UNITINFO]{UnitName=ARMAAA;ai_weight=" + std::string(80, 'x') + ";}");
+        CHECK(parseClassicDownloadableScript(info.findBlock("UNITINFO")->get()).text.size() == 63);
+        CHECK_FALSE(parseClassicDownloadableScript(info.findBlock("UNITINFO")->get()).downloadable);
+        std::vector<ClassicDownloadableScript> scripts{{"ARMAAA", "weight ARMAAA 0", false}};
+        const std::set<std::string> types{"ARMACV", "ARMAAA"};
+        promoteDownloadableAiScript(scripts, parseListTdfFromString(
+            "[FIRST]{UNITMENU=BLANK;UNITNAME=ARMAAA;}[SECOND]{UNITMENU=ARMACV;UNITNAME=ARMAAA;}"), types);
+        CHECK_FALSE(scripts[0].downloadable);
+        promoteDownloadableAiScript(scripts, parseListTdfFromString(
+            "[FIRST]{UNITMENU=ARMACV;UNITNAME=ARMAAA;}"), types);
+        CHECK(scripts[0].downloadable);
+    }
+
+    TEST_CASE("downloadable AI fragments execute whole commands in independent lock passes", "[ai][classic][mods]")
+    {
+        // Deliberately not UNITNAME order: the original sorts IDs before these passes.
+        const std::vector<ClassicScriptType> types{{"B", "GROUP"}, {"A", "GROUP"}};
+        std::vector<ClassicTypeEntry> entries(2);
+        SECTION("category adjustments can execute again in the limit pass")
+        {
+            applyClassicDownloadableScripts({{"A", "weight GROUP .5", true}}, ClassicPlan::Hard, types, entries);
+            CHECK(entries[0].multiplier == 25);
+            CHECK(entries[1].multiplier == 25);
+        }
+        SECTION("UNITNAME order and target locks govern cross-unit commands")
+        {
+            applyClassicDownloadableScripts({{"B", "weight B .8", true}, {"A", "weight B .5", true}}, ClassicPlan::Hard, types, entries);
+            CHECK(entries[0].multiplier == 50);
+            CHECK(entries[1].multiplier == 100);
+        }
+        SECTION("a weight-locked owner can still execute both commands in the limit pass")
+        {
+            entries[1].multiplier = 80;
+            entries[1].multiplierLocked = true;
+            applyClassicDownloadableScripts({{"A", "weight A .5\nlimit A 3", true}}, ClassicPlan::Hard, types, entries);
+            CHECK(entries[1].multiplier == 80);
+            CHECK(entries[1].limit == 3);
+            CHECK(entries[1].limitLocked);
+        }
+        SECTION("each pass starts enabled while a fragment's plan persists within its pass")
+        {
+            entries[1].limitLocked = true;
+            applyClassicDownloadableScripts({{"A", "plan easy", true}, {"B", "weight B 0", true}}, ClassicPlan::Hard, types, entries);
+            CHECK(entries[0].multiplier == 0);
+        }
+        SECTION("a non-downloadable fragment is ignored")
+        {
+            applyClassicDownloadableScripts({{"A", "weight B 0", false}}, ClassicPlan::Hard, types, entries);
+            CHECK(entries[0].multiplier == 100);
+        }
+    }
+
     namespace
     {
         // The first values of the Park-Miller minimal standard from state 1.

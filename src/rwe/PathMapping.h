@@ -4,6 +4,8 @@
 
 namespace rwe
 {
+    class OpaqueArgs;
+
     struct PathMapping
     {
         std::string ai;
@@ -25,4 +27,8 @@ namespace rwe
         std::string units;
         std::string weapons;
     };
+
+    // Explicit mod roots; vanilla defaults remain unchanged. MOD-DIRS-01 in
+    // docs/TA-MOD-COMPATIBILITY-FINDINGS.md records this RWE extension.
+    PathMapping configuredPathMapping(const OpaqueArgs& args);
 }

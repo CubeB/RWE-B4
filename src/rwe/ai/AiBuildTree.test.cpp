@@ -1,9 +1,34 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/ai/AiBuildTree.h>
 #include <rwe/game/BuilderGuisDatabase.h>
+#include <rwe/io/tdf/tdf.h>
 
 namespace rwe
 {
+    TEST_CASE("download AI options accept records without human button coordinates", "[ai][mods][download]")
+    {
+        // Actual GOLD10.2.0 armaaa.tdf relationships, DOWNLOAD-LINK-01.
+        AiBuildTree tree;
+        tree.buildableBy["ARMACV"] = {"ARMMEX"};
+        tree.buildableBy["ARMACH"] = {"ARMMEX"};
+        const std::set<std::string> types{"ARMACV", "ARMACH", "ARMAAA", "ARMMEX"};
+        const auto blocks = parseListTdfFromString(
+            "[MENUENTRY1]{UNITMENU=BLANK;UNITNAME=ARMAAA;}"
+            "[MENUENTRY2]{UNITMENU=BLANK;UNITNAME=ARMAAA;}"
+            "[MENUENTRY3]{UNITMENU=armacv;UNITNAME=armaaa;}"
+            "[MENUENTRY4]{UNITMENU=ARMACH;UNITNAME=ARMAAA;}");
+        REQUIRE(addDownloadBuildOptions(tree, blocks, types) == 2);
+        CHECK(tree.canBuild("ARMACV", "ARMAAA"));
+        CHECK(tree.canBuild("ARMACH", "ARMAAA"));
+        CHECK(tree.canBuild("ARMACV", "ARMMEX"));
+        CHECK_FALSE(tree.knows("BLANK"));
+        CHECK(addDownloadBuildOptions(tree, blocks, types) == 0);
+
+        const auto missing = parseListTdfFromString("[X]{UNITMENU=ARMACV;UNITNAME=MISSING;}");
+        CHECK(addDownloadBuildOptions(tree, missing, types) == 0);
+        CHECK_FALSE(tree.canBuild("ARMACV", "MISSING"));
+    }
+
     TEST_CASE("mission caps constrain even unknown builders and zero weights forbid a type", "[ai][mission-profile]")
     {
         AiBuildTree tree;

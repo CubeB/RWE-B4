@@ -4,6 +4,7 @@
 #include <memory>
 #include <rwe/ai/AiController.h>
 #include <rwe/ai/AiTuningProfile.h>
+#include <rwe/ai/classic/ClassicAiScript.h>
 #include <rwe/sim/PlayerId.h>
 #include <string>
 #include <vector>
@@ -32,6 +33,7 @@ namespace rwe
          * limits -- the original does the same.
          */
         std::string profileText;
+        std::vector<ClassicDownloadableScript> downloadableScripts;
 
         /**
          * Playing back a replay: construct, draw the seed, and do nothing.

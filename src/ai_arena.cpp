@@ -78,33 +78,9 @@ namespace fs = std::filesystem;
 
 namespace
 {
-    rwe::PathMapping defaultPathMapping()
+    std::unordered_map<std::string, rwe::SideData> loadSideData(rwe::AbstractVirtualFileSystem& vfs, const rwe::PathMapping& paths)
     {
-        rwe::PathMapping m;
-        m.ai = "ai";
-        m.anims = "anims";
-        m.bitmaps = "bitmaps";
-        m.camps = "camps";
-        m.downloads = "download";
-        m.features = "features";
-        m.fonts = "fonts";
-        m.gamedata = "gamedata";
-        m.guis = "guis";
-        m.maps = "maps";
-        m.objects3d = "objects3d";
-        m.palettes = "palettes";
-        m.scripts = "scripts";
-        m.sounds = "sounds";
-        m.textures = "textures";
-        m.unitpics = "unitpics";
-        m.units = "units";
-        m.weapons = "weapons";
-        return m;
-    }
-
-    std::unordered_map<std::string, rwe::SideData> loadSideData(rwe::AbstractVirtualFileSystem& vfs)
-    {
-        auto bytes = vfs.readFile("gamedata/SIDEDATA.TDF");
+        auto bytes = vfs.readFile(paths.gamedata + "/SIDEDATA.TDF");
         if (!bytes)
         {
             throw std::runtime_error("Missing side data");
@@ -267,6 +243,7 @@ int main(int argc, char* argv[])
                       << "  --watchdog <seconds>    abort after this much wall-clock time\n"
                       << "  --strict                exit 1 if no AI-ARENA-RESULT was produced or the watchdog fired\n"
                       << "  --data-path <path>      game data search path (repeatable)\n"
+                      << "  --dir-<resource> <dir>  mod resource root, as in rwe (e.g. --dir-ai ae)\n"
                       << "  --replay <file>         play a recorded .rwereplay headlessly instead of --map/--player\n"
                       << "  --list-knobs            print every AI tuning knob (name, type, default) and exit\n"
                       << "  --json                  with --list-knobs, print a JSON array instead of tab-separated text\n";
@@ -474,7 +451,7 @@ int main(int argc, char* argv[])
             }
         } // !isReplay
 
-        auto pathMapping = defaultPathMapping();
+        auto pathMapping = configuredPathMapping(args);
 
         std::vector<fs::path> gameDataPaths;
         auto dataPaths = args.getMulti("data-path");
@@ -510,9 +487,9 @@ int main(int argc, char* argv[])
             throw std::runtime_error("Couldn't find or read GUI palette (palettes/GUIPAL.PAL or GUIPAL.PCX)");
         }
 
-        auto sideData = loadSideData(vfs);
+        auto sideData = loadSideData(vfs, pathMapping);
 
-        auto otaRaw = vfs.readFile("maps/" + gameParameters.mapName + ".ota");
+        auto otaRaw = vfs.readFile(pathMapping.maps + "/" + gameParameters.mapName + ".ota");
         if (!otaRaw)
         {
             throw std::runtime_error("Failed to read OTA file");

@@ -60,32 +60,6 @@ std::shared_ptr<rwe::SimpleLogger> createLoggerInDir(const fs::path& logDir)
     throw std::runtime_error("Failed to create logger");
 }
 
-rwe::PathMapping constructDefaultPathMapping()
-{
-    rwe::PathMapping m;
-
-    m.ai = "ai";
-    m.anims = "anims";
-    m.bitmaps = "bitmaps";
-    m.camps = "camps";
-    m.downloads = "download";
-    m.features = "features";
-    m.fonts = "fonts";
-    m.gamedata = "gamedata";
-    m.guis = "guis";
-    m.maps = "maps";
-    m.objects3d = "objects3d";
-    m.palettes = "palettes";
-    m.scripts = "scripts";
-    m.sounds = "sounds";
-    m.textures = "textures";
-    m.unitpics = "unitpics";
-    m.units = "units";
-    m.weapons = "weapons";
-
-    return m;
-}
-
 int main(int argc, char* argv[])
 {
     try
@@ -566,24 +540,7 @@ int main(int argc, char* argv[])
             }
             config.windowMode = windowModeString;
 
-            auto pathMapping = constructDefaultPathMapping();
-            pathMapping.ai = args.getString("dir-ai", "ai");
-            pathMapping.anims = args.getString("dir-anims", "anims");
-            pathMapping.bitmaps = args.getString("dir-bitmaps", "bitmaps");
-            pathMapping.camps = args.getString("dir-camps", "camps");
-            pathMapping.downloads = args.getString("dir-downloads", "download");
-            pathMapping.fonts = args.getString("dir-fonts", "fonts");
-            pathMapping.gamedata = args.getString("dir-gamedata", "gamedata");
-            pathMapping.guis = args.getString("dir-guis", "guis");
-            pathMapping.maps = args.getString("dir-maps", "maps");
-            pathMapping.objects3d = args.getString("dir-objects3d", "objects3d");
-            pathMapping.palettes = args.getString("dir-palettes", "palettes");
-            pathMapping.scripts = args.getString("dir-scripts", "scripts");
-            pathMapping.sounds = args.getString("dir-sounds", "sounds");
-            pathMapping.textures = args.getString("dir-textures", "textures");
-            pathMapping.unitpics = args.getString("dir-unitpics", "unitpics");
-            pathMapping.units = args.getString("dir-units", "units");
-            pathMapping.weapons = args.getString("dir-weapons", "weapons");
+            auto pathMapping = rwe::configuredPathMapping(args);
 
             // Nothing below here copes with there being no game data: the
             // first thing to touch the directory is a directory_iterator

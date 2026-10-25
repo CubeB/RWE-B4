@@ -291,6 +291,8 @@ namespace rwe
                     break;
             }
             auto report = applyClassicScript(parseClassicScript(config.profileText), plan, scriptTypes, entries);
+            auto downloadableReport = applyClassicDownloadableScripts(config.downloadableScripts, plan, scriptTypes, entries);
+            report.unknownNames.insert(report.unknownNames.end(), downloadableReport.unknownNames.begin(), downloadableReport.unknownNames.end());
             for (const auto& unknown : report.unknownNames)
             {
                 LOG_WARN << "Classic AI profile names '" << unknown << "', which is neither a unit type nor a category here";

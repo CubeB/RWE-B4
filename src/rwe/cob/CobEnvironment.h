@@ -222,9 +222,15 @@ namespace rwe
             struct MyId
             {
             };
-            struct UnitTeam
+            struct UnitOwner
             {
+                enum class Property
+                {
+                    PlayerId,
+                    SimulatedLocally
+                };
                 CobUnitId targetUnitId;
+                Property property{Property::PlayerId};
             };
             struct UnitBuildPercentLeft
             {
@@ -235,7 +241,7 @@ namespace rwe
                 CobUnitId targetUnitId;
             };
 
-            using Query = std::variant<Random, Activation, StandingFireOrders, StandingMoveOrders, Health, InBuildStance, Busy, PieceXZ, PieceY, UnitXZ, UnitY, UnitHeight, XZAtan, GroundHeight, BuildPercentLeft, YardOpen, BuggerOff, Armored, VeteranLevel, MinId, MaxId, MyId, UnitTeam, UnitBuildPercentLeft, UnitAllied>;
+            using Query = std::variant<Random, Activation, StandingFireOrders, StandingMoveOrders, Health, InBuildStance, Busy, PieceXZ, PieceY, UnitXZ, UnitY, UnitHeight, XZAtan, GroundHeight, BuildPercentLeft, YardOpen, BuggerOff, Armored, VeteranLevel, MinId, MaxId, MyId, UnitOwner, UnitBuildPercentLeft, UnitAllied>;
 
             Query query;
         };

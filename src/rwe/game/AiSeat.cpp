@@ -25,14 +25,14 @@ namespace rwe
         return defaultEngine;
     }
 
-    ClassicAiProfileFile readClassicAiProfile(const AbstractVirtualFileSystem& vfs, const std::string& profileName)
+    ClassicAiProfileFile readClassicAiProfile(const AbstractVirtualFileSystem& vfs, const std::string& profileName, const std::string& directory)
     {
         std::vector<std::string> candidates;
         if (!profileName.empty())
         {
-            candidates.push_back("ai/" + profileName + ".txt");
+            candidates.push_back(directory + "/" + profileName + ".txt");
         }
-        candidates.push_back("ai/default.txt");
+        candidates.push_back(directory + "/default.txt");
 
         for (const auto& path : candidates)
         {
@@ -106,12 +106,16 @@ namespace rwe
             config.difficulty = difficulty;
             config.idle = request.idle;
             config.unitLimit = request.unitLimit;
+            if (request.downloadableScripts != nullptr)
+            {
+                config.downloadableScripts = *request.downloadableScripts;
+            }
             // Read-only and the same for every seat; a copy per seat keeps
             // the controller from outliving the loader's table.
             config.buildTree = std::make_shared<const AiBuildTree>(buildTree);
             if (request.vfs != nullptr)
             {
-                auto file = readClassicAiProfile(*request.vfs, request.aiProfileName);
+                auto file = readClassicAiProfile(*request.vfs, request.aiProfileName, request.aiDirectory);
                 if (file.path.empty())
                 {
                     LOG_INFO << "Player " << i << ": no AI profile file (" << request.aiProfileName << " or default); the classic engine plays with its defaults";
@@ -192,7 +196,7 @@ namespace rwe
             std::vector<ClassicTypeEntry> entries(types.size());
             auto plan = difficulty == AiDifficulty::Easy ? ClassicPlan::Easy
                 : difficulty == AiDifficulty::Standard ? ClassicPlan::Medium : ClassicPlan::Hard;
-            auto file = readClassicAiProfile(*request.vfs, request.aiProfileName);
+            auto file = readClassicAiProfile(*request.vfs, request.aiProfileName, request.aiDirectory);
             applyClassicScript(parseClassicScript(file.text), plan, types, entries);
             for (std::size_t n = 0; n < types.size(); ++n)
             {

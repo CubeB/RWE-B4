@@ -207,6 +207,21 @@ Everything else lives in a subject file. **The numbers never move**, so a
 
 ## 88. Where RWE deliberately differs
 
+- **COB extension GET 75** (2026-10-25, `COB-PORT-75-FINDINGS.md`). Rime's
+  documented unit-locality query reports RWE's Local/Remote simulation authority,
+  including locally simulated computer seats rather than only the human seat.
+  RWE normalizes results to 1/0 and returns 0 for absent units. These edge-case
+  policies are RWE adaptations; no executed TADR/TAESC parity is claimed.
+  Vanilla v3.1 instead returns 0 for this unrecognized port.
+
+- **Explicit mod resource directories** (2026-10-25, MOD-DIRS-01 in
+  `TA-MOD-COMPATIBILITY-FINDINGS.md`). RWE allows configured resource roots,
+  including the AI-profile directory, with ordinary TA directories as defaults.
+  The game and headless arena share these choices; selected AI profiles and
+  their fallback stay within the configured root. This supports layouts such
+  as Escalation's AE/UNITSE without claiming vanilla discovers them automatically
+  or that Escalation's patched-engine features are fully implemented.
+
 - **Retired: enlarged map descriptions** (2026-10-22 to 2026-10-23).
   The owner-requested adaptive selector was a workaround for apparent text
   overflow. MAP-FONT-01/02 in `MAP-DESCRIPTION-FONT-FINDINGS.md` establishes
