@@ -610,6 +610,7 @@ namespace rwe
         auto save = readSaveFile(path);
         if (!save)
         {
+            openMessageBox("Could not load save: " + name);
             return;
         }
 
