@@ -130,14 +130,14 @@ namespace rwe
 
         // The simulation knows the ground is taken, and answers the same for
         // every peer. That is what a build attempt runs into when it arrives.
-        REQUIRE_FALSE(sim.canBeBuiltAt(mc, hutDefinition.yardMap, hutDefinition.yardMapContainsGeo, rect.x, rect.y));
+        REQUIRE_FALSE(sim.canBeBuiltAt(mc, hutDefinition.yardMap, hutDefinition.yardMapContainsGeo, rect.x, rect.y, hutDefinition.waterLine));
 
         // What we are allowed to see is another matter: refusing the box here
         // would tell us something is standing there.
-        REQUIRE(sim.canBeBuiltAtAsSeenBy(mc, hutDefinition.yardMap, hutDefinition.yardMapContainsGeo, rect.x, rect.y, us));
+        REQUIRE(sim.canBeBuiltAtAsSeenBy(mc, hutDefinition.yardMap, hutDefinition.yardMapContainsGeo, rect.x, rect.y, hutDefinition.waterLine, us));
 
         // Its owner was never blind to it.
-        REQUIRE_FALSE(sim.canBeBuiltAtAsSeenBy(mc, hutDefinition.yardMap, hutDefinition.yardMapContainsGeo, rect.x, rect.y, them));
+        REQUIRE_FALSE(sim.canBeBuiltAtAsSeenBy(mc, hutDefinition.yardMap, hutDefinition.yardMapContainsGeo, rect.x, rect.y, hutDefinition.waterLine, them));
 
         SECTION("and once it has been seen it refuses like anything else")
         {
@@ -145,7 +145,7 @@ namespace rwe
             sim.tick();
 
             REQUIRE(sim.canSeeUnit(us, theirsId));
-            REQUIRE_FALSE(sim.canBeBuiltAtAsSeenBy(mc, hutDefinition.yardMap, hutDefinition.yardMapContainsGeo, rect.x, rect.y, us));
+            REQUIRE_FALSE(sim.canBeBuiltAtAsSeenBy(mc, hutDefinition.yardMap, hutDefinition.yardMapContainsGeo, rect.x, rect.y, hutDefinition.waterLine, us));
         }
     }
 
@@ -169,8 +169,8 @@ namespace rwe
         auto fz = mc.footprintZ;
 
         auto both = [&](unsigned int x, unsigned int y) {
-            auto a = sim.canBeBuiltAt(mc, hut.yardMap, hut.yardMapContainsGeo, x, y);
-            auto b = sim.canBeBuiltAtAsSeenBy(mc, hut.yardMap, hut.yardMapContainsGeo, x, y, us);
+            auto a = sim.canBeBuiltAt(mc, hut.yardMap, hut.yardMapContainsGeo, x, y, hut.waterLine);
+            auto b = sim.canBeBuiltAtAsSeenBy(mc, hut.yardMap, hut.yardMapContainsGeo, x, y, hut.waterLine, us);
             REQUIRE(a == b);
             return a;
         };
@@ -209,13 +209,13 @@ namespace rwe
         auto mc = sim.getAdHocMovementClass(hut.movementCollisionInfo);
 
         // Flat, empty, well inside the map, and never looked at.
-        REQUIRE(sim.canBeBuiltAt(mc, hut.yardMap, hut.yardMapContainsGeo, 20, 20));
-        REQUIRE_FALSE(sim.canBeBuiltAtAsSeenBy(mc, hut.yardMap, hut.yardMapContainsGeo, 20, 20, us));
+        REQUIRE(sim.canBeBuiltAt(mc, hut.yardMap, hut.yardMapContainsGeo, 20, 20, hut.waterLine));
+        REQUIRE_FALSE(sim.canBeBuiltAtAsSeenBy(mc, hut.yardMap, hut.yardMapContainsGeo, 20, 20, hut.waterLine, us));
 
         SECTION("and green again once it has been")
         {
             revealGround(sim, us);
-            REQUIRE(sim.canBeBuiltAtAsSeenBy(mc, hut.yardMap, hut.yardMapContainsGeo, 20, 20, us));
+            REQUIRE(sim.canBeBuiltAtAsSeenBy(mc, hut.yardMap, hut.yardMapContainsGeo, 20, 20, hut.waterLine, us));
         }
 
         SECTION("one unexplored corner is enough to keep it red")
@@ -229,7 +229,7 @@ namespace rwe
             auto cell = sim.visionCellAt(sim.terrain.heightmapIndexToWorldCenter(20, 20));
             sim.explored.set(cell.x, cell.y, static_cast<ExploredMask>(sim.explored.get(cell.x, cell.y) & ~bit));
 
-            REQUIRE_FALSE(sim.canBeBuiltAtAsSeenBy(mc, hut.yardMap, hut.yardMapContainsGeo, 20, 20, us));
+            REQUIRE_FALSE(sim.canBeBuiltAtAsSeenBy(mc, hut.yardMap, hut.yardMapContainsGeo, 20, 20, hut.waterLine, us));
         }
     }
 }

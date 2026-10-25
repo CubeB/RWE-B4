@@ -290,6 +290,10 @@ namespace rwe
 
     std::optional<YardMapCell> parseYardMapCell(char c)
     {
+        // BT-51: only these ten letters are cells. The original's loader
+        // switches on them and skips anything else without counting it, so a
+        // typo in a third-party FBI leaves the footprint short rather than
+        // turning into a solid ground cell.
         switch (c)
         {
             case 'c':
@@ -298,8 +302,6 @@ namespace rwe
                 return YardMapCell::WaterPassableWhenOpen;
             case 'f':
                 return YardMapCell::GroundNoFeature;
-            case 'g':
-                return YardMapCell::GroundGeoPassableWhenOpen;
             case 'G':
                 return YardMapCell::Geo;
             case 'o':
@@ -314,16 +316,8 @@ namespace rwe
                 return YardMapCell::WaterPassable;
             case '.':
                 return YardMapCell::Passable;
-            case ' ':
-                return std::nullopt;
-            case '\r':
-                return std::nullopt;
-            case '\n':
-                return std::nullopt;
-            case '\t':
-                return std::nullopt;
             default:
-                return YardMapCell::Ground;
+                return std::nullopt;
         }
     }
 

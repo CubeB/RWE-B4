@@ -379,8 +379,13 @@ namespace rwe
         return x >= 1u && y >= 1u && x + footprintX < width && y + footprintZ < height;
     }
 
-    bool GameSimulation::canBeBuiltAt(const rwe::MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y) const
+    bool GameSimulation::canBeBuiltAt(const rwe::MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y, unsigned int waterLine) const
     {
+        if (yardMap)
+        {
+            return isYardMapPlacementValid(mc, *yardMap, yardMapContainsGeo, x, y, waterLine, std::nullopt);
+        }
+
         if (!isInsideBuildableArea(x, y, mc.footprintX, mc.footprintZ))
         {
             return false;
@@ -404,8 +409,13 @@ namespace rwe
         return true;
     }
 
-    bool GameSimulation::canBeBuiltAtAsSeenBy(const MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y, PlayerId player) const
+    bool GameSimulation::canBeBuiltAtAsSeenBy(const MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y, unsigned int waterLine, PlayerId player) const
     {
+        if (yardMap)
+        {
+            return isYardMapPlacementValid(mc, *yardMap, yardMapContainsGeo, x, y, waterLine, player);
+        }
+
         if (!isInsideBuildableArea(x, y, mc.footprintX, mc.footprintZ))
         {
             return false;

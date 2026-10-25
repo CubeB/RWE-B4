@@ -711,6 +711,7 @@ src/rwe/net/EndpointFamily.h
     src/rwe/sim/GameSimulation_features.cpp
     src/rwe/sim/GameSimulation_units.cpp
     src/rwe/sim/GameSimulation_economy.cpp
+    src/rwe/sim/GameSimulation_placement.cpp
     src/rwe/sim/FeatureBlast.cpp
     src/rwe/sim/FactoryConstruction.cpp
     src/rwe/sim/FactoryConstruction.h
@@ -1398,6 +1399,7 @@ set(TEST_FILES
     src/rwe/sim/util.test.cpp
     src/rwe/sim/recoil.test.cpp
     src/rwe/sim/geovent.test.cpp
+    src/rwe/sim/yardmap.test.cpp
     src/rwe/sim/standingorders.test.cpp
     src/rwe/sim/targeting.test.cpp
     src/rwe/sim/targetsearch.test.cpp

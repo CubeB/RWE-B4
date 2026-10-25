@@ -51,7 +51,7 @@ namespace rwe
             {
                 return false;
             }
-            return sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(x), static_cast<unsigned int>(y));
+            return sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(x), static_cast<unsigned int>(y), def.waterLine);
         }
     }
 

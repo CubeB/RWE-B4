@@ -524,7 +524,7 @@ namespace rwe
                     {
                         continue;
                     }
-                    if (canBeBuiltAt(mc, std::nullopt, false, static_cast<unsigned int>(x), static_cast<unsigned int>(y)))
+                    if (canBeBuiltAt(mc, std::nullopt, false, static_cast<unsigned int>(x), static_cast<unsigned int>(y), 0u))
                     {
                         spot = DiscreteRect(x, y, mc.footprintX, mc.footprintZ);
                     }

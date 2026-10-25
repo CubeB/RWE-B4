@@ -291,7 +291,7 @@ namespace rwe
                             auto rect = w.sim.computeFootprintRegion(build->position, def.movementCollisionInfo);
                             auto mc = w.sim.getAdHocMovementClass(def.movementCollisionInfo);
                             // Two builders can be sent to the same place, as the original's can.
-                            if (w.sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
+                            if (w.sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y), def.waterLine))
                             {
                                 addUnit(w.sim, build->unitType, w.ai, build->position, w.script);
                                 if (built)
@@ -1003,7 +1003,7 @@ namespace rwe
             REQUIRE(site);
             auto rect = w.sim.computeFootprintRegion(*site, def.movementCollisionInfo);
             auto mc = w.sim.getAdHocMovementClass(def.movementCollisionInfo);
-            CHECK(w.sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)));
+            CHECK(w.sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y), def.waterLine));
         }
     }
 

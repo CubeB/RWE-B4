@@ -276,7 +276,7 @@ namespace rwe
                 // movement class first -- the same question the game asks
                 // before it puts a building down.
                 auto footprintRect = simulation.computeFootprintRegion(position, definition.movementCollisionInfo);
-                if (footprintRect.x < 0 || footprintRect.y < 0 || !simulation.canBeBuiltAt(movementClass, std::nullopt, false, static_cast<unsigned int>(footprintRect.x), static_cast<unsigned int>(footprintRect.y)))
+                if (footprintRect.x < 0 || footprintRect.y < 0 || !simulation.canBeBuiltAt(movementClass, std::nullopt, false, static_cast<unsigned int>(footprintRect.x), static_cast<unsigned int>(footprintRect.y), 0u))
                 {
                     ++battleTestSpawnsBlocked;
                     continue;
