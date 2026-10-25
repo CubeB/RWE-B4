@@ -228,8 +228,14 @@ namespace rwe
         save.cameraPosition = worldCameraState.position;
         save.gameTimeSeconds = simulation.gameTime.value / static_cast<unsigned int>(SimTicksPerSecond);
         save.simulation = saveSimulationToJson(simulation);
-        writeSaveFile(savePathForName(name), save);
-        printConsole("Game saved: " + name);
+        if (writeSaveFile(savePathForName(name), save))
+        {
+            printConsole("Game saved: " + name);
+        }
+        else
+        {
+            printConsole("Could not save: " + name);
+        }
     }
 
     void GameScene::loadSavedGame(const std::string& name)

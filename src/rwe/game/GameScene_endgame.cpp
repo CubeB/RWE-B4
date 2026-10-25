@@ -547,8 +547,14 @@ namespace rwe
             save.parameters.mapName = campaignMissionMapName(campaign->missions[progress.missionIndex]);
         }
         save.betweenMissions = true;
-        writeSaveFile(savePathForName(name), save);
-        printConsole("Game saved: " + name);
+        if (writeSaveFile(savePathForName(name), save))
+        {
+            printConsole("Game saved: " + name);
+        }
+        else
+        {
+            printConsole("Could not save: " + name);
+        }
     }
 
     void GameScene::updateEndGameSequence()
