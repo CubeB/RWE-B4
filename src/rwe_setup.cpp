@@ -19,9 +19,20 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <memory>
+#include <nlohmann/json.hpp>
 
 #include <rwe/setup/TaInstall.h>
+#include <rwe/setup/PackageLibrary.h>
 #include <rwe/util.h>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shellapi.h>
+#endif
 
 #ifdef RWE_PLATFORM_WINDOWS
 #define WIN32_LEAN_AND_MEAN
@@ -313,6 +324,9 @@ namespace
             << "  --force          Copy files again even if they are already there.\n"
             << "  --check-existing Exit successfully if the data directory already\n"
             << "                   contains the base-game archives; do not import.\n"
+            << "  --inspect-package <path>  Read-only mod/map inspection (JSON).\n"
+            << "  --list-packages          Read the package registry (JSON).\n"
+            << "  --library-root <path>    Package library directory for listing.\n"
             << "  --help           Show this message.\n";
     }
 
@@ -342,6 +356,94 @@ int main(int argc, char* argv[])
     {
         printUsage();
         return 0;
+    }
+
+    // PACKAGE-003: package commands never fall through into base-data import.
+    const auto inspectPackage = argFlag(args, "--inspect-package");
+    const auto listPackages = argFlag(args, "--list-packages");
+    const auto pendingPackageCommand = argFlag(args, "--install-package") || argFlag(args, "--verify-package") || argFlag(args, "--uninstall-package");
+    if (inspectPackage || listPackages || pendingPackageCommand || argFlag(args, "--library-root"))
+    {
+        try
+        {
+            if (pendingPackageCommand)
+            {
+                throw std::runtime_error("Package install, verification and removal are not implemented yet");
+            }
+            if (!inspectPackage && !listPackages)
+            {
+                throw std::runtime_error("--library-root requires --list-packages");
+            }
+            if ((inspectPackage && listPackages) || argFlag(args, "--from") || argFlag(args, "--to"))
+            {
+                throw std::runtime_error("Choose one package command without base-data import options");
+            }
+            std::vector<fs::path> nativeArguments;
+#ifdef _WIN32
+            // PACKAGE-004: preserve Unicode paths rather than decoding narrow argv.
+            int nativeCount = 0;
+            auto releaseArguments = [](LPWSTR* pointer) { LocalFree(pointer); };
+            std::unique_ptr<LPWSTR, decltype(releaseArguments)> native(
+                CommandLineToArgvW(GetCommandLineW(), &nativeCount), releaseArguments);
+            if (!native || nativeCount != argc)
+            {
+                throw std::runtime_error("Cannot parse native package arguments");
+            }
+            for (int i = 1; i < nativeCount; ++i)
+            {
+                nativeArguments.emplace_back(native.get()[i]);
+            }
+#else
+            for (int i = 1; i < argc; ++i)
+            {
+                nativeArguments.emplace_back(argv[i]);
+            }
+#endif
+            const auto value = [&](const std::string& key) -> fs::path {
+                const auto found = std::find(args.begin(), args.end(), key);
+                if (found == args.end() || std::next(found) == args.end())
+                {
+                    throw std::runtime_error("Missing value for " + key);
+                }
+                const auto index = static_cast<std::size_t>(std::distance(args.begin(), found)) + 1;
+                const auto& argument = nativeArguments.at(index);
+                if (argument.empty() || argument.native().compare(0, 2, fs::path("--").native()) == 0)
+                {
+                    throw std::runtime_error("Missing value for " + key);
+                }
+                return argument;
+            };
+            nlohmann::json result;
+            if (inspectPackage)
+            {
+                result = rwe::inspectContentPackage(fs::path(value("--inspect-package")));
+            }
+            else
+            {
+                fs::path library;
+                if (argFlag(args, "--library-root"))
+                {
+                    library = value("--library-root");
+                }
+                else if (const auto local = rwe::getLocalDataPath())
+                {
+                    library = fs::path(*local) / "Library";
+                }
+                else
+                {
+                    throw std::runtime_error("Cannot locate the package library; pass --library-root");
+                }
+                result = rwe::loadPackageRegistry(library / "registry.json");
+            }
+            std::cout << result.dump() << '\n';
+            return 0;
+        }
+        catch (const std::exception& e)
+        {
+            std::cout << nlohmann::json({{"schemaVersion", 1}, {"error", {{"code", "package-command"}, {"message", e.what()}}}})
+                             .dump(-1, ' ', false, nlohmann::json::error_handler_t::replace) << '\n';
+            return 1;
+        }
     }
 
     auto dryRun = argFlag(args, "--dry-run");
