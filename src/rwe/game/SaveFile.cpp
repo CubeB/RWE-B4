@@ -234,7 +234,12 @@ namespace rwe
         std::string stem = name;
         for (auto& c : stem)
         {
-            if (c == '/' || c == 0x5c || c == ':' || static_cast<unsigned char>(c) < 0x20)
+            // Windows rejects these in a file name, and the save box admits
+            // them. Fold them like a path separator so a named save always
+            // names a file and the load list shows the name it was written
+            // under.
+            if (c == '/' || c == 0x5c || c == ':' || c == '*' || c == '?' || c == '"'
+                || c == '<' || c == '>' || c == '|' || static_cast<unsigned char>(c) < 0x20)
             {
                 c = '_';
             }

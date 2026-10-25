@@ -155,6 +155,7 @@ namespace rwe
         REQUIRE(saveFileStem("a/b") == "a_b");
         REQUIRE(saveFileStem("a\\b") == "a_b");
         REQUIRE(saveFileStem("C:evil") == "C_evil");
+        REQUIRE(saveFileStem("a*b?c\"d<e>f|g") == "a_b_c_d_e_f_g");
         REQUIRE(saveFileStem(std::string("tab\there", 8)) == "tab_here");
         // What is left names a file, so no folder can be added to the path.
         REQUIRE(fs::path(saveFileStem("../../outside") + ".rwesave").parent_path().empty());
