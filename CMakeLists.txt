@@ -680,6 +680,8 @@ src/rwe/net/EndpointFamily.h
     src/rwe/scene/SceneManager.cpp
     src/rwe/setup/TaInstall.cpp
     src/rwe/setup/TaInstall.h
+    src/rwe/setup/PackageLibrary.cpp
+    src/rwe/setup/PackageLibrary.h
     src/rwe/scene/SceneManager.h
     src/rwe/scene/Screenshot.cpp
     src/rwe/scene/Screenshot.h
@@ -1041,6 +1043,9 @@ target_link_libraries(rwe librwe)
 # data belongs.
 add_executable(rwe_setup src/rwe_setup.cpp)
 target_link_libraries(rwe_setup librwe)
+if(WIN32)
+    target_link_libraries(rwe_setup shell32)
+endif()
 
 if(UNIX AND NOT APPLE)
     file(WRITE "${CMAKE_BINARY_DIR}/run.sh" "#!/bin/bash
@@ -1314,6 +1319,7 @@ set(TEST_FILES
     src/rwe/sim/weaponfiretick.test.cpp
     src/rwe/sim/ProjectileSpawn.test.cpp
     src/rwe/setup/TaInstall.test.cpp
+    src/rwe/setup/PackageLibrary.test.cpp
     src/rwe/sim/wreckcollision.test.cpp
     src/rwe/sim/wreckage.test.cpp
     src/rwe/sim/aircraftwreck.test.cpp
