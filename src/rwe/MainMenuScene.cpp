@@ -546,18 +546,34 @@ namespace rwe
         auto panel = uiFactory.panelFromGuiFile("MSGBOX");
 
         auto font = sceneContext.textureService->getGafEntry("anims/hattfont12.gaf", "Haettenschweiler (120)");
-        // A centred label is centred on its own x, not within its width, so
-        // the x is the middle of the box. Written as 0 it was centred on the
-        // box's left edge and every message was half off it.
+        // BT-GUI-DIALOGS.md section 6: the original wraps to the supplied
+        // width, starts the text at y 20, and sizes the box to the text --
+        // line count times 25, plus the OK button's 42, plus 40. RWE keeps
+        // the shipped 372-pixel width (no caller supplies an auto-width) and
+        // grows the height instead; long diagnostics therefore wrap rather
+        // than clip or run off the plate.
         auto label = std::make_unique<UiLabel>(
-            static_cast<int>(panel->getWidth()) / 2,
-            (static_cast<int>(panel->getHeight()) / 2) - 40,
-            panel->getWidth(),
             20,
+            20,
+            panel->getWidth() - 40,
+            1,
             message,
             font);
         label->setAlignment(UiLabel::Alignment::Center);
+        const auto textHeight = static_cast<int>(label->getTextHeight());
+        label->setHeight(static_cast<unsigned int>(textHeight));
         panel->appendChild(std::move(label));
+
+        const auto panelHeight = std::max(textHeight + 82, 107);
+        panel->setHeight(static_cast<unsigned int>(panelHeight));
+        if (auto ok = panel->find<UiStagedButton>("OK"))
+        {
+            ok->get().setY(panelHeight - 62);
+        }
+
+        // MSGBOX.GUI names OK for both crdefault and escdefault; the scene has
+        // to turn the panel's default keys on, as the multiplayer screens do.
+        panel->setDefaultKeysEnabled(true);
 
         openDialog(std::move(panel));
     }
@@ -757,6 +773,13 @@ namespace rwe
         auto panel = uiFactory.panelFromGuiFile("MAINMENU", "FrontendX", *parsedGui);
         if (auto debugStrLabel = panel->find<UiLabel>("DebugString"))
         {
+            // The shipped MAINMENU gadget is 300x0 at x=320 and was used as a
+            // centre point, not a rectangle. Centre now means within the
+            // width, so shift it left by half its width and keep it a single
+            // line: the title stays centred at x=320 and a zero height does
+            // not wrap it away.
+            debugStrLabel->get().setX(debugStrLabel->get().getX() - static_cast<int>(debugStrLabel->get().getWidth()) / 2);
+            debugStrLabel->get().setSingleLine(true);
             debugStrLabel->get().setText(RevivalTitle);
             debugStrLabel->get().setAlignment(UiLabel::Alignment::Center);
         }

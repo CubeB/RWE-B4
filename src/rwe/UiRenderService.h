@@ -164,6 +164,9 @@ namespace rwe
 
         void drawTextWrapped(Rectangle2f area, const std::string& text, const SpriteSeries& font);
 
+        /** Wrapped text, each line centred within the area's width. */
+        void drawTextWrappedCentered(Rectangle2f area, const std::string& text, const SpriteSeries& font);
+
         void drawTextCentered(float x, float y, const std::string& text, const SpriteSeries& font);
 
         void drawTextCenteredX(float x, float y, const std::string& text, const SpriteSeries& font);

@@ -316,6 +316,36 @@ namespace rwe
         graphics->disableScissor();
     }
 
+    void UiRenderService::drawTextWrappedCentered(Rectangle2f area, const std::string& text, const SpriteSeries& font)
+    {
+        const auto glyphs = layoutWrappedText(area, text, font);
+        if (glyphs.empty())
+        {
+            return;
+        }
+
+        enableSurfaceClip(area);
+        std::size_t lineStart = 0;
+        while (lineStart < glyphs.size())
+        {
+            std::size_t lineEnd = lineStart;
+            while (lineEnd < glyphs.size() && glyphs[lineEnd].y == glyphs[lineStart].y)
+            {
+                ++lineEnd;
+            }
+
+            const auto& last = glyphs[lineEnd - 1];
+            const auto lineWidth = last.x - area.left() + static_cast<float>(font.glyphAdvance(last.glyph));
+            const auto offset = (area.width() - lineWidth) / 2.0f;
+            for (std::size_t i = lineStart; i < lineEnd; ++i)
+            {
+                drawSprite(glyphs[i].x + offset, glyphs[i].y, *font.sprites[glyphs[i].glyph]);
+            }
+            lineStart = lineEnd;
+        }
+        graphics->disableScissor();
+    }
+
     void UiRenderService::fillColor(float x, float y, float width, float height, Color color)
     {
         assert(width >= 0.0f);

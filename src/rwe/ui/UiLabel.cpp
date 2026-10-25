@@ -22,7 +22,14 @@ namespace rwe
                 }
                 break;
             case Alignment::Center:
-                context.drawTextCentered(posX, posY, text, *font);
+                if (singleLine)
+                {
+                    context.drawTextCentered(posX + (static_cast<float>(sizeX) / 2.0f), posY, fittedToWidth(context), *font);
+                }
+                else
+                {
+                    context.drawTextWrappedCentered(Rectangle2f::fromTopLeft(posX, posY, sizeX, sizeY), text, *font);
+                }
                 break;
         }
     }
