@@ -31,6 +31,29 @@ namespace rwe
                     context.drawTextWrappedCentered(Rectangle2f::fromTopLeft(posX, posY, sizeX, sizeY), text, *font);
                 }
                 break;
+            case Alignment::Right:
+                if (singleLine)
+                {
+                    context.drawTextAlignRight(posX + sizeX, posY + font->textBaseline, fittedToWidth(context), *font);
+                }
+                else
+                {
+                    context.drawTextWrappedRight(Rectangle2f::fromTopLeft(posX, posY, sizeX, sizeY), text, *font);
+                }
+                break;
+        }
+    }
+
+    UiLabel::Alignment UiLabel::alignmentFromAttributes(int attribs)
+    {
+        switch (attribs & 0x7)
+        {
+            case 2:
+                return Alignment::Center;
+            case 4:
+                return Alignment::Right;
+            default:
+                return Alignment::Left;
         }
     }
 

@@ -422,14 +422,11 @@ namespace rwe
         // and nothing else about it changes between call sites.
         auto panel = uiFactory.panelFromGuiFile("YESORNO");
 
-        // S:63 says the question goes into a TITLE gadget. The shipped file
-        // has no such gadget: it is three entries, the panel and the two
-        // buttons, and the original writes the question into the panel's own
-        // text at 0x4605c0. A UiPanel has no text, so the question gets a
-        // label of its own, centred across the panel above the buttons --
-        // which sit at y=55, 20 tall, in a box 400x100. Without this the
-        // dialog asked nothing at all and offered Yes and No to a blank
-        // plate.
+        // S:63 says the question goes into a TITLE gadget, and the shipped
+        // YESORNO.GUI does carry one (x 25, width 350, attribute 2, so centre
+        // alignment now comes from the file). Keep the fallback for a layout
+        // that does not: the buttons sit at y=55 in a 400x100 box, so a label
+        // across the panel at y=20 asks the question without covering them.
         if (auto label = panel->find<UiLabel>("TITLE"))
         {
             label->get().setText(title);

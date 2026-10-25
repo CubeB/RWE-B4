@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
 #include <optional>
+#include <rwe/ui/UiLabel.h>
 #include <rwe/ui/UiListBox.h>
 #include <rwe/ui/UiStagedButton.h>
 #include <string>
@@ -76,6 +77,18 @@ namespace rwe
 
             listBox.reset();
         }
+    }
+
+    TEST_CASE("a label's attribute word chooses its alignment", "[ui]")
+    {
+        // The low three bits of the GUI attribs word: 1 left, 2 centre,
+        // 4 right. Other bits in the word select disabled, links and so on.
+        REQUIRE(UiLabel::alignmentFromAttributes(1) == UiLabel::Alignment::Left);
+        REQUIRE(UiLabel::alignmentFromAttributes(2) == UiLabel::Alignment::Center);
+        REQUIRE(UiLabel::alignmentFromAttributes(4) == UiLabel::Alignment::Right);
+        REQUIRE(UiLabel::alignmentFromAttributes(0) == UiLabel::Alignment::Left);
+        REQUIRE(UiLabel::alignmentFromAttributes(0x12) == UiLabel::Alignment::Center);
+        REQUIRE(UiLabel::alignmentFromAttributes(0x14) == UiLabel::Alignment::Right);
     }
 
     TEST_CASE("releaseSubscriptions is idempotent", "[ui]")
