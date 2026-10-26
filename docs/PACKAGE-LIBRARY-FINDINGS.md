@@ -180,7 +180,7 @@ sharing and an existing registry is replaced with `ReplaceFileW`, which
 supports a target open for reading with delete sharing. First publication,
 when no target exists, uses `MoveFileExW`.
 The `ReplaceFileW` write-through flag is not used because Microsoft documents
-it as unsupported. For its documented partial-replacement errors (1175–1177),
+it as unsupported. For its documented partial-replacement errors (1175 to 1177),
 the temporary path is preserved for recovery; other failures leave the target
 untouched and clean up the temporary. This path follows the documented
 Windows behavior and the independent LLVM report [D13647](https://reviews.llvm.org/D13647)
@@ -200,7 +200,7 @@ rejection and that a failed transaction leaves the prior JSON intact and
 permits a subsequent update. These are RWE registry tests, not original-game
 execution or gameplay-compatibility evidence.
 
-## PACKAGE-007: startup base-data import policy
+## PACKAGE-008: startup base-data import policy
 
 Issue #881, 2026-10-26. Launcher startup checks the existing engine data root
 for usable base-game archives before offering any import UI. If absent, it runs
@@ -243,3 +243,11 @@ and 18 music tracks (about 1.0 GB); it reported that nothing changed. A before
 and after listing of source paths, sizes and modification times matched. This
 is a native importer dry run and local data check, not a complete copy test and
 not an original-game execution. No original runtime or installer was run.
+
+An isolated native copy smoke test used a temporary source containing the two
+required archive filenames and an isolated `%APPDATA%`. The native importer
+copied both files into that data root, and `--check-existing` accepted it. A
+launcher smoke test then called `getInstalledMods(getRweModsPath(), Data)` with
+the same isolated root and found the `ta` entry. The fixture source listing,
+sizes and modification times matched before and after. No real user data root
+was overwritten.

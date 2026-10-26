@@ -154,6 +154,7 @@ describe("wizardEpic", () => {
       })
     );
     action$.next({ type: "RECEIVE_INSTALLED_MODS", mods: [] });
+    action$.next(next(directory));
     const deadline = Date.now() + 2000;
     while (!emitted.some(action => action.type === "wizard/FAIL")) {
       if (Date.now() > deadline)
@@ -161,6 +162,7 @@ describe("wizardEpic", () => {
       await new Promise(resolve => setTimeout(resolve, 5));
     }
     expect(mockImportTaData).toHaveBeenCalledTimes(1);
+    expect(mockSetUpTaModManual).not.toHaveBeenCalled();
     expect(
       emitted.filter(action => action.type === "wizard/FAIL")
     ).toHaveLength(1);

@@ -27,12 +27,13 @@ export function wizardEpic(
   );
 
   let startupHandled = false;
-  let manualImportRunning = false;
+  let importInFlight = false;
   return action$.pipe(
     rxop.mergeMap((action: AppAction) => {
       if (action.type === "RECEIVE_INSTALLED_MODS") {
         if (startupHandled) return rx.EMPTY;
         startupHandled = true;
+        importInFlight = true;
         // Existing usable data wins: don't import again and don't interrupt startup.
         return rx.from(checkExistingTaData(setupExe)).pipe(
           rxop.concatMap(alreadyAvailable => {
@@ -72,6 +73,9 @@ export function wizardEpic(
                       )
               )
             );
+          }),
+          rxop.finalize(() => {
+            importInFlight = false;
           })
         );
       }
@@ -81,8 +85,8 @@ export function wizardEpic(
         return rx.EMPTY;
       }
       if (action.type !== "wizard/NEXT") return rx.EMPTY;
-      if (manualImportRunning) return rx.EMPTY;
-      manualImportRunning = true;
+      if (importInFlight) return rx.EMPTY;
+      importInFlight = true;
       const x = action as NextAction;
       return rx
         .defer(() =>
@@ -108,7 +112,7 @@ export function wizardEpic(
             )
           ),
           rxop.finalize(() => {
-            manualImportRunning = false;
+            importInFlight = false;
           })
         );
     })
