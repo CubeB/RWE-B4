@@ -124,9 +124,9 @@ if(MSVC)
 
     # SDL3 and SDL3_mixer built from submodules above
 
-    set(ZLIB_DLL "${CMAKE_SOURCE_DIR}/libs/_msvc/zlib-1.2.11/lib/zlib1.dll")
+    set(RWE_ZLIB_DLL "${CMAKE_SOURCE_DIR}/libs/_msvc/zlib-1.2.11/lib/zlib1.dll")
     set(ZLIB_LIBRARIES "${CMAKE_SOURCE_DIR}/libs/_msvc/zlib-1.2.11/lib/zdll.lib")
-    set(ZLIB_INCLUDE_DIRS "libs/_msvc/zlib-1.2.11/include")
+    set(ZLIB_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/libs/_msvc/zlib-1.2.11/include")
 
     set(PNG_DLL "${CMAKE_SOURCE_DIR}/libs/_msvc/lpng1634/lib/libpng16-16.dll")
     set(PNG_LIBRARIES "${CMAKE_SOURCE_DIR}/libs/_msvc/lpng1634/lib/libpng16-16.lib")
@@ -150,11 +150,76 @@ else()
     # SDL3 and SDL3_mixer built from submodules above
 
     find_package(ZLIB REQUIRED)
-    find_windows_dll(ZLIB_DLL "zlib1.dll")
+    find_windows_dll(RWE_ZLIB_DLL "zlib1.dll")
     find_package(PNG REQUIRED)
     find_windows_dll(PNG_DLL "libpng16-16.dll")
 
 endif()
+
+# Libarchive's CMake package looks for the zlib variables even on MSVC, where
+# this project supplies its existing, packaged zlib dependency explicitly.
+set(ZLIB_FOUND TRUE)
+set(ZLIB_INCLUDE_DIR "${ZLIB_INCLUDE_DIRS}")
+set(ZLIB_LIBRARY "${ZLIB_LIBRARIES}")
+add_library(rwe_zlib INTERFACE)
+target_include_directories(rwe_zlib INTERFACE "${ZLIB_INCLUDE_DIRS}")
+target_link_libraries(rwe_zlib INTERFACE "${ZLIB_LIBRARIES}")
+
+# Bundle the archive readers into the native binaries. The package manager
+# accepts these formats without an installed archiver or PATH lookup. Keep the
+# dependency static and limit its optional codecs to the ones we ship: ZIP
+# deflate uses the project's existing zlib; 7z LZMA/LZMA2 uses bundled liblzma.
+set(XZ_NLS OFF CACHE BOOL "" FORCE)
+set(XZ_DOC OFF CACHE BOOL "" FORCE)
+set(XZ_TOOL_XZ OFF CACHE BOOL "" FORCE)
+set(XZ_TOOL_XZDEC OFF CACHE BOOL "" FORCE)
+set(XZ_TOOL_LZMADEC OFF CACHE BOOL "" FORCE)
+set(XZ_TOOL_LZMAINFO OFF CACHE BOOL "" FORCE)
+add_subdirectory("libs/xz")
+
+set(LIBLZMA_FOUND TRUE)
+set(LIBLZMA_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/libs/xz/src/liblzma/api")
+set(LIBLZMA_INCLUDE_DIRS "${LIBLZMA_INCLUDE_DIR}")
+set(LIBLZMA_LIBRARY liblzma)
+set(LIBLZMA_LIBRARIES liblzma)
+
+set(_RWE_LibLZMA_DIR "${LibLZMA_DIR}")
+set(_RWE_FIND_PACKAGE_PREFER_CONFIG "${CMAKE_FIND_PACKAGE_PREFER_CONFIG}")
+set(LibLZMA_DIR "${PROJECT_SOURCE_DIR}/cmake/liblzma")
+set(CMAKE_FIND_PACKAGE_PREFER_CONFIG TRUE)
+
+set(ENABLE_TEST OFF CACHE BOOL "" FORCE)
+set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(ENABLE_TAR OFF CACHE BOOL "" FORCE)
+set(ENABLE_CPIO OFF CACHE BOOL "" FORCE)
+set(ENABLE_CAT OFF CACHE BOOL "" FORCE)
+set(ENABLE_UNZIP OFF CACHE BOOL "" FORCE)
+set(ENABLE_OPENSSL OFF CACHE BOOL "" FORCE)
+set(ENABLE_CNG OFF CACHE BOOL "" FORCE)
+set(ENABLE_LIBB2 OFF CACHE BOOL "" FORCE)
+set(ENABLE_LZ4 OFF CACHE BOOL "" FORCE)
+set(ENABLE_LZO OFF CACHE BOOL "" FORCE)
+set(ENABLE_ZSTD OFF CACHE BOOL "" FORCE)
+set(ENABLE_BZip2 OFF CACHE BOOL "" FORCE)
+set(ENABLE_LIBXML2 OFF CACHE BOOL "" FORCE)
+set(ENABLE_BSDXML OFF CACHE BOOL "" FORCE)
+set(ENABLE_EXPAT OFF CACHE BOOL "" FORCE)
+set(ENABLE_WIN32_XMLLITE OFF CACHE BOOL "" FORCE)
+set(ENABLE_ICONV OFF CACHE BOOL "" FORCE)
+set(ENABLE_ACL OFF CACHE BOOL "" FORCE)
+set(ENABLE_XATTR OFF CACHE BOOL "" FORCE)
+add_subdirectory("libs/libarchive")
+get_directory_property(_RWE_HAVE_LZMA_H
+    DIRECTORY "${PROJECT_SOURCE_DIR}/libs/libarchive/libarchive" DEFINITION HAVE_LZMA_H)
+if(NOT _RWE_HAVE_LZMA_H)
+    message(FATAL_ERROR "Bundled libarchive was configured without the required 7z LZMA/LZMA2 codec")
+endif()
+set(LibLZMA_DIR "${_RWE_LibLZMA_DIR}")
+set(CMAKE_FIND_PACKAGE_PREFER_CONFIG "${_RWE_FIND_PACKAGE_PREFER_CONFIG}")
+target_link_libraries(archive_static rwe_zlib)
+# libarchive upstream marks this only for compiling its own objects. Consumers
+# also need it because every RWE binary links this archive statically.
+target_compile_definitions(archive_static INTERFACE LIBARCHIVE_STATIC)
 
 set(Protobuf_USE_STATIC_LIBS ON)
 find_package(Protobuf REQUIRED)
@@ -682,6 +747,8 @@ src/rwe/net/EndpointFamily.h
     src/rwe/setup/TaInstall.h
     src/rwe/setup/PackageLibrary.cpp
     src/rwe/setup/PackageLibrary.h
+    src/rwe/setup/ArchiveBackend.cpp
+    src/rwe/setup/ArchiveBackend.h
     src/rwe/scene/SceneManager.h
     src/rwe/scene/Screenshot.cpp
     src/rwe/scene/Screenshot.h
@@ -988,10 +1055,10 @@ target_link_libraries(librwe glad)
 
 target_link_libraries(librwe SDL3::SDL3-static)
 target_link_libraries(librwe SDL3_mixer::SDL3_mixer)
+target_link_libraries(librwe archive_static)
 
-target_copy_file(librwe ${ZLIB_DLL})
-target_link_libraries(librwe ${ZLIB_LIBRARIES})
-target_include_directories(librwe PUBLIC ${ZLIB_INCLUDE_DIRS})
+target_copy_file(librwe ${RWE_ZLIB_DLL})
+target_link_libraries(librwe rwe_zlib)
 
 target_copy_file(librwe ${PNG_DLL})
 
@@ -1324,6 +1391,7 @@ set(TEST_FILES
     src/rwe/sim/ProjectileSpawn.test.cpp
     src/rwe/setup/TaInstall.test.cpp
     src/rwe/setup/PackageLibrary.test.cpp
+    src/rwe/setup/ArchiveBackend.test.cpp
     src/rwe/sim/wreckcollision.test.cpp
     src/rwe/sim/wreckage.test.cpp
     src/rwe/sim/aircraftwreck.test.cpp
@@ -1430,6 +1498,7 @@ set(TEST_FILES
     )
 
 add_executable(rwe_test ${TEST_FILES})
+target_compile_definitions(rwe_test PRIVATE RWE_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 target_link_libraries(rwe_test Catch2::Catch2WithMain)
 target_link_libraries(rwe_test rapidcheck_catch)
 target_link_libraries(rwe_test librwe)
@@ -1440,10 +1509,24 @@ add_test(NAME rwe_test COMMAND rwe_test)
 add_dependencies(rwe_test crash_probe)
 target_compile_definitions(rwe_test PRIVATE RWE_CRASH_PROBE_PATH="$<TARGET_FILE:crash_probe>")
 
+# Keep the archive backend's locale-sensitive format checks runnable without
+# linking the full game or every simulation test into this focused executable.
+add_executable(rwe_archive_test
+    src/rwe/setup/ArchiveBackend.cpp
+    src/rwe/setup/ArchiveBackend.test.cpp)
+target_compile_definitions(rwe_archive_test PRIVATE RWE_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_compile_features(rwe_archive_test PRIVATE cxx_std_20)
+target_link_libraries(rwe_archive_test PRIVATE Catch2::Catch2WithMain archive_static)
+target_copy_file(rwe_archive_test ${RWE_ZLIB_DLL})
+add_test(NAME rwe_archive_test COMMAND rwe_archive_test)
+
 install(TARGETS rwe rwe_bridge rwe_setup
     RUNTIME DESTINATION .
     )
 install(FILES LICENSE README.md DESTINATION .)
+install(FILES libs/libarchive/COPYING DESTINATION licenses RENAME libarchive-COPYING.txt)
+install(FILES libs/xz/COPYING DESTINATION licenses RENAME xz-COPYING.txt)
+install(FILES libs/xz/COPYING.0BSD DESTINATION licenses RENAME xz-COPYING.0BSD.txt)
 
 install(DIRECTORY shaders DESTINATION .)
 
