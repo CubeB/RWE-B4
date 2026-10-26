@@ -15,7 +15,7 @@ namespace rwe
         {
             if (id.isValid())
             {
-                glDeleteShader(id.value);
+                glDeleteProgram(id.value);
             }
         }
     };

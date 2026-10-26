@@ -1,4 +1,5 @@
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <glad/gl.h>
 #include <iostream>
@@ -36,6 +37,7 @@
 #include <rwe/util/SimpleLogger.h>
 #include <rwe/util/rwe_string.h>
 #include <rwe/vfs/CompositeVirtualFileSystem.h>
+#include <sstream>
 
 #include <rwe/GameLaunch.h>
 
@@ -69,6 +71,64 @@ namespace rwe
     int loadGlFunctions()
     {
         return gladLoadGL(reinterpret_cast<GLADloadfunc>(SDL_GL_GetProcAddress));
+    }
+
+    /**
+     * RWE_GL_DEBUG=1 asks for a debug context and logs what the driver says.
+     *
+     * glGetError only gives a number, and only at the next check, which may
+     * be far from the call that failed. A debug context names the call and
+     * the reason. glad was generated without KHR_debug, so the one entry
+     * point needed is fetched by hand; the enums are KHR_debug's.
+     */
+    bool glDebugRequested()
+    {
+        const auto* value = std::getenv("RWE_GL_DEBUG");
+        return value != nullptr && value[0] != '\0' && value[0] != '0';
+    }
+
+    void GLAD_API_PTR logGlDebugMessage(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei /*length*/, const GLchar* message, const void* /*userParam*/)
+    {
+        constexpr GLenum debugTypeError = 0x824C;
+        constexpr GLenum debugSeverityNotification = 0x826B;
+        if (severity == debugSeverityNotification)
+        {
+            return;
+        }
+        std::ostringstream text;
+        text << std::hex << "GL debug: source 0x" << source << " type 0x" << type << " severity 0x" << severity << std::dec << " id " << id << ": " << message;
+        if (type == debugTypeError)
+        {
+            LOG_ERROR << text.str();
+        }
+        else
+        {
+            LOG_WARN << text.str();
+        }
+    }
+
+    void installGlDebugOutput()
+    {
+        using DebugProc = void(GLAD_API_PTR*)(GLenum, GLenum, GLuint, GLenum, GLsizei, const GLchar*, const void*);
+        using DebugMessageCallback = void(GLAD_API_PTR*)(DebugProc, const void*);
+        auto callback = reinterpret_cast<DebugMessageCallback>(SDL_GL_GetProcAddress("glDebugMessageCallback"));
+        if (callback == nullptr)
+        {
+            callback = reinterpret_cast<DebugMessageCallback>(SDL_GL_GetProcAddress("glDebugMessageCallbackARB"));
+        }
+        if (callback == nullptr)
+        {
+            LOG_WARN << "RWE_GL_DEBUG is set but the driver offers no glDebugMessageCallback";
+            return;
+        }
+        constexpr GLenum debugOutput = 0x92E0;
+        constexpr GLenum debugOutputSynchronous = 0x8242;
+        glEnable(debugOutput);
+        // Synchronous, so the message is logged from inside the failing call
+        // and a breakpoint on logGlDebugMessage shows who made it.
+        glEnable(debugOutputSynchronous);
+        callback(logGlDebugMessage, nullptr);
+        LOG_INFO << "OpenGL debug output enabled";
     }
 
     /** What the engine needs of a context, asked once the pointers are in. */
@@ -106,7 +166,8 @@ namespace rwe
         {
             return Err(SDL_GetError());
         }
-        if (!sdlContext->glSetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG))
+        auto contextFlags = SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG | (glDebugRequested() ? SDL_GL_CONTEXT_DEBUG_FLAG : 0);
+        if (!sdlContext->glSetAttribute(SDL_GL_CONTEXT_FLAGS, contextFlags))
         {
             return Err(SDL_GetError());
         }
@@ -264,6 +325,11 @@ namespace rwe
         }
 
         requireGlCapabilities();
+
+        if (glDebugRequested())
+        {
+            installGlDebugOutput();
+        }
 
         LOG_INFO << "OpenGL version: " << glGetString(GL_VERSION);
         LOG_INFO << "OpenGL vendor: " << glGetString(GL_VENDOR);

@@ -94,7 +94,14 @@ namespace rwe
             GL_UNSIGNED_BYTE,
             image);
 
-        glGenerateMipmap(GL_TEXTURE_2D);
+        // A font's unused characters are zero pixels wide, and glGenerateMipmap
+        // on an empty base level is GL_INVALID_OPERATION. Some drivers let it
+        // pass; AMD's does not, and the error then surfaced at the next
+        // requireNoOpenGlError, on the first frame of a game.
+        if (width > 0 && height > 0)
+        {
+            glGenerateMipmap(GL_TEXTURE_2D);
+        }
 
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
