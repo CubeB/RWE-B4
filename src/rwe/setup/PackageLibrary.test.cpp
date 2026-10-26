@@ -383,6 +383,7 @@ namespace rwe
         savePackageRegistry(filename, registryFixture());
         std::atomic<bool> reading{true};
         std::atomic<bool> valid{true};
+        std::string readerFailure;
         std::thread reader([&] {
             while (reading.load())
             {
@@ -391,8 +392,14 @@ namespace rwe
                     const auto snapshot = loadPackageRegistry(filename);
                     validatePackageRegistry(snapshot);
                 }
+                catch (const std::exception& error)
+                {
+                    readerFailure = error.what();
+                    valid = false;
+                }
                 catch (...)
                 {
+                    readerFailure = "unknown reader failure";
                     valid = false;
                 }
             }
@@ -414,8 +421,51 @@ namespace rwe
         }
         reading = false;
         reader.join();
+        INFO(readerFailure);
         CHECK(valid.load());
     }
+
+#ifdef _WIN32
+    TEST_CASE("package registry replacement preserves an open Windows reader", "[setup][packages]")
+    {
+        PackageFixture fixture;
+        const auto filename = fixture.root / "Library" / "registry.json";
+        savePackageRegistry(filename, registryFixture());
+
+        HANDLE reader = CreateFileW(filename.c_str(), GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL, nullptr);
+        REQUIRE(reader != INVALID_HANDLE_VALUE);
+        try
+        {
+            const auto updated = updatePackageRegistry(filename, [](json& registry) {
+                registry["annotation"] = "new registry snapshot";
+            });
+            REQUIRE(updated["generation"] == 2);
+            CHECK(updated["annotation"] == "new registry snapshot");
+
+            LARGE_INTEGER start{};
+            REQUIRE(SetFilePointerEx(reader, start, nullptr, FILE_BEGIN));
+            LARGE_INTEGER size{};
+            REQUIRE(GetFileSizeEx(reader, &size));
+            REQUIRE(size.QuadPart >= 0);
+            std::string oldText(static_cast<std::size_t>(size.QuadPart), '\0');
+            DWORD bytesRead = 0;
+            REQUIRE(ReadFile(reader, oldText.data(), static_cast<DWORD>(oldText.size()), &bytesRead, nullptr));
+            REQUIRE(bytesRead == oldText.size());
+            const auto oldSnapshot = json::parse(oldText);
+            CHECK(oldSnapshot["generation"] == 1);
+            CHECK_FALSE(oldSnapshot.contains("annotation"));
+            CHECK(loadPackageRegistry(filename)["annotation"] == "new registry snapshot");
+        }
+        catch (...)
+        {
+            CloseHandle(reader);
+            throw;
+        }
+        CloseHandle(reader);
+    }
+#endif
 
     TEST_CASE("a crashed process releases the package registry lock", "[setup][packages]")
     {

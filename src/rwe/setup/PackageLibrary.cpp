@@ -8,6 +8,7 @@
 #include <limits>
 #include <map>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <random>
 #include <regex>
 #include <rwe/ai/classic/ClassicAiScript.h>
@@ -18,6 +19,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
+#include <utility>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -43,24 +45,32 @@ namespace rwe
         constexpr std::size_t MaxRoots = 256;
         constexpr int MaxScanDepth = 12;
 
-        std::string readText(const fs::path& path, std::uintmax_t limit);
+        std::string readText(const fs::path& path, std::uintmax_t limit, bool* missing = nullptr);
+        std::string pathText(const fs::path& path);
 
         class RegistryLock
         {
         public:
-            explicit RegistryLock(const fs::path& lockPath)
+            explicit RegistryLock(const fs::path& lockPath, bool exclusive = true, bool create = true)
             {
 #ifdef _WIN32
-                handle = CreateFileW(lockPath.c_str(), GENERIC_READ | GENERIC_WRITE,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
+                const auto access = create ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ;
+                handle = CreateFileW(lockPath.c_str(), access,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, create ? OPEN_ALWAYS : OPEN_EXISTING,
                     FILE_ATTRIBUTE_NORMAL, nullptr);
                 if (handle == INVALID_HANDLE_VALUE)
                 {
+                    const auto error = GetLastError();
+                    if (!create && (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND))
+                    {
+                        return;
+                    }
                     throw std::runtime_error("Cannot open package registry lock (Windows error "
-                        + std::to_string(GetLastError()) + ")");
+                        + std::to_string(error) + ")");
                 }
                 OVERLAPPED overlapped{};
-                if (!LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &overlapped))
+                const auto flags = exclusive ? LOCKFILE_EXCLUSIVE_LOCK : 0;
+                if (!LockFileEx(handle, flags, 0, 1, 0, &overlapped))
                 {
                     const auto error = GetLastError();
                     CloseHandle(handle);
@@ -70,13 +80,20 @@ namespace rwe
                 }
                 locked = true;
 #else
-                descriptor = ::open(lockPath.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0666);
+                const auto access = create || exclusive ? O_RDWR : O_RDONLY;
+                const auto openFlags = (create ? O_CREAT : 0) | access | O_CLOEXEC;
+                descriptor = ::open(lockPath.c_str(), openFlags, 0666);
                 if (descriptor < 0)
                 {
+                    if (!create && (errno == ENOENT || errno == ENOTDIR))
+                    {
+                        return;
+                    }
                     throw std::runtime_error("Cannot open package registry lock: "
                         + std::error_code(errno, std::generic_category()).message());
                 }
-                while (::flock(descriptor, LOCK_EX) != 0)
+                const auto lockMode = exclusive ? LOCK_EX : LOCK_SH;
+                while (::flock(descriptor, lockMode) != 0)
                 {
                     if (errno == EINTR)
                     {
@@ -93,6 +110,15 @@ namespace rwe
 
             RegistryLock(const RegistryLock&) = delete;
             RegistryLock& operator=(const RegistryLock&) = delete;
+
+            bool hasLock() const
+            {
+#ifdef _WIN32
+                return handle != INVALID_HANDLE_VALUE && locked;
+#else
+                return descriptor >= 0;
+#endif
+            }
 
             ~RegistryLock()
             {
@@ -148,11 +174,13 @@ namespace rwe
 
         json loadPackageRegistryUnlocked(const fs::path& filename)
         {
-            if (!fs::exists(filename))
+            bool missing = false;
+            const auto text = readText(filename, MaxRegistryBytes, &missing);
+            if (missing)
             {
                 return emptyPackageRegistry();
             }
-            auto registry = json::parse(readText(filename, MaxRegistryBytes));
+            auto registry = json::parse(text);
             validatePackageRegistry(registry);
             // Registries written before generation tracking are generation zero.
             if (!registry.contains("generation"))
@@ -172,6 +200,7 @@ namespace rwe
             auto temporary = target;
             temporary += ".tmp-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())
                 + "-" + std::to_string(std::random_device{}());
+            bool preserveTemporaryAfterPartialReplace = false;
             try
             {
                 std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
@@ -182,9 +211,35 @@ namespace rwe
                     throw std::runtime_error("Cannot write package registry temporary file");
                 }
 #ifdef _WIN32
-                if (!MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                if (!ReplaceFileW(target.c_str(), temporary.c_str(), nullptr, 0, nullptr, nullptr))
                 {
-                    throw std::runtime_error("Cannot replace package registry (Windows error " + std::to_string(GetLastError()) + ")");
+                    const auto error = GetLastError();
+                    if (error == ERROR_FILE_NOT_FOUND)
+                    {
+                        // ReplaceFileW handles an existing target even when it
+                        // is open for read with delete sharing. It cannot
+                        // publish the first registry file, where no target
+                        // exists, so use MoveFileExW for that case.
+                        if (!MoveFileExW(temporary.c_str(), target.c_str(),
+                                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                        {
+                            const auto moveError = GetLastError();
+                            throw std::runtime_error("Cannot publish package registry " + pathText(target)
+                                + " from " + pathText(temporary) + " (Windows error "
+                                + std::to_string(moveError) + ")");
+                        }
+                    }
+                    else
+                    {
+                        // ReplaceFileW documents these failures as partial
+                        // replacement states. Keep the temporary path for
+                        // recovery rather than deleting a possibly sole copy.
+                        preserveTemporaryAfterPartialReplace = error == ERROR_UNABLE_TO_REMOVE_REPLACED
+                            || error == ERROR_UNABLE_TO_MOVE_REPLACEMENT
+                            || error == ERROR_UNABLE_TO_MOVE_REPLACEMENT_2;
+                        throw std::runtime_error("Cannot replace package registry " + pathText(target)
+                            + " from " + pathText(temporary) + " (Windows error " + std::to_string(error) + ")");
+                    }
                 }
 #else
                 fs::rename(temporary, target);
@@ -192,8 +247,11 @@ namespace rwe
             }
             catch (...)
             {
-                std::error_code ignored;
-                fs::remove(temporary, ignored);
+                if (!preserveTemporaryAfterPartialReplace)
+                {
+                    std::error_code ignored;
+                    fs::remove(temporary, ignored);
+                }
                 throw;
             }
         }
@@ -257,7 +315,7 @@ namespace rwe
             return true;
         }
 
-        std::string readText(const fs::path& path, std::uintmax_t limit)
+        std::string readText(const fs::path& path, std::uintmax_t limit, bool* missing)
         {
 #ifdef _WIN32
             // Share delete so an atomic registry replacement can publish a
@@ -267,8 +325,14 @@ namespace rwe
                 FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
             if (handle == INVALID_HANDLE_VALUE)
             {
+                const auto error = GetLastError();
+                if (missing && (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND))
+                {
+                    *missing = true;
+                    return {};
+                }
                 throw std::runtime_error("Cannot read " + pathText(path) + " (Windows error "
-                    + std::to_string(GetLastError()) + ")");
+                    + std::to_string(error) + ")");
             }
             try
             {
@@ -303,14 +367,24 @@ namespace rwe
                 throw;
             }
 #else
-            if (fs::file_size(path) > limit)
-            {
-                throw std::runtime_error("Metadata exceeds size limit: " + pathText(path));
-            }
             std::ifstream stream(path, std::ios::binary);
             if (!stream)
             {
+                if (missing)
+                {
+                    std::error_code error;
+                    fs::status(path, error);
+                    if (error == std::errc::no_such_file_or_directory || error == std::errc::not_a_directory)
+                    {
+                        *missing = true;
+                        return {};
+                    }
+                }
                 throw std::runtime_error("Cannot read " + pathText(path));
+            }
+            if (fs::file_size(path) > limit)
+            {
+                throw std::runtime_error("Metadata exceeds size limit: " + pathText(path));
             }
             std::string text(static_cast<std::size_t>(limit + 1), '\0');
             stream.read(text.data(), static_cast<std::streamsize>(text.size()));
@@ -655,7 +729,37 @@ namespace rwe
 
     json loadPackageRegistry(const fs::path& filename)
     {
-        return loadPackageRegistryUnlocked(filename);
+        auto target = fs::absolute(filename).lexically_normal();
+        auto lockPath = target;
+        lockPath += ".lock";
+        // Existing registries are read under a shared sidecar lock so a
+        // Windows replacement cannot expose an open/share transition. Do not
+        // create the library directory or sidecar for a read-only miss.
+        RegistryLock lock(lockPath, false, false);
+        if (lock.hasLock())
+        {
+            return loadPackageRegistryUnlocked(target);
+        }
+
+        // A first writer may create the sidecar after our non-creating open
+        // fails. Read once, then check again: if the writer appeared during
+        // that read, wait for it and reload a committed snapshot.
+        std::optional<json> snapshot;
+        try
+        {
+            snapshot = loadPackageRegistryUnlocked(target);
+        }
+        catch (...)
+        {
+            RegistryLock retryLock(lockPath, false, false);
+            if (!retryLock.hasLock())
+            {
+                throw;
+            }
+            return loadPackageRegistryUnlocked(target);
+        }
+        RegistryLock retryLock(lockPath, false, false);
+        return retryLock.hasLock() ? loadPackageRegistryUnlocked(target) : std::move(*snapshot);
     }
 
     void savePackageRegistry(const fs::path& filename, const json& registry)

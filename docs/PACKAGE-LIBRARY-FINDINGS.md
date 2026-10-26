@@ -144,16 +144,38 @@ lock over read, mutation and commit, so concurrent transaction callers retain
 both changes. Existing version-1 registries with no generation load as
 generation zero; the first successful write stores generation one. Read-only
 loads of an absent registry continue returning an empty value without creating
-the library directory or lock file.
+the library directory or lock file. They open the registry directly and treat
+only file-not-found or path-not-found as absent, avoiding a preliminary
+filesystem status query that could hold a Windows handle without delete
+sharing.
 
-Readers do not acquire the writer lock. They open the registry path and parse
-one complete old or new file because writers publish through atomic same-volume
-replacement. Windows readers allow delete sharing on the opened registry handle,
-so replacement can publish while an existing reader finishes with the old
-snapshot. A failed mutation or validation leaves the old file intact and
-unlocks on scope exit; a process crash likewise releases the OS lock. The
-cross-process regression runs two independently launched test processes behind
-a start barrier and verifies both package records and the resulting generation.
-It also checks stale-snapshot rejection and that a failed transaction leaves
-the prior JSON intact and permits a subsequent update. These are RWE registry
-tests, not original-game execution or gameplay-compatibility evidence.
+Readers acquire a shared lock on an existing sidecar before opening the
+registry; writers hold that same sidecar exclusively through publication.
+Read-only misses do not create the library directory or lock file. If a reader
+cannot find a sidecar, it reads once without creating one and checks again;
+if a first writer created the sidecar in that interval, the reader waits for
+the writer and reloads under a shared lock. Otherwise atomic same-volume
+publication yields a complete old or new file. On Windows, readers use delete
+sharing and an existing registry is replaced with `ReplaceFileW`, which
+supports a target open for reading with delete sharing. First publication,
+when no target exists, uses `MoveFileExW`.
+The `ReplaceFileW` write-through flag is not used because Microsoft documents
+it as unsupported. For its documented partial-replacement errors (1175–1177),
+the temporary path is preserved for recovery; other failures leave the target
+untouched and clean up the temporary. This path follows the documented
+Windows behavior and the independent LLVM report [D13647](https://reviews.llvm.org/D13647)
+on read-open replacement; API details are in [Microsoft's ReplaceFileW
+documentation](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew).
+
+A Windows-specific regression holds a delete-share reader open across an
+update, checks that the existing handle still reads the complete old JSON, and
+checks that a new load reads the complete new JSON. The concurrent reader test
+also exercises repeated publication while readers coordinate through shared
+and exclusive sidecar locks. A failed mutation or
+validation leaves the old file intact and unlocks on scope exit; a process
+crash likewise releases the OS lock. The cross-process regression runs two
+independently launched test processes behind a start barrier and verifies both
+package records and the resulting generation. It also checks stale-snapshot
+rejection and that a failed transaction leaves the prior JSON intact and
+permits a subsequent update. These are RWE registry tests, not original-game
+execution or gameplay-compatibility evidence.
