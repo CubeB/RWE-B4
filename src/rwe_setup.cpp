@@ -427,11 +427,22 @@ int main(int argc, char* argv[])
                 }
                 else if (const auto local = rwe::getLocalDataPath())
                 {
-                    library = fs::path(*local) / "Library";
+                    library = rwe::packageLibraryPaths(*local).root;
                 }
                 else
                 {
                     throw std::runtime_error("Cannot locate the package library; pass --library-root");
+                }
+                std::error_code statusError;
+                const auto libraryStatus = fs::status(library, statusError);
+                if (statusError && statusError != std::errc::no_such_file_or_directory)
+                {
+                    throw std::runtime_error(
+                        "Cannot access package library root " + library.string() + ": " + statusError.message());
+                }
+                if (!statusError && fs::exists(libraryStatus) && !fs::is_directory(libraryStatus))
+                {
+                    throw std::runtime_error("Package library root is not a directory: " + library.string());
                 }
                 result = rwe::loadPackageRegistry(library / "registry.json");
             }
