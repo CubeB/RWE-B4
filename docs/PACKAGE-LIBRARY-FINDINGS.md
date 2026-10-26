@@ -180,7 +180,7 @@ sharing and an existing registry is replaced with `ReplaceFileW`, which
 supports a target open for reading with delete sharing. First publication,
 when no target exists, uses `MoveFileExW`.
 The `ReplaceFileW` write-through flag is not used because Microsoft documents
-it as unsupported. For its documented partial-replacement errors (1175–1177),
+it as unsupported. For its documented partial-replacement errors (1175 to 1177),
 the temporary path is preserved for recovery; other failures leave the target
 untouched and clean up the temporary. This path follows the documented
 Windows behavior and the independent LLVM report [D13647](https://reviews.llvm.org/D13647)
@@ -199,3 +199,55 @@ package records and the resulting generation. It also checks stale-snapshot
 rejection and that a failed transaction leaves the prior JSON intact and
 permits a subsequent update. These are RWE registry tests, not original-game
 execution or gameplay-compatibility evidence.
+
+## PACKAGE-008: startup base-data import policy
+
+Issue #881, 2026-10-26. Launcher startup checks the existing engine data root
+for usable base-game archives before offering any import UI. If absent, it runs
+the shipped `rwe_setup` automatic import command without `--from`; the native
+setup command already validates the supported Steam/GOG/retail discovery
+candidates and copies data into the engine data directory. It does not force an
+overwrite. A successful process exit is verified by re-reading the resulting
+data root before the launcher reports success. On failure or no discovered
+source, the launcher offers the existing manual directory selection flow.
+Manual import continues to validate the known archive hashes and copies those
+files; source files are preserved.
+
+This sequencing and its UI feedback are RWE-original launcher/setup policy,
+not an original-runtime behavior. PACKAGE-001's static comparison at
+byte-tactics revision `e89721c46c3fa06e59558419b54fe26061fafb73` (GOG/v3.1
+`TotalA.exe` MD5 `8e74a1dffa1f5988624c52048f5b20cd`) establishes original
+archive registration from existing data, not an installer or launcher import
+wizard. INSTALL-UX-001 establishes that the separate RWE distribution/import
+presentation has no counterpart in the matching executable reference; it did
+not inspect an external historical installer. No original runtime or
+installer was executed for this change. No original parity is claimed.
+
+Implementation verification, 2026-10-26: the launcher checks `--check-existing`
+before showing UI, verifies every known archive hash in a configured `mods/ta`
+root, and checks again after an automatic native import exits successfully.
+The branch one-shot prevents a `REFRESH_INSTALLED_MODS` feedback action from
+restarting setup. Targeted launcher tests cover existing data, check-before-UI,
+automatic discovery success/failure, re-entered startup actions, manual
+selection success/failure and thrown copy errors. The two affected Jest suites
+passed (24 tests); launcher TypeScript checking and ESLint on touched files
+passed. `npm run build:all:prod` completed; webpack emitted its existing
+optional dependency and critical dependency warnings for master/main and the
+renderer compiled successfully.
+
+With local shipped data, the existing native setup binary
+`D:\RWE-task-775\build-775-ninja2\rwe_setup.exe` reported existing usable data
+in `D:\RWE-Data`. Its automatic `--dry-run --to <empty temporary directory>`
+found `D:\Total Annihilation\Total Annihilation`, listing 30 archives, 5 films
+and 18 music tracks (about 1.0 GB); it reported that nothing changed. A before
+and after listing of source paths, sizes and modification times matched. This
+is a native importer dry run and local data check, not a complete copy test and
+not an original-game execution. No original runtime or installer was run.
+
+An isolated native copy smoke test used a temporary source containing the two
+required archive filenames and an isolated `%APPDATA%`. The native importer
+copied both files into that data root, and `--check-existing` accepted it. A
+launcher smoke test then called `getInstalledMods(getRweModsPath(), Data)` with
+the same isolated root and found the `ta` entry. The fixture source listing,
+sizes and modification times matched before and after. No real user data root
+was overwritten.

@@ -159,6 +159,7 @@ function OverviewScreen(props: OverviewScreenProps) {
       {props.wizardState && (
         <Wizard
           state={props.wizardState.step}
+          error={props.wizardState.error}
           onNext={props.onWizardNext}
           onClose={props.onWizardClose}
         />
