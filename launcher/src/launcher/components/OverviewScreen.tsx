@@ -165,7 +165,7 @@ function OverviewScreen(props: OverviewScreenProps) {
       )}
       {modsDialogOpen && (
         <SelectModsDialog
-          title="Select Single Player Mods"
+          title="Select Single Player Mods and Maps"
           items={props.installedMods}
           initiallyActiveItems={props.activeMods}
           onSubmit={newMods => {

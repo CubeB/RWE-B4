@@ -74,7 +74,9 @@ export function LauncherHome(props: LauncherHomeProps) {
             <br />
             starts here.
           </h1>
-          <p>Choose your mods, then head into a campaign or skirmish.</p>
+          <p>
+            Choose your mods and maps, then head into a campaign or skirmish.
+          </p>
           <div className="launcher-play-actions">
             <Button
               variant="contained"
@@ -139,9 +141,9 @@ export function LauncherHome(props: LauncherHomeProps) {
           </form>
         </section>
         <section className="launcher-card">
-          <span className="launcher-eyebrow">YOUR LOADOUT</span>
+          <span className="launcher-eyebrow">MODS AND MAPS</span>
           <h2>
-            <ExtensionRounded /> Mods
+            <ExtensionRounded /> Mods and maps
           </h2>
           <p>
             {props.activeMods.length
@@ -152,17 +154,19 @@ export function LauncherHome(props: LauncherHomeProps) {
             {props.activeMods.map(mod => (
               <Chip
                 key={mod}
-                label={mod === "ta" ? "Total Annihilation" : mod}
+                label={mod === "ta" ? "Total Annihilation data" : mod}
                 variant="outlined"
               />
             ))}
             {!props.installedMods.length && (
-              <span>No mods found yet. Import game data to get started.</span>
+              <span>
+                No mods or maps found yet. Import game data to get started.
+              </span>
             )}
           </div>
           <div className="launcher-card-actions">
             <Button variant="outlined" onClick={props.onManageMods}>
-              Manage mods
+              Manage mods and maps
             </Button>
             <Button startIcon={<FolderOpenRounded />} onClick={openMods}>
               Open folder
@@ -170,7 +174,8 @@ export function LauncherHome(props: LauncherHomeProps) {
             <Button onClick={props.onRefreshMods}>Refresh</Button>
           </div>
           <small>
-            Put each mod’s archives in its own folder. A manifest is optional.
+            Put each mod’s or map’s archives in its own folder. A manifest is
+            optional.
           </small>
         </section>
       </div>
