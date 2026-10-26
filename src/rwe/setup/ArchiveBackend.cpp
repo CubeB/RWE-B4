@@ -149,15 +149,25 @@ namespace rwe
             reader = openReader(archivePath);
             archive_entry* entry = nullptr;
             std::uint64_t completed = 0;
+            std::size_t entryIndex = 0;
             std::array<char, 64 * 1024> buffer{};
             int status;
             while ((status = archive_read_next_header(reader.value, &entry)) == ARCHIVE_OK)
             {
+                if (entryIndex >= result.entries.size() || archive_entry_is_encrypted(entry) > 0
+                    || archive_entry_symlink(entry) || archive_entry_hardlink(entry))
+                    throw std::runtime_error("Archive changed after inventory");
                 const auto* rawPath = archive_entry_pathname_utf8(entry);
                 if (!rawPath) rawPath = archive_entry_pathname(entry);
                 std::string normalizedPath(rawPath ? rawPath : "");
                 if (archive_entry_filetype(entry) == AE_IFDIR && !normalizedPath.empty() && normalizedPath.back() == '/') normalizedPath.pop_back();
                 const auto relative = checkedRelativePath(normalizedPath);
+                const auto kind = archive_entry_filetype(entry) == AE_IFDIR ? ArchiveEntryKind::directory : ArchiveEntryKind::regularFile;
+                const auto size = kind == ArchiveEntryKind::directory ? 0 : archive_entry_size(entry);
+                const auto& expected = result.entries[entryIndex++];
+                if (expected.path != relative.generic_string() || expected.kind != kind
+                    || size < 0 || expected.size != static_cast<std::uint64_t>(size))
+                    throw std::runtime_error("Archive changed after inventory");
                 const auto destination = stagingDirectory / relative;
                 if (archive_entry_filetype(entry) == AE_IFDIR)
                 {
@@ -187,6 +197,7 @@ namespace rwe
                 completed += written;
             }
             if (status != ARCHIVE_EOF) throw std::runtime_error(archiveError(reader.value, "Cannot extract archive"));
+            if (entryIndex != result.entries.size()) throw std::runtime_error("Archive changed after inventory");
             if (progress && !progress(completed, result.totalBytes)) throw std::runtime_error("Archive extraction cancelled");
             return result;
         }
