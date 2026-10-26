@@ -399,6 +399,28 @@ namespace rwe
         return true;
     }
 
+    void GameScene::selectNextOwnUnit(std::optional<UnitId>& cursor, const std::function<bool(const UnitState&, const UnitDefinition&)>& predicate)
+    {
+        std::vector<UnitId> candidates;
+        for (const auto& [unitId, unit] : simulation.units)
+        {
+            const auto& definition = simulation.unitDefinitions.at(unit.unitType);
+            if (unit.isSelectableBy(definition, localPlayerId) && predicate(unit, definition))
+            {
+                candidates.push_back(unitId);
+            }
+        }
+        auto next = nextInCycle(std::move(candidates), cursor);
+        if (!next)
+        {
+            return;
+        }
+        cursor = next;
+        replaceUnitSelection(*next);
+        const auto& unit = getUnit(*next);
+        setCameraPosition(Vector3f(simScalarToFloat(unit.position.x), 0.0f, simScalarToFloat(unit.position.z)));
+    }
+
     void GameScene::selectAllByCategoryToken(const std::string& token)
     {
         selectAllWhere([&token](const UnitState&, const UnitDefinition& d) {
@@ -1368,26 +1390,25 @@ namespace rwe
             {"Ctrl+A", "Select all units"},
             {"Ctrl+B", "Next idle builder"},
             {"Ctrl+C", "Select commander"},
-            {"Ctrl+F", "Fight (attack-move)"},
-            {"Ctrl+G", "Armed ground units"},
-            {"Ctrl+H", "Armed hovercraft"},
-            {"Ctrl+J", "Metal makers"},
-            {"Ctrl+K", "Armed kbots"},
-            {"Ctrl+L", "Long range artillery"},
-            {"Ctrl+M", "Mines"},
-            {"Ctrl+N", "Armed naval units"},
-            {"Ctrl+O", "Fighters"},
+            {"Ctrl+F", "Next idle factory"},
             {"Ctrl+P", "Armed aircraft"},
-            {"Ctrl+Q", "Bombers"},
             {"Ctrl+R", "Radar / sonar / jammers"},
             {"Ctrl+S", "Armed units on screen"},
-            {"Ctrl+T", "Transports"},
-            {"Ctrl+U", "Armed underwater units"},
-            {"Ctrl+V", "Armed vehicles"},
-            {"Ctrl+W", "Guard mode"},
-            {"Ctrl+X", "Defensive buildings"},
-            {"Ctrl+Y", "Torpedo bombers"},
+            {"Ctrl+V", "Aircraft"},
+            {"Ctrl+W", "Armed mobile units"},
             {"Ctrl+Z", "All units of the selected types"},
+            {"N", "Next unit"},
+            {"W + drag", "Box armed mobile units"},
+            {"B + drag", "Box construction units"},
+            {"Y + drag", "Box factories"},
+            {", / .", "Build menu page"},
+            {"F2 / Tab", "Game menu"},
+            {"F3", "Last place attacked"},
+            {"F5..F8", "Go to camera bookmark"},
+            {"Ctrl+F5..F8", "Set camera bookmark"},
+            {"Enter", "Chat"},
+            {"Ctrl+F9", "Screenshot"},
+            {"F12", "Clear messages"},
         };
 
         const float lineHeight = 14.0f;
@@ -2652,6 +2673,14 @@ namespace rwe
             static_cast<int>(std::round((p.y - cameraPos.z) * worldUiScale())));
     }
 
+    namespace
+    {
+        bool isArmed(const UnitDefinition& d)
+        {
+            return d.canAttack && (!d.weapon1.empty() || !d.weapon2.empty() || !d.weapon3.empty());
+        }
+    }
+
     void GameScene::selectUnitsInBandbox(const DiscreteRect& box)
     {
         const auto& matrix = computeViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height());
@@ -2660,7 +2689,8 @@ namespace rwe
         for (const auto& e : simulation.units)
         {
             const auto& unitDefinition = simulation.unitDefinitions.at(e.second.unitType);
-            if (!e.second.isSelectableBy(unitDefinition, localPlayerId))
+            if (!e.second.isSelectableBy(unitDefinition, localPlayerId)
+                || !bandboxFilterAdmits(bandboxFilter, unitDefinition.isMobile, isArmed(unitDefinition), unitDefinition.builder))
             {
                 continue;
             }
@@ -2703,7 +2733,7 @@ namespace rwe
         for (const auto& e : simulation.units)
         {
             const auto& unitDefinition = simulation.unitDefinitions.at(e.second.unitType);
-            if (!e.second.isSelectableBy(unitDefinition, localPlayerId))
+            if (!e.second.isSelectableBy(unitDefinition, localPlayerId) || !isArmed(unitDefinition))
             {
                 continue;
             }

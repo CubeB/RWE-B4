@@ -134,6 +134,33 @@ namespace
             s.endAt(6);
         });
 
+        // The TA 3.9.01 patch's selection keys (#884). At the start the
+        // commander is the only idle builder, and it carries no CTRL_B token,
+        // so the retail Ctrl+B would select nothing at all here.
+        rwe::registerScenario("884-ta-3901-selection-keys", [](rwe::Scenario& s) {
+            auto factory = std::make_shared<std::optional<rwe::UnitId>>();
+            auto tank = std::make_shared<std::optional<rwe::UnitId>>();
+            s.at(1, [factory, tank](rwe::ScenarioDriver& d) {
+                *factory = d.spawnNearCamera("ARMVP");
+                *tank = d.spawnNearCamera("ARMSTUMP", -96.0f, 96.0f);
+                d.require(factory->has_value(), "a factory was spawned");
+                d.require(tank->has_value(), "a tank was spawned");
+            });
+            s.at(2, [factory](rwe::ScenarioDriver& d) {
+                d.keyDown(SDLK_LCTRL);
+                d.key(SDLK_B);
+                d.require(d.selectedUnit() == d.commander(0), "Ctrl+B selects the idle commander");
+                d.key(SDLK_F);
+                d.require(d.selectedUnit() == *factory, "Ctrl+F selects the idle factory");
+                d.key(SDLK_F);
+                d.require(d.selectedUnit() == *factory, "Ctrl+F wraps round to the only idle factory");
+                d.key(SDLK_S);
+                d.keyUp(SDLK_LCTRL);
+                d.require(d.selectedCount() == 2, "Ctrl+S takes the commander and the tank but not the unarmed factory");
+            });
+            s.endAt(3);
+        });
+
         // The active BUILD/ORDERS tab has to stay pressed across the panel
         // rebuild a tab switch causes. Clicking ORDERS sets guiInfo.section
         // and asks for a new panel; the old panel, and the toggledOn it held,

@@ -27,6 +27,7 @@
 #include <rwe/game/GameScene_util.h>
 #include <rwe/game/GameSpeed.h>
 #include <rwe/game/InGameSoundsInfo.h>
+#include <rwe/game/InterfaceRules.h>
 #include <rwe/game/LockstepStats.h>
 #include <rwe/game/NetworkHistory.h>
 #include <rwe/game/OrderButtons.h>
@@ -1372,6 +1373,9 @@ namespace rwe
         /** Space held, which peeks past the panel while it is down. */
         bool spaceDown{false};
 
+        /** W, B and Y held, which filter the selection box. */
+        BandboxFilter bandboxFilter;
+
         /** currentPanel's own x, before the slide is taken off it. */
         int panelBaseX{0};
 
@@ -2047,6 +2051,13 @@ namespace rwe
 
         /** The cursor for the 'n' key's walk through the player's own units. */
         std::optional<UnitId> nextUnitCursor;
+
+        /** The cursors for Ctrl+F's walk through idle factories and Ctrl+B's through idle builders. */
+        std::optional<UnitId> idleFactoryCursor;
+        std::optional<UnitId> idleBuilderCursor;
+
+        /** Select and centre on the next selectable own unit the predicate admits, advancing the cursor. */
+        void selectNextOwnUnit(std::optional<UnitId>& cursor, const std::function<bool(const UnitState&, const UnitDefinition&)>& predicate);
 
         /**
          * The battle test. Empty unless the harness asked for it: each

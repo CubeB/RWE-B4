@@ -163,7 +163,7 @@ namespace rwe
          * scenario's setup rather than as anything under test. Nothing about
          * it goes through a UI handler.
          */
-        std::optional<UnitId> spawnNearCamera(const std::string& unitType);
+        std::optional<UnitId> spawnNearCamera(const std::string& unitType, float offsetX = 96.0f, float offsetZ = 96.0f);
 
         /** Records a failure at the current step's tick if `condition` does not hold. */
         void require(bool condition, const std::string& message);
