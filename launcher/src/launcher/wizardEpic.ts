@@ -89,26 +89,42 @@ export function wizardEpic(
       importInFlight = true;
       const x = action as NextAction;
       return rx
-        .defer(() =>
-          rx.from(
-            x.path
-              ? automaticallySetUpTaModManual(taModPath, [x.path])
-              : Promise.resolve(false)
-          )
-        )
+        .defer(() => {
+          if (x.path) {
+            return rx
+              .from(automaticallySetUpTaModManual(taModPath, [x.path]))
+              .pipe(
+                rxop.map(success => ({ kind: "manual" as const, success }))
+              );
+          }
+          return rx
+            .from(automaticallyImportTaData(setupExe))
+            .pipe(rxop.map(error => ({ kind: "automatic" as const, error })));
+        })
         .pipe(
-          rxop.concatMap(success =>
-            success
-              ? rx.of(done(), { type: "REFRESH_INSTALLED_MODS" } as AppAction)
-              : rx.of(
-                  fail(
-                    "The selected folder did not contain all required game data."
-                  )
+          rxop.concatMap(result => {
+            if (result.kind === "manual") {
+              return result.success
+                ? rx.of(done(), { type: "REFRESH_INSTALLED_MODS" } as AppAction)
+                : rx.of(
+                    fail(
+                      "The selected folder did not contain all required game data."
+                    )
+                  );
+            }
+            return result.error
+              ? rx.of(
+                  fail(`Automatic import could not finish: ${result.error}`)
                 )
-          ),
+              : rx.of(done(), { type: "REFRESH_INSTALLED_MODS" } as AppAction);
+          }),
           rxop.catchError(error =>
             rx.of(
-              fail(`Could not copy the selected game data: ${String(error)}`)
+              fail(
+                x.path
+                  ? `Could not copy the selected game data: ${String(error)}`
+                  : `Automatic import failed: ${String(error)}`
+              )
             )
           ),
           rxop.finalize(() => {

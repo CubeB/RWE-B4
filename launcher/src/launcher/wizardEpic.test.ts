@@ -217,4 +217,75 @@ describe("wizardEpic", () => {
     expect(await waitForEmission(emitted)).toEqual({ type: "wizard/DONE" });
     expect(emitted).toContainEqual({ type: "REFRESH_INSTALLED_MODS" });
   });
+
+  it("automatically imports on welcome Next when no folder was selected", async () => {
+    mockImportTaData.mockResolvedValue(undefined);
+    const { action$, emitted } = startEpic(path.join(directory, "mods"));
+
+    action$.next(next());
+
+    const deadline = Date.now() + 2000;
+    while (!emitted.some(action => action.type === "REFRESH_INSTALLED_MODS")) {
+      if (Date.now() > deadline)
+        throw new Error("automatic import did not finish");
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    expect(mockImportTaData).toHaveBeenCalledTimes(1);
+    expect(mockImportTaData).toHaveBeenCalledWith(
+      path.join(
+        process.env.RWE_HOME || path.dirname(process.execPath),
+        `rwe_setup${process.platform === "win32" ? ".exe" : ""}`
+      )
+    );
+    expect(mockSetUpTaModManual).not.toHaveBeenCalled();
+    expect(emitted).toEqual([
+      { type: "wizard/DONE" },
+      { type: "REFRESH_INSTALLED_MODS" },
+    ]);
+  });
+
+  it("reports automatic import failure on welcome Next", async () => {
+    mockImportTaData.mockResolvedValue("No installation found");
+    const { action$, emitted } = startEpic(path.join(directory, "mods"));
+
+    action$.next(next());
+
+    expect(await waitForEmission(emitted)).toEqual({
+      type: "wizard/FAIL",
+      message: "Automatic import could not finish: No installation found",
+    });
+    expect(mockImportTaData).toHaveBeenCalledTimes(1);
+    expect(mockSetUpTaModManual).not.toHaveBeenCalled();
+  });
+
+  it("does not re-run pathless Next when automatic completion actions are fed back", async () => {
+    mockImportTaData.mockResolvedValue(undefined);
+    mockGetRweModsPath.mockReturnValue(path.join(directory, "mods"));
+    const action$ = new Subject<AppAction>();
+    const state$ = new StateObservable(
+      new BehaviorSubject({} as State),
+      {} as State
+    );
+    const emitted: AppAction[] = [];
+    subscriptions.push(
+      wizardEpic(action$, state$, {} as EpicDependencies).subscribe(action => {
+        emitted.push(action);
+        action$.next(action);
+      })
+    );
+
+    action$.next(next());
+
+    const deadline = Date.now() + 2000;
+    while (!emitted.some(action => action.type === "REFRESH_INSTALLED_MODS")) {
+      if (Date.now() > deadline)
+        throw new Error("automatic import did not settle");
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    expect(mockImportTaData).toHaveBeenCalledTimes(1);
+    expect(mockSetUpTaModManual).not.toHaveBeenCalled();
+    expect(
+      emitted.filter(action => action.type === "wizard/FAIL")
+    ).toHaveLength(0);
+  });
 });
