@@ -179,6 +179,8 @@ namespace rwe
         PackageFixture fixture;
         fixture.write("Escalation/AE/marker.txt", "");
         fixture.write("Escalation/UNITSE/ARMFOO.fbi", "[UNITINFO]{UnitName=ARMFOO;Objectname=ARMFOO;}");
+        fixture.write("Escalation/WEAPONE/ARMWEAPON.fbi", "[WEAPON]{}");
+        fixture.write("Escalation/GAMEDATE/marker.txt", "");
         fixture.write("Escalation/GUIE/ARMACK2.GUI", "builder page");
         const auto report = inspectContentPackage(fixture.root / "Escalation");
         REQUIRE(report["candidates"].size() == 1);
