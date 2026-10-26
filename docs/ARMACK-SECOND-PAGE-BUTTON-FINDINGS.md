@@ -271,3 +271,99 @@ product activation requires its release inside the retained rectangle.
   The known stock Core Contingency product case is established by the shipped
   v3.1 overlay records and individual gadget resources; patched engines,
   mod overrides and missing individual assets were not executed.
+
+## BUILD-DOWNLOAD-BEVEL-850: missing-art button pixels
+
+Spec-room extension, 2026-10-26. This narrows the no-picture fallback in
+BUILD-DOWNLOAD-850; it does not change the stock finding that all three
+individual gadget GAFs actually exist. The reference revision/build and
+ADR-0004 separation remain those recorded above. No RWE implementation,
+tests or implementation diff was opened.
+
+The no-picture branch of original button drawing at `0x4A5F40` fills the
+entire inclusive gadget rectangle with one solid palette index, then draws
+a **two-pixel bevel** inside that same rectangle. It does not tile the panel
+background, draw an outline outside the rectangle, or leave a transparent
+interior. Its colours are slots in the GUI's palette-remap table, not literal
+indices into whichever game palette happens to be active:
+
+| State | Top/left bevel slot | Bottom/right bevel slot | Interior fill slot |
+| --- | --- | --- | --- |
+| Enabled, unpressed | 17 (`0x11`) | 0 | 20 (`0x14`) |
+| Enabled, nonzero pressed status | 0 | 17 (`0x11`) | 20 (`0x14`) |
+| Greyed/disabled | 0 | 19 (`0x13`) | 19 (`0x13`) |
+
+Disabled appearance takes precedence over pressed status in this fill/bevel
+choice. Thus the disabled case is not simply the normal grey rectangle with
+a reversed edge, nor a separately greyed or faded copy of an already drawn
+button. The later grey/fade operation used for some GAF-backed buttons is
+not enabled by this no-picture branch. Hover does not introduce another
+fill colour in this branch. The normal colours give a raised appearance;
+pressed colours reverse its edge brightness.
+
+For exact geometry, call the inclusive rectangle bounds L,T,R,B. The
+top/left colour covers the outer top row x=L..R at y=T, the inner top row
+x=L..R-1 at y=T+1, the outer left column y=T..B at x=L, and the inner left
+column y=T..B-1 at x=L+1. The bottom/right colour covers the outer right
+column y=T+1..B at x=R, the inner right column y=T+2..B at x=R-1, the outer
+bottom row x=L+1..R at y=B, and the inner bottom row x=L+2..R at y=B-1.
+These coordinates also specify the corner joins: the top-left and top-right
+outer corners belong to top/left, the bottom-left outer corner belongs to
+top/left, and the bottom-right outer corner belongs to bottom/right.
+The remaining interior is the fill colour. For a 64-square stock placeholder
+the unaffected interior is a 60-square region, x=L+2..R-2 and y=T+2..B-2.
+Surface clipping still applies to drawing. No extra pixel is added to the
+gadget's established inclusive hit bounds.
+
+The palette remap is initialized from `palettes/GUIPAL.PAL` against the
+active game palette during match loading at `0x497F40`. For each GUI RGB
+entry, `0x4AC7D0` chooses the game-palette entry with the smallest sum of
+absolute R, G and B differences; the earliest index wins a tie. Directly
+applying that arithmetic to freshly extracted stock totala1.hpi GUIPAL.PAL
+and PALETTE.PAL gives the following concrete standard-palette comparison:
+
+| GUI slot | GUI RGB | Selected game-palette index | Selected RGB |
+| --- | --- | --- | --- |
+| 0 | (0,0,0) | 0 | (0,0,0) |
+| 17 | (223,223,223) | 82 | (219,219,219) |
+| 19 | (195,195,195) | 83 | (203,203,203) |
+| 20 | (183,183,183) | 84 | (187,187,187) |
+
+Those selected RGB values are conditional on that destination palette.
+Palette replacements can change them; the original rule is the remapped
+GUI slot, not a hard-coded RGB grey. No original-runtime palette sample was
+taken. Extracted GUIPAL.PAL SHA-256 is
+`6bc11b83cbd64379fff28ee6b09d36f285a55aff70e6a372b59a21c31950c165`;
+PALETTE.PAL SHA-256 is
+`cda95c32d22297103ac0e375602a2480a9530fe7f7315c9d270aab3abd7367fa`.
+
+No-picture drawing still uses the ordinary button caption. It does not
+substitute the unit's name, portrait, metal cost or energy cost for missing
+art. The stock overlaid IGPATCH cells retain attribute 32, which places their
+caption horizontally centered near the bottom. Their initial caption is
+empty; the build-count refresh at `0x4199B0` supplies `+N` when the resolved
+product has a nonzero queued count and otherwise empties it. This caption
+rule applies whether or not the individual GAF was successfully bound.
+Before drawing, `0x4A5D50` removes trailing characters until the text fits
+width minus six pixels; this changes the stored caption rather than adding
+an ellipsis.
+
+For a caption of measured width W and font line height H, attribute 32
+places its upper-left at x=L+1+(R-L-W)/2 and y=B-4-H, with the original
+integer division. Nonzero button status adds one pixel to both coordinates.
+This text displacement is based on status even when the bevel is greyed.
+The stock cells have no quick key, so no quick-key highlight is added.
+Text colour requests use remapped GUI slot zero when pressed, otherwise
+the button's colour slot; initialization sets that slot to zero for these
+buttons. The loaded font determines the actual glyph pixels. This finding
+does not infer a replacement caption or an alternate text rasterizer.
+
+Additional original addresses: fill-plus-bevel wrappers `0x4B04B0` and
+`0x4B04E0`; two-pixel border primitives `0x4B0090` and `0x4B0160`;
+clipped solid fill `0x4BF6F0`; line drawing `0x4BE950`; inclusive low-level
+line/fill operations `0x4CC7AB` and `0x4CCDEA`. Evidence is direct read-only
+static reference analysis and fresh shipped-palette extraction/arithmetic.
+There was no original game execution, missing-asset runtime experiment,
+screenshot measurement, matching checker run or demo oracle. Malformed
+buttons smaller than the bevel or caption margins are outside this stock
+64-square comparison.
