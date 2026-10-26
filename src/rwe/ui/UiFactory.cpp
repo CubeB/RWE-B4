@@ -345,7 +345,7 @@ namespace rwe
     }
 
     std::unique_ptr<UiStagedButton>
-    UiFactory::createButton(int x, int y, int width, int height, const std::string& guiName, const std::string& name, const std::string& label)
+    UiFactory::createButton(int x, int y, int width, int height, const std::string& guiName, const std::string& name, const std::string& label, bool downloadMenuProduct)
     {
         // hack for SINGLE.GUI buttons
         if (width == 118 && height == 18)
@@ -354,7 +354,9 @@ namespace rwe
             height = 20;
         }
 
-        auto sprites = getButtonGraphics(guiName, name, width, height);
+        auto sprites = downloadMenuProduct
+            ? getDownloadMenuButtonGraphics(name)
+            : getButtonGraphics(guiName, name, width, height);
 
         std::vector<UiStagedButton::StageInfo> stages;
         for (const auto& s : sprites.normal)
@@ -718,7 +720,8 @@ namespace rwe
             entry.common.height,
             guiName,
             entry.common.name,
-            text);
+            text,
+            entry.downloadMenuProduct);
 
         if (entry.common.attribs & GuiButtonAttrib::LabelDisplayLeft)
         {
@@ -1098,6 +1101,31 @@ namespace rwe
         const auto& disabledSprite = stageCount + 1 < spriteCount ? sprites[stageCount + 1] : defaultSprite;
 
         return UiFactory::ButtonSprites{normalSprites, pressedSprite, disabledSprite};
+    }
+
+    UiFactory::ButtonSprites UiFactory::getDownloadMenuButtonGraphics(const std::string& unitName)
+    {
+        // BUILD-DOWNLOAD-850: download overlays carry a per-gadget resource
+        // marker. Their product picture is anims/<UNIT>_GADGET.GAF, never the
+        // ordinary page/common GAF or unitpics PCX. Keep the GUI's authored
+        // rectangle as the hit area; stock gadget frames are 64x64.
+        auto graphics = textureService->tryGetGafEntry("anims/" + unitName + "_GADGET.GAF", unitName);
+        auto defaultSprite = textureService->getDefaultSprite();
+        if (!graphics || (*graphics)->sprites.empty())
+        {
+            return ButtonSprites{{defaultSprite}, defaultSprite, defaultSprite};
+        }
+
+        const auto& sprites = (*graphics)->sprites;
+        auto stageCount = sprites.size() > 3 ? sprites.size() - 2 : 1;
+        std::vector<std::shared_ptr<Sprite>> normalSprites;
+        for (unsigned int i = 0; i < stageCount; ++i)
+        {
+            normalSprites.push_back(sprites[i]);
+        }
+        auto pressedSprite = stageCount < sprites.size() ? sprites[stageCount] : defaultSprite;
+        auto disabledSprite = stageCount + 1 < sprites.size() ? sprites[stageCount + 1] : defaultSprite;
+        return ButtonSprites{std::move(normalSprites), pressedSprite, disabledSprite};
     }
 
     UiFactory::ButtonSprites UiFactory::getBasicButtonGraphics(

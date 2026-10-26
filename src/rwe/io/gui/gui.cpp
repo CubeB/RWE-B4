@@ -243,7 +243,8 @@ namespace rwe
             && quickKey == rhs.quickKey
             && grayedOut == rhs.grayedOut
             && stages == rhs.stages
-            && maxChars == rhs.maxChars;
+            && maxChars == rhs.maxChars
+            && downloadMenuProduct == rhs.downloadMenuProduct;
     }
 
     bool GuiEntry::operator!=(const GuiEntry& rhs) const

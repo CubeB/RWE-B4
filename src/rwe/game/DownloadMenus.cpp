@@ -99,6 +99,7 @@ namespace rwe
             // CORACA2.GUI's empty slots lack the attribute, and it is what
             // draws a build button's queue count where the others draw it.
             target->common.attribs |= static_cast<int>(GuiButtonAttrib::BehaviorBuildButton);
+            target->downloadMenuProduct = true;
             ++result.placed;
         }
         return result;

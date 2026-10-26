@@ -119,6 +119,14 @@ namespace rwe
             REQUIRE(result.skipped == 0);
             REQUIRE(pages.size() == 2);
             REQUIRE(slotNames(pages[1]) == std::vector<std::string>{"ARMANNI", "ARMAMD", "ARMASP", "ARMFLAK", "ARMFORT", "ARMAMB"});
+            // BUILD-DOWNLOAD-850: the overlay selects each product's own
+            // gadget GAF while retaining the authored cell geometry.
+            REQUIRE(gadgetNamed(pages[1], "ARMFLAK").downloadMenuProduct);
+            REQUIRE(gadgetNamed(pages[1], "ARMFORT").downloadMenuProduct);
+            REQUIRE(gadgetNamed(pages[1], "ARMAMB").downloadMenuProduct);
+            REQUIRE_FALSE(gadgetNamed(pages[1], "ARMANNI").downloadMenuProduct);
+            REQUIRE(gadgetNamed(pages[1], "ARMFLAK").common.width == 64);
+            REQUIRE(gadgetNamed(pages[1], "ARMFLAK").common.height == 64);
             // Where IGPATCH was: the bottom-right slot.
             REQUIRE(gadgetNamed(pages[1], "ARMAMB").common.xpos == 64);
             REQUIRE(gadgetNamed(pages[1], "ARMAMB").common.ypos == 155);
