@@ -128,7 +128,9 @@ namespace rwe
         // (UiStagedButton.cpp), and the peek would fire whatever button last
         // had focus. The game menu is handled above and has already returned,
         // so this only takes Space away from the in-game panel.
-        if (!isCtrlDown() && keysym.key != SDLK_SPACE)
+        // Auto-repeat is kept from it too: B is held as a selection-box
+        // filter, and every repeat would press BUILD again, sound and all.
+        if (!isCtrlDown() && keysym.key != SDLK_SPACE && !keysym.repeat)
         {
             currentPanel->keyDown(KeyEvent(keysym.key));
         }
