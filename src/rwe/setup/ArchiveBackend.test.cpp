@@ -10,6 +10,7 @@
 #include <random>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 namespace fs = std::filesystem;
 
@@ -26,7 +27,8 @@ namespace rwe
             ~TempDirectory() { std::error_code ec; fs::remove_all(path, ec); }
         };
 
-        void writeArchive(const fs::path& path, bool sevenZip)
+        void writeArchive(const fs::path& path, bool sevenZip, const char* entryPath = "payload/data.bin",
+            bool symlink = false)
         {
             auto* writer = archive_write_new();
             REQUIRE(writer != nullptr);
@@ -39,13 +41,15 @@ namespace rwe
 #endif
             auto* entry = archive_entry_new();
             REQUIRE(entry != nullptr);
-            archive_entry_set_pathname_utf8(entry, "payload/data.bin");
-            archive_entry_set_filetype(entry, AE_IFREG);
+            archive_entry_set_pathname_utf8(entry, entryPath);
+            archive_entry_set_filetype(entry, symlink ? AE_IFLNK : AE_IFREG);
+            if (symlink) archive_entry_set_symlink(entry, "target");
             archive_entry_set_perm(entry, 0644);
             constexpr std::string_view bytes = "archive-backend-exact-bytes\0with-nul";
-            archive_entry_set_size(entry, bytes.size());
+            archive_entry_set_size(entry, symlink ? 0 : bytes.size());
             REQUIRE(archive_write_header(writer, entry) == ARCHIVE_OK);
-            REQUIRE(archive_write_data(writer, bytes.data(), bytes.size()) == static_cast<la_ssize_t>(bytes.size()));
+            if (!symlink)
+                REQUIRE(archive_write_data(writer, bytes.data(), bytes.size()) == static_cast<la_ssize_t>(bytes.size()));
             archive_entry_free(entry);
             REQUIRE(archive_write_close(writer) == ARCHIVE_OK);
             REQUIRE(archive_write_free(writer) == ARCHIVE_OK);
@@ -112,5 +116,21 @@ namespace rwe
                 expected.push_back(static_cast<char>((static_cast<std::uint32_t>(value) >> (byte * 8)) & 0xff));
         }
         CHECK(actual == expected);
+    }
+
+    TEST_CASE("archive backend rejects traversal and symbolic links before leaving staged files", "[setup][archive]")
+    {
+        TempDirectory temp;
+        for (const auto& [name, entryPath, symlink] : {
+                 std::tuple{"traversal.zip", "../escape.txt", false},
+                 std::tuple{"link.zip", "payload/link", true}})
+        {
+            const auto archivePath = temp.path / name;
+            const auto staging = temp.path / (std::string(name) + ".staging");
+            writeArchive(archivePath, false, entryPath, symlink);
+            CHECK_THROWS(extractArchive(archivePath, staging));
+            CHECK_FALSE(fs::exists(staging));
+            CHECK_FALSE(fs::exists(temp.path / "escape.txt"));
+        }
     }
 }
