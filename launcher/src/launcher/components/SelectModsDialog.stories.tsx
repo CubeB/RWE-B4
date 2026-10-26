@@ -12,7 +12,7 @@ type Story = StoryObj<typeof SelectModsDialog>;
 
 export const Default: Story = {
   args: {
-    title: "Select Mods",
+    title: "Select Single Player Mods and Maps",
     items: ["ta", "tacc", "ta31", "taesc"],
     initiallyActiveItems: ["ta", "tacc"],
     onSubmit: () => {},

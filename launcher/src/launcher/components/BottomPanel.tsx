@@ -49,7 +49,7 @@ const BottomPanel = (props: BottomPanelProps) => {
           </Grid>
           <Grid>
             <Button variant="contained" onClick={props.onOpenModsDialog}>
-              Single Player Mods
+              Single Player Mods and Maps
             </Button>
           </Grid>
           <Grid>

@@ -33,7 +33,24 @@ it("allows offline play with imported data and the saved profile", () => {
   expect(play).toBeDefined();
   expect(play).not.toContain("disabled");
   expect(markup).toContain('value="Oscar"');
-  expect(markup).toContain("Total Annihilation");
+  expect(markup).toContain("Total Annihilation data");
+  expect(markup).toContain("Mods and maps");
+  expect(markup).toContain("Manage mods and maps");
+  expect(markup).toContain("Choose your mods and maps");
+});
+
+it("describes the empty mod and map library", () => {
+  const markup = home({ activeMods: [], installedMods: [] });
+  expect(markup).toContain(
+    "No mods or maps found yet. Import game data to get started."
+  );
+  expect(markup).not.toContain("No mods found yet");
+});
+
+it("labels the legacy ta mod as game data", () => {
+  const markup = home();
+  expect(markup).toContain("Total Annihilation data");
+  expect(markup).not.toContain(">Total Annihilation<");
 });
 
 it("prevents launching a second game and retains the import controls", () => {
