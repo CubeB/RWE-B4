@@ -13,6 +13,7 @@ describe("installed mod resource inspection", () => {
       callback(
         null,
         JSON.stringify({
+          complete: true,
           candidates: [
             {
               root: "C:/mods/Escalation",

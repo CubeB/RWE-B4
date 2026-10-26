@@ -125,12 +125,12 @@ export function hasUniqueInspectionRoot(
   if (typeof report !== "object" || report === null || Array.isArray(report)) {
     return false;
   }
-  const candidates = (report as { candidates?: unknown }).candidates;
-  if (!Array.isArray(candidates)) {
+  const result = report as { complete?: unknown; candidates?: unknown };
+  if (result.complete !== true || !Array.isArray(result.candidates)) {
     return false;
   }
   return (
-    candidates.filter(candidate => {
+    result.candidates.filter(candidate => {
       if (
         typeof candidate !== "object" ||
         candidate === null ||
@@ -152,9 +152,6 @@ export function resourceDirectoriesForSelectedRoot(
   report: unknown,
   selectedRoot: string
 ): ResourceDirectories | undefined {
-  if (typeof report !== "object" || report === null || Array.isArray(report)) {
-    return undefined;
-  }
   if (!hasUniqueInspectionRoot(report, selectedRoot)) {
     return undefined;
   }

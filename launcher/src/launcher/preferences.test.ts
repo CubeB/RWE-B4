@@ -104,6 +104,7 @@ describe("launcher profile and mod selection", () => {
   it("uses only a unique inspection candidate matching the selected data root", () => {
     const selected = path.join(directory, "TAESC");
     const report = {
+      complete: true,
       candidates: [
         {
           root: selected,
@@ -121,10 +122,16 @@ describe("launcher profile and mod selection", () => {
     });
     expect(
       hasUniqueInspectionRoot(
-        { candidates: [{ root: selected.toUpperCase() }] },
+        { complete: true, candidates: [{ root: selected.toUpperCase() }] },
         selected
       )
     ).toBe(process.platform === "win32");
+    expect(
+      hasUniqueInspectionRoot(
+        { complete: false, candidates: [{ root: selected }] },
+        selected
+      )
+    ).toBe(false);
     report.candidates.push({
       root: selected,
       resourceDirectories: { builderGuis: "ambiguous" },
