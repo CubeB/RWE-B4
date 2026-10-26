@@ -20,7 +20,7 @@ import { GameListEntry, MasterClientState } from "./masterClient/state";
 import { reduceReducers, liftState, withSideEffects } from "./sideEffects";
 import { choose } from "../common/util";
 import { normalizePlayerName } from "./preferences";
-import { mergeResourceDirectories } from "../common/mods";
+import { resourceDirectoriesForMods } from "../common/mods";
 
 const initialState: State = {
   masterClient: {
@@ -250,11 +250,11 @@ function globalActionsReducer(
       const selectedMods = choose(state.activeMods, name =>
         (state.installedMods || []).find(x => x.name === name)
       );
-      const resourceSelection = mergeResourceDirectories(selectedMods);
-      if (resourceSelection.conflict) {
+      const resourceSelection = resourceDirectoriesForMods(selectedMods);
+      if (resourceSelection.error) {
         return liftState({
           ...state,
-          launcherError: `Cannot launch with conflicting mod resource directories: ${resourceSelection.conflict}`,
+          launcherError: `Cannot launch: ${resourceSelection.error}`,
         });
       }
       return withSideEffects(

@@ -3,17 +3,33 @@ import * as path from "path";
 import { choose } from "./util";
 
 export const resourceDirectoryKeys = [
-  "ai", "anims", "bitmaps", "builderGuis", "camps", "downloads",
-  "fonts", "gamedata", "guis", "maps", "objects3d", "palettes",
-  "scripts", "sounds", "textures", "unitpics", "units", "weapons",
+  "ai",
+  "anims",
+  "bitmaps",
+  "builderGuis",
+  "camps",
+  "downloads",
+  "fonts",
+  "gamedata",
+  "guis",
+  "maps",
+  "objects3d",
+  "palettes",
+  "scripts",
+  "sounds",
+  "textures",
+  "unitpics",
+  "units",
+  "weapons",
 ] as const;
-export type ResourceDirectoryKey = typeof resourceDirectoryKeys[number];
+export type ResourceDirectoryKey = (typeof resourceDirectoryKeys)[number];
 export type ResourceDirectories = Partial<Record<ResourceDirectoryKey, string>>;
 
 export interface InstalledModResult {
   name: string;
   path: string;
   resourceDirectories?: ResourceDirectories;
+  resourceDirectoryError?: string;
 }
 export function getInstalledMods(
   baseDir: string,
@@ -69,7 +85,9 @@ export interface RweModJson {
 }
 
 /** Keep unknown rwe_mod.json metadata untouched; only forward safe known roots. */
-export function parseResourceDirectories(value: unknown): ResourceDirectories | undefined {
+export function parseResourceDirectories(
+  value: unknown
+): ResourceDirectories | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
   }
@@ -89,11 +107,44 @@ function isSafeResourceDirectory(value: string): boolean {
   if (!trimmed || path.isAbsolute(trimmed) || /^[a-z]:/i.test(trimmed)) {
     return false;
   }
-  return trimmed.split(/[\\/]/).every(part => part.length > 0 && part !== "." && part !== "..");
+  return trimmed
+    .split(/[\\/]/)
+    .every(part => part.length > 0 && part !== "." && part !== "..");
 }
 
 function canonicalPath(value: string): string {
-  return path.resolve(value).replace(/[\\/]+$/, "").toLowerCase();
+  const resolved = path.resolve(value).replace(/[\\/]+$/, "");
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+/** A package inspection must identify this exact selected data root once. */
+export function hasUniqueInspectionRoot(
+  report: unknown,
+  selectedRoot: string
+): boolean {
+  if (typeof report !== "object" || report === null || Array.isArray(report)) {
+    return false;
+  }
+  const candidates = (report as { candidates?: unknown }).candidates;
+  if (!Array.isArray(candidates)) {
+    return false;
+  }
+  return (
+    candidates.filter(candidate => {
+      if (
+        typeof candidate !== "object" ||
+        candidate === null ||
+        Array.isArray(candidate)
+      ) {
+        return false;
+      }
+      const root = (candidate as Record<string, unknown>).root;
+      return (
+        typeof root === "string" &&
+        canonicalPath(root) === canonicalPath(selectedRoot)
+      );
+    }).length === 1
+  );
 }
 
 /** Accept discovered roots only from the single package candidate matching the selected data path. */
@@ -104,21 +155,30 @@ export function resourceDirectoriesForSelectedRoot(
   if (typeof report !== "object" || report === null || Array.isArray(report)) {
     return undefined;
   }
-  const candidates = (report as { candidates?: unknown }).candidates;
-  if (!Array.isArray(candidates)) {
+  if (!hasUniqueInspectionRoot(report, selectedRoot)) {
     return undefined;
   }
+  const candidates = (report as { candidates: unknown[] }).candidates;
   const matching = candidates.filter(candidate => {
-    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
+    if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      Array.isArray(candidate)
+    ) {
       return false;
     }
     const root = (candidate as Record<string, unknown>).root;
-    return typeof root === "string" && canonicalPath(root) === canonicalPath(selectedRoot);
+    return (
+      typeof root === "string" &&
+      canonicalPath(root) === canonicalPath(selectedRoot)
+    );
   });
   if (matching.length !== 1) {
     return undefined;
   }
-  return parseResourceDirectories((matching[0] as Record<string, unknown>).resourceDirectories);
+  return parseResourceDirectories(
+    (matching[0] as Record<string, unknown>).resourceDirectories
+  );
 }
 
 /** Merge paths in data-path precedence order and report conflicting package claims. */
@@ -131,7 +191,10 @@ export function mergeResourceDirectories(
     for (const key of resourceDirectoryKeys) {
       const value = mod.resourceDirectories?.[key];
       if (!value) continue;
-      if (resolved[key] && resolved[key]!.toLowerCase() !== value.toLowerCase()) {
+      if (
+        resolved[key] &&
+        resolved[key]!.toLowerCase() !== value.toLowerCase()
+      ) {
         return {
           resourceDirectories: resolved,
           conflict: `${key} is mapped to both ${resolved[key]} (${owners[key]}) and ${value} (${mod.name})`,
@@ -144,13 +207,41 @@ export function mergeResourceDirectories(
   return { resourceDirectories: resolved };
 }
 
+/** Resolve one selected mod set and surface inspection errors only for that set. */
+export function resourceDirectoriesForMods(
+  mods: Array<
+    Pick<
+      InstalledModResult,
+      "name" | "resourceDirectories" | "resourceDirectoryError"
+    >
+  >
+): { resourceDirectories?: ResourceDirectories; error?: string } {
+  const failedInspection = mods.find(mod => mod.resourceDirectoryError);
+  if (failedInspection) {
+    return {
+      error: `Could not inspect selected mod ${failedInspection.name}: ${failedInspection.resourceDirectoryError}`,
+    };
+  }
+  const merged = mergeResourceDirectories(mods);
+  return merged.conflict
+    ? {
+        error: `Conflicting selected mod resource directories: ${merged.conflict}`,
+      }
+    : { resourceDirectories: merged.resourceDirectories };
+}
+
 function readRweModJson(filename: string): RweModJson | undefined {
   try {
     const value = JSON.parse(fs.readFileSync(filename, "utf8"));
     return value &&
       typeof value.shortname === "string" &&
       value.shortname.trim()
-      ? { ...value, resourceDirectories: parseResourceDirectories(value.resourceDirectories) } as RweModJson
+      ? ({
+          ...value,
+          resourceDirectories: parseResourceDirectories(
+            value.resourceDirectories
+          ),
+        } as RweModJson)
       : undefined;
   } catch {
     return undefined;

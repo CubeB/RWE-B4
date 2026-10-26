@@ -46,6 +46,7 @@ export interface InstalledModInfo {
   name: string;
   path: string;
   resourceDirectories?: ResourceDirectories;
+  resourceDirectoryError?: string;
 }
 
 export interface VideoMode {
