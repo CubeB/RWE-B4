@@ -156,11 +156,16 @@ jobs:
           sudo apt-get update -y -o Acquire::Retries=3
       # SDL3's windowing and GL backends are built from the submodule and
       # need these headers; libglew-dev used to pull them in transitively.
+      # Ubuntu 24.04's protobuf is the same 3.21.12 as the submodule. Using
+      # the distro package avoids rebuilding protobuf with autogen on a cache
+      # miss, which is what broke the clang jobs before the engine built.
       - name: install apt packages
         run: sudo apt-get install -y -o Acquire::Retries=3
           gcc-14
           g++-14
           clang-18
+          libprotobuf-dev
+          protobuf-compiler
           ccache
           imagemagick
           libgl-dev
@@ -183,36 +188,16 @@ jobs:
           path: ~/.cache/ccache
           key: ccache-${{ runner.os }}-${{ env.CC }}-${{ matrix.configuration }}-${{ github.sha }}
           restore-keys: ccache-${{ runner.os }}-${{ env.CC }}-${{ matrix.configuration }}-
-      # `git rev-parse HEAD:libs/protobuf` is the gitlink SHA the superproject
-      # records, so it names the exact protobuf the build is about to compile.
-      # It is read here rather than hashed with hashFiles, whose globs do not
-      # reliably descend into .git -- a miss there returns an empty string and
-      # collapses the key to a constant without saying so.
-      - name: identify protobuf version
-        id: protobuf-version
-        shell: bash
-        run: echo "sha=$(git rev-parse HEAD:libs/protobuf)" >> "$GITHUB_OUTPUT"
-      - name: restore protobuf
-        id: cache-protobuf-restore
-        uses: actions/cache/restore@v5
-        with:
-          path: libs/_protobuf-install
-          key: ${{ runner.os }}-${{ env.CC }}-protobuf-${{ steps.protobuf-version.outputs.sha }}-${{ hashFiles('libs/build-protobuf.sh') }}
-      - name: build protobuf
-        working-directory: libs
-        run: ./build-protobuf.sh
-      - name: save protobuf
-        id: cache-protobuf-save
-        if: steps.cache-protobuf-restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: libs/_protobuf-install
-          key: ${{ steps.cache-protobuf-restore.outputs.cache-primary-key }}
+      # The Linux job uses the distro's 3.21.12 (the submodule's version)
+      # instead of building protobuf from source. The source build depends on
+      # protobuf's recursive autogen, which intermittently loses the root
+      # ltmain.sh and failed the clang matrix before any engine code built.
+      # Protobuf_USE_STATIC_LIBS keeps the AppImage linking the static archive.
       - name: build rwe
         run: |
           mkdir build
           pushd build
-          cmake -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ..
+          cmake -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DProtobuf_USE_STATIC_LIBS=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ..
           make -j 4
           popd
       - name: test rwe
