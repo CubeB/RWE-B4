@@ -181,6 +181,20 @@ export function automaticallySetUpTaModManual(
   searchDirectories: string[]
 ): Promise<boolean> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const succeed = (success: boolean) => {
+      if (!settled) {
+        settled = true;
+        resolve(success);
+      }
+    };
+    const failWith = (err: unknown) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    };
+
     rx.from(searchDirectories)
       .pipe(
         rxop.concatMap(getHashes),
@@ -193,15 +207,20 @@ export function automaticallySetUpTaModManual(
       .subscribe({
         next: info => {
           if (info) {
-            createMod(outDir, info);
-            resolve(true);
+            try {
+              createMod(outDir, info);
+              succeed(true);
+            } catch (err) {
+              failWith(err);
+            }
           } else {
-            resolve(false);
+            succeed(false);
           }
         },
-        error: err => {
-          reject(err);
-        },
+        error: failWith,
+        // An empty search list never produces a value; it is a failed lookup,
+        // not a promise that waits forever.
+        complete: () => succeed(false),
       });
   });
 }
@@ -219,15 +238,31 @@ function hasAllValues<K, V>(a: Map<K, V>, b: Map<K, V>): boolean {
 
 function getHash(filePath: string): Promise<string> {
   return new Promise<string>((resolve, reject) => {
-    const stream = fs
-      .createReadStream(filePath)
-      .pipe(crypto.createHash("sha256"));
-    stream.on("data", data => {
-      resolve(data.toString("hex"));
-    });
-    stream.on("error", err => {
-      reject(err);
-    });
+    const readStream = fs.createReadStream(filePath);
+    const hash = crypto.createHash("sha256");
+    let settled = false;
+    const finish = (err: Error | undefined, value?: string) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (err) {
+        reject(err);
+      } else {
+        resolve(value as string);
+      }
+    };
+
+    // pipe() does not forward the read stream's errors to the hash transform,
+    // so a missing or locked file would otherwise leave this promise pending.
+    readStream.on("error", err => finish(err));
+    hash.on("error", err => finish(err));
+    hash.on("data", data => finish(undefined, data.toString("hex")));
+    // Defensive: a hash transform that ends without producing a digest must
+    // still settle the promise rather than hanging the setup path.
+    hash.on("end", () => finish(new Error(`No hash produced for ${filePath}`)));
+
+    readStream.pipe(hash);
   });
 }
 
