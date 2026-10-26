@@ -368,6 +368,15 @@ namespace rwe
 
         auto button = std::make_unique<UiStagedButton>(x, y, width, height, stages, sprites.pressed, font);
         button->setDisabledSprite(sprites.disabled);
+        button->setNoPictureBevel(sprites.noPictureBevel);
+        if (sprites.noPictureBevel)
+        {
+            button->setNoPictureBevelColors(
+                textureService->getGuiPaletteColor(17),
+                textureService->getGuiPaletteColor(0),
+                textureService->getGuiPaletteColor(19),
+                textureService->getGuiPaletteColor(20));
+        }
 
         auto sound = deduceButtonSound(guiName, name, width, height);
 
@@ -1069,9 +1078,9 @@ namespace rwe
         auto graphics = textureService->getGuiTexture(guiName, name);
         if (!graphics)
         {
-            // A build button a download file put on this page: the page's
-            // own GAF has no frame for its unit, and the unit's build
-            // picture is where its art comes from. See TextureService.
+            // Legacy RWE unitpic fallback for a named gadget with no page or
+            // common-GUI GAF entry. BUILD-DOWNLOAD-850-marked controls take
+            // their dedicated path above instead.
             graphics = textureService->getUnitPic(name);
         }
         if (!graphics)
@@ -1113,7 +1122,7 @@ namespace rwe
         auto defaultSprite = textureService->getDefaultSprite();
         if (!graphics || (*graphics)->sprites.empty())
         {
-            return ButtonSprites{{defaultSprite}, defaultSprite, defaultSprite};
+            return ButtonSprites{{defaultSprite}, defaultSprite, defaultSprite, true};
         }
 
         const auto& sprites = (*graphics)->sprites;

@@ -24,6 +24,7 @@ namespace rwe
             std::vector<std::shared_ptr<Sprite>> normal;
             std::shared_ptr<Sprite> pressed;
             std::shared_ptr<Sprite> disabled;
+            bool noPictureBevel{false};
         };
 
     private:

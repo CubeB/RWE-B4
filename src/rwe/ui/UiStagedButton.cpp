@@ -23,11 +23,37 @@ namespace rwe
 
     void UiStagedButton::render(UiRenderService& graphics) const
     {
-        const auto& sprite = !enabled && disabledSprite
-            ? *disabledSprite
-            : (pressed || toggledOn ? *pressedSprite : *stages[currentStage].sprite);
-
-        graphics.drawSpriteAbs(posX, posY, sprite);
+        if (noPictureBevel)
+        {
+            // BUILD-DOWNLOAD-BEVEL-850: missing download art uses the original
+            // two-pixel bevel, with colors remapped from GUIPAL to game palette.
+            const auto disabled = !enabled;
+            const auto raised = !disabled && !pressed && !toggledOn;
+            const auto topLeft = disabled ? noPictureDark : (raised ? noPictureLight : noPictureDark);
+            const auto bottomRight = disabled ? noPictureDisabled : (raised ? noPictureDark : noPictureLight);
+            const auto interior = disabled ? noPictureDisabled : noPictureInterior;
+            if (sizeX > 0 && sizeY > 0)
+            {
+                const auto w = static_cast<int>(sizeX);
+                const auto h = static_cast<int>(sizeY);
+                graphics.fillColor(posX, posY, w, h, interior);
+                graphics.fillColor(posX, posY, w, 1, topLeft);
+                graphics.fillColor(posX, posY + 1, w - 1, 1, topLeft);
+                graphics.fillColor(posX, posY, 1, h, topLeft);
+                graphics.fillColor(posX + 1, posY, 1, h - 1, topLeft);
+                graphics.fillColor(posX + w - 1, posY + 1, 1, h - 1, bottomRight);
+                graphics.fillColor(posX + w - 2, posY + 2, 1, h - 2, bottomRight);
+                graphics.fillColor(posX + 1, posY + h - 1, w - 1, 1, bottomRight);
+                graphics.fillColor(posX + 2, posY + h - 2, w - 2, 1, bottomRight);
+            }
+        }
+        else
+        {
+            const auto& sprite = !enabled && disabledSprite
+                ? *disabledSprite
+                : (pressed || toggledOn ? *pressedSprite : *stages[currentStage].sprite);
+            graphics.drawSpriteAbs(posX, posY, sprite);
+        }
 
         if (textAlign == TextAlign::Hidden)
         {

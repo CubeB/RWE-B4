@@ -127,6 +127,9 @@ namespace rwe
             REQUIRE_FALSE(gadgetNamed(pages[1], "ARMANNI").downloadMenuProduct);
             REQUIRE(gadgetNamed(pages[1], "ARMFLAK").common.width == 64);
             REQUIRE(gadgetNamed(pages[1], "ARMFLAK").common.height == 64);
+            REQUIRE_FALSE(gadgetNamed(pages[1], "ARMFLAK").grayedOut.value_or(false));
+            REQUIRE_FALSE(gadgetNamed(pages[1], "ARMFORT").grayedOut.value_or(false));
+            REQUIRE_FALSE(gadgetNamed(pages[1], "ARMAMB").grayedOut.value_or(false));
             // Where IGPATCH was: the bottom-right slot.
             REQUIRE(gadgetNamed(pages[1], "ARMAMB").common.xpos == 64);
             REQUIRE(gadgetNamed(pages[1], "ARMAMB").common.ypos == 155);
