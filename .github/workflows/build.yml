@@ -284,9 +284,9 @@ jobs:
           test -s AppDir/licenses/libarchive-COPYING.txt
           test -s AppDir/licenses/xz-COPYING.txt
           test -s AppDir/licenses/xz-COPYING.0BSD.txt
-          grep -Fq 'The libarchive distribution as a whole' AppDir/licenses/libarchive-COPYING.txt
-          grep -Fq 'XZ Utils Licensing' AppDir/licenses/xz-COPYING.txt
-          grep -Fq 'Permission to use, copy, modify, and/or distribute this software' AppDir/licenses/xz-COPYING.0BSD.txt
+          cmp -s libs/libarchive/COPYING AppDir/licenses/libarchive-COPYING.txt
+          cmp -s libs/xz/COPYING AppDir/licenses/xz-COPYING.txt
+          cmp -s libs/xz/COPYING.0BSD AppDir/licenses/xz-COPYING.0BSD.txt
 
           mkdir -p AppDir/usr/share/applications
           cat > AppDir/usr/share/applications/rwe.desktop <<'DESKTOP'

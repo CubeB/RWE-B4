@@ -15,6 +15,7 @@ import { assertNever } from "../../common/util";
 export type State = "welcome" | "working" | "success" | "fail";
 export interface WizardProps {
   state: State;
+  error?: string;
   onNext: (path?: string) => void;
   onClose: () => void;
 }
@@ -27,6 +28,7 @@ export function Wizard(props: WizardProps) {
       <DialogContent>
         <WizardContents
           state={props.state}
+          error={props.error}
           path={filePath}
           onChange={p => {
             console.log(p);
@@ -48,6 +50,7 @@ export function Wizard(props: WizardProps) {
 
 function WizardContents(props: {
   state: State;
+  error?: string;
   path?: string;
   onChange: (path?: string) => void;
 }) {
@@ -59,7 +62,13 @@ function WizardContents(props: {
     case "success":
       return <WizardSuccess />;
     case "fail":
-      return <WizardManual path={props.path} onChange={props.onChange} />;
+      return (
+        <WizardManual
+          path={props.path}
+          error={props.error}
+          onChange={props.onChange}
+        />
+      );
   }
   assertNever(props.state);
 }
@@ -87,10 +96,10 @@ function WizardSuccess() {
   return (
     <>
       <Typography>
-        The wizard has successfully created the Total Annihilation mod.
+        Total Annihilation game data is ready to use in Robot War Engine.
       </Typography>
       <Typography>
-        Please close and re-open the launcher in order to detect the new mod.
+        The launcher will refresh the available game data automatically.
       </Typography>
     </>
   );
@@ -98,6 +107,7 @@ function WizardSuccess() {
 
 function WizardManual(props: {
   path?: string;
+  error?: string;
   onChange: (path?: string) => void;
 }) {
   return (
@@ -105,6 +115,7 @@ function WizardManual(props: {
       <Typography>
         The wizard was unable to locate Total Annihilation game data.
       </Typography>
+      {props.error && <Typography color="error">{props.error}</Typography>}
       <Typography>Manually locate your Total Annihilation folder:</Typography>
       <input
         type="file"

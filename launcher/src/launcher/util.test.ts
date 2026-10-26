@@ -2,12 +2,57 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { PassThrough } from "stream";
+jest.mock("child_process", () => ({ execFile: jest.fn() }));
+import { execFile } from "child_process";
 import {
+  automaticallyImportTaData,
   automaticallySetUpTaModManual,
+  checkExistingTaData,
   chooseRweUserPath,
   rweLibraryPaths,
   rweUserPathCandidates,
 } from "./util";
+
+const mockExecFile = execFile as unknown as jest.Mock;
+
+describe("native TA data setup", () => {
+  beforeEach(() => mockExecFile.mockReset());
+
+  it("checks usable installed data through the native setup command", async () => {
+    mockExecFile.mockImplementation((_exe, _args, _options, callback) =>
+      callback(null, "", "")
+    );
+    await expect(checkExistingTaData("rwe_setup.exe")).resolves.toBe(true);
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "rwe_setup.exe",
+      ["--check-existing"],
+      expect.objectContaining({ windowsHide: true }),
+      expect.any(Function)
+    );
+  });
+
+  it("uses native automatic discovery and verifies imported data", async () => {
+    mockExecFile.mockImplementation((_exe, _args, _options, callback) =>
+      callback(null, "", "")
+    );
+    await expect(
+      automaticallyImportTaData("rwe_setup.exe")
+    ).resolves.toBeUndefined();
+    expect(mockExecFile.mock.calls.map(call => call[1])).toEqual([
+      [],
+      ["--check-existing"],
+    ]);
+  });
+
+  it("returns the native discovery or copy error for manual fallback", async () => {
+    mockExecFile.mockImplementation((_exe, _args, _options, callback) =>
+      callback(new Error("No installation found"), "", "No installation found")
+    );
+    await expect(automaticallyImportTaData("rwe_setup.exe")).resolves.toContain(
+      "No installation found"
+    );
+  });
+});
 
 describe("rweUserPathCandidates", () => {
   it("uses %APPDATA%\\RWE on Windows", () => {

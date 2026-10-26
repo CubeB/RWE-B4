@@ -84,7 +84,7 @@ namespace rwe
             int status;
             std::string path;
             bool hasUtf8Path;
-            int type;
+            decltype(archive_entry_filetype(static_cast<archive_entry*>(nullptr))) type;
         };
 
         ArchiveHeader readUtf8Header(archive* reader, archive_entry** entry)

@@ -2,6 +2,7 @@ import { AppAction } from "./actions";
 
 export interface WizardState {
   step: "welcome" | "working" | "success" | "fail";
+  error?: string;
 }
 
 export function wizardReducer(
@@ -12,11 +13,14 @@ export function wizardReducer(
     case "wizard/NEXT": {
       return { step: "working" };
     }
+    case "wizard/START_AUTOMATIC": {
+      return { step: "working" };
+    }
     case "wizard/DONE": {
       return { step: "success" };
     }
     case "wizard/FAIL": {
-      return { step: "fail" };
+      return { step: "fail", error: action.message };
     }
     default:
       return state;
