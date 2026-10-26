@@ -334,7 +334,10 @@ namespace rwe
         std::optional<std::vector<std::vector<GuiEntry>>> loadBuilderGui(const GameLoadServices& services, const std::string& unitName)
         {
             std::vector<std::vector<GuiEntry>> entries;
-            for (int i = 1; auto rawGui = services.vfs->readFile(services.pathMapping->guis + "/" + unitName + std::to_string(i) + ".GUI"); ++i)
+            // BUILD-BUTTON-850: a builder page and its images must come from
+            // the same mod data set. TAESC keeps these pages in guiE, while
+            // front-end screens remain in guis; do not fall back across roots.
+            for (int i = 1; auto rawGui = services.vfs->readFile(services.pathMapping->builderGuis + "/" + unitName + std::to_string(i) + ".GUI"); ++i)
             {
                 // A builder page comes with the unit, so a bad one in one mod
                 // must cost that unit its pages and not stop every peer's game

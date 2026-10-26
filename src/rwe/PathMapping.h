@@ -17,6 +17,8 @@ namespace rwe
         std::string fonts;
         std::string gamedata;
         std::string guis;
+        /** Unit build-menu GUIs, separate from front-end screen layouts. */
+        std::string builderGuis{"guis"};
         std::string maps;
         std::string objects3d;
         std::string palettes;

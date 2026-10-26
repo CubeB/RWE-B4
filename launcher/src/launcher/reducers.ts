@@ -20,6 +20,7 @@ import { GameListEntry, MasterClientState } from "./masterClient/state";
 import { reduceReducers, liftState, withSideEffects } from "./sideEffects";
 import { choose } from "../common/util";
 import { normalizePlayerName } from "./preferences";
+import { mergeResourceDirectories } from "../common/mods";
 
 const initialState: State = {
   masterClient: {
@@ -245,19 +246,29 @@ function globalActionsReducer(
   switch (action.type) {
     case "SELECT_GAME":
       return liftState({ ...state, selectedGameId: action.gameId });
-    case "LAUNCH_RWE":
+    case "LAUNCH_RWE": {
+      const selectedMods = choose(state.activeMods, name =>
+        (state.installedMods || []).find(x => x.name === name)
+      );
+      const resourceSelection = mergeResourceDirectories(selectedMods);
+      if (resourceSelection.conflict) {
+        return liftState({
+          ...state,
+          launcherError: `Cannot launch with conflicting mod resource directories: ${resourceSelection.conflict}`,
+        });
+      }
       return withSideEffects(
         { ...state, isRweRunning: true },
         {
           type: "LAUNCH_RWE",
           args: {
             playerName: state.playerName,
-            dataPaths: choose(state.activeMods, name =>
-              (state.installedMods || []).find(x => x.name === name)
-            ).map(x => x.path),
+            dataPaths: selectedMods.map(x => x.path),
+            resourceDirectories: resourceSelection.resourceDirectories,
           },
         }
       );
+    }
     case "LAUNCH_RWE_END":
       return liftState({ ...state, isRweRunning: false });
     case "GAME_ENDED":

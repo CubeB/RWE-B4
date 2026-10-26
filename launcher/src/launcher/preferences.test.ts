@@ -7,7 +7,7 @@ import {
   normalizePlayerName,
   normalizePreferences,
 } from "./preferences";
-import { getInstalledMods } from "../common/mods";
+import { getInstalledMods, mergeResourceDirectories, resourceDirectoriesForSelectedRoot } from "../common/mods";
 import { mergeConfig } from "./rweConfig";
 import reducer from "./reducers";
 import { canLaunchRwe } from "./state";
@@ -75,6 +75,44 @@ describe("launcher profile and mod selection", () => {
     expect(found[0].path).toBe(data);
   });
 
+  it("preserves explicit resource roots in mod metadata and leaves unknown fields on disk", async () => {
+    const mods = path.join(directory, "mods");
+    fs.mkdirSync(path.join(mods, "Escalation"), { recursive: true });
+    fs.writeFileSync(path.join(mods, "Escalation", "TAESC.gp3"), "archive");
+    const metadata = path.join(mods, "Escalation", "rwe_mod.json");
+    const original = JSON.stringify({
+      shortname: "Escalation",
+      name: "TA Escalation",
+      author: "Example",
+      resourceDirectories: { builderGuis: "customGui", futureRoot: "leave-alone" },
+      futureMetadata: { enabled: true },
+    });
+    fs.writeFileSync(metadata, original);
+    const found = await getInstalledMods(mods);
+    expect(found[0].resourceDirectories).toEqual({ builderGuis: "customGui" });
+    expect(fs.readFileSync(metadata, "utf8")).toBe(original);
+  });
+
+  it("uses only a unique inspection candidate matching the selected data root", () => {
+    const selected = path.join(directory, "TAESC");
+    const report = {
+      candidates: [
+        { root: selected, resourceDirectories: { builderGuis: "guiE", guis: "other" } },
+        { root: path.join(directory, "nested"), resourceDirectories: { builderGuis: "wrong" } },
+      ],
+    };
+    expect(resourceDirectoriesForSelectedRoot(report, selected)).toEqual({ builderGuis: "guiE", guis: "other" });
+    report.candidates.push({ root: selected.toUpperCase(), resourceDirectories: { builderGuis: "ambiguous" } });
+    expect(resourceDirectoriesForSelectedRoot(report, selected)).toBeUndefined();
+  });
+
+  it("refuses conflicting selected resource roots rather than guessing across mods", () => {
+    expect(mergeResourceDirectories([
+      { name: "TAESC", resourceDirectories: { builderGuis: "guiE" } },
+      { name: "Other mod", resourceDirectories: { builderGuis: "customGui" } },
+    ]).conflict).toContain("builderGuis is mapped to both guiE");
+  });
+
   it("passes the profile and selected overlays to the game with base data last", () => {
     let { state } = reducer(undefined, { type: "LAUNCHER_ERROR" });
     state = reducer(state, {
@@ -86,7 +124,7 @@ describe("launcher profile and mod selection", () => {
       type: "RECEIVE_INSTALLED_MODS",
       mods: [
         { name: "ta", path: "/base data" },
-        { name: "mod", path: "/my mod" },
+        { name: "mod", path: "/my mod", resourceDirectories: { builderGuis: "guiE" } },
       ],
     }).state;
     state = reducer(state, {
@@ -99,7 +137,7 @@ describe("launcher profile and mod selection", () => {
     expect(result.sideEffects).toEqual([
       {
         type: "LAUNCH_RWE",
-        args: { playerName: "Oscar", dataPaths: ["/my mod", "/base data"] },
+        args: { playerName: "Oscar", dataPaths: ["/my mod", "/base data"], resourceDirectories: { builderGuis: "guiE" } },
       },
     ]);
   });

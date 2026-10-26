@@ -6,6 +6,7 @@ import { CurrentGameState } from "./gameClient/state";
 import { isFull, MasterClientState } from "./masterClient/state";
 import { StateWithSideEffects } from "./sideEffects";
 import { RweArgs } from "./rwe";
+import { ResourceDirectories } from "../common/mods";
 
 export interface OverviewScreen {
   screen: "overview";
@@ -44,6 +45,7 @@ export function getRoom(state: State): GameRoom | undefined {
 export interface InstalledModInfo {
   name: string;
   path: string;
+  resourceDirectories?: ResourceDirectories;
 }
 
 export interface VideoMode {

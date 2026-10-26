@@ -332,7 +332,7 @@ namespace rwe
             {
                 for (const auto& [resource, directory] : std::map<std::string, std::string>{
                          {"ai", "ae"}, {"units", "unitse"}, {"weapons", "weapone"}, {"gamedata", "gamedate"},
-                         {"guis", "guie"}, {"downloads", "downloadse"}, {"unitpics", "unitpice"}})
+                         {"builderGuis", "guie"}, {"downloads", "downloadse"}, {"unitpics", "unitpice"}})
                 {
                     if (hasPrefix(inventory, toUpper(directory) + "/"))
                     {

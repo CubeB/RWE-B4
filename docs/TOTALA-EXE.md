@@ -220,7 +220,11 @@ Everything else lives in a subject file. **The numbers never move**, so a
   The game and headless arena share these choices; selected AI profiles and
   their fallback stay within the configured root. This supports layouts such
   as Escalation's AE/UNITSE without claiming vanilla discovers them automatically
-  or that Escalation's patched-engine features are fully implemented.
+  or that Escalation's patched-engine features are fully implemented. Builder-page
+  GUIs may use a separate configured root, defaulting to the effective ordinary
+  GUI root; package inspection may identify Escalation's guiE pages for the
+  launcher. This RWE-original routing does not claim vanilla has a second GUI
+  directory or automatically pairs cross-package resources.
 
 - **Retired: enlarged map descriptions** (2026-10-22 to 2026-10-23).
   The owner-requested adaptive selector was a workaround for apparent text
