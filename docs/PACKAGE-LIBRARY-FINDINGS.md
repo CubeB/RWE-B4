@@ -199,3 +199,38 @@ package records and the resulting generation. It also checks stale-snapshot
 rejection and that a failed transaction leaves the prior JSON intact and
 permits a subsequent update. These are RWE registry tests, not original-game
 execution or gameplay-compatibility evidence.
+
+### PACKAGE-007: bundled extraction backend boundary
+
+Selecting and packaging ZIP/RAR/7z extraction, presenting archive inventories,
+and extracting user-selected packages into an RWE-owned staging directory are
+RWE-original package-management behavior. MOD-ARCHIVE-01 in PACKAGE-001 is the
+static comparison boundary: the original's archive discovery and resolution
+concerns in-game TA data, and provide no per-user installer, external archive
+formats, package staging or extraction counterpart. This uses the existing
+spec-room prose only; no decompilation is opened and no new original-game
+behavior is inferred. No original runtime validation is claimed.
+
+The backend candidate is libarchive as an in-process C library, because it
+offers typed entry iteration and extraction APIs and reports ZIP, RAR and
+7-Zip readers without requiring an external executable. Source/version,
+compression variants, enabled codecs, notices and packaging details are to be
+recorded once proved against the pinned source and Windows/Linux build matrix.
+The selection remains conditional on that proof, especially the Windows MSVC
+build and static runtime packaging.
+
+The shared archive interface will inventory entries and extract into a new,
+empty staging directory created and owned by the caller. It must reject paths
+that escape staging, links unless an explicitly safe policy is proven, and
+colliding/aliased destinations; failures or cancellation remove only that
+staging directory. It never overwrites an existing package, invokes an
+installer, or claims that extracted data is gameplay-compatible. Existing
+HPI/UFO/CCX/GPF/GP3 archive interpretation and engine resolution are outside
+this interface. ZIP, RAR4, RAR5 and 7z method coverage, encrypted-header
+behavior, expansion bounds, cancellation granularity and failure cleanup must
+be established with generated fixtures; unsupported or password-protected
+content is reported explicitly rather than treated as a complete extraction.
+
+This section is the implementation contract and reference boundary. It does
+not claim byte-tactics comparison for RWE-original installer behavior, nor an
+executed original-game check.
