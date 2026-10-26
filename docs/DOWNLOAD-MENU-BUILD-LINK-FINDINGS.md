@@ -32,14 +32,26 @@ an otherwise valid builder/product relationship.
 The completed-unit build-panel routine at `0x41ACE0` overlays a download
 product into a GUI control only when the stored page minus one equals the
 current page index. It locates that control using the stored button offset
-plus four in the GUI entry array. Thus a stored MENU value1 corresponds to
-ordinary current page0. A default MENU value0 would require current page-1,
+plus four in the GUI entry array, including its panel header at entry zero.
+Thus a stored MENU value1 corresponds to internal current page0. Internal
+page zero is the orders view for ordinary builders; build page one loads
+the unit's `1.GUI`, build page two its `2.GUI`. In particular, the stock
+ARMACK download records' MENU=3 maps to internal page2 and ARMACK2.GUI,
+the human second build page. There is only one subtraction. A default MENU
+value0 would require current page-1,
 rather than becoming a normal first-page placement.
 
 Accordingly, absent MENU/BUTTON can leave a build option in the classic AI's
 candidate list without inserting it onto an ordinary human GUI page. Do not
 convert every absent-coordinate record into an arbitrary visible first-page
 button while claiming that this follows the original.
+
+The stock ARMACK records' BUTTON=3/4/5 address entries7/8/9, the three
+IGPATCH placeholders. Their overlay enables per-product gadget GAF binding
+and keeps the placeholders' authored geometry; this is distinct from the
+ordinary page/common GAF button route. See BUILD-DOWNLOAD-850 in
+`ARMACK-SECOND-PAGE-BUTTON-FINDINGS.md` for the full static trace, actual
+stock product resources, dimensions, hotspots and inclusive hit rectangles.
 
 The original keeps its finite build-list storage and has the previously
 documented less-than-or-equal-to30 append guard, an off-by-one against a
