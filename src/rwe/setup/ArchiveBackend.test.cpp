@@ -4,6 +4,7 @@
 #include <archive_entry.h>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <random>
@@ -87,5 +88,29 @@ namespace rwe
         const auto cancelled = temp.path / "cancelled";
         CHECK_THROWS(extractArchive(archivePath, cancelled, [](std::uint64_t, std::uint64_t) { return false; }));
         CHECK_FALSE(fs::exists(cancelled));
+    }
+
+    TEST_CASE("bundled archive backend extracts the licensed RAR5 fixture exactly", "[setup][archive]")
+    {
+        TempDirectory temp;
+        const auto archivePath = fs::path(RWE_SOURCE_DIR) / "tests/fixtures/archive-backend/rar5-compressed.rar";
+        const auto inventory = inspectArchive(archivePath);
+        REQUIRE(inventory.entries.size() == 1);
+        CHECK(inventory.entries[0].path == "test.bin");
+        CHECK(inventory.entries[0].size == 1200);
+        const auto staging = temp.path / "rar5";
+        extractArchive(archivePath, staging);
+        std::ifstream input(staging / "test.bin", std::ios::binary);
+        const std::string actual((std::istreambuf_iterator<char>(input)), {});
+        std::string expected;
+        for (std::int32_t i = 0; i < 300; ++i)
+        {
+            const auto k = i + 1;
+            auto value = k * k - 3 * k + 1;
+            if (value < 0) value = 0;
+            for (int byte = 0; byte < 4; ++byte)
+                expected.push_back(static_cast<char>((static_cast<std::uint32_t>(value) >> (byte * 8)) & 0xff));
+        }
+        CHECK(actual == expected);
     }
 }

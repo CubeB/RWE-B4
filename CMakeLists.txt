@@ -1480,6 +1480,7 @@ set(TEST_FILES
     )
 
 add_executable(rwe_test ${TEST_FILES})
+target_compile_definitions(rwe_test PRIVATE RWE_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 target_link_libraries(rwe_test Catch2::Catch2WithMain)
 target_link_libraries(rwe_test rapidcheck_catch)
 target_link_libraries(rwe_test librwe)

@@ -211,13 +211,29 @@ formats, package staging or extraction counterpart. This uses the existing
 spec-room prose only; no decompilation is opened and no new original-game
 behavior is inferred. No original runtime validation is claimed.
 
-The backend candidate is libarchive as an in-process C library, because it
-offers typed entry iteration and extraction APIs and reports ZIP, RAR and
-7-Zip readers without requiring an external executable. Source/version,
-compression variants, enabled codecs, notices and packaging details are to be
-recorded once proved against the pinned source and Windows/Linux build matrix.
-The selection remains conditional on that proof, especially the Windows MSVC
-build and static runtime packaging.
+The selected backend is libarchive 3.8.10, pinned at
+`0c48412be2d94afe1859a807ea7896a18d8900bd`, plus XZ/liblzma 5.8.2 pinned at
+`3d078b52adbff566ccfc51067dfbf742ecf3ef86`. The in-process reader registers
+ZIP, RAR4, RAR5 and 7z readers. ZIP deflate uses the project's existing zlib;
+7z LZMA/LZMA2 and the RAR readers use the bundled liblzma. Other optional
+codecs and external archive executables are disabled. These source revisions
+and upstream `COPYING` notices are distributed with the project; the generated
+RAR5 regression fixture retains its upstream 3-clause BSD provenance in
+`tests/fixtures/archive-backend/README.md`. A MinGW proof build compiled the
+four readers and static XZ/libarchive libraries. The Windows MSVC + Linux
+packaging/build matrix remains pending under PR #877 and `ci:full`.
+
+The shared API returns typed file/directory inventory entries and extracts
+only into a newly-created staging directory. It rejects path traversal,
+absolute/drive/alternate-stream paths, Windows aliases, case-folded
+collisions, links, special files and encrypted entries; it caps the archive at
+100,000 entries and 16 GiB of declared/actual expanded data. The caller may
+cancel between data chunks; on failure or cancellation only the directory it
+created is removed. It does not overwrite an existing staging path or execute
+extracted files. RAR4/RAR5 variants, archive-level encryption behavior,
+cross-platform path edge cases, and the full Windows static packaging proof
+still need test/CI confirmation. Supported means these registered readers and
+codecs, not every compression method or encrypted variant of each format.
 
 The shared archive interface will inventory entries and extract into a new,
 empty staging directory created and owned by the caller. It must reject paths

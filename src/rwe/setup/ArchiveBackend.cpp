@@ -106,10 +106,12 @@ namespace rwe
                 const auto* rawPath = archive_entry_pathname_utf8(entry);
                 if (!rawPath) rawPath = archive_entry_pathname(entry);
                 if (!rawPath) throw std::runtime_error("Archive entry has no path");
-                auto relative = checkedRelativePath(rawPath);
+                const auto type = archive_entry_filetype(entry);
+                std::string normalizedPath(rawPath);
+                if (type == AE_IFDIR && !normalizedPath.empty() && normalizedPath.back() == '/') normalizedPath.pop_back();
+                auto relative = checkedRelativePath(normalizedPath);
                 auto canonical = lowerAscii(relative.generic_string());
                 if (!names.insert(canonical).second) throw std::runtime_error("Archive has colliding paths");
-                const auto type = archive_entry_filetype(entry);
                 if (type != AE_IFREG && type != AE_IFDIR) throw std::runtime_error("Archive contains a special file");
                 const auto signedSize = archive_entry_size(entry);
                 if (type == AE_IFREG && (!archive_entry_size_is_set(entry) || signedSize < 0))
@@ -153,7 +155,9 @@ namespace rwe
             {
                 const auto* rawPath = archive_entry_pathname_utf8(entry);
                 if (!rawPath) rawPath = archive_entry_pathname(entry);
-                const auto relative = checkedRelativePath(rawPath ? rawPath : "");
+                std::string normalizedPath(rawPath ? rawPath : "");
+                if (archive_entry_filetype(entry) == AE_IFDIR && !normalizedPath.empty() && normalizedPath.back() == '/') normalizedPath.pop_back();
+                const auto relative = checkedRelativePath(normalizedPath);
                 const auto destination = stagingDirectory / relative;
                 if (archive_entry_filetype(entry) == AE_IFDIR)
                 {
