@@ -71,6 +71,13 @@ namespace rwe
         /** A disabled button draws its greyed frame and ignores all input. */
         bool enabled{true};
 
+        /** A download gadget whose dedicated GAF is absent draws only its bevel. */
+        bool noPictureBevel{false};
+        Color noPictureLight;
+        Color noPictureDark;
+        Color noPictureDisabled;
+        Color noPictureInterior;
+
         BehaviorMode behaviorMode{BehaviorMode::Button};
 
         unsigned int currentStage{0};
@@ -159,6 +166,15 @@ namespace rwe
         void setCaptionShadow(bool shadow);
 
         void setDisabledSprite(const std::shared_ptr<Sprite>& sprite);
+
+        void setNoPictureBevel(bool value) { noPictureBevel = value; }
+        void setNoPictureBevelColors(Color light, Color dark, Color disabled, Color interior)
+        {
+            noPictureLight = light;
+            noPictureDark = dark;
+            noPictureDisabled = disabled;
+            noPictureInterior = interior;
+        }
 
         void setEnabled(bool enabled);
 

@@ -68,6 +68,8 @@ namespace rwe
         SharedTextureHandle getDefaultTexture();
         std::shared_ptr<SpriteSeries> getDefaultSpriteSeries();
         std::shared_ptr<Sprite> getDefaultSprite();
+        /** GUI palette slots remapped to the active game palette (BUILD-DOWNLOAD-BEVEL-850). */
+        Color getGuiPaletteColor(unsigned int slot) const;
         std::shared_ptr<Sprite> getMinimap(const std::string& mapName);
 
         /**
