@@ -320,3 +320,33 @@ launcher smoke test then called `getInstalledMods(getRweModsPath(), Data)` with
 the same isolated root and found the `ta` entry. The fixture source listing,
 sizes and modification times matched before and after. No real user data root
 was overwritten.
+
+### PACKAGE-009: selected-root identity for launcher inspection
+
+The launcher may inspect the selected data directory through a Windows
+junction or symbolic link. The native read-only inspector reports the
+physical/canonical root, while the launcher retains the selected path for
+launch. Compare filesystem-resolved identities when associating an inspection
+candidate with the selected root; keep candidate-count, complete-report, and
+error requirements unchanged. Resolve paths asynchronously at the process
+boundary and leave the existing pure report validators available for reports
+whose paths are already normalized. Preserve the user's selected path in
+launch configuration.
+
+Evidence, 2026-10-26: the selected `ta` path
+`C:\Users\Baile\AppData\Roaming\RWE\Data` is a directory junction to
+`D:\RWE-Data`. The packaged `rwe_setup --inspect-package <selected path>
+--json` returned `complete: true`, no warnings, and exactly one `base`
+candidate whose root was the physical target `D:/RWE-Data`. The launcher
+previously compared `path.resolve` strings and therefore rejected the valid
+candidate. The captured report is
+`D:\RWE-plan-issues-20261025\ta-inspection-junction.json`.
+
+This is RWE-original launcher path identity and has no original game
+counterpart. PACKAGE-001's static comparison at byte-tactics revision
+`e89721c46c3fa06e59558419b54fe26061fafb73` (GOG/v3.1 `TotalA.exe` MD5
+`8e74a1dffa1f5988624c52048f5b20cd`) establishes archive discovery and
+resolution, not launcher inspection or Windows junction handling. No original
+runtime behavior is claimed or changed. Explicit `rwe_mod.json` metadata
+continues to override inferred roots, and the existing Escalation `builderGuis`
+inference remains as recorded in PACKAGE-003.
