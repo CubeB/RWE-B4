@@ -96,9 +96,14 @@ namespace rwe
             }
 
             target->common.name = entry.unitName;
+            // BUILD-DOWNLOAD-850: these records replace the greyed IGPATCH
+            // control itself, so the product inherits its name and active
+            // state rather than the placeholder's disabled state.
+            target->grayedOut = false;
             // CORACA2.GUI's empty slots lack the attribute, and it is what
             // draws a build button's queue count where the others draw it.
             target->common.attribs |= static_cast<int>(GuiButtonAttrib::BehaviorBuildButton);
+            target->downloadMenuProduct = true;
             ++result.placed;
         }
         return result;

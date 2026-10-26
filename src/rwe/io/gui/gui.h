@@ -141,6 +141,9 @@ namespace rwe
          */
         std::optional<int> maxChars;
 
+        /** Runtime-only marker for a download-menu product's dedicated gadget GAF binding. */
+        bool downloadMenuProduct{false};
+
         bool operator==(const GuiEntry& rhs) const;
 
         bool operator!=(const GuiEntry& rhs) const;

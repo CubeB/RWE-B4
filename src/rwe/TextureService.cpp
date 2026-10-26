@@ -1,5 +1,7 @@
 #include "TextureService.h"
 #include <algorithm>
+#include <cstdlib>
+#include <limits>
 #include <rwe/util/SpanStream.h>
 #include <rwe/io/fnt/Fnt.h>
 #include <rwe/io/gaf/GafArchive.h>
@@ -93,6 +95,35 @@ namespace rwe
         auto series = std::make_shared<SpriteSeries>();
         series->sprites.push_back(std::make_shared<Sprite>(std::move(sprite)));
         defaultSpriteSeries = std::move(series);
+    }
+
+    Color TextureService::getGuiPaletteColor(unsigned int slot) const
+    {
+        if (slot >= 256 || palette->empty())
+        {
+            throw std::runtime_error("GUI palette slot or active palette is invalid");
+        }
+        auto guiPalette = fileSystem->readPaletteOrPcx("GUIPAL");
+        if (!guiPalette || slot >= guiPalette->size())
+        {
+            throw std::runtime_error("Couldn't read GUI palette slot");
+        }
+        const auto& wanted = (*guiPalette)[slot];
+        auto best = palette->begin();
+        auto distance = std::numeric_limits<unsigned int>::max();
+        for (auto current = palette->begin(); current != palette->end(); ++current)
+        {
+            auto dr = std::abs(static_cast<int>(current->r) - wanted.r);
+            auto dg = std::abs(static_cast<int>(current->g) - wanted.g);
+            auto db = std::abs(static_cast<int>(current->b) - wanted.b);
+            auto candidate = static_cast<unsigned int>(dr + dg + db);
+            if (candidate < distance)
+            {
+                best = current;
+                distance = candidate;
+            }
+        }
+        return *best;
     }
 
     std::optional<std::shared_ptr<SpriteSeries>> TextureService::getGafEntryInternal(const std::string& gafName, const std::string& entryName)

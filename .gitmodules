@@ -25,3 +25,9 @@
 [submodule "libs/sdl3_mixer"]
 	path = libs/sdl3_mixer
 	url = https://github.com/libsdl-org/SDL_mixer.git
+[submodule "libs/libarchive"]
+	path = libs/libarchive
+	url = https://github.com/libarchive/libarchive.git
+[submodule "libs/xz"]
+	path = libs/xz
+	url = https://github.com/tukaani-project/xz.git

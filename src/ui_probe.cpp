@@ -30,6 +30,8 @@
 #include <rwe/Viewport.h>
 #include <rwe/events.h>
 #include <rwe/io/gui/gui.h>
+#include <rwe/game/DownloadMenus.h>
+#include <rwe/game/BuilderGuisDatabase.h>
 #include <rwe/io/tdf/tdf.h>
 #include <rwe/render/GraphicsContext.h>
 #include <rwe/render/OpenGlVersion.h>
@@ -320,6 +322,7 @@ int main(int argc, char* argv[])
         // which is what this took before the option existed.
         CompositeVirtualFileSystem vfs;
         std::vector<std::string> requestedPanels;
+        std::vector<std::pair<std::string, unsigned int>> requestedBuilderPages;
         bool multiplayerScreens = false;
         bool multiplayerFlow = false;
         bool renderRequested = false;
@@ -376,9 +379,21 @@ int main(int argc, char* argv[])
                 requestedPanels.emplace_back(argv[++i]);
                 continue;
             }
+            if (arg == "--builder-page" && i + 2 < argc)
+            {
+                auto name = std::string(argv[++i]);
+                auto page = static_cast<unsigned int>(std::stoul(argv[++i]));
+                if (page == 0)
+                {
+                    throw std::runtime_error("builder page numbers start at 1");
+                }
+                requestedBuilderPages.emplace_back(std::move(name), page);
+                continue;
+            }
             if (arg == "--help" || arg == "-h")
             {
                 std::cout << "usage: ui_probe [--panel NAME]... <data path>...\n"
+                          << "  --builder-page UNIT PAGE composes a stock build page with download overlays.\n"
                           << "  --antialias checks production AA/shading shaders on a hidden GL context.\n"
                           << "  --map-layout checks the original map selector font, rows and artwork.\n"
                       << "  --map-names-cache checks the real skirmish map list and its per-scene cache.\n"
@@ -428,6 +443,102 @@ int main(int argc, char* argv[])
         TdfBlock emptySoundLookup;
 
         UiFactory factory(&textureService, &audioService, &emptySoundLookup, &vfs, pathMapping.get(), 640, 480);
+
+        if (!requestedBuilderPages.empty())
+        {
+            ShaderService shaders = ShaderService::createShaderService(graphics);
+            Viewport uiViewport(0, 0, 640, 480);
+            UiRenderService ui(&graphics, &shaders, &uiViewport);
+            graphics.setViewport(0, 0, 640, 480);
+            graphics.disableDepthBuffer();
+            graphics.enableBlending();
+
+            for (const auto& [builder, requestedPage] : requestedBuilderPages)
+            {
+                std::vector<std::vector<GuiEntry>> pages;
+                for (unsigned int page = 1;; ++page)
+                {
+                    const auto guiName = builder + std::to_string(page);
+                    auto raw = vfs.readFile("guis/" + guiName + ".GUI");
+                    if (!raw)
+                    {
+                        break;
+                    }
+                    auto entries = parseGuiFromBytes(*raw);
+                    if (!entries)
+                    {
+                        throw std::runtime_error("could not parse builder page " + guiName);
+                    }
+                    pages.push_back(std::move(*entries));
+                }
+
+                std::vector<DownloadMenuEntry> downloadEntries;
+                for (const auto& name : vfs.getFileNames("download", ".tdf"))
+                {
+                    auto bytes = vfs.readFile("download/" + name);
+                    if (!bytes)
+                    {
+                        continue;
+                    }
+                    auto parsed = parseDownloadMenuEntries(parseListTdfFromBytes(*bytes));
+                    downloadEntries.insert(downloadEntries.end(), parsed.begin(), parsed.end());
+                }
+                BuilderGuisDatabase database;
+                database.addBuilderGui(builder, std::move(pages));
+                const auto result = applyDownloadMenuEntries(database, downloadEntries);
+                auto resolvedPages = database.tryGetBuilderGui(builder);
+                if (!resolvedPages || requestedPage > resolvedPages->get().size())
+                {
+                    throw std::runtime_error("requested builder page does not exist after download overlays");
+                }
+                const auto guiName = builder + std::to_string(requestedPage);
+                auto panel = factory.panelFromGuiFile(guiName, resolvedPages->get()[requestedPage - 1]);
+                std::set<std::string> activations;
+                panel->groupMessages().subscribe([&activations](const auto& msg) {
+                    if (std::get_if<ActivateMessage>(&msg.message) != nullptr)
+                    {
+                        activations.insert(msg.controlName);
+                        std::cout << "[MSG topic=" << msg.topic << " control=" << msg.controlName << "]";
+                    }
+                });
+                std::cout << "download overlays placed=" << result.placed << " skipped=" << result.skipped << "\n";
+                dumpPanel(*panel, guiName + " composed");
+                clickAll(*panel, guiName + " composed");
+                if (toUpper(builder) == "ARMACK" && requestedPage == 2)
+                {
+                    for (const auto* product : {"ARMANNI", "ARMAMD", "ARMASP", "ARMFLAK", "ARMFORT", "ARMAMB"})
+                    {
+                        auto button = panel->find<UiComponent>(product);
+                        if (!button || button->get().getWidth() != 64 || button->get().getHeight() != 64)
+                        {
+                            throw std::runtime_error(std::string("ARMACK2 slot lost its authored 64x64 hitbox: ") + product);
+                        }
+                        if (!activations.contains(product))
+                        {
+                            throw std::runtime_error(std::string("ARMACK2 product click did not dispatch: ") + product);
+                        }
+                    }
+                    for (const auto* control : {"ARMORDERS", "ARMBUILD", "ARMPREV", "ARMNEXT"})
+                    {
+                        if (!activations.contains(control))
+                        {
+                            throw std::runtime_error(std::string("ARMACK2 control click did not dispatch: ") + control);
+                        }
+                    }
+                }
+                if (renderRequested)
+                {
+                    graphics.clearColor();
+                    panel->render(ui);
+                    glFinish();
+                    const auto file = "probe_builder_" + guiName + ".ppm";
+                    screenshot(file.c_str());
+                    std::cout << "  wrote " << file << "\n";
+                }
+            }
+            std::cout << "probe done\n";
+            return 0;
+        }
 
         if (mapLayout || mapNamesCache || menuInputTiming)
         {

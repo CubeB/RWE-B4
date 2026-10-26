@@ -199,3 +199,124 @@ package records and the resulting generation. It also checks stale-snapshot
 rejection and that a failed transaction leaves the prior JSON intact and
 permits a subsequent update. These are RWE registry tests, not original-game
 execution or gameplay-compatibility evidence.
+
+### PACKAGE-007: bundled extraction backend boundary
+
+Selecting and packaging ZIP/RAR/7z extraction, presenting archive inventories,
+and extracting user-selected packages into an RWE-owned staging directory are
+RWE-original package-management behavior. MOD-ARCHIVE-01 in PACKAGE-001 is the
+static comparison boundary: the original's archive discovery and resolution
+concerns in-game TA data, and provide no per-user installer, external archive
+formats, package staging or extraction counterpart. This uses the existing
+spec-room prose only; no decompilation is opened and no new original-game
+behavior is inferred. No original runtime validation is claimed.
+
+The selected backend is libarchive 3.8.10, pinned at
+`0c48412be2d94afe1859a807ea7896a18d8900bd`, plus XZ/liblzma 5.8.2 pinned at
+`3d078b52adbff566ccfc51067dfbf742ecf3ef86`. The in-process reader registers
+ZIP, RAR4, RAR5 and 7z readers. ZIP deflate uses the project's existing zlib;
+7z LZMA/LZMA2 and the RAR readers use the bundled liblzma. Other optional
+codecs are disabled. Only libarchive's no-filter handler is registered: outer
+compression wrappers are unsupported, and filters such as grzip that can run
+programs from `PATH` are not registered. These source revisions, libarchive's
+`COPYING`, XZ's license summary and liblzma's actual `COPYING.0BSD` text are
+distributed in CPack and AppImage packages; the generated RAR5 regression
+fixture retains its upstream 3-clause BSD provenance in
+`tests/fixtures/archive-backend/README.md`. A MinGW proof build compiled the
+four readers and static XZ/libarchive libraries. The Windows MSVC + Linux
+packaging/build matrix remains pending under PR #877 and `ci:full`.
+
+The shared API returns typed file/directory inventory entries and extracts
+only into a newly-created staging directory. It rejects path traversal,
+absolute/drive/alternate-stream paths, Windows aliases, case-folded
+collisions, links, special files and encrypted entries; it caps the archive at
+100,000 entries and 16 GiB of declared/actual expanded data. The caller may
+cancel between data chunks; on failure or cancellation only the directory it
+created is removed. It does not overwrite an existing staging path or execute
+extracted files. Entry paths must be representable as UTF-8; valid Unicode is
+preserved independently of the process locale. On POSIX, libarchive header
+decoding and UTF-8 pathname access run under a thread-local UTF-8 locale that
+is restored before returning to callers or invoking extraction progress
+callbacks; the process-wide locale is unchanged. Invalid UTF-8 remains an
+error. Windows device aliases (including COM/LPT superscript-digit forms),
+control characters and Unicode case aliases are refused. Supported
+means these registered readers and entry codecs, not every compression method,
+outer wrapper or encrypted variant of each format. RAR4 variants,
+archive-level encryption behavior, cancellation latency within one decoder
+chunk, and broader cross-platform path edge cases remain explicit follow-up
+coverage rather than claims made by this slice. The advanced expansion,
+memory and nesting-depth policy remains #784 and must be settled before the
+launcher exposes archive installation.
+
+The shared archive interface will inventory entries and extract into a new,
+empty staging directory created and owned by the caller. It must reject paths
+that escape staging, links unless an explicitly safe policy is proven, and
+colliding/aliased destinations; failures or cancellation remove only that
+staging directory. It never overwrites an existing package, invokes an
+installer, or claims that extracted data is gameplay-compatible. Existing
+HPI/UFO/CCX/GPF/GP3 archive interpretation and engine resolution are outside
+this interface. ZIP, RAR4, RAR5 and 7z method coverage, encrypted-header
+behavior, expansion bounds, cancellation granularity and failure cleanup must
+be established with generated fixtures; unsupported or password-protected
+content is reported explicitly rather than treated as a complete extraction.
+
+This section is the implementation contract and reference boundary. It does
+not claim byte-tactics comparison for RWE-original installer behavior, nor an
+executed original-game check.
+
+This slice is the shared native backend foundation. It does not yet change the
+launcher or turn PACKAGE-003's extraction-required inspection result into an
+installed/imported package workflow; selection, staging orchestration and the
+launcher presentation remain later package-management integration work.
+
+## PACKAGE-008: startup base-data import policy
+
+Issue #881, 2026-10-26. Launcher startup checks the existing engine data root
+for usable base-game archives before offering any import UI. If absent, it runs
+the shipped `rwe_setup` automatic import command without `--from`; the native
+setup command already validates the supported Steam/GOG/retail discovery
+candidates and copies data into the engine data directory. It does not force an
+overwrite. A successful process exit is verified by re-reading the resulting
+data root before the launcher reports success. On failure or no discovered
+source, the launcher offers the existing manual directory selection flow.
+Manual import continues to validate the known archive hashes and copies those
+files; source files are preserved.
+
+This sequencing and its UI feedback are RWE-original launcher/setup policy,
+not an original-runtime behavior. PACKAGE-001's static comparison at
+byte-tactics revision `e89721c46c3fa06e59558419b54fe26061fafb73` (GOG/v3.1
+`TotalA.exe` MD5 `8e74a1dffa1f5988624c52048f5b20cd`) establishes original
+archive registration from existing data, not an installer or launcher import
+wizard. INSTALL-UX-001 establishes that the separate RWE distribution/import
+presentation has no counterpart in the matching executable reference; it did
+not inspect an external historical installer. No original runtime or
+installer was executed for this change. No original parity is claimed.
+
+Implementation verification, 2026-10-26: the launcher checks `--check-existing`
+before showing UI, verifies every known archive hash in a configured `mods/ta`
+root, and checks again after an automatic native import exits successfully.
+The branch one-shot prevents a `REFRESH_INSTALLED_MODS` feedback action from
+restarting setup. Targeted launcher tests cover existing data, check-before-UI,
+automatic discovery success/failure, re-entered startup actions, manual
+selection success/failure and thrown copy errors. The two affected Jest suites
+passed (24 tests); launcher TypeScript checking and ESLint on touched files
+passed. `npm run build:all:prod` completed; webpack emitted its existing
+optional dependency and critical dependency warnings for master/main and the
+renderer compiled successfully.
+
+With local shipped data, the existing native setup binary
+`D:\RWE-task-775\build-775-ninja2\rwe_setup.exe` reported existing usable data
+in `D:\RWE-Data`. Its automatic `--dry-run --to <empty temporary directory>`
+found `D:\Total Annihilation\Total Annihilation`, listing 30 archives, 5 films
+and 18 music tracks (about 1.0 GB); it reported that nothing changed. A before
+and after listing of source paths, sizes and modification times matched. This
+is a native importer dry run and local data check, not a complete copy test and
+not an original-game execution. No original runtime or installer was run.
+
+An isolated native copy smoke test used a temporary source containing the two
+required archive filenames and an isolated `%APPDATA%`. The native importer
+copied both files into that data root, and `--check-existing` accepted it. A
+launcher smoke test then called `getInstalledMods(getRweModsPath(), Data)` with
+the same isolated root and found the `ta` entry. The fixture source listing,
+sizes and modification times matched before and after. No real user data root
+was overwritten.

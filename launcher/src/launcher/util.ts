@@ -6,6 +6,7 @@ import * as rxop from "rxjs/operators";
 import { chooseOp } from "../common/rxutil";
 import { RweModJson } from "../common/mods";
 import { enumerateValues, HKEY, RegistryValueType } from "./registry";
+import { execFile } from "child_process";
 
 const taModFiles = new Map<string, string>([
   [
@@ -157,6 +158,43 @@ export function automaticallySetUpTaMod(outDir: string): Promise<boolean> {
   });
 }
 
+/** Run the shipped native importer, which owns platform discovery and copy validation. */
+export function checkExistingTaData(setupExe: string): Promise<boolean> {
+  return new Promise(resolve => {
+    execFile(
+      setupExe,
+      ["--check-existing"],
+      { windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
+      error => resolve(!error)
+    );
+  });
+}
+
+export function automaticallyImportTaData(
+  setupExe: string
+): Promise<string | undefined> {
+  return new Promise(resolve => {
+    execFile(
+      setupExe,
+      [],
+      { windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error) {
+          resolve((stderr || stdout || error.message).trim());
+        } else {
+          checkExistingTaData(setupExe).then(usable =>
+            resolve(
+              usable
+                ? undefined
+                : "Import completed but the resulting game data is not usable."
+            )
+          );
+        }
+      }
+    );
+  });
+}
+
 function toMapOp<K, V>(): rx.OperatorFunction<readonly [K, V], Map<K, V>> {
   return rxop.reduce((m, [k, v]) => {
     m.set(k, v);
@@ -234,6 +272,22 @@ function hasAllValues<K, V>(a: Map<K, V>, b: Map<K, V>): boolean {
     }
   }
   return true;
+}
+
+/** A configured TA mod is usable only when it contains every known base archive. */
+export function hasUsableTaMod(directory: string): Promise<boolean> {
+  return new Promise(resolve => {
+    rx.from([directory])
+      .pipe(
+        rxop.concatMap(getHashes),
+        translateOp(taModFiles),
+        toMapOp(),
+        rxop.map(files => hasAllValues(files, taModFiles)),
+        rxop.defaultIfEmpty(false),
+        rxop.catchError(() => rx.of(false))
+      )
+      .subscribe({ next: resolve, complete: () => resolve(false) });
+  });
 }
 
 function getHash(filePath: string): Promise<string> {
