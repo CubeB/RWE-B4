@@ -3,6 +3,14 @@ export interface NextAction {
   path?: string;
 }
 
+export interface StartAutomaticAction {
+  type: "wizard/START_AUTOMATIC";
+}
+
+export function startAutomatic(): StartAutomaticAction {
+  return { type: "wizard/START_AUTOMATIC" };
+}
+
 export function next(path?: string): NextAction {
   return {
     type: "wizard/NEXT",
@@ -22,11 +30,13 @@ export function done(): DoneAction {
 
 export interface FailAction {
   type: "wizard/FAIL";
+  message?: string;
 }
 
-export function fail(): FailAction {
+export function fail(message?: string): FailAction {
   return {
     type: "wizard/FAIL",
+    message,
   };
 }
 
@@ -49,4 +59,9 @@ export function close(): CloseAction {
 }
 
 export type WizardAction =
-  NextAction | DoneAction | FailAction | OpenAction | CloseAction;
+  | NextAction
+  | StartAutomaticAction
+  | DoneAction
+  | FailAction
+  | OpenAction
+  | CloseAction;
