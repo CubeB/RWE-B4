@@ -113,6 +113,94 @@ namespace rwe
             writeArchiveEntries(path, sevenZip, {{entryPath, symlink}});
         }
 
+        // PACKAGE-007 covers this RWE-original archive boundary. Write ZIP records
+        // directly when a fixture needs UTF-8 names. libarchive's
+        // ZIP writer converts pathname_utf8 through the active locale on some
+        // platforms, so using it makes the fixture depend on whether the test
+        // process was started in a UTF-8 locale. ZIP's language-encoding flag
+        // defines these name bytes as UTF-8 and keeps the test host-independent.
+        void writeUtf8ZipEntries(const fs::path& path, const std::vector<std::string>& entryPaths)
+        {
+            struct CentralEntry
+            {
+                std::string path;
+                std::uint32_t crc;
+                std::uint32_t size;
+                std::uint32_t offset;
+            };
+
+            auto put16 = [](std::ostream& out, std::uint16_t value) {
+                out.put(static_cast<char>(value & 0xff));
+                out.put(static_cast<char>((value >> 8) & 0xff));
+            };
+            auto put32 = [](std::ostream& out, std::uint32_t value) {
+                for (int shift = 0; shift < 32; shift += 8)
+                    out.put(static_cast<char>((value >> shift) & 0xff));
+            };
+            auto crc32 = [](std::string_view bytes) {
+                std::uint32_t crc = 0xffffffffu;
+                for (const auto byte : bytes)
+                {
+                    crc ^= static_cast<unsigned char>(byte);
+                    for (int bit = 0; bit < 8; ++bit)
+                        crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u)));
+                }
+                return ~crc;
+            };
+
+            std::ofstream out(path, std::ios::binary);
+            REQUIRE(out);
+            std::vector<CentralEntry> central;
+            for (const auto& entryPath : entryPaths)
+            {
+                REQUIRE(entryPath.size() <= 0xffff);
+                const auto offset = static_cast<std::uint32_t>(static_cast<std::streamoff>(out.tellp()));
+                const auto crc = crc32(ArchiveBytes);
+                put32(out, 0x04034b50); // Local file header
+                put16(out, 20);
+                put16(out, 0x0800); // UTF-8 names
+                put16(out, 0); // Stored
+                put16(out, 0); put16(out, 0);
+                put32(out, crc);
+                put32(out, static_cast<std::uint32_t>(ArchiveBytes.size()));
+                put32(out, static_cast<std::uint32_t>(ArchiveBytes.size()));
+                put16(out, static_cast<std::uint16_t>(entryPath.size()));
+                put16(out, 0);
+                out.write(entryPath.data(), static_cast<std::streamsize>(entryPath.size()));
+                out.write(ArchiveBytes.data(), static_cast<std::streamsize>(ArchiveBytes.size()));
+                central.push_back({entryPath, crc, static_cast<std::uint32_t>(ArchiveBytes.size()), offset});
+            }
+
+            const auto centralOffset = static_cast<std::uint32_t>(static_cast<std::streamoff>(out.tellp()));
+            for (const auto& entry : central)
+            {
+                put32(out, 0x02014b50); // Central directory file header
+                put16(out, static_cast<std::uint16_t>((3 << 8) | 20));
+                put16(out, 20);
+                put16(out, 0x0800);
+                put16(out, 0);
+                put16(out, 0); put16(out, 0);
+                put32(out, entry.crc);
+                put32(out, entry.size);
+                put32(out, entry.size);
+                put16(out, static_cast<std::uint16_t>(entry.path.size()));
+                put16(out, 0); put16(out, 0);
+                put16(out, 0); put16(out, 0);
+                put32(out, 0100644u << 16);
+                put32(out, entry.offset);
+                out.write(entry.path.data(), static_cast<std::streamsize>(entry.path.size()));
+            }
+            const auto centralSize = static_cast<std::uint32_t>(static_cast<std::streamoff>(out.tellp())) - centralOffset;
+            put32(out, 0x06054b50); // End of central directory
+            put16(out, 0); put16(out, 0);
+            put16(out, static_cast<std::uint16_t>(central.size()));
+            put16(out, static_cast<std::uint16_t>(central.size()));
+            put32(out, centralSize);
+            put32(out, centralOffset);
+            put16(out, 0);
+            REQUIRE(out.good());
+        }
+
         void writeGzipWrappedRawFile(const fs::path& path)
         {
             auto* writer = archive_write_new();
@@ -249,8 +337,8 @@ namespace rwe
 
 #ifdef _WIN32
         const auto unicodeArchive = temp.path / "unicode-alias.zip";
-        writeArchiveEntries(unicodeArchive, false,
-            {{"payload/\xC3\x84.txt", false}, {"payload/\xC3\xA4.txt", false}});
+        writeUtf8ZipEntries(unicodeArchive,
+            {"payload/\xC3\x84.txt", "payload/\xC3\xA4.txt"});
         CHECK_THROWS(inspectArchive(unicodeArchive));
 #endif
     }
@@ -261,7 +349,7 @@ namespace rwe
         const std::string entryPath = "payload/\xE2\x98\x83-\xC3\xA9.bin";
         const auto archivePath = temp.path / "unicode.zip";
         const auto staging = temp.path / "unicode";
-        writeArchive(archivePath, false, entryPath.c_str());
+        writeUtf8ZipEntries(archivePath, {entryPath});
 
         const auto inventory = inspectArchive(archivePath);
         REQUIRE(inventory.entries.size() == 1);
@@ -302,7 +390,7 @@ namespace rwe
         for (const auto& entryPath : unsafePaths)
         {
             const auto archivePath = temp.path / ("unsafe-" + std::to_string(index++) + ".zip");
-            writeArchive(archivePath, false, entryPath.c_str());
+            writeUtf8ZipEntries(archivePath, {entryPath});
             CHECK_THROWS(inspectArchive(archivePath));
         }
     }

@@ -183,6 +183,11 @@ set(LIBLZMA_INCLUDE_DIRS "${LIBLZMA_INCLUDE_DIR}")
 set(LIBLZMA_LIBRARY liblzma)
 set(LIBLZMA_LIBRARIES liblzma)
 
+set(_RWE_LibLZMA_DIR "${LibLZMA_DIR}")
+set(_RWE_FIND_PACKAGE_PREFER_CONFIG "${CMAKE_FIND_PACKAGE_PREFER_CONFIG}")
+set(LibLZMA_DIR "${PROJECT_SOURCE_DIR}/cmake/liblzma")
+set(CMAKE_FIND_PACKAGE_PREFER_CONFIG TRUE)
+
 set(ENABLE_TEST OFF CACHE BOOL "" FORCE)
 set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 set(ENABLE_TAR OFF CACHE BOOL "" FORCE)
@@ -204,7 +209,17 @@ set(ENABLE_ICONV OFF CACHE BOOL "" FORCE)
 set(ENABLE_ACL OFF CACHE BOOL "" FORCE)
 set(ENABLE_XATTR OFF CACHE BOOL "" FORCE)
 add_subdirectory("libs/libarchive")
+get_directory_property(_RWE_HAVE_LZMA_H
+    DIRECTORY "${PROJECT_SOURCE_DIR}/libs/libarchive/libarchive" DEFINITION HAVE_LZMA_H)
+if(NOT _RWE_HAVE_LZMA_H)
+    message(FATAL_ERROR "Bundled libarchive was configured without the required 7z LZMA/LZMA2 codec")
+endif()
+set(LibLZMA_DIR "${_RWE_LibLZMA_DIR}")
+set(CMAKE_FIND_PACKAGE_PREFER_CONFIG "${_RWE_FIND_PACKAGE_PREFER_CONFIG}")
 target_link_libraries(archive_static rwe_zlib)
+# libarchive upstream marks this only for compiling its own objects. Consumers
+# also need it because every RWE binary links this archive statically.
+target_compile_definitions(archive_static INTERFACE LIBARCHIVE_STATIC)
 
 set(Protobuf_USE_STATIC_LIBS ON)
 find_package(Protobuf REQUIRED)
