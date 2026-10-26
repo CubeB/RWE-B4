@@ -3,6 +3,7 @@ import * as path from "path";
 import * as readline from "readline";
 import { Observable, Subject } from "rxjs";
 import { assertNever } from "../common/util";
+import { ResourceDirectories, resourceDirectoryKeys } from "../common/mods";
 
 export interface RweArgsPlayerHuman {
   type: "human";
@@ -42,6 +43,8 @@ export type RweArgsPlayerSlot =
 export interface RweArgs {
   playerName?: string;
   dataPaths?: string[];
+  /** Per-selected-package paths. MOD-DIRS-01 and BUILDER-GUI-RESOURCE-DIRECTORY.md. */
+  resourceDirectories?: ResourceDirectories;
   map?: string;
   interface?: string;
   port?: number;
@@ -194,6 +197,15 @@ export function serializeRweArgs(args: RweArgs): string[] {
   if (args.dataPaths) {
     for (const path of args.dataPaths) {
       option("data-path", path);
+    }
+  }
+  if (args.resourceDirectories) {
+    for (const key of resourceDirectoryKeys) {
+      const value = args.resourceDirectories[key];
+      if (value !== undefined) {
+        const cliKey = key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`);
+        option(`dir-${cliKey}`, value);
+      }
     }
   }
   if (args.map !== undefined) {

@@ -15,6 +15,9 @@ namespace rwe
         m.fonts = args.getString("dir-fonts", "fonts");
         m.gamedata = args.getString("dir-gamedata", "gamedata");
         m.guis = args.getString("dir-guis", "guis");
+        // RWE-original split: Escalation's guiE contains builder pages, not
+        // the front-end screens. See docs/BUILDER-GUI-RESOURCE-DIRECTORY.md.
+        m.builderGuis = args.getString("dir-builder-guis", m.guis);
         m.maps = args.getString("dir-maps", "maps");
         m.objects3d = args.getString("dir-objects3d", "objects3d");
         m.palettes = args.getString("dir-palettes", "palettes");

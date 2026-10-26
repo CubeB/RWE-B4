@@ -72,7 +72,7 @@ namespace rwe
                 {"id", id}, {"name", "Example mod"}, {"kind", "mod"}, {"version", "1.0"},
                 {"state", "installed"}, {"compatibility", "unverified"}, {"managed", true},
                 {"source", "original-download.ufo"}, {"contentPath", "packages/" + id},
-                {"dependencies", json::array()}, {"resourceDirectories", {{"units", "units"}}},
+                {"dependencies", json::array()}, {"resourceDirectories", {{"units", "units"}, {"builderGuis", "guiE"}}},
                 {"files", json::array({{{"path", "content.ufo"}, {"size", 3}, {"sha256", std::string(64, 'a')}}})}
             }})}};
         }
@@ -185,6 +185,19 @@ namespace rwe
         CHECK_FALSE(fs::exists(fixture.root / "registry.json"));
     }
 
+    TEST_CASE("package inspection routes Escalation builder pages to their separate GUI root", "[setup][packages]")
+    {
+        PackageFixture fixture;
+        fixture.write("Escalation/AE/marker.txt", "");
+        fixture.write("Escalation/UNITSE/ARMFOO.fbi", "[UNITINFO]{UnitName=ARMFOO;Objectname=ARMFOO;}");
+        fixture.write("Escalation/WEAPONE/ARMWEAPON.fbi", "[WEAPON]{}");
+        fixture.write("Escalation/GAMEDATE/marker.txt", "");
+        fixture.write("Escalation/GUIE/ARMACK2.GUI", "builder page");
+        const auto report = inspectContentPackage(fixture.root / "Escalation");
+        REQUIRE(report["candidates"].size() == 1);
+        CHECK(report["candidates"][0]["resourceDirectories"]["builderGuis"] == "guie");
+        CHECK_FALSE(report["candidates"][0]["resourceDirectories"].contains("guis"));
+    }
     TEST_CASE("loose map selection finds its case-insensitive partner without importing sibling maps", "[setup][packages]")
     {
         PackageFixture fixture;

@@ -26,10 +26,11 @@ import {
   RweArgsPlayerSlot,
 } from "../rwe";
 import { assertNever, masterServer, choose } from "../../common/util";
+import { resourceDirectoriesForMods } from "../../common/mods";
 import { EpicDependencies } from "./EpicDependencies";
 import { ReceiveCreateGameResponseAction } from "../masterClient/actions";
 
-function rweArgsFromCurrentGameState(
+export function rweArgsFromCurrentGameState(
   installedMods: InstalledModInfo[],
   game: CurrentGameState,
   startInfo: protocol.StartGamePayload
@@ -71,10 +72,16 @@ function rweArgsFromCurrentGameState(
   if (game.mapName === undefined) {
     throw new Error("map is not set");
   }
+  const selectedMods = choose(game.activeMods, name =>
+    installedMods.find(x => x.name === name)
+  );
+  const resourceSelection = resourceDirectoriesForMods(selectedMods);
+  if (resourceSelection.error) {
+    throw new Error(resourceSelection.error);
+  }
   return {
-    dataPaths: choose(game.activeMods, name =>
-      installedMods.find(x => x.name === name)
-    ).map(x => x.path),
+    dataPaths: selectedMods.map(x => x.path),
+    resourceDirectories: resourceSelection.resourceDirectories,
     map: game.mapName,
     port: 6670 + portOffset,
     players: playersArgs,
@@ -345,13 +352,20 @@ export const gameRoomEpic = (
           if (!room || !state.installedMods) {
             break;
           }
-          startInfo = action.payload;
-          const args = rweArgsFromCurrentGameState(
-            state.installedMods,
-            room,
-            action.payload
-          );
-          return runGame(room, { ...args, bridge: true });
+          try {
+            const args = rweArgsFromCurrentGameState(
+              state.installedMods,
+              room,
+              action.payload
+            );
+            startInfo = action.payload;
+            return runGame(room, { ...args, bridge: true });
+          } catch (error) {
+            return rx.of<AppAction>({
+              type: "LAUNCHER_ERROR",
+              message: `Could not start multiplayer game: ${error}`,
+            });
+          }
         }
         case "SEND_REQUEST_REJOIN": {
           clientService.requestRejoin();
@@ -408,17 +422,24 @@ export const gameRoomEpic = (
             console.log(`Could not write the rejoin bundle: ${error}`);
             break;
           }
-          const args = rweArgsFromCurrentGameState(
-            state.installedMods,
-            room,
-            startInfo
-          );
-          return runGame(room, {
-            ...args,
-            bridge: true,
-            rejoinFile: bundlePath,
-            rejoinTick: action.payload.tick,
-          });
+          try {
+            const args = rweArgsFromCurrentGameState(
+              state.installedMods,
+              room,
+              startInfo
+            );
+            return runGame(room, {
+              ...args,
+              bridge: true,
+              rejoinFile: bundlePath,
+              rejoinTick: action.payload.tick,
+            });
+          } catch (error) {
+            return rx.of<AppAction>({
+              type: "LAUNCHER_ERROR",
+              message: `Could not rejoin multiplayer game: ${error}`,
+            });
+          }
         }
         case "CHANGE_MAP": {
           const state = state$.value;

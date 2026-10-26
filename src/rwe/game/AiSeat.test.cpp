@@ -340,6 +340,7 @@ namespace rwe
         args.parse(2, argv);
         const auto paths = configuredPathMapping(args);
         CHECK(paths.units == "units");
+        CHECK(paths.builderGuis == "guis");
 
         SECTION("named profile")
         {
@@ -358,6 +359,39 @@ namespace rwe
             vfs.files.erase("ae/default.txt");
             CHECK(readClassicAiProfile(vfs, "MISSING", paths.ai).text.empty());
         }
+    }
+
+    TEST_CASE("builder GUIs inherit the general GUI root unless explicitly split", "[engine][mods][ui]")
+    {
+        OpaqueArgs args;
+        char program[] = "rwe";
+        char general[] = "--dir-guis=custom";
+        char* argv[] = {program, general};
+        args.parse(2, argv);
+        const auto inherited = configuredPathMapping(args);
+        CHECK(inherited.guis == "custom");
+        CHECK(inherited.builderGuis == "custom");
+
+        OpaqueArgs splitArgs;
+        char splitProgram[] = "rwe";
+        char splitGeneral[] = "--dir-guis=front";
+        char splitBuilder[] = "--dir-builder-guis=builder";
+        char* splitArgv[] = {splitProgram, splitGeneral, splitBuilder};
+        splitArgs.parse(3, splitArgv);
+        const auto split = configuredPathMapping(splitArgs);
+        CHECK(split.guis == "front");
+        CHECK(split.builderGuis == "builder");
+    }
+    TEST_CASE("builder GUIs can use a mod root without changing front-end GUI resources", "[engine][mods][ui]")
+    {
+        OpaqueArgs args;
+        char program[] = "rwe";
+        char option[] = "--dir-builder-guis=guiE";
+        char* argv[] = {program, option};
+        args.parse(2, argv);
+        const auto paths = configuredPathMapping(args);
+        CHECK(paths.builderGuis == "guiE");
+        CHECK(paths.guis == "guis");
     }
 
     TEST_CASE("a classic seat is built with a file system, a missing profile and all", "[ai][engine]")

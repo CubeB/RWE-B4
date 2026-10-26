@@ -7,7 +7,12 @@ import {
   normalizePlayerName,
   normalizePreferences,
 } from "./preferences";
-import { getInstalledMods } from "../common/mods";
+import {
+  getInstalledMods,
+  hasUniqueInspectionRoot,
+  resourceDirectoriesForMods,
+  resourceDirectoriesForSelectedRoot,
+} from "../common/mods";
 import { mergeConfig } from "./rweConfig";
 import reducer from "./reducers";
 import { canLaunchRwe } from "./state";
@@ -75,6 +80,96 @@ describe("launcher profile and mod selection", () => {
     expect(found[0].path).toBe(data);
   });
 
+  it("preserves explicit resource roots in mod metadata and leaves unknown fields on disk", async () => {
+    const mods = path.join(directory, "mods");
+    fs.mkdirSync(path.join(mods, "Escalation"), { recursive: true });
+    fs.writeFileSync(path.join(mods, "Escalation", "TAESC.gp3"), "archive");
+    const metadata = path.join(mods, "Escalation", "rwe_mod.json");
+    const original = JSON.stringify({
+      shortname: "Escalation",
+      name: "TA Escalation",
+      author: "Example",
+      resourceDirectories: {
+        builderGuis: "customGui",
+        futureRoot: "leave-alone",
+      },
+      futureMetadata: { enabled: true },
+    });
+    fs.writeFileSync(metadata, original);
+    const found = await getInstalledMods(mods);
+    expect(found[0].resourceDirectories).toEqual({ builderGuis: "customGui" });
+    expect(fs.readFileSync(metadata, "utf8")).toBe(original);
+  });
+
+  it("uses only a unique inspection candidate matching the selected data root", () => {
+    const selected = path.join(directory, "TAESC");
+    const report = {
+      complete: true,
+      candidates: [
+        {
+          root: selected,
+          resourceDirectories: { builderGuis: "guiE", guis: "other" },
+        },
+        {
+          root: path.join(directory, "nested"),
+          resourceDirectories: { builderGuis: "wrong" },
+        },
+      ],
+    };
+    expect(resourceDirectoriesForSelectedRoot(report, selected)).toEqual({
+      builderGuis: "guiE",
+      guis: "other",
+    });
+    expect(
+      hasUniqueInspectionRoot(
+        { complete: true, candidates: [{ root: selected.toUpperCase() }] },
+        selected
+      )
+    ).toBe(process.platform === "win32");
+    expect(
+      hasUniqueInspectionRoot(
+        { complete: false, candidates: [{ root: selected }] },
+        selected
+      )
+    ).toBe(false);
+    report.candidates.push({
+      root: selected,
+      resourceDirectories: { builderGuis: "ambiguous" },
+    });
+    expect(
+      resourceDirectoriesForSelectedRoot(report, selected)
+    ).toBeUndefined();
+  });
+
+  it("refuses conflicting selected resource roots rather than guessing across mods", () => {
+    expect(
+      resourceDirectoriesForMods([
+        { name: "TAESC", resourceDirectories: { builderGuis: "guiE" } },
+        {
+          name: "Other mod",
+          resourceDirectories: { builderGuis: "customGui" },
+        },
+      ])
+    ).toMatchObject({
+      error: expect.stringContaining("builderGuis is mapped to both guiE"),
+    });
+  });
+
+  it("reports inspection failures only for selected mod roots", () => {
+    const failed = {
+      name: "broken",
+      resourceDirectoryError: "could not run rwe_setup",
+    };
+    expect(resourceDirectoriesForMods([failed]).error).toContain(
+      "selected mod broken"
+    );
+    expect(
+      resourceDirectoriesForMods([
+        { name: "selected", resourceDirectories: { builderGuis: "guiE" } },
+      ])
+    ).toEqual({ resourceDirectories: { builderGuis: "guiE" } });
+  });
+
   it("passes the profile and selected overlays to the game with base data last", () => {
     let { state } = reducer(undefined, { type: "LAUNCHER_ERROR" });
     state = reducer(state, {
@@ -86,20 +181,30 @@ describe("launcher profile and mod selection", () => {
       type: "RECEIVE_INSTALLED_MODS",
       mods: [
         { name: "ta", path: "/base data" },
-        { name: "mod", path: "/my mod" },
+        {
+          name: "mod",
+          path: "/my mod",
+          resourceDirectories: { builderGuis: "guiE" },
+        },
       ],
     }).state;
     state = reducer(state, {
       type: "CHANGE_SINGLE_PLAYER_MODS",
       newMods: ["ta", "mod"],
     }).state;
-    expect(state.masterClient.masterServerConnectionStatus).toBe("disconnected");
+    expect(state.masterClient.masterServerConnectionStatus).toBe(
+      "disconnected"
+    );
     expect(canLaunchRwe(state)).toBe(true);
     const result = reducer(state, { type: "LAUNCH_RWE" });
     expect(result.sideEffects).toEqual([
       {
         type: "LAUNCH_RWE",
-        args: { playerName: "Oscar", dataPaths: ["/my mod", "/base data"] },
+        args: {
+          playerName: "Oscar",
+          dataPaths: ["/my mod", "/base data"],
+          resourceDirectories: { builderGuis: "guiE" },
+        },
       },
     ]);
   });
