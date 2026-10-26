@@ -1515,7 +1515,9 @@ add_executable(rwe_archive_test
     src/rwe/setup/ArchiveBackend.cpp
     src/rwe/setup/ArchiveBackend.test.cpp)
 target_compile_definitions(rwe_archive_test PRIVATE RWE_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_compile_features(rwe_archive_test PRIVATE cxx_std_20)
 target_link_libraries(rwe_archive_test PRIVATE Catch2::Catch2WithMain archive_static)
+target_copy_file(rwe_archive_test ${RWE_ZLIB_DLL})
 add_test(NAME rwe_archive_test COMMAND rwe_archive_test)
 
 install(TARGETS rwe rwe_bridge rwe_setup

@@ -89,7 +89,7 @@ namespace rwe
 
         ArchiveHeader readUtf8Header(archive* reader, archive_entry** entry)
         {
-            ArchiveUtf8Locale locale;
+            [[maybe_unused]] ArchiveUtf8Locale locale;
             const auto status = archive_read_next_header(reader, entry);
             if (status != ARCHIVE_OK) return {status, {}, false, 0};
             const auto* pathname = archive_entry_pathname_utf8(*entry);
