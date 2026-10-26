@@ -15,6 +15,7 @@
 #include <rwe/GlobalConfig.h>
 #include <rwe/MainMenuScene.h>
 #include <rwe/MainMenuScene_multiplayer.h>
+#include <rwe/atlas_util.h>
 #include <rwe/net/InviteCode.h>
 #include <rwe/net/stun_test_util.h>
 #include <rwe/SceneContext.h>
@@ -75,6 +76,26 @@ namespace rwe
         static void openMaps(MainMenuScene& scene) { scene.openMapSelectionDialog(); }
         static void selectMap(MainMenuScene& scene, const std::string& name) { scene.setCandidateSelectedMap(name); }
         static auto mapNames(MainMenuScene& scene) { return scene.getMapNames(); }
+        static void click(MainMenuScene& scene, const std::string& name)
+        {
+            auto* current = panel(scene);
+            if (!current)
+            {
+                throw std::runtime_error("No active menu panel while clicking " + name);
+            }
+            auto component = current->find<UiComponent>(name);
+            if (!component)
+            {
+                throw std::runtime_error("Menu panel has no component named " + name);
+            }
+            const auto x = current->getX() + component->get().getX() +
+                std::max(1, static_cast<int>(component->get().getWidth()) / 2);
+            const auto y = current->getY() + component->get().getY() +
+                std::max(1, static_cast<int>(component->get().getHeight()) / 2);
+            scene.onMouseDown(MouseButtonEvent(x, y, MouseButtonEvent::MouseButton::Left));
+            scene.onMouseUp(MouseButtonEvent(x, y, MouseButtonEvent::MouseButton::Left));
+            scene.update(16);
+        }
 
         /**
          * Points one scene's network at things of its own, so that two of
@@ -306,6 +327,9 @@ int main(int argc, char* argv[])
         bool multiplayerFlow = false;
         bool renderRequested = false;
         bool mapLayout = false;
+        bool mapNamesCache = false;
+        bool menuInputTiming = false;
+        bool atlasTiming = false;
         bool antialias = false;
         for (int i = 1; i < argc; ++i)
         {
@@ -318,6 +342,21 @@ int main(int argc, char* argv[])
             if (arg == "--map-layout")
             {
                 mapLayout = true;
+                continue;
+            }
+            if (arg == "--map-names-cache")
+            {
+                mapNamesCache = true;
+                continue;
+            }
+            if (arg == "--menu-input-timing")
+            {
+                menuInputTiming = true;
+                continue;
+            }
+            if (arg == "--atlas-timing")
+            {
+                atlasTiming = true;
                 continue;
             }
             if (arg == "--multiplayer")
@@ -357,6 +396,9 @@ int main(int argc, char* argv[])
                           << "  --builder-page UNIT PAGE composes a stock build page with download overlays.\n"
                           << "  --antialias checks production AA/shading shaders on a hidden GL context.\n"
                           << "  --map-layout checks the original map selector font, rows and artwork.\n"
+                      << "  --map-names-cache checks the real skirmish map list and its per-scene cache.\n"
+                      << "  --menu-input-timing times real front-end button handlers and panel construction.\n"
+                      << "  --atlas-timing measures LoadingScene's texture-atlas construction twice.\n"
                           << "  With no --panel, walks the options screens the probe was written for.\n"
                           << "  With one or more, dumps and clicks just those guis and stops.\n"
                           << "  --multiplayer builds the four multiplayer screens (SELPROV, TCP, SELGAME,\n"
@@ -373,8 +415,25 @@ int main(int argc, char* argv[])
 
         auto paletteBytes = vfs.readFile("palettes/PALETTE.PAL");
         auto palette = readPalette(*paletteBytes);
-
         GraphicsContext graphics;
+
+        if (atlasTiming)
+        {
+            for (unsigned int run = 1; run <= 2; ++run)
+            {
+                const auto start = std::chrono::steady_clock::now();
+                {
+                    auto atlas = createTextureAtlases(&vfs, &graphics, &*palette);
+                    (void)atlas;
+                }
+                const auto elapsed = std::chrono::duration<double, std::milli>(
+                                         std::chrono::steady_clock::now() - start)
+                                         .count();
+                std::cout << "TEXTURE_ATLAS run=" << run << " elapsed_ms=" << elapsed << '\n';
+            }
+            return 0;
+        }
+
         TextureService textureService(&graphics, &vfs, &*palette);
         if (antialias) return runAntialiasProbe(graphics, textureService, vfs);
         AudioService audioService(sdlContext, sdlManager.getSdlMixerContext(), &vfs);
@@ -481,7 +540,7 @@ int main(int argc, char* argv[])
             return 0;
         }
 
-        if (mapLayout)
+        if (mapLayout || mapNamesCache || menuInputTiming)
         {
             ShaderService shaders = ShaderService::createShaderService(graphics);
             Viewport viewport(0, 0, 640, 480);
@@ -495,12 +554,60 @@ int main(int argc, char* argv[])
                 &cursors, &shaders, &vfs, &*palette, &*palette, &manager, &sides, &clock, pathMapping.get(), &config);
             MainMenuScene menu(context, &emptySoundLookup, 640, 480);
             menu.init();
+            if (menuInputTiming)
+            {
+                auto clickAndTime = [&menu](const std::string& control) {
+                    const auto start = std::chrono::steady_clock::now();
+                    MenuProbe::click(menu, control);
+                    return std::chrono::duration<double, std::milli>(
+                               std::chrono::steady_clock::now() - start)
+                        .count();
+                };
+                auto expectPanel = [&menu](const std::string& expected) {
+                    const auto* current = MenuProbe::panel(menu);
+                    if (!current || current->getName() != expected)
+                    {
+                        throw std::runtime_error("Menu click did not reach expected panel " + expected);
+                    }
+                };
+                const auto openSingleMs = clickAndTime("SINGLE");
+                expectPanel("SINGLE");
+                const auto openOptionsMs = clickAndTime("Options");
+                expectPanel("STARTOPT");
+                const auto firstSoundsMs = clickAndTime("SOUND");
+                expectPanel("STARTOPT");
+                const auto secondSoundsMs = clickAndTime("SOUND");
+                expectPanel("STARTOPT");
+                std::cout << "Menu input: SINGLE=" << openSingleMs << " ms, OPTIONS=" << openOptionsMs
+                          << " ms, SOUNDS first=" << firstSoundsMs << " ms, repeat=" << secondSoundsMs
+                          << " ms\n";
+                return 0;
+            }
+            const auto openMapsStart = std::chrono::steady_clock::now();
             MenuProbe::openMaps(menu);
+            const auto firstOpenMs = std::chrono::duration<double, std::milli>(
+                                         std::chrono::steady_clock::now() - openMapsStart)
+                                         .count();
             auto* panel = MenuProbe::dialog(menu);
             if (!panel) { throw std::runtime_error("Map selector did not open"); }
+            const auto repeatStart = std::chrono::steady_clock::now();
+            const auto names = MenuProbe::mapNames(menu);
+            const auto repeatMs = std::chrono::duration<double, std::milli>(
+                                      std::chrono::steady_clock::now() - repeatStart)
+                                      .count();
+            const auto mapList = panel->find<UiListBox>("MAPNAMES");
+            if (!mapList || names != mapList->get().getItems())
+            {
+                throw std::runtime_error("Cached multiplayer map names differ from the displayed list");
+            }
+            std::cout << "Map list open: " << firstOpenMs << " ms; repeated query: " << repeatMs
+                      << " ms; " << names.size() << " maps\n";
+            if (mapNamesCache)
+            {
+                return 0;
+            }
             auto& description = panel->find<UiLabel>("DESCRIPTION")->get();
             auto& size = panel->find<UiLabel>("SIZE")->get();
-            const auto names = MenuProbe::mapNames(menu);
             std::string longestName;
             unsigned int longestHeight = 0;
             // MAP-FONT-01/02: check the real font and unchanged GUI, not a
