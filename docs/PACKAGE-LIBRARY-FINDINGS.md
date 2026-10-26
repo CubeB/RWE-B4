@@ -37,7 +37,8 @@ Absent registries read as empty without creating directories. Corrupt,
 unsupported-version or invalid records fail explicitly rather than being
 replaced with an empty library. Updates validate before writing and atomically
 replace the registry from a unique temporary file in the same directory.
-The first API assumes one writer; job locking and install journals are #765.
+Cross-process registry transaction coordination and stale-snapshot rejection
+are defined in PACKAGE-006; install journals and job lifecycle remain #765.
 
 ## PACKAGE-003: read-only inspection
 
@@ -113,3 +114,46 @@ Installation, uninstall, archive extraction, launcher screens, runtime profile
 activation and multiplayer checks are separately tracked tasks. No original
 or patched game execution, full map validation or complete mod parity is
 asserted by this contract.
+
+### PACKAGE-006: serialized registry transactions
+
+Issue #775, under ADR-0004. Cross-process coordination is RWE-original
+package-library behavior. PACKAGE-001's documented static comparison at
+byte-tactics revision `e89721c46c3fa06e59558419b54fe26061fafb73` (GOG/v3.1
+`TotalA.exe` MD5 `8e74a1dffa1f5988624c52048f5b20cd`) establishes original archive
+discovery and resolution, not a managed registry or concurrent install
+contract. No original runtime behavior is changed or claimed here.
+
+Registry updates use a transaction API that acquires an operating-system
+exclusive lock on a stable sibling lock file, reads the latest registry while
+holding that lock, applies one mutation, validates it, increments its
+generation and atomically replaces the registry file from a same-directory
+temporary. Unix-like builds use `flock`; Windows builds use `LockFileEx`.
+Process exit releases either OS lock, so recovery does not depend on deciding
+whether a recorded PID is stale. The lock file intentionally remains in place:
+deleting and recreating it could let two writers lock different file objects.
+Package-library maintenance must not unlink or replace this sidecar while any
+writer could be active. POSIX descriptors are close-on-exec so helper processes
+cannot keep a parent's lock alive accidentally; Windows lock handles are
+non-inheritable.
+
+The public snapshot-save operation is serialized too. It compares the
+generation supplied by the caller with the current generation and rejects a
+stale snapshot instead of overwriting a newer update. A transaction holds the
+lock over read, mutation and commit, so concurrent transaction callers retain
+both changes. Existing version-1 registries with no generation load as
+generation zero; the first successful write stores generation one. Read-only
+loads of an absent registry continue returning an empty value without creating
+the library directory or lock file.
+
+Readers do not acquire the writer lock. They open the registry path and parse
+one complete old or new file because writers publish through atomic same-volume
+replacement. Windows readers allow delete sharing on the opened registry handle,
+so replacement can publish while an existing reader finishes with the old
+snapshot. A failed mutation or validation leaves the old file intact and
+unlocks on scope exit; a process crash likewise releases the OS lock. The
+cross-process regression runs two independently launched test processes behind
+a start barrier and verifies both package records and the resulting generation.
+It also checks stale-snapshot rejection and that a failed transaction leaves
+the prior JSON intact and permits a subsequent update. These are RWE registry
+tests, not original-game execution or gameplay-compatibility evidence.

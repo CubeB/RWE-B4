@@ -1,8 +1,11 @@
 #include "PackageLibrary.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <nlohmann/json.hpp>
 #include <random>
@@ -14,12 +17,17 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <system_error>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
+#else
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -34,6 +42,161 @@ namespace rwe
         constexpr std::size_t MaxScanEntries = 100000;
         constexpr std::size_t MaxRoots = 256;
         constexpr int MaxScanDepth = 12;
+
+        std::string readText(const fs::path& path, std::uintmax_t limit);
+
+        class RegistryLock
+        {
+        public:
+            explicit RegistryLock(const fs::path& lockPath)
+            {
+#ifdef _WIN32
+                handle = CreateFileW(lockPath.c_str(), GENERIC_READ | GENERIC_WRITE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
+                    FILE_ATTRIBUTE_NORMAL, nullptr);
+                if (handle == INVALID_HANDLE_VALUE)
+                {
+                    throw std::runtime_error("Cannot open package registry lock (Windows error "
+                        + std::to_string(GetLastError()) + ")");
+                }
+                OVERLAPPED overlapped{};
+                if (!LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &overlapped))
+                {
+                    const auto error = GetLastError();
+                    CloseHandle(handle);
+                    handle = INVALID_HANDLE_VALUE;
+                    throw std::runtime_error("Cannot acquire package registry lock (Windows error "
+                        + std::to_string(error) + ")");
+                }
+                locked = true;
+#else
+                descriptor = ::open(lockPath.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0666);
+                if (descriptor < 0)
+                {
+                    throw std::runtime_error("Cannot open package registry lock: "
+                        + std::error_code(errno, std::generic_category()).message());
+                }
+                while (::flock(descriptor, LOCK_EX) != 0)
+                {
+                    if (errno == EINTR)
+                    {
+                        continue;
+                    }
+                    const auto error = errno;
+                    ::close(descriptor);
+                    descriptor = -1;
+                    throw std::runtime_error("Cannot acquire package registry lock: "
+                        + std::error_code(error, std::generic_category()).message());
+                }
+#endif
+            }
+
+            RegistryLock(const RegistryLock&) = delete;
+            RegistryLock& operator=(const RegistryLock&) = delete;
+
+            ~RegistryLock()
+            {
+#ifdef _WIN32
+                if (handle != INVALID_HANDLE_VALUE)
+                {
+                    if (locked)
+                    {
+                        OVERLAPPED overlapped{};
+                        UnlockFileEx(handle, 0, 1, 0, &overlapped);
+                    }
+                    CloseHandle(handle);
+                }
+#else
+                if (descriptor >= 0)
+                {
+                    ::flock(descriptor, LOCK_UN);
+                    ::close(descriptor);
+                }
+#endif
+            }
+
+        private:
+#ifdef _WIN32
+            HANDLE handle{INVALID_HANDLE_VALUE};
+            bool locked{false};
+#else
+            int descriptor{-1};
+#endif
+        };
+
+        std::uint64_t registryGeneration(const json& registry)
+        {
+            if (!registry.contains("generation"))
+            {
+                return 0;
+            }
+            const auto& generation = registry.at("generation");
+            if (generation.is_number_unsigned())
+            {
+                return generation.get<std::uint64_t>();
+            }
+            if (generation.is_number_integer())
+            {
+                const auto value = generation.get<std::int64_t>();
+                if (value >= 0)
+                {
+                    return static_cast<std::uint64_t>(value);
+                }
+            }
+            throw std::runtime_error("Package registry generation must be a nonnegative integer");
+        }
+
+        json loadPackageRegistryUnlocked(const fs::path& filename)
+        {
+            if (!fs::exists(filename))
+            {
+                return emptyPackageRegistry();
+            }
+            auto registry = json::parse(readText(filename, MaxRegistryBytes));
+            validatePackageRegistry(registry);
+            // Registries written before generation tracking are generation zero.
+            if (!registry.contains("generation"))
+            {
+                registry["generation"] = 0;
+            }
+            return registry;
+        }
+
+        void writePackageRegistryAtomically(const fs::path& target, const json& registry)
+        {
+            const auto text = registry.dump(2) + "\n";
+            if (text.size() > MaxRegistryBytes)
+            {
+                throw std::runtime_error("Package registry exceeds size limit");
+            }
+            auto temporary = target;
+            temporary += ".tmp-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())
+                + "-" + std::to_string(std::random_device{}());
+            try
+            {
+                std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+                stream.write(text.data(), static_cast<std::streamsize>(text.size()));
+                stream.close();
+                if (!stream)
+                {
+                    throw std::runtime_error("Cannot write package registry temporary file");
+                }
+#ifdef _WIN32
+                if (!MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                {
+                    throw std::runtime_error("Cannot replace package registry (Windows error " + std::to_string(GetLastError()) + ")");
+                }
+#else
+                fs::rename(temporary, target);
+#endif
+            }
+            catch (...)
+            {
+                std::error_code ignored;
+                fs::remove(temporary, ignored);
+                throw;
+            }
+        }
 
         std::string pathText(const fs::path& path)
         {
@@ -96,6 +259,50 @@ namespace rwe
 
         std::string readText(const fs::path& path, std::uintmax_t limit)
         {
+#ifdef _WIN32
+            // Share delete so an atomic registry replacement can publish a
+            // new file while this reader continues seeing its opened version.
+            HANDLE handle = CreateFileW(path.c_str(), GENERIC_READ,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+            if (handle == INVALID_HANDLE_VALUE)
+            {
+                throw std::runtime_error("Cannot read " + pathText(path) + " (Windows error "
+                    + std::to_string(GetLastError()) + ")");
+            }
+            try
+            {
+                LARGE_INTEGER fileSize{};
+                if (!GetFileSizeEx(handle, &fileSize) || fileSize.QuadPart < 0)
+                {
+                    throw std::runtime_error("Cannot determine metadata size: " + pathText(path));
+                }
+                if (static_cast<std::uint64_t>(fileSize.QuadPart) > limit)
+                {
+                    throw std::runtime_error("Metadata exceeds size limit: " + pathText(path));
+                }
+                std::string text(static_cast<std::size_t>(fileSize.QuadPart), '\0');
+                std::size_t offset = 0;
+                while (offset < text.size())
+                {
+                    const auto remaining = text.size() - offset;
+                    const auto request = static_cast<DWORD>(std::min<std::size_t>(remaining, MAXDWORD));
+                    DWORD count = 0;
+                    if (!ReadFile(handle, text.data() + offset, request, &count, nullptr) || count == 0)
+                    {
+                        throw std::runtime_error("Cannot read bounded metadata: " + pathText(path));
+                    }
+                    offset += count;
+                }
+                CloseHandle(handle);
+                return text;
+            }
+            catch (...)
+            {
+                CloseHandle(handle);
+                throw;
+            }
+#else
             if (fs::file_size(path) > limit)
             {
                 throw std::runtime_error("Metadata exceeds size limit: " + pathText(path));
@@ -114,6 +321,7 @@ namespace rwe
             }
             text.resize(static_cast<std::size_t>(count));
             return text;
+#endif
         }
 
         bool taArchive(const fs::path& path)
@@ -351,7 +559,7 @@ namespace rwe
 
     json emptyPackageRegistry()
     {
-        return {{"schemaVersion", 1}, {"packages", json::array()}};
+        return {{"schemaVersion", 1}, {"generation", 0}, {"packages", json::array()}};
     }
 
     void validatePackageRegistry(const json& registry)
@@ -361,6 +569,7 @@ namespace rwe
         {
             throw std::runtime_error("Unsupported or malformed package registry schema");
         }
+        registryGeneration(registry);
         std::set<std::string> ids;
         for (const auto& entry : registry["packages"])
         {
@@ -446,52 +655,54 @@ namespace rwe
 
     json loadPackageRegistry(const fs::path& filename)
     {
-        if (!fs::exists(filename))
-        {
-            return emptyPackageRegistry();
-        }
-        auto registry = json::parse(readText(filename, MaxRegistryBytes));
-        validatePackageRegistry(registry);
-        return registry;
+        return loadPackageRegistryUnlocked(filename);
     }
 
     void savePackageRegistry(const fs::path& filename, const json& registry)
     {
         validatePackageRegistry(registry);
-        const auto text = registry.dump(2) + "\n";
-        if (text.size() > MaxRegistryBytes)
-        {
-            throw std::runtime_error("Package registry exceeds size limit");
-        }
         auto target = fs::absolute(filename).lexically_normal();
         fs::create_directories(target.parent_path());
-        auto temporary = target;
-        temporary += ".tmp-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())
-            + "-" + std::to_string(std::random_device{}());
-        try
+        auto lockPath = target;
+        lockPath += ".lock";
+        RegistryLock lock(lockPath);
+        const auto current = loadPackageRegistryUnlocked(target);
+        const auto expectedGeneration = registryGeneration(registry);
+        const auto currentGeneration = registryGeneration(current);
+        if (expectedGeneration != currentGeneration)
         {
-            std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-            stream.write(text.data(), static_cast<std::streamsize>(text.size()));
-            stream.close();
-            if (!stream)
-            {
-                throw std::runtime_error("Cannot write package registry temporary file");
-            }
-#ifdef _WIN32
-            if (!MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-            {
-                throw std::runtime_error("Cannot replace package registry (Windows error " + std::to_string(GetLastError()) + ")");
-            }
-#else
-            fs::rename(temporary, target);
-#endif
+            throw std::runtime_error("Package registry update is stale; reload and retry");
         }
-        catch (...)
+        if (currentGeneration == std::numeric_limits<std::uint64_t>::max())
         {
-            std::error_code ignored;
-            fs::remove(temporary, ignored);
-            throw;
+            throw std::runtime_error("Package registry generation is exhausted");
         }
+        auto next = registry;
+        next["generation"] = currentGeneration + 1;
+        validatePackageRegistry(next);
+        writePackageRegistryAtomically(target, next);
+    }
+
+    json updatePackageRegistry(
+        const fs::path& filename,
+        const std::function<void(json&)>& mutation)
+    {
+        auto target = fs::absolute(filename).lexically_normal();
+        fs::create_directories(target.parent_path());
+        auto lockPath = target;
+        lockPath += ".lock";
+        RegistryLock lock(lockPath);
+        auto registry = loadPackageRegistryUnlocked(target);
+        const auto currentGeneration = registryGeneration(registry);
+        if (currentGeneration == std::numeric_limits<std::uint64_t>::max())
+        {
+            throw std::runtime_error("Package registry generation is exhausted");
+        }
+        mutation(registry);
+        registry["generation"] = currentGeneration + 1;
+        validatePackageRegistry(registry);
+        writePackageRegistryAtomically(target, registry);
+        return registry;
     }
 
     json inspectContentPackage(const fs::path& source)
