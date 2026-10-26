@@ -1,5 +1,9 @@
+import fs from "fs";
+import os from "os";
 import path from "path";
+import { PassThrough } from "stream";
 import {
+  automaticallySetUpTaModManual,
   chooseRweUserPath,
   rweLibraryPaths,
   rweUserPathCandidates,
@@ -73,5 +77,51 @@ describe("rweLibraryPaths", () => {
       mapPacks: path.join(userData, "MapPacks"),
       staging: path.join(userData, "Library", "staging"),
     });
+  });
+});
+
+describe("automaticallySetUpTaModManual", () => {
+  let directory: string;
+  beforeEach(() => {
+    directory = fs.mkdtempSync(path.join(os.tmpdir(), "rwe-launcher-"));
+  });
+  afterEach(() => {
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  it("resolves false for an empty search list instead of waiting forever", async () => {
+    await expect(
+      automaticallySetUpTaModManual(path.join(directory, "mods", "ta"), [])
+    ).resolves.toBe(false);
+  });
+
+  it("resolves false when no candidate directory holds the TA archives", async () => {
+    fs.writeFileSync(path.join(directory, "readme.txt"), "not TA");
+    await expect(
+      automaticallySetUpTaModManual(path.join(directory, "mods", "ta"), [
+        directory,
+      ])
+    ).resolves.toBe(false);
+  });
+
+  it("rejects when a candidate file cannot be read instead of hanging", async () => {
+    fs.writeFileSync(path.join(directory, "totala1.hpi"), "base");
+    const readStream = new PassThrough();
+    const createReadStream = jest
+      .spyOn(fs, "createReadStream")
+      .mockImplementation((() => {
+        setImmediate(() => readStream.emit("error", new Error("EBUSY")));
+        return readStream;
+      }) as unknown as typeof fs.createReadStream);
+
+    try {
+      await expect(
+        automaticallySetUpTaModManual(path.join(directory, "mods", "ta"), [
+          directory,
+        ])
+      ).rejects.toThrow("EBUSY");
+    } finally {
+      createReadStream.mockRestore();
+    }
   });
 });
