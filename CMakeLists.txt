@@ -124,9 +124,9 @@ if(MSVC)
 
     # SDL3 and SDL3_mixer built from submodules above
 
-    set(ZLIB_DLL "${CMAKE_SOURCE_DIR}/libs/_msvc/zlib-1.2.11/lib/zlib1.dll")
+    set(RWE_ZLIB_DLL "${CMAKE_SOURCE_DIR}/libs/_msvc/zlib-1.2.11/lib/zlib1.dll")
     set(ZLIB_LIBRARIES "${CMAKE_SOURCE_DIR}/libs/_msvc/zlib-1.2.11/lib/zdll.lib")
-    set(ZLIB_INCLUDE_DIRS "libs/_msvc/zlib-1.2.11/include")
+    set(ZLIB_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/libs/_msvc/zlib-1.2.11/include")
 
     set(PNG_DLL "${CMAKE_SOURCE_DIR}/libs/_msvc/lpng1634/lib/libpng16-16.dll")
     set(PNG_LIBRARIES "${CMAKE_SOURCE_DIR}/libs/_msvc/lpng1634/lib/libpng16-16.lib")
@@ -150,7 +150,7 @@ else()
     # SDL3 and SDL3_mixer built from submodules above
 
     find_package(ZLIB REQUIRED)
-    find_windows_dll(ZLIB_DLL "zlib1.dll")
+    find_windows_dll(RWE_ZLIB_DLL "zlib1.dll")
     find_package(PNG REQUIRED)
     find_windows_dll(PNG_DLL "libpng16-16.dll")
 
@@ -161,6 +161,9 @@ endif()
 set(ZLIB_FOUND TRUE)
 set(ZLIB_INCLUDE_DIR "${ZLIB_INCLUDE_DIRS}")
 set(ZLIB_LIBRARY "${ZLIB_LIBRARIES}")
+add_library(rwe_zlib INTERFACE)
+target_include_directories(rwe_zlib INTERFACE "${ZLIB_INCLUDE_DIRS}")
+target_link_libraries(rwe_zlib INTERFACE "${ZLIB_LIBRARIES}")
 
 # Bundle the archive readers into the native binaries. The package manager
 # accepts these formats without an installed archiver or PATH lookup. Keep the
@@ -201,6 +204,7 @@ set(ENABLE_ICONV OFF CACHE BOOL "" FORCE)
 set(ENABLE_ACL OFF CACHE BOOL "" FORCE)
 set(ENABLE_XATTR OFF CACHE BOOL "" FORCE)
 add_subdirectory("libs/libarchive")
+target_link_libraries(archive_static rwe_zlib)
 
 set(Protobuf_USE_STATIC_LIBS ON)
 find_package(Protobuf REQUIRED)
@@ -1038,9 +1042,8 @@ target_link_libraries(librwe SDL3::SDL3-static)
 target_link_libraries(librwe SDL3_mixer::SDL3_mixer)
 target_link_libraries(librwe archive_static)
 
-target_copy_file(librwe ${ZLIB_DLL})
-target_link_libraries(librwe ${ZLIB_LIBRARIES})
-target_include_directories(librwe PUBLIC ${ZLIB_INCLUDE_DIRS})
+target_copy_file(librwe ${RWE_ZLIB_DLL})
+target_link_libraries(librwe rwe_zlib)
 
 target_copy_file(librwe ${PNG_DLL})
 
@@ -1497,6 +1500,7 @@ install(TARGETS rwe rwe_bridge rwe_setup
 install(FILES LICENSE README.md DESTINATION .)
 install(FILES libs/libarchive/COPYING DESTINATION licenses RENAME libarchive-COPYING.txt)
 install(FILES libs/xz/COPYING DESTINATION licenses RENAME xz-COPYING.txt)
+install(FILES libs/xz/COPYING.0BSD DESTINATION licenses RENAME xz-COPYING.0BSD.txt)
 
 install(DIRECTORY shaders DESTINATION .)
 

@@ -216,9 +216,12 @@ The selected backend is libarchive 3.8.10, pinned at
 `3d078b52adbff566ccfc51067dfbf742ecf3ef86`. The in-process reader registers
 ZIP, RAR4, RAR5 and 7z readers. ZIP deflate uses the project's existing zlib;
 7z LZMA/LZMA2 and the RAR readers use the bundled liblzma. Other optional
-codecs and external archive executables are disabled. These source revisions
-and upstream `COPYING` notices are distributed with the project; the generated
-RAR5 regression fixture retains its upstream 3-clause BSD provenance in
+codecs are disabled. Only libarchive's no-filter handler is registered: outer
+compression wrappers are unsupported, and filters such as grzip that can run
+programs from `PATH` are not registered. These source revisions, libarchive's
+`COPYING`, XZ's license summary and liblzma's actual `COPYING.0BSD` text are
+distributed in CPack and AppImage packages; the generated RAR5 regression
+fixture retains its upstream 3-clause BSD provenance in
 `tests/fixtures/archive-backend/README.md`. A MinGW proof build compiled the
 four readers and static XZ/libarchive libraries. The Windows MSVC + Linux
 packaging/build matrix remains pending under PR #877 and `ci:full`.
@@ -230,10 +233,16 @@ collisions, links, special files and encrypted entries; it caps the archive at
 100,000 entries and 16 GiB of declared/actual expanded data. The caller may
 cancel between data chunks; on failure or cancellation only the directory it
 created is removed. It does not overwrite an existing staging path or execute
-extracted files. RAR4/RAR5 variants, archive-level encryption behavior,
-cross-platform path edge cases, and the full Windows static packaging proof
-still need test/CI confirmation. Supported means these registered readers and
-codecs, not every compression method or encrypted variant of each format.
+extracted files. Entry paths must be representable as UTF-8; valid Unicode is
+preserved, while Windows device aliases (including COM/LPT superscript-digit
+forms), control characters and Unicode case aliases are refused. Supported
+means these registered readers and entry codecs, not every compression method,
+outer wrapper or encrypted variant of each format. RAR4 variants,
+archive-level encryption behavior, cancellation latency within one decoder
+chunk, and broader cross-platform path edge cases remain explicit follow-up
+coverage rather than claims made by this slice. The advanced expansion,
+memory and nesting-depth policy remains #784 and must be settled before the
+launcher exposes archive installation.
 
 The shared archive interface will inventory entries and extract into a new,
 empty staging directory created and owned by the caller. It must reject paths
@@ -250,3 +259,8 @@ content is reported explicitly rather than treated as a complete extraction.
 This section is the implementation contract and reference boundary. It does
 not claim byte-tactics comparison for RWE-original installer behavior, nor an
 executed original-game check.
+
+This slice is the shared native backend foundation. It does not yet change the
+launcher or turn PACKAGE-003's extraction-required inspection result into an
+installed/imported package workflow; selection, staging orchestration and the
+launcher presentation remain later package-management integration work.
