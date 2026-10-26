@@ -797,6 +797,7 @@ namespace rwe
             entry.common.height,
             entry.text.value_or(""),
             font);
+        label->setAlignment(UiLabel::alignmentFromAttributes(entry.common.attribs));
 
         return label;
     }

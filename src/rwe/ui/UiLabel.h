@@ -10,8 +10,15 @@ namespace rwe
         enum class Alignment
         {
             Left,
-            Center
+            Center,
+            Right
         };
+
+        /**
+         * The GUI attribute word's low three bits: 1 left, 2 centre, 4 right.
+         * Other bits in the same word mean disabled, a link and so on.
+         */
+        static Alignment alignmentFromAttributes(int attribs);
 
     private:
         /** The text, or as much of it as fits the label's width with "..." after it. */

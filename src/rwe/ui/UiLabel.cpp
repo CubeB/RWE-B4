@@ -22,8 +22,38 @@ namespace rwe
                 }
                 break;
             case Alignment::Center:
-                context.drawTextCentered(posX, posY, text, *font);
+                if (singleLine)
+                {
+                    context.drawTextCentered(posX + (static_cast<float>(sizeX) / 2.0f), posY, fittedToWidth(context), *font);
+                }
+                else
+                {
+                    context.drawTextWrappedCentered(Rectangle2f::fromTopLeft(posX, posY, sizeX, sizeY), text, *font);
+                }
                 break;
+            case Alignment::Right:
+                if (singleLine)
+                {
+                    context.drawTextAlignRight(posX + sizeX, posY + font->textBaseline, fittedToWidth(context), *font);
+                }
+                else
+                {
+                    context.drawTextWrappedRight(Rectangle2f::fromTopLeft(posX, posY, sizeX, sizeY), text, *font);
+                }
+                break;
+        }
+    }
+
+    UiLabel::Alignment UiLabel::alignmentFromAttributes(int attribs)
+    {
+        switch (attribs & 0x7)
+        {
+            case 2:
+                return Alignment::Center;
+            case 4:
+                return Alignment::Right;
+            default:
+                return Alignment::Left;
         }
     }
 
