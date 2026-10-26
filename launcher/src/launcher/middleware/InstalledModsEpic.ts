@@ -1,6 +1,7 @@
 import * as rx from "rxjs";
 import * as rxop from "rxjs/operators";
 import { execFile } from "child_process";
+import { promises as fs } from "fs";
 import { AppAction, receiveInstalledMods } from "../actions";
 import { getRweModsPath, getRweUserPath } from "../util";
 import {
@@ -11,19 +12,32 @@ import {
 import path from "path";
 import { InstalledModInfo } from "../state";
 
-export function inspectModResourceDirectories(
+export async function inspectModResourceDirectories(
   mod: InstalledModInfo,
   setupExe: string
 ): Promise<InstalledModInfo> {
+  let selectedRoot: string;
+  try {
+    // PACKAGE-009: the CLI reports a canonical physical root. Inspect that
+    // same path so older setup binaries and junction aliases use one identity.
+    selectedRoot = await fs.realpath(mod.path);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      ...mod,
+      resourceDirectoryError: `Could not resolve selected data root: ${detail}`,
+    };
+  }
   return new Promise(resolve => {
     execFile(
       setupExe,
-      ["--inspect-package", mod.path, "--json"],
+      ["--inspect-package", selectedRoot, "--json"],
       { windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
       (error, stdout) => {
         // PACKAGE-003 inspection is read-only and bounded. Use only the single
-        // discovered candidate whose root equals this selected data path; an
-        // ambiguous nested root must not silently configure another package.
+        // discovered candidate whose root equals this filesystem-resolved
+        // selected data path; an ambiguous nested root must not silently
+        // configure another package.
         if (error) {
           resolve({
             ...mod,
@@ -41,7 +55,7 @@ export function inspectModResourceDirectories(
           });
           return;
         }
-        if (!hasUniqueInspectionRoot(report, mod.path)) {
+        if (!hasUniqueInspectionRoot(report, selectedRoot)) {
           resolve({
             ...mod,
             resourceDirectoryError:
@@ -49,7 +63,10 @@ export function inspectModResourceDirectories(
           });
           return;
         }
-        const discovered = resourceDirectoriesForSelectedRoot(report, mod.path);
+        const discovered = resourceDirectoriesForSelectedRoot(
+          report,
+          selectedRoot
+        );
         // Explicit rwe_mod.json values override inferred roots for this package;
         // unknown metadata remains in the file and is never rewritten.
         resolve({
