@@ -1209,7 +1209,7 @@ namespace rwe
          */
         /** The one-cell margin the original keeps clear all round the map; see the definition. */
         bool isInsideBuildableArea(unsigned int x, unsigned int y, unsigned int footprintX, unsigned int footprintZ) const;
-        bool canBeBuiltAt(const MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y) const;
+        bool canBeBuiltAt(const MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y, unsigned int waterLine) const;
 
         /**
          * As canBeBuiltAt, but answered through one player's fog. Two rules,
@@ -1232,7 +1232,17 @@ namespace rwe
          * same for every peer, and only the latter may decide anything the
          * simulation does.
          */
-        bool canBeBuiltAtAsSeenBy(const MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y, PlayerId player) const;
+        bool canBeBuiltAtAsSeenBy(const MovementClassDefinition& mc, const std::optional<Grid<YardMapCell>>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y, unsigned int waterLine, PlayerId player) const;
+
+        /**
+         * BT-51's footprint walk. The mask byte for each yard-map letter says
+         * which map-cell questions apply: blocking building, occupancy,
+         * support/clamp heights, blocking or indestructible feature, and the
+         * geothermal vent. A viewer applies the occupancy questions only to
+         * things that player can see; the terrain and feature questions always
+         * apply.
+         */
+        bool isYardMapPlacementValid(const MovementClassDefinition& mc, const Grid<YardMapCell>& yardMap, bool yardMapContainsGeo, unsigned int x, unsigned int y, unsigned int waterLine, std::optional<PlayerId> viewer) const;
 
         DiscreteRect computeFootprintRegion(const SimVector& position, unsigned int footprintX, unsigned int footprintZ) const;
 

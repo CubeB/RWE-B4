@@ -640,7 +640,7 @@ namespace rwe
                         {
                             continue;
                         }
-                        if (!sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
+                        if (!sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y), def.waterLine))
                         {
                             continue;
                         }
@@ -1271,7 +1271,7 @@ namespace rwe
             }
             if (!footprintInsideVisibleMap(sim.terrain, DiscreteRect(candidate.tile.x, candidate.tile.y, static_cast<int>(mc.footprintX), static_cast<int>(mc.footprintZ)))
                 || !sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo,
-                    static_cast<unsigned int>(candidate.tile.x), static_cast<unsigned int>(candidate.tile.y)))
+                    static_cast<unsigned int>(candidate.tile.x), static_cast<unsigned int>(candidate.tile.y), def.waterLine))
             {
                 continue;
             }
@@ -1570,7 +1570,7 @@ namespace rwe
                     }
                     continue;
                 }
-                if (!sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
+                if (!sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y), def.waterLine))
                 {
                     if (buildableIgnoringUnits(sim, mc, def, rect))
                     {
@@ -2665,7 +2665,7 @@ namespace rwe
                 continue;
             }
             auto mc = sim.getAdHocMovementClass(def.movementCollisionInfo);
-            if (sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
+            if (sim.canBeBuiltAt(mc, def.yardMap, def.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y), def.waterLine))
             {
                 return DefenceRebuildPlan{lost.unitType, lost.position, std::nullopt};
             }
@@ -2903,7 +2903,7 @@ namespace rwe
             }
             auto rect = sim.computeFootprintRegion(slot, teethDef->movementCollisionInfo);
             if (rect.x < 0 || rect.y < 0 || !footprintInsideVisibleMap(sim.terrain, rect)
-                || !sim.canBeBuiltAt(mc, teethDef->yardMap, teethDef->yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
+                || !sim.canBeBuiltAt(mc, teethDef->yardMap, teethDef->yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y), teethDef->waterLine))
             {
                 return std::nullopt;
             }
@@ -5355,7 +5355,7 @@ namespace rwe
                 }
                 auto rect = sim.computeFootprintRegion(vent, nextDef.movementCollisionInfo);
                 if (rect.x < 0 || rect.y < 0 || !footprintInsideVisibleMap(sim.terrain, rect)
-                    || !sim.canBeBuiltAt(mc, nextDef.yardMap, nextDef.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y)))
+                    || !sim.canBeBuiltAt(mc, nextDef.yardMap, nextDef.yardMapContainsGeo, static_cast<unsigned int>(rect.x), static_cast<unsigned int>(rect.y), nextDef.waterLine))
                 {
                     continue;
                 }

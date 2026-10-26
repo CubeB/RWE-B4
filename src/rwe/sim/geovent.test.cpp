@@ -157,34 +157,34 @@ namespace rwe
         {
             sim.addFeature(ventDef, 9, 9).value();
 
-            REQUIRE(sim.canBeBuiltAt(mc, yardMap, true, 8, 8));
+            REQUIRE(sim.canBeBuiltAt(mc, yardMap, true, 8, 8, 0u));
         }
 
         SECTION("it is refused a square off, where the geo cell misses the vent")
         {
             sim.addFeature(ventDef, 9, 9).value();
 
-            REQUIRE(!sim.canBeBuiltAt(mc, yardMap, true, 7, 8));
-            REQUIRE(!sim.canBeBuiltAt(mc, yardMap, true, 8, 7));
+            REQUIRE(!sim.canBeBuiltAt(mc, yardMap, true, 7, 8, 0u));
+            REQUIRE(!sim.canBeBuiltAt(mc, yardMap, true, 8, 7, 0u));
         }
 
         SECTION("it is refused on bare ground")
         {
-            REQUIRE(!sim.canBeBuiltAt(mc, yardMap, true, 8, 8));
+            REQUIRE(!sim.canBeBuiltAt(mc, yardMap, true, 8, 8, 0u));
         }
 
         SECTION("scenery that is not a vent will not do")
         {
             sim.addFeature(shrubDef, 9, 9).value();
 
-            REQUIRE(!sim.canBeBuiltAt(mc, yardMap, true, 8, 8));
+            REQUIRE(!sim.canBeBuiltAt(mc, yardMap, true, 8, 8, 0u));
         }
 
         SECTION("a building with no geo cell in its yardmap is not asked for a vent")
         {
             Grid<YardMapCell> plainYardMap(3, 3, YardMapCell::Ground);
 
-            REQUIRE(sim.canBeBuiltAt(mc, plainYardMap, false, 8, 8));
+            REQUIRE(sim.canBeBuiltAt(mc, plainYardMap, false, 8, 8, 0u));
         }
     }
 }

@@ -197,7 +197,7 @@ namespace rwe
                         intToSimScalar(dz * terrain.getHeightMap().getHeight()));
                     auto cell = terrain.worldToHeightmapCoordinate(probe);
                     if (cell.x < 0 || cell.y < 0 || !canBeBuiltAt(mc, std::nullopt, false,
-                            static_cast<unsigned int>(cell.x), static_cast<unsigned int>(cell.y)))
+                            static_cast<unsigned int>(cell.x), static_cast<unsigned int>(cell.y), 0u))
                     {
                         suitable = false;
                         break;

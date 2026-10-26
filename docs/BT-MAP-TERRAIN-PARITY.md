@@ -177,38 +177,30 @@ minimum water depths.
 
 **RWE.**
 
-- **Per-cell mask selection: DIFFERS (UNCLEAR how much).** `canBeBuiltAt` treats
-  the whole footprint alike: any mobile unit, any impassable building cell and
-  any blocking feature in the movement-class rectangle refuses the site
-  (`GameSimulation.cpp:1824`, `isCollisionAt`), irrespective of the yard mask.
-  The yard mask is consulted only for the vent rule (`:1834`,
-  `containsAnyGeoMatch`, **MATCHES** `TOTALA-EXE-DATA.md` section 15). So a yard
-  cell whose letter selects no occupant check in the original (an open factory
-  bay, for example) still blocks in RWE. This chapter does not say which letter
-  sets which bit, only that the byte selects, so the size of the difference is
-  **UNCLEAR**. The indestructible-feature rejection (`0x40`) is not implemented:
-  RWE has no check that stops a non-vent building going over a vent or other
-  indestructible feature that is not also blocking, except that a vent is
-  non-blocking and `canBeBuiltAt` does not look at it.
-- **Whole-footprint support spread: DIFFERS.** RWE's slope rule is per cell: it
-  refuses a footprint if any one cell's four-corner range exceeds the limit
-  (`src/rwe/sim/movement.cpp:41-70`). The reference's rule is on the footprint's
-  support heights as a whole. A large building on an even ramp therefore passes
-  in RWE (each cell is shallow) and fails in the original (the total rise
-  exceeds the limit). The shipped buildings carry the limit in `MaxSlope`
-  (ARMSOLAR, ARMFUS, ARMMEX, ARMGEO all say 10) and the footprints run to 5 by 5,
-  so the case is not exotic. **UNCLEAR** on one point the chapter leaves open:
-  which cell bytes feed the minimum and maximum (the stored sample height or the
-  cell's low and high bounds). The whole-footprint nature is stated plainly.
-- **Seabed depth bounds: DIFFERS**, see rule 7.
+- **Per-cell mask selection: MATCHES after #684.**
+  `GameSimulation::isYardMapPlacementValid` walks the footprint reading
+  `yardMapMask` for each
+  cell. Bits `0x01` (blocking building), `0x02`/`0x04` (occupant), `0x20`
+  (blocking feature), `0x40` (indestructible feature) and `0x80` (vent wanted)
+  now apply only where the letter selects them; a `.` cell is not part of the
+  building. The loader also skips an unknown character without consuming a cell
+  and no longer accepts `g`. `TOTALA-EXE-DATA.md` section 15's vent rule remains
+  **MATCHES**.
+- **Whole-footprint support spread: MATCHES after #684.** Support cells (`0x08`)
+  feed the running minimum low corner and maximum high corner; the spread must
+  not exceed `MaxSlope`, and the standing height is the minimum low. Clamp cells
+  (`0x10`) feed a separate high maximum that must not exceed that height. The
+  stored sample height is not used.
+- **Seabed depth bounds: MATCHES after #684**, see rule 7. The minimum support
+  low must be at least sea level minus `MaxWaterDepth`, and the larger of the two
+  running maxima at most sea level minus the signed `MinWaterDepth`.
 - **Metal accumulator: MATCHES in shape.** The extractor's metal figure is a sum
   over the footprint (`GameSimulation.cpp:4400-4405`); the plus-one question is
   `TA-SYSTEMS-PARITY.md` rule 17 and is not reopened here.
 
-**Remaining uncertainty.** The yard letters-to-bits mapping and the support-spread
-bytes are the two spec-room prose items this rule needs before any code change.
-The first-order behavioural check is a retail one: a five-by-five building on a
-gentle uniform ramp that a per-cell test would pass.
+**Remaining uncertainty.** None for the letter table or the support-spread bytes;
+BT-51 resolves both. RWE keeps its stricter explored-ground rule for the
+interface, which is a documented RWE choice rather than this rule's subject.
 
 ## 5. Building height and water buildings
 

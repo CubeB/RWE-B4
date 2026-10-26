@@ -788,7 +788,7 @@ namespace rwe
                 // discovered must not turn the box red, or the box has told
                 // them it is there. The build fails on arrival instead, with
                 // the message that failure now carries.
-                auto isValid = simulation.canBeBuiltAtAsSeenBy(mc, unitDefinition.yardMap, unitDefinition.yardMapContainsGeo, footprintRect.x, footprintRect.y, localPlayerId);
+                auto isValid = simulation.canBeBuiltAtAsSeenBy(mc, unitDefinition.yardMap, unitDefinition.yardMapContainsGeo, footprintRect.x, footprintRect.y, unitDefinition.waterLine, localPlayerId);
                 hoverBuildInfo = HoverBuildInfo{footprintRect, isValid};
             }
             else

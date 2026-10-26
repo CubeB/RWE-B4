@@ -264,6 +264,14 @@ namespace rwe
 
     bool isPassable(YardMapCell cell, bool yardMapOpen);
 
+    /**
+     * BT-51: the placement mask byte the original's FBI loader writes for a
+     * yard-map letter. The bits are 0x01 blocking building, 0x02/0x04
+     * occupancy, 0x08 support cell, 0x10 clamp cell, 0x20 blocking feature,
+     * 0x40 indestructible feature and 0x80 geothermal vent wanted.
+     */
+    unsigned int yardMapMask(YardMapCell cell);
+
     struct SteeringInfo
     {
         /** The angle we are trying to steer towards. */

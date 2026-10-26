@@ -235,6 +235,15 @@ cells over a stamped tile — the same "one match is enough" rule the original
 uses. `computeFeaturePosition` already puts a feature at the centre of its
 footprint on the ground, which is the point `0x423F8D` computes.
 
+Ported in #684 (BT-51): the placement walk is now the whole mask byte rather
+than this one bit. `yardMapMask` turns each letter into the byte above;
+`GameSimulation::isYardMapPlacementValid` applies bits `0x01`, `0x02`/`0x04`,
+`0x20`, `0x40` and `0x80` only where the mask asks, feeds `0x08` support cells
+into the whole-footprint spread (with `0x10` clamp cells) and uses the minimum
+low support corner, or the waterline when none supports, as the standing
+height. A `.` cell is not part of the building for any test, and an unknown
+letter is skipped without consuming a cell.
+
 Added here: `GameScene::spawnGeoVentSteam` puts out one `smoke 1` puff per vent
 every `geoVentSteamIntervalTicks` = 5 ticks at `geoVentSteamRiseRate` = 2 world
 units of lift, which is the original's gravity × 16 on the 112 nearly every map

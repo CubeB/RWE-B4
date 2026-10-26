@@ -39,6 +39,46 @@ namespace rwe
         return cell == YardMapCell::Geo;
     }
 
+    unsigned int yardMapMask(YardMapCell cell)
+    {
+        switch (cell)
+        {
+            // 'f'
+            case YardMapCell::GroundNoFeature:
+                return 0x6F;
+            // 'o'
+            case YardMapCell::Ground:
+                return 0x2F;
+            // 'c' and the unused GroundPassableWhenOpen spelling
+            case YardMapCell::GroundGeoPassableWhenOpen:
+            case YardMapCell::GroundPassableWhenOpen:
+                return 0x2D;
+            // 'O'
+            case YardMapCell::GroundPassableWhenClosed:
+                return 0x2B;
+            // 'w'
+            case YardMapCell::Water:
+                return 0x37;
+            // 'C'
+            case YardMapCell::WaterPassableWhenOpen:
+                return 0x35;
+            // 'y'
+            case YardMapCell::GroundPassable:
+                return 0x29;
+            // 'Y'
+            case YardMapCell::WaterPassable:
+                return 0x31;
+            // 'G'
+            case YardMapCell::Geo:
+                return 0x8F;
+            // '.'
+            case YardMapCell::Passable:
+                return 0x00;
+            default:
+                throw std::logic_error("Unknown cell type");
+        }
+    }
+
     bool isPassable(YardMapCell cell, bool yardMapOpen)
     {
         switch (cell)
