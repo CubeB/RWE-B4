@@ -1068,6 +1068,11 @@ target_link_libraries(hpi_test librwe)
 add_executable(vfs_test src/vfs_test.cpp)
 target_link_libraries(vfs_test librwe)
 
+# Console-only timing probe for the synchronous map-list work performed by
+# MainMenuScene when entering and opening skirmish map selection.
+add_executable(menu_lag_probe tools/menu_lag_probe.cpp)
+target_link_libraries(menu_lag_probe librwe)
+
 add_executable(gaf_test src/gaf_test.cpp)
 target_link_libraries(gaf_test librwe)
 target_link_libraries(gaf_test ${PNG_LIBRARIES})

@@ -2182,6 +2182,11 @@ namespace rwe
 
     std::vector<std::string> MainMenuScene::getMapNames()
     {
+        if (multiplayerMapNames)
+        {
+            return *multiplayerMapNames;
+        }
+
         auto mapNames = sceneContext.vfs->getFileNames("maps", ".ota");
 
         mapNames.erase(std::remove_if(mapNames.begin(), mapNames.end(), [this](const auto& e) { return !hasMultiplayerSchema(e); }), mapNames.end());
@@ -2191,7 +2196,8 @@ namespace rwe
             e.resize(e.size() - 4);
         }
 
-        return mapNames;
+        multiplayerMapNames = std::move(mapNames);
+        return *multiplayerMapNames;
     }
 
     void MainMenuScene::attachPlayerSelectionComponents(const std::string& guiName, UiPanel& panel)

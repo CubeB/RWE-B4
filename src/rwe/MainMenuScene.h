@@ -75,6 +75,11 @@ namespace rwe
         std::vector<std::unique_ptr<UiPanel>> panelStack;
         std::vector<std::unique_ptr<UiPanel>> dialogStack;
 
+        // MPR-001: the mounted VFS does not change while this menu scene is
+        // alive. Cache the derived list so opening skirmish and the map
+        // selector do not reread and filter every OTA each time.
+        std::optional<std::vector<std::string>> multiplayerMapNames;
+
         AudioService::LoopToken bgm;
 
         /** The campaign screen's choices: 0 Arm or 1 Core, 0 Easy to 2 Hard, and the campaigns the side can play. */
