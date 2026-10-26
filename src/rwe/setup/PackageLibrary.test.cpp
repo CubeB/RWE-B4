@@ -1,9 +1,32 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/setup/PackageLibrary.h>
+#include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <cstring>
+#include <cstdlib>
+#include <cwchar>
 #include <fstream>
+#include <map>
 #include <nlohmann/json.hpp>
 #include <random>
+#include <thread>
+#include <vector>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
+
+#ifndef _WIN32
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -76,6 +99,179 @@ namespace rwe
                 {"files", json::array({{{"path", "content.ufo"}, {"size", 3}, {"sha256", std::string(64, 'a')}}})}
             }})}};
         }
+
+        json packageEntry(const std::string& id, const std::string& name)
+        {
+            return {{"id", id}, {"name", name}, {"kind", "mod"}, {"version", nullptr},
+                {"state", "installed"}, {"compatibility", "unverified"}, {"managed", true},
+                {"source", "concurrent-test"}, {"contentPath", "packages/" + id},
+                {"dependencies", json::array()}, {"resourceDirectories", json::object()}, {"files", json::array()}};
+        }
+
+        fs::path currentExecutable()
+        {
+#ifdef _WIN32
+            std::wstring path(32768, L'\0');
+            const auto size = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+            if (size == 0 || size == path.size())
+            {
+                throw std::runtime_error("Cannot locate package registry test executable");
+            }
+            path.resize(size);
+            return fs::path(path);
+#else
+#ifdef __APPLE__
+            std::uint32_t size = 0;
+            _NSGetExecutablePath(nullptr, &size);
+            std::vector<char> path(size);
+            if (size == 0 || _NSGetExecutablePath(path.data(), &size) != 0)
+            {
+                throw std::runtime_error("Cannot locate package registry test executable");
+            }
+            return fs::canonical(path.data());
+#else
+            std::vector<char> path(4096);
+            const auto size = ::readlink("/proc/self/exe", path.data(), path.size());
+            if (size <= 0 || static_cast<std::size_t>(size) == path.size())
+            {
+                throw std::runtime_error("Cannot locate package registry test executable");
+            }
+            return fs::path(std::string(path.data(), static_cast<std::size_t>(size)));
+#endif
+#endif
+        }
+
+        struct RegistryWorkerProcess
+        {
+#ifdef _WIN32
+            HANDLE process{nullptr};
+#else
+            pid_t process{-1};
+#endif
+        };
+
+        RegistryWorkerProcess startRegistryWorker(const fs::path& executable, const fs::path& registry,
+                                                  const fs::path& barrier, const std::string& id)
+        {
+#ifdef _WIN32
+            struct EnvironmentNameLess
+            {
+                bool operator()(const std::wstring& left, const std::wstring& right) const
+                {
+                    return _wcsicmp(left.c_str(), right.c_str()) < 0;
+                }
+            };
+            std::map<std::wstring, std::wstring, EnvironmentNameLess> environment;
+            auto* block = GetEnvironmentStringsW();
+            if (!block)
+            {
+                throw std::runtime_error("Cannot read process environment");
+            }
+            for (auto* item = block; *item != L'\0'; item += std::wcslen(item) + 1)
+            {
+                std::wstring entry(item);
+                const auto separator = entry.find(L'=');
+                if (separator != std::wstring::npos)
+                {
+                    const auto key = entry.substr(0, separator);
+                    if (_wcsnicmp(key.c_str(), L"RWE_PACKAGE_TEST_", 17) != 0)
+                    {
+                        environment[key] = entry.substr(separator + 1);
+                    }
+                }
+            }
+            FreeEnvironmentStringsW(block);
+            environment[L"RWE_PACKAGE_TEST_CHILD"] = L"1";
+            environment[L"RWE_PACKAGE_TEST_REGISTRY"] = registry.native();
+            environment[L"RWE_PACKAGE_TEST_BARRIER"] = barrier.native();
+            environment[L"RWE_PACKAGE_TEST_ID"] = std::wstring(id.begin(), id.end());
+
+            std::vector<wchar_t> environmentBlock;
+            for (const auto& [key, value] : environment)
+            {
+                const auto entry = key + L"=" + value;
+                environmentBlock.insert(environmentBlock.end(), entry.begin(), entry.end());
+                environmentBlock.push_back(L'\0');
+            }
+            environmentBlock.push_back(L'\0');
+
+            auto command = L"\"" + executable.native() + L"\" \"[registry-worker]\"";
+            std::vector<wchar_t> commandLine(command.begin(), command.end());
+            commandLine.push_back(L'\0');
+            STARTUPINFOW startup{};
+            startup.cb = sizeof(startup);
+            PROCESS_INFORMATION process{};
+            if (!CreateProcessW(executable.c_str(), commandLine.data(), nullptr, nullptr, FALSE,
+                    CREATE_UNICODE_ENVIRONMENT, environmentBlock.data(), nullptr, &startup, &process))
+            {
+                throw std::runtime_error("Cannot start package registry worker (Windows error "
+                    + std::to_string(GetLastError()) + ")");
+            }
+            CloseHandle(process.hThread);
+            return {process.hProcess};
+#else
+            const auto child = ::fork();
+            if (child < 0)
+            {
+                throw std::runtime_error("Cannot fork package registry worker");
+            }
+            if (child == 0)
+            {
+                ::setenv("RWE_PACKAGE_TEST_CHILD", "1", 1);
+                ::setenv("RWE_PACKAGE_TEST_REGISTRY", registry.c_str(), 1);
+                ::setenv("RWE_PACKAGE_TEST_BARRIER", barrier.c_str(), 1);
+                ::setenv("RWE_PACKAGE_TEST_ID", id.c_str(), 1);
+                ::execl(executable.c_str(), executable.c_str(), "[registry-worker]", static_cast<char*>(nullptr));
+                ::_exit(127);
+            }
+            return {child};
+#endif
+        }
+
+        int waitRegistryWorker(RegistryWorkerProcess worker)
+        {
+#ifdef _WIN32
+            WaitForSingleObject(worker.process, INFINITE);
+            DWORD exitCode = 1;
+            GetExitCodeProcess(worker.process, &exitCode);
+            CloseHandle(worker.process);
+            return static_cast<int>(exitCode);
+#else
+            int status = 0;
+            if (::waitpid(worker.process, &status, 0) != worker.process)
+            {
+                throw std::runtime_error("Cannot wait for package registry worker");
+            }
+            return WIFEXITED(status) ? WEXITSTATUS(status) : 128;
+#endif
+        }
+
+        std::string workerVariable(const char* name)
+        {
+#ifdef _WIN32
+            const auto* value = _wgetenv(std::wstring(name, name + std::strlen(name)).c_str());
+            if (!value)
+            {
+                return {};
+            }
+            const std::wstring wide(value);
+            return std::string(wide.begin(), wide.end());
+#else
+            const auto* value = std::getenv(name);
+            return value ? value : "";
+#endif
+        }
+
+        fs::path workerPathVariable(const char* name)
+        {
+#ifdef _WIN32
+            const auto* value = _wgetenv(std::wstring(name, name + std::strlen(name)).c_str());
+            return value ? fs::path(value) : fs::path{};
+#else
+            const auto* value = std::getenv(name);
+            return value ? fs::path(value) : fs::path{};
+#endif
+        }
     }
 
     TEST_CASE("package registry reads are non-destructive and updates replace an existing file", "[setup][packages]")
@@ -84,15 +280,19 @@ namespace rwe
         const auto filename = fixture.root / "Library" / "registry.json";
         CHECK(loadPackageRegistry(filename) == emptyPackageRegistry());
         CHECK_FALSE(fs::exists(filename.parent_path()));
+        const auto legacyFile = fixture.write("Legacy/registry.json", registryFixture().dump());
+        CHECK(loadPackageRegistry(legacyFile)["generation"] == 0);
 
         auto registry = registryFixture();
         registry["annotation"] = "preserve unknown metadata";
         savePackageRegistry(filename, registry);
-        CHECK(loadPackageRegistry(filename) == registry);
+        registry = loadPackageRegistry(filename);
+        CHECK(registry["generation"] == 1);
         registry["packages"][0]["name"] = "Renamed mod";
         savePackageRegistry(filename, registry);
-        CHECK(loadPackageRegistry(filename) == registry);
-        CHECK(std::distance(fs::directory_iterator(filename.parent_path()), fs::directory_iterator{}) == 1);
+        registry = loadPackageRegistry(filename);
+        CHECK(registry["generation"] == 2);
+        CHECK(std::distance(fs::directory_iterator(filename.parent_path()), fs::directory_iterator{}) == 2);
 
         const auto saved = fixture.read("Library/registry.json");
         auto invalid = registry;
@@ -102,6 +302,198 @@ namespace rwe
         fixture.write("Library/registry.json", "{broken");
         CHECK_THROWS(loadPackageRegistry(filename));
         CHECK(fixture.read("Library/registry.json") == "{broken");
+    }
+
+    TEST_CASE("package registry rejects stale snapshots and releases its lock after failure", "[setup][packages]")
+    {
+        PackageFixture fixture;
+        const auto filename = fixture.root / "Library" / "registry.json";
+        savePackageRegistry(filename, registryFixture());
+        const auto staleSnapshot = loadPackageRegistry(filename);
+        auto committed = updatePackageRegistry(filename, [](json& registry) {
+            registry["packages"].push_back(packageEntry("p-" + std::string(32, 'b'), "Second mod"));
+        });
+        REQUIRE(committed["generation"] == 2);
+        CHECK(committed["packages"].size() == 2);
+        CHECK_THROWS(savePackageRegistry(filename, staleSnapshot));
+        const auto afterStaleSave = loadPackageRegistry(filename);
+        CHECK(afterStaleSave["generation"] == 2);
+        REQUIRE(afterStaleSave["packages"].size() == 2);
+
+        const auto beforeFailure = fixture.read("Library/registry.json");
+        CHECK_THROWS(updatePackageRegistry(filename, [](json& registry) {
+            registry["packages"][0]["kind"] = "invalid";
+        }));
+        CHECK(fixture.read("Library/registry.json") == beforeFailure);
+        CHECK(updatePackageRegistry(filename, [](json&) {}).at("generation") == 3);
+    }
+
+    TEST_CASE("package registry subprocess worker", "[registry-worker]")
+    {
+        if (workerVariable("RWE_PACKAGE_TEST_CHILD") != "1")
+        {
+            return;
+        }
+        const auto filename = workerPathVariable("RWE_PACKAGE_TEST_REGISTRY");
+        const auto barrier = workerPathVariable("RWE_PACKAGE_TEST_BARRIER");
+        const auto id = workerVariable("RWE_PACKAGE_TEST_ID");
+        REQUIRE_FALSE(filename.empty());
+        REQUIRE_FALSE(barrier.empty());
+        REQUIRE_FALSE(id.empty());
+        auto ready = barrier;
+        ready += "." + (id == "crash" ? id : id.substr(2, 1)) + ".ready";
+        std::ofstream(ready) << "ready";
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        while (!fs::exists(barrier) && std::chrono::steady_clock::now() < deadline)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        REQUIRE(fs::exists(barrier));
+        if (id == "crash")
+        {
+            updatePackageRegistry(filename, [](json&) { std::_Exit(23); });
+            FAIL("crash worker unexpectedly returned from update");
+        }
+        updatePackageRegistry(filename, [&](json& registry) {
+            registry["packages"].push_back(packageEntry(id, "Concurrent " + id.substr(2, 1)));
+        });
+    }
+
+    TEST_CASE("concurrent package registry transactions from separate processes keep both records", "[setup][packages]")
+    {
+        PackageFixture fixture;
+        const auto filename = fixture.root / "Library" / "registry.json";
+        const auto barrier = fixture.root / "start-workers";
+        const auto executable = currentExecutable();
+        const auto workerA = startRegistryWorker(executable, filename, barrier, "p-" + std::string(32, 'a'));
+        const auto workerB = startRegistryWorker(executable, filename, barrier, "p-" + std::string(32, 'b'));
+        auto readyA = barrier;
+        readyA += ".a.ready";
+        auto readyB = barrier;
+        readyB += ".b.ready";
+        const auto readyDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        while ((!fs::exists(readyA) || !fs::exists(readyB)) && std::chrono::steady_clock::now() < readyDeadline)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        std::ofstream(barrier) << "start";
+        const auto exitA = waitRegistryWorker(workerA);
+        const auto exitB = waitRegistryWorker(workerB);
+        CHECK(fs::exists(readyA));
+        CHECK(fs::exists(readyB));
+        REQUIRE(exitA == 0);
+        REQUIRE(exitB == 0);
+        const auto registry = loadPackageRegistry(filename);
+        REQUIRE(registry["generation"] == 2);
+        REQUIRE(registry["packages"].size() == 2);
+        CHECK(registry["packages"][0]["id"] != registry["packages"][1]["id"]);
+    }
+
+    TEST_CASE("package registry readers see complete files while transactions replace them", "[setup][packages]")
+    {
+        PackageFixture fixture;
+        const auto filename = fixture.root / "Library" / "registry.json";
+        savePackageRegistry(filename, registryFixture());
+        std::atomic<bool> reading{true};
+        std::atomic<bool> valid{true};
+        std::string readerFailure;
+        std::thread reader([&] {
+            while (reading.load())
+            {
+                try
+                {
+                    const auto snapshot = loadPackageRegistry(filename);
+                    validatePackageRegistry(snapshot);
+                }
+                catch (const std::exception& error)
+                {
+                    readerFailure = error.what();
+                    valid = false;
+                }
+                catch (...)
+                {
+                    readerFailure = "unknown reader failure";
+                    valid = false;
+                }
+            }
+        });
+        try
+        {
+            for (int i = 0; i < 30; ++i)
+            {
+                updatePackageRegistry(filename, [i](json& registry) {
+                    registry["readerProbe"] = std::string(4096, static_cast<char>('a' + (i % 26)));
+                });
+            }
+        }
+        catch (...)
+        {
+            reading = false;
+            reader.join();
+            throw;
+        }
+        reading = false;
+        reader.join();
+        INFO(readerFailure);
+        CHECK(valid.load());
+    }
+
+#ifdef _WIN32
+    TEST_CASE("package registry replacement preserves an open Windows reader", "[setup][packages]")
+    {
+        PackageFixture fixture;
+        const auto filename = fixture.root / "Library" / "registry.json";
+        savePackageRegistry(filename, registryFixture());
+
+        HANDLE reader = CreateFileW(filename.c_str(), GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL, nullptr);
+        REQUIRE(reader != INVALID_HANDLE_VALUE);
+        try
+        {
+            const auto updated = updatePackageRegistry(filename, [](json& registry) {
+                registry["annotation"] = "new registry snapshot";
+            });
+            REQUIRE(updated["generation"] == 2);
+            CHECK(updated["annotation"] == "new registry snapshot");
+
+            LARGE_INTEGER start{};
+            REQUIRE(SetFilePointerEx(reader, start, nullptr, FILE_BEGIN));
+            LARGE_INTEGER size{};
+            REQUIRE(GetFileSizeEx(reader, &size));
+            REQUIRE(size.QuadPart >= 0);
+            std::string oldText(static_cast<std::size_t>(size.QuadPart), '\0');
+            DWORD bytesRead = 0;
+            REQUIRE(ReadFile(reader, oldText.data(), static_cast<DWORD>(oldText.size()), &bytesRead, nullptr));
+            REQUIRE(bytesRead == oldText.size());
+            const auto oldSnapshot = json::parse(oldText);
+            CHECK(oldSnapshot["generation"] == 1);
+            CHECK_FALSE(oldSnapshot.contains("annotation"));
+            CHECK(loadPackageRegistry(filename)["annotation"] == "new registry snapshot");
+        }
+        catch (...)
+        {
+            CloseHandle(reader);
+            throw;
+        }
+        CloseHandle(reader);
+    }
+#endif
+
+    TEST_CASE("a crashed process releases the package registry lock", "[setup][packages]")
+    {
+        PackageFixture fixture;
+        const auto filename = fixture.root / "Library" / "registry.json";
+        const auto barrier = fixture.root / "start-crash-worker";
+        const auto executable = currentExecutable();
+        std::ofstream(barrier) << "start";
+        const auto worker = startRegistryWorker(executable, filename, barrier, "crash");
+        REQUIRE(waitRegistryWorker(worker) == 23);
+        const auto registry = updatePackageRegistry(filename, [](json& current) {
+            current["annotation"] = "lock was released by process exit";
+        });
+        CHECK(registry["generation"] == 1);
+        CHECK(registry["annotation"] == "lock was released by process exit");
     }
 
     TEST_CASE("package registry validates identity and file ownership independently of labels", "[setup][packages]")
@@ -157,6 +549,15 @@ namespace rwe
         {
             registry["packages"][0]["dependencies"].push_back(registry["packages"][0]["id"]);
             CHECK_THROWS(validatePackageRegistry(registry));
+        }
+        SECTION("registry generations must be nonnegative integers")
+        {
+            registry["generation"] = -1;
+            CHECK_THROWS(validatePackageRegistry(registry));
+            registry["generation"] = 1.5;
+            CHECK_THROWS(validatePackageRegistry(registry));
+            registry["generation"] = 7;
+            CHECK_NOTHROW(validatePackageRegistry(registry));
         }
     }
 

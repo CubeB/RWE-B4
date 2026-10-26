@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <nlohmann/json_fwd.hpp>
 
 namespace rwe
@@ -24,5 +25,10 @@ namespace rwe
     void validatePackageRegistry(const nlohmann::json& registry);
     nlohmann::json loadPackageRegistry(const std::filesystem::path& filename);
     void savePackageRegistry(const std::filesystem::path& filename, const nlohmann::json& registry);
+    // Holds the cross-process registry lock across read, mutation, validation
+    // and atomic replacement so concurrent updates cannot lose one another.
+    nlohmann::json updatePackageRegistry(
+        const std::filesystem::path& filename,
+        const std::function<void(nlohmann::json&)>& mutation);
     nlohmann::json inspectContentPackage(const std::filesystem::path& source);
 }

@@ -77,7 +77,8 @@ class PackageCommands(unittest.TestCase):
         library = self.root / 'new library'
         result, data = self.run_command('--list-packages', '--library-root', library, '--json')
         self.assertEqual(result.returncode, 0, data)
-        self.assertEqual(data, {'schemaVersion': 1, 'packages': []})
+        # PACKAGE-006: an absent registry is the generation-zero snapshot.
+        self.assertEqual(data, {'schemaVersion': 1, 'generation': 0, 'packages': []})
         self.assertFalse(library.exists())
         self.assertFalse((self.root / 'user').exists())
 
