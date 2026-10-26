@@ -193,13 +193,19 @@ jobs:
       # protobuf's recursive autogen, which intermittently loses the root
       # ltmain.sh and failed the clang matrix before any engine code built.
       # Protobuf_USE_STATIC_LIBS keeps the AppImage linking the static archive.
-      - name: build rwe
+      - name: configure rwe
         run: |
-          mkdir build
-          pushd build
-          cmake -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DProtobuf_USE_STATIC_LIBS=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ..
-          make -j 4
-          popd
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DProtobuf_USE_STATIC_LIBS=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      - name: build archive backend test
+        if: runner.os == 'Linux'
+        run: cmake --build build --target rwe_archive_test --parallel 2
+      - name: test archive UTF-8 handling under the C locale
+        if: runner.os == 'Linux'
+        env:
+          LC_ALL: C
+        run: ./build/rwe_archive_test --durations yes
+      - name: build rwe
+        run: cmake --build build --parallel 4
       - name: test rwe
         env:
           RWE_TEST_ANNOUNCE: 1

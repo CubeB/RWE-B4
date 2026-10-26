@@ -1509,6 +1509,15 @@ add_test(NAME rwe_test COMMAND rwe_test)
 add_dependencies(rwe_test crash_probe)
 target_compile_definitions(rwe_test PRIVATE RWE_CRASH_PROBE_PATH="$<TARGET_FILE:crash_probe>")
 
+# Keep the archive backend's locale-sensitive format checks runnable without
+# linking the full game or every simulation test into this focused executable.
+add_executable(rwe_archive_test
+    src/rwe/setup/ArchiveBackend.cpp
+    src/rwe/setup/ArchiveBackend.test.cpp)
+target_compile_definitions(rwe_archive_test PRIVATE RWE_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_link_libraries(rwe_archive_test PRIVATE Catch2::Catch2WithMain archive_static)
+add_test(NAME rwe_archive_test COMMAND rwe_archive_test)
+
 install(TARGETS rwe rwe_bridge rwe_setup
     RUNTIME DESTINATION .
     )

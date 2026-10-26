@@ -6,6 +6,7 @@
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <clocale>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -14,9 +15,14 @@
 #include <random>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
+
+#ifndef _WIN32
+#include <locale.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -286,7 +292,7 @@ namespace rwe
             CHECK(extracted.entries.size() == 1);
             std::ifstream input(staging / "payload/data.bin", std::ios::binary);
             const std::string actual((std::istreambuf_iterator<char>(input)), {});
-            CHECK(actual == ArchiveBytes);
+            CHECK(actual == std::string(ArchiveBytes));
         }
     }
 
@@ -357,8 +363,53 @@ namespace rwe
         extractArchive(archivePath, staging);
         std::ifstream input(staging / fs::path(u8"payload/\u2603-\u00e9.bin"), std::ios::binary);
         const std::string actual((std::istreambuf_iterator<char>(input)), {});
-        CHECK(actual == ArchiveBytes);
+        CHECK(actual == std::string(ArchiveBytes));
     }
+
+#ifndef _WIN32
+    TEST_CASE("archive UTF-8 names are locale-independent and keep locale thread-local", "[setup][archive]")
+    {
+        const auto* currentLocale = std::setlocale(LC_CTYPE, nullptr);
+        REQUIRE(currentLocale != nullptr);
+        const std::string originalLocale(currentLocale);
+        struct LocaleRestore
+        {
+            std::string name;
+            ~LocaleRestore() { std::setlocale(LC_CTYPE, name.c_str()); }
+        } restore{originalLocale};
+        REQUIRE(std::setlocale(LC_CTYPE, "C") != nullptr);
+
+        TempDirectory temp;
+        const std::string entryPath = "payload/\xE2\x98\x83-\xC3\xA9.bin";
+        const auto archivePath = temp.path / "unicode-c-locale.zip";
+        writeUtf8ZipEntries(archivePath, {entryPath});
+
+        bool decoded = false;
+        bool threadLocaleRestored = false;
+        std::thread reader([&] {
+            const auto before = uselocale(static_cast<locale_t>(nullptr));
+            try
+            {
+                const auto inventory = inspectArchive(archivePath);
+                decoded = inventory.entries.size() == 1 && inventory.entries[0].path == entryPath;
+            }
+            catch (...)
+            {
+                decoded = false;
+            }
+            threadLocaleRestored = uselocale(static_cast<locale_t>(nullptr)) == before;
+        });
+        reader.join();
+        CHECK(decoded);
+        CHECK(threadLocaleRestored);
+        CHECK(std::string(std::setlocale(LC_CTYPE, nullptr)) == "C");
+
+        const auto malformedArchive = temp.path / "malformed-utf8.zip";
+        writeUtf8ZipEntries(malformedArchive, {std::string("payload/\xC3\x28.bin")});
+        CHECK_THROWS(inspectArchive(malformedArchive));
+        CHECK(std::string(std::setlocale(LC_CTYPE, nullptr)) == "C");
+    }
+#endif
 
     TEST_CASE("archive backend does not use PATH helpers and rejects outer compression wrappers", "[setup][archive]")
     {
@@ -416,7 +467,7 @@ namespace rwe
             for (int byte = 0; byte < 4; ++byte)
                 expected.push_back(static_cast<char>((static_cast<std::uint32_t>(value) >> (byte * 8)) & 0xff));
         }
-        CHECK(actual == expected);
+        CHECK(actual == std::string(expected));
     }
 
     TEST_CASE("bundled archive backend extracts the licensed legacy RAR fixture exactly", "[setup][archive]")
@@ -440,7 +491,7 @@ namespace rwe
         extractArchive(archivePath, staging);
         std::ifstream input(staging / "test.txt", std::ios::binary);
         const std::string actual((std::istreambuf_iterator<char>(input)), {});
-        CHECK(actual == expected);
+        CHECK(actual == std::string(expected));
     }
 
     TEST_CASE("archive backend rejects traversal and symbolic links before leaving staged files", "[setup][archive]")

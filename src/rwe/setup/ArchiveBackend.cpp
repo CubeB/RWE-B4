@@ -16,6 +16,7 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
+#include <locale.h>
 #include <unistd.h>
 #endif
 
@@ -43,6 +44,57 @@ namespace rwe
             }
             ~Reader() { if (value) archive_read_free(value); }
         };
+
+#ifndef _WIN32
+        locale_t utf8ArchiveLocale()
+        {
+            static const auto locale = [] {
+                constexpr const char* names[] = {"C.UTF-8", "C.utf8", "en_US.UTF-8", "UTF-8"};
+                for (const auto* name : names)
+                    if (const auto result = newlocale(LC_CTYPE_MASK, name, static_cast<locale_t>(nullptr)))
+                        return result;
+                throw std::runtime_error("A UTF-8 locale is required to read archive paths");
+            }();
+            return locale;
+        }
+
+        class ArchiveUtf8Locale
+        {
+        public:
+            ArchiveUtf8Locale() : previous(uselocale(utf8ArchiveLocale()))
+            {
+                if (!previous) throw std::system_error(errno, std::generic_category(), "Cannot set archive UTF-8 locale");
+            }
+            ~ArchiveUtf8Locale() { uselocale(previous); }
+
+            ArchiveUtf8Locale(const ArchiveUtf8Locale&) = delete;
+            ArchiveUtf8Locale& operator=(const ArchiveUtf8Locale&) = delete;
+
+        private:
+            locale_t previous;
+        };
+#else
+        class ArchiveUtf8Locale
+        {
+        };
+#endif
+
+        struct ArchiveHeader
+        {
+            int status;
+            std::string path;
+            bool hasUtf8Path;
+            int type;
+        };
+
+        ArchiveHeader readUtf8Header(archive* reader, archive_entry** entry)
+        {
+            ArchiveUtf8Locale locale;
+            const auto status = archive_read_next_header(reader, entry);
+            if (status != ARCHIVE_OK) return {status, {}, false, 0};
+            const auto* pathname = archive_entry_pathname_utf8(*entry);
+            return {status, pathname ? pathname : "", pathname != nullptr, archive_entry_filetype(*entry)};
+        }
 
         std::string archiveError(archive* reader, const char* operation)
         {
@@ -301,16 +353,18 @@ namespace rwe
             std::map<fs::path, ArchiveEntryKind, PathLess> destinations;
             archive_entry* entry = nullptr;
             int status;
-            while ((status = archive_read_next_header(reader, &entry)) == ARCHIVE_OK)
+            while (true)
             {
+                const auto header = readUtf8Header(reader, &entry);
+                status = header.status;
+                if (status != ARCHIVE_OK) break;
                 if (result.entries.size() >= MaxEntries) throw std::runtime_error("Archive entry limit exceeded");
                 if (archive_entry_is_encrypted(entry) > 0) throw std::runtime_error("Encrypted archive entries are unsupported");
                 if (archive_entry_symlink(entry) || archive_entry_hardlink(entry))
                     throw std::runtime_error("Archive links are unsupported");
-                const auto* rawPath = archive_entry_pathname_utf8(entry);
-                if (!rawPath) throw std::runtime_error("Archive entry path is missing or is not valid UTF-8");
-                const auto type = archive_entry_filetype(entry);
-                std::string normalizedPath(rawPath);
+                if (!header.hasUtf8Path) throw std::runtime_error("Archive entry path is missing or is not valid UTF-8");
+                const auto type = header.type;
+                std::string normalizedPath = header.path;
                 if (type == AE_IFDIR && !normalizedPath.empty() && normalizedPath.back() == '/') normalizedPath.pop_back();
                 auto relative = checkedRelativePath(normalizedPath);
                 if (type != AE_IFREG && type != AE_IFDIR) throw std::runtime_error("Archive contains a special file");
@@ -364,15 +418,17 @@ namespace rwe
             std::set<fs::path, PathLess> ownedDirectories{ownedStaging};
             std::array<char, 64 * 1024> buffer{};
             int status;
-            while ((status = archive_read_next_header(reader.value, &entry)) == ARCHIVE_OK)
+            while (true)
             {
+                const auto header = readUtf8Header(reader.value, &entry);
+                status = header.status;
+                if (status != ARCHIVE_OK) break;
                 if (entryIndex >= result.entries.size() || archive_entry_is_encrypted(entry) > 0
                     || archive_entry_symlink(entry) || archive_entry_hardlink(entry))
                     throw std::runtime_error("Archive changed after inventory");
-                const auto* rawPath = archive_entry_pathname_utf8(entry);
-                if (!rawPath) throw std::runtime_error("Archive entry path is missing or is not valid UTF-8");
-                std::string normalizedPath(rawPath);
-                const auto type = archive_entry_filetype(entry);
+                if (!header.hasUtf8Path) throw std::runtime_error("Archive entry path is missing or is not valid UTF-8");
+                std::string normalizedPath = header.path;
+                const auto type = header.type;
                 if (type == AE_IFDIR && !normalizedPath.empty() && normalizedPath.back() == '/') normalizedPath.pop_back();
                 const auto relative = checkedRelativePath(normalizedPath);
                 if (type != AE_IFREG && type != AE_IFDIR)

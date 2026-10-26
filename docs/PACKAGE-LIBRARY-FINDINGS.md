@@ -234,8 +234,12 @@ collisions, links, special files and encrypted entries; it caps the archive at
 cancel between data chunks; on failure or cancellation only the directory it
 created is removed. It does not overwrite an existing staging path or execute
 extracted files. Entry paths must be representable as UTF-8; valid Unicode is
-preserved, while Windows device aliases (including COM/LPT superscript-digit
-forms), control characters and Unicode case aliases are refused. Supported
+preserved independently of the process locale. On POSIX, libarchive header
+decoding and UTF-8 pathname access run under a thread-local UTF-8 locale that
+is restored before returning to callers or invoking extraction progress
+callbacks; the process-wide locale is unchanged. Invalid UTF-8 remains an
+error. Windows device aliases (including COM/LPT superscript-digit forms),
+control characters and Unicode case aliases are refused. Supported
 means these registered readers and entry codecs, not every compression method,
 outer wrapper or encrypted variant of each format. RAR4 variants,
 archive-level encryption behavior, cancellation latency within one decoder
