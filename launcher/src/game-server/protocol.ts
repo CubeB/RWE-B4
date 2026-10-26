@@ -100,6 +100,13 @@ export interface StartGamePayload {
   addresses: [number, string][];
 }
 
+// Broadcast when a start request is refused, so every player sees why rather
+// than only the server log telling the host's request went nowhere.
+export const StartRefused = "start-refused";
+export interface StartRefusedPayload {
+  message: string;
+}
+
 export const ChangeSide = "change-side";
 export interface ChangeSidePayload {
   side: PlayerSide;

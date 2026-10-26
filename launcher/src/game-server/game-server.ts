@@ -454,6 +454,23 @@ export class GameServer {
     this.ns.to(this.getRoomString(roomId)).emit(event, ...args);
   }
 
+  /**
+   * Refuse a start and tell the room why. The client already greys Start and
+   * shows its own warnings, but a request can still arrive from a client that
+   * skipped the check or was built before it existed; this is the message
+   * every player sees when that happens.
+   */
+  private refuseStart(roomId: number, message: string) {
+    const payload: protocol.StartRefusedPayload = { message };
+    this.sendToRoom(roomId, protocol.StartRefused, payload);
+    this.log(message);
+  }
+
+  private playerLabel(room: Room, playerId: number): string {
+    const player = findPlayer(room.players, playerId);
+    return player ? player.name : `player ${playerId}`;
+  }
+
   private onPlayerDroppedFromGame(
     roomId: number,
     reporterId: number,
@@ -857,34 +874,42 @@ export class GameServer {
       room.adminState.state !== "claimed" ||
       room.adminState.adminPlayerId !== playerId
     ) {
-      this.log(
-        `Received start-game from ${playerId}, but that player is not admin!`
-      );
+      this.sendToPlayer(roomId, playerId, protocol.StartRefused, {
+        message: "Cannot start: only the host can start the game.",
+      } satisfies protocol.StartRefusedPayload);
       return;
     }
     if (room.mapName === undefined) {
-      this.log(`Received start-game from ${playerId}, but the map is not set`);
+      this.refuseStart(roomId, "Cannot start: choose a map first.");
       return;
     }
-    if (
-      !room.players.every(x => {
-        switch (x.state) {
-          case "filled":
-            return (
-              x.player.ready &&
-              room.activeMods.every(m => x.player.installedMods.includes(m))
-            );
-          case "closed":
-            return true;
-          case "empty":
-            return false;
-        }
-      })
-    ) {
-      this.log(
-        `Received start-game from ${playerId}, but not all open slots are filled, ready and have the required mods`
+    {
+      const unfilled = room.players.filter(x => x.state === "empty").length;
+      const unready = room.players.flatMap(x =>
+        x.state === "filled" && !x.player.ready ? [x.player.name] : []
       );
-      return;
+      const missingMods = room.players.flatMap(x =>
+        x.state === "filled" &&
+        !room.activeMods.every(m => x.player.installedMods.includes(m))
+          ? [x.player.name]
+          : []
+      );
+      if (unfilled !== 0 || unready.length !== 0 || missingMods.length !== 0) {
+        const reasons: string[] = [];
+        if (unfilled !== 0) {
+          reasons.push("some player slots are still open");
+        }
+        if (unready.length !== 0) {
+          reasons.push(`waiting for ${unready.join(", ")} to ready up`);
+        }
+        if (missingMods.length !== 0) {
+          reasons.push(
+            `${missingMods.join(", ")} do not have all of the active mods`
+          );
+        }
+        this.refuseStart(roomId, `Cannot start: ${reasons.join("; ")}.`);
+        return;
+      }
     }
 
     // The same rule the lobby greys the button with, applied again here
@@ -901,19 +926,29 @@ export class GameServer {
       room.adminState.adminPlayerId
     );
     if (agreement.mismatches.length !== 0) {
-      const names = agreement.mismatches
-        .map(m => `${m.playerId}: ${m.mods.map(x => x.modName).join(", ")}`)
+      const details = agreement.mismatches
+        .map(m => {
+          const archives = m.mods
+            .flatMap(x =>
+              x.differences.map(d => `${x.modName}/${d.archiveName}`)
+            )
+            .join(", ");
+          return `${this.playerLabel(room, m.playerId)} has ${archives}`;
+        })
         .join("; ");
-      this.log(
-        `Received start-game from ${playerId}, but these players do not have the same archives -- ${names}`
+      this.refuseStart(
+        roomId,
+        `Cannot start: the players do not have the same game data (${details}). Both players must use the same mods, maps and archives.`
       );
       return;
     }
     if (agreement.uncheckedPlayerIds.length !== 0) {
-      this.log(
-        `Received start-game from ${playerId}, but these players have not reported their archives yet: ${agreement.uncheckedPlayerIds.join(
-          ", "
-        )}`
+      const names = agreement.uncheckedPlayerIds
+        .map(id => this.playerLabel(room, id))
+        .join(", ");
+      this.refuseStart(
+        roomId,
+        `Cannot start: still checking the game data of ${names}. Wait for the data check to finish.`
       );
       return;
     }

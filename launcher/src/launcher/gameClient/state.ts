@@ -220,6 +220,18 @@ function currentGameReducer(
     case "RECEIVE_START_GAME": {
       return { ...room, started: true };
     }
+    case "RECEIVE_START_REFUSED": {
+      // A system notice, not a player's chat: the server refused a start and
+      // every player needs the reason, including the host whose button was
+      // pressed and any player whose data is the mismatch.
+      return {
+        ...room,
+        messages: [
+          ...room.messages,
+          { senderName: "RWE", message: action.payload.message },
+        ],
+      };
+    }
     case "RECEIVE_PLAYER_DROPPED_FROM_GAME": {
       // Said once by every peer still in the game, so it arrives as many
       // times as there are peers and is remembered once.

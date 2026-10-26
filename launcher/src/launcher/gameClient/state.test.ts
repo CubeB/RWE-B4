@@ -90,6 +90,25 @@ describe("canStartGame, on the archives everyone is about to play with", () => {
   });
 });
 
+describe("start refusals, on what the room shows", () => {
+  it("adds the server's reason to the messages", () => {
+    const next = currentGameWrapperReducer(room([player(1, ta("x"))]), {
+      type: "RECEIVE_START_REFUSED",
+      payload: {
+        message:
+          "Cannot start: the players do not have the same game data (player 2 has ta/totala1.hpi).",
+      },
+    });
+    expect(next?.messages).toEqual([
+      {
+        senderName: "RWE",
+        message:
+          "Cannot start: the players do not have the same game data (player 2 has ta/totala1.hpi).",
+      },
+    ]);
+  });
+});
+
 describe("canRequestRejoin, on who is offered their seat back", () => {
   const inGame = (players: PlayerSlot[]): CurrentGameState => ({
     ...room(players),
