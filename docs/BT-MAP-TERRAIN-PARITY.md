@@ -313,26 +313,23 @@ the occupied rectangle and, if that is fully preferred, checks the four touching
 strips including corners; **a non-preferred strip downgrades the result to 1**.
 Clearance, not slope, is what "tight" measures.
 
-**RWE.** The strip idea is present (`GameSimulation::isAdjacentToObstacle`,
-`GameSimulation.cpp:2143-2153`, called from `computeRoughTerrain`,
-`AbstractUnitPathFinder.cpp:262-300`) and the slope half uses the class's
+**RWE.** The strip test lives in `AbstractUnitPathFinder::computeRoughTerrain`
+(BT-52, ported in #685) and the slope half uses the class's
 `badSlope`/`badWaterSlope` per cell, as `TOTALA-EXE-MOVEMENT.md` section 95
-records. Differences:
+records. It now probes the four pinwheel strips and asks the same rectangle
+questions as the footprint: map bounds, blocking features, occupants under the
+search's stamp, both depth bounds against the cell's low and high corners, and
+the dry or wet slope limit. The differences this audit found are addressed:
 
-- **Strips test occupancy only: DIFFERS.** The original asks the whole cell
-  function of each strip, so a steep or too-deep strip also makes the cell tight.
-  RWE's strips are `isCollisionAt`, which sees units, impassable building cells
-  and blocking features and nothing of terrain. **UNCLEAR** how often it matters
-  (a unit on a ledge beside a cliff).
-- **The bottom strip is placed by the footprint's width: DIFFERS, latent.**
-  `isAdjacentToObstacle` puts the bottom strip at the rectangle's top plus its
-  **width** where it should be plus its height. Every shipped movement class is
-  square, so nothing shows today; a mod class such as 3 by 2 would test the wrong
-  row.
-- **The occupant only counts in certain motion states: UNCLEAR.** The chapter
-  says the primary-occupant check involves the occupant's motion object and a
-  timestamp, which suggests a recently moved or stationary distinction. The
-  chapter does not give it. RWE counts every mobile unit.
+- **Strips test the full cell function: MATCHES after #685.** A steep or
+  too-deep strip now also makes the cell tight; it is no longer occupancy-only.
+- **The bottom strip is placed by the footprint's width: MATCHES after #685.**
+  The bottom strip is at `y+h`, `w+1` wide, with the corners belonging to
+  exactly one strip each.
+- **The occupant only counts in certain motion states: MATCHES the documented
+  reading after #685.** The strip uses the search's thirty-tick occupancy stamp,
+  so a recently moved mobile unit is excused and a stationary one blocks. The
+  finding's confidence in the stamp reading is medium.
 - **Result scale.** 0/1/3 maps to blocked/tight/free; RWE keeps a walkable bit and
   a rough bit per cell. **MATCHES** in effect.
 

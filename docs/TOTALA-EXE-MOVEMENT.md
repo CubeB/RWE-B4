@@ -1300,10 +1300,14 @@ rows of `y` to a dword, indexed `width*(y>>4) + x` with the pair at
 `2*(y & 15)`.
 
 RWE has the same idea in a different place: `AbstractUnitPathFinder::computeRoughTerrain`
-calls `isAdjacentToObstacle` and adds a cost, which is the clearance half, and
+probes the four strips itself and adds a cost, which is the clearance half, and
 its rough threshold used to be `maxSlope / 2`, exactly the original's default
 for `BadSlope`, arrived at independently. Since 2026-09-24 (#112) it reads the
 class's `badSlope` and `badWaterSlope` instead, dry or wet per cell as above.
+The strips were brought to BT-52 in #685: the exact pinwheel rectangles (the
+bottom strip at `y+h`, `w+1` wide), the same terrain, feature and occupant test
+as the footprint, and any strip that is not fully free downgrades the cell to
+tight rather than blocking it.
 
 ### The wreck, specifically
 

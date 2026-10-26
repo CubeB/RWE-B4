@@ -205,6 +205,101 @@ namespace rwe
         REQUIRE_FALSE(routeThroughBand(MovementClassDefinition{"TANK", 1u, 1u, 0u, 255u, 12u, 12u, 5u, 5u}));
     }
 
+    TEST_CASE("BT-52 clearance strips test the terrain and occupants around the footprint", "[pathing]")
+    {
+        auto script = makeEmptyCobScript();
+
+        // A named class so BadSlope can sit below MaxSlope, which is what
+        // makes a passable cell in the ring around the footprint tight.
+        auto addUnitWithClass = [&](GameSimulation& sim, PlayerId player, const MovementClassDefinition& definition, int x, int y) {
+            auto classId = sim.movementClassDatabase.registerMovementClass(definition);
+            sim.movementClassCollisionService.registerMovementClass(classId, computeWalkableGrid(sim.terrain, definition));
+
+            UnitDefinition tank = makeTankDef(definition.maxSlope);
+            tank.movementCollisionInfo = UnitDefinition::NamedMovementClass{classId};
+            sim.unitDefinitions["tank"] = tank;
+            return std::make_pair(addUnitOfType(sim, "tank", player, cellCenter(sim, x, y), script), classId);
+        };
+
+        SECTION("flat ground with a clear ring is free")
+        {
+            GameSimulation sim(makeFlatTerrain(16, 16), 0u, 0, 0);
+            auto player = addPlayer(sim);
+            auto [unitId, classId] = addUnitWithClass(sim, player, MovementClassDefinition{"TANK", 1u, 1u, 0u, 255u, 40u, 40u, 10u, 10u}, 5, 5);
+
+            UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, unitId, classId, 1u, 1u, Point(8, 8));
+            REQUIRE_FALSE(pathFinder.isRoughTerrainOutsideSearch(Point(5, 5)));
+        }
+
+        SECTION("a cliff in the right-hand strip makes the cell tight")
+        {
+            // The footprint's own 2x2 block stays flat; the rise belongs to
+            // the cell immediately east of it, which is in the strip.
+            GameSimulation sim(makeTerrain(16, 16, [](int x, int y) { return (x == 7 && y == 6) ? static_cast<unsigned char>(30) : static_cast<unsigned char>(0); }), 0u, 0, 0);
+            auto player = addPlayer(sim);
+            auto [unitId, classId] = addUnitWithClass(sim, player, MovementClassDefinition{"TANK", 1u, 1u, 0u, 255u, 40u, 40u, 10u, 10u}, 5, 5);
+
+            UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, unitId, classId, 1u, 1u, Point(8, 8));
+            REQUIRE(pathFinder.isRoughTerrainOutsideSearch(Point(5, 5)));
+            REQUIRE(pathFinder.isWalkableOutsideSearch(Point(5, 5)));
+        }
+
+        SECTION("a deep cell in the ring makes the cell tight")
+        {
+            // Sea level 10, the footprint on dry ground at 20, and the cells
+            // south-east of it sunk to the sea bed. The footprint is still
+            // walkable: the depth test only rejects the ring.
+            Grid<unsigned char> heights(16, 16, static_cast<unsigned char>(20));
+            heights.set(5, 6, 0);
+            heights.set(6, 6, 0);
+            heights.set(5, 7, 0);
+            heights.set(6, 7, 0);
+            GameSimulation sim(MapTerrain(std::move(heights), 10_ss), 0u, 0, 0);
+            auto player = addPlayer(sim);
+            auto [unitId, classId] = addUnitWithClass(sim, player, MovementClassDefinition{"TANK", 1u, 1u, 0u, 5u, 255u, 255u, 255u, 255u}, 5, 5);
+
+            UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, unitId, classId, 1u, 1u, Point(8, 8));
+            REQUIRE(pathFinder.isRoughTerrainOutsideSearch(Point(5, 5)));
+            REQUIRE(pathFinder.isWalkableOutsideSearch(Point(5, 5)));
+        }
+
+        SECTION("a stationary occupant makes the strip tight, a recently moved one does not")
+        {
+            // BT-58/BT-59's stamp rule applies to the strips as it does to the
+            // footprint: at tick 100 the class stamp is 70, so a plug stamped
+            // 69 is a wall and one stamped 70 is still moving.
+            GameSimulation sim(makeFlatTerrain(16, 16), 0u, 0, 0);
+            auto player = addPlayer(sim);
+            auto searcher = addTank(sim, player, 5, 5, script, 40u);
+            auto plug = addTank(sim, player, 6, 6, script, 40u);
+
+            sim.gameTime = GameTime(100);
+            sim.getUnitState(plug).occupancyStamp = GameTime(69);
+            UnitPathFinder blocked(&sim, &sim.movementClassCollisionService, searcher, std::nullopt, 1u, 1u, Point(8, 8));
+            REQUIRE(blocked.isRoughTerrainOutsideSearch(Point(5, 5)));
+
+            sim.getUnitState(plug).occupancyStamp = GameTime(70);
+            UnitPathFinder moving(&sim, &sim.movementClassCollisionService, searcher, std::nullopt, 1u, 1u, Point(8, 8));
+            REQUIRE_FALSE(moving.isRoughTerrainOutsideSearch(Point(5, 5)));
+        }
+
+        SECTION("the bottom strip is at y+h and catches the south-east corner of a tall footprint")
+        {
+            // A 1x2 footprint at (5,5) occupies rows 5 and 6. The bottom
+            // strip is (5,7,2,1); the old y+w strip sat on row 6 and missed
+            // the wall at the south-east corner.
+            GameSimulation sim(makeFlatTerrain(16, 16), 0u, 0, 0);
+            auto player = addPlayer(sim);
+            auto [unitId, classId] = addUnitWithClass(sim, player, MovementClassDefinition{"TANK", 1u, 2u, 0u, 255u, 40u, 40u, 10u, 10u}, 5, 5);
+            auto wall = addWallDef(sim);
+            placeWall(sim, wall, 6, 7);
+
+            UnitPathFinder pathFinder(&sim, &sim.movementClassCollisionService, unitId, classId, 1u, 2u, Point(8, 8));
+            REQUIRE(pathFinder.isRoughTerrainOutsideSearch(Point(5, 5)));
+            REQUIRE(pathFinder.isWalkableOutsideSearch(Point(5, 5)));
+        }
+    }
+
     namespace
     {
         /**
@@ -383,7 +478,12 @@ namespace rwe
             auto result = pathFinder.findPath(Point(2, 2));
 
             REQUIRE(result.type == AStarPathType::Complete);
-            REQUIRE(describePath(result.path) == "(2,2) (3,2) (4,2) (5,2) (6,2) (7,2) (8,3) (9,4) (10,5) (11,6) (12,7) (13,8) (14,9) (15,10) (16,11) (17,12) (18,13) (19,14) (20,15) ");
+            // BT-52 (#685) marks a footprint tight when a strip runs off the
+            // map. With a 1x1 footprint the bottom strip names the row below,
+            // so the last two rows and the last two columns are tight. Both
+            // routes are still eighteen steps; the open list now breaks the
+            // tie this way.
+            REQUIRE(describePath(result.path) == "(2,2) (3,3) (4,4) (5,5) (6,6) (7,7) (8,8) (9,9) (10,10) (11,11) (12,12) (13,13) (14,14) (15,15) (16,15) (17,15) (18,15) (19,15) (20,15) ");
         }
 
         SECTION("around a wall with a gap in it")
@@ -416,7 +516,10 @@ namespace rwe
             auto result = pathFinder.findPath(Point(1, 5));
 
             REQUIRE(result.type == AStarPathType::Complete);
-            REQUIRE(describePath(result.path) == "(1,5) (2,5) (3,6) (4,7) (5,7) (6,7) (7,7) (8,7) (9,7) (10,7) (11,6) (12,5) ");
+            // BT-52 (#685) tests the ring as well as the footprint, so a cell
+            // one row from the corrugated band is tight too. The route now
+            // keeps one more row clear of it.
+            REQUIRE(describePath(result.path) == "(1,5) (2,6) (2,7) (3,8) (4,8) (5,8) (6,8) (7,8) (8,8) (9,8) (10,8) (11,7) (12,6) (12,5) ");
         }
 
         SECTION("detouring around water a wading unit would rather avoid")
