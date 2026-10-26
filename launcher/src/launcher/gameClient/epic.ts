@@ -15,6 +15,7 @@ import {
   receiveSlotClosed,
   receiveSlotOpened,
   receiveStartGame,
+  receiveStartRefused,
   receiveActiveModsChanged,
   receivePlayerArchivesChanged,
   receivePlayerDroppedFromGame,
@@ -51,6 +52,7 @@ export const gameClientEventsEpic = (
     clientService.onPlayerReady.pipe(rxop.map(receivePlayerReady)),
     clientService.onMapChanged.pipe(rxop.map(receiveMapChanged)),
     clientService.onStartGame.pipe(rxop.map(receiveStartGame)),
+    clientService.onStartRefused.pipe(rxop.map(receiveStartRefused)),
     clientService.onPlayerDroppedFromGame.pipe(
       rxop.map(receivePlayerDroppedFromGame)
     ),

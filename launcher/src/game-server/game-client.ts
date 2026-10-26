@@ -29,6 +29,8 @@ export class GameClientService {
   private readonly _onPlayerReady = new Subject<protocol.PlayerReadyPayload>();
   private readonly _onMapChanged = new Subject<protocol.MapChangedPayload>();
   private readonly _onStartGame = new Subject<protocol.StartGamePayload>();
+  private readonly _onStartRefused =
+    new Subject<protocol.StartRefusedPayload>();
   private readonly _onPlayerDroppedFromGame =
     new Subject<protocol.PlayerDroppedFromGameBroadcastPayload>();
   private readonly _onRejoinRequested =
@@ -82,6 +84,9 @@ export class GameClientService {
   }
   get onStartGame(): Observable<protocol.StartGamePayload> {
     return this._onStartGame;
+  }
+  get onStartRefused(): Observable<protocol.StartRefusedPayload> {
+    return this._onStartRefused;
   }
   get onPlayerDroppedFromGame(): Observable<protocol.PlayerDroppedFromGameBroadcastPayload> {
     return this._onPlayerDroppedFromGame;
@@ -231,6 +236,13 @@ export class GameClientService {
     this.client.on(protocol.StartGame, (data: protocol.StartGamePayload) => {
       this._onStartGame.next(data);
     });
+
+    this.client.on(
+      protocol.StartRefused,
+      (data: protocol.StartRefusedPayload) => {
+        this._onStartRefused.next(data);
+      }
+    );
 
     this.client.on(
       protocol.PlayerDroppedFromGameBroadcast,

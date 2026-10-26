@@ -178,6 +178,20 @@ export function receiveStartGame(
   };
 }
 
+export interface ReceiveStartRefusedAction {
+  type: "RECEIVE_START_REFUSED";
+  payload: protocol.StartRefusedPayload;
+}
+
+export function receiveStartRefused(
+  payload: protocol.StartRefusedPayload
+): ReceiveStartRefusedAction {
+  return {
+    type: "RECEIVE_START_REFUSED",
+    payload,
+  };
+}
+
 export interface ReceiveActiveModsChangedAction {
   type: "RECEIVE_ACTIVE_MODS_CHANGED";
   payload: protocol.ActiveModsChangedPayload;
@@ -274,6 +288,7 @@ export type GameClientAction =
   | ReceiveSlotOpenedAction
   | ReceiveSlotClosedAction
   | ReceiveStartGameAction
+  | ReceiveStartRefusedAction
   | DisconnectGameAction
   | ReceiveMapChangedAction
   | ReceiveActiveModsChangedAction

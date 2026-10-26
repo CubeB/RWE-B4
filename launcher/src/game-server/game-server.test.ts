@@ -32,11 +32,16 @@ class FakeSocket {
 
 function makeServer() {
   let onConnection: ((s: Socket) => void) | undefined;
+  const emitted: { room: string; event: string; payload: unknown }[] = [];
   const ns = {
     on: (_: string, f: (s: Socket) => void) => {
       onConnection = f;
     },
-    to: () => ({ emit: () => {} }),
+    to: (room: string) => ({
+      emit: (event: string, payload: unknown) => {
+        emitted.push({ room, event, payload });
+      },
+    }),
   } as unknown as Namespace;
   const server = new GameServer(ns, false);
   const connect = () => {
@@ -44,17 +49,31 @@ function makeServer() {
     onConnection!(s as unknown as Socket);
     return s;
   };
-  return { server, connect };
+  return { server, connect, emitted };
 }
 
-function handshake(gameId: number, adminKey?: string) {
+function handshake(
+  gameId: number,
+  adminKey?: string,
+  name = "someone",
+  installedMods: string[] = []
+) {
   return {
     gameId,
-    name: "someone",
+    name,
     ipv4Address: "203.0.113.9",
-    installedMods: [],
+    installedMods,
     adminKey,
   };
+}
+
+function archives(hash: string) {
+  return [
+    {
+      name: "ta",
+      archives: [{ name: "totala1.hpi", size: 1, hash }],
+    },
+  ];
 }
 
 describe("GameServer against payloads a client should never send", () => {
@@ -114,6 +133,30 @@ describe("GameServer against payloads a client should never send", () => {
     expect(player?.state === "filled" && player.player.color).toBe(0);
     expect(info.mapName).toBe("Coast To Coast");
     expect(info.activeMods).toEqual([]);
+  });
+
+  it("tells the room which player and archive differ when a start is refused", () => {
+    const { server, connect, emitted } = makeServer();
+    const room = server.createRoom("x", 2)!;
+    const host = connect();
+    const guest = connect();
+    host.fire(protocol.Handshake, handshake(room.gameId, room.adminKey, "host", ["ta"]));
+    guest.fire(protocol.Handshake, handshake(room.gameId, undefined, "guest", ["ta"]));
+
+    host.fire(protocol.ChangeMap, { mapName: "Coast To Coast" });
+    host.fire(protocol.SetActiveMods, { mods: ["ta"] });
+    host.fire(protocol.SetArchives, { mods: archives("a".repeat(64)) });
+    guest.fire(protocol.SetArchives, { mods: archives("b".repeat(64)) });
+    host.fire(protocol.Ready, true);
+    guest.fire(protocol.Ready, true);
+    host.fire(protocol.RequestStartGame);
+
+    const refusal = emitted.find(x => x.event === protocol.StartRefused);
+    expect(refusal).toBeDefined();
+    expect(refusal!.payload).toEqual({
+      message:
+        "Cannot start: the players do not have the same game data (guest has ta/totala1.hpi). Both players must use the same mods, maps and archives.",
+    });
   });
 
   it("will not record a drop for a player it never seated, or the reporter itself", () => {
