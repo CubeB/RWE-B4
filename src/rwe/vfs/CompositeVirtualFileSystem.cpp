@@ -1,4 +1,6 @@
 #include "CompositeVirtualFileSystem.h"
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <map>
 #include <rwe/io/hpi/hpi_util.h>
@@ -12,6 +14,27 @@ namespace fs = std::filesystem;
 
 namespace rwe
 {
+    namespace
+    {
+        /**
+         * Archives disagree about a directory's case (`features/Corpses` in
+         * one, `features/corpses` in another), so a case-sensitive merge lists
+         * the same file twice and the second read is wasted. Compare letters
+         * without case; the first archive's spelling wins and the result stays
+         * ordered.
+         */
+        struct CaseInsensitiveLess
+        {
+            bool operator()(const std::string& a, const std::string& b) const
+            {
+                return std::lexicographical_compare(
+                    a.begin(), a.end(), b.begin(), b.end(), [](unsigned char x, unsigned char y) {
+                        return std::tolower(x) < std::tolower(y);
+                    });
+            }
+        };
+    }
+
     std::optional<std::vector<char>> CompositeVirtualFileSystem::readFile(const std::string& filename) const
     {
         for (const auto& fs : filesystems)
@@ -103,7 +126,7 @@ namespace rwe
     std::vector<std::string>
     CompositeVirtualFileSystem::getFileNamesRecursive(const std::string& directory, const std::string& extension)
     {
-        std::set<std::string> entries;
+        std::set<std::string, CaseInsensitiveLess> entries;
 
         for (const auto& fs : filesystems)
         {
@@ -118,7 +141,7 @@ namespace rwe
     std::vector<std::pair<std::string, std::string>>
     CompositeVirtualFileSystem::getFileNamesRecursiveWithSources(const std::string& directory, const std::string& extension)
     {
-        std::map<std::string, std::string> entries;
+        std::map<std::string, std::string, CaseInsensitiveLess> entries;
 
         for (const auto& fs : filesystems)
         {

@@ -9,6 +9,8 @@ import {
 import { spawn } from "child_process";
 import * as path from "path";
 import { installExtensions } from "./install-devtools-extensions";
+import { getRweLibraryPaths } from "./util";
+import { listPackageRegistry } from "./packageLibrary";
 
 import { init } from "@sentry/electron/main";
 
@@ -37,6 +39,18 @@ if (!process.env["RWE_HOME"]) {
 }
 
 let mainWindow: Electron.BrowserWindow | null;
+
+// The launcher resolves the same per-user package root as rwe_setup and lets
+// the native registry reader provide the authoritative access diagnostic.
+ipcMain.handle("rwe:list-packages", async () => {
+  const home = process.env["RWE_HOME"]!;
+  const setup = path.join(
+    home,
+    "rwe_setup" + (process.platform === "win32" ? ".exe" : "")
+  );
+  const library = getRweLibraryPaths();
+  return listPackageRegistry(setup, home, library.root);
+});
 
 ipcMain.handle("rwe:import-data", async () => {
   const selected = await dialog.showOpenDialog({

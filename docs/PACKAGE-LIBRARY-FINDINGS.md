@@ -115,6 +115,26 @@ activation and multiplayer checks are separately tracked tasks. No original
 or patched game execution, full map validation or complete mod parity is
 asserted by this contract.
 
+### PACKAGE-005: shared per-user library roots
+
+The native CLI and launcher resolve one registry beneath the existing per-user
+RWE data directory, using the same Windows `%APPDATA%/RWE` and Linux XDG/legacy
+selection rules. The managed layout is `Library/registry.json`,
+`Library/packages/<id>/` and `Library/staging/`; managed record paths remain
+`packages/<id>` relative to `Library`, as PACKAGE-002 requires. The existing
+lower-case `mods/` directory and top-level `MapPacks/` remain discovery/source
+locations for existing content. They are not registry-owned and are never
+removed as managed package data. Registry reads do not create directories;
+inaccessible paths return an error diagnostic. Repository files, source paths
+and original TA data are outside managed ownership.
+
+This is RWE-original storage policy. MOD-ARCHIVE-01's static comparison at
+revision e89721c46c3fa06e59558419b54fe26061fafb73 (GOG/v3.1 MD5
+8e74a1dffa1f5988624c52048f5b20cd) establishes original archive discovery and
+resolution only; it has no per-user library counterpart. No original runtime
+validation is claimed. The code may share a platform data-root algorithm, but
+this is not a claim that the original used these directories.
+
 ### PACKAGE-006: serialized registry transactions
 
 Issue #775, under ADR-0004. Cross-process coordination is RWE-original

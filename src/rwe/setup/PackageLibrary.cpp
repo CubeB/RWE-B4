@@ -37,6 +37,18 @@ using json = nlohmann::json;
 
 namespace rwe
 {
+    PackageLibraryPaths packageLibraryPaths(const fs::path& userDataPath)
+    {
+        const auto root = userDataPath / "Library";
+        return {
+            root,
+            root / "registry.json",
+            root / "packages",
+            userDataPath / "mods",
+            userDataPath / "MapPacks",
+            root / "staging"};
+    }
+
     namespace
     {
         constexpr std::uintmax_t MaxMetadataBytes = 1024 * 1024;

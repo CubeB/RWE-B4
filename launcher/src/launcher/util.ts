@@ -339,7 +339,7 @@ export function chooseRweUserPath(
 export function getRweUserPath(): string {
   return chooseRweUserPath(
     rweUserPathCandidates(process.platform, process.env),
-    (p) => {
+    p => {
       try {
         return fs.statSync(p).isDirectory();
       } catch {
@@ -350,7 +350,32 @@ export function getRweUserPath(): string {
 }
 
 export function getRweModsPath(): string {
-  return path.join(getRweUserPath(), "mods");
+  return getRweLibraryPaths().mods;
+}
+
+export interface RweLibraryPaths {
+  root: string;
+  registry: string;
+  packages: string;
+  mods: string;
+  mapPacks: string;
+  staging: string;
+}
+
+export function rweLibraryPaths(userDataPath: string): RweLibraryPaths {
+  const root = path.join(userDataPath, "Library");
+  return {
+    root,
+    registry: path.join(root, "registry.json"),
+    packages: path.join(root, "packages"),
+    mods: path.join(userDataPath, "mods"),
+    mapPacks: path.join(userDataPath, "MapPacks"),
+    staging: path.join(root, "staging"),
+  };
+}
+
+export function getRweLibraryPaths(): RweLibraryPaths {
+  return rweLibraryPaths(getRweUserPath());
 }
 
 export function getRweConfigPath(): string {

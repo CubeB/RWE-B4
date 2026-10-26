@@ -210,6 +210,41 @@ namespace rwe
             std::vector<std::string> getDirectoryNames(const std::string&) override { return {}; }
             std::vector<std::string> getFileNamesRecursive(const std::string&, const std::string&) override { return {}; }
         };
+
+        class NamedLeafFileSystem final : public LeafVirtualFileSystem
+        {
+        public:
+            NamedLeafFileSystem(std::string name, std::vector<std::string> recursiveNames)
+                : name(std::move(name)), recursiveNames(std::move(recursiveNames))
+            {
+            }
+
+            std::string name;
+            std::vector<std::string> recursiveNames;
+
+            const std::string& getPath() const override { return name; }
+            std::optional<std::vector<char>> readFile(const std::string&) const override { return std::nullopt; }
+            std::vector<std::string> getFileNames(const std::string&, const std::string&) override { return {}; }
+            std::vector<std::string> getDirectoryNames(const std::string&) override { return {}; }
+            std::vector<std::string> getFileNamesRecursive(const std::string&, const std::string&) override { return recursiveNames; }
+        };
+    }
+
+    TEST_CASE("a recursive listing merges case-variant directory spellings once", "[vfs]")
+    {
+        CompositeVirtualFileSystem vfs;
+        vfs.emplaceFileSystem<NamedLeafFileSystem>(
+            "first", std::vector<std::string>{"Corpses/a.tdf", "Corpses/b.tdf"});
+        vfs.emplaceFileSystem<NamedLeafFileSystem>(
+            "second", std::vector<std::string>{"corpses/A.tdf", "corpses/c.tdf"});
+
+        auto names = vfs.getFileNamesRecursive("features", ".tdf");
+        REQUIRE(names == std::vector<std::string>{"Corpses/a.tdf", "Corpses/b.tdf", "corpses/c.tdf"});
+
+        auto withSources = vfs.getFileNamesRecursiveWithSources("features", ".tdf");
+        REQUIRE(withSources.size() == 3);
+        REQUIRE(withSources[0].first == "Corpses/a.tdf");
+        REQUIRE(withSources[0].second == "first");
     }
 
     TEST_CASE("a file that will not extract, or an archive that will not open, costs only itself", "[malformed]")

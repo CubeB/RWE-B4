@@ -31,6 +31,17 @@ using json = nlohmann::json;
 
 namespace rwe
 {
+    TEST_CASE("package storage uses one user-owned layout and keeps mods at its existing path", "[setup][packages]")
+    {
+        const auto paths = packageLibraryPaths(fs::path("/home/user/.local/share/rwe"));
+        CHECK(paths.root == fs::path("/home/user/.local/share/rwe/Library"));
+        CHECK(paths.registry == paths.root / "registry.json");
+        CHECK(paths.packages == paths.root / "packages");
+        CHECK(paths.mods == fs::path("/home/user/.local/share/rwe/mods"));
+        CHECK(paths.mapPacks == fs::path("/home/user/.local/share/rwe/MapPacks"));
+        CHECK(paths.staging == paths.root / "staging");
+    }
+
     namespace
     {
         struct PackageFixture
