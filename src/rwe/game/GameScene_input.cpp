@@ -979,7 +979,10 @@ namespace rwe
                                 hoverBuildInfo->rect.y);
                             auto x = topLeftWorld.x + ((SimScalar(hoverBuildInfo->rect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss);
                             auto z = topLeftWorld.z + ((SimScalar(hoverBuildInfo->rect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss);
-                            auto y = simulation.terrain.getHeightAt(x, z);
+                            // BUILD-GRID-001: the accepted order retains the
+                            // preview's placement plane, including water yards.
+                            const auto& definition = simulation.unitDefinitions.at(buildCursor.unitType);
+                            auto y = simulation.computeBuildHeight(definition, hoverBuildInfo->rect);
                             SimVector buildPos(x, y, z);
                             if (isShiftDown())
                             {

@@ -1041,9 +1041,9 @@ namespace rwe
             auto footprintRect = simulation.computeFootprintRegion(position, unitDefinition.movementCollisionInfo);
 
             auto topLeftWorld = simulation.terrain.heightmapIndexToWorldCorner(footprintRect.x, footprintRect.y);
-            topLeftWorld.y = simulation.terrain.getHeightAt(
-                topLeftWorld.x + ((SimScalar(footprintRect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss),
-                topLeftWorld.z + ((SimScalar(footprintRect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
+            // BUILD-GRID-003: queued and immediate-feedback boxes use stored
+            // order Y. Resampling the seabed separates them from water yards.
+            topLeftWorld.y = position.y;
 
             auto topLeftUi = worldToUi * simVectorToFloat(topLeftWorld);
             auto boxWidth = footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits) * worldUiScale();
@@ -1192,7 +1192,7 @@ namespace rwe
         buildBoxAppearedAt = std::move(stillThere);
     }
 
-    void GameScene::renderBuildBoxSweep(const Matrix4f& worldToUi, const DiscreteRect& footprintRect, unsigned int age, bool ownerSelected)
+    void GameScene::renderBuildBoxSweep(const Matrix4f& worldToUi, const DiscreteRect& footprintRect, SimScalar placementHeight, unsigned int age, bool ownerSelected)
     {
         // 0x438C00. Four full-length lines -- two vertical, two horizontal --
         // sweeping inwards across the footprint: dx = width * t / 10 and
@@ -1210,9 +1210,7 @@ namespace rwe
         auto colorB = ownerSelected ? Color(83, 223, 79) : Color(84, 84, 252);
 
         auto topLeftWorld = simulation.terrain.heightmapIndexToWorldCorner(footprintRect.x, footprintRect.y);
-        topLeftWorld.y = simulation.terrain.getHeightAt(
-            topLeftWorld.x + ((SimScalar(footprintRect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss),
-            topLeftWorld.z + ((SimScalar(footprintRect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss));
+        topLeftWorld.y = placementHeight; // BUILD-GRID-003: the same plane as its queued outline.
 
         auto topLeftUi = worldToUi * simVectorToFloat(topLeftWorld);
         auto width = footprintRect.width * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits) * worldUiScale();
@@ -1281,7 +1279,7 @@ namespace rwe
                     continue;
                 }
 
-                renderBuildBoxSweep(worldToUi, footprintRect, age, ownerSelected);
+                renderBuildBoxSweep(worldToUi, footprintRect, buildOrder->position.y, age, ownerSelected);
             }
         }
 
@@ -1311,7 +1309,7 @@ namespace rwe
             }
 
             auto ownerSelected = selectedUnits.find(ghost.builderId) != selectedUnits.end();
-            renderBuildBoxSweep(worldToUi, footprintRect, age, ownerSelected);
+            renderBuildBoxSweep(worldToUi, footprintRect, ghost.position.y, age, ownerSelected);
         }
     }
 

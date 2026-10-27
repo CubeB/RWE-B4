@@ -415,6 +415,86 @@ namespace rwe
         scene.localPlayerIssueUnitOrder(unitId, MoveOrder(destination));
     }
 
+    std::optional<SimVector> ScenarioDriver::placeWaterBuildAndCheckFeedback(const std::string& unitType)
+    {
+        // BUILD-GRID-001/002, docs/PLAYTEST-BUILD-GRID-FINDINGS.md.
+        // Setup uses shipped terrain and the real placement permission query;
+        // the action under test is GameScene's click-to-order/feedback path.
+        auto builder = commander(0);
+        require(builder.has_value(), "a local commander can place the water building");
+        if (!builder)
+        {
+            return std::nullopt;
+        }
+        select(*builder);
+        require(scene.selectedUnits.contains(*builder), "the placement builder is selected");
+        // Reveal the fixture's terrain: a distant black-map site is correctly
+        // refused by the real placement query before its height is relevant.
+        for (auto& cell : scene.simulation.explored.getVector())
+        {
+            cell |= scene.simulation.losGroupBitFor(scene.localPlayerId);
+        }
+        const auto& definition = scene.simulation.unitDefinitions.at(unitType);
+        auto mc = scene.simulation.getAdHocMovementClass(definition.movementCollisionInfo);
+        const auto& heights = scene.simulation.terrain.getHeightMap();
+        auto expectedY = scene.simulation.terrain.getSeaLevel() - SimScalar(definition.waterLine);
+        for (int y = 16; y + static_cast<int>(mc.footprintZ) < heights.getHeight() - 8; y += 8)
+        {
+            for (int x = 16; x + static_cast<int>(mc.footprintX) < heights.getWidth() - 2; x += 8)
+            {
+                DiscreteRect rect(x, y, mc.footprintX, mc.footprintZ);
+                if (!scene.simulation.canBeBuiltAtAsSeenBy(mc, definition.yardMap, definition.yardMapContainsGeo,
+                        x, y, definition.waterLine, scene.localPlayerId))
+                {
+                    continue;
+                }
+                auto site = scene.simulation.terrain.heightmapIndexToWorldCorner(x, y);
+                site.x += SimScalar(mc.footprintX * 8u);
+                site.z += SimScalar(mc.footprintZ * 8u);
+                site.y = expectedY;
+                auto ground = scene.simulation.terrain.getHeightAt(site.x, site.z);
+                auto delta = site - scene.simulation.getUnitState(*builder).position;
+                delta.y = 0_ss;
+                if (expectedY == ground || delta.lengthSquared() < 600_ss * 600_ss)
+                {
+                    continue;
+                }
+                require(scene.simulation.computeBuildHeight(definition, rect) == expectedY,
+                    "the shipped water-only yard previews at sea level minus draft");
+                scene.setCameraPosition(Vector3f(site.x.value, 0.0f, site.z.value));
+                scene.cursorMode.next(BuildCursorMode{unitType});
+                // Park the legal hover rectangle a real frame would produce.
+                // This avoids making mouse-ray intersection the fixture's subject.
+                scene.hoverBuildInfo = HoverBuildInfo{rect, true};
+                clickAt(scene.worldViewport.x() + scene.worldViewport.width() / 2,
+                    scene.worldViewport.y() + scene.worldViewport.height() / 2);
+                const auto ghost = std::find_if(scene.localBuildGhosts.begin(), scene.localBuildGhosts.end(), [&](const auto& value) {
+                    return value.builderId == *builder && value.unitType == unitType && value.position.x == site.x && value.position.z == site.z;
+                });
+                require(ghost != scene.localBuildGhosts.end(), "the click immediately creates local placement feedback");
+                if (ghost != scene.localBuildGhosts.end())
+                {
+                    require(ghost->position.y == expectedY, "placement feedback retains the preview height instead of the seabed");
+                }
+                return site;
+            }
+        }
+        require(false, "a distant legal water-only site exists in the shipped map");
+        return std::nullopt;
+    }
+
+    std::optional<SimVector> ScenarioDriver::queuedBuildPosition(UnitId builder, const std::string& unitType) const
+    {
+        for (const auto& order : scene.simulation.getUnitState(builder).orders)
+        {
+            if (const auto* build = std::get_if<BuildOrder>(&order); build && build->unitType == unitType)
+            {
+                return build->position;
+            }
+        }
+        return std::nullopt;
+    }
+
     void ScenarioDriver::peerGameSpeed(int peerSpeedLevel)
     {
         scene.setPeerGameSpeedLevel(peerSpeedLevel);

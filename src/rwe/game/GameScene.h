@@ -2312,7 +2312,7 @@ namespace rwe
         void updateBuildBoxAppearances();
 
         /** The ten-tick sweep the original plays over a newly placed building. */
-        void renderBuildBoxSweep(const Matrix4f& worldToUi, const DiscreteRect& footprintRect, unsigned int age, bool ownerSelected);
+        void renderBuildBoxSweep(const Matrix4f& worldToUi, const DiscreteRect& footprintRect, SimScalar placementHeight, unsigned int age, bool ownerSelected);
 
         void renderPlacementSweeps();
 

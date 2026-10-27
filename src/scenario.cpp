@@ -94,6 +94,28 @@ namespace
 
     void registerScenarios()
     {
+        rwe::registerScenario("898-water-build-height", [](rwe::Scenario& s) {
+            auto expected = std::make_shared<std::optional<rwe::SimVector>>();
+            s.at(1, [expected](rwe::ScenarioDriver& d) {
+                *expected = d.placeWaterBuildAndCheckFeedback("ARMTIDE");
+            });
+            s.at(20, [expected](rwe::ScenarioDriver& d) {
+                auto builder = d.commander(0);
+                d.require(builder.has_value() && expected->has_value(), "the placement fixture completed");
+                if (!builder || !*expected)
+                {
+                    return;
+                }
+                auto queued = d.queuedBuildPosition(*builder, "ARMTIDE");
+                d.require(queued.has_value(), "the real click reached the command stream as a queued build");
+                if (queued)
+                {
+                    d.require(*queued == **expected, "the queued order retains the preview's position and height");
+                }
+            });
+            s.endAt(20);
+        });
+
         rwe::registerScenario("653-bookmark-exits-tracking", [](rwe::Scenario& s) {
             auto saved = std::make_shared<std::optional<rwe::SimVector>>();
             s.at(1, [saved](rwe::ScenarioDriver& d) {

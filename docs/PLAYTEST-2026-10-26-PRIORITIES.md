@@ -20,6 +20,13 @@ confidence, especially for unreproduced bugs. They do not make a ticket
 
 ## Recommended work order
 
+Progress from the [2026-10-27 implementation pass](PLAYTEST-2026-10-27-IMPLEMENTATION.md):
+#895's commander border fault is corrected; aircraft recovery remains open.
+#904's watching visibility is corrected. #899's normal-play bubble leak now
+has a separate reference finding and remains the next confirmed fix. #898's
+water build-order/feedback height is corrected and covered by a real placement
+scenario. Other tasks remain in the order below; this is not a completed queue.
+
 | Order | Issue | Priority | Effort | Why / next step |
 | --- | --- | --- | --- | --- |
 | 1 | [#895](https://github.com/CubeB/RWE-B4/issues/895) — Units leaving the map | High | Medium | Potentially loses units or permits invalid movement; establish the boundary rule and reproduce an edge case. |
