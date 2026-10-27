@@ -1700,6 +1700,26 @@ namespace rwe
         // which for the host stops short of the Start button.
         widenStatusLine(*panel, role == RoomRole::Host ? 508 - 9 - 4 : 640 - 9 - 9);
 
+        // #897: a clickable Accept for a waiting join request, beside the
+        // message box. It is RWE's own affordance -- the original has no such
+        // control and the typed /accept still works -- and it is hidden until
+        // a request is waiting (refreshBattleroom).
+        if (role == RoomRole::Host)
+        {
+            auto box = panel->find<UiComponent>("MESSAGE");
+            auto start = panel->find<UiComponent>("START");
+            if (box && start)
+            {
+                const int x = box->get().getX() + static_cast<int>(box->get().getWidth()) + 6;
+                const int width = std::max(60, start->get().getX() - 4 - x);
+                auto accept = factory.createSizedButton(
+                    x, box->get().getY(), width, static_cast<int>(box->get().getHeight()), "LOUNGE2", "Accept");
+                accept->setName("ACCEPT");
+                accept->setVisible(false);
+                panel->appendChild(std::move(accept));
+            }
+        }
+
         // -- typing --
         if (auto message = panel->find<UiTextBox>("MESSAGE"))
         {
@@ -2630,7 +2650,7 @@ namespace rwe
                 text = flow.launching ? "Starting game..." : blocker.value_or("Ready. Click seats for Original TA / RWE AI, or Start Game.");
                 if (!flow.launching && !flow.pendingJoins.empty())
                 {
-                    text = flow.pendingJoins.front().name + " wants to join. Type /accept.";
+                    text = flow.pendingJoins.front().name + " wants to join. Click Accept or type /accept.";
                 }
             }
             else if (!flow.accepted)
@@ -2644,6 +2664,18 @@ namespace rwe
                     : "Click the box beside your name when you are ready.";
             }
             l->get().setText(text);
+        }
+
+        // -- the clickable accept (#897) --
+        if (auto accept = panel.find<UiStagedButton>("ACCEPT"))
+        {
+            const auto waiting = role == RoomRole::Host && !flow.pendingJoins.empty() && !flow.launching;
+            accept->get().setVisible(waiting);
+            if (waiting)
+            {
+                const auto& name = flow.pendingJoins.front().name;
+                accept->get().setLabel("Accept " + (name.empty() ? std::string("player") : name));
+            }
         }
 
         // -- the transcript --
@@ -2719,6 +2751,42 @@ namespace rwe
         }
     }
 
+    namespace
+    {
+        /**
+         * Admits a waiting join request: the oldest, or the one whose name
+         * matches `name`. Shared by the typed `/accept` and the battleroom's
+         * clickable Accept, so the two paths cannot drift (#897).
+         */
+        bool admitJoinRequest(MultiplayerFlow& flow, const std::string& name)
+        {
+            if (flow.launching)
+            {
+                flow.chat.say(std::string(), "Cannot accept a join request while the game is starting.");
+                return true;
+            }
+
+            auto wanted = name;
+            std::transform(wanted.begin(), wanted.end(), wanted.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            auto request = std::find_if(flow.pendingJoins.begin(), flow.pendingJoins.end(), [&](const auto& pending) {
+                auto candidate = pending.name;
+                std::transform(candidate.begin(), candidate.end(), candidate.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                return wanted.empty() || candidate == wanted;
+            });
+            if (request == flow.pendingJoins.end())
+            {
+                flow.chat.say(std::string(), wanted.empty() ? "No join requests are waiting." : "No join request from that name is waiting.");
+                return true;
+            }
+
+            flow.approvedJoinTokens.push_back(request->token);
+            const auto who = request->name.empty() ? std::string("A player") : request->name;
+            flow.chat.say(std::string(), "Accepted " + who + "'s join request.");
+            flow.pendingJoins.erase(request);
+            return true;
+        }
+    }
+
     bool MainMenuScene::battleroomMessage(const std::string& message, const ActivateMessage& details)
     {
         if (!multiplayerFlow || multiplayerFlow->role == MultiplayerFlow::Role::Browsing)
@@ -2746,6 +2814,18 @@ namespace rwe
         if (message == "SEND")
         {
             sendChatLine();
+        }
+        else if (message == "ACCEPT")
+        {
+            // The same admission as the typed /accept: the oldest waiting
+            // request, which is the one the button is labelled with (#897).
+            if (host && !flow.launching && !flow.pendingJoins.empty())
+            {
+                admitJoinRequest(flow, std::string());
+                refreshBattleroom();
+                keepTyping();
+                return true;
+            }
         }
         else if (message == "MAP")
         {
@@ -3052,7 +3132,7 @@ namespace rwe
                 {
                     flow.pendingJoins.push_back(claim);
                     const auto who = claim.name.empty() ? std::string("A player") : claim.name;
-                    flow.chat.say(std::string(), who + " wants to join. Type /accept to allow.");
+                    flow.chat.say(std::string(), who + " wants to join. Click Accept or type /accept.");
                 }
                 continue;
             }
@@ -3424,27 +3504,7 @@ namespace rwe
         std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (lowered == "/accept" || lowered.compare(0, 8, "/accept ") == 0)
         {
-            if (flow.launching)
-            {
-                flow.chat.say(std::string(), "Cannot accept a join request while the game is starting.");
-                return true;
-            }
-            const auto name = lowered.size() > 7 ? trimmed(lowered.substr(8)) : std::string();
-            auto request = std::find_if(flow.pendingJoins.begin(), flow.pendingJoins.end(), [&](const auto& pending) {
-                auto candidate = pending.name;
-                std::transform(candidate.begin(), candidate.end(), candidate.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                return name.empty() || candidate == name;
-            });
-            if (request == flow.pendingJoins.end())
-            {
-                flow.chat.say(std::string(), name.empty() ? "No join requests are waiting." : "No join request from that name is waiting.");
-                return true;
-            }
-            flow.approvedJoinTokens.push_back(request->token);
-            const auto who = request->name.empty() ? std::string("A player") : request->name;
-            flow.chat.say(std::string(), "Accepted " + who + "'s join request.");
-            flow.pendingJoins.erase(request);
-            return true;
+            return admitJoinRequest(flow, lowered.size() > 7 ? trimmed(lowered.substr(8)) : std::string());
         }
         if (lowered == "/invite")
         {

@@ -209,6 +209,14 @@ Everything else lives in a subject file. **The numbers never move**, so a
 
 ## 88. Where RWE deliberately differs
 
+- **Clickable Accept in the battleroom** (#897, 2026-10-27). A host can admit
+  a waiting join request by pressing the Accept button beside the message box
+  instead of typing `/accept`; the button appears only while a request waits,
+  names the oldest requester, and runs the same admission as the command.
+  The original has no such control: its approval gate is the typed command.
+  Approval after `/invite` is unchanged, the LAN path still seats guests
+  automatically, and no transport, packet or simulation state is involved.
+
 - **Full-visibility watching** (#899/#904, 2026-10-27). Replay/demo
   `See everything` shows every top-level model, including cloaked and submerged
   units, regardless of sonar jamming. The same explicit view policy applies

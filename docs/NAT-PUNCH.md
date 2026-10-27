@@ -13,10 +13,11 @@ router blocks it, the guest sends a reply code back as a fallback.
 
 After `/invite`, new players need the host's approval. The guest enters the
 invite code, types their nickname on the game list and presses Join. The host
-sees `Name wants to join. Type /accept to allow.` in the battleroom, with a
-reminder on the status line. `/accept` admits the oldest waiting request;
-`/accept Name` admits the oldest request matching that name, ignoring case.
-The commands are handled locally and are not sent as player chat.
+sees `Name wants to join. Click Accept or type /accept.` in the battleroom,
+with a reminder on the status line and an **Accept** button beside the message
+box that admits the oldest waiting request. `/accept` admits the oldest waiting
+request; `/accept Name` admits the oldest request matching that name, ignoring
+case. The commands are handled locally and are not sent as player chat.
 
 The guest sees the host's actual roster while it is waiting for acceptance,
 without showing itself as admitted early, and can wait longer than the
