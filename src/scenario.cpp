@@ -92,6 +92,16 @@ namespace
         return name == "own-clock-ticks-and-orders";
     }
 
+    /**
+     * Whether a scenario runs with an opposing seat, for fixtures that need a
+     * foreign unit to own (#899). The seat is a computer player so the
+     * ordinary one-human rule still holds and no second local input exists.
+     */
+    bool scenarioNeedsOpposingSeat(const std::string& name)
+    {
+        return name == "899-hidden-extractor-bubbles" || name == "899-owned-extractor-bubbles";
+    }
+
     void registerScenarios()
     {
         rwe::registerScenario("898-water-build-height", [](rwe::Scenario& s) {
@@ -286,6 +296,93 @@ namespace
             });
             s.endAt(91);
         });
+
+        // #899 / WATER-VIS-003A: the original admits a script effect through
+        // the whole-unit display predicate (0x465AC0), so a wholly submerged
+        // foreign extractor cannot give itself away with bubbles merely
+        // because the seabed under it is lit. The owned twin below proves the
+        // shipped script really does emit 259 in this fixture.
+        rwe::registerScenario("899-hidden-extractor-bubbles", [](rwe::Scenario& s) {
+            auto mex = std::make_shared<std::optional<rwe::UnitId>>();
+            s.at(4, [mex](rwe::ScenarioDriver& d) {
+                auto pair = d.findWaterFixturePair("ARMCS", "ARMUWMEX", 96.0f);
+                d.require(pair.has_value(), "the shipped map has open water for the fixture");
+                if (!pair)
+                {
+                    return;
+                }
+                // ARMCS: sight 224, no sonar. It lights the seabed beside it
+                // without ever granting the sonar contact the waterline rule
+                // asks for, which is exactly the reported case.
+                auto beacon = d.spawnCompletedAt("ARMCS", 0, pair->first);
+                d.require(beacon.has_value(), "a local construction ship provides sight over the water");
+                *mex = d.spawnCompletedAt("ARMUWMEX", 1, pair->second);
+                d.require(mex->has_value(), "an enemy underwater extractor spawned");
+                if (*mex)
+                {
+                    d.activateUnit(**mex);
+                }
+            });
+            s.at(8, [mex](rwe::ScenarioDriver& d) {
+                d.require(mex->has_value(), "the enemy extractor survived its spawn tick");
+                if (!*mex)
+                {
+                    return;
+                }
+                auto position = d.unitPosition(**mex);
+                d.require(position.has_value(), "the enemy extractor is on the map");
+                if (position)
+                {
+                    d.require(d.positionIsVisibleToLocalPlayer(*position),
+                        "the seabed under the extractor is in the local player's sight");
+                }
+                d.require(!d.unitIsVisibleToLocalPlayer(**mex),
+                    "a wholly submerged foreign model stays hidden without sonar contact");
+            });
+            for (unsigned int tick = 8; tick <= 120; tick += 8)
+            {
+                s.at(tick, [](rwe::ScenarioDriver& d) {
+                    d.require(d.bubbleDotCount() == 0, "a hidden foreign extractor leaves no bubbles behind");
+                });
+            }
+            s.endAt(120);
+        });
+
+        rwe::registerScenario("899-owned-extractor-bubbles", [](rwe::Scenario& s) {
+            auto mex = std::make_shared<std::optional<rwe::UnitId>>();
+            auto seen = std::make_shared<bool>(false);
+            s.at(4, [mex](rwe::ScenarioDriver& d) {
+                auto pair = d.findWaterFixturePair("ARMCS", "ARMUWMEX", 96.0f);
+                d.require(pair.has_value(), "the shipped map has open water for the fixture");
+                if (!pair)
+                {
+                    return;
+                }
+                *mex = d.spawnCompletedAt("ARMUWMEX", 0, pair->second);
+                d.require(mex->has_value(), "the player's own underwater extractor spawned");
+                if (*mex)
+                {
+                    d.activateUnit(**mex);
+                }
+            });
+            s.at(8, [mex, seen](rwe::ScenarioDriver& d) {
+                d.require(mex->has_value(), "the extractor survived its spawn tick");
+                if (!*mex)
+                {
+                    return;
+                }
+                d.require(d.unitIsVisibleToLocalPlayer(**mex), "the player's own submerged model is admitted");
+                *seen = *seen || d.bubbleDotCount() > 0;
+            });
+            for (unsigned int tick = 16; tick <= 120; tick += 8)
+            {
+                s.at(tick, [seen](rwe::ScenarioDriver& d) { *seen = *seen || d.bubbleDotCount() > 0; });
+            }
+            s.after(120, [seen](rwe::ScenarioDriver& d) {
+                d.require(*seen, "the owned extractor's script really emits bubbles here");
+            });
+            s.endAt(120);
+        });
     }
 
     /** Runs one scenario and says whether it passed. */
@@ -308,6 +405,10 @@ namespace
         // goes into localPlayerCommandBuffer and out as an ordinary command in
         // the lockstep stream. No AI, so nothing else moves the world.
         parameters.players[0] = rwe::parsePlayerInfoFromArg("scenario;Human;ARM;0");
+        if (scenarioNeedsOpposingSeat(name))
+        {
+            parameters.players[1] = rwe::parsePlayerInfoFromArg("opponent;Computer;CORE;1");
+        }
         parameters.scenarioName = name;
         parameters.randomSeed = seed;
 

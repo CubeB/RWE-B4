@@ -171,6 +171,46 @@ namespace rwe
          */
         std::optional<UnitId> spawnNearCamera(const std::string& unitType, float offsetX = 96.0f, float offsetZ = 96.0f);
 
+        /**
+         * Spawns a finished unit of the given type at the given position and
+         * owned by the given simulation player (0 is the local seat), as a
+         * scenario's setup rather than as anything under test. The player must
+         * already exist in the game's seat list.
+         */
+        std::optional<UnitId> spawnCompletedAt(const std::string& unitType, unsigned int playerIndex, const SimVector& position);
+
+        /**
+         * Turns a spawned completed unit on through the simulation's ordinary
+         * activation path, which is what a build completion does for a unit
+         * whose FBI says ActivateWhenBuilt. Fixtures that need the working
+         * script (an extractor mining, not merely standing) call this.
+         */
+        void activateUnit(UnitId unitId);
+
+        /**
+         * Two free points on open water, `separation` apart: a berth for a
+         * surface sight beacon and a seabed site beside it, for fixtures whose
+         * subject must be lit by the local player's own sight. Both footprints
+         * are checked against occupancy and blocking features, so a spawn at
+         * the returned points succeeds.
+         */
+        std::optional<std::pair<SimVector, SimVector>> findWaterFixturePair(
+            const std::string& berthUnitType,
+            const std::string& seabedUnitType,
+            float separation) const;
+
+        /** Whether the local viewer's live sight covers this position. */
+        bool positionIsVisibleToLocalPlayer(const SimVector& position) const;
+
+        /** Whether the local viewer's whole-unit rule admits the unit (WATER-VIS-001). */
+        bool unitIsVisibleToLocalPlayer(UnitId unitId) const;
+
+        /** Reverse-ramp wake dots, which are the bubbles a script effect 259 leaves (0x474A85). */
+        std::size_t bubbleDotCount() const;
+
+        /** Forward-ramp wake dots, the ordinary foil of a surface wake. */
+        std::size_t wakeDotCount() const;
+
         /** Records a failure at the current step's tick if `condition` does not hold. */
         void require(bool condition, const std::string& message);
 

@@ -180,3 +180,63 @@ final correction in this pass. #895 remains open for order-specific aircraft
 recovery. #899 remains open for the normal-play bubble emission gate above.
 The rest of the ranked queue remains open. Linux Debug, launcher and class
 checks for PRs #918 and #919 subsequently passed; final-PR CI is independent.
+
+## #899: the normal-play script-effect emission gate
+
+Authority: [WATER-VIS-003A/003B](PLAYTEST-UNIT-SFX-VISIBILITY-FINDINGS.md),
+static comparison with byte-tactics revision
+`e89721c46c3fa06e59558419b54fe26061fafb73` and the matching GOG v3.1
+`TotalA.exe`. The implementation room read only that prose. No original-game
+session or demo oracle was executed.
+
+The original admits a script `emit-sfx` request through the whole-unit display
+predicate (`0x465AC0`) at the dispatcher (`0x480EB0`), before it prepares any
+effect: a hidden unit's request is refused as a unit. RWE's event consumer only
+asked whether the unit existed, and each effect helper asked whether the unit's
+**origin cell** was lit. For a wholly submerged enemy extractor on watched
+ground, the seabed is visible while the model is not, so its 259 bubbles leaked
+its position.
+
+`processSimEvents` now applies `unitIsVisibleToLocalPlayer` once, at the
+`EmitParticleFromPieceEvent` consumer, before the effect switch. That is the
+same predicate the model draw uses -- ownership, cloak, the strictly-below-sea
+model top with the sonar-contact veto, then the fog corners -- so bubbles stop
+exactly where the model stops. The five per-helper terrain-point checks were
+removed; their call sites exist only through this dispatcher. COB execution,
+the deterministic event stream and hashed state are untouched, and no
+source-unit purge was added: a dot admitted before visibility changed still
+expires on its own tick or on the sea-bed test, as WATER-VIS-003B establishes.
+Unsupported effect types still throw, as before; visibility alone grants them
+nothing.
+
+### Executed RWE checks
+
+Two new scenarios run the real `GameScene` on shipped Coast To Coast (sea level
+85), seed 7, with one local human and one computer seat:
+
+- `899-hidden-extractor-bubbles` places an enemy `ARMUWMEX` on the seabed
+  beside a local `ARMCS` (sight 224, sonar 0), so the seabed is lit by the
+  player's own sight while the model stays hidden with no sonar contact. It
+  asserts both facts, then that **no** reverse-ramp wake dot (the bubble marker,
+  `0x474A85`) exists at any 8-tick sample through tick 120.
+- `899-owned-extractor-bubbles` is the positive control: the player's own
+  `ARMUWMEX` alone must produce bubble dots. This proves the shipped script
+  really does emit 259 in this fixture -- `ARMUWMEX` is `ActivateWhenBuilt=1`
+  and its `Activate` throws three `256|3` requests then sleeps 250 ticks, so
+  the fixture activates its spawned copy through the simulation's ordinary
+  activation path.
+
+Before the gate was restored, the hidden scenario **failed at tick 8 with
+bubbles present**, reproducing the report; with the gate it passes. All 8
+scenarios passed on `D:/RWE-Data` (the 6 existing ones included). The full suite
+with `RWE_SCENARIO_DATA=D:/RWE-Data` passed **1980 cases with 1 skipped
+HOME-path checksum case and 218531 assertions**; Release `rwe`, `rwe_test` and
+`scenario` built successfully.
+
+Remaining uncertainty: this is a static reference comparison plus executed RWE
+scenarios, not a native visual capture or a pixel check of the original. The
+scenarios count presentation dots and do not attribute dots to a source; the
+negative is meaningful because the owned twin shows the same script emitting in
+the same harness. Allied visibility is not separately executed here: it comes
+through the shared sensor picture that the #899/#904 watcher work and its
+retail predicate test already cover.
