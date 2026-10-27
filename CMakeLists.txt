@@ -796,6 +796,7 @@ src/rwe/net/EndpointFamily.h
     src/rwe/sim/PlayerVisibility.cpp
     src/rwe/sim/PlayerVisibility.h
     src/rwe/sim/MapTerrain.cpp
+    src/rwe/sim/MapBoundary.cpp
     src/rwe/sim/MapTerrain.h
     src/rwe/sim/Metal.h
     src/rwe/sim/MovementClassCollisionService.cpp
@@ -1388,6 +1389,7 @@ set(TEST_FILES
     src/rwe/sim/unitnotifications.test.cpp
     src/rwe/sim/burning.test.cpp
     src/rwe/sim/lava.test.cpp
+    src/rwe/sim/mapboundary.test.cpp
     src/rwe/sim/FactoryConstruction.test.cpp
     src/rwe/sim/FeatureBlast.test.cpp
     src/rwe/sim/waterbuilding.test.cpp
