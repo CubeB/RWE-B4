@@ -32,6 +32,8 @@ every page:
   [TA-COMMUNITY-AI.md](TA-COMMUNITY-AI.md), the profile-modding community's
   own account of the same faults.
 
+The [2026-10-16 naval findings](NAVAL-CONSTRUCTION-DGUN-FINDINGS.md) compare submarine construction height and D-gun water behaviour against an identified byte-tactics revision and original executable hash. They correct incomplete waterline readers and UnitsOnly collision ordering in the older weapons register, and distinguish static/data checks from pending original-runtime evidence. Their anchors are standalone and do not renumber this register.
+
 ## The binary
 
 | | |

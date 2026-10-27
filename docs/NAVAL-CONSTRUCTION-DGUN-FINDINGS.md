@@ -25,9 +25,12 @@ For reproducibility, SHA-256 of `totala1/objects3d/armsub.3do` is
 and `totala1/weapons/WEAPONS.TDF` is
 `2a9f88fd64da13fd71ee30bb758a5310cce784511f3ae17640b18239a4841a17`.
 
-**No original-game runtime experiment was executed.** No demo measurement,
-HP capture or original save was collected. All expected results below are
-static findings or explicitly marked predictions. RWE source and tests were
+**One original-game observation has since been recorded (2026-10-16, by eye,
+see "Original-game observation: submarine under construction").** It
+supersedes the static conclusion for the unfinished phase of a shipyard
+submarine. Apart from it, no original-game runtime experiment was executed. No
+demo measurement, HP capture or original save was collected. All other expected
+results below are static findings or explicitly marked predictions. RWE source and tests were
 not inspected or changed. This document establishes reference behaviour,
 not the cause of the reported RWE regression or an implemented fix.
 
@@ -62,6 +65,11 @@ must therefore accompany any reproduction. Both are stationary factories in
 these data; hypothetical moving factories are not evidence for their behaviour.
 
 ### Ordinary placement also applies while a submarine is attached
+
+**Historical static interpretation, refuted for the unfinished phase by the
+owner observation below.** Retained to record the earlier reading; do not use
+its construction-phase conclusion as an implementation specification. The
+exact mechanism remains unresolved.
 
 Attachment (`0x48AAC0`, `0x48AB70`) selects movement mode 1 for factory products.
 At `0x43D6D0`, an attached product follows the selected piece in all three
@@ -239,8 +247,8 @@ an HP result. Keep firing units at zero kills and disable damage cheats.
 
 | Case | Concrete setup and static prediction to check |
 | --- | --- |
-| ARM construction | ARMSY builds ARMSUB over flat depths 30 and 60. Record creation, first unit update, half-built, final work tick and first detached update. Final origin follows seabed, rather than assuming sea minus 20 or the slip height. |
-| CORE construction | CORSY builds CORSUB over the same depths. Distinguish the factory's sea-minus-22 root from the product's seabed origin. |
+| ARM construction | ARMSY builds ARMSUB over flat depths 30 and 60. Record creation, first unit update, half-built, final work tick and first detached update. Final origin follows seabed, rather than assuming sea minus 20 or the slip height. **Partly executed 2026-10-16, by owner observation (by eye, not instrumented):** while unfinished the top of the sub pokes out of the water above the shipyard, so the static prediction of a seabed origin during construction is refuted; on completion it snaps to the seabed. No tick, height or depth was recorded. See "Original-game observation: submarine under construction". |
+| CORE construction | CORSY builds CORSUB over the same depths. Distinguish the factory's sea-minus-22 root from the product's seabed origin. **Not executed.** The 2026-10-16 observation was of a shipyard sub in general; the owner did not say which faction, so treat it as unconfirmed for CORSUB until checked. |
 | Build blockage | Block the selected product footprint, then clear it. Record the 15-tick retry; repeat across a depth boundary using effective BOATD3 limits. |
 | Surface target | ARMCOM versus enemy ARMPT (560 HP) and CORPT (570 HP), fully built and stationary. Direct special attack is water-eligible. Record whether a blast occurs and the actual HP result. |
 | Deep target acquisition | ARMCOM versus enemy ARMSUB (610 HP) or CORSUB (590 HP) at flat depth 30 or 60. Direct unit attack should fail the target dry gate; ground-position special attack is a distinct experiment. |
@@ -249,9 +257,51 @@ an HP result. Keep firing units at zero kills and disable damage cheats.
 | Shooter submerged | Move ARMCOM through water until its whole origin plus 39 is at/below sea level, using an explicitly attainable fixture. Check both ground and unit shot gates. |
 | Flags and maps | Separate stock commander weapons, a controlled UnitsOnly variant, ordinary water, and the map option suppressing sea-level triggering. Do not combine their outcomes. |
 
-No row in this table has been executed in this investigation. Acceptance of
-an implementation needs the applicable original-runtime evidence or an
-explicitly recorded remaining static-only limitation.
+Apart from the construction rows' by-eye observation noted above, no row in
+this table has been executed. Acceptance of an implementation needs the
+applicable original-runtime evidence or an explicitly recorded remaining
+static-only limitation.
+
+## Original-game observation: submarine under construction
+
+Made by the project owner playing retail Total Annihilation on 2026-10-16. It
+is an executed original-game observation, by eye, not instrumented: no tick,
+height, depth, faction or unit type was recorded. Verbatim:
+
+> "In TA it's visible above the shipyard: the top of the sub just pokes out of
+> the water [while being built]. When it is finished it snaps to the bottom of
+> the ocean floor, but still displays as above the pad."
+
+**Interpretation (not part of the quote).** While unfinished, the sub is drawn
+at the shipyard's build piece height, near the surface with its top above the
+waterline. On completion its height snaps to the seabed directly below the pad,
+still horizontally over the pad.
+
+**Effect on the static reading.** Project rule: an original-game observation
+outranks a static reading. The observation therefore overrides the conclusion in
+"Ordinary placement also applies while a submarine is attached" that the
+registered origin height is the seabed "including during construction". That
+reading is **superseded for the construction phase**. The seabed height on
+completion agrees with the static reading and stands.
+
+**Hypothesis, unverified.** The two may reconcile if the piece-following height
+(`0x43D6D0`) is what the unfinished product is drawn and positioned at while
+attached, and ordinary `Upright` seabed placement (`0x48A870`) takes effect only
+once the product is released. That would require the attached, mode 1 product
+to skip or be overridden in the placement pass that this document found had no
+exemption. This was not found in the static trace and may reflect a misread of
+the pass ordering at `0x48AD30`, or of which height the renderer reads. It is a
+lead for the spec room, not a finding.
+
+**Remaining uncertainty, to confirm with the owner.**
+
+- "Still displays as above the pad" was ambiguous; the owner settled it the same
+  day: "It's still over the pad, just on the bottom." The finished sub is drawn
+  on the seabed directly below the pad, as interpreted above. The reading in
+  which the drawn position lingers at pad height is ruled out.
+- Which faction (ARMSUB or CORSUB), the water depth and the camera were not
+  noted. CORSY and ARMSY have different root heights (sea minus 22 and minus 1).
+- How long the snap takes (same tick or later) was not observed.
 
 ## Prioritized remaining research
 
@@ -289,13 +339,34 @@ it**, and the runtime matrix above is still outstanding. Tests are RWE tests
 and establish that the code does what this document says, not that the
 original does.
 
+### Historical construction-height mismatch, subsequently corrected
+
+- **Unfinished submarine height (superseded 2026-10-16).** This entry used to
+  list "submarine products settle on the sea bed ... every tick while attached"
+  as already matching. The original-game observation above refutes that for the
+  construction phase. RWE (commit `d204e072`, `src/rwe/sim/UnitBehaviorService.cpp`,
+  about lines 5400-5410, the factory building branch) holds the unfinished
+  submarine at the seabed, contrary to the reported original-game observation.
+  This is a historical comparison against `d204e072`, not the current branch.
+  Commit `be1323284c0ee974f3b01383da98c9cd8b013cd7` subsequently changed the
+  unfinished product to follow its build piece and settled it on release;
+  merge `f2683228` brought that work into `revival`. Both are ancestors of
+  the audited GitHub/local baseline `b4fd8e77` (2026-10-27).
+
+  This audit checked commit history and the recorded patch, not an executed
+  original-game or RWE experiment. Exact completion timing and faction/depth
+  coverage remain unverified. The interpretation above is a hypothesis about
+  the original's mechanism; the observation establishes only visible behavior.
+  **These documentation updates authorize no further implementation change.**
+  The standing instruction in `AGENTS.md` and ADR-0004 applies to future work.
+
 ### Already matching, left alone
 
-- Submarine products settle on the sea bed, both at creation and every tick
-  while attached (`trySpawnUnit`, the factory build handler): `Upright` without
-  `CanHover`, `WaterLine` ignored. Shipped data: no floater sets `WaterLine` or
-  `Upright`, so the raw-flag branches for floaters and hovercraft cannot differ
-  from RWE's `max(terrain, sea)` on shipped units.
+- Submarine products settle on the sea bed once construction completes
+  (`Upright` without `CanHover`, `WaterLine` ignored). Shipped data: no floater
+  sets `WaterLine` or `Upright`, so the raw-flag branches for floaters and
+  hovercraft cannot differ from RWE's `max(terrain, sea)` on shipped units. The
+  construction-phase half of this entry is withdrawn, see above.
 - Yard retry of 15 ticks on a blocked pad; depth bounds inclusive at both ends;
   shipyard root at sea level minus `WaterLine`.
 - `NoExplode` keeps the disintegrator alive through water and it detonates on

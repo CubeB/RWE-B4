@@ -12,6 +12,24 @@ rooms, and the code is written from what the register says.
 
 **Status**: accepted
 
+## Standing verification instruction, 2026-10-16
+
+The user requires new RWE code to be checked against byte-tactics, available
+locally at `D:\bytetactics`, with documentation as the only handoff. This
+extends the citation requirement below: each new code change needs a prose
+finding recording the relevant byte-tactics comparison, reference revision or
+build, evidence and unresolved questions before implementation proceeds.
+An implementation agent never opens the decompilation to perform that check;
+the dedicated spec room performs it and supplies the finding.
+
+Verification must distinguish static reference analysis, RWE tests, and checks
+actually executed against the original game. Where a code change has no
+original counterpart, document that conclusion; where it intentionally differs,
+record the divergence. Neither case is to be presented as verified parity.
+This instruction applies prospectively and does not assert that the existing
+codebase has already undergone a complete audit. Root `AGENTS.md` carries the
+instruction for subsequent development sessions.
+
 ## Considered Options
 
 **Keep the existing practice.** Until now, one person read the disassembly,

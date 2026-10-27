@@ -1705,6 +1705,8 @@ jitter without walking the view away.
 
 ### `waterline`, `BYTE def+0x22C`
 
+**2026-10-16 correction:** The reader count and final claim that this key only affects water-state reporting below are incomplete. See [construction height](NAVAL-CONSTRUCTION-DGUN-FINDINGS.md#construction-height) for ordinary mobile placement, stationary shipyard yard placement, raw flags, and the attached submarine update. This later finding is static-only; original-runtime checks remain pending.
+
 Stored at `0x42C259`, and it has the two readers §B named.
 
 `0x43D72E` is the one the key is named for. For a unit with the **`floater`**
@@ -2612,6 +2614,8 @@ the stored point unchanged, and a live unit is always aimed at wherever it
 stands.
 
 ### The order the stop tests run in, `0x49B090`
+
+**2026-10-16 correction:** The numbered ordering below is superseded on one point by the [static naval comparison](NAVAL-CONSTRUCTION-DGUN-FINDINGS.md#water-detonations-do-not-consume-this-projectile): `unitsonly` is checked after unit occupancy but before feature collision, so it bypasses features as well as ground and sea. The shipped commander disintegrators leave that flag false. Original-runtime verification of this distinction remains pending.
 
 §7, "Where a round stops", has the unit slots. The rest of the routine, in the
 order it runs, for the square the round now stands in:
