@@ -1611,8 +1611,23 @@ namespace rwe
                         playUnitNotificationSound(unit->get().owner, unit->get().unitType, UnitSoundType::UnitComplete);
                     }
                 },
+                // WATER-VIS-003A: the original's script-effect dispatch
+                // (0x480EB0) asks its whole-unit display-visibility predicate
+                // (0x465AC0) about the emitting unit before it prepares any
+                // effect. The refusal therefore belongs to the unit, not to
+                // whether the seabed under it happens to be lit: a wholly
+                // submerged foreign extractor with no sonar contact emits no
+                // bubbles even on ground the player is watching. This is the
+                // same admission the older per-effect notes called 0x480EEA.
+                // Presentation only -- the COB execution and the deterministic
+                // event stream stay exactly as they are.
                 [&](const EmitParticleFromPieceEvent& e) {
-                    if (!simulation.unitExists(e.unitId))
+                    auto unit = tryGetUnit(e.unitId);
+                    if (!unit)
+                    {
+                        return;
+                    }
+                    if (!unitIsVisibleToLocalPlayer(e.unitId, unit->get()))
                     {
                         return;
                     }
@@ -1962,24 +1977,16 @@ namespace rwe
 
     void GameScene::emitLightSmokeFromPiece(UnitId unitId, const std::string& pieceName)
     {
-        // Same gate as the wakes and the exhaust below: the original refuses
-        // every emit-sfx for a unit the local player cannot see (0x480EEA),
-        // and the damage smoke of types 257 and 258 goes through that same
-        // dispatch. A burning enemy behind the fog gave itself away.
-        if (!positionIsVisibleToLocalPlayer(getUnit(unitId).position))
-        {
-            return;
-        }
+        // Reached only through the emit-sfx dispatch, which has already
+        // admitted the emitting unit as a whole (WATER-VIS-003A, 0x480EB0 and
+        // 0x465AC0). A burning enemy behind the fog still gives itself away
+        // to nothing.
         auto position = simulation.getUnitPiecePosition(unitId, pieceName);
         spawnSmokePuff(simVectorToFloat(position), "smoke 1", 0.5f);
     }
 
     void GameScene::emitBlackSmokeFromPiece(UnitId unitId, const std::string& pieceName)
     {
-        if (!positionIsVisibleToLocalPlayer(getUnit(unitId).position))
-        {
-            return;
-        }
         auto position = simulation.getUnitPiecePosition(unitId, pieceName);
         spawnSmokePuff(simVectorToFloat(position), "smoke 2", 0.5f);
     }
@@ -1992,12 +1999,6 @@ namespace rwe
     void GameScene::emitWakeFromPiece(UnitId unitId, const std::string& pieceName, bool reverse, unsigned int rampPeriod)
     {
         const auto& unit = getUnit(unitId);
-        if (!positionIsVisibleToLocalPlayer(unit.position))
-        {
-            // The original refuses every emit-sfx for a unit the local player
-            // cannot see, before it works anything else out (0x480EEA).
-            return;
-        }
 
         const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
         auto pieceTransform = toFloatMatrix(simulation.getUnitPieceTransform(unitId, pieceName));
@@ -2040,11 +2041,6 @@ namespace rwe
     void GameScene::emitBubblesFromPiece(UnitId unitId, const std::string& pieceName)
     {
         const auto& unit = getUnit(unitId);
-        if (!positionIsVisibleToLocalPlayer(unit.position))
-        {
-            // As every emit-sfx: refused for a unit the local player cannot see (0x480EEA).
-            return;
-        }
 
         const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
         auto pieceTransform = toFloatMatrix(simulation.getUnitPieceTransform(unitId, pieceName));
@@ -3495,10 +3491,6 @@ namespace rwe
         // so a thrust plume is one puff longer and each puff moves a little
         // more slowly. Nothing else about them differs.
         const auto& unit = getUnit(unitId);
-        if (!positionIsVisibleToLocalPlayer(unit.position))
-        {
-            return;
-        }
         const auto& unitDefinition = simulation.unitDefinitions.at(unit.unitType);
         auto pieceTransform = toFloatMatrix(simulation.getUnitPieceTransform(unitId, pieceName));
         const auto pieceMesh = gameMediaDatabase.getUnitPieceMesh(unitDefinition.objectName, pieceName).value().get();

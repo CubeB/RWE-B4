@@ -557,6 +557,91 @@ namespace rwe
         return scene.spawnCompletedUnit(unitType, scene.localPlayerId, SimVector(floatToSimScalar(x), floatToSimScalar(y), floatToSimScalar(z)));
     }
 
+    std::optional<UnitId> ScenarioDriver::spawnCompletedAt(const std::string& unitType, unsigned int playerIndex, const SimVector& position)
+    {
+        if (playerIndex >= scene.simulation.players.size())
+        {
+            require(false, "spawnCompletedAt: player " + std::to_string(playerIndex) + " is not a seat in this game");
+            return std::nullopt;
+        }
+        auto spawned = scene.spawnCompletedUnit(unitType, PlayerId(playerIndex), position);
+        if (!spawned)
+        {
+            // trySpawnCompletedUnit is silent about a refused placement, and a
+            // fixture that cannot place its unit needs to say where it tried.
+            std::cerr << "spawnCompletedAt: " << unitType << " refused at " << position.x.value << ","
+                      << position.y.value << "," << position.z.value << " for player " << playerIndex << "\n";
+        }
+        return spawned;
+    }
+
+    std::optional<std::pair<SimVector, SimVector>> ScenarioDriver::findWaterFixturePair(
+        const std::string& berthUnitType, const std::string& seabedUnitType, float separation) const
+    {
+        const auto& sim = scene.simulation;
+        const auto& terrain = sim.terrain;
+        auto seaLevel = terrain.getSeaLevel();
+        auto left = terrain.leftInWorldUnits();
+        auto top = terrain.topInWorldUnits();
+        auto right = left + terrain.getWidthInWorldUnits();
+        auto bottom = top + terrain.getHeightInWorldUnits();
+        auto stepX = floatToSimScalar(separation);
+        auto minimumDepth = SimScalar(24); // Clear of the waterline for every shipped model top.
+
+        const auto& berthDefinition = sim.unitDefinitions.at(berthUnitType);
+        const auto& seabedDefinition = sim.unitDefinitions.at(seabedUnitType);
+        auto free = [&](const SimVector& position, const UnitDefinition& definition) {
+            return !sim.isCollisionAt(sim.computeFootprintRegion(position, definition.movementCollisionInfo));
+        };
+
+        for (auto z = top + 64_ss; z + 64_ss < bottom; z += 64_ss)
+        {
+            for (auto x = left + 64_ss; x + 64_ss + stepX < right; x += 64_ss)
+            {
+                auto berthGround = terrain.getHeightAt(x, z);
+                auto seabedGround = terrain.getHeightAt(x + stepX, z);
+                if (berthGround >= seaLevel - minimumDepth || seabedGround >= seaLevel - minimumDepth)
+                {
+                    continue;
+                }
+                auto berth = SimVector(x, seaLevel, z);
+                auto seabed = SimVector(x + stepX, seabedGround, z);
+                if (free(berth, berthDefinition) && free(seabed, seabedDefinition))
+                {
+                    return std::pair{berth, seabed};
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
+    bool ScenarioDriver::positionIsVisibleToLocalPlayer(const SimVector& position) const
+    {
+        return scene.positionIsVisibleToLocalPlayer(position);
+    }
+
+    void ScenarioDriver::activateUnit(UnitId unitId)
+    {
+        scene.simulation.activateUnit(unitId);
+    }
+
+    bool ScenarioDriver::unitIsVisibleToLocalPlayer(UnitId unitId) const
+    {
+        return scene.unitIsVisibleToLocalPlayer(unitId, scene.getUnit(unitId));
+    }
+
+    std::size_t ScenarioDriver::bubbleDotCount() const
+    {
+        return static_cast<std::size_t>(std::count_if(
+            scene.wakeDots.begin(), scene.wakeDots.end(), [](const WakeDot& dot) { return dot.reverseRamp; }));
+    }
+
+    std::size_t ScenarioDriver::wakeDotCount() const
+    {
+        return static_cast<std::size_t>(std::count_if(
+            scene.wakeDots.begin(), scene.wakeDots.end(), [](const WakeDot& dot) { return !dot.reverseRamp; }));
+    }
+
     UiStagedButton* ScenarioDriver::findStagedButton(const std::string& name)
     {
         auto* panel = scene.currentPanel.get();
