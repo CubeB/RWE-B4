@@ -132,8 +132,43 @@ namespace rwe
         REQUIRE(parseChatCommand("+Give 2 100 tin")->kind == Kind::GiveUsage);
     }
 
-    TEST_CASE("every other word is unknown, and says what it was", "[chat]")
+    TEST_CASE("the developer phrase is exactly six tokens and five of them are case-sensitive", "[chat]")
     {
+        auto c = parseChatCommand("+Now Film Chris Include Reload Assert");
+        REQUIRE(c->kind == Kind::Now);
+        REQUIRE(c->developerPhraseAccepted);
+
+        // The command word is matched case-insensitively.
+        REQUIRE(parseChatCommand("+nOw Film Chris Include Reload Assert")->developerPhraseAccepted);
+
+        SECTION("anything else clears the unlock rather than failing to parse")
+        {
+            for (const auto* line : {"+Now", "+Now Film Chris Include Reload",
+                     "+Now film Chris Include Reload Assert",
+                     "+Now Film Chris Include Reload Assert extra",
+                     "+Now Film Chris Include Reload Asserted"})
+            {
+                CAPTURE(line);
+                auto parsed = parseChatCommand(line);
+                REQUIRE(parsed->kind == Kind::Now);
+                REQUIRE_FALSE(parsed->developerPhraseAccepted);
+            }
+        }
+    }
+
+    TEST_CASE("the permission mask follows the original's four cases", "[chat]")
+    {
+        // #906: campaign 1; skirmish 3; multiplayer the host's Cheat Codes
+        // option; the local developer phrase raises any of them to 7.
+        REQUIRE(chatCommandMask(false, true, false, false) == ChatCommandMaskOrdinary);
+        REQUIRE(chatCommandMask(false, false, false, false) == (ChatCommandMaskOrdinary | ChatCommandMaskCheat));
+        REQUIRE(chatCommandMask(false, false, true, false) == ChatCommandMaskOrdinary);
+        REQUIRE(chatCommandMask(false, false, true, true) == (ChatCommandMaskOrdinary | ChatCommandMaskCheat));
+        REQUIRE(chatCommandMask(true, true, false, false) == 7u);
+        REQUIRE(chatCommandMask(true, false, true, false) == 7u);
+    }
+
+    TEST_CASE("every other word is unknown, and says what it was", "[chat]")    {
         auto c = parseChatCommand("+NoShake");
         REQUIRE(c->kind == Kind::Unknown);
         REQUIRE(c->word == "NoShake");

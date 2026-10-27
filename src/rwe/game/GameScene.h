@@ -1012,6 +1012,21 @@ namespace rwe
         /** Who a line goes to unless it carries a one-message prefix (BT-176). Cycled with Tab in the bar. */
         ChatSendMode chatSendMode;
 
+        /**
+         * Whether the local developer phrase has unlocked the debug bit
+         * (#906). Presentation only: never hashed, saved, replayed or sent.
+         * It raises a typed line's permission mask to all bits and enables
+         * the repeat key; the cheat and debug tables are not built yet.
+         */
+        bool debugCommandsEnabled{false};
+
+        /**
+         * The saved copy of the last `+` line the repeat key reruns (#906):
+         * the original copies at most 79 bytes, which is the repeat's limit,
+         * not the submitted line's. Presentation only.
+         */
+        std::optional<std::string> lastCommandLine;
+
         /** Where order markers are drawn for targets the local player cannot see (BT-184). */
         OrderMarkerMemory orderMarkers;
 

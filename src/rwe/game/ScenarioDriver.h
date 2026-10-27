@@ -158,6 +158,19 @@ namespace rwe
         /** A keypress and release, through the scene's own handlers. */
         void key(int keyCode);
 
+        /** Composed text, through the scene's own handler (chat bar or a panel box). */
+        void textInput(const std::string& text);
+
+        /**
+         * Console lines the scene holds, oldest first. A scenario reads the
+         * count before and after an action to see what it said without
+         * depending on the exact wording of anything else on screen.
+         */
+        std::size_t consoleMessageCount() const;
+
+        /** Whether the local developer phrase has unlocked the debug bit (#906). */
+        bool debugCommandsEnabled() const;
+
         /** Separate edges allow a modifier to stay held over another key. */
         void keyDown(int keyCode);
         void keyUp(int keyCode);

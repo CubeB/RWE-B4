@@ -63,6 +63,16 @@ namespace rwe
                 // non-allies, a custom list (BT-176).
                 chatSendMode.cycle();
                 break;
+            case SDLK_BACKSLASH:
+                // #906: the original's repeat key is virtual-key 0x5C, which
+                // is this key on a US layout. It reruns the saved line under
+                // all permission bits, but only after the developer phrase
+                // has unlocked debug.
+                if (debugCommandsEnabled && lastCommandLine)
+                {
+                    runChatCommand(*lastCommandLine);
+                }
+                break;
             default:
                 // Ctrl and a digit adds or removes that player slot from the
                 // custom list, the LIVEPLYR buttons' job in the original.
@@ -90,6 +100,11 @@ namespace rwe
         // so it must not reach the other players' screens either.
         if (parseChatCommand(text))
         {
+            // The original's line runner saves the submitted line as it goes,
+            // capped at 79 bytes, and that saved copy is what the repeat key
+            // reruns (#906). Saved before dispatch, so a line that fails to
+            // run is still the last one.
+            lastCommandLine = text.substr(0, 79);
             runChatCommand(text);
             return;
         }
@@ -165,6 +180,31 @@ namespace rwe
 
         const auto& command = *parsed;
         const Color feedbackColor(252, 252, 0);
+
+        // #906: the mask the original computes per submitted line. Campaign
+        // is 1, skirmish 3, multiplayer uses the host's Cheat Codes option
+        // (RWE has no such lobby option, and no cheat or debug handlers yet,
+        // so those bits change nothing today). The local developer phrase
+        // raises it to 7.
+        const auto mask = chatCommandMask(
+            debugCommandsEnabled,
+            gameParameters.mission,
+            gameNetworkService->hasRemotePeers(),
+            false);
+
+        if (command.kind == ChatCommand::Kind::Now)
+        {
+            // The exact phrase unlocks; any other `Now` clears it. Nothing is
+            // printed, and it takes effect on the next line (#906).
+            debugCommandsEnabled = command.developerPhraseAccepted;
+            return;
+        }
+
+        // Every command built so far is in the ordinary table.
+        if ((mask & ChatCommandMaskOrdinary) == 0)
+        {
+            return;
+        }
 
         if (command.kind == ChatCommand::Kind::Unknown)
         {
@@ -287,6 +327,7 @@ namespace rwe
 
             case ChatCommand::Kind::Empty:
             case ChatCommand::Kind::Unknown:
+            case ChatCommand::Kind::Now:
                 break;
         }
     }
