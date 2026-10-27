@@ -11,6 +11,11 @@
 #include <rwe/sim/UnitVisibility.h>
 #include <rwe/resource_io.h>
 #include <rwe/sim/sim_test_util.h>
+#include <rwe/sim/GameHash_util.h>
+#include <rwe/MeshService.h>
+#include <rwe/vfs/CompositeVirtualFileSystem.h>
+#include <cstdlib>
+#include <algorithm>
 
 /**
  * Small pure rules of how the game is drawn, each pinned to a byte-tactics
@@ -178,6 +183,63 @@ namespace rwe
         REQUIRE_FALSE(unitWaterPartsAreCut(true, true));
         REQUIRE_FALSE(unitWaterPartsAreCut(false, true));
         REQUIRE(unitWaterPartsAreCut(false, false));
+    }
+
+    TEST_CASE("watching admits shipped submerged models without changing simulation sensors", "[presentation][watching][retail]")
+    {
+        const auto* dataPath = std::getenv("RWE_SCENARIO_DATA");
+        if (!dataPath)
+        {
+            SKIP("set RWE_SCENARIO_DATA to the retail archive directory");
+        }
+        auto vfs = constructVfs(dataPath);
+        MeshService meshes(&vfs, nullptr, {}, {}, {});
+        GameSimulation sim(MapTerrain(Grid<unsigned char>(64, 64, 0), 255_ss), 0, 0, 0);
+        auto viewer = addPlayer(sim);
+        auto owner = addPlayer(sim);
+        std::vector<UnitId> units;
+        for (const auto* name : {"ARMUWMEX", "CORUWMEX", "ARMSUB", "ARMTIDE"})
+        {
+            CAPTURE(name);
+            auto bytes = vfs.readFile(std::string("units/") + name + ".fbi");
+            REQUIRE(bytes);
+            auto definition = parseUnitDefinition(parseUnitFbi(parseTdfFromBytes(*bytes)), sim.movementClassDatabase);
+            sim.unitModelDefinitions[definition.objectName] = meshes.loadUnitMesh(definition.objectName).modelDefinition;
+            sim.unitDefinitions[name] = definition;
+            auto position = SimVector(SimScalar(static_cast<int>(units.size()) * 64), 0_ss, 0_ss);
+            if (std::string(name) == "ARMTIDE")
+            {
+                position.y = 247_ss; // Shipped WaterLine=8, sea=255.
+            }
+            units.push_back(addUnitOfType(sim, name, owner, position, makeEmptyCobScript()));
+        }
+        auto picture = sim.playerVisibility.at(viewer.value);
+        std::fill(picture.visible.getVector().begin(), picture.visible.getVector().end(), static_cast<unsigned char>(1));
+        for (std::size_t i = 0; i < 3; ++i)
+        {
+            auto id = units[i];
+            REQUIRE(sim.getUnitState(id).position.y + sim.modelHeightOf(sim.unitDefinitions.at(sim.getUnitState(id).unitType)) < 255_ss);
+            REQUIRE_FALSE(canSeeUnitInVisibility(sim, viewer, id, picture));
+            REQUIRE(canSeeUnitInVisibility(sim, owner, id, picture));
+        }
+        REQUIRE(canSeeUnitInVisibility(sim, viewer, units.back(), picture)); // Surface part stays visible.
+        auto hash = computeHashOf(sim);
+        grantWatchingSonarContacts(sim, viewer, picture);
+        for (auto id : units)
+        {
+            REQUIRE(canSeeUnitInVisibility(sim, viewer, id, picture));
+            REQUIRE_FALSE(unitWaterPartsAreCut(false, picture.sonarContacts.contains(id)));
+        }
+        REQUIRE(computeHashOf(sim) == hash);
+        REQUIRE(sim.playerVisibility.at(viewer.value).sonarContacts.empty());
+
+        // A real foreign-sonar-jammer entry erases the watcher grant again.
+        sim.playerVisibility.at(viewer.value).radarJammers.push_back({SimVector(0_ss, 0_ss, 0_ss), 100_ss, true});
+        grantWatchingSonarContacts(sim, viewer, picture);
+        REQUIRE_FALSE(canSeeUnitInVisibility(sim, viewer, units.front(), picture));
+        REQUIRE(unitWaterPartsAreCut(false, picture.sonarContacts.contains(units.front())));
+        REQUIRE(canSeeUnitInVisibility(sim, viewer, units[1], picture));
+        REQUIRE(sim.playerVisibility.at(viewer.value).sonarContacts.empty());
     }
 
     TEST_CASE("an FBI that says digger=1 makes a digger definition (BT-143)", "[presentation]")

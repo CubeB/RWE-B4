@@ -665,6 +665,9 @@ namespace rwe
                         visible[i] = visible[i] || otherVisible[i];
                     }
                 }
+                // WATER-VIS-002: owned-unit contacts are omitted from each
+                // simulation sensor set, so their union alone loses subs.
+                grantWatchingSonarContacts(simulation, localPlayerId, combined);
                 combinedVisibility = std::move(combined);
                 combinedVisibilityTick = simulation.gameTime.value;
             }
@@ -678,12 +681,29 @@ namespace rwe
         // localExploredGrid, which fills in the same way when the fog is off.
         auto width = vis.visible.getWidth();
         auto height = vis.visible.getHeight();
+        bool rebuilt = false;
         if (!revealedVisibility || revealedVisibility->visible.getWidth() != width || revealedVisibility->visible.getHeight() != height)
         {
             PlayerVisibility revealed(width, height);
             auto& visible = revealed.visible.getVector();
             std::fill(visible.begin(), visible.end(), static_cast<unsigned char>(1));
             revealedVisibility = std::move(revealed);
+            rebuilt = true;
+        }
+
+        const bool watching = isPlayback() || eliminationWatching;
+        if (rebuilt || revealedVisibilityTick != simulation.gameTime.value || revealedVisibilityIsWatching != watching)
+        {
+            // Revealing terrain does not discard real sonar detection. Keep
+            // the sensor picture current without copying it at every draw.
+            revealedVisibility->radarContacts = vis.radarContacts;
+            revealedVisibility->sonarContacts = vis.sonarContacts;
+            if (watching)
+            {
+                grantWatchingSonarContacts(simulation, localPlayerId, *revealedVisibility);
+            }
+            revealedVisibilityTick = simulation.gameTime.value;
+            revealedVisibilityIsWatching = watching;
         }
 
         return *revealedVisibility;
@@ -758,8 +778,9 @@ namespace rwe
         // followed by an all-ground-corners check delayed a factory or mex
         // after it was already visible to the simulation. Use the same query
         // with this client's picture, including a watching view's union.
-        auto visible = !fogOfWarEnabled
-            || canSeeUnitInVisibility(simulation, localPlayerId, unitId, localPlayerVisibility());
+        // WATER-VIS-001: a lit map still needs the underwater detection gate.
+        // The revealed picture supplies lit fog cells and current contacts.
+        auto visible = canSeeUnitInVisibility(simulation, localPlayerId, unitId, localPlayerVisibility());
         auto style = computeUnitDrawStyle(unit.isOwnedBy(localPlayerId), unit.cloaked, visible);
         return style != UnitDrawStyle::Hidden;
     }

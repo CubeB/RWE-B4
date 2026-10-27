@@ -209,6 +209,19 @@ Everything else lives in a subject file. **The numbers never move**, so a
 
 ## 88. Where RWE deliberately differs
 
+- **Full-visibility watching** (#899/#904, 2026-10-27). Replay/demo
+  `See everything` shows every top-level model, including cloaked and submerged
+  units, regardless of sonar jamming. The same explicit view policy applies
+  underwater as above water. Native watch mode grants sonar contacts, but a
+  later foreign jammer can erase them (WATER-VIS-002 in
+  [the visibility finding](PLAYTEST-UNDERWATER-VISIBILITY-FINDINGS.md)).
+  Ordinary watching uses both sides' fog and presentation-only sonar grants,
+  with the nominal viewer's foreign sonar jammers still applied; the original
+  clears map fog when entering native watch mode. The combined fog and the
+  stronger explicit full-visibility view are RWE viewing choices, including
+  one-seat playback, not claims of literal original watcher parity. They do
+  not alter simulation sensors, targeting or hashes.
+
 - **The 3.9.01 patch's selection keys** (2026-10-26, #884). RWE takes the
   unofficial TA patch 3.9.01's bindings over v3.1's (§72-§81 decode the
   original). Ctrl+S selects only armed units on screen where the original

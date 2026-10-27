@@ -1980,8 +1980,11 @@ namespace rwe
                 // The part of the model under water is tinted blue for the
                 // viewer's own units and for sonar contacts, and cut away for
                 // every other unit (BT-142).
-                const auto& heard = simulation.playerVisibility.at(localPlayerId.value).sonarContacts;
-                if (unitWaterPartsAreCut(unit.isOwnedBy(localPlayerId), heard.find(unitId) != heard.end()))
+                const auto& heard = localPlayerVisibility().sonarContacts;
+                // WATER-VIS-002: watcher contacts belong to the displayed
+                // picture. "See everything" also reveals submerged geometry
+                // (the stronger explicit view policy is recorded in §88).
+                if (!spectatorMode && unitWaterPartsAreCut(unit.isOwnedBy(localPlayerId), heard.find(unitId) != heard.end()))
                 {
                     for (auto i = firstMesh; i < unitMeshBatch.meshes.size(); ++i)
                     {

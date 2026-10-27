@@ -576,6 +576,8 @@ namespace rwe
          * rebuilt if the simulation's grids are ever a different size.
          */
         mutable std::optional<PlayerVisibility> revealedVisibility;
+        mutable unsigned int revealedVisibilityTick{0};
+        mutable bool revealedVisibilityIsWatching{false};
 
         /**
          * The local player's explored ground, materialised from the one shared
@@ -877,7 +879,8 @@ namespace rwe
          * Both sides' visible fog at once, rebuilt when the tick moves on. A
          * spectator with the fog on wants to see what each side could see,
          * which is neither player's own grid nor a fully lit map. Only the
-         * visible grid is combined: explored ground is the simulation's one
+         * fog grid is combined; watcher sonar contacts are granted locally
+         * and foreign jammers still apply. Explored ground is the simulation's
          * shared bitmap and is read from there (see localExploredGrid).
          */
         mutable std::optional<PlayerVisibility> combinedVisibility;
