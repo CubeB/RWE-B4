@@ -346,26 +346,35 @@ in §88.
   runtime was run, and the key is the code's virtual-key number, not a
   physical-key test on other layouts.
 
-## #907: `+NoShake`, the first settings binding
+## #907: `+NoShake`, `+Gamma` and `+ScrollSpeed`
 
-Authority: `BT-GAME-CONSOLE-COMMANDS-PARITY.md` rule 4 (`NoShake` writes
-UI-option bit 4, is not saved and prints nothing); the remaining display and
-option commands need a units/persistence mapping that has been commissioned
-separately, so this pass is one binding, not the whole ticket.
+Authority: `BT-GAME-CONSOLE-COMMANDS-PARITY.md` rule 4 and
+[BT-GAME-AUDIO-OPTION-COMMANDS-FINDINGS](BT-GAME-AUDIO-OPTION-COMMANDS-FINDINGS.md)
+sections 2.2 and 2.3. The remaining display and option commands need further
+mapping decisions, so this pass is three bindings, not the whole ticket.
 
-`+NoShake` now parses (argument ignored) and toggles `screenShakeEnabled`,
-which starts on and is not saved. While it is off, `addScreenShakeFromWeapon`
-returns before accumulating anything, so no offset is ever applied and nothing
-has to be taken back off the camera. The command prints nothing, as the
-original's option bit does not.
+- **`+NoShake`** parses (argument ignored) and toggles `screenShakeEnabled`,
+  which starts on and is not saved. While it is off,
+  `addScreenShakeFromWeapon` returns before accumulating anything, so no
+  offset is ever applied and nothing has to be taken back off the camera. The
+  command prints nothing, as the original's option bit does not.
+- **`+Gamma n`** maps the original's brightness `n x 0.1` to RWE's percentage
+  field (`n x 10`), so `+Gamma 12` is 120% as the console is in the original,
+  not the menu's 100% for the same raw 12. The original does not clamp; RWE's
+  unsigned field floors at zero. Saved, silently.
+- **`+ScrollSpeed n`** converts the original's pixels per simulation tick
+  (menu 1..65, default 32) to RWE's percentage of 1000 world units/s
+  (`n x 100 / 32`), so 32 is the base speed. Clamped only to the original's
+  byte, then saved, silently.
 
 ### Executed RWE checks
 
-- The `906-developer-phrase-and-repeat` scenario gained a step: `+noshake`
-  turns shake off and `+NOSHAKE` turns it back on, read from the real
-  `GameScene`; it passes. The blast path itself is not exercised.
-- `[chat]` parses the command with and without an argument. Full suite:
-  **1984 passed, one HOME-path checksum skip, 218557 assertions**.
+- The `906-developer-phrase-and-repeat` scenario gained steps: `+noshake`
+  turns shake off and `+NOSHAKE` turns it back on; `+gamma 12` reads back 120;
+  `+scrollspeed 32` reads back 100, all through the real `GameScene`. They
+  pass. The blast path itself is not exercised.
+- `[chat]` parses all three commands with and without arguments. Full suite:
+  **1985 passed, one HOME-path checksum skip, 218563 assertions**.
 - Note: repeated full-suite runs on this machine produced intermittent
   `TaHostSession` failures that do not reproduce in isolation (`[net][ta]`
   passes); they are timing/port flakiness under load, not this change.

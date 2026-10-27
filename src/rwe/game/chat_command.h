@@ -48,6 +48,10 @@ namespace rwe
             Now,
             /** `+NoShake`: toggle screen shake for this client; not saved. */
             NoShake,
+            /** `+Gamma n`: brightness n x 0.1 in the original; `number` is n. */
+            Gamma,
+            /** `+ScrollSpeed n`: n is the original's pixels per tick. */
+            ScrollSpeed,
         };
 
         Kind kind{Kind::Empty};

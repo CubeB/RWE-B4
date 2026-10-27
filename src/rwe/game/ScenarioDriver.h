@@ -174,6 +174,12 @@ namespace rwe
         /** Whether blasts add screen shake for this client (#907, `+NoShake`). */
         bool screenShakeEnabled() const;
 
+        /** The brightness percentage (#907, `+Gamma`). */
+        unsigned int gammaSetting() const;
+
+        /** The camera-scroll percentage (#907, `+ScrollSpeed`). */
+        unsigned int scrollSpeedSetting() const;
+
         /** Separate edges allow a modifier to stay held over another key. */
         void keyDown(int keyCode);
         void keyUp(int keyCode);

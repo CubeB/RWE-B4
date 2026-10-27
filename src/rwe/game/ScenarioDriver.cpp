@@ -563,6 +563,16 @@ namespace rwe
         return scene.screenShakeEnabled;
     }
 
+    unsigned int ScenarioDriver::gammaSetting() const
+    {
+        return scene.gammaSetting;
+    }
+
+    unsigned int ScenarioDriver::scrollSpeedSetting() const
+    {
+        return scene.scrollSpeedSetting;
+    }
+
     bool ScenarioDriver::isCameraTracking() const
     {
         return std::holds_alternative<GameScene::CameraControlStateTrackingUnit>(scene.cameraControlState);

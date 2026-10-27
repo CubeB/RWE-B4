@@ -174,6 +174,19 @@ namespace rwe
         REQUIRE(parseChatCommand("+noshake 1")->kind == Kind::NoShake);
     }
 
+    TEST_CASE("the option setters read argument one and default it to zero", "[chat]")
+    {
+        auto c = parseChatCommand("+Gamma 12");
+        REQUIRE(c->kind == Kind::Gamma);
+        REQUIRE(c->number == 12);
+        REQUIRE(parseChatCommand("+Gamma")->number == 0);
+
+        c = parseChatCommand("+ScrollSpeed 32");
+        REQUIRE(c->kind == Kind::ScrollSpeed);
+        REQUIRE(c->number == 32);
+        REQUIRE(parseChatCommand("+scrollspeed")->number == 0);
+    }
+
     TEST_CASE("every other word is unknown, and says what it was", "[chat]")
     {
         auto c = parseChatCommand("+Contour 4");

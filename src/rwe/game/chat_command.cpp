@@ -174,6 +174,19 @@ namespace rwe
             // #907: UI-option bit 4 in the original; a preference, not saved.
             command.kind = ChatCommand::Kind::NoShake;
         }
+        else if (word == "gamma")
+        {
+            // #907, BT-GAME-AUDIO-OPTION-COMMANDS-FINDINGS §2.2: argument 1,
+            // absent 0; brightness is the raw integer x 0.1.
+            command.kind = ChatCommand::Kind::Gamma;
+            command.number = chatAtoi(argument(1));
+        }
+        else if (word == "scrollspeed")
+        {
+            // #907 §2.3: argument 1, absent 0, pixels per simulation tick.
+            command.kind = ChatCommand::Kind::ScrollSpeed;
+            command.number = chatAtoi(argument(1));
+        }
         else if (word == "give")
         {
             // player amount metal|energy. The resource is the one argument

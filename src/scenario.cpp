@@ -435,7 +435,19 @@ namespace
                 d.key(SDLK_RETURN);
                 d.require(d.screenShakeEnabled(), "and a second one turns it back on");
             });
-            s.endAt(5);
+            s.at(6, [](rwe::ScenarioDriver& d) {
+                // #907: the option setters' units. The original's +Gamma 12 is
+                // 120% brightness; +ScrollSpeed 32 is the base pan speed.
+                d.key(SDLK_RETURN);
+                d.textInput("+gamma 12");
+                d.key(SDLK_RETURN);
+                d.require(d.gammaSetting() == 120, "the console gamma maps to 120 percent");
+                d.key(SDLK_RETURN);
+                d.textInput("+scrollspeed 32");
+                d.key(SDLK_RETURN);
+                d.require(d.scrollSpeedSetting() == 100, "32 pixels a tick maps to the base pan speed");
+            });
+            s.endAt(6);
         });
     }
 
