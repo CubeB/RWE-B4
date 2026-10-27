@@ -1,4 +1,5 @@
 #include "InterfaceRules.h"
+#include <algorithm>
 #include <cmath>
 
 namespace rwe
@@ -25,6 +26,45 @@ namespace rwe
     bool sweepSelectsUnit(bool underConstruction, bool carried)
     {
         return !underConstruction && !carried;
+    }
+
+    bool bandboxFilterAdmits(const BandboxFilter& filter, bool isMobile, bool isArmed, bool isBuilder)
+    {
+        if (!filter.armedMobile && !filter.constructors && !filter.factories)
+        {
+            return true;
+        }
+        return (filter.armedMobile && isMobile && isArmed)
+            || (filter.constructors && isMobile && isBuilder)
+            || (filter.factories && !isMobile && isBuilder);
+    }
+
+    bool isIdleFactory(bool isMobile, bool isBuilder, bool buildQueueEmpty)
+    {
+        return !isMobile && isBuilder && buildQueueEmpty;
+    }
+
+    bool isIdleBuilder(bool isMobile, bool isBuilder, bool ordersEmpty)
+    {
+        return isMobile && isBuilder && ordersEmpty;
+    }
+
+    std::optional<UnitId> nextInCycle(std::vector<UnitId> candidates, std::optional<UnitId> cursor)
+    {
+        if (candidates.empty())
+        {
+            return std::nullopt;
+        }
+        std::sort(candidates.begin(), candidates.end());
+        if (cursor)
+        {
+            auto it = std::upper_bound(candidates.begin(), candidates.end(), *cursor);
+            if (it != candidates.end())
+            {
+                return *it;
+            }
+        }
+        return candidates.front();
     }
 
     std::vector<std::size_t> selfDestructRecipients(const std::vector<bool>& counting)

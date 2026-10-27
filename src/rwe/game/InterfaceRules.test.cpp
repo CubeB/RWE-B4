@@ -128,4 +128,84 @@ namespace rwe
         REQUIRE_FALSE(buildClickTakesUnit(false, true));
         REQUIRE_FALSE(buildClickTakesUnit(false, false));
     }
+
+    TEST_CASE("the W, B and Y selection-box filters (TA 3.9.01)")
+    {
+        // isMobile, isArmed, isBuilder
+        const bool tank[] = {true, true, false};
+        const bool constructor[] = {true, false, true};
+        const bool commander[] = {true, true, true};
+        const bool factory[] = {false, false, true};
+        const bool tower[] = {false, true, false};
+        auto admits = [](const BandboxFilter& f, const bool* u) { return bandboxFilterAdmits(f, u[0], u[1], u[2]); };
+
+        SECTION("nothing held takes everything")
+        {
+            BandboxFilter none;
+            for (auto u : {tank, constructor, commander, factory, tower})
+            {
+                REQUIRE(admits(none, u));
+            }
+        }
+
+        SECTION("W takes armed mobile units only")
+        {
+            BandboxFilter w{true, false, false};
+            REQUIRE(admits(w, tank));
+            REQUIRE(admits(w, commander));
+            REQUIRE_FALSE(admits(w, constructor));
+            REQUIRE_FALSE(admits(w, factory));
+            REQUIRE_FALSE(admits(w, tower));
+        }
+
+        SECTION("B takes mobile builders only")
+        {
+            BandboxFilter b{false, true, false};
+            REQUIRE(admits(b, constructor));
+            REQUIRE(admits(b, commander));
+            REQUIRE_FALSE(admits(b, tank));
+            REQUIRE_FALSE(admits(b, factory));
+        }
+
+        SECTION("Y takes factories only")
+        {
+            BandboxFilter y{false, false, true};
+            REQUIRE(admits(y, factory));
+            REQUIRE_FALSE(admits(y, constructor));
+            REQUIRE_FALSE(admits(y, tower));
+        }
+
+        SECTION("two held take the union")
+        {
+            BandboxFilter wy{true, false, true};
+            REQUIRE(admits(wy, tank));
+            REQUIRE(admits(wy, factory));
+            REQUIRE_FALSE(admits(wy, constructor));
+        }
+    }
+
+    TEST_CASE("Ctrl+F and Ctrl+B find idle factories and idle builders (TA 3.9.01)")
+    {
+        REQUIRE(isIdleFactory(false, true, true));
+        REQUIRE_FALSE(isIdleFactory(false, true, false));
+        REQUIRE_FALSE(isIdleFactory(true, true, true));
+        REQUIRE_FALSE(isIdleFactory(false, false, true));
+
+        REQUIRE(isIdleBuilder(true, true, true));
+        REQUIRE_FALSE(isIdleBuilder(true, true, false));
+        REQUIRE_FALSE(isIdleBuilder(false, true, true));
+        REQUIRE_FALSE(isIdleBuilder(true, false, true));
+    }
+
+    TEST_CASE("the idle-unit keys walk the candidates in id order and wrap")
+    {
+        std::vector<UnitId> ids{UnitId(7), UnitId(3), UnitId(5)};
+        REQUIRE(nextInCycle(ids, std::nullopt) == UnitId(3));
+        REQUIRE(nextInCycle(ids, UnitId(3)) == UnitId(5));
+        REQUIRE(nextInCycle(ids, UnitId(5)) == UnitId(7));
+        REQUIRE(nextInCycle(ids, UnitId(7)) == UnitId(3));
+        // The cursor's unit went busy: carry on from where it stood.
+        REQUIRE(nextInCycle(ids, UnitId(4)) == UnitId(5));
+        REQUIRE(nextInCycle({}, UnitId(3)) == std::nullopt);
+    }
 }

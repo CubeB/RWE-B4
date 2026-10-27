@@ -207,6 +207,20 @@ Everything else lives in a subject file. **The numbers never move**, so a
 
 ## 88. Where RWE deliberately differs
 
+- **The 3.9.01 patch's selection keys** (2026-10-26, #884). RWE takes the
+  unofficial TA patch 3.9.01's bindings over v3.1's (§72-§81 decode the
+  original). Ctrl+S selects only armed units on screen where the original
+  takes every unit (`0x48c030`). Ctrl+F walks the idle factories and Ctrl+B
+  the idle builders, one per press, selecting each and centring on it,
+  instead of matching `CTRL_F` and `CTRL_B` in the Category tokens. Holding W,
+  B or Y while dragging a box keeps only armed mobile units, mobile builders
+  or factories respectively, and several held keep their union. The patch's
+  notes give no definitions, so RWE's are its own: armed means `canAttack`
+  with a weapon, a factory is an immobile builder, idle means an empty build
+  queue for a factory and an empty order queue for a builder, and the
+  commander counts as both armed and a builder. `InterfaceRules.h` holds the
+  rules. Ctrl+W, Ctrl+P, Ctrl+R and Ctrl+V still come from the data.
+
 - **COB extension GET 75** (2026-10-25, `COB-PORT-75-FINDINGS.md`). Rime's
   documented unit-locality query reports RWE's Local/Remote simulation authority,
   including locally simulated computer seats rather than only the human seat.

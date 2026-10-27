@@ -2,7 +2,9 @@
 
 #include <SDL3/SDL_keycode.h>
 #include <cstddef>
+#include <optional>
 #include <rwe/sim/PlayerId.h>
+#include <rwe/sim/UnitId.h>
 #include <vector>
 
 namespace rwe
@@ -109,6 +111,33 @@ namespace rwe
      * queued key.
      */
     bool keyDismissesEndScreen(SDL_Keycode key);
+
+    /**
+     * The selection box's filters, held on W, B and Y while dragging (the
+     * 3.9.01 patch's keys, TOTALA-EXE.md S:88). With none held the box takes
+     * everything; with several it takes what any of them admits.
+     */
+    struct BandboxFilter
+    {
+        bool armedMobile{false};
+        bool constructors{false};
+        bool factories{false};
+    };
+
+    bool bandboxFilterAdmits(const BandboxFilter& filter, bool isMobile, bool isArmed, bool isBuilder);
+
+    /** A finished factory with nothing queued, for Ctrl+F's walk. */
+    bool isIdleFactory(bool isMobile, bool isBuilder, bool buildQueueEmpty);
+
+    /** A finished mobile builder with no orders, for Ctrl+B's walk. */
+    bool isIdleBuilder(bool isMobile, bool isBuilder, bool ordersEmpty);
+
+    /**
+     * The candidate after `cursor` in id order, wrapping to the first, so a
+     * key pressed repeatedly visits each in turn. A cursor that has dropped
+     * out of the list resumes from where it stood rather than from the start.
+     */
+    std::optional<UnitId> nextInCycle(std::vector<UnitId> candidates, std::optional<UnitId> cursor);
 
     BuildMenuPosition stepBuildMenu(BuildMenuPosition position, unsigned int pageCount, bool forward, bool toggle);
 }

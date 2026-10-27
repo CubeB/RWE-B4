@@ -468,11 +468,11 @@ namespace rwe
         return std::holds_alternative<GameScene::CameraControlStateTrackingUnit>(scene.cameraControlState);
     }
 
-    std::optional<UnitId> ScenarioDriver::spawnNearCamera(const std::string& unitType)
+    std::optional<UnitId> ScenarioDriver::spawnNearCamera(const std::string& unitType, float offsetX, float offsetZ)
     {
         auto camera = scene.worldCameraState.position;
-        auto x = camera.x + 96.0f;
-        auto z = camera.z + 96.0f;
+        auto x = camera.x + offsetX;
+        auto z = camera.z + offsetZ;
         auto y = simScalarToFloat(scene.simulation.terrain.getHeightAt(floatToSimScalar(x), floatToSimScalar(z)));
         return scene.spawnCompletedUnit(unitType, scene.localPlayerId, SimVector(floatToSimScalar(x), floatToSimScalar(y), floatToSimScalar(z)));
     }

@@ -128,9 +128,26 @@ namespace rwe
         // (UiStagedButton.cpp), and the peek would fire whatever button last
         // had focus. The game menu is handled above and has already returned,
         // so this only takes Space away from the in-game panel.
-        if (!isCtrlDown() && keysym.key != SDLK_SPACE)
+        // Auto-repeat is kept from it too: B is held as a selection-box
+        // filter, and every repeat would press BUILD again, sound and all.
+        if (!isCtrlDown() && keysym.key != SDLK_SPACE && !keysym.repeat)
         {
             currentPanel->keyDown(KeyEvent(keysym.key));
+        }
+
+        // Held as filters for the selection box, whatever else the key
+        // does: B also opens a builder's BUILD tab through the panel above.
+        if (keysym.key == SDLK_W)
+        {
+            bandboxFilter.armedMobile = true;
+        }
+        else if (keysym.key == SDLK_B)
+        {
+            bandboxFilter.constructors = true;
+        }
+        else if (keysym.key == SDLK_Y)
+        {
+            bandboxFilter.factories = true;
         }
 
         if (keysym.key == SDLK_UP)
@@ -279,43 +296,7 @@ namespace rwe
         }
         else if (keysym.key == SDLK_N && !isCtrlDown())
         {
-            // Walk the player's own units one keypress at a time, selecting
-            // and centering each in turn.
-            std::optional<UnitId> first;
-            std::optional<UnitId> next;
-            bool passedCursor = !nextUnitCursor.has_value();
-            for (const auto& [unitId, unit] : simulation.units)
-            {
-                if (!unit.isAlive() || !unit.isOwnedBy(localPlayerId))
-                {
-                    continue;
-                }
-                if (!first)
-                {
-                    first = unitId;
-                }
-                if (passedCursor)
-                {
-                    next = unitId;
-                    break;
-                }
-                if (unitId == *nextUnitCursor)
-                {
-                    passedCursor = true;
-                }
-            }
-            if (!next)
-            {
-                next = first;
-            }
-            if (next)
-            {
-                nextUnitCursor = next;
-                clearUnitSelection();
-                selectAdditionalUnit(*next);
-                const auto& unit = getUnit(*next);
-                setCameraPosition(Vector3f(simScalarToFloat(unit.position.x), 0.0f, simScalarToFloat(unit.position.z)));
-            }
+            selectNextOwnUnit(nextUnitCursor, [](const UnitState&, const UnitDefinition&) { return true; });
         }
         else if (keysym.key == SDLK_T)
         {
@@ -373,8 +354,9 @@ namespace rwe
         }
         else if (keysym.key == SDLK_S && isCtrlDown() && !isShiftDown())
         {
-            // Ctrl+S is select-on-screen in the original; stop lives on the
-            // plain S quickkey through the orders panel.
+            // The 3.9.01 patch's Ctrl+S, armed units only, where the
+            // original takes everything on screen (TOTALA-EXE.md S:88).
+            // Stop lives on the plain S quickkey through the orders panel.
             selectAllOnScreen();
         }
         else if (keysym.key == SDLK_D && isCtrlDown() && !isShiftDown())
@@ -427,14 +409,32 @@ namespace rwe
                 selectAllWhere([&types](const UnitState& u, const UnitDefinition&) { return types.find(u.unitType) != types.end(); });
             }
         }
+        else if (keysym.key == SDLK_F && isCtrlDown() && !isShiftDown())
+        {
+            // The 3.9.01 patch's walk through idle factories, where the
+            // original selects every CTRL_F unit (TOTALA-EXE.md S:88).
+            selectNextOwnUnit(idleFactoryCursor, [](const UnitState& u, const UnitDefinition& d) {
+                return isIdleFactory(d.isMobile, d.builder, u.buildQueue.empty());
+            });
+        }
+        else if (keysym.key == SDLK_B && isCtrlDown() && !isShiftDown())
+        {
+            // The 3.9.01 patch's walk through idle builders, where the
+            // original selects every CTRL_B unit (TOTALA-EXE.md S:88).
+            selectNextOwnUnit(idleBuilderCursor, [](const UnitState& u, const UnitDefinition& d) {
+                return isIdleBuilder(d.isMobile, d.builder, u.orders.empty());
+            });
+        }
         else if (isCtrlDown() && !isShiftDown()
-            && (keysym.key == SDLK_W || keysym.key == SDLK_F || keysym.key == SDLK_P
-                || keysym.key == SDLK_V || keysym.key == SDLK_B || keysym.key == SDLK_R))
+            && (keysym.key == SDLK_W || keysym.key == SDLK_P
+                || keysym.key == SDLK_V || keysym.key == SDLK_R))
         {
             // The original's Ctrl+letter selections are data-driven: it
             // formats "CTRL_%c" and matches the FBI Category tokens, and the
-            // shipped data defines CTRL_W (weapons), CTRL_V (vtols), CTRL_F
-            // (factories), CTRL_B (builders), CTRL_R (radars) and CTRL_P.
+            // shipped data defines CTRL_W (armed mobile units), CTRL_V
+            // (vtols), CTRL_R (radars and jammers) and CTRL_P (armed
+            // aircraft). CTRL_F and CTRL_B are in the data too, but their
+            // keys are the 3.9.01 patch's idle walks above.
             char letter = static_cast<char>(std::toupper(keysym.key));
             selectAllByCategoryToken(std::string("CTRL_") + letter);
         }
@@ -581,6 +581,18 @@ namespace rwe
         else if (keysym.key == SDLK_SPACE)
         {
             spaceDown = false;
+        }
+        else if (keysym.key == SDLK_W)
+        {
+            bandboxFilter.armedMobile = false;
+        }
+        else if (keysym.key == SDLK_B)
+        {
+            bandboxFilter.constructors = false;
+        }
+        else if (keysym.key == SDLK_Y)
+        {
+            bandboxFilter.factories = false;
         }
     }
 

@@ -324,8 +324,6 @@ namespace rwe
             chromeUiRenderService.drawText(rect.x1, rect.y1, text, *guiFont, Color(255, 71, 0));
         }
 
-        renderHelpOverlay();
-
         // The end-of-game sequence draws over everything rather than into the
         // HUD, so it is run from render() rather than from here.
 
@@ -592,6 +590,8 @@ namespace rwe
         {
             panel->render(chromeUiRenderService);
         }
+
+        renderHelpOverlay();
 
         renderWaitingForPlayers();
 

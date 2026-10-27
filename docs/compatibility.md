@@ -32,6 +32,12 @@ smaller label font and spacing fit the reported descriptions in the shipped
 rectangles; the original artwork and geometry are restored.
 `MAP-DESCRIPTION-FONT-FINDINGS.md` and section 88 record the correction.
 
+**The selection keys are the 3.9.01 patch's.** Ctrl+S takes only armed units
+on screen, Ctrl+F and Ctrl+B step through idle factories and idle builders,
+and holding W, B or Y while dragging a box keeps only armed mobile units,
+construction units or factories. The v3.1 game selected everything on screen,
+and every factory or every builder. Section 88 has the details.
+
 **Mod compatibility is checked per feature and version.** Explicit resource
 directories support layouts such as Escalation's AE/UNITSE, and the classic
 engine reads original AI profiles and downloadable-unit command fragments.

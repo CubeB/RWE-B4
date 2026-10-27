@@ -364,14 +364,11 @@ namespace rwe
             ? sideMenu : std::string("ARMOPT");
         auto panel = uiFactory.panelFromGuiFile(menu);
 
-        // The briefing and help do not exist in RWE yet; the original greys
-        // what does not apply rather than hiding it.
-        for (const auto* name : {"MISSION", "HELP"})
+        // The briefing does not exist in RWE yet; the original greys what
+        // does not apply rather than hiding it. HELP opens the F1 overlay.
+        if (auto button = panel->find<UiStagedButton>("MISSION"))
         {
-            if (auto button = panel->find<UiStagedButton>(name))
-            {
-                button->get().setEnabled(false);
-            }
+            button->get().setEnabled(false);
         }
 
         setGameMenuPanel(std::move(panel));
@@ -987,6 +984,11 @@ namespace rwe
             else if (control == "EXIT")
             {
                 openGameExitMenu();
+            }
+            else if (control == "HELP")
+            {
+                closeGameMenu();
+                helpVisible = true;
             }
         }
         else if (topic == "SAVEGAME")
