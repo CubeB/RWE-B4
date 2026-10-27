@@ -169,6 +169,11 @@ namespace rwe
                 && tokens[1] == "Film" && tokens[2] == "Chris" && tokens[3] == "Include"
                 && tokens[4] == "Reload" && tokens[5] == "Assert";
         }
+        else if (word == "noshake")
+        {
+            // #907: UI-option bit 4 in the original; a preference, not saved.
+            command.kind = ChatCommand::Kind::NoShake;
+        }
         else if (word == "give")
         {
             // player amount metal|energy. The resource is the one argument

@@ -168,10 +168,17 @@ namespace rwe
         REQUIRE(chatCommandMask(true, false, true, false) == 7u);
     }
 
-    TEST_CASE("every other word is unknown, and says what it was", "[chat]")    {
-        auto c = parseChatCommand("+NoShake");
+    TEST_CASE("the local display toggles parse without arguments", "[chat]")
+    {
+        REQUIRE(parseChatCommand("+NoShake")->kind == Kind::NoShake);
+        REQUIRE(parseChatCommand("+noshake 1")->kind == Kind::NoShake);
+    }
+
+    TEST_CASE("every other word is unknown, and says what it was", "[chat]")
+    {
+        auto c = parseChatCommand("+Contour 4");
         REQUIRE(c->kind == Kind::Unknown);
-        REQUIRE(c->word == "NoShake");
+        REQUIRE(c->word == "Contour");
 
         // The original does not register a line-of-sight toggle either.
         c = parseChatCommand("+ShareLOS");

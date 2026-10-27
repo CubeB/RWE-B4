@@ -46,6 +46,8 @@ namespace rwe
             GiveUsage,
             /** `+Now ...`: the developer phrase; see `isDeveloperDebugPhrase`. */
             Now,
+            /** `+NoShake`: toggle screen shake for this client; not saved. */
+            NoShake,
         };
 
         Kind kind{Kind::Empty};

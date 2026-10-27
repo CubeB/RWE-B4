@@ -171,6 +171,9 @@ namespace rwe
         /** Whether the local developer phrase has unlocked the debug bit (#906). */
         bool debugCommandsEnabled() const;
 
+        /** Whether blasts add screen shake for this client (#907, `+NoShake`). */
+        bool screenShakeEnabled() const;
+
         /** Separate edges allow a modifier to stay held over another key. */
         void keyDown(int keyCode);
         void keyUp(int keyCode);

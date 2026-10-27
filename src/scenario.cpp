@@ -421,7 +421,21 @@ namespace
                 d.require(d.consoleMessageCount() == before, "repeat does nothing once debug is off");
                 d.key(SDLK_ESCAPE);
             });
-            s.endAt(4);
+            s.at(5, [](rwe::ScenarioDriver& d) {
+                // #907's first binding: +NoShake is a local toggle and prints
+                // nothing. The switch is what the scenario can see; the shake
+                // path reads it when a blast lands.
+                d.require(d.screenShakeEnabled(), "shake starts on");
+                d.key(SDLK_RETURN);
+                d.textInput("+noshake");
+                d.key(SDLK_RETURN);
+                d.require(!d.screenShakeEnabled(), "the command turns shake off");
+                d.key(SDLK_RETURN);
+                d.textInput("+NOSHAKE");
+                d.key(SDLK_RETURN);
+                d.require(d.screenShakeEnabled(), "and a second one turns it back on");
+            });
+            s.endAt(5);
         });
     }
 

@@ -345,3 +345,27 @@ in §88.
   not demonstrated; the pure mask cases and the repeat path are. No original
   runtime was run, and the key is the code's virtual-key number, not a
   physical-key test on other layouts.
+
+## #907: `+NoShake`, the first settings binding
+
+Authority: `BT-GAME-CONSOLE-COMMANDS-PARITY.md` rule 4 (`NoShake` writes
+UI-option bit 4, is not saved and prints nothing); the remaining display and
+option commands need a units/persistence mapping that has been commissioned
+separately, so this pass is one binding, not the whole ticket.
+
+`+NoShake` now parses (argument ignored) and toggles `screenShakeEnabled`,
+which starts on and is not saved. While it is off, `addScreenShakeFromWeapon`
+returns before accumulating anything, so no offset is ever applied and nothing
+has to be taken back off the camera. The command prints nothing, as the
+original's option bit does not.
+
+### Executed RWE checks
+
+- The `906-developer-phrase-and-repeat` scenario gained a step: `+noshake`
+  turns shake off and `+NOSHAKE` turns it back on, read from the real
+  `GameScene`; it passes. The blast path itself is not exercised.
+- `[chat]` parses the command with and without an argument. Full suite:
+  **1984 passed, one HOME-path checksum skip, 218557 assertions**.
+- Note: repeated full-suite runs on this machine produced intermittent
+  `TaHostSession` failures that do not reproduce in isolation (`[net][ta]`
+  passes); they are timing/port flakiness under load, not this change.

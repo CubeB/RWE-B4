@@ -558,6 +558,11 @@ namespace rwe
         return scene.debugCommandsEnabled;
     }
 
+    bool ScenarioDriver::screenShakeEnabled() const
+    {
+        return scene.screenShakeEnabled;
+    }
+
     bool ScenarioDriver::isCameraTracking() const
     {
         return std::holds_alternative<GameScene::CameraControlStateTrackingUnit>(scene.cameraControlState);

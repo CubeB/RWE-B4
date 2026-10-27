@@ -1897,6 +1897,14 @@ namespace rwe
             return;
         }
 
+        // +NoShake: the original's UI-option bit 4, a local preference. The
+        // shake is never accumulated while it is off, so no offset is applied
+        // and nothing has to be taken back off (#907).
+        if (!screenShakeEnabled)
+        {
+            return;
+        }
+
         // No falloff with distance, and none in the original either: 0x499FAB
         // hands the weapon's two numbers straight to the shake without ever
         // looking at where the explosion was or where the camera is. A blast

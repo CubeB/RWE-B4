@@ -200,6 +200,14 @@ namespace rwe
             return;
         }
 
+        if (command.kind == ChatCommand::Kind::NoShake)
+        {
+            // #907: UI-option bit 4. A local preference, not saved, and the
+            // original prints nothing for it.
+            screenShakeEnabled = !screenShakeEnabled;
+            return;
+        }
+
         // Every command built so far is in the ordinary table.
         if ((mask & ChatCommandMaskOrdinary) == 0)
         {
@@ -328,6 +336,7 @@ namespace rwe
             case ChatCommand::Kind::Empty:
             case ChatCommand::Kind::Unknown:
             case ChatCommand::Kind::Now:
+            case ChatCommand::Kind::NoShake:
                 break;
         }
     }
