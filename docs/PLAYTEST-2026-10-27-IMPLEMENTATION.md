@@ -271,3 +271,39 @@ LAN path are untouched.
   loopback stand-in.
 - Release `ui_probe` built successfully; the game targets are unaffected by
   this menu-only change.
+
+
+## #903: the battleroom message-box baseline
+
+Authority: [BT-GUI-TEXTBOX-BASELINE-FINDINGS](BT-GUI-TEXTBOX-BASELINE-FINDINGS.md),
+static comparison at byte-tactics `e89721c46c3fa06e59558419b54fe26061fafb73`
+and the identified GOG v3.1 binary. That finding is a static read: it ran no
+original game and no RWE render.
+
+A type-3 text input puts its text's pen at **gadget Y + 3**, independent of the
+box's height, and the original's font load normalises every glyph hotspot by the
+`I` frame's height. RWE's drawer takes a baseline, so it needs the pen plus that
+height: for `hattfont12` (I = 12) the row is **Y + 15**. RWE used Y + 12, which
+is three rows high at every box height; the LOUNGE2 MESSAGE box (21, 441,
+294 x 20) drew its capital ink on rows 442-453 instead of 445-456. The caret is
+now the pen through two rows past the `I` bottom, both ends painted (rows
+`Y+3 … Y+17`, fifteen rows), replacing a twelve-row line anchored at the old
+baseline.
+
+The hitbox, focus, horizontal trimming, plate choice and font are unchanged;
+labels already matched and are untouched; the OUTPUT list's 12-row pitch against
+the reference's 15 is a separate mismatch and is not changed here.
+
+### Executed RWE checks
+
+- New `[ui]` case pins the arithmetic for the shipped face: a 20-high box at
+  y 441 with an I-height of 12 gives drawer row 456 and caret rows 444-458; a
+  28-high box gives the same row; a face with I-height 10 gives 454 and a
+  thirteen-row caret. The test uses constructed `SpriteSeries` faces, not the
+  shipped GAF.
+- `[ui]`: 31 cases, 1173 assertions passed. Full suite: **1981 passed, one
+  HOME-path checksum skip, 218536 assertions passed**.
+- No render capture was made. The production path calls the tested helpers,
+  but the visual result is arithmetic plus a clean build, not an observed
+  comparison; a `ui_probe --panel LOUNGE2 --render` capture remains the
+  outstanding visual check.

@@ -14,6 +14,47 @@ namespace rwe
             // render.
             return UiTextBox(0, 0, 100, 12, "", nullptr);
         }
+
+        /** A face with only the "I" frame's height made interesting. */
+        std::shared_ptr<SpriteSeries> textBoxFont(int iFrameHeight)
+        {
+            auto font = std::make_shared<SpriteSeries>();
+            font->sprites.resize(256);
+            for (auto& sprite : font->sprites)
+            {
+                sprite = std::make_shared<Sprite>(Rectangle2f::fromTopLeft(0.0f, 0.0f, 5.0f, 12.0f), SharedTextureHandle(), nullptr);
+            }
+            font->sprites['I'] = std::make_shared<Sprite>(
+                Rectangle2f::fromTopLeft(0.0f, 0.0f, 5.0f, static_cast<float>(iFrameHeight)), SharedTextureHandle(), nullptr);
+            return font;
+        }
+    }
+
+    TEST_CASE("a text box's line is the pen plus the I height, whatever its height", "[ui]")
+    {
+        // #903, BT-GUI-TEXTBOX-BASELINE-FINDINGS.md: the original's type-3
+        // draw puts the pen three rows below the gadget top and normalises
+        // glyphs by the "I" height; it does not centre by the box's height.
+        // The shipped LOUNGE2 MESSAGE box is 20 high at y 441 in hattfont12
+        // (I = 12): drawer row 456, caret rows 444-458.
+        const auto font = textBoxFont(12);
+        const auto box = UiTextBox(21, 441, 294, 20, "", font);
+        REQUIRE(box.textLineBaseline() == 456.0f);
+        REQUIRE(box.caretTop() == 444.0f);
+        REQUIRE(box.caretHeight() == 15.0f);
+
+        SECTION("the box's own height does not move the text")
+        {
+            const auto tall = UiTextBox(21, 441, 294, 28, "", font);
+            REQUIRE(tall.textLineBaseline() == 456.0f);
+        }
+
+        SECTION("a face whose I is a different height uses that height")
+        {
+            const auto shortFace = UiTextBox(21, 441, 294, 20, "", textBoxFont(10));
+            REQUIRE(shortFace.textLineBaseline() == 454.0f);
+            REQUIRE(shortFace.caretHeight() == 13.0f);
+        }
     }
 
     TEST_CASE("a text box is written from composed text, not from keycodes", "[ui]")
