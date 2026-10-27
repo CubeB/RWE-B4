@@ -2329,6 +2329,31 @@ namespace rwe
         return !ownedByViewer && !sonarContact;
     }
 
+    void grantWatchingSonarContacts(const GameSimulation& simulation, PlayerId viewer, PlayerVisibility& visibility)
+    {
+        const auto& jammers = simulation.playerVisibility.at(viewer.value).radarJammers;
+        for (const auto& [id, unit] : simulation.units)
+        {
+            if (unit.isDead())
+            {
+                continue;
+            }
+            const bool jammed = std::any_of(jammers.begin(), jammers.end(), [&](const auto& jammer) {
+                const auto dx = unit.position.x - jammer.position.x;
+                const auto dz = unit.position.z - jammer.position.z;
+                return jammer.sonar && dx * dx + dz * dz <= jammer.rangeSquared;
+            });
+            if (jammed)
+            {
+                visibility.sonarContacts.erase(id);
+            }
+            else
+            {
+                visibility.sonarContacts.insert(id);
+            }
+        }
+    }
+
     std::string unidentifiedObjectText(bool sonarContact)
     {
         return std::string(sonarContact ? "S: " : "R: ") + "Unidentified object";

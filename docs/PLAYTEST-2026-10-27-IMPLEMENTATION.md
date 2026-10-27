@@ -87,3 +87,48 @@ not been run.
   as passing validation.
 - Whitespace checks passed. GitHub CI results are reported by the PR; local
   checks do not imply completion of every platform job.
+
+## #899 / #904: underwater models in watching views
+
+Authority: [WATER-VIS-001/002](PLAYTEST-UNDERWATER-VISIBILITY-FINDINGS.md),
+the same identified byte-tactics revision and GOG build. This is a static
+reference comparison; no original-game watch session was executed.
+
+The owner clarified that the reported extractors were enemy units and were
+also invisible while spectating. An ordinary enemy's submerged model without
+sonar is not itself proof of a bug: the original requires the applicable
+detection. A native watcher receives sonar contacts for live units before
+jammers run.
+
+RWE's full-visibility view admitted the model but then cut its underwater
+fragments using the nominal seat's ownership and sonar. Its fogged watching
+view combined sensor sets that omit each player's own units, which also loses
+underwater units that nobody else detects. The model admission and water pass
+now use the same displayed view. Watching sonar grants are presentation-only;
+foreign sonar jamming still erases them. The explicit `See everything` choice
+also reveals underwater geometry, including through jamming, consistently with
+its existing whole-model/cloak policy. That stronger policy and the combined
+fog choice are recorded as deliberate viewing divergences in §88.
+
+A fully lit ordinary-player map now retains current sonar contacts and still
+uses the underwater model-admission test. Turning fog off no longer discards
+detection information or substitutes terrain visibility for sonar eligibility.
+Normal players do not receive the watcher grant.
+
+### Validation
+
+- MinGW64 Release game and tests built successfully.
+- Presentation/retail selection: **18 cases, 3419 assertions passed**.
+  The new controlled-depth case loads actual FBI and 3DO data for `ARMUWMEX`,
+  `CORUWMEX`, `ARMSUB` and `ARMTIDE` from `D:/RWE-Data`. It checks ordinary
+  owner/nonowner admission, the partly submerged tidal generator, watcher
+  admission/tint selection, sonar jamming and unchanged simulation hash/sensors.
+- Full suite with `RWE_SCENARIO_DATA=D:/RWE-Data`: **1980 cases passed,
+  1 HOME-path-dependent checksum case skipped, 218542 assertions passed**.
+- Production view/cache and renderer call sites were reviewed. These are
+  executed RWE model/predicate tests, not a native visual capture or proof of
+  pixel-identical original rendering.
+
+#904's watcher fault is corrected. #899's watcher aspect is the same fault;
+an ordinary-player enemy case still needs its sonar state and particle source
+captured before calling the original's intended underwater cut a defect.

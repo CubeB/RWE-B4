@@ -784,6 +784,11 @@ namespace rwe
      */
     bool unitWaterPartsAreCut(bool ownedByViewer, bool sonarContact);
 
+    // WATER-VIS-002, docs/PLAYTEST-UNDERWATER-VISIBILITY-FINDINGS.md:
+    // a native watcher gets sonar contacts before foreign jammers erase them.
+    // This updates only the client's visibility picture, never the sim.
+    void grantWatchingSonarContacts(const GameSimulation& simulation, PlayerId viewer, PlayerVisibility& visibility);
+
     /**
      * What the footer prints for a hovered unit the viewer cannot identify
      * (BT-141, 0x46B6F3): the prefix "S: " when the unit is held on sonar and
