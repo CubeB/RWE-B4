@@ -240,3 +240,34 @@ negative is meaningful because the owned twin shows the same script emitting in
 the same harness. Allied visibility is not separately executed here: it comes
 through the shared sensor picture that the #899/#904 watcher work and its
 retail predicate test already cover.
+
+## #897: a clickable accept in the battleroom
+
+The owner's report was a UX complaint about sharing a code and the host's
+`/accept`. The transport itself is RWE-original (there is no byte-tactics
+counterpart to compare), so the investigation was an executed one: the
+simulated-internet harness (`ui_probe --multiplayer-flow`) passed every
+invite, reply-code, approval, expiry, version and reachability check on the
+merged revision. Nothing in the two-code path was broken.
+
+The friction it left was that admitting a waiting player required knowing and
+typing a command. The battleroom now has an **Accept** button beside the
+message box, host-only: hidden unless a request is waiting, labelled with the
+oldest requester's name, and running the same admission as `/accept` through
+one shared helper so the two cannot drift. The typed command is unchanged.
+This is an RWE-original control, recorded in §88; the approval model and the
+LAN path are untouched.
+
+### Executed RWE checks
+
+- `ui_probe --multiplayer-flow D:/RWE-Data`: the waiting request surfaces the
+  button; its label names the request ("Accept Net"); a real click admits the
+  oldest pending guest; the button disappears once the queue is empty; the
+  by-name command, the empty-queue message, the reply-code fallback and the
+  version refusal still pass. `flow done: 0 check(s) failed`.
+- The harness drives two real `MainMenuScene`s over LAN discovery with a fake
+  STUN server, so this is an executed menu-flow check, not a unit test of the
+  handler. It does not emulate two real routers; the direct path is a
+  loopback stand-in.
+- Release `ui_probe` built successfully; the game targets are unaffected by
+  this menu-only change.

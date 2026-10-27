@@ -1468,7 +1468,7 @@ int main(int argc, char* argv[])
                     "a waiting guest does not display an unacknowledged local seat");
                 check(MenuProbe::model(invHost).players[1].type.getValue() == MainMenuModel::PlayerSettings::Type::Open,
                     "the requested seat stays open until the host accepts");
-                check(contains(transcript(invHost), "Net wants to join. Type /accept to allow."), "the join request includes the player's name");
+                check(contains(transcript(invHost), "Net wants to join. Click Accept or type /accept."), "the join request includes the player's name");
                 check(MenuProbe::flow(invHost)->pendingJoins.size() == 1, "repeated claims make one pending request");
                 const auto netToken = MenuProbe::flow(invGuest)->claimToken;
                 check(MenuProbe::flow(invHost)->invitedGuests.empty(), "no reply code was needed for the direct request");
@@ -1508,9 +1508,12 @@ int main(int argc, char* argv[])
                     check(MenuProbe::flow(invGuest)->claimToken == netToken, "a waiting request keeps its approval token when its seat is taken");
                     check(MenuProbe::flow(invGuest)->mySeat != 1, "the waiting guest asks for a different open seat");
                 }
-                say(invHost, "/accept");
+                check(buttonVisible(invHost, "ACCEPT"), "a waiting request surfaces a clickable Accept");
+                check(buttonLabel(invHost, "ACCEPT") == "Accept Net", "the button names the request it will admit");
+                clickGadget(invHost, "ACCEPT");
                 runInternet(2.0);
-                check(MenuProbe::flow(invGuest)->accepted, "bare accept admits the oldest pending guest");
+                check(MenuProbe::flow(invGuest)->accepted, "the Accept button admits the oldest pending guest");
+                check(!buttonVisible(invHost, "ACCEPT"), "the button goes away when the queue is empty");
                 check(contains(transcript(invHost), "Net has joined"), "the host sees the accepted guest join");
                 check(!contains(transcript(invHost), "/accept Nobody"), "accept commands are not sent as chat");
                 requester.stop();
