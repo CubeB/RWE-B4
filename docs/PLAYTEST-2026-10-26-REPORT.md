@@ -1,5 +1,7 @@
 # Playtest report: 2026-10-26
 
+Work order: [importance and implementation effort](PLAYTEST-2026-10-26-PRIORITIES.md).
+
 Recorded and triaged 2026-10-27 from the owner's
 `Desktop/RWEbugsandimprovements.txt` (file modified 2026-10-27), followed by
 the owner's pasted [TA Wiki cheat-code page](https://totalannihilation.fandom.com/wiki/Cheat_codes).

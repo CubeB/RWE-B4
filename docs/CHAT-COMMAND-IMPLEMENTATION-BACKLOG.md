@@ -1,5 +1,7 @@
 # Requested chat commands and cheat-code implementation backlog
 
+Work order: [importance and implementation effort](PLAYTEST-2026-10-26-PRIORITIES.md).
+
 The owner requested every code in the desktop playtest list and the
 [TA Wiki cheat-code page](https://totalannihilation.fandom.com/wiki/Cheat_codes),
 including its universal, exploit, developer and miscellaneous sections.
