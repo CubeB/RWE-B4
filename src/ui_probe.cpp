@@ -1037,7 +1037,9 @@ int main(int argc, char* argv[])
             auto optionLabel = [](const std::string& option, const std::string& value) -> std::string {
                 if (option == "commander")
                 {
-                    return value == "0" ? "Game ends" : "Continues";
+                    // GAME ENDS, CONTINUES, DEATHMATCH: the battleroom's
+                    // commander option gained the third stage with Deathmatch.
+                    return value == "0" ? "Game ends" : value == "2" ? "Deathmatch" : "Continues";
                 }
                 if (option == "startloc")
                 {
