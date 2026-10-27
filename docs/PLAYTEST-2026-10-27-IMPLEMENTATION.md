@@ -129,6 +129,54 @@ Normal players do not receive the watcher grant.
   executed RWE model/predicate tests, not a native visual capture or proof of
   pixel-identical original rendering.
 
-#904's watcher fault is corrected. #899's watcher aspect is the same fault;
-an ordinary-player enemy case still needs its sonar state and particle source
-captured before calling the original's intended underwater cut a defect.
+#904's watcher fault is corrected. The owner subsequently clarified #899's
+ordinary-player fault: **bubbles were present from a hidden enemy extractor**,
+rather than expecting that extractor's model to be revealed. The existing
+effect consumer checks existence and the bubble helper checks terrain-point
+visibility, which is insufficient for whole-unit admission. The separate
+[WATER-VIS-003 finding](PLAYTEST-UNIT-SFX-VISIBILITY-FINDINGS.md) confirms the
+required emission gate and distinguishes new bubbles from legitimate residual
+dots. That normal-play emission fix is **not implemented in this pass** and
+remains the next confirmed defect under #899.
+
+## #898: water build feedback and queued boxes
+
+Authority: [BUILD-GRID-001/002/003](PLAYTEST-BUILD-GRID-FINDINGS.md), static
+comparison with the identified byte-tactics revision and GOG build. An accepted
+click carries preview height; queued outlines and their ten-tick sweeps retain
+the order's stored Y. RWE instead carried the seabed height and resampled it
+again in queued outlines and sweeps.
+
+The click now uses the existing placement-height query. Immediate feedback and
+queued outlines retain that position, and the sweep receives the same stored
+height. No submarine construction-height or placement-legality formula changed.
+
+### Executed RWE checks
+
+- New `898-water-build-height` scenario loads shipped Coast To Coast, seed 7,
+  and ARMTIDE through the real `GameScene`. It prepares explored terrain and a
+  legal distant water site, then drives the placement click. These fixture
+  setup operations are RWE test machinery, not original-game behavior claims.
+- After correcting the fixture's initial unexplored-terrain refusal, the
+  pre-fix scenario **failed on immediate feedback height**. The fixed scenario
+  passes both the feedback check and the real queued command's position/height.
+  Coast To Coast sea level is 85; the shipped ARM tidal draft is 8, so the
+  accepted water-only placement plane is 77, rather than the seabed sample.
+- All **6 scenarios passed** on the shipped archive directory, including the
+  new placement regression, tabs, selection keybindings, camera tracking,
+  own-clock orders and paused placement/selection.
+- Building/presentation/retail/replay selection: **34 cases, 3697 assertions
+  passed**. Release game, unit-test and scenario targets built successfully.
+- The renderer's queued outline and sweep call sites were reviewed to use
+  stored order/feedback height. The headless scenario checks actual input and
+  command transitions; it does not supply a pixel capture. No original-runtime
+  placement check was executed.
+
+## Wrap-up state
+
+The owner requested wrapping up before starting further implementation.
+Commander border exclusions and watching visibility are merged; #898 is the
+final correction in this pass. #895 remains open for order-specific aircraft
+recovery. #899 remains open for the normal-play bubble emission gate above.
+The rest of the ranked queue remains open. Linux Debug, launcher and class
+checks for PRs #918 and #919 subsequently passed; final-PR CI is independent.

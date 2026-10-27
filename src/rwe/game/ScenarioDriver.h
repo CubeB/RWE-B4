@@ -137,6 +137,12 @@ namespace rwe
         /** The local player's own move order, through the real order path. */
         void moveOrder(UnitId unitId, const SimVector& destination);
 
+        /** A valid water-site fixture followed by the real placement click (#898). */
+        std::optional<SimVector> placeWaterBuildAndCheckFeedback(const std::string& unitType);
+
+        /** The first queued build of this type, read after its input has entered the sim. */
+        std::optional<SimVector> queuedBuildPosition(UnitId builder, const std::string& unitType) const;
+
         /** A TA peer's `0x19` game speed, in the original's 1..20 numbering. */
         void peerGameSpeed(int peerSpeedLevel);
 
