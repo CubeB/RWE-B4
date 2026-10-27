@@ -69,4 +69,21 @@ handler. The new ground-cell mask also affects ordinary naval ground-mode
 movement through the shared collision rules; a naval original-runtime check has
 not been run.
 
-Unit-test and build results are recorded after the checks finish.
+### Build and test results
+
+- MinGW64 Release `rwe` and `rwe_test` built successfully. The baseline also
+  rebuilt `scenario` and `ui_probe`; neither is presented as a new-border
+  scenario run.
+- New `[mapboundary]` regressions: **4 cases, 2917 assertions passed**.
+- Full suite: **1977 cases passed, 3 skipped, 215226 assertions passed**.
+  The three skips require retail data or a HOME-based installation location.
+- Reran `[retail]` with `RWE_SCENARIO_DATA=D:/RWE-Data`: **2 cases, 3289
+  assertions passed**. The HOME-path-dependent map checksum case remains
+  skipped. There were no test failures in the final runs.
+- The first regression run exposed a missing tile declaration in the synthetic
+  TNT fixture and an invalid assumption that an unreachable order must advance.
+  The corrected fixture declares its tile and verifies a reachable interior
+  control before checking border refusal. Those initial failures are not counted
+  as passing validation.
+- Whitespace checks passed. GitHub CI results are reported by the PR; local
+  checks do not imply completion of every platform job.
