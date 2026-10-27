@@ -65,6 +65,18 @@ This qualification matters when reproducing the original's precise behavior
 on authored map content. A separate lava-world pass also uses the marker for
 low cells, but is outside the border defect.
 
+**Load ordering and void cells.** The map load at `0x483610` places resolved
+map features and mission features, including expansion of their footprint
+continuations, before the border-marking pass. Border selection consequently
+sees the resolved cells, not merely the raw TNT feature-origin list. An
+ordinary feature origin is retained while its `0xFFFE` continuation cells can
+be replaced. The feature placement at `0x423C50` explicitly preserves a raw
+**`0xFFFC`** void marker as that marker; the border pass does not convert it.
+Both movement consumers below already reject it. An importer that discards
+raw void markers loses an independent movement restriction, at the border or
+inside the map. Retaining only ordinary feature-origin exemptions is not a
+complete substitute for preserving these raw blocked cells.
+
 The same exclusion marker is rejected by both:
 
 - the raw movement-class passability query, `0x47DE60`, which feeds the
