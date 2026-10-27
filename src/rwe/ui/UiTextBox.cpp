@@ -14,6 +14,28 @@ namespace rwe
         return masked ? std::string(text.size(), '*') : text;
     }
 
+    float UiTextBox::textLineBaseline() const
+    {
+        // The original's type-3 draw starts the text's pen three rows below
+        // the gadget's top, and its font load subtracts the "I" frame's
+        // height from every glyph's hotspot. This drawer takes the baseline,
+        // so it wants the pen plus that height. #903,
+        // BT-GUI-TEXTBOX-BASELINE-FINDINGS.md.
+        return posY + 3.0f + static_cast<float>(font->sprites.at('I')->bounds.height());
+    }
+
+    float UiTextBox::caretTop() const
+    {
+        return posY + 3.0f;
+    }
+
+    float UiTextBox::caretHeight() const
+    {
+        // The pen through two rows past the "I" bottom, both ends painted:
+        // fifteen rows for hattfont12.
+        return static_cast<float>(font->sprites.at('I')->bounds.height()) + 3.0f;
+    }
+
     void UiTextBox::render(UiRenderService& context) const
     {
         // A visible field to type into -- sunken plate and outline -- then
@@ -33,7 +55,7 @@ namespace rwe
         }
 
         float textX = posX + 4.0f;
-        float baseline = posY + 12.0f;
+        const float baseline = textLineBaseline();
 
         // A line longer than the field shows its end, which is where the
         // typing is. Leading characters are dropped until what is left fits,
@@ -52,7 +74,7 @@ namespace rwe
         if (focused && editable)
         {
             auto caretX = textX + context.getTextWidth(shown, *font);
-            context.fillColor(caretX, baseline - 10.0f, 1.0f, 12.0f, Color(84, 84, 252));
+            context.fillColor(caretX, caretTop(), 1.0f, caretHeight(), Color(84, 84, 252));
         }
     }
 

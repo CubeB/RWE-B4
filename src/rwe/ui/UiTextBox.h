@@ -48,6 +48,20 @@ namespace rwe
 
         void render(UiRenderService& context) const override;
 
+        /**
+         * The glyph-drawer Y for the line: the original's pen (`posY + 3`)
+         * plus the "I" frame's height. Height-independent, because a text
+         * input is not a centred button (#903,
+         * BT-GUI-TEXTBOX-BASELINE-FINDINGS.md).
+         */
+        float textLineBaseline() const;
+
+        /** The caret's first row, which is the pen. */
+        float caretTop() const;
+
+        /** The caret's painted height in rows: the "I" height plus three. */
+        float caretHeight() const;
+
         void keyDown(KeyEvent event) override;
 
         void textInput(const std::string& newText) override;
