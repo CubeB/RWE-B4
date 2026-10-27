@@ -12,6 +12,7 @@
 #include <unordered_set>
 #include <rwe/LoadingScene_util.h>
 #include <rwe/sim/MissionScripts.h>
+#include <rwe/sim/MapBoundary.h>
 #include <rwe/ai/AiPersonality.h>
 #include <rwe/game/AiSeat.h>
 #include <rwe/ai/AiTuningProfile.h>
@@ -752,17 +753,29 @@ namespace rwe
         auto featureNames = getFeatureNames(tnt);
         std::vector<std::pair<Point, std::string>> features;
 
+        // BOUNDARY-001: raw void cells already block before features are
+        // placed. Preserve them when loading instead of discarding the sentinel.
+        std::vector<unsigned int> exclusions;
+
         mapAttributes.forEachIndexed([&](auto c, const auto& e) {
+            if ((e.feature == TntTileAttributes::FeatureVoid || e.feature == 0xFFFD)
+                && c.x < mapAttributes.getWidth() - 1 && c.y < mapAttributes.getHeight() - 1)
+            {
+                exclusions.push_back(c.y * (mapAttributes.getWidth() - 1) + c.x);
+            }
             switch (e.feature)
             {
                 case TntTileAttributes::FeatureNone:
                 case TntTileAttributes::FeatureUnknown:
                 case TntTileAttributes::FeatureVoid:
+                case 0xFFFD:
                     break;
                 default:
                     features.emplace_back(Point(c.x, c.y), featureNames.at(e.feature));
             }
         });
+
+        terrain.setLavaExclusions(exclusions);
 
         // add features from the OTA schema
         for (const auto& f : schema.features)
@@ -905,6 +918,7 @@ namespace rwe
         }
 
         simulation.initializeLavaExclusions(ota.lavaWorld);
+        initializeMapBoundaryExclusions(simulation);
         simulation.movementClassCollisionService = createMovementClassCollisionService(simulation.terrain, simulation.movementClassDatabase);
 
         auto seedSeq = seedFromGameParameters(gameParameters);

@@ -28,7 +28,8 @@ namespace rwe
         // BT-264/265: lava exclusion changes ground command outcomes.
         // BT-266: factory destruction now cancels its retained product.
         // #383/#699/#700 change command outcomes and elimination state.
-        constexpr char Version = 6;
+        // #895 / BOUNDARY-001: reserved borders now block ground routes.
+        constexpr char Version = 7;
 
         constexpr const char* ReplayExtension = ".rwereplay";
 

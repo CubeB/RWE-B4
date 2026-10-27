@@ -8,7 +8,9 @@ namespace rwe
         this->lavaWorld = lavaWorld;
         // BT-264/265: prepare once after map features, before pass maps.
         // See docs/agents/lava-movement.md for reference and lifetime evidence.
-        std::vector<unsigned int> indices;
+        // Preserve raw TNT void cells loaded before initial feature placement
+        // (BOUNDARY-001, docs/PLAYTEST-MAP-BOUNDARY-FINDINGS.md).
+        auto indices = terrain.lavaExclusionIndices();
         const auto& heights = terrain.getHeightMap();
         const auto& mask = terrain.getLavaExclusions();
         const auto sea = simScalarToUInt(terrain.getSeaLevel());
