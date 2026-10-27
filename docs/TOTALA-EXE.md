@@ -209,6 +209,19 @@ Everything else lives in a subject file. **The numbers never move**, so a
 
 ## 88. Where RWE deliberately differs
 
+- **Command masks, the developer phrase and the repeat key** (#906, 2026-10-27).
+  A typed `+` line now runs under the original's per-mode mask -- campaign 1,
+  skirmish 3, multiplayer the host's Cheat Codes option (RWE has no such lobby
+  option, so 1) -- and the exact `Now Film Chris Include Reload Assert` phrase
+  raises it to 7, enabling the virtual-key `0x5C` repeat of a 79-byte saved
+  line. Only the ordinary table's eight sharing commands exist: the cheat and
+  debug tables and the mask-4 default handler (a unit spawner and debug-script
+  loader in the original) are not ported, so the raised bits currently unlock
+  nothing but the repeat. RWE also keeps its `Unknown command: <word>` message,
+  where the original prints nothing, and keeps `+` lines off the chat wire
+  (BT-177). The debug bit and the saved line are local: never hashed, saved,
+  replayed or replicated.
+
 - **Clickable Accept in the battleroom** (#897, 2026-10-27). A host can admit
   a waiting join request by pressing the Accept button beside the message box
   instead of typing `/accept`; the button appears only while a request waits,

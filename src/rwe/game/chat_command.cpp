@@ -159,6 +159,16 @@ namespace rwe
             command.kind = ChatCommand::Kind::SetShareEnergy;
             command.number = chatAtoi(argument(1));
         }
+        else if (word == "now")
+        {
+            // #906: exactly six tokens, the command word case-insensitive and
+            // the five after it case-sensitive. Any other form clears the
+            // unlock; that is still a successful parse, not an unknown word.
+            command.kind = ChatCommand::Kind::Now;
+            command.developerPhraseAccepted = tokens.size() == 6
+                && tokens[1] == "Film" && tokens[2] == "Chris" && tokens[3] == "Include"
+                && tokens[4] == "Reload" && tokens[5] == "Assert";
+        }
         else if (word == "give")
         {
             // player amount metal|energy. The resource is the one argument
@@ -196,5 +206,26 @@ namespace rwe
         }
 
         return "ShareMapping: there is no toggle in RWE. Allies always share what they see.";
+    }
+
+    unsigned int chatCommandMask(bool debugUnlocked, bool campaign, bool multiplayer, bool cheatCodesEnabled)
+    {
+        // The original computes this per submitted line: 7 once debug is
+        // unlocked (which also grants the cheat bit), otherwise 1 in a
+        // campaign and 3 in a skirmish, and in multiplayer the host's Cheat
+        // Codes option decides between 1 and 3 (#906).
+        if (debugUnlocked)
+        {
+            return ChatCommandMaskOrdinary | ChatCommandMaskCheat | ChatCommandMaskDebug;
+        }
+        if (campaign)
+        {
+            return ChatCommandMaskOrdinary;
+        }
+        if (multiplayer && !cheatCodesEnabled)
+        {
+            return ChatCommandMaskOrdinary;
+        }
+        return ChatCommandMaskOrdinary | ChatCommandMaskCheat;
     }
 }

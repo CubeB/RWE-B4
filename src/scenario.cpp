@@ -383,6 +383,46 @@ namespace
             });
             s.endAt(120);
         });
+
+        // #906: the exact developer phrase unlocks debug; the repeat key
+        // then reruns the saved `+` line and nothing when it is locked. The
+        // original's key is virtual-key 0x5C -- backslash on a US layout.
+        rwe::registerScenario("906-developer-phrase-and-repeat", [](rwe::Scenario& s) {
+            auto linesBefore = std::make_shared<std::size_t>(0);
+            s.at(1, [linesBefore](rwe::ScenarioDriver& d) {
+                *linesBefore = d.consoleMessageCount();
+                d.key(SDLK_RETURN);
+                d.textInput("+Now Film Chris Include Reload Assert");
+                d.key(SDLK_RETURN);
+                d.require(d.debugCommandsEnabled(), "the exact phrase unlocks debug");
+            });
+            s.at(2, [linesBefore](rwe::ScenarioDriver& d) {
+                // An unknown word is the countable command in RWE: it prints
+                // one line per run until #906's tables gain a handler.
+                d.key(SDLK_RETURN);
+                d.textInput("+RweTestUnknownCommand");
+                d.key(SDLK_RETURN);
+                d.require(d.consoleMessageCount() == *linesBefore + 1, "the command runs once");
+                d.key(SDLK_RETURN);
+                d.key(SDLK_BACKSLASH);
+                d.require(d.consoleMessageCount() == *linesBefore + 2, "backslash repeats the saved line");
+                d.key(SDLK_ESCAPE);
+            });
+            s.at(3, [](rwe::ScenarioDriver& d) {
+                d.key(SDLK_RETURN);
+                d.textInput("+Now");
+                d.key(SDLK_RETURN);
+                d.require(!d.debugCommandsEnabled(), "a bare +Now clears the unlock");
+            });
+            s.at(4, [](rwe::ScenarioDriver& d) {
+                const auto before = d.consoleMessageCount();
+                d.key(SDLK_RETURN);
+                d.key(SDLK_BACKSLASH);
+                d.require(d.consoleMessageCount() == before, "repeat does nothing once debug is off");
+                d.key(SDLK_ESCAPE);
+            });
+            s.endAt(4);
+        });
     }
 
     /** Runs one scenario and says whether it passed. */

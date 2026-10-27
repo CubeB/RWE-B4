@@ -307,3 +307,41 @@ the reference's 15 is a separate mismatch and is not changed here.
   but the visual result is arithmetic plus a clean build, not an observed
   comparison; a `ui_probe --panel LOUNGE2 --render` capture remains the
   outstanding visual check.
+
+## #906: command masks, the developer phrase and the repeat key
+
+Authority: [BT-GAME-COMMAND-MASK-GATING-FINDINGS](BT-GAME-COMMAND-MASK-GATING-FINDINGS.md),
+static comparison at byte-tactics `e89721c46c3fa06e59558419b54fe26061fafb73`
+and the identified GOG v3.1 binary.
+
+`chatCommandMask` now computes the original's per-line mask: 7 once the local
+debug bit is set (the original *replaces* the mask with 7, so debug also grants
+the cheat bit), otherwise 1 in a campaign and 3 in a skirmish; multiplayer uses
+the host's Cheat Codes option, which RWE has no equivalent of, so it stays 1.
+`+Now Film Chris Include Reload Assert` is parsed exactly -- command word
+case-insensitive, five arguments case-sensitive, six tokens -- and any other
+`Now` clears the unlock. The repeat key is `SDLK_BACKSLASH` (virtual-key `0x5C`
+on a US layout), active only while debug is unlocked and the message bar is
+open; it reruns the saved `+` line, which is capped at 79 bytes and
+re-tokenised, as the original does. The debug bit and the saved line are
+presentation: never hashed, saved, replayed or replicated.
+
+Only the eight sharing commands exist, in the ordinary table. The cheat and
+debug tables and the mask-4 default handler are not ported -- the last is a
+unit spawner and debug-script loader in the original, not an error path -- so
+the raised mask bits currently enable only the repeat. RWE keeps its
+`Unknown command: <word>` message and its no-echo chat rule; both are recorded
+in §88.
+
+### Executed RWE checks
+
+- New scenario `906-developer-phrase-and-repeat` drives the real `GameScene`:
+  the exact phrase unlocks debug; an unknown `+` line prints once; backslash
+  while the bar is open prints the same line again; a bare `+Now` clears the
+  unlock; backslash then does nothing. It passes on `D:/RWE-Data`.
+- All 9 scenarios pass. `[chat]`: 16 cases, 88 assertions. Full suite:
+  **1983 passed, one HOME-path checksum skip, 218556 assertions**.
+- The mask's cheat bit has no handler to exercise, so its end-to-end effect is
+  not demonstrated; the pure mask cases and the repeat path are. No original
+  runtime was run, and the key is the code's virtual-key number, not a
+  physical-key test on other layouts.

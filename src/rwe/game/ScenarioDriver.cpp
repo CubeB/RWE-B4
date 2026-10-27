@@ -543,6 +543,21 @@ namespace rwe
         scene.onKeyUp(e);
     }
 
+    void ScenarioDriver::textInput(const std::string& text)
+    {
+        scene.onTextInput(text);
+    }
+
+    std::size_t ScenarioDriver::consoleMessageCount() const
+    {
+        return scene.consoleMessages.size();
+    }
+
+    bool ScenarioDriver::debugCommandsEnabled() const
+    {
+        return scene.debugCommandsEnabled;
+    }
+
     bool ScenarioDriver::isCameraTracking() const
     {
         return std::holds_alternative<GameScene::CameraControlStateTrackingUnit>(scene.cameraControlState);

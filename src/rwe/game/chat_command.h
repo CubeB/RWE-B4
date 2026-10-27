@@ -44,9 +44,19 @@ namespace rwe
             Give,
             /** `+Give` with an argument list that does not make a gift. */
             GiveUsage,
+            /** `+Now ...`: the developer phrase; see `isDeveloperDebugPhrase`. */
+            Now,
         };
 
         Kind kind{Kind::Empty};
+
+        /**
+         * `Now`: true only for the exact phrase
+         * `Now Film Chris Include Reload Assert` -- the word is
+         * case-insensitive, the five after it are not. A failed phrase clears
+         * the debug unlock (#906).
+         */
+        bool developerPhraseAccepted{false};
 
         /** The command word as typed, without the `+`. */
         std::string word;
@@ -68,6 +78,25 @@ namespace rwe
      * to be sent as chat.
      */
     std::optional<ChatCommand> parseChatCommand(const std::string& line);
+
+    /** Permission bits, numbered as the original's tables are (#906). */
+    enum ChatCommandMask : unsigned int
+    {
+        ChatCommandMaskOrdinary = 1,
+        ChatCommandMaskCheat = 2,
+        ChatCommandMaskDebug = 4,
+    };
+
+    /**
+     * The mask a locally typed `+` line runs under (#906,
+     * BT-GAME-COMMAND-MASK-GATING-FINDINGS.md): 7 once the local developer
+     * phrase has unlocked debug, otherwise 1 in a campaign and 3 elsewhere.
+     * Multiplayer uses the host's Cheat Codes setting when the game has one;
+     * RWE has no such lobby option, so a caller passes false there.
+     *
+     * This is presentation state: it is never hashed, saved or replicated.
+     */
+    unsigned int chatCommandMask(bool debugUnlocked, bool campaign, bool multiplayer, bool cheatCodesEnabled);
 
     /**
      * What +ShareMapping and +ShareRadar print. RWE has neither toggle: allies
