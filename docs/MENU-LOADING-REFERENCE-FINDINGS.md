@@ -1,4 +1,4 @@
-﻿# Front-end resource reuse and match-loading presentation
+# Front-end resource reuse and match-loading presentation
 
 Spec-room findings for #882, 2026-10-26. These findings supplement
 `MENU-PERFORMANCE-FINDINGS.md` MPR-001 and the existing GUI/interface registers.
@@ -215,4 +215,3 @@ first visible loading background, bar changes and battle entry, including a
 multiplayer peer wait. Equivalent RWE measurements should separate the time
 before its first presented loading frame from its total resource/handshake
 time. Cached/warm reads must not be reported as cold-load measurements.
-
