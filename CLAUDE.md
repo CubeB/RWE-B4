@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Read root `AGENTS.md` for the standing user instruction on byte-tactics
+verification and ADR-0004's spec-room boundary. New RWE code requires a
+documented byte-tactics comparison; implementation sessions never read the
+decompilation directly. Only prose findings pass from research to implementation.
+
 See also `@CONTEXT.md` — the project's domain glossary and design-decision record. Keep it in step when introducing or renaming project terms; the `.claude/skills/domain-modeling` skill is the discipline that maintains it.
 
 ## Project Overview
@@ -388,9 +393,11 @@ of `TotalA.exe` instead of guessed at.
   `tools/ta-net/` holds the tools that found it.
 - `docs/REVERSE-ENGINEERING-PRIORITIES.md` — what is worth reading out of the
   binary next, ranked, with the evidence that each is a real gap and a string
-  or offset to pivot on. **The ranked list is empty as of 2026-09-15** -- every
-  entry has been read or refuted, and the file is now a record of what each
-  turned into and what it got wrong. Append the next one there.
+  or offset to pivot on. The September list is complete; research reopened on
+  2026-10-16 with naval construction height and D-gun water behaviour, followed
+  by unresolved repair, network, AI and demo questions. See
+  `docs/NAVAL-CONSTRUCTION-DGUN-FINDINGS.md` for the static findings, owner
+  observation, pending instrumented runtime checks and prioritized backlog.
 - `tools/exe/` — the probe scripts that produced them, and the method.
   `tools/exe/shading/` holds the palette work, including `shdgen.py`, which
   regenerates the shipped `PALETTE.SHD` byte-for-byte and is what pins its

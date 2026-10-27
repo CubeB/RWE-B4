@@ -6,23 +6,21 @@ which, and several say what the entry originally got wrong. The ranking it opens
 with is the ranking as first written, deliberately left alone so that the
 corrections stay legible next to the guesses that prompted them.
 
-Last revised 2026-09-15, the day the last three entries were read. What had been
+The historical list was last revised 2026-09-15, when its last three entries were read. What had been
 the top three before them -- the corpse level and its `featuredead` walk,
 aircraft leaving no wreck at all, and the exact `PALETTE.SHD` lookup -- had
 already landed, as had `AirToAir` and `maneuverleashlength`. Two subjects grew
 their own documents along the way: the shaded unit rasterizer in
 `TOTALA-EXE-SHADING.md` and wrecks in `TOTALA-EXE-WRECKS.md`.
 
-**The ranked list is now empty.** All three of the entries that were left on
+**The historical ranked list was completed on 2026-09-15.** All three of the entries that were left on
 2026-09-15 -- the veterancy reload term (#50), the death causes (#51) and the
 `SELFREPAIR` mission (#52) -- were read and closed that day. What each turned
 into is below.
 
 ## What is left, ranked
 
-Nothing. The file stays because the record of what was asked, what it turned
-out to be, and what it got wrong is the useful part; the next entry should be
-appended here when somebody finds one.
+Current research reopened on 2026-10-16: first original-runtime naval height and D-gun water checks, then unresolved repair/patrol/pad ordering, network fields and speed/pause/quit semantics, classic-AI arithmetic and positions, and demo cumulative statistics. See the [prioritized backlog](NAVAL-CONSTRUCTION-DGUN-FINDINGS.md#prioritized-remaining-research) and the appended reopening entry below. The completed historical rankings remain unchanged.
 
 ## What was on that list, and where it went
 
@@ -1008,3 +1006,26 @@ Useful new routine addresses:
 | `0x489BB0` | apply damage (armour, veterancy) |
 | `0x485BD6` | new unit placement, uses `buildangle` |
 | `0x4B6C30` | random number in `[0, n)` |
+
+## Research reopened, 2026-10-16
+
+The historical "ranked list is now empty" above describes the completed
+September list. New reported behaviour and remaining October uncertainties
+reopen research without changing that history.
+
+The current prioritized backlog is in
+[Naval construction and D-gun findings](NAVAL-CONSTRUCTION-DGUN-FINDINGS.md#prioritized-remaining-research).
+First obtain original-runtime naval evidence: submarine creation/attachment,
+ordinary height placement and detachment, and D-gun target eligibility versus
+water collision and area damage. The linked findings identify the byte-tactics
+revision and executable hash and distinguish static analysis and shipped-data
+geometry checks from one uninstrumented owner observation of a submarine
+under construction. Instrumented runtime checks remain pending. The record
+also identifies the construction-height change already present in `revival`;
+no RWE implementation change accompanies this documentation update.
+
+Next are the unresolved repair/patrol/pad ordering and return details,
+network status/player fields and speed/pause/quit semantics, classic-AI score
+and candidate/position details, and demo 0x28 cumulative statistics. The linked
+backlog separates these pending questions from older solved findings and
+preserves sections explicitly deferred by the user.
