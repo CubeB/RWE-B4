@@ -410,3 +410,28 @@ worse than an unknown one. They remain unknown commands.
   captured.
 - `[chat]` parses both commands, including `+musicmode`'s default 0. Full
   suite: **1986 passed, one HOME-path checksum skip, 218568 assertions**.
+
+## #907: the render toggles RWE actually has
+
+Authority: [BT-GAME-AUDIO-OPTION-COMMANDS-FINDINGS](BT-GAME-AUDIO-OPTION-COMMANDS-FINDINGS.md)
+section 2.8, read against RWE's settings fields.
+
+- **`+AntiAlias`** toggles `antiAliasEnabled` and saves; the original's visual
+  bit 1.
+- **`+Shadow`** toggles the master `shadowsEnabled` and saves; visual bit 2.
+- **`+Shading`** toggles the shaded renderer between Off and Buildings-only.
+  RWE's menu widens the original's one bit to four stages; the command keeps
+  the original's two states rather than inventing a cycle. Saved; visual bit 5.
+
+All three are silent and local, as in the original. The words whose RWE
+counterpart does not exist are not registered: `TShadow` needs a separate
+feature-shadow pass RWE lacks, `FShadow` a feature-shadow field, `Dither` a
+dithered fog, `Light` a commandable light vector, `Contour` a contour overlay,
+`LOSType` a second LOS algorithm, and `RCache` has no cache to flush.
+
+### Executed RWE checks
+
+- The scenario toggles each through the real `GameScene` and reads the field
+  back; it passes. Rendering itself is not captured.
+- `[chat]` parses all three, with and without a stray argument. Full suite:
+  **1987 passed, one HOME-path checksum skip, 218571 assertions**.

@@ -268,6 +268,32 @@ namespace rwe
             return;
         }
 
+        if (command.kind == ChatCommand::Kind::AntiAlias)
+        {
+            // #907 §2.8: visual bit 1, saved; the renderer reads the field.
+            antiAliasEnabled = !antiAliasEnabled;
+            saveInGameOptions();
+            return;
+        }
+
+        if (command.kind == ChatCommand::Kind::Shadow)
+        {
+            // #907 §2.8: visual bit 2, saved.
+            shadowsEnabled = !shadowsEnabled;
+            saveInGameOptions();
+            return;
+        }
+
+        if (command.kind == ChatCommand::Kind::Shading)
+        {
+            // #907 §2.8: the original's single shaded-rasterizer bit. RWE
+            // widens that setting with a four-stage menu, but the command
+            // toggles the original's two states: Off and buildings-only.
+            shadingMode = shadingMode == ShadingMode::Off ? ShadingMode::BuildingsOnly : ShadingMode::Off;
+            saveInGameOptions();
+            return;
+        }
+
         // Every command built so far is in the ordinary table.
         if ((mask & ChatCommandMaskOrdinary) == 0)
         {
@@ -401,6 +427,9 @@ namespace rwe
             case ChatCommand::Kind::ScrollSpeed:
             case ChatCommand::Kind::MusicMode:
             case ChatCommand::Kind::Sing:
+            case ChatCommand::Kind::AntiAlias:
+            case ChatCommand::Kind::Shadow:
+            case ChatCommand::Kind::Shading:
                 break;
         }
     }

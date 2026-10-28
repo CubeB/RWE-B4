@@ -189,6 +189,11 @@ namespace rwe
         /** Whether `+Sing` substitutes the unit-speech waveform (#908). */
         bool singEnabled() const;
 
+        /** The render toggles (#907): anti-alias, shadows and shading stage. */
+        bool antiAliasEnabled() const;
+        bool shadowsEnabled() const;
+        int shadingMode() const;
+
         /** Separate edges allow a modifier to stay held over another key. */
         void keyDown(int keyCode);
         void keyUp(int keyCode);

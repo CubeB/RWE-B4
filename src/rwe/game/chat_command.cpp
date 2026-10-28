@@ -198,6 +198,18 @@ namespace rwe
             // #908 §1.5: a no-argument toggle of the unit-speech waveform.
             command.kind = ChatCommand::Kind::Sing;
         }
+        else if (word == "antialias")
+        {
+            command.kind = ChatCommand::Kind::AntiAlias;
+        }
+        else if (word == "shadow")
+        {
+            command.kind = ChatCommand::Kind::Shadow;
+        }
+        else if (word == "shading")
+        {
+            command.kind = ChatCommand::Kind::Shading;
+        }
         else if (word == "give")
         {
             // player amount metal|energy. The resource is the one argument

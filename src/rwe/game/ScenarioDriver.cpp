@@ -588,6 +588,21 @@ namespace rwe
         return scene.singEnabled;
     }
 
+    bool ScenarioDriver::antiAliasEnabled() const
+    {
+        return scene.antiAliasEnabled;
+    }
+
+    bool ScenarioDriver::shadowsEnabled() const
+    {
+        return scene.shadowsEnabled;
+    }
+
+    int ScenarioDriver::shadingMode() const
+    {
+        return static_cast<int>(scene.shadingMode);
+    }
+
     bool ScenarioDriver::isCameraTracking() const
     {
         return std::holds_alternative<GameScene::CameraControlStateTrackingUnit>(scene.cameraControlState);

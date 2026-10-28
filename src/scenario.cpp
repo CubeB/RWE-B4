@@ -471,7 +471,30 @@ namespace
                 d.key(SDLK_RETURN);
                 d.require(!d.singEnabled(), "and off again");
             });
-            s.endAt(7);
+            s.at(8, [](rwe::ScenarioDriver& d) {
+                // #907: the render toggles are the original's one-bit
+                // switches. Shading is two-state here, not the menu's four.
+                const auto antiAlias = d.antiAliasEnabled();
+                d.key(SDLK_RETURN);
+                d.textInput("+antialias");
+                d.key(SDLK_RETURN);
+                d.require(d.antiAliasEnabled() != antiAlias, "AntiAlias toggles");
+                const auto shadows = d.shadowsEnabled();
+                d.key(SDLK_RETURN);
+                d.textInput("+shadow");
+                d.key(SDLK_RETURN);
+                d.require(d.shadowsEnabled() != shadows, "Shadow toggles");
+                d.require(d.shadingMode() == 2, "shading starts at buildings-only");
+                d.key(SDLK_RETURN);
+                d.textInput("+shading");
+                d.key(SDLK_RETURN);
+                d.require(d.shadingMode() == 0, "Shading turns off");
+                d.key(SDLK_RETURN);
+                d.textInput("+shading");
+                d.key(SDLK_RETURN);
+                d.require(d.shadingMode() == 2, "and back to the original's on state");
+            });
+            s.endAt(8);
         });
     }
 

@@ -197,6 +197,14 @@ namespace rwe
         REQUIRE(parseChatCommand("+Sing")->kind == Kind::Sing);
     }
 
+    TEST_CASE("the render toggles take no argument", "[chat]")
+    {
+        REQUIRE(parseChatCommand("+AntiAlias")->kind == Kind::AntiAlias);
+        REQUIRE(parseChatCommand("+Shadow")->kind == Kind::Shadow);
+        REQUIRE(parseChatCommand("+Shading")->kind == Kind::Shading);
+        REQUIRE(parseChatCommand("+shading 1")->kind == Kind::Shading);
+    }
+
     TEST_CASE("every other word is unknown, and says what it was", "[chat]")
     {
         auto c = parseChatCommand("+Contour 4");
