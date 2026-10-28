@@ -351,6 +351,9 @@ namespace rwe
             case UnitState::AirLoiterState::Reason::PadQueue:
                 reasonName = "PadQueue";
                 break;
+            case UnitState::AirLoiterState::Reason::LandingHold:
+                reasonName = "LandingHold";
+                break;
         }
         return nlohmann::json{
             {"reason", reasonName},

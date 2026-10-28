@@ -538,8 +538,15 @@ namespace rwe
                     // DefaultMissionType, which for all twenty-one shipped
                     // aircraft is VTOL_Standby (0x40F7D0), and that hops about
                     // only while the aircraft is carrying something. Empty, it
-                    // pushes VTOL_LandIfCan and sets down.
-                    unitInfo.state->airLoiter = std::nullopt;
+                    // pushes VTOL_LandIfCan and sets down. A LandingHold
+                    // circuit is kept across ticks: it is the answer for an
+                    // aircraft with nowhere to land, and its anchor must not
+                    // move with the aircraft.
+                    if (!unitInfo.state->airLoiter
+                        || unitInfo.state->airLoiter->reason != UnitState::AirLoiterState::Reason::LandingHold)
+                    {
+                        unitInfo.state->airLoiter = std::nullopt;
+                    }
                     match(
                         airPhysics->movementState,
                         [&](AirMovementStateFlying& m) {
@@ -925,7 +932,34 @@ namespace rwe
                     auto landingLocation = findLandingLocation(*sim, unitInfo);
                     if (!landingLocation)
                     {
+                        // Nowhere within reach to set down: open water, or no
+                        // clear ground in the search rings. Leaving the
+                        // aircraft with no goal parks it in the air -- its
+                        // air controller has nothing to steer at and the
+                        // arrival profile decelerates it to a standstill.
+                        // Hold a circuit around the spot it went idle on and
+                        // keep looking; the search itself is still throttled
+                        // inside findLandingLocation.
+                        if (unitInfo.definition->canFly)
+                        {
+                            auto anchor = unitInfo.state->airLoiter
+                                    && unitInfo.state->airLoiter->reason == UnitState::AirLoiterState::Reason::LandingHold
+                                ? unitInfo.state->airLoiter->anchor
+                                : unitInfo.state->position;
+                            flyAirLoiterCircuit(
+                                unitInfo,
+                                UnitState::AirLoiterState::Reason::LandingHold,
+                                anchor,
+                                AirMovement::LoiterSeekStep);
+                        }
                         return std::optional<MovingStateGoal>();
+                    }
+
+                    // A spot appeared: the hold is over.
+                    if (unitInfo.state->airLoiter
+                        && unitInfo.state->airLoiter->reason == UnitState::AirLoiterState::Reason::LandingHold)
+                    {
+                        unitInfo.state->airLoiter = std::nullopt;
                     }
                     unitInfo.state->navigationState.state = NavigationStateMovingToLandingSpot{*landingLocation};
                     return std::make_optional<MovingStateGoal>(*landingLocation);

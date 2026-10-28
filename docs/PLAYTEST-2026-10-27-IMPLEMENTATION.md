@@ -519,3 +519,42 @@ change, not a command binding.
   unit. It passes.
 - Full suite: **1989 passed, one HOME-path checksum skip, 218585 assertions**;
   all 9 scenarios pass.
+
+## #894: aircraft that stop in midair
+
+Authority: `TOTALA-EXE-MOVEMENT.md` sections 2 and 128 (`VTOL_Standby` and
+`VTOL_LandIfCan`) and the existing aircraft tests. No original runtime was run
+for this fix; the behaviour below is reproduced and verified in RWE.
+
+**Reproduction.** An idle aircraft is sent home to land. `findLandingLocation`
+searches the spot underneath and then rings outwards, and returns nothing when
+there is no clear, dry landing place within reach — open water over a large map
+is the easy case. `updateNavigation` then set `NavigationStateIdle` and left the
+air movement state with **no goal**. The air controller's arrival profile
+decelerates a goal-less aircraft to a standstill (`computeNewAirUnitVelocity`
+returns `decelerate(...)` when `targetPosition` is empty), so the aircraft
+hovered in place for ever: the reported "planes stopping midair". A new sim test
+that spawns an idle aircraft over all-water terrain measured **0 world units**
+travelled in four seconds before the fix.
+
+**Fix.** When no landing location exists, the aircraft arms and holds a
+`LandingHold` circuit around the spot it went idle on, using the existing loiter
+machinery, and the once-a-second landing search keeps running. When a spot
+appears the hold is cleared and the normal landing starts. The idle branch now
+preserves a `LandingHold` loiter across ticks so its anchor does not move with
+the aircraft. The same test now shows the aircraft flying (speed above two
+units a tick, more than 500 units covered) and still holding the circuit.
+
+The reference's exact behaviour when `LandIfCan` finds nowhere to land is not
+decoded; what the findings establish is that an idle empty aircraft goes to
+land, and what the report establishes is that the original does not park in the
+air. Keeping it flying is the RWE answer to that gap and is recorded in §88.
+
+**Compatibility.** `AirLoiterState` is hashed, so the new reason appears in the
+hash while an aircraft is holding; a recording made before this build can
+diverge only where an aircraft had no landing spot and would previously have
+hovered. Nothing new is saved; the hold is rebuilt from the absence of orders.
+
+**Executed check.** New `[aircraftidle]` case over all-water terrain, plus the
+full suite: **1990 passed, one HOME-path checksum skip, 218598 assertions**.
+All 9 scenarios pass.

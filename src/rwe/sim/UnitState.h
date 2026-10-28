@@ -904,6 +904,16 @@ namespace rwe
                  * a leg (TOTALA-EXE-ECONOMY.md S:130).
                  */
                 PadQueue,
+
+                /**
+                 * Nowhere within reach to set down (open water, or no clear
+                 * ground). The aircraft holds a circuit around the spot it
+                 * went idle on until a landing place appears. Without a goal
+                 * its air controller decelerates to a standstill and parks in
+                 * the air -- the reported "planes stopping midair". RWE's
+                 * hold; the original keeps looking from LandIfCan in flight.
+                 */
+                LandingHold,
             };
 
             Reason reason{Reason::AttackEnded};
