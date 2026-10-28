@@ -209,6 +209,16 @@ Everything else lives in a subject file. **The numbers never move**, so a
 
 ## 88. Where RWE deliberately differs
 
+- **The Community Patch mode** (2026-10-28, #934). An opt-in ruleset built from
+  the TA Community Patch (`tdraw.dll`, tanvanman/TADR), not from Total
+  Annihilation. It is off by default, does not claim original parity, and each
+  adopted rule cites TADR's own text; see
+  [ADR-0006](adr/0006-the-community-patch-is-an-opt-in-ruleset.md) and
+  [the mode's map](COMMUNITY-PATCH-MODE.md). The first slice adopts the TADR
+  weapon flags and is offline/arena only until the lobby and replay headers
+  carry the flag; a network seat or a recording is refused rather than allowed
+  to desync.
+
 - **An aircraft with nowhere to land keeps flying** (2026-10-28, #894). When
   no landing place is within reach, RWE holds a circuit around the spot it went
   idle on and keeps looking; it does not hover in place. The reference's

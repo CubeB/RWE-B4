@@ -141,6 +141,25 @@ namespace rwe
         /** TA toairweapon: the flak guns, which will engage nothing that is not in the air. */
         bool toAirWeapon{false};
 
+        // --- Community Patch (TADR) weapon flags, issue #934 ---
+        // These are read from the weapon TDF whatever the mode, but only
+        // honoured when GameSimulation::communityPatchMode is on.
+
+        /** TADR `nottoair`: never target or fire at a flying unit. */
+        bool notToAir{false};
+
+        /** TADR `nottounderwater`: never target a fully submerged unit. */
+        bool notToUnderwater{false};
+
+        /** TADR `notoverwater`: no firing while the firer is over water. */
+        bool notOverWater{false};
+
+        /** TADR `notoverland`: no firing while the firer is over land. */
+        bool notOverLand{false};
+
+        /** TADR `surfacefire`: a water weapon may also engage surface units. */
+        bool surfaceFire{false};
+
         /**
          * TA turret: the gun sits on a mount that can swing round on its own, so
          * the unit shoots wherever its aim script points. A weapon without one is
@@ -196,4 +215,12 @@ namespace rwe
          */
         SimScalar coverage{0};
     };
+
+    /**
+     * TADR's `notoverwater`/`notoverland` (#934): whether a shot from a unit
+     * over water (or land) is held while the Community Patch ruleset is on.
+     * Held means no launch, no cost, and the target and reload are kept; the
+     * caller only asks this when the mode is on.
+     */
+    bool communityPatchSuppressesFire(const WeaponDefinition& definition, bool firerOverWater);
 }

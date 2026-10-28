@@ -461,8 +461,30 @@ namespace rwe
         auto seaLevel = terrain.getSeaLevel();
         const auto& targetDefinition = unitDefinitions.at(target.unitType);
 
+        // Community Patch (#934): TADR's target-class flags. They are read
+        // whatever the mode, but only honoured under the ruleset.
+        if (communityPatchMode)
+        {
+            if (weaponDefinition.notToAir && isFlying(target.physics))
+            {
+                return false;
+            }
+            if (weaponDefinition.notToUnderwater && !modelTopIsAboveSea(target))
+            {
+                return false;
+            }
+        }
+
         if (weaponDefinition.waterWeapon)
         {
+            // TADR surfacefire: the water weapon may also engage a surface
+            // (non-flying) target, including a hovercraft or a land unit at
+            // the shoreline. Ordinary water-weapon rules apply to aircraft.
+            if (communityPatchMode && weaponDefinition.surfaceFire && !isFlying(target.physics))
+            {
+                return true;
+            }
+
             // 0x49ABF9: a floater is exempt, so a torpedo still reaches a ship
             // riding on the surface.
             if (!targetDefinition.floater && target.position.y > seaLevel)

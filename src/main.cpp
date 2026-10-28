@@ -118,6 +118,8 @@ int main(int argc, char* argv[])
                       << "  --map <name>          Launch directly into a game on this map\n"
                       << "  --mission             Play --map as a mission: its [units] for the players\n"
                       << "                        in the slots they name, and its own starting resources\n"
+                      << "  --community-patch     Play under the Community Patch ruleset (a curated\n"
+                      << "                        subset of TADR's rules; offline/arena only for now)\n"
                       << "  --ta-host             Host a game for a joining Total Annihilation instead of\n"
                       << "                        playing one: wait in a lobby, then load --map with RWE's\n"
                       << "                        player and the joiner, on the peer's own clock\n"
@@ -281,6 +283,20 @@ int main(int argc, char* argv[])
                 if (args.contains("mission"))
                 {
                     gameParameters->mission = true;
+                }
+                if (args.contains("community-patch"))
+                {
+                    // The ruleset is not yet carried by replays or recordings,
+                    // and a network game must agree on it before launch: for
+                    // now it is an offline/arena ruleset. See #934.
+                    if (!args.getString("record-replay", "").empty()
+                        || !args.getString("record-demo", "").empty()
+                        || !args.getString("rejoin", "").empty())
+                    {
+                        throw std::runtime_error(
+                            "--community-patch cannot be combined with recording, demos or rejoining yet");
+                    }
+                    gameParameters->communityPatch = true;
                 }
                 if (args.contains("state-log"))
                 {

@@ -266,6 +266,7 @@ namespace rwe
         header["allowWatching"] = save.parameters.allowWatching;
         header["pathfinding"] = enumToName(save.parameters.pathfindingBackend, PathfindingBackendNames, "rwe");
         header["mission"] = save.parameters.mission;
+        header["communityPatch"] = save.parameters.communityPatch;
         if (const auto& c = save.parameters.campaign)
         {
             // The original's header keys, Campaign, Mission, Difficulty, Side
@@ -377,6 +378,7 @@ namespace rwe
         parameters.allowWatching = header.value("allowWatching", true);
         parameters.pathfindingBackend = enumFromName(header.value("pathfinding", "rwe"), PathfindingBackendNames, PathfindingBackend::RweAStar);
         parameters.mission = header.value("mission", false);
+        parameters.communityPatch = header.value("communityPatch", false);
         if (header.contains("campaign") && header.at("campaign").is_object())
         {
             const auto& c = header.at("campaign");

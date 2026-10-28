@@ -829,6 +829,7 @@ namespace rwe
         simulation.lineOfSightMode = gameParameters.lineOfSight;
         simulation.mappingMode = gameParameters.mapping;
         simulation.commanderDeathMode = gameParameters.commanderDeath;
+        simulation.communityPatchMode = gameParameters.communityPatch;
         simulation.pathFindingService.backend = gameParameters.pathfindingBackend;
 
         simulation.unitDefinitions = std::move(dataMaps.unitDefinitions);
@@ -941,6 +942,14 @@ namespace rwe
                 }
             }
             simulation.skirmishVictoryRules = !anyNetworkSeat && gameParameters.netMode == NetMode::Lockstep;
+
+            // The Community Patch ruleset is not carried by the lobby protocol
+            // yet, so every peer cannot be shown to agree on it. Refuse rather
+            // than silently desync (issue #934).
+            if (gameParameters.communityPatch && anyNetworkSeat)
+            {
+                throw std::runtime_error("--community-patch is not carried by the lobby yet; it cannot be used in a network game");
+            }
         }
 
         for (Index i = 0; i < getSize(gameParameters.players); ++i)

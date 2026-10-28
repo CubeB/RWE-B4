@@ -1600,6 +1600,32 @@ namespace rwe
             return;
         }
 
+        // Community Patch (#934): TADR's notoverwater/notoverland hold the
+        // shot without spending it, and nottoair/nottounderwater refuse a
+        // target that became ineligible after it was chosen. Before the cost,
+        // so ammunition and per-shot resources survive a suppressed frame.
+        if (sim->communityPatchMode)
+        {
+            auto ground = sim->terrain.getHeightAt(unit.position.x, unit.position.z);
+            auto overWater = ground <= sim->terrain.getSeaLevel();
+            if (communityPatchSuppressesFire(weaponDefinition, overWater))
+            {
+                return;
+            }
+            if (auto targetId = std::get_if<UnitId>(&attackInfo->target))
+            {
+                if (auto target = sim->tryGetUnitState(*targetId))
+                {
+                    const auto& targetState = target->get();
+                    if ((weaponDefinition.notToAir && isFlying(targetState.physics))
+                        || (weaponDefinition.notToUnderwater && !sim->modelTopIsAboveSea(targetState)))
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+
         // What the shot costs is settled before anything else happens
         // (TotalA.exe 0x49E3D5). A stockpiled weapon needs a round in the
         // magazine; everything else has to find its energypershot and
