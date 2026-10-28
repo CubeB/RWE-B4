@@ -144,6 +144,18 @@ namespace rwe
         auto sound = getSound(simulation, gameMediaDatabase, unitType, soundType);
         if (sound)
         {
+            // +Sing (#908): the original replaces only the waveform in this
+            // branch, after every speech gate above, with HONK on the first
+            // second of each eight-second block and SING otherwise.
+            if (singEnabled)
+            {
+                const auto blockSecond = (simulation.gameTime.value / SimTicksPerSecond) % 8u;
+                if (auto sung = sceneContext.audioService->loadSound(blockSecond == 0 ? "honk" : "sing"))
+                {
+                    playNotificationSound(playerId, *sung);
+                }
+                return;
+            }
             playNotificationSound(playerId, *sound);
         }
     }
@@ -364,6 +376,18 @@ namespace rwe
             musicPlaylistBuilt = true;
             allMusicTracks = buildMusicAlbum(sceneContext.audioService->getMusicPlaylist());
             rebuildMusicMoods();
+        }
+
+        // +MusicMode 4: no situation chooses a track, and the current one
+        // stops, until another category is asked for (#908). This is a local
+        // console choice, not a saved setting.
+        if (musicSilenced)
+        {
+            if (sceneContext.audioService->musicPlaying())
+            {
+                sceneContext.audioService->stopMusic();
+            }
+            return;
         }
         if (buildingTracks.empty() || !sceneContext.audioService->isMusicEnabled())
         {

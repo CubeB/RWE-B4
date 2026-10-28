@@ -447,7 +447,67 @@ namespace
                 d.key(SDLK_RETURN);
                 d.require(d.scrollSpeedSetting() == 100, "32 pixels a tick maps to the base pan speed");
             });
-            s.endAt(6);
+            s.at(7, [](rwe::ScenarioDriver& d) {
+                // #908: only the categories RWE has. 0 and 1 force the mood,
+                // 4 silences; 2 and 3 have no RWE counterpart.
+                d.key(SDLK_RETURN);
+                d.textInput("+musicmode 1");
+                d.key(SDLK_RETURN);
+                d.require(d.musicSituation() == 1, "MusicMode 1 forces the battle mood");
+                d.key(SDLK_RETURN);
+                d.textInput("+musicmode 4");
+                d.key(SDLK_RETURN);
+                d.require(d.musicSilenced(), "MusicMode 4 silences the chooser");
+                d.key(SDLK_RETURN);
+                d.textInput("+musicmode 0");
+                d.key(SDLK_RETURN);
+                d.require(!d.musicSilenced() && d.musicSituation() == 0, "MusicMode 0 returns to building");
+                d.key(SDLK_RETURN);
+                d.textInput("+sing");
+                d.key(SDLK_RETURN);
+                d.require(d.singEnabled(), "+Sing toggles the speech waveform");
+                d.key(SDLK_RETURN);
+                d.textInput("+sing");
+                d.key(SDLK_RETURN);
+                d.require(!d.singEnabled(), "and off again");
+            });
+            s.at(8, [](rwe::ScenarioDriver& d) {
+                // #907: the render toggles are the original's one-bit
+                // switches. Shading is two-state here, not the menu's four.
+                const auto antiAlias = d.antiAliasEnabled();
+                d.key(SDLK_RETURN);
+                d.textInput("+antialias");
+                d.key(SDLK_RETURN);
+                d.require(d.antiAliasEnabled() != antiAlias, "AntiAlias toggles");
+                const auto shadows = d.shadowsEnabled();
+                d.key(SDLK_RETURN);
+                d.textInput("+shadow");
+                d.key(SDLK_RETURN);
+                d.require(d.shadowsEnabled() != shadows, "Shadow toggles");
+                d.require(d.shadingMode() == 2, "shading starts at buildings-only");
+                d.key(SDLK_RETURN);
+                d.textInput("+shading");
+                d.key(SDLK_RETURN);
+                d.require(d.shadingMode() == 0, "Shading turns off");
+                d.key(SDLK_RETURN);
+                d.textInput("+shading");
+                d.key(SDLK_RETURN);
+                d.require(d.shadingMode() == 2, "and back to the original's on state");
+                const auto vehicleShadows = d.vehicleShadowsEnabled();
+                d.key(SDLK_RETURN);
+                d.textInput("+tshadow");
+                d.key(SDLK_RETURN);
+                d.require(d.vehicleShadowsEnabled() != vehicleShadows, "TShadow toggles the mobile-unit bit");
+                d.key(SDLK_RETURN);
+                d.textInput("+iface 1");
+                d.key(SDLK_RETURN);
+                d.require(!d.leftClickInterfaceMode(), "IFace 1 selects the right-click interface");
+                d.key(SDLK_RETURN);
+                d.textInput("+iface 0");
+                d.key(SDLK_RETURN);
+                d.require(d.leftClickInterfaceMode(), "IFace 0 selects left click");
+            });
+            s.endAt(8);
         });
     }
 

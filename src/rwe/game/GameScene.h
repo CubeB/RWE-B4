@@ -1209,6 +1209,19 @@ namespace rwe
         bool musicPlaylistBuilt{false};
 
         MusicSituation musicSituation{MusicSituation::Building};
+
+        /**
+         * `+MusicMode 4` (#908): no situation chooses a track until another
+         * category is asked for. Local presentation, not saved.
+         */
+        bool musicSilenced{false};
+
+        /**
+         * `+Sing` (#908): substitute the unit-speech waveform with
+         * `sounds/sing.wav`, and `honk.wav` in the first second of every
+         * eight-second block. Local, not saved.
+         */
+        bool singEnabled{false};
         std::array<int, 30> battlePointsRing{};
         unsigned int battleRingCursor{0};
         unsigned int lastMusicSecond{0};
@@ -2437,6 +2450,13 @@ namespace rwe
         }
 
         bool leftClickMode() const;
+
+        /**
+         * `+IFace` (#907): a session-local interface override, since the
+         * config object is read-only in a scene. Not persisted; the options
+         * file's own switch still applies when this is empty.
+         */
+        std::optional<bool> leftClickOverride;
 
         void spawnExplosion(const Vector3f& position, const AnimLocation& anim);
 

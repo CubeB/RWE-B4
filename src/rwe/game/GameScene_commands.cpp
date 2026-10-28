@@ -3214,7 +3214,7 @@ namespace rwe
 
     bool GameScene::leftClickMode() const
     {
-        return sceneContext.globalConfig->leftClickInterfaceMode;
+        return leftClickOverride.value_or(sceneContext.globalConfig->leftClickInterfaceMode);
     }
 
     void GameScene::spawnExplosion(const Vector3f& position, const AnimLocation& anim)

@@ -180,6 +180,24 @@ namespace rwe
         /** The camera-scroll percentage (#907, `+ScrollSpeed`). */
         unsigned int scrollSpeedSetting() const;
 
+        /** Whether `+MusicMode 4` has silenced the chooser (#908). */
+        bool musicSilenced() const;
+
+        /** The forced mood, 0 building or 1 battle (#908, `+MusicMode`). */
+        int musicSituation() const;
+
+        /** Whether `+Sing` substitutes the unit-speech waveform (#908). */
+        bool singEnabled() const;
+
+        /** The render toggles (#907): anti-alias, shadows and shading stage. */
+        bool antiAliasEnabled() const;
+        bool shadowsEnabled() const;
+        int shadingMode() const;
+        bool vehicleShadowsEnabled() const;
+
+        /** Whether the interface is in left-click mode (#907, `+IFace 0`). */
+        bool leftClickInterfaceMode() const;
+
         /** Separate edges allow a modifier to stay held over another key. */
         void keyDown(int keyCode);
         void keyUp(int keyCode);

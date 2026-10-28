@@ -52,6 +52,20 @@ namespace rwe
             Gamma,
             /** `+ScrollSpeed n`: n is the original's pixels per tick. */
             ScrollSpeed,
+            /** `+MusicMode n`: 0 building, 1 battle, 4 silence in RWE. */
+            MusicMode,
+            /** `+Sing`: substitute the unit-speech waveform with sing/honk. */
+            Sing,
+            /** `+AntiAlias`: toggle the 2x2 filter; saved. */
+            AntiAlias,
+            /** `+Shadow`: toggle unit/feature shadows; saved. */
+            Shadow,
+            /** `+Shading`: toggle the shaded renderer (Off/BuildingsOnly); saved. */
+            Shading,
+            /** `+TShadow`: toggle mobile-unit shadows; not saved. */
+            TShadow,
+            /** `+IFace n`: 0 = left-click interface, nonzero = right-click. */
+            IFace,
         };
 
         Kind kind{Kind::Empty};

@@ -378,3 +378,67 @@ mapping decisions, so this pass is three bindings, not the whole ticket.
 - Note: repeated full-suite runs on this machine produced intermittent
   `TaHostSession` failures that do not reproduce in isolation (`[net][ta]`
   passes); they are timing/port flakiness under load, not this change.
+
+## #908: `+MusicMode` and `+Sing` (only the words RWE can honour)
+
+Authority: [BT-GAME-AUDIO-OPTION-COMMANDS-FINDINGS](BT-GAME-AUDIO-OPTION-COMMANDS-FINDINGS.md)
+sections 1.4 and 1.5, plus the owner's rule that no command is added without a
+real RWE effect.
+
+`+MusicMode n` maps the original's situation category onto RWE's two moods and
+its silence: 0 clears silence and selects Building, 1 selects Battle, 4 stops
+the music and blocks the chooser until another category is asked for. 2 and 3
+(Victory and Defeat) have no RWE state, so the command prints a notice and
+changes nothing rather than faking a category. Not saved, as the original does
+not save it.
+
+`+Sing` toggles the speech-waveform substitution: after the existing speech
+gates and only when the unit's own voice would have played, the sound becomes
+`sounds/sing.wav`, or `sounds/honk.wav` during the first second of each
+eight-second block. Local and not saved.
+
+**Deliberately not added**: `CDPlay`, `CDStop` and `Sound3D`. RWE has no CD, no
+track table and no positional mixer; the finding records why each word has no
+honest counterpart (section 4.2), and the owner's rule is that an inert word is
+worse than an unknown one. They remain unknown commands.
+
+### Executed RWE checks
+
+- The `906-developer-phrase-and-repeat` scenario forces Battle, silences,
+  returns to Building, and toggles Sing on and off, reading the scene state
+  back; it passes. The music player and the speech sound itself are not
+  captured.
+- `[chat]` parses both commands, including `+musicmode`'s default 0. Full
+  suite: **1986 passed, one HOME-path checksum skip, 218568 assertions**.
+
+## #907: the render toggles RWE actually has
+
+Authority: [BT-GAME-AUDIO-OPTION-COMMANDS-FINDINGS](BT-GAME-AUDIO-OPTION-COMMANDS-FINDINGS.md)
+section 2.8, read against RWE's settings fields.
+
+- **`+AntiAlias`** toggles `antiAliasEnabled` and saves; the original's visual
+  bit 1.
+- **`+Shadow`** toggles the master `shadowsEnabled` and saves; visual bit 2.
+- **`+Shading`** toggles the shaded renderer between Off and Buildings-only.
+  RWE's menu widens the original's one bit to four stages; the command keeps
+  the original's two states rather than inventing a cycle. Saved; visual bit 5.
+- **`+TShadow`** toggles the mobile-unit shadow sub-bit; not saved, as in the
+  original.
+- **`+IFace n`** selects the left-click interface at 0 and right-click
+  otherwise. RWE's switch lives in the config object, which a scene cannot
+  write, so the command sets a session-local override; unlike the original it
+  does not survive a restart (recorded in §88).
+
+All three are silent and local, as in the original. The words whose RWE
+counterpart does not exist are not registered: `FShadow` needs a
+feature-shadow field RWE lacks, `Dither` a dithered fog, `Light` a commandable
+light vector, `Contour` a contour overlay, `LOSType` a second LOS algorithm,
+and `RCache` has no cache to flush. `Clock` is deferred until the options file
+can persist it.
+
+### Executed RWE checks
+
+- The scenario toggles each through the real `GameScene` and reads the field
+  back; it passes. Rendering itself is not captured.
+- `[chat]` parses all of them, with and without a stray argument. Full suite:
+  **1988 passed, one HOME-path checksum skip, 218580 assertions**.

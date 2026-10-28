@@ -231,6 +231,87 @@ namespace rwe
             return;
         }
 
+        if (command.kind == ChatCommand::Kind::MusicMode)
+        {
+            // #908: the original's argument is a situation category, not the
+            // playback mode. RWE has Building and Battle; 4 is silence. It has
+            // no Victory or Defeat mood, so 2 and 3 are refused rather than
+            // faked. Not saved, as the original does not save it.
+            switch (command.number)
+            {
+                case 0:
+                    musicSituation = MusicSituation::Building;
+                    musicSilenced = false;
+                    musicFadeTarget = std::nullopt;
+                    break;
+                case 1:
+                    musicSituation = MusicSituation::Battle;
+                    musicSilenced = false;
+                    musicFadeTarget = std::nullopt;
+                    break;
+                case 4:
+                    musicSilenced = true;
+                    musicFadeTarget = std::nullopt;
+                    break;
+                default:
+                    printConsole("MusicMode: RWE has no victory or defeat music.", feedbackColor);
+                    break;
+            }
+            return;
+        }
+
+        if (command.kind == ChatCommand::Kind::Sing)
+        {
+            // #908: the original swaps only the waveform of the unit-speech
+            // branch; every speech gate still applies. Local and not saved.
+            singEnabled = !singEnabled;
+            return;
+        }
+
+        if (command.kind == ChatCommand::Kind::AntiAlias)
+        {
+            // #907 §2.8: visual bit 1, saved; the renderer reads the field.
+            antiAliasEnabled = !antiAliasEnabled;
+            saveInGameOptions();
+            return;
+        }
+
+        if (command.kind == ChatCommand::Kind::Shadow)
+        {
+            // #907 §2.8: visual bit 2, saved.
+            shadowsEnabled = !shadowsEnabled;
+            saveInGameOptions();
+            return;
+        }
+
+        if (command.kind == ChatCommand::Kind::Shading)
+        {
+            // #907 §2.8: the original's single shaded-rasterizer bit. RWE
+            // widens that setting with a four-stage menu, but the command
+            // toggles the original's two states: Off and buildings-only.
+            shadingMode = shadingMode == ShadingMode::Off ? ShadingMode::BuildingsOnly : ShadingMode::Off;
+            saveInGameOptions();
+            return;
+        }
+
+        if (command.kind == ChatCommand::Kind::TShadow)
+        {
+            // #907 §2.8: visual bit 3, the mobile-unit sub-bit under Shadow.
+            // Not saved in the original, and not here.
+            vehicleShadowsEnabled = !vehicleShadowsEnabled;
+            return;
+        }
+
+        if (command.kind == ChatCommand::Kind::IFace)
+        {
+            // #907 §2.4: 0 selects the left-click interface; the load path
+            // clamps values above one, the command does not. The command is a
+            // session-local override because the config is read-only here; it
+            // is recorded as a divergence and is not persisted.
+            leftClickOverride = command.number == 0;
+            return;
+        }
+
         // Every command built so far is in the ordinary table.
         if ((mask & ChatCommandMaskOrdinary) == 0)
         {
@@ -362,6 +443,13 @@ namespace rwe
             case ChatCommand::Kind::NoShake:
             case ChatCommand::Kind::Gamma:
             case ChatCommand::Kind::ScrollSpeed:
+            case ChatCommand::Kind::MusicMode:
+            case ChatCommand::Kind::Sing:
+            case ChatCommand::Kind::AntiAlias:
+            case ChatCommand::Kind::Shadow:
+            case ChatCommand::Kind::Shading:
+            case ChatCommand::Kind::TShadow:
+            case ChatCommand::Kind::IFace:
                 break;
         }
     }

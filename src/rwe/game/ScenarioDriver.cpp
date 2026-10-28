@@ -573,6 +573,46 @@ namespace rwe
         return scene.scrollSpeedSetting;
     }
 
+    bool ScenarioDriver::musicSilenced() const
+    {
+        return scene.musicSilenced;
+    }
+
+    int ScenarioDriver::musicSituation() const
+    {
+        return scene.musicSituation == GameScene::MusicSituation::Battle ? 1 : 0;
+    }
+
+    bool ScenarioDriver::singEnabled() const
+    {
+        return scene.singEnabled;
+    }
+
+    bool ScenarioDriver::antiAliasEnabled() const
+    {
+        return scene.antiAliasEnabled;
+    }
+
+    bool ScenarioDriver::shadowsEnabled() const
+    {
+        return scene.shadowsEnabled;
+    }
+
+    int ScenarioDriver::shadingMode() const
+    {
+        return static_cast<int>(scene.shadingMode);
+    }
+
+    bool ScenarioDriver::vehicleShadowsEnabled() const
+    {
+        return scene.vehicleShadowsEnabled;
+    }
+
+    bool ScenarioDriver::leftClickInterfaceMode() const
+    {
+        return scene.leftClickMode();
+    }
+
     bool ScenarioDriver::isCameraTracking() const
     {
         return std::holds_alternative<GameScene::CameraControlStateTrackingUnit>(scene.cameraControlState);
