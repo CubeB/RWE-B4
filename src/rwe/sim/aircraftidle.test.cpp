@@ -836,4 +836,59 @@ namespace rwe
         CHECK(settled);
         CHECK_FALSE(sim.getUnitState(bomberId).airLoiter.has_value());
     }
+
+    TEST_CASE("an idle aircraft with nowhere to land keeps flying instead of stopping midair", "[aircraftidle]")
+    {
+        // Reported from play: planes stop in midair after combat or on patrol.
+        // Over open water there is no landing spot within reach, so
+        // findLandingLocation finds nothing. The aircraft was then left with
+        // no movement goal at all: the air controller has nothing to steer at
+        // and its arrival profile decelerates it to a standstill, where it
+        // hovers for ever. The original's LandIfCan keeps looking while the
+        // aircraft keeps flying; whatever it does when there is no pad, it
+        // does not park in the air.
+        auto script = makeIdleScript();
+        GameSimulation sim(MapTerrain(Grid<unsigned char>(256, 256, static_cast<unsigned char>(0)), 255_ss), 0u, 0, 0);
+        auto us = addIdlePlayer(sim, "us");
+        sim.unitDefinitions["bomber"] = makeIdleBomberDef();
+        registerIdleModel(sim, "model");
+        sim.losTables = generateLosTables(8);
+
+        auto bomberId = spawnIdleUnit(sim, "bomber", us, SimVector(0_ss, 200_ss, 0_ss), script);
+        {
+            auto& bomber = sim.getUnitState(bomberId);
+            bomber.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+        }
+        sim.flyingUnitsSet.insert(bomberId);
+
+        // Give it time to build up whatever speed it is going to.
+        for (int tick = 0; tick < 60; ++tick)
+        {
+            sim.tick();
+        }
+
+        auto previous = sim.getUnitState(bomberId).position;
+        auto travelled = 0_ss;
+        for (int tick = 0; tick < 240; ++tick)
+        {
+            sim.tick();
+            const auto& bomber = sim.getUnitState(bomberId);
+            travelled = travelled + idleFlatDistance(previous, bomber.position);
+            previous = bomber.position;
+        }
+
+        const auto& bomber = sim.getUnitState(bomberId);
+        const auto& air = std::get<UnitPhysicsInfoAir>(bomber.physics);
+        const auto speed = AirMovement::airVelocity(air.movementState).length();
+        INFO("travelled " << simScalarToFloat(travelled) << " world units, final speed "
+                          << simScalarToFloat(speed));
+        REQUIRE_FALSE(isLanding(bomber));
+        REQUIRE_FALSE(std::holds_alternative<UnitPhysicsInfoGround>(bomber.physics));
+        // The controller has a goal, so it keeps its speed instead of running
+        // the arrival profile down to a stop.
+        REQUIRE(speed > 2_ss);
+        REQUIRE(travelled > 500_ss);
+        REQUIRE(bomber.airLoiter.has_value());
+        REQUIRE(bomber.airLoiter->reason == UnitState::AirLoiterState::Reason::LandingHold);
+    }
 }

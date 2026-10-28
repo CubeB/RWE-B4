@@ -209,6 +209,13 @@ Everything else lives in a subject file. **The numbers never move**, so a
 
 ## 88. Where RWE deliberately differs
 
+- **An aircraft with nowhere to land keeps flying** (2026-10-28, #894). When
+  no landing place is within reach, RWE holds a circuit around the spot it went
+  idle on and keeps looking; it does not hover in place. The reference's
+  `VTOL_LandIfCan` behaviour with no pad is not decoded, but a goal-less
+  aircraft parks in the air, which the original does not do. The hold is RWE's
+  answer to that gap, not a transcription.
+
 - **The developer spawn is local and single-player only** (2026-10-28, #913).
   A debug-unlocked `+UNITNAME [player]` creates a completed unit at the cursor
   for that player, but only while no remote peer is present: unit creation is
