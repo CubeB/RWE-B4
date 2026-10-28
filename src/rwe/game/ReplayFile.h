@@ -42,6 +42,12 @@ namespace rwe
         PathfindingBackend pathfindingBackend{PathfindingBackend::RweAStar};
 
         /**
+         * The Community Patch ruleset (issue #934). A header written before
+         * version 8 has no field and means "off".
+         */
+        bool communityPatch{false};
+
+        /**
          * Slot for slot as the lobby dealt them, empty slots included: a
          * slot's index is the PlayerId that the recorded commands name, so
          * closing up the gaps would misattribute every one of them.

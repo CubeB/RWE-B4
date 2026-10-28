@@ -286,15 +286,13 @@ int main(int argc, char* argv[])
                 }
                 if (args.contains("community-patch"))
                 {
-                    // The ruleset is not yet carried by replays or recordings,
-                    // and a network game must agree on it before launch: for
-                    // now it is an offline/arena ruleset. See #934.
-                    if (!args.getString("record-replay", "").empty()
-                        || !args.getString("record-demo", "").empty()
-                        || !args.getString("rejoin", "").empty())
+                    // The mode is carried by the replay header (version 8) and
+                    // by a save. A TA demo is the original's format and cannot
+                    // carry it, so recording one is refused.
+                    if (!args.getString("record-demo", "").empty())
                     {
                         throw std::runtime_error(
-                            "--community-patch cannot be combined with recording, demos or rejoining yet");
+                            "--community-patch cannot be recorded into a TA demo");
                     }
                     gameParameters->communityPatch = true;
                 }
