@@ -447,7 +447,31 @@ namespace
                 d.key(SDLK_RETURN);
                 d.require(d.scrollSpeedSetting() == 100, "32 pixels a tick maps to the base pan speed");
             });
-            s.endAt(6);
+            s.at(7, [](rwe::ScenarioDriver& d) {
+                // #908: only the categories RWE has. 0 and 1 force the mood,
+                // 4 silences; 2 and 3 have no RWE counterpart.
+                d.key(SDLK_RETURN);
+                d.textInput("+musicmode 1");
+                d.key(SDLK_RETURN);
+                d.require(d.musicSituation() == 1, "MusicMode 1 forces the battle mood");
+                d.key(SDLK_RETURN);
+                d.textInput("+musicmode 4");
+                d.key(SDLK_RETURN);
+                d.require(d.musicSilenced(), "MusicMode 4 silences the chooser");
+                d.key(SDLK_RETURN);
+                d.textInput("+musicmode 0");
+                d.key(SDLK_RETURN);
+                d.require(!d.musicSilenced() && d.musicSituation() == 0, "MusicMode 0 returns to building");
+                d.key(SDLK_RETURN);
+                d.textInput("+sing");
+                d.key(SDLK_RETURN);
+                d.require(d.singEnabled(), "+Sing toggles the speech waveform");
+                d.key(SDLK_RETURN);
+                d.textInput("+sing");
+                d.key(SDLK_RETURN);
+                d.require(!d.singEnabled(), "and off again");
+            });
+            s.endAt(7);
         });
     }
 

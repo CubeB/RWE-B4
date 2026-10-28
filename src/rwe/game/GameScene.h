@@ -1209,6 +1209,19 @@ namespace rwe
         bool musicPlaylistBuilt{false};
 
         MusicSituation musicSituation{MusicSituation::Building};
+
+        /**
+         * `+MusicMode 4` (#908): no situation chooses a track until another
+         * category is asked for. Local presentation, not saved.
+         */
+        bool musicSilenced{false};
+
+        /**
+         * `+Sing` (#908): substitute the unit-speech waveform with
+         * `sounds/sing.wav`, and `honk.wav` in the first second of every
+         * eight-second block. Local, not saved.
+         */
+        bool singEnabled{false};
         std::array<int, 30> battlePointsRing{};
         unsigned int battleRingCursor{0};
         unsigned int lastMusicSecond{0};

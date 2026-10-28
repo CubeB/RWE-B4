@@ -209,6 +209,16 @@ Everything else lives in a subject file. **The numbers never move**, so a
 
 ## 88. Where RWE deliberately differs
 
+- **Only commands with an RWE effect are added** (2026-10-28, #907/#908). The
+  audio/option finding records the original's words in full, but RWE does not
+  register a word it cannot honour: `CDPlay`, `CDStop` and `Sound3D` are
+  deliberately absent because RWE has no CD media, no track table and no
+  positional mixer, and an inert word is worse than an unknown one. `MusicMode`
+  accepts only the categories RWE has -- 0 building, 1 battle and 4 silence --
+  and answers 2/3 with a notice because RWE has no victory or defeat music.
+  `Sing` substitutes `sounds/sing.wav`/`honk.wav` in the unit-speech branch, as
+  the original does.
+
 - **Command masks, the developer phrase and the repeat key** (#906, 2026-10-27).
   A typed `+` line now runs under the original's per-mode mask -- campaign 1,
   skirmish 3, multiplayer the host's Cheat Codes option (RWE has no such lobby

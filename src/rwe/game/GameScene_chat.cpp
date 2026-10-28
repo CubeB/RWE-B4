@@ -231,6 +231,43 @@ namespace rwe
             return;
         }
 
+        if (command.kind == ChatCommand::Kind::MusicMode)
+        {
+            // #908: the original's argument is a situation category, not the
+            // playback mode. RWE has Building and Battle; 4 is silence. It has
+            // no Victory or Defeat mood, so 2 and 3 are refused rather than
+            // faked. Not saved, as the original does not save it.
+            switch (command.number)
+            {
+                case 0:
+                    musicSituation = MusicSituation::Building;
+                    musicSilenced = false;
+                    musicFadeTarget = std::nullopt;
+                    break;
+                case 1:
+                    musicSituation = MusicSituation::Battle;
+                    musicSilenced = false;
+                    musicFadeTarget = std::nullopt;
+                    break;
+                case 4:
+                    musicSilenced = true;
+                    musicFadeTarget = std::nullopt;
+                    break;
+                default:
+                    printConsole("MusicMode: RWE has no victory or defeat music.", feedbackColor);
+                    break;
+            }
+            return;
+        }
+
+        if (command.kind == ChatCommand::Kind::Sing)
+        {
+            // #908: the original swaps only the waveform of the unit-speech
+            // branch; every speech gate still applies. Local and not saved.
+            singEnabled = !singEnabled;
+            return;
+        }
+
         // Every command built so far is in the ordinary table.
         if ((mask & ChatCommandMaskOrdinary) == 0)
         {
@@ -362,6 +399,8 @@ namespace rwe
             case ChatCommand::Kind::NoShake:
             case ChatCommand::Kind::Gamma:
             case ChatCommand::Kind::ScrollSpeed:
+            case ChatCommand::Kind::MusicMode:
+            case ChatCommand::Kind::Sing:
                 break;
         }
     }

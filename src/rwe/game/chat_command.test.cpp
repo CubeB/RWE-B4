@@ -187,6 +187,16 @@ namespace rwe
         REQUIRE(parseChatCommand("+scrollspeed")->number == 0);
     }
 
+    TEST_CASE("the audio commands parse their own arguments", "[chat]")
+    {
+        auto c = parseChatCommand("+MusicMode 1");
+        REQUIRE(c->kind == Kind::MusicMode);
+        REQUIRE(c->number == 1);
+        REQUIRE(parseChatCommand("+musicmode")->number == 0);
+
+        REQUIRE(parseChatCommand("+Sing")->kind == Kind::Sing);
+    }
+
     TEST_CASE("every other word is unknown, and says what it was", "[chat]")
     {
         auto c = parseChatCommand("+Contour 4");

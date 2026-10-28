@@ -378,3 +378,35 @@ mapping decisions, so this pass is three bindings, not the whole ticket.
 - Note: repeated full-suite runs on this machine produced intermittent
   `TaHostSession` failures that do not reproduce in isolation (`[net][ta]`
   passes); they are timing/port flakiness under load, not this change.
+
+## #908: `+MusicMode` and `+Sing` (only the words RWE can honour)
+
+Authority: [BT-GAME-AUDIO-OPTION-COMMANDS-FINDINGS](BT-GAME-AUDIO-OPTION-COMMANDS-FINDINGS.md)
+sections 1.4 and 1.5, plus the owner's rule that no command is added without a
+real RWE effect.
+
+`+MusicMode n` maps the original's situation category onto RWE's two moods and
+its silence: 0 clears silence and selects Building, 1 selects Battle, 4 stops
+the music and blocks the chooser until another category is asked for. 2 and 3
+(Victory and Defeat) have no RWE state, so the command prints a notice and
+changes nothing rather than faking a category. Not saved, as the original does
+not save it.
+
+`+Sing` toggles the speech-waveform substitution: after the existing speech
+gates and only when the unit's own voice would have played, the sound becomes
+`sounds/sing.wav`, or `sounds/honk.wav` during the first second of each
+eight-second block. Local and not saved.
+
+**Deliberately not added**: `CDPlay`, `CDStop` and `Sound3D`. RWE has no CD, no
+track table and no positional mixer; the finding records why each word has no
+honest counterpart (section 4.2), and the owner's rule is that an inert word is
+worse than an unknown one. They remain unknown commands.
+
+### Executed RWE checks
+
+- The `906-developer-phrase-and-repeat` scenario forces Battle, silences,
+  returns to Building, and toggles Sing on and off, reading the scene state
+  back; it passes. The music player and the speech sound itself are not
+  captured.
+- `[chat]` parses both commands, including `+musicmode`'s default 0. Full
+  suite: **1986 passed, one HOME-path checksum skip, 218568 assertions**.

@@ -52,6 +52,10 @@ namespace rwe
             Gamma,
             /** `+ScrollSpeed n`: n is the original's pixels per tick. */
             ScrollSpeed,
+            /** `+MusicMode n`: 0 building, 1 battle, 4 silence in RWE. */
+            MusicMode,
+            /** `+Sing`: substitute the unit-speech waveform with sing/honk. */
+            Sing,
         };
 
         Kind kind{Kind::Empty};

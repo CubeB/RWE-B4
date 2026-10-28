@@ -187,6 +187,17 @@ namespace rwe
             command.kind = ChatCommand::Kind::ScrollSpeed;
             command.number = chatAtoi(argument(1));
         }
+        else if (word == "musicmode")
+        {
+            // #908 §1.4: the argument is a situation category, absent 0.
+            command.kind = ChatCommand::Kind::MusicMode;
+            command.number = chatAtoi(argument(1));
+        }
+        else if (word == "sing")
+        {
+            // #908 §1.5: a no-argument toggle of the unit-speech waveform.
+            command.kind = ChatCommand::Kind::Sing;
+        }
         else if (word == "give")
         {
             // player amount metal|energy. The resource is the one argument

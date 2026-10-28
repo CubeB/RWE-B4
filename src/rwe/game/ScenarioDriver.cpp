@@ -573,6 +573,21 @@ namespace rwe
         return scene.scrollSpeedSetting;
     }
 
+    bool ScenarioDriver::musicSilenced() const
+    {
+        return scene.musicSilenced;
+    }
+
+    int ScenarioDriver::musicSituation() const
+    {
+        return scene.musicSituation == GameScene::MusicSituation::Battle ? 1 : 0;
+    }
+
+    bool ScenarioDriver::singEnabled() const
+    {
+        return scene.singEnabled;
+    }
+
     bool ScenarioDriver::isCameraTracking() const
     {
         return std::holds_alternative<GameScene::CameraControlStateTrackingUnit>(scene.cameraControlState);
