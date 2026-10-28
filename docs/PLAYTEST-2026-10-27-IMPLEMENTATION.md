@@ -492,3 +492,30 @@ scenarios pass.
 Both are session-local because RWE's options file has no keys for them yet;
 the original saves them, and that persistence gap is recorded in §88. The
 scenario toggles both and reads the switches back.
+
+## #913: the default-handler spawn (partial)
+
+Authority: `BT-GAME-CONSOLE-COMMANDS-PARITY.md` sections 7 and 8: the original's
+mask-4 default handler treats an unknown word as a unit name and creates it for
+the owner in argument one (default zero).
+
+A word that matches a shipped unit definition, typed while the developer phrase
+has unlocked the mask, now spawns a completed unit of that type at the cursor
+for the zero-based player in argument one (the local player when absent). The
+match is case-insensitive over the loaded unit definitions. The route is
+**single-player only**: it refuses while a remote peer is present, because unit
+creation is simulation state and RWE has no replicated spawn command; the
+original's local spawn would desync in a lockstep game too. The ordinary
+`Unknown command` message is unchanged for every other word.
+
+Not implemented: `+Control` and `+AI`. A seat's player type is fixed at launch
+in RWE and there is no safe mid-game authority change; adding one is a design
+change, not a command binding.
+
+### Executed RWE checks
+
+- The scenario re-enters the developer phrase, parks the cursor away from the
+  start units, types `+ARMSOLAR`, and reads the unit count: exactly one more
+  unit. It passes.
+- Full suite: **1989 passed, one HOME-path checksum skip, 218585 assertions**;
+  all 9 scenarios pass.

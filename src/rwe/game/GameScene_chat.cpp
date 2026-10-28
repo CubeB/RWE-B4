@@ -387,6 +387,45 @@ namespace rwe
 
         if (command.kind == ChatCommand::Kind::Unknown)
         {
+            // #913, the original's default handler: a word that names a unit
+            // spawns it for argument one's owner (default the local player),
+            // at the cursor. It is debug-masked, and RWE refuses it while a
+            // remote peer is present because unit creation is simulation
+            // state and there is no replicated spawn command.
+            if ((mask & ChatCommandMaskDebug) != 0 && !gameNetworkService->hasRemotePeers())
+            {
+                auto wanted = command.word;
+                std::transform(wanted.begin(), wanted.end(), wanted.begin(), [](unsigned char c) {
+                    return static_cast<char>(std::tolower(c));
+                });
+                for (const auto& [name, _] : simulation.unitDefinitions)
+                {
+                    auto candidate = name;
+                    std::transform(candidate.begin(), candidate.end(), candidate.begin(), [](unsigned char c) {
+                        return static_cast<char>(std::tolower(c));
+                    });
+                    if (candidate != wanted)
+                    {
+                        continue;
+                    }
+
+                    auto player = command.playerNumber >= 0
+                        ? PlayerId(static_cast<unsigned int>(command.playerNumber))
+                        : localPlayerId;
+                    if (player.value >= getSize(simulation.players))
+                    {
+                        printConsole(command.word + ": no such player.", feedbackColor);
+                        return;
+                    }
+                    if (auto position = getMouseTerrainCoordinate())
+                    {
+                        spawnCompletedUnit(name, player, *position);
+                        return;
+                    }
+                    break;
+                }
+            }
+
             printConsole("Unknown command: " + command.word, feedbackColor);
             return;
         }

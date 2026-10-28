@@ -209,6 +209,14 @@ Everything else lives in a subject file. **The numbers never move**, so a
 
 ## 88. Where RWE deliberately differs
 
+- **The developer spawn is local and single-player only** (2026-10-28, #913).
+  A debug-unlocked `+UNITNAME [player]` creates a completed unit at the cursor
+  for that player, but only while no remote peer is present: unit creation is
+  simulation state and RWE has no replicated spawn command, so allowing it in
+  a lockstep game would desync. `+Control` and `+AI` are not added because a
+  seat's player type is fixed at launch and changing authority mid-game has no
+  safe RWE path yet.
+
 - **Console cheats are replicated** (2026-10-28, #910/#912). `+NoMetal`,
   `+NoEnergy` and `+ATM` change hashed stockpiles, so in RWE they travel as
   `PlayerShareCommand`s that every peer applies; the original changes its own

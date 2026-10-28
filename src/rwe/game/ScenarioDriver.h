@@ -211,6 +211,12 @@ namespace rwe
         /** Whether the game clock is drawn (#907, `+Clock`). */
         bool clockEnabled() const;
 
+        /** How many units the simulation holds (#913 spawn check). */
+        std::size_t unitCount() const;
+
+        /** Parks the cursor at a frame coordinate without clicking (#913). */
+        void moveMouse(int x, int y);
+
         /** Separate edges allow a modifier to stay held over another key. */
         void keyDown(int keyCode);
         void keyUp(int keyCode);

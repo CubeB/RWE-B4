@@ -638,6 +638,23 @@ namespace rwe
         return scene.clockEnabled;
     }
 
+    std::size_t ScenarioDriver::unitCount() const
+    {
+        std::size_t count = 0;
+        for (const auto& entry : scene.simulation.units)
+        {
+            (void)entry;
+            ++count;
+        }
+        return count;
+    }
+
+    void ScenarioDriver::moveMouse(int x, int y)
+    {
+        scene.mousePositionOverride = Point(x, y);
+        updateHover();
+    }
+
     bool ScenarioDriver::isCameraTracking() const
     {
         return std::holds_alternative<GameScene::CameraControlStateTrackingUnit>(scene.cameraControlState);
