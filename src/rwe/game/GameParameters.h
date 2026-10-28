@@ -217,6 +217,16 @@ namespace rwe
          */
         bool mission{false};
 
+        /**
+         * Play under the Community Patch ruleset (issue #934): a curated
+         * subset of TADR's gameplay rules that RWE can honour. Off by
+         * default; it changes game outcomes, so every peer must run it, and
+         * it is not yet carried by the lobby, replays or recordings -- the
+         * loader refuses a network seat and the command line refuses to
+         * record or replay while it is on. See docs/COMMUNITY-PATCH-MODE.md.
+         */
+        bool communityPatch{false};
+
         /** A mission played as part of a campaign, from the campaign screen. Nothing for --mission alone. */
         std::optional<CampaignProgress> campaign;
 

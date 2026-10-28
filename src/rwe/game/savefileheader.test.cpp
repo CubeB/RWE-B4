@@ -95,6 +95,26 @@ namespace rwe
         }
     }
 
+    TEST_CASE("SaveFile's header round-trips the Community Patch flag", "[saveload][savefile][communitypatch]")
+    {
+        TempFile file;
+        auto save = makeSaveFile();
+        save.parameters.communityPatch = true;
+
+        writeSaveFile(file.path, save);
+        auto loaded = readSaveFile(file.path);
+
+        REQUIRE(loaded.has_value());
+        REQUIRE(loaded->parameters.communityPatch);
+
+        // A save written before the flag existed loads with the mode off.
+        auto old = makeSaveFile();
+        writeSaveFile(file.path, old);
+        auto loadedOld = readSaveFile(file.path);
+        REQUIRE(loadedOld.has_value());
+        REQUIRE_FALSE(loadedOld->parameters.communityPatch);
+    }
+
     TEST_CASE("SaveFile retains Deathmatch and the host's watching policy", "[saveload][savefile][deathmatch][spectators]")
     {
         TempFile file;

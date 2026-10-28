@@ -1468,6 +1468,7 @@ set(TEST_FILES
     src/rwe/sim/visibility.test.cpp
     src/rwe/sim/alliance.test.cpp
     src/rwe/sim/concealment.test.cpp
+src/rwe/sim/communitypatch.test.cpp
     src/rwe/sim/gameoptions.test.cpp
     src/rwe/sim/deathmatch.test.cpp
     src/rwe/sim/UnitState_util.test.cpp

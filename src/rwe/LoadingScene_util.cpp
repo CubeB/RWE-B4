@@ -280,6 +280,14 @@ namespace rwe
         weaponDefinition.fireStarter = tdf.fireStarter & 0xffu;
 
         weaponDefinition.waterWeapon = tdf.waterWeapon;
+
+        // Community Patch (TADR) flags, issue #934: data-driven, honoured only
+        // when the game runs the ruleset.
+        weaponDefinition.notToAir = tdf.notToAir;
+        weaponDefinition.notToUnderwater = tdf.notToUnderwater;
+        weaponDefinition.notOverWater = tdf.notOverWater;
+        weaponDefinition.notOverLand = tdf.notOverLand;
+        weaponDefinition.surfaceFire = tdf.surfaceFire;
         weaponDefinition.paralyzer = tdf.paralyzer;
         weaponDefinition.toAirWeapon = tdf.toAirWeapon;
 

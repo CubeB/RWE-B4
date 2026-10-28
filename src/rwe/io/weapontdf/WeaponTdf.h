@@ -54,6 +54,13 @@ namespace rwe
 
         bool waterWeapon;
 
+        // Community Patch (TADR) weapon flags, issue #934.
+        bool notToAir{false};
+        bool notToUnderwater{false};
+        bool notOverWater{false};
+        bool notOverLand{false};
+        bool surfaceFire{false};
+
         bool burnBlow;
         unsigned int accuracy;
         unsigned int tolerance;

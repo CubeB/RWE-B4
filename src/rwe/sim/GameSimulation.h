@@ -549,6 +549,14 @@ namespace rwe
         LineOfSightMode lineOfSightMode{LineOfSightMode::True};
         MappingMode mappingMode{MappingMode::Unmapped};
         CommanderDeathMode commanderDeathMode{CommanderDeathMode::GameEnds};
+
+        /**
+         * The Community Patch ruleset (issue #934). Off by default; it changes
+         * targeting and firing rules that the TADR weapon flags ask for, so it
+         * must be identical on every peer. The launcher does not carry it yet,
+         * so a network seat is refused while it is on.
+         */
+        bool communityPatchMode{false};
         bool lavaWorld{false};
 
         MapTerrain terrain;

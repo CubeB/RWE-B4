@@ -70,6 +70,14 @@ namespace rwe
 
         tdf.readOrDefault("waterWeapon", w.waterWeapon);
 
+        // Community Patch (TADR) flags, issue #934. Parsed here, honoured only
+        // when the game runs the Community Patch ruleset.
+        tdf.readOrDefault("nottoair", w.notToAir);
+        tdf.readOrDefault("nottounderwater", w.notToUnderwater);
+        tdf.readOrDefault("notoverwater", w.notOverWater);
+        tdf.readOrDefault("notoverland", w.notOverLand);
+        tdf.readOrDefault("surfacefire", w.surfaceFire);
+
         tdf.readOrDefault("burnBlow", w.burnBlow);
         tdf.readOrDefault("accuracy", w.accuracy);
         tdf.readOrDefault("tolerance", w.tolerance, 256u);
