@@ -215,6 +215,28 @@ namespace rwe
         REQUIRE(parseChatCommand("+iface 1")->number == 1);
     }
 
+    TEST_CASE("the stock commands read the original's argument forms", "[chat]")
+    {
+        auto c = parseChatCommand("+NoMetal");
+        REQUIRE(c->kind == Kind::NoMetal);
+        REQUIRE(c->playerNumber == -1);
+        REQUIRE(c->number == 0);
+
+        c = parseChatCommand("+NoMetal 3");
+        REQUIRE(c->playerNumber == 3);
+        REQUIRE(c->number == 0);
+
+        c = parseChatCommand("+NoMetal 3 5000");
+        REQUIRE(c->playerNumber == 3);
+        REQUIRE(c->number == 5000);
+
+        REQUIRE(parseChatCommand("+NoEnergy 2")->kind == Kind::NoEnergy);
+        REQUIRE(parseChatCommand("+ATM")->kind == Kind::Atm);
+        REQUIRE(parseChatCommand("+BPS")->kind == Kind::Bps);
+        REQUIRE(parseChatCommand("+ScreenChat")->kind == Kind::ScreenChat);
+        REQUIRE(parseChatCommand("+Clock")->kind == Kind::Clock);
+    }
+
     TEST_CASE("every other word is unknown, and says what it was", "[chat]")
     {
         auto c = parseChatCommand("+Contour 4");

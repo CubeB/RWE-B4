@@ -220,6 +220,39 @@ namespace rwe
             command.kind = ChatCommand::Kind::IFace;
             command.number = chatAtoi(argument(1));
         }
+        else if (word == "nometal" || word == "noenergy")
+        {
+            // #910, BT-GAME-CONSOLE-COMMANDS-PARITY §5: the lone command token
+            // targets the local player with amount zero; any extra token names
+            // the player (zero-based slot) and a second is the amount.
+            command.kind = word == "nometal" ? ChatCommand::Kind::NoMetal : ChatCommand::Kind::NoEnergy;
+            if (tokens.size() >= 2)
+            {
+                command.playerNumber = chatAtoi(tokens[1]);
+            }
+            command.number = tokens.size() >= 3 ? chatAtoi(tokens[2]) : 0;
+        }
+        else if (word == "atm")
+        {
+            // #912, §6: a cheat-table grant of 1000 metal and energy to the
+            // viewed player; RWE has no divergent view, so it is the local one.
+            command.kind = ChatCommand::Kind::Atm;
+        }
+        else if (word == "bps")
+        {
+            // #911, §6: a local diagnostic toggle, mask one; no message.
+            command.kind = ChatCommand::Kind::Bps;
+        }
+        else if (word == "screenchat")
+        {
+            // #907 §2.5: a local display bit, XOR with one.
+            command.kind = ChatCommand::Kind::ScreenChat;
+        }
+        else if (word == "clock")
+        {
+            // #907 §2.1: UI-option bit 6, toggled; the original saves it.
+            command.kind = ChatCommand::Kind::Clock;
+        }
         else if (word == "give")
         {
             // player amount metal|energy. The resource is the one argument

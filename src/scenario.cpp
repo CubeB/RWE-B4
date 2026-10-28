@@ -507,7 +507,58 @@ namespace
                 d.key(SDLK_RETURN);
                 d.require(d.leftClickInterfaceMode(), "IFace 0 selects left click");
             });
-            s.endAt(8);
+            s.at(9, [](rwe::ScenarioDriver& d) {
+               
+                // #910/#912: the replicated stock commands are applied on the
+                // next tick through the command stream, so they are asserted
+                // a step later.
+                d.key(SDLK_RETURN);
+                d.textInput("+noenergy 0 100");
+                d.key(SDLK_RETURN);
+                d.key(SDLK_RETURN);
+                d.textInput("+nometal 0 5000");
+                d.key(SDLK_RETURN);
+                d.key(SDLK_RETURN);
+                d.textInput("+atm");
+                d.key(SDLK_RETURN);
+            });
+            s.at(10, [](rwe::ScenarioDriver& d) {
+               
+                d.require(d.playerMetal(0) == 6000.0f, "NoMetal assigned and ATM added 1000 metal");
+                d.require(d.playerEnergy(0) == 1100.0f, "NoEnergy assigned and ATM added 1000 energy");
+                // The bare forms target the local player and assign zero.
+                d.key(SDLK_RETURN);
+                d.textInput("+nometal");
+                d.key(SDLK_RETURN);
+                d.key(SDLK_RETURN);
+                d.textInput("+noenergy");
+                d.key(SDLK_RETURN);
+            });
+            s.at(11, [](rwe::ScenarioDriver& d) {
+               
+                d.require(d.playerMetal(0) == 0.0f, "the lone token empties the local metal");
+                d.require(d.playerEnergy(0) == 0.0f, "the lone token empties the local energy");
+                const auto overlay = d.networkOverlayVisible();
+                d.key(SDLK_RETURN);
+                d.textInput("+bps");
+                d.key(SDLK_RETURN);
+                d.require(d.networkOverlayVisible() != overlay, "BPS toggles the network overlay");
+                const auto screenChat = d.screenChatEnabled();
+                d.key(SDLK_RETURN);
+                d.textInput("+screenchat");
+                d.key(SDLK_RETURN);
+                d.require(d.screenChatEnabled() != screenChat, "ScreenChat toggles chat display");
+                d.require(!d.clockEnabled(), "the clock starts off");
+                d.key(SDLK_RETURN);
+                d.textInput("+clock");
+                d.key(SDLK_RETURN);
+                d.require(d.clockEnabled(), "Clock shows the game time");
+                d.key(SDLK_RETURN);
+                d.textInput("+clock");
+                d.key(SDLK_RETURN);
+                d.require(!d.clockEnabled(), "and hides it again");
+            });
+            s.endAt(11);
         });
     }
 

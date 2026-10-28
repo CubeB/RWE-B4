@@ -214,6 +214,12 @@ namespace rwe
             SetEnergyReserve,
             /** Hand `amount` of metal (giveMetal) or energy to `target`. */
             Give,
+            /** Assign the target's metal stock outright (`+NoMetal`). */
+            SetMetalStock,
+            /** Assign the target's energy stock outright (`+NoEnergy`). */
+            SetEnergyStock,
+            /** +1000 metal and energy to `target` (`+ATM`). */
+            AtmGrant,
         };
 
         Kind kind{Kind::ToggleMetal};
@@ -226,6 +232,9 @@ namespace rwe
 
         /** Give only: metal if true, energy if false. */
         bool giveMetal{true};
+
+        // NoMetal/NoEnergy/ATM reuse `target` and `amount`: the stock being
+        // assigned (or the grant's recipient) and the value.
     };
 
     using PlayerCommand = std::variant<PlayerUnitCommand, PlayerPauseGameCommand, PlayerUnpauseGameCommand, PlayerSetGameSpeedCommand, PlayerDroppedCommand, PlayerRejoinedCommand, PlayerShareCommand>;

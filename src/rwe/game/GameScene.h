@@ -1013,6 +1013,19 @@ namespace rwe
         ChatSendMode chatSendMode;
 
         /**
+         * `+ScreenChat` (#907): whether incoming chat lines are drawn. They
+         * still arrive and are logged. Session-local; the options file has no
+         * key for it yet.
+         */
+        bool screenChatEnabled{true};
+
+        /**
+         * `+Clock` (#907): draw the game-time string at the bottom left.
+         * Session-local; the options file has no key for it yet.
+         */
+        bool clockEnabled{false};
+
+        /**
          * Whether the local developer phrase has unlocked the debug bit
          * (#906). Presentation only: never hashed, saved, replayed or sent.
          * It raises a typed line's permission mask to all bits and enables
@@ -1399,6 +1412,9 @@ namespace rwe
         int statsBarMillisecondsOwed{0};
         void updateStatsBarSlide(int millisecondsElapsed);
         void renderSpaceTabs();
+
+        /** `+Clock` (#907): the game-time string at the bottom left of the world view. */
+        void renderGameClock();
 
         /**
          * F4's latch -- the original's display word bit 7 at game+0x37f06

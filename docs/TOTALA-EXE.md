@@ -209,6 +209,15 @@ Everything else lives in a subject file. **The numbers never move**, so a
 
 ## 88. Where RWE deliberately differs
 
+- **Console cheats are replicated** (2026-10-28, #910/#912). `+NoMetal`,
+  `+NoEnergy` and `+ATM` change hashed stockpiles, so in RWE they travel as
+  `PlayerShareCommand`s that every peer applies; the original changes its own
+  local records. `+ATM` grants to the local player because RWE has no separate
+  viewed player. `+BPS` toggles RWE's F9 network overlay rather than drawing a
+  counter of its own. `+Clock` and `+ScreenChat` are session-local: RWE's
+  options file has no keys for them yet, so unlike the original they do not
+  survive a restart.
+
 - **Only commands with an RWE effect are added** (2026-10-28, #907/#908). The
   audio/option finding records the original's words in full, but RWE does not
   register a word it cannot honour: `CDPlay`, `CDStop` and `Sound3D` are
