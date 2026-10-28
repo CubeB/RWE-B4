@@ -274,6 +274,13 @@ namespace rwe
         else
         {
             command.kind = ChatCommand::Kind::Unknown;
+            // The original's default handler spawns a unit named by the
+            // command word and takes the owner from argument one; keep the
+            // token here so the handler can do that when debug is unlocked.
+            if (tokens.size() >= 2)
+            {
+                command.playerNumber = chatAtoi(tokens[1]);
+            }
         }
 
         return command;

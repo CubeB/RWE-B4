@@ -389,6 +389,7 @@ namespace
         // original's key is virtual-key 0x5C -- backslash on a US layout.
         rwe::registerScenario("906-developer-phrase-and-repeat", [](rwe::Scenario& s) {
             auto linesBefore = std::make_shared<std::size_t>(0);
+            auto unitsBefore = std::make_shared<std::size_t>(0);
             s.at(1, [linesBefore](rwe::ScenarioDriver& d) {
                 *linesBefore = d.consoleMessageCount();
                 d.key(SDLK_RETURN);
@@ -558,7 +559,24 @@ namespace
                 d.key(SDLK_RETURN);
                 d.require(!d.clockEnabled(), "and hides it again");
             });
-            s.endAt(11);
+            s.at(12, [unitsBefore](rwe::ScenarioDriver& d) {
+                // #913: the debug-masked default-handler spawn. The phrase was
+                // cleared earlier, so it is re-entered first; the cursor is
+                // parked away from the start units.
+                d.moveMouse(420, 160);
+                d.key(SDLK_RETURN);
+                d.textInput("+Now Film Chris Include Reload Assert");
+                d.key(SDLK_RETURN);
+                d.require(d.debugCommandsEnabled(), "the phrase unlocks the spawn route");
+                *unitsBefore = d.unitCount();
+                d.key(SDLK_RETURN);
+                d.textInput("+ARMSOLAR");
+                d.key(SDLK_RETURN);
+            });
+            s.at(13, [unitsBefore](rwe::ScenarioDriver& d) {
+                d.require(d.unitCount() == *unitsBefore + 1, "a unit name spawns one unit at the cursor");
+            });
+            s.endAt(13);
         });
     }
 
