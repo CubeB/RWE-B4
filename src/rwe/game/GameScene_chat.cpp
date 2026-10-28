@@ -200,6 +200,37 @@ namespace rwe
             return;
         }
 
+        if (command.kind == ChatCommand::Kind::NoShake)
+        {
+            // #907: UI-option bit 4. A local preference, not saved, and the
+            // original prints nothing for it.
+            screenShakeEnabled = !screenShakeEnabled;
+            return;
+        }
+
+        if (command.kind == ChatCommand::Kind::Gamma)
+        {
+            // The original sets brightness to the raw integer x 0.1 and does
+            // not clamp (#907, audio/option finding section 2.2). RWE's field
+            // is a percentage where 100 is 1.0, so the command's n maps to
+            // n * 10; the unsigned field floors at zero.
+            gammaSetting = static_cast<unsigned int>(std::max(0, command.number * 10));
+            saveInGameOptions();
+            return;
+        }
+
+        if (command.kind == ChatCommand::Kind::ScrollSpeed)
+        {
+            // The original's unit is pixels per simulation tick (menu 1..65,
+            // default 32); RWE stores a percentage of 1000 world units/s, so
+            // 32 maps to 100. Its saved field is a byte and has no minimum,
+            // so the conversion is clamped only to that byte (#907).
+            const auto percent = command.number * 100 / 32;
+            scrollSpeedSetting = static_cast<unsigned int>(std::clamp(percent, 0, 255));
+            saveInGameOptions();
+            return;
+        }
+
         // Every command built so far is in the ordinary table.
         if ((mask & ChatCommandMaskOrdinary) == 0)
         {
@@ -328,6 +359,9 @@ namespace rwe
             case ChatCommand::Kind::Empty:
             case ChatCommand::Kind::Unknown:
             case ChatCommand::Kind::Now:
+            case ChatCommand::Kind::NoShake:
+            case ChatCommand::Kind::Gamma:
+            case ChatCommand::Kind::ScrollSpeed:
                 break;
         }
     }

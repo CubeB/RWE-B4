@@ -421,7 +421,33 @@ namespace
                 d.require(d.consoleMessageCount() == before, "repeat does nothing once debug is off");
                 d.key(SDLK_ESCAPE);
             });
-            s.endAt(4);
+            s.at(5, [](rwe::ScenarioDriver& d) {
+                // #907's first binding: +NoShake is a local toggle and prints
+                // nothing. The switch is what the scenario can see; the shake
+                // path reads it when a blast lands.
+                d.require(d.screenShakeEnabled(), "shake starts on");
+                d.key(SDLK_RETURN);
+                d.textInput("+noshake");
+                d.key(SDLK_RETURN);
+                d.require(!d.screenShakeEnabled(), "the command turns shake off");
+                d.key(SDLK_RETURN);
+                d.textInput("+NOSHAKE");
+                d.key(SDLK_RETURN);
+                d.require(d.screenShakeEnabled(), "and a second one turns it back on");
+            });
+            s.at(6, [](rwe::ScenarioDriver& d) {
+                // #907: the option setters' units. The original's +Gamma 12 is
+                // 120% brightness; +ScrollSpeed 32 is the base pan speed.
+                d.key(SDLK_RETURN);
+                d.textInput("+gamma 12");
+                d.key(SDLK_RETURN);
+                d.require(d.gammaSetting() == 120, "the console gamma maps to 120 percent");
+                d.key(SDLK_RETURN);
+                d.textInput("+scrollspeed 32");
+                d.key(SDLK_RETURN);
+                d.require(d.scrollSpeedSetting() == 100, "32 pixels a tick maps to the base pan speed");
+            });
+            s.endAt(6);
         });
     }
 

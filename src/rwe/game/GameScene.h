@@ -1232,6 +1232,13 @@ namespace rwe
         ScreenShakeState screenShake;
 
         /**
+         * `+NoShake` (#907): the original's UI-option bit 4, off by default.
+         * Local presentation and not saved; while it is off, blasts add no
+         * shake at all.
+         */
+        bool screenShakeEnabled{true};
+
+        /**
          * How far the shake has the camera pushed at the moment. Held
          * separately so it can be taken back off before the next frame's
          * offset goes on: the original simply adds to the scroll position
