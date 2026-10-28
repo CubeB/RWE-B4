@@ -193,6 +193,10 @@ namespace rwe
         bool antiAliasEnabled() const;
         bool shadowsEnabled() const;
         int shadingMode() const;
+        bool vehicleShadowsEnabled() const;
+
+        /** Whether the interface is in left-click mode (#907, `+IFace 0`). */
+        bool leftClickInterfaceMode() const;
 
         /** Separate edges allow a modifier to stay held over another key. */
         void keyDown(int keyCode);

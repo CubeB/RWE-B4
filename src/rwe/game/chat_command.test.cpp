@@ -203,6 +203,16 @@ namespace rwe
         REQUIRE(parseChatCommand("+Shadow")->kind == Kind::Shadow);
         REQUIRE(parseChatCommand("+Shading")->kind == Kind::Shading);
         REQUIRE(parseChatCommand("+shading 1")->kind == Kind::Shading);
+        REQUIRE(parseChatCommand("+TShadow")->kind == Kind::TShadow);
+    }
+
+    TEST_CASE("the interface command reads its argument", "[chat]")
+    {
+        auto c = parseChatCommand("+IFace 0");
+        REQUIRE(c->kind == Kind::IFace);
+        REQUIRE(c->number == 0);
+        REQUIRE(parseChatCommand("+iface")->number == 0);
+        REQUIRE(parseChatCommand("+iface 1")->number == 1);
     }
 
     TEST_CASE("every other word is unknown, and says what it was", "[chat]")

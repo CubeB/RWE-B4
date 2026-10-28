@@ -294,6 +294,24 @@ namespace rwe
             return;
         }
 
+        if (command.kind == ChatCommand::Kind::TShadow)
+        {
+            // #907 §2.8: visual bit 3, the mobile-unit sub-bit under Shadow.
+            // Not saved in the original, and not here.
+            vehicleShadowsEnabled = !vehicleShadowsEnabled;
+            return;
+        }
+
+        if (command.kind == ChatCommand::Kind::IFace)
+        {
+            // #907 §2.4: 0 selects the left-click interface; the load path
+            // clamps values above one, the command does not. The command is a
+            // session-local override because the config is read-only here; it
+            // is recorded as a divergence and is not persisted.
+            leftClickOverride = command.number == 0;
+            return;
+        }
+
         // Every command built so far is in the ordinary table.
         if ((mask & ChatCommandMaskOrdinary) == 0)
         {
@@ -430,6 +448,8 @@ namespace rwe
             case ChatCommand::Kind::AntiAlias:
             case ChatCommand::Kind::Shadow:
             case ChatCommand::Kind::Shading:
+            case ChatCommand::Kind::TShadow:
+            case ChatCommand::Kind::IFace:
                 break;
         }
     }

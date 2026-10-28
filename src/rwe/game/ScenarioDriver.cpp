@@ -603,6 +603,16 @@ namespace rwe
         return static_cast<int>(scene.shadingMode);
     }
 
+    bool ScenarioDriver::vehicleShadowsEnabled() const
+    {
+        return scene.vehicleShadowsEnabled;
+    }
+
+    bool ScenarioDriver::leftClickInterfaceMode() const
+    {
+        return scene.leftClickMode();
+    }
+
     bool ScenarioDriver::isCameraTracking() const
     {
         return std::holds_alternative<GameScene::CameraControlStateTrackingUnit>(scene.cameraControlState);

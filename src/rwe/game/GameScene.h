@@ -2451,6 +2451,13 @@ namespace rwe
 
         bool leftClickMode() const;
 
+        /**
+         * `+IFace` (#907): a session-local interface override, since the
+         * config object is read-only in a scene. Not persisted; the options
+         * file's own switch still applies when this is empty.
+         */
+        std::optional<bool> leftClickOverride;
+
         void spawnExplosion(const Vector3f& position, const AnimLocation& anim);
 
         void spawnFlash(const Vector3f& position);

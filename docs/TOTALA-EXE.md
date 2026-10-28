@@ -217,7 +217,9 @@ Everything else lives in a subject file. **The numbers never move**, so a
   accepts only the categories RWE has -- 0 building, 1 battle and 4 silence --
   and answers 2/3 with a notice because RWE has no victory or defeat music.
   `Sing` substitutes `sounds/sing.wav`/`honk.wav` in the unit-speech branch, as
-  the original does.
+  the original does. `+IFace` changes a session-local interface mode; RWE's
+  config file has no key for it yet, so unlike the original it does not persist
+  across a restart.
 
 - **Command masks, the developer phrase and the repeat key** (#906, 2026-10-27).
   A typed `+` line now runs under the original's per-mode mask -- campaign 1,

@@ -422,16 +422,23 @@ section 2.8, read against RWE's settings fields.
 - **`+Shading`** toggles the shaded renderer between Off and Buildings-only.
   RWE's menu widens the original's one bit to four stages; the command keeps
   the original's two states rather than inventing a cycle. Saved; visual bit 5.
+- **`+TShadow`** toggles the mobile-unit shadow sub-bit; not saved, as in the
+  original.
+- **`+IFace n`** selects the left-click interface at 0 and right-click
+  otherwise. RWE's switch lives in the config object, which a scene cannot
+  write, so the command sets a session-local override; unlike the original it
+  does not survive a restart (recorded in §88).
 
 All three are silent and local, as in the original. The words whose RWE
-counterpart does not exist are not registered: `TShadow` needs a separate
-feature-shadow pass RWE lacks, `FShadow` a feature-shadow field, `Dither` a
-dithered fog, `Light` a commandable light vector, `Contour` a contour overlay,
-`LOSType` a second LOS algorithm, and `RCache` has no cache to flush.
+counterpart does not exist are not registered: `FShadow` needs a
+feature-shadow field RWE lacks, `Dither` a dithered fog, `Light` a commandable
+light vector, `Contour` a contour overlay, `LOSType` a second LOS algorithm,
+and `RCache` has no cache to flush. `Clock` is deferred until the options file
+can persist it.
 
 ### Executed RWE checks
 
 - The scenario toggles each through the real `GameScene` and reads the field
   back; it passes. Rendering itself is not captured.
-- `[chat]` parses all three, with and without a stray argument. Full suite:
-  **1987 passed, one HOME-path checksum skip, 218571 assertions**.
+- `[chat]` parses all of them, with and without a stray argument. Full suite:
+  **1988 passed, one HOME-path checksum skip, 218580 assertions**.

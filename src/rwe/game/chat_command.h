@@ -62,6 +62,10 @@ namespace rwe
             Shadow,
             /** `+Shading`: toggle the shaded renderer (Off/BuildingsOnly); saved. */
             Shading,
+            /** `+TShadow`: toggle mobile-unit shadows; not saved. */
+            TShadow,
+            /** `+IFace n`: 0 = left-click interface, nonzero = right-click. */
+            IFace,
         };
 
         Kind kind{Kind::Empty};

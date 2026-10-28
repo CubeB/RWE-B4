@@ -210,6 +210,16 @@ namespace rwe
         {
             command.kind = ChatCommand::Kind::Shading;
         }
+        else if (word == "tshadow")
+        {
+            command.kind = ChatCommand::Kind::TShadow;
+        }
+        else if (word == "iface")
+        {
+            // #907 §2.4: argument 1, absent 0; 0 is the left-click interface.
+            command.kind = ChatCommand::Kind::IFace;
+            command.number = chatAtoi(argument(1));
+        }
         else if (word == "give")
         {
             // player amount metal|energy. The resource is the one argument
