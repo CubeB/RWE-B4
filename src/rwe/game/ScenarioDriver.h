@@ -198,6 +198,19 @@ namespace rwe
         /** Whether the interface is in left-click mode (#907, `+IFace 0`). */
         bool leftClickInterfaceMode() const;
 
+        /** A player's stockpiles, for the replicated stock commands (#910/#912). */
+        float playerMetal(int playerIndex) const;
+        float playerEnergy(int playerIndex) const;
+
+        /** The F9 network overlay state (#911, `+BPS`). */
+        bool networkOverlayVisible() const;
+
+        /** Whether incoming chat lines are drawn (#907, `+ScreenChat`). */
+        bool screenChatEnabled() const;
+
+        /** Whether the game clock is drawn (#907, `+Clock`). */
+        bool clockEnabled() const;
+
         /** Separate edges allow a modifier to stay held over another key. */
         void keyDown(int keyCode);
         void keyUp(int keyCode);

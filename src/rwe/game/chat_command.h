@@ -66,6 +66,18 @@ namespace rwe
             TShadow,
             /** `+IFace n`: 0 = left-click interface, nonzero = right-click. */
             IFace,
+            /** `+NoMetal [player [amount]]`: assign a stockpile outright. */
+            NoMetal,
+            /** `+NoEnergy [player [amount]]`: assign a stockpile outright. */
+            NoEnergy,
+            /** `+ATM`: +1000 metal and energy to the viewed (here local) player. */
+            Atm,
+            /** `+BPS`: toggle RWE's network-stats overlay (F9). */
+            Bps,
+            /** `+ScreenChat`: toggle on-screen chat lines. */
+            ScreenChat,
+            /** `+Clock`: toggle the game-time display; session-local. */
+            Clock,
         };
 
         Kind kind{Kind::Empty};
@@ -86,6 +98,9 @@ namespace rwe
 
         /** Give: the first argument as typed (a player's number or name). */
         std::string playerToken;
+
+        /** NoMetal/NoEnergy: the zero-based slot argument, or -1 for the local player. */
+        int playerNumber{-1};
 
         /** Give: metal if true, energy if false. */
         bool giveMetal{true};

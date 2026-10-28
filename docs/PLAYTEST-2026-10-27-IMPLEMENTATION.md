@@ -442,3 +442,53 @@ can persist it.
   back; it passes. Rendering itself is not captured.
 - `[chat]` parses all of them, with and without a stray argument. Full suite:
   **1988 passed, one HOME-path checksum skip, 218580 assertions**.
+
+## #910/#912: the replicated stock commands and `+ATM`
+
+Authority: `BT-GAME-CONSOLE-COMMANDS-PARITY.md` sections 5 and 6. The original
+changes its own local records; RWE's stockpiles are hashed, so these commands
+travel as `PlayerShareCommand`s that every peer applies.
+
+- **`+NoMetal`/`+NoEnergy`**: the lone token targets the local player with
+  amount zero; any extra token is the player's zero-based slot and a second is
+  the amount, exactly the original's grammar. The new `SetMetalStock`/
+  `SetEnergyStock` kinds assign the stock outright, with no capacity clamp (the
+  original has none) and only a finite-value guard.
+- **`+ATM`**: a cheat-table command; it is refused silently unless the caller's
+  mask carries the cheat bit, as the original does for a denied command. The
+  grant is `AtmGrant`: +1000 metal and +1000 energy to the local player, which
+  is RWE's only viewed player.
+- Both are serialised with new proto enum values (5-7), so the lockstep stream,
+  replay and arena paths carry them like any other share command.
+
+### Executed RWE checks
+
+- Scenario: `+noenergy 0 100`, `+nometal 0 5000` and `+atm` read back 1100
+  energy and 6000 metal on the next tick; the bare forms then empty both. It
+  passes through the real command stream, not the parser alone.
+- Full suite: **1989 passed, one HOME-path checksum skip, 218588 assertions**.
+
+## #911: `+BPS`
+
+The original toggles its on-screen BPS counter. RWE's counterpart is the F9
+network overlay, so `+BPS` toggles `networkOverlayVisible`. That exposed an
+existing latent fault: the overlay drew ImGui outside a frame in a headless
+scenario and hung there; it now returns early when the scene manager is
+headless, as it already did for the arena.
+
+Executed: the scenario toggles the overlay and reads the switch back; all
+scenarios pass.
+
+## #907 continued: `+ScreenChat` and `+Clock`
+
+- **`+ScreenChat`** suppresses incoming chat lines while they still arrive and
+  are logged; system console lines still show. The original's bit hides chat
+  text; RWE's console is shared, so this is the closest honest effect.
+- **`+Clock`** draws the original's bottom-left string, `Game Time :
+  HH:MM:SS`, at x 130 with the baseline landing 34 rows above the bottom of the
+  world view, from the scene tick counter at 30 ticks a second. Nothing is
+  drawn while it is off.
+
+Both are session-local because RWE's options file has no keys for them yet;
+the original saves them, and that persistence gap is recorded in §88. The
+scenario toggles both and reads the switches back.

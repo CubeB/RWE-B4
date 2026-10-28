@@ -577,6 +577,7 @@ namespace rwe
         // strip rendered by renderSpaceTabs below.
         // TOTALA-EXE-KEYBOARD.md:120-121, BT-GAME-GAME-STATE-PARITY.md:136-147.
 
+        renderGameClock();
         renderSpaceTabs();
 
         renderConsole();
@@ -611,6 +612,26 @@ namespace rwe
                 chromeUiRenderService.drawTextCenteredX(centerX, centerY, "PAUSED", *guiFont);
             }
         }
+    }
+
+    void GameScene::renderGameClock()
+    {
+        // +Clock (#907, BT-GAME-AUDIO-OPTION-COMMANDS-FINDINGS 2.1): the game
+        // clock at x 130, one font height and 34 rows above the bottom of the
+        // world view, formatted "Game Time : HH:MM:SS" from the scene's tick
+        // counter at 30 ticks a second. RWE's drawer takes the baseline, so
+        // the pen plus the "I" height lands at screenHeight - 34.
+        if (!clockEnabled || guiFont == nullptr)
+        {
+            return;
+        }
+
+        const auto screenHeight = static_cast<float>(sceneContext.viewport->height()) / static_cast<float>(effectiveUiScale());
+        const auto totalSeconds = simulation.gameTime.value / SimTicksPerSecond;
+        char timeText[64];
+        std::snprintf(timeText, sizeof(timeText), "Game Time : %02u:%02u:%02u",
+            totalSeconds / 3600u, (totalSeconds / 60u) % 60u, totalSeconds % 60u);
+        chromeUiRenderService.drawText(130.0f, std::round(screenHeight - 34.0f), timeText, *guiFont);
     }
 
     void GameScene::renderSpaceTabs()

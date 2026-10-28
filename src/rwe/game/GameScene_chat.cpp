@@ -312,6 +312,73 @@ namespace rwe
             return;
         }
 
+        if (command.kind == ChatCommand::Kind::NoMetal || command.kind == ChatCommand::Kind::NoEnergy)
+        {
+            // #910: the lone token targets the local player with amount zero;
+            // otherwise argument one is the zero-based slot and argument two
+            // the amount. Replicated, because stockpiles are hashed.
+            auto target = localPlayerId;
+            if (command.playerNumber >= 0)
+            {
+                if (static_cast<Index>(command.playerNumber) >= getSize(simulation.players))
+                {
+                    printConsole(command.word + ": no such player.", feedbackColor);
+                    return;
+                }
+                target = PlayerId(static_cast<unsigned int>(command.playerNumber));
+            }
+            PlayerShareCommand stock;
+            stock.kind = command.kind == ChatCommand::Kind::NoMetal
+                ? PlayerShareCommand::Kind::SetMetalStock
+                : PlayerShareCommand::Kind::SetEnergyStock;
+            stock.target = target;
+            stock.amount = static_cast<float>(command.number);
+            localPlayerCommandBuffer.push_back(stock);
+            return;
+        }
+
+        if (command.kind == ChatCommand::Kind::Atm)
+        {
+            // #912: a cheat-table command. A base-mask caller never reaches
+            // it and RWE stays silent, as the original does for a denied
+            // command. The grant is replicated, so it is lockstep-safe.
+            if ((mask & ChatCommandMaskCheat) == 0)
+            {
+                return;
+            }
+            PlayerShareCommand atm;
+            atm.kind = PlayerShareCommand::Kind::AtmGrant;
+            atm.target = localPlayerId;
+            localPlayerCommandBuffer.push_back(atm);
+            return;
+        }
+
+        if (command.kind == ChatCommand::Kind::Bps)
+        {
+            // #911: the original toggles its BPS counter. RWE's counterpart
+            // is the F9 network overlay, which carries the same rates.
+            networkOverlayVisible = !networkOverlayVisible;
+            return;
+        }
+
+        if (command.kind == ChatCommand::Kind::ScreenChat)
+        {
+            // #907 §2.5: XOR bit 0 of the display setting. RWE's console
+            // always draws chat; this suppresses chat lines (system messages
+            // still show). Session-local, recorded in section 88.
+            screenChatEnabled = !screenChatEnabled;
+            return;
+        }
+
+        if (command.kind == ChatCommand::Kind::Clock)
+        {
+            // #907 §2.1: UI-option bit 6 draws "Game Time : HH:MM:SS" at the
+            // bottom left. The original saves it; RWE's options file has no
+            // key yet, so this is session-local (section 88).
+            clockEnabled = !clockEnabled;
+            return;
+        }
+
         // Every command built so far is in the ordinary table.
         if ((mask & ChatCommandMaskOrdinary) == 0)
         {
@@ -450,6 +517,12 @@ namespace rwe
             case ChatCommand::Kind::Shading:
             case ChatCommand::Kind::TShadow:
             case ChatCommand::Kind::IFace:
+            case ChatCommand::Kind::NoMetal:
+            case ChatCommand::Kind::NoEnergy:
+            case ChatCommand::Kind::Atm:
+            case ChatCommand::Kind::Bps:
+            case ChatCommand::Kind::ScreenChat:
+            case ChatCommand::Kind::Clock:
                 break;
         }
     }
@@ -499,6 +572,14 @@ namespace rwe
 
     void GameScene::printChatLine(PlayerId sender, const std::string& text, ChatLabel label)
     {
+        // +ScreenChat (#907): the original's display bit hides the chat text
+        // while the lines still arrive and are logged.
+        if (!screenChatEnabled)
+        {
+            LOG_INFO << "Chat from player " << sender.value << ": " << text;
+            return;
+        }
+
         // In the speaker's own colour, into the same console the game's own
         // announcements use -- so it ages out after its five seconds and F12
         // clears it, both of which the original's message list does too.

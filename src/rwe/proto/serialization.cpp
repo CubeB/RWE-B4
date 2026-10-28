@@ -300,6 +300,15 @@ namespace rwe
                 case PlayerShareCommand::Kind::Give:
                     out.set_kind(proto::PlayerShareCommand::Give);
                     break;
+                case PlayerShareCommand::Kind::SetMetalStock:
+                    out.set_kind(proto::PlayerShareCommand::SetMetalStock);
+                    break;
+                case PlayerShareCommand::Kind::SetEnergyStock:
+                    out.set_kind(proto::PlayerShareCommand::SetEnergyStock);
+                    break;
+                case PlayerShareCommand::Kind::AtmGrant:
+                    out.set_kind(proto::PlayerShareCommand::AtmGrant);
+                    break;
             }
             out.set_amount(c.amount);
             if (c.target)
@@ -429,6 +438,15 @@ namespace rwe
                     break;
                 case proto::PlayerShareCommand::Give:
                     out.kind = PlayerShareCommand::Kind::Give;
+                    break;
+                case proto::PlayerShareCommand::SetMetalStock:
+                    out.kind = PlayerShareCommand::Kind::SetMetalStock;
+                    break;
+                case proto::PlayerShareCommand::SetEnergyStock:
+                    out.kind = PlayerShareCommand::Kind::SetEnergyStock;
+                    break;
+                case proto::PlayerShareCommand::AtmGrant:
+                    out.kind = PlayerShareCommand::Kind::AtmGrant;
                     break;
                 default:
                     throw std::runtime_error("Unknown share command kind");

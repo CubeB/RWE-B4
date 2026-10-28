@@ -271,6 +271,10 @@ message PlayerShareCommand
         SetMetalReserve = 2;
         SetEnergyReserve = 3;
         Give = 4;
+        // The stock commands and ATM carry `target` and `amount` like Give.
+        SetMetalStock = 5;
+        SetEnergyStock = 6;
+        AtmGrant = 7;
     }
 
     required Kind kind = 1;

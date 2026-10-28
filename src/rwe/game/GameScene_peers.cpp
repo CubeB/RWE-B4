@@ -394,7 +394,10 @@ namespace rwe
     void GameScene::renderNetworkOverlay()
     {
         // An arena run has no ImGui frame open; see renderReplayWindow.
-        if (!networkOverlayVisible || gameParameters.aiArenaSeconds)
+        // A headless scenario has none either, so the F9 overlay (or a
+        // +BPS that toggles it) must not try to draw there.
+        if (!networkOverlayVisible || gameParameters.aiArenaSeconds
+            || (sceneContext.sceneManager != nullptr && sceneContext.sceneManager->isHeadless()))
         {
             return;
         }

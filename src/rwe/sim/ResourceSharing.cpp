@@ -226,6 +226,51 @@ namespace rwe
                 transfer(player, sim.players[target.value], resource, amount);
                 return true;
             }
+
+            case PlayerShareCommand::Kind::SetMetalStock:
+            case PlayerShareCommand::Kind::SetEnergyStock:
+            {
+                // +NoMetal/+NoEnergy: the original assigns the stockpile
+                // outright, with no capacity or sign check, to the named
+                // player (argument one, zero-based) or the local one when it
+                // is absent. The command is replicated so every peer agrees
+                // (#910, BT-GAME-CONSOLE-COMMANDS-PARITY section 5).
+                auto target = command.target.value_or(issuer);
+                if (!isPlayerOf(sim, target) || !std::isfinite(command.amount))
+                {
+                    return false;
+                }
+                auto& stock = sim.players[target.value];
+                if (command.kind == PlayerShareCommand::Kind::SetMetalStock)
+                {
+                    stock.metal = Metal(command.amount);
+                }
+                else
+                {
+                    stock.energy = Energy(command.amount);
+                }
+                return true;
+            }
+
+            case PlayerShareCommand::Kind::AtmGrant:
+            {
+                // +ATM: +1000 metal and +1000 energy to the viewed player.
+                // RWE has no separate viewed player, so the recipient is the
+                // issuer. No storage cap, as in the original (#912).
+                if (player.status != GamePlayerStatus::Alive)
+                {
+                    return false;
+                }
+                auto target = command.target.value_or(issuer);
+                if (!isPlayerOf(sim, target))
+                {
+                    return false;
+                }
+                auto& recipient = sim.players[target.value];
+                recipient.metal = Metal(recipient.metal.value + 1000.0f);
+                recipient.energy = Energy(recipient.energy.value + 1000.0f);
+                return true;
+            }
         }
 
         return false;

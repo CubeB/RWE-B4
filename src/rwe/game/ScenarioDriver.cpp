@@ -613,6 +613,31 @@ namespace rwe
         return scene.leftClickMode();
     }
 
+    float ScenarioDriver::playerMetal(int playerIndex) const
+    {
+        return scene.simulation.players.at(static_cast<std::size_t>(playerIndex)).metal.value;
+    }
+
+    float ScenarioDriver::playerEnergy(int playerIndex) const
+    {
+        return scene.simulation.players.at(static_cast<std::size_t>(playerIndex)).energy.value;
+    }
+
+    bool ScenarioDriver::networkOverlayVisible() const
+    {
+        return scene.networkOverlayVisible;
+    }
+
+    bool ScenarioDriver::screenChatEnabled() const
+    {
+        return scene.screenChatEnabled;
+    }
+
+    bool ScenarioDriver::clockEnabled() const
+    {
+        return scene.clockEnabled;
+    }
+
     bool ScenarioDriver::isCameraTracking() const
     {
         return std::holds_alternative<GameScene::CameraControlStateTrackingUnit>(scene.cameraControlState);
