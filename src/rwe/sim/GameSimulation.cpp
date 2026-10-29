@@ -1678,6 +1678,15 @@ namespace rwe
 
     bool projectileCollides(const GameSimulation& sim, const Projectile& projectile, const OccupiedCell& cellValue, bool unitsOnly, std::optional<UnitId>& struckUnit)
     {
+        // Community Patch (TADR, #934): a shot passes through units whose
+        // owner the firer currently treats as an ally, as it already passes
+        // through its own. Splash damage and interception keep their rules;
+        // this is collision only.
+        auto passesThrough = [&](const UnitState& unit) {
+            return unit.isOwnedBy(projectile.owner)
+                || (sim.communityPatchMode && sim.arePlayersAllied(projectile.owner, unit.owner));
+        };
+
         if (cellValue.mobileUnitId)
         {
             const auto& unit = sim.getUnitState(*cellValue.mobileUnitId);
@@ -1686,7 +1695,7 @@ namespace rwe
             // end the test. The building and feature slots of the same cell
             // are still asked, so a round fired over friendly ground units
             // still strikes the building or wreck beneath them.
-            if (!unit.isOwnedBy(projectile.owner))
+            if (!passesThrough(unit))
             {
                 const auto& unitDefinition = sim.unitDefinitions.at(unit.unitType);
                 const auto& modelDefinition = sim.unitModelDefinitions.at(unitDefinition.objectName);
@@ -1709,7 +1718,7 @@ namespace rwe
         {
             const auto& unit = sim.getUnitState(cellValue.buildingInfo->unit);
 
-            if (unit.isOwnedBy(projectile.owner))
+            if (passesThrough(unit))
             {
                 return false;
             }
@@ -1752,7 +1761,9 @@ namespace rwe
     {
         const auto& unit = sim.getUnitState(unitId);
 
-        if (unit.isOwnedBy(projectile.owner))
+        // Community Patch (TADR, #934): allied units are passed through too.
+        if (unit.isOwnedBy(projectile.owner)
+            || (sim.communityPatchMode && sim.arePlayersAllied(projectile.owner, unit.owner)))
         {
             return false;
         }
