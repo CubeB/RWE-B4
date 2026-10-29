@@ -115,6 +115,42 @@ namespace rwe
         }
     }
 
+    TEST_CASE("the Community Patch passes a shot through allies", "[projectilecell][communitypatch]")
+    {
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        auto attacker = addPlayer(sim, "attacker");
+        auto victim = addPlayer(sim, "victim");
+        registerModel(sim);
+        defineSlug(sim);
+        sim.players[attacker.value].teamId = 7;
+        sim.players[victim.value].teamId = 7;
+
+        auto at = SimVector(200_ss, 50_ss, 200_ss);
+        auto unitId = addMobileAt(sim, victim, at, script);
+
+        SECTION("off, an ally is hit like anybody else")
+        {
+            REQUIRE(fireSlugDetonates(sim, attacker, SimVector(at.x, 50_ss, at.z)));
+            REQUIRE(sim.getUnitState(unitId).hitPoints < 1000u);
+        }
+
+        SECTION("on, an allied unit is passed through")
+        {
+            sim.communityPatchMode = true;
+            REQUIRE_FALSE(fireSlugDetonates(sim, attacker, SimVector(at.x, 50_ss, at.z)));
+            REQUIRE(sim.getUnitState(unitId).hitPoints == 1000u);
+        }
+
+        SECTION("on, an enemy is still hit")
+        {
+            sim.communityPatchMode = true;
+            sim.players[victim.value].teamId = std::nullopt;
+            REQUIRE(fireSlugDetonates(sim, attacker, SimVector(at.x, 50_ss, at.z)));
+            REQUIRE(sim.getUnitState(unitId).hitPoints < 1000u);
+        }
+    }
+
     TEST_CASE("a round below a mobile unit's origin but inside its cell still strikes it (BT-253)", "[projectilecell][bt253]")
     {
         auto script = makeEmptyCobScript({"base"});
