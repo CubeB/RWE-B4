@@ -67,8 +67,9 @@ export interface State {
   modFingerprints?: ModFingerprint[];
   videoModes?: VideoMode[];
   activeMods: string[];
-  selectedGameId?: number;
-  currentGame?: CurrentGameState;
+  /** The Community Patch ruleset (issue #934) for single-player launches. */
+  communityPatch: boolean;
+  selectedGameId?: number;  currentGame?: CurrentGameState;
   currentScreen: AppScreen;
   isRweRunning: boolean;
   wizard?: WizardState;

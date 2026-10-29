@@ -75,10 +75,6 @@ body {
   margin-bottom: 16px;
 }
 .launch-hero {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 245px;
   padding: 0 4px 24px;
 }
 .launcher-eyebrow {
@@ -91,13 +87,8 @@ body {
   font-size: clamp(32px, 4.3vw, 48px);
   line-height: 1.08;
   letter-spacing: -1.5px;
-  margin: 15px 0;
+  margin: 8px 0 20px;
   font-weight: 700;
-}
-.launch-hero p {
-  color: #a9bbc8;
-  font-size: 14px;
-  margin: 0 0 24px;
 }
 .launcher-play-actions {
   display: flex;
@@ -110,20 +101,13 @@ body {
   text-transform: none;
   padding: 12px 26px;
 }
-.launcher-play-note {
-  display: block;
-  margin-top: 12px;
-  font-size: 11px;
-  color: #8299aa;
+.launcher-community {
+  display: flex;
+  margin-top: 10px;
 }
-.launcher-emblem {
-  padding: 5px 30px 0 20px;
-}
-.launcher-emblem img {
-  width: 180px;
-  height: 180px;
-  object-fit: contain;
-  filter: drop-shadow(0 16px 30px #0008);
+.launcher-community .MuiFormControlLabel-label {
+  font-size: 13px;
+  color: #a9bbc8;
 }
 .launcher-cards {
   display: grid;

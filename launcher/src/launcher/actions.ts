@@ -88,6 +88,18 @@ export function changeSinglePlayerMods(
   };
 }
 
+export interface SetCommunityPatchAction {
+  type: "SET_COMMUNITY_PATCH";
+  enabled: boolean;
+}
+
+export function setCommunityPatch(enabled: boolean): SetCommunityPatchAction {
+  return {
+    type: "SET_COMMUNITY_PATCH",
+    enabled,
+  };
+}
+
 export interface LaunchRweAction {
   type: "LAUNCH_RWE";
 }
@@ -432,7 +444,9 @@ export type LauncherAction =
       type: "RECEIVE_LAUNCHER_PREFERENCES";
       playerName: string;
       activeMods: string[];
+      communityPatch: boolean;
     }
+  | { type: "SET_COMMUNITY_PATCH"; enabled: boolean }
   | { type: "SET_PLAYER_NAME"; playerName: string }
   | { type: "REFRESH_INSTALLED_MODS" }
   | { type: "LAUNCHER_ERROR"; message?: string };
@@ -444,6 +458,7 @@ export type AppAction =
   | HostGameAction
   | HostGameFormCancelAction
   | HostGameFormConfirmAction
+  | SetCommunityPatchAction
   | LaunchRweAction
   | LaunchRweEndAction
   | SendChatMessageAction

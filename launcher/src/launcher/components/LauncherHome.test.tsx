@@ -15,6 +15,8 @@ function home(overrides: Partial<LauncherHomeProps> = {}) {
       installedMods={["ta"]}
       launchEnabled
       running={false}
+      communityPatch={false}
+      onCommunityPatchChange={jest.fn()}
       onLaunch={jest.fn()}
       onSaveName={jest.fn()}
       onManageMods={jest.fn()}
@@ -36,7 +38,9 @@ it("allows offline play with imported data and the saved profile", () => {
   expect(markup).toContain("Total Annihilation data");
   expect(markup).toContain("Mods and maps");
   expect(markup).toContain("Manage mods and maps");
-  expect(markup).toContain("Choose your mods and maps");
+  expect(markup).toContain("Community Patch");
+  expect(markup).not.toContain("b4-icon.png");
+  expect(markup).not.toContain("Your next battle");
 });
 
 it("describes the empty mod and map library", () => {

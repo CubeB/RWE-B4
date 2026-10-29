@@ -4,11 +4,13 @@ import path from "path";
 export interface LauncherPreferences {
   playerName: string;
   activeMods: string[];
+  communityPatch: boolean;
 }
 
 export const defaultPreferences: LauncherPreferences = {
   playerName: "Player",
   activeMods: ["ta"],
+  communityPatch: false,
 };
 
 /** Names fit both the online lobby and the native LAN name field. */
@@ -50,6 +52,7 @@ export function normalizePreferences(value: unknown): LauncherPreferences {
           ),
         ]
       : [...defaultPreferences.activeMods],
+    communityPatch: data.communityPatch === true,
   };
 }
 

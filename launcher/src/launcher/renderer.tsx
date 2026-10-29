@@ -90,6 +90,7 @@ const persistPreferences: Middleware<unknown, State> =
     if (
       [
         "SET_PLAYER_NAME",
+        "SET_COMMUNITY_PATCH",
         "CHANGE_SINGLE_PLAYER_MODS",
         "HOST_GAME_FORM_CONFIRM",
         "JOIN_SELECTED_GAME_CONFIRM",
@@ -100,6 +101,7 @@ const persistPreferences: Middleware<unknown, State> =
         savePreferences(preferencesPath, {
           playerName: state.playerName || "Player",
           activeMods: state.activeMods,
+          communityPatch: state.communityPatch,
         });
         api.dispatch({ type: "LAUNCHER_ERROR", message: undefined });
       } catch (error) {

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Alert, Button, Chip, TextField } from "@mui/material";
+import { Alert, Button, Chip, FormControlLabel, Switch, TextField } from "@mui/material";
 import PlayArrowRounded from "@mui/icons-material/PlayArrowRounded";
 import FolderOpenRounded from "@mui/icons-material/FolderOpenRounded";
 import ExtensionRounded from "@mui/icons-material/ExtensionRounded";
@@ -14,6 +14,8 @@ export interface LauncherHomeProps {
   installedMods: string[];
   launchEnabled: boolean;
   running: boolean;
+  communityPatch: boolean;
+  onCommunityPatchChange: (enabled: boolean) => void;
   onLaunch: () => void;
   onSaveName: (name: string) => void;
   onManageMods: () => void;
@@ -67,46 +69,42 @@ export function LauncherHome(props: LauncherHomeProps) {
         </Alert>
       )}
       <section className="launch-hero">
-        <div>
-          <span className="launcher-eyebrow">ROBOT WAR ENGINE</span>
-          <h1>
-            Your next battle
-            <br />
-            starts here.
-          </h1>
-          <p>
-            Choose your mods and maps, then head into a campaign or skirmish.
-          </p>
-          <div className="launcher-play-actions">
-            <Button
-              variant="contained"
-              size="large"
-              startIcon={<PlayArrowRounded />}
-              disabled={!props.launchEnabled || importing || !validName}
-              onClick={() => {
-                if (validName !== props.playerName) {
-                  props.onSaveName(validName);
-                }
-                props.onLaunch();
-              }}
-            >
-              {props.running ? "Game running" : "Play RWE"}
-            </Button>
-            <Button onClick={props.onSettings}>Game settings</Button>
-          </div>
-          <span className="launcher-play-note">
-            Single-player works without an internet connection.
-          </span>
+        <span className="launcher-eyebrow">ROBOT WAR ENGINE</span>
+        <h1>Play</h1>
+        <div className="launcher-play-actions">
+          <Button
+            variant="contained"
+            size="large"
+            startIcon={<PlayArrowRounded />}
+            disabled={!props.launchEnabled || importing || !validName}
+            onClick={() => {
+              if (validName !== props.playerName) {
+                props.onSaveName(validName);
+              }
+              props.onLaunch();
+            }}
+          >
+            {props.running ? "Game running" : "Play RWE"}
+          </Button>
+          <Button onClick={props.onSettings}>Game settings</Button>
         </div>
-        <div className="launcher-emblem" aria-hidden="true">
-          <img src="b4-icon.png" alt="" />
-        </div>
+        <FormControlLabel
+          className="launcher-community"
+          control={
+            <Switch
+              size="small"
+              checked={props.communityPatch}
+              onChange={event =>
+                props.onCommunityPatchChange(event.target.checked)
+              }
+            />
+          }
+          label="Community Patch"
+        />
       </section>
       <div className="launcher-cards">
         <section className="launcher-card">
-          <span className="launcher-eyebrow">PLAYER PROFILE</span>
-          <h2>Make a name for yourself.</h2>
-          <p>Your name in skirmishes and multiplayer games.</p>
+          <h2>Player name</h2>
           <form
             onSubmit={event => {
               event.preventDefault();
@@ -117,39 +115,27 @@ export function LauncherHome(props: LauncherHomeProps) {
             }}
           >
             <TextField
-              label="Player name"
+              label="Name"
               value={name}
               fullWidth
               size="small"
               onChange={event => setName(event.target.value)}
               error={!validName}
-              helperText={
-                !validName
-                  ? "Enter a player name."
-                  : validName !== name.trim()
-                    ? `Will save as ${validName}`
-                    : "Saved on this computer."
-              }
+              helperText={!validName ? "Enter a name." : undefined}
             />
             <Button
               type="submit"
               variant="outlined"
               disabled={!validName || validName === props.playerName}
             >
-              Save name
+              Save
             </Button>
           </form>
         </section>
         <section className="launcher-card">
-          <span className="launcher-eyebrow">MODS AND MAPS</span>
           <h2>
             <ExtensionRounded /> Mods and maps
           </h2>
-          <p>
-            {props.activeMods.length
-              ? "Active in the order shown. Higher entries take priority."
-              : "Using the default game data."}
-          </p>
           <div className="launcher-mods">
             {props.activeMods.map(mod => (
               <Chip
@@ -173,17 +159,9 @@ export function LauncherHome(props: LauncherHomeProps) {
             </Button>
             <Button onClick={props.onRefreshMods}>Refresh</Button>
           </div>
-          <small>
-            Put each mod’s or map’s archives in its own folder. A manifest is
-            optional.
-          </small>
         </section>
       </div>
       <footer className="launcher-footer">
-        <span>
-          First time here? Import files from your own Total Annihilation
-          installation.
-        </span>
         <Button onClick={importData} disabled={importing || props.running}>
           {importing ? "Importing…" : "Import game data"}
         </Button>

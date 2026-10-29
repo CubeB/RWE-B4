@@ -39,6 +39,13 @@ describe("serializeRweArgs", () => {
     ]);
   });
 
+  it("passes the Community Patch ruleset to the engine when asked", () => {
+    expect(serializeRweArgs({ communityPatch: true })).toEqual([
+      "--community-patch",
+    ]);
+    expect(serializeRweArgs({ communityPatch: false })).toEqual([]);
+  });
+
   it("passes a detected builder GUI root without changing the general GUI root", () => {
     expect(serializeRweArgs({
       dataPaths: ["/TAESC", "/base"],
