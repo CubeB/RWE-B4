@@ -39,6 +39,7 @@ it("allows offline play with imported data and the saved profile", () => {
   expect(markup).toContain("Mods and maps");
   expect(markup).toContain("Manage mods and maps");
   expect(markup).toContain("Community Patch");
+  expect(markup).toContain("Check for updates");
   expect(markup).not.toContain("b4-icon.png");
   expect(markup).not.toContain("Your next battle");
 });

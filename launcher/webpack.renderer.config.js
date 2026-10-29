@@ -2,6 +2,22 @@ const path = require("path");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
 const ReactRefreshWebpackPlugin = require("@pmmmwh/react-refresh-webpack-plugin");
 const webpack = require("webpack");
+const { execFileSync } = require("child_process");
+
+// What this launcher was built from: the release tag when the build is made
+// from one, otherwise the commit. The updater compares it with GitHub's
+// releases. A build without git (a tarball) falls back to package.json.
+function launcherVersion() {
+  try {
+    return execFileSync("git", ["describe", "--tags", "--always", "--dirty"], {
+      cwd: __dirname,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return require("./package.json").version;
+  }
+}
 
 // react-hot-loader is gone. It worked by patching react-dom through an alias,
 // which React 18's createRoot does not tolerate; React Refresh is the
@@ -69,6 +85,9 @@ module.exports = {
       ],
     }),
     new webpack.IgnorePlugin({ resourceRegExp: /^uws$/ }),
+    new webpack.DefinePlugin({
+      __RWE_LAUNCHER_VERSION__: JSON.stringify(launcherVersion()),
+    }),
     ...(isDev ? [new ReactRefreshWebpackPlugin()] : []),
   ],
   optimization: {

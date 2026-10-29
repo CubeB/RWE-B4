@@ -57,7 +57,11 @@ describe("launcher profile and mod selection", () => {
         playerName: "\n",
         activeMods: ["ta", 1, "ta", ""],
       })
-    ).toEqual({ playerName: "Player", activeMods: ["ta"], communityPatch: false });
+    ).toEqual({
+      playerName: "Player",
+      activeMods: ["ta"],
+      communityPatch: false,
+    });
   });
 
   it("discovers imported base data and ordinary mod folders with or without a manifest", async () => {

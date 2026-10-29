@@ -1,5 +1,12 @@
 import * as React from "react";
-import { Alert, Button, Chip, FormControlLabel, Switch, TextField } from "@mui/material";
+import {
+  Alert,
+  Button,
+  Chip,
+  FormControlLabel,
+  Switch,
+  TextField,
+} from "@mui/material";
 import PlayArrowRounded from "@mui/icons-material/PlayArrowRounded";
 import FolderOpenRounded from "@mui/icons-material/FolderOpenRounded";
 import ExtensionRounded from "@mui/icons-material/ExtensionRounded";
@@ -7,6 +14,11 @@ import { ipcRenderer, shell } from "electron";
 import fs from "fs";
 import { getRweModsPath } from "../util";
 import { normalizePlayerName } from "../preferences";
+import {
+  UpdateCheckResult,
+  currentLauncherVersion,
+  evaluateUpdates,
+} from "../updater";
 
 export interface LauncherHomeProps {
   playerName: string;
@@ -28,6 +40,9 @@ export function LauncherHome(props: LauncherHomeProps) {
   const [importing, setImporting] = React.useState(false);
   const [notice, setNotice] = React.useState<string>();
   const [error, setError] = React.useState<string>();
+  const [checkingUpdates, setCheckingUpdates] = React.useState(false);
+  const [updateResult, setUpdateResult] = React.useState<UpdateCheckResult>();
+  const [updateError, setUpdateError] = React.useState<string>();
   React.useEffect(() => setName(props.playerName), [props.playerName]);
   const validName = normalizePlayerName(name);
   const importData = async () => {
@@ -54,6 +69,20 @@ export function LauncherHome(props: LauncherHomeProps) {
       }
     } catch (failure) {
       setError(String(failure));
+    }
+  };
+  const checkForUpdates = async () => {
+    setCheckingUpdates(true);
+    setUpdateError(undefined);
+    try {
+      const releases = await ipcRenderer.invoke("rwe:check-updates");
+      setUpdateResult(
+        evaluateUpdates(releases, currentLauncherVersion(), process.platform)
+      );
+    } catch {
+      setUpdateError("Could not check for updates.");
+    } finally {
+      setCheckingUpdates(false);
     }
   };
   return (
@@ -101,6 +130,60 @@ export function LauncherHome(props: LauncherHomeProps) {
           }
           label="Community Patch"
         />
+        <div className="launcher-updates">
+          <Button
+            size="small"
+            onClick={checkForUpdates}
+            disabled={checkingUpdates}
+          >
+            {checkingUpdates ? "Checking…" : "Check for updates"}
+          </Button>
+          {updateError && (
+            <span className="launcher-update-status">{updateError}</span>
+          )}
+          {!updateError && updateResult && (
+            <span className="launcher-update-status">
+              {updateResult.updateAvailable && updateResult.latest ? (
+                <>
+                  Update {updateResult.latest.tag} available.{" "}
+                  {updateResult.asset ? (
+                    <Button
+                      size="small"
+                      onClick={() =>
+                        shell.openExternal(updateResult.asset!.url)
+                      }
+                    >
+                      Download
+                    </Button>
+                  ) : (
+                    <Button
+                      size="small"
+                      onClick={() =>
+                        shell.openExternal(updateResult.latest!.url)
+                      }
+                    >
+                      Open release
+                    </Button>
+                  )}
+                </>
+              ) : updateResult.currentIsComparable ? (
+                "Up to date."
+              ) : updateResult.latest ? (
+                <>
+                  Latest release {updateResult.latest.tag}.{" "}
+                  <Button
+                    size="small"
+                    onClick={() => shell.openExternal(updateResult.latest!.url)}
+                  >
+                    Open release
+                  </Button>
+                </>
+              ) : (
+                "No releases found."
+              )}
+            </span>
+          )}
+        </div>
       </section>
       <div className="launcher-cards">
         <section className="launcher-card">

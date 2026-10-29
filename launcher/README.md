@@ -20,3 +20,10 @@ the engine's `rwe.cfg`; changing video settings preserves unrelated native
 settings. The saved profile is passed to a launched engine using
 `RWE_PLAYER_NAME`, and the native menu uses it for the local player and default
 LAN nickname.
+
+The Play screen's **Check for updates** queries this repository's GitHub
+releases. The build's own version is injected at build time from
+`git describe`; when the newest release is newer, the launcher offers the
+platform's asset (the Windows installer or the Linux AppImage) through the
+system browser. It does not replace files in place: there is no signed update
+feed, and the release is a per-platform installer/AppImage that the user runs.
