@@ -358,6 +358,18 @@ namespace rwe
             feature.velocity = SimVector(0_ss, -WreckSinkSpeed, 0_ss);
         }
 
+        // Community Patch (TADR, #934): a wreck created above the terrain falls
+        // under gravity. The original gives only a wet wreck any velocity, and
+        // a wreck with none is never simulated, so an aircraft's corpse hangs
+        // at the height it died. Only above-ground wrecks are affected: a
+        // ground unit dies at ground level already. It falls straight down, not
+        // carrying the aircraft's forward momentum, so it stays on the tile it
+        // was registered on.
+        if (communityPatchMode && !wet && position.y > ground)
+        {
+            feature.velocity = SimVector(0_ss, -gravityPerTick(), 0_ss);
+        }
+
         addFeature(std::move(feature));
 
         // The same test decides the plume: the wet branch zeroes mayBurn

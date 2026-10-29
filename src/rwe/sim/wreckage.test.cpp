@@ -168,6 +168,64 @@ namespace rwe
         }
     }
 
+    TEST_CASE("the Community Patch drops an airborne wreck to the ground", "[wreckage][communitypatch]")
+    {
+        // TADR makes a wreck created above the terrain fall; the original only
+        // sinks wet wrecks and leaves an aircraft's corpse at the height it
+        // died. Ground wrecks are unchanged.
+        Grid<unsigned char> heights(32, 32, 200);
+        GameSimulation sim(MapTerrain(std::move(heights), 0_ss), 0u, 0, 0);
+        sim.featureDefinitions.insert(makeWreckDef("HULK", 100, 1000));
+        sim.featureNameIndex.insert_or_assign("HULK", FeatureDefinitionId(0));
+
+        auto ground = sim.terrain.getHeightAt(200_ss, 200_ss);
+        auto airborne = SimVector(200_ss, ground + 100_ss, 200_ss);
+
+        SECTION("off, the wreck keeps the original's hang in the air")
+        {
+            sim.trySpawnFeature("HULK", airborne, SimAngle(0), false);
+            auto featureId = sim.features.begin()->first;
+            REQUIRE(sim.features.tryGet(featureId)->get().velocity.y == 0_ss);
+            for (int i = 0; i < 60; ++i)
+            {
+                sim.updateFallingFeatures();
+            }
+            REQUIRE(sim.features.tryGet(featureId)->get().position.y == airborne.y);
+        }
+
+        SECTION("on, it falls straight down and lands on the terrain")
+        {
+            sim.communityPatchMode = true;
+            sim.trySpawnFeature("HULK", airborne, SimAngle(0), false);
+            auto featureId = sim.features.begin()->first;
+            REQUIRE(sim.features.tryGet(featureId)->get().velocity.y < 0_ss);
+
+            for (int i = 0; i < 600; ++i)
+            {
+                sim.updateFallingFeatures();
+            }
+            const auto& landed = sim.features.tryGet(featureId)->get();
+            REQUIRE(landed.velocity.y == 0_ss);
+            REQUIRE(landed.position.y == ground);
+            // Straight down: the tile it was registered on does not move.
+            REQUIRE(landed.position.x == airborne.x);
+            REQUIRE(landed.position.z == airborne.z);
+        }
+
+        SECTION("on, a wreck already on the ground still never moves")
+        {
+            sim.communityPatchMode = true;
+            sim.trySpawnFeature("HULK", SimVector(200_ss, ground, 200_ss), SimAngle(0), false);
+            auto featureId = sim.features.begin()->first;
+            REQUIRE(sim.features.tryGet(featureId)->get().velocity.y == 0_ss);
+            for (int i = 0; i < 60; ++i)
+            {
+                sim.updateFallingFeatures();
+            }
+            REQUIRE(sim.features.tryGet(featureId)->get().position.y == ground);
+        }
+    }
+
     TEST_CASE("feature hit points", "[wreckage]")
     {
         GameSimulation sim(makeFlatTerrain(32, 32), 0u, 0, 0);

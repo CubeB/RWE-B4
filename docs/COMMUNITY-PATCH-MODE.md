@@ -65,7 +65,7 @@ Limits of this slice, all deliberate:
 | --- | --- |
 | weapon flags (`nottoair`, `nottounderwater`, `notoverwater`, `notoverland`, `surfacefire`) | **done** (slice 1) |
 | allied projectile pass-through | planned: projectiles ignore units whose owner the firer currently treats as an ally; both native and off-map collision paths |
-| aircraft wrecks fall to the ground | planned if RWE still leaves airborne wrecks; gravity fall, registered on the death tile |
+| aircraft wrecks fall to the ground | **done**: a wreck created above the terrain falls straight down under gravity; ground and wet wrecks keep the original's behaviour |
 | explosions damage every stacked aircraft, contested-cell tie-break | planned: deterministic tie-break is required for lockstep |
 | off-map aircraft targetable | planned: a map-edge margin (TADR's per-build radius) |
 | construction units stay put while guarding a factory | planned once RWE's guard/assist order is compared with TADR's |
