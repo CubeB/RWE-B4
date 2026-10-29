@@ -50,6 +50,9 @@ export interface RweArgs {
   port?: number;
   players?: RweArgsPlayerSlot[];
 
+  /** Play the Community Patch ruleset (issue #934). */
+  communityPatch?: boolean;
+
   /**
    * Speak the bridge protocol on the game's own stdin and stdout: what it has
    * to say about the game while it runs, and what we have to ask of it.
@@ -219,6 +222,9 @@ export function serializeRweArgs(args: RweArgs): string[] {
   }
   if (args.bridge) {
     out.push("--bridge");
+  }
+  if (args.communityPatch) {
+    out.push("--community-patch");
   }
   if (args.recordReplay !== undefined) {
     option("record-replay", args.recordReplay);

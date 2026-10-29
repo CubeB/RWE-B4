@@ -16,6 +16,7 @@ import {
   launchRwe,
   changeSinglePlayerMods,
   submitSettingsDialog,
+  setCommunityPatch,
 } from "../actions";
 import {
   State,
@@ -75,6 +76,7 @@ interface OverviewScreenDispatchProps {
   onLaunchRwe: () => void;
   onChangeMods: (newMods: string[]) => void;
   onChangeConfig: (newConfig: RweConfig) => void;
+  onCommunityPatchChange: (enabled: boolean) => void;
 }
 
 interface OverviewScreenStateProps {
@@ -90,6 +92,7 @@ interface OverviewScreenStateProps {
   launchEnabled: boolean;
   videoModes?: VideoMode[];
   rweConfig?: RweConfig;
+  communityPatch: boolean;
 }
 
 interface OverviewScreenProps
@@ -124,6 +127,8 @@ function OverviewScreen(props: OverviewScreenProps) {
             installedMods={props.installedMods}
             launchEnabled={props.launchEnabled}
             running={props.running}
+            communityPatch={props.communityPatch}
+            onCommunityPatchChange={props.onCommunityPatchChange}
             onLaunch={props.onLaunchRwe}
             onSaveName={props.onSaveName}
             onManageMods={() => setModsDialogOpen(true)}
@@ -216,6 +221,7 @@ function mapStateToProps(state: State): OverviewScreenStateProps {
     launchEnabled: canLaunchRwe(state),
     videoModes: state.videoModes,
     rweConfig: state.rweConfig,
+    communityPatch: state.communityPatch,
   };
 }
 
@@ -241,6 +247,8 @@ function mapDispatchToProps(dispatch: Dispatch): OverviewScreenDispatchProps {
     },
     onHostGame: () => dispatch(hostGame()),
     onLaunchRwe: () => dispatch(launchRwe()),
+    onCommunityPatchChange: (enabled: boolean) =>
+      dispatch(setCommunityPatch(enabled)),
   };
 }
 

@@ -33,14 +33,17 @@ describe("launcher profile and mod selection", () => {
     expect(loadPreferences(filename)).toEqual({
       playerName: "Player",
       activeMods: ["ta"],
+      communityPatch: false,
     });
     savePreferences(filename, {
       playerName: " Oscar ",
       activeMods: ["Escalation", "ta"],
+      communityPatch: true,
     });
     expect(loadPreferences(filename)).toEqual({
       playerName: "Oscar",
       activeMods: ["Escalation", "ta"],
+      communityPatch: true,
     });
     expect(fs.readFileSync(config, "utf8")).toBe("camera-zoom = 125\n");
     expect(fs.existsSync(filename + ".tmp")).toBe(false);
@@ -54,7 +57,7 @@ describe("launcher profile and mod selection", () => {
         playerName: "\n",
         activeMods: ["ta", 1, "ta", ""],
       })
-    ).toEqual({ playerName: "Player", activeMods: ["ta"] });
+    ).toEqual({ playerName: "Player", activeMods: ["ta"], communityPatch: false });
   });
 
   it("discovers imported base data and ordinary mod folders with or without a manifest", async () => {
@@ -176,6 +179,7 @@ describe("launcher profile and mod selection", () => {
       type: "RECEIVE_LAUNCHER_PREFERENCES",
       playerName: "Oscar",
       activeMods: ["ta"],
+      communityPatch: true,
     }).state;
     state = reducer(state, {
       type: "RECEIVE_INSTALLED_MODS",
@@ -204,6 +208,7 @@ describe("launcher profile and mod selection", () => {
           playerName: "Oscar",
           dataPaths: ["/my mod", "/base data"],
           resourceDirectories: { builderGuis: "guiE" },
+          communityPatch: true,
         },
       },
     ]);

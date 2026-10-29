@@ -32,6 +32,7 @@ const initialState: State = {
   },
   isRweRunning: false,
   activeMods: ["ta"],
+  communityPatch: false,
   playerName: "Player",
   preferencesLoaded: false,
 };
@@ -265,6 +266,7 @@ function globalActionsReducer(
             playerName: state.playerName,
             dataPaths: selectedMods.map(x => x.path),
             resourceDirectories: resourceSelection.resourceDirectories,
+            communityPatch: state.communityPatch,
           },
         }
       );
@@ -285,6 +287,7 @@ function globalActionsReducer(
       return liftState({
         ...state,
         playerName: action.playerName,
+        communityPatch: action.communityPatch,
         preferencesLoaded: true,
         activeMods: state.installedMods
           ? action.activeMods.filter(name =>
@@ -292,6 +295,8 @@ function globalActionsReducer(
             )
           : action.activeMods,
       });
+    case "SET_COMMUNITY_PATCH":
+      return liftState({ ...state, communityPatch: action.enabled });
     case "SET_PLAYER_NAME":
     case "HOST_GAME_FORM_CONFIRM":
     case "JOIN_SELECTED_GAME_CONFIRM":

@@ -57,6 +57,15 @@ Limits of this slice, all deliberate:
   every existing hash; the mode is a launch-parameter invariant, agreed by the
   lobby or set identically on the command line.
 
+## Where it is toggled
+
+- **Launcher, single player:** the Play page has a Community Patch switch,
+  saved in `launcher.json`, which passes `--community-patch` to the launch.
+- **Command line:** `rwe --map "<map>" --community-patch`.
+- **Multiplayer:** the host types `/community` in the battleroom; the rule
+  travels with the setup and every guest launches with it.
+- **Saves and replays** carry the flag as described above.
+
 ## The subset, by decision
 
 ### Adopted or planned for the mode (gameplay)
