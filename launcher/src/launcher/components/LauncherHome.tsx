@@ -85,6 +85,32 @@ export function LauncherHome(props: LauncherHomeProps) {
       setCheckingUpdates(false);
     }
   };
+  // A quiet check at startup: only an available update is worth saying
+  // anything about. The button above is the explicit check, with errors and
+  // the up-to-date state.
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const releases = await ipcRenderer.invoke("rwe:check-updates");
+        if (!cancelled) {
+          const result = evaluateUpdates(
+            releases,
+            currentLauncherVersion(),
+            process.platform
+          );
+          if (result.updateAvailable) {
+            setUpdateResult(result);
+          }
+        }
+      } catch {
+        // Offline, rate-limited or no feed: the button reports it on demand.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   return (
     <main className="launcher-home">
       {error && (
