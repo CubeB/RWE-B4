@@ -29,7 +29,10 @@ namespace rwe
         // BT-266: factory destruction now cancels its retained product.
         // #383/#699/#700 change command outcomes and elimination state.
         // #895 / BOUNDARY-001: reserved borders now block ground routes.
-        constexpr char Version = 7;
+        // #934: the header carries the Community Patch ruleset. Version 7 is
+        // still read, as a game with the mode off.
+        constexpr char Version = 8;
+        constexpr char OldestVersion = 7;
 
         constexpr const char* ReplayExtension = ".rwereplay";
 
@@ -220,6 +223,7 @@ namespace rwe
             j["commanderDeath"] = enumToName(header.commanderDeath, CommanderDeathNames, "gameends");
             j["allowWatching"] = header.allowWatching;
             j["pathfinding"] = enumToName(header.pathfindingBackend, PathfindingBackendNames, "rwe");
+            j["communityPatch"] = header.communityPatch;
             auto& players = j["players"];
             players = nlohmann::json::array();
             for (const auto& p : header.players)
@@ -250,6 +254,7 @@ namespace rwe
             header.commanderDeath = enumFromName(j.value("commanderDeath", "gameends"), CommanderDeathNames, CommanderDeathMode::GameEnds);
             header.allowWatching = j.value("allowWatching", true);
             header.pathfindingBackend = enumFromName(j.value("pathfinding", "rwe"), PathfindingBackendNames, PathfindingBackend::RweAStar);
+            header.communityPatch = j.value("communityPatch", false);
             for (const auto& p : j.at("players"))
             {
                 header.players.push_back(p.is_null() ? std::optional<PlayerInfo>() : std::optional<PlayerInfo>(playerFromJson(p)));
@@ -271,6 +276,7 @@ namespace rwe
         header.commanderDeath = parameters.commanderDeath;
         header.allowWatching = parameters.allowWatching;
         header.pathfindingBackend = parameters.pathfindingBackend;
+        header.communityPatch = parameters.communityPatch;
         for (const auto& p : parameters.players)
         {
             header.players.push_back(p);
@@ -289,6 +295,7 @@ namespace rwe
         parameters.commanderDeath = header.commanderDeath;
         parameters.allowWatching = header.allowWatching;
         parameters.pathfindingBackend = header.pathfindingBackend;
+        parameters.communityPatch = header.communityPatch;
         for (std::size_t i = 0; i < parameters.players.size() && i < header.players.size(); ++i)
         {
             parameters.players[i] = header.players[i];
@@ -415,7 +422,7 @@ namespace rwe
 
         char version;
         in.read(&version, 1);
-        if (in.gcount() != 1 || version != Version)
+        if (in.gcount() != 1 || version < OldestVersion || version > Version)
         {
             return std::nullopt;
         }

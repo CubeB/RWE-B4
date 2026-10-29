@@ -100,6 +100,7 @@ namespace rwe
         auto computer = makePlayer("Computer", "CORE", 5, std::nullopt);
         computer.controller = PlayerControllerTypeComputer();
         header.players.push_back(computer);
+        header.communityPatch = true;
 
         ReplayWriter(file.path, header).close();
 
@@ -117,6 +118,7 @@ namespace rwe
         REQUIRE(h.startLocation == StartLocationMode::Random);
         REQUIRE(h.commanderDeath == CommanderDeathMode::GameContinues);
         REQUIRE(h.pathfindingBackend == PathfindingBackend::OpenAnnihilation);
+        REQUIRE(h.communityPatch);
 
         // The empty slot has to stay an empty slot: a player's index is the
         // PlayerId that the recorded commands name.
@@ -135,6 +137,26 @@ namespace rwe
         REQUIRE(!h.players[3]->teamId.has_value());
     }
 
+    TEST_CASE("a version-7 replay still reads, with the Community Patch off", "[replay][communitypatch]")
+    {
+        TempFile file;
+        ReplayWriter(file.path, makeHeader()).close();
+
+        // The version byte sits after "RWEREPLAY". A version-7 file predates
+        // the ruleset field, so it is a game with the mode off.
+        {
+            std::fstream f(file.path, std::ios::binary | std::ios::in | std::ios::out);
+            REQUIRE(f);
+            f.seekp(9);
+            const char seven = 7;
+            f.write(&seven, 1);
+        }
+
+        auto replay = readReplayFile(file.path);
+        REQUIRE(replay.has_value());
+        REQUIRE_FALSE(replay->header.communityPatch);
+    }
+
     TEST_CASE("a replay header rebuilds the game parameters it came from", "[replay]")
     {
         TempFile file;
@@ -144,6 +166,7 @@ namespace rwe
         parameters.commanderDeath = CommanderDeathMode::Deathmatch;
         parameters.allowWatching = false;
         parameters.pathfindingBackend = PathfindingBackend::OpenAnnihilation;
+        parameters.communityPatch = true;
         parameters.players[0] = makePlayer("Blue", "ARM", 0, 2);
         parameters.players[1] = makePlayer("Red", "CORE", 1, 2);
 
@@ -159,6 +182,7 @@ namespace rwe
         REQUIRE(restored.commanderDeath == CommanderDeathMode::Deathmatch);
         REQUIRE_FALSE(restored.allowWatching);
         REQUIRE(restored.pathfindingBackend == PathfindingBackend::OpenAnnihilation);
+        REQUIRE(restored.communityPatch);
         REQUIRE(restored.players[0]->teamId == std::optional<int>(2));
         REQUIRE(restored.players[1]->teamId == std::optional<int>(2));
         REQUIRE(!restored.players[2].has_value());

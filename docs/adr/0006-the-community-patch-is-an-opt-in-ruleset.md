@@ -38,11 +38,12 @@ desync. Local preferences remain local and are not part of the flag.
   `GameSimulation::communityPatchMode`. The first adopted rules are the TADR
   weapon flags `nottoair`, `nottounderwater`, `notoverwater`, `notoverland` and
   `surfacefire`.
-- **Offline/arena first.** The lobby and the replay header do not carry the
-  flag yet, so a network seat, a recording, a demo or a rejoin is refused while
-  it is on. Saves do carry it. The mode is not in the simulation hash, because
-  adding a field would change every existing hash; the launch parameter is the
-  invariant.
+- **Offline/arena and recorded games.** The lobby does not carry the flag yet,
+  so a network seat is refused while it is on. Saves carry it; replays carry it
+  from header version 8 (version 7 loads as the mode off); a TA demo is refused
+  because the original's format cannot carry it. The mode is not in the
+  simulation hash, because adding a field would change every existing hash; the
+  launch parameter is the invariant.
 - **No parity claim.** TADR is not Total Annihilation: each adopted feature
   cites TADR's written rule and records RWE's departures. The mode never
   appears in the original-game divergence register as "matching TA"; where it

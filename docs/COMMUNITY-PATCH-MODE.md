@@ -45,14 +45,15 @@ not model that half yet.
 
 Limits of this slice, all deliberate:
 
-- **Offline/arena only for now.** The lobby does not carry the flag, so a
-  network seat is refused rather than allowed to desync. Recording, demos and
-  rejoining are refused for the same reason: the replay header does not carry
-  the flag yet.
+- **Offline/arena and recorded games.** The lobby does not carry the flag yet,
+  so a network seat is refused rather than allowed to desync. Replays do carry
+  it: the replay header is version 8 with a `communityPatch` field, and a
+  version-7 header still loads as a game with the mode off. A TA demo is the
+  original's format and cannot carry it, so recording one is refused.
 - **Saves carry it** (`SaveFile` writes and reads `communityPatch`).
 - **Not hashed.** No simulation hash field was added, because that would change
   every existing hash; the mode is instead a launch-parameter invariant until
-  the lobby/replay plumbing exists.
+  the lobby plumbing exists.
 
 ## The subset, by decision
 
@@ -114,7 +115,8 @@ client settings even in a community-patch game:
   it must be deterministic, applied identically on every peer, and covered by
   the hash/save/dump rules that apply to the state it touches.
 - The lobby must carry the flag before network games may use it; the replay
-  header must carry it before recordings do. Until then the CLI refuses both.
+  header carries it from version 8 (version 7 loads as the mode off). Until the
+  lobby does, a network seat is refused.
 - Local preferences never change orders or hashed state on their own.
 - Each adopted feature cites TADR's own written rule (release and feature
   list) and states where RWE departs, because there is no original-game
