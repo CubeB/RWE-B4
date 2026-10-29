@@ -215,9 +215,10 @@ Everything else lives in a subject file. **The numbers never move**, so a
   adopted rule cites TADR's own text; see
   [ADR-0006](adr/0006-the-community-patch-is-an-opt-in-ruleset.md) and
   [the mode's map](COMMUNITY-PATCH-MODE.md). The first slice adopts the TADR
-  weapon flags and is offline/arena only until the lobby and replay headers
-  carry the flag; a network seat or a recording is refused rather than allowed
-  to desync.
+  weapon flags; the lobby carries the rule as the `community` setup option
+  (host `/community`), waits for every guest to apply it, and replays carry it
+  from header version 8. A TA demo is refused because its format cannot hold
+  the flag.
 
 - **An aircraft with nowhere to land keeps flying** (2026-10-28, #894). When
   no landing place is within reach, RWE holds a circuit around the spot it went

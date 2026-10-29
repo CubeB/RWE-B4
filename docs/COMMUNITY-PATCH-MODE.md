@@ -45,15 +45,17 @@ not model that half yet.
 
 Limits of this slice, all deliberate:
 
-- **Offline/arena and recorded games.** The lobby does not carry the flag yet,
-  so a network seat is refused rather than allowed to desync. Replays do carry
-  it: the replay header is version 8 with a `communityPatch` field, and a
-  version-7 header still loads as a game with the mode off. A TA demo is the
-  original's format and cannot carry it, so recording one is refused.
+- **Network and recorded games.** The flag travels in the lobby's setup
+  options (`community=1`), so the host's `/community` reaches every guest with
+  the rest of the rules and the launch uses it. Replays carry it (header
+  version 8; version 7 loads as mode off). A TA demo is the original's format
+  and cannot carry it, so recording one is refused. A direct command-line
+  network launch must pass `--community-patch` on every peer; the lobby is the
+  supported path because it agrees the rule before launch.
 - **Saves carry it** (`SaveFile` writes and reads `communityPatch`).
 - **Not hashed.** No simulation hash field was added, because that would change
-  every existing hash; the mode is instead a launch-parameter invariant until
-  the lobby plumbing exists.
+  every existing hash; the mode is a launch-parameter invariant, agreed by the
+  lobby or set identically on the command line.
 
 ## The subset, by decision
 
@@ -114,9 +116,9 @@ client settings even in a community-patch game:
 - A gameplay feature joins the **simulation** only through the ruleset flag;
   it must be deterministic, applied identically on every peer, and covered by
   the hash/save/dump rules that apply to the state it touches.
-- The lobby must carry the flag before network games may use it; the replay
-  header carries it from version 8 (version 7 loads as the mode off). Until the
-  lobby does, a network seat is refused.
+- The lobby must carry the flag before network games may use it; it does so as
+  the `community` setup option, toggled by the host with `/community`, and the
+  replay header carries it from version 8 (version 7 loads as the mode off).
 - Local preferences never change orders or hashed state on their own.
 - Each adopted feature cites TADR's own written rule (release and feature
   list) and states where RWE departs, because there is no original-game

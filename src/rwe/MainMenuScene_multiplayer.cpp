@@ -53,6 +53,7 @@ namespace rwe
             {"startloc", 2, &MainMenuModel::SkirmishOptions::startLocation},
             {"mapping", 2, &MainMenuModel::SkirmishOptions::mapping},
             {"los", 3, &MainMenuModel::SkirmishOptions::lineOfSight},
+            {"community", 2, &MainMenuModel::SkirmishOptions::communityPatch},
             {"difficulty", 3, &MainMenuModel::SkirmishOptions::difficulty},
         };
 
@@ -3505,6 +3506,16 @@ namespace rwe
         if (lowered == "/accept" || lowered.compare(0, 8, "/accept ") == 0)
         {
             return admitJoinRequest(flow, lowered.size() > 7 ? trimmed(lowered.substr(8)) : std::string());
+        }
+        if (lowered == "/community")
+        {
+            // The Community Patch ruleset is a host rule (issue #934): it
+            // travels in the announcement's options, reaches every guest with
+            // the rest of the setup, and is applied at launch.
+            auto next = model.skirmishOptions.communityPatch.getValue() == 0 ? 1u : 0u;
+            model.skirmishOptions.communityPatch.next(next);
+            flow.chat.say(std::string(), std::string("Community Patch: ") + (next != 0 ? "on" : "off"));
+            return true;
         }
         if (lowered == "/invite")
         {

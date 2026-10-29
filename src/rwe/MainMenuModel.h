@@ -119,6 +119,8 @@ namespace rwe
             BehaviorSubject<unsigned int> mapping{0u};
             /** Permanent | True | Circular */
             BehaviorSubject<unsigned int> lineOfSight{1u};
+            /** Community Patch ruleset (issue #934): off | on. */
+            BehaviorSubject<unsigned int> communityPatch{0u};
             /** Easy | Medium | Hard; decides the AI tuning profile. */
             BehaviorSubject<unsigned int> difficulty{1u};
         };
