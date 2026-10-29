@@ -64,7 +64,7 @@ Limits of this slice, all deliberate:
 | TADR feature | RWE plan |
 | --- | --- |
 | weapon flags (`nottoair`, `nottounderwater`, `notoverwater`, `notoverland`, `surfacefire`) | **done** (slice 1) |
-| allied projectile pass-through | planned: projectiles ignore units whose owner the firer currently treats as an ally; both native and off-map collision paths |
+| allied projectile pass-through | **done**: a shot passes through units whose owner the firer currently treats as an ally; splash, interception and enemy rules unchanged |
 | aircraft wrecks fall to the ground | **done**: a wreck created above the terrain falls straight down under gravity; ground and wet wrecks keep the original's behaviour |
 | explosions damage every stacked aircraft, contested-cell tie-break | **already RWE**: the blast sweep walks every flying unit in range, not just the one occupancy cell, so stacked aircraft are all damaged; occupancy writes are deterministic in unit order, so no tie-break is needed |
 | off-map aircraft targetable | planned: a map-edge margin (TADR's per-build radius) |
