@@ -135,7 +135,18 @@ namespace rwe
                 }
             }
             CHECK(found);
-            CHECK(options.size() == 6);
+            CHECK(options.size() == 7);
+
+            bool community = false;
+            for (const auto& [name, value] : options)
+            {
+                if (name == "community")
+                {
+                    community = true;
+                    CHECK(value == "0");
+                }
+            }
+            CHECK(community);
         }
 
         SECTION("a name it does not know is ignored, and a value out of range leaves the option alone")

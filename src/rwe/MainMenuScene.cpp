@@ -2050,6 +2050,7 @@ namespace rwe
         params.startLocation = skirmishStageToStartLocationMode(model.skirmishOptions.startLocation.getValue());
         params.commanderDeath = skirmishStageToCommanderDeathMode(model.skirmishOptions.commanderDeath.getValue());
         params.allowWatching = model.skirmishOptions.allowWatching.getValue() != 0;
+        params.communityPatch = model.skirmishOptions.communityPatch.getValue() != 0;
         params.pathfindingBackend = sceneContext.globalConfig->pathfindingBackend;
 
         for (Index i = 0; i < getSize(model.players); ++i)

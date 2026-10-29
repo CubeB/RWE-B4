@@ -943,13 +943,10 @@ namespace rwe
             }
             simulation.skirmishVictoryRules = !anyNetworkSeat && gameParameters.netMode == NetMode::Lockstep;
 
-            // The Community Patch ruleset is not carried by the lobby protocol
-            // yet, so every peer cannot be shown to agree on it. Refuse rather
-            // than silently desync (issue #934).
-            if (gameParameters.communityPatch && anyNetworkSeat)
-            {
-                throw std::runtime_error("--community-patch is not carried by the lobby yet; it cannot be used in a network game");
-            }
+            // A network game's Community Patch flag comes from the host's
+            // lobby announcement, so every peer agrees on it before launch
+            // (issue #934). A direct command-line network launch must pass the
+            // same --community-patch on every peer; a mismatch is a desync.
         }
 
         for (Index i = 0; i < getSize(gameParameters.players); ++i)

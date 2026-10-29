@@ -1515,6 +1515,11 @@ int main(int argc, char* argv[])
                 check(MenuProbe::flow(invGuest)->accepted, "the Accept button admits the oldest pending guest");
                 check(!buttonVisible(invHost, "ACCEPT"), "the button goes away when the queue is empty");
                 check(contains(transcript(invHost), "Net has joined"), "the host sees the accepted guest join");
+                say(invHost, "/community");
+                runInternet(1.5);
+                check(contains(transcript(invHost), "Community Patch: on"), "the host is told the rule changed");
+                check(MenuProbe::model(invGuest).skirmishOptions.communityPatch.getValue() == 1,
+                    "the guest follows the host's Community Patch rule");
                 check(!contains(transcript(invHost), "/accept Nobody"), "accept commands are not sent as chat");
                 requester.stop();
                 runInternet(4.5);

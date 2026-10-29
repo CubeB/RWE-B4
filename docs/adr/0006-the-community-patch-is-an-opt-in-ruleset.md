@@ -28,9 +28,9 @@ Treating the whole patch as local would make the simulation depend on a
 client-side setting.
 
 **An opt-in ruleset carried by the game parameters (chosen).** The mode is one
-flag, off by default, shared by every peer, saved with the game, and refused
-where it cannot yet be agreed (network, recordings) rather than allowed to
-desync. Local preferences remain local and are not part of the flag.
+flag, off by default, shared by every peer through the lobby's setup options,
+saved with the game, and carried by replays. Local preferences remain local and
+are not part of the flag.
 
 ## Consequences
 
@@ -38,12 +38,14 @@ desync. Local preferences remain local and are not part of the flag.
   `GameSimulation::communityPatchMode`. The first adopted rules are the TADR
   weapon flags `nottoair`, `nottounderwater`, `notoverwater`, `notoverland` and
   `surfacefire`.
-- **Offline/arena and recorded games.** The lobby does not carry the flag yet,
-  so a network seat is refused while it is on. Saves carry it; replays carry it
-  from header version 8 (version 7 loads as the mode off); a TA demo is refused
-  because the original's format cannot carry it. The mode is not in the
-  simulation hash, because adding a field would change every existing hash; the
-  launch parameter is the invariant.
+- **Network and recorded games.** The lobby carries the flag as the
+  `community` setup option; the host toggles it with `/community` and every
+  guest applies it before launch. Saves carry it; replays carry it from header
+  version 8 (version 7 loads as the mode off); a TA demo is refused because the
+  original's format cannot carry it. The mode is not in the simulation hash,
+  because adding a field would change every existing hash; the launch parameter
+  is the invariant. A direct command-line network launch must pass the flag on
+  every peer.
 - **No parity claim.** TADR is not Total Annihilation: each adopted feature
   cites TADR's written rule and records RWE's departures. The mode never
   appears in the original-game divergence register as "matching TA"; where it
