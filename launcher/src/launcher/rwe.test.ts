@@ -47,10 +47,12 @@ describe("serializeRweArgs", () => {
   });
 
   it("passes a detected builder GUI root without changing the general GUI root", () => {
-    expect(serializeRweArgs({
-      dataPaths: ["/TAESC", "/base"],
-      resourceDirectories: { builderGuis: "guiE" },
-    })).toEqual([
+    expect(
+      serializeRweArgs({
+        dataPaths: ["/TAESC", "/base"],
+        resourceDirectories: { builderGuis: "guiE" },
+      })
+    ).toEqual([
       "--data-path=/TAESC",
       "--data-path=/base",
       "--dir-builder-guis=guiE",

@@ -206,7 +206,10 @@ export function serializeRweArgs(args: RweArgs): string[] {
     for (const key of resourceDirectoryKeys) {
       const value = args.resourceDirectories[key];
       if (value !== undefined) {
-        const cliKey = key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`);
+        const cliKey = key.replace(
+          /[A-Z]/g,
+          letter => `-${letter.toLowerCase()}`
+        );
         option(`dir-${cliKey}`, value);
       }
     }

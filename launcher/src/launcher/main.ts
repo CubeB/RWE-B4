@@ -5,6 +5,7 @@ import {
   Menu,
   dialog,
   ipcMain,
+  net,
 } from "electron";
 import { spawn } from "child_process";
 import * as path from "path";
@@ -85,6 +86,53 @@ ipcMain.handle("rwe:import-data", async () => {
     );
   });
   return true;
+});
+
+/**
+ * Release feed for the updater: GitHub's published releases for this
+ * repository, reduced to what the launcher shows. Drafts are dropped here;
+ * prereleases are kept because this project's releases are prereleases.
+ *
+ * Fetched in the main process so the renderer needs no network permission and
+ * the proxy settings Electron already knows about still apply.
+ */
+ipcMain.handle("rwe:check-updates", async () => {
+  const response = await net.fetch(
+    "https://api.github.com/repos/CubeB/RWE-B4/releases?per_page=30",
+    {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "rwe-launcher",
+      },
+    }
+  );
+  if (!response.ok) {
+    throw new Error(`the release feed answered ${response.status}`);
+  }
+  const releases = (await response.json()) as Array<{
+    tag_name?: string;
+    name?: string;
+    html_url?: string;
+    prerelease?: boolean;
+    published_at?: string;
+    draft?: boolean;
+    assets?: Array<{ name?: string; browser_download_url?: string }>;
+  }>;
+  return releases
+    .filter(release => !release.draft)
+    .map(release => ({
+      tag: release.tag_name || "",
+      name: release.name || release.tag_name || "",
+      url: release.html_url || "",
+      prerelease: release.prerelease === true,
+      publishedAt: release.published_at || "",
+      assets: (release.assets || [])
+        .filter(asset => asset.name && asset.browser_download_url)
+        .map(asset => ({
+          name: asset.name!,
+          url: asset.browser_download_url!,
+        })),
+    }));
 });
 
 function createWindow() {
