@@ -40,6 +40,16 @@ namespace rwe
 
         float reserveOf(const GamePlayerInfo& p, Resource r)
         {
+            // Community Patch (#934): a percentage threshold tracks storage.
+            // The absolute field remains the last plain-number setting.
+            if (r == Resource::Metal && p.metalReservePercent)
+            {
+                return p.maxMetal.value * (static_cast<float>(p.metalReservePercentage) / 100.0f);
+            }
+            if (r == Resource::Energy && p.energyReservePercent)
+            {
+                return p.maxEnergy.value * (static_cast<float>(p.energyReservePercentage) / 100.0f);
+            }
             return r == Resource::Metal ? p.metalReserve.value : p.energyReserve.value;
         }
 
@@ -177,7 +187,18 @@ namespace rwe
                 {
                     return false;
                 }
-                player.metalReserve = Metal(std::min(player.maxMetal.value, command.amount));
+                if (command.percent && sim.communityPatchMode)
+                {
+                    // TADR percentage threshold: 0..100, tracking storage.
+                    player.metalReservePercent = true;
+                    player.metalReservePercentage = static_cast<unsigned int>(std::clamp(command.amount, 0.0f, 100.0f));
+                    player.metalReserve = Metal(std::min(player.maxMetal.value, player.maxMetal.value * (static_cast<float>(player.metalReservePercentage) / 100.0f)));
+                }
+                else
+                {
+                    player.metalReservePercent = false;
+                    player.metalReserve = Metal(std::min(player.maxMetal.value, command.amount));
+                }
                 return true;
             }
 
@@ -187,7 +208,17 @@ namespace rwe
                 {
                     return false;
                 }
-                player.energyReserve = Energy(std::min(player.maxEnergy.value, command.amount));
+                if (command.percent && sim.communityPatchMode)
+                {
+                    player.energyReservePercent = true;
+                    player.energyReservePercentage = static_cast<unsigned int>(std::clamp(command.amount, 0.0f, 100.0f));
+                    player.energyReserve = Energy(std::min(player.maxEnergy.value, player.maxEnergy.value * (static_cast<float>(player.energyReservePercentage) / 100.0f)));
+                }
+                else
+                {
+                    player.energyReservePercent = false;
+                    player.energyReserve = Energy(std::min(player.maxEnergy.value, command.amount));
+                }
                 return true;
             }
 

@@ -151,13 +151,17 @@ namespace rwe
         }
         else if (word == "setsharemetal")
         {
+            auto value = argument(1);
             command.kind = ChatCommand::Kind::SetShareMetal;
-            command.number = chatAtoi(argument(1));
+            command.number = chatAtoi(value);
+            command.percent = !value.empty() && value.back() == '%';
         }
         else if (word == "setshareenergy")
         {
+            auto value = argument(1);
             command.kind = ChatCommand::Kind::SetShareEnergy;
-            command.number = chatAtoi(argument(1));
+            command.number = chatAtoi(value);
+            command.percent = !value.empty() && value.back() == '%';
         }
         else if (word == "now")
         {

@@ -293,6 +293,10 @@ namespace rwe
                 {"shareEnergy", p.shareEnergy},
                 {"metalReserve", saveMetal(p.metalReserve)},
                 {"energyReserve", saveEnergy(p.energyReserve)},
+                {"metalReservePercent", p.metalReservePercent},
+                {"energyReservePercent", p.energyReservePercent},
+                {"metalReservePercentage", p.metalReservePercentage},
+                {"energyReservePercentage", p.energyReservePercentage},
                 {"unitsKilled", p.unitsKilled},
                 {"unitsLost", p.unitsLost},
                 {"metalProduced", saveMetal(p.metalProduced)},
@@ -361,6 +365,22 @@ namespace rwe
             if (j.contains("energyReserve"))
             {
                 p.energyReserve = loadEnergy(j.at("energyReserve"));
+            }
+            if (j.contains("metalReservePercent"))
+            {
+                p.metalReservePercent = j.at("metalReservePercent").get<bool>();
+            }
+            if (j.contains("energyReservePercent"))
+            {
+                p.energyReservePercent = j.at("energyReservePercent").get<bool>();
+            }
+            if (j.contains("metalReservePercentage"))
+            {
+                p.metalReservePercentage = j.at("metalReservePercentage").get<unsigned int>();
+            }
+            if (j.contains("energyReservePercentage"))
+            {
+                p.energyReservePercentage = j.at("energyReservePercentage").get<unsigned int>();
             }
             p.unitsKilled = j.at("unitsKilled").get<unsigned int>();
             p.unitsLost = j.at("unitsLost").get<unsigned int>();

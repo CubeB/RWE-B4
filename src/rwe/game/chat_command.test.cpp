@@ -105,6 +105,29 @@ namespace rwe
         REQUIRE(parseChatCommand("+SetShareEnergy 10")->kind == Kind::SetShareEnergy);
     }
 
+    TEST_CASE("a percent suffix makes the reserve track storage", "[chat][communitypatch]")
+    {
+        auto c = parseChatCommand("+SetShareMetal 50%");
+        REQUIRE(c->kind == Kind::SetShareMetal);
+        REQUIRE(c->number == 50);
+        REQUIRE(c->percent);
+
+        c = parseChatCommand("+SetShareEnergy 50%");
+        REQUIRE(c->kind == Kind::SetShareEnergy);
+        REQUIRE(c->number == 50);
+        REQUIRE(c->percent);
+
+        // Without the suffix the old absolute form is unchanged.
+        c = parseChatCommand("+SetShareMetal 50");
+        REQUIRE(c->number == 50);
+        REQUIRE_FALSE(c->percent);
+
+        // The suffix is still a comment-safe token.
+        c = parseChatCommand("+SetShareEnergy 25% # keep it");
+        REQUIRE(c->number == 25);
+        REQUIRE(c->percent);
+    }
+
     TEST_CASE("a gift names a player, an amount and a resource", "[chat]")
     {
         auto c = parseChatCommand("+Give 2 150 metal");

@@ -316,6 +316,7 @@ namespace rwe
                 out.set_target(c.target->value);
             }
             out.set_give_metal(c.giveMetal);
+            out.set_percent(c.percent);
         }
     };
 
@@ -457,6 +458,7 @@ namespace rwe
                 out.target = PlayerId(in.target());
             }
             out.giveMetal = !in.has_give_metal() || in.give_metal();
+            out.percent = in.percent();
             return out;
         }
 

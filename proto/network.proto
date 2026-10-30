@@ -281,6 +281,8 @@ message PlayerShareCommand
     optional float amount = 2;
     optional uint32 target = 3;
     optional bool give_metal = 4;
+    // Community Patch percentage threshold (#934); absent means absolute.
+    optional bool percent = 5;
 }
 
 message PlayerCommand

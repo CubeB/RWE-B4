@@ -442,10 +442,11 @@ namespace rwe
         }
 
         auto onOff = [](bool on) { return on ? "on" : "off"; };
-        auto submit = [&](PlayerShareCommand::Kind kind, float amount = 0.0f) {
+        auto submit = [&](PlayerShareCommand::Kind kind, float amount = 0.0f, bool percent = false) {
             PlayerShareCommand share;
             share.kind = kind;
             share.amount = amount;
+            share.percent = percent;
             localPlayerCommandBuffer.push_back(share);
         };
 
@@ -482,16 +483,28 @@ namespace rwe
                 break;
 
             case ChatCommand::Kind::SetShareMetal:
+            {
                 // The number typed, not the number stored: the original
-                // prints what it was given and stores the capped value.
-                printConsole("SetShareMetal: " + std::to_string(command.number), feedbackColor);
-                submit(PlayerShareCommand::Kind::SetMetalReserve, static_cast<float>(command.number));
+                // prints what it was given and stores the capped value. The
+                // `%` form is a Community Patch rule; outside it, the suffix
+                // is the atoi trailing text the original ignored.
+                auto percent = command.percent && simulation.communityPatchMode;
+                printConsole(
+                    "SetShareMetal: " + std::to_string(command.number) + (percent ? "%" : ""),
+                    feedbackColor);
+                submit(PlayerShareCommand::Kind::SetMetalReserve, static_cast<float>(command.number), percent);
                 break;
+            }
 
             case ChatCommand::Kind::SetShareEnergy:
-                printConsole("SetShareEnergy: " + std::to_string(command.number), feedbackColor);
-                submit(PlayerShareCommand::Kind::SetEnergyReserve, static_cast<float>(command.number));
+            {
+                auto percent = command.percent && simulation.communityPatchMode;
+                printConsole(
+                    "SetShareEnergy: " + std::to_string(command.number) + (percent ? "%" : ""),
+                    feedbackColor);
+                submit(PlayerShareCommand::Kind::SetEnergyReserve, static_cast<float>(command.number), percent);
                 break;
+            }
 
             case ChatCommand::Kind::Give:
             {

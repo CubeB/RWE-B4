@@ -110,6 +110,11 @@ namespace rwe
          * absolute amounts, not fractions, set by `+SetShareMetal` and
          * `+SetShareEnergy`; a negative one is stored as typed.
          *
+         * The Community Patch also accepts a percentage threshold
+         * (`+SetShareMetal 50%`). Its flag and 0..100 value are kept beside
+         * the absolute reserve so it can track storage as it grows; the
+         * absolute field stays the last explicit amount for the plain form.
+         *
          * The original keeps these in a byte of the replicated player record
          * and does not save them, so they reset on a load. RWE saves and
          * hashes them: they steer the simulation, so a lockstep resume or a
@@ -121,6 +126,10 @@ namespace rwe
         bool shareEnergy{false};
         Metal metalReserve{0};
         Energy energyReserve{0};
+        bool metalReservePercent{false};
+        bool energyReservePercent{false};
+        unsigned int metalReservePercentage{0};
+        unsigned int energyReservePercentage{0};
 
         /**
          * When the player's air base list was last rebuilt, if it ever has

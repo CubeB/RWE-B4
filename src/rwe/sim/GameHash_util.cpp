@@ -99,9 +99,13 @@ namespace rwe
             // energy reserve is counted twice so that a metal reserve of 250
             // and an energy reserve of 250 do not add to the same thing.
             (p.shareMetal ? 1u : 0u) | (p.shareEnergy ? 2u : 0u),
+            (p.metalReservePercent ? 1u : 0u) | (p.energyReservePercent ? 2u : 0u),
             p.metalReserve,
             p.energyReserve,
             p.energyReserve,
+            p.metalReservePercentage,
+            p.energyReservePercentage,
+            p.energyReservePercentage,
             // S:130: when the air base list was last rebuilt (the draw's schedule).
             p.airBasesRebuiltAt);
     }
