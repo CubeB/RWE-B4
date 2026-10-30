@@ -336,6 +336,15 @@ namespace rwe
         std::string explodeAs;
         std::string selfDestructAs;
 
+        /**
+         * Community Patch (#934), TADR `TransportedExplodeAs` and
+         * `TransportedSelfDestructAs`. Used only under the ruleset while the
+         * unit is loaded in a transport; empty falls back to the ordinary
+         * key.
+         */
+        std::string transportedExplodeAs;
+        std::string transportedSelfDestructAs;
+
         bool builder;
         unsigned int buildTime;
         Energy buildCostEnergy;
@@ -492,4 +501,16 @@ namespace rwe
         /** Whether the unit is built with its cloak already asked for. */
         bool initCloaked{false};
     };
+
+    /**
+     * The explosion a dying unit should use.
+     *
+     * Under the Community Patch, a unit that dies while loaded in a transport
+     * can name a different weapon through TADR's `TransportedExplodeAs` and
+     * `TransportedSelfDestructAs`. The transported self-destruct key replaces
+     * `SelfDestructAs` (which still falls back to `ExplodeAs`); an omitted or
+     * empty key keeps the ordinary one. Everything outside the ruleset, and
+     * every unit not carried, is unchanged.
+     */
+    const std::string& unitDeathExplosionWeapon(const UnitDefinition& definition, bool carried, bool selfDestruct, bool communityPatch);
 }

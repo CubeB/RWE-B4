@@ -294,6 +294,14 @@ namespace rwe
         std::string explodeAs;
         std::string selfDestructAs;
 
+        /**
+         * Community Patch (#934), TADR `TransportedExplodeAs` and
+         * `TransportedSelfDestructAs`: the explosion to use while the unit is
+         * loaded in a transport. Empty means keep the ordinary key.
+         */
+        std::string transportedExplodeAs;
+        std::string transportedSelfDestructAs;
+
         bool builder;
         unsigned int buildTime;
         unsigned int buildCostEnergy;

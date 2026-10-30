@@ -242,6 +242,9 @@ namespace rwe
         /** Who lost the unit and who killed it, where the sim knows. Scene-facing; not hashed. */
         std::optional<PlayerId> owner{};
         std::optional<PlayerId> killerOwner{};
+
+        /** Whether the unit was loaded in a transport when it died. Scene-facing. */
+        bool carried{false};
     };
 
     /**

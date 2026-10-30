@@ -148,6 +148,8 @@ namespace rwe
 
         tdf.readOrDefault("ExplodeAs", u.explodeAs);
         tdf.readOrDefault("SelfDestructAs", u.selfDestructAs);
+        tdf.readOrDefault("TransportedExplodeAs", u.transportedExplodeAs);
+        tdf.readOrDefault("TransportedSelfDestructAs", u.transportedSelfDestructAs);
 
         tdf.readOrDefault("Builder", u.builder);
 

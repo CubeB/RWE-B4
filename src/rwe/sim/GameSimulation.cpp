@@ -970,13 +970,13 @@ namespace rwe
         // decide whether the blast is one the local player is entitled to
         // see, and by the time it reads the event the unit is gone.
         recordUnitDeath(*this, unitId, "self_destruct", std::nullopt);
-        events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, UnitDiedEvent::DeathType::SelfDestructed, unit.owner});
+        events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, UnitDiedEvent::DeathType::SelfDestructed, unit.owner, std::nullopt, unit.carriedBy.has_value()});
         // Cause 3, self-destruct: RWE leaves nothing to reclaim, so the
         // record is the level-0 shape the corpus gives the skipped-script
         // causes rather than the wreck the original's Killed might pick.
         notifyUnitDied(*this, unitId, std::nullopt, 0, 3, 0);
 
-        const auto& explosion = unitDefinition.selfDestructAs.empty() ? unitDefinition.explodeAs : unitDefinition.selfDestructAs;
+        const auto& explosion = unitDeathExplosionWeapon(unitDefinition, unit.carriedBy.has_value(), true, communityPatchMode);
         if (!explosion.empty())
         {
             auto impactType = unit.position.y < terrain.getSeaLevel() ? ImpactType::Water : ImpactType::Normal;
@@ -2061,7 +2061,7 @@ namespace rwe
         auto deathType = unfinished
             ? UnitDiedEvent::DeathType::Deleted
             : (unit.position.y < terrain.getSeaLevel() ? UnitDiedEvent::DeathType::WaterExploded : UnitDiedEvent::DeathType::NormalExploded);
-        events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, deathType, unit.owner, killerOwner});
+        events.push_back(UnitDiedEvent{unitId, unit.unitType, unit.position, deathType, unit.owner, killerOwner, unit.carriedBy.has_value()});
 
         // The severity is `clamp(1, 100, (100*overkill/maxdamage + X) / 2)`,
         // where X is `unit+0xF7`: the unit's health percentage as sampled
@@ -2139,14 +2139,15 @@ namespace rwe
             }
         }
 
-        if (!unitDefinition.explodeAs.empty() && !unfinished)
+        const auto& deathExplosion = unitDeathExplosionWeapon(unitDefinition, unit.carriedBy.has_value(), false, communityPatchMode);
+        if (!deathExplosion.empty() && !unfinished)
         {
             auto impactType = unit.position.y < terrain.getSeaLevel() ? ImpactType::Water : ImpactType::Normal;
             // The explodeAs projectile is environmental: deaths it causes
             // are not credited to anyone (the original unit is already dead).
             auto projectile = createProjectileFromWeapon(ProjectileSpawn{
                 .owner = unit.owner,
-                .weaponType = unitDefinition.explodeAs,
+                .weaponType = deathExplosion,
                 .position = unit.position,
                 .direction = SimVector(0_ss, -1_ss, 0_ss),
                 .distanceToTarget = 0_ss,

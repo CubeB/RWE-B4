@@ -1782,21 +1782,22 @@ namespace rwe
                     // without so much as a flash.
                     auto deathIsVisible = (e.owner && *e.owner == localPlayerId) || positionIsVisibleToLocalPlayer(e.position);
 
-                    const auto& selfDestructExplosion = unitDefinition.selfDestructAs.empty() ? unitDefinition.explodeAs : unitDefinition.selfDestructAs;
+                    const auto& normalExplosion = unitDeathExplosionWeapon(unitDefinition, e.carried, false, simulation.communityPatchMode);
+                    const auto& selfDestructExplosion = unitDeathExplosionWeapon(unitDefinition, e.carried, true, simulation.communityPatchMode);
                     switch (e.deathType)
                     {
                         case UnitDiedEvent::DeathType::NormalExploded:
-                            if (!unitDefinition.explodeAs.empty())
+                            if (!normalExplosion.empty())
                             {
-                                doProjectileImpact(e.position, unitDefinition.explodeAs, ImpactType::Normal, deathIsVisible);
-                                addScreenShakeFromWeapon(gameMediaDatabase.getWeapon(unitDefinition.explodeAs));
+                                doProjectileImpact(e.position, normalExplosion, ImpactType::Normal, deathIsVisible);
+                                addScreenShakeFromWeapon(gameMediaDatabase.getWeapon(normalExplosion));
                             }
                             break;
                         case UnitDiedEvent::DeathType::WaterExploded:
-                            if (!unitDefinition.explodeAs.empty())
+                            if (!normalExplosion.empty())
                             {
-                                doProjectileImpact(e.position, unitDefinition.explodeAs, ImpactType::Water, deathIsVisible);
-                                addScreenShakeFromWeapon(gameMediaDatabase.getWeapon(unitDefinition.explodeAs));
+                                doProjectileImpact(e.position, normalExplosion, ImpactType::Water, deathIsVisible);
+                                addScreenShakeFromWeapon(gameMediaDatabase.getWeapon(normalExplosion));
                             }
                             break;
                         case UnitDiedEvent::DeathType::SelfDestructed:

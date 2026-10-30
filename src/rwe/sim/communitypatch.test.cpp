@@ -181,6 +181,31 @@ namespace rwe
         REQUIRE_FALSE(sim.canSeeUnit(us, farFlyer));
     }
 
+    TEST_CASE("transported explosion keys replace the normal weapon only under the mode", "[communitypatch]")
+    {
+        UnitDefinition d;
+        d.explodeAs = "NORMAL";
+        d.selfDestructAs = "SD";
+        d.transportedExplodeAs = "TRANSPORTED";
+        d.transportedSelfDestructAs = "TRANSPORTED_SD";
+
+        REQUIRE(unitDeathExplosionWeapon(d, false, false, true) == "NORMAL");
+        REQUIRE(unitDeathExplosionWeapon(d, true, false, false) == "NORMAL");
+        REQUIRE(unitDeathExplosionWeapon(d, true, false, true) == "TRANSPORTED");
+
+        REQUIRE(unitDeathExplosionWeapon(d, false, true, true) == "SD");
+        REQUIRE(unitDeathExplosionWeapon(d, true, true, true) == "TRANSPORTED_SD");
+        REQUIRE(unitDeathExplosionWeapon(d, true, true, false) == "SD");
+
+        // An omitted transported key keeps the ordinary one, including the
+        // self-destruct fallback to ExplodeAs.
+        d.transportedExplodeAs.clear();
+        d.transportedSelfDestructAs.clear();
+        REQUIRE(unitDeathExplosionWeapon(d, true, false, true) == "NORMAL");
+        REQUIRE(unitDeathExplosionWeapon(d, true, true, true) == "SD");
+        d.selfDestructAs.clear();
+        REQUIRE(unitDeathExplosionWeapon(d, true, true, true) == "NORMAL");
+    }
     TEST_CASE("the Community Patch weapon flags only bite under the ruleset", "[communitypatch]")
     {
         // Sea level is 255 over a flat seabed, so the positions below are
