@@ -86,6 +86,15 @@ namespace rwe
 
         std::string objectName;
 
+        /**
+         * Community Patch (#934), TADR `PreviewObject3D`: the 3DO base name
+         * the build-cursor ghost should draw instead of `objectName` while
+         * this unit is being placed. Parsed whatever the mode; read only by
+         * presentation, and only while the ruleset is on. Empty means the
+         * ordinary model.
+         */
+        std::string previewObjectName;
+
         MovementCollisionInfo movementCollisionInfo;
 
         /**

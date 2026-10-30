@@ -1250,6 +1250,7 @@ set(TEST_FILES
     src/rwe/game/panel_slide.test.cpp
     src/rwe/game/GameSpeed.test.cpp
     src/rwe/game/buildghost.test.cpp
+    src/rwe/game/previewobject.test.cpp
     src/rwe/game/cloakdisplay.test.cpp
     src/rwe/game/damagesmoke.test.cpp
     src/rwe/game/soundcategory.test.cpp

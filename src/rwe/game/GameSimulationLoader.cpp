@@ -369,7 +369,7 @@ namespace rwe
             return entries;
         }
 
-        GameDataMaps loadGameData(const GameLoadServices& services, const std::unordered_set<std::string>& requiredFeatures)
+        GameDataMaps loadGameData(const GameLoadServices& services, const std::unordered_set<std::string>& requiredFeatures, bool communityPatch)
         {
             GameDataMaps dataMaps;
 
@@ -619,6 +619,35 @@ namespace rwe
                     dataMaps.gameMediaDatabase.addSelectionCollisionMesh(fbi.objectName, std::make_shared<CollisionMesh>(std::move(meshInfo.selectionMesh.collisionMesh)));
                     dataMaps.gameMediaDatabase.addSelectionQuad(fbi.objectName, meshInfo.selectionMesh.corners);
 
+                    // Community Patch (#934): TADR PreviewObject3D names an
+                    // alternative model for the build-cursor ghost. It is
+                    // presentation only, but it has to be in the model
+                    // database before the ghost can draw it. A missing or
+                    // unreadable model is logged once here and then falls
+                    // back to Objectname at draw time. The key is read only
+                    // by the ruleset, so a normal game does not load it.
+                    if (communityPatch && !fbi.previewObjectName.empty())
+                    {
+                        auto previewName = toUpper(fbi.previewObjectName);
+                        if (dataMaps.modelDefinitions.find(previewName) == dataMaps.modelDefinitions.end())
+                        {
+                            try
+                            {
+                                auto previewMesh = services.meshService->loadUnitMesh(fbi.previewObjectName);
+                                dataMaps.modelDefinitions.insert({previewName, std::move(previewMesh.modelDefinition)});
+                                for (const auto& m : previewMesh.pieceMeshes)
+                                {
+                                    dataMaps.gameMediaDatabase.addUnitPieceMesh(previewName, m.first, m.second);
+                                }
+                            }
+                            catch (const std::exception& e)
+                            {
+                                LOG_WARN << "Unit " << fbi.unitName << " names PreviewObject3D=" << fbi.previewObjectName
+                                         << ", which could not be read (" << e.what() << "); its build ghost will use " << fbi.objectName;
+                            }
+                        }
+                    }
+
                     if (!fbi.corpse.empty())
                     {
                         requiredFeaturesSet.insert(toUpper(fbi.corpse));
@@ -807,7 +836,7 @@ namespace rwe
             requiredFeatureNames.insert(f.second);
         }
 
-        auto dataMaps = loadGameData(services, requiredFeatureNames);
+        auto dataMaps = loadGameData(services, requiredFeatureNames, gameParameters.communityPatch);
 
         // The wind speed range goes through as the map wrote it. The original
         // caps what a generator can make out of it by clamping the ratio, not
