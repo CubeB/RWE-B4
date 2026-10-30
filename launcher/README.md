@@ -39,3 +39,9 @@ releases. The build's own version is injected at build time from
 platform's asset (the Windows installer or the Linux AppImage) through the
 system browser. It does not replace files in place: there is no signed update
 feed, and the release is a per-platform installer/AppImage that the user runs.
+
+Windows releases offer a full portable 7z and a smaller engine-only 7z; the
+engine-only archive uses the native game menus and does not include the
+optional browser launcher or online master lobby. ZIP remains available for
+compatibility with `install.ps1`. The NSIS installer provides the one click
+installation path.
