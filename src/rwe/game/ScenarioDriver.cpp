@@ -805,4 +805,20 @@ namespace rwe
         }
         return GadgetState{true, button->isToggledOn()};
     }
+
+    std::optional<unsigned int> ScenarioDriver::buildPage(UnitId unitId) const
+    {
+        auto info = scene.unitGuiInfos.find(unitId);
+        if (info == scene.unitGuiInfos.end())
+        {
+            return std::nullopt;
+        }
+        return info->second.currentBuildPage;
+    }
+
+    bool ScenarioDriver::showsBuildPage(UnitId unitId) const
+    {
+        auto info = scene.unitGuiInfos.find(unitId);
+        return info != scene.unitGuiInfos.end() && info->second.section == UnitGuiInfo::Section::Build;
+    }
 }

@@ -5,6 +5,7 @@
 #include <optional>
 #include <rwe/sim/PlayerId.h>
 #include <rwe/sim/UnitId.h>
+#include <unordered_set>
 #include <vector>
 
 namespace rwe
@@ -78,6 +79,32 @@ namespace rwe
      * carried is simply refused.
      */
     bool sweepSelectsUnit(bool underConstruction, bool carried);
+
+    /**
+     * The zero-based build-menu page that digit 1-9 opens, if the builder has
+     * one (TOTALA-EXE-KEYBOARD.md section 75). Under the swapped `SwitchAlt`
+     * arrangement RWE uses, the plain digits are squads and Alt+digit opens a
+     * build page. The original bounds the request by the builder's page
+     * count; digit 0 is a squad key and has no page. An out-of-range digit
+     * leaves the menu as it was.
+     */
+    std::optional<unsigned int> buildPageForDigit(unsigned int digit, unsigned int pageCount);
+
+    /**
+     * The selection after a Ctrl+letter category command
+     * (BT-CATEGORY-CAMERA-KEY-FINDINGS). The eligible pool is the local
+     * player's selectable units -- finished, uncarried, not mission-held.
+     * With Shift the members are added to what is selected; without it every
+     * eligible nonmember is dropped and the members take their place. Units
+     * outside the pool keep their selection either way, so a replacement is
+     * not a blanket clear. An unknown category therefore deselects the
+     * eligible pool when Shift is up and changes nothing when it is down.
+     */
+    std::unordered_set<UnitId> selectionAfterCategory(
+        const std::unordered_set<UnitId>& selected,
+        const std::unordered_set<UnitId>& eligible,
+        const std::unordered_set<UnitId>& members,
+        bool additive);
 
     /**
      * Which of the selected units Ctrl+D sends a self-destruct toggle to

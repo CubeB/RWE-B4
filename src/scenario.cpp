@@ -193,6 +193,122 @@ namespace
             s.endAt(3);
         });
 
+        // The original's Ctrl+letter family (#891): any letter is a
+        // `CTRL_<letter>` category lookup, Shift adds instead of replacing,
+        // and Alt+digit opens a build page under the swapped `SwitchAlt`
+        // arrangement RWE uses. Ctrl+B/F stay the 3.9.01 patch's idle walks
+        // when unshifted (#884); their shifted form is the category command.
+        rwe::registerScenario("891-keybindings", [](rwe::Scenario& s) {
+            struct Spawned
+            {
+                std::optional<rwe::UnitId> tank;
+                std::optional<rwe::UnitId> factory;
+                std::optional<rwe::UnitId> builder;
+            };
+            auto units = std::make_shared<Spawned>();
+
+            s.at(1, [units](rwe::ScenarioDriver& d) {
+                units->tank = d.spawnNearCamera("ARMSTUMP", -160.0f, 0.0f);
+                units->factory = d.spawnNearCamera("ARMVP", 160.0f, 0.0f);
+                units->builder = d.spawnNearCamera("ARMCK", 0.0f, 160.0f);
+                d.require(units->tank.has_value(), "a CTRL_W tank was spawned");
+                d.require(units->factory.has_value(), "a CTRL_F factory was spawned");
+                d.require(units->builder.has_value(), "a CTRL_B builder was spawned");
+            });
+
+            s.at(2, [units](rwe::ScenarioDriver& d) {
+                auto commander = d.commander(0);
+                d.require(commander.has_value(), "the local player has a commander");
+                if (!commander || !units->tank || !units->factory || !units->builder)
+                {
+                    return;
+                }
+
+                d.select(*commander);
+                d.keyDown(SDLK_LCTRL);
+                d.keyDown(SDLK_LSHIFT);
+                d.key(SDLK_W);
+                d.keyUp(SDLK_LSHIFT);
+                d.keyUp(SDLK_LCTRL);
+                d.require(d.selectedCount() == 2, "Ctrl+Shift+W adds the armed mobile to the commander");
+
+                d.keyDown(SDLK_LCTRL);
+                d.keyDown(SDLK_LSHIFT);
+                d.key(SDLK_E);
+                d.keyUp(SDLK_LSHIFT);
+                d.keyUp(SDLK_LCTRL);
+                d.require(d.selectedCount() == 2, "Ctrl+Shift+E keeps the selection for an unknown category");
+
+                d.keyDown(SDLK_LCTRL);
+                d.key(SDLK_E);
+                d.keyUp(SDLK_LCTRL);
+                d.require(d.selectedCount() == 0, "Ctrl+E replaces: an unknown category clears the eligible pool");
+
+                d.keyDown(SDLK_LCTRL);
+                d.keyDown(SDLK_LSHIFT);
+                d.key(SDLK_B);
+                d.keyUp(SDLK_LSHIFT);
+                d.keyUp(SDLK_LCTRL);
+                d.require(d.selectedUnit() == units->builder, "Ctrl+Shift+B selects every CTRL_B construction unit");
+
+                d.key(SDLK_ESCAPE);
+                d.keyDown(SDLK_LCTRL);
+                d.keyDown(SDLK_LSHIFT);
+                d.key(SDLK_F);
+                d.keyUp(SDLK_LSHIFT);
+                d.keyUp(SDLK_LCTRL);
+                d.require(d.selectedUnit() == units->factory, "Ctrl+Shift+F selects every CTRL_F factory");
+            });
+
+            s.at(3, [units](rwe::ScenarioDriver& d) {
+                auto commander = d.commander(0);
+                d.require(commander.has_value() && units->tank.has_value() && units->factory.has_value(),
+                    "the fixture survived to the page test");
+                if (!commander || !units->tank || !units->factory)
+                {
+                    return;
+                }
+
+                d.key(SDLK_ESCAPE);
+                d.select(*commander);
+                d.require(d.buildPage(*commander) == 0u, "the commander starts on build page one");
+
+                d.key(SDLK_PERIOD);
+                d.require(d.buildPage(*commander) == 1u, "the period key reaches page two");
+
+                d.keyDown(SDLK_LALT);
+                d.key(SDLK_1);
+                d.keyUp(SDLK_LALT);
+                d.require(d.buildPage(*commander) == 0u, "Alt+1 opens page one");
+                d.require(d.showsBuildPage(*commander), "Alt+1 opens the build menu");
+
+                d.keyDown(SDLK_LALT);
+                d.key(SDLK_2);
+                d.keyUp(SDLK_LALT);
+                d.require(d.buildPage(*commander) == 1u, "Alt+2 opens page two");
+
+                d.keyDown(SDLK_LALT);
+                d.key(SDLK_9);
+                d.keyUp(SDLK_LALT);
+                d.require(d.buildPage(*commander) == 1u, "a page the builder does not have is left alone");
+
+                // Bind the commander to group 1, then prove Alt+1 does not
+                // recall it: a plain 1 would.
+                d.keyDown(SDLK_LCTRL);
+                d.key(SDLK_1);
+                d.keyUp(SDLK_LCTRL);
+                d.select(*units->tank);
+                d.keyDown(SDLK_LALT);
+                d.key(SDLK_1);
+                d.keyUp(SDLK_LALT);
+                d.require(d.selectedUnit() == units->tank, "Alt+1 opens a page instead of recalling a squad");
+
+                d.key(SDLK_1);
+                d.require(d.selectedUnit() == commander, "the plain digit still recalls the squad");
+            });
+            s.endAt(4);
+        });
+
         // The active BUILD/ORDERS tab has to stay pressed across the panel
         // rebuild a tab switch causes. Clicking ORDERS sets guiInfo.section
         // and asks for a new panel; the old panel, and the toggledOn it held,

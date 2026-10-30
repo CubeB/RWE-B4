@@ -276,6 +276,12 @@ namespace rwe
         /** The named gadget's toggle state on the live panel. */
         GadgetState gadget(const std::string& name);
 
+        /** The build page the unit's panel state holds, or nothing if it has none yet. */
+        std::optional<unsigned int> buildPage(UnitId unitId) const;
+
+        /** Whether the unit's panel state is showing the BUILD section. */
+        bool showsBuildPage(UnitId unitId) const;
+
         /** The one selected unit, when exactly one is selected. */
         std::optional<UnitId> selectedUnit() const;
 

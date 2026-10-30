@@ -42,6 +42,34 @@
 
 namespace rwe
 {
+    bool GameScene::openSelectedBuildPage(unsigned int digit)
+    {
+        // Alt+digit under the swapped `SwitchAlt` arrangement: the plain
+        // digits are squads, so Alt opens the builder's page (TOTALA-EXE-
+        // KEYBOARD.md section 75). The original bounds the request by the
+        // builder's own page count, so a digit past the last page leaves the
+        // menu where it was.
+        auto selectedUnit = getSingleSelectedUnit();
+        if (!selectedUnit)
+        {
+            return false;
+        }
+        const auto& unit = getUnit(*selectedUnit);
+        auto page = buildPageForDigit(digit, getBuildPageCount(builderGuisDatabase, unit.unitType));
+        if (!page)
+        {
+            return false;
+        }
+        auto& guiInfo = getGuiInfo(*selectedUnit);
+        guiInfo.currentBuildPage = *page;
+        guiInfo.section = UnitGuiInfo::Section::Build;
+        if (auto buildPanelDefinition = getBuilderGui(builderGuisDatabase, unit.unitType, guiInfo.currentBuildPage))
+        {
+            setNextPanel(createBuildPanel(unit.unitType + std::to_string(guiInfo.currentBuildPage + 1), *buildPanelDefinition, unit.getBuildQueueTotals()));
+        }
+        return true;
+    }
+
     void GameScene::onKeyDown(const SDL_KeyboardEvent& keysym)
     {
         // The shared pause key remains available while options or chat owns
@@ -182,6 +210,14 @@ namespace rwe
         {
             rightShiftDown = true;
         }
+        else if (keysym.key == SDLK_LALT)
+        {
+            leftAltDown = true;
+        }
+        else if (keysym.key == SDLK_RALT)
+        {
+            rightAltDown = true;
+        }
         else if (keysym.key == SDLK_ESCAPE)
         {
             handleEscapeDown();
@@ -298,7 +334,7 @@ namespace rwe
         {
             selectNextOwnUnit(nextUnitCursor, [](const UnitState&, const UnitDefinition&) { return true; });
         }
-        else if (keysym.key == SDLK_T)
+        else if (keysym.key == SDLK_T && !isCtrlDown())
         {
             startTrack();
         }
@@ -425,18 +461,23 @@ namespace rwe
                 return isIdleBuilder(d.isMobile, d.builder, u.orders.empty());
             });
         }
-        else if (isCtrlDown() && !isShiftDown()
-            && (keysym.key == SDLK_W || keysym.key == SDLK_P
-                || keysym.key == SDLK_V || keysym.key == SDLK_R))
+        else if (isCtrlDown() && keysym.key >= SDLK_A && keysym.key <= SDLK_Z)
         {
             // The original's Ctrl+letter selections are data-driven: it
-            // formats "CTRL_%c" and matches the FBI Category tokens, and the
-            // shipped data defines CTRL_W (armed mobile units), CTRL_V
-            // (vtols), CTRL_R (radars and jammers) and CTRL_P (armed
-            // aircraft). CTRL_F and CTRL_B are in the data too, but their
-            // keys are the 3.9.01 patch's idle walks above.
-            char letter = static_cast<char>(std::toupper(keysym.key));
-            selectAllByCategoryToken(std::string("CTRL_") + letter);
+            // formats "CTRL_%c" and matches the FBI Category tokens, so any
+            // letter works when a mod defines the token
+            // (TOTALA-EXE-KEYBOARD.md sections 73-74). Shift adds the members
+            // to the selection; without it the eligible nonmembers are
+            // dropped (BT-CATEGORY-CAMERA-KEY-FINDINGS). A, D, S and Z are
+            // dedicated commands above, and C is the Commander's own case, so
+            // the original never treats them as generic categories. B and F
+            // are the 3.9.01 patch's idle walks when unshifted (#884); the
+            // shifted form is left to the category command.
+            char letter = static_cast<char>(std::toupper(static_cast<unsigned char>(keysym.key)));
+            if (letter != 'A' && letter != 'C' && letter != 'D' && letter != 'S' && letter != 'Z')
+            {
+                selectAllByCategoryToken(std::string("CTRL_") + letter, isShiftDown());
+            }
         }
         else
         {
@@ -446,6 +487,9 @@ namespace rwe
             //               (the squad recall's second argument is the Shift
             //               state, BT-182: 0x48D9A0).
             // Digit alone → recall group (replace current selection).
+            // Alt+digit   → open the selected builder's build-menu page (the
+            //               swapped `SwitchAlt` half of the original's digit
+            //               case, TOTALA-EXE-KEYBOARD.md section 75).
             // Ctrl+Shift+digit adds the current selection to the group; it is
             // RWE's own, the original having no such binding.
             // Assigning plays CreateSquad and recalling SelectSquad.
@@ -462,7 +506,20 @@ namespace rwe
             if (groupIndex)
             {
                 auto idx = *groupIndex;
-                if (isCtrlDown())
+                if (isAltDown() && !isCtrlDown())
+                {
+                    // Alt+digit opens the selected builder's build-menu page
+                    // (TOTALA-EXE-KEYBOARD.md section 75). RWE keeps the plain
+                    // digits as squads -- the original's swapped `SwitchAlt`
+                    // arrangement -- so Alt is the build-page half. Digit 0
+                    // has no page, and a page the builder does not have is
+                    // left alone.
+                    if (keysym.key >= SDLK_1 && keysym.key <= SDLK_9)
+                    {
+                        openSelectedBuildPage(static_cast<unsigned int>(keysym.key - SDLK_1 + 1));
+                    }
+                }
+                else if (isCtrlDown())
                 {
                     if (isShiftDown())
                     {
@@ -577,6 +634,14 @@ namespace rwe
         else if (keysym.key == SDLK_RSHIFT)
         {
             rightShiftDown = false;
+        }
+        else if (keysym.key == SDLK_LALT)
+        {
+            leftAltDown = false;
+        }
+        else if (keysym.key == SDLK_RALT)
+        {
+            rightAltDown = false;
         }
         else if (keysym.key == SDLK_SPACE)
         {
