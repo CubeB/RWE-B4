@@ -212,6 +212,13 @@ namespace rwe
          */
         void drawHealthBar(float x, float y, int health, int maximum);
 
+        /**
+         * TADR `reloadbar` (#934): a compact bar directly below the in-world
+         * health bar, same width and a one-pixel interior. The caller decides
+         * what progress to show; this only draws it.
+         */
+        void drawReloadBar(float x, float y, float percentFull);
+
         void drawHealthBar2(float x, float y, float width, float height, float percentFull);
 
         void drawBoxOutline(float x, float y, float width, float height, Color color);

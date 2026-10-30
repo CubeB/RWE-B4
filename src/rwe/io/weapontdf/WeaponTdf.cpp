@@ -77,7 +77,8 @@ namespace rwe
         tdf.readOrDefault("notoverwater", w.notOverWater);
         tdf.readOrDefault("notoverland", w.notOverLand);
         tdf.readOrDefault("surfacefire", w.surfaceFire);
-    tdf.readOrDefault("nomapweaponalert", w.noMapWeaponAlert);
+        tdf.readOrDefault("nomapweaponalert", w.noMapWeaponAlert);
+        tdf.readOrDefault("reloadbar", w.reloadBar);
 
         tdf.readOrDefault("burnBlow", w.burnBlow);
         tdf.readOrDefault("accuracy", w.accuracy);

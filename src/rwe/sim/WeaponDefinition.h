@@ -168,6 +168,14 @@ namespace rwe
         bool noMapWeaponAlert{false};
 
         /**
+         * TADR `reloadbar`: draw this weapon's reload progress below the
+         * health bar of a locally owned unit. Presentation only -- it adds no
+         * simulation, hash, save or network state. Honoured only under the
+         * Community Patch, like the other TADR weapon flags.
+         */
+        bool reloadBar{false};
+
+        /**
          * TA turret: the gun sits on a mount that can swing round on its own, so
          * the unit shoots wherever its aim script points. A weapon without one is
          * bolted to the hull -- aircraft cannon, torpedo tubes, gunship rockets --

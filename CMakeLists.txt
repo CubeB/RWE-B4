@@ -436,6 +436,8 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_minimap.cpp
     src/rwe/game/GameScene_peers.cpp
     src/rwe/game/GameScene_render.cpp
+    src/rwe/game/ReloadBar.cpp
+    src/rwe/game/ReloadBar.h
     src/rwe/game/panel_slide.cpp
     src/rwe/game/ControlChannel.cpp
     src/rwe/game/ControlChannel.h
@@ -1471,7 +1473,9 @@ set(TEST_FILES
     src/rwe/sim/visibility.test.cpp
     src/rwe/sim/alliance.test.cpp
     src/rwe/sim/concealment.test.cpp
-src/rwe/sim/communitypatch.test.cpp
+    src/rwe/sim/communitypatch.test.cpp
+    src/rwe/game/ReloadBar.test.cpp
+    src/rwe/io/weapontdf/WeaponTdf.test.cpp
     src/rwe/sim/gameoptions.test.cpp
     src/rwe/sim/deathmatch.test.cpp
     src/rwe/sim/UnitState_util.test.cpp

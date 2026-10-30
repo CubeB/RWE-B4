@@ -479,6 +479,25 @@ namespace rwe
         fillColor(x + 1.0f, y + 1.0f, static_cast<float>(healthBarFill(health, maximum)), 3.0f, healthBarColor(health, maximum));
     }
 
+    void UiRenderService::drawReloadBar(float x, float y, float percentFull)
+    {
+        x = std::floor(x);
+        y = std::floor(y);
+
+        // The health bar occupies y+8 through y+12, so this sits one pixel
+        // below it with the same width. A three-pixel frame with a one-pixel
+        // interior keeps it visibly secondary to the health bar.
+        x -= 17.0f;
+        y += 14.0f;
+
+        constexpr float width = 35.0f;
+        constexpr float height = 3.0f;
+        const auto innerWidth = 1.0f + std::floor(std::clamp(percentFull, 0.0f, 1.0f) * 32.0f);
+
+        fillColor(x, y, width, height, Color::Black);
+        fillColor(x + 1.0f, y + 1.0f, innerWidth, 1.0f, Color(83, 223, 79));
+    }
+
     void UiRenderService::drawHealthBar(float x, float y, float percentFull)
     {
         x = std::floor(x);
