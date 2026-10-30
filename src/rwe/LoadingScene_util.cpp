@@ -288,6 +288,7 @@ namespace rwe
         weaponDefinition.notOverWater = tdf.notOverWater;
         weaponDefinition.notOverLand = tdf.notOverLand;
         weaponDefinition.surfaceFire = tdf.surfaceFire;
+    weaponDefinition.noMapWeaponAlert = tdf.noMapWeaponAlert;
         weaponDefinition.paralyzer = tdf.paralyzer;
         weaponDefinition.toAirWeapon = tdf.toAirWeapon;
 

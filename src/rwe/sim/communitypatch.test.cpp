@@ -206,6 +206,23 @@ namespace rwe
         d.selfDestructAs.clear();
         REQUIRE(unitDeathExplosionWeapon(d, true, true, true) == "NORMAL");
     }
+    TEST_CASE("a silent map weapon suppresses the alert only under the mode", "[communitypatch]")
+    {
+        WeaponDefinition w;
+        w.noMapWeaponAlert = true;
+        w.damage["DEFAULT"] = 0;
+        REQUIRE(communityPatchSuppressesAlert(w, false, true));
+        REQUIRE_FALSE(communityPatchSuppressesAlert(w, true, true));
+        REQUIRE_FALSE(communityPatchSuppressesAlert(w, false, false));
+
+        w.damage["DEFAULT"] = 1;
+        REQUIRE_FALSE(communityPatchSuppressesAlert(w, false, true));
+
+        w.noMapWeaponAlert = false;
+        w.damage.clear();
+        REQUIRE_FALSE(communityPatchSuppressesAlert(w, false, true));
+    }
+
     TEST_CASE("the Community Patch weapon flags only bite under the ruleset", "[communitypatch]")
     {
         // Sea level is 255 over a flat seabed, so the positions below are
