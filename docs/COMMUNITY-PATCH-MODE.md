@@ -99,6 +99,24 @@ The simulation selects the weapon through one helper and the scene's death
 blast uses the same selection, so the visual and the damage agree. Keys are
 parsed whatever the mode and only honoured under it. The loader resolves
 missing weapon names the same way it already does for the ordinary keys.
+## Patrol reclaim thresholds (implemented)
+
+TADR 2026.10.6 gives each player `+setreclaimmetal` and
+`+setreclaimenergy`, as `<0-100>[%]`. A patrolling construction unit looks for
+reclaim only while metal is below the metal level or energy is below the
+energy level; it assists only while energy is at or above the energy level.
+The default is 20% for both. `0` never counts as low (so a patrol does not
+reclaim and always assists), and `100` counts as low unless the store is
+exactly full. The levels belong to the player who types the line and track
+storage as it grows; with no argument the command prints the current level.
+
+RWE stores both levels per player, hashes, saves and dumps them, and carries a
+change in the issuer's command stream so every peer applies the same level to
+the same player. They are inert outside the Community Patch and in playback.
+Air constructors use the same gate as ground ones under the mode; outside it,
+the original's fixed fifth and the air constructor's unconditional reclaim
+scan are unchanged. This is RWE-original ruleset work under ADR-0006, not a
+byte-tactics comparison.
 ## Where it is toggled
 
 - **Launcher, single player:** the Play page has a Community Patch switch,
@@ -120,7 +138,7 @@ missing weapon names the same way it already does for the ordinary keys.
 | explosions damage every stacked aircraft, contested-cell tie-break | **already RWE**: the blast sweep walks every flying unit in range, not just the one occupancy cell, so stacked aircraft are all damaged; occupancy writes are deterministic in unit order, so no tie-break is needed |
 | off-map aircraft targetable | **done**: a flying target wholly outside the map by at most one tile is visible from the nearest edge cell; the weapon still has to reach it and pass its ordinary hit rules |
 | construction units stay put while guarding a factory | planned once RWE's guard/assist order is compared with TADR's |
-| patrol reclaim thresholds and `+setreclaimmetal`/`+setreclaimenergy` | planned; TADR's percentages are absolute of storage and reset per game |
+| patrol reclaim thresholds and `+setreclaimmetal`/`+setreclaimenergy` | **done**: per-player 0..100 levels of storage, default 20%, 0 never low, energy also gates assisting, air constructors follow the same rule |
 | percentage share thresholds (`+setsharemetal 50%`) | **done**: a percentage tracks storage, a plain number stays absolute, and both are saved/hashed |
 | repair-rate exploit fix | planned: the many-cheap-repairers fault is a real economy rule |
 | share-abuse guard / `.take` refusal | evaluate against RWE's own sharing and rejoining rules; may stay RWE-original |

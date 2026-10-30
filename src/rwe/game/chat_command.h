@@ -16,9 +16,11 @@ namespace rwe
      * to case. An integer argument that is missing is 0, and one that is
      * present is read as `atoi` reads it, so `12abc` is 12 and `abc` is 0.
      *
-     * Only the sharing commands are built. Every other word the original
-     * registers (NoShake, Contour, ... ) is Unknown here, and so is
-     * `+ShareLOS`, which the original does not register either.
+     * Only the sharing commands, the local UI commands this build carries,
+     * and (under the Community Patch) the two patrol reclaim levels are
+     * built. Every other word the original registers (NoShake, Contour, ... )
+     * is Unknown here, and so is `+ShareLOS`, which the original does not
+     * register either.
      */
     struct ChatCommand
     {
@@ -40,6 +42,14 @@ namespace rwe
             SetShareMetal,
             /** `+SetShareEnergy n`: `number` is what was typed. */
             SetShareEnergy,
+            /**
+             * `+SetReclaimMetal n` (TADR 2026.10.6): `number` is the
+             * percentage, and `hasArgument` says whether one was typed at all
+             * (no value prints the current level).
+             */
+            SetReclaimMetal,
+            /** `+SetReclaimEnergy n`, which also gates assisting. */
+            SetReclaimEnergy,
             /** `+Give player amount metal|energy`. */
             Give,
             /** `+Give` with an argument list that does not make a gift. */
@@ -99,6 +109,13 @@ namespace rwe
         /** SetShare*: the argument ended in `%`, so `number` is a percentage of storage. */
         bool percent{false};
 
+        /**
+         * SetReclaim*: true when an argument was typed. Unlike the original's
+         * integer commands, an absent value here means "print the current
+         * level" rather than zero, so the two cases must be distinguishable.
+         */
+        bool hasArgument{false};
+
         /** Give: the first argument as typed (a player's number or name). */
         std::string playerToken;
 
@@ -114,8 +131,12 @@ namespace rwe
      * character is not `+`, which is how the caller knows it is ordinary chat;
      * when it is `+` the line is a command whatever follows, and is never
      * to be sent as chat.
+     *
+     * `communityPatch` enables the Community Patch words this build adds.
+     * With it false they fall through to Unknown exactly as they did before
+     * the mode existed, so a normal game's parsing is unchanged.
      */
-    std::optional<ChatCommand> parseChatCommand(const std::string& line);
+    std::optional<ChatCommand> parseChatCommand(const std::string& line, bool communityPatch = false);
 
     /** Permission bits, numbered as the original's tables are (#906). */
     enum ChatCommandMask : unsigned int

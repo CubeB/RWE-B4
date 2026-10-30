@@ -80,6 +80,8 @@ namespace rwe
             {"energyReservePercent", dumpJson(p.energyReservePercent)},
             {"metalReservePercentage", dumpJson(p.metalReservePercentage)},
             {"energyReservePercentage", dumpJson(p.energyReservePercentage)},
+            {"reclaimMetalPercent", dumpJson(p.reclaimMetalPercent)},
+            {"reclaimEnergyPercent", dumpJson(p.reclaimEnergyPercent)},
             {"airBasesRebuiltAt", dumpJson(p.airBasesRebuiltAt)}};
     }
     /**

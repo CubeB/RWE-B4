@@ -34,6 +34,10 @@ namespace rwe
      * short of health or still a frame, not already being reclaimed by this
      * player, and within the unit's SightDistance on the flat; one is chosen
      * with a single draw.
+     *
+     * Under the Community Patch the fifth is the player's own energy reclaim
+     * level (`+setreclaimenergy`, TADR 2026.10.6), which is also what gates
+     * assisting: at 0 the gate never fails, so a patrol always assists.
      */
     std::optional<UnitId> pickRepairPatrolRepairTarget(GameSimulation& sim, ConstUnitInfo unitInfo);
 
@@ -43,6 +47,11 @@ namespace rwe
      * square of that side centred on the unit, one map square each, and the
      * feature found is kept in a metal list and an energy list; the best of
      * three draws is taken from each, and the ladder picks between them.
+     *
+     * Under the Community Patch the ladder's two "below a fifth" rungs test
+     * the player's own metal and energy reclaim levels instead (TADR
+     * 2026.10.6). The caller is responsible for the "look at all" gate, which
+     * the mode also changes.
      */
     std::optional<FeatureId> pickRepairPatrolReclaimTarget(GameSimulation& sim, ConstUnitInfo unitInfo, SimScalar side);
 }

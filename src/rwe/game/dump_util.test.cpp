@@ -168,12 +168,16 @@ namespace rwe
         p.shareEnergy = false;
         p.metalReserve = Metal(250.0f);
         p.energyReserve = Energy(-5.0f);
+        p.reclaimMetalPercent = 7;
+        p.reclaimEnergyPercent = 93;
 
         auto j = dumpJson(p);
         REQUIRE(j.at("shareMetal") == true);
         REQUIRE(j.at("shareEnergy") == false);
         REQUIRE(j.at("metalReserve") == 250.0f);
         REQUIRE(j.at("energyReserve") == -5.0f);
+        REQUIRE(j.at("reclaimMetalPercent") == 7);
+        REQUIRE(j.at("reclaimEnergyPercent") == 93);
     }
 
 }

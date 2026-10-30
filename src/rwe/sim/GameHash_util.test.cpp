@@ -593,6 +593,15 @@ namespace rwe
         // The hash is a sum, so equal values in the two accounts must not be
         // interchangeable in it.
         REQUIRE(computeHashOf(metalReserve) != computeHashOf(energyReserve));
+
+        auto reclaimMetal = make();
+        reclaimMetal.reclaimMetalPercent = 40;
+        REQUIRE(computeHashOf(reclaimMetal) != base);
+
+        auto reclaimEnergy = make();
+        reclaimEnergy.reclaimEnergyPercent = 40;
+        REQUIRE(computeHashOf(reclaimEnergy) != base);
+        REQUIRE(computeHashOf(reclaimMetal) != computeHashOf(reclaimEnergy));
     }
 
     TEST_CASE("a new player's sharing state is the same wherever in memory it was built", "[hash]")
