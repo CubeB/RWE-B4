@@ -127,6 +127,53 @@ Weapons fired by a unit, and weapons with any positive damage, keep the
 ordinary alert. RWE has no minimap or megamap projectile alert dots, so there
 is no second surface to suppress. This is RWE-original ruleset work under
 ADR-0006.
+## Map units in a skirmish OTA (implemented)
+
+TADR 2024.10.27's "neutral unit and/or per-player additional unit spawn" adds a
+`[units]` block under a skirmish map's `[Schema 0]`, holding repeated
+`[unitN]` records. RWE reads the block through the same mission-unit reader it
+already had, but under the mode a skirmish map's records are spawned by
+`spawnMapUnits` after the start-position deal; a campaign mission still uses
+`spawnMissionUnits` and is unchanged.
+
+- **`Player` is a map position.** 1..10 names the map's `StartPos<n>`; the
+  owner is whichever seat the deal gave that position, so Random start
+  locations move the units with their player. `Player=11` is the last filled
+  seat and only takes the units when that seat is a computer, exactly as TADR
+  says. Every other `Player` value makes nothing.
+- **The keys.** `UnitName`, `XPos`, `ZPos` and `Player` are the required ones.
+  `Ident` and `InitialMission` work as they do for a mission's units (the same
+  `MissionScripts` interpreter, so waits, patrols, guards and names resolve).
+  `YPos` and `HealthPercentage` are ignored: the unit stands on the terrain and
+  is made at full health. `Angle` is still read by the shared record reader and
+  applies if a map writes it. The other mission flags are read and ignored as
+  the mission spawner ignores them, except `Immunity`, which it copies.
+- **Numbering.** Records are read as `[unit0]`, `[unit1]`, ... until the first
+  missing index, exactly as the mission reader reads them. TDF keeps only the
+  last block of a given name, so a map that literally repeats `[unit0]` loses
+  the earlier one; number the records distinctly.
+- **No commander.** A player who receives at least one map unit is not given a
+  commander. A map that wants one lists a commander among that player's units.
+  A player whose listed units all fail to spawn still gets the ordinary
+  commander, because they received nothing.
+- **Deterministic.** The records are spawned in file order, after the seeded
+  start-position deal, so every peer reaches the same unit ids. The units are
+  ordinary units; the mission scripts they may carry are already hashed, saved
+  and dumped, so the mode adds no simulation state of its own.
+- **Where it is off.** Only the Community Patch spawns them. Without the flag
+  a skirmish `[units]` block is parsed and ignored, as before.
+
+Deliberate departures from TADR, all because RWE's model differs:
+
+- **`CreationCountdown` is parsed but not acted on.** RWE has no delayed
+  spawn queue, and its mission spawner ignores the field too; a unit the map
+  gives a countdown appears at tick 0 rather than after that many seconds.
+- **There is no neutral owner.** TADR leaves a unit with an unoccupied
+  position, or `Player=11` when the last seat is not an AI, to TA's neutral
+  slot (player 0xA). RWE has no neutral player, so those records are skipped
+  with a `Map unit not placed` log line. A map that means them as scenery
+  keeps its per-player units but loses the neutral ones. Giving RWE a neutral
+  seat is a larger change than this slice and is not attempted here.
 ## Where it is toggled
 
 - **Launcher, single player:** the Play page has a Community Patch switch,
@@ -160,7 +207,7 @@ ADR-0006.
 | `VeterancyThresholds`, `VeterancyAccuracyBuffRate` | planned: RWE has veterancy; the per-unit keys are additive |
 | `TransportedExplodeAs`, `TransportedSelfDestructAs` | **done**: the two keys replace the ordinary death and self-destruct weapons for a carried unit, independently |
 | `PreviewObject3D` | planned as a build-ghost presentation key |
-| neutral units and per-player spawn units in the map OTA | planned; RWE reads `[units]` for missions but not for skirmish maps |
+| neutral units and per-player spawn units in the map OTA | **done for per-player/AI seats**: `[units]` spawns under the mode; neutral owners are skipped because RWE has no neutral slot |
 | weapon IDs above 255 | check RWE's parser first; likely already unrestricted |
 | `nomapweaponalert` | **done**: a zero-damage, no-firer map weapon no longer raises the under-attack message or voice; RWE has no projectile alert dots to suppress |
 | `reloadbar` | later: presentation with a clear RWE hook |

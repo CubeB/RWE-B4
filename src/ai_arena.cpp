@@ -116,6 +116,13 @@ namespace
                 continue;
             }
 
+            // A player who received the map's own [units] under the Community
+            // Patch gets no commander (issue #934).
+            if (loaded.mapUnitSlots[i])
+            {
+                continue;
+            }
+
             auto startPos = rwe::findStartPosition(schema, *loaded.startPositionForSlot[i]);
             if (!startPos)
             {

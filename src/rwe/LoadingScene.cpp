@@ -210,6 +210,24 @@ namespace rwe
 
         auto loaded = loadGameSimulation(services, gameParameters, std::move(mapInfo.data), ota);
 
+        // A player who received map units under the Community Patch gets no
+        // commander (issue #934). The camera still opens on something of
+        // theirs: the first unit the map gave them, rather than an empty start
+        // position where a commander would have stood.
+        std::optional<SimVector> mapUnitCameraPos;
+        if (loaded.localPlayerId)
+        {
+            for (auto unitId : loaded.mapUnitSpawn.spawned)
+            {
+                const auto& unit = loaded.simulation.getUnitState(unitId);
+                if (unit.owner == *loaded.localPlayerId)
+                {
+                    mapUnitCameraPos = unit.position;
+                    break;
+                }
+            }
+        }
+
         auto minimap = sceneContext.textureService->getMinimap(mapName);
 
         GameCameraState worldCameraState;
@@ -462,6 +480,14 @@ namespace rwe
                 continue;
             }
 
+            // The map's own [units] are this player's army under the
+            // Community Patch; TADR says such a player gets no commander
+            // unless the map lists one too (issue #934).
+            if (loaded.mapUnitSlots[i])
+            {
+                continue;
+            }
+
             const auto& sideData = getSideData(player->side);
             gameScene->spawnCompletedUnit(sideData.commander, *loaded.gamePlayers[i], worldStartPos);
         }
@@ -484,6 +510,11 @@ namespace rwe
             // the map, and the units arrive as the stream places them.
             humanStartPos = SimVector(0_ss, 0_ss, 0_ss);
             humanStartPos->y = gameScene->getTerrain().getHeightAt(humanStartPos->x, humanStartPos->z);
+        }
+
+        if (mapUnitCameraPos)
+        {
+            humanStartPos = mapUnitCameraPos;
         }
 
         if (!humanStartPos)
