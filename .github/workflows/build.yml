@@ -458,12 +458,26 @@ jobs:
           if errorlevel 1 exit /b 1
           cd build
           cmake --build . --target package || exit /b 1
+      - name: create portable 7z archive
+        if: matrix.configuration == 'Release'
+        shell: pwsh
+        run: |
+          $zip = (Get-ChildItem build/dist/RobotWarEngine-*-Windows-Release.zip).FullName
+          .\tools\package-portable.ps1 -ZipPath $zip
+          .\tools\package-portable.ps1 -ZipPath $zip -EngineOnly
       - name: upload zip artifact
         if: matrix.configuration == 'Release'
         uses: actions/upload-artifact@v6
         with:
           name: RWE Zip ${{ runner.os }} MSVC ${{ matrix.configuration }}
           path: build/dist/RobotWarEngine-*-Windows-${{ matrix.configuration }}.zip
+          if-no-files-found: error
+      - name: upload 7z artifact
+        if: matrix.configuration == 'Release'
+        uses: actions/upload-artifact@v6
+        with:
+          name: RWE 7z ${{ runner.os }} MSVC ${{ matrix.configuration }}
+          path: build/dist/RobotWarEngine-*-Windows-${{ matrix.configuration }}*.7z
           if-no-files-found: error
       - name: upload installer artifact
         if: matrix.configuration == 'Release'
@@ -730,12 +744,26 @@ jobs:
         working-directory: build
         run: make package
         shell: msys2 {0}
+      - name: create portable 7z archive
+        if: matrix.configuration == 'Release'
+        shell: pwsh
+        run: |
+          $zip = (Get-ChildItem build/dist/RobotWarEngine-*-Windows-Release.zip).FullName
+          .\tools\package-portable.ps1 -ZipPath $zip
+          .\tools\package-portable.ps1 -ZipPath $zip -EngineOnly
       - name: upload zip artifact
         if: matrix.configuration == 'Release'
         uses: actions/upload-artifact@v6
         with:
           name: RWE Zip ${{ runner.os }} MinGW64 ${{ matrix.configuration }}
           path: build/dist/RobotWarEngine-*-Windows-${{ matrix.configuration }}.zip
+          if-no-files-found: error
+      - name: upload 7z artifact
+        if: matrix.configuration == 'Release'
+        uses: actions/upload-artifact@v6
+        with:
+          name: RWE 7z ${{ runner.os }} MinGW64 ${{ matrix.configuration }}
+          path: build/dist/RobotWarEngine-*-Windows-${{ matrix.configuration }}*.7z
           if-no-files-found: error
       - name: upload installer artifact
         if: matrix.configuration == 'Release'
@@ -758,6 +786,11 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: RWE Zip Windows MSVC Release
+          path: dist
+      - name: download MSVC Release 7z
+        uses: actions/download-artifact@v7
+        with:
+          name: RWE 7z Windows MSVC Release
           path: dist
       - name: download MSVC Release installer
         uses: actions/download-artifact@v7
@@ -782,7 +815,7 @@ jobs:
 
   # A rolling pre-release of the newest `revival` build, so the community can
   # playtest without waiting for a version tag. One release under a fixed
-  # `nightly` tag, its three assets replaced on every push: the tag is moved to
+  # `nightly` tag, its five assets replaced on every push: the tag is moved to
   # the built commit so it names the revision, and the body says which hash it
   # is and what changed since the previous nightly. The tag is lightweight on
   # purpose -- CMake's `git describe` sees only annotated tags, so it never
@@ -807,6 +840,11 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: RWE Zip Windows MSVC Release
+          path: dist
+      - name: download MSVC Release 7z
+        uses: actions/download-artifact@v7
+        with:
+          name: RWE 7z Windows MSVC Release
           path: dist
       - name: download MSVC Release installer
         uses: actions/download-artifact@v7

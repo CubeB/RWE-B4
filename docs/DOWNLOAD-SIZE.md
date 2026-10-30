@@ -59,7 +59,69 @@ The two large development archives are `rapidcheck.lib` (27898250 bytes) and
 installing their development archives, headers, CMake or pkg-config metadata
 into the game package. Their explicitly installed copyright notices remain.
 
-## Executed verification, 2026-10-30
+## DOWNLOAD-002: further compression, 2026-10-30
+
+The user requests another size reduction. This remains the RWE-original
+distribution scope and documented static reference boundary of DOWNLOAD-001;
+it does not change gameplay, archive resolution or engine file formats.
+
+The controlled preview ZIP attributes 33642412 compressed bytes to the
+launcher out of 39891437 total. The current runtime is an economical migration
+from Electron, not the minimum possible native implementation. A system
+webview can replace the window host, but retaining a Node sidecar retains
+the main remaining runtime cost. Removing it means porting the backend's
+filesystem/process services and existing lobby logic to native code. That is
+a larger implementation and compatibility project, not a packaging switch.
+
+For this pass, add a maximum-compression 7z portable download alongside ZIP
+and the installer. Keep ZIP for existing PowerShell installation and preserve
+all existing entry points and functionality. Set the NSIS LZMA dictionary to
+64 MiB rather than its 8 MiB default. This trades build/extraction memory for
+download size; no executable packing or runtime feature removal is proposed.
+Archive contents must be verified against the same staged distribution.
+
+Also offer a labelled engine-only portable archive, since the existing engine
+entry point already runs without the optional launcher. Keep the native game,
+setup/import controls, runtime libraries, shaders and copyright notices. Omit
+only the optional `launcher/` tree, its `RWE Launcher.cmd` entry and the
+launcher-only `rwe_bridge.exe` helper. The full package retains these features.
+The engine-only option does not include the browser launcher's profile/mod
+screen, update check or online master-server lobby. It is an explicit download
+choice, not a silent removal from the existing full installer or ZIP.
+
+References: [CPack archive formats](https://cmake.org/cmake/help/latest/cpack_gen/archive.html),
+[NSIS dictionary size](https://nsis.sourceforge.io/Reference/SetCompressorDictSize),
+[Tauri system webviews](https://v2.tauri.app/reference/webview-versions/).
+
+Executed against the same first-pass ZIP using
+`tools/package-portable.ps1`, 7-Zip 26.02, solid compression level 9:
+
+| Windows portable download | Bytes | Included interface |
+| --- | ---: | --- |
+| Previous ZIP | 39891437 | Full browser launcher and native game |
+| Full 7z | 25595729 | Identical full package |
+| Engine-only 7z | 3539926 | Native game/setup; optional launcher omitted |
+
+The full package is another **35.8% smaller** as a download, with no payload
+changes. This is compression, not a smaller installed footprint. The
+engine-only option removes the optional runtime and related controls and is
+therefore a different, explicitly labelled product choice.
+
+Both archive CRC checks passed. After extraction, SHA-256 and relative-file
+comparisons matched every selected source file: all 44 files in the full
+package, and all 29 retained engine-only files. No extra files appeared.
+The engine-only archive extracts its game files directly into the chosen
+directory; extract it into a folder of its own. The full archive retains the
+existing top-level distribution folder.
+
+The script parsed under Windows PowerShell; both workflow YAML files parsed
+successfully. Windows Release jobs now create/test/upload both variants,
+and tagged, nightly and weekly publishing collect both. The existing ZIP,
+PowerShell installer and full NSIS installer remain available. The NSIS
+dictionary change is configured but has not been measured with a built
+installer locally. No Linux or game simulation changes were made in this pass.
+
+## First-pass verification
 
 The self-contained Windows package uses local Node v24.19.0; its launcher tree
 is 94824501 bytes, including the runtime, frontend and licences. The branded

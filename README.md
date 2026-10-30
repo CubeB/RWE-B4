@@ -46,7 +46,7 @@ a package for your system:
 
 | Platform | Package |
 | --- | --- |
-| **Windows** | Installer (`.exe`) or portable archive (`.zip`) |
+| **Windows** | Installer (`.exe`), full portable 7z (`.7z`), smallest engine-only 7z (`-Engine.7z`), or ZIP (`.zip`) |
 | **Linux** | AppImage (`.AppImage`) |
 
 The **nightly** release follows development on `revival`. Dated **weekly**

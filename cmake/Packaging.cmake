@@ -33,12 +33,13 @@ set(CPACK_NSIS_INSTALLED_ICON_NAME "rwe.exe")
 set(CPACK_NSIS_EXECUTABLES_DIRECTORY ".")
 set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
 set(CPACK_NSIS_MODIFY_PATH OFF)
-# DOWNLOAD-001: RWE-original distribution size; solid LZMA installer.
+# DOWNLOAD-002: RWE-original distribution size; solid LZMA installer.
 set(CPACK_NSIS_COMPRESSOR "/SOLID lzma")
 set(CPACK_NSIS_MANIFEST_DPI_AWARE ON)
 set(CPACK_NSIS_WELCOME_TITLE "Welcome to Robot War Engine")
 set(CPACK_NSIS_FINISH_TITLE "Robot War Engine is installed")
 set(CPACK_NSIS_DEFINES [=[
+SetCompressorDictSize 64
 !define MUI_WELCOMEPAGE_TEXT "Install Robot War Engine, then import game files from your own copy of Total Annihilation.$\r$\n$\r$\nThe setup assistant opens after installation. It can find your game automatically or let you choose its folder.$\r$\n$\r$\nYour Total Annihilation installation and RWE saved games stay in place."
 !define MUI_FINISHPAGE_TEXT "Next, import your Total Annihilation game files. If you have already imported them, close the assistant and use Play Robot War Engine.$\r$\n$\r$\nYou can reopen Import Game Data from the Start menu at any time."
 !define MUI_FINISHPAGE_RUN

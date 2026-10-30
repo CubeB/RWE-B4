@@ -6,7 +6,7 @@ name: Weekly Release
 # whose assets are replaced on every push -- and this is the one that keeps
 # its history.
 #
-# Nothing is built here. The three assets are the ones `build.yml` already
+# Nothing is built here. The five assets are the ones `build.yml` already
 # produces, called the same way `release.yml` calls it, and the tag-push and
 # push-to-revival jobs inside it are both skipped under `schedule`, so a call
 # from here builds, uploads and stops. This workflow owns the release.
@@ -45,6 +45,11 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: RWE Zip Windows MSVC Release
+          path: dist
+      - name: download MSVC Release 7z
+        uses: actions/download-artifact@v7
+        with:
+          name: RWE 7z Windows MSVC Release
           path: dist
       - name: download MSVC Release installer
         uses: actions/download-artifact@v7
