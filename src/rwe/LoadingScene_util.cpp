@@ -569,6 +569,8 @@ namespace rwe
 
         u.explodeAs = fbi.explodeAs;
         u.selfDestructAs = fbi.selfDestructAs;
+        u.transportedExplodeAs = fbi.transportedExplodeAs;
+        u.transportedSelfDestructAs = fbi.transportedSelfDestructAs;
 
         u.builder = fbi.builder;
         u.buildTime = fbi.buildTime;

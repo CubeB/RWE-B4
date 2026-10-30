@@ -86,6 +86,19 @@ sharing pass; the value is sent with the ordinary share command (a new
 backwards-compatible protobuf field), and older saves load with the absolute
 form. Percentages outside 0..100 are clamped.
 
+## Transported explosion overrides (implemented)
+
+TADR 2026.10.6 adds optional `TransportedExplodeAs` and
+`TransportedSelfDestructAs` unit FBI keys. A unit that dies while loaded in a
+transport uses the named weapon instead of `ExplodeAs` or `SelfDestructAs`;
+the two keys are independent, and an omitted one keeps the ordinary key. A
+unit outside a transport is unchanged. This is RWE-original ruleset work
+under ADR-0006, not a byte-tactics comparison.
+
+The simulation selects the weapon through one helper and the scene's death
+blast uses the same selection, so the visual and the damage agree. Keys are
+parsed whatever the mode and only honoured under it. The loader resolves
+missing weapon names the same way it already does for the ordinary keys.
 ## Where it is toggled
 
 - **Launcher, single player:** the Play page has a Community Patch switch,
@@ -117,7 +130,7 @@ form. Percentages outside 0..100 are clamped.
 | TADR key | RWE plan |
 | --- | --- |
 | `VeterancyThresholds`, `VeterancyAccuracyBuffRate` | planned: RWE has veterancy; the per-unit keys are additive |
-| `TransportedExplodeAs`, `TransportedSelfDestructAs` | planned: RWE has transport deaths, so the keys map directly |
+| `TransportedExplodeAs`, `TransportedSelfDestructAs` | **done**: the two keys replace the ordinary death and self-destruct weapons for a carried unit, independently |
 | `PreviewObject3D` | planned as a build-ghost presentation key |
 | neutral units and per-player spawn units in the map OTA | planned; RWE reads `[units]` for missions but not for skirmish maps |
 | weapon IDs above 255 | check RWE's parser first; likely already unrestricted |

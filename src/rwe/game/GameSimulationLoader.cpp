@@ -847,7 +847,7 @@ namespace rwe
         // name to trip on: the unit dies with no blast, as it must there.
         for (auto& [unitType, definition] : simulation.unitDefinitions)
         {
-            for (auto* deathWeapon : {&definition.explodeAs, &definition.selfDestructAs})
+            for (auto* deathWeapon : {&definition.explodeAs, &definition.selfDestructAs, &definition.transportedExplodeAs, &definition.transportedSelfDestructAs})
             {
                 if (deathWeapon->empty())
                 {
