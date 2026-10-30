@@ -4842,6 +4842,34 @@ namespace rwe
             return false;
         }
 
+        // Community Patch: a construction unit guarding a factory stays where
+        // it finished the last build instead of walking to a new spot. TADR
+        // 2025.5.18, "Improved behaviour of con units when guarding a factory
+        // - they stay put after finishing a build", made an option of the
+        // 2025.7.12 "Improved behaviour of con units" entry (stay put;
+        // cavedog; scatter). RWE's ordinary path below is the one that moves:
+        // once the frame is released there is no factory job to copy, so the
+        // guard falls through to "stay close" and, if it finished the build
+        // from outside 200 of the factory's centre, walks in towards it. The
+        // guard was already within working reach when it did that work, so
+        // staying there costs it nothing: the next frame is still in reach.
+        // Out of reach it keeps the approach, because a unit ordered to guard
+        // a factory from across the map must still arrive to assist.
+        //
+        // Ground only: a construction aircraft's guard is the VTOL circuit
+        // handled above, which TADR does not touch. This is RWE-original
+        // ruleset work under ADR-0006, not a byte-tactics comparison.
+        const auto& guardedDefinition = sim->unitDefinitions.at(targetUnit.unitType);
+        if (sim->communityPatchMode
+            && unitInfo.definition->builder
+            && !unitInfo.definition->canFly
+            && guardedDefinition.builder
+            && !guardedDefinition.isMobile
+            && withinBuildReach(unitInfo, targetUnit))
+        {
+            return false;
+        }
+
         // stay close
         if (unitInfo.definition->canMove && unitInfo.state->position.distanceSquared(targetUnit.position) > SimScalar(200 * 200))
         {

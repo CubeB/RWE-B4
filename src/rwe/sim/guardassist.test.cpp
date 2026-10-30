@@ -748,4 +748,159 @@ namespace rwe
             REQUIRE(std::holds_alternative<GuardOrder>(sim.getUnitState(escort).orders.front()));
         }
     }
+
+    namespace
+    {
+        struct FactoryGuardRun
+        {
+            /** Where the builder stood on the tick each frame was released. */
+            std::vector<SimVector> completions;
+            /** Where it stood a while after the last one. */
+            SimVector after;
+            SimVector plantPosition;
+            bool helped{false};
+        };
+
+        /**
+         * A builder is ordered to guard a plant from outside the plant's
+         * working reach and has to walk in; each released frame is an event.
+         * Its BuildDistance is long enough that it can finish a build while
+         * standing more than 200 from the factory's centre -- the distance at
+         * which RWE's ordinary "stay close" fallback starts walking it in.
+         */
+        FactoryGuardRun runFactoryGuardAfterBuild(bool mode, int queued)
+        {
+            auto script = makeEmptyCobScript({"base"});
+            GameSimulation sim(makeFlatTerrain(96, 96), 0u, 0, 0);
+            sim.communityPatchMode = mode;
+            auto player = addPlayer(sim);
+            registerModel(sim);
+            sim.unitDefinitions["PLANT"] = makeBigPlantDef();
+            openTheYardPad(sim.unitDefinitions["PLANT"]);
+            // A way out of the yard, so a finished product can clear the pad
+            // and the next one can be stood up in the same run.
+            for (int z = 2; z <= 5; ++z)
+            {
+                for (int x = 3; x <= 4; ++x)
+                {
+                    sim.unitDefinitions["PLANT"].yardMap->set(x, z, YardMapCell::GroundPassable);
+                }
+            }
+            sim.unitDefinitions["BUILDER"] = makeBuilderDef(3u);
+            sim.unitDefinitions["TANK"] = makeTankDef();
+            // Long enough that the walk to the yard, and the work, are both
+            // over well before the frame is released.
+            sim.unitDefinitions["TANK"].buildTime = 3000u;
+            sim.unitScriptDefinitions["TANK"] = *script;
+            sim.unitScriptDefinitions["PLANT"] = *script;
+            sim.unitScriptDefinitions["BUILDER"] = *script;
+
+            FactoryGuardRun run;
+            run.plantPosition = SimVector(200_ss, 0_ss, 200_ss);
+            auto plant = sim.trySpawnUnit("PLANT", player, run.plantPosition, std::nullopt).value();
+            sim.getUnitState(plant).inBuildStance = true;
+            sim.getUnitState(plant).buildQueue.push_back(std::make_pair(std::string("TANK"), queued));
+
+            auto builder = sim.trySpawnUnit("BUILDER", player, SimVector(500_ss, 0_ss, 200_ss), std::nullopt).value();
+            sim.getUnitState(builder).inBuildStance = true;
+            sim.getUnitState(builder).orders.push_back(GuardOrder(plant));
+
+            for (int t = 0; t < 3000 && static_cast<int>(run.completions.size()) < queued; ++t)
+            {
+                sim.tick();
+                if (std::holds_alternative<UnitBehaviorStateBuilding>(sim.getUnitState(builder).behaviourState))
+                {
+                    run.helped = true;
+                }
+
+                auto completed = 0;
+                for (const auto& entry : sim.units)
+                {
+                    const auto& unit = entry.second;
+                    if (unit.unitType == "TANK" && !unit.isBeingBuilt(sim.unitDefinitions.at("TANK")))
+                    {
+                        ++completed;
+                    }
+                }
+                while (static_cast<int>(run.completions.size()) < completed)
+                {
+                    run.completions.push_back(sim.getUnitState(builder).position);
+                }
+
+                // The plant has a single pad, so a released product has to
+                // clear it before the next frame can be stood up there.
+                for (const auto& [id, unit] : sim.units)
+                {
+                    if (unit.unitType == "TANK" && !unit.isBeingBuilt(sim.unitDefinitions.at("TANK"))
+                        && unit.orders.empty())
+                    {
+                        sim.getUnitState(UnitId(id)).orders.push_back(createMoveOrder(SimVector(600_ss, 0_ss, 600_ss)));
+                    }
+                }
+            }
+
+            tick(sim, 120);
+            run.after = sim.getUnitState(builder).position;
+            return run;
+        }
+    }
+
+    TEST_CASE("community patch: a factory guard stays put after finishing each build", "[guardassist][communitypatch]")
+    {
+        // TADR 2025.5.18, "Improved behaviour of con units when guarding a
+        // factory - they stay put after finishing a build". RWE's ordinary
+        // fallback is to walk a guard that is further than 200 from the
+        // factory's centre towards it once there is no frame left to help
+        // with, which is the walk this rule removes.
+        auto run = runFactoryGuardAfterBuild(true, 2);
+        REQUIRE(run.completions.size() == 2);
+        REQUIRE(run.helped);
+        for (const auto& completion : run.completions)
+        {
+            CHECK(completion.distance(run.after) <= 1_ss);
+        }
+        // And it did not take a step between the two builds either.
+        CHECK(run.completions.front().distance(run.completions.back()) <= 1_ss);
+    }
+
+    TEST_CASE("without the community patch a factory guard still walks in after a build", "[guardassist]")
+    {
+        // The ordinary path, pinned: RWE keeps its "stay close" walk. The
+        // builder comes to rest inside 200 of the plant's centre, which the
+        // frame's release did not ask for and the next frame does not need.
+        auto run = runFactoryGuardAfterBuild(false, 1);
+        REQUIRE(run.completions.size() == 1);
+        REQUIRE(run.helped);
+        auto atCompletion = run.completions.front();
+        CHECK(atCompletion.distance(run.after) > 50_ss);
+        CHECK(run.after.distance(run.plantPosition) < atCompletion.distance(run.plantPosition));
+    }
+
+    TEST_CASE("community patch: a guard ordered from beyond reach still walks to the factory", "[guardassist][communitypatch]")
+    {
+        // Only the post-build walk is removed. A construction unit ordered to
+        // guard a factory it cannot work on from where it stands must still
+        // approach, or the order could never begin to assist.
+        auto script = makeEmptyCobScript({"base"});
+        GameSimulation sim(makeFlatTerrain(96, 96), 0u, 0, 0);
+        sim.communityPatchMode = true;
+        auto player = addPlayer(sim);
+        registerModel(sim);
+        sim.unitDefinitions["PLANT"] = makeBigPlantDef();
+        openTheYardPad(sim.unitDefinitions["PLANT"]);
+        sim.unitDefinitions["BUILDER"] = makeShortArmedBuilderDef();
+        sim.unitScriptDefinitions["PLANT"] = *script;
+        sim.unitScriptDefinitions["BUILDER"] = *script;
+
+        auto plant = sim.trySpawnUnit("PLANT", player, SimVector(200_ss, 0_ss, 200_ss), std::nullopt).value();
+        auto builder = sim.trySpawnUnit("BUILDER", player, SimVector(500_ss, 0_ss, 200_ss), std::nullopt).value();
+        sim.getUnitState(builder).orders.push_back(GuardOrder(plant));
+
+        auto start = sim.getUnitState(builder).position;
+        tick(sim, 300);
+        auto now = sim.getUnitState(builder).position;
+        CHECK(start.distance(now) > 50_ss);
+        CHECK(now.distance(sim.getUnitState(plant).position) < start.distance(sim.getUnitState(plant).position));
+        REQUIRE(std::holds_alternative<GuardOrder>(sim.getUnitState(builder).orders.front()));
+    }
 }
