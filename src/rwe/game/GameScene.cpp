@@ -261,6 +261,7 @@ namespace rwe
           audioLookup(audioLookup),
           stateLogStream(std::move(stateLogStream))
     {
+        switchAltEnabled = sceneContext.globalConfig->switchAlt;
         worldCameraState.zoom = static_cast<float>(cameraZoomSetting) / 100.0f;
 
         if (this->gameParameters.aiArenaSeconds)

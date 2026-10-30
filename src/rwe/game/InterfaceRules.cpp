@@ -28,6 +28,12 @@ namespace rwe
         return !underConstruction && !carried;
     }
 
+    bool digitOpensBuildPage(bool switchAlt, bool altDown)
+    {
+        // Bit clear: bare digit pages, Alt selects. Bit set: swapped.
+        return switchAlt ? altDown : !altDown;
+    }
+
     std::optional<unsigned int> buildPageForDigit(unsigned int digit, unsigned int pageCount)
     {
         if (digit < 1 || digit > 9 || pageCount == 0)

@@ -256,6 +256,21 @@ Everything else lives in a subject file. **The numbers never move**, so a
   config file has no key for it yet, so unlike the original it does not persist
   across a restart.
 
+- **`+SwitchAlt`'s saved bit lives in rwe.cfg** (2026-10-30, #907). The
+  original keeps bit 8 of its display-options word in the registry; RWE keeps
+  the same one-bit preference as the `switch-alt` key and reads it at startup.
+  The default is false, the original's shipped bit-clear arrangement, so a
+  fresh install and an older rwe.cfg without the key both give bare digits the
+  build-menu pages and Alt+digit the squads. The no-argument form toggles and
+  writes the key; the assign form does not write, matching the original's two
+  paths. Both print the new state, which the original does not, because #907
+  asks for a state query -- and the assign form reads any nonzero argument as
+  on, where the static finding records a low-bit store, so `+SwitchAlt 2`
+  clears in the original and sets here; no executed check settles that edge.
+  The preference is local input presentation: never hashed, saved with a game,
+  replayed or replicated. Squad membership itself is still RWE's scene-set
+  model, not the original's exclusive number on the unit (BT-182).
+
 - **Command masks, the developer phrase and the repeat key** (#906, 2026-10-27).
   A typed `+` line now runs under the original's per-mode mask -- campaign 1,
   skirmish 3, multiplayer the host's Cheat Codes option (RWE has no such lobby

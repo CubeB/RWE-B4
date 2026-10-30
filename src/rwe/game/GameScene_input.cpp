@@ -44,11 +44,11 @@ namespace rwe
 {
     bool GameScene::openSelectedBuildPage(unsigned int digit)
     {
-        // Alt+digit under the swapped `SwitchAlt` arrangement: the plain
-        // digits are squads, so Alt opens the builder's page (TOTALA-EXE-
-        // KEYBOARD.md section 75). The original bounds the request by the
-        // builder's own page count, so a digit past the last page leaves the
-        // menu where it was.
+        // The build-page half of the digit case (TOTALA-EXE-KEYBOARD.md
+        // section 75). Which arrangement makes a digit a build page is
+        // decided by digitOpensBuildPage before this is called. The original
+        // bounds the request by the builder's own page count, so a digit past
+        // the last page leaves the menu where it was.
         auto selectedUnit = getSingleSelectedUnit();
         if (!selectedUnit)
         {
@@ -481,45 +481,30 @@ namespace rwe
         }
         else
         {
-            // Control groups: keys 1-0 map to groups 0-9.
+            // Control groups: keys 1-9 map to groups 0-8.
             // Ctrl+digit  → bind current selection to group (replace).
             // Shift+digit → recall group, adding it to the current selection
             //               (the squad recall's second argument is the Shift
             //               state, BT-182: 0x48D9A0).
-            // Digit alone → recall group (replace current selection).
-            // Alt+digit   → open the selected builder's build-menu page (the
-            //               swapped `SwitchAlt` half of the original's digit
-            //               case, TOTALA-EXE-KEYBOARD.md section 75).
+            // Digit alone → the original's `SwitchAlt` preference decides:
+            //               by default it opens the selected builder's
+            //               build-menu page, and Alt+digit selects the squad;
+            //               with `+SwitchAlt` on, the two swap
+            //               (TOTALA-EXE-KEYBOARD.md section 75).
             // Ctrl+Shift+digit adds the current selection to the group; it is
             // RWE's own, the original having no such binding.
             // Assigning plays CreateSquad and recalling SelectSquad.
+            // `0` is unbound, as in the original: there is no squad 0.
             std::optional<int> groupIndex;
             if (keysym.key >= SDLK_1 && keysym.key <= SDLK_9)
             {
                 groupIndex = keysym.key - SDLK_1; // 0-8
             }
-            else if (keysym.key == SDLK_0)
-            {
-                groupIndex = 9; // '0' maps to group index 9
-            }
 
             if (groupIndex)
             {
                 auto idx = *groupIndex;
-                if (isAltDown() && !isCtrlDown())
-                {
-                    // Alt+digit opens the selected builder's build-menu page
-                    // (TOTALA-EXE-KEYBOARD.md section 75). RWE keeps the plain
-                    // digits as squads -- the original's swapped `SwitchAlt`
-                    // arrangement -- so Alt is the build-page half. Digit 0
-                    // has no page, and a page the builder does not have is
-                    // left alone.
-                    if (keysym.key >= SDLK_1 && keysym.key <= SDLK_9)
-                    {
-                        openSelectedBuildPage(static_cast<unsigned int>(keysym.key - SDLK_1 + 1));
-                    }
-                }
-                else if (isCtrlDown())
+                if (isCtrlDown())
                 {
                     if (isShiftDown())
                     {
@@ -538,6 +523,12 @@ namespace rwe
                     {
                         playUiSound(*sounds.createSquad);
                     }
+                }
+                else if (digitOpensBuildPage(switchAltEnabled, isAltDown()))
+                {
+                    // The build-page half. Digit 0 is not bound above, and a
+                    // page the builder does not have is left alone.
+                    openSelectedBuildPage(static_cast<unsigned int>(idx + 1));
                 }
                 else
                 {

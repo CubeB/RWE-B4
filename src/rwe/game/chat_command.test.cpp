@@ -258,6 +258,20 @@ namespace rwe
         REQUIRE(parseChatCommand("+BPS")->kind == Kind::Bps);
         REQUIRE(parseChatCommand("+ScreenChat")->kind == Kind::ScreenChat);
         REQUIRE(parseChatCommand("+Clock")->kind == Kind::Clock);
+
+        // `+SwitchAlt` is two forms in one word: no argument toggles, an
+        // argument assigns. The parser has to keep "absent" distinct from 0.
+        auto switchAlt = parseChatCommand("+SwitchAlt");
+        REQUIRE(switchAlt->kind == Kind::SwitchAlt);
+        REQUIRE_FALSE(switchAlt->hasArgument);
+        switchAlt = parseChatCommand("+switchalt 1");
+        REQUIRE(switchAlt->kind == Kind::SwitchAlt);
+        REQUIRE(switchAlt->hasArgument);
+        REQUIRE(switchAlt->number == 1);
+        switchAlt = parseChatCommand("+SWITCHALT 0");
+        REQUIRE(switchAlt->kind == Kind::SwitchAlt);
+        REQUIRE(switchAlt->hasArgument);
+        REQUIRE(switchAlt->number == 0);
     }
 
     TEST_CASE("every other word is unknown, and says what it was", "[chat]")

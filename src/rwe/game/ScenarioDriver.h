@@ -211,6 +211,9 @@ namespace rwe
         /** Whether the game clock is drawn (#907, `+Clock`). */
         bool clockEnabled() const;
 
+        /** The digit/Alt arrangement (#907, `+SwitchAlt`): true is the swapped one. */
+        bool switchAltEnabled() const;
+
         /** How many units the simulation holds (#913 spawn check). */
         std::size_t unitCount() const;
 

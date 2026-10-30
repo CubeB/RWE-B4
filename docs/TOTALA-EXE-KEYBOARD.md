@@ -222,6 +222,23 @@ unit to squad 3 removes it from squad 1), and readme.txt section 5 adds the
 factory rule: a factory assigned to a squad stamps that squad onto everything
 it builds.
 
+**RWE (since #907).** The preference is modelled. `GlobalConfig::switchAlt`
+defaults false -- the original's shipped bit-clear arrangement -- and is read
+from the `rwe.cfg` key `switch-alt`, so a fresh install and an rwe.cfg that
+predates the key both get bare digits as build-menu pages and Alt+digit as
+squad select. `+SwitchAlt` with no argument toggles it and writes that key;
+with an argument it assigns the bit and does not write, matching the
+original's two paths. The digit case now asks `digitOpensBuildPage` and, when
+the press is the build-page half, `openSelectedBuildPage`; Ctrl+digit binds
+the group in either arrangement. `0` is unbound, as in the original: RWE no
+longer keeps a tenth group. Groups are still sets held by the scene rather
+than a squad number on the unit, so exclusivity and the factory rule remain
+unported (BT-182). `+SwitchAlt` prints the new state, which the original does
+not, because #907 asks for a state query; and its assign form treats any
+nonzero argument as on, where the static finding records a low-bit store, so
+`+SwitchAlt 2` would clear in the original. No executed check settles that
+edge.
+
 ---
 
 ## 76. F4, Space, and the sliding panel
@@ -407,15 +424,18 @@ self-destruct toggle with the original's rule for a mixed selection: if any
 selected unit is counting down, the key cancels those and arms none of the others
 (BT-181). The command sent per unit is the same toggle as before.
 
-**Digits.** The plain digits recall control groups, the original's swapped
-(`SwitchAlt`) arrangement, not its default of build-menu pages, and there is
-no preference and no Alt: Alt+digit does nothing. Ctrl+digit binds the
-selection to the group and plays `CreateSquad`; a recall plays `SelectSquad`,
-and Shift on a recall adds the group to the selection (BT-182). `0` is a tenth
-group and Ctrl+Shift+digit adds the selection to a group; both are RWE's own.
-Groups are sets held by the scene, not a number on the unit, so a unit can sit
-in two and a factory does not stamp its products. A recall drops dead,
-foreign, mission-held, unfinished and carried units.
+**Digits.** `1`-`9` follow the original's saved `SwitchAlt` preference
+(TOTALA-EXE-KEYBOARD.md section 75): by default a bare digit opens the
+selected builder's build-menu page and Alt+digit selects squad 1-9, with
+Shift on the recall adding the squad; `+SwitchAlt` swaps the two, and RWE
+saves the bit as the `rwe.cfg` key `switch-alt` (written by the no-argument
+form only). Ctrl+digit binds the selection to the group and plays
+`CreateSquad`; a recall plays `SelectSquad`. `0` is unbound, as in the
+original -- there is no squad 0 -- and Ctrl+Shift+digit adds the selection to
+a group, which is RWE's own. Groups are sets held by the scene, not a number
+on the unit, so a unit can sit in two and a factory does not stamp its
+products. A recall drops dead, foreign, mission-held, unfinished and carried
+units.
 
 **Orders and panels.** `,` and `.` step the selected builder's build-menu page
 with the original's toggle argument (past the last page closes the menu, from
@@ -453,10 +473,11 @@ Key -> what the original does -> RWE status, regenerated against the tree of
 | Arrows | scroll map | **works**; ignored while a menu is open (BT-175) |
 | backquote `~` `!` `#` `*` | toggle damage bars | **works** (backquote only; the alias keys absent -- harmless); the setting is not saved |
 | `,` / `.` | previous / next build-menu page, toggle argument one | **works** (BT-104) |
-| `1`-`9` | build-menu page 1-9 (default; `SwitchAlt` swaps with Alt) | **different** -- control-group recall; no Alt, no preference |
-| Alt+`1`-`9` | select squad (Shift adds to selection) | **missing** -- Alt unused |
-| Shift+`1`-`9` | (swapped arrangement) add the squad to the selection | **works** as a recall that adds (BT-182) |
+| `1`-`9` | build-menu page 1-9 (default; `SwitchAlt` swaps with Alt) | **works** -- build page by default; `+SwitchAlt` swaps, and the saved preference is `rwe.cfg`'s `switch-alt` |
+| Alt+`1`-`9` | select squad (Shift adds to selection) | **works** -- squad by default; the build-page half when `+SwitchAlt` is on |
+| Shift+`1`-`9` | (swapped arrangement) add the squad to the selection | **works** -- adds the squad when the digit is the squad half (default: Alt+Shift+digit; swapped: Shift+digit) |
 | Ctrl+`1`-`9` | assign squad (exclusive membership; factories stamp their products); `CreateSquad` | **partly** -- groups are sets (no exclusivity, no factory inheritance); `CreateSquad` plays; `SelectSquad` plays on recall |
+| `0` / Ctrl+`0` | unbound; no squad 0 | **works** -- unbound |
 | `t` / `T` | track selected unit | **works** |
 | `n` | scroll to next unit off screen | **partly** -- walks every own unit in id order, on screen or not |
 | `h` | MP: SHARE.GUI resource sharing | **missing** |

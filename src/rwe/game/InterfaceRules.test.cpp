@@ -209,7 +209,20 @@ namespace rwe
         REQUIRE(nextInCycle({}, UnitId(3)) == std::nullopt);
     }
 
-    TEST_CASE("Alt+digit opens the builder's page and refuses one it does not have (TOTALA-EXE-KEYBOARD 75)")
+    TEST_CASE("the digit case picks build pages or squads from bit 8 and Alt (TOTALA-EXE-KEYBOARD 75)")
+    {
+        // The shipped default, and what RWE now defaults to: the bit is
+        // clear, so a bare digit is the build page and Alt the squad.
+        REQUIRE(digitOpensBuildPage(false, false));
+        REQUIRE_FALSE(digitOpensBuildPage(false, true));
+
+        // With `SwitchAlt` set -- the arrangement RWE used unconditionally
+        // before the preference existed -- the two swap.
+        REQUIRE_FALSE(digitOpensBuildPage(true, false));
+        REQUIRE(digitOpensBuildPage(true, true));
+    }
+
+    TEST_CASE("the build-page digit is bounds-checked (TOTALA-EXE-KEYBOARD 75)")
     {
         // The commander has two shipped pages, so digits 1 and 2 reach them.
         REQUIRE(buildPageForDigit(1, 2) == 0u);

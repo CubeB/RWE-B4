@@ -376,9 +376,23 @@ namespace rwe
         std::unordered_set<UnitId> selectedUnits;
 
         // Control groups are scene/UI state, not part of the deterministic sim.
-        // Index 0 = group bound to key '1', index 9 = group bound to key '0'.
-        static constexpr int ControlGroupCount = 10;
+        // Index 0 = group bound to key '1', index 8 = group bound to key '9'.
+        // There is no squad 0: the original leaves both '0' and Ctrl+'0'
+        // unbound (TOTALA-EXE-KEYBOARD.md section 75).
+        static constexpr int ControlGroupCount = 9;
         std::array<std::unordered_set<UnitId>, ControlGroupCount> controlGroups;
+
+        /**
+         * The original's `SwitchAlt` preference (TOTALA-EXE-KEYBOARD.md
+         * section 75, bit 8 of its display-options word). False is the
+         * shipped default: bare 1-9 open the selected builder's build-menu
+         * pages and Alt+1-9 select squads. True swaps the two, which is the
+         * arrangement RWE used before the preference was modelled. Ctrl+digit
+         * assigns a squad in both arrangements. Local input presentation: it
+         * is never hashed, saved with a game or replicated. `+SwitchAlt` owns
+         * it; the saved copy is the rwe.cfg key `switch-alt`.
+         */
+        bool switchAltEnabled{false};
 
         // Which units were cloaked as of last tick. The original announces
         // cloaking and decloaking to the unit's owner, and nothing about that
@@ -2100,9 +2114,11 @@ namespace rwe
         void selectAllByCategoryToken(const std::string& token, bool additive);
 
         /**
-         * Alt+digit under the swapped `SwitchAlt` arrangement: open the
-         * selected builder's build-menu page. False when nothing is selected,
-         * the selection is not a builder, or the builder has no such page.
+         * The build-page half of the digit case: open the selected builder's
+         * build-menu page. Which arrangement makes a digit a build page is
+         * digitOpensBuildPage's decision (TOTALA-EXE-KEYBOARD.md section 75).
+         * False when nothing is selected, the selection is not a builder, or
+         * the builder has no such page.
          */
         bool openSelectedBuildPage(unsigned int digit);
 

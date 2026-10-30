@@ -152,9 +152,20 @@ defaults to zero and is **not** written back.
   and no global flag for dithered fog or for the persisted damage-bar switch exist in the
   code read, and the screen-chat and damage-bar toggles' persistence was not traced.
   Presentation only.
-- **SwitchAlt: MISSING.** `KEYBOARD.md` section 75 records it, and near 386 that RWE's digit
-  keys are control-group recall rather than the original's build-page keys. A separate
-  decision that section already holds.
+- **SwitchAlt: MATCHES the preference, PARTLY the squads.** Since #907 the
+  original's saved bit is modelled: `GlobalConfig::switchAlt` defaults false
+  (the original's registry default) and is read from the `rwe.cfg` key
+  `switch-alt`, so a fresh install and an older file both get bare digits as
+  build-menu pages and Alt+digit as squad select. `+SwitchAlt`'s no-argument
+  form toggles and writes that key; its assign form sets the bit for the
+  session and does not write, as the original's does not. The digit keys now
+  follow the bit (`KEYBOARD.md` section 75) rather than keeping the swapped
+  arrangement unconditionally, and `0` is unbound because there is no squad 0.
+  The groups themselves are still scene sets rather than exclusive membership
+  stamped onto units, so `BT-INGAME-KEYS-PARITY.md` rule 3's membership
+  departures remain. One argument edge is UNCLEAR: the static finding records
+  the assign path storing only the low bit (`+SwitchAlt 2` clears); RWE reads
+  any nonzero as on, per #907's wording, and no executed check settles it.
 - **Scroll speed: DIVERGENCE (representation), UNCLEAR on the default.** The original keeps a
   byte, default 32, on a slider whose range is 65 (`INTERFACE.md` near 546), the middle of the
   track. RWE keeps a percentage from 25 to 200, default 100, which sits at 0.43 of its track.
@@ -405,7 +416,7 @@ except the unit list.
 | 6 | **Mono and 3D sound are the same**; effect volume and music volume start at 100 percent where TA starts at 27 and 32. | DIFFERS, presentation | `BT-SOUND-PARITY.md` rule 4 |
 | 7 | **Scroll-speed scale and default**, gamma default (12) mapping. | UNCLEAR | an original check of the scroll rate at the slider's middle |
 | 8 | **Index zero exempt from the use-only clearing loop.** | UNCLEAR | spec-room read of the loop start and the load order |
-| 9 | Text lines, text delay and unit text acknowledgements (`MAXLINES`, `TXTSCROL`, `UNITCHAT`) are disabled gadgets; a third shadow bit, dithered fog, the damage-bar persistence, `SwitchAlt` and the mouse speed have no counterpart. | MISSING, presentation | one by one when wanted |
+| 9 | Text lines, text delay and unit text acknowledgements (`MAXLINES`, `TXTSCROL`, `UNITCHAT`) are disabled gadgets; a third shadow bit, dithered fog, the damage-bar persistence and the mouse speed have no counterpart. | MISSING, presentation | one by one when wanted |
 | 10 | The original's own defects (unvalidated registry types and lengths, the unbounded skirmish player count, failed writes lost silently, a stored gamma of ten promoted to twelve). | not applicable | none; RWE clamps instead |
 
 No source file was changed.

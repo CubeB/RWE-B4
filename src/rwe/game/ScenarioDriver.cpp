@@ -638,6 +638,11 @@ namespace rwe
         return scene.clockEnabled;
     }
 
+    bool ScenarioDriver::switchAltEnabled() const
+    {
+        return scene.switchAltEnabled;
+    }
+
     std::size_t ScenarioDriver::unitCount() const
     {
         std::size_t count = 0;

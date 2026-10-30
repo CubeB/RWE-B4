@@ -298,9 +298,10 @@ squad (`TOTALA-EXE-KEYBOARD.md` section 75), which is `OpenBuildMenuPage`'s call
   (`setNextPanel`, applied by the frame). Two simultaneous requests cannot be made through
   the interface, so the priority order cannot be observed. Equivalent.
 - **`OpenBuildMenuPage` with a negative or too-large page:** RWE's index arithmetic is
-  modular, so it cannot go out of range; the digit keys are not ported (KEYBOARD section 80
-  lists Alt+digit squads and digit paging as a gap, and ROADMAP records the decision that
-  digits stay control groups, which is the original's non-default `SwitchAlt` arrangement).
+  modular, so it cannot go out of range. The digit keys are ported since #907
+  (`KEYBOARD` section 75): by default a bare digit opens the page and Alt+digit selects a
+  squad, and `+SwitchAlt` swaps the two; the request is bounds-checked by the builder's own
+  page count.
 
 ## 8. Menu fill, unavailable entries and PREV and NEXT
 

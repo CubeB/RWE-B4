@@ -377,4 +377,9 @@ namespace rwe
                                          {"ui-scale", std::to_string(options.uiScale)},
                                      });
     }
+
+    void writeSwitchAlt(const std::filesystem::path& configPath, bool enabled)
+    {
+        updateConfigFile(configPath, {{SwitchAltConfigKey, enabled ? "true" : "false"}});
+    }
 }

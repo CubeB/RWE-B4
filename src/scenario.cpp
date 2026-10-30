@@ -194,10 +194,13 @@ namespace
         });
 
         // The original's Ctrl+letter family (#891): any letter is a
-        // `CTRL_<letter>` category lookup, Shift adds instead of replacing,
-        // and Alt+digit opens a build page under the swapped `SwitchAlt`
-        // arrangement RWE uses. Ctrl+B/F stay the 3.9.01 patch's idle walks
-        // when unshifted (#884); their shifted form is the category command.
+        // `CTRL_<letter>` category lookup and Shift adds instead of
+        // replacing. Ctrl+B/F stay the 3.9.01 patch's idle walks when
+        // unshifted (#884); their shifted form is the category command.
+        // The digits follow the saved `SwitchAlt` preference (#907,
+        // TOTALA-EXE-KEYBOARD.md section 75): the shipped default is build
+        // pages on the bare digits and squads on Alt, and `+SwitchAlt` swaps
+        // them.
         rwe::registerScenario("891-keybindings", [](rwe::Scenario& s) {
             struct Spawned
             {
@@ -269,44 +272,158 @@ namespace
                     return;
                 }
 
+                // The shipped default: bit 8 clear, so a bare digit opens the
+                // selected builder's build-menu page.
                 d.key(SDLK_ESCAPE);
                 d.select(*commander);
                 d.require(d.buildPage(*commander) == 0u, "the commander starts on build page one");
 
-                d.key(SDLK_PERIOD);
-                d.require(d.buildPage(*commander) == 1u, "the period key reaches page two");
+                d.key(SDLK_2);
+                d.require(d.buildPage(*commander) == 1u, "a bare digit opens its build page");
+                d.require(d.showsBuildPage(*commander), "and switches the panel to BUILD");
+                d.key(SDLK_1);
+                d.require(d.buildPage(*commander) == 0u, "digit 1 returns to page one");
 
+                d.key(SDLK_9);
+                d.require(d.buildPage(*commander) == 0u, "a page the builder does not have is left alone");
+
+                // Alt is the squad half under the default: Ctrl+1 binds the
+                // commander to squad 1.
+                d.keyDown(SDLK_LCTRL);
+                d.key(SDLK_1);
+                d.keyUp(SDLK_LCTRL);
+                d.require(d.selectedUnit() == commander, "Ctrl+1 assigns the squad and keeps the selection");
+
+                d.select(*units->tank);
+                d.keyDown(SDLK_LALT);
+                d.keyDown(SDLK_LSHIFT);
+                d.key(SDLK_1);
+                d.keyUp(SDLK_LSHIFT);
+                d.keyUp(SDLK_LALT);
+                d.require(d.selectedCount() == 2, "Alt+Shift+1 adds the squad to the selection");
+
+                d.key(SDLK_ESCAPE);
+                d.select(*units->tank);
+                d.keyDown(SDLK_LALT);
+                d.key(SDLK_1);
+                d.keyUp(SDLK_LALT);
+                d.require(d.selectedUnit() == commander, "Alt+1 recalls the squad instead of opening a page");
+
+                // Bare digits do not recall under the default: 1 is the
+                // build-page half, and the tank has no build pages.
+                d.key(SDLK_ESCAPE);
+                d.select(*units->tank);
+                d.key(SDLK_1);
+                d.require(d.selectedUnit() == units->tank, "a bare digit does not recall the squad");
+
+                // There is no squad 0 in the original, and none here: neither
+                // the assign nor either recall form binds or recalls one.
+                d.keyDown(SDLK_LCTRL);
+                d.key(SDLK_0);
+                d.keyUp(SDLK_LCTRL);
+                d.require(d.selectedUnit() == units->tank, "Ctrl+0 assigns nothing");
+                d.keyDown(SDLK_LALT);
+                d.key(SDLK_0);
+                d.keyUp(SDLK_LALT);
+                d.require(d.selectedUnit() == units->tank, "Alt+0 recalls no squad 0");
+                d.key(SDLK_0);
+                d.require(d.selectedUnit() == units->tank, "a bare 0 does nothing");
+            });
+
+            s.at(4, [units](rwe::ScenarioDriver& d) {
+                auto commander = d.commander(0);
+                d.require(commander.has_value() && units->tank.has_value() && units->factory.has_value(),
+                    "the fixture survived to the SwitchAlt test");
+                if (!commander || !units->tank || !units->factory)
+                {
+                    return;
+                }
+
+                // A bare +SwitchAlt flips the preference and saves it, and
+                // says what it now is.
+                d.require(!d.switchAltEnabled(), "the default arrangement is bit-clear");
+                const auto linesBefore = d.consoleMessageCount();
+                d.key(SDLK_RETURN);
+                d.textInput("+switchalt");
+                d.key(SDLK_RETURN);
+                d.require(d.switchAltEnabled(), "+SwitchAlt flips the bit on");
+                d.require(d.consoleMessageCount() == linesBefore + 1, "and prints the new state");
+
+                // Swapped: the bare digit recalls the squad.
+                d.key(SDLK_ESCAPE);
+                d.select(*units->tank);
+                d.key(SDLK_1);
+                d.require(d.selectedUnit() == commander, "a bare digit recovers the squad");
+
+                // And Alt is now the build-page half.
+                d.key(SDLK_ESCAPE);
+                d.select(*commander);
                 d.keyDown(SDLK_LALT);
                 d.key(SDLK_1);
                 d.keyUp(SDLK_LALT);
                 d.require(d.buildPage(*commander) == 0u, "Alt+1 opens page one");
                 d.require(d.showsBuildPage(*commander), "Alt+1 opens the build menu");
-
                 d.keyDown(SDLK_LALT);
                 d.key(SDLK_2);
                 d.keyUp(SDLK_LALT);
                 d.require(d.buildPage(*commander) == 1u, "Alt+2 opens page two");
 
-                d.keyDown(SDLK_LALT);
-                d.key(SDLK_9);
-                d.keyUp(SDLK_LALT);
-                d.require(d.buildPage(*commander) == 1u, "a page the builder does not have is left alone");
-
-                // Bind the commander to group 1, then prove Alt+1 does not
-                // recall it: a plain 1 would.
-                d.keyDown(SDLK_LCTRL);
-                d.key(SDLK_1);
-                d.keyUp(SDLK_LCTRL);
+                // Ctrl still assigns, and Shift on a bare digit still adds the
+                // squad to the selection.
+                d.key(SDLK_ESCAPE);
                 d.select(*units->tank);
-                d.keyDown(SDLK_LALT);
+                d.keyDown(SDLK_LSHIFT);
                 d.key(SDLK_1);
-                d.keyUp(SDLK_LALT);
-                d.require(d.selectedUnit() == units->tank, "Alt+1 opens a page instead of recalling a squad");
+                d.keyUp(SDLK_LSHIFT);
+                d.require(d.selectedCount() == 2, "Shift+digit adds the squad");
+                d.keyDown(SDLK_LCTRL);
+                d.key(SDLK_3);
+                d.keyUp(SDLK_LCTRL);
+                d.key(SDLK_ESCAPE);
+                d.select(*units->factory);
+                d.key(SDLK_3);
+                d.require(d.selectedCount() == 2, "Ctrl+digit still assigns and a bare digit recalls it");
 
-                d.key(SDLK_1);
-                d.require(d.selectedUnit() == commander, "the plain digit still recalls the squad");
+                // No squad 0 in this arrangement either.
+                d.key(SDLK_ESCAPE);
+                d.select(*units->tank);
+                d.key(SDLK_0);
+                d.require(d.selectedUnit() == units->tank, "a bare 0 is still unbound");
             });
-            s.endAt(4);
+
+            s.at(5, [units](rwe::ScenarioDriver& d) {
+                auto commander = d.commander(0);
+                d.require(commander.has_value(), "the commander survived to the assign test");
+                if (!commander)
+                {
+                    return;
+                }
+
+                // The assign form sets the bit and does not save.
+                d.key(SDLK_RETURN);
+                d.textInput("+switchalt 0");
+                d.key(SDLK_RETURN);
+                d.require(!d.switchAltEnabled(), "+SwitchAlt 0 assigns the bit off");
+                d.key(SDLK_ESCAPE);
+                d.select(*commander);
+                d.key(SDLK_2);
+                d.require(d.buildPage(*commander) == 1u, "a bare digit opens a page again");
+
+                d.key(SDLK_RETURN);
+                d.textInput("+switchalt 1");
+                d.key(SDLK_RETURN);
+                d.require(d.switchAltEnabled(), "+SwitchAlt 1 assigns the bit on");
+
+                // Leave the saved preference as it was found: the no-argument
+                // form is the only one that writes rwe.cfg.
+                const auto linesBefore = d.consoleMessageCount();
+                d.key(SDLK_RETURN);
+                d.textInput("+switchalt");
+                d.key(SDLK_RETURN);
+                d.require(!d.switchAltEnabled(), "the toggle form turns it off and saves");
+                d.require(d.consoleMessageCount() == linesBefore + 1, "and prints the state");
+            });
+            s.endAt(5);
         });
 
         // The active BUILD/ORDERS tab has to stay pressed across the panel
