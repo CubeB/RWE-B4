@@ -85,7 +85,13 @@ namespace rwe
      */
     std::vector<MissionOrder> parseInitialMission(const std::string& text);
 
-    /** One [unitN] of a mission schema's [units] (0x436DFE-0x437002, "MISSIONUNIT DATA"). */
+    /**
+     * One [unitN] of a schema's [units] (0x436DFE-0x437002, "MISSIONUNIT
+     * DATA"). The campaign mission path fills the spawner's slots from it; a
+     * skirmish map may use the same block under the Community Patch, where
+     * `player` names a map start position rather than a lobby slot (issue
+     * #934, docs/COMMUNITY-PATCH-MODE.md).
+     */
     struct OtaMissionUnit
     {
         std::string unitName;
@@ -174,7 +180,11 @@ namespace rwe
 
         std::vector<OtaFeature> features;
         std::vector<OtaSpecial> specials;
-        /** A mission's starting units; empty on a skirmish map. */
+        /**
+         * A schema's starting units. A campaign mission's are spawned by
+         * spawnMissionUnits; a skirmish map's are read as map units under the
+         * Community Patch (issue #934). Empty when the schema has no [units].
+         */
         std::vector<OtaMissionUnit> units;
     };
 

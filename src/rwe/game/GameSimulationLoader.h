@@ -103,6 +103,17 @@ namespace rwe
         AudioService* audioService;
     };
 
+    /** What spawnMissionUnits or spawnMapUnits did, for the log and the tests. */
+    struct MissionSpawnResult
+    {
+        /** The units made, in the order of the schema's [unitN] blocks. */
+        std::vector<UnitId> spawned;
+        /** One line for each [unitN] that was not spawned, and why. */
+        std::vector<std::string> skipped;
+        /** One line for each building placed only by clearing scenery from under it or moving it onto the map. */
+        std::vector<std::string> adjusted;
+    };
+
     /**
      * A game loaded up to the point the interface takes over: the simulation
      * with its terrain, features, players and AI controllers, plus the map
@@ -117,6 +128,17 @@ namespace rwe
         std::optional<PlayerId> localPlayerId;
         std::array<std::optional<PlayerId>, 10> gamePlayers;
         std::array<std::optional<int>, 10> startPositionForSlot;
+        /**
+         * The skirmish map's own [units], made under the Community Patch
+         * (issue #934); empty in every other game.
+         */
+        MissionSpawnResult mapUnitSpawn;
+        /**
+         * The slots that received at least one of those map units. Such a
+         * player gets no commander, as TADR's rule says; their units are the
+         * ones the map listed.
+         */
+        std::array<bool, 10> mapUnitSlots{};
         MapIntel mapIntel;
         AiBuildTree buildTree;
         GameDataMaps dataMaps;
@@ -136,17 +158,6 @@ namespace rwe
         const GameParameters& gameParameters,
         MapData mapData,
         const OtaRecord& ota);
-
-    /** What spawnMissionUnits did, for the log and the tests. */
-    struct MissionSpawnResult
-    {
-        /** The units made, in the order of the schema's [unitN] blocks. */
-        std::vector<UnitId> spawned;
-        /** One line for each [unitN] that was not spawned, and why. */
-        std::vector<std::string> skipped;
-        /** One line for each building placed only by clearing scenery from under it or moving it onto the map. */
-        std::vector<std::string> adjusted;
-    };
 
     /**
      * A mission's starting units, as the original lays them out at mission
@@ -169,6 +180,47 @@ namespace rwe
      * keeps a building out.
      */
     MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers);
+
+    /**
+     * Where one skirmish map [unitN] goes (issue #934, TADR 2024.10.27):
+     * `Player` 1..10 is a map start position, so the unit belongs to whichever
+     * seat was dealt that position, and `Player` 11 is the last filled seat
+     * when that seat is a computer. `slot` is the lobby slot the unit goes to,
+     * which the caller uses to give that player no commander. `reason` says
+     * why a record has no owner.
+     */
+    struct MapUnitOwner
+    {
+        std::optional<PlayerId> player;
+        std::optional<std::size_t> slot;
+        std::string reason;
+    };
+
+    MapUnitOwner resolveMapUnitOwner(
+        const GameSimulation& simulation,
+        int player,
+        const std::array<std::optional<int>, 10>& startPositionForSlot,
+        const std::array<std::optional<PlayerId>, 10>& slotPlayers);
+
+    /**
+     * A skirmish map's own [units], TADR 2024.10.27's "neutral unit and/or
+     * per-player additional unit spawn", under the Community Patch. The map
+     * names a start position (or 11 for the last AI seat) rather than a lobby
+     * slot; everything else is laid out exactly as a mission's units are.
+     * HealthPercentage and YPos are ignored as TADR says, so a map unit is
+     * always made at full health, on the ground. `slotsThatReceivedUnits`
+     * gains one entry for every slot whose player got at least one unit.
+     *
+     * CreationCountdown is parsed but not acted on: RWE has no delayed
+     * spawn queue, and its mission spawner ignores the field too.
+     * docs/COMMUNITY-PATCH-MODE.md records that departure.
+     */
+    MissionSpawnResult spawnMapUnits(
+        GameSimulation& simulation,
+        const OtaSchema& schema,
+        const std::array<std::optional<PlayerId>, 10>& slotPlayers,
+        const std::array<std::optional<int>, 10>& startPositionForSlot,
+        std::array<bool, 10>* slotsThatReceivedUnits);
 
     /**
      * The unit types a mission's `useonlyunits` file lists: the names of its

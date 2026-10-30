@@ -1364,6 +1364,7 @@ set(TEST_FILES
     src/rwe/game/screenshake.test.cpp
     src/rwe/game/shatter.test.cpp
     src/rwe/game/missionspawn.test.cpp
+    src/rwe/game/mapunits.test.cpp
     src/rwe/game/missionrules.test.cpp
     src/rwe/game/missionscripts.test.cpp
     src/rwe/game/wake.test.cpp

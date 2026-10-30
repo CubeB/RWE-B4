@@ -1225,6 +1225,32 @@ namespace rwe
             startPositionForSlot[filledSlots[k]] = dealtStartPositions[k];
         }
 
+        // A skirmish map may bring its own units under the Community Patch
+        // (issue #934). They go in after the deal, because `Player` names the
+        // map position the deal settled, not the seat the map file happens to
+        // be read in. A campaign mission's [units] are spawned by its own
+        // path, so this is skipped there, and a save already holds them.
+        MissionSpawnResult mapUnitSpawn;
+        std::array<bool, 10> mapUnitSlots{};
+        if (gameParameters.communityPatch && !gameParameters.mission && !gameParameters.loadFromSaveFile)
+        {
+            mapUnitSpawn = spawnMapUnits(
+                simulation,
+                ota.schemas.at(gameParameters.schemaIndex),
+                gamePlayers,
+                startPositionForSlot,
+                &mapUnitSlots);
+            LOG_INFO << "Map units: " << mapUnitSpawn.spawned.size() << " placed, " << mapUnitSpawn.skipped.size() << " not";
+            for (const auto& line : mapUnitSpawn.skipped)
+            {
+                LOG_WARN << "Map unit not placed: " << line;
+            }
+            for (const auto& line : mapUnitSpawn.adjusted)
+            {
+                LOG_INFO << "Map unit building " << line;
+            }
+        }
+
         return LoadedGame{
             std::move(simulation),
             gameParameters,
@@ -1232,6 +1258,8 @@ namespace rwe
             localPlayerId,
             gamePlayers,
             startPositionForSlot,
+            std::move(mapUnitSpawn),
+            mapUnitSlots,
             std::move(mapIntel),
             std::move(buildTree),
             std::move(dataMaps)};
@@ -1606,143 +1634,260 @@ namespace rwe
         player.hasBaseStorage = true;
     }
 
-    MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers)
+    namespace
     {
-        MissionSpawnResult result;
-        std::vector<std::size_t> spawnedRecords;
-        for (std::size_t i = 0; i < schema.units.size(); ++i)
+        struct SchemaUnitOwner
         {
-            const auto& record = schema.units[i];
-            auto describe = [&](const std::string& why) {
-                return "[unit" + std::to_string(i) + "] " + record.unitName + " for player " + std::to_string(record.player) + ": " + why;
-            };
+            std::optional<PlayerId> player;
+            std::string reason;
+        };
 
-            // 0x488A50: the definition by name. An unknown one makes nothing.
-            auto unitType = toUpper(record.unitName);
-            auto defIt = simulation.unitDefinitions.find(unitType);
-            if (defIt == simulation.unitDefinitions.end())
+        /**
+         * The body both spawners share. A mission's records name a lobby slot
+         * and take their health from the record; a skirmish map's name a start
+         * position and are always made at full health (TADR ignores
+         * HealthPercentage). Everything else -- placement, heading, hit
+         * points, the Ident/InitialMission pass -- is the same.
+         */
+        MissionSpawnResult spawnSchemaUnits(
+            GameSimulation& simulation,
+            const std::vector<OtaMissionUnit>& records,
+            const std::function<SchemaUnitOwner(std::size_t)>& ownerOf,
+            bool useRecordHealth)
+        {
+            MissionSpawnResult result;
+            std::vector<std::size_t> spawnedRecords;
+            for (std::size_t i = 0; i < records.size(); ++i)
             {
-                result.skipped.push_back(describe("no such unit"));
-                continue;
-            }
-            const auto& def = defIt->second;
+                const auto& record = records[i];
+                auto describe = [&](const std::string& why) {
+                    return "[unit" + std::to_string(i) + "] " + record.unitName + " for player " + std::to_string(record.player) + ": " + why;
+                };
 
-            // Off the mission's own unit list the original has no definition
-            // for it at all, so it makes nothing, as for an unknown name.
-            if (def.excludedByMission)
-            {
-                result.skipped.push_back(describe("not on the mission's unit list"));
-                continue;
-            }
-
-            // Player N is slot N-1 (0x4883B2). The original logs an unseated
-            // one and spawns it regardless; RWE has no player to give it to.
-            auto slot = record.player - 1;
-            if (slot < 0 || slot >= static_cast<int>(slotPlayers.size()) || !slotPlayers[slot])
-            {
-                result.skipped.push_back(describe("no player in that slot"));
-                continue;
-            }
-
-            // Positions are world units from the map's top-left corner, as a
-            // start position is.
-            auto position = simulation.terrain.topLeftCoordinateToWorld(SimVector(SimScalar(static_cast<float>(record.xPos)), 0_ss, SimScalar(static_cast<float>(record.zPos))));
-            if (!def.isMobile)
-            {
-                // 0x47DDC0: a building goes on the build grid, its footprint
-                // on the nearest whole cells, as a building placed by hand
-                // does.
-                auto rect = simulation.computeFootprintRegion(position, def.movementCollisionInfo);
-                auto topLeft = simulation.terrain.heightmapIndexToWorldCorner(rect.x, rect.y);
-                position.x = topLeft.x + ((SimScalar(rect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss);
-                position.z = topLeft.z + ((SimScalar(rect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss);
-            }
-            position.y = simulation.terrain.getHeightAt(position.x, position.z);
-
-            // 0x436EF9: degrees to the sixteen-bit angle, truncated.
-            auto heading = SimAngle(static_cast<uint16_t>(static_cast<int32_t>((static_cast<int64_t>(record.angle) * 65536) / 360)));
-
-            auto unitId = simulation.trySpawnUnit(unitType, *slotPlayers[slot], position, heading);
-            // The original's creator 0x485F50 fails only for want of a unit
-            // slot or on the per-type limit, never on where the unit goes,
-            // so mission units that overlap -- a truck parked under an
-            // aircraft, a unit on a tree -- simply share the ground. RWE's
-            // occupancy holds one unit to a cell, so a mobile unit that
-            // cannot have its own spot takes the nearest one it can, ring by
-            // ring out to eight cells, in a fixed order. A building keeps its
-            // place or is not made: moving one would redraw the mission.
-            for (int ring = 1; !unitId && def.isMobile && ring <= 8; ++ring)
-            {
-                for (int dz = -ring; !unitId && dz <= ring; ++dz)
+                // 0x488A50: the definition by name. An unknown one makes nothing.
+                auto unitType = toUpper(record.unitName);
+                auto defIt = simulation.unitDefinitions.find(unitType);
+                if (defIt == simulation.unitDefinitions.end())
                 {
-                    for (int dx = -ring; !unitId && dx <= ring; ++dx)
+                    result.skipped.push_back(describe("no such unit"));
+                    continue;
+                }
+                const auto& def = defIt->second;
+
+                // Off the mission's own unit list the original has no definition
+                // for it at all, so it makes nothing, as for an unknown name.
+                if (def.excludedByMission)
+                {
+                    result.skipped.push_back(describe("not on the mission's unit list"));
+                    continue;
+                }
+
+                auto owner = ownerOf(i);
+                if (!owner.player)
+                {
+                    result.skipped.push_back(describe(owner.reason));
+                    continue;
+                }
+
+                // Positions are world units from the map's top-left corner, as a
+                // start position is.
+                auto position = simulation.terrain.topLeftCoordinateToWorld(SimVector(SimScalar(static_cast<float>(record.xPos)), 0_ss, SimScalar(static_cast<float>(record.zPos))));
+                if (!def.isMobile)
+                {
+                    // 0x47DDC0: a building goes on the build grid, its footprint
+                    // on the nearest whole cells, as a building placed by hand
+                    // does.
+                    auto rect = simulation.computeFootprintRegion(position, def.movementCollisionInfo);
+                    auto topLeft = simulation.terrain.heightmapIndexToWorldCorner(rect.x, rect.y);
+                    position.x = topLeft.x + ((SimScalar(rect.width) * MapTerrain::HeightTileWidthInWorldUnits) / 2_ss);
+                    position.z = topLeft.z + ((SimScalar(rect.height) * MapTerrain::HeightTileHeightInWorldUnits) / 2_ss);
+                }
+                position.y = simulation.terrain.getHeightAt(position.x, position.z);
+
+                // 0x436EF9: degrees to the sixteen-bit angle, truncated.
+                auto heading = SimAngle(static_cast<uint16_t>(static_cast<int32_t>((static_cast<int64_t>(record.angle) * 65536) / 360)));
+
+                auto unitId = simulation.trySpawnUnit(unitType, *owner.player, position, heading);
+                // The original's creator 0x485F50 fails only for want of a unit
+                // slot or on the per-type limit, never on where the unit goes,
+                // so mission units that overlap -- a truck parked under an
+                // aircraft, a unit on a tree -- simply share the ground. RWE's
+                // occupancy holds one unit to a cell, so a mobile unit that
+                // cannot have its own spot takes the nearest one it can, ring by
+                // ring out to eight cells, in a fixed order. A building keeps its
+                // place or is not made: moving one would redraw the mission.
+                for (int ring = 1; !unitId && def.isMobile && ring <= 8; ++ring)
+                {
+                    for (int dz = -ring; !unitId && dz <= ring; ++dz)
                     {
-                        if (std::max(std::abs(dx), std::abs(dz)) != ring)
+                        for (int dx = -ring; !unitId && dx <= ring; ++dx)
                         {
-                            continue;
+                            if (std::max(std::abs(dx), std::abs(dz)) != ring)
+                            {
+                                continue;
+                            }
+                            auto nearby = position;
+                            nearby.x += SimScalar(static_cast<float>(dx)) * MapTerrain::HeightTileWidthInWorldUnits;
+                            nearby.z += SimScalar(static_cast<float>(dz)) * MapTerrain::HeightTileHeightInWorldUnits;
+                            nearby.y = simulation.terrain.getHeightAt(nearby.x, nearby.z);
+                            unitId = simulation.trySpawnUnit(unitType, *owner.player, nearby, heading);
                         }
-                        auto nearby = position;
-                        nearby.x += SimScalar(static_cast<float>(dx)) * MapTerrain::HeightTileWidthInWorldUnits;
-                        nearby.z += SimScalar(static_cast<float>(dz)) * MapTerrain::HeightTileHeightInWorldUnits;
-                        nearby.y = simulation.terrain.getHeightAt(nearby.x, nearby.z);
-                        unitId = simulation.trySpawnUnit(unitType, *slotPlayers[slot], nearby, heading);
                     }
                 }
+                if (!unitId && !def.isMobile)
+                {
+                    unitId = placeMissionBuildingAnyway(simulation, unitType, def, *owner.player, position, heading, result.adjusted, describe("placed anyway"));
+                }
+                if (!unitId)
+                {
+                    result.skipped.push_back(describe("could not be placed"));
+                    continue;
+                }
+                auto& unit = simulation.getUnitState(*unitId);
+                unit.finishBuilding(def);
+                if (useRecordHealth)
+                {
+                    // 0x48848E: the maximum times the percentage over a hundred,
+                    // truncated.
+                    unit.hitPoints = static_cast<unsigned int>((static_cast<uint64_t>(def.maxHitPoints) * static_cast<uint64_t>(std::max(0, record.healthPercentage))) / 100u);
+                }
+                result.spawned.push_back(*unitId);
+                spawnedRecords.push_back(i);
             }
-            if (!unitId && !def.isMobile)
-            {
-                unitId = placeMissionBuildingAnyway(simulation, unitType, def, *slotPlayers[slot], position, heading, result.adjusted, describe("placed anyway"));
-            }
-            if (!unitId)
-            {
-                result.skipped.push_back(describe("could not be placed"));
-                continue;
-            }
-            auto& unit = simulation.getUnitState(*unitId);
-            unit.finishBuilding(def);
-            // 0x48848E: the maximum times the percentage over a hundred,
-            // truncated.
-            unit.hitPoints = static_cast<unsigned int>((static_cast<uint64_t>(def.maxHitPoints) * static_cast<uint64_t>(std::max(0, record.healthPercentage))) / 100u);
-            result.spawned.push_back(*unitId);
-            spawnedRecords.push_back(i);
-        }
 
-        // The orders, in a second pass once every unit is made, as the
-        // original reads them (0x4884F1). A name is the Ident or the unit
-        // type of the first record, in file order, that produced a unit
-        // (0x487AF0).
-        auto resolveName = [&](const std::string& name) -> std::optional<UnitId> {
-            // A name that did not scan resolves to nothing, not to the first
-            // record that has no Ident.
-            if (name.empty())
-            {
+            // The orders, in a second pass once every unit is made, as the
+            // original reads them (0x4884F1). A name is the Ident or the unit
+            // type of the first record, in file order, that produced a unit
+            // (0x487AF0).
+            auto resolveName = [&](const std::string& name) -> std::optional<UnitId> {
+                // A name that did not scan resolves to nothing, not to the first
+                // record that has no Ident.
+                if (name.empty())
+                {
+                    return std::nullopt;
+                }
+                auto wanted = toUpper(name);
+                for (std::size_t n = 0; n < spawnedRecords.size(); ++n)
+                {
+                    const auto& record = records[spawnedRecords[n]];
+                    if (toUpper(record.ident) == wanted || toUpper(record.unitName) == wanted)
+                    {
+                        return result.spawned[n];
+                    }
+                }
                 return std::nullopt;
-            }
-            auto wanted = toUpper(name);
+            };
             for (std::size_t n = 0; n < spawnedRecords.size(); ++n)
             {
-                const auto& record = schema.units[spawnedRecords[n]];
-                if (toUpper(record.ident) == wanted || toUpper(record.unitName) == wanted)
+                const auto& record = records[spawnedRecords[n]];
+                // Immunity is the one record flag the spawner copies (0x488475).
+                simulation.getUnitState(result.spawned[n]).immune = record.immunity;
+                MissionScript script;
+                readInitialMission(simulation, result.spawned[n], record, resolveName, script);
+                if (!script.steps.empty())
                 {
-                    return result.spawned[n];
+                    if (!simulation.missionScripts)
+                    {
+                        simulation.missionScripts = std::make_unique<MissionScripts>();
+                    }
+                    simulation.missionScripts->scripts[result.spawned[n].value] = std::move(script);
                 }
             }
-            return std::nullopt;
-        };
-        for (std::size_t n = 0; n < spawnedRecords.size(); ++n)
-        {
-            const auto& record = schema.units[spawnedRecords[n]];
-            // Immunity is the one record flag the spawner copies (0x488475).
-            simulation.getUnitState(result.spawned[n]).immune = record.immunity;
-            MissionScript script;
-            readInitialMission(simulation, result.spawned[n], record, resolveName, script);
-            if (!script.steps.empty())
-            {
-                if (!simulation.missionScripts)
+            return result;
+        }
+    }
+
+    MissionSpawnResult spawnMissionUnits(GameSimulation& simulation, const OtaSchema& schema, const std::array<std::optional<PlayerId>, 10>& slotPlayers)
+    {
+        return spawnSchemaUnits(
+            simulation,
+            schema.units,
+            [&](std::size_t i) -> SchemaUnitOwner {
+                // Player N is slot N-1 (0x4883B2). The original logs an unseated
+                // one and spawns it regardless; RWE has no player to give it to.
+                auto slot = schema.units[i].player - 1;
+                if (slot < 0 || slot >= static_cast<int>(slotPlayers.size()) || !slotPlayers[slot])
                 {
-                    simulation.missionScripts = std::make_unique<MissionScripts>();
+                    return {std::nullopt, "no player in that slot"};
                 }
-                simulation.missionScripts->scripts[result.spawned[n].value] = std::move(script);
+                return {slotPlayers[slot], {}};
+            },
+            true);
+    }
+
+    MapUnitOwner resolveMapUnitOwner(
+        const GameSimulation& simulation,
+        int player,
+        const std::array<std::optional<int>, 10>& startPositionForSlot,
+        const std::array<std::optional<PlayerId>, 10>& slotPlayers)
+    {
+        if (player >= 1 && player <= 10)
+        {
+            for (std::size_t slot = 0; slot < startPositionForSlot.size(); ++slot)
+            {
+                if (startPositionForSlot[slot] == player && slotPlayers[slot])
+                {
+                    return {slotPlayers[slot], slot, {}};
+                }
+            }
+            return {std::nullopt, std::nullopt, "no player was dealt map position " + std::to_string(player)};
+        }
+
+        if (player == 11)
+        {
+            // TADR: Player=11 is the last player, and only when that player is
+            // an AI. RWE has no neutral seat for the case where it is not.
+            std::optional<std::size_t> last;
+            for (std::size_t slot = 0; slot < slotPlayers.size(); ++slot)
+            {
+                if (slotPlayers[slot])
+                {
+                    last = slot;
+                }
+            }
+            if (!last)
+            {
+                return {std::nullopt, std::nullopt, "there is no last player for Player 11"};
+            }
+            if (simulation.getPlayer(*slotPlayers[*last]).type != GamePlayerType::Computer)
+            {
+                return {std::nullopt, std::nullopt, "the last player is not a computer"};
+            }
+            return {slotPlayers[*last], last, {}};
+        }
+
+        return {std::nullopt, std::nullopt, "Player " + std::to_string(player) + " is not a map position 1-10 or 11"};
+    }
+
+    MissionSpawnResult spawnMapUnits(
+        GameSimulation& simulation,
+        const OtaSchema& schema,
+        const std::array<std::optional<PlayerId>, 10>& slotPlayers,
+        const std::array<std::optional<int>, 10>& startPositionForSlot,
+        std::array<bool, 10>* slotsThatReceivedUnits)
+    {
+        auto result = spawnSchemaUnits(
+            simulation,
+            schema.units,
+            [&](std::size_t i) -> SchemaUnitOwner {
+                auto owner = resolveMapUnitOwner(simulation, schema.units[i].player, startPositionForSlot, slotPlayers);
+                return {owner.player, owner.reason};
+            },
+            false);
+
+        if (slotsThatReceivedUnits)
+        {
+            slotsThatReceivedUnits->fill(false);
+            for (auto unitId : result.spawned)
+            {
+                auto owner = simulation.getUnitState(unitId).owner;
+                for (std::size_t slot = 0; slot < slotPlayers.size(); ++slot)
+                {
+                    if (slotPlayers[slot] && *slotPlayers[slot] == owner)
+                    {
+                        (*slotsThatReceivedUnits)[slot] = true;
+                    }
+                }
             }
         }
         return result;
