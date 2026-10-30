@@ -57,6 +57,36 @@ Limits of this slice, all deliberate:
   every existing hash; the mode is a launch-parameter invariant, agreed by the
   lobby or set identically on the command line.
 
+## Reload bars (implemented)
+
+TADR 2026.10.6 adds `reloadbar=1` to the weapon TDF flags. RWE parses the key
+whatever the mode and honours it only under the Community Patch, like the other
+weapon flags in slice 1. This is RWE-original ruleset work under ADR-0006:
+TADR's written rule is the reference, and there is no byte-tactics comparison.
+
+- **What is drawn.** For a locally owned unit whose health bar is showing, a
+  35-by-3 frame sits one pixel below the health bar and shares its left edge.
+  The fill follows the health bar's convention, `1 + floor(32 x progress)`
+  pixels, so an empty bar still keeps the one-pixel minimum the health bar
+  uses.
+- **Which weapon.** Among the unit's weapon slots whose definition carries
+  `reloadbar=1`, the one with the longest `reloadTime` is shown, whether or
+  not it has fired recently. Ties go to the lower slot. A unit with no tagged
+  weapon draws nothing, so health bars, stockpile text and the panel layout
+  are unchanged.
+- **Progress.** Full before the first shot and whenever `readyTime` has
+  passed; empty on the tick the weapon fires; then linear over that weapon's
+  reload as `(now - (readyTime - reloadTicks)) / reloadTicks`, clamped to
+  0..1. `reloadTicks` goes through `computeReloadTicks`, the same helper the
+  simulation uses to set `readyTime`, so the damage and veterancy scaling
+  agree with the timer that is actually running.
+- **Presentation only.** It reads `UnitState::weapons` and the weapon
+  definitions and writes nothing: no simulation, hash, save, network or
+  replay state. It is drawn under the same F9 health-bar toggle as the health
+  bar and only for units this machine owns, which is TADR's "locally owned
+  unit". With health bars switched off there is no bar to sit below, so no
+  reload bar is drawn either; RWE has no separate setting for it.
+
 ## Off-map aircraft (implemented)
 
 TADR 2026.10.6 says "off-map aircraft targetable, in tiles past the map edge",

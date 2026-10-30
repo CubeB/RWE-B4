@@ -62,6 +62,13 @@ namespace rwe
         bool surfaceFire{false};
         bool noMapWeaponAlert{false};
 
+        /**
+         * TADR `reloadbar`: show this weapon's reload progress under a locally
+         * owned unit's health bar. Presentation only; honoured under the
+         * Community Patch ruleset.
+         */
+        bool reloadBar{false};
+
         bool burnBlow;
         unsigned int accuracy;
         unsigned int tolerance;

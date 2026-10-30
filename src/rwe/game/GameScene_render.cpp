@@ -19,6 +19,7 @@
 #include <rwe/camera_util.h>
 #include <rwe/game/GameScene_util.h>
 #include <rwe/game/OrderButtons.h>
+#include <rwe/game/ReloadBar.h>
 #include <rwe/game/dump_util.h>
 #include <rwe/game/matrix_util.h>
 #include <rwe/render/render_prof.h>
@@ -2361,6 +2362,26 @@ namespace rwe
                     * viewProjectionMatrix
                     * simVectorToFloat(unit.position);
                 worldUiRenderService.drawHealthBar(uiPos.x, uiPos.y, static_cast<int>(unit.hitPoints), static_cast<int>(unitDefinition.maxHitPoints));
+
+                // TADR reloadbar (#934): the slowest tagged weapon gets a
+                // compact bar under the health bar. It is presentation only
+                // and is off outside the Community Patch, like the other TADR
+                // weapon flags.
+                if (simulation.communityPatchMode)
+                {
+                    if (auto reloadBar = chooseReloadBarWeapon(
+                            unit.weapons,
+                            simulation.weaponDefinitions,
+                            unit.hitPoints,
+                            unitDefinition.maxHitPoints,
+                            unit.kills))
+                    {
+                        worldUiRenderService.drawReloadBar(
+                            uiPos.x,
+                            uiPos.y,
+                            reloadBarProgress(*reloadBar, simulation.gameTime));
+                    }
+                }
             }
         }
 
