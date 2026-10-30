@@ -807,7 +807,14 @@ Relevant FBI values, for reference:
   `[gs+0x1422F]/2` — the map dimensions, used the same way at `0x40820E`).
   Reading this as "the unit is off the playable map" fits everything except
   `AirToGround`'s response at `0x412828`, which merely forces state 2 with a
-  30-tick timer. **[inferred]**
+  30-tick timer. **Settled**: the state is the full-terrain footprint test, not
+  the rendered border, and there are **six** order handlers with the recovery
+  branch rather than the three named here — `VTOL_Follow` (`0x40FBE0`),
+  `VTOL_SeekAttack` (`0x4103E0`) and `VTOL_SeekGuard` (`0x410850`) join
+  `VTOL_LandIfCan` and `AirToGroundHover`; the goal resolver is a separate
+  site inside the movement goal. The complete behaviour, the handlers that
+  have no such branch, and the remaining uncertainty are in
+  [BOUNDARY-004](PLAYTEST-MAP-BOUNDARY-FINDINGS.md#boundary-004-what-the-edge-means-to-an-aircraft-in-flight).
 * **The exact meaning of the individual wake-mask bits.** Confirmed: bit 0 is
   the timer (`0x439E80`), bits 5–9 are move-goal outcomes (`0x4388D0` clears
   exactly `0x3E0` when installing a new goal, and the handlers advance on
