@@ -233,6 +233,9 @@ namespace rwe
         /** Give only: metal if true, energy if false. */
         bool giveMetal{true};
 
+        /** SetMetalReserve/SetEnergyReserve: `amount` is a percentage of storage, not an absolute value. */
+        bool percent{false};
+
         // NoMetal/NoEnergy/ATM reuse `target` and `amount`: the stock being
         // assigned (or the grant's recipient) and the value.
     };

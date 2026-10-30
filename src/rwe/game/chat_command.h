@@ -96,6 +96,9 @@ namespace rwe
         /** SetShare*: the reserve typed. Give: the amount. */
         int number{0};
 
+        /** SetShare*: the argument ended in `%`, so `number` is a percentage of storage. */
+        bool percent{false};
+
         /** Give: the first argument as typed (a player's number or name). */
         std::string playerToken;
 

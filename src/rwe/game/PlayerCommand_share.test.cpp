@@ -20,13 +20,14 @@ namespace rwe
 {
     namespace
     {
-        PlayerShareCommand makeShare(PlayerShareCommand::Kind kind, float amount = 0.0f, std::optional<PlayerId> target = std::nullopt, bool giveMetal = true)
+        PlayerShareCommand makeShare(PlayerShareCommand::Kind kind, float amount = 0.0f, std::optional<PlayerId> target = std::nullopt, bool giveMetal = true, bool percent = false)
         {
             PlayerShareCommand c;
             c.kind = kind;
             c.amount = amount;
             c.target = target;
             c.giveMetal = giveMetal;
+            c.percent = percent;
             return c;
         }
 
@@ -47,6 +48,7 @@ namespace rwe
             REQUIRE(a.amount == b.amount);
             REQUIRE(a.target == b.target);
             REQUIRE(a.giveMetal == b.giveMetal);
+            REQUIRE(a.percent == b.percent);
         }
     }
 
@@ -73,6 +75,12 @@ namespace rwe
         SECTION("a negative reserve is carried as typed")
         {
             auto original = makeShare(PlayerShareCommand::Kind::SetEnergyReserve, -40.0f);
+            requireSame(roundTrip(original), original);
+        }
+
+        SECTION("a percentage reserve keeps its suffix flag")
+        {
+            auto original = makeShare(PlayerShareCommand::Kind::SetMetalReserve, 50.0f, std::nullopt, true, true);
             requireSame(roundTrip(original), original);
         }
 

@@ -68,11 +68,12 @@ namespace rwe
             return c;
         }
 
-        PlayerShareCommand setReserve(bool metal, float amount)
+        PlayerShareCommand setReserve(bool metal, float amount, bool percent = false)
         {
             PlayerShareCommand c;
             c.kind = metal ? PlayerShareCommand::Kind::SetMetalReserve : PlayerShareCommand::Kind::SetEnergyReserve;
             c.amount = amount;
+            c.percent = percent;
             return c;
         }
 
@@ -138,6 +139,37 @@ namespace rwe
             REQUIRE(sim.getPlayer(a).metalReserve == Metal(-300.0f));
         }
 
+        SECTION("a percentage reserve tracks storage and clamps to 0..100")
+        {
+            sim.communityPatchMode = true;
+            REQUIRE(applyPlayerShareCommand(sim, a, setReserve(true, 50.0f, true)));
+            REQUIRE(sim.getPlayer(a).metalReservePercent);
+            REQUIRE(sim.getPlayer(a).metalReservePercentage == 50u);
+            REQUIRE(sim.getPlayer(a).metalReserve == Metal(500.0f));
+
+            REQUIRE(applyPlayerShareCommand(sim, a, setReserve(true, 250.0f, true)));
+            REQUIRE(sim.getPlayer(a).metalReservePercentage == 100u);
+            REQUIRE(sim.getPlayer(a).metalReserve == Metal(1000.0f));
+
+            REQUIRE(applyPlayerShareCommand(sim, a, setReserve(false, -10.0f, true)));
+            REQUIRE(sim.getPlayer(a).energyReservePercent);
+            REQUIRE(sim.getPlayer(a).energyReservePercentage == 0u);
+            REQUIRE(sim.getPlayer(a).energyReserve == Energy(0.0f));
+
+            // A plain number goes back to the absolute form.
+            REQUIRE(applyPlayerShareCommand(sim, a, setReserve(true, 400.0f)));
+            REQUIRE_FALSE(sim.getPlayer(a).metalReservePercent);
+            REQUIRE(sim.getPlayer(a).metalReserve == Metal(400.0f));
+        }
+
+        SECTION("outside the Community Patch a percent suffix is an absolute number")
+        {
+            sim.communityPatchMode = false;
+            REQUIRE(applyPlayerShareCommand(sim, a, setReserve(true, 50.0f, true)));
+            REQUIRE_FALSE(sim.getPlayer(a).metalReservePercent);
+            REQUIRE(sim.getPlayer(a).metalReserve == Metal(50.0f));
+        }
+
         SECTION("a reserve that is not a number is refused")
         {
             REQUIRE_FALSE(applyPlayerShareCommand(sim, a, setReserve(true, std::numeric_limits<float>::quiet_NaN())));
@@ -185,6 +217,24 @@ namespace rwe
         // Energy was never switched on.
         REQUIRE(energyOf(sim, donor) == 100.0f);
         REQUIRE(energyOf(sim, ally) == 100.0f);
+    }
+
+    TEST_CASE("a percentage share threshold follows storage", "[share][communitypatch]")
+    {
+        auto sim = makeSim();
+        auto donor = addSharer(sim, 900.0f, 100.0f, 0);
+        auto ally = addSharer(sim, 100.0f, 100.0f, 0);
+        sim.communityPatchMode = true;
+        applyPlayerShareCommand(sim, donor, toggleMetal());
+        REQUIRE(applyPlayerShareCommand(sim, donor, setReserve(true, 50.0f, true)));
+
+        // Storage is 1000, so the reserve is 500 and the offer is a third of
+        // the 400 surplus. An absolute reservation of 50 would have offered
+        // a third of 850 instead.
+        tick(sim, 60);
+        REQUIRE(metalOf(sim, donor) > 766.0f);
+        REQUIRE(metalOf(sim, donor) < 767.0f);
+        REQUIRE(metalOf(sim, ally) == 100.0f);
     }
 
     TEST_CASE("the automatic pass moves half the energy surplus", "[share]")

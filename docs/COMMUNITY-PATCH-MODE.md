@@ -72,6 +72,20 @@ visibility test runs. The target scan, weapon range, `nottoair`, cloak, sonar
 and submerged rules still apply, and ground units are unaffected. The change
 only alters derived visibility; it adds no saved or hashed state.
 
+## Percentage share thresholds (implemented)
+
+TADR 2026.10.6 adds a `%` suffix to `+setsharemetal` and `+setshareenergy`:
+the threshold is that percentage of current storage and keeps tracking it as
+storage grows. A plain number remains the absolute threshold it always was.
+This is RWE-original ruleset work under ADR-0006, not a byte-tactics
+comparison.
+
+RWE keeps the flag and the 0..100 value beside each player's absolute reserve.
+It hashes, saves and dumps them because they steer the every-two-seconds
+sharing pass; the value is sent with the ordinary share command (a new
+backwards-compatible protobuf field), and older saves load with the absolute
+form. Percentages outside 0..100 are clamped.
+
 ## Where it is toggled
 
 - **Launcher, single player:** the Play page has a Community Patch switch,
@@ -94,7 +108,7 @@ only alters derived visibility; it adds no saved or hashed state.
 | off-map aircraft targetable | **done**: a flying target wholly outside the map by at most one tile is visible from the nearest edge cell; the weapon still has to reach it and pass its ordinary hit rules |
 | construction units stay put while guarding a factory | planned once RWE's guard/assist order is compared with TADR's |
 | patrol reclaim thresholds and `+setreclaimmetal`/`+setreclaimenergy` | planned; TADR's percentages are absolute of storage and reset per game |
-| percentage share thresholds (`+setsharemetal 50%`) | planned on top of RWE's existing reserves |
+| percentage share thresholds (`+setsharemetal 50%`) | **done**: a percentage tracks storage, a plain number stays absolute, and both are saved/hashed |
 | repair-rate exploit fix | planned: the many-cheap-repairers fault is a real economy rule |
 | share-abuse guard / `.take` refusal | evaluate against RWE's own sharing and rejoining rules; may stay RWE-original |
 

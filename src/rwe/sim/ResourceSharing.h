@@ -65,7 +65,9 @@ namespace rwe
      * alive, human and has a sharing flag set, and for metal and then energy
      * independently: if the player holds more than its reserve, find the
      * recipient and offer it one third (metal) or one half (energy) of the
-     * surplus, capped at the recipient's free storage.
+     * surplus, capped at the recipient's free storage. A reserve set with a
+     * trailing `%` is that percentage of current storage and tracks it; an
+     * absolute reserve stays absolute.
      *
      * The recipient is the LAST player, in index order, that is alive, human,
      * simulated here, allied to the donor and holds less of the resource than
