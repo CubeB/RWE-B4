@@ -73,6 +73,18 @@ describe("update evaluation", () => {
     expect(result.asset?.url).toBe("https://example.test/setup.exe");
   });
 
+  it("ignores rolling releases whose tag is not a version", () => {
+    // GitHub returns `nightly` first: a moving tag, not a version, and it must
+    // not stand in front of a real release.
+    const result = evaluateUpdates(
+      [release("nightly"), ...releases],
+      "v1.1.0-pre5",
+      "win32"
+    );
+    expect(result.latest?.tag).toBe("v1.1.0-pre6");
+    expect(result.updateAvailable).toBe(true);
+  });
+
   it("reports up to date when the build is the newest release", () => {
     const result = evaluateUpdates(releases, "v1.1.0-pre6", "win32");
     expect(result.updateAvailable).toBe(false);

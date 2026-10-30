@@ -141,7 +141,12 @@ export function evaluateUpdates(
   platform: string
 ): UpdateCheckResult {
   const candidates = releases
-    .filter(release => release !== undefined && release !== null)
+    .filter(
+      release =>
+        release !== undefined &&
+        release !== null &&
+        parseVersion(release.tag) !== undefined
+    )
     .slice()
     .sort((a, b) => {
       const pa = parseVersion(a.tag);
