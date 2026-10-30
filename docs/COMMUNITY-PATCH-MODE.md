@@ -174,6 +174,39 @@ Deliberate departures from TADR, all because RWE's model differs:
   with a `Map unit not placed` log line. A map that means them as scenery
   keeps its per-player units but loses the neutral ones. Giving RWE a neutral
   seat is a larger change than this slice and is not attempted here.
+## Construction units stay put while guarding a factory (implemented)
+
+TADR 2025.5.18 lists "Improved behaviour of con units when guarding a factory
+- they stay put after finishing a build". The 2025.7.12 entry turns that into
+an opt-in behaviour with three choices -- stay put, cavedog or scatter -- and
+every build configuration except `tdraw-ota` enables it. RWE adopts the
+stay-put rule for the Community Patch and has no cavedog/scatter selector.
+This is RWE-original ruleset work under ADR-0006, not a byte-tactics
+comparison: TADR's written feature list is the reference, not a decoded
+routine.
+
+RWE's ordinary guard path stops assisting when the frame is released, then
+falls through to "stay close": a guard more than 200 world units from the
+guarded factory's centre is told to walk in. A construction unit can finish a
+build from farther out than that, because assisting only requires it to be
+within its BuildDistance of the factory's *footprint*, so the completed build
+could be followed by a walk towards the factory's centre. Under the mode a
+ground construction unit guarding a factory stays where it is once it is
+already within working reach and there is no frame to assist. It still walks to
+a factory it cannot reach from where it stands, so a guard ordered from across
+the map still arrives and assists. Aircraft guards are unchanged: a
+construction aircraft's guard is the VTOL circuit described above, which TADR
+does not touch.
+
+The rule adds no simulation state. It is a condition on the guard's current
+position and its build reach, both already saved and hashed, so there is
+nothing new to hash, save or dump. Outside the mode the walk is untouched.
+
+Uncertainty: TADR's written list describes the effect but not whether the
+choice is stored per player or resolves some other way in the DLL. RWE applies
+the rule for the whole mode, matching the "One ruleset, not per-feature
+toggles" decision. The cavedog and scatter variants are not implemented
+because RWE has no setting that selects among them.
 ## Where it is toggled
 
 - **Launcher, single player:** the Play page has a Community Patch switch,
@@ -194,7 +227,7 @@ Deliberate departures from TADR, all because RWE's model differs:
 | aircraft wrecks fall to the ground | **done**: a wreck created above the terrain falls straight down under gravity; ground and wet wrecks keep the original's behaviour |
 | explosions damage every stacked aircraft, contested-cell tie-break | **already RWE**: the blast sweep walks every flying unit in range, not just the one occupancy cell, so stacked aircraft are all damaged; occupancy writes are deterministic in unit order, so no tie-break is needed |
 | off-map aircraft targetable | **done**: a flying target wholly outside the map by at most one tile is visible from the nearest edge cell; the weapon still has to reach it and pass its ordinary hit rules |
-| construction units stay put while guarding a factory | planned once RWE's guard/assist order is compared with TADR's |
+| construction units stay put while guarding a factory | **done**: under the mode a ground guard already within working reach stays put after a build; out-of-reach approach and aircraft circuits are unchanged |
 | patrol reclaim thresholds and `+setreclaimmetal`/`+setreclaimenergy` | **done**: per-player 0..100 levels of storage, default 20%, 0 never low, energy also gates assisting, air constructors follow the same rule |
 | percentage share thresholds (`+setsharemetal 50%`) | **done**: a percentage tracks storage, a plain number stays absolute, and both are saved/hashed |
 | repair-rate exploit fix | planned: the many-cheap-repairers fault is a real economy rule |
