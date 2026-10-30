@@ -108,6 +108,11 @@ export class MasterClientService {
     );
   }
 
+  disconnect() {
+    this.client?.close();
+    this.client = undefined;
+  }
+
   requestCreateGame(description: string, maxPlayers: number) {
     if (!this.client) {
       return;

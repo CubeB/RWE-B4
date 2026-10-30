@@ -7,7 +7,7 @@ import {
   TextField,
 } from "@mui/material";
 import * as React from "react";
-import { normalizePlayerName } from "../preferences";
+import { normalizePlayerName } from "../playerName";
 
 interface PlayerNameDialogProps {
   initialName?: string;

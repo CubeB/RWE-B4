@@ -250,7 +250,7 @@ that code with the guest; the host accepts a waiting player with `/accept`.
 Some router configurations need a reply-code exchange. Follow the
 [connection guide](docs/NAT-PUNCH.md) for the complete flow.
 
-The separate [Electron launcher](#the-launcher) provides another lobby path.
+The separate [launcher](#the-launcher) provides another lobby path.
 Both players should use the same engine build and matching maps and mods.
 
 ### Essential controls
@@ -419,20 +419,21 @@ make -j$(nproc)
 
 ## The launcher
 
-The optional multiplayer launcher is an Electron application built with
-TypeScript, React and Redux. It talks to the engine through `rwe_bridge`.
+The optional multiplayer launcher uses TypeScript, React and Redux in your
+installed browser, with a bundled Node backend. It talks to the engine through
+`rwe_bridge`. Downloads include no Electron or Chromium runtime, and players
+do not need to install Node.
 
 <details>
 <summary><strong>Build and run the launcher</strong></summary>
 
-Use Node.js 22, as in CI. In the `launcher` directory:
+Use the latest Node.js 22, as in CI (at least 22.22.2). In the `launcher` directory:
 
 ```bash
 npm ci
-npm run server
 ```
 
-In a second terminal, set `RWE_HOME` to the directory containing `rwe` and
+Set `RWE_HOME` to the directory containing `rwe`, `rwe_setup` and
 `rwe_bridge`, then start the launcher:
 
 ```bash
@@ -440,7 +441,7 @@ export RWE_HOME=/path/to/engine/build
 npm start
 ```
 
-For local development, run its master server in a third terminal from the
+For local development, run its master server in another terminal from the
 same `launcher` directory:
 
 ```bash

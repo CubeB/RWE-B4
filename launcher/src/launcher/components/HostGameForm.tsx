@@ -6,7 +6,7 @@ import { connect } from "react-redux";
 import { Dispatch } from "redux";
 import { hostGameFormCancel, hostGameFormConfirm } from "../actions";
 import { State } from "../state";
-import { normalizePlayerName } from "../preferences";
+import { normalizePlayerName } from "../playerName";
 
 interface HostGameFormDispatchProps {
   onConfirm: (

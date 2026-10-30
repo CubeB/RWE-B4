@@ -1,5 +1,7 @@
 import fs from "fs";
 import path from "path";
+import { normalizePlayerName } from "./playerName";
+export { normalizePlayerName } from "./playerName";
 
 export interface LauncherPreferences {
   playerName: string;
@@ -12,25 +14,6 @@ export const defaultPreferences: LauncherPreferences = {
   activeMods: ["ta"],
   communityPatch: false,
 };
-
-/** Names fit both the online lobby and the native LAN name field. */
-export function normalizePlayerName(value: string): string {
-  const cleaned = Array.from(value)
-    .filter(character => {
-      const code = character.codePointAt(0)!;
-      return code >= 32 && code !== 127 && character !== ";";
-    })
-    .join("")
-    .trim();
-  let name = "";
-  for (const character of cleaned) {
-    if (Buffer.byteLength(name + character, "utf8") > 20) {
-      break;
-    }
-    name += character;
-  }
-  return name.trim();
-}
 
 export function normalizePreferences(value: unknown): LauncherPreferences {
   const data =

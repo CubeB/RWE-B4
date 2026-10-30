@@ -26,10 +26,10 @@ function launcherVersion() {
 const isDev = !!process.env.RWE_LAUNCHER_IS_DEV;
 
 module.exports = {
-  mode: "development",
+  mode: isDev ? "development" : "production",
   entry: "./src/launcher/renderer.tsx",
-  target: "electron-renderer",
-  devtool: "source-map",
+  target: "web",
+  devtool: isDev ? "source-map" : false,
   module: {
     rules: [
       {
@@ -42,7 +42,11 @@ module.exports = {
                 "@babel/env",
                 {
                   targets: {
-                    electron: "44.4.5",
+                    browsers: [
+                      "last 2 Chrome versions",
+                      "last 2 Firefox versions",
+                      "last 2 Edge versions",
+                    ],
                   },
                 },
               ],
@@ -91,7 +95,8 @@ module.exports = {
     ...(isDev ? [new ReactRefreshWebpackPlugin()] : []),
   ],
   optimization: {
-    moduleIds: "named",
+    moduleIds: isDev ? "named" : "deterministic",
+    minimize: !isDev,
   },
 
   devServer: {

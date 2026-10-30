@@ -9,6 +9,7 @@ import {
   Typography,
 } from "@mui/material";
 import * as React from "react";
+import { minimapUrl } from "../browserApi";
 import { FixedSizeList as List } from "react-window";
 
 export interface SelectedMapDetails {
@@ -47,7 +48,7 @@ function MapSelectDialog(props: MapSelectDialogProps) {
   const mapImage =
     props.selectedMapDetails && props.selectedMapDetails.minimap ? (
       <img
-        src={`file://${props.selectedMapDetails.minimap}`}
+        src={minimapUrl(props.selectedMapDetails.minimap)}
         className="map-dialog-minimap"
       />
     ) : (

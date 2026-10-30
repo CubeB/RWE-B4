@@ -55,8 +55,9 @@ add_subdirectory("libs/catch2")
 
 set(RC_ENABLE_CATCH OFF CACHE BOOL "Enables Catch support in RapidCheck" FORCE)
 set(RC_ENABLE_BOOST OFF CACHE BOOL "Enables Boost support in RapidCheck" FORCE)
-add_subdirectory("libs/rapidcheck")
-add_subdirectory("libs/rapidcheck/extras/catch")
+# DOWNLOAD-001: keep vendored dependency development files out of RWE packages.
+add_subdirectory("libs/rapidcheck" EXCLUDE_FROM_ALL)
+add_subdirectory("libs/rapidcheck/extras/catch" EXCLUDE_FROM_ALL)
 
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 set(JSON_Install OFF CACHE INTERNAL "")
@@ -175,7 +176,8 @@ set(XZ_TOOL_XZ OFF CACHE BOOL "" FORCE)
 set(XZ_TOOL_XZDEC OFF CACHE BOOL "" FORCE)
 set(XZ_TOOL_LZMADEC OFF CACHE BOOL "" FORCE)
 set(XZ_TOOL_LZMAINFO OFF CACHE BOOL "" FORCE)
-add_subdirectory("libs/xz")
+# DOWNLOAD-001: suppress the bundled codec development install rules too.
+add_subdirectory("libs/xz" EXCLUDE_FROM_ALL)
 
 set(LIBLZMA_FOUND TRUE)
 set(LIBLZMA_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/libs/xz/src/liblzma/api")
@@ -208,7 +210,7 @@ set(ENABLE_WIN32_XMLLITE OFF CACHE BOOL "" FORCE)
 set(ENABLE_ICONV OFF CACHE BOOL "" FORCE)
 set(ENABLE_ACL OFF CACHE BOOL "" FORCE)
 set(ENABLE_XATTR OFF CACHE BOOL "" FORCE)
-add_subdirectory("libs/libarchive")
+add_subdirectory("libs/libarchive" EXCLUDE_FROM_ALL)
 get_directory_property(_RWE_HAVE_LZMA_H
     DIRECTORY "${PROJECT_SOURCE_DIR}/libs/libarchive/libarchive" DEFINITION HAVE_LZMA_H)
 if(NOT _RWE_HAVE_LZMA_H)

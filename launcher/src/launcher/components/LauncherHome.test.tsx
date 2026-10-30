@@ -2,9 +2,10 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LauncherHome, LauncherHomeProps } from "./LauncherHome";
 
-jest.mock("electron", () => ({
-  ipcRenderer: { invoke: jest.fn() },
-  shell: { openPath: jest.fn() },
+jest.mock("../browserApi", () => ({
+  invoke: jest.fn(),
+  openExternal: jest.fn(),
+  minimapUrl: jest.fn(),
 }));
 
 function home(overrides: Partial<LauncherHomeProps> = {}) {

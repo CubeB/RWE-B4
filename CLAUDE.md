@@ -11,7 +11,7 @@ See also `@CONTEXT.md` — the project's domain glossary and design-decision rec
 
 ## Project Overview
 
-Robot War Engine (RWE) is an open-source real-time strategy game engine with high compatibility for Total Annihilation data files. It consists of a C++20 core engine and a TypeScript/Electron launcher application.
+Robot War Engine (RWE) is an open-source real-time strategy game engine with high compatibility for Total Annihilation data files. It consists of a C++20 core engine and a TypeScript launcher with an installed-browser frontend and a bundled Node backend (ADR-0007).
 
 Most of the current work is not new features but fidelity: taking behaviours the engine already reproduces and pinning them to exactly what the original executable does. That work has its own reference documents and its own hazards — read "Matching Total Annihilation" below before changing anything TA-facing.
 
@@ -56,8 +56,7 @@ npm ci
 npm run tsc          # Type check
 npm test             # Jest tests
 npm run lint         # ESLint
-npm run server       # Webpack dev server (hot reload)
-npm start            # Launch Electron app (needs RWE_HOME env var)
+npm start            # Build and open browser launcher (needs RWE_HOME env var)
 npm run master-server # Local multiplayer master server
 npm run package      # Package for distribution
 ```
