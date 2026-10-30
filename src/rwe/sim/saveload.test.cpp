@@ -870,4 +870,37 @@ namespace rwe
         }
     }
 
+    TEST_CASE("the strafing overflow deadline survives a save and a load", "[saveload][aircraft][boundary004]")
+    {
+        // BOUNDARY-004: the deadline decides when an off-grid strafing run is
+        // re-aimed, so it can move the aircraft's future and must be saved and
+        // hashed like the rest of the run.
+        auto simA = makeBaseSim();
+        buildScenario(simA);
+        auto id = spawnUnit(simA, "TANK", PlayerId(0), SimVector(300_ss, 0_ss, 300_ss));
+        simA.tick();
+
+        AirMovementStateAttackRun run(SimVector(400_ss, 40_ss, 400_ss));
+        run.strafingPass = true;
+        run.phase = AirMovementStateAttackRun::Phase::Departing;
+        run.overflowRepathAt = GameTime(1234);
+        UnitPhysicsInfoAir air;
+        air.movementState = run;
+        simA.getUnitState(id).physics = air;
+
+        auto saved = saveSimulationToJson(simA);
+        auto simB = makeBaseSim();
+        loadSimulationFromJson(saved, simB);
+        REQUIRE(saveSimulationToJson(simB) == saved);
+        REQUIRE(computeHashOf(simA) == computeHashOf(simB));
+
+        const auto* airB = std::get_if<UnitPhysicsInfoAir>(&simB.getUnitState(id).physics);
+        REQUIRE(airB != nullptr);
+        const auto* runB = std::get_if<AirMovementStateAttackRun>(&airB->movementState);
+        REQUIRE(runB != nullptr);
+        REQUIRE(runB->overflowRepathAt.has_value());
+        REQUIRE(*runB->overflowRepathAt == GameTime(1234));
+        REQUIRE(runB->phase == AirMovementStateAttackRun::Phase::Departing);
+    }
+
 }

@@ -396,6 +396,19 @@ namespace rwe
         /** Where the break is flying to, while phase is Breaking. */
         SimVector breakWaypoint{0_ss, 0_ss, 0_ss};
 
+        /**
+         * BOUNDARY-004: when the strafing pass next re-issues its attack goal
+         * while the aircraft's footprint is outside the full terrain grid.
+         * Strafing is the one air mission that does not head for the map
+         * centre in that state: it sets a 30-tick deadline and forces its
+         * attack state, so an off-grid strafing aircraft keeps attacking
+         * from outside. Empty while it is inside the grid.
+         *
+         * Hashed and saved: it decides when the run is re-aimed, and so
+         * where the aircraft flies.
+         */
+        std::optional<GameTime> overflowRepathAt{};
+
         /** Current air velocity in game units/tick. */
         SimVector currentVelocity{0_ss, 0_ss, 0_ss};
 

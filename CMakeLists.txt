@@ -1429,6 +1429,7 @@ set(TEST_FILES
     src/rwe/sim/fogplacement.test.cpp
     src/rwe/sim/gunship.test.cpp
     src/rwe/sim/aircraftidle.test.cpp
+    src/rwe/sim/aircraftboundary.test.cpp
     src/rwe/sim/airbase.test.cpp
     src/rwe/sim/repairpatrol.test.cpp
     src/rwe/game/noshadow.test.cpp

@@ -136,16 +136,19 @@ namespace rwe
 
         /**
          * Advances an attack run one tick: refresh the remembered target
-         * position, step the phase machine, and turn back early if the run-out
-         * would leave the map. It does not fire, does not break and does not
-         * capture the run-out heading — those are the caller's, in the order
-         * they had before.
+         * position and step the phase machine. It does not fire, does not
+         * break and does not capture the run-out heading — those are the
+         * caller's, in the order they had before.
+         *
+         * BOUNDARY-004: there is deliberately no edge test here. The
+         * original's AirStrike and AirToGround have no boundary branch at
+         * all, so a run-out past the map edge is flown rather than turned
+         * back; the strafing exception is the caller's deadline, not a clamp.
          */
         static AttackRunStep stepAttackRun(
             AirMovementStateAttackRun& run,
             const UnitState& unit,
             const UnitDefinition& unitDefinition,
-            const MapTerrain& terrain,
             const SimVector& targetPositionAtAltitude,
             const SimVector& targetPosition,
             SimScalar weaponMaxRange);

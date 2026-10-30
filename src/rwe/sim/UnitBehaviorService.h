@@ -132,6 +132,29 @@ namespace rwe
         void dropAirAttackRun(UnitInfo unitInfo);
 
         /**
+         * BOUNDARY-004: whether this unit's footprint is outside the full
+         * terrain grid -- the state in which the original's recovery handlers
+         * act. Evaluated when it is asked, which is equivalent to the
+         * original's "when the unit's cell changes": the answer is a pure
+         * function of the position and only turns over on a cell change.
+         */
+        bool airIsOutsideGrid(UnitInfo unitInfo) const;
+
+        /**
+         * BOUNDARY-004: one tick of an order handler's off-grid recovery.
+         * Replaces the aircraft's movement objective with the point 800 world
+         * units toward the rendered map centre (approach radius 128, event
+         * mask 0xE0) and keeps the order, its state and its target. A run,
+         * ring or dogfight is handed back as level flight because the
+         * original's branch replaces the attached movement objective rather
+         * than the mission, and the aircraft's state there lives on the
+         * mission. The original answers "no change" from this branch, which
+         * is why it is re-issued every order pass until the footprint is back
+         * inside the grid.
+         */
+        void steerAirBackInside(UnitInfo unitInfo);
+
+        /**
          * One decision of a constructor on patrol: the original's
          * RepairPatrol (0x405980 ground, 0x4152F0 air), S:131 of
          * TOTALA-EXE-ECONOMY.md. Repairs or helps build what is hurt nearby,

@@ -185,7 +185,6 @@ namespace rwe
         AirMovementStateAttackRun& run,
         const UnitState& unit,
         const UnitDefinition& unitDefinition,
-        const MapTerrain& terrain,
         const SimVector& targetPositionAtAltitude,
         const SimVector& targetPosition,
         SimScalar weaponMaxRange)
@@ -206,22 +205,11 @@ namespace rwe
         }
         result.weaponsHot = stepAttackRunPhase(unit.position, heading, targetPosition, geometry, run);
 
-        // Never run out past the edge of the map: turn back early instead.
-        if (run.phase == AirMovementStateAttackRun::Phase::Departing)
-        {
-            const auto& heights = terrain.getHeightMap();
-            auto corner = terrain.heightmapIndexToWorldCorner(0, 0);
-            auto margin = 64_ss;
-            auto minX = corner.x + margin;
-            auto minZ = corner.z + margin;
-            auto maxX = corner.x + (SimScalar(static_cast<float>(heights.getWidth())) * MapTerrain::HeightTileWidthInWorldUnits) - margin;
-            auto maxZ = corner.z + (SimScalar(static_cast<float>(heights.getHeight())) * MapTerrain::HeightTileHeightInWorldUnits) - margin;
-            const auto& p = unit.position;
-            if (p.x < minX || p.x > maxX || p.z < minZ || p.z > maxZ)
-            {
-                run.phase = AirMovementStateAttackRun::Phase::Approaching;
-            }
-        }
+        // BOUNDARY-004: no edge test. A bomber's strike and a strafing pass
+        // both fly their run-out wherever it goes; the original has no
+        // boundary branch in either mission, and turning back early here was
+        // RWE's own rule. The strafing pass's answer to being off the grid is
+        // its 30-tick re-aim in the caller.
 
         return result;
     }

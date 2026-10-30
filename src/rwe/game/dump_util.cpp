@@ -173,6 +173,7 @@ namespace rwe
             {"lastKnownTargetPos", dumpJson(p.lastKnownTargetPos)},
             {"runOutDirection", dumpJson(p.runOutDirection)},
             {"releasePoint", p.releasePoint ? dumpJson(*p.releasePoint) : nlohmann::json(nullptr)},
+            {"overflowRepathAt", p.overflowRepathAt ? nlohmann::json(p.overflowRepathAt->value) : nlohmann::json(nullptr)},
         };
     }
 

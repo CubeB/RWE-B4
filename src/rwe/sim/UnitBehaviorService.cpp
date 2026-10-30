@@ -519,7 +519,20 @@ namespace rwe
                     // keeps flying over what it just flattened, which is what
                     // the original looks like and what RWE was missing.
                     auto anchor = unitInfo.state->airLoiter->anchor;
-                    flyAirLoiterCircuit(unitInfo, UnitState::AirLoiterState::Reason::AttackEnded, anchor, AirMovement::LoiterSeekStep);
+
+                    // BOUNDARY-004: VTOL_SeekAttack is one of the six
+                    // handlers with the off-grid recovery, and its earlier
+                    // termination is the path-failure event. Off the grid the
+                    // circuit is replaced by the step toward the centre; the
+                    // circuit itself is kept and resumes on re-entry.
+                    if (airIsOutsideGrid(unitInfo))
+                    {
+                        steerAirBackInside(unitInfo);
+                    }
+                    else
+                    {
+                        flyAirLoiterCircuit(unitInfo, UnitState::AirLoiterState::Reason::AttackEnded, anchor, AirMovement::LoiterSeekStep);
+                    }
                 }
                 else if (unitInfo.definition->canFly
                     && !unitInfo.state->carriedUnits.empty()
@@ -918,6 +931,20 @@ namespace rwe
                 }
                 else
                 {
+                    // BOUNDARY-004: VTOL_LandIfCan's off-grid recovery comes
+                    // before the landing search, and is what brings an idle
+                    // or stopped aircraft home rather than leaving it to
+                    // hover outside for ever. Landing itself still refuses an
+                    // off-grid target, because the placement test behind
+                    // findLandingLocation rejects any footprint outside the
+                    // full grid. This branch replaces only the movement
+                    // objective; the landing search resumes on re-entry.
+                    if (unitInfo.definition->canFly && airIsOutsideGrid(unitInfo))
+                    {
+                        steerAirBackInside(unitInfo);
+                        return std::optional<MovingStateGoal>();
+                    }
+
                     // An aircraft with nothing to do lands where it stands,
                     // damaged or not. This used to prefer a repair pad, on the
                     // strength of reading 0x4105B9 as the standby mission
@@ -2430,6 +2457,44 @@ namespace rwe
         flying.currentVelocity = std::get<AirMovementStateAttackRun>(airPhysics->movementState).currentVelocity;
         airPhysics->movementState = flying;
         unitInfo.state->clearWeaponTargets();
+    }
+
+    bool UnitBehaviorService::airIsOutsideGrid(UnitInfo unitInfo) const
+    {
+        return unitFootprintIsOutsideTerrain(*sim, *unitInfo.state, *unitInfo.definition);
+    }
+
+    void UnitBehaviorService::steerAirBackInside(UnitInfo unitInfo)
+    {
+        auto airPhysics = std::get_if<UnitPhysicsInfoAir>(&unitInfo.state->physics);
+        if (airPhysics == nullptr)
+        {
+            return;
+        }
+
+        // Climbing out or setting down is a transition rather than a movement
+        // objective; leave it to the air state machine.
+        if (std::holds_alternative<AirMovementStateTakingOff>(airPhysics->movementState)
+            || std::holds_alternative<AirMovementStateLanding>(airPhysics->movementState))
+        {
+            return;
+        }
+
+        // Whatever the aircraft was flying is movement, not order state: the
+        // original's branch replaces the attached movement objective and
+        // leaves the mission's own state alone. Hand the run, the ring or the
+        // dogfight back as level flight, keeping the speed it had, as the
+        // idle circuits do.
+        if (!std::holds_alternative<AirMovementStateFlying>(airPhysics->movementState))
+        {
+            AirMovementStateFlying flying;
+            flying.currentVelocity = airVelocity(airPhysics->movementState);
+            airPhysics->movementState = flying;
+            unitInfo.state->clearWeaponTargets();
+        }
+        auto& flying = std::get<AirMovementStateFlying>(airPhysics->movementState);
+
+        flying.targetPosition = aircraftBoundaryRecoveryGoal(sim->terrain, unitInfo.state->position);
     }
 
     void UnitBehaviorService::maybeBreakOffToRepairPad(UnitInfo unitInfo)
@@ -4297,14 +4362,39 @@ namespace rwe
 
         attackRun->target = target;
 
-        // Refresh the cached target position (target may move), step the phase
-        // machine, and turn back early rather than run off the edge of the map.
+        // BOUNDARY-004: strafing is the exception among the attack missions.
+        // AirToGround (0x412710) does not aim at the centre off the grid: it
+        // sets a 30-tick deadline and forces state 2, the attack state, whose
+        // goal is the target's current position with the weapon range as its
+        // approach radius. RWE's Approaching phase is that goal, so an
+        // off-grid strafing run is re-aimed on the target every 30 ticks and
+        // keeps attacking from outside. The run, its target and the order are
+        // all retained. A bomber (strafingPass false) takes no branch at all.
+        const bool outsideGrid = airIsOutsideGrid(unitInfo);
+        if (outsideGrid && attackRun->strafingPass)
+        {
+            if (!attackRun->overflowRepathAt || sim->gameTime >= *attackRun->overflowRepathAt)
+            {
+                attackRun->overflowRepathAt = sim->gameTime + GameTime(30);
+                attackRun->phase = AirMovementStateAttackRun::Phase::Approaching;
+                attackRun->bombsDroppedThisPass = 0;
+                attackRun->releasePoint.reset();
+            }
+        }
+        else if (!outsideGrid)
+        {
+            // Back inside: a later excursion starts a fresh deadline rather
+            // than inheriting whatever was left of this one.
+            attackRun->overflowRepathAt.reset();
+        }
+
+        // Refresh the cached target position (target may move) and step the
+        // phase machine.
         auto altitude = getTargetAltitude(sim->terrain, targetPosition->x, targetPosition->z, *unitInfo.definition);
         auto step = AirMovement::stepAttackRun(
             *attackRun,
             *unitInfo.state,
             *unitInfo.definition,
-            sim->terrain,
             SimVector(targetPosition->x, altitude, targetPosition->z),
             *targetPosition,
             weaponDefinition.maxRange);
@@ -4410,31 +4500,16 @@ namespace rwe
 
         // Off the map, and nothing else matters until it is back. The
         // original checks this before it even looks at the leash (0x412E5E),
-        // and sends the aircraft 800 units towards the middle without
-        // touching any of the state -- so the pursuit picks up where it left
-        // off. Two fighters working each other over will drift a long way
-        // otherwise: an extend runs thirty times top speed ahead and a break
-        // goes two weapon ranges out.
+        // and sends the aircraft 800 units towards the rendered map centre
+        // without touching any of the state -- so the pursuit picks up where
+        // it left off. Two fighters working each other over will drift a long
+        // way otherwise: an extend runs thirty times top speed ahead and a
+        // break goes two weapon ranges out.
+        if (airIsOutsideGrid(unitInfo))
         {
-            const auto& heights = sim->terrain.getHeightMap();
-            auto corner = sim->terrain.heightmapIndexToWorldCorner(0, 0);
-            auto minX = corner.x;
-            auto minZ = corner.z;
-            auto maxX = corner.x + (SimScalar(static_cast<float>(heights.getWidth())) * MapTerrain::HeightTileWidthInWorldUnits);
-            auto maxZ = corner.z + (SimScalar(static_cast<float>(heights.getHeight())) * MapTerrain::HeightTileHeightInWorldUnits);
-            const auto& p = unitInfo.state->position;
-            if (p.x < minX || p.x > maxX || p.z < minZ || p.z > maxZ)
-            {
-                SimVector centre((minX + maxX) / 2_ss, p.y, (minZ + maxZ) / 2_ss);
-                SimVector inward(centre.x - p.x, 0_ss, centre.z - p.z);
-                auto direction = inward.normalizedOr(UnitState::toDirection(unitInfo.state->rotation));
-                dogfight->goalPosition = SimVector(
-                    p.x + (direction.x * 800_ss),
-                    p.y,
-                    p.z + (direction.z * 800_ss));
-                dogfight->goalVelocity = SimVector(0_ss, 0_ss, 0_ss);
-                return false;
-            }
+            dogfight->goalPosition = aircraftBoundaryRecoveryGoal(sim->terrain, unitInfo.state->position);
+            dogfight->goalVelocity = SimVector(0_ss, 0_ss, 0_ss);
+            return false;
         }
 
         SimVector toBandit(
@@ -4635,7 +4710,15 @@ namespace rwe
         SimVector toStation(hover->station.x - unitInfo.state->position.x, 0_ss, hover->station.z - unitInfo.state->position.z);
         SimVector toTarget(targetPosition.x - unitInfo.state->position.x, 0_ss, targetPosition.z - unitInfo.state->position.z);
 
-        if (hover->phase == AirMovementStateHoverAttack::Phase::Closing)
+        // BOUNDARY-004: AirToGroundHover is one of the six handlers with the
+        // off-grid recovery. It replaces the station with the 800-toward-centre
+        // point and leaves the ring, its phase and its target as they were, so
+        // the gunship resumes its swing once it is back inside the grid.
+        if (airIsOutsideGrid(unitInfo))
+        {
+            hover->station = aircraftBoundaryRecoveryGoal(sim->terrain, unitInfo.state->position);
+        }
+        else if (hover->phase == AirMovementStateHoverAttack::Phase::Closing)
         {
             // The approach ends as soon as the target is within reach, whether
             // or not the half-way point was ever made: the point of it was to
@@ -4835,6 +4918,18 @@ namespace rwe
                 // VTOL_Follow's state 0 puts the aircraft in the air before it
                 // does anything else (0x4102BE).
                 groundPhysics->steeringInfo.shouldTakeOff = true;
+                return false;
+            }
+
+            // BOUNDARY-004: VTOL_Follow's off-grid recovery. No retained
+            // target and a cancellation are the earlier terminations, and
+            // both were settled above; while the aircraft is outside, the
+            // movement objective is the 800-toward-centre point instead of
+            // the ring around the guarded unit. The order, its target and
+            // the aircraft's state are retained.
+            if (airIsOutsideGrid(unitInfo))
+            {
+                steerAirBackInside(unitInfo);
                 return false;
             }
 

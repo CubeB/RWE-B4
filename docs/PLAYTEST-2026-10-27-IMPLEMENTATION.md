@@ -558,3 +558,106 @@ hovered. Nothing new is saved; the hold is rebuilt from the absence of orders.
 **Executed check.** New `[aircraftidle]` case over all-water terrain, plus the
 full suite: **1990 passed, one HOME-path checksum skip, 218598 assertions**.
 All 9 scenarios pass.
+
+## #895: aircraft boundary and order recovery (BOUNDARY-004)
+
+Authority: [BOUNDARY-004](PLAYTEST-MAP-BOUNDARY-FINDINGS.md#boundary-004-what-the-edge-means-to-an-aircraft-in-flight),
+static comparison at byte-tactics revision
+`e89721c46c3fa06e59558419b54fe26061fafb73` and the matching GOG v3.1
+`TotalA.exe`. The implementation room read only that prose and RWE sources. No
+original-game session, demo oracle or original-runtime capture was executed;
+the evidence below is a static reference comparison plus executed RWE tests.
+
+The original lets aircraft cross both the rendered rectangle and the full
+heightmap. No global clamp, no reserved-border rule and no "aircraft must stay
+over terrain" test applies to flight. What recovers an aircraft is the order
+handler that happens to be running, and only some handlers have the branch.
+
+**The predicate.** RWE has no sentinel occupancy bucket, so the state is
+`footprintIsOutsideTerrain`: the footprint's origin cell below zero, or origin
+plus size at or beyond the full terrain tile count, using the same footprint
+that `computeFootprintRegion` builds from the position and movement class. It
+is never the rendered rectangle and never the position alone. The `>=` is
+load-bearing: a footprint enters the state while part of it is still over the
+last row or column, so a one-cell footprint can never occupy the last row or
+column at all. The answer is a pure function of the position and only turns
+over when the cell does, which is the original's "evaluated on cell change"
+without a latched copy to hash and save.
+
+**The recovery.** `aircraftBoundaryRecoveryGoal` returns the point 800 world
+units from the aircraft along the bearing to the rendered map centre --
+BOUNDARY-001's full width less 32 and full height less 128, each
+integer-divided by two -- with the current height carried over. In RWE's
+centred world that is the full-terrain centre displaced by (-16, -64) on an
+even-sized map; it is computed so odd sizes follow the original's integer
+division. The finding's approach radius 128 and event mask `0xE0` are kept as
+named constants beside it; RWE's movement objectives have no separate radius
+or event-mask fields, and re-issuing the objective every pass is what the
+branch's "no change" answer means, so neither value changes a decision here.
+
+Implemented in six handlers, each re-issued every tick while its footprint is
+outside, retaining the order, its state and its target:
+
+- `VTOL_LandIfCan`'s landing search (the `NavigationGoalLandingLocation`
+  branch of `updateNavigation`), which is also where an idle aircraft, an
+  empty order list and Stop arrive. Landing itself still refuses an off-grid
+  target, because the placement test behind `findLandingLocation` rejects any
+  footprint outside the full grid.
+- `VTOL_Follow`'s guard (`handleGuardOrder`), after the missing-target and
+  retaliation terminations.
+- `VTOL_SeekAttack`'s post-attack search (the `AttackEnded` circuit).
+- `AirToAir`'s dogfight, replacing the earlier ad-hoc world-position test.
+- `AirToGroundHover`'s gunship ring.
+
+`VTOL_SeekGuard` has no separate mission in RWE; its place is the guard
+handler's circuit, which now carries the branch. RWE also has no `0xE0`
+movement-event plumbing, so the branch is simply the handler's own per-tick
+path.
+
+**Strafing is the exception.** An off-grid `AirToGround` run does not head for
+the centre: it arms a 30-tick deadline and is re-aimed on the target's current
+position (RWE's `Approaching` phase is that goal), so it keeps attacking from
+outside. The deadline is new hashed and saved state on
+`AirMovementStateAttackRun` (`overflowRepathAt`); it is cleared on re-entry so
+a later excursion starts fresh. A bomber (`strafingPass` false) takes no
+branch.
+
+**Orders with no branch, left alone:** move (an off-edge move target is not
+clamped), patrol (a waypoint near the edge takes the aircraft outside),
+bomber strike, standby (a loaded aircraft keeps hopping where it is; an empty
+one goes to landing, which recovers), and pad landing (the pad is a map cell,
+so it is already a return). RWE's own "never run out past the edge of the map"
+turn-back inside the attack-run phase machine was removed: the finding has no
+boundary test in `AirStrike` or `AirToGround`, and the strafing branch is what
+answers overflow instead.
+
+**Compatibility.** The command recording format is 9. `AirMovementStateAttackRun`'s
+new deadline is hashed, saved and dumped like the rest of the run; old saves
+load it as absent, and version 7 and 8 recordings are still read, as before.
+Nothing else about units, ground pathing or the reserved ground borders
+changed.
+
+**Executed RWE checks.** New `[aircraftboundary]`: **13 cases, 485
+assertions passed**. They pin the predicate's `>=` and one-cell consequences,
+that the last rendered strip is inside the grid, the 800/centre arithmetic,
+move and patrol crossing the edge without recovery or a clamp, idle, Stop,
+guard, post-attack search, dogfight, gunship, strafing's 30-tick deadline and
+bomber's absence of one, and pad landing. The save/load suite gained a case
+for the deadline: **`[saveload]` round-trips it with the same hash**. Related
+suites (`[aircraft]`, `[aircraftidle]`, `[dogfight]`, `[gunship]`, `[bomber]`,
+`[saveload]`, `[replay]`, `[airbase]`): **134 cases, 6624 assertions passed**.
+Full suite with `RWE_SCENARIO_DATA=D:/RWE-Data`: **2026 passed, one
+HOME-path-dependent checksum skip, 219287 assertions passed**; Release `rwe`
+and `rwe_test` built successfully.
+
+**Remaining uncertainty.** This is a static comparison plus executed RWE
+tests, not an original-game reproduction; the finding itself records that no
+original runtime check exists. The original's goal altitude while off the grid
+is not steered; RWE's recovery point carries the current height, which keeps
+the ordinary flying state from steering altitude, but the drag-only vertical
+coast of the original is not separately modelled. The corner case where the
+followed unit is itself outside the grid -- the original holds the last valid
+on-map point -- is not implemented. The user interface's ability to deliver a
+move outside the rendered rectangle was not audited by the finding and is not
+claimed here. Weapons, targeting, line of sight and rendering of an off-map
+aircraft were outside BOUNDARY-004's scope.
