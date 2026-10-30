@@ -94,6 +94,59 @@ namespace rwe
     std::optional<SimVector> findLandingLocation(const GameSimulation& sim, ConstUnitInfo unitInfo);
 
     /**
+     * BOUNDARY-004: one step of an order handler's off-grid recovery, 800
+     * world units back toward the rendered map centre. The original's six
+     * recovery branches all install a goal this far from the aircraft, with
+     * an approach radius of 128 and movement event mask 0xE0, and re-issue it
+     * every order pass until the footprint is back inside the full grid.
+     */
+    constexpr SimScalar AircraftBoundaryRecoveryStep = 800_ss;
+
+    /** BOUNDARY-004: the recovery goal's approach radius, 0x80. */
+    constexpr SimScalar AircraftBoundaryRecoveryApproachRadius = 128_ss;
+
+    /**
+     * BOUNDARY-004: the movement event mask the recovery goal carries,
+     * 0xE0. RWE's movement objectives have no event mask of their own; the
+     * value is kept with the rest of the finding so a later port of the goal
+     * fields has it.
+     */
+    constexpr unsigned int AircraftBoundaryRecoveryEventMask = 0xE0;
+
+    /**
+     * BOUNDARY-004: whether a footprint lies outside the full terrain grid,
+     * which is the original's sentinel-bucket state. The test is on the
+     * footprint's origin cell and its size, against the full terrain tile
+     * counts -- origin below zero, or origin plus size at or beyond the
+     * count -- and never on the rendered rectangle or the position alone.
+     * The `>=` matters: a footprint enters the state while part of it is
+     * still over the last row or column, so a one-cell footprint can never
+     * occupy the last column or row at all.
+     *
+     * RWE has no sentinel bucket, so this predicate stands in for it. It is
+     * a pure function of the position, and its answer only changes when the
+     * footprint's origin cell does, which is the original's "evaluated on
+     * cell change" without a latched copy of the answer to hash and save.
+     */
+    bool footprintIsOutsideTerrain(const MapTerrain& terrain, const DiscreteRect& footprint);
+
+    /** `footprintIsOutsideTerrain` for a unit, from its own position and movement class. */
+    bool unitFootprintIsOutsideTerrain(const GameSimulation& sim, const UnitState& unit, const UnitDefinition& definition);
+
+    /**
+     * BOUNDARY-004: the point one recovery step flies at -- 800 world units
+     * from `position`, along the bearing to the centre of the rendered
+     * rectangle, with the current height carried over (the original does not
+     * steer altitude while the unit is off the grid). The rendered rectangle
+     * is BOUNDARY-001's: full width less 32 and full height less 128, each
+     * integer-divided by two from the same top-left origin. In RWE's centred
+     * world coordinates that is the full-terrain centre displaced by
+     * (-16, -64) on an even-sized map; it is computed rather than written
+     * down so an odd-sized map follows the original's integer division.
+     */
+    SimVector aircraftBoundaryRecoveryGoal(const MapTerrain& terrain, const SimVector& position);
+
+    /**
      * How far an aircraft will go looking for a repair pad. The original's
      * seven callers of the air base query all pass 0xf00 (0x410558,
      * 0x4109B2, 0x410F8E, 0x41260C and three more), and the query squares it

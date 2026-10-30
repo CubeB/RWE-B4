@@ -29,9 +29,12 @@ namespace rwe
         // BT-266: factory destruction now cancels its retained product.
         // #383/#699/#700 change command outcomes and elimination state.
         // #895 / BOUNDARY-001: reserved borders now block ground routes.
+        // #895 / BOUNDARY-004: aircraft answer an off-grid footprint by order
+        // handler, and strafing re-aims on a 30-tick deadline, so air command
+        // outcomes differ.
         // #934: the header carries the Community Patch ruleset. Version 7 is
         // still read, as a game with the mode off.
-        constexpr char Version = 8;
+        constexpr char Version = 9;
         constexpr char OldestVersion = 7;
 
         constexpr const char* ReplayExtension = ".rwereplay";

@@ -660,6 +660,7 @@ namespace rwe
                     {"releasePoint", a.releasePoint ? saveSimVector(*a.releasePoint) : json()},
                     {"strafingPass", a.strafingPass},
                     {"breakWaypoint", saveSimVector(a.breakWaypoint)},
+                    {"overflowRepathAt", a.overflowRepathAt ? json(a.overflowRepathAt->value) : json()},
                     {"currentVelocity", saveSimVector(a.currentVelocity)}};
             },
             [&](const AirMovementStateHoverAttack& h) {
@@ -727,6 +728,10 @@ namespace rwe
             }
             a.strafingPass = j.at("strafingPass").get<bool>();
             a.breakWaypoint = loadSimVector(j.at("breakWaypoint"));
+            if (j.contains("overflowRepathAt") && !j.at("overflowRepathAt").is_null())
+            {
+                a.overflowRepathAt = GameTime(j.at("overflowRepathAt").get<unsigned int>());
+            }
             a.currentVelocity = loadSimVector(j.at("currentVelocity"));
             return a;
         }

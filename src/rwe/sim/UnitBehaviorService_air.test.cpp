@@ -573,12 +573,10 @@ namespace rwe
 
         SECTION("stepping into weapon range commits and reports weapons hot")
         {
-            auto terrain = MapTerrain(Grid<unsigned char>(1, 1), 0_ss);
             auto step = AirMovement::stepAttackRun(
                 run,
                 unit,
                 def,
-                terrain,
                 SimVector(50_ss, 50_ss, 0_ss),
                 SimVector(50_ss, 0_ss, 0_ss),
                 100_ss);

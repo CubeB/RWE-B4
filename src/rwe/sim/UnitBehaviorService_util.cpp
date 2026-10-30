@@ -349,6 +349,44 @@ namespace rwe
         return std::nullopt;
     }
 
+    bool footprintIsOutsideTerrain(const MapTerrain& terrain, const DiscreteRect& footprint)
+    {
+        const auto& heights = terrain.getHeightMap();
+        return footprint.x < 0
+            || footprint.y < 0
+            || footprint.x + footprint.width >= heights.getWidth()
+            || footprint.y + footprint.height >= heights.getHeight();
+    }
+
+    bool unitFootprintIsOutsideTerrain(const GameSimulation& sim, const UnitState& unit, const UnitDefinition& definition)
+    {
+        return footprintIsOutsideTerrain(
+            sim.terrain,
+            sim.computeFootprintRegion(unit.position, definition.movementCollisionInfo));
+    }
+
+    SimVector aircraftBoundaryRecoveryGoal(const MapTerrain& terrain, const SimVector& position)
+    {
+        // BOUNDARY-001's rendered rectangle and BOUNDARY-004's arithmetic:
+        // the rendered dimensions, each integer-divided by two, from the
+        // map's top-left corner.
+        const auto& heights = terrain.getHeightMap();
+        const int renderedWidth = (heights.getWidth() * static_cast<int>(MapTerrain::HeightTileWidthInWorldUnits.value)) - 32;
+        const int renderedHeight = (heights.getHeight() * static_cast<int>(MapTerrain::HeightTileHeightInWorldUnits.value)) - 128;
+        const auto centreX = terrain.leftInWorldUnits() + intToSimScalar(renderedWidth / 2);
+        const auto centreZ = terrain.topInWorldUnits() + intToSimScalar(renderedHeight / 2);
+
+        // The heading is flat (0x48A980 reads X and Z only), and atan2(0, 0)
+        // is bearing zero, whose RWE direction is +Z.
+        SimVector inward(centreX - position.x, 0_ss, centreZ - position.z);
+        auto direction = inward.normalizedOr(SimVector(0_ss, 0_ss, 1_ss));
+
+        return SimVector(
+            position.x + (direction.x * AircraftBoundaryRecoveryStep),
+            position.y,
+            position.z + (direction.z * AircraftBoundaryRecoveryStep));
+    }
+
     bool aircraftWantsRepair(const UnitState& state, const UnitDefinition& definition)
     {
         // 0x410518-0x410533 and the six other mission handlers that repeat it:

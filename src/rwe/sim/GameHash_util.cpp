@@ -219,7 +219,8 @@ namespace rwe
             p.bombsDroppedThisPass,
             p.releasePoint,
             p.strafingPass,
-            p.breakWaypoint);
+            p.breakWaypoint,
+            p.overflowRepathAt);
     }
 
     GameHash computeHashOf(const AirMovementStateHoverAttack& p)
