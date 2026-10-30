@@ -60,6 +60,7 @@ namespace rwe
         bool notOverWater{false};
         bool notOverLand{false};
         bool surfaceFire{false};
+        bool noMapWeaponAlert{false};
 
         bool burnBlow;
         unsigned int accuracy;

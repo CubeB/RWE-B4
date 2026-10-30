@@ -161,6 +161,13 @@ namespace rwe
         bool surfaceFire{false};
 
         /**
+         * TADR `nomapweaponalert`: a zero-damage weapon fired without an
+         * attacker (a map/weather effect) does not raise the under-attack
+         * alert. Only honoured under the Community Patch.
+         */
+        bool noMapWeaponAlert{false};
+
+        /**
          * TA turret: the gun sits on a mount that can swing round on its own, so
          * the unit shoots wherever its aim script points. A weapon without one is
          * bolted to the hull -- aircraft cannon, torpedo tubes, gunship rockets --
@@ -223,4 +230,13 @@ namespace rwe
      * caller only asks this when the mode is on.
      */
     bool communityPatchSuppressesFire(const WeaponDefinition& definition, bool firerOverWater);
+
+    /**
+     * TADR's `nomapweaponalert` (#934): whether an impact is a silent map
+     * effect. It is silent only under the ruleset, only for a weapon carrying
+     * the flag, only when no unit fired it, and only when every damage entry
+     * is zero. A weapon with any positive damage, or one fired by a unit,
+     * keeps the ordinary under-attack handling.
+     */
+    bool communityPatchSuppressesAlert(const WeaponDefinition& definition, bool hasAttacker, bool communityPatch);
 }

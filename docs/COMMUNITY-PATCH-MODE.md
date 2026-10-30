@@ -117,6 +117,16 @@ Air constructors use the same gate as ground ones under the mode; outside it,
 the original's fixed fifth and the air constructor's unconditional reclaim
 scan are unchanged. This is RWE-original ruleset work under ADR-0006, not a
 byte-tactics comparison.
+## Silent map weapons (implemented)
+
+TADR 2026.10.6 adds `nomapweaponalert` for zero-damage map weapons. A
+projectile with no firing unit from a weapon carrying the flag, whose damage
+entries are all zero, no longer raises the under-attack message or voice. The
+damage event itself is still emitted and scored; only the alert is dropped.
+Weapons fired by a unit, and weapons with any positive damage, keep the
+ordinary alert. RWE has no minimap or megamap projectile alert dots, so there
+is no second surface to suppress. This is RWE-original ruleset work under
+ADR-0006.
 ## Where it is toggled
 
 - **Launcher, single player:** the Play page has a Community Patch switch,
@@ -152,7 +162,8 @@ byte-tactics comparison.
 | `PreviewObject3D` | planned as a build-ghost presentation key |
 | neutral units and per-player spawn units in the map OTA | planned; RWE reads `[units]` for missions but not for skirmish maps |
 | weapon IDs above 255 | check RWE's parser first; likely already unrestricted |
-| `reloadbar`, `nomapweaponalert` | later: both are presentation with a clear RWE hook |
+| `nomapweaponalert` | **done**: a zero-damage, no-firer map weapon no longer raises the under-attack message or voice; RWE has no projectile alert dots to suppress |
+| `reloadbar` | later: presentation with a clear RWE hook |
 
 ### Local preferences, not the ruleset
 

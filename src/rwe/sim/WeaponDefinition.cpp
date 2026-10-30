@@ -18,4 +18,20 @@ namespace rwe
         }
         return false;
     }
+
+    bool communityPatchSuppressesAlert(const WeaponDefinition& definition, bool hasAttacker, bool communityPatch)
+    {
+        if (!communityPatch || !definition.noMapWeaponAlert || hasAttacker)
+        {
+            return false;
+        }
+        for (const auto& entry : definition.damage)
+        {
+            if (entry.second != 0)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
 }

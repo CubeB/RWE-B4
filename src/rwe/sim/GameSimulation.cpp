@@ -2264,7 +2264,7 @@ namespace rwe
         return static_cast<int>(std::min<std::uint64_t>(100u, (std::uint64_t(100) * hitPoints) / maxHitPoints));
     }
 
-    void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer, std::optional<PlayerId> sourceOwner, const char* deathCause, bool reportedByOwner, std::optional<SimVector> burstPosition)
+    void GameSimulation::applyDamage(UnitId unitId, unsigned int damagePoints, std::optional<UnitId> attacker, bool paralyzer, std::optional<PlayerId> sourceOwner, const char* deathCause, bool reportedByOwner, std::optional<SimVector> burstPosition, bool suppressAlert)
     {
         // Damage to a Remote player's unit is the owner's to report. When this
         // machine ran the hit, its attacker side shows the damage and records a
@@ -2301,7 +2301,7 @@ namespace rwe
                     attackerOwner = attackerUnit->get().owner;
                 }
             }
-            events.push_back(UnitDamagedEvent{unitId, getUnitState(unitId).owner, attackerOwner, paralyzer});
+            events.push_back(UnitDamagedEvent{unitId, getUnitState(unitId).owner, attackerOwner, paralyzer, suppressAlert});
         }
 
         // The figure on the wire is the one that arrived, before veterancy and
@@ -2535,6 +2535,8 @@ namespace rwe
         // (0x499E20) and turns it into damage type 2.
         auto weaponIt = weaponDefinitions.find(projectile.weaponType);
         auto paralyzer = weaponIt != weaponDefinitions.end() && weaponIt->second.paralyzer;
+        auto suppressAlert = weaponIt != weaponDefinitions.end()
+            && communityPatchSuppressesAlert(weaponIt->second, projectile.attacker.has_value(), communityPatchMode);
 
         // Exactly one unit walks away from a blast for free, and it is the one
         // that fired it (0x49A259 compares each candidate against the
@@ -2644,7 +2646,7 @@ namespace rwe
           }
           auto rawDamage = projectile.getDamage(unit.unitType);
           auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * *damageScale);
-          applyDamage(*u, scaledDamage, projectile.attacker, paralyzer, projectile.owner, deathCause, false, projectile.position); });
+          applyDamage(*u, scaledDamage, projectile.attacker, paralyzer, projectile.owner, deathCause, false, projectile.position, suppressAlert); });
 
         for (const auto& flyingUnitId : flyingUnitsSet)
         {
@@ -2674,7 +2676,7 @@ namespace rwe
             }
             auto rawDamage = projectile.getDamage(unit.unitType);
             auto scaledDamage = simScalarToUInt(SimScalar(rawDamage) * *damageScale);
-            applyDamage(flyingUnitId, scaledDamage, projectile.attacker, paralyzer, projectile.owner, deathCause, false, projectile.position);
+            applyDamage(flyingUnitId, scaledDamage, projectile.attacker, paralyzer, projectile.owner, deathCause, false, projectile.position, suppressAlert);
         }
     }
 
@@ -2694,9 +2696,11 @@ namespace rwe
                 // BT-112.
                 auto weaponIt = weaponDefinitions.find(projectile.weaponType);
                 auto paralyzer = weaponIt != weaponDefinitions.end() && weaponIt->second.paralyzer;
+                auto suppressAlert = weaponIt != weaponDefinitions.end()
+                    && communityPatchSuppressesAlert(weaponIt->second, projectile.attacker.has_value(), communityPatchMode);
                 if (auto struck = tryGetUnitState(*struckUnit); struck && !struck->get().isDead())
                 {
-                    applyDamage(*struckUnit, projectile.getDamage(struck->get().unitType), projectile.attacker, paralyzer, projectile.owner, "weapon", false, projectile.position);
+                    applyDamage(*struckUnit, projectile.getDamage(struck->get().unitType), projectile.attacker, paralyzer, projectile.owner, "weapon", false, projectile.position, suppressAlert);
                 }
             }
             else

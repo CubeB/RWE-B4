@@ -1707,6 +1707,13 @@ namespace rwe
                     }
                     if (e.victimOwner == localPlayerId)
                     {
+                        // TADR nomapweaponalert: a zero-damage map weapon with
+                        // no firer is silent. It still scored above; only the
+                        // message, voice and last-attack marker are dropped.
+                        if (e.suppressAlert)
+                        {
+                            return;
+                        }
                         if (auto victim = tryGetUnit(e.unitId))
                         {
                             lastAttackPosition = victim->get().position;

@@ -284,6 +284,9 @@ namespace rwe
          * (0x4071BA-0x4071D1). See TOTALA-EXE.md §97.
          */
         bool paralyzer{false};
+
+        /** A TADR silent map weapon: keep the damage, suppress the alert. */
+        bool suppressAlert{false};
     };
 
     /**
@@ -1665,7 +1668,8 @@ namespace rwe
             std::optional<PlayerId> sourceOwner = std::nullopt,
             const char* deathCause = "weapon",
             bool reportedByOwner = false,
-            std::optional<SimVector> burstPosition = std::nullopt);
+            std::optional<SimVector> burstPosition = std::nullopt,
+            bool suppressAlert = false);
 
         /**
          * The acid in the sea, once a second (0x48AED3-0x48AF32): every unit
