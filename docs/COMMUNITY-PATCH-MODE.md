@@ -57,6 +57,21 @@ Limits of this slice, all deliberate:
   every existing hash; the mode is a launch-parameter invariant, agreed by the
   lobby or set identically on the command line.
 
+## Off-map aircraft (implemented)
+
+TADR 2026.10.6 says "off-map aircraft targetable, in tiles past the map edge",
+with a per-build value of 1 tile for ProTA/OTA and 32 for Escalation/Mayhem.
+RWE has one ruleset rather than per-mod builds, so it uses the conservative
+mainline value of **one tile**. The reference is TADR's written feature list,
+not a byte-tactics comparison: this is RWE-original ruleset work under
+ADR-0006.
+
+A flying unit whose origin is wholly outside the map by at most that margin
+is treated as visible from the nearest edge vision cell when the ordinary
+visibility test runs. The target scan, weapon range, `nottoair`, cloak, sonar
+and submerged rules still apply, and ground units are unaffected. The change
+only alters derived visibility; it adds no saved or hashed state.
+
 ## Where it is toggled
 
 - **Launcher, single player:** the Play page has a Community Patch switch,
@@ -76,7 +91,7 @@ Limits of this slice, all deliberate:
 | allied projectile pass-through | **done**: a shot passes through units whose owner the firer currently treats as an ally; splash, interception and enemy rules unchanged |
 | aircraft wrecks fall to the ground | **done**: a wreck created above the terrain falls straight down under gravity; ground and wet wrecks keep the original's behaviour |
 | explosions damage every stacked aircraft, contested-cell tie-break | **already RWE**: the blast sweep walks every flying unit in range, not just the one occupancy cell, so stacked aircraft are all damaged; occupancy writes are deterministic in unit order, so no tie-break is needed |
-| off-map aircraft targetable | planned: a map-edge margin (TADR's per-build radius) |
+| off-map aircraft targetable | **done**: a flying target wholly outside the map by at most one tile is visible from the nearest edge cell; the weapon still has to reach it and pass its ordinary hit rules |
 | construction units stay put while guarding a factory | planned once RWE's guard/assist order is compared with TADR's |
 | patrol reclaim thresholds and `+setreclaimmetal`/`+setreclaimenergy` | planned; TADR's percentages are absolute of storage and reset per game |
 | percentage share thresholds (`+setsharemetal 50%`) | planned on top of RWE's existing reserves |
