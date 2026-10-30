@@ -15,6 +15,8 @@ crash.txt
 # Build trees; the repo keeps nothing in them and CI rebuilds from scratch.
 /build/
 /build-gdebug/
+/launcher/rwe-launcher-win32-x64/
+/launcher/rwe-launcher-linux-x64/
 
 # Sub-agent worktrees spawned during autonomous sessions.
 /.claude/worktrees/

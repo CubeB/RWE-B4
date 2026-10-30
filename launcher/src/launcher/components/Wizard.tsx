@@ -9,7 +9,7 @@ import {
   DialogContent,
   Grid,
 } from "@mui/material";
-import { webUtils } from "electron";
+import { invoke } from "../browserApi";
 import { assertNever } from "../../common/util";
 
 export type State = "welcome" | "working" | "success" | "fail";
@@ -22,6 +22,17 @@ export interface WizardProps {
 
 export function Wizard(props: WizardProps) {
   const [filePath, setFilePath] = useState<string>();
+  const [selecting, setSelecting] = useState(false);
+  const chooseDirectory = async () => {
+    setSelecting(true);
+    try {
+      setFilePath(
+        (await invoke<string | null>("choose-directory")) || undefined
+      );
+    } finally {
+      setSelecting(false);
+    }
+  };
   return (
     <Dialog open onClose={props.onClose}>
       <DialogTitle>Total Annihilation Mod Setup</DialogTitle>
@@ -34,6 +45,8 @@ export function Wizard(props: WizardProps) {
             console.log(p);
             setFilePath(p);
           }}
+          onChoose={chooseDirectory}
+          selecting={selecting}
         />
       </DialogContent>
       <DialogActions>
@@ -53,6 +66,8 @@ function WizardContents(props: {
   error?: string;
   path?: string;
   onChange: (path?: string) => void;
+  onChoose: () => void;
+  selecting: boolean;
 }) {
   switch (props.state) {
     case "welcome":
@@ -67,6 +82,8 @@ function WizardContents(props: {
           path={props.path}
           error={props.error}
           onChange={props.onChange}
+          onChoose={props.onChoose}
+          selecting={props.selecting}
         />
       );
   }
@@ -109,6 +126,8 @@ function WizardManual(props: {
   path?: string;
   error?: string;
   onChange: (path?: string) => void;
+  onChoose: () => void;
+  selecting: boolean;
 }) {
   return (
     <>
@@ -117,19 +136,10 @@ function WizardManual(props: {
       </Typography>
       {props.error && <Typography color="error">{props.error}</Typography>}
       <Typography>Manually locate your Total Annihilation folder:</Typography>
-      <input
-        type="file"
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        webkitdirectory="true"
-        onChange={e => {
-          props.onChange(
-            e.target.files!.length > 0
-              ? webUtils.getPathForFile(e.target.files![0])
-              : undefined
-          );
-        }}
-      />
+      <Button onClick={props.onChoose} disabled={props.selecting}>
+        {props.selecting ? "Selecting…" : "Choose folder"}
+      </Button>
+      {props.path && <Typography>{props.path}</Typography>}
     </>
   );
 }

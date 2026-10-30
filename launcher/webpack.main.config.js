@@ -2,10 +2,10 @@ const path = require("path");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
 
 module.exports = {
-  mode: "development",
+  mode: process.env.RWE_LAUNCHER_IS_DEV ? "development" : "production",
   entry: "./src/launcher/main.ts",
-  target: "electron-main",
-  devtool: "source-map",
+  target: "node",
+  devtool: process.env.RWE_LAUNCHER_IS_DEV ? "source-map" : false,
   module: {
     rules: [
       {
@@ -18,7 +18,7 @@ module.exports = {
                 "@babel/env",
                 {
                   targets: {
-                    electron: "44.4.5",
+                    node: "22",
                   },
                 },
               ],
@@ -48,11 +48,8 @@ module.exports = {
           from: "../assets/b4-icon.png",
           to: "b4-icon.png",
         },
-        {
-          from: "package.json",
-          to: "package.json",
-        },
       ],
     }),
   ],
+  optimization: { minimize: !process.env.RWE_LAUNCHER_IS_DEV },
 };

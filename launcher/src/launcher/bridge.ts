@@ -78,6 +78,7 @@ export class RweBridge {
   private readonly rl: readline.ReadLine;
 
   private readonly commandQueue: CommandQueueItem[] = [];
+  private closed = false;
 
   constructor() {
     const rweHome = process.env["RWE_HOME"];
@@ -89,7 +90,10 @@ export class RweBridge {
       "rwe_bridge" + (process.platform === "win32" ? ".exe" : "")
     );
 
-    this.proc = spawn(bridgeExe, undefined, { cwd: rweHome });
+    this.proc = spawn(bridgeExe, undefined, {
+      cwd: rweHome,
+      windowsHide: true,
+    });
 
     this.rl = readline.createInterface({
       input: this.proc.stdout!,
@@ -148,8 +152,21 @@ export class RweBridge {
     );
   }
 
+  close(): void {
+    this.closed = true;
+    this.rl.close();
+    this.proc.kill();
+    this.commandQueue
+      .splice(0)
+      .forEach(item => item.callback('{"result":"error"}'));
+  }
+
   private submitCommand(cmd: BridgeCommand): Promise<string> {
     return new Promise<string>((resolve, reject) => {
+      if (this.closed) {
+        reject(new Error("Bridge is closed"));
+        return;
+      }
       if (this.commandQueue.length === 0) {
         this.writeCommand(cmd);
       }

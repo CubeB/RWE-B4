@@ -12,7 +12,6 @@ import {
 import StarIcon from "@mui/icons-material/Grade";
 import * as React from "react";
 import { PlayerInfo, PlayerSide, PlayerSlot } from "../gameClient/state";
-import { archiveDigest } from "../../common/archives";
 import { assertNever } from "../../common/util";
 
 type OpenStatus = "open" | "closed";
@@ -222,7 +221,7 @@ export class PlayersTable extends React.Component<PlayersTableProps> {
         <TableCell>
           {player.archives === undefined
             ? "checking"
-            : archiveDigest(this.props.activeMods, player.archives)}
+            : player.archivesDigest || "checking"}
         </TableCell>
         <TableCell padding="checkbox">{checkbox}</TableCell>
       </TableRow>

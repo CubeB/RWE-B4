@@ -22,6 +22,8 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Robot War Engine - play using your Total 
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "Robot War Engine")
 set(CPACK_PACKAGE_INSTALL_REGISTRY_KEY "Robot War Engine")
 set(CPACK_OUTPUT_FILE_PREFIX "dist")
+# DOWNLOAD-001: RWE-original distribution size; maximum ZIP compression.
+set(CPACK_ARCHIVE_COMPRESSION_LEVEL 9)
 set(CPACK_PACKAGE_EXECUTABLES
     "rwe;Play Robot War Engine;launcher\\rwe-launcher;RWE Launcher")
 set(CPACK_NSIS_DISPLAY_NAME "Robot War Engine")
@@ -31,6 +33,8 @@ set(CPACK_NSIS_INSTALLED_ICON_NAME "rwe.exe")
 set(CPACK_NSIS_EXECUTABLES_DIRECTORY ".")
 set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
 set(CPACK_NSIS_MODIFY_PATH OFF)
+# DOWNLOAD-001: RWE-original distribution size; solid LZMA installer.
+set(CPACK_NSIS_COMPRESSOR "/SOLID lzma")
 set(CPACK_NSIS_MANIFEST_DPI_AWARE ON)
 set(CPACK_NSIS_WELCOME_TITLE "Welcome to Robot War Engine")
 set(CPACK_NSIS_FINISH_TITLE "Robot War Engine is installed")

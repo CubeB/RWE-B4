@@ -10,10 +10,8 @@ import {
 import PlayArrowRounded from "@mui/icons-material/PlayArrowRounded";
 import FolderOpenRounded from "@mui/icons-material/FolderOpenRounded";
 import ExtensionRounded from "@mui/icons-material/ExtensionRounded";
-import { ipcRenderer, shell } from "electron";
-import fs from "fs";
-import { getRweModsPath } from "../util";
-import { normalizePlayerName } from "../preferences";
+import { invoke, openExternal } from "../browserApi";
+import { normalizePlayerName } from "../playerName";
 import {
   UpdateCheckResult,
   currentLauncherVersion,
@@ -49,7 +47,7 @@ export function LauncherHome(props: LauncherHomeProps) {
     setImporting(true);
     setError(undefined);
     try {
-      if (await ipcRenderer.invoke("rwe:import-data")) {
+      if (await invoke<boolean>("import-data")) {
         props.onRefreshMods();
         setNotice("Game data imported. Ready to play.");
       }
@@ -61,12 +59,7 @@ export function LauncherHome(props: LauncherHomeProps) {
   };
   const openMods = async () => {
     try {
-      const directory = getRweModsPath();
-      fs.mkdirSync(directory, { recursive: true });
-      const failure = await shell.openPath(directory);
-      if (failure) {
-        setError(failure);
-      }
+      await invoke("open-mods");
     } catch (failure) {
       setError(String(failure));
     }
@@ -75,9 +68,12 @@ export function LauncherHome(props: LauncherHomeProps) {
     setCheckingUpdates(true);
     setUpdateError(undefined);
     try {
-      const releases = await ipcRenderer.invoke("rwe:check-updates");
+      const [releases, platform] = await Promise.all([
+        invoke<any[]>("check-updates"),
+        invoke<string>("platform"),
+      ]);
       setUpdateResult(
-        evaluateUpdates(releases, currentLauncherVersion(), process.platform)
+        evaluateUpdates(releases, currentLauncherVersion(), platform)
       );
     } catch {
       setUpdateError("Could not check for updates.");
@@ -92,12 +88,15 @@ export function LauncherHome(props: LauncherHomeProps) {
     let cancelled = false;
     (async () => {
       try {
-        const releases = await ipcRenderer.invoke("rwe:check-updates");
+        const [releases, platform] = await Promise.all([
+          invoke<any[]>("check-updates"),
+          invoke<string>("platform"),
+        ]);
         if (!cancelled) {
           const result = evaluateUpdates(
             releases,
             currentLauncherVersion(),
-            process.platform
+            platform
           );
           if (result.updateAvailable) {
             setUpdateResult(result);
@@ -175,18 +174,14 @@ export function LauncherHome(props: LauncherHomeProps) {
                   {updateResult.asset ? (
                     <Button
                       size="small"
-                      onClick={() =>
-                        shell.openExternal(updateResult.asset!.url)
-                      }
+                      onClick={() => openExternal(updateResult.asset!.url)}
                     >
                       Download
                     </Button>
                   ) : (
                     <Button
                       size="small"
-                      onClick={() =>
-                        shell.openExternal(updateResult.latest!.url)
-                      }
+                      onClick={() => openExternal(updateResult.latest!.url)}
                     >
                       Open release
                     </Button>
@@ -199,7 +194,7 @@ export function LauncherHome(props: LauncherHomeProps) {
                   Latest release {updateResult.latest.tag}.{" "}
                   <Button
                     size="small"
-                    onClick={() => shell.openExternal(updateResult.latest!.url)}
+                    onClick={() => openExternal(updateResult.latest!.url)}
                   >
                     Open release
                   </Button>

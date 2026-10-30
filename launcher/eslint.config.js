@@ -10,7 +10,7 @@ const globals = require("globals");
 
 module.exports = tseslint.config(
   {
-    ignores: ["dist/**", "webpack.*.config.js", "eslint.config.js"],
+    ignores: ["dist/**", "rwe-launcher-*/**", "webpack.*.config.js", "eslint.config.js"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -50,5 +50,9 @@ module.exports = tseslint.config(
     languageOptions: {
       globals: globals.jest,
     },
-  }
+  },
+  {
+    files: ["scripts/**/*.cjs"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
 );

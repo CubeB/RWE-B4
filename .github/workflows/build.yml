@@ -94,6 +94,16 @@ jobs:
       - name: build launcher bundles
         working-directory: launcher
         run: npm run build:all:prod
+      - name: package launcher and inspect SEA contents
+        working-directory: launcher
+        run: |
+          npm run package
+          test -x rwe-launcher-linux-x64/rwe-launcher
+          test -f rwe-launcher-linux-x64/licenses/node-LICENSE.txt
+          test -f rwe-launcher-linux-x64/index.html
+          test ! -e rwe-launcher-linux-x64/resources.pak
+          test ! -e rwe-launcher-linux-x64/chrome-sandbox
+          if find rwe-launcher-linux-x64 -iname '*electron*' | grep -q .; then exit 1; fi
 
   # MSVC puts the class key into the decorated name, so `struct Foo;` against
   # `class Foo { ... };` is two types to its linker and an unresolved external

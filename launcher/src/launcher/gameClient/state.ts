@@ -1,9 +1,6 @@
 import { AppAction } from "../actions";
-import {
-  ModDifference,
-  ModFingerprint,
-  checkArchiveAgreement,
-} from "../../common/archives";
+import type { ModDifference, ModFingerprint } from "../../common/archives";
+import { checkArchiveAgreement } from "../../common/browserArchives";
 import { findAndMap, assertNever, choose } from "../../common/util";
 
 export type PlayerSide = "ARM" | "CORE";
@@ -20,6 +17,8 @@ export interface PlayerInfo {
   installedMods: string[];
   /** The archives in each of their mods, hashed. Undefined until theirs arrive. */
   archives?: ModFingerprint[];
+  /** Present in browser snapshots, computed by the Node backend. */
+  archivesDigest?: string;
 }
 
 export interface ChatMessage {

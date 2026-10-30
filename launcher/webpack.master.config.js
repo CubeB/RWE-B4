@@ -3,10 +3,10 @@ const CopyWebpackPlugin = require("copy-webpack-plugin");
 const webpack = require("webpack");
 
 module.exports = {
-  mode: "development",
+  mode: process.env.RWE_LAUNCHER_IS_DEV ? "development" : "production",
   entry: "./src/master-server/master-server.ts",
   target: "node",
-  devtool: "source-map",
+  devtool: process.env.RWE_LAUNCHER_IS_DEV ? "source-map" : false,
   module: {
     rules: [
       {
@@ -44,12 +44,14 @@ module.exports = {
   },
   plugins: [
     new CopyWebpackPlugin({
-        patterns: [
-      {
-        from: "package.json",
-        to: "package.json",
-      },
-    ]}),
+      patterns: [
+        {
+          from: "package.json",
+          to: "package.json",
+        },
+      ],
+    }),
     new webpack.IgnorePlugin({ resourceRegExp: /^uws$/ }),
   ],
+  optimization: { minimize: !process.env.RWE_LAUNCHER_IS_DEV },
 };
