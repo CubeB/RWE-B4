@@ -443,7 +443,10 @@ Decoded here and deliberately **not** ported:
   but a timer wake re-installs the same goal at the same bearing, so it changes
   nothing geometrically. RWE checks arrival every tick instead.
 - **The off-map recovery** (`0x41041D`, 800 units back toward the map centre),
-  which shares the unconfirmed reading recorded in the missions document §11.
+  which the missions document section 11 called unconfirmed. It is confirmed,
+  and it is not the whole picture: six handlers share it, `AirToGround` answers
+  differently, and move, patrol, the bomber and standby have no such branch.
+  See [BOUNDARY-004](PLAYTEST-MAP-BOUNDARY-FINDINGS.md#boundary-004-what-the-edge-means-to-an-aircraft-in-flight).
 
 One correction to `docs/REVERSE-ENGINEERING-PRIORITIES.md`, entry 6: it says
 `DefaultMissionType` is "left decoded but unported" because "`Standby` versus
