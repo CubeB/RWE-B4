@@ -348,6 +348,8 @@ namespace rwe
         bool rightCtrlDown{false};
         bool leftShiftDown{false};
         bool rightShiftDown{false};
+        bool leftAltDown{false};
+        bool rightAltDown{false};
 
         struct CameraControlStateFree
         {
@@ -2095,7 +2097,14 @@ namespace rwe
         bool selectAllWhere(const std::function<bool(const UnitState&, const UnitDefinition&)>& predicate);
 
         /** Ctrl+letter category selection, matched against the FBI Category tokens (CTRL_V and friends). */
-        void selectAllByCategoryToken(const std::string& token);
+        void selectAllByCategoryToken(const std::string& token, bool additive);
+
+        /**
+         * Alt+digit under the swapped `SwitchAlt` arrangement: open the
+         * selected builder's build-menu page. False when nothing is selected,
+         * the selection is not a builder, or the builder has no such page.
+         */
+        bool openSelectedBuildPage(unsigned int digit);
 
         /** F5-F8 camera bookmarks; Ctrl+Fn stores, Fn recalls. */
         std::array<std::optional<Vector3f>, 4> cameraBookmarks;
@@ -2175,6 +2184,8 @@ namespace rwe
         bool isCtrlDown() const;
 
         bool isShiftDown() const;
+
+        bool isAltDown() const;
 
         void handleEscapeDown();
 

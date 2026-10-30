@@ -421,11 +421,29 @@ namespace rwe
         setCameraPosition(Vector3f(simScalarToFloat(unit.position.x), 0.0f, simScalarToFloat(unit.position.z)));
     }
 
-    void GameScene::selectAllByCategoryToken(const std::string& token)
+    void GameScene::selectAllByCategoryToken(const std::string& token, bool additive)
     {
-        selectAllWhere([&token](const UnitState&, const UnitDefinition& d) {
-            return categoryListContains(d.category, token);
-        });
+        // BT-CATEGORY-CAMERA-KEY-FINDINGS: the category service visits every
+        // local unit, not only what is selected or on screen, and takes the
+        // selectable, finished, uncarried pool. Replacement drops the
+        // eligible nonmembers even when the category is empty; additive
+        // keeps the current selection and adds the members.
+        std::unordered_set<UnitId> eligible;
+        std::unordered_set<UnitId> members;
+        for (const auto& [unitId, unit] : simulation.units)
+        {
+            const auto& definition = simulation.unitDefinitions.at(unit.unitType);
+            if (!unit.isSelectableBy(definition, localPlayerId))
+            {
+                continue;
+            }
+            eligible.insert(unitId);
+            if (categoryListContains(definition.category, token))
+            {
+                members.insert(unitId);
+            }
+        }
+        replaceUnitSelection(selectionAfterCategory(selectedUnits, eligible, members, additive));
     }
 
     void GameScene::localPlayerSetOnOff(UnitId unitId, bool on)
@@ -624,6 +642,11 @@ namespace rwe
     bool GameScene::isShiftDown() const
     {
         return leftShiftDown || rightShiftDown;
+    }
+
+    bool GameScene::isAltDown() const
+    {
+        return leftAltDown || rightAltDown;
     }
 
     const PlayerVisibility& GameScene::localPlayerVisibility() const

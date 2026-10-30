@@ -28,6 +28,47 @@ namespace rwe
         return !underConstruction && !carried;
     }
 
+    std::optional<unsigned int> buildPageForDigit(unsigned int digit, unsigned int pageCount)
+    {
+        if (digit < 1 || digit > 9 || pageCount == 0)
+        {
+            return std::nullopt;
+        }
+        auto page = digit - 1;
+        if (page >= pageCount)
+        {
+            return std::nullopt;
+        }
+        return page;
+    }
+
+    std::unordered_set<UnitId> selectionAfterCategory(
+        const std::unordered_set<UnitId>& selected,
+        const std::unordered_set<UnitId>& eligible,
+        const std::unordered_set<UnitId>& members,
+        bool additive)
+    {
+        std::unordered_set<UnitId> result;
+        if (additive)
+        {
+            result = selected;
+        }
+        else
+        {
+            // Only the eligible pool is replaced; a selected unit that the
+            // pool does not describe keeps its flag.
+            for (const auto& unitId : selected)
+            {
+                if (eligible.find(unitId) == eligible.end())
+                {
+                    result.insert(unitId);
+                }
+            }
+        }
+        result.insert(members.begin(), members.end());
+        return result;
+    }
+
     bool bandboxFilterAdmits(const BandboxFilter& filter, bool isMobile, bool isArmed, bool isBuilder)
     {
         if (!filter.armedMobile && !filter.constructors && !filter.factories)

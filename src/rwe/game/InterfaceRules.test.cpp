@@ -208,4 +208,44 @@ namespace rwe
         REQUIRE(nextInCycle(ids, UnitId(4)) == UnitId(5));
         REQUIRE(nextInCycle({}, UnitId(3)) == std::nullopt);
     }
+
+    TEST_CASE("Alt+digit opens the builder's page and refuses one it does not have (TOTALA-EXE-KEYBOARD 75)")
+    {
+        // The commander has two shipped pages, so digits 1 and 2 reach them.
+        REQUIRE(buildPageForDigit(1, 2) == 0u);
+        REQUIRE(buildPageForDigit(2, 2) == 1u);
+        // A digit past the last page, digit 0 and a builder with no pages all
+        // leave the menu alone.
+        REQUIRE_FALSE(buildPageForDigit(3, 2).has_value());
+        REQUIRE_FALSE(buildPageForDigit(0, 2).has_value());
+        REQUIRE_FALSE(buildPageForDigit(1, 0).has_value());
+        REQUIRE_FALSE(buildPageForDigit(10, 20).has_value());
+    }
+
+    TEST_CASE("a Ctrl+letter category replaces the eligible pool and Shift adds (BT-CATEGORY-CAMERA-KEY-FINDINGS)")
+    {
+        const std::unordered_set<UnitId> eligible{UnitId(1), UnitId(2), UnitId(3)};
+        const std::unordered_set<UnitId> members{UnitId(2)};
+        // Unit 4 is outside the pool: an ineligible unit already selected is
+        // untouched, and replacement is not a blanket clear.
+        const std::unordered_set<UnitId> selected{UnitId(1), UnitId(4)};
+
+        auto replaced = selectionAfterCategory(selected, eligible, members, false);
+        REQUIRE(replaced == std::unordered_set<UnitId>{UnitId(2), UnitId(4)});
+
+        auto added = selectionAfterCategory(selected, eligible, members, true);
+        REQUIRE(added == std::unordered_set<UnitId>{UnitId(1), UnitId(2), UnitId(4)});
+    }
+
+    TEST_CASE("an unknown Ctrl+letter deselects the pool without Shift and retains it with Shift")
+    {
+        // Shipped data has no CTRL_E, so Ctrl+E is the empty-category case:
+        // the eligible selected units go, and Shift keeps them.
+        const std::unordered_set<UnitId> eligible{UnitId(1), UnitId(2)};
+        const std::unordered_set<UnitId> noMembers;
+        const std::unordered_set<UnitId> selected{UnitId(1), UnitId(2)};
+
+        REQUIRE(selectionAfterCategory(selected, eligible, noMembers, false).empty());
+        REQUIRE(selectionAfterCategory(selected, eligible, noMembers, true) == selected);
+    }
 }
