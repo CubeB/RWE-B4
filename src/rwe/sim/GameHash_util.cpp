@@ -106,6 +106,12 @@ namespace rwe
             p.metalReservePercentage,
             p.energyReservePercentage,
             p.energyReservePercentage,
+            // The two patrol reclaim levels live in one packed number for the
+            // same reason as the sharing flags above: the hash is a sum, so a
+            // metal level of 30 and an energy level of 30 must not add to the
+            // same thing as the reverse, and the two fields have to differ.
+            static_cast<uint32_t>(p.reclaimMetalPercent)
+                | (static_cast<uint32_t>(p.reclaimEnergyPercent) << 8u),
             // S:130: when the air base list was last rebuilt (the draw's schedule).
             p.airBasesRebuiltAt);
     }

@@ -132,6 +132,25 @@ namespace rwe
         unsigned int energyReservePercentage{0};
 
         /**
+         * The Community Patch's patrol reclaim thresholds, as whole
+         * percentages of the player's own storage (TADR release 2026.10.6,
+         * "Patrol reclaim thresholds"). A patrolling construction unit looks
+         * for something to reclaim only while metal is below the metal level
+         * or energy is below the energy level; it assists only while energy is
+         * at or above the energy level. Both default to 20 and reset to it
+         * when a new game starts; `+setreclaimmetal` and `+setreclaimenergy`
+         * change them for the player who typed the line.
+         *
+         * They are read only while GameSimulation::communityPatchMode is on,
+         * where they change what a patrol does and so are part of simulation
+         * state: hashed, saved and dumped. Outside the mode they are inert.
+         * Every one has an initialiser because the sync hash reads them from
+         * the moment the player exists.
+         */
+        int reclaimMetalPercent{20};
+        int reclaimEnergyPercent{20};
+
+        /**
          * When the player's air base list was last rebuilt, if it ever has
          * been. The original rebuilds it at most every 30 ticks from the
          * player update (0x40B2C0 from 0x465037) and draws `rand(30)` each

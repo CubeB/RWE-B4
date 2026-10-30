@@ -99,7 +99,7 @@ namespace rwe
         return value > INT_MAX ? INT_MAX : static_cast<int>(value);
     }
 
-    std::optional<ChatCommand> parseChatCommand(const std::string& line)
+    std::optional<ChatCommand> parseChatCommand(const std::string& line, bool communityPatch)
     {
         std::size_t start = 0;
         while (start < line.size() && isSpace(line[start]))
@@ -162,6 +162,17 @@ namespace rwe
             command.kind = ChatCommand::Kind::SetShareEnergy;
             command.number = chatAtoi(value);
             command.percent = !value.empty() && value.back() == '%';
+        }
+        else if (communityPatch && (word == "setreclaimmetal" || word == "setreclaimenergy"))
+        {
+            // TADR 2026.10.6: `<0-100>[%]`, and no value at all prints the
+            // current level rather than meaning zero. `%` is read by `atoi`
+            // as the first non-digit and simply ends the number.
+            command.kind = word == "setreclaimmetal"
+                ? ChatCommand::Kind::SetReclaimMetal
+                : ChatCommand::Kind::SetReclaimEnergy;
+            command.hasArgument = tokens.size() >= 2;
+            command.number = chatAtoi(argument(1));
         }
         else if (word == "now")
         {

@@ -77,6 +77,14 @@ namespace rwe
             return c;
         }
 
+        PlayerShareCommand setReclaim(bool metal, float amount)
+        {
+            PlayerShareCommand c;
+            c.kind = metal ? PlayerShareCommand::Kind::SetReclaimMetalLevel : PlayerShareCommand::Kind::SetReclaimEnergyLevel;
+            c.amount = amount;
+            return c;
+        }
+
         PlayerShareCommand give(PlayerId target, float amount, bool metal)
         {
             PlayerShareCommand c;
@@ -180,6 +188,52 @@ namespace rwe
         {
             REQUIRE_FALSE(applyPlayerShareCommand(sim, PlayerId(7), toggleMetal()));
         }
+    }
+
+    TEST_CASE("the Community Patch reclaim levels belong to the issuing player", "[share][communitypatch]")
+    {
+        auto sim = makeSim();
+        auto a = addSharer(sim, 500.0f, 500.0f, 0);
+        auto b = addSharer(sim, 500.0f, 500.0f, 0);
+        sim.communityPatchMode = true;
+
+        REQUIRE(sim.getPlayer(a).reclaimMetalPercent == 20);
+        REQUIRE(sim.getPlayer(a).reclaimEnergyPercent == 20);
+
+        REQUIRE(applyPlayerShareCommand(sim, a, setReclaim(true, 73.0f)));
+        REQUIRE(sim.getPlayer(a).reclaimMetalPercent == 73);
+        REQUIRE(sim.getPlayer(a).reclaimEnergyPercent == 20);
+        REQUIRE(sim.getPlayer(b).reclaimMetalPercent == 20);
+        REQUIRE(sim.getPlayer(b).reclaimEnergyPercent == 20);
+
+        REQUIRE(applyPlayerShareCommand(sim, b, setReclaim(false, 0.0f)));
+        REQUIRE(sim.getPlayer(b).reclaimEnergyPercent == 0);
+        REQUIRE(sim.getPlayer(a).reclaimEnergyPercent == 20);
+
+        // The mode says 0-100, and a line outside it leaves a usable level
+        // rather than an impossible one.
+        REQUIRE(applyPlayerShareCommand(sim, a, setReclaim(true, 500.0f)));
+        REQUIRE(sim.getPlayer(a).reclaimMetalPercent == 100);
+        REQUIRE(applyPlayerShareCommand(sim, a, setReclaim(true, -20.0f)));
+        REQUIRE(sim.getPlayer(a).reclaimMetalPercent == 0);
+        REQUIRE(applyPlayerShareCommand(sim, a, setReclaim(false, 40.6f)));
+        REQUIRE(sim.getPlayer(a).reclaimEnergyPercent == 41);
+
+        REQUIRE_FALSE(applyPlayerShareCommand(sim, a, setReclaim(true, std::numeric_limits<float>::quiet_NaN())));
+        REQUIRE(sim.getPlayer(a).reclaimMetalPercent == 0);
+    }
+
+    TEST_CASE("a Community Patch reclaim level is refused when the mode is off", "[share][communitypatch]")
+    {
+        // Every gameplay effect is mode-gated, and a command that arrived from
+        // a peer (or a replay) while the mode is off must not move anything.
+        auto sim = makeSim();
+        auto a = addSharer(sim, 500.0f, 500.0f, 0);
+
+        REQUIRE_FALSE(applyPlayerShareCommand(sim, a, setReclaim(true, 90.0f)));
+        REQUIRE_FALSE(applyPlayerShareCommand(sim, a, setReclaim(false, 90.0f)));
+        REQUIRE(sim.getPlayer(a).reclaimMetalPercent == 20);
+        REQUIRE(sim.getPlayer(a).reclaimEnergyPercent == 20);
     }
 
     TEST_CASE("the automatic pass moves a third of the metal surplus every two seconds", "[share]")

@@ -15,6 +15,22 @@ namespace rwe
         // The double 0.2 at 0x4FC950 (ground) and 0x4FCC58 (air).
         constexpr double RepairPatrolStoreFraction = 0.2;
 
+        /**
+         * The fraction of storage a patrol threshold stands for. Outside the
+         * Community Patch that is the original's fixed fifth. Under it
+         * (TADR 2026.10.6, "Patrol reclaim thresholds") it is the player's own
+         * whole-percentage level, read live so that it tracks the storage as
+         * the storage grows.
+         */
+        double reclaimThresholdFraction(const GameSimulation& sim, const GamePlayerInfo& player, bool metal)
+        {
+            if (!sim.communityPatchMode)
+            {
+                return RepairPatrolStoreFraction;
+            }
+            return static_cast<double>(metal ? player.reclaimMetalPercent : player.reclaimEnergyPercent) / 100.0;
+        }
+
         // The scan's sample spacing, 0x30 in whole world units.
         constexpr int ScanStep = 48;
 
@@ -47,8 +63,12 @@ namespace rwe
     std::optional<UnitId> pickRepairPatrolRepairTarget(GameSimulation& sim, ConstUnitInfo unitInfo)
     {
         // S:131: "only if player.energy >= 0.2 * player.energyCap".
+        // TADR 2026.10.6: under the Community Patch the energy level is the
+        // player's own, and it also decides when a patrol assists; at or above
+        // the level it assists, below it it does not.
         const auto& player = sim.getPlayer(unitInfo.state->owner);
-        if (static_cast<double>(player.energy.value) < RepairPatrolStoreFraction * static_cast<double>(player.maxEnergy.value))
+        const auto energyFraction = reclaimThresholdFraction(sim, player, false);
+        if (static_cast<double>(player.energy.value) < energyFraction * static_cast<double>(player.maxEnergy.value))
         {
             return std::nullopt;
         }
@@ -231,18 +251,22 @@ namespace rwe
         auto metal = bestOfThree(metalList);
         auto energy = bestOfThree(energyList);
 
-        // The decision ladder, in order.
+        // The decision ladder, in order. Under the Community Patch the first
+        // two rungs use the player's own levels instead of the fixed fifth
+        // (TADR 2026.10.6); the two "still fits" rungs are unchanged.
         const auto& player = sim.getPlayer(unitInfo.state->owner);
         const auto metalStored = static_cast<double>(player.metal.value);
         const auto metalCap = static_cast<double>(player.maxMetal.value);
         const auto energyStored = static_cast<double>(player.energy.value);
         const auto energyCap = static_cast<double>(player.maxEnergy.value);
+        const auto metalFraction = reclaimThresholdFraction(sim, player, true);
+        const auto energyFraction = reclaimThresholdFraction(sim, player, false);
 
-        if (metal && metalStored < RepairPatrolStoreFraction * metalCap)
+        if (metal && metalStored < metalFraction * metalCap)
         {
             return metal->feature;
         }
-        if (energy && energyStored < RepairPatrolStoreFraction * energyCap)
+        if (energy && energyStored < energyFraction * energyCap)
         {
             return energy->feature;
         }

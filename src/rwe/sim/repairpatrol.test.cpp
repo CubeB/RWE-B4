@@ -531,4 +531,132 @@ namespace rwe
         REQUIRE(reclaim != nullptr);
         REQUIRE(std::get<FeatureId>(reclaim->target) == wreck);
     }
+
+    TEST_CASE("community patch: the energy level gates assisting at or above it", "[repairpatrol][communitypatch]")
+    {
+        // TADR 2026.10.6: "a patrolling unit assists only while energy is at
+        // or above it". At 0 the gate can never fail, so it always assists;
+        // at 100 only a full store assists.
+        Field f(MetalCapacity, EnergyCapacity);
+        f.sim.communityPatchMode = true;
+        auto builder = f.addBuilder(SimVector(500_ss, 0_ss, 500_ss));
+        f.addHurtPatient(SimVector(560_ss, 0_ss, 500_ss), f.us);
+
+        auto& player = f.sim.getPlayer(f.us);
+
+        SECTION("80% needs four fifths of the energy cap")
+        {
+            player.reclaimEnergyPercent = 80;
+            player.energy = Energy(0.79f * EnergyCapacity);
+            REQUIRE_FALSE(pickRepairPatrolRepairTarget(f.sim, infoOf(f.sim, builder)).has_value());
+
+            player.energy = Energy(0.8f * EnergyCapacity);
+            REQUIRE(pickRepairPatrolRepairTarget(f.sim, infoOf(f.sim, builder)).has_value());
+        }
+
+        SECTION("0 always assists, even with nothing in the store")
+        {
+            player.reclaimEnergyPercent = 0;
+            player.energy = Energy(0.0f);
+            REQUIRE(pickRepairPatrolRepairTarget(f.sim, infoOf(f.sim, builder)).has_value());
+        }
+
+        SECTION("100 assists only when the energy store is exactly full")
+        {
+            player.reclaimEnergyPercent = 100;
+            player.energy = Energy(EnergyCapacity - 1.0f);
+            REQUIRE_FALSE(pickRepairPatrolRepairTarget(f.sim, infoOf(f.sim, builder)).has_value());
+
+            player.energy = Energy(EnergyCapacity);
+            REQUIRE(pickRepairPatrolRepairTarget(f.sim, infoOf(f.sim, builder)).has_value());
+        }
+    }
+
+    TEST_CASE("community patch: a ground constructor's reclaim levels gate the whole scan", "[repairpatrol][communitypatch]")
+    {
+        // "A patrolling construction unit looks for something to reclaim only
+        // while metal or energy is below [its level]". The ladder's two
+        // "still fits" rungs therefore cannot reclaim on their own: at 0 the
+        // gate never passes and the patrol does not reclaim at all.
+        auto run = [](bool mode, int metalLevel, int energyLevel) {
+            Field f(0.0f, 0.0f);
+            f.sim.communityPatchMode = mode;
+            f.sim.getPlayer(f.us).reclaimMetalPercent = metalLevel;
+            f.sim.getPlayer(f.us).reclaimEnergyPercent = energyLevel;
+            auto metalDefinition = f.sim.featureDefinitions.insert(makeFeatureDef("wreck", 40, 0));
+            auto position = SimVector(800_ss, 0_ss, 800_ss);
+            auto builder = f.addBuilder(position);
+            f.addFeatureNear(metalDefinition, SimVector(800_ss + 24_ss, 0_ss, 800_ss + 24_ss));
+            f.sim.getUnitState(builder).orders.push_back(PatrolOrder(position));
+            return tickUntilJob(f.sim, builder, 70);
+        };
+
+        // 0 never counts as low, so no reclaim -- where the mode-off game,
+        // whose fixed fifth is above an empty store, does reclaim.
+        REQUIRE(run(true, 0, 0) == -1);
+        REQUIRE(run(false, 0, 0) > 0);
+    }
+
+    TEST_CASE("community patch: 100 counts as low until the store is exactly full", "[repairpatrol][communitypatch]")
+    {
+        auto run = [](float metal, float energy) {
+            Field f(metal, energy);
+            f.sim.communityPatchMode = true;
+            f.sim.getPlayer(f.us).reclaimMetalPercent = 100;
+            f.sim.getPlayer(f.us).reclaimEnergyPercent = 100;
+            auto metalDefinition = f.sim.featureDefinitions.insert(makeFeatureDef("wreck", 40, 0));
+            auto position = SimVector(800_ss, 0_ss, 800_ss);
+            auto builder = f.addBuilder(position);
+            f.addFeatureNear(metalDefinition, SimVector(800_ss + 24_ss, 0_ss, 800_ss + 24_ss));
+            f.sim.getUnitState(builder).orders.push_back(PatrolOrder(position));
+            return tickUntilJob(f.sim, builder, 70);
+        };
+
+        REQUIRE(run(MetalCapacity, EnergyCapacity) == -1);
+        REQUIRE(run(MetalCapacity - 1.0f, EnergyCapacity) > 0);
+    }
+
+    TEST_CASE("community patch: a reclaim level is a percentage of the storage, not a fixed amount", "[repairpatrol][communitypatch]")
+    {
+        // The same 600 metal is above half of a 1050 store and below half of a
+        // larger one, so the level follows the cap as it grows.
+        Field f(600.0f, EnergyCapacity);
+        f.sim.communityPatchMode = true;
+        auto& player = f.sim.getPlayer(f.us);
+        player.reclaimMetalPercent = 50;
+        player.reclaimEnergyPercent = 0;
+
+        auto huge = f.sim.featureDefinitions.insert(makeFeatureDef("huge", 2000, 0));
+        auto position = SimVector(800_ss, 0_ss, 800_ss);
+        auto builder = f.addBuilder(position, true);
+        f.addFeatureNear(huge, SimVector(800_ss + 24_ss, 0_ss, 800_ss + 24_ss));
+
+        player.maxMetal = Metal(1050.0f);
+        REQUIRE_FALSE(pickRepairPatrolReclaimTarget(f.sim, infoOf(f.sim, builder), 240_ss).has_value());
+
+        player.maxMetal = Metal(3000.0f);
+        REQUIRE(pickRepairPatrolReclaimTarget(f.sim, infoOf(f.sim, builder), 240_ss).has_value());
+    }
+
+    TEST_CASE("community patch: an air constructor follows the same reclaim gate as a ground one", "[repairpatrol][communitypatch]")
+    {
+        auto run = [](bool mode, float metal) {
+            Field f(metal, EnergyCapacity);
+            f.sim.communityPatchMode = mode;
+            auto metalDefinition = f.sim.featureDefinitions.insert(makeFeatureDef("wreck", 40, 0));
+            auto position = SimVector(800_ss, 100_ss, 800_ss);
+            auto builder = f.addBuilder(position, true);
+            f.addFeatureNear(metalDefinition, SimVector(800_ss + 24_ss, 0_ss, 800_ss + 24_ss));
+            f.sim.getUnitState(builder).orders.push_back(PatrolOrder(position));
+            return tickUntilJob(f.sim, builder, 70);
+        };
+
+        // Above the default fifth: the original's air routine reclaimed any
+        // stock it could store; the community rule does not look at all.
+        REQUIRE(run(false, 0.5f * MetalCapacity) > 0);
+        REQUIRE(run(true, 0.5f * MetalCapacity) == -1);
+
+        // Below it, the air constructor still reclaims.
+        REQUIRE(run(true, 0.1f * MetalCapacity) > 0);
+    }
 }

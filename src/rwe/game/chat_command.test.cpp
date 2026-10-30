@@ -297,4 +297,37 @@ namespace rwe
         REQUIRE(mapping.find("already share") == std::string::npos);
         REQUIRE(mapping.find("always share what they see") != std::string::npos);
     }
+
+    TEST_CASE("the Community Patch reclaim levels parse only with the mode on", "[chat][communitypatch]")
+    {
+        // TADR 2026.10.6, "Patrol reclaim thresholds". Outside the mode these
+        // words are not registered at all, which is exactly what they were
+        // before the mode existed: the Unknown fallback.
+        REQUIRE(parseChatCommand("+SetReclaimMetal 50")->kind == Kind::Unknown);
+        REQUIRE(parseChatCommand("+setreclaimenergy 50")->kind == Kind::Unknown);
+        REQUIRE(parseChatCommand("+SetReclaimMetal 50", false)->kind == Kind::Unknown);
+
+        auto metal = parseChatCommand("+SetReclaimMetal 50", true);
+        REQUIRE(metal->kind == Kind::SetReclaimMetal);
+        REQUIRE(metal->hasArgument);
+        REQUIRE(metal->number == 50);
+
+        // The optional percent sign is not part of the number, as for
+        // +SetShareMetal; a plain number is the same level.
+        REQUIRE(parseChatCommand("+setreclaimmetal 50%", true)->number == 50);
+        REQUIRE(parseChatCommand("+SETRECLAIMENERGY 0%", true)->kind == Kind::SetReclaimEnergy);
+        REQUIRE(parseChatCommand("+setreclaimenergy 0", true)->number == 0);
+        REQUIRE(parseChatCommand("+setreclaimmetal 100", true)->number == 100);
+
+        // No value means "print the current level", not zero: the caller has
+        // to be able to tell the two apart.
+        auto printing = parseChatCommand("+SetReclaimMetal", true);
+        REQUIRE(printing->kind == Kind::SetReclaimMetal);
+        REQUIRE_FALSE(printing->hasArgument);
+
+        // Out-of-range values are read as typed here and clamped where applied,
+        // the way the other integer commands read first and decide later.
+        REQUIRE(parseChatCommand("+setreclaimmetal 200", true)->number == 200);
+        REQUIRE(parseChatCommand("+setreclaimmetal -5", true)->number == -5);
+    }
 }

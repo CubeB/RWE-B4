@@ -259,9 +259,10 @@ message PlayerRejoinedCommand
     required uint32 from_tick = 2;
 }
 
-// One resource-sharing action: a toggle, a reserve, or a gift. The issuer is
-// the sender's player, as for every command. `amount` is the reserve to set
-// or the quantity to give; `target` and `give_metal` are for Give only.
+// One resource-sharing action: a toggle, a reserve, a gift, or a Community
+// Patch patrol reclaim level. The issuer is the sender's player, as for every
+// command. `amount` is the reserve to set, the quantity to give, or the
+// percentage; `target` and `give_metal` are for Give only.
 message PlayerShareCommand
 {
     enum Kind
@@ -275,6 +276,10 @@ message PlayerShareCommand
         SetMetalStock = 5;
         SetEnergyStock = 6;
         AtmGrant = 7;
+        // Community Patch patrol reclaim levels (TADR 2026.10.6), carried in
+        // `amount` as a percentage of storage. Only the issuer's level moves.
+        SetReclaimMetalLevel = 8;
+        SetReclaimEnergyLevel = 9;
     }
 
     required Kind kind = 1;

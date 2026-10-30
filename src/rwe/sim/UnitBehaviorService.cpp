@@ -5743,17 +5743,35 @@ namespace rwe
         // The reclaim stage: always in the air, with a side of 240; on the
         // ground only while one of the stores is under a fifth, with the
         // unit's sight as the side (so the half-extent is half of it).
+        //
+        // Under the Community Patch (TADR 2026.10.6, "Patrol reclaim
+        // thresholds") both kinds of unit use the same gate, each against the
+        // player's own metal and energy levels, and only then does the air
+        // scan at 240 while the ground unit scans its sight. An air
+        // constructor therefore no longer reclaims whatever its owner's
+        // stocks; 0 means "never low", so a patrol at 0 never reclaims.
         SimScalar side = 240_ss;
-        if (!flies)
         {
             const auto& player = sim->getPlayer(unitInfo.state->owner);
-            const auto metalShort = static_cast<double>(player.metal.value) < 0.2 * static_cast<double>(player.maxMetal.value);
-            const auto energyShort = static_cast<double>(player.energy.value) < 0.2 * static_cast<double>(player.maxEnergy.value);
-            if (!metalShort && !energyShort)
+            const auto metalFraction = sim->communityPatchMode
+                ? static_cast<double>(player.reclaimMetalPercent) / 100.0
+                : 0.2;
+            const auto energyFraction = sim->communityPatchMode
+                ? static_cast<double>(player.reclaimEnergyPercent) / 100.0
+                : 0.2;
+            const auto metalShort = static_cast<double>(player.metal.value) < metalFraction * static_cast<double>(player.maxMetal.value);
+            const auto energyShort = static_cast<double>(player.energy.value) < energyFraction * static_cast<double>(player.maxEnergy.value);
+            if (sim->communityPatchMode || !flies)
             {
-                return false;
+                if (!metalShort && !energyShort)
+                {
+                    return false;
+                }
             }
-            side = SimScalar(static_cast<float>(unitInfo.definition->sightDistance));
+            if (!flies)
+            {
+                side = SimScalar(static_cast<float>(unitInfo.definition->sightDistance));
+            }
         }
 
         if (auto feature = pickRepairPatrolReclaimTarget(*sim, unitInfo, side))

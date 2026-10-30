@@ -98,7 +98,7 @@ namespace rwe
         // chat, whether or not it turns out to be one this build knows: the
         // original's talk dialog hands it to the command interpreter locally,
         // so it must not reach the other players' screens either.
-        if (parseChatCommand(text))
+        if (parseChatCommand(text, simulation.communityPatchMode))
         {
             // The original's line runner saves the submitted line as it goes,
             // capped at 79 bytes, and that saved copy is what the repeat key
@@ -172,7 +172,7 @@ namespace rwe
 
     void GameScene::runChatCommand(const std::string& line)
     {
-        auto parsed = parseChatCommand(line);
+        auto parsed = parseChatCommand(line, simulation.communityPatchMode);
         if (!parsed || parsed->kind == ChatCommand::Kind::Empty)
         {
             return;
@@ -430,6 +430,43 @@ namespace rwe
             return;
         }
 
+        if (command.kind == ChatCommand::Kind::SetReclaimMetal || command.kind == ChatCommand::Kind::SetReclaimEnergy)
+        {
+            // TADR 2026.10.6, "Patrol reclaim thresholds": the levels belong
+            // to the player who types the line and start every game at 20%.
+            // In TADR they are client-local; RWE's simulation is lockstep, so
+            // they travel in the issuing player's command stream like the
+            // share commands, and only ever move that player's own level.
+            if (isPlayback() || !simulation.communityPatchMode)
+            {
+                return;
+            }
+
+            const bool metal = command.kind == ChatCommand::Kind::SetReclaimMetal;
+            const auto& local = simulation.getPlayer(localPlayerId);
+            if (!command.hasArgument)
+            {
+                const auto current = metal ? local.reclaimMetalPercent : local.reclaimEnergyPercent;
+                printConsole(
+                    std::string(metal ? "ReclaimMetal: " : "ReclaimEnergy: ") + std::to_string(current) + "%",
+                    feedbackColor);
+                return;
+            }
+
+            const auto level = std::clamp(command.number, 0, 100);
+            printConsole(
+                std::string(metal ? "ReclaimMetal: " : "ReclaimEnergy: ") + std::to_string(level) + "%",
+                feedbackColor);
+
+            PlayerShareCommand reclaim;
+            reclaim.kind = metal
+                ? PlayerShareCommand::Kind::SetReclaimMetalLevel
+                : PlayerShareCommand::Kind::SetReclaimEnergyLevel;
+            reclaim.amount = static_cast<float>(level);
+            localPlayerCommandBuffer.push_back(reclaim);
+            return;
+        }
+
         // Every sharing command needs a network game and acts on the local
         // player, and a computer player or a watcher has no stock to share.
         // An own-clock game is a peer that owns its own clock and its own
@@ -455,6 +492,10 @@ namespace rwe
         // everyone's, through the command stream.
         switch (command.kind)
         {
+            case ChatCommand::Kind::SetReclaimMetal:
+            case ChatCommand::Kind::SetReclaimEnergy:
+                // Handled above, before the sharing-only gate.
+                break;
             case ChatCommand::Kind::ShareMetal:
                 printConsole(std::string("ShareMetal: ") + onOff(!local.shareMetal), feedbackColor);
                 submit(PlayerShareCommand::Kind::ToggleMetal);

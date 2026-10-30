@@ -9,8 +9,10 @@ namespace rwe
 
     /**
      * Applies one resource-sharing command from `issuer`: a toggle of its
-     * metal or energy sharing flag, a change of its reserve, or a gift to
-     * another player. TOTALA-EXE-COMMANDS.md section 124.
+     * metal or energy sharing flag, a change of its reserve, a gift to
+     * another player, or a Community Patch patrol reclaim threshold.
+     * TOTALA-EXE-COMMANDS.md section 124; the thresholds are TADR 2026.10.6,
+     * "Patrol reclaim thresholds".
      *
      * This is the one definition of what those commands do. The live game,
      * the replay player and the headless arena all call it, so they cannot
@@ -27,7 +29,9 @@ namespace rwe
      *  - a reserve is not a finite number;
      *  - the issuer or a gift's recipient is not simulated on this machine,
      *    because a Remote player's account belongs to the machine that owns
-     *    its units.
+     *    its units;
+     *  - a patrol reclaim threshold arrives while communityPatchMode is off,
+     *    or is not a finite number.
      *
      * Two deliberate departures from the original, both hardenings:
      *

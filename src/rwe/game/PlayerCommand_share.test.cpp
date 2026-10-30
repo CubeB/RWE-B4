@@ -56,7 +56,7 @@ namespace rwe
     {
         SECTION("every kind survives, with its amount")
         {
-            for (auto kind : {PlayerShareCommand::Kind::ToggleMetal, PlayerShareCommand::Kind::ToggleEnergy, PlayerShareCommand::Kind::SetMetalReserve, PlayerShareCommand::Kind::SetEnergyReserve})
+            for (auto kind : {PlayerShareCommand::Kind::ToggleMetal, PlayerShareCommand::Kind::ToggleEnergy, PlayerShareCommand::Kind::SetMetalReserve, PlayerShareCommand::Kind::SetEnergyReserve, PlayerShareCommand::Kind::SetReclaimMetalLevel, PlayerShareCommand::Kind::SetReclaimEnergyLevel})
             {
                 auto original = makeShare(kind, 123.0f);
                 requireSame(roundTrip(original), original);

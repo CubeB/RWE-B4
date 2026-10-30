@@ -297,6 +297,11 @@ namespace rwe
                 {"energyReservePercent", p.energyReservePercent},
                 {"metalReservePercentage", p.metalReservePercentage},
                 {"energyReservePercentage", p.energyReservePercentage},
+                // TADR 2026.10.6: the Community Patch patrol reclaim levels.
+                // Saved because they change what a patrol does; a save from
+                // before they existed loads them at their default 20.
+                {"reclaimMetalPercent", p.reclaimMetalPercent},
+                {"reclaimEnergyPercent", p.reclaimEnergyPercent},
                 {"unitsKilled", p.unitsKilled},
                 {"unitsLost", p.unitsLost},
                 {"metalProduced", saveMetal(p.metalProduced)},
@@ -382,6 +387,10 @@ namespace rwe
             {
                 p.energyReservePercentage = j.at("energyReservePercentage").get<unsigned int>();
             }
+            // Added with the Community Patch patrol thresholds (TADR
+            // 2026.10.6). An older save predates them and loads the default.
+            p.reclaimMetalPercent = std::clamp(j.value("reclaimMetalPercent", 20), 0, 100);
+            p.reclaimEnergyPercent = std::clamp(j.value("reclaimEnergyPercent", 20), 0, 100);
             p.unitsKilled = j.at("unitsKilled").get<unsigned int>();
             p.unitsLost = j.at("unitsLost").get<unsigned int>();
             // Added after the first saves were written; an older file simply

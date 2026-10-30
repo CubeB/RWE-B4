@@ -283,6 +283,31 @@ namespace rwe
                 return true;
             }
 
+            case PlayerShareCommand::Kind::SetReclaimMetalLevel:
+            case PlayerShareCommand::Kind::SetReclaimEnergyLevel:
+            {
+                // TADR 2026.10.6, "Patrol reclaim thresholds": these levels
+                // belong to the player issuing the command. They are only
+                // meaningful under the Community Patch ruleset, and a peer
+                // must not be able to move another player's level. The value
+                // is a whole percentage; clamp rather than refuse so a line
+                // such as `+setreclaimmetal 200` still leaves a usable level.
+                if (!sim.communityPatchMode || !std::isfinite(command.amount))
+                {
+                    return false;
+                }
+                auto percentage = static_cast<int>(std::lround(std::clamp(command.amount, 0.0f, 100.0f)));
+                if (command.kind == PlayerShareCommand::Kind::SetReclaimMetalLevel)
+                {
+                    player.reclaimMetalPercent = percentage;
+                }
+                else
+                {
+                    player.reclaimEnergyPercent = percentage;
+                }
+                return true;
+            }
+
             case PlayerShareCommand::Kind::AtmGrant:
             {
                 // +ATM: +1000 metal and +1000 energy to the viewed player.

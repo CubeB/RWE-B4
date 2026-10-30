@@ -519,10 +519,14 @@ namespace rwe
         simA.players[0].shareEnergy = false;
         simA.players[0].metalReserve = Metal(125.0f);
         simA.players[0].energyReserve = Energy(-40.0f);
+        simA.players[0].reclaimMetalPercent = 5;
+        simA.players[0].reclaimEnergyPercent = 95;
         simA.players[1].shareMetal = false;
         simA.players[1].shareEnergy = true;
         simA.players[1].metalReserve = Metal(0.0f);
         simA.players[1].energyReserve = Energy(900.0f);
+        simA.players[1].reclaimMetalPercent = 0;
+        simA.players[1].reclaimEnergyPercent = 100;
 
         auto saved = saveSimulationToJson(simA);
 
@@ -533,10 +537,14 @@ namespace rwe
         REQUIRE_FALSE(simB.players[0].shareEnergy);
         REQUIRE(simB.players[0].metalReserve == Metal(125.0f));
         REQUIRE(simB.players[0].energyReserve == Energy(-40.0f));
+        REQUIRE(simB.players[0].reclaimMetalPercent == 5);
+        REQUIRE(simB.players[0].reclaimEnergyPercent == 95);
         REQUIRE_FALSE(simB.players[1].shareMetal);
         REQUIRE(simB.players[1].shareEnergy);
         REQUIRE(simB.players[1].metalReserve == Metal(0.0f));
         REQUIRE(simB.players[1].energyReserve == Energy(900.0f));
+        REQUIRE(simB.players[1].reclaimMetalPercent == 0);
+        REQUIRE(simB.players[1].reclaimEnergyPercent == 100);
 
         REQUIRE(saveSimulationToJson(simB) == saved);
         REQUIRE(computeHashOf(simB) == computeHashOf(simA));
@@ -596,6 +604,8 @@ namespace rwe
             pj.erase("shareEnergy");
             pj.erase("metalReserve");
             pj.erase("energyReserve");
+            pj.erase("reclaimMetalPercent");
+            pj.erase("reclaimEnergyPercent");
         }
 
         auto simB = makeBaseSim();
@@ -606,6 +616,8 @@ namespace rwe
             REQUIRE_FALSE(player.shareEnergy);
             REQUIRE(player.metalReserve == Metal(0.0f));
             REQUIRE(player.energyReserve == Energy(0.0f));
+            REQUIRE(player.reclaimMetalPercent == 20);
+            REQUIRE(player.reclaimEnergyPercent == 20);
         }
     }
 

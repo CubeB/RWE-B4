@@ -187,13 +187,14 @@ namespace rwe
 
     /**
      * One resource-sharing action by the issuing player: a toggle, a reserve,
-     * or a gift (TOTALA-EXE-COMMANDS.md section 124).
+     * a gift, or a Community Patch patrol reclaim threshold
+     * (TOTALA-EXE-COMMANDS.md section 124; TADR 2026.10.6 for the thresholds).
      *
-     * One alternative with a kind rather than five, because every alternative
+     * One alternative with a kind rather than many, because every alternative
      * added to PlayerCommand costs GameSimulation.cpp hundreds of COFF
      * sections. The chat bar's `+ShareMetal`, `+ShareEnergy`, `+SetShareMetal`,
-     * `+SetShareEnergy` and `+Give` each become exactly one of these, and
-     * `+ShareAll` becomes two.
+     * `+SetShareEnergy`, `+Give`, `+SetReclaimMetal` and `+SetReclaimEnergy`
+     * each become exactly one of these, and `+ShareAll` becomes two.
      *
      * The issuer is the player the command arrives under, as for every other
      * command, never a field of the command: a peer can only give away its
@@ -220,11 +221,19 @@ namespace rwe
             SetEnergyStock,
             /** +1000 metal and energy to `target` (`+ATM`). */
             AtmGrant,
+            /**
+             * Set the issuing player's Community Patch patrol reclaim metal
+             * level to `amount`, a percentage of storage in [0, 100]
+             * (`+SetReclaimMetal`). Ignored outside communityPatchMode.
+             */
+            SetReclaimMetalLevel,
+            /** The energy counterpart, which also gates assisting (`+SetReclaimEnergy`). */
+            SetReclaimEnergyLevel,
         };
 
         Kind kind{Kind::ToggleMetal};
 
-        /** The reserve to set, or the amount to give. Unused by the toggles. */
+        /** The reserve to set, the amount to give, or the reclaim percentage. Unused by the toggles. */
         float amount{0.0f};
 
         /** Give only: the recipient. */
