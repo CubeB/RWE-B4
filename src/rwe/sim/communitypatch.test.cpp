@@ -121,6 +121,66 @@ namespace rwe
         REQUIRE(communityPatchSuppressesFire(w, false));
     }
 
+    TEST_CASE("the Community Patch can see and target an off-map aircraft within one tile", "[communitypatch]")
+    {
+        GameSimulation sim(MapTerrain(Grid<unsigned char>(64, 64, static_cast<unsigned char>(0)), 0_ss), 0u, 0, 0);
+        auto us = sim.addPlayer(communityPlayer("us"));
+        auto them = sim.addPlayer(communityPlayer("them"));
+        defineCommunityUnits(sim);
+        auto script = communityScript();
+
+        WeaponDefinition gun{};
+        gun.maxRange = 400_ss;
+        gun.reloadTime = 15_ss;
+        gun.burst = 1;
+        gun.velocity = 450_ss / 30_ss;
+        gun.damageRadius = 4_ss;
+        gun.damage["DEFAULT"] = 10;
+        sim.weaponDefinitions["gun"] = gun;
+
+        // The map runs from -512 to 512 on each axis. The observer sits just
+        // inside the right edge; the aircraft sits eight world units past it,
+        // which is inside TADR's one-tile margin.
+        auto attacker = spawnCommunityUnit(sim, "ordinary", us, SimVector(64_ss, 10_ss, 64_ss), script);
+        sim.getUnitState(attacker).position = SimVector(440_ss, 10_ss, 0_ss);
+        sim.getUnitState(attacker).previousPosition = sim.getUnitState(attacker).position;
+        auto flyer = spawnCommunityUnit(sim, "ordinary", them, SimVector(128_ss, 100_ss, 128_ss), script);
+        sim.getUnitState(flyer).position = SimVector(520_ss, 100_ss, 0_ss);
+        sim.getUnitState(flyer).previousPosition = sim.getUnitState(flyer).position;
+        sim.getUnitState(flyer).physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+
+        UnitWeapon weapon;
+        weapon.weaponType = "gun";
+        sim.getUnitState(attacker).weapons[0] = weapon;
+
+        auto attacking = [&]() {
+            const auto& slot = sim.getUnitState(attacker).weapons[0];
+            return slot ? std::get_if<UnitWeaponStateAttacking>(&slot->state) : nullptr;
+        };
+
+        sim.communityPatchMode = false;
+        sim.tick();
+        REQUIRE_FALSE(sim.canSeeUnit(us, flyer));
+        REQUIRE(attacking() == nullptr);
+
+        sim.communityPatchMode = true;
+        sim.tick();
+        REQUIRE(sim.canSeeUnit(us, flyer));
+        auto state = attacking();
+        REQUIRE(state != nullptr);
+        auto target = std::get_if<UnitId>(&state->target);
+        REQUIRE(target != nullptr);
+        REQUIRE(*target == flyer);
+
+        // Past the margin the edge cell is not a substitute for the real one.
+        auto farFlyer = spawnCommunityUnit(sim, "ordinary", them, SimVector(192_ss, 100_ss, 192_ss), script);
+        sim.getUnitState(farFlyer).position = SimVector(540_ss, 100_ss, 0_ss);
+        sim.getUnitState(farFlyer).previousPosition = sim.getUnitState(farFlyer).position;
+        sim.getUnitState(farFlyer).physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
+        sim.tick();
+        REQUIRE_FALSE(sim.canSeeUnit(us, farFlyer));
+    }
+
     TEST_CASE("the Community Patch weapon flags only bite under the ruleset", "[communitypatch]")
     {
         // Sea level is 255 over a flat seabed, so the positions below are

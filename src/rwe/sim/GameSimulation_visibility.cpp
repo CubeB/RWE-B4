@@ -337,18 +337,46 @@ namespace rwe
         auto extentY = sim.modelHeightOf(unitDefinition);
 
         auto whole = [](SimScalar s) { return SimScalar(std::floor(s.value)); };
-        auto lit = [&](SimScalar x, SimScalar y, SimScalar z) {
-            return visibility.isVisible(sim.visionCellAtHeight(SimVector(whole(x), 0_ss, whole(z)), y));
-        };
 
         auto a = unit.position.x - (extentX / 2_ss);
         auto b = unit.position.y + extentY;
         auto c = unit.position.z - (extentZ / 2_ss);
 
-        return lit(a, b, c)
-            || lit(a + extentX, b, c)
-            || lit(a + extentX, b - extentY, c + extentZ)
-            || lit(a, b - extentY, c + extentZ);
+        // Community Patch (#934): TADR lets an aircraft that is hiding just
+        // past the map edge be shot down. The target scan still has to reach
+        // it and the weapon still has to be able to hit it; this only lifts
+        // the fog refusal by reading the nearest edge cell for a flying unit
+        // whose whole model is outside the grid. TADR's builds use 1 or 32
+        // tiles; this ruleset uses the mainline ProTA/OTA value of one tile,
+        // which is the conservative choice for a single RWE ruleset.
+        auto offMapAircraft = false;
+        if (sim.communityPatchMode && isFlying(unit.physics))
+        {
+            constexpr int OffMapAircraftTiles = 1;
+            auto margin = intToSimScalar(OffMapAircraftTiles) * MapTerrain::HeightTileWidthInWorldUnits;
+            auto left = sim.terrain.leftInWorldUnits();
+            auto right = left + sim.terrain.getWidthInWorldUnits();
+            auto top = sim.terrain.topInWorldUnits();
+            auto bottom = top + sim.terrain.getHeightInWorldUnits();
+            auto outsideX = rweMax(0_ss, rweMax(left - unit.position.x, unit.position.x - right));
+            auto outsideZ = rweMax(0_ss, rweMax(top - unit.position.z, unit.position.z - bottom));
+            offMapAircraft = (outsideX > 0_ss || outsideZ > 0_ss) && outsideX <= margin && outsideZ <= margin;
+        }
+
+        auto visibleAt = [&](SimScalar x, SimScalar y, SimScalar z) {
+            auto cell = sim.visionCellAtHeight(SimVector(whole(x), 0_ss, whole(z)), y);
+            if (offMapAircraft && !visibility.contains(cell))
+            {
+                cell.x = std::clamp(cell.x, 0, visibility.visible.getWidth() - 1);
+                cell.y = std::clamp(cell.y, 0, visibility.visible.getHeight() - 1);
+            }
+            return visibility.isVisible(cell);
+        };
+
+        return visibleAt(a, b, c)
+            || visibleAt(a + extentX, b, c)
+            || visibleAt(a + extentX, b - extentY, c + extentZ)
+            || visibleAt(a, b - extentY, c + extentZ);
     }
 
     bool GameSimulation::canDetectUnit(PlayerId viewer, UnitId unitId) const
