@@ -268,6 +268,15 @@ namespace rwe
             // #907 §2.1: UI-option bit 6, toggled; the original saves it.
             command.kind = ChatCommand::Kind::Clock;
         }
+        else if (word == "switchalt")
+        {
+            // #907 §2.7: no argument toggles the one bit and saves; with an
+            // argument the bit is assigned and not saved. The presence of the
+            // argument matters, so a bare `+SwitchAlt` is not `+SwitchAlt 0`.
+            command.kind = ChatCommand::Kind::SwitchAlt;
+            command.hasArgument = tokens.size() >= 2;
+            command.number = chatAtoi(argument(1));
+        }
         else if (word == "give")
         {
             // player amount metal|energy. The resource is the one argument

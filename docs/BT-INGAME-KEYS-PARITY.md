@@ -106,27 +106,21 @@ bookmarks and **play the `SelectSquad` sound** (rule in `BT-INGAME-CAMERA-PARITY
 Membership lives on the unit, is exclusive, and a factory stamps its squad on what it builds
 (`TOTALA-EXE-KEYBOARD.md` section 75; `TOTALA-EXE-INTERFACE.md` section 133).
 
-**RWE: DIVERGENCE (documented in the roadmap, not in section 88).** Plain digits recall control
-groups, Ctrl+digit binds, Shift+digit adds the selection, Ctrl+Shift+digit adds, and `0` is a
-tenth group (about 368-428). `docs/ROADMAP.md` records this as the `SwitchAlt` arrangement ("digits
-stay as control groups, the original's SwitchAlt arrangement"). It is the original's *swapped*
-mapping, with two departures that nothing records:
+**RWE: MATCHES the arrangement, PARTLY the squads (since #907).** The saved `SwitchAlt` preference now
+exists: `GlobalConfig::switchAlt` defaults false, so bare digits open build-menu pages and Alt+digit selects
+a squad exactly as the shipped original does; `+SwitchAlt` toggles and saves it (`rwe.cfg` key `switch-alt`)
+or assigns it for the session without saving, and the two mappings swap. `0` is unbound in both
+arrangements, because there is no squad 0. Ctrl+digit binds and Shift on a squad recall adds the squad to
+the selection (`about 368-428`). The remaining departures are the membership model and the sounds:
 
-- **No Alt, no preference.** The original reads the swap from a saved preference and the Alt state
-  and so offers both mappings; RWE offers the swapped one only, so the shipped default (digits are
-  build pages, `HELP.TDF` line 32 "1 - 9 Select the menu for the current unit") has no equivalent
-  and Alt+digit does nothing. A player can still reach a build page with `,` and `.` (rule 9) and
-  the panel buttons.
 - **Groups are not squads.** They are sets in the scene (`controlGroups`), not a number on the
-  unit, so there is no exclusivity (a unit can sit in two groups), no factory inheritance, and
-  Shift+digit adds the *current selection to the group* where the original's Shift on a recall
-  adds the *group to the current selection*. The two Shift meanings are opposite. Presentation
-  and interface only; nothing reaches the simulation.
-- **Both sounds are missing.** Neither `CREATESQUAD` nor `SELECTSQUAD` is looked up anywhere in
-  RWE; both are `beep4` in the shipped `allsound.tdf`. The roadmap says the assignment sound "is
-  ProTA's rather than TA's"; the register's own section 73 (the `CreateSquad` sound) and this
-  chapter both say the original plays it. **CONFLICT** inside the tree, register and chapter
-  against the roadmap's sentence.
+  unit, so there is no exclusivity (a unit can sit in two groups) and no factory inheritance. Ctrl+Shift+digit
+  adds the *current selection to the group*, which is RWE's own and has no original counterpart. Interface
+  only; nothing reaches the simulation.
+- **The sounds play.** `CreateSquad` on assignment and `SelectSquad` on recall are looked up by name
+  (`LoadingScene.cpp` about 328) and played by the digit case (BT-182), matching the original's two
+  sounds. The roadmap's old sentence that the assignment sound "is ProTA's rather than TA's" no
+  longer describes the code.
 
 ## 4. The selection keys: Ctrl+A, Ctrl+S, Ctrl+Z, Ctrl+C and the category range
 

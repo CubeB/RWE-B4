@@ -406,6 +406,20 @@ namespace rwe
         unsigned int buildingHaloRedShift{50};
 
         /**
+         * The original's `SwitchAlt` preference (TOTALA-EXE-KEYBOARD.md
+         * section 75, bit 8 of its display-options word, saved in the
+         * registry). False is the shipped default: bare 1-9 open the selected
+         * builder's build-menu pages and Alt+1-9 select squads; true swaps
+         * the two. Local input presentation, never simulation state.
+         *
+         * RWE keeps it in rwe.cfg as `switch-alt`, so it survives a restart
+         * as the original's registry value does. `+SwitchAlt` with no
+         * argument toggles and writes it; with an argument it assigns without
+         * saving, exactly as the original does.
+         */
+        bool switchAlt{false};
+
+        /**
          * Which pathfinding backend a new game starts on, read from the
          * rwe.cfg key `pathfinding`. A game option and not a local preference:
          * two lockstep peers that path their units differently desync, and no
@@ -511,4 +525,14 @@ namespace rwe
 
     /** Writes the eleven settings to rwe.cfg, leaving every other key in it alone. */
     void writeGameOptions(const std::filesystem::path& configPath, const GameOptions& options);
+
+    /** The rwe.cfg key holding the `+SwitchAlt` preference (GlobalConfig::switchAlt). */
+    inline constexpr const char* SwitchAltConfigKey = "switch-alt";
+
+    /**
+     * Writes only the `+SwitchAlt` preference, leaving every other key in
+     * rwe.cfg alone. The no-argument `+SwitchAlt` saves through this; the
+     * assign form deliberately does not save, as the original does not.
+     */
+    void writeSwitchAlt(const std::filesystem::path& configPath, bool enabled);
 }

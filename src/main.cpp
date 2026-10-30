@@ -202,6 +202,10 @@ int main(int argc, char* argv[])
             config.buildingHaloSaturation = std::min(100u, args.getUint("building-halo-saturation", 65));
             config.buildingHaloRedShift = std::min(100u, args.getUint("building-halo-red-shift", 50));
             config.pathfindingBackend = rwe::pathfindingBackendFromString(args.getString("pathfinding", "rwe"), rwe::PathfindingBackend::RweAStar);
+            // #907: the original's saved `SwitchAlt` bit. Absent is the
+            // shipped default, which is the original's too -- bare digits open
+            // build-menu pages and Alt+digit selects a squad.
+            config.switchAlt = args.getString(rwe::SwitchAltConfigKey, "false") != "false";
             std::optional<rwe::GameParameters> gameParameters;
             if (args.contains("replay"))
             {

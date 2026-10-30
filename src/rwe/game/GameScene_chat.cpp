@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <rwe/game/chat_command.h>
 #include <rwe/game/chat_util.h>
+#include <rwe/util.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/SimpleLogger.h>
 
@@ -379,6 +380,29 @@ namespace rwe
             return;
         }
 
+        if (command.kind == ChatCommand::Kind::SwitchAlt)
+        {
+            // #907 §2.7: the no-argument form flips the preference and saves
+            // it; the assign form sets it from the argument and deliberately
+            // does not save, so the next start keeps whatever rwe.cfg already
+            // holds. The original has no message; RWE prints the new state
+            // because #907 asks for a state query here.
+            if (command.hasArgument)
+            {
+                switchAltEnabled = command.number != 0;
+            }
+            else
+            {
+                switchAltEnabled = !switchAltEnabled;
+                if (auto localDataPath = getLocalDataPath())
+                {
+                    writeSwitchAlt(*localDataPath / "rwe.cfg", switchAltEnabled);
+                }
+            }
+            printConsole(std::string("SwitchAlt: ") + (switchAltEnabled ? "on" : "off"), feedbackColor);
+            return;
+        }
+
         // Every command built so far is in the ordinary table.
         if ((mask & ChatCommandMaskOrdinary) == 0)
         {
@@ -616,6 +640,7 @@ namespace rwe
             case ChatCommand::Kind::Bps:
             case ChatCommand::Kind::ScreenChat:
             case ChatCommand::Kind::Clock:
+            case ChatCommand::Kind::SwitchAlt:
                 break;
         }
     }

@@ -88,6 +88,11 @@ namespace rwe
             ScreenChat,
             /** `+Clock`: toggle the game-time display; session-local. */
             Clock,
+            /**
+             * `+SwitchAlt [n]`: no argument toggles the digit/Alt preference
+             * and saves it; with an argument assigns it and does not save.
+             */
+            SwitchAlt,
         };
 
         Kind kind{Kind::Empty};

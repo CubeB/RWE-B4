@@ -1,6 +1,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <filesystem>
+#include <fstream>
 #include <rwe/GlobalConfig.h>
+#include <rwe/util/OpaqueArgs.h>
 
 namespace rwe
 {
@@ -18,6 +21,42 @@ namespace rwe
         // (TOTALA-EXE-SHADING.md S:11). BuildingsOnly is that On.
         REQUIRE(GlobalConfig{}.shadingMode == static_cast<unsigned int>(ShadingMode::BuildingsOnly));
         REQUIRE(GameOptions{}.shading == ShadingMode::BuildingsOnly);
+
+        // The original's SwitchAlt registry value defaults to zero, which is
+        // the arrangement with build-menu pages on the bare digits
+        // (TOTALA-EXE-KEYBOARD.md section 75).
+        REQUIRE_FALSE(GlobalConfig{}.switchAlt);
+    }
+
+    TEST_CASE("the SwitchAlt preference round-trips through rwe.cfg")
+    {
+        // The no-argument `+SwitchAlt` writes the key; main.cpp reads it back
+        // with the same expression used below. `updateConfigFile` leaves the
+        // other keys alone, which is what an rwe.cfg with all the options in
+        // it depends on.
+        auto path = std::filesystem::temp_directory_path() / "rwe-switchalt-config-test.cfg";
+        std::filesystem::remove(path);
+        {
+            std::ofstream out(path);
+            out << "sound-volume=55\n";
+        }
+
+        writeSwitchAlt(path, true);
+        {
+            OpaqueArgs args;
+            args.parseConfig(path.string());
+            REQUIRE(args.getString(SwitchAltConfigKey, "false") != "false");
+            REQUIRE(args.getString("sound-volume", "") == "55");
+        }
+
+        writeSwitchAlt(path, false);
+        {
+            OpaqueArgs args;
+            args.parseConfig(path.string());
+            REQUIRE(args.getString(SwitchAltConfigKey, "true") == "false");
+        }
+
+        std::filesystem::remove(path);
     }
 
     TEST_CASE("window mode button stages")

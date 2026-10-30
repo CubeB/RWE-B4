@@ -81,12 +81,21 @@ namespace rwe
     bool sweepSelectsUnit(bool underConstruction, bool carried);
 
     /**
+     * Whether a digit opens the selected builder's build-menu page rather
+     * than selecting a squad (TOTALA-EXE-KEYBOARD.md section 75). The
+     * original decides on display bit 8 -- the saved `SwitchAlt` preference
+     * -- and the Alt state: with the bit clear a bare digit is a build page
+     * and Alt+digit a squad; with it set the two swap. The shipped default
+     * is the bit clear.
+     */
+    bool digitOpensBuildPage(bool switchAlt, bool altDown);
+
+    /**
      * The zero-based build-menu page that digit 1-9 opens, if the builder has
-     * one (TOTALA-EXE-KEYBOARD.md section 75). Under the swapped `SwitchAlt`
-     * arrangement RWE uses, the plain digits are squads and Alt+digit opens a
-     * build page. The original bounds the request by the builder's page
-     * count; digit 0 is a squad key and has no page. An out-of-range digit
-     * leaves the menu as it was.
+     * one (TOTALA-EXE-KEYBOARD.md section 75). Called only when
+     * digitOpensBuildPage says this press is the build-page half. The
+     * original bounds the request by the builder's page count; digit 0 has no
+     * page. An out-of-range digit leaves the menu as it was.
      */
     std::optional<unsigned int> buildPageForDigit(unsigned int digit, unsigned int pageCount);
 

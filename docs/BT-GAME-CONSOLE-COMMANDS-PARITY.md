@@ -127,11 +127,13 @@ separate global). `Contour` stores spacing and offset as float arguments times 2
 ever terminating**. The flags live in three different words (visual, UI-option, map visibility) and
 similar-looking bits do not share a cache or persistence effect.
 
-**RWE: MISSING as commands; the settings they write are the options screens' business.** None of these words is
-registered (`Unknown command`). The stores are `BT-GAME-SETTINGS-PARITY.md`'s: shading, anti-alias, shadows,
-vehicle shadows, gamma and scroll speed have an options-screen control or an `rwe.cfg` key; a separate
-feature-shadow bit, dithered fog, `SwitchAlt`, screen chat and the clock option are **not found** in RWE (that
-audit's rules 3, 7 and 9 and its gap table). The differences a port must not copy:
+**RWE: PARTLY PORTED as commands; the settings they write are also the options screens' business.** The words
+with an RWE effect are registered and listed in `TOTALA-EXE.md` section 88: `Shading`, `AntiAlias`, `Shadow`,
+`TShadow`, `Gamma`, `ScrollSpeed`, `IFace`, `NoShake`, `ScreenChat`, `Clock`, `SwitchAlt` and the cheat/stock
+words below. `SwitchAlt` is the one ordinary-table word with a saved RWE preference (`rwe.cfg` key
+`switch-alt`); it now decides the digit arrangement (`KEYBOARD.md` section 75). The rest of the table --
+`Dither`, `FShadow`, `LOSType`, `Light`, `RCache`, `Contour`, `Drop`, `Selectable` and the rest -- is still
+`Unknown command`, because RWE has no effect for it to drive. The differences a port must not copy:
 
 - **Gamma and scroll speed through the console are unclamped**, the options pages clamp (gamma 50 to 133, scroll
   speed 25 to 200). A command that wrote straight through would be a way to a gamma the screen cannot return from.
