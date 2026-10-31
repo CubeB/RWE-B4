@@ -435,6 +435,7 @@ set(SOURCE_FILES
     src/rwe/game/GameScene_menu.cpp
     src/rwe/game/GameScene_minimap.cpp
     src/rwe/game/GameScene_peers.cpp
+    src/rwe/game/GameScene_poster.cpp
     src/rwe/game/GameScene_render.cpp
     src/rwe/game/ReloadBar.cpp
     src/rwe/game/ReloadBar.h
@@ -754,6 +755,8 @@ src/rwe/net/EndpointFamily.h
     src/rwe/setup/ArchiveBackend.cpp
     src/rwe/setup/ArchiveBackend.h
     src/rwe/scene/SceneManager.h
+    src/rwe/scene/PosterCapture.cpp
+    src/rwe/scene/PosterCapture.h
     src/rwe/scene/Screenshot.cpp
     src/rwe/scene/Screenshot.h
     src/rwe/scene/util.h
@@ -1319,6 +1322,7 @@ set(TEST_FILES
     src/rwe/puppet/TadDemo.test.cpp
     src/rwe/puppet/TadPuppetDriver.test.cpp
     src/rwe/puppet/TaLiveReceiver.test.cpp
+    src/rwe/scene/PosterCapture.test.cpp
     src/rwe/scene/SceneManager.test.cpp
     src/rwe/scene/Screenshot.test.cpp
     src/rwe/io/sidedatatdf/SideData.test.cpp

@@ -1461,6 +1461,16 @@ namespace rwe
         float appliedUiScale{0.0f};
 
         FrameBufferInfo worldFrameBuffer;
+
+        /**
+         * Set only while `capturePoster` is drawing a tile of a poster. It
+         * makes renderWorld write its resolved image into the capture
+         * framebuffer rather than the window, and leaves the cursor and
+         * selection overlays out of the picture.
+         */
+        bool posterCaptureActive{false};
+        FrameBufferIdentifier posterCaptureTarget{0};
+
         /** AA-PHASE-01: ground uses the same native raster with AA on or off. */
         std::optional<FrameBufferInfo> nativeTerrainFrameBuffer;
         TextureHandle nativeTerrainMask;
@@ -1924,6 +1934,14 @@ namespace rwe
          * everything else says so locally. Nothing is ever sent as chat.
          */
         void runChatCommand(const std::string& line);
+
+        /**
+         * `+MakePoster`: renders a poster-sized world rectangle, clamped to the
+         * map and centred on the camera, into <local data>/screenshots/BIGSHOT.pcx.
+         * `all` asks for the map's own pixel size; otherwise the two numbers
+         * are the requested size. Nothing here touches the simulation.
+         */
+        void capturePoster(bool all, unsigned int requestedWidth, unsigned int requestedHeight);
 
         /**
          * RWE_CHAT_TEST=<tick>:<text>, which says that line once at that tick.

@@ -77,6 +77,14 @@ namespace rwe
 
         unsigned int lastFrameStartTime{0};
 
+        /**
+         * Set when the scene has finished a synchronous capture whose delay
+         * must not be charged as elapsed frame time. The next frame starts its
+         * clock at the moment the capture finished rather than at this frame's
+         * start (BT-GAME-CONSOLE-COMMANDS-PARITY.md section 6, `+MakePoster`).
+         */
+        std::optional<unsigned int> pacingResetAt;
+
         std::array<float, 500> frameTimes;
         int frameTimesOffset{0};
 
@@ -87,6 +95,15 @@ namespace rwe
         void execute();
 
         void requestExit();
+
+        /**
+         * Excludes work already done in this frame from the next frame's
+         * elapsed time. A synchronous capture calls this when it finishes, so
+         * the capture's own delay is not handed to the simulation as a burst
+         * of caught-up ticks. Presentation only; it never changes what a tick
+         * contains.
+         */
+        void requestFramePacingReset();
 
         /** See the headless member. Set before execute(). */
         void setHeadless(bool value) { headless = value; }

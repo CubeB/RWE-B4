@@ -274,6 +274,36 @@ namespace rwe
         REQUIRE(switchAlt->number == 0);
     }
 
+    TEST_CASE("MakePoster reads its documented forms", "[chat]")
+    {
+        auto c = parseChatCommand("+MakePoster");
+        REQUIRE(c->kind == Kind::MakePoster);
+        REQUIRE_FALSE(c->posterAll);
+        REQUIRE(c->posterWidth == 0);
+        REQUIRE(c->posterHeight == 0);
+
+        c = parseChatCommand("+makeposter all");
+        REQUIRE(c->kind == Kind::MakePoster);
+        REQUIRE(c->posterAll);
+
+        // The explicit two-number form is the natural reading of "each
+        // dimension"; the reference does not spell out the grammar.
+        c = parseChatCommand("+MakePoster 3200 2400");
+        REQUIRE(c->kind == Kind::MakePoster);
+        REQUIRE_FALSE(c->posterAll);
+        REQUIRE(c->posterWidth == 3200);
+        REQUIRE(c->posterHeight == 2400);
+
+        // Anything else is refused rather than guessed at.
+        for (const auto* line : {"+MakePoster 3200", "+MakePoster 0 100",
+                 "+MakePoster -1 100", "+MakePoster 12abc 100",
+                 "+MakePoster all 100", "+MakePoster 100 200 300"})
+        {
+            CAPTURE(line);
+            REQUIRE(parseChatCommand(line)->kind == Kind::MakePosterUsage);
+        }
+    }
+
     TEST_CASE("every other word is unknown, and says what it was", "[chat]")
     {
         auto c = parseChatCommand("+Contour 4");

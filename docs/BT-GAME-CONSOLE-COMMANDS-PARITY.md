@@ -215,7 +215,7 @@ the map's pixel size, each dimension is raised to at least the visible tile span
 map's, it centres on the view, clamps, creates the screenshots directory and writes a `BIGSHOT` bitmap, then
 resets the pacing timestamp so the capture delay is not charged as elapsed frame time.
 
-**RWE: MISSING, by design (and by lockstep).**
+**RWE: PARTLY PORTED (only `MakePoster`), by design (and by lockstep).**
 
 - **`ATM`, `View`, `LOS`, `Mapping`, `NowISee`, `Radar`: not built.** RWE has no human cheat option: the "cheat"
   words in the tree are the computer player's own tuning knobs (`cheatModeOmniscient`, `resourceCheatMultiplier`,
@@ -227,9 +227,17 @@ resets the pacing timestamp so the capture delay is not charged as elapsed frame
   traced here.
 - **`Meteor`: nothing to drive.** RWE does not implement the meteor shower (`BT-WEAPONS-WEAPON-TYPES-PARITY.md`
   rule on the `meteor` flag; the OTA reader parses the fields only).
-- **`MakePoster`: not applicable** (`BT-INGAME-KEYS-PARITY.md`: "the BMP poster is a console command"). The
-  pacing-timestamp reset is the same class of side effect as the movie recorder's
-  (`BT-GAME-MAIN-LOOP-PARITY.md` rule 5): nothing RWE depends on.
+- **`MakePoster`: PORTED (#915).** `+MakePoster` is registered under the cheat mask and implements the
+  capture, not a wrapper around the viewport screenshot: default 3200x2400, `all` the map's pixel size,
+  each side raised to the visible tile span times sixteen and lowered to the map's, centred and clamped,
+  an off-screen tiled world render, `screenshots/BIGSHOT.pcx`, and a frame-pacing reset on completion. The
+  capture is presentation only and touches no simulation state. RWE renders true colour, so the output is a
+  24-bit three-plane PCX rather than the original's 8-bit BMP; one poster pixel is one world unit, whereas
+  the original's poster scale is not decoded; and the two-number form is the natural reading of "each
+  dimension" rather than a grammar the chapter states. These RWE-original details are recorded in
+  `TOTALA-EXE.md` section 88 and `docs/MAKEPOSTER.md`. The pacing-timestamp reset is the same class of side
+  effect as the movie recorder's (`BT-GAME-MAIN-LOOP-PARITY.md` rule 5): it only keeps the wall-clock delay
+  out of the next frame's elapsed time and cannot change what a tick contains.
 
 ## 7. The debug table: simulation, mission and files
 

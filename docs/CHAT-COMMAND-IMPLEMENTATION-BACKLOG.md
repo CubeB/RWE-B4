@@ -102,7 +102,7 @@ Bracketed arguments describe optional forms, not literal brackets to type.
 | `+UNITNAME [player]; examples: CORCOM, ARMPT, CORDEV1, ARMDEV1` | Missing typed interface in the inspected parser; verify underlying subsystem. | [#913](https://github.com/CubeB/RWE-B4/issues/913) |
 | `DRDEATH on the single-player selection screen` | Menu sequence; audit existing mission access/seat controls. | [#914](https://github.com/CubeB/RWE-B4/issues/914) |
 | `*I through *X on skirmish setup` | Menu sequence; audit existing mission access/seat controls. | [#914](https://github.com/CubeB/RWE-B4/issues/914) |
-| `+makeposter` | Missing typed interface in the inspected parser; verify underlying subsystem. | [#915](https://github.com/CubeB/RWE-B4/issues/915) |
+| `+makeposter` | Recognized and handled: optional `all` or `<width> <height>`, tiled off-screen world capture, `screenshots/BIGSHOT.pcx`. See `docs/MAKEPOSTER.md`. | [#915](https://github.com/CubeB/RWE-B4/issues/915) |
 
 The `+logo` row includes the colour-only and colour-plus-player forms.
 `+nometal` and `+noenergy` include both no-argument and explicit-player forms;

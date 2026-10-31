@@ -349,7 +349,19 @@ namespace rwe
             {
                 sdl->delay(static_cast<Uint32>(UnpacedFrameMilliseconds - lastFrameDurationMs));
             }
-            lastFrameStartTime = startTime;
+
+            // A capture that finished part way through this frame is the new
+            // frame-time origin, so the next update does not count its delay
+            // as elapsed game time. Never earlier than this frame's own start.
+            if (pacingResetAt)
+            {
+                lastFrameStartTime = std::max(startTime, *pacingResetAt);
+                pacingResetAt.reset();
+            }
+            else
+            {
+                lastFrameStartTime = startTime;
+            }
             frameTimes[frameTimesOffset] = lastFrameDurationMs;
             frameTimesOffset = (frameTimesOffset + 1) % 500;
         }
@@ -466,6 +478,11 @@ namespace rwe
     void SceneManager::requestExit()
     {
         requestedExit = true;
+    }
+
+    void SceneManager::requestFramePacingReset()
+    {
+        pacingResetAt = timeService->getTicks();
     }
 
     void SceneManager::renderDebugWindow()

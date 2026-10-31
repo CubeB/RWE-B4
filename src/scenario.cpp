@@ -18,6 +18,7 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -26,6 +27,8 @@
 #include <rwe/GlobalConfig.h>
 #include <rwe/PathMapping.h>
 #include <rwe/game/ScenarioDriver.h>
+#include <rwe/io/pcx/pcx.h>
+#include <rwe/scene/PosterCapture.h>
 #include <rwe/sim/SimVector.h>
 #include <rwe/util.h>
 #include <rwe/util/CrashHandler.h>
@@ -620,6 +623,53 @@ namespace
         // #906: the exact developer phrase unlocks debug; the repeat key
         // then reruns the saved `+` line and nothing when it is locked. The
         // original's key is virtual-key 0x5C -- backslash on a US layout.
+        // #915: the poster is not a viewport grab. The command has to reach the
+        // real off-screen capture path and leave a readable 24-bit PCX behind.
+        // Headless mode still builds the GL context the capture needs, so the
+        // render itself is exercised here rather than only its arithmetic.
+        rwe::registerScenario("915-makeposter-writes-a-poster", [](rwe::Scenario& s) {
+            auto posterPath = std::make_shared<fs::path>();
+            s.at(1, [posterPath](rwe::ScenarioDriver& d) {
+                auto localDataPath = rwe::getLocalDataPath();
+                d.require(localDataPath.has_value(), "there is a local data directory");
+                if (localDataPath)
+                {
+                    *posterPath = *localDataPath / "screenshots" / rwe::posterFileName();
+                    std::error_code ec;
+                    fs::remove(*posterPath, ec);
+                }
+            });
+            s.at(2, [](rwe::ScenarioDriver& d) {
+                d.key(SDLK_RETURN);
+                d.textInput("+makeposter 3200 2400");
+                d.key(SDLK_RETURN);
+            });
+            s.after(2, [posterPath](rwe::ScenarioDriver& d) {
+                d.require(!posterPath->empty(), "the poster path was resolved");
+                if (posterPath->empty())
+                {
+                    return;
+                }
+
+                std::ifstream in(*posterPath, std::ios::binary);
+                d.require(in.is_open(), "the poster file was written");
+                if (!in)
+                {
+                    return;
+                }
+
+                rwe::PcxHeader header{};
+                in.read(reinterpret_cast<char*>(&header), sizeof(header));
+                d.require(in.gcount() == static_cast<std::streamsize>(sizeof(header)), "the poster has a PCX header");
+                d.require(header.manufacturer == 10 && header.version == 5, "the poster is a version-5 PCX");
+                d.require(header.numberOfPlanes == 3 && header.bitsPerPixel == 8, "the poster is 24-bit true colour");
+                auto width = static_cast<unsigned int>(header.window.xMax) + 1u;
+                auto height = static_cast<unsigned int>(header.window.yMax) + 1u;
+                d.require(width >= 16 && height >= 16, "the poster has a real image size");
+            });
+            s.endAt(2);
+        });
+
         rwe::registerScenario("906-developer-phrase-and-repeat", [](rwe::Scenario& s) {
             auto linesBefore = std::make_shared<std::size_t>(0);
             auto unitsBefore = std::make_shared<std::size_t>(0);
