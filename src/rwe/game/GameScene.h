@@ -787,6 +787,14 @@ namespace rwe
         /** Live copies of the display settings the options pages edit. */
         bool shadowsEnabled{true};
         /**
+         * The original's feature-shadow bit (visual bit 4), under the master
+         * above: with it clear, features and scenery stop casting while units
+         * and buildings go on. The options screens have only the one Shadows
+         * button and this bit is not saved, so it is set only by `+FShadow`
+         * for the session -- see FEATURE-SHADOW-01.
+         */
+        bool featureShadowsEnabled{true};
+        /**
          * The original's second shadow bit, under the master above: with it
          * clear, buildings and scenery go on casting and mobile units do not.
          * rwe.cfg only -- see GlobalConfig for why it is not a button.

@@ -74,6 +74,8 @@ namespace rwe
             Shading,
             /** `+TShadow`: toggle mobile-unit shadows; not saved. */
             TShadow,
+            /** `+FShadow`: toggle feature/scenery shadows under the master; not saved. */
+            FShadow,
             /** `+IFace n`: 0 = left-click interface, nonzero = right-click. */
             IFace,
             /** `+NoMetal [player [amount]]`: assign a stockpile outright. */

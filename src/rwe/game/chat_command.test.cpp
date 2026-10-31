@@ -227,6 +227,8 @@ namespace rwe
         REQUIRE(parseChatCommand("+Shading")->kind == Kind::Shading);
         REQUIRE(parseChatCommand("+shading 1")->kind == Kind::Shading);
         REQUIRE(parseChatCommand("+TShadow")->kind == Kind::TShadow);
+        REQUIRE(parseChatCommand("+FShadow")->kind == Kind::FShadow);
+        REQUIRE(parseChatCommand("+fshadow")->kind == Kind::FShadow);
     }
 
     TEST_CASE("the interface command reads its argument", "[chat]")

@@ -325,6 +325,14 @@ namespace rwe
             return;
         }
 
+        if (command.kind == ChatCommand::Kind::FShadow)
+        {
+            // #907 §2.8: visual bit 4, the feature/scenery sub-bit under the
+            // master. Not saved in the original, and not here.
+            featureShadowsEnabled = !featureShadowsEnabled;
+            return;
+        }
+
         if (command.kind == ChatCommand::Kind::IFace)
         {
             // #907 §2.4: 0 selects the left-click interface; the load path
@@ -655,6 +663,7 @@ namespace rwe
             case ChatCommand::Kind::Shadow:
             case ChatCommand::Kind::Shading:
             case ChatCommand::Kind::TShadow:
+            case ChatCommand::Kind::FShadow:
             case ChatCommand::Kind::IFace:
             case ChatCommand::Kind::NoMetal:
             case ChatCommand::Kind::NoEnergy:
