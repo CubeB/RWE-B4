@@ -12,6 +12,9 @@ if(WIN32)
 endif()
 
 set(CPACK_GENERATOR "ZIP;NSIS")
+# INSTALL-UX-001: RWE has no optional install components. Dependency component
+# metadata must not turn its installer into a component-selection wizard.
+set(CPACK_MONOLITHIC_INSTALL ON)
 set(CPACK_VERBATIM_VARIABLES YES)
 set(CPACK_PACKAGE_VERSION "${RWE_GIT_DESCRIPTION}")
 set(CPACK_PACKAGE_FILE_NAME "RobotWarEngine-${RWE_GIT_DESCRIPTION}-${CMAKE_SYSTEM_NAME}-${CMAKE_BUILD_TYPE}")

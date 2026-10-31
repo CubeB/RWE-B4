@@ -69,6 +69,14 @@ underlying importer. This finding establishes the
 original-comparison classification before implementation, not implementation
 success or permission to redistribute game assets.
 
+Implementation scope clarification, 2026-10-31: suppressing RWE's empty NSIS
+component-selection page by packaging the application as one monolithic
+installation falls under INSTALL-UX-001. RWE offers no optional installation
+components; dependency component metadata is not a user-facing product choice.
+This changes the RWE wizard presentation, not game-data import semantics.
+The reference revision, static evidence and external-installer uncertainty
+above still apply; no original-installer parity is claimed.
+
 ### Verification boundaries
 
 Implementation-room verification should exercise the generated package's
