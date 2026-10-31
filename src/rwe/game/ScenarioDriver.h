@@ -194,6 +194,7 @@ namespace rwe
         bool shadowsEnabled() const;
         int shadingMode() const;
         bool vehicleShadowsEnabled() const;
+        bool featureShadowsEnabled() const;
 
         /** Whether the interface is in left-click mode (#907, `+IFace 0`). */
         bool leftClickInterfaceMode() const;

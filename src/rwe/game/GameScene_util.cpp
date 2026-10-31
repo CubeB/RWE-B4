@@ -573,6 +573,11 @@ namespace rwe
         return groundHeight >= seaLevel;
     }
 
+    bool featureShadowsAreDrawn(bool shadowsEnabled, bool featureShadowsEnabled)
+    {
+        return shadowsEnabled && featureShadowsEnabled;
+    }
+
     void drawUnitShadowMesh(
         const GameMediaDatabase& gameMediaDatabase,
         const Matrix4f& viewProjectionMatrix,

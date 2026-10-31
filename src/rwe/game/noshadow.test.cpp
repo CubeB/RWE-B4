@@ -81,6 +81,17 @@ namespace rwe
         REQUIRE_FALSE(featureCastsShadow(0_ss, 20_ss));
     }
 
+    TEST_CASE("feature shadows need both the master bit and the feature bit", "[noshadow]")
+    {
+        // FEATURE-SHADOW-01 and BT-GAME-AUDIO-OPTION-COMMANDS-FINDINGS 2.8:
+        // FeatureShadows is visual bit 4 under the master Shadows bit 2.
+        // TShadow (bit 3) gates mobile units instead and is not consulted here.
+        REQUIRE(featureShadowsAreDrawn(true, true));
+        REQUIRE_FALSE(featureShadowsAreDrawn(true, false));
+        REQUIRE_FALSE(featureShadowsAreDrawn(false, true));
+        REQUIRE_FALSE(featureShadowsAreDrawn(false, false));
+    }
+
     TEST_CASE("attachedFactoryProducts: only the product the factory is still building is attached", "[noshadow]")
     {
         // A factory product is attached to the build piece and drawn in the

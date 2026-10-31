@@ -318,6 +318,18 @@ namespace rwe
     bool featureCastsShadow(SimScalar groundHeight, SimScalar seaLevel);
 
     /**
+     * Whether a feature's shadow is drawn at all: the original's
+     * FeatureShadows bit (visual bit 4) under the master Shadows bit (bit 2).
+     *
+     * `+FShadow` writes the first and `+Shadow` the second, so feature and
+     * scenery shadows stop when either is clear while units and buildings
+     * follow the master and VehicleShadows alone. Presentation only; neither
+     * bit is saved or hashed (BT-GAME-AUDIO-OPTION-COMMANDS-FINDINGS §2.8,
+     * MAP-TEXTURE-AND-FEATURE-SHADOW-FINDINGS FEATURE-SHADOW-01).
+     */
+    bool featureShadowsAreDrawn(bool shadowsEnabled, bool featureShadowsEnabled);
+
+    /**
      * The unit's whole model as the camera sees it, finished or not, for
      * keeping a nanoframe's own shadow out of its outline.
      */

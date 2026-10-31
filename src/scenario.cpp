@@ -782,6 +782,15 @@ namespace
                 d.textInput("+tshadow");
                 d.key(SDLK_RETURN);
                 d.require(d.vehicleShadowsEnabled() != vehicleShadows, "TShadow toggles the mobile-unit bit");
+                const auto featureShadows = d.featureShadowsEnabled();
+                d.key(SDLK_RETURN);
+                d.textInput("+fshadow");
+                d.key(SDLK_RETURN);
+                d.require(d.featureShadowsEnabled() != featureShadows, "FShadow toggles the feature-scenery bit");
+                d.key(SDLK_RETURN);
+                d.textInput("+fshadow");
+                d.key(SDLK_RETURN);
+                d.require(d.featureShadowsEnabled() == featureShadows, "and a second one turns it back");
                 d.key(SDLK_RETURN);
                 d.textInput("+iface 1");
                 d.key(SDLK_RETURN);

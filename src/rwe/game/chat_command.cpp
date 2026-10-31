@@ -263,6 +263,12 @@ namespace rwe
         {
             command.kind = ChatCommand::Kind::TShadow;
         }
+        else if (word == "fshadow")
+        {
+            // #907 §2.8: visual bit 4, the feature/scenery sub-bit under
+            // Shadow; a toggle with no argument.
+            command.kind = ChatCommand::Kind::FShadow;
+        }
         else if (word == "iface")
         {
             // #907 §2.4: argument 1, absent 0; 0 is the left-click interface.

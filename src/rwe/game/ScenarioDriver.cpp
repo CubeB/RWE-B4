@@ -608,6 +608,11 @@ namespace rwe
         return scene.vehicleShadowsEnabled;
     }
 
+    bool ScenarioDriver::featureShadowsEnabled() const
+    {
+        return scene.featureShadowsEnabled;
+    }
+
     bool ScenarioDriver::leftClickInterfaceMode() const
     {
         return scene.leftClickMode();
