@@ -5,8 +5,10 @@
 #include <string>
 #include <vector>
 
+#include <rwe/io/gaf/GafArchive.h>
 #include <rwe/io/ota/ota.h>
 #include <rwe/io/tdf/tdf.h>
+#include <rwe/util/SpanStream.h>
 #include <rwe/vfs/CompositeVirtualFileSystem.h>
 
 namespace
@@ -81,6 +83,7 @@ int main(int argc, char** argv)
     std::string dataPath;
     std::string mapName = "Coast To Coast";
     unsigned int repeats = 10;
+    std::vector<std::string> gafNames;
     for (int i = 1; i < argc; ++i)
     {
         const std::string arg = argv[i];
@@ -96,9 +99,13 @@ int main(int argc, char** argv)
         {
             repeats = static_cast<unsigned int>(std::stoul(argv[++i]));
         }
+        else if (arg == "--gaf" && i + 1 < argc)
+        {
+            gafNames.emplace_back(argv[++i]);
+        }
         else
         {
-            std::cerr << "Usage: menu_lag_probe --data-path <path> [--map <name>] [--repeats <n>]\n";
+            std::cerr << "Usage: menu_lag_probe --data-path <path> [--map <name>] [--repeats <n>] [--gaf <name>]...\n";
             return 2;
         }
     }
@@ -109,6 +116,87 @@ int main(int argc, char** argv)
     }
 
     auto vfs = rwe::constructVfs(dataPath);
+
+    // What a gadget's art lookup costs when the same screen GAF is asked for
+    // one entry at a time: TextureService re-reads (and, for archive members,
+    // re-decompresses) the whole file and rebuilds its entry table for each
+    // lookup. The three figures are the parts of that repeated work.
+    for (const auto& gafName : gafNames)
+    {
+        auto bytes = vfs.readFile(gafName);
+        if (!bytes)
+        {
+            double missingMs = 0;
+            for (unsigned int i = 0; i < repeats; ++i)
+            {
+                const auto start = Clock::now();
+                auto again = vfs.readFile(gafName);
+                missingMs += milliseconds(Clock::now() - start);
+                if (again)
+                {
+                    missingMs = -1;
+                    break;
+                }
+            }
+            std::cout << "GAF name=" << gafName << " missing read_ms="
+                      << (missingMs / static_cast<double>(repeats)) << '\n';
+            continue;
+        }
+
+        double readMs = 0;
+        for (unsigned int i = 0; i < repeats; ++i)
+        {
+            const auto start = Clock::now();
+            auto again = vfs.readFile(gafName);
+            readMs += milliseconds(Clock::now() - start);
+            if (!again)
+            {
+                readMs = -1;
+                break;
+            }
+        }
+
+        double parseMs = 0;
+        std::size_t entryCount = 0;
+        std::vector<std::string> entryNames;
+        for (unsigned int i = 0; i < repeats; ++i)
+        {
+            const auto start = Clock::now();
+            rwe::SpanStream stream(bytes->data(), bytes->size());
+            rwe::GafArchive archive(&stream);
+            parseMs += milliseconds(Clock::now() - start);
+            if (i == 0)
+            {
+                entryCount = archive.entries().size();
+                for (const auto& entry : archive.entries())
+                {
+                    entryNames.push_back(entry.name);
+                }
+            }
+        }
+
+        double findMs = 0;
+        if (!entryNames.empty())
+        {
+            const auto start = Clock::now();
+            for (unsigned int i = 0; i < repeats; ++i)
+            {
+                rwe::SpanStream stream(bytes->data(), bytes->size());
+                rwe::GafArchive archive(&stream);
+                for (const auto& name : entryNames)
+                {
+                    (void)archive.findEntry(name);
+                }
+            }
+            findMs = milliseconds(Clock::now() - start);
+        }
+
+        std::cout << "GAF name=" << gafName << " bytes=" << bytes->size() << " entries=" << entryCount
+                  << " read_ms=" << (readMs / static_cast<double>(repeats))
+                  << " parse_ms=" << (parseMs / static_cast<double>(repeats))
+                  << " parse_and_find_all_ms=" << (findMs / static_cast<double>(repeats)) << '\n';
+    }
+
     std::vector<std::string> mapNames;
     for (unsigned int i = 0; i < repeats; ++i)
     {

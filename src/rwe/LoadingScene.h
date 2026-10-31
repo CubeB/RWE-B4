@@ -62,9 +62,23 @@ namespace rwe
 
         void init() override;
 
+        void update(int millisecondsElapsed) override;
+
         void render() override;
 
     private:
+        /**
+         * MLR-002: the loading presentation is drawn once before the
+         * expensive construction starts, so the skirmish screen does not sit
+         * frozen on screen through it. This is RWE's own frame scheduling --
+         * the reference establishes the loading presentation concurrent with
+         * match construction, not a mandatory order for the first frame.
+         */
+        bool loadPending{true};
+        int framesUntilLoad{1};
+
+        void loadGame();
+
         std::unique_ptr<GameScene> createGameScene(const std::string& mapName, unsigned int schemaIndex);
 
 
