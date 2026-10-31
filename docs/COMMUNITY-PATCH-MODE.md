@@ -87,6 +87,35 @@ TADR's written rule is the reference, and there is no byte-tactics comparison.
   unit". With health bars switched off there is no bar to sit below, so no
   reload bar is drawn either; RWE has no separate setting for it.
 
+## Weapon IDs above 255 (already RWE)
+
+TADR 2026.10.6 lists "weapon IDs above 255 in `Weapons/*.tdf`". Vanilla TA's
+weapon loader has a 256-record table, and an `ID=` of 256 or more indexes past
+it and corrupts memory at load; the patch extends the usable range to 0..4095.
+Unit FBIs keep naming weapons by name.
+
+RWE needs no change for this. Its weapon TDF reads the id as an `unsigned int`,
+the loader copies it unchanged into `WeaponDefinition::taWeaponId`, and weapons
+are keyed by name rather than by an id-indexed table
+(`BT-WEAPONS-WEAPON-TYPES-PARITY.md` section 1). There is no 256-entry array to
+overflow, so a mod's `ID=300` or `ID=4095` loads and plays like any other
+weapon. It is not gated on the Community Patch because there is no corruption
+or different rule to opt into: RWE has always accepted these values in both
+modes. `WeaponTdf.test.cpp` pins the parse and load for 0, 20, 255, 256, 300
+and 4095.
+
+One limit remains, and it belongs to the original's wire format rather than to
+RWE's parser. The TA `0x0d` shot packet names the weapon in the low byte of its
+first word (`docs/TA-DEMOS.md`, "`0x0d`, shot fired"), and `TaWireTape` writes
+`weaponId & 0xff` there. An ID above 255 therefore cannot be named to a TA peer
+or in a TA demo; 300 goes out as 44. RWE's own lockstep replay and network
+protocol send commands rather than per-shot packets and do not carry the id at
+all, so ordinary RWE play is unaffected. TADR's written rule says multiplayer
+and replays carry high IDs transparently but does not give the packet layout;
+RWE has no finding for a widened field, so it keeps the original's byte.
+Widening it would be a TA wire change and needs its own finding; it is not
+attempted here.
+
 ## Off-map aircraft (implemented)
 
 TADR 2026.10.6 says "off-map aircraft targetable, in tiles past the map edge",
@@ -271,7 +300,7 @@ because RWE has no setting that selects among them.
 | `TransportedExplodeAs`, `TransportedSelfDestructAs` | **done**: the two keys replace the ordinary death and self-destruct weapons for a carried unit, independently |
 | `PreviewObject3D` | planned as a build-ghost presentation key |
 | neutral units and per-player spawn units in the map OTA | **done for per-player/AI seats**: `[units]` spawns under the mode; neutral owners are skipped because RWE has no neutral slot |
-| weapon IDs above 255 | check RWE's parser first; likely already unrestricted |
+| weapon IDs above 255 | **already RWE**: the id is an `unsigned int` and weapons are keyed by name, so 0..4095 loads unchanged in both modes; only the TA `0x0d` wire carries a byte, so it cannot name an ID above 255 (see above) |
 | `nomapweaponalert` | **done**: a zero-damage, no-firer map weapon no longer raises the under-attack message or voice; RWE has no projectile alert dots to suppress |
 | `reloadbar` | later: presentation with a clear RWE hook |
 

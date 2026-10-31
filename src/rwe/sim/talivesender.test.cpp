@@ -397,6 +397,36 @@ namespace rwe
         REQUIRE(shot->rotation.z == 8192);
     }
 
+    TEST_CASE("the TA wire's 0x0d carries only a weapon ID's low byte", "[talive]")
+    {
+        // A high weapon ID is fine in RWE's definition and simulation, but the
+        // original's 0x0d names the weapon in one byte (TA-DEMOS.md, "0x0d,
+        // shot fired"), so a TA peer or a TA demo cannot be told an ID above
+        // 255. This is the format's limit, not a parser one: the definition is
+        // left at 300 and only the packet carries its low byte, 44.
+        GameSimulation sim(makeFlatTerrain(64, 64), 0u, 0, 0);
+        defineLiveWorld(sim);
+        sim.weaponDefinitions.at("LASER").taWeaponId = 300u;
+
+        auto local = addPlayer(sim, "local");
+        auto gun = sim.trySpawnCompletedUnit("GUN", local, SimVector(0_ss, 0_ss, 0_ss), std::nullopt);
+        REQUIRE(gun);
+
+        TaWireTape tape(sim, TaWireTapeSettings{8, 0, liveLoadOrder()}, std::vector<PlayerId>{local}, TaPeerIds{});
+
+        tape.shotFired(sim, *gun, 0, std::nullopt, SimVector(0_ss, 0_ss, 0_ss), SimVector(1_ss, 1_ss, 0_ss), SimVector(1_ss, 1_ss, 0_ss));
+        auto records = tape.endOfTick(sim, local);
+
+        auto it = std::find_if(records.unitPass.begin(), records.unitPass.end(), [](const TadBytes& s) {
+            return !s.empty() && static_cast<TadSubPacketCode>(s[0]) == TadSubPacketCode::WeaponFired;
+        });
+        REQUIRE(it != records.unitPass.end());
+        auto shot = tadDecodeShot(*it);
+        REQUIRE(shot);
+        REQUIRE(shot->rotation.x == 44);
+        CHECK(sim.weaponDefinitions.at("LASER").taWeaponId == 300u);
+    }
+
     TEST_CASE("a waypoint entry leads with the corner the unit has just left", "[talive]")
     {
         // ta-rwe-test-10.pcap: a real TA sends a new entry as its unit reaches
