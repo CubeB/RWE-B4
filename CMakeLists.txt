@@ -871,6 +871,8 @@ src/rwe/net/EndpointFamily.h
     src/rwe/sim/UnitState_util.cpp
     src/rwe/sim/UnitState_util.h
     src/rwe/sim/UnitWeapon.h
+    src/rwe/sim/Veterancy.cpp
+    src/rwe/sim/Veterancy.h
     src/rwe/sim/WeaponDefinition.cpp
     src/rwe/sim/WeaponDefinition.h
     src/rwe/sim/cob.cpp
@@ -1387,6 +1389,7 @@ set(TEST_FILES
     src/rwe/sim/SimAngle.test.cpp
     src/rwe/sim/SimVector.test.cpp
     src/rwe/sim/UnitBehaviorService_air.test.cpp
+    src/rwe/sim/veterancy.test.cpp
     src/rwe/sim/autoreclaim.test.cpp
     src/rwe/sim/reclaim.test.cpp
     src/rwe/sim/repair.test.cpp

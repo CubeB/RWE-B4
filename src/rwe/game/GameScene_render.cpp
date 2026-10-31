@@ -423,12 +423,14 @@ namespace rwe
                     chromeUiRenderService.drawText(rect.x1, extraBottom + rect.y1, text, *guiFont, Color(255, 71, 0));
                 }
 
-                // Kills, and Veteran from the fifth kill on. There is no
-                // rectangle for this in SIDEDATA.TDF: 0x46B2D6 takes the
-                // damage bar's own left edge and its bottom plus two, so the
-                // line hangs off the bar it belongs to. Colour is interface
-                // slot 0x0F, which resolves to white.
-                if (auto caption = killsCaption(unit.kills); !caption.empty())
+                // Kills, and Veteran from the unit's first veterancy level on.
+                // There is no rectangle for this in SIDEDATA.TDF: 0x46B2D6
+                // takes the damage bar's own left edge and its bottom plus
+                // two, so the line hangs off the bar it belongs to. Colour is
+                // interface slot 0x0F, which resolves to white. The threshold
+                // is the unit's own under the Community Patch (#934).
+                auto veteran = veterancyLevel(veterancyRules(unitDefinition.veterancy, simulation.communityPatchMode), unit.kills) > 0;
+                if (auto caption = killsCaption(unit.kills, veteran); !caption.empty())
                 {
                     const auto& bar = localSideData.damageBar.toDiscreteRect();
                     chromeUiRenderService.drawText(
@@ -2420,7 +2422,8 @@ namespace rwe
                             simulation.weaponDefinitions,
                             unit.hitPoints,
                             unitDefinition.maxHitPoints,
-                            unit.kills))
+                            unit.kills,
+                            veterancyRules(unitDefinition.veterancy, simulation.communityPatchMode)))
                     {
                         worldUiRenderService.drawReloadBar(
                             uiPos.x,

@@ -180,7 +180,8 @@ namespace rwe
             SimVector(3_ss, 0_ss, 0_ss),
             SimScalar(300.0f / 30.0f),
             false,
-            6);
+            6,
+            defaultVeterancy());
 
         REQUIRE(lead.x == simScalarFromFixed(4718520));
         REQUIRE(lead.y == 0_ss);
@@ -196,7 +197,8 @@ namespace rwe
                 SimVector(2_ss, 0_ss, 0_ss),
                 SimScalar(300.0f / 30.0f),
                 false,
-                kills);
+                kills,
+                defaultVeterancy());
         };
 
         REQUIRE(leadAt(0).x == 0_ss);
@@ -213,10 +215,10 @@ namespace rwe
         const SimVector spot(0_ss, 0_ss, 300_ss);
         const SimVector velocity(2_ss, 0_ss, 0_ss);
 
-        auto cruise = computeAimLead(origin, spot, velocity, SimScalar(10.0f), true, 20);
+        auto cruise = computeAimLead(origin, spot, velocity, SimScalar(10.0f), true, 20, defaultVeterancy());
         REQUIRE(cruise.x == 0_ss);
 
-        auto bomb = computeAimLead(origin, spot, velocity, 0_ss, false, 20);
+        auto bomb = computeAimLead(origin, spot, velocity, 0_ss, false, 20, defaultVeterancy());
         REQUIRE(bomb.x == 0_ss);
     }
 
@@ -229,7 +231,8 @@ namespace rwe
             SimVector(0_ss, -2_ss, 1_ss),
             SimScalar(300.0f / 30.0f),
             false,
-            10);
+            10,
+            defaultVeterancy());
 
         REQUIRE(lead.y == simScalarFromFixed(-2 * 1572840));
         REQUIRE(lead.z == simScalarFromFixed(1572840));

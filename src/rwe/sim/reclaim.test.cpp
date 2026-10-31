@@ -313,21 +313,21 @@ namespace rwe
         // trunc(workerTime * ((kills + 5) / 5) * maxDamage * 15 / (300 * max(buildCostMetal, 10))), at least 1.
         // A 300-workertime builder on a 1000-hit-point, 150-metal unit: 100 a
         // bite, ten bites, 160 ticks.
-        REQUIRE(computeUnitReclaimStep(300u, 0u, 1000u, Metal(150.0f)) == 100u);
+        REQUIRE(computeUnitReclaimStep(300u, 0u, 1000u, Metal(150.0f), defaultVeterancy()) == 100u);
 
         // Veterancy is integer fifths: four kills change nothing, five double it.
-        REQUIRE(computeUnitReclaimStep(300u, 4u, 1000u, Metal(150.0f)) == 100u);
-        REQUIRE(computeUnitReclaimStep(300u, 5u, 1000u, Metal(150.0f)) == 200u);
+        REQUIRE(computeUnitReclaimStep(300u, 4u, 1000u, Metal(150.0f), defaultVeterancy()) == 100u);
+        REQUIRE(computeUnitReclaimStep(300u, 5u, 1000u, Metal(150.0f), defaultVeterancy()) == 200u);
 
         // The cost is floored at ten, so a free unit is not undone in one bite.
-        REQUIRE(computeUnitReclaimStep(300u, 0u, 100u, Metal(0.0f)) == 150u);
+        REQUIRE(computeUnitReclaimStep(300u, 0u, 100u, Metal(0.0f), defaultVeterancy()) == 150u);
 
         // And a bite is never nothing.
-        REQUIRE(computeUnitReclaimStep(1u, 0u, 1u, Metal(10000.0f)) == 1u);
+        REQUIRE(computeUnitReclaimStep(1u, 0u, 1u, Metal(10000.0f), defaultVeterancy()) == 1u);
 
         // MaxDamage cancels out of the total: whatever the hit points, the
         // unit lasts 300 * buildCostMetal / workerTime ticks of bites.
-        REQUIRE(computeUnitReclaimStep(300u, 0u, 4000u, Metal(150.0f)) == 400u);
+        REQUIRE(computeUnitReclaimStep(300u, 0u, 4000u, Metal(150.0f), defaultVeterancy()) == 400u);
     }
 
     TEST_CASE("computeFeatureReclaimWork", "[reclaim]")

@@ -12,15 +12,27 @@ namespace rwe
     static const SimAngle BerthaAccuracy(500);
     static const SimAngle IntimidatorAccuracy(1000);
 
+    namespace
+    {
+        /**
+         * The original's rules. The per-unit cases live in
+         * veterancy.test.cpp; these pin the default arithmetic.
+         */
+        SimAngle originalCone(SimAngle accuracy, unsigned int health, unsigned int maxHealth, unsigned int kills)
+        {
+            return computeAccuracyCone(accuracy, health, maxHealth, kills, defaultVeterancy());
+        }
+    }
+
     TEST_CASE("computeAccuracyCone: an undamaged unit gets exactly its weapon's accuracy", "[accuracy]")
     {
         // The health term is (health << 11) / maxdamage, which is 0x800 on the
         // nose at full health, and the original adds 0x800 straight back. So a
         // fresh shooter fires the cone the TDF asked for and nothing else --
         // this is the case that pins the whole formula down.
-        REQUIRE(computeAccuracyCone(VulcanAccuracy, 1400, 1400, 0) == VulcanAccuracy);
-        REQUIRE(computeAccuracyCone(BerthaAccuracy, 1800, 1800, 0) == BerthaAccuracy);
-        REQUIRE(computeAccuracyCone(IntimidatorAccuracy, 1900, 1900, 0) == IntimidatorAccuracy);
+        REQUIRE(originalCone(VulcanAccuracy, 1400, 1400, 0) == VulcanAccuracy);
+        REQUIRE(originalCone(BerthaAccuracy, 1800, 1800, 0) == BerthaAccuracy);
+        REQUIRE(originalCone(IntimidatorAccuracy, 1900, 1900, 0) == IntimidatorAccuracy);
     }
 
     TEST_CASE("computeAccuracyCone: a hurt unit shoots wider", "[accuracy]")
@@ -28,14 +40,14 @@ namespace rwe
         // Half health leaves half of the 0x800 behind, so the cone opens by
         // 1024. A Vulcan on 700 of 1400 goes from 800 to 1824, which is a bit
         // over ten degrees of spread.
-        REQUIRE(computeAccuracyCone(VulcanAccuracy, 700, 1400, 0) == SimAngle(1824));
+        REQUIRE(originalCone(VulcanAccuracy, 700, 1400, 0) == SimAngle(1824));
 
         // A quarter health leaves three quarters of it: 800 + 2048 - 512.
-        REQUIRE(computeAccuracyCone(VulcanAccuracy, 350, 1400, 0) == SimAngle(2336));
+        REQUIRE(originalCone(VulcanAccuracy, 350, 1400, 0) == SimAngle(2336));
 
         // All but dead is the worst the original can do: the whole 0x800,
         // an eighth of a turn, on top of whatever the weapon asked for.
-        REQUIRE(computeAccuracyCone(VulcanAccuracy, 0, 1400, 0) == SimAngle(800 + 0x800));
+        REQUIRE(originalCone(VulcanAccuracy, 0, 1400, 0) == SimAngle(800 + 0x800));
     }
 
     TEST_CASE("computeAccuracyCone: kills tighten the cone, but only past twenty-four", "[accuracy]")
@@ -47,23 +59,23 @@ namespace rwe
         // which is 1/12.
         for (unsigned int kills = 0; kills < 24; ++kills)
         {
-            REQUIRE(computeAccuracyCone(VulcanAccuracy, 1400, 1400, kills) == VulcanAccuracy);
+            REQUIRE(originalCone(VulcanAccuracy, 1400, 1400, kills) == VulcanAccuracy);
         }
 
-        REQUIRE(computeAccuracyCone(VulcanAccuracy, 1400, 1400, 24) == SimAngle(400));
-        REQUIRE(computeAccuracyCone(VulcanAccuracy, 1400, 1400, 36) == SimAngle(266));
-        REQUIRE(computeAccuracyCone(VulcanAccuracy, 1400, 1400, 120) == SimAngle(80));
+        REQUIRE(originalCone(VulcanAccuracy, 1400, 1400, 24) == SimAngle(400));
+        REQUIRE(originalCone(VulcanAccuracy, 1400, 1400, 36) == SimAngle(266));
+        REQUIRE(originalCone(VulcanAccuracy, 1400, 1400, 120) == SimAngle(80));
 
         // It is an integer divide with no floor under it, so a preposterous
         // kill count really does close the cone completely and the weapon
         // stops straying at all. Nothing in a game ever gets there, but it is
         // what the original's idiv does and we match it rather than clamping.
-        REQUIRE(computeAccuracyCone(VulcanAccuracy, 1400, 1400, 30000) == SimAngle(0));
+        REQUIRE(originalCone(VulcanAccuracy, 1400, 1400, 30000) == SimAngle(0));
 
         // And the count really is taken as a word: 65548 kills is 12 after the
         // truncation, which divides by exactly one and so does nothing, where
         // an untruncated count would have divided by 5462.
-        REQUIRE(computeAccuracyCone(VulcanAccuracy, 1400, 1400, 65548) == VulcanAccuracy);
+        REQUIRE(originalCone(VulcanAccuracy, 1400, 1400, 65548) == VulcanAccuracy);
     }
 
     TEST_CASE("computeAccuracyCone: damage and veterancy compose the way the original composes them", "[accuracy]")
@@ -71,7 +83,7 @@ namespace rwe
         // The health term goes on first and the divide second, so a hurt
         // veteran is not the same as a healthy one: 800 + 1024 = 1824, then
         // divided by three.
-        REQUIRE(computeAccuracyCone(VulcanAccuracy, 700, 1400, 36) == SimAngle(1824 / 3));
+        REQUIRE(originalCone(VulcanAccuracy, 700, 1400, 36) == SimAngle(1824 / 3));
     }
 
     TEST_CASE("computeAccuracyCone: a perfect weapon on a damaged unit still strays", "[accuracy]")
@@ -80,14 +92,14 @@ namespace rwe
         // term is added regardless, so even a perfect weapon spreads once its
         // mount has been shot up. That falls out of the original's arithmetic
         // rather than being a decision of ours.
-        REQUIRE(computeAccuracyCone(SimAngle(0), 1000, 1000, 0) == SimAngle(0));
-        REQUIRE(computeAccuracyCone(SimAngle(0), 500, 1000, 0) == SimAngle(1024));
+        REQUIRE(originalCone(SimAngle(0), 1000, 1000, 0) == SimAngle(0));
+        REQUIRE(originalCone(SimAngle(0), 500, 1000, 0) == SimAngle(1024));
 
         // This is the case with the widest reach, because the great majority
         // of weapons in the game leave the key at zero: an undamaged one is
         // still perfect, so nothing changes until something has been shot.
-        REQUIRE(computeAccuracyCone(SimAngle(0), 999, 1000, 0) != SimAngle(0));
-        REQUIRE(computeAccuracyCone(SimAngle(0), 1, 1000, 0) == SimAngle(2046));
+        REQUIRE(originalCone(SimAngle(0), 999, 1000, 0) != SimAngle(0));
+        REQUIRE(originalCone(SimAngle(0), 1, 1000, 0) == SimAngle(2046));
     }
 
     TEST_CASE("weaponAimScatters: only a weapon on a turret strays", "[accuracy]")
@@ -199,7 +211,7 @@ namespace rwe
         // accuracy 800, so the heading error alone is uniform on +/-400 of
         // 65536 -- a little under 2.2 degrees -- and at that range it throws
         // the fall of shot well outside the weapon's own 100-unit blast.
-        auto cone = computeAccuracyCone(VulcanAccuracy, 1400, 1400, 0);
+        auto cone = originalCone(VulcanAccuracy, 1400, 1400, 0);
         auto halfCone = SimAngle(cone.value / 2u);
 
         SimVector direction(0_ss, 0_ss, 1_ss);

@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rwe/game/GameScene_util.h>
+#include <rwe/sim/Veterancy.h>
 
 namespace rwe
 {
@@ -91,24 +92,39 @@ namespace rwe
         // 0x46B2C8 compares the kill count with zero and jumps over the whole
         // block, so a unit that has killed nothing shows no line rather than
         // a zero.
-        REQUIRE(killsCaption(0).empty());
+        REQUIRE(killsCaption(0, false).empty());
     }
 
     TEST_CASE("killsCaption: singular at one, plural after", "[infopanel]")
     {
-        REQUIRE(killsCaption(1) == "1 kill");
-        REQUIRE(killsCaption(2) == "2 kills");
-        REQUIRE(killsCaption(4) == "4 kills");
+        REQUIRE(killsCaption(1, false) == "1 kill");
+        REQUIRE(killsCaption(2, false) == "2 kills");
+        REQUIRE(killsCaption(4, false) == "4 kills");
     }
 
     TEST_CASE("killsCaption: Veteran from the fifth kill", "[infopanel]")
     {
         // The comparison is jbe against 4 at 0x46B30D: four kills take the
         // plain "%d %s", five take "%d %s - %s" with Veteran in the third
-        // slot. There is no other veterancy display in the binary.
-        REQUIRE(killsCaption(4) == "4 kills");
-        REQUIRE(killsCaption(5) == "5 kills - Veteran");
-        REQUIRE(killsCaption(30) == "30 kills - Veteran");
+        // slot. There is no other veterancy display in the binary. The caller
+        // decides when the unit has reached its first level, which is the
+        // fifth kill under the original's thresholds.
+        REQUIRE(killsCaption(4, false) == "4 kills");
+        REQUIRE(killsCaption(5, true) == "5 kills - Veteran");
+        REQUIRE(killsCaption(30, true) == "30 kills - Veteran");
+    }
+
+    TEST_CASE("killsCaption: the Veteran suffix follows the unit's first threshold", "[infopanel][veterancy]")
+    {
+        // Under the Community Patch a unit's own VeterancyThresholds decide
+        // where level 1 starts; the wording stays the original's.
+        VeterancyDefinition custom{};
+        REQUIRE(parseVeterancyThresholds("6 12 18 24 30", custom));
+        auto veteranAt = [&](unsigned int kills) {
+            return killsCaption(kills, veterancyLevel(custom, kills) > 0);
+        };
+        REQUIRE(veteranAt(5) == "5 kills");
+        REQUIRE(veteranAt(6) == "6 kills - Veteran");
     }
 
     TEST_CASE("unitOrderTargetUnit: an idle unit points at nothing", "[infopanel]")

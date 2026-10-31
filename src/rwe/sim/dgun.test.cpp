@@ -790,26 +790,26 @@ namespace rwe
 
         SECTION("an undamaged rookie gets the TDF number back untouched")
         {
-            REQUIRE(computeReloadTicks(reload, commanderHitPoints, commanderHitPoints, 0) == GameTime(36));
+            REQUIRE(computeReloadTicks(reload, commanderHitPoints, commanderHitPoints, 0, defaultVeterancy()) == GameTime(36));
         }
 
         SECTION("damage slows it down, to 120% at the point of death")
         {
             // Half health: (120 - 10) * 36 / 100 = 39.
-            REQUIRE(computeReloadTicks(reload, 1500, commanderHitPoints, 0) == GameTime(39));
+            REQUIRE(computeReloadTicks(reload, 1500, commanderHitPoints, 0, defaultVeterancy()) == GameTime(39));
             // Nothing left: 120 * 36 / 100 = 43, which is 1.43 seconds.
-            REQUIRE(computeReloadTicks(reload, 0, commanderHitPoints, 0) == GameTime(43));
+            REQUIRE(computeReloadTicks(reload, 0, commanderHitPoints, 0, defaultVeterancy()) == GameTime(43));
         }
 
         SECTION("kills speed it up, in tiers of five, and stop at five tiers")
         {
             // Four kills is still tier zero.
-            REQUIRE(computeReloadTicks(reload, commanderHitPoints, commanderHitPoints, 4) == GameTime(36));
+            REQUIRE(computeReloadTicks(reload, commanderHitPoints, commanderHitPoints, 4, defaultVeterancy()) == GameTime(36));
             // Five is tier one: (100 - 6) * 36 / 100 = 33.
-            REQUIRE(computeReloadTicks(reload, commanderHitPoints, commanderHitPoints, 5) == GameTime(33));
+            REQUIRE(computeReloadTicks(reload, commanderHitPoints, commanderHitPoints, 5, defaultVeterancy()) == GameTime(33));
             // Twenty-five is tier five and the end of it: 70 * 36 / 100 = 25.
-            REQUIRE(computeReloadTicks(reload, commanderHitPoints, commanderHitPoints, 25) == GameTime(25));
-            REQUIRE(computeReloadTicks(reload, commanderHitPoints, commanderHitPoints, 100) == GameTime(25));
+            REQUIRE(computeReloadTicks(reload, commanderHitPoints, commanderHitPoints, 25, defaultVeterancy()) == GameTime(25));
+            REQUIRE(computeReloadTicks(reload, commanderHitPoints, commanderHitPoints, 100, defaultVeterancy()) == GameTime(25));
         }
 
         SECTION("and the weapon really waits that long")

@@ -119,7 +119,9 @@ namespace rwe
             {
                 continue;
             }
-            const auto damage = (25u - std::min(5u, unit.kills / 5)) * 30000u * 4u / 100u;
+            const auto& definition = unitDefinitions.at(unit.unitType);
+            const auto tier = std::min<unsigned int>(25u, veterancyLevel(veterancyRules(definition.veterancy, communityPatchMode), unit.kills));
+            const auto damage = (25u - tier) * 30000u * 4u / 100u;
             if (unit.hitPoints > damage)
             {
                 unit.hitPoints -= damage;

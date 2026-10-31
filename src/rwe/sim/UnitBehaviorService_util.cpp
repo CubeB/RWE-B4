@@ -89,7 +89,7 @@ namespace rwe
         }
     }
 
-    SimAngle computeAccuracyCone(SimAngle accuracy, unsigned int health, unsigned int maxHealth, unsigned int kills)
+    SimAngle computeAccuracyCone(SimAngle accuracy, unsigned int health, unsigned int maxHealth, unsigned int kills, const VeterancyDefinition& veterancy)
     {
         // A hurt unit shoots worse and a blooded one shoots better, and the
         // original does both by widening or narrowing this one number before
@@ -120,10 +120,14 @@ namespace rwe
         // `/3` until 2026-09-24, which put the first effect at six kills
         // instead of twenty-four. The count is zero-extended from a word, so
         // it is (uint16)kills.
-        auto veterancy = static_cast<uint16_t>(kills) / 12u;
-        if (veterancy > 1)
+        //
+        // Community Patch (#934), TADR `VeterancyAccuracyBuffRate`: the rate
+        // is the unit's, and zero switches the buff off. The default rate of
+        // twelve reproduces the original exactly, including the `> 1` test.
+        auto divisor = veterancyAccuracyDivisor(veterancy, kills);
+        if (divisor > 1)
         {
-            cone = static_cast<uint16_t>(cone / veterancy);
+            cone = static_cast<uint16_t>(cone / divisor);
         }
 
         return SimAngle(cone);
@@ -163,14 +167,20 @@ namespace rwe
         const SimVector& targetVelocity,
         SimScalar weaponVelocityPerTick,
         bool cruise,
-        unsigned int shooterKills)
+        unsigned int shooterKills,
+        const VeterancyDefinition& veterancy)
     {
         // TOTALA-EXE-WEAPONS.md S:126, 0x48A1E0. A step, not a ramp: the
-        // shooter's kill count read as a word has to be six or more, and the
-        // weapon has to be moving at all. Bombs (no weaponvelocity) and the
-        // cruise missiles never lead.
+        // shooter's kill count read as a word has to be past the first
+        // veterancy threshold, and the weapon has to be moving at all. Bombs
+        // (no weaponvelocity) and the cruise missiles never lead.
+        //
+        // The original's test is `> 5`, which is the default first threshold;
+        // TADR's aim hook keeps the comparison and swaps in the unit's own
+        // first threshold, so the default is bit-identical.
         const SimVector none(0_ss, 0_ss, 0_ss);
-        if (static_cast<uint16_t>(shooterKills) <= 5 || cruise)
+        auto firstThreshold = veterancy.thresholdCount > 0 ? veterancy.thresholds[0] : 5u;
+        if (static_cast<uint16_t>(shooterKills) <= static_cast<uint16_t>(firstThreshold) || cruise)
         {
             return none;
         }
@@ -213,7 +223,7 @@ namespace rwe
         return SimVector(lead(targetVelocity.x), lead(targetVelocity.y), lead(targetVelocity.z));
     }
 
-    GameTime computeReloadTicks(SimScalar reloadTime, unsigned int health, unsigned int maxHealth, unsigned int kills)
+    GameTime computeReloadTicks(SimScalar reloadTime, unsigned int health, unsigned int maxHealth, unsigned int kills, const VeterancyDefinition& veterancy)
     {
         // The branch a non-stockpiled weapon takes at 0x49E468. RWE used the
         // flat TDF number; the original scales it twice over, once by how hurt
@@ -229,12 +239,17 @@ namespace rwe
         // twenty-five kills reloads in 70% of the time and a unit at the point
         // of death takes 120%.
         //
+        // Community Patch (#934): the tier is the unit's, capped at sixteen
+        // levels or its threshold count, whichever is lower (TADR's stated
+        // limit for reload time). The default five thresholds give the
+        // original's min(5, kills/5) exactly.
+        //
         // The commander's disintegrator is the case worth checking by hand:
         // reloadtime 1.2 is 36 ticks, and a healthy commander gets exactly 36
         // back -- the 1.2 seconds the TDF asked for.
         auto baseTicks = static_cast<int64_t>(deltaSecondsToTicks(reloadTime).value);
 
-        auto tier = std::min<int64_t>(5, kills / 5);
+        auto tier = std::min<int64_t>(16, veterancyLevel(veterancy, kills));
         auto veteranTicks = ((100 - (6 * tier)) * baseTicks) / 100;
 
         // maxdamage of zero is not something the shipped data does, but it is

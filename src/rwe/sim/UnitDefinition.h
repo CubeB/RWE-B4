@@ -9,6 +9,7 @@
 #include <rwe/sim/SimScalar.h>
 #include <rwe/sim/UnitFireOrders.h>
 #include <rwe/sim/UnitMovementOrders.h>
+#include <rwe/sim/Veterancy.h>
 #include <string>
 #include <variant>
 
@@ -94,6 +95,16 @@ namespace rwe
          * ordinary model.
          */
         std::string previewObjectName;
+
+        /**
+         * Community Patch (#934), TADR `VeterancyThresholds` and
+         * `VeterancyAccuracyBuffRate`: how this unit earns veterancy levels
+         * and how fast its accuracy improves with kills. Parsed whatever the
+         * mode and read only under the ruleset; a unit with no keys carries
+         * the original's 5 10 15 20 25 and 12, so its arithmetic is
+         * unchanged in both modes.
+         */
+        VeterancyDefinition veterancy{};
 
         MovementCollisionInfo movementCollisionInfo;
 

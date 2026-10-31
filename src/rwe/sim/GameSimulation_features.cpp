@@ -130,15 +130,19 @@ namespace rwe
         return addFeature(std::move(featureInstance));
     }
 
-    unsigned int computeUnitReclaimStep(unsigned int workerTime, unsigned int kills, unsigned int targetMaxHitPoints, const Metal& targetBuildCostMetal)
+    unsigned int computeUnitReclaimStep(unsigned int workerTime, unsigned int kills, unsigned int targetMaxHitPoints, const Metal& targetBuildCostMetal, const VeterancyDefinition& veterancy)
     {
         // 0x438650: the veterancy factor (kills + 5) / 5 is an integer
         // division, the product is integer, and only the final scaling by
         // 300 and the build cost is done in floating point before the
         // truncation. The cost is floored at ten so a free unit does not
         // divide by nothing.
-        auto veterancy = (kills + 5u) / 5u;
-        auto product = static_cast<double>(workerTime) * static_cast<double>(veterancy) * static_cast<double>(targetMaxHitPoints) * 15.0;
+        //
+        // (kills + 5) / 5 is 1 + kills / 5, so the factor is one plus the
+        // unbounded level. Under the Community Patch the level is the
+        // reclaimer's own (#934); the default list gives kills / 5 back.
+        auto factor = static_cast<std::uint64_t>(1) + veterancyLevelUnbounded(veterancy, kills);
+        auto product = static_cast<double>(workerTime) * static_cast<double>(factor) * static_cast<double>(targetMaxHitPoints) * 15.0;
         auto cost = std::max(targetBuildCostMetal.value, 10.0f);
         auto step = static_cast<unsigned int>(product / (300.0 * static_cast<double>(cost)));
         return std::max(1u, step);

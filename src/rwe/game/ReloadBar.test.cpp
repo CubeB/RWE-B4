@@ -43,7 +43,7 @@ namespace rwe
         {
             weapons[2]->readyTime = GameTime(0);
 
-            const auto selected = chooseReloadBarWeapon(weapons, definitions, 100, 100, 0);
+            const auto selected = chooseReloadBarWeapon(weapons, definitions, 100, 100, 0, defaultVeterancy());
             REQUIRE(selected);
             CHECK(selected->weaponIndex == 2);
             CHECK(selected->reloadTicks == GameTime(150));
@@ -55,7 +55,7 @@ namespace rwe
             weapons[2]->weaponType = "UNTAGGED";
             definitions.at("FAST").reloadBar = false;
 
-            CHECK_FALSE(chooseReloadBarWeapon(weapons, definitions, 100, 100, 0));
+            CHECK_FALSE(chooseReloadBarWeapon(weapons, definitions, 100, 100, 0, defaultVeterancy()));
         }
 
         SECTION("the stored reload includes damage and veterancy scaling")
@@ -63,7 +63,7 @@ namespace rwe
             weapons[2]->readyTime = GameTime(400);
 
             // 150 base ticks, at half health (x110%) and 25 kills (x70%).
-            const auto selected = chooseReloadBarWeapon(weapons, definitions, 100, 200, 25);
+            const auto selected = chooseReloadBarWeapon(weapons, definitions, 100, 200, 25, defaultVeterancy());
             REQUIRE(selected);
             CHECK(selected->weaponIndex == 2);
             CHECK(selected->reloadTicks == GameTime(115));
@@ -73,7 +73,7 @@ namespace rwe
         {
             weapons[2]->weaponType = "MISSING";
 
-            const auto selected = chooseReloadBarWeapon(weapons, definitions, 100, 100, 0);
+            const auto selected = chooseReloadBarWeapon(weapons, definitions, 100, 100, 0, defaultVeterancy());
             REQUIRE(selected);
             CHECK(selected->weaponIndex == 0);
         }

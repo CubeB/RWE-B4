@@ -117,9 +117,14 @@ namespace rwe
      * The damage one sixteen-tick bite takes out of a unit being reclaimed,
      * 0x438650(reclaimer, target, 15):
      *
-     *   trunc(workerTime * ((kills + 5) / 5) * maxDamage * 15 / (300 * max(buildCostMetal, 10)))
+     *   trunc(workerTime * (1 + level) * maxDamage * 15 / (300 * max(buildCostMetal, 10)))
      *
-     * with the veterancy factor in integer arithmetic and never less than one.
+     * where `level` is the reclaimer's veterancy level: `kills / 5` for the
+     * original, and the unit's own thresholds under the Community Patch.
+     * The factor is `1 + level` where the level is unbounded -- the original's
+     * `(kills + 5) / 5`, which is `1 + kills / 5`; under the Community Patch
+     * (#934) the level follows the unit's own `VeterancyThresholds`, with
+     * TADR's linear extrapolation past the last one.
      * Everything but the target's hit points cancels out of the total, so a
      * unit is reclaimed in 320 * buildCostMetal / (workerTime * veterancy)
      * ticks whatever its MaxDamage: ten and two-thirds seconds per
@@ -127,7 +132,7 @@ namespace rwe
      * every sixteen (the handler sleeps two ticks a pass and counts to
      * fifteen), so the real rate is a sixteenth slower than the nominal 300.
      */
-    unsigned int computeUnitReclaimStep(unsigned int workerTime, unsigned int kills, unsigned int targetMaxHitPoints, const Metal& targetBuildCostMetal);
+    unsigned int computeUnitReclaimStep(unsigned int workerTime, unsigned int kills, unsigned int targetMaxHitPoints, const Metal& targetBuildCostMetal, const VeterancyDefinition& veterancy);
 
     /**
      * The direction a missile with this attitude is pointing. TA builds its
@@ -910,11 +915,14 @@ namespace rwe
          *     t  = trunc(BuildCostEnergy * 0.015 + BuildCostMetal * 3/14 + 150)
          *     t  = min(t, 1800)
          *     t  = t * (hitPoints + maxHitPoints) / (2 * maxHitPoints)
-         *     t  = t * (kills/5 + 10) / 10
+         *     t  = t * (level + 10) / 10
          *
-         * so a damaged unit changes hands faster (down to half the time at
-         * death's door) and a veteran one slower (+10% per five kills, with no
-         * ceiling -- unlike the damage tiers, which stop at five). Note what is
+         * where `level` is the target's unbounded veterancy level: `kills / 5`
+         * for the original, and its own `VeterancyThresholds` under the
+         * Community Patch (#934), extrapolated past the last one. So a
+         * damaged unit changes hands faster (down to half the time at death's
+         * door) and a veteran one slower (+10% per level, with no ceiling --
+         * unlike the damage tiers, which stop at five). Note what is
          * *not* in it: the captor's `workertime`. Capture runs at one tick of
          * progress per tick for everybody. See TOTALA-EXE.md §96.
          */

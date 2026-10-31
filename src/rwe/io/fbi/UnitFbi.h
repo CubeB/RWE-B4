@@ -1,5 +1,6 @@
 #pragma once
 
+#include <rwe/sim/Veterancy.h>
 #include <string>
 
 namespace rwe
@@ -15,6 +16,15 @@ namespace rwe
          * Empty means the ordinary Objectname is used.
          */
         std::string previewObjectName;
+
+        /**
+         * Community Patch (#934), TADR `VeterancyThresholds` and
+         * `VeterancyAccuracyBuffRate`: how this unit earns its veterancy
+         * levels and how fast its accuracy improves with kills. Parsed
+         * whatever the mode; honoured only under the ruleset. Defaults are
+         * the original's 5 10 15 20 25 and 12.
+         */
+        VeterancyDefinition veterancy{};
 
         std::string soundCategory;
         std::string movementClass;

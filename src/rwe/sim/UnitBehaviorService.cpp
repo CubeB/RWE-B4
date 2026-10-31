@@ -1352,7 +1352,7 @@ namespace rwe
                         {
                             cruise = selfPropelled->cruise;
                         }
-                        *targetPosition = *targetPosition + computeAimLead(unit.position, *targetPosition, targetVelocity, weaponDefinition.velocity, cruise, unit.kills);
+                        *targetPosition = *targetPosition + computeAimLead(unit.position, *targetPosition, targetVelocity, weaponDefinition.velocity, cruise, unit.kills, veterancyRules(sim->unitDefinitions.at(unit.unitType).veterancy, sim->communityPatchMode));
                     }
                 }
             }
@@ -1768,7 +1768,7 @@ namespace rwe
             // which is why this is not as drastic as it sounds -- nothing
             // changes for an undamaged unit.
             const auto& unitDefinition = sim->unitDefinitions.at(unit.unitType);
-            auto cone = computeAccuracyCone(weaponDefinition.accuracy, unit.hitPoints, unitDefinition.maxHitPoints, unit.kills);
+            auto cone = computeAccuracyCone(weaponDefinition.accuracy, unit.hitPoints, unitDefinition.maxHitPoints, unit.kills, veterancyRules(unitDefinition.veterancy, sim->communityPatchMode));
             if (cone != SimAngle(0))
             {
                 // Uniform on [-cone/2, cone/2), drawn twice over, exactly as
@@ -1897,7 +1897,7 @@ namespace rwe
                 // gets exactly its `reloadtime` back, so nothing changes for
                 // the ordinary case.
                 const auto& shooterDefinition = sim->unitDefinitions.at(unit.unitType);
-                weapon->readyTime = gameTime + computeReloadTicks(weaponDefinition.reloadTime, unit.hitPoints, shooterDefinition.maxHitPoints, unit.kills);
+                weapon->readyTime = gameTime + computeReloadTicks(weaponDefinition.reloadTime, unit.hitPoints, shooterDefinition.maxHitPoints, unit.kills, veterancyRules(shooterDefinition.veterancy, sim->communityPatchMode));
             }
         }
 
@@ -7175,7 +7175,7 @@ namespace rwe
                         reclaimingState.stepCounter = 0;
 
                         const auto& targetDefinition = sim->unitDefinitions.at(targetRef->get().unitType);
-                        auto damage = computeUnitReclaimStep(unitInfo.definition->workerTime, unitInfo.state->kills, targetDefinition.maxHitPoints, targetDefinition.buildCostMetal);
+                        auto damage = computeUnitReclaimStep(unitInfo.definition->workerTime, unitInfo.state->kills, targetDefinition.maxHitPoints, targetDefinition.buildCostMetal, veterancyRules(unitInfo.definition->veterancy, sim->communityPatchMode));
                         auto finished = sim->reclaimUnitStep(targetUnitId, unitInfo.state->owner, damage);
                         if (finished)
                         {

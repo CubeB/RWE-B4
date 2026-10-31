@@ -2403,7 +2403,7 @@ namespace rwe
         return !definition.noDisplayInfo;
     }
 
-    std::string killsCaption(unsigned int kills)
+    std::string killsCaption(unsigned int kills, bool veteran)
     {
         if (kills == 0)
         {
@@ -2412,7 +2412,7 @@ namespace rwe
 
         auto noun = kills == 1 ? std::string("kill") : std::string("kills");
         auto caption = std::to_string(kills) + " " + noun;
-        if (kills > 4)
+        if (veteran)
         {
             caption += " - Veteran";
         }

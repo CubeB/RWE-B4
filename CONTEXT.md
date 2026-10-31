@@ -298,6 +298,15 @@ per-unit scope. Hashed state; a desync report gives one sub-hash per
 namespace. A **var** is its per-unit `i32` fast path.
 _Avoid_: blackboard, shared memory (mods never share linear memory)
 
+**Veterancy level**:
+The tier a unit's kill count reaches, 1 up to the number of its thresholds.
+The original buckets kills in fives and stops at five; under the Community
+Patch a unit's `VeterancyThresholds` replace that ladder and
+`VeterancyAccuracyBuffRate` sets how fast the accuracy buff climbs. The level
+scales damage dealt and taken, reload time, capture and reclaim, and it is
+unit-definition data — never per-unit saved or hashed state.
+_Avoid_: rank, promotion, tier (that is the arithmetic, not the unit's level)
+
 **Base mod** (`ta-base`):
 The wasm mod holding TA's own policy: the bottom layer of every fold. Ships as
 wasm, and the tests run it as wasm; the same source can be built natively as a

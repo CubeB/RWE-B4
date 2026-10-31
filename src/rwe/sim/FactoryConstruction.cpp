@@ -45,7 +45,9 @@ namespace rwe
             sim.activateUnit(*product);
         }
         // Direct cause-9 damage: bypass armour, but retain victim veterancy.
-        const auto tier = std::min(5u, unit.kills / 5);
+        // The tier is the victim's damage-taken tier, so a unit with TADR's
+        // own thresholds (#934) keeps the same fraction of its kills' worth.
+        const auto tier = std::min<unsigned int>(25u, veterancyLevel(veterancyRules(definition.veterancy, sim.communityPatchMode), unit.kills));
         const auto damage = (25u - tier) * 30000u * 4u / 100u;
         if (unit.hitPoints <= damage)
         {
