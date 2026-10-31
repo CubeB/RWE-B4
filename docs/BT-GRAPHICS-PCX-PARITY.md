@@ -147,6 +147,10 @@ separator looks for a backslash only; the name is built into a 260-byte buffer w
   shots.
 - **Source of the pixels and the cursor: DIVERGENCE (documented).** RWE reads the back buffer before
   the cursor is drawn (`-KEYBOARD.md` section 77); the original uses the 8-bit override image.
+- **The large poster uses the same format family.** `+MakePoster` (#915) streams the same 24-bit
+  three-plane PCX rules a row at a time to `screenshots/BIGSHOT.pcx`; the original names a `BIGSHOT`
+  bitmap and writes it with its 256-colour BMP writer, which RWE does not have. The stem is kept and the
+  format divergence is the screenshot one, recorded in `TOTALA-EXE.md` section 88 and `docs/MAKEPOSTER.md`.
 - **Directory and enumeration failures: MATCHES in effect.** RWE creates the directory (the original
   does not); a failure returns no path.
 

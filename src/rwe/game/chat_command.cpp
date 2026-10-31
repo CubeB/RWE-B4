@@ -64,6 +64,40 @@ namespace rwe
 
             return tokens;
         }
+
+        /**
+         * A poster side, read strictly: decimal digits only, no sign, no
+         * trailing text, and positive. An explicit capture size is not the
+         * original's unvalidated `atoi` grammar -- this is presentation, and a
+         * typo should be refused rather than silently read as a prefix.
+         */
+        std::optional<unsigned int> parsePosterDimension(const std::string& token)
+        {
+            if (token.empty())
+            {
+                return std::nullopt;
+            }
+
+            unsigned long long value = 0;
+            for (auto c : token)
+            {
+                if (c < '0' || c > '9')
+                {
+                    return std::nullopt;
+                }
+                value = (value * 10) + static_cast<unsigned long long>(c - '0');
+                if (value > static_cast<unsigned long long>(INT_MAX))
+                {
+                    return std::nullopt;
+                }
+            }
+
+            if (value == 0)
+            {
+                return std::nullopt;
+            }
+            return static_cast<unsigned int>(value);
+        }
     }
 
     int chatAtoi(const std::string& token)
@@ -252,6 +286,37 @@ namespace rwe
             // #912, §6: a cheat-table grant of 1000 metal and energy to the
             // viewed player; RWE has no divergent view, so it is the local one.
             command.kind = ChatCommand::Kind::Atm;
+        }
+        else if (word == "makeposter")
+        {
+            // #915, BT-GAME-CONSOLE-COMMANDS-PARITY section 6: a cheat-table
+            // command. No argument is the original's 3200x2400 and `all` is
+            // the map's pixel size. The two-number form is the natural reading
+            // of "each dimension"; the finding does not spell out the grammar,
+            // so anything else is refused rather than guessed at.
+            command.kind = ChatCommand::Kind::MakePoster;
+            if (tokens.size() == 2 && lowered(tokens[1]) == "all")
+            {
+                command.posterAll = true;
+            }
+            else if (tokens.size() == 3)
+            {
+                auto width = parsePosterDimension(tokens[1]);
+                auto height = parsePosterDimension(tokens[2]);
+                if (!width || !height)
+                {
+                    command.kind = ChatCommand::Kind::MakePosterUsage;
+                }
+                else
+                {
+                    command.posterWidth = *width;
+                    command.posterHeight = *height;
+                }
+            }
+            else if (tokens.size() != 1)
+            {
+                command.kind = ChatCommand::Kind::MakePosterUsage;
+            }
         }
         else if (word == "bps")
         {

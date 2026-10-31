@@ -1815,6 +1815,7 @@ namespace rwe
             viewportWidth,
             viewportHeight};
 
+        if (!posterCaptureActive)
         {
             RWE_RENDERPROF("w.selection");
             ColoredMeshBatch selectionRectBatch;
@@ -2240,13 +2241,24 @@ namespace rwe
             sceneContext.graphics->bindFrameBufferColorBuffer(worldFrameBuffer.texture.get());
         }
 
-        sceneContext.graphics->unbindFrameBuffer();
-        auto viewportPos = worldViewport.toOtherViewport(*sceneContext.viewport, 0, worldViewport.height());
-        sceneContext.graphics->setViewport(
-            viewportPos.x,
-            sceneContext.viewport->height() - viewportPos.y,
-            worldViewport.width(),
-            worldViewport.height());
+        if (posterCaptureActive)
+        {
+            // #915: a poster tile resolves into its own off-screen target at
+            // the tile's own size, so the capture never depends on the window
+            // being large enough for it.
+            sceneContext.graphics->bindFrameBuffer(posterCaptureTarget);
+            sceneContext.graphics->setViewport(0, 0, worldViewport.width(), worldViewport.height());
+        }
+        else
+        {
+            sceneContext.graphics->unbindFrameBuffer();
+            auto viewportPos = worldViewport.toOtherViewport(*sceneContext.viewport, 0, worldViewport.height());
+            sceneContext.graphics->setViewport(
+                viewportPos.x,
+                sceneContext.viewport->height() - viewportPos.y,
+                worldViewport.width(),
+                worldViewport.height());
+        }
 
         sceneContext.graphics->disableDepthBuffer();
         {
@@ -2321,14 +2333,20 @@ namespace rwe
 
         sceneContext.graphics->enableDepthWrites();
 
+        // A poster is a picture of the world, not of this player's cursor.
+        // Selection plates, order lines, health bars, the build ghost and the
+        // bandbox are all viewport UI and stay out of it; #915.
         // The sweep over a freshly placed building plays whether or not shift
         // is held: it is the acknowledgement of the click, and the original
         // shows it as soon as the order exists.
         RWE_RENDERPROF("w.worldui");
-        renderPlacementSweeps();
+        if (!posterCaptureActive)
+        {
+            renderPlacementSweeps();
+        }
 
         // in-world UI/overlay rendering
-        if (isShiftDown())
+        if (!posterCaptureActive && isShiftDown())
         {
             auto singleSelectedUnit = getSingleSelectedUnit();
 
@@ -2367,7 +2385,7 @@ namespace rwe
             }
         }
 
-        if (healthBarsVisible)
+        if (!posterCaptureActive && healthBarsVisible)
         {
             for (const auto& [_, unit] : simulation.units)
             {
@@ -2433,7 +2451,7 @@ namespace rwe
         // ONE colour -- guicolours[10]/[4], which the runtime nearest-match
         // mapping (0x4AC7D0, GUIPAL.PAL into the screen palette) lands on
         // palette 233 bright green and 213 red.
-        if (hoverBuildInfo)
+        if (!posterCaptureActive && hoverBuildInfo)
         {
             Color color = hoverBuildInfo->isValid ? Color(83, 223, 79) : Color(171, 23, 0);
 
@@ -2471,23 +2489,26 @@ namespace rwe
         }
 
         // Draw bandbox selection rectangle
-        if (auto normalCursorMode = std::get_if<NormalCursorMode>(&cursorMode.getValue()))
+        if (!posterCaptureActive)
         {
-            if (auto selectingState = std::get_if<NormalCursorMode::SelectingState>(&normalCursorMode->state))
+            if (auto normalCursorMode = std::get_if<NormalCursorMode>(&cursorMode.getValue()))
             {
-                auto start = cameraPlaneToWorldViewport(selectingState->startPosition);
-                auto worldViewportPos = sceneContext.viewport->toOtherViewport(worldViewport, getMousePosition());
-                auto rect = DiscreteRect::fromPoints(start, worldViewportPos);
-
-                worldUiRenderService.drawBoxOutline(rect.x, rect.y, rect.width, rect.height, Color(255, 255, 255));
-                if (rect.width > 2 && rect.height > 2)
+                if (auto selectingState = std::get_if<NormalCursorMode::SelectingState>(&normalCursorMode->state))
                 {
-                    worldUiRenderService.drawBoxOutline(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2, Color(0, 0, 0));
+                    auto start = cameraPlaneToWorldViewport(selectingState->startPosition);
+                    auto worldViewportPos = sceneContext.viewport->toOtherViewport(worldViewport, getMousePosition());
+                    auto rect = DiscreteRect::fromPoints(start, worldViewportPos);
+
+                    worldUiRenderService.drawBoxOutline(rect.x, rect.y, rect.width, rect.height, Color(255, 255, 255));
+                    if (rect.width > 2 && rect.height > 2)
+                    {
+                        worldUiRenderService.drawBoxOutline(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2, Color(0, 0, 0));
+                    }
                 }
             }
         }
 
-        if (cursorTerrainDotVisible)
+        if (!posterCaptureActive && cursorTerrainDotVisible)
         {
             // draw a dot where we think the cursor intersects terrain
             auto ray = screenToWorldRayUtil(computeInverseViewProjectionMatrix(worldCameraState, worldViewport.width(), worldViewport.height()), screenToWorldClipSpace(getMousePosition()));

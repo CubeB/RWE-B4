@@ -673,6 +673,18 @@ quirks of the original that RWE reproduces although they look like defects.
   pixels. The picture is read back after the scene draws and before the
   cursor and the debug windows go on top; whether the original's included
   its cursor is not decoded (§77).
+- **`+MakePoster` writes a 24-bit PCX at 1:1 world scale (#915).** The
+  reference names the output "a `BIGSHOT` bitmap" and gives no exact
+  extension or capture scale. RWE keeps the `BIGSHOT` stem, writes its own
+  screenshot family (`BIGSHOT.pcx`, three-plane 24-bit, the same writer as
+  `SHOTnnnn.pcx`), and renders one poster pixel per world unit rather than
+  folding the camera zoom into the image size. The sizing and placement rules
+  the prose does give -- default 3200x2400, `all` the map's pixel size, the
+  visible-tile minimum and map maximum, centre-then-clamp, the screenshots
+  directory and the pacing reset -- are followed. The two-number size syntax
+  is the natural reading of "each dimension", not a stated grammar, and
+  malformed forms are refused rather than read with `atoi`. `docs/MAKEPOSTER.md`
+  records the implementation and the remaining uncertainty.
 - **A weapon silent about `tolerance` gets 256, not the original's
   bits-driven default.** Finding `tolerance` zero, the original picks 2000
   (`0x7D0`, about 11°) when `unit+0x110` bits 2–3 are set and 150 (`0x96`,
@@ -799,18 +811,19 @@ quirks of the original that RWE reproduces although they look like defects.
   test is flat now, with each square floored separately. Only the ballistic
   arc check keeps three axes. Do not put the 3D test back on the strength of
   that reasoning.
-- **The cheat and debug console commands are absent.** The original registers
-  commands under three permission masks: ordinary (1), cheat (2: `Radar`, `ATM`,
-  `View`, `LOS`, `Mapping`, `DoubleShot`, `HalfShot`, `NowISee`, `Meteor`,
-  `MakePoster`) and debug (4), and the talk dialog's mask comes from the game
-  type and the lobby's Cheat Codes option (`TOTALA-EXE-COMMANDS.md` §124). RWE
-  registers none of the mask-two or mask-four commands, and the chat bar's `+`
-  lines reach only the sharing commands: every other word answers "Unknown
-  command". They are absent by choice, not by omission. Several mask-one
-  commands that the original has also write simulation state locally
-  (`NoMetal`, `NoEnergy`, `Selectable`, `Logo`, `Give`); matching any of them in a
-  lockstep game would mean a replicated `PlayerCommand`, hashed and saved
-  (BT-215), which nothing asks for.
+- **Almost all the cheat and debug console commands are absent.** The original
+  registers commands under three permission masks: ordinary (1), cheat (2:
+  `Radar`, `ATM`, `View`, `LOS`, `Mapping`, `DoubleShot`, `HalfShot`, `NowISee`,
+  `Meteor`, `MakePoster`) and debug (4), and the talk dialog's mask comes from
+  the game type and the lobby's Cheat Codes option
+  (`TOTALA-EXE-COMMANDS.md` §124). RWE registers none of the mask-four commands;
+  of the mask-two table only `ATM` (a replicated grant, #912) and `MakePoster`
+  (presentation only, #915) are built. The rest are absent by choice, not by
+  omission, and every remaining word answers "Unknown command". Several
+  mask-one commands that the original has also write
+  simulation state locally (`NoMetal`, `NoEnergy`, `Selectable`, `Logo`,
+  `Give`); matching any of them in a lockstep game would mean a replicated
+  `PlayerCommand`, hashed and saved (BT-215), which nothing asks for.
 - **Lobby teams are symmetric and fixed.** RWE takes a team from the lobby and
   keeps it for the game: two players on a team are allied with each other, both
   ways, and nothing changes it. The original keeps relations as per-player byte

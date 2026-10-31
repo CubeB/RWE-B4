@@ -17,10 +17,10 @@ namespace rwe
      * present is read as `atoi` reads it, so `12abc` is 12 and `abc` is 0.
      *
      * Only the sharing commands, the local UI commands this build carries,
-     * and (under the Community Patch) the two patrol reclaim levels are
-     * built. Every other word the original registers (NoShake, Contour, ... )
-     * is Unknown here, and so is `+ShareLOS`, which the original does not
-     * register either.
+     * the presentation-only `+MakePoster`, and (under the Community Patch)
+     * the two patrol reclaim levels are built. Every other word the original
+     * registers (Contour, ... ) is Unknown here, and so is `+ShareLOS`, which
+     * the original does not register either.
      */
     struct ChatCommand
     {
@@ -93,6 +93,15 @@ namespace rwe
              * and saves it; with an argument assigns it and does not save.
              */
             SwitchAlt,
+            /**
+             * `+MakePoster [all | <width> <height>]`: a large world capture.
+             * No argument is the original's 3200x2400, `all` is the map's
+             * pixel size, and two positive integers are an explicit size.
+             * Presentation only: it does not touch the simulation.
+             */
+            MakePoster,
+            /** `+MakePoster` with a form this build does not support. */
+            MakePosterUsage,
         };
 
         Kind kind{Kind::Empty};
@@ -129,6 +138,13 @@ namespace rwe
 
         /** Give: metal if true, energy if false. */
         bool giveMetal{true};
+
+        /** MakePoster: `all` asks for the map's own pixel size. */
+        bool posterAll{false};
+
+        /** MakePoster: an explicit size in output pixels, when one was typed. */
+        unsigned int posterWidth{0};
+        unsigned int posterHeight{0};
     };
 
     /**

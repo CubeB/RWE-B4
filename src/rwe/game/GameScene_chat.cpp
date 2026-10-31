@@ -201,6 +201,28 @@ namespace rwe
             return;
         }
 
+        if (command.kind == ChatCommand::Kind::MakePoster || command.kind == ChatCommand::Kind::MakePosterUsage)
+        {
+            // #915: MakePoster is in the original's cheat table, so a caller
+            // without the cheat bit never reaches it and RWE stays silent, as
+            // it does for +ATM. The capture is presentation only: it reads
+            // the camera and the world and never queues a command, touches
+            // hashed state or draws from the simulation's RNG.
+            if ((mask & ChatCommandMaskCheat) == 0)
+            {
+                return;
+            }
+
+            if (command.kind == ChatCommand::Kind::MakePosterUsage)
+            {
+                printConsole("Usage: +MakePoster [all | <width> <height>]", feedbackColor);
+                return;
+            }
+
+            capturePoster(command.posterAll, command.posterWidth, command.posterHeight);
+            return;
+        }
+
         if (command.kind == ChatCommand::Kind::NoShake)
         {
             // #907: UI-option bit 4. A local preference, not saved, and the
@@ -641,6 +663,8 @@ namespace rwe
             case ChatCommand::Kind::ScreenChat:
             case ChatCommand::Kind::Clock:
             case ChatCommand::Kind::SwitchAlt:
+            case ChatCommand::Kind::MakePoster:
+            case ChatCommand::Kind::MakePosterUsage:
                 break;
         }
     }
