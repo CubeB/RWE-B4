@@ -2103,6 +2103,34 @@ namespace rwe
                 auto wireframeColor = buildCycleColorB(unitId.value, renderTime().value);
                 drawUnitWireframe(gameMediaDatabase, unit, unitDefinition, modelDefinition, interpolationFraction, toCamera, wireframeScreen, wireframeColor, wireframeBatch);
             }
+
+            // Community Patch (#934): the nanoframe ghost at the build
+            // cursor. RWE had only the footprint box before this key, so
+            // the preview is drawn as the same wireframe a placed nanoframe
+            // gets, in the ordinary build green. It is deliberately gated on
+            // the ruleset so a normal game's cursor is unchanged, and it is
+            // presentation only: the simulation, the footprint, the height
+            // and the finished model are all untouched.
+            if (simulation.communityPatchMode && hoverBuildInfo && hoverBuildInfo->isValid)
+            {
+                if (auto buildCursor = std::get_if<BuildCursorMode>(&cursorMode.getValue()); buildCursor != nullptr)
+                {
+                    const auto& ghostDefinition = simulation.unitDefinitions.at(buildCursor->unitType);
+                    auto ghostObjectName = buildGhostObjectName(ghostDefinition, simulation.unitModelDefinitions, true);
+                    const auto& ghostModel = simulation.unitModelDefinitions.at(ghostObjectName);
+                    std::vector<UnitMesh> ghostPieces(ghostModel.pieces.size());
+
+                    auto topLeftWorld = simulation.terrain.heightmapIndexToWorldCorner(hoverBuildInfo->rect.x, hoverBuildInfo->rect.y);
+                    auto ghostPosition = Vector3f(
+                        simScalarToFloat(topLeftWorld.x) + (static_cast<float>(hoverBuildInfo->rect.width) * simScalarToFloat(MapTerrain::HeightTileWidthInWorldUnits) / 2.0f),
+                        simScalarToFloat(simulation.computeBuildHeight(ghostDefinition, hoverBuildInfo->rect)),
+                        simScalarToFloat(topLeftWorld.z) + (static_cast<float>(hoverBuildInfo->rect.height) * simScalarToFloat(MapTerrain::HeightTileHeightInWorldUnits) / 2.0f));
+                    auto ghostTransform = Matrix4f::translation(ghostPosition);
+
+                    drawModelWireframe(gameMediaDatabase, ghostTransform, ghostObjectName, ghostModel, ghostPieces, 0.0f, toCamera, wireframeScreen, buildCycleColorB(0, renderTime().value), wireframeBatch);
+                }
+            }
+
             // Solid, as the original's lines are: one palette colour, one
             // output pixel wide.
             worldRenderService.drawBatch(wireframeBatch, viewProjectionMatrix, 1.0f);

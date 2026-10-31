@@ -1,6 +1,8 @@
 #pragma once
 
 #include <functional>
+#include <string>
+#include <unordered_map>
 #include <rwe/AudioService.h>
 #include <rwe/ColorPalette.h>
 #include <rwe/GlobalConfig.h>
@@ -458,6 +460,38 @@ namespace rwe
         const WireframeScreen& screen,
         const Vector3f& color,
         ColoredMeshBatch& batch);
+
+    /**
+     * The same outline for a model with no unit behind it, which is what the
+     * build-cursor ghost is: the model's pieces are assumed to be at rest and
+     * all visible.
+     */
+    void drawModelWireframe(
+        const GameMediaDatabase& gameMediaDatabase,
+        const Matrix4f& transform,
+        const std::string& objectName,
+        const UnitModelDefinition& modelDefinition,
+        const std::vector<UnitMesh>& pieces,
+        float frac,
+        const Vector3f& toCamera,
+        const WireframeScreen& screen,
+        const Vector3f& color,
+        ColoredMeshBatch& batch);
+
+    /**
+     * The model a build-cursor ghost should draw for `unitDefinition`.
+     *
+     * Community Patch (#934), TADR `PreviewObject3D`: an override is honoured
+     * only while the ruleset is on and only once its model is in the database.
+     * Anything else -- key absent, mode off, model failed to load -- falls
+     * back to the unit's ordinary Objectname, so a bad preview key cannot
+     * stop the ghost from appearing. Presentation only; the real unit's
+     * model, footprint and build behaviour are untouched.
+     */
+    std::string buildGhostObjectName(
+        const UnitDefinition& unitDefinition,
+        const std::unordered_map<std::string, UnitModelDefinition>& modelDefinitions,
+        bool communityPatch);
 
     void drawSpriteParticle(const GameMediaDatabase& gameMediaDatabase, GameTime currentTime, const Matrix4f& viewProjectionMatrix, const Particle& particle, SpriteBatch& batch);
 

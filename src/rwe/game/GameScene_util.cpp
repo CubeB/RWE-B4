@@ -8,6 +8,7 @@
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/util/Index.h>
 #include <rwe/util/match.h>
+#include <rwe/util/rwe_string.h>
 
 namespace rwe
 {
@@ -1098,6 +1099,22 @@ namespace rwe
         }
     }
 
+    std::string buildGhostObjectName(
+        const UnitDefinition& unitDefinition,
+        const std::unordered_map<std::string, UnitModelDefinition>& modelDefinitions,
+        bool communityPatch)
+    {
+        if (communityPatch && !unitDefinition.previewObjectName.empty())
+        {
+            auto previewName = toUpper(unitDefinition.previewObjectName);
+            if (modelDefinitions.find(previewName) != modelDefinitions.end())
+            {
+                return previewName;
+            }
+        }
+        return unitDefinition.objectName;
+    }
+
     void drawUnitWireframe(
         const GameMediaDatabase& gameMediaDatabase,
         const UnitState& unit,
@@ -1115,6 +1132,23 @@ namespace rwe
         auto rotation = angleLerp(toRadians(unit.previousRotation).value, toRadians(unit.rotation).value, frac);
         auto transform = unitRenderTransform(unit, position, rotation, frac);
 
+        drawModelWireframe(gameMediaDatabase, transform, unitDefinition.objectName, modelDefinition, unit.pieces, frac, toCamera, screen, color, batch);
+    }
+
+    void drawModelWireframe(
+        const GameMediaDatabase& gameMediaDatabase,
+        const Matrix4f& transform,
+        const std::string& objectName,
+        const UnitModelDefinition& modelDefinition,
+        const std::vector<UnitMesh>& pieces,
+        float frac,
+        const Vector3f& toCamera,
+        const WireframeScreen& screen,
+        const Vector3f& color,
+        ColoredMeshBatch& batch)
+    {
+        assert(modelDefinition.pieces.size() == pieces.size());
+
         // Lift each pixel towards the camera so it passes the depth test
         // against the surface it lies on, while anything the model itself
         // hides stays hidden. That stands in for the original's height test,
@@ -1126,15 +1160,15 @@ namespace rwe
         // thinner, broken line.
         auto bias = toCamera * WireframeDepthLift;
 
-        const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(unitDefinition.objectName, modelDefinition);
-        const auto& transforms = computePieceTransformsForRender(modelDefinition, renderInfo, unit.pieces, frac);
+        const auto& renderInfo = gameMediaDatabase.getUnitModelRenderInfo(objectName, modelDefinition);
+        const auto& transforms = computePieceTransformsForRender(modelDefinition, renderInfo, pieces, frac);
 
         std::vector<Vector3f> world;
         std::vector<Vector2f> onScreen;
         std::vector<WireframePixel> pixels;
         for (Index i = 0; i < getSize(modelDefinition.pieces); ++i)
         {
-            if (!unit.pieces[i].visible)
+            if (!pieces[i].visible)
             {
                 continue;
             }

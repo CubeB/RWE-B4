@@ -8,6 +8,14 @@ namespace rwe
     {
         std::string unitName;
         std::string objectName;
+
+        /**
+         * Community Patch (#934), TADR `PreviewObject3D`: a 3DO base name
+         * used only by the build-cursor ghost while it shows this unit.
+         * Empty means the ordinary Objectname is used.
+         */
+        std::string previewObjectName;
+
         std::string soundCategory;
         std::string movementClass;
 

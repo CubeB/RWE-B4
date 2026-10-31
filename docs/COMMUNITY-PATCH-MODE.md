@@ -237,6 +237,52 @@ choice is stored per player or resolves some other way in the DLL. RWE applies
 the rule for the whole mode, matching the "One ruleset, not per-feature
 toggles" decision. The cavedog and scatter variants are not implemented
 because RWE has no setting that selects among them.
+
+## Build-ghost model override (implemented)
+
+TADR 2026.5.15 adds a `PreviewObject3D=` unit FBI key that names an
+alternative 3DO for the nanoframe ghost preview. RWE parses the key whatever
+the mode and copies it into `UnitDefinition::previewObjectName`. The mode is
+the only thing that decides whether it is read.
+
+RWE had no model at the build cursor before this change -- only the footprint
+box and its placement sweep -- so the key is given effect by drawing the same
+green construction wireframe a placed nanoframe gets, centred on the build
+cursor and at the height `computeBuildHeight` will give the finished
+structure. The ghost appears only while the Community Patch is on, so a
+normal game's cursor is unchanged; it is presentation only and never writes
+simulation state, footprint, collision, placement height or the real unit's
+model. A finished unit still draws `Objectname`.
+
+`PreviewObject3D` is a 3DO base name without an extension, loaded from
+`objects3d/<name>.3do` beside the unit's real model at load. When the named
+model is absent or unreadable, load logs one warning and the ghost falls back
+to the unit's ordinary `Objectname`; the fallback is decided per unit and never
+per frame. If the model is missing from the database for any other reason, the
+same fallback applies silently.
+
+Deliberate departures from TADR, all because RWE's model and presentation
+differ:
+
+- **The ghost is gated on the ruleset.** TADR treats the nanoframe preview as
+  a local preference. RWE has one ruleset and no separate preview setting yet,
+  so the ghost and the key arrive together under `--community-patch`; outside
+  the mode neither is drawn.
+- **Rotation is fixed at the unit's default facing.** RWE has no rotate-build
+  key yet, so there is no facing for the ghost to follow. `BuildAngle` is the
+  settle arc the simulation applies when the building goes up, not a player
+  choice, and is not used for the ghost.
+- **The key applies to the model only.** TADR's `PreviewPieces`,
+  `PreviewPieces<S|E|N|W>` and `PreviewFaceOpponent` keys are not implemented;
+  RWE draws every piece of the override model at rest. A mod that relies on a
+  piece whitelist will see more of the preview model than TADR would show.
+- **The ghost is a wireframe.** It uses RWE's construction wireframe and
+  build-cycle green rather than TADR's animated fill, since the existing
+  renderer already has that shape and colour.
+
+No original-game comparison applies: this is RWE-original presentation work
+under ADR-0006, and TADR's written feature list is the reference.
+
 ## Where it is toggled
 
 - **Launcher, single player:** the Play page has a Community Patch switch,
@@ -269,7 +315,7 @@ because RWE has no setting that selects among them.
 | --- | --- |
 | `VeterancyThresholds`, `VeterancyAccuracyBuffRate` | planned: RWE has veterancy; the per-unit keys are additive |
 | `TransportedExplodeAs`, `TransportedSelfDestructAs` | **done**: the two keys replace the ordinary death and self-destruct weapons for a carried unit, independently |
-| `PreviewObject3D` | planned as a build-ghost presentation key |
+| `PreviewObject3D` | **done**: the build-cursor ghost draws the named 3DO under the mode; a missing model falls back to the unit's ordinary model |
 | neutral units and per-player spawn units in the map OTA | **done for per-player/AI seats**: `[units]` spawns under the mode; neutral owners are skipped because RWE has no neutral slot |
 | weapon IDs above 255 | check RWE's parser first; likely already unrestricted |
 | `nomapweaponalert` | **done**: a zero-damage, no-firer map weapon no longer raises the under-attack message or voice; RWE has no projectile alert dots to suppress |
