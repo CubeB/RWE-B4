@@ -503,6 +503,7 @@ namespace rwe
         u.unitDescription = fbi.description;
         u.objectName = fbi.objectName;
         u.previewObjectName = fbi.previewObjectName;
+        u.veterancy = fbi.veterancy;
 
         u.turnRate = SimScalar(fbi.turnRate);
         u.maxVelocity = SimScalar(fbi.maxVelocity);

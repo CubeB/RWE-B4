@@ -40,22 +40,25 @@ namespace rwe
 
     /**
      * How wide the shot may stray, once the shooter's own damage and kill
-     * count have had their say on the weapon's `accuracy`.
+     * count have had their say on the weapon's `accuracy`. `veterancy` is the
+     * shooter's rules: the original's unless the unit names TADR's keys and
+     * the Community Patch is on.
      */
-    SimAngle computeAccuracyCone(SimAngle accuracy, unsigned int health, unsigned int maxHealth, unsigned int kills);
+    SimAngle computeAccuracyCone(SimAngle accuracy, unsigned int health, unsigned int maxHealth, unsigned int kills, const VeterancyDefinition& veterancy);
 
     /**
      * How long the weapon actually waits, once the shooter's own damage and
      * kill count have had their say on the TDF's `reloadtime`.
      */
-    GameTime computeReloadTicks(SimScalar reloadTime, unsigned int health, unsigned int maxHealth, unsigned int kills);
+    GameTime computeReloadTicks(SimScalar reloadTime, unsigned int health, unsigned int maxHealth, unsigned int kills, const VeterancyDefinition& veterancy);
 
     /**
      * The aim lead of a veteran shooter, TOTALA-EXE-WEAPONS.md S:126
      * (0x48A1E0): where the sweet spot would be in 0.8 * D / S ticks if the
      * target kept its present velocity. Returns the vector to ADD to the sweet
-     * spot; zero when the shooter has fewer than six kills, the weapon has no
-     * velocity or is a cruise missile.
+     * spot; zero when the shooter has not passed its first veterancy
+     * threshold (six kills for the original's 5 10 15 20 25), the weapon has
+     * no velocity or is a cruise missile.
      *
      * Integer throughout, as the original: positions and velocities are taken
      * to 16.16, the distance is an integer square root truncated, and the two
@@ -63,6 +66,8 @@ namespace rwe
      *
      * @param weaponVelocityPerTick the weapon's `weaponvelocity / 30`, in world units/tick.
      * @param targetVelocity the target's per-tick velocity, in world units/tick.
+     * @param veterancy the shooter's rules; the original's `kills > 5` step
+     * becomes `kills >` the unit's first threshold under the Community Patch.
      */
     SimVector computeAimLead(
         const SimVector& shooterOrigin,
@@ -70,7 +75,8 @@ namespace rwe
         const SimVector& targetVelocity,
         SimScalar weaponVelocityPerTick,
         bool cruise,
-        unsigned int shooterKills);
+        unsigned int shooterKills,
+        const VeterancyDefinition& veterancy);
 
     /** Floor of the square root of a 64-bit integer, with no floating point. */
     uint64_t integerSquareRoot(uint64_t value);

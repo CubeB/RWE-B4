@@ -87,6 +87,63 @@ TADR's written rule is the reference, and there is no byte-tactics comparison.
   unit". With health bars switched off there is no bar to sit below, so no
   reload bar is drawn either; RWE has no separate setting for it.
 
+## Per-unit veterancy keys (implemented)
+
+TADR 2025.11.26 adds two optional unit FBI keys, `VeterancyThresholds` and
+`VeterancyAccuracyBuffRate`, that change how a unit earns veterancy without
+changing what each level does (TADR 2026.10.6, "Per-Unit Veterancy
+Customization"). RWE parses both whatever the mode and honours them only under
+the Community Patch. This is RWE-original ruleset work under ADR-0006, not a
+byte-tactics comparison: TADR's written rule is the reference, and its public
+`VeterancyHack` source supplies the exact arithmetic where the prose is loose.
+
+- `VeterancyThresholds=6 12 18 24 30` sets the kills needed for VetLevel 1..N.
+  The default is `5 10 15 20 25`. Empty, non-numeric, signed, overflowing,
+  non-increasing, or longer than 32 entries is refused as a whole: the unit
+  keeps the default and the loader logs one warning. A single threshold is
+  allowed and extrapolates with itself.
+- `VeterancyAccuracyBuffRate=3` replaces the accuracy divisor's rate; `0`
+  disables the accuracy buff. The default is 12. A malformed value keeps 12.
+
+What honours the keys:
+
+| Effect | How |
+| --- | --- |
+| capture cost | the target's unbounded level, +10% per level; past the last threshold the ladder continues with the step between the last two, as TADR says |
+| damage taken | the target's level, capped at 25 or the number of thresholds |
+| damage dealt | the attacker's level, capped at the number of thresholds |
+| reload time | the shooter's level, capped at 16 or the number of thresholds |
+| target tracking | one level: the aim lead starts one kill past the unit's first threshold, which is the original's `kills > 5` at the default |
+| accuracy buff | divisor `floor((uint16)kills / rate)`, applied when greater than one, exactly the shape the original's decode has |
+| reclaim work | RWE extension: the reclaimer's unbounded level, `1 + level`, which is the original's `(kills + 5) / 5` at the default; TADR has no reclaim hook |
+| COB `VeteranLevel` | the unit's level, bounded by the number of thresholds (RWE answers this query; the original returns zero) |
+| info-panel suffix | starts at the unit's first level; RWE keeps the word "Veteran" rather than TADR's `VetN` |
+| endgame damage | the commander-army wipe and a cancelled factory product use the victim's damage-taken level |
+
+A file that names neither key carries the defaults, so its arithmetic is
+bit-identical to the original in both modes. The keys are unit-definition
+data, not per-unit state: they are never saved, hashed or dumped, and every
+peer with the same data reaches the same answer.
+
+Unsupported or deliberately different halves:
+
+- **TADR's prose formula for the accuracy buff is `1 + floor(kills/rate)`.**
+  Its hook actually replaces the original's divisor with `floor(kills/rate)`
+  and leaves the original's `> 1` test alone, so the first effect is at twice
+  the rate (24 kills at the default). RWE keeps the decoded shape; honouring
+  the prose literally would tighten a 12-kill shooter's cone, which the
+  original does not do.
+- **`VetN` wording.** TADR replaces the kills caption with `Vet1`, `Vet2`, ...
+  RWE moves where "Veteran" starts but keeps the original's wording.
+- **No per-unit display of the level.** TADR's developer overlay prints the
+  number; RWE has no such overlay.
+- **A malformed key falls back to the default rather than being applied
+  token by token.** TADR's reader silently drops bad tokens and accepts a
+  non-increasing list; RWE refuses the whole value, so a unit never plays
+  with a half-applied ladder.
+- **No new saved or hashed state.** The mode remains the launch-parameter
+  invariant described above; the per-unit data travels with the mod's FBI.
+
 ## Weapon IDs above 255 (already RWE)
 
 TADR 2026.10.6 lists "weapon IDs above 255 in `Weapons/*.tdf`". Vanilla TA's
@@ -342,7 +399,7 @@ under ADR-0006, and TADR's written feature list is the reference.
 
 | TADR key | RWE plan |
 | --- | --- |
-| `VeterancyThresholds`, `VeterancyAccuracyBuffRate` | planned: RWE has veterancy; the per-unit keys are additive |
+| `VeterancyThresholds`, `VeterancyAccuracyBuffRate` | **done**: per-unit levels for capture, damage, reload, tracking, accuracy, reclaim and the COB query; no-key units keep the original exactly |
 | `TransportedExplodeAs`, `TransportedSelfDestructAs` | **done**: the two keys replace the ordinary death and self-destruct weapons for a carried unit, independently |
 | `PreviewObject3D` | **done**: the build-cursor ghost draws the named 3DO under the mode; a missing model falls back to the unit's ordinary model |
 | neutral units and per-player spawn units in the map OTA | **done for per-player/AI seats**: `[units]` spawns under the mode; neutral owners are skipped because RWE has no neutral slot |

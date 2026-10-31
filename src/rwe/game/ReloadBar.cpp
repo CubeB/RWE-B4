@@ -10,7 +10,8 @@ namespace rwe
         const std::unordered_map<std::string, WeaponDefinition>& weaponDefinitions,
         unsigned int health,
         unsigned int maxHealth,
-        unsigned int kills)
+        unsigned int kills,
+        const VeterancyDefinition& veterancy)
     {
         std::optional<ReloadBarState> selected;
         GameTime selectedReload{0};
@@ -29,7 +30,7 @@ namespace rwe
                 continue;
             }
 
-            auto reloadTicks = computeReloadTicks(definition->second.reloadTime, health, maxHealth, kills);
+            auto reloadTicks = computeReloadTicks(definition->second.reloadTime, health, maxHealth, kills, veterancy);
             if (!selected || reloadTicks.value > selectedReload.value)
             {
                 selected = ReloadBarState{

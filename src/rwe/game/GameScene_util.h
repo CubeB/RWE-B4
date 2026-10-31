@@ -862,8 +862,14 @@ namespace rwe
      * and skips the whole block. Singular at one. From five upward the string
      * gains a Veteran suffix -- the comparison is jbe against 4, and there is
      * no other veterancy display anywhere in the binary.
+     *
+     * `veteran` is whether the unit has reached its first veterancy level.
+     * With no keys that is kills >= 5, exactly the original's test; under the
+     * Community Patch (#934) a unit's own `VeterancyThresholds` move the
+     * suffix to its first threshold. TADR also renames the suffix to `VetN`;
+     * RWE keeps the original's wording and only moves where it starts.
      */
-    std::string killsCaption(unsigned int kills);
+    std::string killsCaption(unsigned int kills, bool veteran);
 
     /**
      * What the unit's current order is pointed at, for the footer's second

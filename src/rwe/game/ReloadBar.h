@@ -6,6 +6,7 @@
 #include <rwe/sim/GameTime.h>
 #include <rwe/sim/SimVector.h>
 #include <rwe/sim/UnitWeapon.h>
+#include <rwe/sim/Veterancy.h>
 #include <rwe/sim/WeaponDefinition.h>
 #include <string>
 #include <unordered_map>
@@ -39,16 +40,17 @@ namespace rwe
      * is still chosen while it is fully ready. Ties go to the lower slot.
      *
      * Returns nullopt when no slot carries the flag or the weapon definition
-     * cannot be found. `health`, `maxHealth` and `kills` are the shooter's,
-     * so the stored reload is the one the simulation actually waits: the
-     * original scales `reloadTime` by damage and veterancy.
+     * cannot be found. `health`, `maxHealth`, `kills` and `veterancy` are the
+     * shooter's, so the stored reload is the one the simulation actually
+     * waits: the original scales `reloadTime` by damage and veterancy.
      */
     std::optional<ReloadBarState> chooseReloadBarWeapon(
         const std::array<std::optional<UnitWeapon>, 3>& weapons,
         const std::unordered_map<std::string, WeaponDefinition>& weaponDefinitions,
         unsigned int health,
         unsigned int maxHealth,
-        unsigned int kills);
+        unsigned int kills,
+        const VeterancyDefinition& veterancy);
 
     /**
      * How full the reload bar is: 1 when the weapon is ready (including

@@ -1,5 +1,6 @@
 #include "io.h"
 #include <rwe/util/OpaqueId_io.h>
+#include <rwe/util/SimpleLogger.h>
 
 namespace rwe
 {
@@ -21,6 +22,26 @@ namespace rwe
         tdf.read("UnitName", u.unitName);
         tdf.read("Objectname", u.objectName);
         tdf.readOrDefault("PreviewObject3D", u.previewObjectName);
+
+        // Community Patch (#934), TADR's per-unit veterancy keys. A malformed
+        // value keeps the original's rule for that unit rather than changing
+        // it halfway; the defaults are the original's own.
+        if (auto thresholds = tdf.findValue("VeterancyThresholds"); thresholds)
+        {
+            if (!parseVeterancyThresholds(thresholds->get(), u.veterancy))
+            {
+                LOG_WARN << "Unit " << u.unitName << " has a malformed VeterancyThresholds=\"" << thresholds->get()
+                         << "\"; using the default 5 10 15 20 25";
+            }
+        }
+        if (auto rate = tdf.findValue("VeterancyAccuracyBuffRate"); rate)
+        {
+            if (!parseVeterancyAccuracyBuffRate(rate->get(), u.veterancy))
+            {
+                LOG_WARN << "Unit " << u.unitName << " has a malformed VeterancyAccuracyBuffRate=\"" << rate->get()
+                         << "\"; using the default 12";
+            }
+        }
 
         // ProTA's stockpile build-menu pseudo-units name none.
         tdf.readOrDefault("SoundCategory", u.soundCategory);

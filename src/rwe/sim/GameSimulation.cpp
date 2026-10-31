@@ -805,8 +805,13 @@ namespace rwe
             ticks = ((hitPoints + maxHitPoints) * ticks) / (2 * maxHitPoints);
         }
 
-        // 0x4043CD: and by the target's veterancy, +10% per five kills.
-        ticks = (((static_cast<std::uint64_t>(target.kills) / 5) + 10) * ticks) / 10;
+        // 0x4043CD: and by the target's veterancy, +10% per five kills. Under
+        // the Community Patch (#934) the levels are the target's own and have
+        // no ceiling -- past the last threshold TADR extrapolates with the
+        // step between the last two -- so the level is the unbounded one. The
+        // default list makes it kills / 5, which is the original's figure.
+        auto veterancyLevels = static_cast<std::uint64_t>(veterancyLevelUnbounded(veterancyRules(definition.veterancy, communityPatchMode), target.kills));
+        ticks = ((veterancyLevels + 10) * ticks) / 10;
 
         return static_cast<unsigned int>(std::max<std::uint64_t>(1, ticks));
     }
@@ -2225,11 +2230,21 @@ namespace rwe
          * TA buckets a unit's kill count in fives and stops at the fifth tier
          * (TotalA.exe 0x489BF3 and 0x499DAE do the same division and clamp).
          * Nothing in the original ever exposes the tier directly; it only ever
-         * scales damage.
+         * scales damage. Under the Community Patch (#934) the bucket comes
+         * from the unit's own `VeterancyThresholds`, so the helpers in
+         * Veterancy.h are what both damage steps ask.
          */
-        int64_t veterancyTier(unsigned int kills)
+
+        /** Damage dealt: up to the number of thresholds (TADR's stated limit). */
+        int64_t damageDealtTier(const VeterancyDefinition& rules, unsigned int kills)
         {
-            return std::min<int64_t>(5, kills / 5);
+            return static_cast<int64_t>(veterancyLevel(rules, kills));
+        }
+
+        /** Damage taken: up to 25 levels or the number of thresholds, whichever is lower. */
+        int64_t damageTakenTier(const VeterancyDefinition& rules, unsigned int kills)
+        {
+            return static_cast<int64_t>(std::min<unsigned int>(25u, veterancyLevel(rules, kills)));
         }
     }
 
@@ -2348,7 +2363,14 @@ namespace rwe
         {
             if (auto attackerUnit = tryGetUnitState(*attacker); attackerUnit)
             {
-                damage = (damage * (100 + 6 * veterancyTier(attackerUnit->get().kills))) / 100;
+                // The attacker's own thresholds decide its bonus; an unknown
+                // unit type falls back to the original's rules rather than
+                // throwing, which is what this step did before the keys.
+                auto definitionIt = unitDefinitions.find(attackerUnit->get().unitType);
+                const auto& attackerRules = definitionIt != unitDefinitions.end()
+                    ? veterancyRules(definitionIt->second.veterancy, communityPatchMode)
+                    : defaultVeterancy();
+                damage = (damage * (100 + 6 * damageDealtTier(attackerRules, attackerUnit->get().kills))) / 100;
             }
         }
 
@@ -2361,8 +2383,9 @@ namespace rwe
         }
 
         // Then the victim's own veterancy (0x489BF3, -4% per tier), which
-        // applies to every kind of damage, weapon or not.
-        damage = (damage * (100 - 4 * veterancyTier(unit.kills))) / 100;
+        // applies to every kind of damage, weapon or not. Its own thresholds
+        // decide the tier under the Community Patch (#934).
+        damage = (damage * (100 - 4 * damageTakenTier(veterancyRules(unitDefinition.veterancy, communityPatchMode), unit.kills))) / 100;
 
         damagePoints = static_cast<unsigned int>(std::max<int64_t>(0, damage));
 

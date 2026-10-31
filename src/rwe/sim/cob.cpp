@@ -416,15 +416,16 @@ namespace rwe
                 // apiece and capped at five (0x489BF3), on the grounds that a
                 // script asking the question is better served by the number
                 // the simulation actually acts on than by a constant zero.
+                //
+                // Under the Community Patch (#934) the tier follows the
+                // unit's own `VeterancyThresholds`, still bounded by their
+                // number. A unit with no definition keeps the default rules.
                 const auto& unit = sim.getUnitState(unitId);
-                constexpr unsigned int VeteranKillsPerTier = 5;
-                constexpr unsigned int VeteranMaxTier = 5;
-                unsigned int tier = unit.kills / VeteranKillsPerTier;
-                if (tier > VeteranMaxTier)
-                {
-                    tier = VeteranMaxTier;
-                }
-                return static_cast<int>(tier);
+                auto definitionIt = sim.unitDefinitions.find(unit.unitType);
+                const auto& rules = definitionIt != sim.unitDefinitions.end()
+                    ? veterancyRules(definitionIt->second.veterancy, sim.communityPatchMode)
+                    : defaultVeterancy();
+                return static_cast<int>(veterancyLevel(rules, unit.kills));
             },
             [&](const CobEnvironment::QueryStatus::MinId&) {
                 std::optional<unsigned int> minId;
