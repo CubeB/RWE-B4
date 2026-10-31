@@ -148,7 +148,7 @@ namespace rwe
 
             UnitId spawnAircraft(const std::string& type, PlayerId owner, const SimVector& position)
             {
-                auto id = addUnitOfType(sim, type, owner, position, script);
+                auto id = spawnBoundaryUnit(type, owner, position);
                 auto& unit = sim.getUnitState(id);
                 unit.hitPoints = sim.unitDefinitions.at(type).maxHitPoints;
                 unit.physics = UnitPhysicsInfoAir{AirMovementStateFlying{}};
@@ -159,8 +159,30 @@ namespace rwe
 
             UnitId spawnTarget(const SimVector& position)
             {
-                auto id = addUnitOfType(sim, "target", them, position, script);
+                auto id = spawnBoundaryUnit("target", them, position);
                 sim.getUnitState(id).hitPoints = sim.unitDefinitions.at("target").maxHitPoints;
+                return id;
+            }
+
+            /**
+             * The shared `addUnitOfType` leaves the mesh list empty; these
+             * tests query a piece transform, and Debug builds assert that the
+             * list matches the model's piece count. Build the one-piece mesh
+             * the synthetic model describes.
+             */
+            UnitId spawnBoundaryUnit(const std::string& type, PlayerId owner, const SimVector& position)
+            {
+                auto env = std::make_unique<CobEnvironment>(script.get());
+                UnitMesh base;
+                base.name = "base";
+                std::vector<UnitMesh> pieces{base};
+                const UnitId id(sim.units.emplace(pieces, std::move(env)));
+                auto& unit = sim.getUnitState(id);
+                unit.unitType = type;
+                unit.owner = owner;
+                unit.position = position;
+                unit.previousPosition = position;
+                unit.buildTimeCompleted = sim.unitDefinitions.at(type).buildTime;
                 return id;
             }
 
