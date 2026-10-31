@@ -177,7 +177,8 @@ per-press cost.
 
 ### Verification
 
-Release `ui_probe --menu-input-timing` after the change, five runs on the same
+Release `ui_probe --menu-input-timing` after the change (build
+`3368c97a8776c0dc36d04a21ba09f38ef5f735f2`), five runs on the same
 data (the one warm outlier is GL/driver noise):
 
 | Action | Before | After |
@@ -199,11 +200,13 @@ For skirmish start, the same Release build was launched as
 --player AI;Computer;CORE;1`. With the previous code the window captured 1.4 s
 after launch was black: `LoadingScene::init` was building the match before any
 frame could be drawn. With this change the same capture shows the loading
-background and its bars, while the log still places the first game-side log at
-about two seconds after "Entering main loop". The cost itself is legitimate
-one-time match construction (atlas creation, map/terrain, unit media, AI
-setup); the change makes it visible rather than shorter. The load's total
-wall-clock time is not claimed as improved and varies with OS cache state.
+background and its bars, while the log still places the first game-side log
+("Player 1 is a computer player") 2.03 s after "Entering main loop" (the
+baseline run measured 2.55 s from loop entry to the same stage; both are
+uncontrolled OS-cache samples). The cost itself is legitimate one-time match
+construction (atlas creation, map/terrain, unit media, AI setup); the change
+makes it visible rather than shorter. The load's total wall-clock time is not
+claimed as improved and varies with OS cache state.
 
 `rwe_test` passed (2055 cases, 2050 passed, 5 skipped; 216,168 assertions) and
 `scenario --run 342-active-tab-stays-pressed` passed.
