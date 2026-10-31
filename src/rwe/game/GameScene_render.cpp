@@ -1717,7 +1717,7 @@ namespace rwe
                 {
                     auto fogged = !positionIsVisibleToLocalPlayer(f.second.position);
                     drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, renderTime(), fogged, flatFeatureBatch);
-                    if (featureShadowsAreDrawn(shadowsEnabled, featureShadowsEnabled)) // FEATURE-SHADOW-01: feature scenery has its own bit under the master.
+                    if (featureShadowsEnabled) // FEATURE-SHADOW-01: sprite-feature shadows read bit 4 alone.
                     {
                         drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, fogged, flatFeatureShadowBatch);
                     }
@@ -1923,7 +1923,7 @@ namespace rwe
             for (const auto& [_, feature] : simulation.features)
             {
                 const auto& position = feature.position;
-                if (!featureShadowsAreDrawn(shadowsEnabled, featureShadowsEnabled)) // FEATURE-SHADOW-01: a model feature's projected shadow is a feature shadow too.
+                if (!shadowsEnabled) // FEATURE-SHADOW-01: a model feature's projected shadow uses the master gate.
                 {
                     continue;
                 }
@@ -2165,7 +2165,7 @@ namespace rwe
                 {
                     auto fogged = !positionIsVisibleToLocalPlayer(f.second.position);
                     drawFeature(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, renderTime(), fogged, featureBatch);
-                    if (featureShadowsAreDrawn(shadowsEnabled, featureShadowsEnabled)) // FEATURE-SHADOW-01: leave the tree visible, suppress only its shadow.
+                    if (featureShadowsEnabled) // FEATURE-SHADOW-01: leave the tree visible, suppress only its shadow.
                     {
                         drawFeatureShadow(gameMediaDatabase, f.second, featureDefinition, viewProjectionMatrix, fogged, featureShadowBatch);
                     }
