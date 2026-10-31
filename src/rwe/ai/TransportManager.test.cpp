@@ -478,7 +478,7 @@ namespace rwe
         // kind ever started. After: ferries start and complete.
         auto script = makeEmptyCobScript();
         GameSimulation sim(makeWideChannelTerrain(), 0u, 0, 0);
-        addPlayer(sim, "human", GamePlayerType::Human, "ARM");
+        auto human = addPlayer(sim, "human", GamePlayerType::Human, "ARM");
         auto ai = addPlayer(sim, "ai", GamePlayerType::Computer, "ARM");
         defineLandUnits(sim);
         defineSeaTransport(sim);
@@ -541,6 +541,64 @@ namespace rwe
             // Nothing moved, so home is the anchor and the two agree. A
             // reader of groundAnchor never has to ask which case it is in.
             REQUIRE(controller.getBlackboard().groundAnchor->distanceSquared(commanderPosition) == 0_ss);
+        }
+
+        SECTION("before any factory stands, the spawn anchor is still home")
+        {
+            // The rule is "once there are factories, home on their ground".
+            // In the opening there is no factory to ask about, so the layer
+            // must stay on the anchor EconomyManager established from the
+            // commander. Re-homing on anything else here would change where
+            // the opening builder considers home before it has built a base.
+            AiPlayerController controller(ai, makeDefaultStandardProfile(), 42u, mapIntel);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 5, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.factories.empty());
+            REQUIRE(bb.baseAnchor.has_value());
+            REQUIRE(bb.groundAnchor.has_value());
+            REQUIRE(bb.baseAnchor->distanceSquared(commanderPosition) == 0_ss);
+            REQUIRE(bb.groundAnchor->distanceSquared(commanderPosition) == 0_ss);
+            REQUIRE(controller.getReachabilityMap().isReachable(sim, commanderPosition));
+        }
+
+        SECTION("a passenger born on the re-homed ground is accepted for the ferry")
+        {
+            // The point of the re-homing is not the labelling alone. Every
+            // unit the AI owns is born at the factory, and TransportManager
+            // refuses a passenger that is not ground-reachable from home --
+            // so with the layer still on the abandoned spawn island this
+            // passenger is refused on every tactical pass and no ferry ever
+            // starts. This is the end-to-end assertion the reachability
+            // checks above cannot make on their own.
+            auto labPosition = SimVector(400_ss, 60_ss, 0_ss);
+            addUnit(sim, "ARMLAB", ai, labPosition, script);
+            addUnit(sim, "ARMSOLAR", human, SimVector(-400_ss, 60_ss, 400_ss), script);
+            auto kbot = addUnit(sim, "ARMPW", ai, SimVector(360_ss, 60_ss, 0_ss), script);
+            auto ship = addUnit(sim, "ARMTSHIP", ai, SimVector(0_ss, 0_ss, 0_ss), script);
+
+            auto profile = makeDefaultBrutalProfile();
+            profile.scoutCount = 0;
+            profile.attackArmySize = 1;
+            profile.ferryMinArmySize = 0;
+
+            AiPlayerController controller(ai, profile, 42u, mapIntel);
+            std::vector<PlayerCommand> commands;
+            runTicks(sim, controller, 90, commands);
+
+            const auto& bb = controller.getBlackboard();
+            REQUIRE(bb.groundAnchor.has_value());
+            REQUIRE(bb.groundAnchor->distanceSquared(labPosition) == 0_ss);
+            REQUIRE(controller.getReachabilityMap().isReachable(sim, SimVector(360_ss, 60_ss, 0_ss)));
+            REQUIRE(controller.getTransportManager().getFerries().count(ship.value) == 1);
+            REQUIRE(bb.ferryPassengers.count(kbot.value) == 1);
+
+            commands.clear();
+            runTicks(sim, controller, profile.tacticalTickInterval, commands);
+            auto loads = ordersFor<LoadOrder>(commands, ship);
+            REQUIRE(!loads.empty());
+            REQUIRE(std::any_of(loads.begin(), loads.end(), [&](const LoadOrder& load) { return load.target == kbot; }));
         }
     }
 
