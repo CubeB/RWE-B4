@@ -1,5 +1,6 @@
 #pragma once
 
+#include <deque>
 #include <memory>
 #include <optional>
 #include <rwe/ColorPalette.h>
@@ -8,6 +9,7 @@
 #include <rwe/render/TextureHandle.h>
 #include <rwe/vfs/AbstractVirtualFileSystem.h>
 #include <unordered_map>
+#include <vector>
 
 namespace rwe
 {
@@ -46,6 +48,28 @@ namespace rwe
         std::unordered_map<std::string, MinimapPixels> minimapPixelCache;
         /** Misses too, since every button on every page asks and most are not units. */
         std::unordered_map<std::string, std::optional<std::shared_ptr<SpriteSeries>>> unitPicCache;
+
+        /**
+         * MLR-001: the decompressed whole-GAF bytes, by upper-cased name.
+         * Looking up one entry used to re-read and re-inflate the whole file,
+         * which is what made every rebuild of a menu panel pay for its art
+         * again. Bounded by total bytes, oldest first, because this is a
+         * performance cache and never the only copy of anything: an evicted
+         * file is simply read again. Decoded entries stay in animCache as
+         * before, so eviction cannot change what a caller sees.
+         */
+        std::unordered_map<std::string, std::shared_ptr<const std::vector<char>>> gafFileCache;
+        std::deque<std::string> gafFileOrder;
+        std::size_t gafFileCacheBytes{0};
+        static constexpr std::size_t gafFileCacheBudgetBytes = 32u * 1024u * 1024u;
+
+        /**
+         * The decompressed bytes of a whole GAF, from the cache when this
+         * service has read it before. Null when the VFS has no such file;
+         * absent files are not remembered, so a miss still asks the VFS on
+         * the next call exactly as it did before.
+         */
+        std::shared_ptr<const std::vector<char>> getGafFileBytes(const std::string& gafName);
 
     public:
         TextureService(GraphicsContext* graphics, AbstractVirtualFileSystem* filesystem, const ColorPalette* palette);

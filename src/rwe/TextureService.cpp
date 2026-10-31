@@ -126,6 +126,48 @@ namespace rwe
         return *best;
     }
 
+    std::shared_ptr<const std::vector<char>> TextureService::getGafFileBytes(const std::string& gafName)
+    {
+        auto key = toUpper(gafName);
+        auto it = gafFileCache.find(key);
+        if (it != gafFileCache.end())
+        {
+            return it->second;
+        }
+
+        auto bytes = fileSystem->readFile(gafName);
+        if (!bytes)
+        {
+            return nullptr;
+        }
+
+        auto shared = std::make_shared<const std::vector<char>>(std::move(*bytes));
+        auto size = shared->size();
+
+        // A file larger than the whole budget is read for this lookup and not
+        // retained; holding it would mean evicting everything else for one
+        // entry. Everything else is inserted oldest-first evicted.
+        if (size <= gafFileCacheBudgetBytes)
+        {
+            while (!gafFileOrder.empty() && gafFileCacheBytes + size > gafFileCacheBudgetBytes)
+            {
+                auto oldest = std::move(gafFileOrder.front());
+                gafFileOrder.pop_front();
+                auto oldestIt = gafFileCache.find(oldest);
+                if (oldestIt != gafFileCache.end())
+                {
+                    gafFileCacheBytes -= oldestIt->second->size();
+                    gafFileCache.erase(oldestIt);
+                }
+            }
+            gafFileOrder.push_back(key);
+            gafFileCacheBytes += size;
+            gafFileCache.emplace(std::move(key), shared);
+        }
+
+        return shared;
+    }
+
     std::optional<std::shared_ptr<SpriteSeries>> TextureService::getGafEntryInternal(const std::string& gafName, const std::string& entryName)
     {
         auto normEntryName = toUpper(entryName);
@@ -137,7 +179,7 @@ namespace rwe
             return it->second;
         }
 
-        auto gafBytes = fileSystem->readFile(gafName);
+        auto gafBytes = getGafFileBytes(gafName);
         if (!gafBytes)
         {
             return std::nullopt;

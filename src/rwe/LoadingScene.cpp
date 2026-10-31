@@ -124,7 +124,31 @@ namespace rwe
             }
         }
         networkService.start(gameParameters.localNetworkPort);
+    }
 
+    void LoadingScene::update(int /*millisecondsElapsed*/)
+    {
+        // The first update of a visible loading scene draws nothing but the
+        // panel: SceneManager renders and presents it at the end of this same
+        // loop iteration, so the first asset work below happens with the
+        // loading presentation already on screen (MLR-002). Headless runs
+        // skip the presentation but not the state machine, so every harness
+        // reaches the same load on the second pass.
+        if (framesUntilLoad > 0)
+        {
+            --framesUntilLoad;
+            return;
+        }
+        if (!loadPending)
+        {
+            return;
+        }
+        loadPending = false;
+        loadGame();
+    }
+
+    void LoadingScene::loadGame()
+    {
         std::shared_ptr<Scene> gameScene;
         if (gameParameters.loadFromSaveFile)
         {
