@@ -33,7 +33,8 @@ wherever the window manager puts them; nothing here depends on user32.
                                                  # launcher asks: over the game's
                                                  # own stdin and stdout
   uv run tools/net-test.py --lag 1:50            # peer 1 sleeps 50 ms after every
-                                                 # tick, to reproduce a slow machine
+                                                 # tick, to reproduce a slow machine;
+                                                 # fails if a peer waits for itself
   uv run tools/net-test.py --peer-data-path "0:D:/GOG/TA" --peer-data-path "1:D:/Steam/TA"
                                                 # load each installation independently
 
@@ -70,12 +71,20 @@ LOCKSTEP_PATTERN = re.compile(r"Lockstep summary:")
 INTERESTING_PATTERN = re.compile(
     r"waiting for|quiet for|dropped|left the game|Desync|diverged at tick|critical|Chat from player"
 )
+SELF_WAIT_PATTERN = re.compile(r"Tick (\d+) is waiting for (.+)$")
 BUNDLE_PATTERN = re.compile(r"tick=(?P<tick>\d+) file=(?P<file>.+)$")
 REJOIN_BUNDLE_PATTERN = re.compile(r"REJOIN-BUNDLE")
 LAG_PATTERN = re.compile(r"\d+(@\d+)?")
 
 STARTUP_TIMEOUT = 30.0
 KILL_GRACE = 5.0
+
+# Before this tick the local command buffer is still being filled for the
+# first time, and waiting for one's own player is honest. Past it, a peer that
+# names itself in "waiting for" has run out of the sets it should have queued
+# for the ticks this frame is dispatching -- which is the local feed fault
+# #896 measured, not lockstep waiting on anybody else.
+SELF_WAIT_AFTER_TICK = 90
 
 
 def say(*parts: object) -> None:
@@ -502,6 +511,8 @@ class Harness:
     def finish(self, agreed: bool, compared: bool, rejoin_succeeded: bool) -> int:
         self.terminate_all()
 
+        self_waits = self.self_wait_lines()
+
         expected_divergence = self.args.desync_at > 0
         silent = [s for s in self.survivors if not read_lines(self.peers[s].hashes)]
         if silent:
@@ -523,11 +534,41 @@ class Harness:
             say("RESULT: peers agree")
             code = 0
 
+        if self_waits:
+            # A peer stalling on its own command stream is the fault #896
+            # measured: every set it should have queued for the rest of this
+            # frame was missing, so it waited for itself. Lockstep waiting on
+            # another player is not this and is expected. It is never a
+            # legitimate wait once the stream has had time to fill.
+            for peer, tick, waiting in self_waits[:5]:
+                say(f"SELF-WAIT: player {peer} ({NAMES[peer]}) waited for itself at tick "
+                    f"{tick}: {waiting}")
+            if len(self_waits) > 5:
+                say(f"SELF-WAIT: and {len(self_waits) - 5} more")
+            code = 1
+
         if self.args.rejoin and not rejoin_succeeded:
             code = 1
 
         self.report_logs()
         return code
+
+    def self_wait_lines(self) -> list[tuple[int, int, str]]:
+        """Ticks where a peer named itself in "waiting for", past startup."""
+        found: list[tuple[int, int, str]] = []
+        for s in range(self.count):
+            own = NAMES[s]
+            for line in read_lines(self.peers[s].log):
+                match = SELF_WAIT_PATTERN.search(line)
+                if not match:
+                    continue
+                tick = int(match.group(1))
+                if tick < SELF_WAIT_AFTER_TICK:
+                    continue
+                waiting = [name.strip() for name in match.group(2).split(",")]
+                if own in waiting:
+                    found.append((s, tick, match.group(2)))
+        return found
 
     def report_logs(self) -> None:
         # Each peer's own account of the run, beside the hash comparison above.

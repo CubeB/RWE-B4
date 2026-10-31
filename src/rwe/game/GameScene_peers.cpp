@@ -57,6 +57,16 @@ namespace rwe
             && simulation.getPlayer(localPlayerId).type == GamePlayerType::Human;
     }
 
+    void GameScene::pushLocalCommandSet()
+    {
+        auto count = GameNetworkService::commandsFittingOneSet(localPlayerCommandBuffer);
+        std::vector<PlayerCommand> set(localPlayerCommandBuffer.begin(), localPlayerCommandBuffer.begin() + static_cast<std::ptrdiff_t>(count));
+        playerCommandService->pushCommands(localPlayerId, set);
+        gameNetworkService->submitCommands(sceneTime, set);
+        ++localSetsSubmitted;
+        localPlayerCommandBuffer.erase(localPlayerCommandBuffer.begin(), localPlayerCommandBuffer.begin() + static_cast<std::ptrdiff_t>(count));
+    }
+
     unsigned int GameScene::chooseDropTick(const std::vector<GameNetworkService::PeerStatus>& peers) const
     {
         // Past the furthest tick anybody has reached, not merely past this

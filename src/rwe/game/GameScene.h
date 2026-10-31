@@ -1711,6 +1711,24 @@ namespace rwe
         void tryTickGame();
 
         /**
+         * Queues the next set of the local human's orders -- or an empty set
+         * when none are waiting -- and sends it to every peer.
+         *
+         * Called by the frame's own top-up and by tryTickGame after a tick has
+         * run. The tick-side call is what keeps the stream one set per tick
+         * however many ticks a slow frame dispatches; the frame-side call is
+         * what puts the first sets there before any tick runs.
+         */
+        void pushLocalCommandSet();
+
+        /**
+         * The depth the local human's command stream is kept at, in ticks:
+         * `commandBufferTargetForRttMillis` for the worst peer, computed once
+         * a frame. Zero until the first frame has measured the peers.
+         */
+        unsigned int localCommandDepthTarget{0};
+
+        /**
          * Works out who the tick is waiting on and, if one of them has been
          * quiet past the timeout and this peer is the one to say so, issues the
          * drop that lets everybody else carry on.

@@ -143,11 +143,23 @@ player's.
   projected forward at the normal rate, because a packet does not yet say what
   speed or pause state its sender is in. Issue #354 adds that.
 
+## One thing that is always wrong
+
+**A peer's own name in "waiting for".** No machine can be late for itself. If
+the line names the player whose panel it is on -- "waiting for Bob" on Bob's
+machine -- the fault is the local command feed, not the network: the sets for
+the rest of this frame's ticks were not queued before it started dispatching
+them. It was measured and fixed in `NETWORK-LOCAL-FEED-001`
+([findings](NETWORK-LOCAL-FEED-FINDINGS.md)); `tools/net-test.py --lag` fails a
+run that shows it again.
+
 ## The code
 
 `GameScene::renderNetworkOverlay` and `recordNetworkHistory`
 (`src/rwe/game/GameScene_peers.cpp`) draw and feed it; `NetworkHistory`
 keeps the samples; `LockstepStats` times the stalls from `tryTickGame`; and
 `GameNetworkService::getPeerStatuses` supplies each peer's figures, once a frame
-in a single request to the network thread. The colour thresholds are first
-guesses and are all in `renderNetworkOverlay`.
+in a single request to the network thread. `GameScene::pushLocalCommandSet` is
+the one place the local human's sets enter the stream, called by the frame's
+top-up and by `tryTickGame` after every tick that ran. The colour thresholds are
+first guesses and are all in `renderNetworkOverlay`.

@@ -578,6 +578,26 @@ namespace rwe
 
         sceneTime += SceneTime(1);
 
+        // Keep the local stream one set per tick however many ticks this
+        // frame dispatches, rather than only as deep as the last frame left
+        // it. A slow tick or a frame hitch leaves several ticks owed in one
+        // frame, and a buffer filled only once a frame runs out part-way
+        // through it -- the local player then waits for its own commands,
+        // which the overlay reports as a stall and turns one slow tick into
+        // a freeze. This happens after a tick that has run and never on an
+        // attempt that was held up, so a stall cannot make the buffer grow.
+        // A lone human is fed by the tick itself, above, and needs nothing
+        // here.
+        if (!isPlayback()
+            && !localHumanCommandsAreFedPerTick()
+            && simulation.getPlayer(localPlayerId).type == GamePlayerType::Human)
+        {
+            while (playerCommandService->bufferedCommandCount(localPlayerId) < localCommandDepthTarget)
+            {
+                pushLocalCommandSet();
+            }
+        }
+
         // Four relaxed stores a tick, so that a crash anywhere below can say
         // when it happened rather than only where.
         setCrashPhase(CrashPhase::SimTick);

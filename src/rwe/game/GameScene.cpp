@@ -914,6 +914,7 @@ namespace rwe
         finishRejoinIfCaughtUp();
 
         auto targetCommandBufferSize = commandBufferTargetForRttMillis(gameNetworkService->getMaxAverageRttMillis(), gameNetworkService->getMaxRoundTripDeviationMillis());
+        localCommandDepthTarget = targetCommandBufferSize;
 
         auto bufferedCommandCount = playerCommandService->bufferedCommandCount(localPlayerId);
 
@@ -925,64 +926,56 @@ namespace rwe
         // demo is the same story with no commands at all.
         if (!isPlayback())
         {
-
-        // In an AI arena there is no human at all and the local player is
-        // itself a computer, so its commands arrive through the drain below
-        // like everybody else's. Pushing here as well would put two entries a
-        // tick into one player's queue and take it out of step with the rest.
-        //
-        // And in a game with no peers at all the human is fed a tick at a time
-        // in tryTickGame instead -- see localHumanCommandsAreFedPerTick -- so
-        // pushing here as well would put two entries a tick into their queue.
-        if (simulation.getPlayer(localPlayerId).type == GamePlayerType::Human && !localHumanCommandsAreFedPerTick())
-        {
-            // If we have too many commands buffered,
-            // defer submitting commands this frame
-            // so that we drop back down to the threshold.
-            // The second arm is for a stalled game. The buffer is not being
-            // drained, so it sits at its limit and the first arm stops
-            // firing -- which would leave a drop command waiting for a tick
-            // that is waiting for the drop. Queueing an extra set is safe:
-            // every peer sees this peer's stream exactly as it is sent, and
-            // the depth only decides how long an order waits.
-            auto setsToPush = planCommandSets(
-                bufferedCommandCount,
-                targetCommandBufferSize,
-                !waitingForPlayers.empty(),
-                !localPlayerCommandBuffer.empty());
-
-            if (setsToPush.pushLocalSet)
+            // In an AI arena there is no human at all and the local player is
+            // itself a computer, so its commands arrive through the drain below
+            // like everybody else's. Pushing here as well would put two entries a
+            // tick into one player's queue and take it out of step with the rest.
+            //
+            // And in a game with no peers at all the human is fed a tick at a time
+            // in tryTickGame instead -- see localHumanCommandsAreFedPerTick -- so
+            // pushing here as well would put two entries a tick into their queue.
+            if (simulation.getPlayer(localPlayerId).type == GamePlayerType::Human && !localHumanCommandsAreFedPerTick())
             {
-                // Queue up commands collected from the local player, as many
-                // as make one set a packet can carry. An order to a large
-                // selection is more than that -- a hundred units is three
-                // kilobytes against a 1500-byte datagram -- and sending it as
-                // one set used to stop the game. The rest waits for the next
-                // tick, still in order, which puts a tick between the first
-                // thirty or so units moving and the next. Issue #75.
-                auto count = GameNetworkService::commandsFittingOneSet(localPlayerCommandBuffer);
-                std::vector<PlayerCommand> set(localPlayerCommandBuffer.begin(), localPlayerCommandBuffer.begin() + static_cast<std::ptrdiff_t>(count));
-                playerCommandService->pushCommands(localPlayerId, set);
-                gameNetworkService->submitCommands(sceneTime, set);
-                ++localSetsSubmitted;
-                localPlayerCommandBuffer.erase(localPlayerCommandBuffer.begin(), localPlayerCommandBuffer.begin() + static_cast<std::ptrdiff_t>(count));
+                // If we have too many commands buffered,
+                // defer submitting commands this frame
+                // so that we drop back down to the threshold.
+                // The second arm is for a stalled game. The buffer is not being
+                // drained, so it sits at its limit and the first arm stops
+                // firing -- which would leave a drop command waiting for a tick
+                // that is waiting for the drop. Queueing an extra set is safe:
+                // every peer sees this peer's stream exactly as it is sent, and
+                // the depth only decides how long an order waits.
+                auto setsToPush = planCommandSets(
+                    bufferedCommandCount,
+                    targetCommandBufferSize,
+                    !waitingForPlayers.empty(),
+                    !localPlayerCommandBuffer.empty());
+
+                if (setsToPush.pushLocalSet)
+                {
+                    // Queue up commands collected from the local player, as many
+                    // as make one set a packet can carry. An order to a large
+                    // selection is more than that -- a hundred units is three
+                    // kilobytes against a 1500-byte datagram -- and sending it as
+                    // one set used to stop the game. The rest waits for the next
+                    // tick, still in order, which puts a tick between the first
+                    // thirty or so units moving and the next. Issue #75.
+                    pushLocalCommandSet();
+                }
+
+                // fill up to the required threshold
+                for (unsigned int i = 0; i < setsToPush.emptySetsToPush; ++i)
+                {
+                    pushLocalCommandSet();
+                }
             }
 
-            // fill up to the required threshold
-            for (unsigned int i = 0; i < setsToPush.emptySetsToPush; ++i)
-            {
-                playerCommandService->pushCommands(localPlayerId, std::vector<PlayerCommand>());
-                gameNetworkService->submitCommands(sceneTime, std::vector<PlayerCommand>());
-                ++localSetsSubmitted;
-            }
-        }
-
-        // The computer players' commands are NOT queued here. They are taken
-        // in tryTickGame, a tick at a time: the buffer is drained a set per
-        // player per tick, so feeding it per frame made the delay on an AI
-        // order a function of how many ticks the last frame dispatched, which
-        // is not the same number on two peers of a network game. See
-        // feedAiCommands.
+            // The computer players' commands are NOT queued here. They are taken
+            // in tryTickGame, a tick at a time: the buffer is drained a set per
+            // player per tick, so feeding it per frame made the delay on an AI
+            // order a function of how many ticks the last frame dispatched, which
+            // is not the same number on two peers of a network game. See
+            // feedAiCommands.
         }
 
         // If we are waiting to swap in a new unit GUI panel, do that now
@@ -1031,6 +1024,7 @@ namespace rwe
             ? 2000
             : (isPlayback() ? 10 * std::max(replaySpeed, 1) : 10 + static_cast<int>(ownClockCatchUp));
         FrameScheduler scheduler(static_cast<unsigned int>(millisecondsBuffer), averageSceneTime, sceneTime, maxTicksPerFrame);
+
         // Fast playback is bounded by the clock as well as by the count. At
         // 64x a frame asks for thirty-odd ticks, and if those take longer
         // than the frame the next one asks for more, and the one after for
