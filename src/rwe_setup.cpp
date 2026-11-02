@@ -389,7 +389,7 @@ namespace
     // that requires anything else is refused rather than half-loaded.
     const std::vector<std::string>& supportedModFeatures()
     {
-        static const std::vector<std::string> features = {"transform.definitions@1"};
+        static const std::vector<std::string> features = {"transform.definitions@1", "runtime.damage@1"};
         return features;
     }
 
@@ -524,6 +524,7 @@ namespace
             launch.version = mod.manifest.versionText;
             launch.manifestSha256 = mod.manifestSha256;
             launch.kind = rwe::modKindText(mod.manifest.kind);
+            launch.features = mod.manifest.features;
             if (mod.manifest.entry)
             {
                 launch.scriptName = mod.manifest.id + "/" + *mod.manifest.entry;

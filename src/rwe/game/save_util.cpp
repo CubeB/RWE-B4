@@ -13,6 +13,7 @@
 #include <rwe/ai/AiController.h>
 #include <rwe/game/GameParameters.h>
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/mod/ModRuntime.h>
 #include <rwe/mod/ModStateStore.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
@@ -762,6 +763,14 @@ namespace rwe
         {
             j["modState"] = state->toJson();
         }
+        if (const auto* runtime = sim.modRuntime())
+        {
+            auto runtimeJson = runtime->toJson();
+            // The store is saved once, under modState; keep runtime metadata
+            // to disabled packages and RNG positions.
+            runtimeJson.erase("store");
+            j["modRuntime"] = std::move(runtimeJson);
+        }
 
         json players = json::array();
         for (const auto& p : sim.players)
@@ -979,6 +988,14 @@ namespace rwe
         else
         {
             sim.setModState(nullptr);
+        }
+        if (j.contains("modRuntime"))
+        {
+            if (!sim.modRuntime())
+            {
+                throw std::runtime_error("save carries mod runtime state but no runtime is resolved");
+            }
+            sim.modRuntime()->loadJson(j.at("modRuntime"));
         }
 
         // The fresh sim has the map's initial features standing. Sweep them

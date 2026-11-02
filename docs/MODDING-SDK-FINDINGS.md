@@ -388,6 +388,62 @@ Remaining for MOD-08: the runtime hook dispatcher, the disabled-package set,
 script RNG/timer state, and the engine APIs that let a script create or inspect
 runtime state.
 
+## MOD-SDK-009: the runtime hook dispatcher
+
+Status: implemented 2026-11-02 in `src/rwe/mod/ModRuntime.{h,cpp}` and
+`src/rwe/mod/ModRuntime.test.cpp`, with simulation integration in
+`GameSimulation.cpp`, `GameSimulationLoader.cpp` and the save/hash/dump paths.
+
+A runtime package is one whose manifest requires a `runtime.*` feature (today
+`runtime.damage@1`). It is distinguished from a pre-match mutator by that
+feature, not by `kind`, and the loader's transform pass skips it.
+
+`ModRuntime` owns one persistent, sandboxed Lua state per package and the
+engine-owned store is shared with `GameSimulation`:
+
+- `hook_damage_v1(victim, attacker, amount, paralyzer, prev) -> number` is a
+  fold in resolved order, called at the final-damage point in
+  `GameSimulation::applyDamage`: after attacker veterancy, armour and victim
+  veterancy, before the value is stored. The result is checked finite and
+  non-negative and rounded once, half away from zero.
+- `on_tick(tick)` runs after `runAutomaticSharing`, i.e. after every native
+  phase, so appending it reorders nothing. It sees the tick's settled state.
+- `rwe.store_get(key)` / `rwe.store_set(key, value)` use the package's own
+  namespace in `ModStateStore`; `rwe.options` carries resolved options;
+  `rwe.log` appends to the runtime log.
+- `rwe.rand_below(n)` is a deterministic modulo of the package's own
+  `minstd_rand`, seeded from the resolved-set identity plus the package id, so
+  adding a runtime package does not move the simulation's own RNG.
+- The same sandbox as the transform runtime: no `os`/`io`/`package`/`debug`,
+  no `load`/`dofile`/`loadfile`, no `math.random`, bounded memory, and a
+  deterministic instruction budget per call, checked in 1000-instruction
+  windows.
+- A fault (Lua error, non-finite or negative damage) disables that package,
+  logs it, and passes `prev` through. Disabled packages are recorded in the
+  runtime metadata and therefore hashed.
+
+Save: `save_util.cpp` writes the store under `modState` and the runtime
+metadata (disabled packages and RNG positions) under `modRuntime`, excluding
+the duplicated store. A recorded `modRuntime` with no resolved runtime is
+refused rather than silently dropped. Hash and dump include both. The save
+version is 4 whenever either is present; an unmodded game stays at 3.
+
+Launch: `GameSimulationLoader` creates the store and runtime for packages with
+a `runtime.*` feature, after the simulation exists and before players and units
+are added. The seed is the first 32 bits of the resolved identity.
+
+Evidence, executed 2026-11-02: `rwe_test "[modruntime]"` passes 7 cases and
+`"[damage]"` 8, including an end-to-end case where a runtime `prev * 2` hook
+turns 100 damage into 200 while the same simulation without a runtime takes
+100. Full suite: 2111 cases, 2106 passed, 5 skipped, 0 failed.
+
+Remaining and deliberately not claimed: only the damage fold and per-tick event
+exist; there are no unit/projectile queries, no deferred effects, no custom
+orders, no per-unit store vars, no scripted AI, and no call-site hooks for
+creation/completion/death. Limb (feature/reclaim/remote) damage still bypasses
+the unit choke point. The libm/`^` determinism caveat in MOD-SDK-004 applies
+unchanged.
+
 ## Verification
 
 Executed 2026-11-02: `rwe_test "[modsdk]"` and the full `rwe_test` suite; the

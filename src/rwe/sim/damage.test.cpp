@@ -2,6 +2,8 @@
 #include <rwe/cob/CobEnvironment.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
+#include <rwe/mod/ModRuntime.h>
+#include <rwe/mod/ModStateStore.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
 #include <rwe/sim/Projectile.h>
@@ -526,5 +528,36 @@ namespace rwe
             sim.killUnit(frame, attackerId);
             REQUIRE(sim.getPlayer(us).unitsLost == 2);
         }
+    }
+
+    TEST_CASE("a runtime damage hook folds after the native pipeline", "[damage][modruntime]")
+    {
+        auto script = makeDamageScript();
+        GameSimulation sim(makeDamageTerrain(64, 64), 0u, 0, 0);
+        auto them = addDamagePlayer(sim, "them");
+        registerDamageModel(sim, "model");
+        sim.unitDefinitions["plain"] = makeTargetDef(1000000);
+        auto id = spawnDamageUnit(sim, "plain", them, SimVector(0_ss, 0_ss, 0_ss), script);
+
+        sim.setModState(std::make_unique<ModStateStore>());
+        sim.setModRuntime(std::make_unique<ModRuntime>(
+            std::vector<ModRuntimePackage>{
+                {"a.double", "a.double/scripts/main.lua",
+                    "function hook_damage_v1(v, a, amount, paralyzer, prev) return prev * 2 end",
+                    nlohmann::json::object()}},
+            7,
+            *sim.modState()));
+
+        sim.applyDamage(id, 100);
+        REQUIRE(damageTaken(sim, id) == 200);
+
+        // The same hit with no runtime is unchanged.
+        GameSimulation plain(makeDamageTerrain(64, 64), 0u, 0, 0);
+        auto plainThem = addDamagePlayer(plain, "them");
+        registerDamageModel(plain, "model");
+        plain.unitDefinitions["plain"] = makeTargetDef(1000000);
+        auto plainId = spawnDamageUnit(plain, "plain", plainThem, SimVector(0_ss, 0_ss, 0_ss), script);
+        plain.applyDamage(plainId, 100);
+        REQUIRE(damageTaken(plain, plainId) == 100);
     }
 }

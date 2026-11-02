@@ -10,6 +10,8 @@
 #include <limits>
 #include <map>
 #include <random>
+#include <rwe/mod/ModRuntime.h>
+#include <rwe/mod/ModStateStore.h>
 #include <rwe/mod/ModTransform.h>
 #include <set>
 #include <unordered_set>
@@ -600,7 +602,9 @@ namespace rwe
                         // to a different consumer and must not be fed to the
                         // definition transform.
                         const auto isMutator = package.kind.empty() || package.kind == "mutator";
-                        if (!isMutator)
+                        const auto isRuntime = std::any_of(package.features.begin(), package.features.end(),
+                            [](const std::string& feature) { return feature.rfind("runtime.", 0) == 0; });
+                        if (!isMutator || isRuntime)
                         {
                             continue;
                         }
@@ -947,6 +951,53 @@ namespace rwe
         // the speed, so clamping the speed here as well would have left a map
         // whose minimum is above the cap with an empty range to draw from.
         GameSimulation simulation(std::move(mapData.terrain), mapData.surfaceMetal, std::max(0, mapData.minWindSpeed), std::max(0, mapData.maxWindSpeed));
+
+        // MOD-08: persistent runtime packages. Their scripts run across ticks
+        // rather than once over the parsed definitions, so they get their own
+        // states and the engine-owned store. The seed comes from the resolved
+        // identity, not from simulation.rng, so adding a runtime mod does not
+        // move the simulation's own random sequence.
+        if (gameParameters.modContent && !gameParameters.modContent->packages.empty())
+        {
+            std::vector<ModRuntimePackage> runtimePackages;
+            for (const auto& package : gameParameters.modContent->packages)
+            {
+                const auto isRuntime = std::any_of(package.features.begin(), package.features.end(),
+                    [](const std::string& feature) { return feature.rfind("runtime.", 0) == 0; });
+                if (!isRuntime)
+                {
+                    continue;
+                }
+                if (package.scriptPath.empty())
+                {
+                    throw std::runtime_error("Mod " + package.id
+                        + ": the recorded runtime set has not been resolved on this machine");
+                }
+                std::ifstream scriptFile(package.scriptPath, std::ios::binary);
+                if (!scriptFile)
+                {
+                    throw std::runtime_error("Mod " + package.id + ": cannot open " + package.scriptPath);
+                }
+                std::string source((std::istreambuf_iterator<char>(scriptFile)), std::istreambuf_iterator<char>());
+                if (source.size() > 1024 * 1024)
+                {
+                    throw std::runtime_error("Mod " + package.id + ": script is larger than 1 MiB");
+                }
+                runtimePackages.push_back({package.id, package.scriptName, source, package.options});
+            }
+            if (!runtimePackages.empty())
+            {
+                std::uint32_t modSeed = 7;
+                const auto& identity = gameParameters.modContent->identity;
+                if (identity.size() >= 8)
+                {
+                    modSeed = static_cast<std::uint32_t>(std::stoul(identity.substr(0, 8), nullptr, 16));
+                }
+                simulation.setModState(std::make_unique<ModStateStore>());
+                simulation.setModRuntime(std::make_unique<ModRuntime>(
+                    std::move(runtimePackages), modSeed, *simulation.modState()));
+            }
+        }
         simulation.tidalStrength = std::max(0, mapData.tidalStrength);
         simulation.killMul = mapData.killMul;
         simulation.timeMul = mapData.timeMul;

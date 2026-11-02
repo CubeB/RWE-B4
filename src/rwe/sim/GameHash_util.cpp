@@ -1,5 +1,6 @@
 #include "GameHash_util.h"
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/mod/ModRuntime.h>
 #include <rwe/mod/ModStateStore.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
@@ -564,6 +565,7 @@ namespace rwe
             simulation.missionScripts ? computeHashOf(*simulation.missionScripts) : GameHash(0),
             // MOD-08: absent in an unmodded game, and then it adds nothing,
             // so existing hashes are unchanged.
-            simulation.modState() ? computeHashOf(simulation.modState()->hash()) : GameHash(0));
+            simulation.modState() ? computeHashOf(simulation.modState()->hash()) : GameHash(0),
+            simulation.modRuntime() ? computeHashOf(simulation.modRuntime()->hash()) : GameHash(0));
     }
 }

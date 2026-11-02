@@ -1,5 +1,6 @@
 #include "GameSimulation.h"
 
+#include <rwe/mod/ModRuntime.h>
 #include <rwe/mod/ModStateStore.h>
 #include <algorithm>
 #include <cassert>
@@ -280,6 +281,11 @@ namespace rwe
     void GameSimulation::setModState(std::unique_ptr<ModStateStore> state)
     {
         modState_ = std::move(state);
+    }
+
+    void GameSimulation::setModRuntime(std::unique_ptr<ModRuntime> runtime)
+    {
+        modRuntime_ = std::move(runtime);
     }
     GameSimulation::GameSimulation(GameSimulation&&) noexcept = default;
 
@@ -2394,6 +2400,16 @@ namespace rwe
         // decide the tier under the Community Patch (#934).
         damage = (damage * (100 - 4 * damageTakenTier(veterancyRules(unitDefinition.veterancy, communityPatchMode), unit.kills))) / 100;
 
+        // MOD-08: the final-damage fold, after every native modifier and
+        // before the value is stored. Rounds the same way the transform
+        // surface does: once, half away from zero.
+        if (modRuntime_)
+        {
+            const auto adjusted = modRuntime_->adjustDamage(
+                unitId, attacker.value_or(UnitId(0)), static_cast<float>(damage), paralyzer);
+            damage = static_cast<int64_t>(std::floor(adjusted + 0.5f));
+        }
+
         damagePoints = static_cast<unsigned int>(std::max<int64_t>(0, damage));
 
         // A paralyzer hit never takes hit points off anything: 0x489DEB sends
@@ -3373,6 +3389,13 @@ namespace rwe
         // later when T is a multiple of sixty. Sizes are taken on the
         // balances as the tick leaves them (ResourceSharing.h).
         runAutomaticSharing(*this);
+
+        // MOD-08: appended after every native phase, so no existing update
+        // moves. The hook sees the tick's settled state.
+        if (modRuntime_)
+        {
+            modRuntime_->onTick(gameTime.value);
+        }
 
         // Last, once every phase has left its mark on the tick: the recorder
         // reads the end-of-tick state, which is the state TA's sender would

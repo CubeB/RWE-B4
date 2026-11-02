@@ -753,6 +753,8 @@ src/rwe/net/EndpointFamily.h
     src/rwe/mod/ModTransform.h
     src/rwe/mod/ModStateStore.cpp
     src/rwe/mod/ModStateStore.h
+    src/rwe/mod/ModRuntime.cpp
+    src/rwe/mod/ModRuntime.h
     src/rwe/scene/Scene.h
     src/rwe/scene/SceneManager.cpp
     src/rwe/setup/TaInstall.cpp
@@ -1426,6 +1428,7 @@ set(TEST_FILES
     src/rwe/setup/ModManifest.test.cpp
     src/rwe/mod/ModTransform.test.cpp
     src/rwe/mod/ModStateStore.test.cpp
+    src/rwe/mod/ModRuntime.test.cpp
     src/rwe/setup/ArchiveBackend.test.cpp
     src/rwe/sim/wreckcollision.test.cpp
     src/rwe/sim/wreckage.test.cpp

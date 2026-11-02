@@ -338,6 +338,7 @@ namespace rwe
                 {"manifestSha256", package.manifestSha256},
                 {"scriptName", package.scriptName},
                 {"kind", package.kind},
+                {"features", package.features},
             });
         }
         return json{{"identity", content->identity}, {"packages", std::move(packages)}};
@@ -378,6 +379,10 @@ namespace rwe
                 package.manifestSha256 = item.value("manifestSha256", std::string());
                 package.scriptName = item.value("scriptName", std::string());
                 package.kind = item.value("kind", std::string());
+                if (item.contains("features"))
+                {
+                    package.features = item.value("features", std::vector<std::string>());
+                }
                 content->packages.push_back(std::move(package));
             }
         }

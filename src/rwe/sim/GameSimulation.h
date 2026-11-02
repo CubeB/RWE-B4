@@ -50,6 +50,7 @@ namespace rwe
     struct MissionRules;
     struct MissionScripts;
     class ModStateStore;
+    class ModRuntime;
     struct MixedOwnershipOutbox;
 
     constexpr int MaxUtilizableWindSpeed = 5000;
@@ -852,8 +853,18 @@ namespace rwe
          */
         std::unique_ptr<ModStateStore> modState_;
 
+        /**
+         * MOD-08: the persistent runtime scripts, when the resolved set
+         * contains runtime packages. Null in an unmodded or pre-match-only
+         * game, and then the damage hook and tick event cost nothing.
+         */
+        std::unique_ptr<ModRuntime> modRuntime_;
+
         ModStateStore* modState() { return modState_.get(); }
         const ModStateStore* modState() const { return modState_.get(); }
+        ModRuntime* modRuntime() { return modRuntime_.get(); }
+        const ModRuntime* modRuntime() const { return modRuntime_.get(); }
+        void setModRuntime(std::unique_ptr<ModRuntime> runtime);
         // Defined out of line: assigning a unique_ptr destroys the old
         // object, and this header must never see ModStateStore's definition.
         void setModState(std::unique_ptr<ModStateStore> state);

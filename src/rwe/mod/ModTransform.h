@@ -81,6 +81,9 @@ namespace rwe
         // in a record written before kind existed; a script-bearing package
         // is then treated as a pre-match mutator.
         std::string kind;
+        // Required API features. A package asking for a "runtime." feature
+        // is a persistent runtime script, not a pre-match transform.
+        std::vector<std::string> features;
     };
 
     struct ModLaunchContent

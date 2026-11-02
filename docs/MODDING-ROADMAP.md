@@ -212,9 +212,12 @@ scopes, per-mod namespaces and quotas, canonical JSON and a content hash, and
 is wired into `GameSimulation`'s save (version 4 only when present), hash and
 dump (MOD-SDK-008). The integration map is recorded from a read-only survey:
 damage choke point, lifecycle events, tick dispatch, save/hash/dump
-registration and section-budget hazards. Still open: the runtime hook
-dispatcher, Lua hooks, the disabled set, and the shield/mission example. No
-runtime script runs during a battle yet.
+registration and section-budget hazards. The persistent runtime now exists: `hook_damage_v1` folds at the final-damage
+point, `on_tick` runs after the native phases, the store and a seeded random
+stream are reachable, a fault disables the package, and save/hash/dump carry
+the metadata (MOD-SDK-009). Still open: the shield/mission example, lifecycle
+hooks, unit queries and deferred effects; reclaim, feature and remote damage
+still bypass the unit hook.
 
 ### MOD-09: Add Lua AI through the lockstep controller path
 
