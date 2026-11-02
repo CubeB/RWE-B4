@@ -4,6 +4,7 @@
 #include <array>
 #include <cctype>
 #include <fstream>
+#include <rwe/mod/ModTransform.h>
 #include <rwe/pathfinding/PathfindingBackend.h>
 #include <rwe/util.h>
 #include <rwe/util/SimpleLogger.h>
@@ -267,6 +268,11 @@ namespace rwe
         header["pathfinding"] = enumToName(save.parameters.pathfindingBackend, PathfindingBackendNames, "rwe");
         header["mission"] = save.parameters.mission;
         header["communityPatch"] = save.parameters.communityPatch;
+        // MOD-06: the set identity and ordered fingerprints, not local paths.
+        if (auto mods = modLaunchContentToJson(save.parameters.modContent.get()); !mods.is_null())
+        {
+            header["mods"] = std::move(mods);
+        }
         if (const auto& c = save.parameters.campaign)
         {
             // The original's header keys, Campaign, Mission, Difficulty, Side
@@ -379,6 +385,10 @@ namespace rwe
         parameters.pathfindingBackend = enumFromName(header.value("pathfinding", "rwe"), PathfindingBackendNames, PathfindingBackend::RweAStar);
         parameters.mission = header.value("mission", false);
         parameters.communityPatch = header.value("communityPatch", false);
+        if (header.contains("mods"))
+        {
+            parameters.modContent = modLaunchContentFromJson(header.at("mods"));
+        }
         if (header.contains("campaign") && header.at("campaign").is_object())
         {
             const auto& c = header.at("campaign");

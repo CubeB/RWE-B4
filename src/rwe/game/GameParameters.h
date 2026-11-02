@@ -17,6 +17,7 @@
 namespace rwe
 {
     struct TaHostGame;
+    struct ModLaunchContent;
 
     struct PlayerControllerTypeHuman
     {
@@ -341,6 +342,14 @@ namespace rwe
 
         /** Which path search this game runs; a lockstep option like the four above. */
         PathfindingBackend pathfindingBackend{PathfindingBackend::RweAStar};
+
+        /**
+         * MOD-06: the resolved mod set this game runs, or null for unmodded.
+         * Shared because GameParameters is copied along the launch, save and
+         * replay paths. Its identity and ordered fingerprints are recorded in
+         * saves and replays; script paths are launch-only.
+         */
+        std::shared_ptr<const ModLaunchContent> modContent;
 
         /**
          * The battle test: instead of a commander each, every player is kept

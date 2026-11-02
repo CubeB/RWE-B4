@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <rwe/game/GameParameters.h>
 #include <rwe/game/PlayerCommand.h>
@@ -46,6 +47,13 @@ namespace rwe
          * version 8 has no field and means "off".
          */
         bool communityPatch{false};
+
+        /**
+         * MOD-06: the resolved mod set identity and ordered fingerprints.
+         * Version 9 and older have no field and mean the unmodded base
+         * game. Local script paths are never recorded.
+         */
+        std::shared_ptr<const ModLaunchContent> modContent;
 
         /**
          * Slot for slot as the lobby dealt them, empty slots included: a

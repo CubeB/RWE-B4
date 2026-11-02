@@ -63,6 +63,9 @@ set(JSON_BuildTests OFF CACHE INTERNAL "")
 set(JSON_Install OFF CACHE INTERNAL "")
 add_subdirectory("libs/json")
 
+# MOD-04: the modding SDK's pinned authoring runtime.
+add_subdirectory("libs/lua" EXCLUDE_FROM_ALL)
+
 set(SDL_STATIC ON CACHE BOOL "" FORCE)
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
@@ -746,12 +749,18 @@ src/rwe/net/EndpointFamily.h
     src/rwe/resource_io.h
     src/rwe/rwe_time.cpp
     src/rwe/rwe_time.h
+    src/rwe/mod/ModTransform.cpp
+    src/rwe/mod/ModTransform.h
+    src/rwe/mod/ModStateStore.cpp
+    src/rwe/mod/ModStateStore.h
     src/rwe/scene/Scene.h
     src/rwe/scene/SceneManager.cpp
     src/rwe/setup/TaInstall.cpp
     src/rwe/setup/TaInstall.h
     src/rwe/setup/PackageLibrary.cpp
     src/rwe/setup/PackageLibrary.h
+    src/rwe/setup/ModManifest.cpp
+    src/rwe/setup/ModManifest.h
     src/rwe/setup/ArchiveBackend.cpp
     src/rwe/setup/ArchiveBackend.h
     src/rwe/scene/SceneManager.h
@@ -914,6 +923,8 @@ src/rwe/net/EndpointFamily.h
     src/rwe/util/OpaqueId_io.h
     src/rwe/util/OpaqueUnit.h
     src/rwe/util/Result.h
+    src/rwe/util/Sha256.cpp
+    src/rwe/util/Sha256.h
     src/rwe/util/SharedHandle.h
     src/rwe/util/UniqueHandle.h
     src/rwe/util/collection_util.h
@@ -1100,6 +1111,7 @@ target_include_directories(librwe PUBLIC ${Protobuf_INCLUDE_DIRS})
 target_include_directories(librwe PUBLIC ${CMAKE_CURRENT_BINARY_DIR}) # for generated headers
 
 target_link_libraries(librwe nlohmann_json::nlohmann_json)
+target_link_libraries(librwe rwe_lua)
 
 target_include_directories(librwe PUBLIC ${PROJECT_SOURCE_DIR}/libs/imgui)
 target_include_directories(librwe PUBLIC ${PROJECT_SOURCE_DIR}/libs/imgui/backends)
@@ -1411,6 +1423,9 @@ set(TEST_FILES
     src/rwe/sim/ProjectileSpawn.test.cpp
     src/rwe/setup/TaInstall.test.cpp
     src/rwe/setup/PackageLibrary.test.cpp
+    src/rwe/setup/ModManifest.test.cpp
+    src/rwe/mod/ModTransform.test.cpp
+    src/rwe/mod/ModStateStore.test.cpp
     src/rwe/setup/ArchiveBackend.test.cpp
     src/rwe/sim/wreckcollision.test.cpp
     src/rwe/sim/wreckage.test.cpp

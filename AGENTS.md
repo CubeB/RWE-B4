@@ -36,3 +36,13 @@ Current priority investigations are submarine construction height in shipyards
 and D-gun interactions with surface ships and submerged submarines. Treat the
 reported expected behaviour as a hypothesis until the reference establishes it.
 Documentation work does not authorize implementing these fixes.
+
+## Modding change publication
+
+Standing user instruction, 2026-11-02: no modding-related change is pushed
+directly to any GitHub remote without the user's explicit authorisation. A
+modding change may be proposed as a pull request, and nothing more. Agent
+sessions keep modding work local until the user says otherwise; do not commit
+it to `revival` and do not `git push` it, including to a fork or a feature
+branch, unless the user authorises that specific push. This applies to the
+modding plan, roadmap, findings, SDK code, tests and tooling alike.

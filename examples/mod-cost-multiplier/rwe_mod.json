@@ -1,0 +1,13 @@
+{
+  "manifestVersion": 1,
+  "id": "com.example.costmultiplier",
+  "name": "Cost multiplier",
+  "version": "1.0.0",
+  "kind": "mutator",
+  "api": 1,
+  "entry": "scripts/main.lua",
+  "features": ["transform.definitions@1"],
+  "options": [
+    {"key": "multiplier", "type": "number", "default": 1.5, "min": 0.1, "max": 10.0}
+  ]
+}
