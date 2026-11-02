@@ -1,4 +1,8 @@
-import type { ArchiveInfo, ModFingerprint } from "../common/archives";
+import type {
+  ArchiveInfo,
+  ManifestInfo,
+  ModFingerprint,
+} from "../common/archives";
 
 /**
  * What a lobby client sends, checked before the server keeps it or passes it
@@ -143,7 +147,24 @@ function archiveInfo(x: unknown): ArchiveInfo | undefined {
   return { name, size, hash };
 }
 
-/** The archive fingerprints a client reports (common/archives.ts). */
+/** The author manifest a client reports, if it has one. */
+function manifestInfo(x: unknown): ManifestInfo | undefined {
+  if (typeof x !== "object" || x === null) {
+    return undefined;
+  }
+  const o = x as Record<string, unknown>;
+  const size = intInRange(o.size, 0, Number.MAX_SAFE_INTEGER);
+  const hash =
+    typeof o.hash === "string" && /^[0-9a-f]{64}$/.test(o.hash)
+      ? o.hash
+      : undefined;
+  if (size === undefined || hash === undefined) {
+    return undefined;
+  }
+  return { size, hash };
+}
+
+/** The archive and manifest fingerprints a client reports (common/archives.ts). */
 export function modFingerprints(x: unknown): ModFingerprint[] | undefined {
   if (!Array.isArray(x) || x.length > MaxMods) {
     return undefined;
@@ -170,7 +191,15 @@ export function modFingerprints(x: unknown): ModFingerprint[] | undefined {
       }
       archives.push(info);
     }
-    out.push({ name, archives });
+    if (o.manifest === undefined) {
+      out.push({ name, archives });
+      continue;
+    }
+    const manifest = manifestInfo(o.manifest);
+    if (manifest === undefined) {
+      return undefined;
+    }
+    out.push({ name, archives, manifest });
   }
   return out;
 }

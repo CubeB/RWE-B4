@@ -72,6 +72,37 @@ describe("lobby payload validation", () => {
     ).toBeUndefined();
   });
 
+  it("checks the author manifest fingerprint when one is reported", () => {
+    const hash = "a".repeat(64);
+    const good = [
+      {
+        name: "mod",
+        archives: [{ name: "x.hpi", size: 10, hash }],
+        manifest: { size: 4, hash },
+      },
+    ];
+    expect(valid.modFingerprints(good)).toEqual(good);
+
+    // A client that reports no manifest is a legacy package, not an error.
+    expect(valid.modFingerprints([{ name: "mod", archives: [] }])).toEqual([
+      { name: "mod", archives: [] },
+    ]);
+
+    expect(
+      valid.modFingerprints([{ name: "mod", archives: [], manifest: null }])
+    ).toBeUndefined();
+    expect(
+      valid.modFingerprints([
+        { name: "mod", archives: [], manifest: { size: 1, hash: "zz" } },
+      ])
+    ).toBeUndefined();
+    expect(
+      valid.modFingerprints([
+        { name: "mod", archives: [], manifest: { size: -1, hash } },
+      ])
+    ).toBeUndefined();
+  });
+
   it("only reads fields off a real object", () => {
     expect(valid.payload(null)).toBeUndefined();
     expect(valid.payload([1])).toBeUndefined();
