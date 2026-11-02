@@ -300,3 +300,21 @@ This table identifies likely work locations, not permission to bypass the
 original-behaviour findings or add every subsystem header to `GameSimulation.h`.
 Preserve the existing section-budget discipline and keep runtime dependencies
 behind private implementation boundaries.
+
+## Tracking issues (opened 2026-11-02)
+
+These are the follow-up issues for the work that is not in the first SDK PRs.
+Close each when its PR merges.
+
+| Issue | Scope |
+| --- | --- |
+| #970 | MOD-08: finish the runtime hook surface and ship a shield example |
+| #971 | MOD-09: scripted AI state survives save/resume and rejoin |
+| #972 | MOD-10: presentation mod SDK |
+| #973 | MOD-11: subsystem provider contract and the first economy provider |
+| #974 | MOD-11b: module runtime spike |
+| #975 | ProTA P1/P2: content package recognition and loading |
+| #976 | ProTA P3: the ProTA rules profile |
+| #977 | ProTA P4: presentation, settings and compatibility run |
+| #978 | Hash entry scripts and content files into the resolved identity |
+| #979 | Carry the resolved-set identity on the multiplayer wire |
