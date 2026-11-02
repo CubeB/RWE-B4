@@ -167,20 +167,16 @@ namespace rwe
             lua_createtable(state, 0, 9);
             lua_pushinteger(state, currentModAiApiVersion);
             lua_setfield(state, -2, "api_version");
-            lua_pushcfunction(state, tickFunction);
-            lua_setfield(state, -2, "tick");
-            lua_pushcfunction(state, myUnitsFunction);
-            lua_setfield(state, -2, "my_units");
+            lua_pushcfunction(state, cmdAttackFunction);
+            lua_setfield(state, -2, "cmd_attack");
             lua_pushcfunction(state, cmdMoveFunction);
             lua_setfield(state, -2, "cmd_move");
             lua_pushcfunction(state, cmdStopFunction);
             lua_setfield(state, -2, "cmd_stop");
-            lua_pushcfunction(state, cmdAttackFunction);
-            lua_setfield(state, -2, "cmd_attack");
             lua_pushcfunction(state, logFunction);
             lua_setfield(state, -2, "log");
-            lua_pushcfunction(state, randBelowFunction);
-            lua_setfield(state, -2, "rand_below");
+            lua_pushcfunction(state, myUnitsFunction);
+            lua_setfield(state, -2, "my_units");
             lua_createtable(state, 0, static_cast<int>(
                 script.options.is_object() ? script.options.size() : 0));
             if (script.options.is_object())
@@ -192,6 +188,10 @@ namespace rwe
                 }
             }
             lua_setfield(state, -2, "options");
+            lua_pushcfunction(state, randBelowFunction);
+            lua_setfield(state, -2, "rand_below");
+            lua_pushcfunction(state, tickFunction);
+            lua_setfield(state, -2, "tick");
             lua_setglobal(state, "ai");
 
             // Load the package. A script that does not load is a broken
@@ -301,13 +301,14 @@ namespace rwe
             return UnitId(0);
         }
 
-        void pushCommand(PlayerUnitCommand command, const char* where)
+        bool pushCommand(PlayerUnitCommand command)
         {
             if (pending.size() >= limits.maxCommandsPerTick)
             {
-                throw std::runtime_error(std::string(where) + ": command budget exhausted");
+                return false;
             }
             pending.push_back(std::move(command));
+            return true;
         }
 
         static Impl* current(lua_State* state)
@@ -387,17 +388,12 @@ namespace rwe
             {
                 return luaL_error(state, "ai.cmd_move: destination must be finite");
             }
-            try
-            {
-                impl->pushCommand(
+            if (!impl->pushCommand(
                     PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(
                         MoveOrder(SimVector(SimScalar(x), 0_ss, SimScalar(z))),
-                        PlayerUnitCommand::IssueOrder::Immediate)),
-                    "ai.cmd_move");
-            }
-            catch (const std::exception& e)
+                        PlayerUnitCommand::IssueOrder::Immediate))))
             {
-                return luaL_error(state, "%s", e.what());
+                return luaL_error(state, "ai.cmd_move: command budget exhausted");
             }
             return 0;
         }
@@ -406,15 +402,9 @@ namespace rwe
         {
             auto* impl = current(state);
             const auto unit = impl->checkedOwnUnit(state, 1, "ai.cmd_stop");
-            try
+            if (!impl->pushCommand(PlayerUnitCommand(unit, PlayerUnitCommand::Stop{})))
             {
-                impl->pushCommand(
-                    PlayerUnitCommand(unit, PlayerUnitCommand::Stop{}),
-                    "ai.cmd_stop");
-            }
-            catch (const std::exception& e)
-            {
-                return luaL_error(state, "%s", e.what());
+                return luaL_error(state, "ai.cmd_stop: command budget exhausted");
             }
             return 0;
         }
@@ -435,16 +425,11 @@ namespace rwe
             {
                 return luaL_error(state, "ai.cmd_attack: no such unit %d", static_cast<int>(target.value));
             }
-            try
-            {
-                impl->pushCommand(
+            if (!impl->pushCommand(
                     PlayerUnitCommand(unit, PlayerUnitCommand::IssueOrder(
-                        AttackOrder(target), PlayerUnitCommand::IssueOrder::Immediate)),
-                    "ai.cmd_attack");
-            }
-            catch (const std::exception& e)
+                        AttackOrder(target), PlayerUnitCommand::IssueOrder::Immediate))))
             {
-                return luaL_error(state, "%s", e.what());
+                return luaL_error(state, "ai.cmd_attack: command budget exhausted");
             }
             return 0;
         }

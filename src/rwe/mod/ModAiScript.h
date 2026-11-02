@@ -3,11 +3,12 @@
 #include <cstdint>
 #include <memory>
 #include <nlohmann/json.hpp>
-#include <rwe/mod/ModTransform.h>
 #include <string>
 
 namespace rwe
 {
+    struct ModLaunchContent;
+
     /**
      * MOD-09, docs/MODDING-SDK-FINDINGS.md MOD-SDK-010. One AI package as the
      * launch path resolved it, ready to hand to ModAiController.

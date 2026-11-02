@@ -444,6 +444,142 @@ creation/completion/death. Limb (feature/reclaim/remote) damage still bypasses
 the unit choke point. The libm/`^` determinism caveat in MOD-SDK-004 applies
 unchanged.
 
+## MOD-SDK-010: Lua AI through the lockstep controller path
+
+Status: partially implemented 2026-11-02 in `src/rwe/mod/ModAiScript.{h,cpp}`,
+`src/rwe/mod/ModAiController.{h,cpp}`, `src/rwe/mod/ModAi.test.cpp`,
+`src/rwe/ai/AiEngine.h`, `src/rwe/ai/AiController.cpp`,
+`src/rwe/game/AiSeat.{h,cpp}` and `src/rwe/game/GameSimulationLoader.cpp`.
+MOD-09 is **not complete**: AI private state is not saved, resumed or rejoined.
+
+This is **RWE-original**. `TotalA.exe` has no scripted AI, no AI package, no
+per-seat script provider and no Lua observation API. The evidence boundary is
+inherited from MOD-SDK-001 (the authoring foundation) and MOD-SDK-004 (the
+pinned Lua runtime); this entry records an implementation against that boundary,
+not original-game parity. No decompilation was opened for it and no original
+runtime was executed. The native Classic and RWE engines, their personalities,
+`--ai-engine rwe`, saves and replays written by them are unchanged; Classic
+remains the default.
+
+### Engine selection and save
+
+`AiEngine` gains `Lua`, named `"lua"` by `aiEngineName` and accepted
+case-insensitively by `aiEngineFromName`, beside `"classic"` and `"rwe"`.
+`PlayerInfo::aiEngine` round-trips it as `"lua"` in the save header, and
+`recordAiEngines` records it from the live controller like any other engine. A
+save written before the choice still loads as RWE's engine, and an unknown name
+still falls back as before; those policies are untouched.
+
+A seat resolves to Lua only through the existing order: its personality's
+engine, else the saved engine, else the game's default. A Classic personality
+still plays Classic and an RWE personality still plays RWE.
+
+### Launch resolution
+
+`AiSeatRequest` carries `scriptPackageId` and a
+`std::shared_ptr<const ModAiScript>`. `AiSeat.h` forward-declares the struct, so
+the widely included header sees neither Lua nor nlohmann::json. `ModAiScript`
+holds the package id, script name, source text, resolved options and a
+deterministic seed.
+
+`GameSimulationLoader`, immediately before `createAiController`, resolves the
+seat's engine and, for Lua, calls `resolveModAiScript` against
+`GameParameters::modContent`:
+
+- an empty `scriptPackageId` selects the first package whose manifest `kind` is
+  `ai`, in resolved load order, so the choice is deterministic;
+- a named id must exist and must be an `ai` package;
+- the entry script is read with the same 1 MiB cap as every package script;
+- the seed is the first 32 bits of the resolved-set identity, or 0 without one,
+  and `AiSeat` still draws exactly one value from `simulation.rng` per seat, so
+  the start-position deal is unaffected;
+- a seat that asks for Lua with no resolved set, no `ai` package, no local
+  script path or an unreadable/oversized script **throws** a message naming the
+  package. It is never quietly played by Classic.
+
+A Lua seat with `--ai-tune` is refused, as a Classic seat is: neither has knobs.
+
+### The controller and its surface
+
+`ModAiController` is one persistent, sandboxed Lua state per seat behind a
+pimpl. Its tick runs inside the ordinary `GameSimulation::runAiControllers`
+pass and appends ordinary `PlayerUnitCommand`s to the same buffer as every
+other engine, so the fixed command depth and readiness guard are unchanged.
+
+The first-slice API, sorted as implemented:
+
+| Call | Meaning |
+| --- | --- |
+| `ai.api_version` | `1` |
+| `ai.cmd_attack(unit, target)` | Immediate `AttackOrder`; the target may be any unit the simulation holds |
+| `ai.cmd_move(unit, x, z)` | Immediate `MoveOrder` at a finite world position |
+| `ai.cmd_stop(unit)` | Immediate `Stop` |
+| `ai.log(text)` | Bounded controller log |
+| `ai.my_units()` | Sorted array of `{id, type, x, z, health}` for this seat's living units only |
+| `ai.options` | The package's resolved manifest options |
+| `ai.rand_below(n)` | Deterministic modulo of the controller's own `minstd_rand` |
+| `ai.tick()` | The simulation tick number being run |
+
+The script defines `on_tick(tick)`; a script without it is disabled with a
+diagnostic rather than left silently inert.
+
+Observation policy: `ai.my_units()` iterates only units whose `owner` equals
+the seat and sorts them by unit id. There is no enemy, fog, map or projectile
+query, so the first slice adds no omniscience. Commands are rejected with a
+Lua error when the unit is unknown or belongs to another seat; a target id must
+name an existing simulation unit. Emitted commands are stable-sorted by unit
+id before they leave the controller, so author order cannot make two peers
+differ, and a unit's own sequence keeps its order.
+
+Determinism: no wall clock, frame rate, ping or presentation state is
+reachable. Randomness is the controller's own `minstd_rand`, seeded from the
+request seed, the package-id hash and the seat's single simulation draw. Unit
+iteration is the snapshot above. The Lua string-hash seed is the fixed one from
+MOD-SDK-004.
+
+Sandbox and budgets, reused from `ModRuntime`: `os`, `io`, `package` and
+`debug` are not opened; `load`, `dofile` and `loadfile` are removed;
+`math.random`/`math.randomseed` are removed; a count hook enforces 200,000 VM
+instructions per call in 1000-instruction windows; a custom allocator enforces
+a 4 MiB state budget; commands per tick, log entries and log-line length are
+bounded. A fault (Lua error, budget exhaustion, foreign unit, missing
+`on_tick`) disables the seat for the match and emits nothing for that tick.
+The disable is sticky and deterministic, as `ModRuntime`'s package disable is.
+
+### What is deliberately not done
+
+- **Save/resume and rejoin of AI private state are not implemented.** The save
+  header records only the engine name. Plans, timers, pending actions, the Lua
+  heap and the RNG position are not in `ModStateStore`, the save, the hash or
+  a checkpoint. A saved game that resumes a Lua seat rebuilds a fresh state
+  and therefore does not yet reproduce the AI's future decisions. Rejoin has
+  no state transfer or deterministic reconstruction.
+- Replay shadow AI still runs the recorded command stream with an idle seat;
+  a replay does not start a second AI producer. The recorded-lua replay path
+  requires the recorded AI package to resolve locally, like every MOD-06 set.
+- No two-peer delayed-packet or differing-frame-rate run, and no
+  Windows/Linux cross-build run, has been performed. The determinism claims
+  above are test-level, not an executed multi-machine parity check.
+- No seat-to-package assignment UI or PlayerInfo field exists yet: the first
+  `ai` package in load order is the seat's, or an explicit package id supplied
+  by a caller.
+- The libm/`^` caveat in MOD-SDK-004 applies unchanged.
+
+### Evidence
+
+Executed 2026-11-02 with the shipped data build tree: `rwe_test "[modai]"`
+passes 11 cases and 72 assertions. The cases cover byte-identical command
+sets from one seed, sorted emission, own-unit observation and foreign-unit
+refusal, idle seats not thinking, the sandbox removals, sticky deterministic
+faults, the instruction budget, a missing `on_tick`, and AI-package resolution
+including the refused unresolved, missing, non-ai and no-set cases. `"[ai][engine]"`
+passes 15 cases and 137 assertions including Lua selection and the
+one-draw-per-seat invariant. `"[saveload][ai]"` passes 4 cases and 23
+assertions. The full suite passes 2125 cases (2120 passed, 5 skipped) and
+216896 assertions in the final run; the assertion total varies by a few between
+runs, so the test-case count is the stable figure. These are RWE tests of
+RWE-original behaviour, not original-game execution.
+
 ## Verification
 
 Executed 2026-11-02: `rwe_test "[modsdk]"` and the full `rwe_test` suite; the

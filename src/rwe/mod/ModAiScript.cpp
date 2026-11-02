@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <iterator>
+#include <rwe/mod/ModTransform.h>
 #include <stdexcept>
 
 namespace rwe

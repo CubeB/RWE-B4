@@ -1,8 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <rwe/ai/AiTuningProfile.h>
 #include <rwe/mod/ModAiController.h>
 #include <rwe/mod/ModAiScript.h>
+#include <rwe/mod/ModTransform.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/sim_test_util.h>
 #include <string>
@@ -358,5 +361,92 @@ namespace rwe
         auto controller = controllerFor(world.owner, "local x = 1");
         CHECK(controller->disabled());
         CHECK(controller->lastError().find("on_tick") != std::string::npos);
+    }
+
+    TEST_CASE("the launch set resolves an ai package and refuses an unresolved one", "[modai]")
+    {
+        namespace fs = std::filesystem;
+        const auto path = fs::temp_directory_path() / "rwe-modai-resolve-test.lua";
+        {
+            std::ofstream out(path, std::ios::binary | std::ios::trunc);
+            out << "function on_tick(tick) end\n";
+        }
+
+        auto content = std::make_shared<ModLaunchContent>();
+        content->identity = "0123abcd" + std::string(56, '0');
+        ModLaunchPackage package;
+        package.id = "com.example.ai";
+        package.kind = "ai";
+        package.scriptName = "scripts/main.lua";
+        package.scriptPath = path.string();
+        package.options = {{"aggression", 2}};
+        content->packages.push_back(std::move(package));
+
+        const auto script = resolveModAiScript(content.get(), "", 77u);
+        REQUIRE(script);
+        CHECK(script->packageId == "com.example.ai");
+        CHECK(script->scriptName == "scripts/main.lua");
+        CHECK(script->seed == 77u);
+        CHECK(script->source.find("on_tick") != std::string::npos);
+        CHECK(script->options.at("aggression") == 2);
+        CHECK(modAiSeedFromContent(content.get()) == 0x0123abcdu);
+
+        SECTION("a package that names no local path is refused")
+        {
+            content->packages[0].scriptPath.clear();
+            try
+            {
+                resolveModAiScript(content.get(), "", 0);
+                FAIL("an unresolved package was accepted");
+            }
+            catch (const std::runtime_error& e)
+            {
+                CHECK(std::string(e.what()).find("has not been resolved") != std::string::npos);
+            }
+        }
+
+        SECTION("a set with no ai package is refused")
+        {
+            content->packages.clear();
+            try
+            {
+                resolveModAiScript(content.get(), "", 0);
+                FAIL("a set with no ai package was accepted");
+            }
+            catch (const std::runtime_error& e)
+            {
+                CHECK(std::string(e.what()).find("no ai package") != std::string::npos);
+            }
+        }
+
+        SECTION("a named package must be an ai package")
+        {
+            content->packages[0].kind = "mutator";
+            try
+            {
+                resolveModAiScript(content.get(), "com.example.ai", 0);
+                FAIL("a mutator was accepted as an ai package");
+            }
+            catch (const std::runtime_error& e)
+            {
+                CHECK(std::string(e.what()).find("not an ai package") != std::string::npos);
+            }
+        }
+
+        SECTION("no resolved set at all is refused")
+        {
+            try
+            {
+                resolveModAiScript(nullptr, "", 0);
+                FAIL("a missing mod set was accepted");
+            }
+            catch (const std::runtime_error& e)
+            {
+                CHECK(std::string(e.what()).find("no resolved mod set") != std::string::npos);
+            }
+        }
+
+        std::error_code ec;
+        fs::remove(path, ec);
     }
 }
