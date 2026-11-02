@@ -208,13 +208,13 @@ Done when: the example behaves consistently across peers, supported failures
 have deterministic outcomes, and uninterrupted and saved/resumed runs agree.
 
 Progress 2026-11-02: the authoritative state store exists with the three
-scopes, per-mod namespaces and quotas, canonical JSON and a content hash
-(MOD-SDK-008). The integration map is recorded from a read-only survey:
+scopes, per-mod namespaces and quotas, canonical JSON and a content hash, and
+is wired into `GameSimulation`'s save (version 4 only when present), hash and
+dump (MOD-SDK-008). The integration map is recorded from a read-only survey:
 damage choke point, lifecycle events, tick dispatch, save/hash/dump
 registration and section-budget hazards. Still open: the runtime hook
-dispatcher, Lua hooks, wiring the store into `GameSimulation`, the disabled
-set, and the shield/mission example. No runtime script runs during a battle
-yet.
+dispatcher, Lua hooks, the disabled set, and the shield/mission example. No
+runtime script runs during a battle yet.
 
 ### MOD-09: Add Lua AI through the lockstep controller path
 

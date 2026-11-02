@@ -5,6 +5,7 @@
 #include <rwe/game/save_util.h>
 #include <rwe/grid/Grid.h>
 #include <rwe/io/cob/Cob.h>
+#include <rwe/mod/ModStateStore.h>
 #include <rwe/sim/GameHash_util.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/MapTerrain.h>
@@ -283,6 +284,37 @@ namespace rwe
                 }
             }
         }
+    }
+
+    TEST_CASE("the mod state is saved, loaded and hashed only when present", "[saveload][modsdk][modstore]")
+    {
+        GameSimulation plain(makeFlatTerrain(32, 32), 0u, 100, 3000);
+        const auto plainSave = saveSimulationToJson(plain);
+        CHECK(plainSave["version"] == 3);
+        CHECK_FALSE(plainSave.contains("modState"));
+        const auto plainHash = computeHashOf(plain);
+
+        GameSimulation modded(makeFlatTerrain(32, 32), 0u, 100, 3000);
+        modded.setModState(std::make_unique<ModStateStore>());
+        REQUIRE(modded.modState()->setGlobal("a.mod", "shield", ModValue::integer(5)));
+        REQUIRE(modded.modState()->setUnit("a.mod", UnitId(1), "charge", ModValue::number(2.5f)));
+
+        const auto moddedSave = saveSimulationToJson(modded);
+        CHECK(moddedSave["version"] == 4);
+        REQUIRE(moddedSave.contains("modState"));
+        CHECK(computeHashOf(modded) != plainHash);
+
+        GameSimulation restored(makeFlatTerrain(32, 32), 0u, 100, 3000);
+        loadSimulationFromJson(moddedSave, restored);
+        REQUIRE(restored.modState());
+        CHECK(restored.modState()->hash() == modded.modState()->hash());
+        CHECK(computeHashOf(restored) == computeHashOf(modded));
+        CHECK(saveSimulationToJson(restored) == moddedSave);
+
+        // Loading an unmodded save clears a store the target already held.
+        loadSimulationFromJson(plainSave, restored);
+        CHECK_FALSE(restored.modState());
+        CHECK(computeHashOf(restored) == plainHash);
     }
 
     TEST_CASE("a saved simulation replays tick for tick from its save", "[saveload]")

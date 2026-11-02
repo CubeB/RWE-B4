@@ -1,4 +1,6 @@
 #include "GameSimulation.h"
+
+#include <rwe/mod/ModStateStore.h>
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -274,6 +276,11 @@ namespace rwe
     // is intentionally absent (declared `=delete` in the header) because the
     // simulation has const wind-speed members.
     GameSimulation::~GameSimulation() = default;
+
+    void GameSimulation::setModState(std::unique_ptr<ModStateStore> state)
+    {
+        modState_ = std::move(state);
+    }
     GameSimulation::GameSimulation(GameSimulation&&) noexcept = default;
 
     void GameSimulation::attachDemoRecorder(std::unique_ptr<DemoRecorder> recorder)

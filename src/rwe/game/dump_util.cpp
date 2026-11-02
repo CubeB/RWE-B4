@@ -1,5 +1,6 @@
 #include "dump_util.h"
 #include <rwe/sim/GameSimulation.h>
+#include <rwe/mod/ModStateStore.h>
 #include <rwe/sim/MissionRules.h>
 #include <rwe/sim/MissionScripts.h>
 
@@ -668,6 +669,10 @@ namespace rwe
         if (simulation.missionScripts)
         {
             j["missionScripts"] = dumpJson(*simulation.missionScripts);
+        }
+        if (const auto* state = simulation.modState())
+        {
+            j["modState"] = state->toJson();
         }
         return j;
     }

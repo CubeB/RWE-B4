@@ -342,8 +342,8 @@ plan asks for; the launcher does not yet show it.
 ## MOD-SDK-008: the authoritative mod state store
 
 Status: implemented 2026-11-02 in `src/rwe/mod/ModStateStore.{h,cpp}` and
-`src/rwe/mod/ModStateStore.test.cpp`. Not yet wired into `GameSimulation`'s
-save, hash or dump. No runtime hook writes it yet.
+`src/rwe/mod/ModStateStore.test.cpp`, and now wired into `GameSimulation`'s
+save, hash and dump. No runtime hook writes it yet.
 
 `ModStateStore` is the engine-owned state contract from ADR-0002 D14:
 
@@ -366,11 +366,27 @@ Evidence, executed 2026-11-02: `rwe_test "[modstore]"` passes 6 cases and 69
 assertions, including quota refusal, scope isolation, unit deletion, canonical
 round-trip and hash-by-content.
 
-Remaining for MOD-08: hold the store behind a pimpl in `GameSimulation`,
-register it in `save_util.cpp`, `GameHash_util.cpp` and `dump_util.cpp`, and
-include the disabled-package set and any script RNG/timer state alongside it.
-Until that registration exists, an unmodded game's hash and save are
-deliberately unchanged.
+Registration, implemented later on 2026-11-02:
+
+- `GameSimulation` holds a `std::unique_ptr<ModStateStore>` behind a forward
+  declaration; `setModState` is out of line so the widely included header never
+  sees the store's definition.
+- `save_util.cpp` writes `modState` and raises the save version to 4 only when
+  a store exists; a version-4 save is accepted on load, and a save without the
+  field clears the target's store. Versions 1-3 are unchanged.
+- `GameHash_util.cpp` folds `computeHashOf(store.hash())` only when a store
+  exists; `dump_util.cpp` writes the same JSON only when it exists.
+- `clearSimulationForLoad` clears the store before a load.
+
+Evidence, executed 2026-11-02: `rwe_test "[saveload]"` passes 40 cases and
+2031 assertions, including a new case that saves and restores a store, checks
+the version remains 3 for an unmodded game and 4 for a modded one, and checks
+the hash changes by content and is restored exactly. An unmodded game's hash
+and save are byte-for-byte what they were.
+
+Remaining for MOD-08: the runtime hook dispatcher, the disabled-package set,
+script RNG/timer state, and the engine APIs that let a script create or inspect
+runtime state.
 
 ## Verification
 

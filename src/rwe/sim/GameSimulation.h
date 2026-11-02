@@ -49,6 +49,7 @@ namespace rwe
     class DemoRecorder;
     struct MissionRules;
     struct MissionScripts;
+    class ModStateStore;
     struct MixedOwnershipOutbox;
 
     constexpr int MaxUtilizableWindSpeed = 5000;
@@ -842,6 +843,20 @@ namespace rwe
          * steps left. Held and kept like missionRules, for the same reasons.
          */
         std::unique_ptr<MissionScripts> missionScripts;
+
+        /**
+         * MOD-08: engine-owned mod state. Null in an unmodded game, which is
+         * why the hash, save and dump contributions are zero/absent there.
+         * Held behind a unique_ptr so this widely included header never sees
+         * the store's definition.
+         */
+        std::unique_ptr<ModStateStore> modState_;
+
+        ModStateStore* modState() { return modState_.get(); }
+        const ModStateStore* modState() const { return modState_.get(); }
+        // Defined out of line: assigning a unique_ptr destroys the old
+        // object, and this header must never see ModStateStore's definition.
+        void setModState(std::unique_ptr<ModStateStore> state);
 
         explicit GameSimulation(MapTerrain&& terrain, unsigned char surfaceMetal, int minWindSpeed, int maxWindSpeed);
 
