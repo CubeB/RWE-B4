@@ -246,6 +246,20 @@ Windows/Linux builds. Replay uses its recorded command stream without a second
 AI producer. Initial script-AI support is for RWE lockstep and local play;
 original-client own-clock integration remains a separately specified feature.
 
+Progress 2026-11-02: the first slice exists. `AiEngine::Lua` is selectable and
+round-trips through the save header; a seat's AI package is resolved from the
+launch set before the controller is built, and a missing or unresolved package
+refuses the launch instead of falling back to Classic. `ModAiController` runs
+one persistent sandboxed Lua state per seat during the ordinary AI pass, emits
+sorted `PlayerUnitCommand`s from `ai.cmd_move`/`cmd_stop`/`cmd_attack`, and
+observes only its own units through `ai.my_units()`. Budgets, the fixed hash
+seed, a private seeded RNG and sticky fault disabling follow MOD-08's runtime.
+Recorded in MOD-SDK-010. Still open: saving and restoring AI plans, timers,
+RNG position and the private Lua state; rejoin catch-up and handover; the
+mixed-seat delayed-packet and cross-build acceptance runs; replay using a
+recorded stream without a second producer; and assigning a specific AI package
+to a specific seat. **MOD-09 is not complete.**
+
 ### MOD-10: Expose presentation safely
 
 Dependencies: MOD-02 and the runtime boundary; may progress alongside MOD-08.
@@ -318,3 +332,4 @@ Close each when its PR merges.
 | #977 | ProTA P4: presentation, settings and compatibility run |
 | #978 | Hash entry scripts and content files into the resolved identity |
 | #979 | Carry the resolved-set identity on the multiplayer wire |
+| #980 | TA: Escalation content and rules (docs/ESCALATION-INTEGRATION-PLAN.md) |
