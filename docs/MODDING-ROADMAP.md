@@ -256,6 +256,11 @@ Presentation has its own settings and developer reload lifecycle.
 Done when: a HUD/minimap example can reload, never exposes hidden state through
 the API, and does not change simulation hashes or RNG simply by being enabled.
 
+Progress 2026-11-02: a read-only survey fixed the presentation boundary, the
+filtered-query gates, the panel/input/draw/camera/audio attachment points and
+the section-budget rules. Recorded in `MODDING-PRESENTATION-SUBSYSTEM-MAP.md`.
+No presentation runtime exists yet.
+
 ### MOD-11: Prove replacement, then expand coverage
 
 Dependencies: MOD-08 and a chosen module execution contract. Start with a
@@ -269,6 +274,13 @@ contract, the default preserves the baseline, save/replay/rejoin are supported
 and real battle measurements meet the agreed budget. Then add a tracked task
 for every remaining row in the plan's system inventory. Each row needs a real
 example and an acceptance check before it is called moddable.
+
+Progress 2026-11-02: the survey recommends the economy settle as the first
+provider (pure value interface, fixed phase, no RNG or entity creation) and
+wind as the second (per-provider RNG and state restoration), with the provider
+pimpl and save/hash/dump order fixed in
+`MODDING-PRESENTATION-SUBSYSTEM-MAP.md`. No provider contract or replacement
+exists yet; the wasm module runtime remains a separate spike.
 
 ## Repository integration points inspected
 
