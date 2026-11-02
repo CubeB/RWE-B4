@@ -10,6 +10,7 @@
 #include <limits>
 #include <map>
 #include <random>
+#include <rwe/mod/ModAiScript.h>
 #include <rwe/mod/ModRuntime.h>
 #include <rwe/mod/ModStateStore.h>
 #include <rwe/mod/ModTransform.h>
@@ -1376,6 +1377,20 @@ namespace rwe
             request.downloadableScripts = &dataMaps.downloadableAiScripts;
             request.mission = gameParameters.mission;
             request.unitLimit = static_cast<unsigned int>(std::max(1, ota.maxUnits));
+
+            // MOD-09: resolve the seat's AI package before the controller is
+            // built. Which engine plays the seat is only known once the
+            // personality, the saved engine and the game's default are all
+            // settled, so this happens here rather than at the top of the
+            // loop. A seat that asks for lua and cannot get its script is
+            // refused; it is never quietly played by Classic.
+            if (chooseAiEngine(request.personality, request.savedEngine, request.defaultEngine) == AiEngine::Lua)
+            {
+                request.script = resolveModAiScript(
+                    gameParameters.modContent.get(),
+                    request.scriptPackageId,
+                    modAiSeedFromContent(gameParameters.modContent.get()));
+            }
 
             simulation.addAiController(aiPlayerId, createAiController(simulation, request, mapIntel, buildTree));
         }

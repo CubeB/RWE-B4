@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/ai/classic/ClassicAiController.h>
+#include <rwe/mod/ModAiController.h>
+#include <rwe/mod/ModAiScript.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/util/SimpleLogger.h>
 #include <rwe/vfs/AbstractVirtualFileSystem.h>
@@ -136,6 +138,48 @@ namespace rwe
             // and in the RWE branch below and nowhere else: see the header.
             const std::uint64_t aiSeed = static_cast<std::uint64_t>(simulation.rng());
             return std::make_unique<ClassicAiController>(playerId, std::move(config), aiSeed);
+        }
+
+        if (engine == AiEngine::Lua)
+        {
+            // MOD-09. The loader resolves the package before this point; a
+            // null script here means a caller built the seat directly without
+            // one. Refusing is deliberate: a lua seat silently played by
+            // Classic would be a different opponent from the one recorded.
+            if (!request.script)
+            {
+                throw std::runtime_error(
+                    "Player " + std::to_string(i) + ": the lua engine has no resolved AI script");
+            }
+            if (!tuning.empty())
+            {
+                throw std::runtime_error(
+                    "--ai-tune: player " + std::to_string(i) + " plays the lua engine, which has no knobs (use --ai-engine rwe)");
+            }
+
+            auto profile = makeProfileForDifficulty(difficulty);
+            applyFactionDefaults(profile, request.side);
+            if (personality)
+            {
+                if (auto knob = applyAiPersonality(profile, *personality))
+                {
+                    LOG_WARN << "Player " << i << ": the " << personality->name << " personality sets " << *knob << ", which is no AI knob";
+                }
+                LOG_INFO << "Player " << i << " plays the " << personality->name << " personality";
+            }
+            if (request.idle)
+            {
+                // The command stream comes out of the replay file; a scripted
+                // seat that also thought would add its own on top.
+                profile.idle = true;
+            }
+            LOG_INFO << "Player " << i << " is a computer player at " << aiDifficultyName(profile.difficulty)
+                     << " difficulty, lua engine (" << request.script->packageId << ")";
+
+            // The seat's single draw, here as in every other branch: the deal
+            // of start positions depends on it.
+            const std::uint64_t aiSeed = static_cast<std::uint64_t>(simulation.rng());
+            return std::make_unique<ModAiController>(playerId, request.script, std::move(profile), aiSeed);
         }
 
         auto profile = makeProfileForDifficulty(difficulty);

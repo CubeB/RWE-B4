@@ -13,6 +13,8 @@ namespace rwe
                 return "classic";
             case AiEngine::Rwe:
                 return "rwe";
+            case AiEngine::Lua:
+                return "lua";
         }
         return "classic";
     }
@@ -36,6 +38,11 @@ namespace rwe
         if (lowered == "rwe")
         {
             out = AiEngine::Rwe;
+            return true;
+        }
+        if (lowered == "lua")
+        {
+            out = AiEngine::Lua;
             return true;
         }
         return false;

@@ -516,6 +516,15 @@ namespace rwe
             return Ok(true);
     }
 
+    bool isKnownResourceDirectory(const std::string& name)
+    {
+        static const std::set<std::string> names = {
+            "ai", "anims", "bitmaps", "camps", "downloads", "features", "fonts", "gamedata",
+            "guis", "builderGuis", "maps", "objects3d", "palettes", "scripts", "sounds",
+            "textures", "unitpics", "units", "weapons"};
+        return names.count(name) != 0;
+    }
+
     std::string modKindText(ModKind kind)
     {
         switch (kind)
@@ -859,6 +868,35 @@ namespace rwe
             }
         }
 
+        if (value.contains("resourceDirectories"))
+        {
+            if (!value["resourceDirectories"].is_object())
+            {
+                return fail(ModErrorCode::InvalidField, manifest.id,
+                    source + ": \"resourceDirectories\" must be an object");
+            }
+            for (const auto& [name, directory] : value["resourceDirectories"].items())
+            {
+                if (!isKnownResourceDirectory(name))
+                {
+                    return fail(ModErrorCode::InvalidField, manifest.id,
+                        source + ": unknown resource directory \"" + name + "\"");
+                }
+                if (!directory.is_string())
+                {
+                    return fail(ModErrorCode::InvalidField, manifest.id,
+                        source + ": resource directory \"" + name + "\" must be a string");
+                }
+                const auto path = directory.get<std::string>();
+                if (!validEntryPath(path))
+                {
+                    return fail(ModErrorCode::InvalidField, manifest.id,
+                        source + ": resource directory \"" + name + "\" is not a normalized relative path");
+                }
+                manifest.resourceDirectories[name] = path;
+            }
+        }
+
         if (value.contains("options"))
         {
             if (!value["options"].is_array())
@@ -1039,6 +1077,13 @@ namespace rwe
                 options[key] = value;
             }
             package["options"] = std::move(options);
+
+            json directories = json::object();
+            for (const auto& [name, directory] : mod.manifest.resourceDirectories)
+            {
+                directories[name] = directory;
+            }
+            package["resourceDirectories"] = std::move(directories);
 
             packages.push_back(std::move(package));
         }

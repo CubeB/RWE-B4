@@ -8,6 +8,8 @@
 #include <rwe/ai/classic/ClassicAiController.h>
 #include <rwe/game/SaveFile.h>
 #include <rwe/game/save_util.h>
+#include <rwe/mod/ModAiController.h>
+#include <rwe/mod/ModAiScript.h>
 #include <rwe/sim/GameSimulation.h>
 #include <rwe/sim/sim_test_util.h>
 
@@ -86,6 +88,15 @@ namespace rwe
             };
             return sim.addPlayer(p);
         }
+
+        std::shared_ptr<const ModAiScript> aiScript()
+        {
+            auto script = std::make_shared<ModAiScript>();
+            script->packageId = "com.example.ai";
+            script->scriptName = "scripts/main.lua";
+            script->source = "function on_tick(tick) end";
+            return script;
+        }
     }
 
     TEST_CASE("a computer player's engine round-trips through the save header", "[saveload][savefile][ai]")
@@ -97,6 +108,8 @@ namespace rwe
         save.parameters.players[1] = makeSeat(PlayerControllerTypeComputer());
         save.parameters.players[1]->aiEngine = AiEngine::Rwe;
         save.parameters.players[1]->aiPersonality = "Turtle";
+        save.parameters.players[2] = makeSeat(PlayerControllerTypeComputer());
+        save.parameters.players[2]->aiEngine = AiEngine::Lua;
 
         writeSaveFile(file.path, save);
 
@@ -107,6 +120,7 @@ namespace rwe
             const auto& players = j.at("header").at("players");
             CHECK(players.at(0).at("aiEngine") == "classic");
             CHECK(players.at(1).at("aiEngine") == "rwe");
+            CHECK(players.at(2).at("aiEngine") == "lua");
         }
 
         SECTION("and read back")
@@ -115,9 +129,11 @@ namespace rwe
             REQUIRE(loaded.has_value());
             REQUIRE(loaded->parameters.players[0].has_value());
             REQUIRE(loaded->parameters.players[1].has_value());
+            REQUIRE(loaded->parameters.players[2].has_value());
             CHECK(loaded->parameters.players[0]->aiEngine == AiEngine::Classic);
             CHECK(loaded->parameters.players[1]->aiEngine == AiEngine::Rwe);
             CHECK(loaded->parameters.players[1]->aiPersonality == std::optional<std::string>("Turtle"));
+            CHECK(loaded->parameters.players[2]->aiEngine == AiEngine::Lua);
         }
     }
 
@@ -163,13 +179,17 @@ namespace rwe
         auto classic = addComputer(sim);
         auto rwe = addComputer(sim);
         auto human = addPlayer(sim);
+        auto lua = addComputer(sim);
         sim.addAiController(classic, std::make_unique<ClassicAiController>(classic, ClassicAiConfig{}, 1u));
         sim.addAiController(rwe, std::make_unique<AiPlayerController>(rwe, makeDefaultStandardProfile(), 1u, MapIntel{}));
+        sim.addAiController(lua, std::make_unique<ModAiController>(
+            lua, aiScript(), makeProfileForDifficulty(AiDifficulty::Standard), 1u));
 
         GameParameters parameters("SomeMap", 0);
         parameters.players[0] = makeSeat(PlayerControllerTypeComputer());
         parameters.players[2] = makeSeat(PlayerControllerTypeComputer());
         parameters.players[3] = makeSeat(PlayerControllerTypeHuman());
+        parameters.players[4] = makeSeat(PlayerControllerTypeComputer());
         (void)human;
 
         recordAiEngines(parameters, sim);
@@ -177,6 +197,7 @@ namespace rwe
         CHECK(parameters.players[0]->aiEngine == AiEngine::Classic);
         CHECK(parameters.players[2]->aiEngine == AiEngine::Rwe);
         CHECK(parameters.players[3]->aiEngine == std::nullopt);
+        CHECK(parameters.players[4]->aiEngine == AiEngine::Lua);
         CHECK_FALSE(parameters.players[1].has_value());
     }
 }

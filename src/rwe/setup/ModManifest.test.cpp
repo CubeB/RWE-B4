@@ -163,6 +163,50 @@ namespace rwe
         }
     }
 
+    TEST_CASE("resource directories are validated and are part of identity", "[setup][modsdk]")
+    {
+        auto value = manifestJson("com.example.prota");
+        value["kind"] = "content";
+        value["resourceDirectories"] = {
+            {"weapons", "weaponP"},
+            {"guis", "guiP"},
+            {"unitpics", "unitpicsP"},
+        };
+
+        const auto parsed = parseModManifest(value, "fixture");
+        REQUIRE(parsed);
+        REQUIRE(parsed.get().resourceDirectories.size() == 3);
+        CHECK(parsed.get().resourceDirectories.at("weapons") == "weaponP");
+
+        SECTION("an unknown resource name is refused")
+        {
+            value["resourceDirectories"]["not-a-root"] = "x";
+            const auto result = parseModManifest(value, "fixture");
+            REQUIRE_FALSE(result);
+            CHECK(result.getErr().code == ModErrorCode::InvalidField);
+        }
+
+        SECTION("a path that escapes the package is refused")
+        {
+            value["resourceDirectories"]["weapons"] = "../weaponP";
+            const auto result = parseModManifest(value, "fixture");
+            REQUIRE_FALSE(result);
+            CHECK(result.getErr().code == ModErrorCode::InvalidField);
+        }
+
+        SECTION("the mapping changes the resolved identity")
+        {
+            const auto first = resolve({packageFrom(value)});
+            REQUIRE(first);
+            auto changed = value;
+            changed["resourceDirectories"]["weapons"] = "weapons2";
+            const auto second = resolve({packageFrom(changed)});
+            REQUIRE(second);
+            CHECK(second.get().identity != first.get().identity);
+            CHECK(canonicalJson(resolvedModSetJson(first.get())).find("\"weaponP\"") != std::string::npos);
+        }
+    }
+
     TEST_CASE("a legacy descriptor borrows the caller's content-derived id", "[setup][modsdk]")
     {
         const json legacy = {{"name", "Old pack"}, {"version", "1.2.0"}};

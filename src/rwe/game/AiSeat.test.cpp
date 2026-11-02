@@ -4,6 +4,7 @@
 #include <rwe/ai/AiPersonality.h>
 #include <rwe/ai/AiPlayerController.h>
 #include <rwe/game/AiSeat.h>
+#include <rwe/mod/ModAiScript.h>
 #include <rwe/PathMapping.h>
 #include <rwe/util/OpaqueArgs.h>
 #include <rwe/sim/GameSimulation.h>
@@ -71,6 +72,16 @@ namespace rwe
         {
             return findAiPersonality(builtInAiPersonalities(), name);
         }
+
+        std::shared_ptr<const ModAiScript> aiScript()
+        {
+            auto script = std::make_shared<ModAiScript>();
+            script->packageId = "com.example.ai";
+            script->scriptName = "scripts/main.lua";
+            script->source = "function on_tick(tick) end";
+            script->seed = 1u;
+            return script;
+        }
     }
 
     TEST_CASE("RWE mission seats apply mission profile limits and difficulty weights", "[ai][engine][mission-profile]")
@@ -131,6 +142,50 @@ namespace rwe
         {
             CHECK(chooseAiEngine(balanced, AiEngine::Classic, AiEngine::Classic) == AiEngine::Rwe);
             CHECK(chooseAiEngine(original, AiEngine::Rwe, AiEngine::Rwe) == AiEngine::Classic);
+        }
+
+        SECTION("lua is an engine with a name like the others")
+        {
+            CHECK(std::string(aiEngineName(AiEngine::Lua)) == "lua");
+            AiEngine engine = AiEngine::Classic;
+            CHECK(aiEngineFromName("LUA", engine));
+            CHECK(engine == AiEngine::Lua);
+            CHECK_FALSE(aiEngineFromName("luaa", engine));
+        }
+    }
+
+    TEST_CASE("a seat with a resolved script is built as the lua engine", "[ai][engine]")
+    {
+        auto sim = makeSimulation();
+        auto request = seat(2);
+        request.defaultEngine = AiEngine::Lua;
+        request.script = aiScript();
+
+        auto controller = build(sim, request);
+        REQUIRE(controller);
+        CHECK(controller->engine() == AiEngine::Lua);
+        CHECK(controller->getPlayerId() == PlayerId(2u));
+        CHECK(controller->asRweController() == nullptr);
+
+        std::vector<PlayerCommand> out;
+        controller->tick(sim, out);
+        CHECK(out.empty());
+    }
+
+    TEST_CASE("a lua seat with no resolved script is refused, not played as classic", "[ai][engine]")
+    {
+        auto sim = makeSimulation();
+        auto request = seat();
+        request.defaultEngine = AiEngine::Lua;
+
+        try
+        {
+            build(sim, request);
+            FAIL("a lua seat without a script was built");
+        }
+        catch (const std::runtime_error& e)
+        {
+            CHECK(std::string(e.what()) == "Player 0: the lua engine has no resolved AI script");
         }
     }
 
@@ -205,6 +260,16 @@ namespace rwe
             request.personality = builtIn("Turtle");
             CHECK(build(sim, request)->engine() == AiEngine::Rwe);
         }
+
+        SECTION("lua's, with its script, against an RWE default")
+        {
+            auto sim = makeSimulation();
+            auto request = seat();
+            request.savedEngine = AiEngine::Lua;
+            request.defaultEngine = AiEngine::Rwe;
+            request.script = aiScript();
+            CHECK(build(sim, request)->engine() == AiEngine::Lua);
+        }
     }
 
     TEST_CASE("--ai-tune aimed at a classic seat is an error that says what to do", "[ai][engine]")
@@ -243,6 +308,21 @@ namespace rwe
             request.tuning = {"1:noSuchKnob=9"};
             CHECK_THROWS_AS(build(sim, request), std::runtime_error);
         }
+
+        SECTION("a knob on a lua seat is also fatal")
+        {
+            request.defaultEngine = AiEngine::Lua;
+            request.script = aiScript();
+            try
+            {
+                build(sim, request);
+                FAIL("a knob on a lua seat was accepted");
+            }
+            catch (const std::runtime_error& e)
+            {
+                CHECK(std::string(e.what()) == "--ai-tune: player 1 plays the lua engine, which has no knobs (use --ai-engine rwe)");
+            }
+        }
     }
 
     TEST_CASE("each seat draws exactly one value from the simulation's generator, whichever engine plays it", "[ai][engine]")
@@ -254,13 +334,17 @@ namespace rwe
 
         for (const bool idle : {false, true})
         {
-            for (const auto engine : {AiEngine::Classic, AiEngine::Rwe})
+            for (const auto engine : {AiEngine::Classic, AiEngine::Rwe, AiEngine::Lua})
             {
                 INFO("engine " << aiEngineName(engine) << ", idle " << idle);
                 auto sim = makeSimulation();
                 auto request = seat();
                 request.defaultEngine = engine;
                 request.idle = idle;
+                if (engine == AiEngine::Lua)
+                {
+                    request.script = aiScript();
+                }
                 auto controller = build(sim, request);
                 REQUIRE(controller);
                 CHECK(controller->engine() == engine);

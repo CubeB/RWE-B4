@@ -84,6 +84,9 @@ namespace rwe
         // Required API features. A package asking for a "runtime." feature
         // is a persistent runtime script, not a pre-match transform.
         std::vector<std::string> features;
+        // Resource-directory overrides for this package, e.g. ProTA's
+        // weaponP/guiP roots. Sorted by map order.
+        std::map<std::string, std::string> resourceDirectories;
     };
 
     struct ModLaunchContent

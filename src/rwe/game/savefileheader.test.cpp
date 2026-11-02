@@ -402,9 +402,9 @@ namespace rwe
         modContent->identity = std::string(64, 'a');
         modContent->packages.push_back(
             {"com.example.costs", "1.0.0", std::string(64, 'b'), "com.example.costs/scripts/main.lua",
-                "C:/Users/someone/mods/costs/scripts/main.lua", {{"multiplier", 1.5}}, "mutator", {}});
+                "C:/Users/someone/mods/costs/scripts/main.lua", {{"multiplier", 1.5}}, "mutator", {}, {}});
         modContent->packages.push_back(
-            {"com.example.more", "2.0.0", std::string(64, 'c'), "com.example.more/scripts/main.lua", "", {}, "content", {}});
+            {"com.example.more", "2.0.0", std::string(64, 'c'), "com.example.more/scripts/main.lua", "", {}, "content", {}, {}});
         save.parameters.modContent = modContent;
 
         REQUIRE(writeSaveFile(file.path, save));

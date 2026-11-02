@@ -339,6 +339,7 @@ namespace rwe
                 {"scriptName", package.scriptName},
                 {"kind", package.kind},
                 {"features", package.features},
+                {"resourceDirectories", package.resourceDirectories},
             });
         }
         return json{{"identity", content->identity}, {"packages", std::move(packages)}};
@@ -382,6 +383,11 @@ namespace rwe
                 if (item.contains("features"))
                 {
                     package.features = item.value("features", std::vector<std::string>());
+                }
+                if (item.contains("resourceDirectories"))
+                {
+                    package.resourceDirectories = item.value("resourceDirectories",
+                        std::map<std::string, std::string>());
                 }
                 content->packages.push_back(std::move(package));
             }

@@ -60,11 +60,14 @@ adopt with no new engine mechanism.
 | Unit limit 1500 | ProTA config, shown on its loading screen | A **map/profile value**, not a pool size: OTA `maxunits` becomes the AI request limit (default 200). Never a hard-coded constant | `src/rwe/io/ota/ota.cpp`; `GameSimulationLoader.cpp`; `AiSeat.h` |
 | 3 000 projectiles / 3 000 explosions / 1 000 debris; SFX 20 480; path cycles 66 650 | ProTA engine defaults | No located fixed pool or shared budget in RWE; stress-test targets, not constants to port | `src/rwe/sim/Projectile.h`; effect, sound and pathfinding paths |
 
-`ModManifest` format 1 has **no limits, no resource-directory map and no
-presentation block**; those live in the legacy `rwe_mod.json` fields the
-launcher reads, and adding a limits block would change the resolved identity (a
-MOD-02 revision, not an ad-hoc key). The Nanolathe config schema 2 is **not**
-RWE's manifest; do not copy it or treat it as a second format.
+`ModManifest` format 1 now carries a validated `resourceDirectories` map
+(known `PathMapping` names, normalized relative paths), and the mapping is part
+of the canonical resolved identity and the launch form. Applying the map to the
+engine's `PathMapping` at launch is still separate engine work; carrying it
+without applying it is not enough to load ProTA. Format 1 has **no limits block
+and no presentation block**; adding limits would change the resolved identity
+(a MOD-02 revision, not an ad-hoc key). The Nanolathe config schema 2 is
+**not** RWE's manifest; do not copy it or treat it as a second format.
 
 ## 3. Features: documented effects and RWE work
 Classification: **(a)** already available in RWE's Community Patch

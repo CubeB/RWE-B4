@@ -16,9 +16,16 @@ namespace rwe
         Classic,
         /** RWE's own, improved one: AiPlayerController. */
         Rwe,
+        /**
+         * A seat played by a package's sandboxed Lua script: MOD-09,
+         * docs/MODDING-SDK-FINDINGS.md MOD-SDK-010. The seat cannot exist
+         * without a resolved AI package, because a lua engine with no script
+         * would be a silently inert seat.
+         */
+        Lua,
     };
 
-    /** "classic" or "rwe", as --ai-engine and the save file spell it. */
+    /** "classic", "rwe" or "lua", as --ai-engine and the save file spell it. */
     const char* aiEngineName(AiEngine engine);
 
     /** The inverse of aiEngineName, ignoring case; false for a name it does not know. */

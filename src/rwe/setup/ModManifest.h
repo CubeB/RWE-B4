@@ -129,7 +129,16 @@ namespace rwe
         std::vector<std::string> exclusive;
         std::vector<std::string> replaces;
         std::vector<ModOption> options;
+        // Resource-directory overrides, e.g. {"weapons": "weaponP"} for a
+        // package that renames its roots (ProTA uses downloadP, gamedatP,
+        // guiP, unitpicsP and weaponP). Paths are relative to the package
+        // root and are part of the resolved identity.
+        std::map<std::string, std::string> resourceDirectories;
     };
+
+    // The PathMapping fields a manifest may override. Kept as a free
+    // predicate so the parser and tests agree on the vocabulary.
+    bool isKnownResourceDirectory(const std::string& name);
 
     struct ModPackage
     {

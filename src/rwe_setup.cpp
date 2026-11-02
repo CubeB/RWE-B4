@@ -525,6 +525,7 @@ namespace
             launch.manifestSha256 = mod.manifestSha256;
             launch.kind = rwe::modKindText(mod.manifest.kind);
             launch.features = mod.manifest.features;
+            launch.resourceDirectories = mod.manifest.resourceDirectories;
             if (mod.manifest.entry)
             {
                 launch.scriptName = mod.manifest.id + "/" + *mod.manifest.entry;
